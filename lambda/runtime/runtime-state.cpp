@@ -575,6 +575,16 @@ extern "C" bool lambda_module_state_grow_vars(uint32_t module_id,
     return true;
 }
 
+extern "C" Item lambda_module_state_var(uint32_t module_id, int32_t slot) {
+    LambdaModuleState* state = lambda_module_state_at(context, module_id);
+    if (!state || slot < 0 || (uint32_t)slot >= state->var_count) return ItemNull;
+    // The stored Item verbatim, as generated code's slab load reads it. The
+    // wide-scalar payload lives in the state's own var_payloads array, which
+    // outlives every reader, so re-homing is unnecessary — and lossy: it would
+    // collapse a small u64 back into the int lane and change type().
+    return state->vars[slot];
+}
+
 extern "C" bool lambda_module_state_snapshot(uint32_t module_id,
         LambdaModuleStateSnapshot* snapshot) {
     if (!snapshot) return false;

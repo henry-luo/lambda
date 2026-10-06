@@ -2007,14 +2007,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 }
             }
 
-            css_web_animation_resolve(dom_elem, lycon);
-
-            if (lycon->ui_context) {
-                css_animation_resolve(dom_elem, lycon);
-                // (opacity/color/background-color) against the persistent per-element
-                css_transition_resolve(dom_elem, lycon);
-            }
-
             // CSS Zoom resolves author lengths after UA defaults; refresh only
             // untouched body sides so authored margins remain cascade winners.
             layout_refresh_html_body_ua_margin(lycon, dom_elem);
@@ -2025,6 +2017,13 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                                       ? font_prop_used_size(span->font)
                                       : lycon->font.style->font_size;
                 layout_reresolve_ua_em_margins(dom_elem, used_font_size);
+            }
+
+            // finalize HTML defaults before capturing or sampling animation values.
+            css_web_animation_resolve(dom_elem, lycon);
+            if (lycon->ui_context) {
+                css_animation_resolve(dom_elem, lycon);
+                css_transition_resolve(dom_elem, lycon);
             }
 
             if (!layout_context_is_measuring(lycon)) {
@@ -5312,6 +5311,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     LayoutContext lycon;
     if (!doc) return;
     LayoutDocumentActivity layout_activity(doc);
+    // Lambda and JS can replace DOM targets; discard their clocks before relayout.
+    if (doc->state) {
+        animation_scheduler_prune_disconnected_css_views(
+            doc->state->animation_scheduler, doc);
+    }
     if (!is_reflow && !doc->root && doc->view_tree && doc->view_tree->root) {
         doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
         return;

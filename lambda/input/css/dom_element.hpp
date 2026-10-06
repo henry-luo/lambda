@@ -582,6 +582,10 @@ struct CssCustomProp {
 // may omit the leading dashes from its lookup token.
 bool css_custom_property_name_matches(const char* stored_name,
                                       const char* lookup_name);
+DomElement* dom_parent_element(DomElement* element);
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name);
+const CssValue* dom_element_lookup_custom_property(DomElement* element,
+    const char* name, DomElement** owner);
 
 enum DomElementFlag : uint32_t {
     ELMT_FLAG_NEEDS_STYLE_RECOMPUTE = 1u << 0,

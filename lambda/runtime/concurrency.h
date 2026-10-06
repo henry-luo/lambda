@@ -52,7 +52,12 @@ LambdaTask* lambda_scheduler_current(LambdaScheduler* scheduler);
 LambdaTask* lambda_task_create(LambdaScheduler* scheduler, ActivationEntry entry,
     Item arg);
 Item lambda_task_handle(LambdaTask* task);
+#ifdef LAMBDA_NO_TASKS
+// no task capability objects can be constructed in a synchronous profile.
+static inline bool lambda_task_handle_is(Item item) { (void)item; return false; }
+#else
 bool lambda_task_handle_is(Item item);
+#endif
 LambdaTask* lambda_task_from_handle(Item item);
 LambdaTaskState lambda_task_state(const LambdaTask* task);
 Item lambda_task_result(const LambdaTask* task);

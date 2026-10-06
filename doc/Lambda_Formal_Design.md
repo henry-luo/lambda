@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 23.0.0 (2026-10-05)
+**Spec version:** 25.0.0 (2026-10-06)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1348,6 +1348,39 @@ loosely across the corpus — context disambiguates, and we live with it.
   of it. An excluded command fails with an explicit "excluded from this
   build" diagnostic; importing a `.js`/`.ts` or Jube module is an ordinary
   import error. Nothing degrades silently. [SM15]
+- **D7.1.7v6** **`lambda-wasm` is the browser evaluation profile**, smaller
+  than `lambda-cli` (D7.1.6). It embeds the Lambda parser, AST interpreter,
+  core values, precise GC and a **stateful in-memory REPL** over
+  host-supplied source and data; the native CLI entry point is excluded.
+  It excludes **MIR and all JIT machinery, network access (including
+  curl/HTTP), system information, filesystem IO, and image loading**, in
+  addition to D7.1.6's exclusions. Also excluded are **libuv, threads,
+  task/mailbox scheduling, resource caches, SQLite/cookies, PDF and LaTeX
+  parsers and their packages, ambient clock, timezone discovery, and entropy
+  providers**. **CSS and graph input parsers are excluded; HTML document and
+  fragment parsing are retained.** HTML style attributes/elements and resource
+  URLs remain inert data, without CSS parsing or resource acquisition.
+  **Image-processing kernels and pixel conversions, CSS/graph/LaTeX/math
+  formatting, and document math-expression parsing are excluded.** Core
+  numerical operations remain. **`undo`, `redo`, `edit_commit` and `emit`
+  are excluded; template `apply` is retained**, including stateful templates
+  across REPL submissions. Rejected submissions roll back template registration,
+  and session reset retires template entries and their borrowed state before
+  releasing the AST (D5.3.3).
+  Evaluation is synchronous and stays in AST: no native-code
+  promotion or MIR-interpreter fallback. REPL bindings and retained results
+  obey ordinary ownership contracts (D4.6.2v2, D5.3.3); no terminal or
+  filesystem transport is required. **Logging uses a disabled stub and
+  console inspection dumps are excluded at compile time**; structured source
+  diagnostics and explicit procedural `print` remain available (D5.4.4).
+  **Allocation tracking is excluded**: a lean `lib/` allocation provider
+  retains the ordinary allocation API, overflow checks and ownership without
+  tracker state or counters (D4.2.5v3). The initial browser artifact uses scalar
+  string search and excludes the inactive native SIMD translation unit.
+  Unavailable capabilities fail explicitly; retained values and operations
+  keep their ordinary semantics
+  and ownership contracts (D2.1, D5.3.3). This is a reduced build profile,
+  not a Jube bundle or a WASM guest language. [SM17, SM §13.4]
 
 ### D7.2 Script packages
 
@@ -1534,7 +1567,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v16*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v17*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1669,9 +1702,19 @@ loosely across the corpus — context disambiguates, and we live with it.
   later receives its MIR satellite. An AST shape outside T0's supported surface
   falls back only on that receiving runtime's established whole-MIR path. The
   scheduler is common infrastructure, not a shared language parser or
-  evaluator. [D8.5.1v7] The REPL and legacy inspection tools
-  may still use the reference Tree-sitter path until their fragment/source-span
-  migration is complete. *(Historical: v1 ruled the opposite — "no
+  evaluator. [D8.5.1v7] *(v17, 2026-10-06, USER)* **The REPL is one
+  persistent T0 session.** Each completed entry is parsed by the C parser,
+  built, planned and executed as a fragment against the retained Script,
+  global scope and module slab; a rejected or failed entry is rolled back
+  whole. No REPL or inspection path depends on Tree-sitter. Whole-history
+  replay is retired: in a session the tier selector governs satellites only
+  (`auto` promotes at the ordinary thresholds, `interp` never, `jit` at the
+  first call) and nothing compiles a whole module. An entry outside T0's
+  supported surface is rejected with a diagnostic naming the construct and is
+  never compiled as a per-entry MIR module. An interrupt (SIGINT) during an
+  entry raises a fault through the execution recovery frame; the session
+  reports the entry as failed and restores its snapshot. [Repl_Interp
+  RI4–RI6] *(Historical: v1 ruled the opposite — "no
   AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
   by user ruling 2026-08-15; the full record is
   `Lambda_Design_Unified_AST.md` §12.)* [CGP1, CGP2, AI1–AI22]
@@ -2367,6 +2410,7 @@ slice; no formal semantic ruling or document semver changes.
 | D6.3.1 | **JSCU25 implemented 2026-10-05, in the lean form** (Runtime_Async §10.1): a parked JS async activation registers weakly with the attached scheduler (`lambda_scheduler_weak_enter/leave`, a token naming the scheduler's serial). It counts in `lambda_scheduler_live_count` until it settles or its carrier is collected, so a Lambda run's end-of-run drain lets an unawaited JS async call finish. Readiness stays with the microtask queue, and the run queue never resumes a JS activation. The record is the GC-owned async carrier, and its Promise is the handle; there is no `LambdaTask` per JS call and no mailbox. A drain with only weak registrations left waits while anything besides its own watchdog keeps the loop alive; when idle it gives queued promise jobs a checkpoint, collects, and then ends without error. Fixture `test/lambda/conc/js_async_weak.ls`; gtest `WeakRegistrationsCountUntilTheyLeave`. |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
+| D7.1.7v6 | **Implemented 2026-10-06.** `make lambda-wasm` builds the synchronous browser REPL from an explicit source/dependency manifest, with no MIR, allocation tracker, native string-SIMD unit or excluded acquisition/ambient providers. CSS/graph/math input and CSS/graph/LaTeX/math formatting, image-processing kernels and public history/event builtins are excluded. HTML parsing and template apply are retained, with REPL registration/rollback/reset verified. Node and Chromium each pass 283 embedding checks; native REPL tests pass 41/41 and the full native Lambda baseline passes 6,243/6,243. Optimized WASM + loader: 1,891,405 bytes raw / 729,874 bytes gzipped. Interpreter corpus and broader browser coverage remain verification work; the C API is initial, and external imports are rejected. Working record: `vibe/Lambda_Design_Static_Modules.md` §13.4; reproduction and ABI: `doc/dev/Lambda_WASM_Build.md`. |
 | D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and resolves shipped source from `<lambda-home>/package/` while exposing `lambda/{chart,dom,edit,editor,graph,latex,openapi,pdf}` and typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths. Since 2026-09-29 the source checkout and the release share one home, `./lmd/`: the package tree moved from `lambda/package/` to `lmd/package/`, and the formerly separate `input/` assets moved into their packages (validator default schemas and view stylesheets under `package/doc/`, math/KaTeX CSS and fonts under `package/math/`, LaTeX CSS and CMU fonts under `package/latex/`); regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
 | D7.2.5 | Implemented 2026-09-07. The shipped `lmd/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.2.6 | **Implemented 2026-09-29.** `lambda_resolve_import_module_path` is the one resolver (AST import, dependency prebuild, document-transform package loader); it returns NULL for a bare root other than `lambda`, and `resolve_import` reports E216 after the built-in and registered-module checks. `run_source_fixture` in `test/test_lambda_opt_gtest.cpp` runs checked-in scripts in place for the same reason the ruling states. |
@@ -2384,6 +2428,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.1v14 | Ruled 2026-10-02 (USER); **partially implemented** 2026-10-02 (branch `worktree-interp-tune2`). Implemented: the per-loop back-edge trigger at 10000, retirement of the loop-owner first-entry trigger, and handoff at the loop head. The loop entry is a synthesized procedure over the live-in locals (the body's statements from the loop onward), entered through its boxed wrapper, so every live-in is admitted like an unknown caller's argument. Residue: eligible loops are only `while` statements directly in a `pn` body, and back-edges of their nested loops count toward them; the loop-triggered image does not carry the definition's own boxed entry. Under AUTO, `mandelbrot2` 12.0 s → 0.10 s and `matmul2` 6.3 s → 0.11 s (eager JIT 0.06 s / 0.05 s, debug build). AUTO corpus differential 1092/1092 identical; with `LAMBDA_LOOP_JIT_THRESHOLD=1 LAMBDA_SATELLITE_SYNC=1` every eligible loop hands off and the corpus matches `interp` except one pre-existing sync-mode satellite abort. Plan and evidence: `vibe/impl/Lambda_Impl_Interp_Tune2.md` §12.2. Working record: `vibe/Lambda_Design_Ast_Interpreter.md` §5.1.1. Renamed 2026-10-03 (USER), meaning unchanged: the tier selector `LAMBDA_TIER` is `LAMBDA_EXEC_BACKEND`, `LAMBDA_JIT_THRESHOLD` is `LAMBDA_FUNC_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE` is `LAMBDA_LOOP_JIT_THRESHOLD`, and LambdaJS's `JS_EXECUTION_BACKEND` is `JS_EXEC_BACKEND`; the old names are no longer read. |
 | D8.1.1v15 | **Implemented 2026-10-03.** Explicit interp rejects unsupported scripts/imports before execution, including task-backed MIR satellites and cached AST activation. AUTO retains fallback; explicit jit retains eager MIR. Lambda baseline: 6,180/6,180; strict-pin regression cases: 6/6. Evidence and existing differential failures: `vibe/impl/Lambda_Impl_Typed_Performance_Audit.md` §6–§7. |
 | D8.1.1v16 | **Implemented 2026-10-05** (Runtime_Async P1, P4): T0 evaluates `start`, `select` and scoped tasks, and the strict-`interp` rejection of task-backed bodies is gone; JS promotion admits async and generator definitions and loop handoff refuses only a loop whose tail can suspend. Forced-promotion sweep over every `test/js` golden identical to the base. |
+| D8.1.1v17 | **Implemented 2026-10-06** (branch `worktree-repl-interp`). `run_repl` owns one `InterpReplSession`; whole-history `run_script_mir` replay and the init-failure fallback are deleted, and a `jit` selection becomes `auto` with a first-call promotion threshold. The entry transaction (`ReplEntryTxn`, `runner.cpp`) returns OK, INCOMPLETE (the C parser's status, no pre-check), REJECTED or FAILED and prints each diagnostic once; an unsupported construct or import is rejected by name. Imported cones initialize before the entry runs. SIGINT is armed per entry; T0 polls it at call entry and back-edges (`LAMBDA_FAULT_INTERRUPTED`), and promoted satellite code is not polled. No Tree-sitter symbol is reachable from the REPL path. Session services: `.env`, `.type`, `.time`, `.load`, `.save`, Tab completion and a history file. Gates: `LambdaReplSessionTests` and `LambdaReplTests`. [Repl_Interp §3, §6](../vibe/Lambda_Design_Repl_Interp.md) |
 | D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
 | D8.1.3v19 | Revised 2026-09-23: the unset `JS_EXEC_BACKEND` now selects AUTO. Interpreter-supported units execute through the retained AST path and may promote admitted hot definitions to P2; unsupported units retain whole-module MIR. `ast` remains explicit and fail-closed, `mir` remains an explicit whole-module selector. MIR link-interface and O1 decisions are selected through shared `mir_select_link_interface`, so large modules/documents can install the MIR interpreter without changing generated MIR. The v18 parser, AST-interpreter, module-registry, and P2 admission record remains otherwise unchanged. Working record: `vibe/Lambda_Design_Compiling_Pipeline_JS.md` LC4.1–LC4.12. |
 | D8.1.3v20 | Revised 2026-09-24 (USER): dynamic source — direct/indirect `eval`, the `Function`-family constructors, string timers, and `$262.evalScript` — parses into a retained `JsScript` and executes only in the AST interpreter, whatever the caller's tier or the unit selector. The MIR dynamic-code service (expression-wrapper and whole-script eval tiers, the dynamic-Function MIR cache, eval preambles, the `is_eval_direct` lowering mode) is deleted; a MIR caller keeps only the direct-eval bridge projection and write-back. Script top-level lexical realm records link their module slots on both tiers, so interpreted readers see live values and TDZ, and a projected caller binding outranks a global lexical of the same name. Dynamic source shares the AST template cache (a direct eval naming private members is parsed per call); whitespace/comment-only and lone-RegExp sources create no script. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3754/3754 (incl. `test_js_gtest` 479/479, `test_js_script_gtest` 191/191); `test_js_gtest --baseline --full-mir` 477/477. Residue: eval-created closures lose projected caller locals after the eval returns, `eval("arguments")` in functions and `new.target` in direct eval remain unsupported (pre-existing). Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI35; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
@@ -2666,6 +2711,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
+| D8.1.1v17 | RI1–RI6 | `Lambda_Design_Repl_Interp.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune10_Fast_Paths.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |

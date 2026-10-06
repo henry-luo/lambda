@@ -247,6 +247,7 @@ static const char js_computed_style_vmap_marker = 0;
 static const char js_inline_style_vmap_marker = 0;
 static const char js_foreign_doc_vmap_marker = 0;
 static const char js_web_animation_vmap_marker = 0;
+static const char js_web_keyframe_effect_vmap_marker = 0;
 
 extern "C" const void* radiant_dom_inline_style_host_type(void);
 extern "C" const void* radiant_dom_computed_style_host_type(void);
@@ -259,6 +260,12 @@ static TypeMap js_inline_style_marker = {};
 
 struct JsWebAnimationHost {
     CssWebAnimationState* state;
+};
+
+struct JsWebKeyframeEffectHost {
+    CssKeyframes* keyframes;
+    double duration_ms;
+    TimingFunction timing;
 };
 
 // Cached JS wrappers are owned by the active EvalContext, not this translation
@@ -832,6 +839,20 @@ extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
 
 static thread_local bool dom_geometry_flush_in_progress = false;
 
+static bool dom_flush_pending_document_layout(UiContext* uicon, DomDocument* doc) {
+    if (doc->js.mutation_count > 0) {
+        dom_engine_reconcile_dom_mutations(uicon, doc);
+        return true;
+    }
+    bool pending_scroll = doc->pending_scroll_into_view_target.address;
+    bool pending_reflow = doc->state && doc->state->needs_reflow;
+    if (!pending_scroll && !pending_reflow) return false;
+    // animation seeks and scroll requests change layout without changing the DOM.
+    layout_html_doc(uicon, doc, true);
+    doc_state_clear_reflow(doc->state);
+    return true;
+}
+
 extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     if (!doc) return false;
     // Host event turns expose their last committed tree. Re-entering layout
@@ -871,9 +892,7 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     // Standalone callers synchronously flush style and layout. The host loop
     // above owns its event-turn commit boundary.
     if (doc->view_tree && doc->view_tree->root) {
-        if (doc->js.mutation_count > 0) {
-            dom_engine_reconcile_dom_mutations(uicon, doc);
-        }
+        dom_flush_pending_document_layout(uicon, doc);
     } else if (doc->root && dom_engine_document_ensure_state(
                    doc, "dom_geometry_flush")) {
         // First-layout geometry is renderer work required for the initial
@@ -904,7 +923,8 @@ static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
     if (scheduler && scheduler->has_active_animations) {
         double now = scheduler->current_time +
             (delta_seconds >= 0.0 ? delta_seconds : 1.0 / 60.0);
-        active = animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
+        active = radiant_tick_document_animation_scheduler(
+            doc, now, &state->dirty_tracker);
     }
     if (state->has_active_smooth_scroll) {
         double now = js_event_loop_virtual_clock_enabled()
@@ -927,20 +947,13 @@ extern "C" bool dom_commit_headless_layout_checkpoint(void) {
     UiContext* uicon = _js_current_ui_context;
     DomDocument* doc = uicon && uicon->document
         ? uicon->document : _js_current_document;
-    bool scroll_into_view_pending = doc && doc->pending_scroll_into_view_target.address;
     if (!uicon || !uicon->headless || dom_is_host_driven_loop() ||
-        !doc || !doc->view_tree || !doc->view_tree->root ||
-        (doc->js.mutation_count == 0 && !scroll_into_view_pending)) {
+        !doc || !doc->view_tree || !doc->view_tree->root) {
         return false;
     }
     // A one-shot DOM session has no native render loop, so task boundaries must
     // commit pending mutations and layout-only scroll requests.
-    if (doc->js.mutation_count > 0) {
-        dom_engine_reconcile_dom_mutations(uicon, doc);
-    } else {
-        layout_html_doc(uicon, doc, true);
-    }
-    return true;
+    return dom_flush_pending_document_layout(uicon, doc);
 }
 
 // keep the older entry point as a boundary wrapper: geometry readers must use
@@ -10237,7 +10250,7 @@ static Item dom_dispatch_queued_scroll(Item env_item) {
     return make_js_undefined();
 }
 
-static void dom_schedule_scroll_frame(Item callback) {
+void dom_schedule_animation_frame(Item callback) {
     (void)js_requestAnimationFrame(callback);
 }
 
@@ -10252,7 +10265,7 @@ static void dom_queue_scroll_event(DomElement* elem, float old_x, float old_y) {
     RootFrame roots(1);
     Rooted<Item> target_root(roots, dom_wrap_element(elem));
     Item values[1] = {target_root.get()};
-    js_schedule_native_env(dom_schedule_scroll_frame,
+    js_schedule_native_env(dom_schedule_animation_frame,
         dom_dispatch_queued_scroll, 0, values, 1);
 }
 
@@ -14589,9 +14602,8 @@ extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
     float height = 0.0f;
     // CSSOM View §6 returns the visual border-box after CSS transforms.
     view_get_visual_bounds(static_cast<View*>(elem), &x, &y, &width, &height);
-    return dom_make_rect_object_in(elem->doc, x, y,
-        width > 0.0f ? width : (float)dom_geometry_dimension(elem, true),
-        height > 0.0f ? height : (float)dom_geometry_dimension(elem, false));
+    // a collapsed transform has real zero visual dimensions, independent of its layout size.
+    return dom_make_rect_object_in(elem->doc, x, y, width, height);
 }
 
 extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
@@ -14607,8 +14619,6 @@ extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     float w = 0.0f;
     float h = 0.0f;
     view_get_visual_bounds(static_cast<View*>(elem), &x, &y, &w, &h);
-    if (w <= 0.0f) w = (float)dom_geometry_dimension(elem, true);
-    if (h <= 0.0f) h = (float)dom_geometry_dimension(elem, false);
 
     // This built the same eight fields by hand, which is why it kept crashing
     // after dom_make_rect learned a realm-free path: one rect, one builder.
@@ -18171,86 +18181,340 @@ static JsWebAnimationHost* js_web_animation_host(Item value) {
     return nullptr;
 }
 
-JS_FORWARD_STATIC_EXPRESSION(float, js_web_animation_number, (Item value, float fallback),
-    dom_svg_number(value, fallback))
+enum JsWebKeyframeValueKind {
+    JS_WEB_KEYFRAME_STRING,
+    JS_WEB_KEYFRAME_OFFSET,
+    JS_WEB_KEYFRAME_COMPOSITE,
+};
 
 static CssAnimComposite js_web_animation_composite(Item value) {
     const char* text = fn_to_cstr(value);
-    if (text && str_icmp_cstr(text, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
-    if (text && str_icmp_cstr(text, "accumulate") == 0) {
-        return CSS_ANIM_COMPOSITE_ACCUMULATE;
-    }
+    if (text && strcmp(text, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
+    if (text && strcmp(text, "accumulate") == 0) return CSS_ANIM_COMPOSITE_ACCUMULATE;
     return CSS_ANIM_COMPOSITE_REPLACE;
 }
 
-static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
-                                                       Item keyframes_item) {
-    if (!element || !element->doc ||
-        (get_type_id(keyframes_item) != LMD_TYPE_ARRAY &&
-         get_type_id(keyframes_item) != LMD_TYPE_MAP &&
-         get_type_id(keyframes_item) != LMD_TYPE_VMAP)) return nullptr;
+// GetMethod is performed once: getters and custom array iterators are observable.
+static Item js_web_keyframe_iterator(Item value) {
+    RootFrame roots(3);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> method_root(roots, dom_realm_get(
+        value_root.get(), js_well_known_symbol_key(1)));
+    if (item_is_error(method_root.get())) return method_root.get();
+    if (is_js_undefined(method_root.get()) || method_root.get().item == ITEM_NULL)
+        return make_js_undefined();
+    if (!js_is_callable(method_root.get()))
+        return dom_realm_throw_type_error("keyframe iterator is not callable");
+    Rooted<Item> iterator_root(roots, dom_realm_call(
+        method_root.get(), value_root.get(), nullptr, 0));
+    if (item_is_error(iterator_root.get())) return iterator_root.get();
+    return js_iterator_return_checked(iterator_root.get(), true,
+        "keyframe iterator is not an object");
+}
 
-    bool sequence = get_type_id(keyframes_item) == LMD_TYPE_ARRAY;
-    int count = sequence ? (int)js_array_length(keyframes_item) : 1;
-    // Web Animations accepts an empty keyframe object and still returns an
-    // Animation whose timing/properties can be inspected by the caller.
-    if (count <= 0) count = 1;
-    if (count > 64) count = 64;
+static Item js_web_keyframe_convert(Item value, JsWebKeyframeValueKind kind) {
+    if (kind == JS_WEB_KEYFRAME_OFFSET) {
+        if (value.item == ITEM_NULL || is_js_undefined(value)) return ItemNull;
+        Item number = js_to_number(value);
+        if (item_is_error(number)) return number;
+        double offset = get_type_id(number) == LMD_TYPE_FLOAT ? it2d(number)
+            : (double)it2i(number);
+        return isfinite(offset) ? number
+            : dom_realm_throw_type_error("keyframe offset must be finite");
+    }
+    Item text = js_to_string(value);
+    if (item_is_error(text)) return text;
+    if (kind == JS_WEB_KEYFRAME_COMPOSITE) {
+        const char* name = fn_to_cstr(text);
+        if (!name || (strcmp(name, "auto") && strcmp(name, "replace") &&
+                strcmp(name, "add") && strcmp(name, "accumulate")))
+            return dom_realm_throw_type_error("invalid keyframe composite");
+    }
+    return text;
+}
 
-    Pool* pool = element->doc->document_pool;
-    CssKeyframes* keyframes = (CssKeyframes*)pool_calloc(
-        pool, sizeof(CssKeyframes));
-    if (!keyframes) return nullptr;
-    keyframes->name = lam::up("web-animation");
-    keyframes->stops = lam::own_arr((CssKeyframeStop*)pool_calloc(
-        pool, sizeof(CssKeyframeStop) * count));
-    if (!keyframes->stops) return nullptr;
-    keyframes->stop_count = count;
+// Indexed dictionaries accept scalar values or iterables; primitive strings
+// remain one CSS value. Convert each yield before advancing its iterator.
+static Item js_web_keyframe_values(Item value, bool allow_list,
+                                   JsWebKeyframeValueKind kind) {
+    RootFrame roots(4);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> iterator_root(roots, make_js_undefined());
+    Rooted<Item> result_root(roots, js_array_new(0));
+    Rooted<Item> current_root(roots, ItemNull);
+    if (allow_list && js_is_object_value(value_root.get())) {
+        iterator_root.set(js_web_keyframe_iterator(value_root.get()));
+        if (item_is_error(iterator_root.get())) return iterator_root.get();
+    }
+    bool sequence = !is_js_undefined(iterator_root.get());
+    do {
+        current_root.set(sequence ? js_iterator_step(iterator_root.get())
+            : value_root.get());
+        if (item_is_error(current_root.get())) return current_root.get();
+        if (sequence && current_root.get().item == JS_ITER_DONE_SENTINEL) break;
+        current_root.set(js_web_keyframe_convert(current_root.get(), kind));
+        if (item_is_error(current_root.get())) return current_root.get();
+        js_array_push_item_direct(result_root.get().array, current_root.get());
+    } while (sequence);
+    return result_root.get();
+}
 
-    for (int i = 0; i < count; i++) {
-        CssKeyframeStop* stop = &keyframes->stops[i];
-        stop->offset = count > 1 ? (float)i / (float)(count - 1) : 0.0f;
-        Item frame = sequence ? js_elements_get_int(keyframes_item, i)
-                              : keyframes_item;
-        if (get_type_id(frame) != LMD_TYPE_MAP &&
-            get_type_id(frame) != LMD_TYPE_VMAP) continue;
+struct JsWebKeyframeStop {
+    CssKeyframeStop stop;
+    double specified_offset;
+    double computed_offset;
+    char* easing;
+    int property_capacity;
+};
 
-        Item offset = dom_realm_get_cstr(frame, "offset");
-        if (!is_js_undefined(offset) && offset.item != ITEM_NULL) {
-            float parsed_offset = js_web_animation_number(offset, stop->offset);
-            if (isfinite(parsed_offset)) stop->offset = parsed_offset;
+struct JsWebKeyframeBuilder {
+    Pool* pool;
+    JsWebKeyframeStop* stops;
+    int count;
+    int capacity;
+};
+
+static JsWebKeyframeStop* js_web_keyframe_add_stop(JsWebKeyframeBuilder* builder,
+                                                 double computed_offset,
+                                                 bool merge) {
+    int index = builder->count;
+    if (merge) {
+        index = 0;
+        while (index < builder->count &&
+                builder->stops[index].computed_offset < computed_offset) index++;
+        if (index < builder->count &&
+                builder->stops[index].computed_offset == computed_offset)
+            return &builder->stops[index];
+    }
+    if (!lam::pool_grow_array(builder->pool, &builder->stops,
+            &builder->capacity, builder->count + 1, 8)) return nullptr;
+    memmove(builder->stops + index + 1, builder->stops + index,
+        (size_t)(builder->count - index) * sizeof(JsWebKeyframeStop));
+    JsWebKeyframeStop* stop = &builder->stops[index];
+    *stop = {};
+    stop->specified_offset = NAN;
+    stop->computed_offset = computed_offset;
+    builder->count++;
+    return stop;
+}
+
+static bool js_web_keyframe_add_property(JsWebKeyframeBuilder* builder,
+                                        JsWebKeyframeStop* stop,
+                                        CssPropertyCode property,
+                                        Item text) {
+    CssAnimatedProp parsed;
+    if (!css_animation_parse_property_value(property, fn_to_cstr(text),
+            &parsed, builder->pool)) return true;
+    CssAnimatedProp* properties = stop->stop.properties;
+    if (!lam::pool_grow_array(builder->pool, &properties,
+            &stop->property_capacity, stop->stop.property_count + 1, 4)) return false;
+    stop->stop.properties = lam::own_arr(properties);
+    properties[stop->stop.property_count++] = parsed;
+    return true;
+}
+
+static int js_web_keyframe_compare_names(const void* a, const void* b) {
+    return strcmp(*(const char* const*)a, *(const char* const*)b);
+}
+
+// Copy eligible enumerable names before calling getters: GC may relocate the
+// source name array, and Web Animations reads supported properties in name order.
+static Item js_web_keyframe_property_names(Item frame, Pool* pool,
+                                           char*** out, int* out_count) {
+    RootFrame roots(2);
+    Rooted<Item> frame_root(roots, frame);
+    Rooted<Item> names_root(roots, js_object_keys(frame_root.get()));
+    if (item_is_error(names_root.get())) return names_root.get();
+    int count = (int)js_array_length(names_root.get());
+    char** names = nullptr;
+    int capacity = 0;
+    *out_count = 0;
+    for (int index = 0; index < count; index++) {
+        const char* name = fn_to_cstr(js_elements_get_int(names_root.get(), index));
+        if (!name || !strcmp(name, "offset") || !strcmp(name, "easing") ||
+                !strcmp(name, "composite")) continue;
+        char css_name[128];
+        js_camel_to_css_prop(name, css_name, sizeof(css_name));
+        const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(
+            css_property_code_from_name(css_name));
+        if (!metadata || metadata->animation_type == ANIM_VAL_NONE) continue;
+        if (!lam::pool_grow_array(pool, &names, &capacity, *out_count + 1, 8))
+            return ItemError;
+        names[*out_count] = pool_strdup(pool, name);
+        if (!names[*out_count]) return ItemError;
+        (*out_count)++;
+    }
+    if (*out_count > 1) qsort(names, (size_t)*out_count, sizeof(*names),
+        js_web_keyframe_compare_names);
+    *out = names;
+    return ItemNull;
+}
+
+static Item js_web_animation_parse_keyframes(DomDocument* document,
+                                             Item keyframes_item,
+                                             CssKeyframes** out) {
+    *out = nullptr;
+    if (!document) return ItemNull;
+    Pool* pool = document->document_pool;
+    if (!css_property_system_init(pool)) return ItemError;
+    JsWebKeyframeBuilder builder = {pool, nullptr, 0, 0};
+    RootFrame roots(7);
+    Rooted<Item> input_root(roots, keyframes_item);
+    Rooted<Item> iterator_root(roots, make_js_undefined());
+    Rooted<Item> frame_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
+    Rooted<Item> offsets_root(roots, ItemNull);
+    Rooted<Item> easings_root(roots, ItemNull);
+    Rooted<Item> composites_root(roots, ItemNull);
+    if (!is_js_undefined(input_root.get()) && input_root.get().item != ITEM_NULL) {
+        if (!js_is_object_value(input_root.get()))
+            return dom_realm_throw_type_error("keyframes must be an object");
+        iterator_root.set(js_web_keyframe_iterator(input_root.get()));
+        if (item_is_error(iterator_root.get())) return iterator_root.get();
+    }
+    bool sequence = !is_js_undefined(iterator_root.get());
+    bool empty = is_js_undefined(input_root.get()) || input_root.get().item == ITEM_NULL;
+    while (!empty) {
+        frame_root.set(sequence ? js_iterator_step(iterator_root.get()) : input_root.get());
+        if (item_is_error(frame_root.get())) return frame_root.get();
+        if (sequence && frame_root.get().item == JS_ITER_DONE_SENTINEL) break;
+        bool null_frame = is_js_undefined(frame_root.get()) || frame_root.get().item == ITEM_NULL;
+        if (!null_frame && !js_is_object_value(frame_root.get()))
+            return dom_realm_throw_type_error("keyframe must be an object");
+        // WebIDL dictionary conversion reads these members before CSS properties.
+        const struct {
+            const char* name;
+            JsWebKeyframeValueKind kind;
+            const char* initial;
+        } members[] = {{"composite", JS_WEB_KEYFRAME_COMPOSITE, "auto"},
+            {"easing", JS_WEB_KEYFRAME_STRING, "linear"},
+            {"offset", JS_WEB_KEYFRAME_OFFSET, nullptr}};
+        Rooted<Item>* converted[] = {&composites_root, &easings_root, &offsets_root};
+        for (int index = 0; index < 3; index++) {
+            value_root.set(null_frame ? make_js_undefined()
+                : dom_realm_get_cstr(frame_root.get(), members[index].name));
+            if (!item_is_error(value_root.get())) {
+                if (is_js_undefined(value_root.get())) value_root.set(
+                    members[index].initial ? js_string_key(members[index].initial) : ItemNull);
+                value_root.set(js_web_keyframe_values(value_root.get(), !sequence,
+                    members[index].kind));
+            }
+            if (item_is_error(value_root.get())) return value_root.get();
+            converted[index]->set(value_root.get());
         }
-
-        Item names = dom_realm_own_property_names(frame);
-        if (get_type_id(names) != LMD_TYPE_ARRAY) continue;
-        int name_count = (int)js_array_length(names);
-        for (int j = 0; j < name_count; j++) {
-            const char* js_name = fn_to_cstr(js_elements_get_int(names, j));
-            if (!js_name || strcmp(js_name, "offset") == 0 ||
-                strcmp(js_name, "composite") == 0) continue;
-
+        JsWebKeyframeStop* sequence_stop = sequence
+            ? js_web_keyframe_add_stop(&builder, NAN, false) : nullptr;
+        if (sequence && !sequence_stop) return ItemError;
+        char** names = nullptr;
+        int name_count = 0;
+        value_root.set(null_frame ? ItemNull : js_web_keyframe_property_names(
+            frame_root.get(), pool, &names, &name_count));
+        if (item_is_error(value_root.get())) return value_root.get();
+        for (int index = 0; index < name_count; index++) {
             char css_name[128];
-            js_camel_to_css_prop(js_name, css_name, sizeof(css_name));
+            js_camel_to_css_prop(names[index], css_name, sizeof(css_name));
             CssPropertyCode property = css_property_code_from_name(css_name);
-            if (property == CSS_PROPERTY_UNKNOWN || property == 0) continue;
-
-            const char* value = fn_to_cstr(dom_realm_get(
-                frame, js_string_key(js_name)));
-            if (!value || !value[0]) continue;
-
-            CssAnimatedProp parsed;
-            if (!css_animation_parse_property_value(property, value, &parsed,
-                                                    pool)) continue;
-            parsed.composite = js_web_animation_composite(dom_realm_get_cstr(frame, "composite"));
-            stop->properties = lam::own_arr((CssAnimatedProp*)pool_calloc(
-                pool, sizeof(CssAnimatedProp)));
-            if (!stop->properties) return nullptr;
-            stop->properties[0] = parsed;
-            stop->property_count = 1;
-            break;
+            value_root.set(dom_realm_get(frame_root.get(), js_string_key(names[index])));
+            if (!item_is_error(value_root.get())) value_root.set(js_web_keyframe_values(
+                value_root.get(), !sequence, JS_WEB_KEYFRAME_STRING));
+            if (item_is_error(value_root.get())) return value_root.get();
+            int count = (int)js_array_length(value_root.get());
+            for (int value_index = 0; value_index < count; value_index++) {
+                double offset = count > 1 ? (double)value_index / (count - 1) : 1.0;
+                JsWebKeyframeStop* stop = sequence ? sequence_stop
+                    : js_web_keyframe_add_stop(&builder, offset, true);
+                if (!stop || !js_web_keyframe_add_property(&builder, stop, property,
+                        js_elements_get_int(value_root.get(), value_index))) return ItemError;
+            }
+        }
+        for (int index = 0; index < name_count; index++) pool_free(pool, names[index]);
+        pool_free(pool, names);
+        int first = sequence ? builder.count - 1 : 0;
+        int offset_count = (int)js_array_length(offsets_root.get());
+        int easing_count = (int)js_array_length(easings_root.get());
+        int composite_count = (int)js_array_length(composites_root.get());
+        for (int index = first; index < builder.count; index++) {
+            JsWebKeyframeStop* stop = &builder.stops[index];
+            int member_index = sequence ? 0 : index;
+            if (member_index < offset_count) {
+                Item offset = js_elements_get_int(offsets_root.get(), member_index);
+                if (offset.item != ITEM_NULL) stop->specified_offset =
+                    get_type_id(offset) == LMD_TYPE_FLOAT ? it2d(offset) : (double)it2i(offset);
+            }
+            if (easing_count) {
+                stop->easing = pool_strdup(pool, fn_to_cstr(js_elements_get_int(
+                    easings_root.get(), member_index % easing_count)));
+                if (!stop->easing) return ItemError;
+            }
+            CssAnimComposite composite = composite_count ? js_web_animation_composite(
+                js_elements_get_int(composites_root.get(), member_index % composite_count))
+                : CSS_ANIM_COMPOSITE_REPLACE;
+            for (int property_index = 0; property_index < stop->stop.property_count;
+                    property_index++) stop->stop.properties[property_index].composite = composite;
+        }
+        if (!sequence) break;
+    }
+    double previous_offset = -1.0;
+    for (int index = 0; index < builder.count; index++) {
+        JsWebKeyframeStop* stop = &builder.stops[index];
+        double offset = stop->specified_offset;
+        if (!isnan(offset)) {
+            if (offset < 0.0 || offset > 1.0 || offset < previous_offset)
+                return dom_realm_throw_type_error("keyframe offsets must increase within [0, 1]");
+            previous_offset = offset;
+        }
+        stop->computed_offset = offset;
+    }
+    if (builder.count > 1 && isnan(builder.stops[0].computed_offset))
+        builder.stops[0].computed_offset = 0.0;
+    if (builder.count && isnan(builder.stops[builder.count - 1].computed_offset))
+        builder.stops[builder.count - 1].computed_offset = 1.0;
+    for (int first = 0; first + 1 < builder.count;) {
+        int last = first + 1;
+        while (last < builder.count && isnan(builder.stops[last].computed_offset)) last++;
+        double start = builder.stops[first].computed_offset;
+        double end = builder.stops[last].computed_offset;
+        for (int index = first + 1; index < last; index++)
+            builder.stops[index].computed_offset = start + (end - start) *
+                (double)(index - first) / (last - first);
+        first = last;
+    }
+    CssKeyframes* keyframes = (CssKeyframes*)pool_calloc(pool, sizeof(CssKeyframes));
+    if (!keyframes) return ItemError;
+    keyframes->name = lam::up("web-animation");
+    keyframes->stop_count = builder.count;
+    if (builder.count) {
+        keyframes->stops = lam::own_arr((CssKeyframeStop*)pool_calloc(pool,
+            sizeof(CssKeyframeStop) * (size_t)builder.count));
+        if (!keyframes->stops) return ItemError;
+    }
+    for (int index = 0; index < builder.count; index++) {
+        JsWebKeyframeStop* stop = &builder.stops[index];
+        TimingFunction timing;
+        if (!css_animation_parse_timing_function_text(stop->easing ? stop->easing : "linear", &timing))
+            return dom_realm_throw_type_error("invalid keyframe easing");
+        if (timing.type != TIMING_LINEAR) {
+            stop->stop.timing = lam::own((TimingFunction*)pool_alloc(pool, sizeof(TimingFunction)));
+            if (!stop->stop.timing) return ItemError;
+            *stop->stop.timing = timing;
+        }
+        stop->stop.offset = (float)stop->computed_offset;
+        keyframes->stops[index] = stop->stop;
+        pool_free(pool, stop->easing);
+    }
+    // Indexed easing lists can exceed the merged frame count; validate the tail.
+    if (!sequence && !empty) {
+        int count = (int)js_array_length(easings_root.get());
+        for (int index = builder.count; index < count; index++) {
+            TimingFunction timing;
+            if (!css_animation_parse_timing_function_text(fn_to_cstr(
+                    js_elements_get_int(easings_root.get(), index)), &timing))
+                return dom_realm_throw_type_error("invalid keyframe easing");
         }
     }
-    return keyframes;
+    pool_free(pool, builder.stops);
+    *out = keyframes;
+    return ItemNull;
 }
 
 // the headless runner samples currentTime explicitly; pausing only needs to
@@ -18286,41 +18550,63 @@ static Item js_web_animation_current_time_set(Item value) {
     return value;
 }
 
-// Element.animate and new Animation(effect) converge here so their host state
-// has one allocation, timing, and property-sampling path.
-static Item js_web_animation_create(DomElement* element, Item keyframes_item,
-                                    Item options_item) {
-    if (!element || !element->doc) return ItemNull;
+static Item js_web_animation_parse_timing_options(Item options,
+                                                  double* duration_ms,
+                                                  TimingFunction* timing) {
+    *duration_ms = 0.0;
+    *timing = {};
+    timing->type = TIMING_LINEAR;
+    RootFrame roots(2);
+    Rooted<Item> options_root(roots, options);
+    Rooted<Item> value_root(roots, ItemNull);
+    bool dictionary = js_is_object_value(options_root.get());
+    value_root.set(dictionary ? dom_realm_get_cstr(options_root.get(), "duration")
+        : options_root.get());
+    if (item_is_error(value_root.get())) return value_root.get();
+    if (!is_js_undefined(value_root.get()) && value_root.get().item != ITEM_NULL) {
+        const char* text = fn_to_cstr(value_root.get());
+        if (!text || strcmp(text, "auto")) {
+            value_root.set(js_to_number(value_root.get()));
+            if (item_is_error(value_root.get())) return value_root.get();
+            *duration_ms = get_type_id(value_root.get()) == LMD_TYPE_FLOAT
+                ? it2d(value_root.get()) : (double)it2i(value_root.get());
+            if (isnan(*duration_ms) || *duration_ms < 0.0)
+                return dom_realm_throw_type_error("invalid animation duration");
+        }
+    }
+    if (dictionary) {
+        value_root.set(dom_realm_get_cstr(options_root.get(), "easing"));
+        if (item_is_error(value_root.get())) return value_root.get();
+        if (!is_js_undefined(value_root.get())) {
+            value_root.set(js_to_string(value_root.get()));
+            if (item_is_error(value_root.get())) return value_root.get();
+            if (!css_animation_parse_timing_function_text(fn_to_cstr(value_root.get()), timing))
+                return dom_realm_throw_type_error("invalid animation easing");
+        }
+    }
+    return ItemNull;
+}
 
+// Element.animate and new Animation(effect) share one state builder; the latter
+// consumes the document-owned snapshot already converted by KeyframeEffect.
+static Item js_web_animation_create(DomElement* element, Item keyframes_item,
+                                    Item options_item,
+                                    JsWebKeyframeEffectHost* snapshot = nullptr) {
+    if (!element || !element->doc) return ItemNull;
     RootFrame roots(5);
     Rooted<Item> keyframes_root(roots, keyframes_item);
     Rooted<Item> options_root(roots, options_item);
-    CssKeyframes* keyframes = js_web_animation_parse_keyframes(
-        element, keyframes_root.get());
-    if (!keyframes) return ItemNull;
-
-    double duration_ms = 0.0;
-    TimingFunction timing = {};
-    timing.type = TIMING_LINEAR;
-    if (get_type_id(options_root.get()) == LMD_TYPE_MAP ||
-        get_type_id(options_root.get()) == LMD_TYPE_VMAP) {
-        Item duration = dom_realm_get_cstr(options_root.get(), "duration");
-        if (!is_js_undefined(duration) && duration.item != ITEM_NULL) {
-            duration_ms = js_web_animation_number(duration, 0.0f);
-        }
-        Item easing = dom_realm_get_cstr(options_root.get(), "easing");
-        const char* easing_text = fn_to_cstr(easing);
-        if (easing_text) {
-            css_animation_parse_timing_function_text(easing_text, &timing);
-        }
-    } else {
-        Item duration = js_to_number(options_root.get());
-        TypeId duration_type = get_type_id(duration);
-        if (duration_type == LMD_TYPE_FLOAT) duration_ms = it2d(duration);
-        else if (duration_type == LMD_TYPE_INT || duration_type == LMD_TYPE_INT64) {
-            duration_ms = (double)it2i(duration);
-        }
+    CssKeyframes* keyframes = snapshot ? snapshot->keyframes : nullptr;
+    double duration_ms = snapshot ? snapshot->duration_ms : 0.0;
+    TimingFunction timing = snapshot ? snapshot->timing : TimingFunction{};
+    if (!snapshot) {
+        Item parsed = js_web_animation_parse_timing_options(options_root.get(),
+            &duration_ms, &timing);
+        if (item_is_error(parsed)) return parsed;
+        parsed = js_web_animation_parse_keyframes(element->doc, keyframes_root.get(), &keyframes);
+        if (item_is_error(parsed)) return parsed;
     }
+    if (!keyframes) return ItemNull;
 
     CssWebAnimationState* state = css_web_animation_create(
         element, keyframes, duration_ms, &timing, element->doc->document_pool);
@@ -18369,35 +18655,48 @@ extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
 
 extern "C" Item dom_keyframe_effect_ctor(Item target, Item keyframes,
                                            Item options) {
-    // Keep the WebIDL constructor value-shaped; Animation consumes these
-    // rooted fields and delegates to the Element.animate state builder.
-    RootFrame roots(4);
+    RootFrame roots(5);
     Rooted<Item> target_root(roots, target);
     Rooted<Item> keyframes_root(roots, keyframes);
     Rooted<Item> options_root(roots, options);
+    DomElement* element = (DomElement*)dom_unwrap_element(target_root.get());
+    DomDocument* document = element ? element->doc : _js_current_document;
+    if (!document) return ItemNull;
+    JsWebKeyframeEffectHost* host = (JsWebKeyframeEffectHost*)pool_calloc(
+        document->document_pool, sizeof(JsWebKeyframeEffectHost));
+    if (!host) return ItemError;
+    Item parsed = js_web_animation_parse_timing_options(options_root.get(),
+        &host->duration_ms, &host->timing);
+    if (item_is_error(parsed)) return parsed;
+    parsed = js_web_animation_parse_keyframes(document, keyframes_root.get(), &host->keyframes);
+    if (item_is_error(parsed)) return parsed;
+    Rooted<Item> holder_root(roots, vmap_new());
+    if (get_type_id(holder_root.get()) != LMD_TYPE_VMAP) return ItemError;
+    holder_root.get().vmap->host_type = (const void*)&js_web_keyframe_effect_vmap_marker;
+    holder_root.get().vmap->host_data = host;
     Rooted<Item> effect_root(roots, js_new_object());
-    dom_realm_set_cstr(effect_root.get(), "__lambda_keyframe_effect_target",
-                       target_root.get());
-    dom_realm_set_cstr(effect_root.get(), "__lambda_keyframe_effect_keyframes",
-                       keyframes_root.get());
-    dom_realm_set_cstr(effect_root.get(), "__lambda_keyframe_effect_options",
-                       options_root.get());
+    dom_realm_set_cstr(effect_root.get(), "__lambda_keyframe_effect_target", target_root.get());
+    dom_realm_set_cstr(effect_root.get(), "__lambda_keyframe_effect_keyframes", holder_root.get());
     dom_realm_apply_prototype(effect_root.get(), "KeyframeEffect");
     return effect_root.get();
 }
 
 extern "C" Item dom_animation_ctor(Item effect) {
-    RootFrame roots(4);
+    RootFrame roots(3);
     Rooted<Item> effect_root(roots, effect);
     Rooted<Item> target_root(roots, dom_realm_get_cstr(
         effect_root.get(), "__lambda_keyframe_effect_target"));
-    Rooted<Item> keyframes_root(roots, dom_realm_get_cstr(
+    if (item_is_error(target_root.get())) return target_root.get();
+    Rooted<Item> holder_root(roots, dom_realm_get_cstr(
         effect_root.get(), "__lambda_keyframe_effect_keyframes"));
-    Rooted<Item> options_root(roots, dom_realm_get_cstr(
-        effect_root.get(), "__lambda_keyframe_effect_options"));
+    if (item_is_error(holder_root.get())) return holder_root.get();
+    Item holder = holder_root.get();
+    if (get_type_id(holder) != LMD_TYPE_VMAP || !holder.vmap ||
+            holder.vmap->host_type != (const void*)&js_web_keyframe_effect_vmap_marker)
+        return ItemNull;
     return js_web_animation_create(
-        (DomElement*)dom_unwrap_element(target_root.get()),
-        keyframes_root.get(), options_root.get());
+        (DomElement*)dom_unwrap_element(target_root.get()), ItemNull, ItemNull,
+        (JsWebKeyframeEffectHost*)holder.vmap->host_data);
 }
 
 

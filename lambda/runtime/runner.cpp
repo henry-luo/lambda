@@ -47,7 +47,9 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/shell.h"
+#ifndef LAMBDA_NO_TASKS
 #include "../../lib/uv_loop.h"
+#endif
 #include "../dom/dom.h"
 
 extern "C" Item js_get_key_default(Item object, Item key);
@@ -80,6 +82,7 @@ extern "C" double lambda_process_peak_rss_mb(void) {
 #endif
 }
 
+#ifndef LAMBDA_NO_RESOURCE_CACHE
 typedef struct LambdaAstPrebuildDiscoverState {
     const char* source;
     size_t source_length;
@@ -192,6 +195,8 @@ static bool lambda_ast_prebuild_imports(const char* path) {
         path, NULL, 0, &stats);
 }
 
+#endif
+
 static void record_direct_parse_error(Transpiler* tp, const char* script_path,
         const LambdaParseError* parse_error) {
     if (!tp || !tp->source) return;
@@ -301,10 +306,14 @@ static void free_transpiler_diagnostics(Transpiler* tp) {
 }
 
 extern "C" int lambda_compiler_timing_enabled(void) {
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    return false;
+#else
     if (g_compiler_timing_enabled >= 0) return g_compiler_timing_enabled;
     const char* value = shell_getenv("LAMBDA_COMPILER_TIMING");
     g_compiler_timing_enabled = value && value[0] && strcmp(value, "0") != 0;
     return g_compiler_timing_enabled;
+#endif
 }
 
 extern "C" void lambda_compiler_timing_reset(void) {
@@ -382,12 +391,16 @@ static pthread_mutex_t profile_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 bool is_profile_enabled() {
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    return false;
+#else
     if (!profile_checked) {
         const char* env = shell_getenv("LAMBDA_PROFILE");
         profile_enabled = (env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0));
         profile_checked = true;
     }
     return profile_enabled;
+#endif
 }
 
 extern "C" int lambda_compiler_timing_collecting(void) {
@@ -535,6 +548,7 @@ void lambda_profile_record_js_compilation(const char* script_path,
 }
 
 void profile_dump_to_file() {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!profile_enabled || profile_count == 0) return;
     create_dir_recursive("temp");
     FILE* f = fopen("temp/phase_profile.txt", "w");
@@ -556,6 +570,7 @@ void profile_dump_to_file() {
                 total, p->peak_rss_mb, p->code_len, p->worker_thread, p->thread_id);
     }
     fclose(f);
+#endif
 }
 
 // ============================================================================
@@ -684,6 +699,7 @@ static void runtime_module_unit_index_delete_script(Runtime* runtime,
     runtime_module_state_unbind_unit(runtime, unit_id, script->module_state_id);
 }
 
+#ifndef LAMBDA_NO_RESOURCE_CACHE
 static int64_t script_file_mtime_nsec(const struct stat* stat_value) {
     if (!stat_value) return 0;
 #if defined(__APPLE__)
@@ -1162,6 +1178,8 @@ static Script* lambda_ast_template_clone_for_runtime(Runtime* runtime,
     return instance;
 }
 
+#endif
+
 Script* lambda_ast_overlay_import_script(const Script* importer,
         const AstImportNode* import_node) {
     if (!import_node || !importer || !importer->cache_template ||
@@ -1281,6 +1299,7 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
     }
 }
 
+#ifndef LAMBDA_NO_MIR
 static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
         const char* path, const char* source, bool inline_source,
         bool is_import) {
@@ -1439,6 +1458,8 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
     return true;
 }
 
+#endif
+
 static bool lambda_prepare_ast_interpreter(Transpiler* tp) {
     if (!tp || !tp->ast_root) return false;
     AstScript* interp_root = (AstScript*)tp->ast_root;
@@ -1489,6 +1510,7 @@ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
     return true;
 }
 
+#ifndef LAMBDA_NO_MIR
 static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         Script* script) {
     if (!runtime || !script) return false;
@@ -1520,6 +1542,8 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
     if (script->jit_context) (void)lambda_cache_promote_ast_shell_mir(runtime, script);
     return script->jit_context != NULL;
 }
+
+#endif
 
 typedef struct LambdaDirectFrontendPassContext {
     Transpiler* tp;
@@ -1616,7 +1640,9 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (own_timing_enabled) lambda_own_timing_enter(&own_timing);
     if (profiling || compiler_timing) profile_get_time(&p0);
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&start);
+#endif
     tp->source = script->source;
     // A non-main Script can be linked from a native parent. Keep its exports
     // callable even when automatic document policy prefers interpretation.
@@ -1641,8 +1667,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p1);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
     print_elapsed_time("parsing", start, end);
+#endif
 
     lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_BUILD);
     if (!compiler_pass_manager_add(&tp->pass_manager, &build_pass) ||
@@ -1652,8 +1680,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p2);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
     print_elapsed_time("building AST", start, end);
+#endif
 
     lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_BIND);
     if (!compiler_pass_manager_add(&tp->pass_manager, &bind_pass) ||
@@ -1663,8 +1693,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p3);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
     print_elapsed_time("binding AST", start, end);
+#endif
 
     CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
         COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED,
@@ -1681,8 +1713,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // Allocation reserves dense node IDs and bind publishes graph columns, so
     // no post-validation index walk remains (D8.2.4/D8.2.5v2).
     if (profiling || compiler_timing) p5 = p4;
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
     print_elapsed_time("building AST", start, end);
+#endif
 
     // ANY-census [Type_Infer TI3]: one line per compile naming where static
     // types fell back to `any`. Purely diagnostic — later inference slices
@@ -1773,12 +1807,15 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         interp_run_stats()->scripts_fallback++;
         log_debug("interp: fallback file=%s reason=node:%s",
             script_path, interp_node_kind_name(tp->interp_reject_kind));
+#ifndef LAMBDA_NO_MIR
         if (!interp_force_jit_import_cone(tp)) {
             if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
             return;
         }
+#endif
     }
 
+#ifndef LAMBDA_NO_MIR
     // compile the AST directly to MIR; this is the only supported Lambda backend.
     {
         double mir_jit_init_ms = 0, mir_transpile_ms = 0, mir_gen_ms = 0;
@@ -1837,6 +1874,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
     }
+#endif
+
 
 }
 
@@ -1845,6 +1884,16 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
 
+#ifdef LAMBDA_NO_RESOURCE_CACHE
+    // browser evaluation accepts source bytes only; native import providers are absent.
+    if (!runtime || !script_path || !source || is_import) {
+        log_error("wasm-loader: only in-memory main source is supported");
+        return NULL;
+    }
+    const char* lookup_path = script_path;
+    const char* exact_source = source;
+    char* canonical_path = NULL;
+#else
     // Build the static closure before the root enters its Runtime. Workers only
     // publish AST templates; import initialization and tier selection stay on
     // this execution path (D8.1.1v13, D8.5.1v7).
@@ -1906,7 +1955,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     bool cache_artifact_enabled = strcmp(lookup_path, "<repl-session>") != 0;
 
     // find the script in the path index (thread-safe)
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
     pthread_mutex_lock(&scripts_mutex);
 #endif
     Script* cached_script = runtime_loaded_script_get_current(runtime, lookup_path);
@@ -1930,7 +1979,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (cached_script) {
         // circular import detection: script is in list but still being loaded
         if (cached_script->is_loading) {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
             pthread_mutex_unlock(&scripts_mutex);
 #endif
             log_error("Circular import detected: %s", lookup_path);
@@ -1938,7 +1987,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             if (canonical_path) mem_free(canonical_path);
             return NULL;
         }
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
         pthread_mutex_unlock(&scripts_mutex);
 #endif
         runtime->script_load_hits++;
@@ -1975,7 +2024,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                     cached_template->cache_compilation_unit_id, lookup_path);
                 InputCacheScope* stale_scope = source_lease.release_scope();
                 input_script_cache_close_scope(stale_scope);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
                 pthread_mutex_unlock(&scripts_mutex);
 #endif
                 if (canonical_path) mem_free(canonical_path);
@@ -1992,7 +2041,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                 input_script_cache_mark_module_hit(script_cache);
                 log_info("script-cache: Lambda MIR hit path=%s unit=%u", lookup_path,
                     cached_template->cache_compilation_unit_id);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
                 // The common entry is immutable and its lease is now owned by
                 // the instance, so no Runtime-index mutation remains under
                 // this lock. Returning with it held deadlocks the next miss.
@@ -2021,7 +2070,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                     cached_template->cache_compilation_unit_id, lookup_path);
                 InputCacheScope* stale_scope = source_lease.release_scope();
                 input_script_cache_close_scope(stale_scope);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
                 pthread_mutex_unlock(&scripts_mutex);
 #endif
                 if (canonical_path) mem_free(canonical_path);
@@ -2035,7 +2084,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                 input_script_cache_mark_module_hit(script_cache);
                 log_info("script-cache: Lambda AST hit path=%s unit=%u", lookup_path,
                     cached_template->cache_compilation_unit_id);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
                 pthread_mutex_unlock(&scripts_mutex);
 #endif
                 if (!lambda_finalize_ast_template_for_execution(runtime, instance)) {
@@ -2059,7 +2108,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // of its imports. The registry lock protects this Runtime's short index
     // mutations only; holding it across that wait blocks the publisher at its
     // nested registration and deadlocks the whole prebuild pool.
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
     pthread_mutex_unlock(&scripts_mutex);
 #endif
     LambdaScriptBuildClaim build_claim(raw_lease, build_kind,
@@ -2087,13 +2136,15 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     runtime->script_load_misses++;
     log_info("runtime-script-registry: miss path=%s", lookup_path);
     // script not found — create stub and register immediately to prevent duplicates
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
     pthread_mutex_lock(&scripts_mutex);
+#endif
 #endif
     Script *new_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     new_script->reference = mem_strdup(lookup_path, MEM_CAT_SYSTEM);
     new_script->is_loading = true;
     new_script->profile = &lambda_profile;
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     uint32_t compilation_unit_id = input_script_compilation_unit_id(
         input_script_lease_input(raw_lease));
     // Every source-backed image receives a stable logical identity.  Its
@@ -2101,8 +2152,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // Runtime, keeping the EvalContext table compact across cache reuse.
     new_script->cache_compilation_unit_id = compilation_unit_id;
     new_script->cache_source_inline = source != NULL;
+    #endif
     runtime_register_script(runtime, new_script);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
     pthread_mutex_unlock(&scripts_mutex);
 #endif
 
@@ -2140,7 +2192,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
     log_debug("script directory: %s", new_script->directory);
     new_script->source = script_source;
+#ifndef LAMBDA_NO_FILE_IO
     capture_script_file_stat(new_script, lookup_path, source == NULL || is_import);
+#endif
     if (canonical_path) mem_free(canonical_path);
     log_debug("script source length: %d", (int)strlen(new_script->source));
     new_script->is_main = !is_import;  // main script is not an import
@@ -2197,6 +2251,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         log_error("Error: Failed to compile script %s", script_path);
         return NULL;
     }
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     // The common cache accepts only self-contained Lambda MIR images. A
     // cross-language import can retain guest-owned callbacks or module
     // namespaces, so it stays source-only until its adapter proves a fresh
@@ -2240,8 +2295,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
     build_claim.complete(cache_published);
+#endif
+
     runtime->script_load_compiles++;
 
+#ifndef LAMBDA_NO_JS
     // Register in unified module registry for cross-language imports.
     // A Lambda behavior package can compile inside an initialized evaluator
     // without a JS realm. Its exports need no JS callable wrappers, whose
@@ -2253,10 +2311,13 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             runtime, new_script->reference, "lambda", ns, new_script->jit_context);
     }
 
+#endif
+
     log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
     return new_script;
 }
 
+#ifndef LAMBDA_NO_MIR
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import) {
     if (!runtime) return NULL;
@@ -2264,6 +2325,9 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     // MIR Direct backend explicitly before loading the module.
     bool was_mir_direct = runtime->use_mir_direct;
     runtime->use_mir_direct = true;
+#ifdef LAMBDA_NO_MIR
+    runtime->use_mir_direct = false;
+#endif
     // The JS membrane reaches a Lambda export through a native function
     // pointer, so this module must actually be JIT-compiled. Under AUTO the
     // planner would stop at T0 and produce no MIR context at all, leaving
@@ -2276,6 +2340,8 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     runtime->use_mir_direct = was_mir_direct;
     return script;
 }
+
+#endif
 
 static void repl_restore_scope(NameScope* scope, NameEntry* first,
         NameEntry* last) {
@@ -2315,15 +2381,116 @@ static void repl_report_transpiler_errors(ArrayList* errors) {
     }
 }
 
-static void repl_free_transpiler_errors(ArrayList* errors) {
-    free_transpiler_error_list(errors);
+// One entry's append transaction over the session Script. Every rejection
+// or failure restores exactly these fields, so an entry is all-or-nothing
+// (D8.1.1v17) and the next one sees the last successful environment.
+typedef struct ReplEntryTxn {
+    Script* script;
+    AstScript* root;
+    size_t source_length;
+    NameEntry* scope_first;
+    NameEntry* scope_last;
+    int const_count;
+    int type_count;
+    uint32_t slab_count;
+    AstNode* prior_last;
+    bool linked;  // the fragment is on the root chain and in the AST index
+} ReplEntryTxn;
+
+static void repl_entry_begin(ReplEntryTxn* txn, Script* script) {
+    memset(txn, 0, sizeof(*txn));
+    txn->script = script;
+    txn->root = (AstScript*)script->ast_root;
+    txn->source_length = script->repl_source->length;
+    NameScope* globals = txn->root->global_vars;
+    txn->scope_first = globals ? globals->first : NULL;
+    txn->scope_last = globals ? globals->last : NULL;
+    txn->const_count = script->const_list ? script->const_list->length : 0;
+    txn->type_count = script->type_list ? script->type_list->length : 0;
+    txn->slab_count = script->interp_slab_count;
+    txn->prior_last = script->repl_last_top_level;
 }
+
+static void repl_entry_rollback(ReplEntryTxn* txn) {
+    Script* script = txn->script;
+    if (txn->linked) {
+        if (txn->prior_last) txn->prior_last->next = NULL;
+        else txn->root->child = NULL;
+    }
+    repl_restore_scope(txn->root->global_vars, txn->scope_first, txn->scope_last);
+    if (script->const_list) script->const_list->length = txn->const_count;
+    if (script->type_list) script->type_list->length = txn->type_count;
+    // a plan rejection restores the count; once the slab has grown its
+    // layout is sealed at the larger count, so a failed entry's slots stay
+    // allocated (the snapshot restore zeroed them) and are simply unused
+    script->interp_slab_count = txn->slab_count;
+    if (txn->linked) {
+        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
+    }
+    repl_restore_source(script, txn->source_length);
+}
+
+static ReplEntryStatus repl_entry_reject(ReplEntryTxn* txn) {
+    repl_entry_rollback(txn);
+    return REPL_ENTRY_REJECTED;
+}
+
+// S16.7.4/S16.7.6: declarations (`let`, `fn`, `pn`, `type`, `import`, ...)
+// and statements (assignment, `while`, a statement `for`, a control `if`)
+// produce no item. A named function definition is a declaration; an anonymous
+// arrow is a value and echoes.
+static bool repl_item_produces_no_item(AstNode* item) {
+    if (!item) return true;
+    if (item->node_type == AST_NODE_IMPORT) return true;
+    if (item->node_type == AST_NODE_CONTENT) {
+        for (AstNode* inner = ((AstListNode*)item)->item; inner; inner = inner->next) {
+            if (!repl_item_produces_no_item(inner)) return false;
+        }
+        return true;
+    }
+    if (item->node_type == AST_NODE_FUNC_EXPR) return ((AstFuncNode*)item)->name != NULL;
+    if ((item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_MATCH_EXPR) &&
+            ast_branch_kind(item) == AST_BRANCH_CONTROL) return true;
+    return is_declaration_node(item->node_type) ||
+        is_side_effect_stam(item->node_type) ||
+        is_procedural_only_stam(item->node_type) || ast_for_discards_result(item);
+}
+
+static bool repl_fragment_declarations_only(AstNode* fragment) {
+    for (AstNode* item = fragment; item; item = item->next) {
+        if (!repl_item_produces_no_item(item)) return false;
+    }
+    return true;
+}
+
+// A failed entry reports the error it completed with; a fault or a payload-less
+// error falls back to the context's diagnostic mirror.
+static void repl_report_failure(Item result) {
+    LambdaError* error = it2err(result);
+    if (!error) error = get_persistent_last_error();
+    if (error) err_print(error);
+    else fputs("error: the entry completed with an error and no diagnostic\n", stderr);
+    clear_persistent_last_error();
+}
+
+struct ReplFragmentIndexOwner {
+    AstIndex* index;
+    ~ReplFragmentIndexOwner() { ast_index_destroy(index); }
+};
 
 void interp_repl_session_destroy(InterpReplSession* session) {
     if (!session) return;
     Runtime* runtime = session->runner.runtime;
     Script* script = session->runner.script;
     if (runtime && script) {
+        EvalContext* owner = session->runner.context;
+        if (owner && runtime_context_bind_retained(runtime, owner)) {
+            // template entries and reconciliation state borrow the retiring AST's names.
+            edit_bridge_destroy();
+            render_map_destroy();
+            tmpl_state_destroy();
+            template_registry_remove_module(owner->template_registry, script);
+        }
         // Each REPL Script receives a unique module id. Releasing its exact
         // root before freeing the Script prevents `clear` from pinning its
         // former bindings until the whole Runtime exits (D5.3.3).
@@ -2334,15 +2501,18 @@ void interp_repl_session_destroy(InterpReplSession* session) {
             runtime->scripts->data[index] = NULL;
         }
     }
+    if (session->initialized_modules) arraylist_free(session->initialized_modules);
     memset(session, 0, sizeof(*session));
 }
 
-bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
+bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime,
+        bool procedural) {
     if (!session || !runtime) return false;
     interp_repl_session_destroy(session);
 
     // The normal loader owns AST/pool initialization. Build the empty session
-    // through its T0 branch even when the shell's default remains eager JIT.
+    // through its T0 branch whatever tier the shell selected: the session is
+    // always T0, and the tier only governs satellite promotion (D8.1.1v17).
     LambdaTier saved_tier = lambda_tier_selected();
     lambda_tier_set(LAMBDA_TIER_INTERP);
     Script* script = load_script(runtime, "<repl-session>", "", false);
@@ -2352,10 +2522,11 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
         return false;
     }
     script->repl_source = strbuf_new_cap(256);
-    if (!script->repl_source) {
-        log_error("interp-repl: could not allocate retained source state");
-        // The bootstrap source still has Script ownership until both retained
-        // buffers exist; clear partial replacements before common teardown.
+    session->initialized_modules = arraylist_new(4);
+    if (!script->repl_source || !session->initialized_modules) {
+        log_error("interp-repl: could not allocate retained session state");
+        // The bootstrap source still has Script ownership until the retained
+        // buffer exists; clear a partial replacement before common teardown.
         if (script->repl_source) {
             strbuf_free(script->repl_source);
             script->repl_source = NULL;
@@ -2370,8 +2541,14 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
     mem_free((void*)script->source);
     script->source = script->repl_source->str;
 
+    // S16.7.6: a procedural session's top level is one persistent `pn` body;
+    // the resolver's procedure checks read this scope flag.
+    AstScript* root = (AstScript*)script->ast_root;
+    if (root && root->global_vars) root->global_vars->is_proc = procedural;
+
     runner_init(runtime, &session->runner);
     session->runner.script = script;
+    session->procedural = procedural;
     runner_setup_context(&session->runner);
     if (!session->runner.context || !lambda_module_state_prepare(
             script->module_state_id, script->interp_slab_count)) {
@@ -2383,16 +2560,20 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
     return true;
 }
 
-Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
-    if (session) session->last_input_rejected = false;
+// Appends `source` and builds it against the retained scope. On OK the entry
+// is built (spans rebased) but neither planned nor linked; every other status
+// has already rolled the transaction back and reported its diagnostics.
+static ReplEntryStatus repl_entry_build(InterpReplSession* session,
+        const char* source, ReplEntryTxn* txn, AstNode** out_fragment) {
+    *out_fragment = NULL;
     if (!session || !session->initialized || !session->runner.runtime ||
-            !session->runner.script || !source) return (session->last_input_rejected = true), ItemError;
+            !session->runner.script || !source) return REPL_ENTRY_REJECTED;
     Script* script = session->runner.script;
     AstScript* root = (AstScript*)script->ast_root;
-    if (!root || !script->repl_source) return (session->last_input_rejected = true), ItemError;
+    if (!root || !script->repl_source) return REPL_ENTRY_REJECTED;
 
-    size_t saved_source_length = script->repl_source->length;
-    size_t prefix_length = saved_source_length;
+    repl_entry_begin(txn, script);
+    size_t prefix_length = txn->source_length;
     if (prefix_length) {
         strbuf_append_char(script->repl_source, '\n');
         prefix_length++;
@@ -2400,18 +2581,15 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     strbuf_append_str(script->repl_source, source);
     script->source = script->repl_source->str;
 
-    NameScope* globals = root->global_vars;
-    NameEntry* saved_scope_first = globals ? globals->first : NULL;
-    NameEntry* saved_scope_last = globals ? globals->last : NULL;
-    int saved_const_count = script->const_list ? script->const_list->length : 0;
-    int saved_type_count = script->type_list ? script->type_list->length : 0;
-    uint32_t saved_slab_count = script->interp_slab_count;
-
     Transpiler tp = {};
     memcpy(&tp, script, sizeof(Script));
+    // fragment analysis must own a fresh graph: the retained module index has
+    // no new function/capture edges and its buffers cannot be shallow-copied.
+    tp.ast_index = {};
+    ReplFragmentIndexOwner fragment_index = {&tp.ast_index};
     tp.script_owner = script;
     tp.runtime = session->runner.runtime;
-    tp.current_scope = globals;
+    tp.current_scope = root->global_vars;
     tp.max_errors = session->runner.runtime->max_errors > 0
         ? session->runner.runtime->max_errors : 10;
     tp.errors = arraylist_new(4);
@@ -2421,34 +2599,48 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     const char* fragment_source = script->source + prefix_length;
     LambdaParseStatus parse_status = lambda_rd_reduce_ast(&tp, fragment_source,
         strlen(source), &parsed_root, &parse_error);
+    if (parse_status == LAMBDA_PARSE_INCOMPLETE) {
+        // The C parser is the completeness authority (D8.1.1v17): the driver
+        // keeps collecting lines, and nothing of this probe is retained.
+        free_transpiler_error_list(tp.errors);
+        repl_entry_rollback(txn);
+        return REPL_ENTRY_INCOMPLETE;
+    }
     if (parse_status != LAMBDA_PARSE_OK || !parsed_root) {
         record_direct_parse_diagnostics(&tp, "<repl>", &parse_error);
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        script->interp_slab_count = saved_slab_count;
-        repl_restore_source(script, saved_source_length);
         repl_report_transpiler_errors(tp.errors);
-        repl_free_transpiler_errors(tp.errors);
+        free_transpiler_error_list(tp.errors);
         log_error("interp-repl: direct parser rejected completed input");
-        return (session->last_input_rejected = true), ItemError;
+        return repl_entry_reject(txn);
     }
-    lambda_ast_finalize_script(&tp, parsed_root);
+    bool finalized = ast_index_build_profile(&tp.ast_index,
+        (AstNode*)parsed_root, script->profile) &&
+        lambda_ast_finalize_script(&tp, parsed_root);
 
     AstNode* fragment = parsed_root->child;
-    if (tp.error_count != 0 || !fragment) {
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        script->interp_slab_count = saved_slab_count;
-        repl_restore_source(script, saved_source_length);
-        repl_free_transpiler_errors(tp.errors);
-        return (session->last_input_rejected = true), ItemError;
+    if (!finalized || tp.error_count != 0 || !fragment) {
+        repl_report_transpiler_errors(tp.errors);
+        free_transpiler_error_list(tp.errors);
+        return repl_entry_reject(txn);
     }
+    free_transpiler_error_list(tp.errors);
     // Direct parsing is intentionally fragment-local for REPL latency. Rebase
     // every retained AST span before the fragment sees the append-only source.
     lambda_ast_shift_source_spans(fragment, (uint32_t)prefix_length);
-    repl_free_transpiler_errors(tp.errors);
+    *out_fragment = fragment;
+    return REPL_ENTRY_OK;
+}
+
+ReplEntryStatus interp_repl_session_eval(InterpReplSession* session,
+        const char* source, Item* out) {
+    if (out) *out = ItemNull;
+    if (session) session->declarations_only = false;
+    ReplEntryTxn txn;
+    AstNode* fragment = NULL;
+    ReplEntryStatus built = repl_entry_build(session, source, &txn, &fragment);
+    if (built != REPL_ENTRY_OK) return built;
+    Script* script = session->runner.script;
+    AstScript* root = txn.root;
 
     AstScript scan_root = {};
     scan_root.node_type = AST_SCRIPT;
@@ -2457,65 +2649,136 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     scan_script.ast_root = (AstNode*)&scan_root;
     scan_script.profile = script->profile;
     AstNodeType reject = AST_NODE_NULL;
-    bool supported = interp_scan_supported(&scan_script, &reject);
-    bool planned = supported && interp_plan_repl_fragment(script, fragment);
-    bool slab_grown = planned && lambda_module_state_grow_vars(
-        script->module_state_id, script->interp_slab_count);
-    if (!supported || !planned || !slab_grown) {
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        if (!slab_grown) script->interp_slab_count = saved_slab_count;
-        repl_restore_source(script, saved_source_length);
-        log_error("interp-repl: rejected fragment node=%s",
+    if (!interp_scan_supported(&scan_script, &reject)) {
+        // RI5: T0 coverage is the fix; an entry is never compiled on its own.
+        fprintf(stderr, "error: %s is not supported in the REPL yet\n",
             interp_node_kind_name(reject));
-        return (session->last_input_rejected = true), ItemError;
+        log_error("interp-repl: rejected fragment node=%s", interp_node_kind_name(reject));
+        return repl_entry_reject(&txn);
     }
+    Script* unsupported_import = interp_repl_fragment_unsupported_import(fragment);
+    if (unsupported_import) {
+        fprintf(stderr, "error: imported module '%s' is not supported in the REPL yet\n",
+            unsupported_import->reference ? unsupported_import->reference : "<module>");
+        return repl_entry_reject(&txn);
+    }
+    if (!interp_plan_repl_fragment(script, fragment) ||
+            !lambda_module_state_grow_vars(script->module_state_id,
+                script->interp_slab_count)) {
+        fputs("error: the REPL could not plan storage for this entry\n", stderr);
+        return repl_entry_reject(&txn);
+    }
+    txn.slab_count = script->interp_slab_count;   // the grown layout is sealed
 
-    AstNode* prior_last = script->repl_last_top_level;
     AstNode* fragment_last = fragment;
     while (fragment_last->next) fragment_last = fragment_last->next;
-    if (prior_last) prior_last->next = fragment;
+    if (txn.prior_last) txn.prior_last->next = fragment;
     else root->child = fragment;
+    txn.linked = true;
     if (!ast_index_append_profile(&script->ast_index, fragment,
             (AstNode*)root, script->profile)) {
-        if (prior_last) prior_last->next = NULL;
-        else root->child = NULL;
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
-        repl_restore_source(script, saved_source_length);
-        return (session->last_input_rejected = true), ItemError;
+        fputs("error: the REPL could not index this entry\n", stderr);
+        return repl_entry_reject(&txn);
     }
 
     LambdaModuleStateSnapshot snapshot = {};
     if (!lambda_module_state_snapshot(script->module_state_id, &snapshot)) {
-        if (prior_last) prior_last->next = NULL;
-        else root->child = NULL;
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
-        repl_restore_source(script, saved_source_length);
-        return (session->last_input_rejected = true), ItemError;
+        fputs("error: the REPL could not snapshot the session\n", stderr);
+        return repl_entry_reject(&txn);
     }
-    Item result = interp_run_repl_fragment(&session->runner, fragment);
+    clear_persistent_last_error();   // a stale mirror must not explain this entry
+    InterpReplTemplateCheckpoint template_checkpoint = {};
+    InterpReplFragmentRun run = {fragment, session->initialized_modules,
+        session->procedural, &template_checkpoint};
+    Item result = interp_run_repl_fragment(&session->runner, &run);
     if (item_is_error(result)) {
+        repl_report_failure(result);
+        if (template_checkpoint.ready) {
+            template_registry_restore(template_checkpoint.registry,
+                &template_checkpoint.snapshot);
+        }
         lambda_module_state_restore(script->module_state_id, &snapshot);
-        if (prior_last) prior_last->next = NULL;
-        else root->child = NULL;
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
-        repl_restore_source(script, saved_source_length);
         lambda_module_state_snapshot_dispose(&snapshot);
-        return result;
+        repl_entry_rollback(&txn);
+        return REPL_ENTRY_FAILED;
     }
     lambda_module_state_snapshot_dispose(&snapshot);
     script->repl_last_top_level = fragment_last;
-    return result;
+    session->declarations_only = repl_fragment_declarations_only(fragment);
+    if (out) *out = result;
+    return REPL_ENTRY_OK;
+}
+
+// ---------------------------------------------------------------------------
+// Session services (D8.1.1v17): each reads the live scope and slab or builds
+// an entry without running it; none re-runs anything.
+// ---------------------------------------------------------------------------
+
+const char* interp_repl_session_source(const InterpReplSession* session) {
+    Script* script = session ? session->runner.script : NULL;
+    return script && script->repl_source ? script->repl_source->str : "";
+}
+
+void interp_repl_session_each_binding(InterpReplSession* session,
+        InterpReplBindingVisitor visit, void* opaque) {
+    Script* script = session ? session->runner.script : NULL;
+    AstScript* root = script ? (AstScript*)script->ast_root : NULL;
+    if (!root || !root->global_vars || !visit) return;
+    for (NameEntry* entry = root->global_vars->first; entry; entry = entry->next) {
+        if (!entry->name) continue;
+        bool imported = entry->import != NULL;
+        // an imported name's slot indexes its owner's slab, not the session's
+        Item value = !imported && entry->storage_assigned &&
+                entry->binding_storage == BINDING_STORAGE_MODULE
+            ? lambda_module_state_var(script->module_state_id, entry->slot) : ItemNull;
+        visit(opaque, entry->name->chars, (size_t)entry->name->len, value, imported);
+    }
+}
+
+ReplEntryStatus interp_repl_session_type(InterpReplSession* session,
+        const char* source, const char** out_type) {
+    *out_type = NULL;
+    ReplEntryTxn txn;
+    AstNode* fragment = NULL;
+    ReplEntryStatus built = repl_entry_build(session, source, &txn, &fragment);
+    if (built != REPL_ENTRY_OK) return built;
+    AstNode* last = fragment;
+    while (last->next) last = last->next;
+    *out_type = type_contract_display_name(last->type);
+    repl_entry_rollback(&txn);   // typed, never run (S2.5.4v2 still holds)
+    return REPL_ENTRY_OK;
+}
+
+// Completion candidates for `word`: session names, then system functions,
+// then the lexer vocabulary. Duplicates (overloaded system functions, a
+// shadowing user name) are reported once.
+void interp_repl_session_complete(InterpReplSession* session, const char* word,
+        size_t length, InterpReplCompletionAdd add, void* sink) {
+    if (!word || !add) return;
+    ArrayList* seen = arraylist_new(16);
+    auto offer = [&](const char* text, size_t text_length) {
+        if (!text || text_length < length || strncmp(text, word, length) != 0) return;
+        for (int i = 0; seen && i < seen->length; i++) {
+            const char* prior = (const char*)seen->data[i];
+            if (strlen(prior) == text_length && strncmp(prior, text, text_length) == 0) return;
+        }
+        if (seen) arraylist_append(seen, (void*)text);
+        add(sink, text, text_length);
+    };
+    Script* script = session ? session->runner.script : NULL;
+    AstScript* root = script ? (AstScript*)script->ast_root : NULL;
+    for (NameEntry* entry = root && root->global_vars ? root->global_vars->first : NULL;
+            entry; entry = entry->next) {
+        if (entry->name) offer(entry->name->chars, (size_t)entry->name->len);
+    }
+    for (int i = 0; i < sys_func_def_count; i++) {
+        const char* name = sys_func_defs[i].name;
+        if (name) offer(name, strlen(name));
+    }
+    for (size_t i = 0; const char* text = lambda_lexer_vocabulary_word(i); i++) {
+        offer(text, strlen(text));
+    }
+    if (seen) arraylist_free(seen);
 }
 
 void runner_init(Runtime *runtime, Runner* runner) {
@@ -2566,7 +2829,9 @@ void runner_setup_context(Runner* runner) {
         url_destroy(ctx->cwd);
         ctx->cwd = NULL;
     }
+#ifndef LAMBDA_NO_FILE_IO
     ctx->cwd = get_current_dir();  // proper URL object for current directory
+#endif
     // initialize decimal context (use shared fixed-precision context for runtime)
     ctx->decimal_ctx = decimal_fixed_context();
     ctx->context_alloc = heap_alloc;
@@ -2617,12 +2882,15 @@ void runner_setup_context(Runner* runner) {
     }
     path_register_pool_provider(runner_path_pool_provider);
 
+#ifndef LAMBDA_NO_TASKS
     if (rt && runtime_scheduler(rt)) {
         ctx->scheduler = runtime_scheduler(rt);
     } else {
         ctx->scheduler = lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
         if (rt) runtime_set_scheduler(rt, ctx->scheduler);
     }
+#endif
+
     // SCU15: cross-language JS imports compile on this same canonical context
     // (load_js_module binds runtime_get_eval_context), so their JS capsule is
     // already in ctx's JS capsule; there is no separate bootstrap context to adopt.
@@ -2810,11 +3078,15 @@ void runtime_init(Runtime* runtime) {
     // MIR Direct is the sole Lambda backend; keep the mode bit true for cache
     // and import scheduling code that still uses it as a fast-path predicate.
     runtime->use_mir_direct = true;
+#ifdef LAMBDA_NO_MIR
+    runtime->use_mir_direct = false;
+#endif
     runtime->scripts = arraylist_new(16);
     runtime->loaded_script_index = RuntimeLoadedScriptIndex::create(64);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
     runtime->dry_run = false;  // default: real IO
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     InputScriptCache* script_cache = input_manager_global_script_cache();
     const char* disable_mir_cache = shell_getenv("LAMBDA_DISABLE_MIR_CACHE");
     runtime->mir_cache_disabled = (LAMBDA_MIR_CACHE_DEFAULT == 0) ||
@@ -2825,12 +3097,18 @@ void runtime_init(Runtime* runtime) {
     if (runtime->mir_cache_disabled) {
         log_info("runtime-script-registry: process MIR artifacts disabled by build default or LAMBDA_DISABLE_MIR_CACHE");
     }
+#endif
+
     // The CLI creates a short-lived selector Runtime before some language
     // subcommands create their execution Runtime. Keep the registry lazy so
     // that selector never owns a module-registry allocation it cannot use;
     // module registration paths create it on their first real module.
+#ifndef LAMBDA_NO_JUBE
     jube_register_builtin_modules();
+#endif
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     rdb_host_install();  // RDB connections join the rid table; drivers resolve via Jube
+#endif
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 
@@ -2937,6 +3215,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     // releasing an execution shell, then release every private MIR context
     // that was already published into its Function entries.
     interp_satellite_cancel_script(script);
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     if (script->interp_satellite_images) {
         for (int index = 0; index < script->interp_satellite_images->length; index++) {
             interp_satellite_image_destroy((InterpSatelliteImage*)
@@ -2955,6 +3234,8 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         input_script_cache_close_scope(script->cache_scope);
         script->cache_scope = NULL;
     }
+#endif
+
     if (script->ast_overlay_strings) {
         for (int i = 0; i < script->ast_overlay_strings->length; i++) {
             mem_free(script->ast_overlay_strings->data[i]);
@@ -2980,11 +3261,13 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         // A cached AST shell can compile its own satellite image. The
         // immutable template never owns that context, so release it with the
         // shell rather than leaking it past the execution lease.
+#ifndef LAMBDA_NO_MIR
         if (!script->cache_mir_artifact && script->jit_context) {
             jit_cleanup_mode(script->jit_context,
                 script->mir_gen_initialized ? 1 : 0);
             script->jit_context = NULL;
         }
+#endif
         // Clone graphs allocate their own edge list even though the AST and
         // sealed code remain with the cache owner.
         if (script->direct_imports) arraylist_free(script->direct_imports);
@@ -3032,23 +3315,28 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (script->pool) pool_destroy(script->pool);
     if (script->direct_imports) arraylist_free(script->direct_imports);
     if (script->cache_direct_imports) arraylist_free(script->cache_direct_imports);
+#ifndef LAMBDA_NO_MIR
     if (script->jit_context) {
         jit_cleanup_mode(script->jit_context, script->mir_gen_initialized ? 1 : 0);
     }
+#endif
     // decimal context is shared global; cached/free paths only clear the borrowed pointer
     script->decimal_ctx = NULL;
     mem_free(script);
 }
 
+#ifndef LAMBDA_NO_RESOURCE_CACHE
 void runtime_destroy_cached_script_template(Script* script) {
     if (!script) return;
     if (script->cache_template && script->cache_mir_artifact) {
         // A promoted MIR owner borrows AST storage from the sibling AST image.
+#ifndef LAMBDA_NO_MIR
         if (script->jit_context) {
             jit_cleanup_mode(script->jit_context,
                 script->mir_gen_initialized ? 1 : 0);
             script->jit_context = NULL;
         }
+#endif
         if (script->cache_direct_imports) {
             arraylist_free(script->cache_direct_imports);
             script->cache_direct_imports = NULL;
@@ -3134,6 +3422,10 @@ void runtime_log_script_load_summary(Runtime* runtime) {
 // call will create fresh heap/name_pool state and store it back.
 static void runtime_quiesce_satellite_workers(Runtime* runtime);
 
+#endif
+
+static void runtime_quiesce_satellite_workers(Runtime* runtime);
+
 void runtime_reset_heap(Runtime* runtime) {
     if (!runtime) return;
     // A satellite still lowering the finished script reads types and names
@@ -3181,13 +3473,17 @@ void runtime_reset_heap(Runtime* runtime) {
             dom_batch_reset();
         }
 
+#ifndef LAMBDA_NO_TASKS
         if (runtime_scheduler(runtime)) {
             lambda_scheduler_destroy(runtime_scheduler(runtime));
             runtime_set_scheduler(runtime, NULL);
         }
+#endif
         if (runtime->js_runtime_used) {
             js_event_loop_shutdown();
-            if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
+    #ifndef LAMBDA_NO_TASKS
+        if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
+#endif
             runtime->js_runtime_used = false;
         }
 
@@ -3300,16 +3596,22 @@ void runtime_cleanup(Runtime* runtime) {
         if (js_runtime_state_for(cleanup_context)) {
             // Cancel host tasks while their roots and native owners are still
             // valid; scheduler teardown only drains their inert completions.
+#ifndef LAMBDA_NO_TASKS
             runtime_resource_table_clear(js_runtime_resource_table());
+#endif
         }
+#ifndef LAMBDA_NO_TASKS
         if (runtime_scheduler(runtime)) {
             cleanup_context->scheduler = runtime_scheduler(runtime);
             lambda_scheduler_destroy(runtime_scheduler(runtime));
             runtime_set_scheduler(runtime, NULL);
         }
+#endif
 
         if (js_runtime_state_for(cleanup_context)) js_event_loop_shutdown();
+#ifndef LAMBDA_NO_TASKS
         if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
+#endif
         event_loop_cleaned = true;
 
         dom_shutdown();
@@ -3388,7 +3690,9 @@ void runtime_cleanup(Runtime* runtime) {
             if (!js_runtime_state_init(runtime->eval_context)) return;
             js_event_loop_shutdown();
         }
+#ifndef LAMBDA_NO_TASKS
         if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
+#endif
     }
     if (runtime->eval_context) {
         EvalContext* retiring_context = runtime->eval_context;
@@ -3405,6 +3709,8 @@ void runtime_cleanup(Runtime* runtime) {
         runtime->eval_context = NULL;
     }
     lambda_stack_cleanup();
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     runtime_close_js_module_mir_scopes(runtime);
+#endif
     runtime_free_all_scripts(runtime);
 }

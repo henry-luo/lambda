@@ -1204,12 +1204,16 @@ fn parallel_info(edge, edges) {
 }
 
 fn lane_route_points(from_node, to_node, offset, vertical_rank_axis,
-    from_port = null, to_port = null, from_compass = null, to_compass = null) {
+    from_port = null, to_port = null, from_compass = null, to_compass = null,
+    side_endpoints = false) {
   // Lane reconstruction must retain authored ports instead of reverting to shape clipping.
+  // outside feedback lanes clip along their terminal segments, not toward the peer center.
   if (vertical_rank_axis) {
     let lane_x = (from_node.x + to_node.x) / 2.0 + offset;
-    let start = clip_node(from_node, lane_x, to_node.y, from_port, from_compass);
-    let finish = clip_node(to_node, lane_x, from_node.y, to_port, to_compass);
+    let start = clip_node(from_node, lane_x,
+      if (side_endpoints) from_node.y else to_node.y, from_port, from_compass);
+    let finish = clip_node(to_node, lane_x,
+      if (side_endpoints) to_node.y else from_node.y, to_port, to_compass);
     simplify_route([
       start,
       {x: lane_x, y: start.y},
@@ -1218,8 +1222,10 @@ fn lane_route_points(from_node, to_node, offset, vertical_rank_axis,
     ])
   } else {
     let lane_y = (from_node.y + to_node.y) / 2.0 + offset;
-    let start = clip_node(from_node, to_node.x, lane_y, from_port, from_compass);
-    let finish = clip_node(to_node, from_node.x, lane_y, to_port, to_compass);
+    let start = clip_node(from_node,
+      if (side_endpoints) from_node.x else to_node.x, lane_y, from_port, from_compass);
+    let finish = clip_node(to_node,
+      if (side_endpoints) to_node.x else from_node.x, lane_y, to_port, to_compass);
     simplify_route([
       start,
       {x: start.x, y: lane_y},
@@ -1323,7 +1329,7 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
             not route_hits_obstacle([start, finish], obstacles)) [start, finish]
         else lane_route_points(from_node, to_node, back_lane_offset,
           vertical_rank_axis, edge.from_port, edge.to_port,
-          edge.from_compass, edge.to_compass)
+          edge.from_compass, edge.to_compass, true)
       else if (has_compound)
         if (route_mode == "orthogonal")
           orthogonal_waypoints(compound_points, vertical_rank_axis)

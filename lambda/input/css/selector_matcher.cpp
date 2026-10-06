@@ -1884,6 +1884,7 @@ void selector_matcher_reset_statistics(SelectorMatcher* matcher) {
 }
 
 void selector_matcher_print_info(SelectorMatcher* matcher) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!matcher) {
         log_info("Selector Matcher: NULL");
         return;
@@ -1901,6 +1902,7 @@ void selector_matcher_print_info(SelectorMatcher* matcher) {
         double hit_rate = (double)matcher->cache_hits / (double)matcher->total_matches;
         log_info("  Cache hit rate: %.2f%%", hit_rate * 100.0);
     }
+#endif
 }
 
 // ============================================================================

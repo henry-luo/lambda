@@ -39,6 +39,29 @@ DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp) {
     DateTime* dt = datetime_new(pool);
     if (!dt) return NULL;
 
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    // libc gmtime pulls in host timezone discovery in Emscripten. Convert
+    // explicit UTC seconds using the same civil calendar as datetime_to_unix.
+    int64_t days = unix_timestamp / 86400;
+    int64_t seconds = unix_timestamp % 86400;
+    if (seconds < 0) { days--; seconds += 86400; }
+    if (days < datetime_days_from_civil(DATETIME_MIN_YEAR, 1, 1) ||
+            days >= datetime_days_from_civil(DATETIME_MAX_YEAR + 1, 1, 1)) return NULL;
+    int low = DATETIME_MIN_YEAR, high = DATETIME_MAX_YEAR + 1;
+    while (low + 1 < high) {
+        int mid = low + (high - low) / 2;
+        if (datetime_days_from_civil(mid, 1, 1) <= days) low = mid;
+        else high = mid;
+    }
+    int day = (int)(days - datetime_days_from_civil(low, 1, 1)) + 1;
+    int month = 1;
+    while (day > days_in_month(low, month)) day -= days_in_month(low, month++);
+    DATETIME_SET_YEAR_MONTH(dt, low, month);
+    dt->day = day;
+    dt->hour = seconds / 3600;
+    dt->minute = (seconds % 3600) / 60;
+    dt->second = seconds % 60;
+#else
     time_t timestamp = (time_t)unix_timestamp;
     struct tm* tm_utc = gmtime(&timestamp);
     if (!tm_utc) return NULL;
@@ -49,6 +72,7 @@ DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp) {
     dt->hour = tm_utc->tm_hour;
     dt->minute = tm_utc->tm_min;
     dt->second = tm_utc->tm_sec;
+#endif
     dt->millisecond = 0;
 
     /* Set UTC timezone (offset 0) and precision */

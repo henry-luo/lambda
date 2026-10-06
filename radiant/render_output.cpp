@@ -8,6 +8,7 @@
 
 #include "../lib/tagged.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/input/css/css_engine.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
@@ -43,6 +44,25 @@ static int render_output_render_document_transform_to_target(const char* documen
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     RenderOutputTarget* target);
+
+static bool render_export_find_page_rule(void* context, const CssRule* rule) {
+    if (rule->type == CSS_RULE_PAGE && rule->page) {
+        *(bool*)context = true;
+        return false;
+    }
+    return true;
+}
+
+static bool render_export_has_page_rule(DomDocument* doc) {
+    if (!doc || !doc->services.cached_css_engine) return false;
+    CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
+    bool found = false;
+    for (int i = 0; i < doc->stylesheet_count && !found; i++) {
+        css_stylesheet_visit_active_rules(engine, doc->stylesheets.get()[i],
+            render_export_find_page_rule, &found);
+    }
+    return found;
+}
 static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
                                           const char* output_file);
 static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
@@ -104,7 +124,8 @@ static DomDocument* render_export_load_transform_document(RenderExportSession* s
     }
     DomDocument* doc = load_lambda_document_transform_doc(document_url,
         transform_request->transform, transform_options, transform_option_count,
-        layout_width, layout_height, pool, transform_request->resource_policy);
+        layout_width, layout_height, pool, transform_request->resource_policy,
+        session->print_media);
     if (!doc) {
         url_destroy(document_url);
         pool_destroy(pool);
@@ -350,6 +371,14 @@ static bool render_export_session_begin_internal(
 
     // Every file exporter must lay out and measure the same scaled document before encoding.
     session->ui_context->document = session->document;
+    // exports sample the same initial CSS animation timeline as headless layout.
+    if (!radiant_document_ensure_state(session->document, "render_export_session")) {
+        render_export_session_end(session);
+        return false;
+    }
+    if (session->document->services.cached_css_engine) {
+        ((CssEngine*)session->document->services.cached_css_engine)->context.print_media = session->print_media;
+    }
     session->document->viewport.output_scale = session->output_scale;
     ui_context_sync_document_raster_scale(session->ui_context,
                                           session->document);
@@ -373,11 +402,43 @@ static bool render_export_session_begin_internal(
         }
         return true;
     }
+    if (session->print_media && render_export_has_page_rule(session->document)) {
+        // Query the existing page cascade before continuous layout so its content width
+        // determines line breaking while the PDF MediaBox retains the full paper size.
+        ViewTree* page_query = view_tree_secondary_create(session->document, &environment);
+        ViewPageStyle page_style = {};
+        ViewModelStatus status = page_query
+            ? view_css_page_style(page_query, nullptr, 1, VIEW_PAGE_RIGHT, false, &page_style)
+            : VIEW_MODEL_OUT_OF_MEMORY;
+        if (page_query) view_tree_secondary_release(session->document, page_query);
+        if (status != VIEW_MODEL_OK) {
+            log_error("[EXPORT_PAGE_GEOMETRY] Could not resolve @page size and margins: status=%u",
+                (unsigned)status);
+            render_export_session_end(session);
+            return false;
+        }
+        session->has_page_geometry = true;
+        session->page_width = page_style.width;
+        session->page_height = page_style.height;
+        session->page_content_x = page_style.content_rect.x;
+        session->page_content_y = page_style.content_rect.y;
+        session->ui_context->viewport_width = (int)ceilf(page_style.content_rect.width); // INT_CAST_OK: legacy viewport stores integral CSS pixels.
+        session->ui_context->viewport_height = (int)ceilf(page_style.content_rect.height); // INT_CAST_OK: legacy viewport stores integral CSS pixels.
+        ui_context_create_surface(session->ui_context,
+            session->ui_context->viewport_width, session->ui_context->viewport_height);
+        session->ui_context->window_width = session->ui_context->viewport_width;
+        session->ui_context->window_height = session->ui_context->viewport_height;
+        CssEngine* engine = (CssEngine*)session->document->services.cached_css_engine;
+        css_engine_set_viewport(engine, page_style.content_rect.width,
+            page_style.content_rect.height);
+    }
     layout_html_doc(session->ui_context, session->document, false);
 
-    session->content_width = layout_width;
-    session->content_height = layout_height;
-    if (session->document->view_tree && session->document->view_tree->root) {
+    session->content_width = session->has_page_geometry
+        ? (int)ceilf(session->page_width) : layout_width; // INT_CAST_OK: legacy export extent stores integral CSS pixels.
+    session->content_height = session->has_page_geometry
+        ? (int)ceilf(session->page_height) : layout_height; // INT_CAST_OK: legacy export extent stores integral CSS pixels.
+    if (!session->has_page_geometry && session->document->view_tree && session->document->view_tree->root) {
         int bounds_width = 0;
         int bounds_height = 0;
         calculate_content_bounds(
@@ -388,7 +449,7 @@ static bool render_export_session_begin_internal(
         if (auto_height || bounds_height > layout_height) session->content_height = bounds_height;
     }
 
-    if (auto_width || auto_height) {
+    if (!session->has_page_geometry && (auto_width || auto_height)) {
         log_info("[EXPORT_SESSION] Auto-sized output to %dx%d with content padding",
                  session->content_width, session->content_height);
     } else {
@@ -421,11 +482,12 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
         const char* document_file, const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         int viewport_width, int viewport_height, int fallback_width,
-        int fallback_height, float output_scale, float device_scale, bool raster_surface, bool paged) {
+        int fallback_height, float output_scale, float device_scale, bool raster_surface,
+        bool paged, bool print_media) {
     RenderExportTransformRequest request = {document_file, transform, options, option_count};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height, output_scale,
-        device_scale, raster_surface, false, paged,
+        device_scale, raster_surface, print_media, paged,
         render_export_load_transform_document, &request);
 }
 

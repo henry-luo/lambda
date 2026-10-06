@@ -66,6 +66,7 @@
 
 extern "C" {
 #include "../lib/image.h"
+#include "../lib/str.h"
 #include "../lib/strbuf.h"
 }
 
@@ -271,23 +272,36 @@ static bool render_html_fixture(const char* html_path, const char* output_path,
         render_document_fixture(html_path, output_path, options);
 }
 
-static bool rasterize_pdf_fixture(const char* pdf_path, const char* png_path) {
-    char qpdf[PATH_MAX + 8], qpng[PATH_MAX + 8], cmd[PATH_MAX * 3 + 128];
+static CommandResult run_html_fixture_script(const char* html_path, const char* js_path,
+                                             const char* script) {
+    if (!write_file_all(js_path, script, strlen(script))) {
+        CommandResult result = {};
+        result.exit_code = -1;
+        return result;
+    }
+    char qhtml[PATH_MAX + 8], qjs[PATH_MAX + 8], command[PATH_MAX * 2 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(js_path, qjs, sizeof(qjs));
+    snprintf(command, sizeof(command), "%s js %s --document %s --no-log 2>&1", LAMBDA_EXE, qjs, qhtml);
+    return run_command_capture(command);
+}
+
+static bool rasterize_fixture_pdf(const char* pdf_path, const char* png_path) {
+    char qpdf[PATH_MAX + 8], qpng[PATH_MAX + 8], command[PATH_MAX * 3 + 128];
     shell_quote(pdf_path, qpdf, sizeof(qpdf));
     shell_quote(png_path, qpng, sizeof(qpng));
     if (command_exists("sips")) {
-        snprintf(cmd, sizeof(cmd), "sips -s format png %s --out %s >/dev/null 2>&1", qpdf, qpng);
-    } else {
-        size_t length = strlen(png_path);
-        if (length < 4 || length >= PATH_MAX || strcmp(png_path + length - 4, ".png") != 0)
-            return false;
+        snprintf(command, sizeof(command), "sips -s format png %s --out %s >/dev/null 2>&1", qpdf, qpng);
+    } else if (command_exists("pdftoppm")) {
         char prefix[PATH_MAX], qprefix[PATH_MAX + 8];
-        memcpy(prefix, png_path, length - 4);
+        str_copy(prefix, sizeof(prefix), png_path, strlen(png_path));
+        size_t length = strlen(prefix);
+        if (length < 4 || strcmp(prefix + length - 4, ".png") != 0) return false;
         prefix[length - 4] = '\0';
         shell_quote(prefix, qprefix, sizeof(qprefix));
-        snprintf(cmd, sizeof(cmd), "pdftoppm -png -f 1 -l 1 -singlefile -r 72 %s %s >/dev/null 2>&1", qpdf, qprefix);
-    }
-    int status = system(cmd);
+        snprintf(command, sizeof(command), "pdftoppm -png -f 1 -l 1 -singlefile -r 72 %s %s >/dev/null 2>&1", qpdf, qprefix);
+    } else return false;
+    int status = system(command);
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
@@ -727,7 +741,7 @@ static void expect_html_pair_output_parity(const char* name, const char* actual,
             snprintf(pdf_path, sizeof(pdf_path), "temp/render_output_parity/%s%s.pdf", name, suffix);
             snprintf(pdf_png_paths[i], sizeof(pdf_png_paths[i]), "temp/render_output_parity/%s%s_pdf.png", name, suffix);
             ASSERT_TRUE(render_document_fixture(html_path, pdf_path));
-            ASSERT_TRUE(rasterize_pdf_fixture(pdf_path, pdf_png_paths[i]));
+            ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, pdf_png_paths[i]));
         }
     }
     expect_pngs_exactly_equal(png_paths[1], png_paths[0]);
@@ -2957,7 +2971,7 @@ TEST(RenderOutputParity, BackfacesRespectThreeDimensionalContextsInRasterAndSvg)
         const char* pdf = "temp/render_output_parity/backface_visibility.pdf";
         const char* pdf_png = "temp/render_output_parity/backface_visibility_pdf.png";
         ASSERT_TRUE(render_document_fixture(html, pdf));
-        ASSERT_TRUE(rasterize_pdf_fixture(pdf, pdf_png));
+        ASSERT_TRUE(rasterize_fixture_pdf(pdf, pdf_png));
         const char* reference_pdf = "temp/render_output_parity/backface_reference.pdf";
         const char* reference_png = "temp/render_output_parity/backface_reference.png";
         const char* reference_html = "<!doctype html><style>html,body{margin:0;background:white}"
@@ -2969,7 +2983,7 @@ TEST(RenderOutputParity, BackfacesRespectThreeDimensionalContextsInRasterAndSvg)
             "<div class=face style='left:380px;background:red'></div>"
             "<div class=face style='left:470px;background:blue'></div>";
         ASSERT_TRUE(render_html_fixture("temp/render_output_parity/backface_reference.html", reference_pdf, reference_html));
-        ASSERT_TRUE(rasterize_pdf_fixture(reference_pdf, reference_png));
+        ASSERT_TRUE(rasterize_fixture_pdf(reference_pdf, reference_png));
         // compare like PDF rasterizations: platform color management changes raw sRGB samples.
         ImageData reference = {};
         ASSERT_TRUE(load_png_rgba(pdf_png, &image));
@@ -3920,7 +3934,7 @@ TEST(RenderOutputParity, PdfPrintMediaSelectsRulesAndLinkedStylesheet) {
     ASSERT_TRUE(write_file_all(css_path, css, strlen(css)));
     ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html));
 
-    ASSERT_TRUE(rasterize_pdf_fixture(pdf_path, png_path));
+    ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, png_path));
     ImageData image = {};
     ASSERT_TRUE(load_png_rgba(png_path, &image));
     ASSERT_GE(image.width, 140);
@@ -4025,7 +4039,7 @@ TEST(RenderOutputParity, ScopeRootsLimitsAndProximityReachRasterSvgAndPdf) {
         ASSERT_TRUE(render_document_fixture(html_paths[i], svg_paths[i]));
         if (pdf_available) {
             ASSERT_TRUE(render_document_fixture(html_paths[i], pdf_paths[i]));
-            ASSERT_TRUE(rasterize_pdf_fixture(pdf_paths[i], pdf_png_paths[i]));
+            ASSERT_TRUE(rasterize_fixture_pdf(pdf_paths[i], pdf_png_paths[i]));
         }
     }
     strbuf_free(source);
@@ -4667,6 +4681,1473 @@ TEST(RenderOutputParity, LayoutCustomPropertyOwnerCycleAndInvalidFallback) {
     EXPECT_FALSE(file_contains_text(view_path, "\"width\": 0.0"));
 }
 
+TEST(RenderOutputParity, AnimationShorthandProjectsCascadeAndVariableValues) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0}"
+        "@keyframes grow{from{width:20px}to{width:100px}}"
+        "div{width:20px;height:10px;background:red}"
+        "#long{animation-name:grow;animation-duration:1s;"
+        "animation-timing-function:linear;animation-delay:-.5s;animation-fill-mode:both}"
+        "#short{animation:grow -.5s 1s linear both}"
+        "#longWins{animation:grow 1s linear -.5s both;animation-duration:2s}"
+        "#shortWins{animation-duration:2s;animation:grow 1s linear -.5s both}"
+        "#variable{--motion:grow 1s linear -.5s both;animation:var(--motion)}"
+        "#invalid{animation:grow 1s linear -.5s both;animation:grow 1s 2s 3s}"
+        "#computedInvalid{--motion:grow 1px;animation:grow 1s linear -.5s both;"
+        "animation:var(--motion)}"
+        "#zero{animation:grow 0s linear forwards}"
+        "</style><div id=long></div><div id=short></div><div id=longWins></div>"
+        "<div id=shortWins></div><div id=variable></div><div id=invalid></div>"
+        "<div id=computedInvalid></div><div id=zero></div>";
+    const char* svg_path = "temp/render_output_parity/animation_shorthand.svg";
+    ASSERT_TRUE(render_html_fixture(
+        "temp/render_output_parity/animation_shorthand.html", svg_path, html));
+    const float widths[] = {60, 60, 40, 60, 60, 60, 20, 100};
+    for (size_t i = 0; i < sizeof(widths) / sizeof(widths[0]); i++) {
+        char expected[160];
+        snprintf(expected, sizeof(expected),
+            "y=\"%.2f\" width=\"%.2f\" height=\"10.00\" fill=\"rgb(255,0,0)\"",
+            (double)i * 10.0, (double)widths[i]);
+        EXPECT_TRUE(file_contains_text(svg_path, expected)) << expected;
+    }
+}
+
+TEST(RenderOutputParity, AnimationListsSampleEveryNameAndRepeatShorterLonghandLists) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0}"
+        "@keyframes grow{from{width:20px}to{width:100px}}"
+        "@keyframes tint{from{background-color:green}to{background-color:green}}"
+        "div{width:20px;height:10px;background:red}"
+        "#short{animation:grow 1s linear -.5s both,tint 2s linear -.5s both}"
+        "#long{animation-name:grow,tint;animation-duration:1s,2s;"
+        "animation-timing-function:linear;animation-delay:-.5s;animation-fill-mode:both}"
+        "</style><div id=short></div><div id=long></div>";
+    const char* svg_path = "temp/render_output_parity/animation_lists.svg";
+    ASSERT_TRUE(render_html_fixture(
+        "temp/render_output_parity/animation_lists.html", svg_path, html));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"0.00\" width=\"60.00\" height=\"10.00\" fill=\"rgb(0,128,0)\""));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"10.00\" width=\"60.00\" height=\"10.00\" fill=\"rgb(0,128,0)\""));
+}
+
+TEST(RenderOutputParity, AnimationNamesRetainCaseAndTimingEndpointsPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0}"
+        "@keyframes grow{from{width:20px}to{width:100px}}"
+        "@keyframes Reverse{from{width:20px}to{width:80px}}"
+        "@keyframes reverse{from{width:20px}to{width:40px}}"
+        "div{width:20px;height:10px;background:red}"
+        "#upper{animation-name:Reverse;animation-duration:0s;animation-fill-mode:forwards}"
+        "#lower{animation-name:reverse;animation-duration:0s;animation-fill-mode:forwards}"
+        "#quoted{animation:\"Reverse\" 0s forwards}"
+        "#paused{animation:grow 1s linear -.5s both paused}"
+        "#fraction{animation:grow 1s linear -2s .5 forwards}"
+        "#zero{animation:grow 1s linear 0 forwards}"
+        "#back{animation:grow 1s linear 2s reverse backwards}"
+        "#steps{animation:grow 1s steps(4,jump-start) -.25s both}"
+        "</style><div id=upper></div><div id=lower></div><div id=quoted></div>"
+        "<div id=paused></div><div id=fraction></div><div id=zero></div>"
+        "<div id=back></div><div id=steps></div>";
+    const char* path = "temp/render_output_parity/animation_endpoints.svg";
+    ASSERT_TRUE(render_html_fixture(
+        "temp/render_output_parity/animation_endpoints.html", path, html));
+    const float widths[] = {80, 40, 80, 60, 60, 20, 100, 60};
+    for (size_t i = 0; i < sizeof(widths) / sizeof(widths[0]); i++) {
+        char expected[160];
+        snprintf(expected, sizeof(expected),
+            "y=\"%.2f\" width=\"%.2f\" height=\"10.00\" fill=\"rgb(255,0,0)\"",
+            (double)i * 10.0, (double)widths[i]);
+        EXPECT_TRUE(file_contains_text(path, expected)) << expected;
+    }
+}
+
+TEST(RenderOutputParity, AnimationEventsMutateStylesAfterLayoutAndKeepPayloads) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}"
+        "@keyframes grow{from{width:20px}to{width:100px}}"
+        "#box{width:20px;height:10px;background:red;animation:grow 0s linear forwards}"
+        "</style><div id=box></div><script>"
+        "var box=document.getElementById('box');"
+        "box.addEventListener('animationstart',function(event){"
+        "box.setAttribute('data-start',event.animationName);"
+        "box.style.backgroundColor='green';"
+        "box.setAttribute('data-width',String(box.getBoundingClientRect().width));});"
+        "box.addEventListener('animationend',function(event){"
+        "box.setAttribute('data-end',String(event.elapsedTime));});"
+        "</script>";
+    const char* events =
+        "{\"name\":\"animation event layout ownership\","
+        "\"html\":\"temp/render_output_parity/animation_events.html\","
+        "\"viewport\":{\"width\":200,\"height\":40},\"events\":["
+        "{\"type\":\"wait\",\"ms\":30},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"#box\"},"
+        "\"attribute\":\"data-start\",\"equals\":\"grow\"},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"#box\"},"
+        "\"attribute\":\"data-width\",\"equals\":\"100\"},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"#box\"},"
+        "\"attribute\":\"data-end\",\"equals\":\"0\"},"
+        "{\"type\":\"assert_pixel\",\"x\":80,\"y\":5,\"min_g\":120,\"max_r\":20,\"max_b\":20}]}";
+    ASSERT_TRUE(run_html_fixture_view(
+        "temp/render_output_parity/animation_events.html",
+        "temp/render_output_parity/animation_events.json", html, events));
+}
+
+TEST(RenderOutputParity, AnimationPausedListRestyleUpdatesAndCancelsPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}"
+        "@keyframes grow{from{width:20px}to{width:100px}}"
+        "@keyframes tint{from{background-color:green}to{background-color:green}}"
+        "#box{width:20px;height:10px;background:red;"
+        "animation:grow 1s linear -.5s both paused,tint 1s both paused}"
+        "button{position:absolute;top:30px;width:80px;height:20px}"
+        "#update{left:0}#cancel{left:100px}</style><div id=box></div>"
+        "<button id=update onclick=\"document.getElementById('box').style.animation="
+        "'grow 2s linear -.5s both paused'\">update</button>"
+        "<button id=cancel onclick=\"document.getElementById('box').style.animation='none'\">cancel</button>";
+    const char* events =
+        "{\"name\":\"paused animation restyle\","
+        "\"html\":\"temp/render_output_parity/animation_restyle.html\","
+        "\"viewport\":{\"width\":200,\"height\":80},\"events\":["
+        "{\"type\":\"assert_pixel\",\"x\":50,\"y\":5,\"min_g\":120,\"max_r\":20,\"max_b\":20},"
+        "{\"type\":\"click\",\"x\":40,\"y\":40},"
+        "{\"type\":\"assert_pixel\",\"x\":30,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":50,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"click\",\"x\":140,\"y\":40},"
+        "{\"type\":\"assert_pixel\",\"x\":10,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":30,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240}]}";
+    ASSERT_TRUE(run_html_fixture_view(
+        "temp/render_output_parity/animation_restyle.html",
+        "temp/render_output_parity/animation_restyle.json", html, events));
+}
+
+TEST(RenderOutputParity, TransitionListsProjectCascadeVariablesAndKeepEveryProperty) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}"
+        "div{position:absolute;left:0;width:20px;height:10px;background:red}"
+        ".changed div{width:100px}"
+        "#a{top:0;transition:width 1s linear -.5s;transition-duration:2s}"
+        "#b{top:20px;transition:all 1s linear -.5s,width 2s linear -.5s}"
+        "#c{top:40px;transition-property:opacity,color,background-color,height,min-height,"
+        "max-height,min-width,max-width,aspect-ratio,width;transition-duration:1s,2s;"
+        "transition-delay:-.5s;transition-timing-function:linear}"
+        "#d{top:60px;transition-property:height,unknown-target,width;"
+        "transition-duration:1s,2s,4s;transition-delay:-.5s;transition-timing-function:linear}"
+        "#e{top:80px;transition:none;transition-duration:1s;transition-delay:-.5s}"
+        "#f{top:100px;--motion:width -.5s 2s linear;transition:var(--motion)}"
+        "button{position:absolute;left:120px;top:130px;width:60px;height:20px}"
+        "</style><div id=a></div><div id=b></div><div id=c></div><div id=d></div>"
+        "<div id=e></div><div id=f></div><button onclick=\"document.body.className='changed';"
+        "var box=document.getElementById('d');var s=getComputedStyle(box);"
+        "box.setAttribute('data-duration',s.transitionDuration);"
+        "box.setAttribute('data-properties',s.transitionProperty)\">change</button>";
+    const char* events =
+        "{\"name\":\"transition computed lists and paint\","
+        "\"html\":\"temp/render_output_parity/transition_lists.html\","
+        "\"viewport\":{\"width\":200,\"height\":170},\"events\":["
+        "{\"type\":\"click\",\"x\":150,\"y\":140},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"#d\"},"
+        "\"attribute\":\"data-duration\",\"equals\":\"1s, 2s, 4s\"},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"#d\"},"
+        "\"attribute\":\"data-properties\",\"equals\":\"height, unknown-target, width\"},"
+        "{\"type\":\"assert_pixel\",\"x\":35,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":45,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"assert_pixel\",\"x\":35,\"y\":25,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":45,\"y\":25,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"assert_pixel\",\"x\":35,\"y\":45,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":45,\"y\":45,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"assert_pixel\",\"x\":25,\"y\":65,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":35,\"y\":65,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"assert_pixel\",\"x\":80,\"y\":85,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":35,\"y\":105,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":45,\"y\":105,\"min_r\":240,\"min_g\":240,\"min_b\":240}]}";
+    ASSERT_TRUE(run_html_fixture_view(
+        "temp/render_output_parity/transition_lists.html",
+        "temp/render_output_parity/transition_lists.json", html, events));
+}
+
+TEST(RenderOutputParity, TransitionRetargetRestartAndCancellationReachPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}"
+        "#box{width:20px;height:10px;background:red;transition:width 1s linear}"
+        "button{position:absolute;top:30px;width:40px;height:20px}"
+        "#start{left:0}#retarget{left:50px}#restart{left:100px}#cancel{left:150px}"
+        "</style><div id=box></div>"
+        "<button id=start onclick=\"document.getElementById('box').style.width='100px'\">start</button>"
+        "<button id=retarget onclick=\"document.getElementById('box').style.width='60px'\">retarget</button>"
+        "<button id=restart onclick=\"document.getElementById('box').style.width='80px'\">restart</button>"
+        "<button id=cancel onclick=\"var b=document.getElementById('box');"
+        "b.style.transition='none';b.style.width='20px'\">cancel</button>";
+    // clicks drain their input frames, so samples include that elapsed time.
+    const char* events =
+        "{\"name\":\"transition retarget and completed restart paint\","
+        "\"html\":\"temp/render_output_parity/transition_retarget.html\","
+        "\"viewport\":{\"width\":200,\"height\":80},\"events\":["
+        "{\"type\":\"click\",\"x\":20,\"y\":40},{\"type\":\"advance_time\",\"ms\":250},"
+        "{\"type\":\"assert_pixel\",\"x\":35,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":50,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"click\",\"x\":70,\"y\":40},{\"type\":\"advance_time\",\"ms\":250},"
+        "{\"type\":\"assert_pixel\",\"x\":43,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":55,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"advance_time\",\"ms\":1000},{\"type\":\"click\",\"x\":120,\"y\":40},"
+        "{\"type\":\"advance_time\",\"ms\":500},"
+        "{\"type\":\"assert_pixel\",\"x\":65,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":75,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"click\",\"x\":170,\"y\":40},"
+        "{\"type\":\"assert_pixel\",\"x\":15,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":25,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240}]}";
+    ASSERT_TRUE(run_html_fixture_view(
+        "temp/render_output_parity/transition_retarget.html",
+        "temp/render_output_parity/transition_retarget.json", html, events));
+}
+
+static StrBuf* physical_side_effect_fixture(bool transition) {
+    const char* sides[] = {"top", "right", "bottom", "left"};
+    const char* properties[] = {"border-%s-color", "border-%s-width", "%s",
+        "margin-%s", "padding-%s"};
+    const char* from[] = {"red", "2px", "0px", "-10px", "0px"};
+    const char* to[] = {"blue", "10px", "20px", "30px", "20px"};
+    StrBuf* html = strbuf_new();
+    strbuf_append_str(html, "<!doctype html><style>body{margin:0;background:white;height:350px}"
+        ".row{position:absolute;width:120px;font-size:0;line-height:0}"
+        ".cell{display:inline-block;position:relative;vertical-align:top;"
+        "width:40px;height:20px;border:2px solid red;background:white}"
+        ".marker{display:inline-block;vertical-align:top;margin-left:30px;"
+        "width:5px;height:5px;background:blue}"
+        ".below{display:block;width:5px;height:5px;background:blue}"
+        "button{position:absolute;left:0;top:310px;width:60px;height:20px}");
+    for (int family = 0; family < 5; family++) {
+        for (int side = 0; side < 4; side++) {
+            int index = family * 4 + side;
+            char property[48];
+            snprintf(property, sizeof(property), properties[family], sides[side]);
+            strbuf_append_format(html, "#row%d{left:%dpx;top:%dpx}", index, side * 140, family * 60);
+            if (transition) {
+                strbuf_append_format(html,
+                    "#b%d{%s:%s;transition:%s 1s linear -.5s}.changed #b%d{%s:%s}",
+                    index, property, from[family], property, index, property, to[family]);
+            } else {
+                strbuf_append_format(html, "@keyframes k%d{from{%s:%s}to{%s:%s}}"
+                    "#b%d{animation:k%d 1s linear -.5s both paused}",
+                    index, property, from[family], property, to[family], index, index);
+            }
+        }
+    }
+    strbuf_append_str(html, "</style>");
+    for (int index = 0; index < 20; index++) {
+        strbuf_append_format(html, "<div class=row id=row%d><span class=cell id=b%d></span>"
+            "<i class=marker></i><i class=below></i></div>", index, index);
+    }
+    if (transition) strbuf_append_str(html,
+        "<button onclick=\"document.body.className='changed'\">change</button>");
+    return html;
+}
+
+struct PhysicalSideGeometry {
+    float x, y, width, height;
+    float marker_x, marker_y, below_y;
+};
+
+static PhysicalSideGeometry physical_side_geometry(int family, int side, float progress) {
+    float row_x = (float)side * 140.0f;
+    float row_y = (float)family * 60.0f;
+    float offset = progress * 20.0f;
+    float margin = -10.0f + progress * 40.0f;
+    PhysicalSideGeometry result = {row_x, row_y, 44.0f, 24.0f};
+    if (family == 1 || family == 4) {
+        float addition = family == 1 ? progress * 8.0f : offset;
+        if (side == 1 || side == 3) result.width += addition;
+        else result.height += addition;
+    } else if (family == 2) {
+        if (side == 0) result.y += offset;
+        else if (side == 1) result.x -= offset;
+        else if (side == 2) result.y -= offset;
+        else result.x += offset;
+    } else if (family == 3) {
+        if (side == 0) result.y += margin;
+        else if (side == 3) result.x += margin;
+    }
+    // keep the flow marker beyond a relatively positioned cell's painted overlap.
+    result.marker_x = row_x + result.width + 30.0f;
+    result.marker_y = row_y;
+    result.below_y = row_y + result.height;
+    if (family == 3) {
+        if (side == 1 || side == 3) result.marker_x += margin;
+        else result.below_y += margin;
+    }
+    return result;
+}
+
+TEST(RenderOutputParity, AnimationPhysicalBoxSidesReachLayoutAndPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    StrBuf* html = physical_side_effect_fixture(false);
+    bool rendered = render_html_fixture("temp/render_output_parity/animation_physical_sides.html",
+        "temp/render_output_parity/animation_physical_sides.svg", html->str);
+    strbuf_free(html);
+    ASSERT_TRUE(rendered);
+    const char* svg = "temp/render_output_parity/animation_physical_sides.svg";
+    for (int family = 0; family < 5; family++) {
+        for (int side = 0; side < 4; side++) {
+            PhysicalSideGeometry box = physical_side_geometry(family, side, .5f);
+            char expected[200];
+            snprintf(expected, sizeof(expected),
+                "x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"rgb(255,255,255)\"",
+                (double)box.x, (double)box.y, (double)box.width, (double)box.height);
+            EXPECT_TRUE(file_contains_text(svg, expected)) << family << "/" << side;
+            snprintf(expected, sizeof(expected),
+                "x=\"%.2f\" y=\"%.2f\" width=\"5.00\" height=\"5.00\" fill=\"rgb(0,0,255)\"",
+                (double)box.marker_x, (double)box.marker_y);
+            EXPECT_TRUE(file_contains_text(svg, expected)) << family << "/" << side;
+            if (family == 3 && side == 2) {
+                // the bottom margin must affect the following block's painted position.
+                EXPECT_TRUE(file_contains_text(svg,
+                    "x=\"280.00\" y=\"214.00\" width=\"5.00\" height=\"5.00\" fill=\"rgb(0,0,255)\""));
+            }
+        }
+    }
+    const char* colored_sides[] = {
+        "points=\"0.00,0.00 44.00,0.00 42.00,2.00 2.00,2.00\" fill=\"rgb(128,0,128)\"",
+        "points=\"182.00,2.00 184.00,0.00 184.00,24.00 182.00,22.00\" fill=\"rgb(128,0,128)\"",
+        "points=\"282.00,22.00 322.00,22.00 324.00,24.00 280.00,24.00\" fill=\"rgb(128,0,128)\"",
+        "points=\"420.00,0.00 422.00,2.00 422.00,22.00 420.00,24.00\" fill=\"rgb(128,0,128)\""
+    };
+    for (const char* color : colored_sides) EXPECT_TRUE(file_contains_text(svg, color));
+}
+
+TEST(RenderOutputParity, TransitionPhysicalBoxSidesReachGeometryAndRasterPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    StrBuf* html = physical_side_effect_fixture(true);
+    StrBuf* events = strbuf_new();
+    strbuf_append_str(events, "{\"name\":\"physical side transition consumers\","
+        "\"html\":\"temp/render_output_parity/transition_physical_sides.html\","
+        "\"viewport\":{\"width\":600,\"height\":350},\"events\":["
+        "{\"type\":\"click\",\"x\":30,\"y\":320}");
+    // the click drains five input frames after the negative-delay initial sample.
+    float progress = .5f + 5.0f / 60.0f;
+    for (int family = 0; family < 5; family++) {
+        for (int side = 0; side < 4; side++) {
+            int index = family * 4 + side;
+            PhysicalSideGeometry box = physical_side_geometry(family, side, progress);
+            strbuf_append_format(events, ",{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#b%d\"},"
+                "\"x\":%.2f,\"y\":%.2f,\"width\":%.2f,\"height\":%.2f,\"tolerance\":1}",
+                index, (double)box.x, (double)box.y, (double)box.width, (double)box.height);
+            strbuf_append_format(events, ",{\"type\":\"assert_pixel\",\"x\":%.2f,\"y\":%.2f,"
+                "\"max_r\":20,\"max_g\":20,\"min_b\":240}",
+                (double)box.marker_x + 2.0, (double)box.marker_y + 2.0);
+            if (family == 3 && side == 2) {
+                strbuf_append_format(events, ",{\"type\":\"assert_pixel\",\"x\":282,\"y\":%.2f,"
+                    "\"max_r\":20,\"max_g\":20,\"min_b\":240}", (double)box.below_y + 2.0);
+            }
+        }
+    }
+    const float border_points[][2] = {{22, 1}, {183, 12}, {302, 23}, {421, 12}};
+    for (const auto& point : border_points) {
+        strbuf_append_format(events, ",{\"type\":\"assert_pixel\",\"x\":%.2f,\"y\":%.2f,"
+            "\"min_r\":70,\"max_r\":170,\"max_g\":20,\"min_b\":90,\"max_b\":190}",
+            (double)point[0], (double)point[1]);
+    }
+    strbuf_append_str(events, "]}");
+    bool passed = run_html_fixture_view("temp/render_output_parity/transition_physical_sides.html",
+        "temp/render_output_parity/transition_physical_sides.json", html->str, events->str);
+    strbuf_free(events);
+    strbuf_free(html);
+    EXPECT_TRUE(passed);
+}
+
+TEST(RenderOutputParity, AnimationMarginsOverrideHtmlDefaults) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{background:white;"
+        "animation:move 1s linear -.5s both paused}"
+        "@keyframes move{from{margin-top:0px;margin-left:0px}"
+        "to{margin-top:20px;margin-left:20px}}"
+        ".red{width:40px;height:10px;background:red}"
+        "h1{width:40px;height:10px;background:blue;font-size:20px;"
+        "margin-left:0;margin-right:0;margin-bottom:0;"
+        "animation:gap 1s linear -.5s both paused}"
+        "@keyframes gap{from{margin-top:0px}to{margin-top:20px}}"
+        "</style><div class=red></div><h1></h1>";
+    const char* svg = "temp/render_output_parity/animation_default_margins.svg";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/animation_default_margins.html",
+        svg, html));
+    EXPECT_TRUE(file_contains_text(svg,
+        "x=\"10.00\" y=\"10.00\" width=\"40.00\" height=\"10.00\" fill=\"rgb(255,0,0)\""));
+    EXPECT_TRUE(file_contains_text(svg,
+        "x=\"10.00\" y=\"30.00\" width=\"40.00\" height=\"10.00\" fill=\"rgb(0,0,255)\""));
+}
+
+static StrBuf* typed_keyframe_length_fixture() {
+    StrBuf* html = strbuf_new();
+    strbuf_append_str(html,
+        "<!doctype html><style>html{font-size:12px}body{margin:0;background:white}"
+        ".row{position:absolute;left:0;width:200px;height:30px;font-size:10px}"
+        ".box{position:relative;width:20px;height:10px;background:red;"
+        "animation:ems 1s linear -.5s both paused}"
+        "@keyframes ems{from{width:2em}to{width:4em}}"
+        "@keyframes percent{from{width:10%}to{width:30%}}"
+        "@keyframes math{from{width:calc(10px + 10%)}to{width:calc(30px + 30%)}}"
+        "@keyframes root{from{width:2rem}to{width:4rem}}"
+        "@keyframes physical{from{width:.25in}to{width:.75in}}"
+        "@keyframes inset{from{left:10%}to{left:30%}}"
+        "@keyframes margin{from{margin-left:10%}to{margin-left:30%}}"
+        "@keyframes padding{from{padding-left:10%}to{padding-left:30%}}"
+        "@keyframes variable{from{width:var(--from)}to{width:var(--to)}}"
+        "#b1,#b9{font-size:20px}#b2{animation-name:percent}"
+        "#b3{animation-name:math}#b4{animation-name:root}#b5{animation-name:physical}"
+        "#b6{animation-name:inset}#b7{animation-name:margin}#b8{animation-name:padding}"
+        "#b9{animation-name:variable;--from:2em;--to:4em}"
+        "button{position:absolute;left:0;top:420px;width:200px;height:20px}");
+    for (int index = 0; index < 10; index++) {
+        strbuf_append_format(html, "#r%d{top:%dpx}", index, index * 40);
+    }
+    strbuf_append_str(html, "</style>");
+    for (int index = 0; index < 10; index++) {
+        strbuf_append_format(html,
+            "<div class=row id=r%d><div class=box id=b%d></div></div>", index, index);
+    }
+    strbuf_append_str(html,
+        "<button onclick=\"document.getElementById('b0').style.fontSize='20px';"
+        "document.getElementById('r2').style.width='400px';"
+        "document.getElementById('r3').style.width='400px';"
+        "document.getElementById('b9').style.setProperty('--to','6em')\">change</button>");
+    return html;
+}
+
+struct TypedKeyframeGeometry {
+    float x, width;
+};
+
+static TypedKeyframeGeometry typed_keyframe_geometry(int index, bool changed) {
+    const float widths[] = {30, 60, 40, 60, 36, 48, 20, 20, 60, 60};
+    TypedKeyframeGeometry box = {index == 6 || index == 7 ? 40.0f : 0.0f, widths[index]};
+    if (changed) {
+        if (index == 0) box.width = 60.0f;
+        else if (index == 2) box.width = 80.0f;
+        else if (index == 3) box.width = 100.0f;
+        else if (index == 9) box.width = 80.0f;
+    }
+    return box;
+}
+
+TEST(RenderOutputParity, AnimationTypedKeyframeLengthsResolveIntoPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    StrBuf* html = typed_keyframe_length_fixture();
+    const char* svg = "temp/render_output_parity/animation_typed_lengths.svg";
+    bool rendered = render_html_fixture(
+        "temp/render_output_parity/animation_typed_lengths.html", svg, html->str);
+    strbuf_free(html);
+    ASSERT_TRUE(rendered);
+    for (int index = 0; index < 10; index++) {
+        TypedKeyframeGeometry box = typed_keyframe_geometry(index, false);
+        char expected[200];
+        snprintf(expected, sizeof(expected),
+            "x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"10.00\" fill=\"rgb(255,0,0)\"",
+            (double)box.x, (double)index * 40.0, (double)box.width);
+        EXPECT_TRUE(file_contains_text(svg, expected)) << index;
+    }
+}
+
+TEST(RenderOutputParity, AnimationTypedKeyframeLengthsResampleAfterStyleChanges) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    StrBuf* html = typed_keyframe_length_fixture();
+    StrBuf* events = strbuf_new();
+    strbuf_append_str(events, "{\"name\":\"keyframe length contexts refresh\","
+        "\"html\":\"temp/render_output_parity/animation_typed_lengths_live.html\","
+        "\"viewport\":{\"width\":450,\"height\":460},\"events\":[");
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass == 1) strbuf_append_str(events, ",{\"type\":\"click\",\"x\":30,\"y\":430}");
+        for (int index = 0; index < 10; index++) {
+            TypedKeyframeGeometry box = typed_keyframe_geometry(index, pass == 1);
+            strbuf_append_format(events,
+                "%s{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#b%d\"},"
+                "\"x\":%.2f,\"y\":%.2f,\"width\":%.2f,\"height\":10,\"tolerance\":0.1},"
+                "{\"type\":\"assert_pixel\",\"x\":%.2f,\"y\":%.2f,"
+                "\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+                "{\"type\":\"assert_pixel\",\"x\":%.2f,\"y\":%.2f,"
+                "\"min_r\":240,\"min_g\":240,\"min_b\":240}",
+                pass == 0 && index == 0 ? "" : ",", index,
+                (double)box.x, (double)index * 40.0, (double)box.width,
+                (double)box.x + box.width - 2.0, (double)index * 40.0 + 5.0,
+                (double)box.x + box.width + 2.0, (double)index * 40.0 + 5.0);
+        }
+    }
+    strbuf_append_str(events, "]}");
+    bool passed = run_html_fixture_view(
+        "temp/render_output_parity/animation_typed_lengths_live.html",
+        "temp/render_output_parity/animation_typed_lengths_live.json", html->str, events->str);
+    strbuf_free(events);
+    strbuf_free(html);
+    EXPECT_TRUE(passed);
+}
+
+TEST(RenderOutputParity, AnimationInvalidKeyframeLengthsUseComputedFallback) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}"
+        ".row{width:200px;height:50px;font-size:10px}"
+        ".box{width:40px;height:10px;background:red;animation:bad 1s linear -.5s both paused}"
+        "@keyframes bad{from{width:10px}to{width:var(--end)}}"
+        "@keyframes math{from{width:calc(-20px)}to{width:20px}}"
+        "@keyframes pad{from{padding-left:calc(-20px)}to{padding-left:20px}}"
+        "@keyframes invalid{from{width:10px}to{width:30px;width:20junk}}"
+        "@keyframes duplicate{from{width:10px;width:20px}to{width:30px;width:40px}}"
+        "#b5{animation-name:math}#b6{animation-name:pad}"
+        "#b7{animation-name:invalid}#b8{animation-name:duplicate}</style>"
+        "<div class=row><div class=box id=b0 style=\"--end:20junk\"></div></div>"
+        "<div class=row><div class=box id=b1></div></div>"
+        "<div class=row><div class=box id=b2 style=\"--end:auto\"></div></div>"
+        "<div class=row><div class=box id=b3 style=\"--end:10px 20px\"></div></div>"
+        "<div class=row><div class=box id=b4 style=\"--end:calc(2px + bad)\"></div></div>"
+        "<div class=row><div class=box id=b5></div></div>"
+        "<div class=row><div class=box id=b6></div></div>"
+        "<div class=row><div class=box id=b7></div></div>"
+        "<div class=row><div class=box id=b8></div></div>";
+    const float widths[] = {200, 200, 200, 200, 200, 0, 40, 20, 30};
+    StrBuf* events = strbuf_new();
+    strbuf_append_str(events, "{\"name\":\"keyframe value fallback and final range\","
+        "\"html\":\"temp/render_output_parity/animation_invalid_lengths.html\","
+        "\"viewport\":{\"width\":250,\"height\":460},\"events\":[");
+    for (int index = 0; index < 9; index++) {
+        strbuf_append_format(events,
+            "%s{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#b%d\"},"
+            "\"x\":0,\"y\":%.2f,\"width\":%.2f,\"height\":10,\"tolerance\":0.1},"
+            "{\"type\":\"assert_pixel\",\"x\":%.2f,\"y\":%.2f,"
+            "\"min_r\":240,\"min_g\":240,\"min_b\":240}",
+            index == 0 ? "" : ",", index, (double)index * 50.0, (double)widths[index],
+            (double)widths[index] + 2.0, (double)index * 50.0 + 5.0);
+        if (widths[index] > 0) strbuf_append_format(events,
+            ",{\"type\":\"assert_pixel\",\"x\":%.2f,\"y\":%.2f,"
+            "\"min_r\":240,\"max_g\":20,\"max_b\":20}",
+            (double)widths[index] - 2.0, (double)index * 50.0 + 5.0);
+    }
+    strbuf_append_str(events, "]}");
+    bool passed = run_html_fixture_view(
+        "temp/render_output_parity/animation_invalid_lengths.html",
+        "temp/render_output_parity/animation_invalid_lengths.json", html, events->str);
+    strbuf_free(events);
+    EXPECT_TRUE(passed);
+}
+
+static const char* web_length_effect_fixture() {
+    return
+        "<!doctype html><style>body{margin:0;background:white}"
+        "#row{width:200px;font-size:10px}#box{width:40px;height:10px;background:red}"
+        "button{position:absolute;top:30px;width:80px;height:20px}"
+        "#start{left:0}#resize{left:90px}#seek{left:180px}</style><div id=row><div id=box></div></div>"
+        "<button id=start onclick=\"var b=document.getElementById('box');"
+        "window.motion=b.animate([{width:'2em'},{width:'calc(4em + 20%)'}],"
+        "{duration:1000,fill:'both'});window.motion.pause();window.motion.currentTime=500\">start</button>"
+        "<button id=resize onclick=\"document.getElementById('box').style.fontSize='20px'\">resize</button>"
+        "<button id=seek onclick=\"window.motion.currentTime=750\">seek</button>";
+}
+
+TEST(RenderOutputParity, AnimationWebKeyframeLengthsResolveAndResample) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* events =
+        "{\"name\":\"Web Animation length contexts refresh\","
+        "\"html\":\"temp/render_output_parity/animation_web_lengths.html\","
+        "\"viewport\":{\"width\":280,\"height\":70},\"events\":["
+        "{\"type\":\"click\",\"x\":30,\"y\":40},"
+        "{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#box\"},"
+        "\"x\":0,\"y\":0,\"width\":50,\"height\":10,\"tolerance\":0.1},"
+        "{\"type\":\"assert_pixel\",\"x\":48,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":52,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"click\",\"x\":120,\"y\":40},"
+        "{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#box\"},"
+        "\"x\":0,\"y\":0,\"width\":80,\"height\":10,\"tolerance\":0.1},"
+        "{\"type\":\"assert_pixel\",\"x\":78,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":82,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"click\",\"x\":210,\"y\":40},"
+        "{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#box\"},"
+        "\"x\":0,\"y\":0,\"width\":100,\"height\":10,\"tolerance\":0.1},"
+        "{\"type\":\"assert_pixel\",\"x\":98,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":102,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240}]}";
+    ASSERT_TRUE(run_html_fixture_view("temp/render_output_parity/animation_web_lengths.html",
+        "temp/render_output_parity/animation_web_lengths.json", web_length_effect_fixture(), events));
+}
+
+TEST(RenderOutputParity, AnimationStandaloneWebSeeksCommitPendingGeometry) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/animation_web_lengths_standalone.html";
+    const char* js_path = "temp/render_output_parity/animation_web_lengths_standalone.js";
+    const char* html = web_length_effect_fixture();
+    const char* script =
+        "var box=document.getElementById('box');\n"
+        "console.log(box.getBoundingClientRect().width);\n"
+        "var motion=box.animate([{width:'2em'},{width:'calc(4em + 20%)'}],"
+        "{duration:1000,fill:'both'});\n"
+        "motion.pause();motion.currentTime=500;\n"
+        "console.log(box.getBoundingClientRect().width);\n"
+        "box.style.fontSize='20px';\n"
+        "console.log(box.getBoundingClientRect().width);\n"
+        "motion.currentTime=750;\n"
+        "console.log(box.getBoundingClientRect().width);\n";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    ASSERT_TRUE(write_file_all(js_path, script, strlen(script)));
+    char qhtml[PATH_MAX + 8], qjs[PATH_MAX + 8], command[PATH_MAX * 2 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(js_path, qjs, sizeof(qjs));
+    snprintf(command, sizeof(command), "%s js %s --document %s --no-log 2>&1",
+        LAMBDA_EXE, qjs, qhtml);
+    CommandResult result = run_command_capture(command);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, "40\n50\n80\n100\n");
+}
+
+TEST(RenderOutputParity, AnimationWebKeyframesConvertListsOffsetsAndEffectSnapshots) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/animation_web_keyframe_conversion.html";
+    const char* js_path = "temp/render_output_parity/animation_web_keyframe_conversion.js";
+    const char* html =
+        "<!doctype html><style>body{margin:0}.box{position:absolute;top:0;left:0;"
+        "width:40px;height:10px;background:red}</style><div class=box id=box></div>";
+    // Chromium reference checks conversion ordering/error identity as well as used values.
+    const char* script =
+        "var box=document.getElementById('box');\n"
+        "function reset(){box=document.createElement('div');box.className='box';document.body.appendChild(box);return box;}\n"
+        "function sample(frames,time){reset();var a=box.animate(frames,{duration:1000,fill:'both',easing:'linear'});a.pause();a.currentTime=time;return box.getBoundingClientRect().width;}\n"
+        "function check(name,run){try{console.log(name+':'+run());}catch(e){console.log(name+':THREW:'+e.name+':'+e.message);}}\n"
+        "function rejects(frames){try{sample(frames,500);return false;}catch(e){return e.name==='TypeError';}}\n"
+        "check('anchored',()=>Math.abs(sample([{width:'20px',offset:.2},{width:'40px'},{width:'60px',offset:.8},{width:'100px'}],500)-40)<.01);\n"
+        "check('single',()=>Math.abs(sample([{width:'100px'}],500)-70)<.01);\n"
+        "check('single_indexed',()=>Math.abs(sample({width:'100px'},500)-70)<.01);\n"
+        "check('uneven_indexed',()=>Math.abs(sample({width:['20px','40px','100px'],opacity:[0,1]},500)-40)<.01&&Math.abs(Number(getComputedStyle(box).opacity)-.5)<.01);\n"
+        "check('shared_offsets',()=>Math.abs(sample({width:['20px','60px','100px'],offset:[0,.25,1]},250)-60)<.01);\n"
+        "check('frame_easing',()=>Math.abs(sample([{width:'20px',easing:'steps(2,start)'},{width:'100px'}],250)-60)<.01);\n"
+        "check('indexed_easing',()=>Math.abs(sample({width:['20px','60px','100px'],easing:['steps(2,start)','linear']},125)-40)<.01);\n"
+        "check('large',()=>{var f=[];for(var i=0;i<80;i++)f.push({width:(20+i)+'px'});return Math.abs(sample(f,1000)-99)<.01;});\n"
+        "check('negative_offset',()=>rejects([{width:'20px',offset:-.1},{width:'100px'}]));\n"
+        "check('descending_offset',()=>rejects([{width:'20px',offset:.8},{width:'100px',offset:.2}]));\n"
+        "check('nonfinite_offset',()=>rejects([{width:'20px',offset:Infinity}]));\n"
+        "check('offset_coercion',()=>Math.abs(sample([{width:'20px',offset:'0'},{width:'100px',offset:'1'}],500)-60)<.01);\n"
+        "check('duplicate_offset',()=>Math.abs(sample([{width:'20px',offset:0},{width:'40px',offset:0},{width:'100px',offset:1}],500)-70)<.01);\n"
+        "check('empty',()=>{reset();return !!box.animate([],{duration:1000})&&!!box.animate(null,{duration:1000})&&!!box.animate({},{duration:1000});});\n"
+        "check('primitive_frame',()=>rejects([3]));\n"
+        "check('invalid_easing',()=>rejects([{width:'20px',easing:'bogus'}]));\n"
+        "check('unused_easing',()=>rejects({width:['20px'],easing:['linear','bogus']}));\n"
+        "check('invalid_composite',()=>rejects([{width:'20px',composite:'ADD'}]));\n"
+        "check('symbol_value',()=>rejects([{width:Symbol('bad')} ]));\n"
+        "check('thrown_getter',()=>{var error={marker:1};try{sample([{get width(){throw error;}}],500);return false;}catch(e){return e===error;}});\n"
+        "check('thrown_conversion',()=>{var error={marker:2};try{sample([{width:{toString(){throw error;}}}],500);return false;}catch(e){return e===error;}});\n"
+        "check('numeric_opacity',()=>{reset();var a=box.animate([{opacity:0},{opacity:1}],{duration:1000,fill:'both'});a.pause();a.currentTime=500;return Math.abs(Number(getComputedStyle(box).opacity)-.5)<.01;});\n"
+        "check('enumerable_names',()=>{var f={width:'100px'};Object.defineProperty(f,'height',{enumerable:false,get(){throw 4;}});return Math.abs(sample([f],500)-70)<.01;});\n"
+        "check('name_order',()=>{var order='';var f={get width(){order+='w';return '100px';},get opacity(){order+='p';return 1;},get height(){order+='h';return '10px';},get offset(){order+='o';return 1;},get easing(){order+='e';return 'linear';},get composite(){order+='c';return 'replace';}};sample([f],500);return order==='ceohpw';});\n"
+        "check('iterable_frames',()=>{var reads=0,steps=0;var frames={get [Symbol.iterator](){reads++;return function(){return {next(){return steps++<2?{value:{width:steps===1?'20px':'100px'},done:false}:{done:true};}};};}};return Math.abs(sample(frames,500)-60)<.01&&reads===1;});\n"
+        "check('array_iterator',()=>{var frames=[{width:'bad'}];frames[Symbol.iterator]=function*(){yield {width:'20px'};yield {width:'100px'};};return Math.abs(sample(frames,500)-60)<.01;});\n"
+        "check('indexed_iterable',()=>{var values=new Set(['20px','100px']);return Math.abs(sample({width:values},500)-60)<.01;});\n"
+        "check('interleaved_conversion',()=>{var order='';var values={[Symbol.iterator](){var i=0;return {next(){order+='n';return i++<2?{value:{toString(){order+='s';return '20px';}},done:false}:{done:true};}};}};sample({width:values},500);return order==='nsnsn';});\n"
+        "check('iterator_error',()=>{var closed=false,error={};var values={[Symbol.iterator](){return {next(){return {value:{toString(){throw error;}},done:false};},return(){closed=true;return {};}};}};try{sample({width:values},500);return false;}catch(e){return e===error&&!closed;}});\n"
+        "check('effect_snapshot',()=>{reset();var reads=0,f=[{get width(){reads++;return '20px';}},{width:'100px'}];var effect=new KeyframeEffect(box,f,{duration:1000,fill:'both'});var immediate=reads===1;f[1].width='200px';var a=new Animation(effect);a.pause();a.currentTime=500;return immediate&&reads===1&&Math.abs(box.getBoundingClientRect().width-60)<.01;});\n"
+        "\n"
+        "check('effect_timing_snapshot',()=>{reset();var reads=0,o={get duration(){reads++;return 1000;},fill:'both'};var effect=new KeyframeEffect(box,[{width:'20px'},{width:'100px'}],o);var immediate=reads===1;var a=new Animation(effect);a.pause();a.currentTime=500;return immediate&&reads===1&&Math.abs(box.getBoundingClientRect().width-60)<.01;});\n"
+        "check('effect_eager_error',()=>{reset();try{new KeyframeEffect(box,[{offset:-1,width:'20px'}],1000);return false;}catch(e){return e.name==='TypeError';}});\n"
+        "check('timing_error',()=>{reset();try{box.animate([{width:'100px'}],{duration:-1});return false;}catch(e){return e.name==='TypeError';}});\n"
+        "check('timing_getter_error',()=>{reset();var error={};try{box.animate([{width:'100px'}],{get duration(){throw error;}});return false;}catch(e){return e===error;}});\n"
+        "check('nullable_offsets',()=>Math.abs(sample({width:['20px','60px','100px'],offset:[0,undefined,1]},500)-60)<.01);\n"
+        "check('capture_next_once',()=>{var reads=0,i=0;var frames={[Symbol.iterator](){return {get next(){reads++;return function(){return i++<2?{value:{width:i===1?'20px':'100px'},done:false}:{done:true};};}};}};return Math.abs(sample(frames,500)-60)<.01&&reads===1;});\n"
+        "\n"
+        "function collect(){if(typeof gc==='function')gc();}\n"
+        "check('getter_collection',()=>{var f=[{get width(){collect();return {toString(){collect();return '20px';}};},get opacity(){collect();return 0;}},{get width(){collect();return '100px';},get opacity(){collect();return 1;}}];return Math.abs(sample(f,500)-60)<.01&&Math.abs(Number(getComputedStyle(box).opacity)-.5)<.01;});\n"
+        "check('iterator_collection',()=>{var i=0,frames={[Symbol.iterator](){collect();return {get next(){collect();return function(){collect();return i++<2?{value:{width:i===1?'20px':'100px'},done:false}:{done:true};};}};}};return Math.abs(sample(frames,500)-60)<.01;});\n"
+        "check('snapshot_collection',()=>{reset();var effect=new KeyframeEffect(box,[{width:'20px'},{width:'100px'}],{duration:1000,fill:'both'});collect();var a=new Animation(effect);collect();a.pause();a.currentTime=500;collect();return Math.abs(box.getBoundingClientRect().width-60)<.01;});\n";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    CommandResult result = run_html_fixture_script(html_path, js_path, script);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output,
+        "anchored:true\n"
+        "single:true\n"
+        "single_indexed:true\n"
+        "uneven_indexed:true\n"
+        "shared_offsets:true\n"
+        "frame_easing:true\n"
+        "indexed_easing:true\n"
+        "large:true\n"
+        "negative_offset:true\n"
+        "descending_offset:true\n"
+        "nonfinite_offset:true\n"
+        "offset_coercion:true\n"
+        "duplicate_offset:true\n"
+        "empty:true\n"
+        "primitive_frame:true\n"
+        "invalid_easing:true\n"
+        "unused_easing:true\n"
+        "invalid_composite:true\n"
+        "symbol_value:true\n"
+        "thrown_getter:true\n"
+        "thrown_conversion:true\n"
+        "numeric_opacity:true\n"
+        "enumerable_names:true\n"
+        "name_order:true\n"
+        "iterable_frames:true\n"
+        "array_iterator:true\n"
+        "indexed_iterable:true\n"
+        "interleaved_conversion:true\n"
+        "iterator_error:true\n"
+        "effect_snapshot:true\n"
+        "effect_timing_snapshot:true\n"
+        "effect_eager_error:true\n"
+        "timing_error:true\n"
+        "timing_getter_error:true\n"
+        "nullable_offsets:true\n"
+        "capture_next_once:true\n"
+        "getter_collection:true\n"
+        "iterator_collection:true\n"
+        "snapshot_collection:true\n");
+}
+
+TEST(RenderOutputParity, AnimationWebMultiplePropertiesReachSizingTransformAndOpacityPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* frames[] = {
+        "[{opacity:0,transform:'translateX(0px)',width:'20px',height:'10px'},"
+        "{opacity:1,transform:'translateX(40px)',width:'100px',height:'30px'}]",
+        "{opacity:[0,1],transform:['translateX(0px)','translateX(40px)'],"
+        "width:['20px','100px'],height:['10px','30px']}",
+    };
+    for (int index = 0; index < 3; index++) {
+        char html_path[256], events_path[256];
+        snprintf(html_path, sizeof(html_path),
+            "temp/render_output_parity/animation_web_multiple_%d.html", index);
+        snprintf(events_path, sizeof(events_path),
+            "temp/render_output_parity/animation_web_multiple_%d.json", index);
+        StrBuf* html = strbuf_new();
+        strbuf_append_str(html,
+            "<!doctype html><style>body{margin:0;background:white}"
+            "#box{position:absolute;width:40px;height:10px;background:red}"
+            "button{position:absolute;top:50px;width:80px;height:20px}"
+            "#start{left:0}#seek{left:90px}</style><div id=box></div>"
+            "<button id=start onclick=\"var b=document.getElementById('box');window.motion=");
+        strbuf_append_format(html, index == 2
+            ? "new Animation(new KeyframeEffect(b,%s,{duration:1000,fill:'both'}))"
+            : "b.animate(%s,{duration:1000,fill:'both'})", frames[index % 2]);
+        strbuf_append_str(html,
+            ";window.motion.pause();window.motion.currentTime=500\">start</button>"
+            "<button id=seek onclick=\"window.motion.currentTime=750\">seek</button>");
+        StrBuf* events = strbuf_new();
+        strbuf_append_format(events,
+            "{\"name\":\"Multiple Web keyframe properties\",\"html\":\"%s\","
+            "\"viewport\":{\"width\":200,\"height\":80},\"events\":[", html_path);
+        strbuf_append_str(events,
+            "{\"type\":\"click\",\"x\":30,\"y\":60},"
+            "{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#box\"},"
+            "\"x\":20,\"y\":0,\"width\":60,\"height\":20,\"tolerance\":0.1},"
+            "{\"type\":\"assert_pixel\",\"x\":25,\"y\":5,\"min_r\":250,"
+            "\"min_g\":120,\"max_g\":135,\"min_b\":120,\"max_b\":135},"
+            "{\"type\":\"assert_pixel\",\"x\":85,\"y\":5,"
+            "\"min_r\":250,\"min_g\":250,\"min_b\":250},"
+            "{\"type\":\"click\",\"x\":120,\"y\":60},"
+            "{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#box\"},"
+            "\"x\":30,\"y\":0,\"width\":80,\"height\":25,\"tolerance\":0.1},"
+            "{\"type\":\"assert_pixel\",\"x\":35,\"y\":5,\"min_r\":250,"
+            "\"min_g\":55,\"max_g\":70,\"min_b\":55,\"max_b\":70},"
+            "{\"type\":\"assert_pixel\",\"x\":115,\"y\":5,"
+            "\"min_r\":250,\"min_g\":250,\"min_b\":250}]}");
+        bool passed = run_html_fixture_view(html_path, events_path, html->str, events->str);
+        strbuf_free(events);
+        strbuf_free(html);
+        EXPECT_TRUE(passed) << "keyframe form " << index;
+    }
+}
+
+TEST(RenderOutputParity, AnimationImportantDeclarationsReachGeometryAndPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const struct {
+        const char* id;
+        const char* base;
+        const char* from;
+        const char* to;
+        float x, y, width, height;
+        bool green;
+    } cases[] = {
+        {"width", "width:40px!important", "width:20px", "width:100px", 0,0,40,10,false},
+        {"height", "height:10px!important", "height:0px", "height:40px", 0,50,40,10,false},
+        {"margin", "margin:2px!important", "margin-left:0px", "margin-left:20px", 2,102,40,10,false},
+        {"padding", "padding:2px!important", "padding-left:0px", "padding-left:20px", 0,152,44,14,false},
+        {"border", "border:2px solid red!important", "border-left-width:2px", "border-left-width:10px", 0,202,44,14,false},
+        {"background", "background:green!important", "background-color:red", "background-color:blue", 0,252,40,10,true},
+        {"logical", "margin-inline-start:2px!important", "margin-left:0px", "margin-left:20px", 2,302,40,10,false},
+        {"all", "all:initial!important;display:block!important;height:10px!important;background:red!important",
+            "width:20px", "width:100px", 0,352,200,10,false},
+        {"normal", "", "width:20px", "width:100px", 0,402,60,10,false},
+        {"inherited", "width:inherit", "width:20px", "width:100px", 0,452,60,10,false},
+        {"endpoint", "", "width:20px!important", "width:100px", 0,502,70,10,false}
+    };
+    StrBuf* html = strbuf_new();
+    strbuf_append_str(html, "<!doctype html><style>body{margin:0;background:white}"
+        ".row{width:200px;height:50px}.box{width:40px;height:10px;background:red}");
+    for (const auto& box : cases) {
+        strbuf_append_format(html, "@keyframes k_%s{from{%s}to{%s}}"
+            "#%s{%s;animation:k_%s 1s linear -.5s both paused!important}",
+            box.id, box.from, box.to, box.id, box.base, box.id);
+    }
+    strbuf_append_str(html, "#r_inherited{width:200px!important}</style>");
+    for (const auto& box : cases)
+        strbuf_append_format(html, "<div class=row id=r_%s><div class=box id=%s></div></div>", box.id, box.id);
+    const char* svg = "temp/render_output_parity/animation_priority.svg";
+    bool rendered = render_html_fixture("temp/render_output_parity/animation_priority.html", svg, html->str);
+    strbuf_free(html);
+    ASSERT_TRUE(rendered);
+    for (const auto& box : cases) {
+        char expected[200];
+        snprintf(expected, sizeof(expected),
+            "x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"rgb(%s)\"",
+            (double)box.x, (double)box.y, (double)box.width, (double)box.height,
+            box.green ? "0,128,0" : "255,0,0");
+        EXPECT_TRUE(file_contains_text(svg, expected)) << box.id;
+    }
+}
+
+TEST(RenderOutputParity, AnimationNeutralEndpointsAndPropertyIntervalsReachPaintAndCssom) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const struct {
+        const char* id;
+        const char* base;
+        const char* rule;
+        const char* background;
+        float width;
+    } cases[] = {
+        {"opacity_to", "opacity:.2", "to{opacity:1}", "rgb(0,128,0)", 40},
+        {"opacity_from", "opacity:.8", "from{opacity:0}", "rgb(0,128,0)", 40},
+        {"background_to", "", "to{background-color:blue}", "rgb(0,64,128)", 40},
+        {"background_from", "", "from{background-color:red}", "rgb(128,64,0)", 40},
+        {"separate", "opacity:.8", "from{opacity:0}to{background-color:blue}", "rgb(0,64,128)", 40},
+        {"sparse", "opacity:.8", "0%{opacity:0}25%{width:40px}75%{width:60px}100%{opacity:1}", "rgb(0,128,0)", 50},
+        {"interior", "", "25%{width:20px}", "rgb(0,128,0)", 26.67f},
+        {"add_to", "", "to{width:20px;animation-composition:add}", "rgb(0,128,0)", 50},
+        {"mixed", "", "from{width:10px;animation-composition:add}to{width:20px}", "rgb(0,128,0)", 35},
+        {"transparent", "background:transparent", "to{background-color:blue}", "rgba(0,0,255,0.502)", 40},
+        {"transform_none", "", "to{transform:translateX(20px)}", "rgb(0,128,0)", 40},
+        {"transform_base", "transform:translateX(10px)", "to{transform:translateX(20px)}", "rgb(0,128,0)", 40},
+        {"duplicate", "", "from{width:20px}50%{width:50px}50%{width:60px}to{width:100px}", "rgb(0,128,0)", 60},
+        {"timing", "", "from{width:0px}50%{width:80px;animation-timing-function:ease-out}to{width:100px}", "rgb(0,128,0)", 93.69f},
+        {"color_to", "", "to{color:blue}", "rgb(0,128,0)", 40},
+        {"color_default", "color:initial", "to{color:blue}", "rgb(0,128,0)", 40}
+    };
+    StrBuf* html = strbuf_new();
+    strbuf_append_str(html, "<!doctype html><style>body{margin:0;background:white}"
+        ".row{width:200px;height:50px}.box{width:40px;height:10px;background:green;color:green}");
+    for (const auto& box : cases) {
+        bool interval_timing = strcmp(box.id, "timing") == 0;
+        strbuf_append_format(html, "@keyframes k_%s{%s}#%s{%s;animation:k_%s 1s %s %s both paused}",
+            box.id, box.rule, box.id, box.base, box.id,
+            interval_timing ? "ease-in" : "linear", interval_timing ? "-.75s" : "-.5s");
+    }
+    strbuf_append_str(html, "</style>");
+    for (const auto& box : cases)
+        strbuf_append_format(html, "<div class=row><div class=box id=%s>X</div></div>", box.id);
+    const char* html_path = "temp/render_output_parity/animation_neutral.html";
+    const char* svg = "temp/render_output_parity/animation_neutral.svg";
+    bool rendered = render_html_fixture(html_path, svg, html->str);
+    strbuf_free(html);
+    ASSERT_TRUE(rendered);
+    for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
+        char expected[200];
+        snprintf(expected, sizeof(expected),
+            "x=\"0.00\" y=\"%.2f\" width=\"%.2f\" height=\"10.00\" fill=\"%s\"",
+            (double)index * 50.0, (double)cases[index].width, cases[index].background);
+        EXPECT_TRUE(file_contains_text(svg, expected)) << cases[index].id;
+    }
+    EXPECT_TRUE(file_contains_text(svg, "opacity=\"0.6000\""));
+    EXPECT_TRUE(file_contains_text(svg, "opacity=\"0.4000\""));
+    EXPECT_TRUE(file_contains_text(svg, "opacity=\"0.5000\""));
+    EXPECT_TRUE(file_contains_text(svg, "transform=\"matrix(1 0 0 1 10 0)\""));
+    EXPECT_TRUE(file_contains_text(svg, "transform=\"matrix(1 0 0 1 15 0)\""));
+    EXPECT_TRUE(file_contains_text(svg, "font-size=\"16.00\" fill=\"rgb(0,64,128)\">X</text>"));
+    EXPECT_TRUE(file_contains_text(svg, "font-size=\"16.00\" fill=\"rgb(0,0,128)\">X</text>"));
+
+    const char* js_path = "temp/render_output_parity/animation_neutral.js";
+    const char* script =
+        "for(const id of ['opacity_to','opacity_from','separate','sparse'])"
+        "console.log(getComputedStyle(document.getElementById(id)).opacity);"
+        "for(const id of ['background_to','background_from','color_to','color_default']){"
+        "const s=getComputedStyle(document.getElementById(id));"
+        "console.log(id.startsWith('background')?s.backgroundColor:s.color);}";
+    ASSERT_TRUE(write_file_all(js_path, script, strlen(script)));
+    char qhtml[PATH_MAX + 8], qjs[PATH_MAX + 8], command[PATH_MAX * 2 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(js_path, qjs, sizeof(qjs));
+    snprintf(command, sizeof(command), "%s js %s --document %s --no-log 2>&1",
+        LAMBDA_EXE, qjs, qhtml);
+    CommandResult result = run_command_capture(command);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output,
+        "0.6\n0.4\n0.4\n0.5\nrgb(0, 64, 128)\nrgb(128, 64, 0)\nrgb(0, 64, 128)\nrgb(0, 0, 128)\n");
+}
+
+TEST(RenderOutputParity, AnimationTypedOpacityAndColorReachPaintAndCssom) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const struct { const char* id; const char* base; const char* rule; } cases[] = {
+        {"percent", "", "from{opacity:0%}to{opacity:100%}"},
+        {"variable", "--low:.2;--high:.8", "from{opacity:var(--low)}to{opacity:var(--high)}"},
+        {"math", "", "from{opacity:calc(.2 + .1)}to{opacity:calc(.8 - .1)}"},
+        {"hint", "", "from{opacity:calc(10% + 20%)}to{opacity:clamp(0%,90%,70%)}"},
+        {"clipped_low", "", "from{opacity:-1}to{opacity:1}"},
+        {"clipped_high", "", "from{opacity:0}to{opacity:2}"},
+        {"color_var", "--start:red;--end:blue", "from{color:var(--start)}to{color:var(--end)}"},
+        {"color_current", "", "from{color:currentColor}to{color:blue}"},
+        {"color_modern", "", "from{color:rgb(255 0 0 / .5)}to{color:rgb(0 0 255 / .5)}"},
+        {"ordinary_math", "opacity:calc(20% + 30%)", ""},
+        {"ordinary_invalid", "opacity:.4;opacity:.5 auto", ""}
+    };
+    StrBuf* html = strbuf_new();
+    strbuf_append_str(html, "<!doctype html><style>body{margin:0;background:white}"
+        ".row{width:200px;height:50px}.box{width:40px;height:10px;background:green;color:green}");
+    for (const auto& box : cases) {
+        strbuf_append_format(html, "#%s{%s}", box.id, box.base);
+        if (*box.rule) strbuf_append_format(html,
+            "@keyframes k_%s{%s}#%s{animation:k_%s 1s linear -.5s both paused}",
+            box.id, box.rule, box.id, box.id);
+    }
+    strbuf_append_str(html, "</style>");
+    for (const auto& box : cases)
+        strbuf_append_format(html, "<div class=row><div class=box id=%s>X</div></div>", box.id);
+    const char* html_path = "temp/render_output_parity/animation_typed_scalar_color.html";
+    const char* svg = "temp/render_output_parity/animation_typed_scalar_color.svg";
+    bool rendered = render_html_fixture(html_path, svg, html->str);
+    strbuf_free(html);
+    ASSERT_TRUE(rendered);
+    EXPECT_TRUE(file_contains_text(svg, "opacity=\"0.5000\""));
+    EXPECT_TRUE(file_contains_text(svg, "opacity=\"0.4000\""));
+    const char* colors[] = {"rgb(128,0,128)", "rgb(0,0,128)", "rgba(128,0,128,0.502)"};
+    for (const char* color : colors) {
+        char expected[160];
+        snprintf(expected, sizeof(expected), "font-size=\"16.00\" fill=\"%s\">X</text>", color);
+        EXPECT_TRUE(file_contains_text(svg, expected)) << color;
+    }
+    const char* js_path = "temp/render_output_parity/animation_typed_scalar_color.js";
+    const char* script =
+        "for(const id of ['percent','variable','math','hint','clipped_low','clipped_high',"
+        "'ordinary_math','ordinary_invalid'])console.log(getComputedStyle(document.getElementById(id)).opacity);"
+        "for(const id of ['color_var','color_current','color_modern'])"
+        "console.log(getComputedStyle(document.getElementById(id)).color);";
+    ASSERT_TRUE(write_file_all(js_path, script, strlen(script)));
+    char qhtml[PATH_MAX + 8], qjs[PATH_MAX + 8], command[PATH_MAX * 2 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(js_path, qjs, sizeof(qjs));
+    snprintf(command, sizeof(command), "%s js %s --document %s --no-log 2>&1",
+        LAMBDA_EXE, qjs, qhtml);
+    CommandResult result = run_command_capture(command);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, "0.5\n0.5\n0.5\n0.5\n0.5\n0.5\n0.5\n0.4\n"
+        "rgb(128, 0, 128)\nrgb(0, 0, 128)\nrgba(128, 0, 128, 0.5)\n");
+}
+
+TEST(RenderOutputParity, AnimationTypedTransformsReachPaintAndComputedMatrices) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const struct { const char* id; const char* base; const char* rule; float x; float scale = 1.0f; } cases[] = {
+        {"percent", "", "from{transform:translateX(0%)}to{transform:translateX(100%)}", 20},
+        {"em", "font-size:10px", "from{transform:translateX(0em)}to{transform:translateX(4em)}", 20},
+        {"variable", "--end:40px", "from{transform:translateX(0px)}to{transform:translateX(var(--end))}", 20},
+        {"scale", "", "from{transform:scale(50%)}to{transform:scale(150%)}", 0},
+        {"mixed", "", "from{transform:translateX(10px)}to{transform:translateX(100%)}", 25},
+        {"inches", "", "from{transform:translateX(1in)}to{transform:translateX(2in)}", 144},
+        {"ordinary", "transform:translateX(50%);transform:translateX(1deg)", "", 20},
+        {"chain", "transform:translateX(50%) scale(2);transform-origin:0 0", "", 20, 2},
+        {"depth", "transform:translateZ(20px)", "", 0}
+    };
+    StrBuf* html = strbuf_new();
+    strbuf_append_str(html, "<!doctype html><style>body{margin:0;background:white}"
+        ".row{width:200px;height:50px}.box{width:40px;height:10px;background:red}");
+    for (const auto& box : cases) {
+        strbuf_append_format(html, "#%s{%s}", box.id, box.base);
+        if (*box.rule) strbuf_append_format(html, "@keyframes k_%s{%s}"
+            "#%s{animation:k_%s 1s linear -.5s both paused}", box.id, box.rule, box.id, box.id);
+    }
+    strbuf_append_str(html, "</style>");
+    for (const auto& box : cases)
+        strbuf_append_format(html, "<div class=row><div class=box id=%s></div></div>", box.id);
+    const char* html_path = "temp/render_output_parity/animation_typed_transform.html";
+    const char* svg = "temp/render_output_parity/animation_typed_transform.svg";
+    bool rendered = render_html_fixture(html_path, svg, html->str);
+    strbuf_free(html);
+    ASSERT_TRUE(rendered);
+    float row_y = 0.0f;
+    for (const auto& box : cases) {
+        float paint_y = row_y * (1.0f - box.scale);
+        row_y += 50.0f;
+        if (box.x == 0.0f) continue;
+        char expected[128];
+        snprintf(expected, sizeof(expected), "transform=\"matrix(%.6g 0 0 %.6g %.6g %.6g)\"",
+            (double)box.scale, (double)box.scale, (double)box.x, (double)paint_y);
+        EXPECT_TRUE(file_contains_text(svg, expected)) << box.id;
+    }
+    const char* js_path = "temp/render_output_parity/animation_typed_transform.js";
+    const char* script = "var ids=['percent','em','variable','scale','mixed','inches','ordinary','chain','depth'];"
+        "for(const id of ids)console.log(getComputedStyle(document.getElementById(id)).transform);"
+        "for(const id of ids){var r=document.getElementById(id).getBoundingClientRect();"
+        "console.log(r.x+','+r.y+','+r.width+','+r.height);}";
+    ASSERT_TRUE(write_file_all(js_path, script, strlen(script)));
+    char qhtml[PATH_MAX + 8], qjs[PATH_MAX + 8], command[PATH_MAX * 2 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(js_path, qjs, sizeof(qjs));
+    snprintf(command, sizeof(command), "%s js %s --document %s --no-log 2>&1", LAMBDA_EXE, qjs, qhtml);
+    CommandResult result = run_command_capture(command);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output,
+        "matrix(1, 0, 0, 1, 20, 0)\nmatrix(1, 0, 0, 1, 20, 0)\nmatrix(1, 0, 0, 1, 20, 0)\n"
+        "matrix(1, 0, 0, 1, 0, 0)\nmatrix(1, 0, 0, 1, 25, 0)\nmatrix(1, 0, 0, 1, 144, 0)\n"
+        "matrix(1, 0, 0, 1, 20, 0)\nmatrix(2, 0, 0, 2, 20, 0)\n"
+        "matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 20, 1)\n"
+        "20,0,40,10\n20,50,40,10\n20,100,40,10\n0,150,40,10\n25,200,40,10\n"
+        "144,250,40,10\n20,300,40,10\n20,350,80,20\n0,400,40,10\n");
+}
+
+struct TransformAnimationFixtureCase {
+    const char* id; const char* from; const char* to; const char* matrix; const char* rect;
+};
+
+static void check_transform_animation_fixture(const TransformAnimationFixtureCase* cases, size_t count,
+                                               const char* stem, const char* const* paint, size_t paint_count) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    StrBuf* html = strbuf_new();
+    StrBuf* script = strbuf_new();
+    StrBuf* expected = strbuf_new();
+    strbuf_append_str(html, "<!doctype html><style>body{margin:0;background:white}.row{width:200px;height:50px}"
+        ".box{width:40px;height:10px;background:red;font-size:10px;transform-origin:0 0}");
+    strbuf_append_str(script, "function near(actual,expected){return actual.length===expected.length&&"
+        "expected.every(function(value,index){return Math.abs(actual[index]-value)<.0001;});}var cases={");
+    for (size_t index = 0; index < count; index++) {
+        const TransformAnimationFixtureCase& box = cases[index];
+        strbuf_append_format(html, "@keyframes k_%s{from{transform:%s}to{transform:%s}}"
+            "#%s{animation:k_%s 1s linear -.5s both paused}", box.id, box.from, box.to, box.id, box.id);
+        strbuf_append_format(script, "'%s':{matrix:%s,rect:%s},", box.id, box.matrix, box.rect);
+        strbuf_append_format(expected, "%s:true:true\n", box.id);
+    }
+    strbuf_append_str(html, "</style>");
+    for (size_t index = 0; index < count; index++)
+        strbuf_append_format(html, "<div class=row><div class=box id=%s></div></div>", cases[index].id);
+    strbuf_append_str(script, "};for(const id of Object.keys(cases)){var box=document.getElementById(id);"
+        "var matrix=getComputedStyle(box).transform;var coefficients=matrix.slice(matrix.indexOf('(')+1,-1).split(',').map(Number);"
+        "var rect=box.getBoundingClientRect();console.log(id+':'+near(coefficients,cases[id].matrix)+':'"
+        "+near([rect.x,rect.y,rect.width,rect.height],cases[id].rect));}");
+    char html_path[256], js_path[256], svg[256];
+    snprintf(html_path, sizeof(html_path), "temp/render_output_parity/%s.html", stem);
+    snprintf(js_path, sizeof(js_path), "temp/render_output_parity/%s.js", stem);
+    snprintf(svg, sizeof(svg), "temp/render_output_parity/%s.svg", stem);
+    bool rendered = render_html_fixture(html_path, svg, html->str);
+    strbuf_free(html);
+    ASSERT_TRUE(rendered);
+    for (size_t index = 0; index < paint_count; index++) EXPECT_TRUE(file_contains_text(svg, paint[index])) << paint[index];
+    CommandResult result = run_html_fixture_script(html_path, js_path, script->str);
+    strbuf_free(script);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, expected->str);
+    strbuf_free(expected);
+}
+
+TEST(RenderOutputParity, AnimationTransformMathSpatialAndMatrixValuesReachPaintAndClientRects) {
+    const TransformAnimationFixtureCase cases[] = {
+        {"scale", "scale(calc(0%))", "scale(calc(100%))", "[.5,0,0,.5,0,0]", "[0,0,20,5]"},
+        {"angle", "rotate(calc(0deg))", "rotate(calc(.25turn))", "[.7071068,.7071068,-.7071068,.7071068,0,0]", "[-7.0710678,50,35.3553391,35.3553391]"},
+        {"translate3d", "translate3d(0px,0px,0px)", "translate3d(40px,0px,0px)", "[1,0,0,1,20,0]", "[20,100,40,10]"},
+        {"scale3d", "scale3d(1,1,1)", "scale3d(3,3,3)", "[2,0,0,0,0,2,0,0,0,0,2,0,0,0,0,1]", "[0,150,80,20]"},
+        {"rotatex", "rotateX(0deg)", "rotateX(90deg)", "[1,0,0,0,0,.7071068,.7071068,0,0,-.7071068,.7071068,0,0,0,0,1]", "[0,200,40,7.0710678]"},
+        {"primitive", "translateX(10px)", "translateY(20px)", "[1,0,0,1,5,10]", "[5,260,40,10]"},
+        {"matrix", "matrix(1,0,0,1,0,0)", "matrix(3,0,0,3,0,0)", "[2,0,0,2,0,0]", "[0,300,80,20]"},
+        {"suffix", "rotate(0deg)", "translateX(40px)", "[1,0,0,1,20,0]", "[20,350,40,10]"},
+        {"length", "translateX(calc(1em + 1in))", "translateX(calc(3em + 2in))", "[1,0,0,1,164,0]", "[164,400,40,10]"},
+        {"axes", "scaleX(1)", "scaleY(3)", "[1,0,0,2,0,0]", "[0,450,40,20]"},
+        {"prefix", "rotate(0deg) matrix(1,0,0,1,0,0)", "rotate(360deg) matrix(3,0,0,3,0,0)", "[-2,0,0,-2,0,0]", "[-80,480,80,20]"}
+    };
+    const char* paint[] = {"matrix(0.5 0 0 0.5 0 0)", "matrix(1 0 0 1 5 10)",
+        "matrix(2 0 0 2 0 -150)", "matrix(1 0 0 0.707107 0 58.5786)", "matrix(1 0 0 1 164 0)"};
+    check_transform_animation_fixture(cases, sizeof(cases) / sizeof(cases[0]), "animation_spatial_transform",
+        paint, sizeof(paint) / sizeof(paint[0]));
+}
+
+TEST(RenderOutputParity, AnimationGeneral3dRotationPerspectiveAndMatrixValuesReachPaintAndClientRects) {
+    const TransformAnimationFixtureCase cases[] = {
+        {"axis", "rotate3d(1,1,0,0deg)", "rotate3d(1,1,0,90deg)", "[.85355339,.14644661,-.5,0,.14644661,.85355339,.5,0,.5,-.5,.70710678,0,0,0,0,1]", "[0,0,35.6066017,14.3933983]"},
+        {"mixed_axes", "rotateX(90deg)", "rotateY(90deg)", "[.66666667,.33333333,-.66666667,0,.33333333,.66666667,.66666667,0,.66666667,-.66666667,.33333333,0,0,0,0,1]", "[0,50,30,20]"},
+        {"normalized_axis", "rotate3d(1,0,0,30deg)", "rotate3d(2,0,0,90deg)", "[1,0,0,0,0,.5,.8660254,0,0,-.8660254,.5,0,0,0,0,1]", "[0,100,40,5]"},
+        {"primitive_turn", "rotate(0deg)", "rotate3d(0,0,1,360deg)", "[-1,0,0,-1,0,0]", "[-40,140,40,10]"},
+        {"perspective", "perspective(100px)", "perspective(200px)", "[1,0,0,0,0,1,0,0,0,0,1,-.0075,0,0,0,1]", "[0,200,40,10]"},
+        {"perspective_none", "perspective(none)", "perspective(200px)", "[1,0,0,0,0,1,0,0,0,0,1,-.0025,0,0,0,1]", "[0,250,40,10]"},
+        {"perspective_zero", "perspective(0px)", "perspective(200px)", "[1,0,0,0,0,1,0,0,0,0,1,-.5025,0,0,0,1]", "[0,300,40,10]"},
+        {"matrix3d", "matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)", "matrix3d(1,0,0,0,0,1,0,0,0,0,3,0,0,0,0,1)", "[1,0,0,0,0,1,0,0,0,0,2,0,0,0,0,1]", "[0,350,40,10]"},
+        {"spatial_suffix", "rotateX(0deg)", "translateZ(40px)", "[1,0,0,0,0,1,0,0,0,0,1,0,0,0,20,1]", "[0,400,40,10]"},
+        {"matrix_tail", "matrix(1,0,0,1,0,0) rotate(0deg)", "matrix(3,0,0,3,0,0) rotate(360deg)", "[-2,0,0,-2,0,0]", "[-80,430,80,20]"},
+        {"perspective_tail", "perspective(100px) rotateX(0deg)", "perspective(200px) rotateX(360deg)", "[1,0,0,0,0,-1,0,0,0,0,-1,.0075,0,0,0,1]", "[0,490,40,10]"},
+        {"rotation_tail", "rotateX(90deg) rotate(0deg)", "rotateY(90deg) rotate(360deg)", "[-.66666667,-.33333333,.66666667,0,-.33333333,-.66666667,-.66666667,0,.66666667,-.66666667,.33333333,0,0,0,0,1]", "[-30,530,30,20]"},
+        {"referencebox", "rotateX(0deg)", "translate3d(100%,50%,40px)", "[1,0,0,0,0,1,0,0,0,0,1,0,20,2.5,20,1]", "[20,602.5,40,10]"},
+        {"perspective_depth", "perspective(100px) translateZ(40px)", "perspective(200px) translateZ(40px)", "[1,0,0,0,0,1,0,0,0,0,1,-.0075,0,0,40,.7]", "[0,650,57.1428571,14.2857143]"},
+        {"collapsed", "matrix3d(-1,0,0,0,0,2,0,0,0,0,3,0,0,0,0,1)", "matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)", "[0,0,0,0,0,0,-.5,0,0,1,0,0,0,0,0,1]", "[0,700,0,0]"}
+    };
+    const char* paint[] = {"matrix(0.853553 0.146447 0.146447 0.853553 0 0)",
+        "matrix(0.666667 0.333333 0.333333 0.666667 -16.6667 16.6667)",
+        "matrix(1 0 0 0.5 0 50)", "matrix(1 0 0 -1 0 1000)", "matrix(1 0 0 1 20 2.5)",
+        "matrix(1.42857 0 0 1.42857 0 -278.571)"};
+    check_transform_animation_fixture(cases, sizeof(cases) / sizeof(cases[0]), "animation_general3d_transform",
+        paint, sizeof(paint) / sizeof(paint[0]));
+}
+
+TEST(RenderOutputParity, AnimationPerspectiveDepthExportsTheAffineScaleAcrossBackends) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    if (!command_exists("sips") && !command_exists("pdftoppm"))
+        GTEST_SKIP() << "a PDF rasterizer is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/animation_perspective_depth.html";
+    const char* svg_path = "temp/render_output_parity/animation_perspective_depth.svg";
+    const char* pdf_path = "temp/render_output_parity/animation_perspective_depth.pdf";
+    const char* png_path = "temp/render_output_parity/animation_perspective_depth.png";
+    const char* pdf_png = "temp/render_output_parity/animation_perspective_depth_pdf.png";
+    const char* html = "<!doctype html><style>body{margin:0;background:white;height:50px}"
+        "#box{position:absolute;left:10px;top:10px;width:40px;height:10px;background:red;"
+        "transform-origin:0 0;animation:depth 1s linear -.5s both paused}"
+        "@keyframes depth{from{transform:perspective(100px) translateZ(40px)}"
+        "to{transform:perspective(200px) translateZ(40px)}}</style><div id=box></div>";
+    ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
+    EXPECT_TRUE(file_contains_text(svg_path, "matrix(1.42857 0 0 1.42857 -4.28571 -4.28571)"));
+    ASSERT_TRUE(render_html_fixture(html_path, png_path, html));
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html));
+    ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, pdf_png));
+    const char* images[] = {png_path, pdf_png};
+    const struct { int x, y; bool red; } samples[] = {{20,12,true}, {60,12,true}, {20,22,true}, {70,12,false}, {20,26,false}};
+    for (const char* path : images) {
+        SCOPED_TRACE(path);
+        ImageData image = {};
+        ASSERT_TRUE(load_png_rgba(path, &image));
+        ASSERT_GT(image.width, 70);
+        ASSERT_GT(image.height, 26);
+        for (const auto& sample : samples) {
+            const unsigned char* pixel = image.pixels + ((size_t)sample.y * image.width + sample.x) * 4;
+            // pdf rasterizers color-manage device RGB; geometry depends on the occupied color region.
+            if (sample.red) { EXPECT_GT(pixel[0], pixel[1] * 3); EXPECT_GT(pixel[0], pixel[2] * 3); }
+            else { EXPECT_GT(pixel[0], 240); EXPECT_GT(pixel[1], 240); EXPECT_GT(pixel[2], 240); }
+        }
+        image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, AnimationWebSpatialSuffixesAndPerspectiveRefreshAfterSeekingAndSizing) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/animation_web_general3d_transform.html";
+    const char* js_path = "temp/render_output_parity/animation_web_general3d_transform.js";
+    const char* html = "<!doctype html><style>body{margin:0}.box{width:40px;height:10px;font-size:10px;"
+        "transform-origin:0 0;--end:calc(100% - 1em)}</style><div class=box id=box></div>"
+        "<div class=box id=perspective></div>";
+    const char* script = "var box=document.getElementById('box');"
+        "var motion=box.animate([{transform:'rotateX(0deg)'},{transform:'translate3d(var(--end),50%,40px)'}],"
+        "{duration:1000,fill:'both',easing:'linear'});motion.pause();motion.currentTime=500;"
+        "function values(element){var value=getComputedStyle(element).transform;"
+        "return value.slice(value.indexOf('(')+1,-1).split(',').map(Number);}"
+        "function check(x,y,z,width,height){var matrix=values(box);var rect=box.getBoundingClientRect();"
+        "console.log('suffix:'+([matrix[12]-x,matrix[13]-y,matrix[14]-z,rect.x-x,rect.y-y,"
+        "rect.width-width,rect.height-height].every(function(error){return Math.abs(error)<.0001;})));}"
+        "check(15,2.5,20,40,10);box.style.cssText+='width:80px;height:40px';check(35,10,20,80,40);"
+        "box.style.fontSize='20px';check(30,10,20,80,40);box.style.setProperty('--end','min(100%,30px)');"
+        "check(15,10,20,80,40);motion.currentTime=750;check(22.5,15,30,80,40);"
+        "var depth=document.getElementById('perspective');var effect=depth.animate("
+        "[{transform:'perspective(100px) translateZ(40px)'},{transform:'perspective(200px) translateZ(40px)'}],"
+        "{duration:1000,fill:'both',easing:'linear'});effect.pause();effect.currentTime=500;"
+        "function checkDepth(coefficient,width,height){var matrix=values(depth);var rect=depth.getBoundingClientRect();"
+        "console.log('perspective:'+([matrix[11]-coefficient,rect.width-width,rect.height-height]"
+        ".every(function(error){return Math.abs(error)<.0001;})));}"
+        "checkDepth(-.0075,57.1428571,14.2857143);depth.style.width='80px';"
+        "checkDepth(-.0075,114.2857143,14.2857143);effect.currentTime=750;"
+        "checkDepth(-.00625,106.6666667,13.3333333);";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    CommandResult result = run_html_fixture_script(html_path, js_path, script);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, "suffix:true\nsuffix:true\nsuffix:true\nsuffix:true\nsuffix:true\n"
+        "perspective:true\nperspective:true\nperspective:true\n");
+}
+
+TEST(RenderOutputParity, CollapsedTransformsRetainZeroVisualDimensionsInBothRectApis) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/collapsed_transform_rect.html";
+    const char* js_path = "temp/render_output_parity/collapsed_transform_rect.js";
+    const char* html = "<!doctype html><style>body{margin:0}.row{width:200px;height:50px}"
+        ".box{width:40px;height:10px;transform-origin:0 0}#x{transform:scaleX(0)}"
+        "#both{transform:scale(0)}#edge{transform:rotateY(90deg)}"
+        "#matrix{transform:matrix3d(0,0,0,0,0,0,-.5,0,0,1,0,0,0,0,0,1)}</style>"
+        "<div class=row><div class=box id=x></div></div><div class=row><div class=box id=both></div></div>"
+        "<div class=row><div class=box id=edge></div></div><div class=row><div class=box id=matrix></div></div>";
+    const char* script = "var cases={x:[0,0,0,10],both:[0,50,0,0],edge:[0,100,0,10],matrix:[0,150,0,0]};"
+        "function near(rect,expected){var values=[rect.x,rect.y,rect.width,rect.height];"
+        "return expected.every(function(value,index){return Math.abs(value-values[index])<.0001;});}"
+        "for(const id of Object.keys(cases)){var box=document.getElementById(id);var rect=box.getBoundingClientRect();"
+        "var rects=box.getClientRects();console.log(id+':'+near(rect,cases[id])+':'"
+        "+(rects.length===1&&near(rects[0],cases[id])));}";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    CommandResult result = run_html_fixture_script(html_path, js_path, script);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, "x:true:true\nboth:true:true\nedge:true:true\nmatrix:true:true\n");
+}
+
+TEST(RenderOutputParity, AnimationPercentageTransformMathAndMatrixSuffixesReachUsedGeometry) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/animation_referencebox_transform.html";
+    const char* js_path = "temp/render_output_parity/animation_referencebox_transform.js";
+    const char* svg = "temp/render_output_parity/animation_referencebox_transform.svg";
+    const char* html = "<!doctype html><style>body{margin:0}.row{width:200px;height:50px}"
+        ".box{width:40px;height:10px;background:red;font-size:10px;transform-origin:0 0}"
+        "#ordinary{transform:translate(calc(10px + 50%),calc(5px + 50%))}"
+        "@keyframes calc{from{transform:translateX(calc(10px + 25%))}to{transform:translateX(calc(30px + 75%))}}"
+        "@keyframes nonlinear{from{transform:translateX(min(100%,30px))}to{transform:translateX(max(50%,10px))}}"
+        "@keyframes spatial{from{transform:translate3d(0px,0px,0px)}to{transform:translate3d(calc(50% + 1em),calc(50% + 1em),0px)}}"
+        "@keyframes suffix{from{transform:rotate(0deg)}to{transform:translateX(100%)}}"
+        "@keyframes product{from{transform:translateX(calc(100% - 1em)) rotate(0deg)}to{transform:scale(2) translateX(50%)}}"
+        "@keyframes grow{from{transform:rotate(0deg);width:20px}to{transform:translateX(100%);width:100px}}"
+        "#calc{animation:calc 1s linear -.5s both paused}#nonlinear{animation:nonlinear 1s linear -.5s both paused}"
+        "#spatial{animation:spatial 1s linear -.5s both paused}#suffix{animation:suffix 1s linear -.5s both paused}"
+        "#product{animation:product 1s linear -.5s both paused}#grow{animation:grow 1s linear -.5s both paused}"
+        "#zero{width:0;height:0;transform:translate(calc(1em + 100%),calc(5px + 100%))}</style>"
+        "<div class=row><div class=box id=ordinary></div></div><div class=row><div class=box id=calc></div></div>"
+        "<div class=row><div class=box id=nonlinear></div></div><div class=row><div class=box id=spatial></div></div>"
+        "<div class=row><div class=box id=suffix></div></div><div class=row><div class=box id=product></div></div>"
+        "<div class=row><div class=box id=grow></div></div><div class=row><div class=box id=zero></div></div>";
+    const char* script = "var cases={ordinary:[30,10,40,10],calc:[40,50,40,10],nonlinear:[25,100,40,10],"
+        "spatial:[15,157.5,40,10],suffix:[20,200,40,10],product:[35,250,60,15],grow:[30,300,60,10],zero:[10,355,0,0]};"
+        "function check(id,expected){var box=document.getElementById(id);var matrix=getComputedStyle(box).transform;"
+        "var values=matrix.slice(matrix.indexOf('(')+1,-1).split(',').map(Number);var rect=box.getBoundingClientRect();"
+        "var actual=[rect.x,rect.y,rect.width,rect.height];var y=expected[1]-box.parentElement.offsetTop;"
+        "console.log(id+':'+(Math.abs(values[4]-expected[0])<.0001&&Math.abs(values[5]-y)<.0001)+':'"
+        "+expected.every(function(value,index){return Math.abs(value-actual[index])<.0001;}));}"
+        "for(const id of Object.keys(cases))check(id,cases[id]);"
+        "document.getElementById('ordinary').style.cssText+='width:80px;height:40px';check('ordinary',[50,25,80,40]);"
+        "document.getElementById('product').style.cssText+='width:80px;font-size:20px';check('product',[70,250,120,15]);"
+        "document.getElementById('calc').style.width='80px';check('calc',[60,50,80,10]);";
+    ASSERT_TRUE(render_html_fixture(html_path, svg, html));
+    const char* matrices[] = {"matrix(1 0 0 1 30 10)", "matrix(1 0 0 1 40 0)",
+        "matrix(1 0 0 1 25 0)", "matrix(1.5 0 0 1.5 35 -125)", "matrix(1 0 0 1 30 0)"};
+    for (const char* matrix : matrices) EXPECT_TRUE(file_contains_text(svg, matrix)) << matrix;
+    CommandResult result = run_html_fixture_script(html_path, js_path, script);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, "ordinary:true:true\ncalc:true:true\nnonlinear:true:true\nspatial:true:true\n"
+        "suffix:true:true\nproduct:true:true\ngrow:true:true\nzero:true:true\nordinary:true:true\nproduct:true:true\ncalc:true:true\n");
+}
+
+TEST(RenderOutputParity, AnimationWebPercentageMathSuffixesRefreshAfterSizingAndVariableChanges) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/animation_web_referencebox_transform.html";
+    const char* js_path = "temp/render_output_parity/animation_web_referencebox_transform.js";
+    const char* html = "<!doctype html><style>body{margin:0}#box{width:40px;height:10px;font-size:10px;"
+        "--end:calc(100% - 1em)}</style><div id=box></div>";
+    const char* script = "var box=document.getElementById('box');"
+        "var motion=box.animate([{transform:'rotate(0deg)'},{transform:'translateX(var(--end))'}],"
+        "{duration:1000,fill:'both',easing:'linear'});motion.pause();motion.currentTime=500;"
+        "console.log(getComputedStyle(box).transform);box.style.width='80px';"
+        "console.log(getComputedStyle(box).transform);box.style.fontSize='20px';"
+        "console.log(getComputedStyle(box).transform);box.style.setProperty('--end','clamp(10px,50%,50px)');"
+        "console.log(getComputedStyle(box).transform);motion.currentTime=750;"
+        "console.log(getComputedStyle(box).transform);";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    CommandResult result = run_html_fixture_script(html_path, js_path, script);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, "matrix(1, 0, 0, 1, 15, 0)\nmatrix(1, 0, 0, 1, 35, 0)\n"
+        "matrix(1, 0, 0, 1, 30, 0)\nmatrix(1, 0, 0, 1, 20, 0)\nmatrix(1, 0, 0, 1, 30, 0)\n");
+}
+
+TEST(RenderOutputParity, AnimationStandaloneWebTransformsRefreshUnitsVariablesAndReferenceBox) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/animation_web_transform.html";
+    const char* js_path = "temp/render_output_parity/animation_web_transform.js";
+    const char* html = "<!doctype html><style>body{margin:0}#box{width:40px;height:10px;"
+        "font-size:10px;--end:100%}</style><div id=box></div>";
+    const char* script = "var box=document.getElementById('box');"
+        "var motion=box.animate([{transform:'translateX(1em)'},{transform:'translateX(var(--end))'}],"
+        "{duration:1000,fill:'both',easing:'linear'});motion.pause();motion.currentTime=500;"
+        "console.log(getComputedStyle(box).transform);box.style.width='80px';"
+        "console.log(getComputedStyle(box).transform);box.style.fontSize='20px';"
+        "console.log(getComputedStyle(box).transform);box.style.setProperty('--end','50%');"
+        "console.log(getComputedStyle(box).transform);motion.currentTime=750;"
+        "console.log(getComputedStyle(box).transform);";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    CommandResult result = run_html_fixture_script(html_path, js_path, script);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, "matrix(1, 0, 0, 1, 25, 0)\nmatrix(1, 0, 0, 1, 45, 0)\n"
+        "matrix(1, 0, 0, 1, 50, 0)\nmatrix(1, 0, 0, 1, 30, 0)\nmatrix(1, 0, 0, 1, 35, 0)\n");
+}
+
+TEST(RenderOutputParity, AnimationStandaloneWebTypedValuesRefreshOnStyleChanges) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/animation_web_scalar_color.html";
+    const char* js_path = "temp/render_output_parity/animation_web_scalar_color.js";
+    const char* html = "<!doctype html><style>body{margin:0}#box{width:40px;height:10px;"
+        "opacity:.2;color:green;--low:20%;--high:80%;--start:red;--end:blue}</style><div id=box>X</div>";
+    const char* script =
+        "var box=document.getElementById('box');"
+        "var fade=box.animate([{opacity:'var(--low)'},{opacity:'calc(var(--high) - 10%)'}],"
+        "{duration:1000,fill:'both',easing:'linear'});fade.pause();fade.currentTime=500;"
+        "var color=box.animate([{color:'var(--start)'},{color:'var(--end)'}],"
+        "{duration:1000,fill:'both',easing:'linear'});color.pause();color.currentTime=500;"
+        "console.log(getComputedStyle(box).opacity);console.log(getComputedStyle(box).color);"
+        "box.style.setProperty('--low','40%');box.style.setProperty('--high','100%');"
+        "box.style.setProperty('--start','black');"
+        "console.log(getComputedStyle(box).opacity);console.log(getComputedStyle(box).color);"
+        "fade.currentTime=750;color.currentTime=750;"
+        "console.log(getComputedStyle(box).opacity);console.log(getComputedStyle(box).color);";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    CommandResult result = run_html_fixture_script(html_path, js_path, script);
+    ASSERT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_STREQ(result.output, "0.45\nrgb(128, 0, 128)\n0.65\nrgb(0, 0, 128)\n"
+        "0.775\nrgb(0, 0, 191)\n");
+}
+
+TEST(RenderOutputParity, AnimationLiveImportantChangesRefreshCssAndWebSampling) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}.row{width:200px;height:50px}"
+        ".box{width:40px;height:10px;background:red}"
+        "@keyframes grow{from{width:20px}to{width:100px}}"
+        "#css{animation:grow 1s linear -.5s both paused}"
+        "button{position:absolute;left:0;width:100px;height:30px}"
+        "#start{top:150px}#normal{top:210px}#important{top:270px}#seek{top:330px}</style>"
+        "<div class=row><div class=box id=css style='width:40px!important'></div></div>"
+        "<div class=row><div class=box id=web style='width:40px!important'></div></div>"
+        "<button id=start>start</button><button id=normal>normal</button>"
+        "<button id=important>important</button><button id=seek>seek</button><script>"
+        "var css=document.getElementById('css'),web=document.getElementById('web'),motion;"
+        "document.getElementById('start').onclick=function(){motion=web.animate("
+        "[{width:'20px'},{width:'100px'}],{duration:1000,fill:'both'});"
+        "motion.pause();motion.currentTime=500;};"
+        "document.getElementById('normal').onclick=function(){"
+        "css.style.setProperty('width','40px','');web.style.setProperty('width','40px','');};"
+        "document.getElementById('important').onclick=function(){"
+        "css.style.setProperty('width','80px','important');web.style.setProperty('width','80px','important');};"
+        "document.getElementById('seek').onclick=function(){motion.currentTime=750;"
+        "css.style.setProperty('width','40px','');web.style.setProperty('width','40px','');};</script>";
+    StrBuf* events = strbuf_new();
+    strbuf_append_str(events, "{\"name\":\"animation priority changes reach paint\","
+        "\"html\":\"temp/render_output_parity/animation_priority_live.html\","
+        "\"viewport\":{\"width\":300,\"height\":400},\"events\":[");
+    const float widths[4][2] = {{40,40},{60,60},{80,80},{60,80}};
+    for (int phase = 0; phase < 4; phase++) {
+        strbuf_append_format(events, "%s{\"type\":\"click\",\"x\":30,\"y\":%d}",
+            phase ? "," : "", 160 + phase * 60);
+        for (int box = 0; box < 2; box++) {
+            strbuf_append_format(events, ",{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#%s\"},"
+                "\"x\":0,\"y\":%d,\"width\":%.2f,\"height\":10,\"tolerance\":0.1},"
+                "{\"type\":\"assert_pixel\",\"x\":%.2f,\"y\":%d,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+                "{\"type\":\"assert_pixel\",\"x\":%.2f,\"y\":%d,\"min_r\":240,\"min_g\":240,\"min_b\":240}",
+                box ? "web" : "css", box * 50, (double)widths[phase][box],
+                (double)widths[phase][box] - 2.0, box * 50 + 5,
+                (double)widths[phase][box] + 2.0, box * 50 + 5);
+        }
+    }
+    strbuf_append_str(events, "]}");
+    bool passed = run_html_fixture_view("temp/render_output_parity/animation_priority_live.html",
+        "temp/render_output_parity/animation_priority_live.json", html, events->str);
+    strbuf_free(events);
+    EXPECT_TRUE(passed);
+}
+
+TEST(RenderOutputParity, AnimationFrameTicksReflowAnimatedSizes) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}"
+        "@keyframes grow{from{width:20px}to{width:100px}}"
+        "#box{width:20px;height:10px;background:red;animation:grow 1s linear forwards}"
+        "</style><div id=box></div>";
+    const char* events =
+        "{\"name\":\"animation frame geometry reaches paint\","
+        "\"html\":\"temp/render_output_parity/animation_frame_geometry.html\","
+        "\"viewport\":{\"width\":150,\"height\":40},\"events\":["
+        "{\"type\":\"advance_time\",\"ms\":250},"
+        "{\"type\":\"assert_pixel\",\"x\":35,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":50,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"advance_time\",\"ms\":250},"
+        "{\"type\":\"assert_pixel\",\"x\":55,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":70,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"advance_time\",\"ms\":500},"
+        "{\"type\":\"assert_pixel\",\"x\":95,\"y\":5,\"min_r\":240,\"max_g\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":105,\"y\":5,\"min_r\":240,\"min_g\":240,\"min_b\":240}]}";
+    ASSERT_TRUE(run_html_fixture_view(
+        "temp/render_output_parity/animation_frame_geometry.html",
+        "temp/render_output_parity/animation_frame_geometry.json", html, events));
+}
+
 TEST(RenderOutputParity, CustomPropertyTokensExpandInsideSpacingShorthands) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
@@ -4713,6 +6194,187 @@ TEST(RenderOutputParity, CustomPropertyTokensExpandInsideRgbFunction) {
         "y=\"0.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(255,0,0)\""));
     EXPECT_TRUE(file_contains_text(svg_path,
         "y=\"10.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(0,0,255)\""));
+}
+
+TEST(RenderOutputParity, CustomPropertyCommaAndEmptyFallbackTokensReachPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/var_comma_empty.html";
+    const char* svg_path = "temp/render_output_parity/var_comma_empty.svg";
+    const char* html =
+        "<!doctype html><style>body{margin:0}div{width:20px;height:10px}"
+        "#a{--rgb:255,0,0;background:rgb(var(--rgb))}"
+        "#b{--rg:0,255;background:rgb(var(--rg),0)}"
+        "#c{background:rgb(var(--missing,0,0,255))}"
+        "#d{background:purple;margin:5px var(--missing,) 10px}"
+        "#e{--empty:;background:orange;margin:5px var(--empty,99px) 10px}"
+        "</style><div id=a></div><div id=b></div><div id=c></div>"
+        "<div id=d></div><div id=e></div>";
+    ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"0.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(255,0,0)\""));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"10.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(0,255,0)\""));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"20.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(0,0,255)\""));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "x=\"10.00\" y=\"35.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(128,0,128)\""));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "x=\"10.00\" y=\"50.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(255,165,0)\""));
+}
+
+TEST(RenderOutputParity, CustomPropertyCommasJoinSurroundingGradientStopTokens) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* literal_html = "temp/render_output_parity/var_gradient_literal.html";
+    const char* variable_html = "temp/render_output_parity/var_gradient_comma.html";
+    const char* literal_png = "temp/render_output_parity/var_gradient_literal.png";
+    const char* variable_png = "temp/render_output_parity/var_gradient_comma.png";
+    ASSERT_TRUE(render_html_fixture(literal_html, literal_png,
+        "<!doctype html><style>body{margin:0}div{width:80px;height:40px;"
+        "background:linear-gradient(to right,red 0%,blue 100%)}"
+        "</style><div></div>"));
+    ASSERT_TRUE(render_html_fixture(variable_html, variable_png,
+        "<!doctype html><style>body{margin:0}div{width:80px;height:40px;"
+        "--stops:0%,blue;background:linear-gradient(to right,"
+        "red var(--stops) 100%)}"
+        "</style><div></div>"));
+    expect_pngs_exactly_equal(literal_png, variable_png);
+}
+
+TEST(RenderOutputParity, CustomPropertyDefaultingAndCyclesReachPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0}section{--tone:red}"
+        "div{position:absolute;left:0;width:20px;height:10px;"
+        "background:var(--tone,lime)}"
+        "#initial{top:0;--tone:initial}"
+        "#inherit{top:10px;--tone:inherit}"
+        "#unset{top:20px;--tone:unset}"
+        "#self{top:30px;--tone:var(--tone,red)}"
+        "#mutual{top:40px;--tone:var(--other,red);--other:var(--tone,blue)}"
+        "#outside{top:50px;--tone:var(--a,blue);--a:var(--b,red);--b:var(--a)}"
+        "#unused{top:60px;--solid:red;--tone:var(--solid,var(--tone))}"
+        "#parent{--a:red;--tone:var(--a)}"
+        "#child{top:70px;--a:var(--tone);background:var(--a,lime)}"
+        "</style><section><div id=initial></div><div id=inherit></div>"
+        "<div id=unset></div><div id=self></div><div id=mutual></div>"
+        "<div id=outside></div><div id=unused></div></section>"
+        "<section id=parent><div id=child></div></section>";
+    const char* svg_path = "temp/render_output_parity/var_defaulting_cycles.svg";
+    ASSERT_TRUE(render_html_fixture(
+        "temp/render_output_parity/var_defaulting_cycles.html", svg_path, html));
+    const char* colors[] = {"0,255,0", "255,0,0", "255,0,0", "0,255,0",
+                            "0,255,0", "0,0,255", "255,0,0", "255,0,0"};
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); i++) {
+        char expected[160];
+        snprintf(expected, sizeof(expected),
+            "y=\"%.2f\" width=\"20.00\" height=\"10.00\" fill=\"rgb(%s)\"",
+            (double)i * 10.0, colors[i]);
+        EXPECT_TRUE(file_contains_text(svg_path, expected)) << expected;
+    }
+}
+
+TEST(RenderOutputParity, SvgCustomPropertyReferencesUseDeclarationOwner) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0}svg{display:block}"
+        "g{--base:red;--alias:var(--base)}"
+        "rect{--base:blue;fill:var(--alias,lime)}"
+        "</style><svg width='20' height='10' viewBox='0 0 20 10' "
+        "xmlns='http://www.w3.org/2000/svg'>"
+        "<g><rect width='20' height='10'/></g></svg>";
+    const char* png_path = "temp/render_output_parity/svg_var_owner.png";
+    ASSERT_TRUE(render_html_fixture(
+        "temp/render_output_parity/svg_var_owner.html", png_path, html));
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png_path, &image));
+    ASSERT_GT(image.width, 10);
+    ASSERT_GT(image.height, 5);
+    const unsigned char* pixel = image.pixels + (5 * image.width + 10) * 4;
+    EXPECT_EQ(pixel[0], 255);
+    EXPECT_EQ(pixel[1], 0);
+    EXPECT_EQ(pixel[2], 0);
+    EXPECT_EQ(pixel[3], 255);
+    image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, CustomPropertyRollbackRespectsOriginLayerAndInlinePriority) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0}section{--tone:red}"
+        "div{width:20px;height:10px;background:var(--tone,lime)}"
+        "@layer first,second;"
+        "@layer first{#normal{--tone:red}#important{--tone:revert-layer!important}"
+        "#inline{--tone:blue!important}}"
+        "@layer second{#normal{--tone:blue;--tone:revert-layer}"
+        "#important{--tone:blue!important}}"
+        "#origin{--tone:blue;--tone:revert}"
+        "</style><section><div id=normal></div><div id=important></div>"
+        "<div id=origin></div><div id=inline style='--tone:revert-layer!important'></div>"
+        "</section>";
+    const char* svg_path = "temp/render_output_parity/var_rollback.svg";
+    ASSERT_TRUE(render_html_fixture(
+        "temp/render_output_parity/var_rollback.html", svg_path, html));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"0.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(255,0,0)\""));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"10.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(0,0,255)\""));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"20.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(255,0,0)\""));
+    EXPECT_TRUE(file_contains_text(svg_path,
+        "y=\"30.00\" width=\"20.00\" height=\"10.00\" fill=\"rgb(0,0,255)\""));
+}
+
+TEST(RenderOutputParity, SvgCustomPropertyDefaultingRollbackAndCaseReachPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0}svg{display:block}g{--tone:red}"
+        "rect{fill:var(--tone,lime)}"
+        "#inherit{--tone:inherit}#initial{--tone:initial}"
+        "#case{--Tone:red;--tone:blue;fill:var(--Tone,lime)}"
+        "@layer first,second;@layer first{#layer{--tone:red}}"
+        "@layer second{#layer{--tone:blue;--tone:revert-layer}}"
+        "#origin{--tone:blue;--tone:revert}"
+        "</style><svg width='100' height='10' viewBox='0 0 100 10' "
+        "xmlns='http://www.w3.org/2000/svg'><g>"
+        "<rect id='inherit' x='0' width='20' height='10'/>"
+        "<rect id='initial' x='20' width='20' height='10'/>"
+        "<rect id='case' x='40' width='20' height='10'/>"
+        "<rect id='layer' x='60' width='20' height='10'/>"
+        "<rect id='origin' x='80' width='20' height='10'/>"
+        "</g></svg>";
+    const char* png_path = "temp/render_output_parity/svg_var_defaulting.png";
+    ASSERT_TRUE(render_html_fixture(
+        "temp/render_output_parity/svg_var_defaulting.html", png_path, html));
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png_path, &image));
+    ASSERT_GT(image.width, 90);
+    ASSERT_GT(image.height, 5);
+    const unsigned char colors[][3] = {{255,0,0}, {0,255,0}, {255,0,0}, {255,0,0}, {255,0,0}};
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); i++) {
+        const unsigned char* pixel = image.pixels + ((size_t)5 * image.width + i * 20 + 10) * 4;
+        for (int channel = 0; channel < 3; channel++) {
+            EXPECT_EQ(pixel[channel], colors[i][channel]) << "box " << i;
+        }
+    }
+    image_free(image.pixels);
 }
 
 TEST(RenderOutputParity, UnitlessMarginRequiresQuirksMode) {

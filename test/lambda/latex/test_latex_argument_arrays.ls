@@ -1,4 +1,4 @@
-// S2.6.1v2/S2.6.4: command arrays preserve argument positions while element text merges.
+// S2.6.1v2/S2.6.4: command arrays preserve positions; S8.3.1v2 counts attributes in len.
 import util: lambda.latex.util
 import analyze: lambda.latex.analyze
 import latex: lambda.latex.latex

@@ -1,0 +1,46 @@
+\documentclass[letter]{article}
+
+%% Language and font encodings
+\usepackage[english]{babel}
+\usepackage[utf8x]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+
+%% Useful packages
+\usepackage{amsmath}
+\usepackage{graphicx}
+
+\title{COSC-4765-HW2-TEMPLATE}
+\author{Rafael Diaz de Leon Plata}
+\lhead{Test Flight}
+\cfoot{Introduction to Mathematical Thinking}
+
+
+\begin{document}
+
+
+\section{Problem}
+Say whether the following is true or false and support your answer by a proof.
+
+$$
+(\exists m \in {\cal N})(\exists n \in {\cal N})(3m + 5n = 12)
+$$
+
+\subsection{Solution}
+This is false, proof:
+
+By algebra, we re-arrange the equation
+
+$$
+m = 4 - (5/3)*n
+$$
+
+The minimum value of $ n \in {\cal N} $ that would gives us an integer $m$ is 3,
+but this gives us $ m = - 1 $, we can see that any greater value for $n$ would
+give us a more negative value for $m$, so we can see that there is not a pair
+of natural number that fulfill the given conditions. $QED$.
+
+
+\end{document}

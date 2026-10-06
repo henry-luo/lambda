@@ -492,6 +492,7 @@ Item MarkEditor::get_version(int version_num) const {
 }
 
 void MarkEditor::list_versions() const {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (mode_ != EDIT_MODE_IMMUTABLE) {
         printf("Version control not available in inline mode\n"); // PRINTF_OK: user-facing CLI output.
         return;
@@ -510,6 +511,7 @@ void MarkEditor::list_versions() const {
                v == current_version_ ? "<- current" : "");
         v = v->next;
     }
+#endif
 }
 
 //==============================================================================

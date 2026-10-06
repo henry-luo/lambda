@@ -111,7 +111,7 @@ Format FormatRegistry::detectFromFilename(const char* filename) {
 
     // Find the extension
     size_t ext_len = 0;
-    const char* ext = file_path_ext_len(filename, strlen(filename), &ext_len);
+    const char* ext = str_file_ext(filename, strlen(filename), &ext_len);
     if (!ext) return Format::AUTO_DETECT;
 
     // Convert to lowercase for comparison

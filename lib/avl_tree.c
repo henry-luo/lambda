@@ -782,6 +782,7 @@ bool avl_tree_validate(AvlTree* tree) {
 }
 
 // Helper callback for avl_tree_print
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 static bool print_node_callback(AvlNode* node, void* ctx) {
     struct PrintContext* pc = (struct PrintContext*)ctx;
     // uintptr_t has a different printf width under MinGW; use its portable format macro.
@@ -793,6 +794,7 @@ static bool print_node_callback(AvlNode* node, void* ctx) {
     printf("\n");
     return true;
 }
+#endif
 
 // Helper callback for avl_tree_clone
 static bool clone_node_callback(AvlNode* node, void* ctx) {
@@ -810,6 +812,7 @@ static bool clone_node_callback(AvlNode* node, void* ctx) {
 }
 
 void avl_tree_print(AvlTree* tree, void (*print_value)(void* declaration)) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!tree) {
         printf("AVL Tree: NULL\n");
         return;
@@ -827,6 +830,7 @@ void avl_tree_print(AvlTree* tree, void (*print_value)(void* declaration)) {
     struct PrintContext context = { print_value, 0 };
     
     avl_tree_foreach_inorder(tree, print_node_callback, &context);
+#endif
 }
 
 void avl_tree_get_stats(AvlTree* tree, AvlTreeStats* stats) {

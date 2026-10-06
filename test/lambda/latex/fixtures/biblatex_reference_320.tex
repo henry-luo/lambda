@@ -1,0 +1,11 @@
+\documentclass{article}
+\usepackage[style=numeric,sorting=none,backend=biber,
+  maxcitenames=2,mincitenames=1,uniquename=init]{biblatex}
+\addbibresource{biblatex_reference_320.bib}
+\begin{document}
+\cite{ada1843,smith2020a,smith2020b}
+\parencite[see][p.~12]{ada1844}
+\textcite{ada1843}
+\cite{ada1843,ada1844}
+\printbibliography
+\end{document}

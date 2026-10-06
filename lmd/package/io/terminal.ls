@@ -145,6 +145,8 @@ on readline_prompt(value) {
   emit("readline_frame_event", {name: "set_prompt", event: value})
 }
 on readline_history_size(value) { history_limit = max(0, value) }
+// a host restores a saved history (REPL session start, D8.1.1v17)
+on readline_history_load(entries) { history = entries }
 on readline_history_ignore_dot(value) { history_ignore_dot = value }
 on readline_history_unique(value) { history_unique = value }
 on readline_pause() { paused = true }

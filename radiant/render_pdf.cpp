@@ -4,11 +4,13 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "layout_paged.hpp"
+#include "radiant.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
+#include "../lib/str.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/url.h"
@@ -49,6 +51,7 @@ typedef struct PdfRenderContext : RenderContext {
 
     float page_width;
     float page_height;
+    float page_scale;
     float current_x;
     float current_y;
 
@@ -72,6 +75,74 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx);
 static void pdf_error_handler(HPDF_STATUS error_no, HPDF_STATUS detail_no, void* user_data) {
     log_error("PDF Error: error_no=0x%04X, detail_no=0x%04X",
               (unsigned int)error_no, (unsigned int)detail_no);
+}
+
+static const char* pdf_nearest_link(DomNode* node) {
+    for (DomNode* current = node; current; current = current->parent) {
+        DomElement* element = current->as_element();
+        if (element && element->tag_id == MARKUP_NAME_A) {
+            const char* href = element->get_attribute("href");
+            if (href && *href) return href;
+        }
+    }
+    return nullptr;
+}
+
+static void pdf_record_link_rect(PdfRenderContext* ctx, const char* href,
+                                 float x, float y, float width, float height) {
+    if (!ctx || !ctx->current_page || !href || !*href ||
+        !isfinite(x) || !isfinite(y) || !isfinite(width) || !isfinite(height) ||
+        width <= 0.0f || height <= 0.0f) return;
+    float scale = ctx->page_scale;
+    HPDF_STATUS status = HPDF_Page_AddLink(ctx->current_page,
+        x * scale, (ctx->page_height - y - height) * scale,
+        (x + width) * scale, (ctx->page_height - y) * scale, href);
+    if (status != HPDF_OK) log_error("[PDF_LINK] Could not add annotation: status=%lu", status);
+}
+
+static void pdf_record_destination(PdfRenderContext* ctx, const char* id,
+                                   float x, float y) {
+    if (!ctx || !ctx->current_page || !id || !*id) return;
+    HPDF_STATUS status = HPDF_Doc_AddNamedDestination(ctx->pdf_doc, id,
+        ctx->current_page, x * ctx->page_scale,
+        (ctx->page_height - y) * ctx->page_scale);
+    if (status != HPDF_OK) log_error("[PDF_LINK] Could not add destination: status=%lu", status);
+}
+
+static DomElement* pdf_document_head(DomDocument* doc) {
+    if (!doc || !doc->root) return nullptr;
+    DomElement* root = doc->root;
+    if (root->tag_id == MARKUP_NAME_HEAD) return root;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        DomElement* element = child->as_element();
+        if (element && element->tag_id == MARKUP_NAME_HEAD) return element;
+    }
+    return nullptr;
+}
+
+static const char* pdf_head_meta(DomElement* head, const char* name) {
+    if (!head) return nullptr;
+    for (DomNode* child = head->first_child; child; child = child->next_sibling) {
+        DomElement* element = child->as_element();
+        if (!element || element->tag_id != MARKUP_NAME_META) continue;
+        const char* meta_name = element->get_attribute("name");
+        if (meta_name && str_icmp_cstr(meta_name, name) == 0)
+            return element->get_attribute("content");
+    }
+    return nullptr;
+}
+
+static void pdf_apply_document_info(PdfRenderContext* ctx, DomDocument* doc) {
+    if (!ctx || !doc) return;
+    const char* title = session_extract_title(doc);
+    DomElement* head = pdf_document_head(doc);
+    const char* author = pdf_head_meta(head, "author");
+    const char* subject = pdf_head_meta(head, "description");
+    const char* keywords = pdf_head_meta(head, "keywords");
+    if (title && *title) HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_TITLE, title);
+    if (author && *author) HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_AUTHOR, author);
+    if (subject && *subject) HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_SUBJECT, subject);
+    if (keywords && *keywords) HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_KEYWORDS, keywords);
 }
 
 static void pdf_paint_lowering_state_init(PdfPaintLoweringState* state) {
@@ -1396,6 +1467,9 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     paint_glyph_run(pdf_active_paint_list(ctx), &run);
     pdf_lower_paint_list(ctx);
 
+    pdf_record_link_rect(ctx, pdf_nearest_link(text), base_x, y,
+        text_rect->width, text_rect->height);
+
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -1534,6 +1608,20 @@ static void pdf_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs
         Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
         pdf_paint_draw_image(ctx, img, &image_rect);
     }
+    pdf_record_link_rect(ctx, pdf_nearest_link(block), abs_x, abs_y,
+        block->width, block->height);
+}
+
+static void pdf_cb_visit_element(RenderContext* vctx, ViewElement* view,
+                                  float abs_x, float abs_y) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
+    if (!ctx || !element) return;
+    if (element->id) pdf_record_destination(ctx, element->id, abs_x, abs_y);
+    if (view->is_block() && element->tag_id == MARKUP_NAME_A) {
+        pdf_record_link_rect(ctx, element->get_attribute("href"), abs_x, abs_y,
+            view->width, view->height);
+    }
 }
 
 static void pdf_cb_render_inline_svg(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
@@ -1586,6 +1674,8 @@ static void pdf_cb_render_inline_svg(RenderContext* vctx, ViewBlock* block, floa
     subscene.id_scope = lam::up(render_svg_reference_scope(dom_elem));
     paint_svg_subscene(pdf_active_paint_list(ctx), &subscene);
     pdf_lower_paint_list(ctx);
+    pdf_record_link_rect(ctx, pdf_nearest_link(block), content_rect.x, content_rect.y,
+        content_rect.width, content_rect.height);
     (void)font;
 }
 
@@ -1708,6 +1798,22 @@ static void pdf_cb_end_transform(RenderContext* vctx) {
     }
 }
 
+static bool pdf_cb_begin_clip(RenderContext* vctx, ViewElement* element,
+                              float abs_x, float abs_y) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx || !render_clip_push_vector_css(pdf_active_paint_list(ctx), element,
+            abs_x, abs_y)) return false;
+    pdf_lower_paint_list(ctx);
+    return true;
+}
+
+static void pdf_cb_end_clip(RenderContext* vctx) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx) return;
+    paint_pop_clip(pdf_active_paint_list(ctx));
+    pdf_lower_paint_list(ctx);
+}
+
 static void pdf_cb_begin_effect_group(RenderContext* vctx, const PaintEffectGroup* group) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx) return;
@@ -1758,6 +1864,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.render_image     = pdf_cb_render_image;
     b.render_inline_svg = pdf_cb_render_inline_svg;
     b.render_svg_subscene = pdf_cb_render_svg_subscene;
+    b.visit_element     = pdf_cb_visit_element;
     b.begin_block_children  = NULL;
     b.end_block_children    = NULL;
     b.begin_inline_children = NULL;
@@ -1766,6 +1873,8 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.end_effect_group = pdf_cb_end_effect_group;
     b.begin_transform  = pdf_cb_begin_transform;
     b.end_transform    = pdf_cb_end_transform;
+    b.begin_clip       = pdf_cb_begin_clip;
+    b.end_clip         = pdf_cb_end_clip;
     b.render_column_rules = pdf_cb_render_column_rules;
     b.on_font_change   = pdf_cb_on_font_change;
     return b;
@@ -1786,6 +1895,7 @@ static bool pdf_context_begin(PdfRenderContext* ctx, UiContext* ui) {
     HPDF_SetCompressionMode(ctx->pdf_doc, HPDF_COMP_ALL);
     HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_CREATOR, "Lambda Script Renderer");
     HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_PRODUCER, "Lambda PDF Renderer");
+    if (ui && ui->document) pdf_apply_document_info(ctx, ui->document);
     ctx->ui_context = lam::up(ui);
     ctx->color = {.r = 0, .g = 0, .b = 0, .a = 255};
     if (ui) ctx->font.style = lam::up(&ui->default_font);
@@ -1808,7 +1918,7 @@ static bool pdf_page_begin(PdfRenderContext* ctx, float width, float height, flo
     if (!ctx->current_page || HPDF_Page_SetWidth(ctx->current_page, width * scale) != HPDF_OK ||
         HPDF_Page_SetHeight(ctx->current_page, height * scale) != HPDF_OK ||
         HPDF_Page_Concat(ctx->current_page, scale, 0, 0, scale, 0, 0) != HPDF_OK) return false;
-    ctx->page_width = width; ctx->page_height = height;
+    ctx->page_width = width; ctx->page_height = height; ctx->page_scale = scale;
     ctx->current_x = ctx->current_y = 0.0f;
     ctx->block.x = ctx->block.y = 0.0f;
     ctx->transform_emitted_depth = ctx->transform_emitted_overflow_depth = 0;
@@ -1825,15 +1935,13 @@ static bool pdf_page_begin(PdfRenderContext* ctx, float width, float height, flo
 
 // Main PDF rendering function
 static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width, float height,
-                                       float output_scale) {
+                                       float output_scale, float content_x, float content_y) {
     if (!root_view || !uicon || !isfinite(output_scale) || output_scale <= 0) {
         return NULL;
     }
 
     PdfRenderContext ctx = {};
     if (!pdf_context_begin(&ctx, uicon)) return nullptr;
-    width /= output_scale;
-    height /= output_scale;
     if (!pdf_page_begin(&ctx, width, height, output_scale)) {
         pdf_context_destroy(&ctx); HPDF_Free(ctx.pdf_doc); return nullptr;
     }
@@ -1845,8 +1953,8 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     // Render the root view via shared tree walker
     RenderBackend backend = pdf_make_backend(&ctx);
     RenderWalkState walk_state = {};
-    walk_state.x = 0;
-    walk_state.y = 0;
+    walk_state.x = content_x;
+    walk_state.y = content_y;
     walk_state.font = ctx.font;
     walk_state.color = ctx.color;
     walk_state.ui_context = lam::up(uicon);
@@ -1856,7 +1964,6 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     } else if (root_view->view_type >= RDT_VIEW_INLINE) {
         render_walk_children(&backend, &walk_state, root_view);
     }
-
     RenderPathTrace trace = {};
     trace.target = lam::up("pdf");
     trace.replay_mode = lam::up("paint_ir_pdf");
@@ -1893,6 +2000,24 @@ static bool save_pdf_to_file(HPDF_Doc pdf_doc, const char* filename) {
     return true;
 }
 
+static void pdf_record_fragment_semantics(PdfRenderContext* ctx, DomDocument* doc,
+                                           LayoutViewNode* node) {
+    if (!ctx || !doc || !node) return;
+    DomNode* source = dom_node_ref_validate(doc, node->source);
+    if (source) {
+        DomElement* element = source->as_element();
+        if (element && element->id) {
+            pdf_record_destination(ctx, element->id, node->rect.x, node->rect.y);
+        }
+        if (node->glyph_run || (node->paint_box && !node->first_child)) {
+            pdf_record_link_rect(ctx, pdf_nearest_link(source), node->rect.x,
+                node->rect.y, node->rect.width, node->rect.height);
+        }
+    }
+    for (LayoutViewNode* child = node->first_child; child; child = child->next_sibling)
+        pdf_record_fragment_semantics(ctx, doc, child);
+}
+
 static bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* page,
         const ViewPagePlacement*, void* context) {
     PdfRenderContext* ctx = (PdfRenderContext*)context;
@@ -1900,6 +2025,8 @@ static bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* page,
     if (!pdf_page_begin(ctx, page->node.rect.width, page->node.rect.height, 72.0f / 96.0f) ||
         !layout_secondary_paint_page(tree, page, &ctx->paint_list) ||
         !paint_ir_validate_or_log(&ctx->paint_list, "pdf secondary page")) return false;
+    for (LayoutViewNode* child = page->node.first_child; child; child = child->next_sibling)
+        pdf_record_fragment_semantics(ctx, tree->model->document, child);
     pdf_lower_paint_list(ctx);
     return ctx->paint_state.unsupported_count == 0 && ctx->paint_state.active_transform_depth == 0 &&
         ctx->paint_state.active_effect_depth == 0;
@@ -1931,11 +2058,16 @@ static int render_export_session_to_pdf(RenderExportSession* session, const char
 
     // Render to PDF (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
-        // PDF output dimensions are scaled; coordinates inside are in CSS pixels with transform
-        float pdf_width = session->content_width * session->output_scale;
-        float pdf_height = session->content_height * session->output_scale;
+        // @page controls the paper box; the continuous view stays inside its content rect.
+        float pdf_width = session->has_page_geometry ? session->page_width : (float)session->content_width;
+        float pdf_height = session->has_page_geometry ? session->page_height : (float)session->content_height;
+        // CSS physical lengths use 96 px/in; PDF MediaBox coordinates use 72 pt/in.
+        float page_scale = session->output_scale *
+            (session->has_page_geometry ? 72.0f / 96.0f : 1.0f);
         HPDF_Doc pdf_doc = render_view_tree_to_pdf(ui_context, doc->view_tree->root,
-                                                   pdf_width, pdf_height, session->output_scale);
+                                                   pdf_width, pdf_height, page_scale,
+                                                   session->has_page_geometry ? session->page_content_x : 0.0f,
+                                                   session->has_page_geometry ? session->page_content_y : 0.0f);
         if (pdf_doc) {
             if (save_pdf_to_file(pdf_doc, pdf_file)) {
                 log_info("Successfully rendered HTML to PDF: %s", pdf_file);
@@ -1973,7 +2105,7 @@ int render_document_transform_to_pdf(const char* document_file,
     RenderExportSession session;
     if (!render_export_session_begin_document_transform(&session, document_file, transform,
             options, option_count, viewport_width, viewport_height, 800, 1200, scale,
-            1.0f, false, paged)) {
+            1.0f, false, paged, true)) {
         return 1;
     }
     int result = render_export_session_to_pdf(&session, pdf_file);

@@ -2661,7 +2661,7 @@ DomDocument* load_lambda_document_transform_doc(Url* document_url,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     int viewport_width, int viewport_height, Pool* pool,
-    InputResourcePolicy resource_policy);
+    InputResourcePolicy resource_policy, bool print_media);
 
 static DomDocument* load_pdf_transform_doc(Url* pdf_url, int viewport_width,
                                             int viewport_height, Pool* pool) {
@@ -2818,6 +2818,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     // Use the parsed pathname so a query does not hide the file extension.
     doc = load_layout_special_file(full_url, url_get_pathname(full_url),
                                    viewport_width, viewport_height, pool, true, &handled, js_host_config);
+    // non-HTML documents still dispatch callbacks through their owning viewer.
+    if (handled) document_apply_js_host_config(doc, js_host_config);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
             viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing,
@@ -3833,7 +3835,8 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         int viewport_width, int viewport_height, Pool* pool,
-        InputResourcePolicy resource_policy = g_css_resource_policy) {
+        InputResourcePolicy resource_policy = g_css_resource_policy,
+        bool print_media = false) {
     CssSourceScope request_scope(nullptr, resource_policy);
     auto total_start = time_now_ns();
 
@@ -4052,6 +4055,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         pool_destroy(result_pool);
         return nullptr;
     }
+    css_engine->context.print_media = print_media;
 
     auto step5_end = time_now_ns();
     dom_doc->resource_policy = resource_policy;
@@ -4122,14 +4126,15 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool, InputResourcePolicy resource_policy) {
+        int viewport_width, int viewport_height, Pool* pool,
+        InputResourcePolicy resource_policy, bool print_media) {
     return load_lambda_document_doc(document_url, transform, options, option_count,
-        viewport_width, viewport_height, pool, resource_policy);
+        viewport_width, viewport_height, pool, resource_policy, print_media);
 }
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
     return load_lambda_document_doc(script_url, nullptr, nullptr, 0,
-        viewport_width, viewport_height, pool);
+        viewport_width, viewport_height, pool, g_css_resource_policy, false);
 }
 
 static View* find_matching_input(View* root, const char* match_tag, const char* match_class) {

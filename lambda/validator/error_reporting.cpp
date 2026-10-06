@@ -340,6 +340,7 @@ String* format_type_name(void* type, Pool* pool) {
 }
 
 void print_validation_result(ValidationResult* result) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!result) {
         log_debug("NULL validation result");
         return;
@@ -361,6 +362,7 @@ void print_validation_result(ValidationResult* result) {
             error = error->next;
         }
     }
+#endif
 }
 
 void print_validation_path(PathSegment* path, StringBuf* sb) {

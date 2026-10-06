@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **179 historical records**: 174 fixed or resolved entries,
+This archive contains **181 historical records**: 176 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -29,6 +29,17 @@ interleaved with live entries; §15 preserves the 44 records from the former
 resolved/obsolete appendix.
 
 ## 1. Compilation pipeline, CLI & REPL (LR_01)
+
+<a id="lr01-7"></a>**LR01-7 · Stateless REPL re-execution is O(n²) · FIXED 2026-10-06**
+The whole `repl_history` StrBuf (`main.cpp:785`) is re-transpiled and re-run
+every turn, with error rollback implemented as a raw byte-truncate
+(`main.cpp:882`–`893`). Any non-idempotent side effect repeats each turn.
+
+Fixed 2026-10-06 (D8.1.1v17, S16.7.4): the REPL is one persistent T0 session that executes only the new entry and rolls back a failed one; see `vibe/Lambda_Design_Repl_Interp.md` §8 and `LambdaReplSessionTests`.
+
+<a id="lr01-18"></a>**LR01-18 · The REPL echoes `null` after a declaration-only entry · FIXED 2026-10-06 (found 2026-09-30, site snippet pass)**
+Piped into `lambda`, the entries `let x = 1` then `x` print `null` then `1`, and `1 + 2`, `let x = 1`, `x` print `3`, `null`, `1`. A script holding only declarations prints `null`, since its root is `null` (S2.5.4v2), but the script `1 + 2; let x = 1` prints only `3`, so the second echo is the REPL's own. `run_repl` (`lambda/main.cpp:1094`) re-runs the whole history each turn and prints the part of the root's output that is new (`:1235`–`:1266`); the path that turns an output that did not grow into `null` is not traced yet. No S# or D# ruling says what a REPL entry echoes; S16.2.3v3 covers only how entries are separated. The website's quickstart REPL sample avoids a `let` for this reason.
+Fixed 2026-10-06 by S16.7.4: an entry whose top-level items are all declarations or statements echoes nothing; any other entry echoes its value, `null` included. `declaration_only_entry_echoes_nothing` covers it.
 
 <a id="lr01-r12"></a>**LR01-R12 · `g_template_registry` was a process-global registry · RESOLVED 2026-09-13**
 The runtime-globals migration in `46a2c9ee72` moved the registry into

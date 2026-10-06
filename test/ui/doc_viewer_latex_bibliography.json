@@ -1,0 +1,18 @@
+{
+  "name": "Document viewer resolves bibliography resources beside LaTeX files",
+  "html": "test/ui/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "biblatex_phase2.tex"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_lambda .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_lambda_latex .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_lambda_latex_fixtures .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_lambda_latex_fixtures_biblatex_phase2_tex .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "biblatex_phase2.tex"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Notes on the Analytical Engine"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .latex-unsupported"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .latex-bib-list li"}, "min": 1}
+  ]
+}

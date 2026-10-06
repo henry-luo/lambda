@@ -1,0 +1,75 @@
+\documentclass[fontsize=11pt]{scrartcl}
+% Pakete für LuaLaTeX:
+\usepackage{polyglossia} 
+\setmainlanguage{german}
+\usepackage{amsmath}        % <------ vor unicode-math laden, sonst FEHLER!!
+\usepackage{unicode-math}   % lädt auch fontspec!
+\usepackage{luacode}  
+\usepackage{multicol} 
+% Zeichensätze
+\setmainfont{Linux Libertine O}
+\setsansfont{Linux Biolinum O}
+\setmonofont[Scale=MatchLowercase]{Inconsolata}
+\setmathfont{Asana-Math}
+
+\newcommand{\wert}[1]{\directlua{tex.sprint(#1)}}
+% Lua erzeugt Pseudozufallszahlen und rechnet
+\begin{luacode*}
+math.randomseed(os.time())
+function addaufgabe(hi)
+tex.print{[[\begin{array}{rcrcr}]]}
+for k = 1, hi do	
+    a = math.random(11,50) 
+	b = math.random(11,50)
+    tex.print{a, '&+&', b, '&=&', a+b, '\\\\'}
+	end
+tex.print{[[\end{array}]]}
+end    
+function subaufgabe(hi)
+tex.print{[[\begin{array}{rcrcr}]]}
+for k = 1, hi do	
+    a = math.random(11,50) 
+	b = math.random(11,50)
+    tex.print{a+b, '&-&', b, '&=&', a, '\\\\'}
+	end
+tex.print{[[\end{array}]]}
+end   
+function multaufgabe(hi)
+tex.print{[[\begin{array}{rcrcr}]]}
+for k = 1, hi do	
+    a = math.random(5,20) 
+	b = math.random(5,20)
+	tex.print{a, '&\\cdot&', b, '&=&', a*b, '\\\\'}
+    end
+tex.print{[[\end{array}]]}
+end    
+function divaufgabe(hi)
+tex.print{[[\begin{array}{rcrcr}]]}
+for k = 1, hi do	
+    a = math.random(5,20) 
+	b = math.random(2,20)
+    tex.print{a*b, '&:&', b, '&=&', a, '\\\\'}
+	end
+tex.print{[[\end{array}]]}
+end   
+\end{luacode*}
+
+\begin{document}
+\title{Grundrechenarten}
+\author{Werner Pronkow}
+\maketitle
+\thispagestyle{empty}
+\setlength{\columnseprule}{0.3pt}
+\begin{multicols}{4}
+\subsection*{Addition}
+\(\directlua{addaufgabe(30)}\)
+\subsection*{Subtraktion}
+\(\directlua{subaufgabe(30)}\)
+\subsection*{Multiplikation}
+\(\directlua{multaufgabe(30)}\)
+\subsection*{Division}
+\(\directlua{divaufgabe(30)}\)
+\end{multicols}
+
+
+\end{document}

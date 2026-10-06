@@ -106,7 +106,7 @@ Counts:
 
 | Source doc | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
-| LR_01 | Compilation pipeline, CLI & REPL | 7 | 2 | 0 | 9 |
+| LR_01 | Compilation pipeline, CLI & REPL | 5 | 2 | 0 | 7 |
 | LR_02 | Parsing & AST construction | 2 | 4 | 0 | 6 |
 | LR_03 | Value & type model | 3 | 1 | 0 | 4 |
 | LR_04 | Numbers, decimal & datetime | 5 | 1 | 0 | 6 |
@@ -331,7 +331,7 @@ Verified on the tree merged with master: `make test-lambda-baseline` 5967/5967 (
 
 ### Site snippet pass — 2026-09-30
 
-Running every Lambda snippet on the website (`site/`) against the current build found five defects: [LR01-18](#lr01-18), [LR02-32](#lr02-32), [LR02-33](#lr02-33), [LR11-9](#lr11-9) and [LR13-16](#lr13-16). Two further findings are not defects. A constrained type used as a map field is enforced by its base only, by `is` and by `lambda validate` alike (`{age: 300} is {age: Age}` is `true`); S11.4.6 rules that interim ("enforce the base only, for now") and its status row records it. And `<body d *content(b)>` multiplies `d` by the array, because juxtaposed content continues through a binary `*`; `;` is the separator that makes the spread an item (`<body d; *content(b)>` works on both tiers), and the `error` child the product leaves is a value error flowing as data (S7.4.1).
+Running every Lambda snippet on the website (`site/`) against the current build found five defects: [LR01-18](<Lambda_Issue_Ledger (fixed).md#lr01-18>), [LR02-32](#lr02-32), [LR02-33](#lr02-33), [LR11-9](#lr11-9) and [LR13-16](#lr13-16). Two further findings are not defects. A constrained type used as a map field is enforced by its base only, by `is` and by `lambda validate` alike (`{age: 300} is {age: Age}` is `true`); S11.4.6 rules that interim ("enforce the base only, for now") and its status row records it. And `<body d *content(b)>` multiplies `d` by the array, because juxtaposed content continues through a binary `*`; `;` is the separator that makes the spread an item (`<body d; *content(b)>` works on both tiers), and the `error` child the product leaves is a value error flowing as data (S7.4.1).
 
 ---
 
@@ -353,12 +353,6 @@ Module BSS name `char buf[256]` (`runner.cpp:565`); REPL synthetic path `char
 script_path[64]` (`main.cpp:903`); the JS CLI thread stack is a 256 MB
 `JS_CLI_STACK_SIZE` allocated per run (`main.cpp:264`, applied `:316`); and
 non-reentrant `static char mir_error_msg[256]` (`main.cpp:1560`).
-
-<a id="lr01-7"></a>**LR01-7 · Stateless REPL re-execution is O(n²) · OPEN**
-The whole `repl_history` StrBuf (`main.cpp:785`) is re-transpiled and re-run
-every turn, with error rollback implemented as a raw byte-truncate
-(`main.cpp:882`–`893`). Any non-idempotent side effect repeats each turn.
-
 
 <a id="lr01-9"></a>**LR01-9 · Namespace export gaps (pub vars) · OPEN**
 `module_build_lambda_namespace` still skips **pub vars** entirely —
@@ -398,9 +392,6 @@ Thirteen `test/lambda/conc/*` scripts and three `proc/*` async scripts
 pre-existing: the pre-P1 binary fails identically on `interp` and `auto`.
 Either the interpreter must run S13 tasks, or `auto` must not admit a script
 that starts one.
-
-<a id="lr01-18"></a>**LR01-18 · The REPL echoes `null` after a declaration-only entry · OPEN (found 2026-09-30, site snippet pass)**
-Piped into `lambda`, the entries `let x = 1` then `x` print `null` then `1`, and `1 + 2`, `let x = 1`, `x` print `3`, `null`, `1`. A script holding only declarations prints `null`, since its root is `null` (S2.5.4v2), but the script `1 + 2; let x = 1` prints only `3`, so the second echo is the REPL's own. `run_repl` (`lambda/main.cpp:1094`) re-runs the whole history each turn and prints the part of the root's output that is new (`:1235`–`:1266`); the path that turns an output that did not grow into `null` is not traced yet. No S# or D# ruling says what a REPL entry echoes; S16.2.3v3 covers only how entries are separated. The website's quickstart REPL sample avoids a `let` for this reason.
 
 ---
 

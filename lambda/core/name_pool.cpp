@@ -7,7 +7,9 @@
 #include "well_known_markup_names.h"
 #include "well_known_lambda_names.h"
 #include "well_known_name_lookup.h"
+#ifndef LAMBDA_NO_JS
 #include "../js/js_well_known_names.h"
+#endif
 
 static const WellKnownNameRecord* find_well_known_record(NameId id) {
     const WellKnownNameRecord* records = NULL;
@@ -15,7 +17,9 @@ static const WellKnownNameRecord* find_well_known_record(NameId id) {
     switch (id >> 16) {
     case 0: records = g_well_known_markup_names; count = g_well_known_markup_name_count; break;
     case 1: records = g_well_known_lambda_names; count = g_well_known_lambda_name_count; break;
+#ifndef LAMBDA_NO_JS
     case 2: records = g_well_known_js_names; count = g_well_known_js_name_count; break;
+#endif
     default: return NULL;
     }
     uint16_t ordinal = (uint16_t)id;
@@ -34,6 +38,7 @@ NameId well_known_name_id(StrView name) {
         if (candidate_id == NAME_ID_NONE) {
             return NAME_ID_NONE;
         }
+        // skip disabled catalogs without ending a shared-table probe chain.
         const WellKnownNameRecord* record = find_well_known_record(candidate_id);
         if (record && record->meta.hash == hash && record->len == name.length &&
                 memcmp(record->chars, name.str, name.length) == 0) {
@@ -601,6 +606,7 @@ size_t name_pool_count(NamePool* pool) {
 }
 
 void name_pool_print_stats(NamePool* pool) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!pool) {
         log_debug("NamePool: null");
         return;
@@ -615,6 +621,7 @@ void name_pool_print_stats(NamePool* pool) {
         log_debug("  parent stats:");
         name_pool_print_stats(pool->parent);
     }
+#endif
 }
 
 static bool verify_name_pool_entry(const void* item, void*) {

@@ -142,6 +142,7 @@ CssTokenizer* css_tokenizer_create(Pool* pool);
 void css_tokenizer_destroy(CssTokenizer* tokenizer);
 int css_tokenizer_tokenize(CssTokenizer* tokenizer, const char* input, size_t length, CssToken** tokens);
 CssToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count);
+bool css_token_is_integer(const CssToken* token);
 
 // Unicode support functions
 UnicodeChar css_parse_unicode_char(const char* input, size_t max_length);

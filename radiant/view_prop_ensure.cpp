@@ -26,6 +26,19 @@ static Prop* ensure_view_prop(const DomElement* owner, Pool* pool, Field& storag
 
 static Pool* prop_pool(ViewTree* tree) { return tree ? tree->prop_pool : nullptr; }
 
+BorderProp* radiant_ensure_border_prop(BoundaryProp* boundary, Pool* pool) {
+    if (!boundary) return nullptr;
+    if (!boundary->border && pool) {
+        boundary->border = lam::own((BorderProp*)pool_calloc(pool, sizeof(BorderProp)));
+        if (!boundary->border) {
+            // style consumers require a complete border group, as alloc_prop does.
+            log_error("css-prop: border allocation failed (pool=%p)", (void*)pool);
+            abort();
+        }
+    }
+    return boundary->border;
+}
+
 Pool* layout_prop_pool(LayoutContext* lycon) {
     if (!lycon) return nullptr;
     // secondary resolution owns its properties even when a default browsing view exists.

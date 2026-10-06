@@ -652,6 +652,18 @@ struct DocumentAnimationTick {
     bool active;
 };
 
+bool radiant_tick_document_animation_scheduler(DomDocument* document, double now,
+                                               DirtyTracker* dirty_tracker) {
+    DocState* state = document ? document->state : nullptr;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    if (!scheduler || !scheduler->has_active_animations) return false;
+    bool active = animation_scheduler_tick(scheduler, now, dirty_tracker);
+    // sampled sizes must reach geometry before native or virtual frames paint.
+    if (scheduler->needs_layout) doc_state_request_reflow(state);
+    doc_state_request_repaint(state);
+    return active;
+}
+
 static void tick_document_animation_tree(DomDocument* document,
                                          DocumentAnimationTick* tick);
 
@@ -684,7 +696,8 @@ static void tick_document_animation_tree(DomDocument* document,
         // Embedded bounds are local to their own viewport; the host repaints
         // the complete frame after any child tick.
         DirtyTracker* dirty = tick->depth == 0 ? &state->dirty_tracker : nullptr;
-        tick->active = animation_scheduler_tick(scheduler, tick->now, dirty) || tick->active;
+        tick->active = radiant_tick_document_animation_scheduler(
+            document, tick->now, dirty) || tick->active;
         tick->ticked = true;
     }
     if (state && state->has_active_smooth_scroll &&
@@ -3719,8 +3732,20 @@ static bool radiant_dispatch_event_from_script_impl(void* dom_node,
         return false;
     }
     View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    // nested dispatch must retain the parent's record; otherwise its UA pass
+    // mistakes it for an undelivered event and invokes author handlers twice.
+    EventContext* evcon = ctx->evcon;
+    RootFrame roots(1);
+    Rooted<Item> parent_event(roots, evcon->dom_event);
+    bool parent_ua_handled = evcon->dom_event_ua_handled;
+    bool parent_author_dirty = evcon->dom_event_author_dirty;
+    bool parent_prevented = evcon->default_prevented;
     bool ok = radiant_dispatch_simple_event(
-        ctx->evcon, view, event_name, bubbles, cancelable);
+        evcon, view, event_name, bubbles, cancelable);
+    evcon->dom_event = parent_event.get();
+    evcon->dom_event_ua_handled = parent_ua_handled;
+    evcon->dom_event_author_dirty = parent_author_dirty || evcon->dom_event_author_dirty;
+    evcon->default_prevented = parent_prevented;
     if (report_flags) {
         log_debug("dispatch-from-script: '%s' (bubbles=%d cancelable=%d) -> %s",
                   event_name, bubbles ? 1 : 0, cancelable ? 1 : 0,
@@ -7398,13 +7423,6 @@ static void post_html_handler_rebuild(EventContext* evcon,
         view_pool_reset_retained(doc->view_tree);
     }
 
-    // CSS animation targets are retained DOM nodes, not view-pool allocations.
-    // Only a detached target is invalid across the layout-resource reset.
-    if (state) {
-        animation_scheduler_prune_disconnected_css_views(
-            state->animation_scheduler, doc);
-    }
-
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
     layout_html_doc(evcon->ui_context, doc, true);
@@ -7472,8 +7490,9 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
     s->handler_ctx = nullptr;
     s->doc = event_context_target_document(evcon);
-    if (!s->doc || !s->doc->js.runtime) return false;
-    Runtime* runtime = s->doc->js.runtime;
+    // native timing events also belong to Lambda-only document evaluators.
+    Runtime* runtime = dom_document_script_runtime(s->doc);
+    if (!runtime) return false;
     s->handler_ctx = runtime_get_eval_context(runtime);
     if (!s->handler_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
     s->handler_ctx->heap = runtime_heap(runtime);
@@ -7481,12 +7500,13 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx->type_list = runtime_type_list(runtime);
     s->handler_ctx->pool = runtime_heap(runtime)->pool;
     s->saved_input_ctx = input_context;
-    if (!eval_context_init(s->handler_ctx) ||
-            (js_runtime_state_for(s->handler_ctx) &&
-             !js_runtime_state_init(s->handler_ctx))) {
+    if (!js_runtime_context_enter_turn(runtime, s->handler_ctx)) {
         return false;
     }
     input_context = nullptr;
+    // timing support must use the viewer clock, not the static headless drain.
+    dom_set_host_driven_loop(s->doc->js.host_driven_loop);
+    dom_set_ui_context(evcon->ui_context);
     dom_set_document(s->doc);
     // A queued callback may change the DOM immediately before dispatching a
     // custom event. Its records belong to that callback turn and must survive
@@ -8074,6 +8094,8 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     s_synthetic_dom_dispatch_raw_event = previous_raw_event;
     bool prevented = radiant_dom_event_default_prevented(event_root.get());
     evcon->default_prevented = prevented;
+    // cancellation suppresses UA behavior, but author state still needs its redraw.
+    if (prevented) settle_pending_author_templates(evcon);
     const char* resolved_event_name = fn_to_cstr(
         js_get_name_key(event_root.get(), "type"));
     if (run_ua_tier) {
@@ -9942,6 +9964,9 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
             return result;
         }
         const char* event_name = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
+        if (radiant_dom_event_default_prevented(event_root.get())) {
+            settle_pending_author_templates(&evcon);
+        }
         if (event_name && !radiant_dom_event_default_prevented(event_root.get())) {
             if (strcmp(event_name, "click") == 0) {
                 dispatch_click_default_actions(&evcon, evcon.target);

@@ -313,7 +313,9 @@ void reset_dom_element_timing() {
 }
 
 void log_dom_element_timing() {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     log_info("[TIMING] cascade detail: decl_count: %lld", g_apply_decl_count);
+#endif
 }
 
 // Forward declaration
@@ -1594,6 +1596,12 @@ static bool dom_element_uses_quirks_css(const DomElement* element) {
 }
 
 int dom_element_apply_inline_style(DomElement* element, const char* style_text) {
+#ifdef LAMBDA_NO_CSS_INPUT
+    // reduced profiles retain the raw HTML style attribute without CSS parsing.
+    (void)element;
+    (void)style_text;
+    return 0;
+#else
     if (!element || !style_text || !element->doc) {
         return 0;
     }
@@ -1709,6 +1717,7 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
 
     pool_free(element->doc->document_pool, text_copy);
     return applied_count;
+#endif
 }
 
 /**
@@ -1742,6 +1751,59 @@ bool dom_element_remove_inline_styles(DomElement* element) {
     }
 
     return removed_attr || removed_decl;
+}
+
+static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
+    const char* name, const CssDeclaration* ceiling = nullptr,
+    const CssRollbackFilter* filters = nullptr) {
+    CssCustomProp* winner = nullptr;
+    for (CssCustomProp* variable = variables; variable; variable = variable->next) {
+        if (!css_custom_property_name_matches(variable->name, name)) continue;
+        if (variable->declaration &&
+            !css_declaration_cascade_eligible(variable->declaration, ceiling, filters)) continue;
+        if (!winner || !winner->declaration || !variable->declaration ||
+            css_declaration_cascade_compare(variable->declaration, winner->declaration) > 0) {
+            winner = variable;
+        }
+    }
+    if (winner && css_declaration_is_rollback(winner->declaration)) {
+        CssRollbackFilter filter = {winner->declaration, filters};
+        return css_custom_property_winner(variables, name, winner->declaration, &filter);
+    }
+    return winner;
+}
+
+// registered-property computation needs the same rollback winner without inherited lookup.
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name) {
+    CssCustomProp* winner = element ? css_custom_property_winner(element->css_variables, name) : nullptr;
+    return winner ? winner->value : nullptr;
+}
+
+// return the declaration owner so inherited references use its computed environment.
+const CssValue* dom_element_lookup_custom_property(DomElement* element,
+                                                  const char* var_name,
+                                                  DomElement** owner) {
+    if (owner) *owner = nullptr;
+    if (!element || !var_name) return nullptr;
+    while (element) {
+        // Check if this element has CSS variables
+        if (element->css_variables) {
+            CssCustomProp* winner = css_custom_property_winner(element->css_variables, var_name);
+            if (winner) {
+                CssEnum keyword = winner->value && winner->value->type == CSS_VALUE_TYPE_KEYWORD
+                    ? winner->value->data.keyword : CSS_VALUE_NONE;
+                if (keyword == CSS_VALUE_INITIAL) return nullptr;
+                if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
+                    element = dom_parent_element(element);
+                    continue;
+                }
+                if (owner) *owner = element;
+                return winner->value;
+            }
+        }
+        element = dom_parent_element(element);
+    }
+    return nullptr;
 }
 
 bool css_custom_property_name_matches(const char* stored_name,

@@ -1,0 +1,70 @@
+{
+  counts: [3, 4],
+  shapes: ["rectangle", "rectangle", "cylinder"],
+  valid: true,
+  labels: ["API Request", "Query", "Results", "Response"],
+  html_counts: [3, 4],
+  cylinder_rim: [true, true, true, true, true, true, true],
+  directions: [{
+      direction: "TB",
+      returns: [{
+          from: "database",
+          to: "backend",
+          source_side: true,
+          target_side: true,
+          orthogonal: true
+        }, {
+          from: "backend",
+          to: "frontend",
+          source_side: true,
+          target_side: true,
+          orthogonal: true
+        }]
+    }, {
+      direction: "BT",
+      returns: [{
+          from: "database",
+          to: "backend",
+          source_side: true,
+          target_side: true,
+          orthogonal: true
+        }, {
+          from: "backend",
+          to: "frontend",
+          source_side: true,
+          target_side: true,
+          orthogonal: true
+        }]
+    }, {
+      direction: "LR",
+      returns: [{
+          from: "database",
+          to: "backend",
+          source_side: true,
+          target_side: true,
+          orthogonal: true
+        }, {
+          from: "backend",
+          to: "frontend",
+          source_side: true,
+          target_side: true,
+          orthogonal: true
+        }]
+    }, {
+      direction: "RL",
+      returns: [{
+          from: "database",
+          to: "backend",
+          source_side: true,
+          target_side: true,
+          orthogonal: true
+        }, {
+          from: "backend",
+          to: "frontend",
+          source_side: true,
+          target_side: true,
+          orthogonal: true
+        }]
+    }],
+  explicit_endpoints: [true, true]
+}

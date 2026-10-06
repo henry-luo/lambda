@@ -695,15 +695,25 @@ static CssValue* svg_parse_property_value(Pool* pool, const char* text, const ch
 
 typedef struct {
     SvgStyleContext* style;
-    DomElement* element;
     const SvgDomStyleScope* scope = nullptr;
 } SvgVariableContext;
 
-static const CssValue* svg_lookup_variable(void* context, const char* name) {
+static const CssValue* svg_lookup_variable(void* context, DomElement* element,
+                                           const char* name, DomElement** owner) {
+    if (owner) *owner = nullptr;
     SvgVariableContext* variables = (SvgVariableContext*)context;
     SvgStyleContext* style = variables->style;
     DomDocument* doc = style->document;
-    for (DomNode* node = variables->element; node && node->is_element();
+    if (strncmp(name, "--", 2) != 0) {
+        // the dedicated var parser omits dashes; declaration queries require the full name.
+        size_t length = strlen(name);
+        char* qualified = (char*)pool_alloc(style->pool, length + 3);
+        if (!qualified) return nullptr;
+        qualified[0] = qualified[1] = '-';
+        memcpy(qualified + 2, name, length + 1);
+        name = qualified;
+    }
+    for (DomNode* node = element; node && node->is_element();
         node = svg_dom_style_parent(node, variables->scope)) {
         SvgStyleEntry* entry = svg_style_entry(style, dom_element_to_element(node->as_element()));
         DomElement* current = node->as_element();
@@ -715,17 +725,24 @@ static const CssValue* svg_lookup_variable(void* context, const char* name) {
         CssDeclaration declaration = {};
         if (css_select_element_declaration(style->engine, style->matcher, current,
             doc->stylesheets, (size_t)doc->stylesheet_count, inline_declarations,
-            inline_count, name, &declaration)) return declaration.value;
+            inline_count, name, &declaration)) {
+            CssEnum keyword = declaration.value && declaration.value->type == CSS_VALUE_TYPE_KEYWORD
+                ? declaration.value->data.keyword : CSS_VALUE_NONE;
+            if (keyword == CSS_VALUE_INITIAL) return nullptr;
+            if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) continue;
+            if (owner) *owner = current;
+            return declaration.value;
+        }
     }
     return nullptr;
 }
 
 static const char* svg_resolve_property_declaration(SvgStyleContext* style, DomElement* element,
     const char* name, CssDeclaration* declaration, const SvgDomStyleScope* scope = nullptr) {
-    SvgVariableContext variables = {style, element, scope};
+    SvgVariableContext variables = {style, scope};
     const CssValue* authored = declaration->value;
     declaration->value = (CssValue*)css_resolve_var_value(
-        style->pool, authored, svg_lookup_variable, &variables);
+        style->pool, authored, svg_lookup_variable, &variables, element);
     // layout, DOM geometry and painting must all project the same resolved CSS tokens.
     if (declaration->value != authored) {
         declaration->value_text = nullptr; declaration->value_text_len = 0;

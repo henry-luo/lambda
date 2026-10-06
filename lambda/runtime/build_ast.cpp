@@ -20,7 +20,9 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
+#ifndef LAMBDA_NO_TASKS
 #include "../../lib/uv_loop.h"
+#endif
 #include <errno.h>
 #include <stdlib.h>
 
@@ -139,7 +141,11 @@ typedef struct {
 static struct hashmap* sys_func_map = NULL;       // (name, arg_count) → SysFuncInfo*
 static struct hashmap* sys_func_name_set = NULL;   // name → exists
 // AST closure workers can reach this cold process-wide table concurrently.
+#ifndef LAMBDA_NO_TASKS
 static uv_once_t sys_func_maps_once = UV_ONCE_INIT;
+#else
+static bool sys_func_maps_initialized = false;
+#endif
 
 typedef struct JubeSysFuncRecord {
     SysFuncInfo info;
@@ -425,7 +431,15 @@ static void init_sys_func_maps_once() {
 }
 
 static void init_sys_func_maps() {
+#ifndef LAMBDA_NO_TASKS
     uv_once(&sys_func_maps_once, init_sys_func_maps_once);
+#else
+    // synchronous profiles have no concurrent AST workers.
+    if (!sys_func_maps_initialized) {
+        init_sys_func_maps_once();
+        sys_func_maps_initialized = true;
+    }
+#endif
 }
 
 void ensure_sys_func_maps_initialized() {
@@ -2469,6 +2483,23 @@ static bool ast_node_declares_binding(AstNode* node) {
 NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
     if (!tp || !tp->current_scope || !name) return NULL;
     return name_scope_lookup_name(tp->current_scope, name);
+}
+
+// The current-scope entry that binds exactly this declaration node, if any.
+// A declaration is identified by its node, never by its source offset: a REPL
+// entry is built with fragment-local spans, so two entries' `fn f` both start
+// at byte 0 (S16.7.5), and in a file the offset test registered a duplicate
+// `fn` twice and reported its E209 twice.
+static NameEntry* lookup_declaration_in_current_scope(Transpiler* tp,
+        String* name, const AstNode* node) {
+    NameEntry* entry = lookup_name_in_current_scope(tp, name);
+    if (!entry || !node) return NULL;
+    if (entry->node == node) return entry;
+    // the name has several entries only after an E209; scan for this node
+    for (entry = tp->current_scope->first; entry; entry = entry->next) {
+        if (entry->node == node) return entry;
+    }
+    return NULL;
 }
 
 static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
@@ -8016,6 +8047,8 @@ typedef enum CallColour {
 typedef struct CallColourWalk {
     Transpiler* tp;
     AstFuncNode* function;  // innermost enclosing function; NULL at module level
+    // S16.7.6: a procedural REPL session's module level is a `pn` body
+    bool module_is_proc;
 } CallColourWalk;
 
 static bool colour_walk_is_passthrough(CallColourWalk* walk, AstNode* node) {
@@ -8145,7 +8178,7 @@ static bool colour_walk_visit(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) {
         AstFuncNode* fn = (AstFuncNode*)node;
-        CallColourWalk inner = {walk->tp, fn};
+        CallColourWalk inner = {walk->tp, fn, false};
         walk_lambda_ast(fn->body, colour_walk_visit, &inner, true);
         return false;
     }
@@ -8155,7 +8188,8 @@ static bool colour_walk_visit(AstNode* node, void* data) {
             colour_walk_constraint(walk->tp, constraint);
         }
     }
-    bool in_proc = walk->function && walk->function->node_type == AST_NODE_PROC;
+    bool in_proc = walk->function ? walk->function->node_type == AST_NODE_PROC
+        : walk->module_is_proc;
     if (node->node_type == AST_NODE_CALL_EXPR && !in_proc) {
         colour_walk_call(walk, (AstCallNode*)node);
     }
@@ -8168,7 +8202,7 @@ static bool colour_walk_visit(AstNode* node, void* data) {
 // walked from the type list, and an object type's own constraints where the
 // walk meets the type.
 static void colour_walk_constraint(Transpiler* tp, AstNode* constraint) {
-    CallColourWalk walk = {tp, NULL};
+    CallColourWalk walk = {tp, NULL, false};   // `that` is fn context everywhere
     walk_lambda_ast(constraint, colour_walk_visit, &walk, true);
 }
 
@@ -8205,7 +8239,8 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
     // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
     walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
     if (tp->error_count != 0) return false;
-    CallColourWalk colour_walk = {tp, NULL};
+    CallColourWalk colour_walk = {tp, NULL,
+        script->global_vars && script->global_vars->is_proc};
     walk_lambda_ast((AstNode*)script, colour_walk_visit, &colour_walk, true);
     colour_walk_constrained_types(tp);
     if (tp->error_count != 0) return false;
@@ -10232,8 +10267,12 @@ void lambda_ast_mark_place_copy(AstDeclaratorNode* named) {
 // Diagnostic only: it changes no behavior and exists to measure the
 // migration blast radius before CW29 ships (COW §11.9 rollout).
 static bool cow_param_note_enabled(void) {
+#ifdef LAMBDA_NO_SYSINFO
+    return false;
+#else
     static const bool enabled = getenv("LAMBDA_COW_PARAM_NOTE") != NULL;
     return enabled;
+#endif
 }
 
 typedef struct CowParamEffectScan {
@@ -13076,6 +13115,11 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
         else tp->builtin_import_io = true;
         return import_resolves_to_marker(node);
     }
+#ifdef LAMBDA_NO_FILE_IO
+    record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
+        "external modules and packages are excluded from this profile: '%.*s'",
+        (int)module.length, module.str);
+#else
 #ifndef SIMPLE_SCHEMA_PARSER
     char module_buf[128];
     if (module.length < sizeof(module_buf)) {
@@ -13150,6 +13194,7 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
             (int)module.length, module.str, path);
     }
     mem_free(path);
+#endif
 }
 
 // S16.6.8/S16.6.9 branch classification, by INTERIOR on the S12.1 boundary.
@@ -15335,10 +15380,9 @@ static AstFuncNode* resolver_function_begin(LambdaResolver* r, AstFuncNode* fn) 
     bool declares_name = fn->name && !r->type_object_depth;
     AstFuncNode* target = NULL;
     if (declares_name) {
-        NameEntry* existing = lookup_name_in_current_scope(tp, fn->name);
-        if (existing && existing->node &&
-                existing->node->source_span.start_byte == fn->source_span.start_byte &&
-                (existing->node->node_type == AST_NODE_FUNC ||
+        NameEntry* existing = lookup_declaration_in_current_scope(tp, fn->name,
+            (AstNode*)fn);
+        if (existing && (existing->node->node_type == AST_NODE_FUNC ||
                  existing->node->node_type == AST_NODE_PROC)) {
             target = (AstFuncNode*)existing->node;
         }
@@ -16673,9 +16717,9 @@ static void resolver_predeclare_functions(LambdaResolver* r) {
     for (int i = 0; i < list->length; i++) {
         AstFuncNode* fn = (AstFuncNode*)list->data[i];
         uint16_t facts = fn->syntax_aux;
-        NameEntry* existing = lookup_name_in_current_scope(tp, fn->name);
-        if (!existing || !existing->node ||
-                existing->node->source_span.start_byte != fn->source_span.start_byte) {
+        NameEntry* existing = lookup_declaration_in_current_scope(tp, fn->name,
+            (AstNode*)fn);
+        if (!existing) {
             init_function_placeholder(tp, fn);
             ((TypeFunc*)fn->type)->is_public = (facts & LSF_FN_PUBLIC) != 0;
             ((TypeFunc*)fn->type)->is_colour_poly = (facts & LSF_FN_COLOUR_POLY) != 0;

@@ -323,6 +323,8 @@ CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
                                                                    bool horizontal,
                                                                    bool minimum);
+CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
+                                                     CssPropertyCode property);
 bool layout_axis_size_is_percentage(ViewBlock* block, bool horizontal);
 bool layout_axis_size_is_percentage(DomElement* element, bool horizontal);
 CssEnum layout_intrinsic_preferred_size_keyword(ViewBlock* block, bool horizontal);
@@ -3343,6 +3345,9 @@ typedef struct LayoutContext {
     // Additional fields for test compatibility
     float width, height;  // context dimensions
     float scroll_percentage_base;  // set only while resolving deferred scroll-padding math
+    bool transform_angle_math;  // scoped transform argument evaluation in degrees
+    bool transform_length_math;  // used-value evaluation of absolute/percentage transform math
+    float transform_percentage_base;
     float dpi;           // dots per inch
     lam::Up<Pool> pool;  // memory pool for view allocation
     // Available space constraints for current layout
@@ -3850,6 +3855,11 @@ void* alloc_prop(LayoutContext* lycon, size_t size);
 // The pool element props of this pass come from: the view tree's prop pool,
 // or the pass pool where a focused test has no view tree.
 Pool* layout_prop_pool(LayoutContext* lycon);
+// shared sizing consumers also accept discrete animation endpoints.
+void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
+                            const CssValue* value, LayoutAxis axis);
+void resolve_css_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
+                                       CssPropertyCode property, const CssValue* value);
 FontProp* alloc_font_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
@@ -3873,11 +3883,7 @@ inline BackgroundProp* layout_ensure_background(LayoutContext* lycon, ViewSpan* 
 inline BorderProp* layout_ensure_border(LayoutContext* lycon, ViewSpan* view) {
     if (!view) return nullptr;
     BoundaryProp* bound = view->ensure_boundary(lycon);
-    if (!bound) return nullptr;
-    if (!bound->border) {
-        bound->border = lam::own((BorderProp*)alloc_prop(lycon, sizeof(BorderProp)));
-    }
-    return bound->border;
+    return radiant_ensure_border_prop(bound, layout_prop_pool(lycon));
 }
 
 inline OutlineProp* layout_ensure_outline(LayoutContext* lycon, ViewSpan* view) {

@@ -30,7 +30,7 @@ import font:    .font
 //     (still authored in PDF user space). The label is kept for
 //     debugging visibility; opts.show_label = false suppresses it.
 //   - Text elements emitted by interp.render_page are already in SVG
-//     space (text.ls computes y = page_h - Tm[5]) so they sit as
+//     space (text.ls computes y from the media top and Tm[5]) so they sit as
 //     siblings of the flipped group, NOT inside it.
 
 fn _label_layer(rect, page_index) {
@@ -86,27 +86,39 @@ fn _resolve_bg(opts) {
 }
 
 fn _render_page_parts(pdf, page, page_index, opts) {
-    let rect = coords.media_box_rect(page)
-    let view_box = coords.view_box_attr(page)
+    let geometry = coords.page_geometry(page, pdf)
+    let media = geometry.media
+    let viewport = geometry.viewport
+    let view_box = coords.rect_view_box(if (geometry.transformed) viewport else media)
     let bg = _resolve_bg(opts)
 
     // SVG fragment lookup is document-wide, so page-local clip/pattern counters need a namespace.
     let document_prefix = if (opts and opts.id_prefix) string(opts.id_prefix) else "pdf"
     let resource_prefix = document_prefix ++ "-page-" ++ (page_index) ++ "-clip"
-    let r = _content_elements(pdf, page, rect.h, resource_prefix)
+    let resolved_page = {*:page, media_box: [media.x, media.y, media.x + media.w, media.y + media.h]}
+    let r = _content_elements(pdf, resolved_page, media.y + media.h, resource_prefix)
     let paths = [for (p in r.paths) p]
     let texts = [for (t in r.texts) t]
-    let flip_group = _flip_group_list(rect, paths)
-    let label_kids = _label_children(rect, page_index, opts);
+    let flip_group = _flip_group_list(media, paths)
+    let label_kids = _label_children(if (geometry.transformed) viewport else media, page_index, opts)
 
-    let children = [svg.page_background(rect, bg),
-                    for (p in flip_group) p,
-                    for (t in texts) t,
-                    for (l in label_kids) l]
+    // the same page matrix moves painted content and the HTML selection layer.
+    let content = [for (p in flip_group) p, for (t in texts) t]
+    let children = if (geometry.transformed) {
+        [svg.page_background(viewport, bg),
+         svg.group(util.fmt_matrix(geometry.matrix), content),
+         for (l in label_kids) l]
+    } else {
+        [svg.page_background(media, bg),
+         for (c in content) c,
+         for (l in label_kids) l]
+    }
+    let overlay_transform = if (geometry.transformed) util.fmt_css_matrix(geometry.matrix) else null
 
-    { svg: svg.svg_pdf_root(view_box, rect.w, rect.h, children, pdf),
+    { svg: svg.svg_pdf_root(view_box, viewport.w, viewport.h, children, pdf),
       texts: texts,
-      rect: rect }
+      rect: viewport,
+      overlay_transform: overlay_transform }
 }
 
 fn render_page(pdf, page, page_index, opts) {
@@ -115,7 +127,7 @@ fn render_page(pdf, page, page_index, opts) {
 
 fn render_page_div(pdf, page, page_index, opts) {
     let parts = _render_page_parts(pdf, page, page_index, opts)
-    html.page_div_with_text_layer(parts.svg, parts.texts, page_index + 1)
+    html.page_div_with_text_layer(parts.svg, parts.texts, page_index + 1, parts.overlay_transform)
 }
 
 fn render_missing(page_index: int) {

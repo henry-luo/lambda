@@ -8,7 +8,6 @@ Most scripts do three things with data: reshape every item, keep the items that 
 
 ```text repl
 λ> let books = input("books.json")^
-null
 λ> books[2]
 {
   title: "Clean Code",
@@ -18,7 +17,6 @@ null
   tags: ["craft"]
 }
 λ> let sales = input("sales.csv")^
-null
 λ> sales[0]
 {
   date: "2026-01-05",
@@ -89,7 +87,6 @@ For a **single** value, `that` is the matching proviso: `x that p` is `x` when `
 
 ```text repl
 λ> let books = input("books.json")^
-null
 λ> books[2].price that ~ < 50
 37.9
 λ> (books[4].price that ~ < 50) or 50
@@ -269,9 +266,7 @@ The collection functions round out the toolkit. `sum`, `avg`, `min` and `max` re
 
 ```text repl
 λ> let books = input("books.json")^
-null
 λ> let prices = books |> ~.price
-null
 λ> [sum(prices), avg(prices), min(prices), max(prices)]
 [374.4, 74.88, 37.9, 190]
 λ> sort(prices, 'desc')
@@ -279,7 +274,6 @@ null
 λ> take(sort(prices, 'desc'), 3)
 [190, 55, 49]
 λ> let tags = [for (b in books) for (t in b.tags) t]
-null
 λ> unique(tags)
 ["craft", "career", "lisp", "classic", "data", "systems", "algorithms"]
 ```

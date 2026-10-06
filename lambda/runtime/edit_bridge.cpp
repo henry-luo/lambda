@@ -861,6 +861,8 @@ Item edit_current(void) {
 
 extern "C" {
 
+#ifndef LAMBDA_NO_EDIT_HISTORY
+// public history builtins are optional; apply/edit execution retains internal transactions.
 Item fn_undo(void) {
     bool ok = edit_undo();
     return (Item){.item = ok ? ITEM_TRUE : ITEM_FALSE};
@@ -886,4 +888,5 @@ Item fn_edit_commit1(Item description) {
     return (Item){.item = i2it(ver)};
 }
 
+#endif
 } // extern "C"

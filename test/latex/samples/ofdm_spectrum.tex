@@ -1,0 +1,60 @@
+%\title{Espectro de Banda Base OFDM Multiportadora Logarítmica}
+\documentclass[svgnames]{standalone}
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+\usepackage{pgfplots, helvet, verbatim}
+\pgfplotsset{compat=1.14} % Compatibilidad
+\renewcommand{\familydefault}{\sfdefault}
+\begin{comment}
+Este listado LaTeX es una versión logarítmica del proyecto "Espectro de Banda Base OFDM Multiportadora" que muestra las notorias diferencias en el trazado de las curvas del espectro OFDM correspondiente a 4, 16 y 64 subportadoras, cuando se aplica una escala lineal logarítmica en base 10. Esta figura se basa en la mostrada en la página 643 del texto "Digital Modulation Techniques, Second Edition", de Fuqin Xiong, de la editorial Artech House, Inc.
+\end{comment}
+
+% Sección colores de etiquetas
+\newcommand{\titulo}{RoyalBlue} % Variable del color de la etiqueta del título.
+\newcommand{\etiq}{VioletRed} % Variable del color de las etiquetas de los ejes.
+\newcommand{\fondo}{LightGrey!15} % Variable del color del fondo del gráfico.
+
+\begin{document}
+\begin{tikzpicture}[
+declare function={
+sinc(\x)=(sin(pi*\x r)/(pi*\x)); % Definición de la función sinc(x) 
+ofdm(\x)=sinc(\x)^2;   % Definición de la función ofdm(x) 
+}]
+    \begin{axis}[
+    legend style={fill=\fondo, font=\scriptsize,anchor=north east}, % Dibuja la caja de leyendas y aplica fondo
+	legend entries={$N=4$, $N=16$, $N=64$}, % Texto de las leyendas
+	axis background/.style={fill=\fondo},
+	title=\textbf{\color{\titulo} Espectro de Banda Base OFDM Multiportadora Logarítmica},
+	xlabel=\color{\etiq} $\frac{f}{N*Rs}$,
+	ylabel=\color{\etiq} $S(f)$,
+	domain=-0.1:2,
+	minor tick num=9,
+	ymin=-50,
+	grid=major
+	]
+	% Definición de constantes
+    \def\sumaa{0}
+    \def\sumab{0}
+    \def\sumac{0}
+    % Sección de sumas de portadoras
+    \pgfplotsinvokeforeach{0,...,3}
+    {
+    \xdef\sumaa{\sumaa + ofdm(4*x-#1)}
+    }
+    \pgfplotsinvokeforeach{0,...,15}
+    {
+    \xdef\sumab{\sumab + ofdm(16*x-#1)}
+    }
+    \pgfplotsinvokeforeach{0,...,63}
+    {
+    \xdef\sumac{\sumac + ofdm(64*x-#1)}
+    }
+    % Sección de gráficos
+    \addplot[smooth, Goldenrod, thick, samples=100]{10*log10(\sumaa)};
+    \addplot[smooth, Blue, thick, samples=100]{10*log10(\sumab)};
+    \addplot[smooth, Red, thick, samples=100]{10*log10(\sumac)};
+ \end{axis}
+\end{tikzpicture}
+\end{document}

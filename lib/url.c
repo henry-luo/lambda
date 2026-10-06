@@ -1070,7 +1070,7 @@ bool url_text_path_has_ext_ci(const char* href, const char* ext) {
     }
 
     size_t actual_len = 0;
-    const char* actual = file_path_ext_len(href, path_len, &actual_len);
+    const char* actual = str_file_ext(href, path_len, &actual_len);
     if (!actual) return false;
     if (actual[0] == '.') {
         actual++;

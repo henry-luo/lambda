@@ -105,7 +105,11 @@ static char* module_registry_key_dup(const char* path) {
     }
     if (!lexical[0] && path_str_copy(lexical, (int)sizeof(lexical), path) < 0) return NULL;
 
+#ifdef LAMBDA_NO_FILE_IO
+    char* resolved = NULL;  // in-memory module identities require no host canonicalization.
+#else
     char* resolved = file_realpath(lexical);
+#endif
     const char* source = resolved ? resolved : lexical;
     char normalized[4096];
     if (path_str_normalize_lexical_posix(source, normalized,
@@ -368,6 +372,7 @@ bool module_is_loading(const char* path) {
 // Lambda namespace builder
 // =============================================================================
 
+#ifndef LAMBDA_NO_MIR
 Item module_build_lambda_namespace(void* script_ptr) {
     Script* script = (Script*)script_ptr;
     if (!script || !script->ast_root) return ItemNull;
@@ -456,6 +461,8 @@ Item module_build_lambda_namespace(void* script_ptr) {
 
     return namespace_root.get();
 }
+
+#endif
 
 // =============================================================================
 // Create a synthetic Script from a hosted namespace for Lambda imports

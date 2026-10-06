@@ -298,7 +298,11 @@ TEST_F(AnimationSchedulerTest, TickLinearAnimation) {
     // tick at t=1.5 → animation should finish
     animation_scheduler_tick(scheduler, 1.5, nullptr);
     EXPECT_EQ(g_finish_count, 1);
-    EXPECT_EQ(scheduler->count, 0);
+    // the CSS timeline remains attached so a later relayout cannot restart it.
+    EXPECT_EQ(scheduler->count, 1);
+    EXPECT_EQ(anim->play_state, ANIM_PLAY_FINISHED);
+    animation_scheduler_tick(scheduler, 2.0, nullptr);
+    EXPECT_EQ(g_finish_count, 1);
 }
 
 TEST_F(AnimationSchedulerTest, RetainedFinishedTimelineWithoutFillStaysInactive) {
@@ -571,7 +575,7 @@ TEST_F(AnimationSchedulerTest, EasedTick) {
     g_tick_count = 0;
 
     AnimationInstance* anim = animation_instance_create(scheduler);
-    anim->type = ANIM_CSS_ANIMATION;
+    anim->type = ANIM_CSS_TRANSITION;
     anim->duration = 1.0;
     anim->start_time = 0.0;
     anim->delay = 0.0;
@@ -585,6 +589,17 @@ TEST_F(AnimationSchedulerTest, EasedTick) {
     animation_scheduler_tick(scheduler, 0.25, nullptr);
     EXPECT_LT(g_last_tick_value, 0.25f);
     EXPECT_GT(g_last_tick_value, 0.0f);
+}
+
+TEST_F(AnimationSchedulerTest, CssTickReceivesUneasedIterationProgress) {
+    AnimationInstance* animation = animation_instance_create(scheduler);
+    animation->type = ANIM_CSS_ANIMATION;
+    animation->duration = 1.0;
+    animation->timing = TIMING_EASE_IN;
+    animation->tick = test_tick_fn;
+    animation_scheduler_add(scheduler, animation);
+    animation_scheduler_tick(scheduler, .25, nullptr);
+    EXPECT_FLOAT_EQ(g_last_tick_value, .25f);
 }
 
 TEST_F(AnimationSchedulerTest, MultipleAnimations) {

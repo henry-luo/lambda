@@ -1,0 +1,26 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,graphicx,hyperref,xcolor,booktabs,enumitem,siunitx,tikz}
+\usepackage[margin=1in]{geometry}
+\usepackage[style=numeric,sorting=none]{biblatex}
+\usepackage[tracking=5]{microtype}
+\addbibresource{references.bib}
+\title{Package document}
+\begin{document}
+\section{Intro}\label{sec:intro}
+\textcolor{red!50!blue}{Mixed}
+{\definecolor{local}{HTML}{123456}\color{local}Inside}
+\begin{enumerate}[label=\alph*.,start=3]
+\item[Custom] Item
+\end{enumerate}
+\begin{align}
+a &= b\\
+c &= d
+\end{align}
+\num{12345.67}\qty{12}{\kilo\metre}\num{1.23(4)}\num{1.25e3}
+\begin{tabular}{S[table-format=2.2]r}
+1.2 & A\\
+12.34 & B
+\end{tabular}
+\cite{knuth}
+\printbibliography
+\end{document}

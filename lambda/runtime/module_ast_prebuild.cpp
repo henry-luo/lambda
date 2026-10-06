@@ -1,4 +1,5 @@
 #include "module_ast_prebuild.hpp"
+#include "compiler_worker_stack.h"
 
 #include "../../lib/file.h"
 #include "../../lib/hashmap_typed.hpp"
@@ -102,7 +103,7 @@ static void module_ast_prebuild_registry_init(void) {
         return;
     }
     registry->pool = tp_create_with_stack(module_ast_prebuild_pool_workers(),
-        8 * 1024 * 1024);
+        LAMBDA_COMPILER_WORKER_STACK_BYTES);
     if (!registry->pool) {
         // The caller still gets a correct serial best-effort producer; normal
         // loading remains authoritative if a scheduling allocation fails.

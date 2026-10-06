@@ -32,17 +32,16 @@ bool css_import_rule_is_active(CssRule* rule, CssEngine* engine) {
 
 typedef bool (*CssRegistrationVisitor)(void*, const CssPropertyRegistration*);
 
-static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
-    CssRegistrationVisitor visitor, void* context, size_t depth);
+static bool css_visit_active_rules_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context, size_t depth);
 
-static bool css_visit_registrations_in_rule(CssEngine* engine, CssRule* rule,
-    CssRegistrationVisitor visitor, void* context, size_t depth) {
+static bool css_visit_active_rules_in_rule(CssEngine* engine, CssRule* rule,
+    CssActiveRuleVisitor visitor, void* context, size_t depth) {
     if (!rule || depth > 512) return true;
-    if (rule->type == CSS_RULE_PROPERTY)
-        return visitor(context, &rule->data.property_rule);
+    if (!visitor(context, rule)) return false;
     if (rule->type == CSS_RULE_IMPORT) {
         return !css_import_rule_is_active(rule, engine) ||
-            css_visit_registrations_in_sheet(engine, rule->data.import_rule.stylesheet,
+            css_visit_active_rules_in_sheet(engine, rule->data.import_rule.stylesheet,
                 visitor, context, depth + 1);
     }
     // Registrations are global within the document, including within @scope.
@@ -52,19 +51,43 @@ static bool css_visit_registrations_in_rule(CssEngine* engine, CssRule* rule,
     if (!active) return true;
     CssRuleChildList children = css_rule_child_list(rule);
     for (size_t i = 0; children.count && i < *children.count; i++)
-        if (!css_visit_registrations_in_rule(engine, (*children.rules)[i], visitor, context, depth + 1))
+        if (!css_visit_active_rules_in_rule(engine, (*children.rules)[i], visitor, context, depth + 1))
             return false;
     return true;
 }
 
-static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
-    CssRegistrationVisitor visitor, void* context, size_t depth) {
+static bool css_visit_active_rules_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context, size_t depth) {
     if (!sheet || sheet->disabled || depth > 512 ||
         (sheet->media && !css_evaluate_media_query(engine, sheet->media))) return true;
     for (size_t i = 0; i < sheet->rule_count; i++)
-        if (!css_visit_registrations_in_rule(engine, sheet->rules[i], visitor, context, depth + 1))
+        if (!css_visit_active_rules_in_rule(engine, sheet->rules[i], visitor, context, depth + 1))
             return false;
     return true;
+}
+
+bool css_stylesheet_visit_active_rules(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context) {
+    return engine && visitor &&
+        css_visit_active_rules_in_sheet(engine, sheet, visitor, context, 0);
+}
+
+typedef struct CssRegistrationWalk {
+    CssRegistrationVisitor visitor;
+    void* context;
+} CssRegistrationWalk;
+
+static bool css_visit_registration_rule(void* context, const CssRule* rule) {
+    CssRegistrationWalk* walk = (CssRegistrationWalk*)context;
+    return rule->type != CSS_RULE_PROPERTY ||
+        walk->visitor(walk->context, &rule->data.property_rule);
+}
+
+static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssRegistrationVisitor visitor, void* context, size_t depth) {
+    CssRegistrationWalk walk = {visitor, context};
+    return css_visit_active_rules_in_sheet(engine, sheet,
+        css_visit_registration_rule, &walk, depth);
 }
 
 static bool css_index_property_registration(void* context, const CssPropertyRegistration* registration) {
@@ -105,6 +128,8 @@ struct CssElementDeclarationQuery {
     const char* property;
     uint8_t pseudo_element;
     CssDeclaration best;
+    const CssDeclaration* ceiling;
+    const CssRollbackFilter* filters;
     uint32_t order;
     uint32_t scope_proximity;
     bool found;
@@ -117,6 +142,12 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool marker_shorthand = str_icmp_cstr(declaration->property_name, "marker") == 0 &&
         (strcmp(query->property, "marker-start") == 0 || strcmp(query->property, "marker-mid") == 0 ||
          strcmp(query->property, "marker-end") == 0);
+    bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
+        css_font_shorthand_contains_property(query->property);
+    bool custom_property = strncmp(declaration->property_name, "--", 2) == 0;
+    bool same_property = custom_property
+        ? strcmp(declaration->property_name, query->property) == 0
+        : str_icmp_cstr(declaration->property_name, query->property) == 0;
     CssPropertyCode requested = css_property_code_from_name(query->property);
     bool shorthand = requested > 0 && css_property_shorthand_contains(declaration->property_code, requested);
     bool break_alias = strncmp(query->property, "break-", 6) == 0 &&
@@ -125,14 +156,14 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool all_reset = strcmp(declaration->property_name, "all") == 0 &&
         strncmp(query->property, "--", 2) != 0 && strcmp(query->property, "direction") != 0 &&
         strcmp(query->property, "unicode-bidi") != 0;
-    if (!marker_shorthand && !shorthand && !break_alias && !all_reset &&
-        str_icmp_cstr(declaration->property_name, query->property) != 0) return;
+    if (!marker_shorthand && !font_shorthand && !shorthand && !break_alias && !all_reset && !same_property) return;
     CssDeclaration candidate = *declaration;
     candidate.specificity = specificity;
     candidate.specificity.important = declaration->important;
     candidate.origin = origin;
     candidate.source_order = query->order++;
     candidate.scope_proximity = query->scope_proximity;
+    if (!css_declaration_cascade_eligible(&candidate, query->ceiling, query->filters)) return;
     if (!query->found || css_declaration_cascade_compare(&candidate, &query->best) >= 0) {
         query->best = candidate;
         query->found = true;
@@ -213,16 +244,19 @@ static void css_query_element_sheet(CssElementDeclarationQuery* query, CssStyles
     }
 }
 
-bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
+static bool css_select_element_declaration_inner(CssEngine* engine, SelectorMatcher* matcher,
     DomElement* element, CssStylesheet** sheets, size_t sheet_count,
     CssDeclaration** inline_declarations, size_t inline_count,
-    const char* property_name, CssDeclaration* result, uint8_t pseudo_element) {
+    const char* property_name, CssDeclaration* result,
+    const CssDeclaration* ceiling, const CssRollbackFilter* filters, uint8_t pseudo_element) {
     if (!matcher || !element || !property_name || !result) return false;
     CssElementDeclarationQuery query = {};
     query.engine = engine;
     query.matcher = matcher;
     query.element = element;
     query.property = property_name;
+    query.ceiling = ceiling;
+    query.filters = filters;
     query.pseudo_element = pseudo_element;
     for (size_t i = 0; sheets && i < sheet_count; i++) {
         css_query_element_sheet(&query, sheets[i], 0);
@@ -232,8 +266,22 @@ bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
         css_query_consider_declaration(&query, inline_declarations[i],
                                        inline_specificity, CSS_ORIGIN_AUTHOR);
     }
+    if (query.found && css_declaration_is_rollback(&query.best)) {
+        // SVG queries share the style tree's origin and layer rollback rules.
+        CssRollbackFilter filter = {&query.best, filters};
+        return css_select_element_declaration_inner(engine, matcher, element, sheets, sheet_count,
+            inline_declarations, inline_count, property_name, result, &query.best, &filter, pseudo_element);
+    }
     if (query.found) *result = query.best;
     return query.found;
+}
+
+bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
+    DomElement* element, CssStylesheet** sheets, size_t sheet_count,
+    CssDeclaration** inline_declarations, size_t inline_count,
+    const char* property_name, CssDeclaration* result, uint8_t pseudo_element) {
+    return css_select_element_declaration_inner(engine, matcher, element, sheets, sheet_count,
+        inline_declarations, inline_count, property_name, result, nullptr, nullptr, pseudo_element);
 }
 
 static uint64_t css_condition_environment_key(const CssEngine* engine,
@@ -618,7 +666,9 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     const char* css_text, const char* base_url) {
     if (!engine || !css_text) return NULL;
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     clock_t start_time = clock();
+#endif
 
     log_debug("Starting enhanced CSS parsing: %zu chars, base_url=%s", strlen(css_text), base_url ? base_url : "(none)");
 
@@ -660,8 +710,10 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     if (token_count <= 0) {
         log_debug("CSS tokenization returned %d tokens", token_count);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
         clock_t end_time = clock();
         stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+#endif
         engine->stats.stylesheets_parsed++;
         pool_destroy(token_pool);
         return stylesheet;
@@ -822,8 +874,10 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     log_debug("Parsed %zu CSS rules", stylesheet->rule_count);
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     clock_t end_time = clock();
     stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+#endif
 
     // Update engine statistics
     engine->stats.rules_parsed += stylesheet->rule_count;
@@ -854,6 +908,7 @@ void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* ru
 }
 
 void css_engine_print_stats(CssEngine* engine) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!engine) return;
 
     log_info("css engine stats: rules_parsed=%zu selectors_cached=%zu values_computed=%zu cascade_calcs=%zu",
@@ -865,6 +920,7 @@ void css_engine_print_stats(CssEngine* engine) {
              engine->features.css_nesting, engine->features.css_cascade_layers,
              engine->features.css_container_queries, engine->features.css_scope,
              engine->features.css_color_4);
+#endif
 }
 
 double css_engine_get_parse_time(CssEngine* engine) {

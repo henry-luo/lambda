@@ -97,6 +97,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_js_regex_router_poc_gtest \
 	test_js_coerce_gtest \
 	test_lambda_std_gtest \
+	test_io_terminal_gtest \
 	test_ts_gtest
 # test-input-baseline invokes these five binaries directly, so keep their
 # build separate from the full test aggregate and reusable by both targets.
@@ -652,6 +653,8 @@ help:
 	@echo "  release-jube  - Package the full hosted-language bundle (same host binary)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
+	@echo "  lambda-wasm   - Build the optimized browser evaluator and stateful REPL"
+	@echo "  test-wasm     - Verify the WASM embedding (ARGS=--browser for Chromium)"
 	@echo "  all           - Build all projects"
 	@echo ""
 	@echo "Maintenance:"
@@ -1585,9 +1588,15 @@ lambda: build
 all: lambda
 	@echo "All projects built successfully."
 
+.PHONY: lambda-wasm build-wasm test-wasm
+lambda-wasm: build-wasm
+
 build-wasm:
-	@echo "Building WebAssembly version..."
-	./compile-wasm.sh --linking-only
+	@echo "Building optimized browser WASM profile..."
+	$(PYTHON) utils/build_wasm.py --jobs $(JOBS)
+
+test-wasm:
+	node utils/test_wasm.mjs $(ARGS)
 
 # Clean targets
 clean:

@@ -84,8 +84,11 @@ fn _text_span(t) {
         'data-pdf-copy-space': _copy_space_attr(t), style: _text_span_style(t), _copy_content(t)>
 }
 
-pub fn text_layer(texts, width, height) {
-    let style = "width:" ++ width ++ "px;height:" ++ height ++ "px;";
+pub fn text_layer(texts, width, height, transform) {
+    let base = "width:" ++ width ++ "px;height:" ++ height ++ "px;"
+    let style = if (transform != null)
+        base ++ "transform:" ++ transform ++ ";transform-origin:0 0;overflow:visible;"
+        else base;
     <div class: "pdf-text-layer", style: style,
         for (t in texts) _text_span(t)
     >
@@ -99,11 +102,11 @@ pub fn page_div(svg_el, page_num: int) {
     >
 }
 
-pub fn page_div_with_text_layer(svg_el, texts, page_num: int) {
+pub fn page_div_with_text_layer(svg_el, texts, page_num: int, transform) {
     let page_style = "width: " ++ svg_el.width ++ "px;";
     <div class: "pdf-page", 'data-page': string(page_num), style: page_style,
         svg_el
-        text_layer(texts, svg_el.width, svg_el.height)
+        text_layer(texts, svg_el.width, svg_el.height, transform)
     >
 }
 

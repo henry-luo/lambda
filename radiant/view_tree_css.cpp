@@ -89,7 +89,8 @@ static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* nam
         style->inline_declarations, style->inline_count, name, result, style->pseudo_element);
 }
 
-static const CssValue* view_css_variable(void* context, const char* name) {
+static const CssValue* view_css_variable(void* context, DomElement*, const char* name, DomElement** owner) {
+    if (owner) *owner = nullptr;
     ViewVariableQuery* query = (ViewVariableQuery*)context;
     if (!name) return nullptr;
     ViewCssStyle* style = query->style;
@@ -114,7 +115,7 @@ static const CssValue* view_css_variable(void* context, const char* name) {
     } else if (style->parent) {
         // Inherited variables retain their declaration owner's computed environment.
         ViewVariableQuery parent = {query->tree, style->parent};
-        variable->value = view_css_variable(&parent, name);
+        variable->value = view_css_variable(&parent, nullptr, name, nullptr);
     }
     variable->status = variable->value ? 2 : 3;
     return variable->value;
