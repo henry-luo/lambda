@@ -1,7 +1,7 @@
 # Map Transition Coverage — Implementation Plan
 
 **Date:** 2026-10-06 (rev 2, same day: tree at construction; replay dropped)
-**Status:** IN PROGRESS — P0 and P1 implemented 2026-10-06 (see the phase notes); P1.5, P2–P4 to do. Q1–Q3 and Q5 ruled; Q4 open.
+**Status:** IN PROGRESS — P0, P1 and P2 implemented 2026-10-06, P1.5's instrumentation landed (see the phase notes); the P1.5 sweep, P3 and P4 to do. Q1–Q3 and Q5 ruled; Q4 open.
 **Design:** [Lambda_Design_Shape_Transitions.md](../Lambda_Design_Shape_Transitions.md) §2–§5 and Appendix B (the 2026-10-06 survey of paths outside the tree). **Rulings touched:** D3.4.3v4 → v5 (external parents: every map type can be the parent of a runtime-tree edge, and the parent is never written), D3.4.4v2 → v3 (a string key's identity is its spelling). D3.4.5 is unchanged: an incompatible write still rebuilds and repacks; only where the rebuilt type comes from changes. **Closes:** the D3.4.3v4 residue recorded in [LR03-38](<../Lambda_Issue_Ledger (fixed).md#lr03-38>) and Shape_Transitions §8.
 **Scope:** the four cases listed on 2026-10-06 — identity keys, spelling-keyed edges, the growth copy path, layout-changing writes — done by construction, so that no map is ever relaid out to join the tree. JavaScript objects, parser-side bounds and VMap/Velmt are out of scope except where one change serves both sides at no extra cost.
 
@@ -130,7 +130,11 @@ The 16-edge cap bounds a linear walk that table edges do not have, but more shar
 - **Decision rule**: the setting with the fewest fan-out declines that regresses neither time nor peak RSS beyond noise on every workload. If no cap wins on sharing but reaches the budget on the jq rows, raise the budget rather than keep the cap, and record both numbers. The outcome is written into §2.1, D3.4.3v5's footnote and Shape_Transitions §5.
 - Gates: the instrumentation changes no emission (MIR ratchet) and no output (Lambda baseline); the override is removed before P2.
 
+**Sweep status (2026-10-06):** the first sweep was stopped during the jq λ-VM rows, when `jq_bf_vm` read 181 s against the 122 s of the V1 runner table. Investigated before going on: it is the machine, not the code. A release build of `f5f18c058` (the V1 commit) measured 189 s the same hour, and interleaved runs of a shortened `jq_bf` input on both binaries gave equal user time (19.80 vs 20.01, 22.27 vs 22.48, 28.77 vs 29.90 s) and equal or lower peak RSS (349–371 vs 346 MB); load average was about 35 (two IDE indexers and other sessions' test runs), and one pair read 54 vs 110 s user for the same work. The stats counters cost nothing measurable (182.5 s without them). Counts are deterministic and can be gathered under load; the timing half of the decision needs a quiet machine, so the sweep is rerun when it is quiet.
+
 ### P2 — Retype edges (§2.4)
+
+**Implemented 2026-10-06.** `type_tree_retype_field` (input.cpp) mints the target as a copy of the parent's entries with the one field's lane replaced, so a `number` or union contract on another field survives (a replay through `type_tree_follow` would have reset every field to its TypeId's canonical type, which `map_rebuild_for_type_change` deliberately avoids); the target is keyed in the external table by the parent's fingerprint plus (field position, new type), repacked from offset 0 as the rebuild packs a private chain, and is an ordinary tree node afterwards. `map_rebuild_for_type_change` was split so its data move (`container_move_to_type`) serves both the private rebuild and the tree target. Contract admission's reification keeps the private rebuild, since it installs full field contracts. `TransitionTreeRetypeTest` (2) and the retype/flip cases added to `map_runtime_shape_tree.ls`, whose output matches the pre-P0 binary.
 
 - `lambda-eval.cpp`: in `fn_map_set`, before `map_rebuild_for_type_change`, the retype edge for plain Lambda maps, sharing P1's child minting with the one entry's lane replaced.
 - Tests: extend `map_runtime_shape_tree.ls` (the "retype" block) so two maps retyped alike share a type and a retyped sibling's reads are unchanged; forced-GC run of the same.

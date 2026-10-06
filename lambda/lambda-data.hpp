@@ -1024,6 +1024,13 @@ typedef struct TypeElmt : TypeMap {
     Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;
 
+// Whether `tm` has TypeElmt's layout, so its element fields may be read. Only an
+// element-kinded type is allocated that large; a plain TypeMap ends before
+// them, even when an element container carries it.
+static inline bool typemap_has_element_layout(const TypeMap* tm) {
+    return tm && tm->type_id == LMD_TYPE_ELEMENT;
+}
+
 // TypeMethod: entry in the method table of a TypeObject
 typedef struct TypeMethod {
     StrView* name;              // method name (interned)

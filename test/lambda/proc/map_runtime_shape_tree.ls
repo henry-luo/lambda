@@ -60,4 +60,25 @@ pn main() {
     var keys = ""
     for (k, v at small) { keys = keys ++ string(k) ++ " " }
     print("order: " ++ keys ++ "\n")
+
+    // Impl_Map_Transition_Coverage P2: two maps retyped the same way take one
+    // shared target, then grow on independently; a field that flips between
+    // kinds keeps every value, and its neighbours keep theirs
+    var r1 = {}
+    fill(r1, 3, 0)
+    var r2 = {}
+    fill(r2, 3, 100)
+    r1["k1"] = "one"
+    r2["k1"] = "uno"
+    r1["extra"] = 1.5
+    r2["extra"] = 2.5
+    print("retyped: " ++ format(r1, 'json') ++ " " ++ format(r2, 'json') ++ "\n")
+    var flip = {}
+    fill(flip, 3, 0)
+    flip["k1"] = "s"
+    flip["k1"] = 7
+    flip["k1"] = [1, 2]
+    flip["k1"] = 3.25
+    print("flip: " ++ format(flip, 'json') ++ " k0=" ++ string(flip["k0"]) ++
+        " k2=" ++ string(flip["k2"]) ++ "\n")
 }

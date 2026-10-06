@@ -2365,3 +2365,79 @@ TEST(TransitionTreeExternalParentTest, EqualShapesFromTwoDocumentsShareAChild) {
         LMD_TYPE_INT, nullptr), from_first);
     mem_pool_destroy(other_pool);
 }
+
+// ============================================================================
+// Retype edges (Impl_Map_Transition_Coverage P2, D3.4.5 through the tree): a
+// type-changing write takes one shared target per parent structure, keeps
+// every other field's exact contract, repacks the layout, and the target then
+// grows like any node.
+// ============================================================================
+
+TEST(TransitionTreeRetypeTest, RetypedParentsShareOneTarget) {
+    ExternalParentFixture f("test.tree.retype");
+    ASSERT_NE(f.tree, nullptr);
+    MarkBuilder builder(f.doc);
+    Item made = builder.map().put("a", (int64_t)1).put("b", (int64_t)2)
+        .put("c", (int64_t)3).final();
+    TypeMap* parent = (TypeMap*)made.map->type;
+    ASSERT_NE(parent, nullptr);
+    // give `a` a contract that is not its TypeId's canonical type, as a union
+    // or `number` field has: a retype elsewhere must keep it exactly
+    ShapeEntry* a = typemap_first_field(parent);
+    ShapeEntry* b = typemap_next_field(parent, a);
+    Type* custom = (Type*)pool_calloc(f.doc_pool, sizeof(Type));
+    ASSERT_NE(custom, nullptr);
+    *custom = *type_info[LMD_TYPE_INT].type;
+    shape_entry_set_type(a, custom);
+    TypeMapTransition* parent_edges = parent->transitions;
+
+    TypeMap* target = type_tree_retype_field(f.tree, parent, b, LMD_TYPE_STRING);
+    ASSERT_NE(target, nullptr);
+    EXPECT_TRUE(type_tree_owns(f.tree, target));
+    EXPECT_EQ(target->length, parent->length);
+    EXPECT_EQ(parent->transitions, parent_edges);  // the parent is never written
+    EXPECT_EQ(type_tree_retype_field(f.tree, parent, b, LMD_TYPE_STRING), target);
+    ShapeEntry* ta = typemap_first_field(target);
+    ShapeEntry* tb = typemap_next_field(target, ta);
+    ShapeEntry* tc = typemap_next_field(target, tb);
+    ASSERT_NE(tc, nullptr);
+    EXPECT_EQ(ta->type, custom);
+    EXPECT_EQ(tb->type, type_info[LMD_TYPE_STRING].type);
+    EXPECT_EQ(tc->type, typemap_next_field(parent, b)->type);
+    EXPECT_EQ(tb->byte_offset, ta->byte_offset + shape_entry_storage_size(ta));
+    EXPECT_EQ(tc->byte_offset, tb->byte_offset + shape_entry_storage_size(tb));
+    EXPECT_EQ(target->byte_size, tc->byte_offset + shape_entry_storage_size(tc));
+    // another value type, or another field, is another target
+    EXPECT_NE(type_tree_retype_field(f.tree, parent, b, LMD_TYPE_FLOAT), target);
+    EXPECT_NE(type_tree_retype_field(f.tree, parent, typemap_next_field(parent, b),
+        LMD_TYPE_STRING), target);
+    // the target grows through the tree like any node
+    TypeMap* grown = type_tree_add_map_field_chars(f.tree, target, "d", 1, LMD_TYPE_INT, nullptr);
+    ASSERT_NE(grown, nullptr);
+    EXPECT_EQ(type_tree_add_map_field_chars(f.tree, target, "d", 1, LMD_TYPE_INT, nullptr), grown);
+    EXPECT_EQ(grown->length, target->length + 1);
+}
+
+TEST(TransitionTreeRetypeTest, EqualShapesFromTwoDocumentsShareATarget) {
+    ExternalParentFixture f("test.tree.retype.structural");
+    ASSERT_NE(f.tree, nullptr);
+    MarkBuilder first_builder(f.doc);
+    Item first = first_builder.map().put("a", (int64_t)1).put("b", (int64_t)2).final();
+    Pool* other_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.retype.other");
+    ASSERT_NE(other_pool, nullptr);
+    Input* other = Input::create(other_pool, nullptr);
+    ASSERT_NE(other, nullptr);
+    MarkBuilder other_builder(other);
+    Item second = other_builder.map().put("a", (int64_t)5).put("b", (int64_t)6).final();
+    TypeMap* first_type = (TypeMap*)first.map->type;
+    TypeMap* second_type = (TypeMap*)second.map->type;
+    TypeMap* t1 = type_tree_retype_field(f.tree, first_type,
+        typemap_next_field(first_type, typemap_first_field(first_type)), LMD_TYPE_STRING);
+    TypeMap* t2 = type_tree_retype_field(f.tree, second_type,
+        typemap_next_field(second_type, typemap_first_field(second_type)), LMD_TYPE_STRING);
+    ASSERT_NE(t1, nullptr);
+    EXPECT_EQ(t2, t1);
+    f.release_doc();
+    EXPECT_TRUE(field_named(typemap_first_field(t1), "a"));
+    mem_pool_destroy(other_pool);
+}
