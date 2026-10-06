@@ -7257,21 +7257,10 @@ ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bo
     bounds.right = ceilf(bounds.right); bounds.bottom = ceilf(bounds.bottom);
     DomDocument* doc = subscene->ui_context ? subscene->ui_context->document : nullptr;
     MemContext* memory = doc ? (MemContext*)doc->services.mem_ctx : nullptr;
-    // D4.2.6: the shared surface allocator checks physical extents and coordinator pressure before casts.
-    ImageSurface* surface = render_surface_create_budgeted(memory, bounds.right - bounds.left, bounds.bottom - bounds.top);
-    if (surface && dl_validate_or_log(&dl, "svg_export_snapshot")) {
-        RdtVector vec = {}; rdt_vector_init(&vec, (uint32_t*)surface->pixels, surface->width, surface->height, surface->width);
-        ScratchArena scratch = {}; mem_scratch_init(memory, &scratch, arenas.scratch_arena,
-            MEM_ROLE_RENDER, "render.svg.export.replay");
-        dl_replay_tile(&dl, &vec, surface, &scratch, bounds.left, bounds.top,
-            (float)surface->width, (float)surface->height, scale);
-        rdt_vector_flush_batch(&vec); rdt_vector_destroy(&vec); scratch_release(&scratch);
-        // PNG/PDF image payloads use straight channels; vector replay writes premultiplied ABGR.
-        for (size_t i = 0, count = (size_t)surface->width * (size_t)surface->height; i < count; i++)
-            ((uint32_t*)surface->pixels)[i] = render_pixel_unpremultiply_abgr(((uint32_t*)surface->pixels)[i]);
-        surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
+    ImageSurface* surface = render_display_list_snapshot(&dl, memory, bounds, scale);
+    if (surface) {
         *logical_bounds = {bounds.left / scale, bounds.top / scale, bounds.right / scale, bounds.bottom / scale};
-    } else if (surface) { image_surface_destroy(surface); surface = nullptr; }
+    }
     dl_destroy(&dl); arenas.destroy();
     return surface;
 }
@@ -7790,7 +7779,7 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
     bool viewport_clip = !overflow || strcmp(overflow, "visible") != 0;
     // visible SVG ink may extend beyond a viewport that lies outside the paint clip.
     if (viewport_clip && !rdcon->has_transform &&
-        !(view->transform && view->transformp()->functions) &&
+        !transform_has_functions(view->transform) &&
         !view_geometry_bounds_intersect(view_geometry_rect_to_bound(content_rect), rdcon->block.clip)) return;
 
     Element* svg_elem = dom_element_to_element(dom_elem);

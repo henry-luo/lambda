@@ -71,7 +71,7 @@ static RdtMatrix4 matrix4_from_rotate3d(float x, float y, float z,
     return matrix;
 }
 
-static RdtMatrix4 transform_function_matrix_3d(TransformFunction* function,
+static RdtMatrix4 transform_function_matrix_3d(const TransformFunction* function,
                                                float width, float height) {
     RdtMatrix4 matrix = rdt_matrix4_identity();
     if (!function) return matrix;
@@ -170,17 +170,41 @@ static RdtMatrix4 transform_function_matrix_3d(TransformFunction* function,
     return matrix;
 }
 
-RdtMatrix4 compute_transform_matrix_3d(TransformFunction* functions,
-                                       float width, float height,
-                                       float origin_x, float origin_y,
-                                       float origin_z) {
+static RdtMatrix4 compose_transform_matrix_3d(TransformFunction* functions,
+                                             const TransformFunction* individual,
+                                             float width, float height,
+                                             float origin_x, float origin_y,
+                                             float origin_z) {
     RdtMatrix4 result = rdt_matrix4_translate(origin_x, origin_y, origin_z);
+    // individual properties precede the transform list inside the same origin pair.
+    if (individual) {
+        for (int i = 0; i < 3; i++) {
+            RdtMatrix4 local = transform_function_matrix_3d(&individual[i], width, height);
+            result = rdt_matrix4_multiply(&result, &local);
+        }
+    }
     for (TransformFunction* function = functions; function; function = function->next) {
         RdtMatrix4 local = transform_function_matrix_3d(function, width, height);
         result = rdt_matrix4_multiply(&result, &local);
     }
     RdtMatrix4 to_origin = rdt_matrix4_translate(-origin_x, -origin_y, -origin_z);
     return rdt_matrix4_multiply(&result, &to_origin);
+}
+
+RdtMatrix4 compute_transform_matrix_3d(TransformFunction* functions,
+                                       float width, float height,
+                                       float origin_x, float origin_y,
+                                       float origin_z) {
+    return compose_transform_matrix_3d(functions, nullptr, width, height,
+                                      origin_x, origin_y, origin_z);
+}
+
+RdtMatrix4 compute_transform_matrix_3d(const TransformProp* transform,
+                                       float width, float height,
+                                       float origin_x, float origin_y,
+                                       float origin_z) {
+    return compose_transform_matrix_3d(transform ? transform->functions.get() : nullptr,
+        transform ? transform->individual : nullptr, width, height, origin_x, origin_y, origin_z);
 }
 
 static RdtMatrix matrix4_project_to_2d(const RdtMatrix4* matrix) {
@@ -208,6 +232,14 @@ RdtMatrix4 compute_parent_perspective_matrix_3d(float distance,
     return rdt_matrix4_multiply(&result, &to_origin);
 }
 
+static RdtMatrix project_transform_matrix(RdtMatrix4 matrix, float perspective_distance,
+                                          float perspective_origin_x, float perspective_origin_y) {
+    RdtMatrix4 perspective = compute_parent_perspective_matrix_3d(
+        perspective_distance, perspective_origin_x, perspective_origin_y);
+    matrix = rdt_matrix4_multiply(&perspective, &matrix);
+    return matrix4_project_to_2d(&matrix);
+}
+
 RdtMatrix compute_transform_matrix(TransformFunction* functions,
                                    float width, float height,
                                    float origin_x, float origin_y,
@@ -215,16 +247,25 @@ RdtMatrix compute_transform_matrix(TransformFunction* functions,
                                    float perspective_origin_x,
                                    float perspective_origin_y) {
     if (!functions) return rdt_matrix_identity();
-    RdtMatrix4 matrix = compute_transform_matrix_3d(
-        functions, width, height, origin_x, origin_y);
-    RdtMatrix4 perspective = compute_parent_perspective_matrix_3d(
-        perspective_distance, perspective_origin_x, perspective_origin_y);
-    matrix = rdt_matrix4_multiply(&perspective, &matrix);
-    return matrix4_project_to_2d(&matrix);
+    return project_transform_matrix(compute_transform_matrix_3d(
+        functions, width, height, origin_x, origin_y), perspective_distance,
+        perspective_origin_x, perspective_origin_y);
+}
+
+RdtMatrix compute_transform_matrix(const TransformProp* transform,
+                                   float width, float height,
+                                   float origin_x, float origin_y,
+                                   float perspective_distance,
+                                   float perspective_origin_x,
+                                   float perspective_origin_y) {
+    if (!transform_has_functions(transform)) return rdt_matrix_identity();
+    return project_transform_matrix(compute_transform_matrix_3d(
+        transform, width, height, origin_x, origin_y, transform->origin_z), perspective_distance,
+        perspective_origin_x, perspective_origin_y);
 }
 
 bool has_transform(DomElement* elem) {
-    return elem && elem->transform && elem->transformp()->functions;
+    return elem && transform_has_functions(elem->transform);
 }
 
 void transform_point(float& x, float& y, const RdtMatrix& m) {

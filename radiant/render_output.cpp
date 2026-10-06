@@ -1,6 +1,8 @@
 #include "render.hpp"
 #include "../lib/base64.h"
 #include "layout.hpp"
+#include "layout_paged.hpp"
+#include "render_glyph_run_raster_lower.hpp"
 #include "event.hpp"
 
 #include "../lib/tagged.hpp"
@@ -16,6 +18,7 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
@@ -181,13 +184,21 @@ static bool render_export_session_begin_internal(
         RenderExportSession* session,
         int viewport_width, int viewport_height,
         int fallback_width, int fallback_height, float output_scale,
-        float device_scale, bool raster_surface, bool print_media,
+        float device_scale, bool raster_surface, bool print_media, bool paged,
         RenderExportDocumentLoader loader, void* request) {
     if (!session || !loader) return false;
     memset(session, 0, sizeof(*session));
 
     bool auto_width = viewport_width == 0;
     bool auto_height = viewport_height == 0;
+    ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+    if (paged) {
+        // The loader takes whole-pixel viewport extents; the secondary layout retains exact A4 geometry.
+        fallback_width = (int)ceilf(environment.viewport_width); // INT_CAST_OK: legacy loader viewport argument, bounded A4 extent.
+        fallback_height = (int)ceilf(environment.viewport_height); // INT_CAST_OK: legacy loader viewport argument, bounded A4 extent.
+        if (viewport_width > 0) environment.viewport_width = (float)viewport_width;
+        if (viewport_height > 0) environment.viewport_height = (float)viewport_height;
+    }
     int layout_width = viewport_width > 0 ? viewport_width : fallback_width;
     int layout_height = viewport_height > 0 ? viewport_height : fallback_height;
     session->output_scale = output_scale > 0.0f ? output_scale : 1.0f;
@@ -197,7 +208,7 @@ static bool render_export_session_begin_internal(
     session->viewport_height = viewport_height;
     session->auto_width = auto_width;
     session->auto_height = auto_height;
-    session->print_media = print_media;
+    session->print_media = print_media || paged;
 
     session->ui_context = lam::own((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
@@ -242,6 +253,25 @@ static bool render_export_session_begin_internal(
     ui_context_sync_document_raster_scale(session->ui_context,
                                           session->document);
     process_document_font_faces(session->ui_context, session->document);
+    if (paged) {
+        // The settled shared DOM owns this output view; no embedded geometry is overwritten.
+        session->paged_view = lam::up(view_tree_secondary_create(session->document, &environment));
+        PagedLayoutOptions options = paged_layout_options_default();
+        PagedLayoutDiagnostic diagnostic = {};
+        TypesetStatus status = session->paged_view
+            ? layout_secondary_view(session->paged_view, &options, &diagnostic) : TYPESET_OUT_OF_MEMORY;
+        if (status != TYPESET_OK) {
+            const char* reason = diagnostic.reason ? diagnostic.reason : "secondary view initialization failed";
+            log_error("[EXPORT_PAGED] Composition failed: status=%u source=%llu page=%u reason=%s",
+                (unsigned)status, (unsigned long long)diagnostic.source.expected_id, diagnostic.page_number,
+                reason);
+            // Export errors are user output and remain visible when diagnostic logging is disabled.
+            fputs("Error: paged layout: ", stderr); fputs(reason, stderr); fputc('\n', stderr);
+            render_export_session_end(session);
+            return false;
+        }
+        return true;
+    }
     layout_html_doc(session->ui_context, session->document, false);
 
     session->content_width = layout_width;
@@ -268,11 +298,11 @@ static bool render_export_session_begin_internal(
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media) {
+                                 bool print_media, bool paged) {
     RenderExportHtmlRequest request = {html_file};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
-        output_scale, 1.0f, false, print_media,
+        output_scale, 1.0f, false, print_media, paged,
         render_export_load_html_document, &request);
 }
 
@@ -283,18 +313,18 @@ bool render_export_session_begin_raster(RenderExportSession* session,
     RenderExportHtmlRequest request = {html_file};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, 1200, 800, output_scale,
-        device_scale, true, false, render_export_load_html_document, &request);
+        device_scale, true, false, false, render_export_load_html_document, &request);
 }
 
 bool render_export_session_begin_document_transform(RenderExportSession* session,
         const char* document_file, const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         int viewport_width, int viewport_height, int fallback_width,
-        int fallback_height, float output_scale, float device_scale, bool raster_surface) {
+        int fallback_height, float output_scale, float device_scale, bool raster_surface, bool paged) {
     RenderExportTransformRequest request = {document_file, transform, options, option_count};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height, output_scale,
-        device_scale, raster_surface, false,
+        device_scale, raster_surface, false, paged,
         render_export_load_transform_document, &request);
 }
 
@@ -309,6 +339,7 @@ void render_export_session_end(RenderExportSession* session) {
         lam::free_owned(session->ui_context);
     }
     session->document = nullptr;
+    session->paged_view = nullptr;
 }
 
 static const char* render_output_path_trace_target(RenderOutputKind kind) {
@@ -458,6 +489,68 @@ static void render_output_render_view_tree(RasterRenderContext* rdcon, ViewTree*
     }
 
     render_raster_view_tree(rdcon, view_tree);
+}
+
+ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory,
+        Bound physical_bounds, float raster_scale, Color backdrop) {
+    if (!list || !isfinite(raster_scale) || raster_scale <= 0.0f ||
+        !isfinite(physical_bounds.left) || !isfinite(physical_bounds.top) ||
+        !isfinite(physical_bounds.right) || !isfinite(physical_bounds.bottom) ||
+        !dl_validate_or_log(list, "render_display_list_snapshot")) return nullptr;
+    ImageSurface* surface = render_surface_create_budgeted(memory,
+        physical_bounds.right - physical_bounds.left, physical_bounds.bottom - physical_bounds.top);
+    if (!surface) return nullptr;
+    RasterPaintContext raster = raster_paint_context(surface, nullptr, nullptr, 0);
+    raster_fill_rect(&raster, nullptr, render_pixel_premultiply_abgr(backdrop.c));
+    RdtVector vec = {};
+    rdt_vector_init(&vec, (uint32_t*)surface->pixels, surface->width, surface->height, surface->width);
+    ScratchArena scratch = {};
+    mem_scratch_init(memory, &scratch, nullptr, MEM_ROLE_RENDER, "render.snapshot.replay");
+    dl_replay_tile(list, &vec, surface, &scratch, physical_bounds.left, physical_bounds.top,
+        (float)surface->width, (float)surface->height, raster_scale);
+    rdt_vector_flush_batch(&vec); rdt_vector_destroy(&vec); scratch_release(&scratch);
+    // encoders and snapshot callers consume straight channels; vector replay writes premultiplied ABGR.
+    for (size_t i = 0, count = (size_t)surface->width * (size_t)surface->height; i < count; i++)
+        ((uint32_t*)surface->pixels)[i] = render_pixel_unpremultiply_abgr(((uint32_t*)surface->pixels)[i]);
+    surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
+    return surface;
+}
+
+ImageSurface* render_secondary_view_snapshot(ViewTree* tree, float raster_scale, Color backdrop) {
+    if (!view_tree_model_source_valid(tree) || !tree->model->committed ||
+        !isfinite(raster_scale) || raster_scale <= 0.0f) return nullptr;
+    PaintList paint = {}; paint_list_init(&paint, nullptr);
+    DisplayList list = {}; dl_init(&list, nullptr);
+    ImageSurface* surface = nullptr;
+    // display-list replay consumes physical coordinates; apply output density once before lowering.
+    RdtMatrix density = rdt_matrix_scale(raster_scale, raster_scale);
+    paint_push_transform(&paint, &density);
+    bool painted = layout_secondary_paint_root(tree, &paint);
+    paint_pop_transform(&paint);
+    if (painted && paint_ir_validate_or_log(&paint, "secondary snapshot")) {
+        paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+        paint_ir_lower_raster(&paint, &list);
+        RdtLogicalRect bounds = tree->model->root->rect;
+        MemContext* memory = (MemContext*)tree->model->document->services.mem_ctx;
+        surface = render_display_list_snapshot(&list, memory,
+            {bounds.x * raster_scale, bounds.y * raster_scale,
+             (bounds.x + bounds.width) * raster_scale, (bounds.y + bounds.height) * raster_scale},
+            raster_scale, backdrop);
+    }
+    dl_destroy(&list); paint_list_destroy(&paint);
+    return surface;
+}
+
+bool render_secondary_view_to_png(ViewTree* tree, const char* filename, float raster_scale, Color backdrop) {
+    if (!filename) return false;
+    ImageSurface* surface = render_secondary_view_snapshot(tree, raster_scale, backdrop);
+    if (!surface) return false;
+    StrBuf* png = render_encode_surface_png(surface);
+    image_surface_destroy(surface);
+    if (!png) return false;
+    bool written = write_binary_file(filename, png->str, png->length) == 0;
+    strbuf_free(png);
+    return written;
 }
 
 static RenderOutputReplayResult render_output_replay_display_list(RasterRenderContext* rdcon,
@@ -685,6 +778,10 @@ static int render_output_render_html_file_to_target(const char* html_file,
         log_error("render_output_render_html_file_to_target: invalid file render job");
         return 1;
     }
+    if (target->paged && target->kind != RENDER_OUTPUT_PDF) {
+        log_error("[EXPORT_PAGED] Paged file output currently requires a PDF target");
+        return 1;
+    }
 
     float output_scale = target->output_scale > 0 ? target->output_scale : 1.0f;
     float device_scale = target->device_scale > 0 ? target->device_scale : 1.0f;
@@ -707,7 +804,7 @@ static int render_output_render_html_file_to_target(const char* html_file,
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_html_to_pdf(html_file, target->output_file,
-                                      viewport_width, viewport_height, output_scale);
+                                      viewport_width, viewport_height, output_scale, target->paged);
         case RENDER_OUTPUT_SVG:
             return render_html_to_svg(html_file, target->output_file,
                                       viewport_width, viewport_height, output_scale);
@@ -736,6 +833,10 @@ static int render_output_render_document_transform_to_target(const char* documen
         log_error("render document transform: invalid export job");
         return 1;
     }
+    if (target->paged && target->kind != RENDER_OUTPUT_PDF) {
+        log_error("[EXPORT_PAGED] Paged transformed output currently requires a PDF target");
+        return 1;
+    }
 
     float output_scale = target->output_scale > 0 ? target->output_scale : 1.0f;
     float device_scale = target->device_scale > 0 ? target->device_scale : 1.0f;
@@ -744,7 +845,7 @@ static int render_output_render_document_transform_to_target(const char* documen
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_document_transform_to_pdf(document_file, transform, options,
-                option_count, target->output_file, viewport_width, viewport_height, output_scale);
+                option_count, target->output_file, viewport_width, viewport_height, output_scale, target->paged);
         case RENDER_OUTPUT_SVG:
             return render_document_transform_to_svg(document_file, transform, options,
                 option_count, target->output_file, viewport_width, viewport_height, output_scale);
@@ -770,7 +871,7 @@ static int render_output_render_document_transform_to_target(const char* documen
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
                                  float output_scale, float device_scale,
-                                 int jpeg_quality) {
+                                 int jpeg_quality, bool paged) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.viewport_width = viewport_width;
@@ -778,6 +879,7 @@ int render_html_to_output_target(const char* html_file, const char* output_file,
     target.output_scale = output_scale;
     target.device_scale = device_scale;
     target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
+    target.paged = paged;
     return render_output_render_html_file_to_target(html_file, &target);
 }
 
@@ -785,7 +887,7 @@ int render_document_transform_to_output_target(const char* document_file,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         const char* output_file, int viewport_width, int viewport_height,
-        float output_scale, float device_scale, int jpeg_quality) {
+        float output_scale, float device_scale, int jpeg_quality, bool paged) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.viewport_width = viewport_width;
@@ -793,6 +895,7 @@ int render_document_transform_to_output_target(const char* document_file,
     target.output_scale = output_scale;
     target.device_scale = device_scale;
     target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
+    target.paged = paged;
     return render_output_render_document_transform_to_target(document_file, transform, options,
         option_count, &target);
 }

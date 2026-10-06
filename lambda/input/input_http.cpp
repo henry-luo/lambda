@@ -3,6 +3,7 @@
 // Handles downloading files to cache and returning Input*
 
 #include <curl/curl.h>
+#include "../network/curl_trust.h"
 #include <string.h>
 #include <stdio.h>
 #include "../../lib/mem.h"
@@ -176,6 +177,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     if (config ? config->verify_ssl : default_http_config.verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+        curl_use_host_trust_store(curl);
     } else {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
@@ -575,6 +577,7 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     if (verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+        curl_use_host_trust_store(curl);
     } else {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);

@@ -84,12 +84,14 @@ typedef enum RuntimeResourceKind {
     RUNTIME_RESOURCE_CHILD_PROCESS,
     RUNTIME_RESOURCE_SPAWN_PROCESS,
     RUNTIME_RESOURCE_PROCESS_IPC,
+    RUNTIME_RESOURCE_RDB_CONNECTION,
 } RuntimeResourceKind;
 
 typedef enum RuntimeResourceGroup {
     RUNTIME_RESOURCE_GROUP_NONE = 0,
     RUNTIME_RESOURCE_GROUP_NETWORK,
     RUNTIME_RESOURCE_GROUP_CRYPTO,
+    RUNTIME_RESOURCE_GROUP_DATABASE,
 } RuntimeResourceGroup;
 
 typedef struct RuntimeResourceDescriptor {
@@ -178,6 +180,11 @@ uint32_t runtime_resource_table_add_root_span_owned(RuntimeResourceTable* table,
     const RuntimeResourceDescriptor* descriptor,
     RuntimeResourceCloseCallback close_callback, void* close_user,
     bool is_handle);
+// A host-owned native row with no script-visible owner (JA16.2): an RDB
+// connection borrowed for one call. Teardown still runs its close callback.
+uint32_t runtime_resource_table_add_native_owned(RuntimeResourceTable* table,
+    void* lifecycle_owner, const RuntimeResourceDescriptor* descriptor,
+    RuntimeResourceCloseCallback close_callback, void* close_user);
 void runtime_resource_table_remove(RuntimeResourceTable* table, uint32_t id);
 void runtime_resource_table_remove_owned(RuntimeResourceTable* table,
     void* lifecycle_owner, uint32_t id);

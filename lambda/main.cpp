@@ -3593,6 +3593,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  -vh, --viewport-height   Viewport height in CSS pixels (default: auto-size to content)\n");
             printf("  -s, --scale              Raster export density (default: 1.0; does not change layout)\n");
             printf("  --pixel-ratio            Device scale for HiDPI/Retina (default: 1.0; legacy option spelling)\n");
+            printf("  --paged                  Experimental HTML/Lambda paged PDF; CSS @page size or A4 fallback\n");
             printf("  --theme <name>           Color theme for graph diagrams (default: zinc-dark)\n");
             printf("                           Dark: tokyo-night, nord, dracula, catppuccin-mocha, one-dark, github-dark\n");
             printf("                           Light: github-light, solarized-light, catppuccin-latte, zinc-light\n");
@@ -3603,6 +3604,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  %s render document.pdf -o output.svg      # Render PDF through Lambda PDF package\n", argv[0]);
             printf("  %s render script.ls -o output.pdf         # Render Lambda script result\n", argv[0]);
             printf("  %s render index.html -o output.pdf        # Auto-size to content\n", argv[0]);
+            printf("  %s render book.html --paged -o book.pdf   # Physical pages from print CSS\n", argv[0]);
             printf("  %s render index.html -o output.png        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.jpg        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport size\n", argv[0]);
@@ -3622,6 +3624,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         float device_scale = 1.0f;  // device pixels per logical pixel
         const char* theme_name = NULL;  // Graph theme name
         const char* graph_view_key = NULL;
+        bool paged = false;
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -3679,6 +3682,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     printf("Error: --pixel-ratio option requires a value\n");
                     return lambda_main_finish(1);
                 }
+            } else if (strcmp(argv[i], "--paged") == 0) {
+                paged = true;
             } else if (strcmp(argv[i], "--theme") == 0 || strcmp(argv[i], "-t") == 0) {
                 if (i + 1 < argc) {
                     theme_name = argv[++i];
@@ -3765,6 +3770,13 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
 
         const char* output_ext = file_path_ext(output_file);
+        if (paged && (!output_ext || strcmp(output_ext, ".pdf") != 0 ||
+                !input_ext || (strcmp(input_ext, ".html") != 0 && strcmp(input_ext, ".htm") != 0 &&
+                               strcmp(input_ext, ".ls") != 0))) {
+            log_error("[EXPORT_PAGED] --paged currently requires HTML or Lambda input and PDF output");
+            fputs("Error: --paged currently requires HTML or Lambda input and PDF output\n", stderr);
+            return lambda_main_finish(1);
+        }
         if (input_ext && strcmp(input_ext, ".pdf") == 0) {
             if (output_ext && strcmp(output_ext, ".pdf") == 0) {
                 FileCopyOptions copy_opts = { true, false };
@@ -3795,9 +3807,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             exit_code = render_transform
                 ? render_document_transform_to_output_target(html_file, render_transform,
                     render_options, render_option_count, output_file, viewport_width,
-                    viewport_height, output_scale, device_scale, 85)
+                    viewport_height, output_scale, device_scale, 85, paged)
                 : render_html_to_output_target(html_file, output_file,
-                    viewport_width, viewport_height, output_scale, device_scale, 85);
+                    viewport_width, viewport_height, output_scale, device_scale, 85, paged);
         }
         else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");

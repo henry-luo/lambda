@@ -4,7 +4,7 @@
 #include "../lib/str.h"
 #include <string.h>
 
-static bool css_content_value_has_image_url(const CssValue* value) {
+bool css_content_value_has_image_url(const CssValue* value) {
     if (!value) return false;
     if (value->type == CSS_VALUE_TYPE_URL) return true;
     if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&

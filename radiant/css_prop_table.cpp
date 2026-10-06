@@ -2,6 +2,7 @@
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
+#include "../lib/math_utils.h"
 
 #include <assert.h>
 #include <math.h>
@@ -441,17 +442,6 @@ static const CssValue* cssom_lookup_custom_property(DomElement* element,
     return nullptr;
 }
 
-static const char* cssom_identifier_name(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
-    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    return nullptr;
-}
-
 static const CssValue* cssom_resolve_font_size_var(DomElement* element,
                                                     const CssValue* value,
                                                     int depth) {
@@ -466,7 +456,7 @@ static const CssValue* cssom_resolve_font_size_var(DomElement* element,
                strcmp(value->data.function->name, "var") == 0) {
         CssFunction* function = value->data.function;
         if (function->arg_count > 0 && function->args) {
-            name = cssom_identifier_name(function->args[0]);
+            name = css_value_identifier_name(function->args[0]);
         }
         if (function->arg_count > 1 && function->args) fallback = function->args[1];
     } else {
@@ -953,6 +943,58 @@ static const char* scroll_snap_axis_name(ScrollSnapAxis axis) {
     }
 }
 
+static bool serialize_individual_transform(const CssPropAccessor* accessor,
+    DomElement* element, int, char* out, size_t out_size) {
+    int index = css_individual_transform_index(accessor->id);
+    const TransformFunction* function = element && element->transform
+        ? &element->transformp()->individual[index] : nullptr;
+    if (!function || function->type == TRANSFORM_NONE) return copy_text(out, out_size, "none");
+    if (accessor->id == CSS_PROPERTY_TRANSLATE) {
+        bool three_d = function->type == TRANSFORM_TRANSLATE3D;
+        float x = three_d ? function->params.translate3d.x : function->params.translate.x;
+        float y = three_d ? function->params.translate3d.y : function->params.translate.y;
+        float z = three_d ? function->params.translate3d.z : 0.0f;
+        char components[3][64];
+        bool x_percent = !isnan(function->translate_x_percent);
+        bool y_percent = !isnan(function->translate_y_percent);
+        format_number(components[0], sizeof(components[0]),
+            x_percent ? function->translate_x_percent : x, x_percent ? "%" : "px");
+        format_number(components[1], sizeof(components[1]),
+            y_percent ? function->translate_y_percent : y, y_percent ? "%" : "px");
+        format_number(components[2], sizeof(components[2]), z, "px");
+        if (z != 0.0f) snprintf(out, out_size, "%s %s %s", components[0], components[1], components[2]);
+        else if (y != 0.0f || y_percent) snprintf(out, out_size, "%s %s", components[0], components[1]);
+        else return copy_text(out, out_size, components[0]);
+    } else if (accessor->id == CSS_PROPERTY_SCALE) {
+        bool three_d = function->type == TRANSFORM_SCALE3D;
+        float x = three_d ? function->params.scale3d.x : function->params.scale.x;
+        float y = three_d ? function->params.scale3d.y : function->params.scale.y;
+        float z = three_d ? function->params.scale3d.z : 1.0f;
+        if (z != 1.0f) snprintf(out, out_size, "%.6g %.6g %.6g", x, y, z);
+        else if (x != y) snprintf(out, out_size, "%.6g %.6g", x, y);
+        else return format_number(out, out_size, x, "");
+    } else {
+        bool three_d = function->type == TRANSFORM_ROTATE3D;
+        float angle = (float)math_radians_to_degrees_d(three_d
+            ? function->params.rotate3d.angle : function->params.angle);
+        if (!three_d || (function->params.rotate3d.x == 0.0f &&
+            function->params.rotate3d.y == 0.0f && function->params.rotate3d.z > 0.0f)) {
+            return format_number(out, out_size, angle, "deg");
+        }
+        if (function->params.rotate3d.z == 0.0f &&
+            ((function->params.rotate3d.x != 0.0f && function->params.rotate3d.y == 0.0f) ||
+             (function->params.rotate3d.y != 0.0f && function->params.rotate3d.x == 0.0f))) {
+            bool x_axis = function->params.rotate3d.x != 0.0f;
+            float axis = x_axis ? function->params.rotate3d.x : function->params.rotate3d.y;
+            snprintf(out, out_size, "%s %.6gdeg", x_axis ? "x" : "y", axis < 0.0f ? -angle : angle);
+            return true;
+        }
+        snprintf(out, out_size, "%.6g %.6g %.6g %.6gdeg", function->params.rotate3d.x,
+            function->params.rotate3d.y, function->params.rotate3d.z, angle);
+    }
+    return true;
+}
+
 static bool serialize_scroll_snap(const CssPropAccessor* accessor,
                                   DomElement* element, int pseudo_type,
                                   char* out, size_t out_size) {
@@ -1092,6 +1134,9 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DECL_ROW(CSS_PROPERTY_BORDER_BOTTOM_COLOR),
     DECL_ROW(CSS_PROPERTY_BORDER_LEFT_COLOR),
     DECL_ROW(CSS_PROPERTY_TRANSFORM),
+    DERIVED_ROW(CSS_PROPERTY_TRANSLATE, serialize_individual_transform, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_ROTATE, serialize_individual_transform, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_SCALE, serialize_individual_transform, CSS_PROP_ACCESSOR_USED_VALUE),
     DECL_ROW(CSS_PROPERTY_FILTER),
     DECL_ROW(CSS_PROPERTY_ANIMATION_DURATION),
     DECL_ROW(CSS_PROPERTY_ANIMATION_DELAY),
@@ -1137,7 +1182,9 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     bool missing_used_value_snapshot = needs_used_value &&
         (!element->doc->view_tree || !element->doc->view_tree->root);
     bool dirty = missing_used_value_snapshot || element->layout_dirty;
-    for (DomNode* node = element; node && !dirty; node = node->parent) {
+    // the Range/Selection document stub above doc->root never participates in CSS resolution.
+    for (DomNode* node = element; node && !dirty;
+         node = node == element->doc->root ? nullptr : node->parent.get()) {
         if (node->layout_dirty || (node->is_element() &&
             (!node->as_element()->styles_resolved() ||
              node->as_element()->needs_style_recompute()))) dirty = true;

@@ -9,6 +9,100 @@ extern "C" {
 }
 #include "css_value.hpp"
 #include "css_style.hpp"
+#include "../../../lib/strbuf.h"
+
+bool css_value_keyword_equals(const CssValue* value, CssEnum keyword) {
+    return value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == keyword;
+}
+
+bool css_function_name_is(const CssFunction* function, const char* name) {
+    return function && function->name && name && str_ieq_cstr(function->name, name);
+}
+
+bool css_value_is_inherit(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_INHERIT); }
+bool css_value_is_initial(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_INITIAL); }
+bool css_value_is_unset(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_UNSET); }
+bool css_value_is_auto(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_AUTO); }
+bool css_value_is_none(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_NONE); }
+
+int css_content_quote_type(const CssValue* value) {
+    if (!value || (value->type != CSS_VALUE_TYPE_CUSTOM && value->type != CSS_VALUE_TYPE_KEYWORD)) return 0;
+    const char* name = css_value_identifier_name(value);
+    const char* names[] = {"open-quote", "close-quote", "no-open-quote", "no-close-quote"};
+    for (int i = 0; name && i < 4; i++) if (str_ieq_cstr(name, names[i])) return i + 1;
+    return 0;
+}
+
+const char* css_content_quote_char(const CssValue* quotes, bool open, int depth) {
+    if (depth < 0) depth = 0;
+    if (css_value_is_none(quotes)) return "";
+    if (quotes && quotes->type == CSS_VALUE_TYPE_LIST && quotes->data.list.count >= 2) {
+        int pairs = quotes->data.list.count / 2;
+        int pair = depth < pairs ? depth : pairs - 1;
+        const CssValue* item = quotes->data.list.values[pair * 2 + (open ? 0 : 1)];
+        if (item && item->type == CSS_VALUE_TYPE_STRING) return item->data.string;
+    }
+    if (quotes && quotes->type == CSS_VALUE_TYPE_STRING) return quotes->data.string;
+    return open ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
+}
+
+const char* css_content_attribute_name(const CssValue* value, const char** type) {
+    if (type) *type = nullptr;
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_ATTR && value->data.attr_ref) {
+        if (type) *type = value->data.attr_ref->type_or_unit;
+        return value->data.attr_ref->name;
+    }
+    const CssFunction* function = value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    if (!css_function_name_is(function, "attr") || function->arg_count < 1 || function->arg_count > 2) return nullptr;
+    const CssValue* name = function->args[0];
+    // attr(name type) is one space-separated argument, followed by an optional comma fallback.
+    if (name && name->type == CSS_VALUE_TYPE_LIST) {
+        if (name->data.list.comma_separated || name->data.list.count < 1 || name->data.list.count > 2) return nullptr;
+        if (name->data.list.count == 2) {
+            const char* hint = css_value_identifier_name(name->data.list.values[1]);
+            if (!hint) return nullptr;
+            if (type) *type = hint;
+        }
+        name = name->data.list.values[0];
+    }
+    return css_value_identifier_name(name);
+}
+
+bool css_content_append(const CssValue* value, const CssContentBindings* bindings,
+                        int* quote_depth, StrBuf* text, size_t depth) {
+    if (!value || !bindings || !quote_depth || !text || depth > 64) return false;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++)
+            if (!css_content_append(value->data.list.values[i], bindings, quote_depth, text, depth + 1)) return false;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_STRING) {
+        if (value->data.string) strbuf_append_str(text, value->data.string);
+        return true;
+    }
+    const char* attribute = css_content_attribute_name(value);
+    const CssFunction* function = value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    if (attribute) {
+        const char* result = bindings->attribute ? bindings->attribute(bindings->context, attribute) : nullptr;
+        if (result) strbuf_append_str(text, result);
+        else if (value->type == CSS_VALUE_TYPE_ATTR && value->data.attr_ref->fallback)
+            return css_content_append(value->data.attr_ref->fallback, bindings, quote_depth, text, depth + 1);
+        return true;
+    }
+    int quote = css_content_quote_type(value);
+    if (quote) {
+        if (quote == 2 || quote == 4) { if (*quote_depth > 0) (*quote_depth)--; }
+        if ((quote == 1 || quote == 2) && bindings->quote) {
+            const char* result = bindings->quote(bindings->context, quote == 1, *quote_depth);
+            if (result) strbuf_append_str(text, result);
+        }
+        if (quote == 1 || quote == 3) (*quote_depth)++;
+        return true;
+    }
+    if (css_value_is_none(value) || (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL)) return true;
+    return function && function->name && bindings->function && bindings->function(bindings->context, function, text);
+}
 
 bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels) {
     static const double scales[] = {
@@ -604,7 +698,16 @@ static const CssEnumInfo css_value_definitions[] = {
     {"preserve-3d", 11, CSS_VALUE_PRESERVE_3D, CSS_VALUE_GROUP_MISC},
     {"from-font", 9, CSS_VALUE_FROM_FONT, CSS_VALUE_GROUP_MISC},
     {"chain", 5, CSS_VALUE_CHAIN, CSS_VALUE_GROUP_MISC},
+    {"always", 6, CSS_VALUE_ALWAYS, CSS_VALUE_GROUP_MISC},
+    {"avoid-page", 10, CSS_VALUE_AVOID_PAGE, CSS_VALUE_GROUP_MISC},
+    {"avoid-column", 12, CSS_VALUE_AVOID_COLUMN, CSS_VALUE_GROUP_MISC},
+    {"avoid-region", 12, CSS_VALUE_AVOID_REGION, CSS_VALUE_GROUP_MISC},
+    {"recto", 5, CSS_VALUE_RECTO, CSS_VALUE_GROUP_MISC},
+    {"verso", 5, CSS_VALUE_VERSO, CSS_VALUE_GROUP_MISC},
+    {"footnote", 8, CSS_VALUE_FOOTNOTE, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
+    {"col-resize", 10, CSS_VALUE_COL_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"row-resize", 10, CSS_VALUE_ROW_RESIZE, CSS_VALUE_GROUP_CURSOR},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);
@@ -623,6 +726,18 @@ const CssEnumInfo* css_enum_info(CssEnum id) {
 
 // Look up CSS value by name (case-insensitive)
 // Returns the LXB_CSS_VALUE enum, or CSS_VALUE__UNDEF if not found
+const char* css_value_identifier_name(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    return nullptr;
+}
+
 CssEnum css_enum_by_name(const char* name) {
     if (!name) return CSS_VALUE__UNDEF;
 

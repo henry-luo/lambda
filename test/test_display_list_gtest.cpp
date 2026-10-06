@@ -687,6 +687,60 @@ static void expect_matrix_eq(const RdtMatrix& a, const RdtMatrix& b) {
     EXPECT_FLOAT_EQ(a.e21, b.e21); EXPECT_FLOAT_EQ(a.e22, b.e22); EXPECT_FLOAT_EQ(a.e23, b.e23);
 }
 
+TEST_F(PaintIrParityTest, RasterScopesComposeNestedPlacementAndLocalTransforms) {
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 0.0f, 0.0f, 10.0f, 12.0f, 0.0f, 0.0f);
+    RdtMatrix parent = rdt_matrix_translate(10.0f, 20.0f);
+    RdtMatrix nested = {2, 0, 0, 0, 3, 0, 0, 0, 1};
+    RdtMatrix local = rdt_matrix_translate(4.0f, 5.0f);
+    Color color = {0xff112233u};
+    paint_push_transform(&pl, &parent);
+    paint_push_clip(&pl, path, &local);
+    paint_push_transform(&pl, &nested);
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, color);
+    paint_fill_path(&pl, path, color, RDT_FILL_WINDING, &local);
+    paint_pop_transform(&pl);
+    paint_fill_rounded_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, 1.0f, 1.0f, color);
+    paint_pop_clip(&pl); paint_pop_transform(&pl);
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, color);
+    lower();
+    ASSERT_EQ(lowered.item_count(), 6);
+    ASSERT_EQ(lowered.data()[0].op, DL_PUSH_CLIP);
+    RdtMatrix expected_clip = rdt_matrix_translate(14.0f, 25.0f);
+    expect_matrix_eq(lowered.data()[0].push_clip.transform, expected_clip);
+    ASSERT_EQ(lowered.data()[1].op, DL_FILL_PATH);
+    RdtMatrix expected_nested = {2, 0, 10, 0, 3, 20, 0, 0, 1};
+    expect_matrix_eq(lowered.data()[1].fill_path.transform, expected_nested);
+    RdtMatrix expected_local = {2, 0, 18, 0, 3, 35, 0, 0, 1};
+    expect_matrix_eq(lowered.data()[2].fill_path.transform, expected_local);
+    expect_matrix_eq(lowered.data()[3].fill_path.transform, parent);
+    EXPECT_EQ(lowered.data()[4].op, DL_POP_CLIP);
+    EXPECT_EQ(lowered.data()[5].op, DL_FILL_RECT);
+    expect_matrix_eq(pl.data()[4].fill_path.transform, local);
+    expect_matrix_eq(pl.data()[1].push_clip.transform, local);
+    rdt_path_free(path);
+}
+
+TEST_F(PaintIrParityTest, RasterScopeMapsLogicalEffectBoundsBeforePixelReservation) {
+    RdtMatrix parent = {2, 0, 10, 0, 3, 20, 0, 0, 1};
+    PaintEffectGroup group = {}; group.bounds = {0, 0, 10, 12}; group.opacity = 0.5f;
+    paint_push_transform(&pl, &parent); paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 0.0f, 0.0f, 10.0f, 12.0f, Color{0xff112233u});
+    paint_end_effect_group(&pl); paint_pop_transform(&pl);
+    lower();
+    ASSERT_EQ(lowered.item_count(), 3);
+    EXPECT_EQ(lowered.data()[0].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.x0, 10);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.y0, 20);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.w, 20);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.h, 36);
+    EXPECT_EQ(lowered.data()[2].op, DL_COMPOSITE_OPACITY);
+    EXPECT_EQ(lowered.data()[2].composite_opacity.x0, 10);
+    EXPECT_EQ(lowered.data()[2].composite_opacity.h, 36);
+    EXPECT_FLOAT_EQ(pl.data()[1].effect_group.bounds.left, 0.0f);
+    EXPECT_FLOAT_EQ(pl.data()[1].effect_group.bounds.right, 10.0f);
+}
+
 // Op-aware comparison: variable-length payloads (gradient stops, dash arrays)
 // are copied into each DisplayList's own arena, so compare values not pointers.
 static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
@@ -1547,8 +1601,10 @@ TEST_F(PaintIrParityTest, SemanticBuildersValidateAndLowerEffectGroupRasterOps) 
     uint32_t glyph_ids[2] = {11, 12};
     float xs[2] = {3.0f, 8.0f};
     float ys[2] = {5.0f, 5.0f};
+    // A missing font handle tests unsupported output without aliasing an unrelated payload.
+    FontBox missing_font = {};
     PaintGlyphRun glyph_run = {};
-    glyph_run.font = lam::up((FontBox*)&group);
+    glyph_run.font = lam::up(&missing_font);
     glyph_run.color = test_color(0xff102030);
     glyph_run.glyph_ids = lam::up(glyph_ids);
     glyph_run.xs = lam::up(xs);

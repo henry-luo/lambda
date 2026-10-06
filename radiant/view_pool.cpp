@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "view_tree_model.hpp"
 #include <assert.h>
 #include "event.hpp"
 #include "rdt_video.h"
@@ -643,8 +644,10 @@ static constexpr bool view_slots_all_have_rows() {
 }
 static_assert(view_slots_all_have_rows(), "an element view slot has no teardown row");
 
-// This helper is only used by the debug pointer-clearing assertion below.
 #ifndef NDEBUG
+// The value of a view slot, for the debug check that a pointer-clearing
+// teardown left none behind. Compiled with its only caller, which is
+// debug-only: release builds would otherwise reject an unused static.
 static const void* view_slot_value(const DomElement* elem, DomViewSlot slot) {
     const DomElementExt* ext = elem->ext;
     switch (slot) {
@@ -1132,6 +1135,7 @@ void view_pool_init(ViewTree* tree, MemContext* owner) {
 
 void ViewTree::reset_retained() {
     layout_generation = generation_next32(layout_generation);
+    if (model) view_tree_model_reset(this);
     if (root) {
         // DOM mutation fallback keeps both DOM/view nodes and their owned prop
         // blocks; only external payloads and generation-local values reset.
@@ -1156,6 +1160,7 @@ void view_pool_reset_retained(ViewTree* tree) {
 }
 
 void ViewTree::destroy() {
+    view_tree_model_destroy(this);
     destroy_measurement_cache(this);
     if (root) {
         view_teardown_visit_node(this, root,
@@ -1418,7 +1423,7 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, Vie
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = lam::view_require_block(view);
-    if (!block->transform || !block->transformp()->functions) return false;
+    if (!transform_has_functions(block->transform)) return false;
 
     float abs_x = 0.0f, abs_y = 0.0f;
     calculate_absolute_position(view, nullptr, &abs_x, &abs_y, boundary);
@@ -1426,7 +1431,7 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, Vie
         block->transformp(), abs_x, abs_y, block->width, block->height);
 
     *out_matrix = radiant::compute_transform_matrix(
-        block->transformp()->functions, block->width, block->height, origin.x, origin.y);
+        block->transformp(), block->width, block->height, origin.x, origin.y);
     return true;
 }
 
@@ -1478,7 +1483,10 @@ static bool view_chain_has_3d_transform(View* view) {
     for (View* current = view; current; current = current->parent_view()) {
         if (!current->is_block()) continue;
         ViewBlock* block = lam::view_require_block(current);
-        if (!block->transform || !block->transformp()->functions) continue;
+        if (!transform_has_functions(block->transform)) continue;
+        for (const TransformFunction& function : block->transformp()->individual) {
+            if (transform_function_is_3d(function.type)) return true;
+        }
         for (TransformFunction* function = block->transformp()->functions;
              function; function = function->next) {
             if (transform_function_is_3d(function->type)) return true;
@@ -1523,7 +1531,7 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
             }
         }
 
-        if (transform && transform->functions) {
+        if (transform_has_functions(transform)) {
             float block_x = 0.0f;
             float block_y = 0.0f;
             calculate_absolute_position(
@@ -1535,7 +1543,7 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
                 ? block->height * transform->origin_y / 100.0f
                 : transform->origin_y);
             RdtMatrix4 local = radiant::compute_transform_matrix_3d(
-                transform->functions, block->width, block->height,
+                transform, block->width, block->height,
                 origin_x, origin_y, transform->origin_z);
             accumulated = rdt_matrix4_multiply(&local, &accumulated);
         }

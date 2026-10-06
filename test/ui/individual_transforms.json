@@ -1,0 +1,30 @@
+{
+  "name": "Individual transforms share paint, geometry, hit testing and containing blocks",
+  "html": "test/ui/individual_transforms.html",
+  "viewport": {"width": 240, "height": 220},
+  "events": [
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "translate", "equals": "50% 10px"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "scale", "equals": "2"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "rotate", "equals": "none"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "cursor", "equals": "col-resize"},
+    {"type": "assert_style", "target": {"selector": "#nested-child"}, "property": "cursor", "equals": "row-resize"},
+    {"type": "assert_style", "target": {"selector": "#invalid"}, "property": "translate", "equals": "none"},
+    {"type": "assert_style", "target": {"selector": "#invalid"}, "property": "scale", "equals": "none"},
+    {"type": "assert_rect", "target": {"selector": "#box"}, "x": 30, "y": 50, "width": 80, "height": 40, "tolerance": 0.1},
+    {"type": "assert_hit_test", "x": 70, "y": 70, "expected_selector": "#box"},
+    {"type": "assert_pixel", "x": 70, "y": 70, "min_r": 245, "max_g": 10, "max_b": 10},
+    {"type": "assert_rect", "target": {"selector": "#fixed"}, "x": 125, "y": 125, "width": 10, "height": 10, "tolerance": 0.1},
+    {"type": "assert_hit_test", "x": 90, "y": 170, "expected_selector": "#nested-child"},
+    {"type": "assert_pixel", "x": 90, "y": 170, "max_r": 10, "min_g": 120, "max_g": 135, "max_b": 10},
+    {"type": "assert_hit_test", "x": 185, "y": 65, "expected_selector": "#under"},
+    {"type": "assert_pixel", "x": 185, "y": 65, "max_r": 10, "max_g": 10, "min_b": 245},
+    {"type": "click", "x": 70, "y": 70},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "translate", "equals": "10px"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "scale", "equals": "0.5"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "rotate", "equals": "90deg"},
+    {"type": "assert_rect", "target": {"selector": "#box"}, "x": 10, "y": 40, "width": 10, "height": 20, "tolerance": 0.1},
+    {"type": "assert_hit_test", "x": 15, "y": 50, "expected_selector": "#box"},
+    {"type": "assert_pixel", "x": 15, "y": 50, "min_r": 245, "max_g": 10, "max_b": 10},
+    {"type": "assert_rect", "target": {"selector": "#fixed"}, "x": 5, "y": 5, "width": 10, "height": 10, "tolerance": 0.1}
+  ]
+}

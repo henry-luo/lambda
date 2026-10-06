@@ -535,8 +535,8 @@ Each option maps onto a library option already ruled. The names are ruled (USER,
 | `line`, `byte_offset`, `text` | bool | false | GRP4, GRP20 |
 | `line_ending` | bool | false | GRP31 |
 | `context`, `before`, `after` | int | 0 | GRP24 |
-| `limit` | int | 0 (none) | total limit, GRP25 |
-| `limit_per_file` | int | 0 (none) | per-file limit, GRP25 |
+| `limit` | int | none | total limit, GRP25 |
+| `limit_per_file` | int | none | per-file limit, GRP25 |
 | `files` | bool | false | Return the paths of files with a match instead of match maps (GRP21) |
 | `count` | bool | false | Return one `{file, count}` per file instead of match maps (GRP30); not with `files` |
 | `include`, `exclude` | string or array of strings | none | globs, GRP22 |

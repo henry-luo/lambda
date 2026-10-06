@@ -20,6 +20,7 @@
 #include "../../lib/file.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/log.h"
+#include "../../lib/atomic.h"
 
 namespace {
 
@@ -1026,6 +1027,49 @@ TEST_F(GrepWalkTest, AncestorIgnoreFilesApply) {
     };
     ASSERT_EQ(c.n, 4);
     for (int i = 0; i < 4; i++) EXPECT_STREQ(c.recs[i].path, expect[i]) << i;
+}
+
+// grep_walk_paths alone (FTX10): every selected file once, and a slot held by
+// one visit at a time
+struct WalkVisits {
+    int slots = 0;
+    atomic_int32 busy[16];
+    atomic_int32 visits;
+    atomic_int32 overlap;
+    atomic_int32 bad_slot;
+};
+
+bool walk_begin(void* ud, int slot_count) {
+    WalkVisits* v = (WalkVisits*)ud;
+    v->slots = slot_count;
+    return slot_count <= 16;
+}
+
+GrepAction walk_visit(void* ud, int slot, const char*, const char*, size_t) {
+    WalkVisits* v = (WalkVisits*)ud;
+    if (slot < 0 || slot >= v->slots) {
+        atomic_store32(&v->bad_slot, 1);
+        return GREP_CONTINUE;
+    }
+    if (atomic_inc32(&v->busy[slot]) != 1) atomic_store32(&v->overlap, 1);
+    atomic_inc32(&v->visits);
+    atomic_dec32(&v->busy[slot]);
+    return GREP_CONTINUE;
+}
+
+TEST_F(GrepWalkTest, WalkVisitsEachSelectedFileOnce) {
+    WalkVisits v;
+    memset(&v, 0, sizeof(v));
+    GrepWalkVisitor visitor = {&v, walk_begin, walk_visit};
+    GrepWalkOptions w = walk_opts();
+    w.threads = 4;
+    const char* roots[1] = {ROOT};
+    ASSERT_EQ(grep_walk_paths(roots, 1, &w, &visitor), GREP_OK);
+    EXPECT_EQ(v.slots, 5);  // four workers and the calling thread
+    EXPECT_EQ(atomic_load32(&v.bad_slot), 0);
+    EXPECT_EQ(atomic_load32(&v.overlap), 0);
+    // the files DefaultLayersAndPathOrder finds, a.txt once (its symlink is not followed)
+    EXPECT_EQ(atomic_load32(&v.visits), 8);
 }
 
 }  // namespace

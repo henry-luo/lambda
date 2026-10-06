@@ -683,12 +683,22 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_TEXT_DECORATION_SKIP_INK,
     CSS_PROPERTY_TEXT_UNDERLINE_POSITION,
 
+    CSS_PROPERTY_TRANSLATE,
+    CSS_PROPERTY_ROTATE,
+    CSS_PROPERTY_SCALE,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 
     CSS_PROPERTY_COUNT,
     CSS_PROPERTY_UNKNOWN = -1
 } CssPropertyCode;
+
+// individual transforms compose in this order, independently of declaration order.
+static inline int css_individual_transform_index(CssPropertyCode property) {
+    return property >= CSS_PROPERTY_TRANSLATE && property <= CSS_PROPERTY_SCALE
+        ? property - CSS_PROPERTY_TRANSLATE : -1;
+}
 
 // ============================================================================
 // CSS Value Structures
@@ -942,6 +952,7 @@ typedef struct CssComputedStyle {
 // Forward declarations
 typedef struct CssRule CssRule;
 typedef struct CssStylesheet CssStylesheet;
+typedef struct CssPageRule CssPageRule;
 
 // CSS Rule types
 typedef enum CssRuleType {
@@ -973,6 +984,7 @@ typedef struct CssLayerName {
 typedef struct CssRule {
     CssRuleType type;
     Pool* pool;
+    CssPageRule* page; // typed page selectors/descriptors; generic text remains available to CSSOM
 
     // Rule content varies by type
     union {
@@ -1288,6 +1300,7 @@ bool css_property_is_animatable(CssPropertyCode property_code);
  * @return true if shorthand, false otherwise
  */
 bool css_property_is_shorthand(CssPropertyCode property_code);
+bool css_property_shorthand_contains(CssPropertyCode shorthand, CssPropertyCode property);
 
 /**
  * Get longhand properties for a shorthand property

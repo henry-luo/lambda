@@ -581,5 +581,8 @@ const WellKnownNameRecord g_well_known_markup_names[] = {
     { { 0x63A84B16u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000241u }, 21u, 0x05u, "scroll-padding-inline" },
     { { 0x15274613u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000242u }, 27u, 0x05u, "scroll-padding-inline-start" },
     { { 0xAC9DDD46u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000243u }, 25u, 0x05u, "scroll-padding-inline-end" },
+    { { 0xAD0ECFD5u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000244u }, 9u, 0x05u, "translate" },
+    { { 0xA5F4FD0Au, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000245u }, 6u, 0x05u, "rotate" },
+    { { 0x82971C71u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000246u }, 5u, 0x05u, "scale" },
 };
 const size_t g_well_known_markup_name_count = sizeof(g_well_known_markup_names) / sizeof(g_well_known_markup_names[0]);

@@ -1,0 +1,17 @@
+int
+1
+decimal
+29.99
+datetime
+t'2023-01-15 10:30:00'
+map
+320
+["math", "cs"]
+type.null
+float
+4.8
+bool
+false
+datetime
+t'1985-03-15'
+type.null

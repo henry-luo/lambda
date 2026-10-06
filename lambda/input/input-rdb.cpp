@@ -59,7 +59,7 @@ static void rdb_ensure_drivers(void) {
     if (rdb_drivers_registered) return;
     rdb_drivers_registered = true;
     rdb_sqlite_register();
-    // future: rdb_pg_register(), rdb_duckdb_register(), etc.
+    // module drivers (postgresql, mysql) arrive through the resolver (RDB4)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -141,7 +141,8 @@ static Item rdb_value_to_item(MarkBuilder& builder, RdbValue val, RdbType declar
 
 static Item rdb_fetch_table(MarkBuilder& builder, RdbConn* conn, RdbTable* tbl) {
     StrBuf* sb = strbuf_new();
-    strbuf_append_all(sb, 3, "SELECT * FROM \"", tbl->name, "\"");
+    strbuf_append_str(sb, "SELECT * FROM ");
+    rdb_append_ident(sb, rdb_dialect(conn), tbl->name);
 
     RdbStmt* stmt = rdb_prepare(conn, sb->str);
     strbuf_free(sb);
@@ -233,7 +234,8 @@ static Item rdb_fetch_table_with_fks(MarkBuilder& builder, RdbConn* conn,
                                      RdbTable* tbl, RdbSchema* schema,
                                      Item* table_data, HashMap** pk_indexes) {
     StrBuf* sb = strbuf_new();
-    strbuf_append_all(sb, 3, "SELECT * FROM \"", tbl->name, "\"");
+    strbuf_append_str(sb, "SELECT * FROM ");
+    rdb_append_ident(sb, rdb_dialect(conn), tbl->name);
 
     RdbStmt* stmt = rdb_prepare(conn, sb->str);
     strbuf_free(sb);
@@ -591,27 +593,32 @@ Input* input_rdb_from_path_with_name_parent(const char* pathname,
         log_error("rdb input: pathname is NULL");
         return NULL;
     }
+    // RDB9: credentials never reach logs or the Input's identity URL
+    char redacted[1024];
+    rdb_redact_uri(pathname, redacted, sizeof(redacted));
 
     // create Input through InputManager
-    Url* abs_url = url_parse(pathname);
+    Url* abs_url = url_parse(redacted);
     Input* input = InputManager::create_input_with_name_parent(abs_url, name_parent);
-    if (abs_url) url_destroy(abs_url);
+    // the Input owns abs_url (input->url) and InputManager destroys it; freeing
+    // it here left a dangling input->url that was freed twice at exit
     if (!input) {
-        log_error("rdb input: failed to create Input for '%s'", pathname);
+        if (abs_url) url_destroy(abs_url);
+        log_error("rdb input: failed to create Input for '%s'", redacted);
         return NULL;
     }
 
     // open connection via generic RDB API
     RdbConn* conn = rdb_open(input->pool, pathname, type, /*readonly=*/true);
     if (!conn) {
-        log_error("rdb input: failed to open database '%s'", pathname);
+        log_error("rdb input: failed to open database '%s'", redacted);
         input->root = ItemNull;
         return input;
     }
 
     // load schema
     if (rdb_load_schema(conn) != RDB_OK) {
-        log_error("rdb input: failed to load schema for '%s'", pathname);
+        log_error("rdb input: failed to load schema for '%s'", redacted);
         rdb_close(conn);
         input->root = ItemNull;
         return input;
@@ -728,7 +735,7 @@ Input* input_rdb_from_path_with_name_parent(const char* pathname,
     }
 
     // extract filename for the db element name
-    const char* basename = file_path_basename(pathname);
+    const char* basename = file_path_basename(redacted);
 
     // build top-level <db> element
     ElementBuilder db_el = builder.element("db");
@@ -764,7 +771,7 @@ Input* input_rdb_from_path_with_name_parent(const char* pathname,
     // close connection — all data has been materialized into arena
     rdb_close(conn);
 
-    log_debug("rdb input: loaded '%s' with %d tables", pathname, conn->schema.table_count);
+    log_debug("rdb input: loaded '%s' with %d tables", redacted, conn->schema.table_count);
     return input;
 }
 

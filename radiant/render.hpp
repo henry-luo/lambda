@@ -1249,8 +1249,8 @@ typedef enum {
     X(PAINT_WEBVIEW_LAYER_PLACEHOLDER, PAINT_OP_FLAG_NONE) \
     X(PAINT_PUSH_CLIP, PAINT_OP_FLAG_OWNED_PAYLOAD | PAINT_OP_FLAG_CLIP_STACK | PAINT_OP_FLAG_STACK_PUSH) \
     X(PAINT_POP_CLIP, PAINT_OP_FLAG_CLIP_STACK | PAINT_OP_FLAG_STACK_POP) \
-    X(PAINT_PUSH_TRANSFORM, PAINT_OP_FLAG_TRANSFORM_STACK | PAINT_OP_FLAG_RASTER_NOOP | PAINT_OP_FLAG_STACK_PUSH) \
-    X(PAINT_POP_TRANSFORM, PAINT_OP_FLAG_TRANSFORM_STACK | PAINT_OP_FLAG_RASTER_NOOP | PAINT_OP_FLAG_STACK_POP) \
+    X(PAINT_PUSH_TRANSFORM, PAINT_OP_FLAG_TRANSFORM_STACK | PAINT_OP_FLAG_STACK_PUSH) \
+    X(PAINT_POP_TRANSFORM, PAINT_OP_FLAG_TRANSFORM_STACK | PAINT_OP_FLAG_STACK_POP) \
     X(PAINT_SAVE_BACKDROP, PAINT_OP_FLAG_NONE) \
     X(PAINT_COMPOSITE_OPACITY, PAINT_OP_FLAG_NONE) \
     X(PAINT_APPLY_BLEND_MODE, PAINT_OP_FLAG_NONE) \
@@ -1556,7 +1556,7 @@ void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raste
                                              PaintSvgSubsceneSvgLowerFn svg_lower);
 
 // A semantic glyph run. Positions/text/font, not rasterised bitmaps.
-typedef struct {
+typedef struct PaintGlyphRun {
     lam::Up<FontBox> font;
     Color color;
     lam::Up<const char> text;       // optional native text payload; UTF-8, borrowed, or owned_text
@@ -1570,13 +1570,16 @@ typedef struct {
     int font_weight;         // CSS numeric weight; 0 = omit
     bool italic;
     lam::Up<const uint32_t> glyph_ids;   // borrowed
-    lam::Up<const float> xs;             // borrowed pen positions
+    lam::Up<const float> xs;             // borrowed offsets from x/baseline_y in CSS pixels
     lam::Up<const float> ys;
     int count;
     bool has_transform;
     RdtMatrix transform;
     Bound clip;
 } PaintGlyphRun;
+
+// caller owns the outline; all targets share the selected glyph IDs and offsets.
+RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run);
 
 void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
                              float cjk_spacing);
@@ -2871,6 +2874,7 @@ RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
 // Returns false when the boundary needs a richer backend-specific fallback.
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y);
+bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* boundary, Rect rect);
 bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* view,
                                               float x, float y);
 
@@ -3833,6 +3837,14 @@ void draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 // Function declarations for image rendering
 StrBuf* render_encode_surface_png(ImageSurface* surface);
 StrBuf* render_encode_surface_data_uri(ImageSurface* surface);
+// requires the host's rdt_engine_init(); owned straight-alpha surfaces use image_surface_destroy().
+// display-list commands/bounds are physical; secondary snapshots apply density to logical paint input.
+ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory,
+    Bound physical_bounds, float raster_scale, Color backdrop = Color{0});
+ImageSurface* render_secondary_view_snapshot(ViewTree* tree, float raster_scale = 1.0f,
+    Color backdrop = Color{0xffe8e8e8u});
+bool render_secondary_view_to_png(ViewTree* tree, const char* filename,
+    float raster_scale = 1.0f, Color backdrop = Color{0xffe8e8e8u});
 void save_surface_to_png(ImageSurface* surface, const char* filename);
 void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality);
 int render_html_to_png(const char* html_file, const char* png_file,
@@ -3905,12 +3917,14 @@ typedef struct RenderOutputTarget {
     int jpeg_quality;
     float output_scale;
     float device_scale;
+    bool paged;
 } RenderOutputTarget;
 
 typedef struct RenderExportSession {
     lam::Own<UiContext> ui_context;
     lam::Own<Url> base_url;
     lam::Up<DomDocument> document;
+    lam::Up<ViewTree> paged_view;
     float output_scale;
     float device_scale;
     float raster_scale;
@@ -3930,7 +3944,7 @@ void render_output_target_apply_session(RenderOutputTarget* target,
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media = false);
+                                 bool print_media = false, bool paged = false);
 bool render_export_session_begin_raster(RenderExportSession* session, const char* html_file,
                                         int viewport_width, int viewport_height,
                                         float output_scale, float device_scale);
@@ -3938,19 +3952,19 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     const char* document_file, const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     int viewport_width, int viewport_height, int fallback_width, int fallback_height,
-    float output_scale, float device_scale, bool raster_surface);
+    float output_scale, float device_scale, bool raster_surface, bool paged = false);
 void render_export_session_end(RenderExportSession* session);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
                                  float output_scale, float device_scale,
-                                 int jpeg_quality);
+                                 int jpeg_quality, bool paged = false);
 int render_document_transform_to_output_target(const char* document_file,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     const char* output_file, int viewport_width, int viewport_height,
-    float output_scale, float device_scale, int jpeg_quality);
+    float output_scale, float device_scale, int jpeg_quality, bool paged = false);
 
 // ===== render_overlay.hpp =====
 struct RasterRenderContext;
@@ -3962,14 +3976,17 @@ bool render_text_selection_span(struct RasterRenderContext* rdcon, ViewText* tex
 void render_ui_overlays(struct RasterRenderContext* rdcon, DocState* state);
 
 // ===== render_pdf.hpp =====
+struct ViewPageSelection;
+bool render_secondary_view_to_pdf(ViewTree* tree, const char* filename,
+    const ViewPageSelection* selection = nullptr, UiContext* ui = nullptr);
 // Main function to render HTML to PDF
 int render_html_to_pdf(const char* html_file, const char* pdf_file,
                        int viewport_width, int viewport_height,
-                       float scale = 1.0f);
+                       float scale = 1.0f, bool paged = false);
 int render_document_transform_to_pdf(const char* document_file,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
-    const char* pdf_file, int viewport_width, int viewport_height, float scale);
+    const char* pdf_file, int viewport_width, int viewport_height, float scale, bool paged = false);
 
 // ===== render_raster.hpp =====
 typedef struct RasterPaintContext {

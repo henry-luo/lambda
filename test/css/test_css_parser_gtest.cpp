@@ -322,6 +322,47 @@ TEST_F(CssEngineParserTest, LogicalBorderPartsValidateOneOrTwoSides) {
     }
 }
 
+TEST_F(CssEngineParserTest, ResizeCursorsRetainComputedKeywordIdentity) {
+    // the enum serializer indexes the catalog directly, so appended rows must preserve its order.
+    for (int i = 0; i < CSS_VALUE__LAST_ENTRY; i++) {
+        EXPECT_EQ(css_enum_info((CssEnum)i)->enum_id, i);
+    }
+    const char* declarations[] = {"cursor: col-resize", "cursor: row-resize"};
+    const CssEnum expected[] = {CSS_VALUE_COL_RESIZE, CSS_VALUE_ROW_RESIZE};
+    for (size_t i = 0; i < sizeof(declarations) / sizeof(declarations[0]); i++) {
+        CssDeclaration* declaration = css_parse_declaration_text(
+            declarations[i], strlen(declarations[i]), pool);
+        ASSERT_NE(declaration, nullptr);
+        ASSERT_NE(declaration->value, nullptr);
+        EXPECT_EQ(declaration->value->type, CSS_VALUE_TYPE_KEYWORD);
+        EXPECT_EQ(declaration->value->data.keyword, expected[i]);
+    }
+}
+
+TEST_F(CssEngineParserTest, IndividualTransformsValidateAxisAndComponentGrammar) {
+    const char* valid[] = {
+        "translate: 10px", "translate: -25% 2em 3px", "translate: 0 0",
+        "translate: none", "translate: inherit", "translate: var(--move)",
+        "rotate: 90deg", "rotate: x .25turn", "rotate: .5rad y",
+        "rotate: 1 2 3 100grad", "rotate: 180deg 0 0 1",
+        "rotate: initial", "scale: 50%", "scale: -1 2 100%",
+        "scale: none", "scale: unset"
+    };
+    for (const char* text : valid) {
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    }
+    const char* invalid[] = {
+        "translate: 1", "translate: 1px 2px 3%", "translate: 1px, 2px",
+        "translate: 1px 2px 3px 4px", "translate: 3foo", "translate: auto",
+        "rotate: 10px", "rotate: 90", "rotate: w 90deg", "rotate: x y 90deg",
+        "rotate: 1 2 90deg", "rotate: 1 2 3 90deg 4", "rotate: none 90deg",
+        "scale: 2px", "scale: 1, 2", "scale: 1 2 3 4", "scale: auto"
+    };
+    for (const char* text : invalid) {
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    }
+}
+
 TEST_F(CssEngineParserTest, LogicalCornerRadiiValidatePhysicalValueGrammar) {
     const char* valid[] = {
         "border-start-start-radius: 10px",
@@ -888,17 +929,18 @@ TEST_F(CssEngineParserTest, TextJustifyAcceptsOnlyDefinedModes) {
     }
 }
 
-TEST_F(CssEngineParserTest, LogicalFloatAndClearRejectOtherKeywords) {
+TEST_F(CssEngineParserTest, LogicalAndPageFloatClearValuesRejectOtherKeywords) {
     const char* valid[] = {
         "float: inline-start", "float: inline-end", "float: left",
         "clear: inline-start", "clear: inline-end", "clear: both",
-        "float: initial", "clear: var(--side)"
+        "float: initial", "clear: var(--side)",
+        "float: top", "float: bottom", "float: footnote", "clear: top", "clear: bottom"
     };
     for (const char* text : valid) {
         EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
     }
     const char* invalid[] = {
-        "float: both", "float: top", "float: red",
+        "float: both", "float: red", "clear: footnote",
         "clear: 4px", "clear: auto", "clear: left right"
     };
     for (const char* text : invalid) {

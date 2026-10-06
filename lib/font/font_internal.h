@@ -506,6 +506,8 @@ void*               font_rasterize_ct_create(const uint8_t* data, size_t len,
                                               FontWeight weight, FontSlant slant);
 bool                font_rasterize_ct_visit_path(void* ct_font_ref, uint32_t codepoint,
                                                FontPathVisitFn visitor, void* context);
+bool                font_rasterize_ct_visit_index_path(void* ct_font_ref, uint32_t glyph_index,
+                                               FontPathVisitFn visitor, void* context);
 bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
                                                float bitmap_scale, GlyphInfo* out);
 GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,

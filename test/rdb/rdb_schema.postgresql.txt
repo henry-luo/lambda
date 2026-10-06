@@ -1,0 +1,6 @@
+["id*", "title", "author_id", "price?", "published?", "metadata?", "cover?"]
+["integer", "text", "integer", "numeric(8,2)", "timestamp without time zone", "jsonb", "bytea"]
+["author_id -> authors.id"]
+["books_pkey!", "books_title_key!", "idx_books_author"]
+["trg_books_before_insert: BEFORE INSERT"]
+5

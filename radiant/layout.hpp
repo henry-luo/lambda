@@ -1277,6 +1277,15 @@ void counter_set(CounterContext* ctx, const char* counter_spec);
 int counter_get_value(CounterContext* ctx, const char* name);
 void counter_get_all_values(CounterContext* ctx, const char* name, int** values, int* count);
 int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_size);
+struct CounterSnapshotEntry { const char* name; int value; };
+struct CounterSnapshot { CounterSnapshotEntry* entries; size_t count; };
+CounterSnapshot* counter_snapshot_create(CounterContext* context, Pool* pool);
+CounterSnapshot* counter_snapshot_copy(const CounterSnapshot* source, Pool* pool);
+bool counter_value_append(int value, uint32_t style, StrBuf* text);
+bool counter_snapshot_append(const CounterSnapshot* snapshot, const char* name,
+    const char* separator, uint32_t style, StrBuf* text);
+void resolve_counter_property(LayoutContext* context, const CssValue* value,
+    char** destination, const char* property_name, bool allow_reversed);
 int counter_format(CounterContext* ctx, const char* name, uint32_t style,
                    char* buffer, size_t buffer_size);
 int counters_format(CounterContext* ctx, const char* name, const char* separator,
@@ -3292,6 +3301,8 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
 typedef struct LayoutContext {
     lam::Up<View> view;  // current view
     lam::Up<DomNode> elmt;  // current dom element, used before the view is created
+    lam::Up<ViewTree> selected_view_tree; // explicit secondary environment for shared value resolution
+    lam::Up<struct ViewCssStyle> selected_style;
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox

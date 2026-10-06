@@ -95,6 +95,9 @@ bool jube_activate_module(const JubeModuleDef* module);
 bool jube_resolve_global(const char* name, size_t name_length, Item* out_value);
 const JubeGlobalDef* jube_module_globals(const JubeModuleDef* module, int32_t* count);
 const JubeLanguageDef* jube_module_language(const JubeModuleDef* module);
+// Activates the module whose manifest provides `rdb:<name>` and returns its
+// driver table, or NULL when no installed module provides it (RDB4).
+const RdbDriver* jube_rdb_resolve_driver(const char* name);
 void jube_notify_heap_cleanup(void* heap);
 // Releases process-lifetime Jube registry allocations before memtrack shutdown.
 void jube_registry_cleanup(void);
