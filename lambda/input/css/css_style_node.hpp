@@ -126,6 +126,8 @@ CssDeclaration* css_declaration_clone_for_cascade(
 /** Return whether a declaration payload can be snapshotted into another pool. */
 bool css_declaration_can_clone_owned(const CssDeclaration* source);
 
+/** Copy value payload into the caller pool, preserving no borrowed child storage. */
+CssValue* css_value_clone_owned(const CssValue* source, Pool* pool);
 /** Copy declaration metadata and all mutable/pointer payload into target_pool. */
 CssDeclaration* css_declaration_clone_owned(
     const CssDeclaration* source, CssSpecificity specificity,

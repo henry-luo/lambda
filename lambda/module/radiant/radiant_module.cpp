@@ -3913,6 +3913,9 @@ extern "C" void* dom_engine_element_from_point(DomDocument* d, float x, float y)
 extern "C" void* dom_engine_subtree_element_from_point(DomElement* root, float x, float y) {
     return radiant_subtree_element_from_point(root, x, y);
 }
+extern "C" bool dom_engine_hit_test_skips_subtree(DomElement* element) {
+    return view_backface_is_hidden(element, BACKFACE_HIT_TEST);
+}
 
 PROVIDE(bool, history_initialize, (DomDocument* d), (d))
 PROVIDE(int, history_length, (DomDocument* d), (d))

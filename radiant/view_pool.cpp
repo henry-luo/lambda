@@ -1483,24 +1483,27 @@ static bool transform_function_is_3d(TransformFunctionType type) {
         type == TRANSFORM_PERSPECTIVE;
 }
 
-static bool view_chain_has_3d_transform(View* view) {
-    for (View* current = view; current; current = current->parent_view()) {
-        if (!current->is_block()) continue;
-        ViewBlock* block = lam::view_require_block(current);
-        if (!transform_has_functions(block->transform)) continue;
-        for (const TransformFunction& function : block->transformp()->individual) {
-            if (transform_function_is_3d(function.type)) return true;
-        }
-        for (TransformFunction* function = block->transformp()->functions;
-             function; function = function->next) {
-            if (transform_function_is_3d(function->type)) return true;
-        }
+static bool view_has_3d_transform(View* view) {
+    if (!view || !view->is_block()) return false;
+    const TransformProp* transform = lam::view_require_block(view)->transform;
+    if (!transform_has_functions(transform)) return false;
+    for (const TransformFunction& function : transform->individual) {
+        if (transform_function_is_3d(function.type)) return true;
+    }
+    for (TransformFunction* function = transform->functions; function; function = function->next) {
+        if (transform_function_is_3d(function->type)) return true;
     }
     return false;
 }
 
-static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
-                                         float* width, float* height) {
+static bool view_chain_has_3d_transform(View* view) {
+    for (View* current = view; current; current = current->parent_view()) {
+        if (view_has_3d_transform(current)) return true;
+    }
+    return false;
+}
+
+static RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
     RdtMatrix4 accumulated = rdt_matrix4_identity();
     int depth = 0;
     for (View* current = view; current && depth < 256;
@@ -1523,7 +1526,9 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
                     transform->perspective, origin_x, origin_y);
                 accumulated = rdt_matrix4_multiply(&perspective, &accumulated);
             }
-            if (!transform || transform->transform_style != CSS_VALUE_PRESERVE_3D) {
+            if (!radiant::transform_preserves_3d(block)) {
+                // backface orientation is relative to this 3D context, before ancestor flattening.
+                if (context_only) break;
                 // CSS Transforms 2 §4.1.3: project descendant depth after the
                 // parent's perspective and before the parent's own transform.
                 RdtMatrix4 flatten = rdt_matrix4_identity();
@@ -1552,7 +1557,30 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
             accumulated = rdt_matrix4_multiply(&local, &accumulated);
         }
     }
+    return accumulated;
+}
 
+bool view_backface_is_hidden(View* view, BackfaceCheck check) {
+    bool independent_plane = false;
+    for (View* current = view; current; current = current->parent_view()) {
+        if (!current->is_block()) continue;
+        const TransformProp* transform = lam::view_require_block(current)->transform;
+        if (transform && transform->backface_visibility == CSS_VALUE_HIDDEN) {
+            RdtMatrix4 accumulated = view_accumulated_transform_3d(current, true);
+            if (rdt_matrix4_backface_visible(&accumulated)) {
+                // preserved child planes can paint independently; input still excludes the hidden ancestor.
+                if (check == BACKFACE_HIT_TEST || !radiant::transform_preserves_3d(lam::view_require_block(current)) ||
+                    (check == BACKFACE_SELF && (current == view || !independent_plane))) return true;
+            }
+        }
+        independent_plane = independent_plane || view_has_3d_transform(current);
+    }
+    return false;
+}
+
+static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
+                                         float* width, float* height) {
+    RdtMatrix4 accumulated = view_accumulated_transform_3d(view, false);
     float local_x[4] = {*x, *x + *width, *x + *width, *x};
     float local_y[4] = {*y, *y, *y + *height, *y + *height};
     float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;

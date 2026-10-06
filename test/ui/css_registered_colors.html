@@ -1,0 +1,8 @@
+<!doctype html><style>
+@property --color{syntax:"<color>";inherits:true;initial-value:red}
+@property --colors{syntax:"<color>+";inherits:true;initial-value:red blue}
+@property --color-list{syntax:"<color>#";inherits:true;initial-value:red,blue}
+@property --literal{syntax:"<custom-ident>";inherits:false;initial-value:red}body{margin:0}#parent{color:red;--color:currentColor;--colors:hsl(.5turn 100% 50%) hwb(60deg 0% 0%);--color-list:rgb(calc(100 + 20) 0 0 / calc(.5)),#0000ff}
+#child{color:blue;background:var(--color);height:20px;width:20px}
+</style><button id=inspect>inspect</button><div id=parent><div id=child></div></div>
+<script>document.getElementById('inspect').addEventListener('click',function(){var b=this;var p=getComputedStyle(document.getElementById('parent'));var c=getComputedStyle(document.getElementById('child'));b.setAttribute('data-parent',p.getPropertyValue('--color'));b.setAttribute('data-child',c.getPropertyValue('--color'));b.setAttribute('data-colors',c.getPropertyValue('--colors'));b.setAttribute('data-color-list',c.getPropertyValue('--color-list'));b.setAttribute('data-literal',c.getPropertyValue('--literal'));});</script>

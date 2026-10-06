@@ -377,6 +377,7 @@ static bool render_block_skip_paint(RasterRenderContext* rdcon, ViewBlock* block
     if (!rdcon || !block) {
         return true;
     }
+    if (view_backface_is_hidden(block, BACKFACE_SUBTREE)) return true;
     if (render_block_clip_empty(&rdcon->block.clip)) {
         return true;
     }
@@ -434,7 +435,8 @@ static RenderBlockPhase render_block_begin_phase(RasterRenderContext* rdcon, Vie
 
     // CSS 2.1 11.2: visibility:hidden suppresses own rendering but children
     // with visibility:visible should still appear.
-    phase.self_hidden = block->in_line && block->inl()->visibility == VIS_HIDDEN;
+    phase.self_hidden = (block->in_line && block->inl()->visibility == VIS_HIDDEN) ||
+        view_backface_is_hidden(block);
     phase.transform_scope = render_state_push_transform(rdcon, block, &phase.parent_block);
 
     render_block_setup_font(rdcon, block);
@@ -458,7 +460,7 @@ static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block
             time_elapsed_ms_f(tb1, tb2));
     }
 
-    if (block->vector_path() && block->vector_path()->segments) {
+    if (!phase->self_hidden && block->vector_path() && block->vector_path()->segments) {
         render_vector_path(rdcon, block);
     }
 
@@ -511,7 +513,7 @@ static void render_block_deferred_child_outlines(RasterRenderContext* rdcon, Vie
         if (outline_view->view_type == RDT_VIEW_BLOCK ||
             outline_view->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* outline_block = lam::view_require_block(outline_view);
-            if (outline_block->bound && outline_block->boundary_mut()->outline) {
+            if (!view_backface_is_hidden(outline_block) && outline_block->bound && outline_block->boundary_mut()->outline) {
                 render_outline_deferred(rdcon, outline_block);
             }
         }

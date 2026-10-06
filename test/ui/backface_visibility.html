@@ -1,0 +1,55 @@
+<!doctype html>
+<style>
+body { margin: 0; background: white; }
+.parent { position: absolute; top: 20px; width: 60px; height: 60px; background: blue; }
+.child { width: 60px; height: 60px; background: red; transform: rotateY(180deg); backface-visibility: hidden; }
+#local { left: 20px; }
+#local-child { background: magenta; }
+#visible { left: 110px; }
+#visible .child { backface-visibility: visible; }
+#visible-child { background: #ff8000; }
+#preserved { left: 200px; transform: rotateY(180deg); transform-style: preserve-3d; }
+#flattened { left: 290px; transform: rotateY(180deg); }
+#parent-hidden { left: 380px; transform: rotateY(180deg); transform-style: preserve-3d; backface-visibility: hidden; }
+#parent-hidden .child { backface-visibility: visible; }
+#zscale { left: 470px; }
+#zscale .child { transform: scaleZ(-1); }
+.grouped { transform: rotateY(180deg); transform-style: preserve-3d; }
+#opacity { left: 560px; opacity: .5; }
+#overflow-hidden { left: 650px; overflow: hidden; }
+#overflow-clip { left: 740px; overflow: clip; }
+#filtered { left: 830px; filter: brightness(1); }
+#paint-contained { left: 920px; contain: paint; }
+#scene { position: absolute; left: 20px; top: 100px; width: 150px; height: 60px; transform-style: preserve-3d; }
+#host { margin-left: 40px; width: 60px; height: 60px; backface-visibility: hidden; }
+#fixed { position: fixed; left: 5px; top: 5px; width: 10px; height: 10px; }
+</style>
+<button id="show" style="height:18px">show face</button>
+<button id="sample" style="height:18px">sample faces</button>
+<div id="local" class="parent"><div id="local-child" class="child"></div></div>
+<div id="visible" class="parent"><div id="visible-child" class="child"></div></div>
+<div id="preserved" class="parent"><div id="preserved-child" class="child"></div></div>
+<div id="flattened" class="parent"><div id="flattened-child" class="child"></div></div>
+<div id="parent-hidden" class="parent"><div id="parent-hidden-child" class="child"></div></div>
+<div id="zscale" class="parent"><div id="zscale-child" class="child"></div></div>
+<div id="opacity" class="parent grouped"><div id="opacity-child" class="child"></div></div>
+<div id="overflow-hidden" class="parent grouped"><div id="overflow-hidden-child" class="child"></div></div>
+<div id="overflow-clip" class="parent grouped"><div id="overflow-clip-child" class="child"></div></div>
+<div id="filtered" class="parent grouped"><div id="filtered-child" class="child"></div></div>
+<div id="paint-contained" class="parent grouped"><div id="paint-contained-child" class="child"></div></div>
+<div id="scene"><div id="host"><div id="fixed"></div></div></div>
+<script>
+function sampleHits() {
+    ['local', 'visible', 'preserved', 'flattened', 'parent-hidden', 'zscale',
+        'opacity', 'overflow-hidden', 'overflow-clip', 'filtered', 'paint-contained'].forEach(function (id, index) {
+        var hit = document.elementFromPoint(index * 90 + 50, 50);
+        document.getElementById(id).setAttribute('data-hit', hit ? hit.id : '');
+    });
+    document.getElementById('host').setAttribute('data-fixed-x', String(document.getElementById('fixed').getBoundingClientRect().x));
+}
+window.addEventListener('load', sampleHits);
+document.getElementById('show').addEventListener('click', function () {
+    document.getElementById('local-child').style.backfaceVisibility = 'visible';
+});
+document.getElementById('sample').addEventListener('click', sampleHits);
+</script>

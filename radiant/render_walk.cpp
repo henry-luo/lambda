@@ -149,13 +149,15 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
 
-    if (block->bound && backend->render_bound) {
+    bool hidden = view_backface_is_hidden(block);
+    if (!hidden && block->bound && backend->render_bound) {
         backend->render_bound(backend->ctx, block, state->x, state->y);
     }
 
     if (block->in_line && block->inl()->has_color) {
         state->color = block->inl()->color;
     }
+    if (hidden) return true;
 
     if (block->tag_id == MARKUP_NAME_SVG) {
         if (backend->render_inline_svg) {
@@ -243,7 +245,7 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
 
-    if (!p->stop_after_self &&
+    if (!p->stop_after_self && !view_backface_is_hidden(block) &&
         block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
         if (backend->render_column_rules) {
             backend->render_column_rules(backend->ctx, block, state->x, state->y);
@@ -266,6 +268,7 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
 
 void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
     if (!backend || !state || !block) return;
+    if (view_backface_is_hidden(block, BACKFACE_SUBTREE)) return;
 
     RenderWalkBlockDriver driver = {};
     driver.backend = backend;
@@ -328,6 +331,7 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
 
 static void render_walk_view(RenderBackend* backend, RenderWalkState* state, View* view) {
     if (!backend || !state || !view) return;
+    if (view_backface_is_hidden(view, view->is_block() ? BACKFACE_SUBTREE : BACKFACE_SELF)) return;
 
     switch (view->view_type) {
         case RDT_VIEW_BLOCK:
@@ -424,6 +428,7 @@ void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* st
 
     for (int i = 0; i < abs_children->length; i++) {
         ViewBlock* abs_child = (ViewBlock*)abs_children->data[i];
+        if (view_backface_is_hidden(abs_child, BACKFACE_SUBTREE)) continue;
         if (backend->render_block) {
             backend->render_block(backend->ctx, abs_child,
                                   state->x, state->y, &state->font, state->color);

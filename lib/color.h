@@ -71,26 +71,47 @@ static inline bool color_parse_hex(const char* str, uint8_t* r, uint8_t* g,
     return true;
 }
 
-// CSS Color: hue in degrees; saturation, lightness and alpha in [0,1].
+// CSS Color: conversion keeps floating components until a consumer needs bytes.
+static inline void color_hsl_to_rgb(double h, double s, double l,
+                                   double* r, double* g, double* b) {
+    h = isfinite(h) ? fmod(h, 360.0) : 0.0;
+    if (h < 0.0) h += 360.0;
+    s = fmax(0.0, fmin(1.0, s)); l = fmax(0.0, fmin(1.0, l));
+    double c = (1.0 - fabs(2.0 * l - 1.0)) * s;
+    double x = c * (1.0 - fabs(fmod(h / 60.0, 2.0) - 1.0));
+    double m = l - c * 0.5;
+    double r1, g1, b1;
+    if (h < 60.0)       { r1 = c; g1 = x; b1 = 0.0; }
+    else if (h < 120.0) { r1 = x; g1 = c; b1 = 0.0; }
+    else if (h < 180.0) { r1 = 0.0; g1 = c; b1 = x; }
+    else if (h < 240.0) { r1 = 0.0; g1 = x; b1 = c; }
+    else if (h < 300.0) { r1 = x; g1 = 0.0; b1 = c; }
+    else               { r1 = c; g1 = 0.0; b1 = x; }
+    *r = r1 + m; *g = g1 + m; *b = b1 + m;
+}
+
+static inline void color_hwb_to_rgb(double h, double w, double black,
+                                   double* r, double* g, double* b) {
+    w = fmax(0.0, fmin(1.0, w)); black = fmax(0.0, fmin(1.0, black));
+    double sum = w + black;
+    if (sum >= 1.0) {
+        *r = *g = *b = w / sum;
+    } else {
+        color_hsl_to_rgb(h, 1.0, 0.5, r, g, b);
+        *r = *r * (1.0 - sum) + w;
+        *g = *g * (1.0 - sum) + w;
+        *b = *b * (1.0 - sum) + w;
+    }
+}
+
 static inline void color_hsl_to_rgba(float h, float s, float l, float a,
                                       uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* alpha) {
-    h = fmodf(h, 360.0f);
-    if (h < 0.0f) h += 360.0f;
-    s = clamp_unit(s); l = clamp_unit(l); a = clamp_unit(a);
-    float c = (1.0f - fabsf(2.0f * l - 1.0f)) * s;
-    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
-    float m = l - c * 0.5f;
-    float r1, g1, b1;
-    if (h < 60.0f)       { r1 = c; g1 = x; b1 = 0.0f; }
-    else if (h < 120.0f) { r1 = x; g1 = c; b1 = 0.0f; }
-    else if (h < 180.0f) { r1 = 0.0f; g1 = c; b1 = x; }
-    else if (h < 240.0f) { r1 = 0.0f; g1 = x; b1 = c; }
-    else if (h < 300.0f) { r1 = x; g1 = 0.0f; b1 = c; }
-    else                { r1 = c; g1 = 0.0f; b1 = x; }
-    *r = clamp_byte_round((r1 + m) * 255.0f);
-    *g = clamp_byte_round((g1 + m) * 255.0f);
-    *b = clamp_byte_round((b1 + m) * 255.0f);
-    *alpha = clamp_byte_round(a * 255.0f);
+    double red, green, blue;
+    color_hsl_to_rgb(h, s, l, &red, &green, &blue);
+    *r = clamp_byte_round((float)(red * 255.0));
+    *g = clamp_byte_round((float)(green * 255.0));
+    *b = clamp_byte_round((float)(blue * 255.0));
+    *alpha = clamp_byte_round(clamp_unit(a) * 255.0f);
 }
 
 // Format "#rrggbb" (lowercase, 7 chars + NUL) into out (must hold >= 8 bytes).

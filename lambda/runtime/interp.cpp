@@ -358,8 +358,9 @@ static void interp_satellite_publish_ready(Script* script) {
                 job->def->name ? job->def->name->chars : "<anonymous>",
                 (unsigned)job->sequence);
         } else if (cell && cell->state == FN_PROMOTION_QUEUED) {
+            // A rejected optional image leaves this definition on its T0 path.
             cell->state = FN_PROMOTION_PINNED_INTERP;
-            log_error("interp-tier: queued satellite failed function='%s'; pinned to T0",
+            log_debug("interp-tier: queued satellite failed function='%s'; pinned to T0",
                 job->def->name ? job->def->name->chars : "<anonymous>");
         }
         interp_satellite_job_destroy(job);

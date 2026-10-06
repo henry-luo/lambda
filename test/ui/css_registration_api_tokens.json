@@ -1,0 +1,120 @@
+{
+  "name": "CSS.registerProperty initial values use complete component-token grammar",
+  "html": "test/ui/css_registration_api_tokens.html",
+  "viewport": {
+    "width": 240,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inspect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-semicolon",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-bang",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-other-bang",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-inner",
+      "equals": "ok|nested(; !)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-bad-nesting",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-bad-string",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-comment",
+      "equals": "ok|"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-comment-tail",
+      "equals": "ok|red"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-quoted",
+      "equals": "ok|\"initial\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-quoted-var",
+      "equals": "ok|\"var(--other)\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-wide-case",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-block",
+      "equals": "ok|{ color: red; }"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-typed-semi",
+      "equals": "SyntaxError"
+    }
+  ]
+}

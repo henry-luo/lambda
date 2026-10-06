@@ -35,6 +35,7 @@ typedef struct {
     bool lowercase_hex;       // Use lowercase for hex colors
     bool quote_urls;          // Quote URLs in url() functions
     bool sort_properties;     // Sort properties alphabetically
+    bool computed_colors;     // Serialize computed color channels; retain currentColor/none
 } CssFormatOptions;
 
 // Formatter context

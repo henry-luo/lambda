@@ -288,7 +288,7 @@ bool css_declaration_can_clone_owned(const CssDeclaration* source) {
     return source && css_value_can_clone_owned(source->value);
 }
 
-static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool);
+CssValue* css_value_clone_owned(const CssValue* source, Pool* pool);
 static void css_value_destroy_owned(CssValue* value, Pool* pool);
 
 static CssValue** css_value_array_clone_owned(CssValue* const* source,
@@ -388,7 +388,7 @@ static void css_value_destroy_owned(CssValue* value, Pool* pool) {
     pool_free(pool, value);
 }
 
-static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
+CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
     if (!source) return NULL;
     if (!css_value_can_clone_owned(source)) return NULL;
     CssValue* clone = (CssValue*)pool_calloc(pool, sizeof(CssValue));
@@ -617,6 +617,13 @@ int css_declaration_cascade_compare(const CssDeclaration* a, const CssDeclaratio
     int spec_cmp = css_specificity_compare(a->specificity, b->specificity);
     if (spec_cmp != 0) {
         return spec_cmp;
+    }
+
+    // scope proximity follows specificity and precedes source order.
+    if (a->scope_proximity != b->scope_proximity) {
+        if (!a->scope_proximity) return -1;
+        if (!b->scope_proximity) return 1;
+        return a->scope_proximity < b->scope_proximity ? 1 : -1;
     }
 
     // Finally, source order comparison (later wins)
@@ -951,13 +958,9 @@ CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCod
         return style_node_resolve_cascade(node);
     }
 
-    bool border_image_part = property_code == CSS_PROPERTY_BORDER_IMAGE_SOURCE ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_SLICE ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_WIDTH ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_OUTSET ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_REPEAT;
-    AvlNode* shorthand_node = border_image_part
-        ? avl_tree_search(style_tree->tree, CSS_PROPERTY_BORDER_IMAGE) : NULL;
+    CssPropertyCode shorthand = css_property_cascade_shorthand(property_code);
+    AvlNode* shorthand_node = shorthand
+        ? avl_tree_search(style_tree->tree, shorthand) : NULL;
     AvlNode* all_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_ALL);
     if (!all_node && !shorthand_node) return style_node_resolve_cascade(node);
     return style_tree_best_property_candidate(node,

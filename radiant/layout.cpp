@@ -1819,7 +1819,7 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
         goto INHERIT;
     }
     else { // initial value - 'normal'
-        CssValue normal_value;
+        CssValue normal_value = {};
         normal_value.type = CSS_VALUE_TYPE_KEYWORD;
         normal_value.data.keyword = CSS_VALUE_NORMAL;
         return normal_value;

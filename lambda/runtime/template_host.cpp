@@ -4,6 +4,7 @@
 #include "runtime-state.h"
 #include "heap_api.h"
 #include "../input/input.hpp"
+#include "../js/js_runtime_state.hpp"
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
 
@@ -100,7 +101,18 @@ TemplateHostBinding::~TemplateHostBinding() {
 
 TemplateHostSession* template_host_session_open(const char* source,
                                                 const char* reference) {
-    return template_host_session_open_with_hooks(source, reference, nullptr);
+    // A mounted template temporarily takes the eval thread from its host;
+    // release and restore the host's JS TLS capsule with that context switch.
+    const TemplateHostActivationHooks hooks = {
+        [](EvalContext* owner, bool* was_active) -> bool {
+            *was_active = js_runtime_state_thread_matches(owner);
+            return !*was_active || js_runtime_state_shutdown(owner);
+        },
+        [](EvalContext* owner, bool was_active) -> bool {
+            return !was_active || js_runtime_state_init(owner);
+        },
+    };
+    return template_host_session_open_with_hooks(source, reference, &hooks);
 }
 
 TemplateHostSession* template_host_session_open_with_hooks(const char* source,

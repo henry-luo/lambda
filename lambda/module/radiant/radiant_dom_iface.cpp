@@ -119,7 +119,15 @@ const char radiant_dom_interface_decl[] =
     "    css_text: string,\n"
     "    'type': int,\n"
     "    parent_rule: any,\n"
-    "    parent_style_sheet: any\n"
+    "    parent_style_sheet: any,\n"
+    "    start: any,\n"
+    "    end: any,\n"
+    "    name: any,\n"
+    "    syntax: any,\n"
+    "    inherits: any,\n"
+    "    initial_value: any,\n"
+    "    insert_rule: fn(text: string, index: int) int,\n"
+    "    delete_rule: fn(index: int) null\n"
     "}\n"
     "type dom_node {\n"
     "    node_name: string, node_type: int,\n"
@@ -815,13 +823,13 @@ static int sh_indexed_get(Item receiver, int64_t index, Item* out) {
     return 1;
 }
 
-static int sh_insert_rule(Item receiver, Item* args, int argc, Item* out) {
+static int cssom_insert_rule(Item receiver, Item* args, int argc, Item* out) {
     *out = radiant_host_api->dom_catalog->stylesheet_insert_rule(receiver,
         radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1));
     return 1;
 }
 
-static int sh_delete_rule(Item receiver, Item* args, int argc, Item* out) {
+static int cssom_delete_rule(Item receiver, Item* args, int argc, Item* out) {
     *out = radiant_host_api->dom_catalog->stylesheet_delete_rule(receiver,
         radiant_iface_arg(args, argc, 0));
     return 1;
@@ -833,6 +841,13 @@ RADIANT_GETTER_D(cr_css_rules, rule_get_css_rules)
 RADIANT_GETTER_D(cr_css_text, rule_get_css_text)
 RADIANT_GETTER_D(cr_type, rule_get_type)
 RADIANT_GETTER_D(cr_parent_rule, rule_get_parent_rule)
+RADIANT_GETTER_D(cr_parent_style_sheet, rule_get_parent_style_sheet)
+RADIANT_GETTER_D(cr_scope_start, rule_get_scope_start)
+RADIANT_GETTER_D(cr_scope_end, rule_get_scope_end)
+RADIANT_GETTER_D(cr_property_name, rule_get_property_name)
+RADIANT_GETTER_D(cr_property_syntax, rule_get_property_syntax)
+RADIANT_GETTER_D(cr_property_inherits, rule_get_property_inherits)
+RADIANT_GETTER_D(cr_property_initial_value, rule_get_property_initial_value)
 
 static int cr_selector_text_set(Item receiver, Item value, Item* out) {
     *out = radiant_host_api->dom_catalog->set_selector_text(receiver, value);
@@ -888,8 +903,8 @@ static const JubeMemberBind radiant_stylesheet_members[] = {
     BIND_GET_HIDDEN("href", sh_href),
     BIND_GET_HIDDEN("title", sh_title),
     BIND_GET_HIDDEN("owner_node", cssom_null_get),
-    BIND_CALL("insert_rule", sh_insert_rule),
-    BIND_CALL("delete_rule", sh_delete_rule),
+    BIND_CALL("insert_rule", cssom_insert_rule),
+    BIND_CALL("delete_rule", cssom_delete_rule),
 };
 
 static const JubeMemberBind radiant_css_rule_members[] = {
@@ -901,7 +916,15 @@ static const JubeMemberBind radiant_css_rule_members[] = {
     BIND_GET_HIDDEN("css_text", cr_css_text),
     BIND_GET_HIDDEN("type", cr_type),
     BIND_GET_HIDDEN("parent_rule", cr_parent_rule),
-    BIND_GET_HIDDEN("parent_style_sheet", cssom_null_get),
+    BIND_GET_HIDDEN("parent_style_sheet", cr_parent_style_sheet),
+    BIND_GET_HIDDEN("start", cr_scope_start),
+    BIND_GET_HIDDEN("end", cr_scope_end),
+    BIND_GET_HIDDEN("name", cr_property_name),
+    BIND_GET_HIDDEN("syntax", cr_property_syntax),
+    BIND_GET_HIDDEN("inherits", cr_property_inherits),
+    BIND_GET_HIDDEN("initial_value", cr_property_initial_value),
+    BIND_CALL("insert_rule", cssom_insert_rule),
+    BIND_CALL("delete_rule", cssom_delete_rule),
 };
 
 static const JubeMemberBind radiant_rule_decl_members[] = {
