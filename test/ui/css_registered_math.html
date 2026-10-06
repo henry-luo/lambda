@@ -1,0 +1,29 @@
+<!doctype html><style>
+@property --math {syntax:"<length>";inherits:true;initial-value:calc(1in + 4px)}
+@property --number {syntax:"<number>";inherits:true;initial-value:2}
+@property --percent {syntax:"<percentage>";inherits:true;initial-value:calc(10% + 5%)}
+@property --integer {syntax:"<integer>";inherits:true;initial-value:0}
+@property --angle {syntax:"<angle>";inherits:true;initial-value:90deg}
+@property --time {syntax:"<time>";inherits:true;initial-value:calc(1s + 500ms)}
+@property --density {syntax:"<resolution>";inherits:true;initial-value:1dppx}
+@property --list {syntax:"<length>+";inherits:true;initial-value:1px 2px}
+@property --mix {syntax:"<length-percentage>";inherits:true;initial-value:5px}
+@property --transform {syntax:"<transform-list>";inherits:true;initial-value:rotate(0deg)}
+@property --ident {syntax:"<custom-ident>";inherits:true;initial-value:auto}
+@property --word {syntax:"<string>";inherits:true;initial-value:"start"}
+@property --integers {syntax:"<integer>#";inherits:true;initial-value:0}
+body{margin:0}#parent{width:200px;font-size:calc(5px + 5px);--ident:pi;--word:"pi";--integers:calc(-1.5),calc(1.5);--math:calc(2em + 5px);--number:calc(2 * 3 + 1);--integer:calc(-1.5);--angle:calc(.25turn + 45deg);--density:calc(96dpi + 1dppx);--list:calc(2em + 1px) calc(3em + 2px);--mix:calc(2em + 10% + 3px);--transform:translate(calc(2em + 5px),10%) rotate(.25turn)}
+#child{font-size:30px;width:var(--math);height:20px;background:red}
+#mixed{font-size:30px;width:var(--mix);height:20px;background:blue}
+#fallback{width:30px;width:var(--math,red);height:20px}
+</style><button id=inspect>inspect</button><div id=default></div><div id=parent><div id=child></div><div id=mixed></div><div id=fallback></div></div>
+<script>document.getElementById('inspect').addEventListener('click',function(){
+var button=document.getElementById('inspect');
+var defaults=getComputedStyle(document.getElementById('default'));
+var child=getComputedStyle(document.getElementById('child'));
+var names=['math','number','percent','integer','angle','time','density','list','mix','transform','ident','word','integers'];
+for(var i=0;i<names.length;i++){button.setAttribute('data-'+names[i],child.getPropertyValue('--'+names[i]));}
+button.setAttribute('data-initial-math',defaults.getPropertyValue('--math'));
+button.setAttribute('data-initial-time',defaults.getPropertyValue('--time'));
+button.setAttribute('data-initial-percent',defaults.getPropertyValue('--percent'));
+});</script>

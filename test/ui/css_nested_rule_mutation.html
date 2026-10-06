@@ -1,0 +1,65 @@
+<!doctype html>
+<style>html,body{margin:0}button{height:20px}#outer{position:absolute;left:20px;top:40px;width:60px;height:60px}.child{width:60px;height:60px}</style>
+<style id="rules">
+#outer { color: red; > .child { background: red; } @media all { > .child { color: blue; } } color: green; }
+</style>
+<button id="insert">insert rules</button><button id="remove">remove rules</button>
+<div id="outer"><div class="child" id="child">child</div></div>
+<script>
+var sheet = document.getElementById('rules').sheet;
+var outer = sheet.cssRules[0];
+var sheetLive = sheet.cssRules;
+var live = outer.cssRules;
+var media = live[1];
+var mediaLive = media.cssRules;
+var inserted;
+function record(name, value) { document.getElementById('outer').setAttribute('data-' + name, String(value)); }
+function exceptionName(callback) { try { callback(); return 'none'; } catch (error) { return error.name; } }
+document.getElementById('insert').addEventListener('click', function () {
+    try {
+        record('insert', outer.insertRule('> .child { background: green; }', 1));
+        inserted = live[1];
+        record('declarations', outer.insertRule('outline-color: cyan;', 2));
+        record('media-insert', media.insertRule('> .child { color: purple; }', 1));
+        record('live-length', live.length);
+        record('media-length', mediaLive.length);
+        record('parent', inserted.parentRule.selectorText);
+        record('sheet-owner', inserted.parentStyleSheet.cssRules.length);
+        record('declaration-parent', live[2].parentRule.selectorText);
+        record('declaration-sheet', live[2].parentStyleSheet.cssRules.length);
+        record('declaration-color', live[2].style.outlineColor);
+        record('sheet-default-index', sheet.insertRule('#outer { border-color: black; }'));
+        record('sheet-live-length', sheetLive.length);
+        record('bad-index', exceptionName(function () { outer.insertRule('', 50); }));
+        record('bad-syntax', exceptionName(function () { outer.insertRule('bad', 0); }));
+        record('bad-hierarchy', exceptionName(function () { outer.insertRule('@import "missing.css";', 0); }));
+        record('bad-delete', exceptionName(function () { outer.deleteRule(99); }));
+        record('bad-charset', exceptionName(function () { sheet.insertRule('@charset "utf-8";', 0); }));
+        record('bad-multiple', exceptionName(function () { outer.insertRule('> .a {} > .b {}', 0); }));
+        var namespaceSheet = new CSSStyleSheet();
+        record('namespace-insert', namespaceSheet.insertRule('@namespace ns "urn:test";', 0));
+        record('namespace-selector', namespaceSheet.insertRule('ns|x { color: blue; }', 1));
+        record('unknown-namespace', exceptionName(function () { namespaceSheet.insertRule('missing|x {}', 2); }));
+        record('namespace-delete-state', exceptionName(function () { namespaceSheet.deleteRule(0); }));
+        record('namespace-insert-state', exceptionName(function () { namespaceSheet.insertRule('@namespace other "urn:other";', 1); }));
+        record('import-order', exceptionName(function () { namespaceSheet.insertRule('@import "missing.css";', 2); }));
+        record('sheet-import-order', exceptionName(function () { sheet.insertRule('@import "missing.css";', 2); }));
+        record('sheet-syntax-before-index', exceptionName(function () { sheet.insertRule('', 50); }));
+        namespaceSheet.deleteRule(1);
+        namespaceSheet.deleteRule(0);
+        record('namespace-final-length', namespaceSheet.cssRules.length);
+        record('insert-status', 'ok');
+    } catch (error) { record('insert-status', error.name); }
+});
+document.getElementById('remove').addEventListener('click', function () {
+    try {
+        outer.deleteRule(1);
+        media.deleteRule(1);
+        record('live-length', live.length);
+        record('media-length', mediaLive.length);
+        record('detached-parent', inserted.parentRule === null);
+        record('detached-sheet', inserted.parentStyleSheet === null);
+        record('remove-status', 'ok');
+    } catch (error) { record('remove-status', error.name); }
+});
+</script>

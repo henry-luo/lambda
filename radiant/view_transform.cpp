@@ -2,6 +2,32 @@
 
 #include <math.h>
 
+static double matrix4_cofactor(const RdtMatrix4* matrix, int row, int column) {
+    double minor[9];
+    unsigned count = 0;
+    for (int r = 0; r < 4; r++) {
+        if (r == row) continue;
+        for (int c = 0; c < 4; c++) {
+            if (c != column) minor[count++] = matrix->values[r * 4 + c];
+        }
+    }
+    double determinant = minor[0] * (minor[4] * minor[8] - minor[5] * minor[7]) -
+        minor[1] * (minor[3] * minor[8] - minor[5] * minor[6]) +
+        minor[2] * (minor[3] * minor[7] - minor[4] * minor[6]);
+    return (row + column) % 2 ? -determinant : determinant;
+}
+
+bool rdt_matrix4_backface_visible(const RdtMatrix4* matrix) {
+    if (!matrix) return false;
+    double determinant = 0.0;
+    for (int column = 0; column < 4; column++)
+        determinant += matrix->values[column] * matrix4_cofactor(matrix, 0, column);
+    double normal_z = matrix4_cofactor(matrix, 2, 2);
+    // surface normals use the inverse transpose; m33 alone fails with perspective and skew.
+    return determinant != 0.0 && isfinite(determinant) && isfinite(normal_z) &&
+        normal_z != 0.0 && signbit(normal_z) != signbit(determinant);
+}
+
 namespace radiant {
 
 RdtLogicalPoint transform_origin(const TransformProp* transform,
@@ -266,6 +292,31 @@ RdtMatrix compute_transform_matrix(const TransformProp* transform,
 
 bool has_transform(DomElement* elem) {
     return elem && transform_has_functions(elem->transform);
+}
+
+bool transform_preserves_3d(DomElement* elem) {
+    if (!elem || elem->transformp()->transform_style != CSS_VALUE_PRESERVE_3D) return false;
+    const ScrollProp* scroll = elem->scroll();
+    const InlineProp* inline_prop = elem->inl();
+    // grouping effects flatten descendants while preserving the authored computed keyword.
+    return (scroll->overflow_x == CSS_VALUE_VISIBLE || scroll->overflow_x == CSS_VALUE_CLIP) &&
+        (scroll->overflow_y == CSS_VALUE_VISIBLE || scroll->overflow_y == CSS_VALUE_CLIP) &&
+        !(inline_prop->opacity >= 0.0f && inline_prop->opacity < 1.0f) &&
+        (!inline_prop->mix_blend_mode || inline_prop->mix_blend_mode == CSS_VALUE_NORMAL) &&
+        !elem->filterp()->functions &&
+        !(elem->boundary()->mask && elem->boundary()->mask->has_radial_gradient) &&
+        !elem->block()->contain_paint && !elem->block()->content_visibility_hidden;
+}
+
+bool transform_establishes_containing_block(DomElement* elem) {
+    if (!elem) return false;
+    const TransformProp* transform = elem->transformp();
+    if (has_transform(elem) || transform->perspective > 0.0f ||
+        transform->transform_style == CSS_VALUE_PRESERVE_3D) return true;
+    ViewElement* parent = elem->parent_view();
+    // hidden backfaces establish a containing block when the element participates in a 3D context.
+    return transform->backface_visibility == CSS_VALUE_HIDDEN && parent &&
+        transform_preserves_3d(parent);
 }
 
 void transform_point(float& x, float& y, const RdtMatrix& m) {

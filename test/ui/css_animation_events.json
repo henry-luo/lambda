@@ -1,0 +1,28 @@
+{
+  "name": "Animation events follow active phases and allow listener mutations",
+  "html": "test/ui/css_animation_events.html",
+  "viewport": {"width": 240, "height": 200},
+  "events": [
+    {"type": "advance_time", "ms": 100, "steps": 2},
+    {"type": "assert_attribute", "target": {"selector": "#delayed"}, "attribute": "data-animationstart", "equals": "0"},
+    {"type": "assert_attribute", "target": {"selector": "#negative"}, "attribute": "data-animationstart", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#negative"}, "attribute": "data-animationstart-elapsed", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#instant"}, "attribute": "data-animationstart", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#instant"}, "attribute": "data-animationend", "equals": "1"},
+    {"type": "assert_style", "target": {"selector": "#keyword"}, "property": "animation-name", "equals": "Ease"},
+    {"type": "assert_style", "target": {"selector": "#keyword"}, "property": "opacity", "equals": "0.5", "animated": true, "tolerance": 0.01},
+    {"type": "click", "target": {"selector": "#cancel"}},
+    {"type": "advance_time", "ms": 100, "steps": 2},
+    {"type": "assert_attribute", "target": {"selector": "#cancelled"}, "attribute": "data-animationcancel", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#cancelled"}, "attribute": "data-animationcancel-elapsed", "equals": "0"},
+    {"type": "advance_time", "ms": 450, "steps": 9},
+    {"type": "assert_attribute", "target": {"selector": "#iterated"}, "attribute": "data-animationiteration", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#iterated"}, "attribute": "data-animationiteration-elapsed", "equals": "0.5"},
+    {"type": "advance_time", "ms": 500, "steps": 10},
+    {"type": "assert_attribute", "target": {"selector": "#delayed"}, "attribute": "data-animationstart", "equals": "1"},
+    {"type": "assert_style", "target": {"selector": "#delayed"}, "property": "width", "equals": "44px"},
+    {"type": "assert_attribute", "target": {"selector": "#iterated"}, "attribute": "data-animationend", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#iterated"}, "attribute": "data-animationend-elapsed", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#iterated"}, "attribute": "data-animationiteration", "equals": "1"}
+  ]
+}

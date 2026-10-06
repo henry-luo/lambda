@@ -1,0 +1,17 @@
+<!doctype html><button id="inspect">inspect</button><div id="target"></div><script>
+document.getElementById('inspect').addEventListener('click', function () {
+    var button = this;
+    var cases = [['semicolon','red;'],['bang','!'],['other-bang','red !other'],
+        ['inner','nested(; !)'],['bad-nesting','nested([)]'],['bad-string','nested("a\nb")'],
+        ['comment','/* comment */'],['comment-tail','red/**/'],['quoted','"initial"'],
+        ['quoted-var','"var(--other)"'],['wide-case','INITIAL'],['block','{ color: red; }'],
+        ['typed-semi','2px;']];
+    cases.forEach(function (entry) {
+        var name = '--tokens-' + entry[0];
+        try {
+            CSS.registerProperty({name:name, syntax:entry[0] === 'typed-semi' ? '<length>' : '*', inherits:false, initialValue:entry[1]});
+            button.setAttribute('data-' + entry[0], 'ok|' + getComputedStyle(document.getElementById('target')).getPropertyValue(name));
+        } catch (error) {button.setAttribute('data-' + entry[0], error.name);}
+    });
+});
+</script>

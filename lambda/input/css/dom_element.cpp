@@ -27,6 +27,19 @@
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
 
+DomElement* dom_parent_element(DomElement* element) {
+    if (!element || !element->parent) return nullptr;
+    DomElement* parent = element->parent->as_element();
+    if (parent && parent->tag_name &&
+        strcmp(parent->tag_name, "#document-fragment") == 0 &&
+        parent->shadow_host_element()) {
+        // CSS Shadow DOM: a shadow fragment inherits the host's computed style;
+        // projected light-DOM nodes must not fall back to UA defaults.
+        return parent->shadow_host_element();
+    }
+    return parent;
+}
+
 const char* dom_element_lookup_namespace_uri(DomElement* element, const char* prefix) {
     if (!element) return nullptr;
     if (prefix && strcmp(prefix, "xml") == 0) return "http://www.w3.org/XML/1998/namespace";
@@ -1815,12 +1828,13 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     return true;
 }
 
-int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity specificity) {
+int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity specificity,
+                            uint32_t scope_proximity) {
     if (!element || !rule) {
         return 0;
     }
 
-    if (style_epoch_record_rule(element, rule, specificity)) {
+    if (style_epoch_record_rule(element, rule, specificity, scope_proximity)) {
         return (int)rule->data.style_rule.declaration_count;
     }
 
@@ -1835,6 +1849,7 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
             if (decl) {
                 CssDeclaration* element_decl = css_declaration_clone_for_cascade(
                     decl, specificity, rule->origin, element->doc->document_pool);
+                if (element_decl) element_decl->scope_proximity = scope_proximity;
                 if (element_decl && dom_element_apply_declaration(element, element_decl)) {
                     applied_count++;
                 }
@@ -1902,7 +1917,7 @@ bool dom_element_clear_pseudo_styles(DomElement* element) {
 // ============================================================================
 
 static int dom_element_apply_selection_rule(DomElement* element, CssRule* rule,
-                                            CssSpecificity specificity) {
+                                            CssSpecificity specificity, uint32_t scope_proximity) {
     if (!element || !rule || rule->type != CSS_RULE_STYLE) return 0;
     int applied_count = 0;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
@@ -1927,17 +1942,20 @@ static int dom_element_apply_selection_rule(DomElement* element, CssRule* rule,
         candidate.specificity = specificity;
         candidate.specificity.important = declaration->important;
         candidate.origin = rule->origin;
+        candidate.scope_proximity = scope_proximity;
         CssDeclaration previous = {};
         if (target->source) {
             previous = *target->source;
             previous.specificity = target->specificity;
             previous.origin = target->origin;
+            previous.scope_proximity = target->scope_proximity;
         }
         if (!target->source ||
             css_declaration_cascade_compare(&candidate, &previous) >= 0) {
             target->source = lam::up(declaration);
             target->specificity = candidate.specificity;
             target->origin = candidate.origin;
+            target->scope_proximity = scope_proximity;
             applied_count++;
         }
     }
@@ -1949,7 +1967,8 @@ static int dom_element_apply_selection_rule(DomElement* element, CssRule* rule,
 }
 
 int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
-                                          CssSpecificity specificity, int pseudo_element) {
+                                          CssSpecificity specificity, int pseudo_element,
+                                          uint32_t scope_proximity) {
     log_debug("[CSS-PSEUDO] Applying pseudo-element rule to <%s>, pseudo_type=%d",
               element ? element->tag_name : "NULL", pseudo_element);
 
@@ -1958,7 +1977,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
         return 0;
     }
     if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
-        return dom_element_apply_selection_rule(element, rule, specificity);
+        return dom_element_apply_selection_rule(element, rule, specificity, scope_proximity);
     }
 
     // Get the appropriate style tree for the pseudo-element
@@ -2013,6 +2032,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
                 CssDeclaration* element_decl = css_declaration_clone_for_cascade(
                     decl, specificity, rule->origin, element->doc->document_pool);
                 if (!element_decl) continue;
+                element_decl->scope_proximity = scope_proximity;
 
                 // Apply to pseudo-element style tree
                 if (style_tree_apply_declaration(*target_style, element_decl)) {

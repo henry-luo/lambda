@@ -1,0 +1,28 @@
+<!doctype html><style>@property --api{syntax:"<length>";inherits:false;initial-value:5px}#child{width:var(--api);height:10px}</style><button id=inspect>inspect</button><div id=parent style="--api:20px"><div id=child></div></div><script>
+document.getElementById('inspect').addEventListener('click',function(){var b=this;function record(name,fn){try{b.setAttribute('data-'+name,String(fn()));}catch(e){b.setAttribute('data-'+name,e.name);}}
+record('missing',function(){CSS.registerProperty();});
+record('missing-name',function(){CSS.registerProperty({inherits:false});});
+record('missing-inherits',function(){CSS.registerProperty({name:'--required'});});
+record('bad-name',function(){CSS.registerProperty({name:'bad',inherits:false});});
+record('bad-syntax',function(){CSS.registerProperty({name:'--bad-syntax',syntax:'<unknown>',inherits:false,initialValue:'0'});});
+record('missing-initial',function(){CSS.registerProperty({name:'--missing-initial',syntax:'<length>',inherits:false});});
+record('invalid-initial',function(){CSS.registerProperty({name:'--invalid-initial',syntax:'<number>',inherits:false,initialValue:'red'});});
+record('relative-initial',function(){CSS.registerProperty({name:'--relative-initial',syntax:'<length>',inherits:false,initialValue:'2em'});});
+record('register',function(){return CSS.registerProperty({name:'--api',syntax:'<length>',inherits:true,initialValue:'7px'});});
+record('value',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--api');});
+record('duplicate',function(){CSS.registerProperty({name:'--api',syntax:'*',inherits:false});});
+record('value-after-duplicate',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--api');});
+document.styleSheets[0].insertRule('@property --api{syntax:"<length>";inherits:false;initial-value:9px}',0);
+record('after-css',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--api');});
+record('universal',function(){return CSS.registerProperty({name:'--universal',inherits:false});});
+record('universal-value',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--universal');});
+record('math',function(){return CSS.registerProperty({name:'--api-math',syntax:'<length>',inherits:false,initialValue:'calc(1in + 4px)'});});
+record('math-value',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--api-math');});
+record('receiver',function(){return CSS.registerProperty.call({}, {name:'--receiver',inherits:false});});
+record('name-0',function(){return CSS.registerProperty({name:"--",inherits:false});});
+record('name-1',function(){return CSS.registerProperty({name:"--has space",inherits:false});});
+record('name-2',function(){return CSS.registerProperty({name:"--back\\slash",inherits:false});});
+record('name-3',function(){return CSS.registerProperty({name:"--\u2603",inherits:false});});
+record('name-4',function(){return CSS.registerProperty({name:"--has:colon",inherits:false});});
+record('name-5',function(){return CSS.registerProperty({name:"--name\u0000tail",inherits:false});});
+});</script>

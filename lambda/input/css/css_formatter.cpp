@@ -4,6 +4,7 @@
 #include "../../../lib/stringbuf.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 // Create a CSS formatter with default style
 CssFormatter* css_formatter_create(Pool* pool, CssFormatStyle style) {
@@ -26,6 +27,7 @@ CssFormatter* css_formatter_create(Pool* pool, CssFormatStyle style) {
     formatter->options.lowercase_hex = true;
     formatter->options.quote_urls = false;
     formatter->options.sort_properties = false;
+    formatter->options.computed_colors = false;
 
     return formatter;
 }
@@ -150,6 +152,52 @@ static void format_number_clean(StringBuf* output, double value) {
     }
 }
 
+static void format_color_channel(StringBuf* output, double value, bool missing, const char* suffix = "") {
+    if (missing) stringbuf_append_str(output, "none");
+    else if (!isfinite(value)) {
+        stringbuf_append_str(output, isnan(value) ? "calc(NaN)" : value < 0.0 ? "calc(-infinity)" : "calc(infinity)");
+    }
+    else {
+        // CSS Color 4 §16 requires rounding and sufficient precision for modern alpha.
+        format_number_clean(output, floor(value * 1000000.0 + 0.5) / 1000000.0);
+        stringbuf_append_str(output, suffix);
+    }
+}
+
+static bool format_computed_color(CssFormatter* formatter, const CssValue* value) {
+    CssComputedColor color;
+    if (!css_color_compute(value, &color)) return false;
+    if (color.type == CSS_COLOR_CURRENTCOLOR || color.type == CSS_COLOR_SYSTEM) {
+        const CssEnumInfo* keyword = css_enum_info(color.keyword);
+        if (!keyword || !keyword->name) return false;
+        stringbuf_append_str(formatter->output, keyword->name);
+        return true;
+    }
+    bool missing = color.missing != 0;
+    bool rgb = color.type == CSS_COLOR_RGB;
+    bool modern = missing || color.type == CSS_COLOR_COLOR;
+    bool alpha = color.components[3] != 1.0 || (color.missing & 8);
+    if (color.type == CSS_COLOR_COLOR) stringbuf_append_all(formatter->output, 3, "color(", color.color_space, " ");
+    else stringbuf_append_str(formatter->output, rgb ? missing ? "color(srgb " : alpha ? "rgba(" : "rgb("
+        : color.type == CSS_COLOR_HSL ? "hsl(" : "hwb(");
+    for (int i = 0; i < 3; i++) {
+        if (i) stringbuf_append_str(formatter->output, modern ? " " : ", ");
+        double scale = rgb ? missing ? 1.0 : 255.0 : color.type == CSS_COLOR_COLOR ? 1.0 : i ? 100.0 : 1.0;
+        format_color_channel(formatter->output, color.components[i] * scale, color.missing & (1u << i),
+            !rgb && color.type != CSS_COLOR_COLOR && i ? "%" : "");
+    }
+    if (alpha) {
+        stringbuf_append_str(formatter->output, modern ? " / " : ", ");
+        double amount = color.components[3];
+        if (color.alpha_is_byte) {
+            amount = css_color_legacy_alpha((uint8_t)floor(amount * 255.0 + 0.5));
+        }
+        format_color_channel(formatter->output, amount, color.missing & 8);
+    }
+    stringbuf_append_str(formatter->output, ")");
+    return true;
+}
+
 // ============================================================================
 // Value Formatting
 // ============================================================================
@@ -165,6 +213,8 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
 // Internal implementation with property context
 static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyCode property_code) {
     if (!formatter || !value) return;
+
+    if (formatter->options.computed_colors && format_computed_color(formatter, value)) return;
 
     // Don't reset buffer - append to existing content
 
@@ -754,7 +804,17 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
     stringbuf_reset(formatter->output);
 
     // Handle different rule types
-    if (rule->type == CSS_RULE_STYLE) {
+    if (rule->type == CSS_RULE_PROPERTY) {
+        CssPropertyRegistration* property = &rule->data.property_rule;
+        stringbuf_append_all(formatter->output, 2, "@property ", property->name);
+        stringbuf_append_all(formatter->output, 2, " { syntax: \"", property->syntax);
+        stringbuf_append_str(formatter->output, property->inherits ? "\"; inherits: true;" : "\"; inherits: false;");
+        if (property->initial_text) {
+            stringbuf_append_all(formatter->output, 2, " initial-value: ", property->initial_text);
+            stringbuf_append_str(formatter->output, ";");
+        }
+        stringbuf_append_str(formatter->output, " }");
+    } else if (rule->type == CSS_RULE_STYLE) {
         // Format selector group
         if (rule->data.style_rule.authored_selector_text) {
             stringbuf_append_str(formatter->output,
@@ -820,11 +880,12 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         stringbuf_append_str(formatter->output, "}");
 
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_LAYER) {
         // Format nested at-rules (@media, @supports, @container, @layer).
         const char* rule_name = (rule->type == CSS_RULE_MEDIA) ? "media" :
                                (rule->type == CSS_RULE_SUPPORTS) ? "supports" :
-                               (rule->type == CSS_RULE_CONTAINER) ? "container" : "layer";
+                               (rule->type == CSS_RULE_CONTAINER) ? "container" :
+                               (rule->type == CSS_RULE_SCOPE) ? "scope" : "layer";
 
         stringbuf_append_all(formatter->output, 2, "@", rule_name);
 
@@ -1000,6 +1061,7 @@ const char* css_stylesheet_to_string_styled(CssStylesheet* stylesheet, Pool* poo
 CssFormatOptions css_get_default_format_options(CssFormatStyle style) {
     CssFormatOptions options;
     options.style = style;
+    options.computed_colors = false;
 
     switch (style) {
         case CSS_FORMAT_COMPACT:

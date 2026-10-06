@@ -84,6 +84,38 @@ void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* sc
     matcher->scope_element = scope_element;
 }
 
+void css_scope_visit_roots(CssRule* rule, DomElement* element, SelectorMatcher* matcher,
+                           CssScopeRootVisitor visitor, void* context) {
+    if (!rule || rule->type != CSS_RULE_SCOPE || rule->data.conditional_rule.invalid_scope ||
+        !element || !matcher || !visitor) return;
+    DomElement* outer = matcher->scope_element;
+    DomElement* implicit = rule->stylesheet && rule->stylesheet->owner_element
+        ? dom_parent_element(rule->stylesheet->owner_element) : nullptr;
+    if (!implicit && element->doc) implicit = element->doc->root;
+    uint32_t hops = 0;
+    for (DomElement* root = element; root; root = dom_parent_element(root), hops++) {
+        CssSelectorGroup* start = rule->data.conditional_rule.scope_start;
+        matcher->scope_element = outer;
+        bool matches = start ? selector_matcher_matches_group(matcher, start, root, nullptr)
+                             : root == implicit;
+        if (matches) {
+            matcher->scope_element = root;
+            bool excluded = false;
+            CssSelectorGroup* end = rule->data.conditional_rule.scope_end;
+            for (DomElement* candidate = element; end && candidate && candidate != root;
+                 candidate = dom_parent_element(candidate)) {
+                if (selector_matcher_matches_group(matcher, end, candidate, nullptr)) {
+                    excluded = true;
+                    break;
+                }
+            }
+            if (!excluded) visitor(context, hops + 1);
+        }
+        if (root == outer) break;
+    }
+    matcher->scope_element = outer;
+}
+
 void selector_matcher_destroy(SelectorMatcher* matcher) {
     if (!matcher) {
         return;

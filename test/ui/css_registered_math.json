@@ -1,0 +1,160 @@
+{
+  "name": "Registered numeric math computes before inheritance",
+  "html": "test/ui/css_registered_math.html",
+  "viewport": {
+    "width": 240,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#child"
+      },
+      "property": "width",
+      "equals": "25px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mixed"
+      },
+      "property": "width",
+      "equals": "43px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inspect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-math",
+      "equals": "25px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-number",
+      "equals": "7"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-percent",
+      "equals": "15%"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-integer",
+      "equals": "-1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-angle",
+      "equals": "135deg"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-time",
+      "equals": "1.5s"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-density",
+      "equals": "2dppx"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-list",
+      "equals": "21px 32px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-mix",
+      "equals": "calc(10% + 23px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-transform",
+      "equals": "translate(25px, 10%) rotate(90deg)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-initial-math",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-initial-time",
+      "equals": "1.5s"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-initial-percent",
+      "equals": "15%"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-ident",
+      "equals": "pi"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-word",
+      "equals": "\"pi\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-integers",
+      "equals": "-1, 2"
+    }
+  ]
+}

@@ -1,0 +1,326 @@
+{
+  "name": "Nested CSSOM rule lists remain live through insertion and deletion",
+  "html": "test/ui/css_nested_rule_mutation.html",
+  "viewport": {
+    "width": 240,
+    "height": 120
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#child"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-insert-status",
+      "equals": "ok"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-insert",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-declarations",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-media-insert",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-live-length",
+      "equals": "5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-media-length",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-parent",
+      "equals": "#outer"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-declaration-color",
+      "equals": "cyan"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-sheet-default-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-bad-index",
+      "equals": "IndexSizeError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-bad-syntax",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-bad-hierarchy",
+      "equals": "HierarchyRequestError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-bad-delete",
+      "equals": "IndexSizeError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-sheet-owner",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-declaration-parent",
+      "equals": "#outer"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-declaration-sheet",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-sheet-live-length",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-bad-charset",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-bad-multiple",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-namespace-insert",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-namespace-selector",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-unknown-namespace",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-namespace-delete-state",
+      "equals": "InvalidStateError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-namespace-insert-state",
+      "equals": "InvalidStateError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-import-order",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-sheet-import-order",
+      "equals": "HierarchyRequestError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-sheet-syntax-before-index",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-namespace-final-length",
+      "equals": "0"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#child"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 128, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#child"
+      },
+      "property": "color",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-remove-status",
+      "equals": "ok"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-live-length",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-media-length",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-detached-parent",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#outer"
+      },
+      "attribute": "data-detached-sheet",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#child"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#child"
+      },
+      "property": "color",
+      "equals": "rgb(0, 0, 255)"
+    }
+  ]
+}

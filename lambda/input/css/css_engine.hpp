@@ -13,6 +13,7 @@ extern "C" {
 // Forward declarations
 struct CssPropertyValueParser;
 struct DomElement;
+struct DomDocument;
 struct SelectorMatcher;
 
 enum {
@@ -32,6 +33,11 @@ typedef struct CssConditionCacheEntry {
     uint8_t kind;
     uint8_t result;
 } CssConditionCacheEntry;
+
+typedef struct CssPropertyRegistrationEntry {
+    const CssPropertyRegistration* registration; // borrowed from a document stylesheet
+    size_t source_order;
+} CssPropertyRegistrationEntry;
 
 // CSS Style Engine structure
 typedef struct CssStyleEngine {
@@ -134,6 +140,14 @@ typedef struct CssEngine {
     CssConditionCacheEntry condition_cache[CSS_CONDITION_CACHE_CAPACITY];
     uint64_t condition_evaluations;
     uint64_t condition_cache_hits;
+
+    // pool-owned index, rebuilt after stylesheet or condition changes
+    CssPropertyRegistrationEntry* property_registrations;
+    size_t property_registration_count;
+    size_t property_registration_capacity;
+    uint64_t property_registration_key;
+    uint64_t property_registration_rebuilds;
+    bool property_registration_index_valid;
 } CssEngine;
 // CSS Processing Options
 typedef struct CssProcessingOptions {
@@ -187,6 +201,7 @@ void css_engine_set_root_font_size(CssEngine* engine, double size);
 
 // CSS parsing
 CssStylesheet* css_parse_stylesheet(CssEngine* engine, const char* css_text, const char* base_url);
+bool css_bind_rule_namespaces(CssRule* rule, CssStylesheet* stylesheet);
 
 // Resolve authored declarations without requiring layout boxes. The result
 // borrows its payload from the supplied sheets/inline list; its priority is copied.
@@ -237,6 +252,17 @@ void css_engine_reset_stats(CssEngine* engine);
 typedef CssEngine CSSEngine;
 typedef CssRule CSSRule;
 typedef CssStylesheet CSSStylesheet;
+
+const CssPropertyRegistration* css_find_property_registration(CssEngine* engine,
+    CssStylesheet** sheets, size_t sheet_count, const char* name);
+const CssPropertyRegistration* css_find_script_property_registration(DomDocument* doc,
+    const char* name, size_t name_length);
+const CssPropertyRegistration* css_find_document_property_registration(DomDocument* doc,
+    const char* name, size_t name_length = (size_t)-1);
+bool css_register_document_property(DomDocument* doc,
+    const CssPropertyRegistration* registration, size_t name_length);
+void css_stylesheet_mark_changed(CssStylesheet* stylesheet);
+bool css_import_rule_is_active(CssRule* rule, CssEngine* engine);
 
 // Cascade integration features
 int css_calculate_cascade_priority(CssEngine* engine,

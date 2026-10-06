@@ -125,11 +125,38 @@ typedef enum CssUnit {
 // CSS Values §5.4 absolute lengths use the reference-pixel conversion shared
 // by cascade consumers that cannot depend on a layout context.
 bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels);
+bool css_dimension_to_canonical(CssUnit unit, double value, CssUnit* canonical_unit,
+                                double* canonical_value);
 bool css_viewport_length_to_px(CssUnit unit, double value, double width,
                                double height, bool vertical_inline_axis,
                                double* pixels);
 const char* css_math_token_name(const CssValue* value);
 bool css_value_contains_var_reference(const CssValue* value);
+bool css_value_contains_pending_substitution(const CssValue* value);
+const char* css_value_identifier_name(const CssValue* value);
+bool css_value_is_global_keyword(const CssValue* value);
+
+typedef enum CssMathType {
+    CSS_MATH_INVALID, CSS_MATH_NUMBER, CSS_MATH_LENGTH, CSS_MATH_PERCENT,
+    CSS_MATH_LENGTH_PERCENT, CSS_MATH_ANGLE, CSS_MATH_DEFERRED,
+    CSS_MATH_TIME, CSS_MATH_RESOLUTION,
+} CssMathType;
+typedef bool (*CssMathLeafResolver)(void* context, const CssValue* value, double* result);
+struct CssMathEvaluationContext {
+    CssMathLeafResolver resolve_leaf;
+    void* context;
+    double line_width_step;
+    bool preserve_percentages;
+};
+struct CssMathResult {
+    CssMathType type;
+    double value;
+    double percentage;
+    bool resolved;
+};
+CssMathResult css_math_evaluate(const CssValue* value,
+    const CssMathEvaluationContext* context, int depth = 0);
+CssMathType css_math_value_type(const CssValue* value, int depth = 0);
 
 // CSS Fonts §2.5 maps absolute font-size keywords before layout applies
 // inherited relative sizes such as larger and smaller.
@@ -152,6 +179,23 @@ typedef enum CssColorType {
     CSS_COLOR_CURRENT,        // alias for currentColor
     CSS_COLOR_SYSTEM          // system colors
 } CssColorType;
+
+// Computed components retain precision and missing channels until painting/interpolation.
+// RGB components are normalized; HSL/HWB use degrees and unit fractions.
+struct CssComputedColor {
+    CssColorType type;
+    double components[4];
+    uint8_t missing;
+    bool alpha_is_byte;
+    CssEnum keyword;
+    const char* color_space;
+};
+bool css_color_compute(const CssValue* value, CssComputedColor* result);
+const CssValue* css_background_color_component(const CssValue* value);
+bool css_color_to_rgba(const CssComputedColor* color, uint8_t* r, uint8_t* g,
+                       uint8_t* b, uint8_t* a);
+double css_color_legacy_alpha(uint8_t alpha);
+CssValue* css_value_create_computed_color(Pool* pool, const CssComputedColor* color);
 
 typedef struct CssLength {
     double value;
@@ -700,6 +744,16 @@ static inline int css_individual_transform_index(CssPropertyCode property) {
         ? property - CSS_PROPERTY_TRANSLATE : -1;
 }
 
+static inline int css_animation_longhand_index(CssPropertyCode property) {
+    return property >= CSS_PROPERTY_ANIMATION_NAME && property <= CSS_PROPERTY_ANIMATION_PLAY_STATE
+        ? property - CSS_PROPERTY_ANIMATION_NAME : -1;
+}
+
+static inline int css_transition_longhand_index(CssPropertyCode property) {
+    return property >= CSS_PROPERTY_TRANSITION_PROPERTY && property <= CSS_PROPERTY_TRANSITION_DELAY
+        ? property - CSS_PROPERTY_TRANSITION_PROPERTY : -1;
+}
+
 // ============================================================================
 // CSS Value Structures
 // ============================================================================
@@ -761,7 +815,8 @@ typedef struct {
 // Generic CSS value structure
 typedef struct CssValue {
     CssValueType type;
-    uint8_t reserved[3];  // padding for alignment
+    bool has_keyword_spelling;
+    uint8_t reserved[2];  // padding for alignment
     union {
         // Numeric values
         struct {
@@ -797,6 +852,10 @@ typedef struct CssValue {
 
         // Keyword value (enum-based)
         CssEnum keyword;
+        struct {
+            CssEnum id;
+            const char* spelling; // stylesheet-owned identity, shares the compact keyword union
+        } keyword_token;
 
         // Color hex value (legacy support)
         const char* color_hex;
@@ -837,6 +896,27 @@ typedef struct CssValue {
     } data;
 } CssValue;
 
+// comma groups are list entries; a space-separated value remains one entry.
+static inline int css_value_comma_count(const CssValue* value) {
+    return !value ? 0 : value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated
+        ? value->data.list.count : 1;
+}
+
+static inline const CssValue* css_value_comma_at(const CssValue* value, int index) {
+    int count = css_value_comma_count(value);
+    if (count <= 0 || index < 0) return NULL;
+    return value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated
+        ? (value->data.list.values ? value->data.list.values[index % count] : NULL) : value;
+}
+
+typedef struct CssMotionShorthandParts {
+    const CssValue* values[8];
+} CssMotionShorthandParts;
+
+// one definition is shared by validation, computed style and frame scheduling.
+bool css_parse_motion_shorthand(CssPropertyCode shorthand, const CssValue* group,
+    CssMotionShorthandParts* parts);
+bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value);
 typedef struct CssBorderImageComponents {
     const CssValue* source;
     const CssValue* slice[5];
@@ -905,6 +985,7 @@ typedef struct CssDeclaration {
     CssOrigin origin;
     uint32_t source_order;    // Declaration order within stylesheet
     uint32_t layer_order;     // zero is unlayered; named layers follow declaration order
+    uint32_t scope_proximity; // zero is unscoped; scoped values store ancestor hops plus one
     bool important;           // !important flag
     const char* source_file;  // Source file (for debugging)
     int source_line;          // Source line (for debugging)
@@ -953,6 +1034,39 @@ typedef struct CssComputedStyle {
 typedef struct CssRule CssRule;
 typedef struct CssStylesheet CssStylesheet;
 
+typedef enum CssPropertySyntaxType {
+    CSS_SYNTAX_IDENT, CSS_SYNTAX_LENGTH, CSS_SYNTAX_NUMBER,
+    CSS_SYNTAX_PERCENTAGE, CSS_SYNTAX_LENGTH_PERCENTAGE, CSS_SYNTAX_STRING,
+    CSS_SYNTAX_COLOR, CSS_SYNTAX_IMAGE, CSS_SYNTAX_URL, CSS_SYNTAX_INTEGER,
+    CSS_SYNTAX_ANGLE, CSS_SYNTAX_TIME, CSS_SYNTAX_RESOLUTION,
+    CSS_SYNTAX_TRANSFORM_FUNCTION, CSS_SYNTAX_TRANSFORM_LIST, CSS_SYNTAX_CUSTOM_IDENT,
+} CssPropertySyntaxType;
+
+struct CssPropertySyntaxComponent {
+    CssPropertySyntaxType type;
+    const char* identifier;
+    char multiplier;
+};
+
+struct CssPropertyRegistration {
+    const char* name;
+    const char* syntax;
+    CssPropertySyntaxComponent* components;
+    size_t component_count;
+    bool universal;
+    bool inherits;
+    const CssValue* initial_value;
+    const char* initial_text;
+    size_t initial_text_length;
+};
+
+bool css_value_is_custom_ident(const CssValue* value);
+bool css_parse_property_syntax(const char* syntax, Pool* pool, CssPropertyRegistration* result);
+const CssPropertySyntaxComponent* css_match_property_syntax(
+    const CssPropertyRegistration* registration, const CssValue* value);
+bool css_property_initial_is_independent(const CssValue* value);
+bool css_property_registration_is_valid(const CssPropertyRegistration* registration);
+
 // CSS Rule types
 typedef enum CssRuleType {
     CSS_RULE_STYLE,          // Standard style rule with selector and declarations
@@ -971,7 +1085,8 @@ typedef enum CssRuleType {
     CSS_RULE_CONTAINER,      // @container rule
     CSS_RULE_SCOPE,          // @scope rule
     CSS_RULE_NESTING,        // Nested rule
-    CSS_RULE_NESTED_DECLARATIONS  // CSSNestedDeclarations (declarations after nested rules)
+    CSS_RULE_NESTED_DECLARATIONS, // CSSNestedDeclarations (declarations after nested rules)
+    CSS_RULE_PROPERTY,           // @property custom-property registration
 } CssRuleType;
 
 typedef struct CssLayerName {
@@ -1004,6 +1119,12 @@ typedef struct CssRule {
             size_t layer_name_count;
             bool layer_statement;
             bool invalid_layer;
+            CssSelectorGroup* scope_start;
+            CssSelectorGroup* scope_end;
+            const char* scope_start_text;
+            const char* scope_end_text;
+            CssSelectorGroup* scope_selector;
+            bool invalid_scope;
         } conditional_rule; // For @media, @supports, @container, etc.
 
         struct {
@@ -1030,6 +1151,8 @@ typedef struct CssRule {
             const char* name;       // e.g. "font-face", "keyframes"
             const char* content;    // Raw content inside the at-rule
         } generic_rule; // For @font-face, @keyframes, etc.
+
+        CssPropertyRegistration property_rule;
     } data;
 
     // Source information
@@ -1038,6 +1161,7 @@ typedef struct CssRule {
 
     // Parent rule (for nested rules)
     CssRule* parent;
+    CssStylesheet* stylesheet; // pool-owned association; cleared when detached through CSSOM
 
     // Legacy compatibility fields (for older code that expects these)
     size_t property_count;       // Number of properties in this rule
@@ -1049,6 +1173,13 @@ typedef struct CssRule {
     uint32_t cached_specificity; // Cached specificity value
 } CssRule;
 
+struct CssRuleChildList {
+    CssRule*** rules;
+    size_t* count;
+};
+CssRuleChildList css_rule_child_list(CssRule* rule);
+void css_rule_attach(CssRule* rule, CssRule* parent, CssStylesheet* stylesheet);
+
 // CSS Stylesheet structure
 typedef struct CssStylesheet {
     Pool* pool;
@@ -1057,6 +1188,7 @@ typedef struct CssStylesheet {
     CssRule** rules;
     size_t rule_count;
     size_t rule_capacity;
+    uint64_t mutation_generation; // includes edits in imported child sheets
 
     // Stylesheet metadata
     const char* title;
@@ -1066,6 +1198,7 @@ typedef struct CssStylesheet {
     CssOrigin origin;
     bool disabled;
     bool is_import_child;
+    bool constructed;           // constructed sheets reject @import through CSSOM.
     // Document sheets retain their owning <link> or <style> for source order.
     struct DomElement* owner_element;
 
@@ -1130,6 +1263,7 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword);
 CssValue* css_value_create_string(Pool* pool, const char* string);
 CssValue* css_value_create_url(Pool* pool, const char* url);
 CssValue* css_value_create_list(Pool* pool, CssValue** values, size_t count);
+CssValue* css_value_create_function(Pool* pool, const char* name, CssValue** args, int count);
 void css_value_destroy(CssValue* value);
 
 // Unit and value utilities
@@ -1309,6 +1443,7 @@ bool css_property_is_shorthand(CssPropertyCode property_code);
 int css_property_get_longhand_properties(CssPropertyCode shorthand_id,
                                         CssPropertyCode* longhand_ids,
                                         int max_count);
+CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property);
 
 /**
  * Get the initial value for a property

@@ -79,6 +79,7 @@ bool dom_engine_event_cascade_active(void);
 void dom_engine_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void* dom_engine_element_from_point(DomDocument* doc, float x, float y);
 void* dom_engine_subtree_element_from_point(DomElement* root, float x, float y);
+bool dom_engine_hit_test_skips_subtree(DomElement* element);
 void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail);
 void dom_engine_svg_timing_key(DomElement* target, const char* key);
 bool dom_engine_layout_active(DomDocument* doc);

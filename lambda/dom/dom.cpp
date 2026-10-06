@@ -4939,6 +4939,15 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
     const char* js_prop = fn_to_cstr(prop_name);
     if (!js_prop) return js_name_item("");
 
+    // Custom names are literal DOM strings: preserve case, length and punctuation before camel-case conversion.
+    if (js_prop[0] == '-' && js_prop[1] == '-' && elem->doc && elem->doc->document_pool) {
+        size_t name_length = get_type_id(prop_name) == LMD_TYPE_STRING ? it2s(prop_name)->len : strlen(js_prop);
+        String* registered = css_prop_serialize_registered_custom_property(elem->doc->document_pool,
+            elem, js_prop, name_length);
+        if (registered) return js_make_string_len(registered->chars, registered->len);
+        if (memchr(js_prop, '\0', name_length)) return js_name_item("");
+    }
+
     // handle getPropertyValue method separately
     if (strcmp(js_prop, "getPropertyValue") == 0) {
         // return a function-like marker — handled by method dispatch
@@ -11358,6 +11367,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 // e.g., "fontFamily" → "font-family", "borderWidth" → "border-width"
 // "cssFloat" → "float", "display" → "display"
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size) {
+    if (js_prop && js_prop[0] == '-' && js_prop[1] == '-') {
+        snprintf(css_buf, buf_size, "%s", js_prop);
+        return;
+    }
     // special cases
     if (strcmp(js_prop, "cssFloat") == 0) {
         snprintf(css_buf, buf_size, "float");
@@ -14211,6 +14224,8 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
 
 static bool dom_element_from_point_skips_subtree(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
+    // fallback geometry must not resurrect a subtree rejected by the engine's face test.
+    if (dom_engine_hit_test_skips_subtree(elem)) return true;
     return _is_tag(elem, "head") ||
         _is_tag(elem, "style") ||
         _is_tag(elem, "script") ||

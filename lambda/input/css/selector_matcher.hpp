@@ -181,6 +181,11 @@ void selector_matcher_set_case_sensitive_attributes(SelectorMatcher* matcher, bo
 // Bind :scope for an Element query. Pass NULL for stylesheet matching.
 void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* scope_element);
 
+typedef void (*CssScopeRootVisitor)(void* context, uint32_t scope_proximity);
+// visit every eligible root while binding :scope, then restore the caller's context.
+void css_scope_visit_roots(CssRule* rule, DomElement* element, SelectorMatcher* matcher,
+                           CssScopeRootVisitor visitor, void* context);
+
 /**
  * Set dynamic pseudo-state resolver
  * @param matcher Selector matcher

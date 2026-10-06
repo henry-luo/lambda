@@ -1175,6 +1175,10 @@ static bool event_block_is_top_level_viewport(ViewBlock* block) {
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
     log_enter();
+    if (view_backface_is_hidden(block, BACKFACE_HIT_TEST)) {
+        log_leave();
+        return;
+    }
     if (block && block->tag() == MARKUP_NAME_SVG) {
         // SVG subtrees have user-space geometry; HTML boxes inside foreignObject
         // must be walked only after the SVG frame has mapped the pointer locally.
@@ -6667,13 +6671,22 @@ static bool dom_js_rule_has_column_dependency(CssRule* rule, void*) {
     return dom_js_selector_has_column_dependency(rule->data.style_rule.selector);
 }
 
-static bool dom_js_document_has_column_css_dependency(DomDocument* doc) {
+static bool dom_js_document_rule_tree_has_match(DomDocument* doc,
+                                                DomJsRulePredicate predicate, void* context) {
     if (!doc || !doc->stylesheets) return false;
     for (int i = 0; i < doc->stylesheet_count; i++) {
         if (dom_js_stylesheet_tree_has_match(doc->stylesheets[i],
-                dom_js_rule_has_column_dependency, nullptr)) return true;
+                predicate, context)) return true;
     }
     return false;
+}
+
+static bool dom_js_document_has_column_css_dependency(DomDocument* doc) {
+    return dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_column_dependency, nullptr);
+}
+
+static bool dom_js_rule_is_scope(CssRule* rule, void*) {
+    return rule && rule->type == CSS_RULE_SCOPE;
 }
 
 static bool dom_js_rule_has_relational_mutation_attribute_dependency(
@@ -6698,16 +6711,8 @@ static bool dom_js_rule_has_relational_mutation_attribute_dependency(
 
 static bool dom_js_document_has_relational_mutation_attribute_dependency(
         DomDocument* doc, DomJsMutationAttribute attribute) {
-    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        if (dom_js_stylesheet_tree_has_match(
-                doc->stylesheets[i],
-                dom_js_rule_has_relational_mutation_attribute_dependency,
-                &attribute)) {
-            return true;
-        }
-    }
-    return false;
+    return dom_js_document_rule_tree_has_match(doc,
+        dom_js_rule_has_relational_mutation_attribute_dependency, &attribute);
 }
 
 static bool dom_js_selector_can_match_mutated_element(CssSelector* selector,
@@ -6788,14 +6793,8 @@ static bool dom_js_rule_has_relational_mutation_target_dependency(CssRule* rule,
 static bool dom_js_document_has_relational_mutation_target_dependency(
         DomDocument* doc, DomElement* target) {
     if (!doc || !target || !doc->stylesheets || doc->stylesheet_count <= 0) return true;
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        if (dom_js_stylesheet_tree_has_match(
-                doc->stylesheets[i],
-                dom_js_rule_has_relational_mutation_target_dependency, target)) {
-            return true;
-        }
-    }
-    return false;
+    return dom_js_document_rule_tree_has_match(doc,
+        dom_js_rule_has_relational_mutation_target_dependency, target);
 }
 
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
@@ -6826,6 +6825,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
     }
 
     bool checked_broad_structural_css = false;
+    // arbitrary root/limit selectors can change eligibility outside the mutated subtree.
+    bool has_scope_css = dom_js_document_rule_tree_has_match(doc, dom_js_rule_is_scope, nullptr);
     bool has_broad_structural_css = false;
     bool checked_class_relational_css = false;
     bool has_class_relational_css = false;
@@ -6835,6 +6836,12 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
             continue;
+        }
+        if (has_scope_css && (record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
+            record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
+            record->kind == DOM_JS_MUTATION_CHILD_REMOVE)) {
+            if (reason) *reason = "scope-boundary-mutation";
+            return false;
         }
         if (record->kind == DOM_JS_MUTATION_UNKNOWN ||
             record->kind == DOM_JS_MUTATION_TREE_REPLACE) {
@@ -7989,7 +7996,17 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
 
 typedef Item (*RadiantJsEventBuilder)(void* userdata);
 
-static void radiant_dispatch_timing_event(UiContext* uicon, DomElement* target,
+static Item radiant_deliver_timing_event(Item env_item) {
+    JS_ENV_UNPACK(env, env_item);
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, env[0]);
+    Rooted<Item> event_root(roots, env[1]);
+    // document teardown invalidates wrappers and cancels its queued timer jobs.
+    if (!dom_unwrap_element(target_root.get())) return make_js_undefined();
+    return dom_dispatch_event(target_root.get(), event_root.get());
+}
+
+static void radiant_queue_timing_event(UiContext* uicon, DomElement* target,
     RadiantJsEventBuilder build, void* userdata) {
     if (!uicon || !target || !target->doc) return;
     EventContext evcon = {};
@@ -8001,8 +8018,10 @@ static void radiant_dispatch_timing_event(UiContext* uicon, DomElement* target,
     RootFrame roots(2);
     Rooted<Item> target_root(roots, dom_wrap_element(target));
     Rooted<Item> event_root(roots, build(userdata));
-    dom_dispatch_event(target_root.get(), event_root.get());
-    // Scheduler callbacks defer layout until the enclosing frame has finished.
+    Item values[2] = {target_root.get(), event_root.get()};
+    // listeners may mutate style; the traced task owns its arguments until layout has unwound.
+    js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
+        (Item){.item = i2it(0)}, values, 2);
     if (entered_scope) {
         input_context = scope.saved_input_ctx;
         scope.active = false;
@@ -8031,14 +8050,14 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value, double elapsed_time) {
     if (!type || !*type) return;
     RadiantTimingEventData data = {type, detail_name, detail_value, elapsed_time, 0};
-    radiant_dispatch_timing_event(uicon, target, radiant_build_css_timing_event, &data);
+    radiant_queue_timing_event(uicon, target, radiant_build_css_timing_event, &data);
 }
 
 void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
     const char* type, double detail, double seconds) {
     if (!type || !*type) return;
     RadiantTimingEventData data = {type, nullptr, nullptr, seconds, detail};
-    radiant_dispatch_timing_event(uicon, target, radiant_build_svg_timing_event, &data);
+    radiant_queue_timing_event(uicon, target, radiant_build_svg_timing_event, &data);
 }
 
 static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
