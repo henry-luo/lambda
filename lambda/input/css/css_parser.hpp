@@ -258,6 +258,8 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_IMAGE_PAIR, // ::view-transition-image-pair
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_OLD, // ::view-transition-old
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_NEW, // ::view-transition-new
+    CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL,
+    CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER,
     CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC,    // Generic unknown pseudo-element (uses value field)
 
     // Combinators

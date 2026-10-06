@@ -250,24 +250,25 @@ static bool write_file_all(const char* path, const char* data, size_t len) {
     return written == len;
 }
 
-static bool render_document_fixture(const char* html_path, const char* output_path) {
+static bool render_document_fixture(const char* html_path, const char* output_path,
+                                    const char* options = "") {
     char qhtml[PATH_MAX + 8];
     char qoutput[PATH_MAX + 8];
     char cmd[PATH_MAX * 4 + 256];
     shell_quote(html_path, qhtml, sizeof(qhtml));
     shell_quote(output_path, qoutput, sizeof(qoutput));
     snprintf(cmd, sizeof(cmd),
-             "%s render %s%s -o %s > %s.out 2> %s.err",
-             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qoutput,
+             "%s render %s%s %s -o %s > %s.out 2> %s.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, options, qoutput,
              qoutput, qoutput);
     int status = system(cmd);
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 static bool render_html_fixture(const char* html_path, const char* output_path,
-                                    const char* html) {
+                                    const char* html, const char* options = "") {
     return write_file_all(html_path, html, strlen(html)) &&
-        render_document_fixture(html_path, output_path);
+        render_document_fixture(html_path, output_path, options);
 }
 
 static bool rasterize_pdf_fixture(const char* pdf_path, const char* png_path) {
@@ -474,12 +475,16 @@ static int discover_pdfs(PdfFileInfo* files, int max_files) {
     return count;
 }
 
-static int pdf_page_count(const char* pdf_path) {
+static CommandResult pdf_info(const char* pdf_path) {
     char qpath[PATH_MAX + 8];
     char cmd[PATH_MAX + 128];
     shell_quote(pdf_path, qpath, sizeof(qpath));
     snprintf(cmd, sizeof(cmd), "pdfinfo %s 2>&1", qpath);
-    CommandResult result = run_command_capture(cmd);
+    return run_command_capture(cmd);
+}
+
+static int pdf_page_count(const char* pdf_path) {
+    CommandResult result = pdf_info(pdf_path);
     if (result.exit_code != 0) return 0;
 
     const char* pages = strstr(result.output, "Pages:");
@@ -521,13 +526,13 @@ static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int
              "import pdf: lambda.pdf.pdf\n"
              "\n"
              "let doc = input(\"%s\", 'pdf') ^ { null }\n"
-             "let page = pdf.pdf_to_svg(doc, %d, {show_label: false})\n"
-             "<html;\n"
-             "  <head;\n"
+             "let page = pdf.pdf_to_svg(doc, %d, {show_label: false});\n"
+             "<html\n"
+             "  <head\n"
              "    <meta charset: \"utf-8\">\n"
-             "    <style; \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%dpx;}\">\n"
+             "    <style \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%dpx;}\">\n"
              "  >\n"
-             "  <body; page>\n"
+             "  <body page>\n"
              ">\n",
              pdf_path_escaped, page_index, RENDER_WIDTH, height);
 
@@ -782,6 +787,57 @@ static int count_pdf_regressions(const PdfPageResult* results, int result_count)
         if (results[i].regressed) count++;
     }
     return count;
+}
+
+TEST(RenderOutputParity, PagedPdfUsesCssSheetsAndA4FallbackWithoutRasterScaling) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_sheets.html";
+    const char* pdf_path = "temp/render_output_parity/paged_sheets.pdf";
+    const char* html = "<!doctype html><html><head><style>"
+        "@page { size: 320px 480px; margin: 40px; @bottom-center { content: counter(page) '/' counter(pages) } }"
+        "html,body { margin: 0; font: 16px Arial } section { height: 120px }"
+        "section + section { break-before: page } @media print { section { color: blue } }"
+        "</style></head><body><section>Page one</section><section>Page two</section><section>Page three</section></body></html>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged -s 2 -vw 900 -vh 700"));
+    EXPECT_EQ(pdf_page_count(pdf_path), 3);
+    CommandResult info = pdf_info(pdf_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0;
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 240.0, 0.01); EXPECT_NEAR(height, 360.0, 0.01);
+    const char* a4 = "<!doctype html><html><head><style>html,body { margin: 0 }"
+        "p + p { break-before: page }</style></head><body><p>First A4 sheet</p><p>Second A4 sheet</p></body></html>";
+    const char* a4_path = "temp/render_output_parity/paged_a4.pdf";
+    ASSERT_TRUE(render_html_fixture(html_path, a4_path, a4, "--paged"));
+    EXPECT_EQ(pdf_page_count(a4_path), 2);
+    info = pdf_info(a4_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 210.0 * 72.0 / 25.4, 0.01); EXPECT_NEAR(height, 297.0 * 72.0 / 25.4, 0.01);
+    const char* continuous = "temp/render_output_parity/continuous_sheets.pdf";
+    ASSERT_TRUE(render_html_fixture(html_path, continuous, html));
+    EXPECT_EQ(pdf_page_count(continuous), 1);
+}
+
+TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndRejectsUnimplementedContexts) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_settled.html";
+    const char* pdf_path = "temp/render_output_parity/paged_settled.pdf";
+    const char* html = "<!doctype html><html><head><style>html,body{margin:0}"
+        "@page{size:320px 480px;margin:40px}</style></head><body><p>First</p><p id='next'>Second</p>"
+        "<script>document.getElementById('next').style.breakBefore='page';</script></body></html>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged"));
+    EXPECT_EQ(pdf_page_count(pdf_path), 2);
+    const char* invalid = "<!doctype html><html><body><div style='display:grid'>Grid</div></body></html>";
+    const char* invalid_path = "temp/render_output_parity/paged_invalid.pdf";
+    remove(invalid_path);
+    EXPECT_FALSE(render_html_fixture(html_path, invalid_path, invalid, "--paged"));
+    EXPECT_FALSE(file_exists(invalid_path));
+    EXPECT_TRUE(file_contains_text("temp/render_output_parity/paged_invalid.pdf.err", "formatting context requires"));
+    const char* unsupported = "temp/render_output_parity/paged_unsupported.png";
+    remove(unsupported);
+    EXPECT_FALSE(render_html_fixture(html_path, unsupported, html, "--paged"));
+    EXPECT_FALSE(file_exists(unsupported));
 }
 
 TEST(RenderOutputParity, NormalPngMatchesForcedTiledPng) {
@@ -1127,7 +1183,7 @@ TEST(RenderOutputParity, TikzLatencyYLabelTracksAxisAtTwoX) {
     EXPECT_GT(label_ink, 40);
 }
 
-TEST(RenderOutputParity, PdfInlineSvgUsesRasterFallbackImage) {
+TEST(RenderOutputParity, PdfInlineSvgUsesVectorPaths) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";
     }
@@ -1163,8 +1219,27 @@ TEST(RenderOutputParity, PdfInlineSvgUsesRasterFallbackImage) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 40\n/H 30"))
-        << "PDF inline SVG fallback should emit an inline image";
+    EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
+    EXPECT_FALSE(file_contains_text(pdf_path, "BI\n/W"));
+    if (!command_exists("pdftoppm")) GTEST_SKIP() << "Poppler is needed to inspect vector PDF output";
+    ASSERT_TRUE(ensure_dir("temp/pdf_visual"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo rendered = {};
+    snprintf(rendered.path, sizeof(rendered.path), "%s", pdf_path);
+    snprintf(rendered.base, sizeof(rendered.base), "inline_svg_vector");
+    char png_path[PATH_MAX];
+    ASSERT_TRUE(render_reference_page(&rendered, 1, png_path, sizeof(png_path)));
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png_path, &image));
+    size_t blue = 0, gold = 0;
+    for (size_t i = 0; i < (size_t)image.width * image.height; i++) {
+        const unsigned char* pixel = image.pixels + i * 4;
+        if (pixel[2] > 180 && pixel[0] < 80 && pixel[1] < 140) blue++;
+        if (pixel[0] > 235 && pixel[1] > 220 && pixel[2] > 170 && pixel[2] < 220) gold++;
+    }
+    image_free(image.pixels);
+    EXPECT_GT(blue, 100u);
+    EXPECT_GT(gold, 100u);
 }
 
 TEST(RenderOutputParity, SvgExportInlineSvgUsesSubsceneLowering) {
@@ -1202,10 +1277,10 @@ TEST(RenderOutputParity, SvgExportInlineSvgUsesSubsceneLowering) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(svg_path));
-    EXPECT_TRUE(file_contains_text(svg_path, "<circle"))
-        << "SVG export should serialize the inline SVG subscene";
-    EXPECT_TRUE(file_contains_text(svg_path, "color=\"rgb(22,163,74)\""))
-        << "SVG subscene should carry inherited currentColor";
+    // Semantic SVG primitives share the vector path lowering used by PDF.
+    EXPECT_TRUE(file_contains_text(svg_path, "<path d=\"M30.00,15.00 C"));
+    EXPECT_TRUE(file_contains_text(svg_path, "fill=\"rgb(22,163,74)\""))
+        << "the vector path should carry inherited currentColor";
 }
 
 TEST(RenderOutputParity, SvgExportTextShadowWithoutAuthoredFont) {

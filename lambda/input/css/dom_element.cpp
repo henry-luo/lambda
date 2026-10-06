@@ -362,18 +362,6 @@ static String* dom_create_mutation_string(MarkBuilder* builder, const char* cont
     return string_from_strview_arena(strview_init("", 0), builder->arena());
 }
 
-// helper: extract a name string from a CssValue (works for counter names, attr names, etc.)
-static const char* css_value_extract_name(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
-    return nullptr;
-}
-
 // ============================================================================
 // DOM Document Creation and Destruction
 // ============================================================================
@@ -2162,58 +2150,13 @@ static const char* resolve_quote_char(DomElement* element, bool is_open_quote, i
         cur = cur->parent_element();
     }
 
-    if (!quotes_decl || !quotes_decl->value) {
-        // Default quotes per CSS 2.1: use typographic quotes
-        return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";  // U+201C / U+201D
-    }
-
-    CssValue* qval = quotes_decl->value;
-
-    // quotes: none
-    if (qval->type == CSS_VALUE_TYPE_KEYWORD && qval->data.keyword == CSS_VALUE_NONE) {
-        return "";
-    }
-
-    // quotes: "open1" "close1" "open2" "close2" ...
-    // Parsed as a CSS_VALUE_TYPE_LIST of strings
-    if (qval->type == CSS_VALUE_TYPE_LIST && qval->data.list.count >= 2) {
-        int pair_count = qval->data.list.count / 2;
-        int pair_index = depth < pair_count ? depth : pair_count - 1;  // CSS 2.1: use last pair for deeper nesting
-        int str_index = pair_index * 2 + (is_open_quote ? 0 : 1);
-        if (str_index < qval->data.list.count) {
-            CssValue* sv = qval->data.list.values[str_index];
-            if (sv && sv->type == CSS_VALUE_TYPE_STRING && sv->data.string) {
-                log_debug("[QUOTES] depth=%d, pair=%d, %s='%s'",
-                    depth, pair_index, is_open_quote ? "open" : "close", sv->data.string);
-                return sv->data.string;
-            }
-        }
-    }
-
-    // quotes: "open" "close" (single pair, may be stored as 2 strings in a list or other format)
-    if (qval->type == CSS_VALUE_TYPE_STRING && qval->data.string) {
-        // Single string — shouldn't normally happen for quotes, but handle gracefully
-        return qval->data.string;
-    }
-
-    return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";  // fallback
+    return css_content_quote_char(quotes_decl ? quotes_decl->value : nullptr, is_open_quote, depth);
 }
 
 /**
  * Check if a CssValue represents an open-quote or close-quote content value.
  * Returns 1 for open-quote, 2 for close-quote, 0 for neither.
  */
-static int check_quote_content(CssValue* value) {
-    if (!value) return 0;
-    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-        if (strcmp(value->data.custom_property.name, "open-quote") == 0) return 1;
-        if (strcmp(value->data.custom_property.name, "close-quote") == 0) return 2;
-        if (strcmp(value->data.custom_property.name, "no-open-quote") == 0) return 3;
-        if (strcmp(value->data.custom_property.name, "no-close-quote") == 0) return 4;
-    }
-    return 0;
-}
-
 const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element) {
     if (!element) {
         return NULL;
@@ -2282,7 +2225,7 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
     }
 
     // Handle open-quote / close-quote (CSS_VALUE_TYPE_CUSTOM with ident name)
-    int quote_type = check_quote_content(value);
+    int quote_type = css_content_quote_type(value);
     if (quote_type == 1 || quote_type == 2) {
         return resolve_quote_char(element, quote_type == 1, 0);
     }
@@ -2307,269 +2250,56 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
  * Get pseudo-element content with counter resolution
  * This version handles counter() and counters() functions
  */
+struct DomContentBindings { DomElement* element; void* counters; };
+
+static const char* dom_content_attribute(void* context, const char* name) {
+    return ((DomContentBindings*)context)->element->get_attribute(name);
+}
+static const char* dom_content_quote(void* context, bool open, int depth) {
+    return resolve_quote_char(((DomContentBindings*)context)->element, open, depth);
+}
+static bool dom_content_function(void* context, const CssFunction* function, StrBuf* text) {
+    DomContentBindings* bindings = (DomContentBindings*)context;
+    bool multiple = css_function_name_is(function, "counters");
+    if (!multiple && !css_function_name_is(function, "counter")) return true;
+    if (!bindings->counters || function->arg_count < (multiple ? 2 : 1)) return true;
+    const char* name = css_value_identifier_name(function->args[0]);
+    if (!name) return false;
+    const char* separator = multiple ? css_value_identifier_name(function->args[1]) : nullptr;
+    int style_index = multiple ? 2 : 1;
+    uint32_t style = function->arg_count > style_index && function->args[style_index]->type == CSS_VALUE_TYPE_KEYWORD
+        ? function->args[style_index]->data.keyword : CSS_VALUE_DECIMAL;
+    char buffer[256] = {};
+    int length = multiple ? css_counters_format(bindings->counters, name, separator ? separator : ".", style, buffer, sizeof(buffer))
+        : css_counter_format(bindings->counters, name, style, buffer, sizeof(buffer));
+    if (length < 0 || (size_t)length >= sizeof(buffer)) return false;
+    strbuf_append_str_n(text, buffer, (size_t)length);
+    return true;
+}
+
+bool dom_element_append_content(DomElement* element, const CssValue* value,
+        void* counters, int* quote_depth, StrBuf* text) {
+    if (!element) return false;
+    DomContentBindings data = {element, counters};
+    CssContentBindings bindings = {&data, dom_content_attribute, dom_content_quote, dom_content_function};
+    return css_content_append(value, &bindings, quote_depth, text);
+}
+
 const char* dom_element_get_pseudo_element_content_with_counters(
-    DomElement* element, int pseudo_element, void* counter_context, Arena* arena) {
-    if (!element || !arena) {
-        return NULL;
-    }
-
-    StyleTree* style = nullptr;
-
-    if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
-        style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
-    } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
-        style = element->pseudo_style(PSEUDO_STYLE_AFTER);
-    } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
-        style = element->pseudo_style(PSEUDO_STYLE_MARKER);
-    }
-
-    if (!style) {
-        return NULL;
-    }
-
-    CssDeclaration* content_decl = style_tree_get_declaration(style, CSS_PROPERTY_CONTENT);
-
-    if (!content_decl || !content_decl->value) {
-        return NULL;
-    }
-
-    CssValue* value = content_decl->value;
-
-    // Return string content directly
-    if (value->type == CSS_VALUE_TYPE_STRING) {
-        const char* str = value->data.string;
-        return str;
-    }
-
-    // Handle attr() via CSS_VALUE_TYPE_ATTR
-    if (value->type == CSS_VALUE_TYPE_ATTR) {
-        CSSAttrRef* attr_ref = value->data.attr_ref;
-        if (attr_ref && attr_ref->name) {
-            const char* attr_value = element->get_attribute(attr_ref->name);
-            return attr_value ? attr_value : "";
-        }
-    }
-
-    // Handle open-quote / close-quote (CSS_VALUE_TYPE_CUSTOM with ident name)
-    {
-        int quote_type = check_quote_content(value);
-        if (quote_type == 1 || quote_type == 2) {
-            return resolve_quote_char(element, quote_type == 1, 0);
-        }
-        if (quote_type == 3 || quote_type == 4) {
-            return "";  // no-open-quote / no-close-quote
-        }
-    }
-
-    // Handle counter() or counters() function
-    if (value->type == CSS_VALUE_TYPE_FUNCTION) {
-        CssFunction* func = value->data.function;
-        log_debug("[Counter] Found function in content: %s (arg_count=%d)",
-                 func ? func->name : "NULL", func ? func->arg_count : 0);
-        if (func && func->name && counter_context) {
-            if (strcmp(func->name, "counter") == 0) {
-                // counter(name) or counter(name, style)
-                // Parse arguments: name (identifier), optional style (keyword)
-                if (func->arg_count >= 1) {
-                    log_debug("[Counter] counter() arg[0] type=%d", (int)func->args[0]->type);
-
-                    const char* counter_name = css_value_extract_name(func->args[0]);
-
-                    uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
-
-                    if (func->arg_count >= 2 && func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
-                        style_type = func->args[1]->data.keyword;
-                        const CssEnumInfo* style_info = css_enum_info((CssEnum)style_type);
-                        log_debug("[Counter] counter style keyword: %u (%s)",
-                                style_type, style_info ? style_info->name : "unknown");
-                    }
-
-                    // Format counter value
-                    char* buffer = (char*)arena_alloc(arena, 64);
-                    if (buffer && counter_name) {
-                        css_counter_format(counter_context, counter_name,
-                                     style_type, buffer, 64);
-                        log_debug("[Counter] counter(%s, style=%u) = '%s'", counter_name, style_type, buffer);
-                        return buffer;
-                    }
-                }
-            } else if (strcmp(func->name, "counters") == 0) {
-                // counters(name, separator) or counters(name, separator, style)
-                if (func->arg_count >= 2) {
-                    const char* counter_name = css_value_extract_name(func->args[0]);
-
-                    const char* separator = func->args[1]->data.string;
-                    uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
-
-                    if (func->arg_count >= 3 && func->args[2]->type == CSS_VALUE_TYPE_KEYWORD) {
-                        style_type = func->args[2]->data.keyword;
-                    }
-
-                    // Format counters with separator
-                    char* buffer = (char*)arena_alloc(arena, 128);
-                    if (buffer && counter_name) {
-                        css_counters_format(counter_context, counter_name,
-                                      separator ? separator : ".", style_type, buffer, 128);
-                        log_debug("[Counter] counters(%s, \"%s\") = %s",
-                                counter_name, separator ? separator : ".", buffer);
-                        return buffer;
-                    }
-                }
-            } else if (strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
-                // attr(attribute-name) in content property
-                const char* attr_name = css_value_extract_name(func->args[0]);
-                if (attr_name) {
-                    const char* attr_value = element->get_attribute(attr_name);
-                    return attr_value ? attr_value : "";
-                }
-            }
-        }
-    }
-
-    // Handle list of values (for content with multiple parts, e.g., counter(c) "text")
-    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        log_debug("[Counter] Processing content list with %d values", value->data.list.count);
-
-        // Use a fixed-size buffer for concatenation
-        char result_buffer[512];
-        result_buffer[0] = '\0';
-        int result_len = 0;
-
-        // Concatenate all values in the list
-        for (int i = 0; i < value->data.list.count; i++) {
-            CssValue* item = value->data.list.values[i];
-            if (!item) continue;
-
-            if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
-                // Append string content
-                int str_len = strlen(item->data.string);
-                if (result_len + str_len < (int)sizeof(result_buffer) - 1) {
-                    memcpy(result_buffer + result_len, item->data.string, str_len);
-                    result_len += str_len;
-                    result_buffer[result_len] = '\0';
-                    log_debug("[Counter] Appended string: '%s'", item->data.string);
-                }
-            } else if (item->type == CSS_VALUE_TYPE_FUNCTION) {
-                // Handle counter() or counters() in list
-                CssFunction* func = item->data.function;
-                log_debug("[Counter] Processing function in list: %s", func ? func->name : "NULL");
-                if (func && func->name && counter_context) {
-                    char temp_buffer[128];
-                    temp_buffer[0] = '\0';
-
-                    if (strcmp(func->name, "counter") == 0 && func->arg_count >= 1) {
-                        const char* counter_name = css_value_extract_name(func->args[0]);
-
-                        uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
-                        if (func->arg_count >= 2 && func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
-                            style_type = func->args[1]->data.keyword;
-                            const CssEnumInfo* style_info = css_enum_info((CssEnum)style_type);
-                            log_debug("[Counter] counter style keyword: %u (%s)",
-                                    style_type, style_info ? style_info->name : "unknown");
-                        }
-
-                        if (counter_name) {
-                            css_counter_format(counter_context, counter_name,
-                                         style_type, temp_buffer, sizeof(temp_buffer));
-                            int temp_len = strlen(temp_buffer);
-                            if (result_len + temp_len < (int)sizeof(result_buffer) - 1) {
-                                memcpy(result_buffer + result_len, temp_buffer, temp_len);
-                                result_len += temp_len;
-                                result_buffer[result_len] = '\0';
-                            }
-                            log_debug("[Counter] counter(%s, style=%u) = '%s'", counter_name, style_type, temp_buffer);
-                        }
-                    } else if (strcmp(func->name, "counters") == 0 && func->arg_count >= 2) {
-                        const char* counter_name = css_value_extract_name(func->args[0]);
-
-                        const char* separator = func->args[1]->data.string;
-                        uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
-                        if (func->arg_count >= 3 && func->args[2]->type == CSS_VALUE_TYPE_KEYWORD) {
-                            style_type = func->args[2]->data.keyword;
-                        }
-
-                        if (counter_name) {
-                            css_counters_format(counter_context, counter_name,
-                                          separator ? separator : ".", style_type,
-                                          temp_buffer, sizeof(temp_buffer));
-                            int temp_len = strlen(temp_buffer);
-                            if (result_len + temp_len < (int)sizeof(result_buffer) - 1) {
-                                memcpy(result_buffer + result_len, temp_buffer, temp_len);
-                                result_len += temp_len;
-                                result_buffer[result_len] = '\0';
-                            }
-                            log_debug("[Counter] counters(%s, '%s', style=%u) = '%s'",
-                                    counter_name, separator ? separator : ".", style_type, temp_buffer);
-                        }
-                    }
-                }
-                if (func && func->name && strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
-                    // Handle attr() function in list
-                    const char* attr_name = css_value_extract_name(func->args[0]);
-                    if (attr_name) {
-                        const char* attr_value = element->get_attribute(attr_name);
-                        if (attr_value) {
-                            int attr_len = strlen(attr_value);
-                            if (result_len + attr_len < (int)sizeof(result_buffer) - 1) {
-                                memcpy(result_buffer + result_len, attr_value, attr_len);
-                                result_len += attr_len;
-                                result_buffer[result_len] = '\0';
-                            }
-                            log_debug("[Counter] Appended attr(%s) = '%s'", attr_name, attr_value);
-                        }
-                    }
-                }
-            } else if (item->type == CSS_VALUE_TYPE_ATTR) {
-                // Handle attr() in list: content: "text" attr(class) "more text"
-                CSSAttrRef* attr_ref = item->data.attr_ref;
-                if (attr_ref && attr_ref->name) {
-                    const char* attr_value = element->get_attribute(attr_ref->name);
-                    if (attr_value) {
-                        int attr_len = strlen(attr_value);
-                        if (result_len + attr_len < (int)sizeof(result_buffer) - 1) {
-                            memcpy(result_buffer + result_len, attr_value, attr_len);
-                            result_len += attr_len;
-                            result_buffer[result_len] = '\0';
-                        }
-                        log_debug("[Counter] Appended attr(%s) = '%s'", attr_ref->name, attr_value);
-                    }
-                }
-            } else {
-                // Handle open-quote / close-quote in list
-                int qt = check_quote_content(item);
-                if (qt == 1 || qt == 2) {
-                    // Track depth based on position of quote in the list
-                    int quote_depth = 0;
-                    for (int j = 0; j < i; j++) {
-                        int prev_qt = check_quote_content(value->data.list.values[j]);
-                        if (prev_qt == 1 || prev_qt == 3) quote_depth++;
-                    }
-                    const char* qc = resolve_quote_char(element, qt == 1, quote_depth);
-                    if (qc) {
-                        int qlen = strlen(qc);
-                        if (result_len + qlen < (int)sizeof(result_buffer) - 1) {
-                            memcpy(result_buffer + result_len, qc, qlen);
-                            result_len += qlen;
-                            result_buffer[result_len] = '\0';
-                        }
-                        log_debug("[Counter] Appended %s = '%s'", qt == 1 ? "open-quote" : "close-quote", qc);
-                    }
-                }
-                // no-open-quote / no-close-quote: generate nothing but affect depth
-            }
-        }
-
-        // Copy result to arena-allocated buffer
-        if (result_len > 0) {
-            char* result = arena_dup_n(arena, result_buffer, result_len);
-            if (result) {
-                log_debug("[Counter] Final content: '%s'", result);
-                return result;
-            }
-        }
-    }
-
-    return NULL;
+        DomElement* element, int pseudo_element, void* counter_context, Arena* arena) {
+    if (!element || !arena) return nullptr;
+    PseudoStyleKind kind = pseudo_element == 1 ? PSEUDO_STYLE_BEFORE : pseudo_element == 2 ? PSEUDO_STYLE_AFTER : PSEUDO_STYLE_MARKER;
+    if (pseudo_element != 1 && pseudo_element != 2 && pseudo_element != 6) return nullptr;
+    StyleTree* style = element->pseudo_style(kind);
+    const CssDeclaration* declaration = style ? style_tree_get_declaration(style, CSS_PROPERTY_CONTENT) : nullptr;
+    if (!declaration || !declaration->value) return nullptr;
+    StrBuf* text = strbuf_new();
+    if (!text) return nullptr;
+    int quote_depth = 0;
+    bool ok = dom_element_append_content(element, declaration->value, counter_context, &quote_depth, text);
+    const char* result = ok ? arena_dup_n(arena, text->str ? text->str : "", text->length) : nullptr;
+    strbuf_free(text);
+    return result;
 }
 
 // ============================================================================

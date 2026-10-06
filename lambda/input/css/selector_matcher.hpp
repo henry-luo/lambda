@@ -69,7 +69,8 @@ typedef enum PseudoElementType {
     PSEUDO_ELEMENT_PLACEHOLDER,   // ::placeholder
     // keep existing numeric values stable because cascade routing uses them
     PSEUDO_ELEMENT_BACKDROP,      // ::backdrop
-    PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON // ::file-selector-button
+    PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON, // ::file-selector-button
+    PSEUDO_ELEMENT_FOOTNOTE_CALL, PSEUDO_ELEMENT_FOOTNOTE_MARKER
 } PseudoElementType;
 
 /**

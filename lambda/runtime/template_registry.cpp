@@ -3,6 +3,8 @@
 #include "template_registry.h"
 #include "render_map.h"
 #include "edit_bridge.h"
+#include "lambda-root-frame.hpp"
+#include "ast.hpp"
 #include "../core/mark_reader.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
@@ -15,6 +17,52 @@ extern __thread EvalContext* context;
 
 extern "C" Item interp_eval_view_template(Context* context, Script* module,
                                            AstViewNode* view, Item model);
+extern "C" Item interp_eval_view_handler(Context* context, Script* module,
+                                          AstViewNode* view,
+                                          AstEventHandler* handler,
+                                          Item model, Item event);
+
+Item template_call_event_handler(TemplateHandlerEntry* entry,
+                                 Item model_item, Item event_item) {
+    if (!context || !entry) {
+        log_error("template-host: no bound runtime or handler");
+        return ItemError;
+    }
+    if (entry->interp_handler) {
+        return interp_eval_view_handler((Context*)context, entry->interp_module,
+            entry->interp_view, entry->interp_handler, model_item, event_item);
+    }
+    typedef Item (*TemplateEventHandlerFn)(Context*, Item, Item);
+    union {
+        fn_ptr raw;
+        TemplateEventHandlerFn typed;
+    } handler;
+    // The registry stores MIR handlers erased; restore their context ABI here.
+    handler.raw = entry->handler_func;
+    return handler.typed((Context*)context, model_item, event_item);
+}
+
+Item template_dispatch_event(Item model_item, bool edit_mode,
+                             const char* event_name, Item event_item,
+                             bool* handled) {
+    if (handled) *handled = false;
+    if (!context || !g_template_registry || !event_name) {
+        log_error("template-host: event dispatch lacks an active session");
+        return ItemError;
+    }
+    RootFrame roots(3);
+    Rooted<Item> model_root(roots, model_item);
+    Rooted<Item> event_root(roots, event_item);
+    Rooted<Item> result_root(roots, ItemNull);
+    TemplateEntry* tmpl = template_registry_match(g_template_registry,
+        model_root.get(), edit_mode, NULL);
+    TemplateHandlerEntry* entry = template_entry_find_handler(tmpl, event_name);
+    if (!entry) return ItemNull;
+    if (handled) *handled = true;
+    result_root.set(template_call_event_handler(entry, model_root.get(),
+        event_root.get()));
+    return result_root.get();
+}
 
 // Handler names are dynamic strings, while the dispatch hot path only needs a
 // no-false-negative prefilter before its exact strcmp lookup.
@@ -67,6 +115,7 @@ void template_registry_destroy(TemplateRegistry* registry) {
             mem_free(handler);
             handler = next_handler;
         }
+        mem_free(entry->state_names);
         mem_free(entry);
         entry = next_entry;
     }
@@ -75,6 +124,38 @@ void template_registry_destroy(TemplateRegistry* registry) {
         context->template_registry = NULL;
     }
     mem_free(registry);
+}
+
+void template_registry_set_state_declarations(TemplateEntry* entry,
+                                              AstViewNode* view) {
+    if (!entry || !view) return;
+    int count = 0;
+    for (AstStateEntry* state = view->state; state; state = state->next_state) {
+        if (state->name) count++;
+    }
+    if (count == 0) return;
+    const char** names = (const char**)mem_alloc(
+        (size_t)count * sizeof(const char*), MEM_CAT_SYSTEM);
+    if (!names) return;
+    int index = 0;
+    for (AstStateEntry* state = view->state; state; state = state->next_state) {
+        if (state->name) names[index++] = state->name->chars;
+    }
+    // Host state lookup must use the exact AST-owned name pointer because
+    // TemplateStateKey compares interned identities, not string contents.
+    entry->state_names = names;
+    entry->state_count = count;
+}
+
+const char* template_entry_state_name(TemplateEntry* entry,
+                                      const char* name) {
+    if (!entry || !name) return NULL;
+    for (int index = 0; index < entry->state_count; index++) {
+        if (strcmp(entry->state_names[index], name) == 0) {
+            return entry->state_names[index];
+        }
+    }
+    return NULL;
 }
 
 void template_registry_add(TemplateRegistry* registry,

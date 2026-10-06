@@ -208,7 +208,7 @@ bool css_bind_rule_namespaces(CssRule* rule, CssStylesheet* stylesheet);
 bool css_select_element_declaration(CssEngine* engine, struct SelectorMatcher* matcher,
     struct DomElement* element, CssStylesheet** sheets, size_t sheet_count,
     CssDeclaration** inline_declarations, size_t inline_count,
-    const char* property_name, CssDeclaration* result);
+    const char* property_name, CssDeclaration* result, uint8_t pseudo_element = 0);
 CssRule* css_parse_rule(CssEngine* engine, const char* rule_text);
 
 // Style system integration

@@ -47322,11 +47322,15 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     MirModuleBuild build = {};
     InterpSatelliteImage* image = NULL;
     void* entry = NULL;
+#ifndef NDEBUG
     struct timespec image_t0 = {};
     struct timespec image_t1 = {};
+#endif
     AstScript* source_root = NULL;
     StrBuf* entry_name = NULL;
+#ifndef NDEBUG
     double image_ms = 0.0;
+#endif
     LambdaModuleLayout* layout = NULL;
     if (snapshot) {
         // Worker images never extend the Script's compiler-owned pools. A
@@ -47442,7 +47446,9 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         }
     }
 
+#ifndef NDEBUG
     clock_gettime(CLOCK_MONOTONIC, &image_t0);
+#endif
     lowering_target = snapshot ? compiled_target : (AstFuncNode*)fn;
     lowering_members = snapshot ? compiled_members : members;
     transpile_mir_ast_begin(&build, satellite_context, &satellite_root, script->source,
@@ -47474,22 +47480,24 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         log_error("interp-tier: satellite link did not publish its immutable BSS");
         goto fail;
     }
+#ifndef NDEBUG
     clock_gettime(CLOCK_MONOTONIC, &image_t1);
     image_ms = (double)(image_t1.tv_sec - image_t0.tv_sec) * 1000.0 +
         (double)(image_t1.tv_nsec - image_t0.tv_nsec) / 1e6;
-    log_notice("interp-tier: satellite image function='%s' members=%d compile_ms=%.1f",
+    log_debug("interp-tier: satellite image function='%s' members=%d compile_ms=%.1f",
         fn->name ? fn->name->chars : "<anonymous>", member_count, image_ms);
+#endif
 
     // Snapshot lowering may allocate fallback constants only in its private
     // list. Such an image would address slots the live module cannot see, so
     // fail closed instead of merging worker-owned values into Script state.
     if (snapshot && compile_const_list->length != source_const_count) {
-        log_notice("interp-tier: snapshot rejected function='%s' reason=const-growth",
+        log_debug("interp-tier: snapshot rejected function='%s' reason=const-growth",
             fn->name ? fn->name->chars : "<anonymous>");
         goto fail;
     }
     if (snapshot && compile_type_list->length != source_type_count) {
-        log_notice("interp-tier: snapshot rejected function='%s' reason=type-growth",
+        log_debug("interp-tier: snapshot rejected function='%s' reason=type-growth",
             fn->name ? fn->name->chars : "<anonymous>");
         goto fail;
     }
@@ -47630,7 +47638,7 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         image->context = NULL;
         interp_satellite_image_destroy(image);
     }
-    log_notice("interp-tier: satellite compiled function='%s' image=%u",
+    log_debug("interp-tier: satellite compiled function='%s' image=%u",
         fn->name ? fn->name->chars : "<anonymous>", (unsigned)sequence);
     return true;
 }
@@ -48013,6 +48021,7 @@ void lambda_register_mir_view_templates(Script* script) {
                         // get the just-added entry (it's the last one)
                         TemplateEntry* tmpl_entry = g_template_registry->last;
                         template_registry_set_element_pattern(tmpl_entry, match_elmt);
+                        template_registry_set_state_declarations(tmpl_entry, view);
 
                         // set template_ref for state store keying
                         // func_name is stack-local, so we need a persistent copy
@@ -48464,7 +48473,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
         bool run_main, Script** out_script) {
     if (out_script) *out_script = NULL;
     LambdaTier tier = lambda_tier_selected();
-    log_notice("lambda-script: starting tier=%s backend=mir-direct",
+    log_debug("lambda-script: starting tier=%s backend=mir-direct",
         tier == LAMBDA_TIER_JIT ? "jit" :
         tier == LAMBDA_TIER_INTERP ? "interp" : "auto");
 

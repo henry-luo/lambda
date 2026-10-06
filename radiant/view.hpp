@@ -1172,13 +1172,14 @@ inline CssBoxSide radiant_css_box_side(CssPropertyCode property) {
     }
 }
 
+inline CssPropertyCode radiant_box_side_property(CssPropertyCode shorthand, CssBoxSide side) {
+    const CssProperty* property = css_property_get_by_code(shorthand);
+    return property && property->longhand_count == 4
+        ? property->longhand_props[side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP] : shorthand;
+}
+
 inline CssPropertyCode radiant_border_width_property(CssBoxSide side) {
-    static const CssPropertyCode properties[4] = {
-        CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_RIGHT_WIDTH,
-        CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_LEFT_WIDTH
-    };
-    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
-    return properties[index];
+    return radiant_box_side_property(CSS_PROPERTY_BORDER_WIDTH, side);
 }
 
 inline CssPropertyCode radiant_inset_property(CssBoxSide side) {
@@ -2812,6 +2813,8 @@ typedef struct CanonicalPropStats {
 
 // tier-2: view-pool, rebuilt each relayout
 struct ViewTree {
+    lam::Own<struct ViewTreeModel> model; // Secondary geometry; null for the DOM-backed default.
+    lam::Own<ViewTree> next_secondary;   // Document-owned secondary registry chain.
     lam::Own<Pool> prop_pool;       // Mutable element-owned view props; survives retained reflow.
     lam::Own<Arena> canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
     // The owning document's memory context (borrowed); every allocator below is
@@ -3845,8 +3848,11 @@ bool resolve_pseudo_color(LayoutContext* lycon, StyleTree* pseudo_style,
                           Color* out_color);
 Color radiant_caret_color_for_view(ViewSpan* span);
 Color color_name_to_rgb(CssEnum color_name);
+Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+struct MultiValue { const CssValue* length; const CssValue* color; const CssValue* style; };
+void set_multi_value(LayoutContext* lycon, MultiValue* parts, const CssValue* value);
 float resolve_css_angle_value(const CssValue* value);
 float layout_effective_zoom(View* view);
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
@@ -3870,10 +3876,12 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* view);
 DisplayValue resolve_display_value(void* child);
+DisplayValue css_default_display_for_element(DomElement* element, DomNode* node);
 bool css_resolve_display_css_value(DomElement* element, const CssValue* value,
                                    DisplayValue* out_display);
 bool css_display_contents_suppresses_element(DomElement* element);
 bool css_display_element_is_replaced(DomElement* element);
+bool css_content_value_has_image_url(const CssValue* value);
 bool css_is_mathml_element(const DomElement* element);
 bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* element,
                                            float* out_width, float* out_height);

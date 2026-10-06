@@ -182,6 +182,10 @@ typedef bool (*FontPathVisitFn)(void* context, FontPathCommand command,
 // false indicates a glyph without an outline; coverage remains available below.
 bool font_visit_glyph_path(FontHandle* handle, uint32_t codepoint,
     FontPathVisitFn visitor, void* context, struct Arena* arena);
+// shaped runs retain font-local glyph IDs; do not map them back through Unicode.
+// an empty outline (such as a space) succeeds without visiting any commands.
+bool font_visit_glyph_index_path(FontHandle* handle, uint32_t glyph_index,
+    FontPathVisitFn visitor, void* context, struct Arena* arena);
 
 // get the font's .notdef advance when no face covers a codepoint
 float font_get_missing_glyph_advance(FontHandle* handle);

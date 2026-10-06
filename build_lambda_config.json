@@ -68,6 +68,7 @@
     "lambda/format/format_latex_html_v2.cpp",
     "lambda/input/input-adoc.cpp",
     "lib/font/font_config.c",
+    "lib/test_font_path_gtest.cpp",
     "lambda/runtime/http_module.cpp"
   ],
   "release_exclude_source_files": [
@@ -380,6 +381,7 @@
         "lambda/module/node_core/node_process.cpp",
         "lambda/module/node_core/node_punycode.cpp",
         "lambda/module/node_core/node_querystring.cpp",
+        "lambda/module/node_core/node_readline.cpp",
         "lambda/module/node_core/node_string_decoder.cpp",
         "lambda/module/node_core/node_timers.cpp",
         "lambda/module/node_core/node_trace_events.cpp",
@@ -637,6 +639,7 @@
         "lambda/input/css/css_value.cpp",
         "lambda/input/css/css_value.cpp",
         "lambda/input/css/css_parser.cpp",
+        "lambda/input/css/css_paged_media.cpp",
         "lambda/input/css/css_engine.cpp",
         "lambda/input/css/css_counter_hook.cpp",
         "lambda/input/css/css_symbol_hook.cpp",
@@ -1796,7 +1799,9 @@
     "linux": {
       "output": "lambda.exe",
       "compiler": "clang",
-      "pkg_config_includes": ["webkit2gtk-4.1"],
+      "pkg_config_includes": [
+        "webkit2gtk-4.1"
+      ],
       "exclude_source_files": [
         "lib/clock_compat.c",
         "lib/font/font_backend_dwrite.cpp",
@@ -2732,21 +2737,6 @@
             "icon": "\ud83c\udf10"
           },
           {
-            "source": "lib/test_cmdedit_gtest.cpp",
-            "name": " Command Line Editor Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main",
-              "utf8proc"
-            ],
-            "binary": "test_cmdedit_gtest.exe",
-            "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC",
-            "icon": "\u2328\ufe0f"
-          },
-          {
             "source": "lib/test_mempool_gtest.cpp",
             "name": "Unified Memory Pool Tests",
             "disable_sanitizer": true,
@@ -3150,7 +3140,8 @@
             "source": "test_display_list_gtest.cpp",
             "name": "Display List Tests",
             "dependencies": [
-              "lambda-data"
+              "lambda-data",
+              "lambda-lib"
             ],
             "libraries": [
               "gtest",
@@ -3172,7 +3163,8 @@
               "radiant/paint_ir.cpp",
               "radiant/render_paint_block.cpp",
               "radiant/render_paint_boundary.cpp",
-              "test/test_display_list_stubs.cpp"
+              "test/test_display_list_stubs.cpp",
+              "radiant/render_glyph_path.cpp"
             ],
             "binary": "test_display_list_gtest.exe",
             "icon": "\ud83e\uddfe"
@@ -3233,6 +3225,10 @@
           },
           {
             "source": "test/test_view_reuse_gtest.cpp",
+            "additional_sources": [
+              "test/test_view_tree_model_gtest.cpp",
+              "lib/test_font_path_gtest.cpp"
+            ],
             "name": "View Reuse Tests",
             "dependencies": [
               "lambda-rt",
@@ -4400,6 +4396,7 @@
               "lambda/input/css/css_properties.cpp",
               "lambda/input/css/css_value_parser.cpp",
               "lambda/input/css/css_value.cpp",
+              "lib/strbuf.c",
               "lib/mempool.c",
               "lib/mem_context.c",
               "lib/memtrack.c",
@@ -4431,6 +4428,7 @@
               "lambda/input/css/css_properties.cpp",
               "lambda/input/css/css_value_parser.cpp",
               "lambda/input/css/css_value.cpp",
+              "lib/strbuf.c",
               "lib/mempool.c",
               "lib/mem_context.c",
               "lib/memtrack.c",
@@ -4929,6 +4927,46 @@
               ]
             },
             "icon": "\ud83d\udd00"
+          },
+          {
+            "source": "test/test_io_terminal_gtest.cpp",
+            "name": "IO Terminal Template Host Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "additional_sources": [
+              "lambda/runtime/concurrency.cpp",
+              "lib/uv_loop.c"
+            ],
+            "binary": "test_io_terminal_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main",
+              "libuv"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "icon": "⌨"
           },
           {
             "source": "test/test_mir_gc_stress_gtest.cpp",

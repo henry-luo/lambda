@@ -680,6 +680,69 @@ int counter_format(CounterContext* ctx, const char* name, uint32_t style,
     return counter_format_value(value, style, buffer, buffer_size);
 }
 
+CounterSnapshot* counter_snapshot_create(CounterContext* context, Pool* pool) {
+    if (!context || !pool) return nullptr;
+    size_t count = 0;
+    for (CounterScope* scope = context->current_scope; scope; scope = scope->parent) {
+        size_t size = hashmap_count(scope->counters);
+        if (size > SIZE_MAX / sizeof(CounterSnapshotEntry) - count) return nullptr;
+        count += size;
+    }
+    CounterSnapshot* snapshot = (CounterSnapshot*)pool_calloc(pool, sizeof(CounterSnapshot));
+    if (!snapshot) return nullptr;
+    snapshot->entries = count ? (CounterSnapshotEntry*)pool_calloc(pool, count * sizeof(CounterSnapshotEntry)) : nullptr;
+    if (count && !snapshot->entries) return nullptr;
+    // Keep inner scopes first for counter(); counters() reads the copied bindings in reverse.
+    for (CounterScope* scope = context->current_scope; scope; scope = scope->parent) {
+        size_t iter = 0; CounterValue* value = nullptr;
+        while (CounterMap::next(scope->counters, &iter, &value)) {
+            char* name = pool_strdup(pool, value->name);
+            if (!name) return nullptr;
+            snapshot->entries[snapshot->count++] = {name, value->value};
+        }
+    }
+    return snapshot;
+}
+
+CounterSnapshot* counter_snapshot_copy(const CounterSnapshot* source, Pool* pool) {
+    if (!pool) return nullptr;
+    CounterSnapshot* copy = (CounterSnapshot*)pool_calloc(pool, sizeof(CounterSnapshot));
+    if (!copy || !source || !source->count) return copy;
+    if (source->count > SIZE_MAX / sizeof(CounterSnapshotEntry)) return nullptr;
+    copy->entries = (CounterSnapshotEntry*)pool_calloc(pool, source->count * sizeof(CounterSnapshotEntry));
+    if (!copy->entries) return nullptr;
+    for (size_t i = 0; i < source->count; i++) {
+        const char* name = pool_strdup(pool, source->entries[i].name);
+        if (!name) return nullptr;
+        copy->entries[copy->count++] = {name, source->entries[i].value};
+    }
+    return copy;
+}
+
+bool counter_value_append(int value, uint32_t style, StrBuf* text) {
+    if (!text) return false;
+    char buffer[128] = {};
+    int length = counter_format_value(value, style, buffer, sizeof(buffer));
+    if (length < 0 || (size_t)length >= sizeof(buffer)) return false;
+    strbuf_append_str_n(text, buffer, (size_t)length);
+    return true;
+}
+
+bool counter_snapshot_append(const CounterSnapshot* snapshot, const char* name,
+        const char* separator, uint32_t style, StrBuf* text) {
+    if (!snapshot || !name || !text) return false;
+    bool found = false;
+    for (size_t i = 0; i < snapshot->count; i++) {
+        const CounterSnapshotEntry& entry = snapshot->entries[separator ? snapshot->count - i - 1 : i];
+        if (strcmp(entry.name, name) != 0) continue;
+        if (found) strbuf_append_str(text, separator);
+        if (!counter_value_append(entry.value, style, text)) return false;
+        found = true;
+        if (!separator) break;
+    }
+    return found || counter_value_append(0, style, text);
+}
+
 int counters_format(CounterContext* ctx, const char* name, const char* separator,
                     uint32_t style, char* buffer, size_t buffer_size) {
     if (!ctx || !name || !buffer || buffer_size == 0) return 0;

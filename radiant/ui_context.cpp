@@ -1,4 +1,5 @@
 #include "view.hpp"
+#include "view_tree_model.hpp"
 #include "render.hpp"
 #include "event.hpp"
 #include "radiant.hpp"
@@ -470,6 +471,7 @@ void free_document(DomDocument* doc) {
     // then dangle.
     if (doc->root) view_tree_release_detached_embedded_documents(doc->view_tree, doc->root);
 
+    view_tree_secondary_release_all(doc);
     view_tree_shell_destroy(doc, doc->view_tree);
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here

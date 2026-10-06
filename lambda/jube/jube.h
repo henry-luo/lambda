@@ -39,6 +39,7 @@ typedef struct JubeHostGcAPI JubeHostGcAPI;
 typedef struct JubeRootFrame JubeRootFrame;
 typedef struct JubeHostRootAPI JubeHostRootAPI;
 typedef struct JubeHostDataAPI JubeHostDataAPI;
+typedef struct JubeHostTemplateAPI JubeHostTemplateAPI;
 typedef struct JubeHostValueAPI JubeHostValueAPI;
 typedef struct JubeHostScriptAPI JubeHostScriptAPI;
 typedef struct JubeHostRealmAPI JubeHostRealmAPI;
@@ -196,6 +197,7 @@ typedef enum JubeHostCapability {
     JUBE_HOST_CAP_GUEST_EXECUTION = 1ull << 4,
     JUBE_HOST_CAP_COMPILER = 1ull << 5,
     JUBE_HOST_CAP_NODE_RUNTIME = 1ull << 6,
+    JUBE_HOST_CAP_TEMPLATE_SESSION = 1ull << 7,
 } JubeHostCapability;
 
 // Hosted-language service capabilities are separate from the base host
@@ -591,6 +593,76 @@ struct JubeHostDataAPI {
     // Names may carry explicit source slices; preserve their byte length so a
     // guest never needs a host string allocator or NUL-terminated workaround.
     Item (*name_from_utf8_n)(void* session, const char* text, size_t length);
+};
+
+// Plain descriptors are copied into the mounted Lambda heap before dispatch.
+// A guest must not pass JS Items as template payloads or retain borrowed
+// Lambda Items after the synchronous emit callback returns (D7.4.2v2).
+typedef enum JubeTemplateValueKind {
+    JUBE_TEMPLATE_NULL = 0,
+    JUBE_TEMPLATE_BOOL,
+    JUBE_TEMPLATE_INT,
+    JUBE_TEMPLATE_STRING,
+    JUBE_TEMPLATE_BINARY,
+    JUBE_TEMPLATE_MAP,
+    JUBE_TEMPLATE_ARRAY,
+} JubeTemplateValueKind;
+
+typedef struct JubeTemplateValue JubeTemplateValue;
+typedef struct JubeTemplateField {
+    const char* name;
+    const JubeTemplateValue* value;
+} JubeTemplateField;
+
+struct JubeTemplateValue {
+    JubeTemplateValueKind kind;
+    const char* bytes;
+    size_t byte_length;
+    int64_t integer;
+    bool boolean;
+    const JubeTemplateField* fields;
+    size_t field_count;
+    const JubeTemplateValue* elements;
+    size_t element_count;
+};
+
+typedef struct JubeTemplateTarget {
+    // NULL selects the root. Otherwise select a named template-state child,
+    // falling back to a model attribute before that child has been replaced.
+    const char* state_name;
+    const char* fallback_attr;
+    bool edit_mode;
+} JubeTemplateTarget;
+
+typedef Item (*JubeTemplateEmitCallback)(void* user, void* template_session,
+                                         Item event_name, Item event_data);
+typedef int (*JubeTemplateRenderCallback)(void* user, void* template_session,
+                                          Item snapshot);
+
+struct JubeHostTemplateAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    void* (*open)(const char* source, const char* reference);
+    void (*close)(void* template_session);
+    int (*dispatch)(void* template_session, const JubeTemplateTarget* target,
+                    const char* event_name, const JubeTemplateValue* event_data,
+                    JubeTemplateEmitCallback emit, void* user);
+    // The callback may route an emitted Item without converting it to JS.
+    // This entry is valid only while dispatch's emit callback is active.
+    int (*dispatch_item)(void* template_session, const JubeTemplateTarget* target,
+                         const char* event_name, Item event_data,
+                         JubeTemplateEmitCallback emit, void* user);
+    Item (*attribute)(Item value, const char* name);
+    bool (*string_copy)(Item value, char* out, size_t capacity,
+                        size_t* out_length);
+    int (*render_json)(void* template_session, char** out_bytes,
+                       size_t* out_length);
+    void (*bytes_release)(char* bytes);
+    // Borrowed snapshot is live only during this callback. It can be copied
+    // or passed back to dispatch_item before returning.
+    int (*render_item)(void* template_session, JubeTemplateRenderCallback callback,
+                       void* user);
+    Item (*child_at)(Item value, int64_t index);
 };
 
 struct JubeHostValueAPI {
@@ -1557,6 +1629,8 @@ struct JubeHostAPI {
     const JubeHostDataAPI* data;
     // Node-only services are absent from minimal/non-Node hosts.
     const JubeHostNodeAPI* node;
+    // Additive host-neutral retained-template service (size-gated).
+    const JubeHostTemplateAPI* templates;
 };
 
 // A hosted language owns parsing and language semantics while the host owns

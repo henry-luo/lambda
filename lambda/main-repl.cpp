@@ -1,6 +1,8 @@
 
 #include "../lib/strbuf.h"
+#include "../lib/memtrack.h"
 #include "runtime/lambda-error.h"
+#include <string.h>
 #ifndef _WIN32
 #include <unistd.h>  // for isatty()
 #else
@@ -19,8 +21,54 @@
 #include <signal.h>  // for signal handling
 #include <setjmp.h>  // for setjmp/longjmp
 
-// Include our custom command line editor
-#include "../lib/cmdedit.h"
+#include "../lib/terminal_device.h"
+#include "runtime/terminal_host.h"
+
+static TerminalDevice* g_repl_device = nullptr;
+static TerminalSession* g_repl_terminal = nullptr;
+
+static int repl_device_raw(void* device, bool enable) {
+    return terminal_device_set_raw((TerminalDevice*)device, enable);
+}
+
+static int repl_device_size(void* device, int* rows, int* columns) {
+    return terminal_device_size((TerminalDevice*)device, rows, columns);
+}
+
+static int repl_device_wait(void* device, int timeout_ms) {
+    return terminal_device_wait((TerminalDevice*)device, timeout_ms);
+}
+
+static int64_t repl_device_read(void* device, char* bytes, size_t capacity) {
+    return terminal_device_read((TerminalDevice*)device, bytes, capacity);
+}
+
+static int64_t repl_device_write(void* device, const char* bytes, size_t length) {
+    return terminal_device_write((TerminalDevice*)device, bytes, length);
+}
+
+// Only a missing/failed package mount uses this deliberately plain recovery
+// path. The normal REPL never enters cmdedit's native editor loop.
+static char* repl_basic_readline(const char* prompt) {
+    if (isatty(STDOUT_FILENO)) {
+        fputs(prompt, stdout);
+        fflush(stdout);
+    }
+    StrBuf* line = strbuf_new_cap(128);
+    if (!line) return nullptr;
+    int next = 0;
+    while ((next = fgetc(stdin)) != EOF && next != '\n') {
+        if (next != '\r') strbuf_append_char(line, (char)next);
+    }
+    if (next == EOF && line->length == 0) {
+        strbuf_free(line);
+        return nullptr;
+    }
+    char* result = (char*)mem_alloc(line->length + 1, MEM_CAT_SYSTEM);
+    if (result) memcpy(result, line->str, line->length + 1);
+    strbuf_free(line);
+    return result;
+}
 
 // Result of checking statement completeness
 enum StatementStatus {
@@ -132,13 +180,27 @@ const char* get_continuation_prompt() {
 
 // Initialize command line editor
 int lambda_repl_init() {
-    // Use our custom cmdedit which handles all platforms
-    return repl_init();  // Our cmdedit's repl_init function
+    g_repl_device = terminal_device_open();
+    if (!g_repl_device) return -1;
+    int rows = 0;
+    int columns = 80;
+    terminal_device_size(g_repl_device, &rows, &columns);
+    g_repl_terminal = terminal_session_open(
+        terminal_device_is_tty(g_repl_device), columns);
+    if (!g_repl_terminal) {
+        terminal_device_close(g_repl_device);
+        g_repl_device = nullptr;
+        return -1;
+    }
+    return 0;
 }
 
 // Clean up command line editor
 void lambda_repl_cleanup() {
-    repl_cleanup();  // Our cmdedit's cleanup function
+    terminal_session_close(g_repl_terminal);
+    g_repl_terminal = nullptr;
+    terminal_device_close(g_repl_device);
+    g_repl_device = nullptr;
 }
 
 void print_help() {
@@ -214,12 +276,21 @@ const char* get_repl_prompt() {
 #endif
 }
 
-char *lambda_repl_readline(const char *prompt) {
-    // Use our custom cmdedit which handles all platforms uniformly
-    return repl_readline(prompt);
-}
-
-int lambda_repl_add_history(const char *line) {
-    // Use our custom cmdedit history function
-    return repl_add_history(line);
+TerminalReadResult lambda_repl_readline(const char *prompt) {
+    // The host writes frame bytes directly; drain stdio output from the last
+    // evaluation first so redirected prompts cannot overtake its result.
+    fflush(stdout);
+    if (!g_repl_terminal || !g_repl_device) {
+        char* line = repl_basic_readline(prompt);
+        return {line ? TERMINAL_READ_LINE : TERMINAL_READ_EOF, line};
+    }
+    TerminalTransport transport = {};
+    transport.device = g_repl_device;
+    transport.is_tty = terminal_device_is_tty(g_repl_device);
+    transport.set_raw = repl_device_raw;
+    transport.size = repl_device_size;
+    transport.wait = repl_device_wait;
+    transport.read = repl_device_read;
+    transport.write = repl_device_write;
+    return terminal_session_readline(g_repl_terminal, &transport, prompt);
 }

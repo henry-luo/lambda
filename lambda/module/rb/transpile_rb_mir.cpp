@@ -4711,7 +4711,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     }
 
     // execute
-    log_notice("rb-mir: executing JIT compiled Ruby code");
+    log_debug("rb-mir: executing JIT compiled Ruby code");
     rb_reset_module_vars();
     rb_runtime_set_current_file(filename);
     rb_runtime_set_runtime(runtime);
