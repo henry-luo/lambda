@@ -60,21 +60,21 @@ pub pn open_document(path, options) element^ {
 // its own state; switching hands the other the view it builds from the
 // current text, `shown` = {mode, session, doc, status}.
 edit <edit_doc> state shown: ~.shown {
-  // The root renders <html> and the surface renders <body>: each template
-  // needs an element of its own, since the render map records one template
-  // per result element and a shared one would hide the surface's handlers.
+  // the surface's own <body> is this template's result as well; both handle
+  // its events, the surface first (render_map_wrapper_lookup)
+  if (shown.mode == 'source') src.app(shown.session, shown.doc, shown.status)
+  else shell.app(shown.session, shown.doc, shown.status)
+}
+on edit_switch(next) {
+  shown = next
+}
+
+fn page(shown) =>
   <html lang: "en",
     <head
       <meta charset: "UTF-8">
       <title sess.window_title(shown.session, false)>
       <style files.css ++ tools.css ++ shell.surface_css ++ src.surface_css>
     >
-    if (shown.mode == 'source') src.app(shown.session, shown.doc, shown.status)
-    else shell.app(shown.session, shown.doc, shown.status)
+    apply(<edit_doc shown: shown>, {mode: "edit"})
   >
-}
-on edit_switch(next) {
-  shown = next
-}
-
-fn page(shown) => apply(<edit_doc shown: shown>, {mode: "edit"})

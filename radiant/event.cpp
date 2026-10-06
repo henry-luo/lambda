@@ -2515,6 +2515,21 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     return event_root.get();
 }
 
+// The templates that returned a result element, innermost first: one whose
+// body applies another template returns that template's element, and both
+// handle its events, as nested elements would (render_map_wrapper_lookup).
+struct RenderOwners {
+    RenderMapLookup lookup = {};
+    bool owned;
+    int link = 0;
+    explicit RenderOwners(Item result) { owned = render_map_reverse_lookup(result, &lookup); }
+    bool valid() const { return owned && link < 64; }
+    void next() {
+        link++;
+        owned = render_map_wrapper_lookup(lookup, &lookup);
+    }
+};
+
 // ============================================================================
 // Handler context for emit() support
 // ============================================================================
@@ -2796,12 +2811,11 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
                 item.element = dom_element_render_source(dom_elem);
 
                 // skip the current handler's template (we want PARENT)
-                RenderMapLookup lookup;
-                if (render_map_reverse_lookup(item, &lookup)) {
+                for (RenderOwners owners(item); owners.valid(); owners.next()) {
+                    RenderMapLookup lookup = owners.lookup;
                     if (lookup.template_ref == g_emit_handler_ctx->template_ref &&
                         lookup.source_item.item == g_emit_handler_ctx->model_item.item) {
                         found_self = true;
-                        node = node->parent;
                         continue;
                     }
 
@@ -3406,23 +3420,25 @@ static bool dispatch_author_template_participant(EventContext* evcon,
 
     Item source_item;
     source_item.element = dom_element_render_source(dom_elem);
-    RenderMapLookup lookup;
-    if (!render_map_reverse_lookup(source_item, &lookup)) return false;
-    TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
-                                                      lookup.template_ref);
-    if (!tmpl || tmpl->is_behavior ||
-        !template_entry_may_handle_event(tmpl, event_name)) {
-        return false;
+    bool delivered = false;
+    for (RenderOwners owners(source_item); owners.valid(); owners.next()) {
+        RenderMapLookup lookup = owners.lookup;
+        TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
+                                                          lookup.template_ref);
+        if (!tmpl || tmpl->is_behavior ||
+            !template_entry_may_handle_event(tmpl, event_name)) {
+            continue;
+        }
+        TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
+        if (!handler || !author_template_cascade_claim_participant(evcon, lookup)) continue;
+        bool reconciled = false;
+        (void)invoke_template_handler(evcon, evcon->target, event_name, intent,
+                                      tmpl, handler, lookup.source_item,
+                                      lookup.template_ref, &reconciled);
+        if (reconciled) evcon->need_repaint = true;
+        delivered = true;
     }
-    TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
-    if (!handler) return false;
-    if (!author_template_cascade_claim_participant(evcon, lookup)) return false;
-    bool reconciled = false;
-    (void)invoke_template_handler(evcon, evcon->target, event_name, intent,
-                                  tmpl, handler, lookup.source_item,
-                                  lookup.template_ref, &reconciled);
-    if (reconciled) evcon->need_repaint = true;
-    return true;
+    return delivered;
 }
 
 extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
@@ -7634,22 +7650,23 @@ static bool snapshot_template_edit_action(View* target,
         if (!element || element->is_synthetic()) continue;
         Item source;
         source.element = dom_element_render_source(element);
-        RenderMapLookup lookup = {};
-        if (!render_map_reverse_lookup(source, &lookup)) continue;
-        TemplateEntry* tmpl = template_registry_find_ref(
-            g_template_registry, lookup.template_ref);
-        if (!tmpl || tmpl->is_behavior || !tmpl->is_edit ||
-            !template_entry_may_handle_event(tmpl, "editaction")) {
-            continue;
+        for (RenderOwners owners(source); owners.valid(); owners.next()) {
+            RenderMapLookup lookup = owners.lookup;
+            TemplateEntry* tmpl = template_registry_find_ref(
+                g_template_registry, lookup.template_ref);
+            if (!tmpl || tmpl->is_behavior || !tmpl->is_edit ||
+                !template_entry_may_handle_event(tmpl, "editaction")) {
+                continue;
+            }
+            TemplateHandlerEntry* handler = template_entry_find_handler(
+                tmpl, "editaction");
+            if (!handler) continue;
+            out->tmpl = tmpl;
+            out->handler = handler;
+            out->model_item = lookup.source_item;
+            out->template_ref = lookup.template_ref;
+            return true;
         }
-        TemplateHandlerEntry* handler = template_entry_find_handler(
-            tmpl, "editaction");
-        if (!handler) continue;
-        out->tmpl = tmpl;
-        out->handler = handler;
-        out->model_item = lookup.source_item;
-        out->template_ref = lookup.template_ref;
-        return true;
     }
     return false;
 }

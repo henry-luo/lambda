@@ -164,6 +164,12 @@ static HashMap* ensure_reverse_map(void) {
     return s_reverse_map;
 }
 
+static bool render_map_link_wrapper(RenderMapKey inner, RenderMapKey outer, Item result_node);
+
+static bool render_map_same_key(RenderMapKey a, RenderMapKey b) {
+    return a.template_ref == b.template_ref && a.source_item.item == b.source_item.item;  // RAW_ITEM_EQ_OK: render keys are identity-tracked.
+}
+
 static void render_map_record_reverse_result_tree(HashMap* reverse_map,
                                                   Item result_node,
                                                   RenderMapKey key,
@@ -172,10 +178,18 @@ static void render_map_record_reverse_result_tree(HashMap* reverse_map,
 
     ReverseMapEntry query = {};
     query.result_item_bits = result_node.item;
+    const ReverseMapEntry* owner = ReverseMap::get(reverse_map, query);
+    // A template whose body applies another template returns that template's
+    // element: the inner template recorded it first and keeps it, and this
+    // one wraps it, so neither template's handlers hide the other's.
+    if (depth == 0 && owner && !render_map_same_key(owner->key, key) &&
+        render_map_link_wrapper(owner->key, key, result_node)) {
+        return;
+    }
     // A direct template result can reuse a fat-element address after a
     // retransform. Refresh that root mapping; nested apply() results below
     // it still retain their more specific reverse ownership.
-    if (depth == 0 || !ReverseMap::get(reverse_map, query)) {
+    if (depth == 0 || !owner) {
         ReverseMapEntry entry = {};
         entry.result_item_bits = result_node.item;
         entry.key = key;
@@ -211,6 +225,56 @@ static const char* render_map_template_ref(const RenderMapEntry& entry) {
 typedef TypedHashMap<RenderMapEntry,
     HashMapIdentity2KeyOps<RenderMapEntry, render_map_source_item, render_map_template_ref>> RenderMap;
 
+static RenderMapEntry* render_map_entry(HashMap* map, RenderMapKey key) {
+    if (!map) return nullptr;
+    RenderMapEntry query = {};
+    query.key = key;
+    return RenderMap::get(map, query);
+}
+
+// The live wrapper of `entry`: recorded, and still returning `result_node`.
+static RenderMapEntry* render_map_live_wrapper(HashMap* map, const RenderMapEntry* entry,
+                                               Item result_node) {
+    if (!entry || !entry->has_wrapper) return nullptr;
+    RenderMapEntry* outer = render_map_entry(map, entry->wrapper);
+    return outer && outer->result_node.item == result_node.item ? outer : nullptr;  // RAW_ITEM_EQ_OK: render results are identity-tracked.
+}
+
+// Chain `outer` to the outermost live wrapper of `inner`, which must still
+// own `result_node`; false when that ownership is stale (a reused address).
+static bool render_map_link_wrapper(RenderMapKey inner, RenderMapKey outer, Item result_node) {
+    HashMap* map = s_render_map;
+    RenderMapEntry* cur = render_map_entry(map, inner);
+    if (!cur || cur->result_node.item != result_node.item) return false;  // RAW_ITEM_EQ_OK: render results are identity-tracked.
+    for (int depth = 0; depth < 64; depth++) {
+        if (render_map_same_key(cur->key, outer)) return true;
+        RenderMapEntry* next = render_map_live_wrapper(map, cur, result_node);
+        if (!next) break;
+        cur = next;
+    }
+    RenderMapEntry linked = *cur;
+    linked.has_wrapper = true;
+    linked.wrapper = outer;
+    RenderMap::set(map, linked);
+    log_debug("render_map_link_wrapper: tmpl=%s wraps tmpl=%s",
+              outer.template_ref ? outer.template_ref : "(anon)",
+              linked.key.template_ref ? linked.key.template_ref : "(anon)");
+    return true;
+}
+
+// A re-rendered template's new element is also every wrapper's result.
+static void render_map_move_wrappers(HashMap* map, RenderMapKey inner, Item old_result,
+                                     Item new_result) {
+    RenderMapEntry* cur = render_map_entry(map, inner);
+    for (int depth = 0; cur && depth < 64; depth++) {
+        RenderMapEntry* outer = render_map_live_wrapper(map, cur, old_result);
+        if (!outer) return;
+        RenderMapKey outer_key = outer->key;
+        outer->result_node = new_result;
+        cur = render_map_entry(map, outer_key);
+    }
+}
+
 void render_map_forget_retired_result(EvalContext* owner, Item result) {
     if (!owner || !result.item) return;
     RenderMapState* state = (RenderMapState*)context_capsule(owner, CONTEXT_CAPSULE_RENDER_MAP);
@@ -219,14 +283,20 @@ void render_map_forget_retired_result(EvalContext* owner, Item result) {
     query.result_item_bits = result.item;
     const ReverseMapEntry* found = ReverseMap::get(state->reverse_map, query);
     if (!found) return;
-    RenderMapEntry forward_query = {};
-    forward_query.key = found->key;
-    RenderMapEntry* forward = state->render_map
-        ? RenderMap::get(state->render_map, forward_query) : nullptr;
     // Retransformation can already have published the replacement under the
-    // same key. Retirement removes only the old result's identities.
-    if (forward && forward->result_node.item == result.item) {
+    // same key. Retirement removes only the old result's identities: the
+    // innermost template's and those of the wrappers that returned it too.
+    RenderMapKey key = found->key;
+    for (int depth = 0; state->render_map && depth < 64; depth++) {
+        RenderMapEntry* forward = render_map_entry(state->render_map, key);
+        if (!forward || forward->result_node.item != result.item) break;  // RAW_ITEM_EQ_OK: render results are identity-tracked.
+        bool wrapped = forward->has_wrapper;
+        RenderMapKey outer = forward->wrapper;
+        RenderMapEntry forward_query = {};
+        forward_query.key = key;
         RenderMap::erase(state->render_map, forward_query);
+        if (!wrapped) break;
+        key = outer;
     }
     ReverseMap::erase(state->reverse_map, query);
 }
@@ -468,6 +538,7 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         updated.result_node = new_result;
         updated.dirty = false;
         RenderMap::set(map, updated);
+        render_map_move_wrappers(map, saved.key, old_result, new_result);
 
         count++;
         log_debug("render_map_retransform: re-transformed tmpl=%s (entry %d)",
@@ -526,6 +597,18 @@ bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out) {
         return true;
     }
     return false;
+}
+
+bool render_map_wrapper_lookup(RenderMapLookup inner, RenderMapLookup* out) {
+    if (!out || !context) return false;
+    RenderMapKey key = {inner.source_item, inner.template_ref};
+    HashMap* map = ensure_map();
+    RenderMapEntry* entry = render_map_entry(map, key);
+    RenderMapEntry* outer = entry ? render_map_live_wrapper(map, entry, entry->result_node) : nullptr;
+    if (!outer) return false;
+    out->source_item = outer->key.source_item;
+    out->template_ref = outer->key.template_ref;
+    return true;
 }
 
 void render_map_set_doc_root(Item root) {

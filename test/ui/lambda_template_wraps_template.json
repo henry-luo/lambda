@@ -1,0 +1,20 @@
+{
+  "name": "a template that renders another template directly: the inner's handlers run, its emit reaches the outer and swaps it, and the outer's handlers receive the inner's clicks",
+  "html": "test/ui/lambda_template_wraps_template.ls",
+  "viewport": {"width": 800, "height": 600},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#count"}, "equals": "5"},
+    {"type": "click", "target": {"selector": "#inc"}},
+    {"type": "assert_text", "target": {"selector": "#count"}, "equals": "6"},
+    {"type": "click", "target": {"selector": "#inc"}},
+    {"type": "assert_text", "target": {"selector": "#count"}, "equals": "7"},
+    {"type": "click", "target": {"selector": "#switch"}},
+    {"type": "assert_count", "target": {"selector": "#child"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": "#got"}, "equals": "7"},
+    {"type": "assert_text", "target": {"selector": "#outer-clicks"}, "equals": "1"},
+    {"type": "click", "target": {"selector": "#poke"}},
+    {"type": "assert_text", "target": {"selector": "#outer-clicks"}, "equals": "2"},
+    {"type": "click", "target": {"selector": "#poke"}},
+    {"type": "assert_text", "target": {"selector": "#outer-clicks"}, "equals": "3"}
+  ]
+}
