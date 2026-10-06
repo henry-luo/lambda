@@ -1603,7 +1603,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         log_error("Error: Source code is NULL");
         return;
     }
-    log_notice("Start transpiling %s...", script_path);
+    log_debug("Start transpiling %s...", script_path);
     win_timer start, end;
 
     // Phase profiling: use high-res timer for release-accurate timing.
@@ -1687,6 +1687,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // ANY-census [Type_Infer TI3]: one line per compile naming where static
     // types fell back to `any`. Purely diagnostic — later inference slices
     // prove their effect by the delta, not by reading the emitter.
+#ifndef NDEBUG
     {
         int any_total = 0;
         for (int r = 0; r < ANY_REASON_COUNT; r++) any_total += tp->any_census[r];
@@ -1699,11 +1700,12 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                     strbuf_append_format(census, " %s=%d",
                         any_reason_name((AnyReason)r), tp->any_census[r]);
                 }
-                log_notice("%s (%s)", census->str, script_path);
+                log_debug("%s (%s)", census->str, script_path);
                 strbuf_free(census);
             }
         }
     }
+#endif
 
     // D8.1.1v15: only AUTO may fall back when the walker rejects a script.
     if (lambda_tier_selected() == LAMBDA_TIER_INTERP ||
@@ -1769,7 +1771,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             return;
         }
         interp_run_stats()->scripts_fallback++;
-        log_notice("interp: fallback file=%s reason=node:%s",
+        log_debug("interp: fallback file=%s reason=node:%s",
             script_path, interp_node_kind_name(tp->interp_reject_kind));
         if (!interp_force_jit_import_cone(tp)) {
             if (own_timing_enabled) lambda_own_timing_leave(&own_timing);

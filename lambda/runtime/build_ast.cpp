@@ -12983,11 +12983,24 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
         source_prefix = "math/";
     } else if (strview_starts_with(&module, "lambda.") &&
             !strview_starts_with(&module, "lambda.math.") &&
-            !strview_starts_with(&module, "lambda.io.") &&
             !strview_starts_with(&module, "lambda.sys.")) {
         namespace_prefix = "lambda.";
     } else {
         return false;
+    }
+
+    // A shipped io leaf must not shadow an exact built-in io export.
+    if (strview_starts_with(&module, "lambda.io.")) {
+        StrView leaf = strview_sub(&module, strlen("lambda.io."), module.length);
+        if (!memchr(leaf.str, '.', leaf.length)) {
+            StrBuf* builtin_name = strbuf_new();
+            if (!builtin_name) return false;
+            strbuf_append_str(builtin_name, "io_");
+            strbuf_append_str_n(builtin_name, leaf.str, leaf.length);
+            bool collision = is_sys_func_name(builtin_name->str, (int)builtin_name->length);
+            strbuf_free(builtin_name);
+            if (collision) return false;
+        }
     }
 
     // D7.2.4 separates the public lambda.* namespace from the packaged

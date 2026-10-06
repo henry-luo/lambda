@@ -5,12 +5,19 @@ set -e
 OUT="${1:-test/type_infer/any_census_js_baseline.tsv}"
 EXE="${LAMBDA_EXE:-./lambda.exe}"
 TMP="temp/any_census_js_raw.txt"
+LOG="temp/any_census_js_run.log"
 mkdir -p temp
 : > "$TMP"
 for f in test/js/*.js; do
     [ -f "$f" ] || continue
-    "$EXE" js "$f" 2>&1 | grep -o 'any_census: .*(js)' >> "$TMP" || true
+    : > "$LOG"
+    LAMBDA_LOG_LEVEL=DEBUG LAMBDA_LOG_FILE="$LOG" "$EXE" js "$f" >/dev/null 2>&1 || true
+    grep -o 'any_census: .* (js)' "$LOG" >> "$TMP" || true
 done
+if ! grep -q 'any_census:' "$TMP"; then
+    echo 'JS ANY census needs a debug Lambda build with file logging enabled' >&2
+    exit 1
+fi
 python3 - "$TMP" "$OUT" <<'PY'
 import re, sys, collections
 raw, out = sys.argv[1], sys.argv[2]

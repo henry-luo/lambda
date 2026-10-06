@@ -8130,6 +8130,24 @@ Item fn_chr(Item cp_item) {
     return {.item = s2it(result)};
 }
 
+// Expose only Unicode metadata; terminal width accumulation stays in Lambda.
+Item fn_io_cell_width(Item cp_item) {
+    GUARD_ERROR1(cp_item);
+    int64_t cp = 0;
+    if (!lambda_item_to_int64_exact(cp_item, &cp) || cp < 0 || cp > 0x10FFFF ||
+            (cp >= 0xD800 && cp <= 0xDFFF)) return ItemNull;
+    return {.item = i2it(utf8proc_charwidth((utf8proc_int32_t)cp))};
+}
+
+Item fn_io_unicode_category(Item cp_item) {
+    GUARD_ERROR1(cp_item);
+    int64_t cp = 0;
+    if (!lambda_item_to_int64_exact(cp_item, &cp) || cp < 0 || cp > 0x10FFFF ||
+            (cp >= 0xD800 && cp <= 0xDFFF)) return ItemNull;
+    const char* category = utf8proc_category_string((utf8proc_int32_t)cp);
+    return {.item = s2it(heap_strcpy(category, strlen(category)))};
+}
+
 // join(strs, sep) - join list of strings with separator
 Item fn_join2(Item list_item, Item sep_item) {
     GUARD_ERROR2(list_item, sep_item);

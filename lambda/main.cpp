@@ -44,6 +44,7 @@
 #include "runtime/ast.hpp"  // For print_root_item declaration
 #include "runtime/emit_ast_dump.h"
 #include "runtime/interp.hpp"  // T0 tier selection + run summary
+#include "runtime/terminal_host.h"
 
 // Error handling with stack traces
 #include "runtime/lambda-error.h"
@@ -1058,8 +1059,7 @@ extern "C" {
 // Forward declare REPL functions from main-repl.cpp
 const char* get_repl_prompt();
 const char* get_continuation_prompt();
-char *lambda_repl_readline(const char *prompt);
-int lambda_repl_add_history(const char *line);
+TerminalReadResult lambda_repl_readline(const char *prompt);
 void print_help();
 
 // Statement completeness check for multi-line REPL input
@@ -1138,16 +1138,19 @@ void run_repl(Runtime *runtime) {
         log_error("interp-repl: falling back to historical REPL execution");
     }
 
-    while ((line = lambda_repl_readline(pending_input->length > 0 ? cont_prompt : main_prompt)) != NULL) {
+    while (true) {
+        TerminalReadResult read = lambda_repl_readline(
+            pending_input->length > 0 ? cont_prompt : main_prompt);
+        if (read.status == TERMINAL_READ_INTERRUPTED) {
+            strbuf_reset(pending_input);
+            continue;
+        }
+        if (read.status != TERMINAL_READ_LINE) break;
+        line = read.line;
         // Skip empty lines when not in multi-line mode
         if (strlen(line) == 0 && pending_input->length == 0) {
             mem_free(line);
             continue;
-        }
-
-        // Add to command history (only for first line of multi-line input)
-        if (pending_input->length == 0) {
-            lambda_repl_add_history(line);
         }
 
         // Handle REPL commands (only when not in multi-line mode)
@@ -2421,10 +2424,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
     }
     if (!is_bash_mode) {
-        log_notice("############################################");
-        log_notice("!!! Running DEBUG build of lambda.exe  !!!");
-        log_notice("!!! Do NOT use it for performance test !!!");
-        log_notice("############################################");
+        log_debug("############################################");
+        log_debug("!!! Running DEBUG build of lambda.exe  !!!");
+        log_debug("!!! Do NOT use it for performance test !!!");
+        log_debug("############################################");
     }
 #endif
 

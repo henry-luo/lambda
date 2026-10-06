@@ -1130,6 +1130,26 @@ static void plan_link_call_shape(Pool* pool, AstCallNode* call) {
 // builder, so they cost 1 regardless of element count.
 static uint32_t plan_need(AstNode* node);
 
+// Computed map and element fields use the same owner/key/value Scratch shape
+// in eval_map and eval_element. The nested expression runs with those homes
+// already live, including the source home for a spread.
+static uint32_t plan_computed_field_need(AstNode* first) {
+    uint32_t best = 1;  // container owner
+    for (AstNode* item = first; item; item = item->next) {
+        AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR
+            ? (AstNamedNode*)item : NULL;
+        uint32_t need = named && named->is_spread
+            ? 2 + plan_need(named->as)
+            : 3 + plan_need(named ? named->as : item);
+        if (named && !named->is_spread) {
+            uint32_t key_need = 2 + plan_need(named->key);
+            if (key_need > need) need = key_need;
+        }
+        if (need > best) best = need;
+    }
+    return best;
+}
+
 // A constrained type that `is` or a match arm names -- inline, by name, or
 // through an alias chain -- roots one predicate closure while each layer's
 // call runs (interp_eval_constrained_predicate). The bodies are planned as
@@ -1453,19 +1473,7 @@ static uint32_t plan_need(AstNode* node) {
     case AST_NODE_MAP: {
         AstMapNode* map = (AstMapNode*)node;
         if (!map->has_computed_key) return 1 + plan_need_max_siblings(map->item);
-        uint32_t best = 1;  // the runtime-built map owner
-        for (AstNode* item = map->item; item; item = item->next) {
-            AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR
-                ? (AstNamedNode*)item : NULL;
-            uint32_t need = named && named->is_spread
-                ? 1 + plan_need(named->as) : 2 + plan_need(named ? named->as : item);
-            if (named && !named->is_spread) {
-                uint32_t key_need = 1 + plan_need(named->key);
-                if (key_need > need) need = key_need;
-            }
-            if (need > best) best = need;
-        }
-        return best;
+        return plan_computed_field_need(map->item);
     }
     case AST_NODE_ELEMENT: {
         AstElementNode* element = (AstElementNode*)node;
@@ -1474,18 +1482,7 @@ static uint32_t plan_need(AstNode* node) {
             interp_visit_children(node, plan_need_child, &acc);
             return 1 + acc.best;
         }
-        uint32_t best = 1;  // element owner
-        for (AstNode* item = element->item; item; item = item->next) {
-            AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR
-                ? (AstNamedNode*)item : NULL;
-            uint32_t need = named && named->is_spread
-                ? 1 + plan_need(named->as) : 2 + plan_need(named ? named->as : item);
-            if (named && !named->is_spread) {
-                uint32_t key_need = 1 + plan_need(named->key);
-                if (key_need > need) need = key_need;
-            }
-            if (need > best) best = need;
-        }
+        uint32_t best = plan_computed_field_need(element->item);
         uint32_t content_need = 1 + plan_need(element->content);
         return content_need > best ? content_need : best;
     }

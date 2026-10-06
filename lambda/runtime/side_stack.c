@@ -400,3 +400,19 @@ void lambda_side_stack_regions_select(LambdaSideStackRegion* root,
     root_region_current = root;
     number_region_current = number;
 }
+
+void lambda_side_stack_regions_current(LambdaSideStackRegion** root,
+                                       LambdaSideStackRegion** number) {
+    if (root) *root = root_region_current;
+    if (number) *number = number_region_current;
+}
+
+void lambda_side_stack_region_release(LambdaSideStackRegion* region) {
+    if (!region || !region->base) return;
+#if defined(_WIN32)
+    VirtualFree(region->base, 0, MEM_RELEASE);
+#else
+    munmap(region->base, region->byte_size);
+#endif
+    *region = (LambdaSideStackRegion){0};
+}
