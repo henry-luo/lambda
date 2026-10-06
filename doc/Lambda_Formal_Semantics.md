@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 57.0.0 (2026-10-05)
+**Spec version:** 57.1.0 (2026-10-06)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2309,6 +2309,26 @@ below by its section.
 - **S16.7.3v2** **Lists spread and adjacent strings or binaries merge (S2.6.3,
   S2.6.4)**, after dropping, so `"a" ⏎ null ⏎ "b"` yields `"ab"` — the
   dropped null does not keep its neighbours apart.
+- **S16.7.4*** **A REPL entry echoes its value unless it is declarations
+  only.** An interactive session evaluates each completed entry as a fragment
+  of one script (entries are separated per S16.2.3v3). An entry whose
+  top-level items are all declarations (`let`, `fn`, `pn`, `type`, `import`)
+  produces no item (S2.5.4v2) and prints nothing; every other entry prints
+  its value, a `null` result included — the S16.7.2v2 residual is a script's
+  value, not an entry's echo. [Repl_Interp RI1]
+- **S16.7.5** **A session top level rebinds nothing.** A later `let`/`fn`/
+  `pn`/`type` of a name already bound at the session top level is E209,
+  duplicate definition, exactly as in a file: the session's top level is one
+  scope, not a sequence of scopes. `clear` starts a new session.
+  [Repl_Interp RI2]
+- **S16.7.6*** **Two session kinds.** `lambda` opens a **functional**
+  session: entries are top-level content (S16.7.1), and `var`, assignment and
+  procedure calls are rejected as they are at a file's top level. `lambda run`
+  without a script opens a **procedural** session: entries are statements
+  appended to one persistent implicit procedure body, so `var` bindings
+  persist across entries and procedure calls run; the session warns at start
+  that entries carry out effects. A trailing expression statement echoes per
+  S16.7.4. [Repl_Interp RI3]
 
 ### S16.8 Lexical forms
 
@@ -2661,6 +2681,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S16.4.2v2 | **Conformant; the v2 procedure-arrow clause since 2026-09-26** (S16.6.7v2's row): a procedure arrow's body parses as a `pn` body, so `pn () => {}` is the empty procedure. The v1 rule was **conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
 | S16.6.6, S16.6.7v2 | S16.6.6 and the v1 declaration rule **conformant in both front ends as of 2026-08-24** (C 140/140, Tree-sitter 135/135, zero corpus movement). Enforcement mechanics and findings: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 35. **S16.6.7v2 implemented 2026-09-26 in both front ends and on every tier.** The C parser's `parse_procedure_arrow` reduces an unnamed `AST_NODE_PROC`, so each tier treats it as a nested `pn`; the reference grammar's `proc_expr` is a closed tail. `fn` in value position is E100 naming the repair ([LR02-21](../vibe/Lambda_Issue_Ledger.md#lr02-21)'s `fn` half). S16 harnesses with the new cases: C 372/372, Tree-sitter 358/358. Fixture `proc/pn_arrow.ls` is pinned on interp, jit and auto: `function`, `pn (...)` and `start` targets, the run-time refusal in `fn` context, closures, a raised error, and promotion. `make test-lambda-baseline` 5949/5955 in the worktree; the six failures are test262 JS suites whose `ref/` data the worktree lacks, and the five `test_js_script_gtest` cases pass once it is linked. Captures behave as a named nested `pn`'s, including S9.1.4's pending capture-assignment error (its row). |
 | S16.6.8v2, S16.6.9 | v2 (2026-09-26): a procedure arrow's braced body is exempt (S16.6.7v2's row). **Conformant as of 2026-08-24** (`E312` in `build_ast` per S16.6.5; C 152/152, Tree-sitter 135/135, baseline 3868/3868). Classifier subtleties (three-way recursive `ast_branch_kind`, NEUTRAL empty branch) and migration: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 38 addendum. |
+| S16.7.4, S16.7.6 | **Ruled 2026-10-06 (USER), not implemented.** A declaration-only entry echoes `null` today (ledger LR01-18), and there is no procedural session: `var`, assignment and `pn` calls are E224 in the only session kind. S16.7.5 is conformant (E209, reported twice for a `fn` — the duplicate print is a defect, not a semantics gap). Plan: [Repl_Interp §3.4, §3.7](../vibe/Lambda_Design_Repl_Interp.md). |
 | S16.8.4, S16.8.8, S16.9.2 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.9.4 was probed on 2026-09-21 on both tiers and in both front ends, and ships unmarked. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
 | S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** Residue: the marker wraps the field type in `OPERATOR_OPTIONAL` — the same representation `a: T?` produces — so the two spellings this ruling calls *distinct* are indistinguishable downstream until `ShapeEntry` carries a field-level flag; independently, the declaration binding checker treats an optional field as required for both spellings (`error[E205]`, pre-existing). History: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S12.3.7 | **Conformant as of 2026-08-27.** Module-local bindings win over same-named system functions, including non-callable shadows, and the compiler emits the required warning; explicit `lambda.sys.*` qualification remains the escape from that shadow under S17.2.2. Regression and implementation record: [LR02-15](<../vibe/Lambda_Issue_Ledger (fixed).md#lr02-15>). |
@@ -2820,7 +2841,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
-| S16 surface syntax | Design_Syntax §3–§7 (39 decided points) | `Lambda_Design_Syntax.md` |
+| S16 surface syntax | Design_Syntax §3–§7 (39 decided points); RI1–RI3 | `Lambda_Design_Syntax.md`, `Lambda_Design_Repl_Interp.md` |
 | S17 system library | C18, C15b.1; IL2-I11, IL2-I12, IL2-I25; SP21–SP23; GRP28 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Int_Sized.md`, `Lambda_IO_Sysinfo.md`, `Lambda_Expr_String_Pattern.md`, `Lambda_Lib_Grep.md` |
 
 The decision records preserve the full deliberations — every alternative that
