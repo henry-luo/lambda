@@ -13,11 +13,14 @@ import md: lambda.edit.markdown
 import html: lambda.edit.html
 import svg: lambda.edit.svg
 import shell: lambda.edit.shell
+import src: lambda.edit.source
 import sess: lambda.edit.session
 import lambda.editor.mod_editor
 
-// Every editable format, in lookup order.
-pub let formats = [md.descriptor, html.descriptor, svg.descriptor]
+// Every editable format, in lookup order. The source surface opens the text
+// formats no rich surface claims, and any file under `--source`
+// (Radiant_Design_Source_Editor CED20).
+pub let formats = [md.descriptor, html.descriptor, svg.descriptor, src.descriptor]
 
 fn supported_suffixes() => join([for (f in formats) for (s in f.suffixes) s], ", ")
 
@@ -29,7 +32,7 @@ pub fn format_for_path(path) {
 }
 
 pub pn open_document(path, options) element^ {
-  let format = format_for_path(path)
+  let format = if (options != null and options.source == true) src.descriptor else format_for_path(path)
   if (format == null) {
     raise error("'" ++ sess.basename(path) ++ "' is not a document type lambda edit supports (" ++
                 supported_suffixes() ++ ")")
@@ -42,6 +45,7 @@ pub pn open_document(path, options) element^ {
     raise error("the " ++ format.name ++ " editor cannot keep this document exactly: " ++ mismatch)
   }
   let session = sess.new_session(path, format, source, loaded)
-  let editor = edit_open(loaded.doc, format.schema, null)
-  shell.page(session, editor, "Opened " ++ session.name ++ ".")
+  let status = "Opened " ++ session.name ++ "."
+  if (format.surface == 'source') src.page(session, loaded.doc, status)
+  else shell.page(session, edit_open(loaded.doc, format.schema, null), status)
 }

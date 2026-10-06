@@ -1,0 +1,10 @@
+Source editor sample
+second line
+    indented line
+fourth line with some words in it
+
+sixth line after a blank
+seventh
+eighth
+ninth
+tenth

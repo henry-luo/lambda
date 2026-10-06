@@ -12,6 +12,7 @@ import lambda.editor.mod_editor
 import lambda.editor.mod_source_pos
 import edit_result: lambda.dom.edit_result
 import sess: lambda.edit.session
+import files: lambda.edit.files
 import tools: lambda.edit.toolbar
 import rich: lambda.edit.rich_text
 import dr: lambda.edit.drawing
@@ -22,8 +23,6 @@ import .model
 // ---------------------------------------------------------------------------
 
 let shell_css = "
-  * { box-sizing: border-box; }
-  html { height: 100%; }
   /* the body grows with the document: a sticky toolbar and status line stay
      inside their containing block, so a body fixed to the viewport's height
      would carry both away once the page scrolls past its first screen */
@@ -34,19 +33,6 @@ let shell_css = "
   .edit-main { flex: 1; max-width: 980px; width: 100%; margin: 0 auto; }
   .edit-status { position: sticky; bottom: 0; padding: 4px 12px; font-size: 12px;
                  color: #57606a; background: #f6f8fa; border-top: 1px solid #d0d7de; }
-  .edit-dialog-backdrop { position: fixed; left: 0; top: 0; right: 0; bottom: 0;
-                          background: rgba(31, 35, 40, 0.3); z-index: 20; }
-  .edit-dialog { position: fixed; left: 50%; top: 96px; width: 440px; margin-left: -220px;
-                 z-index: 21; background: #ffffff; border: 1px solid #d0d7de;
-                 border-radius: 8px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
-  .edit-dialog-title { font-weight: 600; margin-bottom: 8px; }
-  .edit-dialog-text { font-size: 14px; color: #424a53; margin-bottom: 12px; }
-  .edit-dialog-field { display: block; width: 100%; margin-bottom: 10px; padding: 5px 8px;
-                       border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
-  .edit-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
-  .edit-dialog-btn { height: 30px; padding: 0 12px; border: 1px solid #d0d7de; border-radius: 6px;
-                     background: #f6f8fa; font-size: 13px; cursor: pointer; }
-  .edit-dialog-btn.primary { background: #1f883d; border-color: #1a7f37; color: #ffffff; }
 "
 
 // The page the loader returns: the session model applied in edit mode. The
@@ -57,7 +43,7 @@ pub fn page(session, editor, status) =>
     <head
       <meta charset: "UTF-8">
       <title sess.window_title(session, false)>
-      <style shell_css ++ tools.css ++ rich.css ++ dr.css>
+      <style files.css ++ shell_css ++ tools.css ++ rich.css ++ dr.css>
     >
     apply(<edit_app session: session, editor: editor, status: status>, {mode: "edit"})
   >
@@ -66,77 +52,32 @@ pub fn page(session, editor, status) =>
 // Dialogs
 // ---------------------------------------------------------------------------
 
-view <edit_dialog_button> {
-  <button class: "edit-dialog-btn edit-dialog-" ++ ~.action ++ (if (~.primary) " primary" else ""), ~.label>
-}
-on click(evt) {
-  emit("edit_dialog", {action: ~.action, node: evt.target})
-}
-
-fn dialog_button(action, label, primary) =>
-  apply(<edit_dialog_button action: action, label: label, primary: primary>)
-
-fn field(id, value, placeholder) =>
-  <input id: id, class: "edit-dialog-field", type: "text", value: value, placeholder: placeholder>
-
-fn dialog_frame(kind, title, text, fields, buttons) =>
-  <div class: "edit-dialog-layer",
-    <div class: "edit-dialog-backdrop">
-    <div class: "edit-dialog edit-dialog-" ++ kind, role: "dialog", ["aria-label"]: title,
-      <div class: "edit-dialog-title", title>
-      <div class: "edit-dialog-text", text>
-      <div class: "edit-dialog-fields", *fields>
-      <div class: "edit-dialog-actions", *buttons>
-    >
-  >
-
+// The surface's own dialogs; the file dialogs come from files.ls.
 fn dialog_view(dialog, session) {
   if (dialog == null) null
-  else if (dialog.kind == 'close') {
-    dialog_frame("close", "Unsaved changes",
-      "Save the changes to " ++ session.name ++ " before closing?", [],
-      [dialog_button("cancel", "Cancel", false), dialog_button("discard", "Don't Save", false),
-       dialog_button("save", "Save", true)])
-  }
-  else if (dialog.kind == 'changed') {
-    dialog_frame("changed", "File changed on disk",
-      session.name ++ " was changed by another program. Overwrite it with your version, " ++
-      "reload the file and lose your edits, or save your version under another name.", [],
-      [dialog_button("cancel", "Cancel", false), dialog_button("reload", "Reload", false),
-       dialog_button("save_as", "Save As", false), dialog_button("overwrite", "Overwrite", true)])
-  }
-  else if (dialog.kind == 'exists') {
-    dialog_frame("exists", "File exists",
-      dialog.path ++ " already exists. Replace it?", [],
-      [dialog_button("cancel", "Cancel", false), dialog_button("overwrite", "Replace", true)])
-  }
-  else if (dialog.kind == 'save_as') {
-    dialog_frame("save_as", "Save As", "Save a copy of the document to a new file.",
-      [field("edit-dialog-path", dialog.path, "path/to/file")],
-      [dialog_button("cancel", "Cancel", false), dialog_button("save_as_ok", "Save", true)])
-  }
+  else if (member(files.dialog_kinds, dialog.kind)) files.dialog_view(dialog, session)
   else if (dialog.kind == 'link') {
-    dialog_frame("link", "Insert link", "Link the selection (or insert the address).",
-      [field("edit-dialog-href", "", "https://")],
-      [dialog_button("cancel", "Cancel", false), dialog_button("link_ok", "Insert", true)])
+    files.dialog_frame("link", "Insert link", "Link the selection (or insert the address).",
+      [files.field("edit-dialog-href", "", "https://")],
+      [files.dialog_button("cancel", "Cancel", false), files.dialog_button("link_ok", "Insert", true)])
   }
   else if (dialog.kind == 'style') {
-    dialog_frame("style", "Fill and stroke",
+    files.dialog_frame("style", "Fill and stroke",
       "Any SVG paint: #rrggbb, a color name, or none. An empty field is left as it is.",
-      [field("edit-dialog-fill", dialog.fill, "Fill"), field("edit-dialog-stroke", dialog.stroke, "Stroke"),
-       field("edit-dialog-width", dialog.width, "Stroke width")],
-      [dialog_button("cancel", "Cancel", false), dialog_button("style_ok", "Apply", true)])
+      [files.field("edit-dialog-fill", dialog.fill, "Fill"), files.field("edit-dialog-stroke", dialog.stroke, "Stroke"),
+       files.field("edit-dialog-width", dialog.width, "Stroke width")],
+      [files.dialog_button("cancel", "Cancel", false), files.dialog_button("style_ok", "Apply", true)])
   }
   else if (dialog.kind == 'words') {
     // not kind 'text': every dialog has an .edit-dialog-text description
-    dialog_frame("words", "Text", "The words the text object shows.",
-      [field("edit-dialog-text", dialog.text, "Text")],
-      [dialog_button("cancel", "Cancel", false), dialog_button("text_ok", "OK", true)])
+    files.dialog_frame("words", "Text", "The words the text object shows.",
+      [files.field("edit-dialog-text", dialog.text, "Text")],
+      [files.dialog_button("cancel", "Cancel", false), files.dialog_button("text_ok", "OK", true)])
   }
   else if (dialog.kind == 'image') {
-    dialog_frame("image", "Insert image", "Image address and description.",
-      [field("edit-dialog-src", "", "images/picture.png"), field("edit-dialog-alt", "", "Description")],
-      [dialog_button("cancel", "Cancel", false), dialog_button("image_ok", "Insert", true)])
+    files.dialog_frame("image", "Insert image", "Image address and description.",
+      [files.field("edit-dialog-src", "", "images/picture.png"), files.field("edit-dialog-alt", "", "Description")],
+      [files.dialog_button("cancel", "Cancel", false), files.dialog_button("image_ok", "Insert", true)])
   }
   else null
 }
@@ -145,32 +86,6 @@ fn dialog_view(dialog, session) {
 // `root_node` answers for any connected node, where owner_document has no
 // value for a text node in a document without a JS realm.
 fn doc_root(node) => dom.root_node(node)
-
-// The live text of a dialog field.
-fn field_value(node, id) {
-  let input_node = dom.get_element_by_id(doc_root(node), id)
-  if (input_node == null) "" else string(dom.get_state(input_node, "value") or "")
-}
-
-// ---------------------------------------------------------------------------
-// Session effects
-// ---------------------------------------------------------------------------
-
-// Publish the dirty state to the window: the title marks it, and an armed
-// close guard routes a close request through the Save / Discard dialog.
-pn sync_window(node, session, doc) {
-  let dirty = sess.is_dirty(session, doc)
-  dom.set_close_guard(node, dirty)
-  dom.set_window_title(node, sess.window_title(session, dirty))
-}
-
-// A closed dialog hands focus back to the document: the button that closed it
-// is gone, and with nothing focused the next key would reach <body>, outside
-// the shell that owns the shortcuts.
-pn focus_surface(node) {
-  let surface = dom.get_element_by_id(doc_root(node), "edit-surface")
-  if (surface != null) { dom.focus_set(surface, false) }
-}
 
 // Bind the editor to its surface once. A caret placed by a click reports no
 // `selectionchange`, so the first handler of any kind mounts; without a bound
@@ -305,12 +220,6 @@ fn text_dialog_for(doc, index) =>
 // The application template
 // ---------------------------------------------------------------------------
 
-fn file_label(session, dirty) =>
-  <div class: "edit-file",
-    <span class: "edit-name", session.name>
-    <span class: "edit-dirty", title: if (dirty) "Unsaved changes" else "Saved", if (dirty) "*" else "">
-  >
-
 fn format_groups(session) =>
   if (is_drawing(session)) tools.drawing_groups() else tools.rich_text_groups(session.format.underline == true)
 
@@ -318,7 +227,7 @@ fn format_groups(session) =>
 // also shows its zoom.
 fn toolbar_children(session, editor, dirty, ds) {
   let drawing = if (is_drawing(session)) ds else null;
-  [file_label(session, dirty), tools.group(tools.file_group, editor, dirty, drawing),
+  [files.file_label(session, dirty), tools.group(tools.file_group, editor, dirty, drawing),
    *[for (g in format_groups(session)) tools.group(g, editor, dirty, drawing)],
    *(if (drawing == null) [] else [<span class: "edit-zoom", dr.fmt(ds.zoom * 100.0) ++ "%">])]
 }
@@ -363,7 +272,7 @@ on editaction(evt) {
             else edit_handle_request(edit_set_selection(editor, part), edit_request_from_toolbar(evt.input_type, {}))
   editor = run.editor
   if (run.result.failure != null) { status = "Could not apply " ++ evt.input_type ++ "." }
-  sync_window(evt.target, session, editor.doc)
+  files.sync_window(evt.target, session, editor.doc)
   return run.result
 }
 on selectionchange(evt) {
@@ -381,11 +290,10 @@ on edit_cmd(req) {
   editor = mounted(editor, req.node, session.format)
   let cmd = req.cmd
   if (cmd == "save") {
-    let result = sess.save(session, editor.doc, session.path, false)
-    session = result.session
-    status = result.status
-    if (result.conflict != null) { dialog = {kind: result.conflict, path: session.path} }
-    sync_window(req.node, session, editor.doc)
+    let saved = files.save_now(session, editor.doc, req.node)
+    session = saved.session
+    status = saved.status
+    if (saved.dialog != null) { dialog = saved.dialog }
   }
   else if (cmd == "save_as") {
     dialog = {kind: 'save_as', path: session.path}
@@ -419,7 +327,7 @@ on edit_cmd(req) {
     else if (cmd == "zoom_in") { ds = {*: ds, zoom: zoomed(ds.zoom, 1.25)} }
     else if (cmd == "zoom_out") { ds = {*: ds, zoom: zoomed(ds.zoom, 0.8)} }
     else if (cmd == "zoom_fit") { ds = {*: ds, zoom: fit_zoom(req.node, editor.doc)} }
-    sync_window(req.node, session, editor.doc)
+    files.sync_window(req.node, session, editor.doc)
   }
   else {
     let item = if (cmd == "undo" or cmd == "redo") tools.find_item([tools.file_group], cmd)
@@ -435,7 +343,7 @@ on edit_cmd(req) {
       editor = run.editor
       if (run.result.failure != null) { status = "Could not apply " ++ item.title ++ "." }
       else { status = "" }
-      sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)
     }
   }
 }
@@ -443,61 +351,27 @@ on edit_dialog(req) {
   editor = mounted(editor, req.node, session.format)
   let action = req.action
   var edited = false
-  if (action == "cancel") {
-    dialog = null
-    after_save = null
-  }
-  else if (action == "discard") {
-    dialog = null
-    dom.request_window_close(req.node)
-  }
-  else if (action == "save" or action == "overwrite" or action == "save_as_ok") {
-    let typed = if (action == "save_as_ok") trim(field_value(req.node, "edit-dialog-path")) else null
-    let target = if (typed != null) (if (typed == "") "" else sess.resolve_path(sess.dirname(session.path), typed))
-                 else if (dialog != null and dialog.path != null) dialog.path
-                 else session.path
-    let closing = (dialog != null and dialog.kind == 'close') or after_save == 'close'
-    if (target == "") { status = "Choose a file name." }
-    else {
-      let result = sess.save(session, editor.doc, target, action == "overwrite")
-      session = result.session
-      status = result.status
-      sync_window(req.node, session, editor.doc)
-      if (result.ok) {
-        dialog = null
-        after_save = null
-        if (closing) { dom.request_window_close(req.node) }
-      }
-      else if (result.conflict != null) {
-        dialog = {kind: result.conflict, path: target}
-        after_save = if (closing) 'close' else null
-      }
-      // a refused Save As keeps its dialog, showing the path it tried
-      else if (typed != null) { dialog = {kind: 'save_as', path: target} }
-    }
-  }
-  else if (action == "reload") {
-    let result = sess.reload(session)
-    status = result.status
-    if (result.ok) {
-      session = result.session
-      editor = edit_open(result.doc, session.format.schema, null)
+  // the file dialogs' actions are shared with the source surface (files.ls)
+  let filed = files.dialog_action(action, req.node,
+    {session: session, doc: editor.doc, status: status, dialog: dialog, after_save: after_save})
+  if (filed.handled) {
+    session = filed.session
+    status = filed.status
+    dialog = filed.dialog
+    after_save = filed.after_save
+    if (filed.reloaded != null) {
+      editor = edit_open(filed.reloaded, session.format.schema, null)
       ds = {*: ds, picked: [], gesture: null}
-      dialog = null
-      sync_window(req.node, session, editor.doc)
     }
-  }
-  else if (action == "save_as") {
-    dialog = {kind: 'save_as', path: session.path}
   }
   else if (action == "style_ok") {
-    let changes = [["fill", trim(field_value(req.node, "edit-dialog-fill"))],
-                   ["stroke", trim(field_value(req.node, "edit-dialog-stroke"))],
-                   ["stroke-width", trim(field_value(req.node, "edit-dialog-width"))]]
+    let changes = [["fill", trim(files.field_value(req.node, "edit-dialog-fill"))],
+                   ["stroke", trim(files.field_value(req.node, "edit-dialog-stroke"))],
+                   ["stroke-width", trim(files.field_value(req.node, "edit-dialog-width"))]]
     dialog = null
     if (len(ds.picked) > 0) {
       editor = apply_edit(editor, dr.paint_tx(editor.doc, dr.picked_indices(ds), changes))
-      sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)
     }
     else {
       // with nothing picked the dialog sets the paint of new shapes
@@ -507,42 +381,42 @@ on edit_dialog(req) {
     }
   }
   else if (action == "text_ok") {
-    let words = trim(field_value(req.node, "edit-dialog-text"))
+    let words = trim(files.field_value(req.node, "edit-dialog-text"))
     let target = dialog
     dialog = null
     if (words != "" and target.index != null) {
       editor = apply_edit(editor, dr.retext_tx(editor.doc, target.index, words))
-      sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)
     }
     else if (words != "") {
       editor = apply_edit(editor, dr.insert_tx(editor.doc, dr.new_text(editor.doc, target.point, words, ds.style)))
       ds = {*: ds, tool: 'select', picked: [{index: len(editor.doc.content) - 1, box: null}]}
-      sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)
     }
   }
   else if (action == "link_ok") {
-    let href = trim(field_value(req.node, "edit-dialog-href"))
+    let href = trim(files.field_value(req.node, "edit-dialog-href"))
     dialog = null
     if (href != "") {
       let run = run_request(editor, "insertLink", {href: href, title: "", label: href})
       editor = run.editor
       edited = true
-      sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)
     }
   }
   else if (action == "image_ok") {
-    let src = trim(field_value(req.node, "edit-dialog-src"))
-    let alt = trim(field_value(req.node, "edit-dialog-alt"))
+    let src = trim(files.field_value(req.node, "edit-dialog-src"))
+    let alt = trim(files.field_value(req.node, "edit-dialog-alt"))
     dialog = null
     if (src != "") {
       let run = run_request(editor, "insertImage", {src: src, alt: alt})
       editor = run.editor
       edited = true
-      sync_window(req.node, session, editor.doc)
+      files.sync_window(req.node, session, editor.doc)
     }
   }
   if (dialog == null) {
-    focus_surface(req.node)
+    files.focus_surface(req.node)
     // an insert completed through the surface already; otherwise put the
     // caret back where the model has it (proposal §5 selection bookmark)
     if (not edited) { edit_restore_selection(editor) }
@@ -552,11 +426,10 @@ on keydown(evt) {
   if (primary_key(evt) and key_is(evt, "s")) {
     if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
     else {
-      let result = sess.save(session, editor.doc, session.path, false)
-      session = result.session
-      status = result.status
-      if (result.conflict != null) { dialog = {kind: result.conflict, path: session.path} }
-      sync_window(evt.target, session, editor.doc)
+      let saved = files.save_now(session, editor.doc, evt.target)
+      session = saved.session
+      status = saved.status
+      if (saved.dialog != null) { dialog = saved.dialog }
     }
     return 'prevent-default'
   }
@@ -600,7 +473,7 @@ on keydown(evt) {
                 else if (key == "l") 'line' else 'text'}
   }
   else { return 'pass' }
-  sync_window(evt.target, session, editor.doc)
+  files.sync_window(evt.target, session, editor.doc)
   'prevent-default'
 }
 // A gesture runs from press to release (proposal §6): the press picks the
@@ -643,7 +516,7 @@ on mousedown(evt) {
   }
   else if (ds.tool == 'text') { dialog = {kind: 'words', point: p, text: ""} }
   else { ds = {*: ds, gesture: {kind: 'create', start: p}} }
-  focus_surface(evt.target)
+  files.focus_surface(evt.target)
   'prevent-default'
 }
 on mouseup(evt) {
@@ -669,7 +542,7 @@ on mouseup(evt) {
     editor = apply_edit(editor, dr.insert_tx(editor.doc, shape))
     ds = {*: ds, tool: 'select', picked: [{index: len(editor.doc.content) - 1, box: dr.frame_box(shape, null)}]}
   }
-  sync_window(evt.target, session, editor.doc)
+  files.sync_window(evt.target, session, editor.doc)
   'prevent-default'
 }
 on dblclick(evt) {

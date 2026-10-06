@@ -1,0 +1,25 @@
+{
+  "name": "the source surface opens a text file, types into a line, and Cmd+S writes it back exactly",
+  "command": "edit",
+  "html": "test/ui/edit/sample.txt",
+  "working_copy": "temp/edit-ui/edit_src_type_save.txt",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".edit-name"}, "equals": "edit_src_type_save.txt"},
+    {"type": "assert_count", "target": {"selector": ".src-text .edit-doc > div"}, "count": 10},
+    {"type": "assert_text", "target": {"selector": ".src-gutter"}, "contains": "10"},
+    {"type": "click", "target": {"text": "second line"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " XYZ"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "second line XYZ"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 2, Col 16"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved edit_src_type_save.txt"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_type_save.txt", "contains": "Source editor sample\nsecond line XYZ\n    indented line\n"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_type_save.txt", "contains": "ninth\ntenth\n"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true}
+  ]
+}

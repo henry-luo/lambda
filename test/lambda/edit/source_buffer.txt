@@ -1,0 +1,65 @@
+"round trip:"
+[true, true, true, true, true, true, true, true]
+"line endings:"
+[true, true, ["one", "two"]]
+"chunks:"
+[1000, 4, [0, 250, 500, 750], "line 0", "line 249", "line 250", "line 999", 3]
+"text_between:"
+["1", " 0\nline 1\nli", "249\nline 250\nline"]
+"insert:"
+["line! 10", 1, {
+    from: {
+      line: 10,
+      col: 4
+    },
+    to: {
+      line: 10,
+      col: 5
+    },
+    insert: [""]
+  }, 0, 1, 1]
+[true, true]
+"split:"
+[1001, "li", "ne 260", "line 999", [0, 250, 501, 751]]
+"join across chunks:"
+[999, "line 250", "line 251", [0, 250, 499, 749], {
+    from: {
+      line: 249,
+      col: 4
+    },
+    to: {
+      line: 249,
+      col: 4
+    },
+    insert: [" 249", "line"]
+  }]
+[true]
+"paste:"
+[1002, ["a", "b", "cline 500", "line 501"], {
+    from: {
+      line: 500,
+      col: 0
+    },
+    to: {
+      line: 502,
+      col: 1
+    },
+    insert: [""]
+  }]
+[true]
+"delete all:"
+[1, 1, "\n", [0]]
+[true]
+"merge:"
+[760, [0, 130, 260, 510], 2, 2]
+"clamp:"
+[{
+    line: 0,
+    col: 6
+  }, {
+    line: 5,
+    col: 6
+  }, {
+    line: 999,
+    col: 1
+  }]

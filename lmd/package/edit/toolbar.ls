@@ -110,11 +110,16 @@ fn item_active(item, editor, ds) {
   else false
 }
 
+// The source surface passes {kind: 'source', can_undo, can_redo} for
+// `editor`: its buffer history is not a lambda.editor history (source.ls).
+fn can_undo(editor) => if (editor.kind == 'source') editor.can_undo else edit_can_undo(editor)
+fn can_redo(editor) => if (editor.kind == 'source') editor.can_redo else edit_can_redo(editor)
+
 fn item_disabled(item, editor, dirty, ds) {
   if (item.cmd == "save") not dirty
   else if (item.needs_pick == true) ds == null or len(ds.picked) == 0
-  else if (item.history == 'undo') not edit_can_undo(editor)
-  else if (item.history == 'redo') not edit_can_redo(editor)
+  else if (item.history == 'undo') not can_undo(editor)
+  else if (item.history == 'redo') not can_redo(editor)
   else false
 }
 

@@ -917,13 +917,14 @@ struct DocWindowLaunchOptions {
     bool event_log;
     bool state_dump;
     const char* graph_view_key;
+    bool source_surface;
     const char* font_dirs[16];
     int font_dir_count;
 };
 
 // Parse argv[2..] for a document-window command. `--view-key` belongs to the
-// viewer only. Returns false after reporting a usage error.
-static bool parse_doc_window_launch_options(int argc, char** argv, bool allow_view_key,
+// viewer and `--source` to the editor. Returns false after reporting a usage error.
+static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
                                             DocWindowLaunchOptions* out) {
     *out = DocWindowLaunchOptions{};
     for (int i = 2; i < argc; i++) {
@@ -937,7 +938,9 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool allow_vi
             out->event_log = true;
         } else if (strcmp(argv[i], "--state-dump") == 0) {
             out->state_dump = true;
-        } else if (allow_view_key && strcmp(argv[i], "--view-key") == 0) {
+        } else if (!is_view && strcmp(argv[i], "--source") == 0) {
+            out->source_surface = true;
+        } else if (is_view && strcmp(argv[i], "--view-key") == 0) {
             if (i + 1 < argc) {
                 out->graph_view_key = argv[++i];
             } else {
@@ -3956,7 +3959,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .md/.markdown  Markdown rich text\n");
             printf("  .html/.htm     HTML rich text (head, styles and scripts are preserved)\n");
             printf("  .svg           SVG drawing\n");
+            printf("  .txt/.ls/.json/.yaml/.css/.js/...  Source text (virtualized source editor)\n");
             printf("\nOptions:\n");
+            printf("  --source                   Open the file as source text, whatever its format\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
             printf("  --headless                 Run without creating a window\n");
@@ -3987,8 +3992,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
         log_info("Opening document for editing: %s (event_file: %s)", filename,
                  launch.event_file ? launch.event_file : "none");
-        int exit_code = edit_doc_in_window_with_events(filename, launch.event_file,
-            launch.headless, launch.font_dirs, launch.font_dir_count,
+        int exit_code = edit_doc_in_window_with_events(filename, launch.source_surface,
+            launch.event_file, launch.headless, launch.font_dirs, launch.font_dir_count,
             launch.event_log, launch.state_dump);
         if (exit_code < 0) {
             const char* diagnostic = lambda_document_load_diagnostic();

@@ -2260,8 +2260,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     // `scrollwheel` is behavior-only, after the public WheelEvent has had its
     // cancellation chance. Expose the same CSS-pixel deltas to package policy
-    // without giving it a mutable scroll offset or live layout geometry.
-    if (evcon && strcmp(event_name, "scrollwheel") == 0) {
+    // without giving it a mutable scroll offset or live layout geometry. Author
+    // templates read them from the public `wheel` / `mousewheel` (ES5v2).
+    if (evcon && (strcmp(event_name, "scrollwheel") == 0 ||
+                  (evcon->event.type == RDT_EVENT_SCROLL &&
+                   (strcmp(event_name, "wheel") == 0 || strcmp(event_name, "mousewheel") == 0)))) {
         const ScrollEvent* scroll = &evcon->event.scroll;
         mb.put("deltaX", -(double)scroll->xoffset * 100.0);
         mb.put("deltaY", -(double)scroll->yoffset * 100.0);
@@ -3289,28 +3292,32 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     return true;
 }
 
-// ES5 hot-path guard: continuous events must never enter Lambda, and must never
-// trigger a package load. Real workloads deliver these per frame, so letting one
-// bootstrap the dom package puts script compilation on the pointer path — and
-// loading a package mid-mousemove inside a JS page crashed it outright.
+// ES5v2 hot-path guard: a continuous event (pointer motion, scroll, wheel,
+// drag-over) must never trigger a package load, and reaches behavior templates
+// only in an already-loaded package. Real workloads deliver these per frame, so
+// letting one bootstrap the dom package puts script compilation on the pointer
+// path — and loading a package mid-mousemove inside a JS page crashed it
+// outright. Author templates do receive them, but only in a document whose own
+// templates declare the handler (author_template_may_handle).
 static bool event_is_hot_path(const char* event_name) {
-    if (!event_name) return false;
-    return strcmp(event_name, "mousemove") == 0 ||
-           strcmp(event_name, "pointermove") == 0 ||
-           strcmp(event_name, "scroll") == 0 ||
-           strcmp(event_name, "wheel") == 0 ||
-           strcmp(event_name, "scrollwheel") == 0 ||
-           strcmp(event_name, "dragmove") == 0 ||
-           strcmp(event_name, "dragover") == 0;
+    return template_continuous_event_index(event_name) >= 0;
+}
+
+// Whether an author template may handle `event_name`. A continuous event uses
+// the registry's exact flag, so a document that does not declare it never
+// builds an event record or walks ancestors per frame; a discrete event uses
+// the collision-tolerant prefilter.
+static bool author_template_may_handle(const char* event_name) {
+    return event_is_hot_path(event_name)
+        ? template_registry_has_author_continuous_handler(g_template_registry, event_name)
+        : template_registry_may_have_author_handler(g_template_registry, event_name);
 }
 
 extern "C" bool radiant_author_template_event_live(const char* event_name) {
-    if (!s_active_js_dispatch_event_context || !context || !event_name ||
-        event_is_hot_path(event_name)) {
+    if (!s_active_js_dispatch_event_context || !context || !event_name) {
         return false;
     }
-    return template_registry_may_have_author_handler(g_template_registry,
-                                                     event_name);
+    return author_template_may_handle(event_name);
 }
 
 static bool author_template_dispatch_begin(EventContext* evcon, Item event) {
@@ -4612,8 +4619,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                  (Item){.item = ITEM_TRUE}, &ignored);
 
     bool author_dispatched = false;
-    bool author_live = !event_is_hot_path(event_name) &&
-        template_registry_may_have_author_handler(g_template_registry, event_name);
+    bool author_live = author_template_may_handle(event_name);
     bool author_cascade = author_live && author_template_dispatch_begin(evcon, event);
     if (author_cascade) {
         bool bubbles = dom_event_bubbles(event);
