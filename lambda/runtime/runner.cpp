@@ -2395,6 +2395,14 @@ void interp_repl_session_destroy(InterpReplSession* session) {
     Runtime* runtime = session->runner.runtime;
     Script* script = session->runner.script;
     if (runtime && script) {
+        EvalContext* owner = session->runner.context;
+        if (owner && runtime_context_bind_retained(runtime, owner)) {
+            // template entries and reconciliation state borrow the retiring AST's names.
+            edit_bridge_destroy();
+            render_map_destroy();
+            tmpl_state_destroy();
+            template_registry_remove_module(owner->template_registry, script);
+        }
         // Each REPL Script receives a unique module id. Releasing its exact
         // root before freeing the Script prevents `clear` from pinning its
         // former bindings until the whole Runtime exits (D5.3.3).
@@ -2578,8 +2586,11 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         repl_restore_source(script, saved_source_length);
         return (session->last_input_rejected = true), ItemError;
     }
+    TemplateRegistry* templates = session->runner.context->template_registry;
+    TemplateRegistry template_checkpoint = templates ? *templates : TemplateRegistry{};
     Item result = interp_run_repl_fragment(&session->runner, fragment);
     if (item_is_error(result)) {
+        template_registry_restore(templates, &template_checkpoint);
         lambda_module_state_restore(script->module_state_id, &snapshot);
         if (prior_last) prior_last->next = NULL;
         else root->child = NULL;

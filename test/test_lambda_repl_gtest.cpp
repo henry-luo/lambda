@@ -108,6 +108,20 @@ static int count_substr(const char* text, const char* needle) {
     return count;
 }
 
+TEST(LambdaReplTests, test_views_apply_across_submissions_and_rollback) {
+    test_result result = run_lambda_repl(
+        "view int { ~ * 2 }\napply(42)\napply(7, {})\n"
+        "view int { ~ * 3 }; raise error(\"rejected\")\napply(42)\n"
+        "clear\napply(42)\nview int { ~ + 1 }\napply(42)\nquit");
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_EQ(result.exit_code, 0);
+    EXPECT_EQ(count_substr(result.output, "> 84\n"), 2) << result.output;
+    EXPECT_EQ(count_substr(result.output, "> 14\n"), 1) << result.output;
+    EXPECT_EQ(count_substr(result.output, "> 42\n"), 1) << result.output;
+    EXPECT_EQ(count_substr(result.output, "> 43\n"), 1) << result.output;
+    free_test_result(&result);
+}
+
 TEST(LambdaReplTests, test_runtime_error_does_not_replay_previous_output) {
     test_result result = run_lambda_repl("1 + 1\n[1, 2, 3] + \"hello\"\n2 + 2\nquit");
     ASSERT_NE(result.output, nullptr);

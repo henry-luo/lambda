@@ -1596,6 +1596,12 @@ static bool dom_element_uses_quirks_css(const DomElement* element) {
 }
 
 int dom_element_apply_inline_style(DomElement* element, const char* style_text) {
+#ifdef LAMBDA_NO_CSS_INPUT
+    // reduced profiles retain the raw HTML style attribute without CSS parsing.
+    (void)element;
+    (void)style_text;
+    return 0;
+#else
     if (!element || !style_text || !element->doc) {
         return 0;
     }
@@ -1711,6 +1717,7 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
 
     pool_free(element->doc->document_pool, text_copy);
     return applied_count;
+#endif
 }
 
 /**

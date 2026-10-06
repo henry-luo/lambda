@@ -319,6 +319,27 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #define PROFILE_JS_FPTR(fn) FPTR(fn)
 #endif
 
+#ifdef LAMBDA_NO_IMAGE_PROCESSING
+#define PROFILE_IMAGE_PROCESSING_FPTR(fn) NULL
+#else
+#define PROFILE_IMAGE_PROCESSING_FPTR(fn) FPTR(fn)
+#endif
+#if defined(LAMBDA_NO_FILE_IO) || defined(LAMBDA_NO_IMAGE_IO) || defined(LAMBDA_NO_IMAGE_PROCESSING)
+#define PROFILE_IMAGE_IO_FPTR(fn) NULL
+#else
+#define PROFILE_IMAGE_IO_FPTR(fn) FPTR(fn)
+#endif
+#ifdef LAMBDA_NO_EDIT_HISTORY
+#define PROFILE_EDIT_HISTORY_FPTR(fn) NULL
+#else
+#define PROFILE_EDIT_HISTORY_FPTR(fn) FPTR(fn)
+#endif
+#ifdef LAMBDA_NO_EMIT
+#define PROFILE_EMIT_FPTR(fn) NULL
+#else
+#define PROFILE_EMIT_FPTR(fn) FPTR(fn)
+#endif
+
 SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Type/conversion functions — all method-eligible
@@ -502,61 +523,61 @@ SysFuncInfo sys_func_defs[] = {
 
     // image stencil engine (windowed neighbourhood ops over ArrayNum)
     {SYSFUNC_CONVOLVE, "convolve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_convolve", FPTR(fn_convolve), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_convolve", PROFILE_IMAGE_PROCESSING_FPTR(fn_convolve), NULL, NULL, false, 0},
     {SYSFUNC_BLUR, "blur", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_blur", FPTR(fn_blur), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_blur", PROFILE_IMAGE_PROCESSING_FPTR(fn_blur), NULL, NULL, false, 0},
     {SYSFUNC_ERODE, "erode", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_erode", FPTR(fn_erode), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_erode", PROFILE_IMAGE_PROCESSING_FPTR(fn_erode), NULL, NULL, false, 0},
     {SYSFUNC_DILATE, "dilate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_dilate", FPTR(fn_dilate), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_dilate", PROFILE_IMAGE_PROCESSING_FPTR(fn_dilate), NULL, NULL, false, 0},
     {SYSFUNC_MEDIAN_FILT, "median_filter", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_median_filter", FPTR(fn_median_filter), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_median_filter", PROFILE_IMAGE_PROCESSING_FPTR(fn_median_filter), NULL, NULL, false, 0},
     {SYSFUNC_MAXPOOL, "maxpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_maxpool", FPTR(fn_maxpool), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_maxpool", PROFILE_IMAGE_PROCESSING_FPTR(fn_maxpool), NULL, NULL, false, 0},
     {SYSFUNC_AVGPOOL, "avgpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_avgpool", FPTR(fn_avgpool), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_avgpool", PROFILE_IMAGE_PROCESSING_FPTR(fn_avgpool), NULL, NULL, false, 0},
 
     // image I/O bridge
     {SYSFUNC_LOAD_IMAGE, "load", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_load", PROFILE_FILE_IO_FPTR(fn_load), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_load", PROFILE_IMAGE_IO_FPTR(fn_load), NULL, NULL, false, 0},
     // a bad image, path, or write fails with an ordinary error, as any/all
     {SYSFUNC_SAVE_IMAGE, "save", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_BOOL, false,
-     C_RET_ITEM, NULL, "fn_save", PROFILE_FILE_IO_FPTR(fn_save), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_save", PROFILE_IMAGE_IO_FPTR(fn_save), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
     {SYSFUNC_AS_FLOAT, "as_float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_as_float", FPTR(fn_as_float), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_as_float", PROFILE_IMAGE_PROCESSING_FPTR(fn_as_float), NULL, NULL, false, 0},
     {SYSFUNC_AS_UBYTE, "as_ubyte", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_as_ubyte", FPTR(fn_as_ubyte), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_as_ubyte", PROFILE_IMAGE_PROCESSING_FPTR(fn_as_ubyte), NULL, NULL, false, 0},
 
     // point / colour / geometric image ops
     {SYSFUNC_INVERT, "invert", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_invert", FPTR(fn_invert), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_invert", PROFILE_IMAGE_PROCESSING_FPTR(fn_invert), NULL, NULL, false, 0},
     {SYSFUNC_GAMMA, "gamma", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_gamma", FPTR(fn_gamma), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_gamma", PROFILE_IMAGE_PROCESSING_FPTR(fn_gamma), NULL, NULL, false, 0},
     {SYSFUNC_THRESHOLD, "threshold", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_threshold", FPTR(fn_threshold), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_threshold", PROFILE_IMAGE_PROCESSING_FPTR(fn_threshold), NULL, NULL, false, 0},
     {SYSFUNC_GRAYSCALE, "grayscale", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_grayscale", FPTR(fn_grayscale), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_grayscale", PROFILE_IMAGE_PROCESSING_FPTR(fn_grayscale), NULL, NULL, false, 0},
     {SYSFUNC_FLIP, "flip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_flip", FPTR(fn_flip), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_flip", PROFILE_IMAGE_PROCESSING_FPTR(fn_flip), NULL, NULL, false, 0},
     {SYSFUNC_ROT90, "rot90", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_rot90", FPTR(fn_rot90), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_rot90", PROFILE_IMAGE_PROCESSING_FPTR(fn_rot90), NULL, NULL, false, 0},
     {SYSFUNC_CROP, "crop", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_crop", FPTR(fn_crop), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_crop", PROFILE_IMAGE_PROCESSING_FPTR(fn_crop), NULL, NULL, false, 0},
 
     // histogram / segmentation / resize / warp
     {SYSFUNC_HISTOGRAM, "histogram", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_histogram", FPTR(fn_histogram), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_histogram", PROFILE_IMAGE_PROCESSING_FPTR(fn_histogram), NULL, NULL, false, 0},
     {SYSFUNC_OTSU, "otsu", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_otsu", FPTR(fn_otsu), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_otsu", PROFILE_IMAGE_PROCESSING_FPTR(fn_otsu), NULL, NULL, false, 0},
     {SYSFUNC_LABEL, "label", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_label", FPTR(fn_label), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_label", PROFILE_IMAGE_PROCESSING_FPTR(fn_label), NULL, NULL, false, 0},
     {SYSFUNC_RESIZE, "resize", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_resize", FPTR(fn_resize), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_resize", PROFILE_IMAGE_PROCESSING_FPTR(fn_resize), NULL, NULL, false, 0},
     {SYSFUNC_ROTATE, "rotate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_rotate", FPTR(fn_rotate), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_rotate", PROFILE_IMAGE_PROCESSING_FPTR(fn_rotate), NULL, NULL, false, 0},
     {SYSFUNC_AFFINE_WARP, "affine_warp", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_affine_warp", FPTR(fn_affine_warp), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_affine_warp", PROFILE_IMAGE_PROCESSING_FPTR(fn_affine_warp), NULL, NULL, false, 0},
 
     // `bool` is only the success shape (D6.4.1): an error operand or a
     // non-sequence returns an ordinary error (S7.9.3, S7.10.4). Declaring
@@ -1286,23 +1307,23 @@ SysFuncInfo sys_func_defs[] = {
     // Edit bridge version control (reactive UI Phase 4)
     // ========================================================================
     {SYSFUNC_EDIT_UNDO, "undo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_undo", FPTR(fn_undo), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_undo", PROFILE_EDIT_HISTORY_FPTR(fn_undo), NULL, NULL, false, 0},
 
     {SYSFUNC_EDIT_REDO, "redo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_redo", FPTR(fn_redo), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_redo", PROFILE_EDIT_HISTORY_FPTR(fn_redo), NULL, NULL, false, 0},
 
     // `commit` is the Tier-3 transaction statement (PTH62), so the editor's
     // version-commit function carries the `edit_` prefix instead of sharing
     // the keyword's spelling (S1.7: one symbol, one concept).
     {SYSFUNC_EDIT_COMMIT, "edit_commit", 0, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_edit_commit0", FPTR(fn_edit_commit0), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_edit_commit0", PROFILE_EDIT_HISTORY_FPTR(fn_edit_commit0), NULL, NULL, false, 0},
 
     {SYSFUNC_EDIT_COMMIT1, "edit_commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_edit_commit1", FPTR(fn_edit_commit1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_edit_commit1", PROFILE_EDIT_HISTORY_FPTR(fn_edit_commit1), NULL, NULL, false, 0},
 
     // reactive UI: emit event to parent template handler
     {SYSPROC_EMIT, "emit", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "pn_emit", FPTR(pn_emit), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_emit", PROFILE_EMIT_FPTR(pn_emit), NULL, NULL, false, 0},
 
     // PDF package: native content stream tokenizer for dense vector pages
     {SYSFUNC_PDF_PARSE_CONTENT_STREAM, "pdf_parse_content_stream", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 24.2.0 (2026-10-06)
+**Spec version:** 24.4.0 (2026-10-06)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1348,7 +1348,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   of it. An excluded command fails with an explicit "excluded from this
   build" diagnostic; importing a `.js`/`.ts` or Jube module is an ordinary
   import error. Nothing degrades silently. [SM15]
-- **D7.1.7v4** **`lambda-wasm` is the browser evaluation profile**, smaller
+- **D7.1.7v6** **`lambda-wasm` is the browser evaluation profile**, smaller
   than `lambda-cli` (D7.1.6). It embeds the Lambda parser, AST interpreter,
   core values, precise GC and a **stateful in-memory REPL** over
   host-supplied source and data; the native CLI entry point is excluded.
@@ -1357,7 +1357,17 @@ loosely across the corpus — context disambiguates, and we live with it.
   addition to D7.1.6's exclusions. Also excluded are **libuv, threads,
   task/mailbox scheduling, resource caches, SQLite/cookies, PDF and LaTeX
   parsers and their packages, ambient clock, timezone discovery, and entropy
-  providers**. Evaluation is synchronous and stays in AST: no native-code
+  providers**. **CSS and graph input parsers are excluded; HTML document and
+  fragment parsing are retained.** HTML style attributes/elements and resource
+  URLs remain inert data, without CSS parsing or resource acquisition.
+  **Image-processing kernels and pixel conversions, CSS/graph/LaTeX/math
+  formatting, and document math-expression parsing are excluded.** Core
+  numerical operations remain. **`undo`, `redo`, `edit_commit` and `emit`
+  are excluded; template `apply` is retained**, including stateful templates
+  across REPL submissions. Rejected submissions roll back template registration,
+  and session reset retires template entries and their borrowed state before
+  releasing the AST (D5.3.3).
+  Evaluation is synchronous and stays in AST: no native-code
   promotion or MIR-interpreter fallback. REPL bindings and retained results
   obey ordinary ownership contracts (D4.6.2v2, D5.3.3); no terminal or
   filesystem transport is required. **Logging uses a disabled stub and
@@ -2390,7 +2400,7 @@ slice; no formal semantic ruling or document semver changes.
 | D6.3.1 | **JSCU25 implemented 2026-10-05, in the lean form** (Runtime_Async §10.1): a parked JS async activation registers weakly with the attached scheduler (`lambda_scheduler_weak_enter/leave`, a token naming the scheduler's serial). It counts in `lambda_scheduler_live_count` until it settles or its carrier is collected, so a Lambda run's end-of-run drain lets an unawaited JS async call finish. Readiness stays with the microtask queue, and the run queue never resumes a JS activation. The record is the GC-owned async carrier, and its Promise is the handle; there is no `LambdaTask` per JS call and no mailbox. A drain with only weak registrations left waits while anything besides its own watchdog keeps the loop alive; when idle it gives queued promise jobs a checkpoint, collects, and then ends without error. Fixture `test/lambda/conc/js_async_weak.ls`; gtest `WeakRegistrationsCountUntilTheyLeave`. |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
-| D7.1.7v4 | **Implemented 2026-10-06.** `make lambda-wasm` builds the synchronous browser REPL from an explicit source/dependency manifest, with no MIR, allocation tracker, native string-SIMD unit or excluded acquisition/ambient providers. Node and Chromium each pass 145 embedding checks; native REPL tests pass 40/40 and the full native Lambda baseline passes 6,242/6,242. Optimized WASM + loader: 2,097,995 bytes raw / 817,899 bytes gzipped. Interpreter corpus and broader browser coverage remain verification work; the C API is initial, and external imports are rejected. Working record: `vibe/Lambda_Design_Static_Modules.md` §13.4; reproduction and ABI: `doc/dev/Lambda_WASM_Build.md`. |
+| D7.1.7v6 | **Implemented 2026-10-06.** `make lambda-wasm` builds the synchronous browser REPL from an explicit source/dependency manifest, with no MIR, allocation tracker, native string-SIMD unit or excluded acquisition/ambient providers. CSS/graph/math input and CSS/graph/LaTeX/math formatting, image-processing kernels and public history/event builtins are excluded. HTML parsing and template apply are retained, with REPL registration/rollback/reset verified. Node and Chromium each pass 283 embedding checks; native REPL tests pass 41/41 and the full native Lambda baseline passes 6,243/6,243. Optimized WASM + loader: 1,891,405 bytes raw / 729,874 bytes gzipped. Interpreter corpus and broader browser coverage remain verification work; the C API is initial, and external imports are rejected. Working record: `vibe/Lambda_Design_Static_Modules.md` §13.4; reproduction and ABI: `doc/dev/Lambda_WASM_Build.md`. |
 | D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and resolves shipped source from `<lambda-home>/package/` while exposing `lambda/{chart,dom,edit,editor,graph,latex,openapi,pdf}` and typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths. Since 2026-09-29 the source checkout and the release share one home, `./lmd/`: the package tree moved from `lambda/package/` to `lmd/package/`, and the formerly separate `input/` assets moved into their packages (validator default schemas and view stylesheets under `package/doc/`, math/KaTeX CSS and fonts under `package/math/`, LaTeX CSS and CMU fonts under `package/latex/`); regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
 | D7.2.5 | Implemented 2026-09-07. The shipped `lmd/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.2.6 | **Implemented 2026-09-29.** `lambda_resolve_import_module_path` is the one resolver (AST import, dependency prebuild, document-transform package loader); it returns NULL for a bare root other than `lambda`, and `resolve_import` reports E216 after the built-in and registered-module checks. `run_source_fixture` in `test/test_lambda_opt_gtest.cpp` runs checked-in scripts in place for the same reason the ruling states. |

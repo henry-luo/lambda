@@ -103,12 +103,8 @@ TemplateRegistry* template_registry_new(void) {
     return reg;
 }
 
-void template_registry_destroy(TemplateRegistry* registry) {
-    if (!registry) return;
-
-    TemplateEntry* entry = registry->first;
-    while (entry) {
-        TemplateEntry* next_entry = entry->next;
+static void template_entry_destroy(TemplateEntry* entry) {
+    if (entry) {
         TemplateHandlerEntry* handler = entry->handlers;
         while (handler) {
             TemplateHandlerEntry* next_handler = handler->next;
@@ -117,6 +113,53 @@ void template_registry_destroy(TemplateRegistry* registry) {
         }
         mem_free(entry->state_names);
         mem_free(entry);
+    }
+}
+
+void template_registry_restore(TemplateRegistry* registry,
+                               const TemplateRegistry* checkpoint) {
+    if (!registry || !checkpoint) return;
+    TemplateEntry* entry = checkpoint->last ? checkpoint->last->next : registry->first;
+    if (checkpoint->last) checkpoint->last->next = NULL;
+    while (entry) {
+        TemplateEntry* next_entry = entry->next;
+        template_entry_destroy(entry);
+        entry = next_entry;
+    }
+    *registry = *checkpoint;
+}
+
+void template_registry_remove_module(TemplateRegistry* registry, Script* module) {
+    if (!registry || !module) return;
+    TemplateEntry** link = &registry->first;
+    registry->last = NULL;
+    registry->count = registry->behavior_count = 0;
+    registry->author_event_mask = registry->behavior_event_mask = 0;
+    while (*link) {
+        TemplateEntry* entry = *link;
+        if (entry->interp_module == module) {
+            *link = entry->next;
+            template_entry_destroy(entry);
+            continue;
+        }
+        registry->last = entry;
+        entry->definition_order = registry->count++;
+        if (entry->is_behavior) {
+            registry->behavior_count++;
+            registry->behavior_event_mask |= entry->handler_event_mask;
+        } else {
+            registry->author_event_mask |= entry->handler_event_mask;
+        }
+        link = &entry->next;
+    }
+}
+
+void template_registry_destroy(TemplateRegistry* registry) {
+    if (!registry) return;
+    TemplateEntry* entry = registry->first;
+    while (entry) {
+        TemplateEntry* next_entry = entry->next;
+        template_entry_destroy(entry);
         entry = next_entry;
     }
 

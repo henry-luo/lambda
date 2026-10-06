@@ -1,7 +1,9 @@
 #include "dom_node.hpp"
 #include "dom_element.hpp"
 #include "dom_lifecycle.hpp"
+#ifndef LAMBDA_NO_CSS_FORMAT
 #include "css_formatter.hpp"
+#endif
 #include "css_style_node.hpp"
 #include "css_symbol_hook.h"
 #include "../../../lib/log.h"
@@ -304,6 +306,7 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
 /**
  * Context for style property printing callback
  */
+#ifndef LAMBDA_NO_CSS_FORMAT
 typedef struct {
     StrBuf* buf;
     bool* has_props;
@@ -369,6 +372,7 @@ static bool print_style_property_callback(StyleNode* node, void* context) {
     *ctx->has_props = true;
     return true;  // continue iteration
 }
+#endif
 
 void DomNode::print(StrBuf* buf, int indent) const {
     // If no buffer provided, print to console (legacy behavior)
@@ -493,6 +497,8 @@ void DomNode::print(StrBuf* buf, int indent) const {
                 has_text = true;
             }
 
+#ifndef LAMBDA_NO_CSS_FORMAT
+            // raw attributes above remain printable without the CSS formatter.
             // print styles generically using style_tree_foreach
             if (element->specified_style && element->specified_style->tree) {
                 strbuf_append_str(buf, has_text ? ", styles:{" : "styles:{");
@@ -508,6 +514,7 @@ void DomNode::print(StrBuf* buf, int indent) const {
                 if (fmt_pool) mem_pool_destroy(fmt_pool);
                 strbuf_append_str(buf, "}");
             }
+#endif
 
             strbuf_append_char(buf, ']');
         }

@@ -8256,11 +8256,11 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
         view->handler ? 1 : 0);
 }
 
-static void interp_register_view_templates(Script* script) {
-    if (!script || script->interp_views_registered || !g_template_registry ||
+static void interp_register_view_templates(Script* script, AstNode* fragment = NULL) {
+    if (!script || (!fragment && script->interp_views_registered) || !g_template_registry ||
             !script->ast_root) return;
-    AstNode* top = ((AstScript*)script->ast_root)->child;
-    int ordinal = 0;
+    AstNode* top = fragment ? fragment : ((AstScript*)script->ast_root)->child;
+    int ordinal = fragment ? g_template_registry->count : 0;
     for (AstNode* item = top; item; item = item->next) {
         AstNode* view_item = item;
         if (item->node_type == AST_NODE_CONTENT) {
@@ -8275,7 +8275,7 @@ static void interp_register_view_templates(Script* script) {
                 ? view_item->next : NULL;
         }
     }
-    script->interp_views_registered = true;
+    if (!fragment) script->interp_views_registered = true;
 }
 
 static NameEntry* interp_view_scope_entry(NameScope* scope, String* name) {
@@ -8617,6 +8617,8 @@ static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
     }
     runner->context->consts = script->const_list ? script->const_list->data : NULL;
     runner->context->type_list = script->type_list;
+    // each admitted REPL fragment adds only its own templates before apply dispatch.
+    interp_register_view_templates(script, fragment);
     return interp_execute_top_level_nodes(runner, st, script, fragment, false);
 }
 

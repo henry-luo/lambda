@@ -193,7 +193,9 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         { "toml",       format_toml },
         { "ini",        format_ini },
         { "properties", format_properties },
+#ifndef LAMBDA_NO_CSS_FORMAT
         { "css",        format_css },
+#endif
         { "jsx",        format_jsx },
         { "mdx",        format_mdx },
 #ifndef LAMBDA_NO_LATEX
@@ -229,10 +231,12 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
     }
 
     // 3. Flavor-based dispatch for compound types
+#ifndef LAMBDA_NO_GRAPH_FORMAT
     if (strcmp(t, "graph") == 0) {
         const char* graph_flavor = f ? f : "dot";
         return format_graph_with_flavor(pool, item, graph_flavor);
     }
+#endif
 
     if (strcmp(t, "markup") == 0) {
         const char* markup_flavor = (!f || strcmp(f, "standard") == 0) ? "markdown" : f;
@@ -244,6 +248,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         return format_markup_string(pool, item, rules);
     }
 
+#ifndef LAMBDA_NO_MATH_FORMAT
     if (strcmp(t, "math") == 0) {
         // Math flavor dispatch table
         struct MathEntry { const char* flavor; String* (*fn)(Pool*, Item); };
@@ -279,6 +284,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
             if (strcmp(combined, e->name) == 0) return e->fn(pool, item);
         }
     }
+#endif
 
     log_error("format: unsupported format type: %s%s%s", t, f ? "-" : "", f ? f : "");
     return NULL;

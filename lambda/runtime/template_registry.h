@@ -106,6 +106,12 @@ TemplateRegistry* template_registry_new(void);
 // Destroy a template registry and clear its entries
 void template_registry_destroy(TemplateRegistry* registry);
 
+// restore an append-only registration checkpoint after a rejected REPL submission.
+void template_registry_restore(TemplateRegistry* registry,
+                               const TemplateRegistry* checkpoint);
+// remove interpreter entries before their owning module's AST is released.
+void template_registry_remove_module(TemplateRegistry* registry, struct Script* module);
+
 // Register a template entry in the registry
 void template_registry_add(TemplateRegistry* registry,
                            const char* name, bool is_edit,

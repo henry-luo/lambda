@@ -1260,7 +1260,9 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"mark", parse_mark},
     {"org", parse_org_input},
     {"typst", parse_typst_input},
+#ifndef LAMBDA_NO_CSS_INPUT
     {"css", parse_css},
+#endif
     {"jsx", parse_jsx},
     {"mdx", parse_mdx_input},
 };
@@ -1479,7 +1481,7 @@ static Input* input_from_source_n_with_name_parent(const char* source,
         }
 
 #endif
-#ifndef LAMBDA_NO_LATEX
+#if !defined(LAMBDA_NO_LATEX) && !defined(LAMBDA_NO_MATH_INPUT)
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor) ? flavor->chars : "latex";
             // Both ASCII and LaTeX math use the direct cursor parser.
@@ -1492,11 +1494,13 @@ static Input* input_from_source_n_with_name_parent(const char* source,
         }
 
 #endif
+#ifndef LAMBDA_NO_GRAPH_INPUT
         else if (strcmp(effective_type, "graph") == 0) {
             const char* graph_flavor = flavor ? flavor->chars
                 : (detected_graph_flavor ? detected_graph_flavor : "dot");
             parse_graph(input, source, graph_flavor);
         }
+#endif
         else {
             input->parse_failed = true;
             log_error("input_from_source: unsupported input type '%s'", effective_type);
@@ -1559,6 +1563,7 @@ static Input* input_from_local_path(const char* pathname, Url* abs_url,
 
     Input* input = input_from_source_n_with_name_parent(source, src_len,
         abs_url, type, flavor, name_parent);
+#ifndef LAMBDA_NO_GRAPH_INPUT
     const bool explicit_structurizr = flavor &&
         (strcmp(flavor->chars, "structurizr") == 0 || strcmp(flavor->chars, "c4") == 0);
     const bool detected_structurizr = !flavor &&
@@ -1566,6 +1571,7 @@ static Input* input_from_local_path(const char* pathname, Url* abs_url,
     if (input && !is_binary_pdf && (explicit_structurizr || detected_structurizr)) {
         resolve_graph_structurizr_local_includes(input, pathname);
     }
+#endif
     mem_free(source);
     return input;
 }
