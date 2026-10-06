@@ -4,7 +4,7 @@
  * parse(lines, {type: 'markdown', sourcepos: 'spans', window: [first, last],
  * prescan: …}) parses only a window of a large document and reports where
  * every construct lies, for the source editor's highlighter
- * (vibe/radiant/Radiant_Design_Source_Editor.md CED15, CED16v2, CED17).
+ * (vibe/radiant/Radiant_Design_Source_Editor.md CED15v2, CED16v3, CED17, CED18v2).
  *
  * The parse runs on a private pool that is released before returning, so a
  * parse per frame accumulates nothing; the caller copies the spans out.
@@ -116,6 +116,12 @@ struct InlineOriginScope {
 bool markdown_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
                                const RestartState* cache, int64_t cache_count, int64_t valid,
                                HighlightResult* out);
+
+// The same contract for HTML: spans from the tokenizer in lexical mode
+// (html5_lex_spans), restarting at any line that begins in the data state.
+bool html_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
+                           const RestartState* cache, int64_t cache_count, int64_t valid,
+                           HighlightResult* out);
 
 } // namespace markup
 } // namespace lambda

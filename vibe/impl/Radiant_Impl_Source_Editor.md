@@ -1,7 +1,7 @@
 # Radiant Source Editor — Implementation Plan and Record
 
 **Date:** 2026-10-06
-**Status:** P0 committed (`9007c54b3`, branch `worktree-source-editor`). P1 (Markdown highlighting) implemented in the same worktree (§5); OQ15 and OQ16 await the user.
+**Status:** P0 committed (`9007c54b3`) and P1, Markdown highlighting, committed (`8c477c3a8`), both on branch `worktree-source-editor`. P2, HTML highlighting, is implemented in the same worktree (§6). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5).
 **Design:** [Radiant Source Editor](../radiant/Radiant_Design_Source_Editor.md) (CED11–CED22, CED14v2, CED16v2).
 
 ## 1. What P0 has built
@@ -103,7 +103,40 @@ Fidelity over the 57 top-level corpus files in `lambda-test/markdown`, sliding 4
 | `test/ui/edit/edit_src_md_large.json` | 100,009-line Markdown: highlight at both ends, typing, wheel | 9/9 |
 | all `test/ui/edit/edit_src_*.json` | P0 behavior with highlighting on | 9/9 |
 
-### 5.5 Open questions raised in P1
+### 5.5 Open questions raised in P1 — resolved (user, 2026-10-07)
 
-- **OQ15 — the window parse returns flat spans, not a trimmed tree.** CED15 and CED16v2 say the parser returns a trimmed Mark tree. Built that way, every frame's tree would live in a retained `Input` (see 5.3), so the parse instead returns `[kinds, spans, states, restart]`: span kinds as symbols, spans as flat ints. The walker maps kinds to classes exactly as designed. Needs ratification as a revision of the two rulings, or a different direction.
-- **OQ16 — pass 2 on the next frame.** Waiting for the main checkout's `dom.request_frame` to land, or should the source editor add its own minimal frame request?
+- **OQ15 — the window parse returns flat spans, not a trimmed tree.** Every frame's tree would live in a retained `Input` (see 5.3), so the parse returns `[kinds, spans, states, restart]`. **Decision:** keep flat spans, ruled as CED15v2 and CED16v3. CED18 followed in P2 as CED18v2 (§6).
+- **OQ16 — pass 2 on the next frame.** **Decision:** wait for `dom.request_frame`. Pass 2 stays synchronous in `settle` until it lands.
+
+## 6. P2 — HTML highlighting
+
+### 6.1 What was built
+
+| Layer | Owns | Files |
+|---|---|---|
+| Lexical mode (CED18v2) | `html5_lex_spans`: the tokenizer with the tree builder bypassed; a token's span is the cursor range around `html5_tokenize_next`; attribute name and value spans come from an optional state hook in `html5_switch_tokenizer_state` (null on ordinary parses); the lexer switches to RCDATA, RAWTEXT or PLAINTEXT after the start tags that need it | `lambda/input/html5/html5_parser.h`, `html5_tokenizer.cpp` |
+| Window parse | the restart engine is now format-neutral: `RestartRules {step, safe}` per format and one `highlight_window` driver; HTML restart states are comment, CDATA, open tag (with its open quote) and raw-text body (with its end tag); byte offsets in the joined slice map back to lines through the slice's line starts | `lambda/input/markup/markup_highlight.{hpp,cpp}` |
+| `parse()` option | `type: 'html'` with `sourcepos: 'spans'` | `lambda/runtime/lambda-eval.cpp` |
+| Highlighter | `language_of` maps `.html`/`.htm`; `highlight` takes the language; HTML kinds map to `tok-tag-punct`, `tok-tag`, `tok-attr`, `tok-attr-value`, `tok-comment`, `tok-doctype`, `tok-entity`, `tok-raw`; the outer `tag` span paints first so `<`, `=`, `>` and spaces keep the punctuation class; adjacent runs with one class merge; front matter applies to Markdown only | `lmd/package/edit/source_highlight.ls`, `source.ls` |
+
+### 6.2 Measurements
+
+Debug build, so for orientation only (rule 10): on a 105,000-line HTML buffer, a 171-line window at line 50,000 parses in 1.6 ms cold and 0.08 ms with the restart cache; the whole pass 2 (native parse plus Lambda runs) takes 15 ms.
+
+Fidelity: `test/lambda/edit/source_highlight_html.ls` slides 30-line windows every 7 lines over 600 lines of comments, script and style bodies, and tags whose attributes span lines. Window and full parses agree on every line, with and without the cache, and after an edit that opens a comment above the window.
+
+### 6.3 Findings worth keeping
+
+- **The tokenizer's position is enough for token spans, not for attributes.** A start tag token is produced only at `>`, so attribute ranges must be observed while the tokenizer is in them; the state hook is the smallest seam that reports them, and it costs ordinary parses one null check per state switch.
+- **Raw-text switching belongs to the tree builder.** Without it, `<script>` bodies would tokenize as markup. The lexer reproduces only that switch, keyed on the start tag just emitted.
+- **The source filename can match a click target.** The fixture's first draft clicked the text "light" and hit the toolbar's `edit_src_html_highlight.html`; target text unique to the document.
+
+### 6.4 Tests
+
+| Test | Covers | Status |
+|---|---|---|
+| `test/lambda/edit/source_highlight_html.ls` | runs for every HTML kind; window versus full parse, cached and uncached; cache after opening a comment above the window | pass, 0 mismatches |
+| `test/ui/edit/edit_src_html_highlight.json` | classes for doctype, tag, attribute, value, comment, entity and raw text in `sample.html`; typing inside an attribute value keeps it colored; save | 10/10 |
+| all `test/ui/edit/edit_src_*.json` | P0 and P1 behavior with HTML highlighting added | 10/10 |
+| all `test/ui/edit/*.json` | the edit application | 27/29; `edit_md_save_as` and `edit_md_scroll_chrome` fail before this work too |
+| `make test-lambda-baseline` | including the HTML5 WPT parser suite (364/364) | 6274/6274 |

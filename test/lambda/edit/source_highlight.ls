@@ -6,7 +6,7 @@ import hl: lambda.edit.source_highlight
 
 let md = "---\ntitle: T\n---\n# Title *here*\n\nSome **bold** and `code` with a [link](http://x.y).\n\n```js\nlet x = 1;\n```\n\n- item **b**\n- [ ] task\n\n> quote\n\n| a | b |\n|---|---|\n\n[ref]: http://r.s\n"
 let b = buf.from_text(md)
-let h = hl.highlight(b, 0, b.count - 1, hl.empty_scan())
+let h = hl.highlight(b, 0, b.count - 1, hl.empty_scan(), 'markdown')
 
 fn show(runs) => [for (r in runs) string(r.s) ++ "-" ++ string(r.e) ++ ":" ++ r.c]
 
@@ -39,7 +39,7 @@ let m3 = hl.after_steps(h.hl, h.scan, [{delta: d3, applied: a3}], a3.buf.version
 
 // the exact parse after the edit agrees with the provisional runs for typing
 "exact after typing:";
-let e1 = hl.highlight(a1.buf, 0, a1.buf.count - 1, m1.scan);
+let e1 = hl.highlight(a1.buf, 0, a1.buf.count - 1, m1.scan, 'markdown');
 [show(hl.runs_for(e1.hl, a1.buf, 5)) == show(hl.runs_for(m1.hl, a1.buf, 5))]
 
 "scan_after:";

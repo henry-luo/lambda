@@ -14,7 +14,9 @@ import buf: lambda.edit.source_buffer
 // The language a file highlights as, or null for plain text.
 pub fn language_of(path) {
   let p = lower(path)
-  if (ends_with(p, ".md") or ends_with(p, ".markdown")) 'markdown' else null
+  if (ends_with(p, ".md") or ends_with(p, ".markdown")) 'markdown'
+  else if (ends_with(p, ".html") or ends_with(p, ".htm")) 'html'
+  else null
 }
 
 // ---------------------------------------------------------------------------
@@ -48,7 +50,17 @@ fn block_class(kind) {
 }
 
 fn inline_class(kind) {
-  if (kind == 'em' or kind == 'i') "tok-emphasis"
+  // HTML (the tokenizer's lexical kinds)
+  if (kind == 'tag') "tok-tag-punct"
+  else if (kind == 'tag-name') "tok-tag"
+  else if (kind == 'attr-name') "tok-attr"
+  else if (kind == 'attr-value') "tok-attr-value"
+  else if (kind == 'comment') "tok-comment"
+  else if (kind == 'doctype') "tok-doctype"
+  else if (kind == 'entity') "tok-entity"
+  else if (kind == 'raw') "tok-raw"
+  // Markdown
+  else if (kind == 'em' or kind == 'i') "tok-emphasis"
   else if (kind == 'strong' or kind == 'b') "tok-strong"
   else if (kind == 'del' or kind == 's') "tok-strike"
   else if (kind == 'code') "tok-code"
@@ -159,7 +171,7 @@ fn line_runs(text, line, spans, fm_end) {
     let inlines = sort([for (sp in here where not sp.block) sp],
                        (sp) => 0 - ((sp.end_line - sp.line) * 100000 + sp.end_col - sp.col))
     let base = block_runs(text, line, blocks)
-    inline_runs(text, line, inlines, 0, base)
+    merge(inline_runs(text, line, inlines, 0, base))
   }
 }
 
@@ -191,16 +203,16 @@ fn inline_runs(text, line, spans, i, runs) {
   }
 }
 
-// Parse the window [first, last] and build its runs. `scan` is the restart
-// cache {states, valid} the previous call returned.
-pub fn highlight(b, first, final, scan) {
+// Parse the window [first, last] of a buffer in `lang` and build its runs.
+// `scan` is the restart cache {states, valid} the previous call returned.
+pub fn highlight(b, first, final, scan, lang) {
   let lo = max(0, first)
   let hi = min(b.count - 1, final)
-  let r = parse(b.chunks, {type: 'markdown', sourcepos: 'spans', window: [lo, hi], prescan: scan}) or null
+  let r = parse(b.chunks, {type: lang, sourcepos: 'spans', window: [lo, hi], prescan: scan}) or null
   if (r == null) null
   else {
     let spans = [for (i in 0 to len(r[1]) div FIELDS - 1) span_at(r, i)]
-    let fm_end = front_matter_end(b);
+    let fm_end = if (lang == 'markdown') front_matter_end(b) else -1;
     {hl: {version: b.version, first: lo, last: hi, exact: true,
           runs: [for (l in lo to hi) line_runs(buf.line(b, l), l, spans, fm_end)]},
      scan: {states: r[2], valid: len(r[2]) div 3}}
@@ -310,4 +322,12 @@ pub let css = "
   .tok-hr, .tok-list-marker, .tok-quote, .tok-table-delim { color: #cf222e; }
   .tok-meta { color: #6e7781; }
   .tok-markup { color: #6639ba; }
+  .tok-tag-punct { color: #6e7781; }
+  .tok-tag { color: #116329; }
+  .tok-attr { color: #953800; }
+  .tok-attr-value { color: #0a3069; }
+  .tok-comment { color: #6e7781; font-style: italic; }
+  .tok-doctype { color: #8250df; }
+  .tok-entity { color: #cf222e; }
+  .tok-raw { color: #24292f; background: #f6f8fa; }
 "

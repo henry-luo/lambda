@@ -1,6 +1,6 @@
 /**
- * markup_highlight.cpp - windowed Markdown parse for source highlighting
- * (vibe/radiant/Radiant_Design_Source_Editor.md CED15, CED16v2, CED17).
+ * markup_highlight.cpp - windowed Markdown and HTML parse for source highlighting
+ * (vibe/radiant/Radiant_Design_Source_Editor.md CED15v2, CED16v3, CED17, CED18v2).
  *
  * Three parts:
  *  - the restart scan: the state before each chunk boundary (inside a fence,
@@ -15,6 +15,7 @@
 #include "block/block_common.hpp"
 #include "../input.hpp"
 #include "../../io/input-allocation-context.h"
+#include "../html5/html5_parser.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/log.h"
@@ -95,6 +96,116 @@ static bool restart_equal(const RestartState& a, const RestartState& b) {
     return a.kind == b.kind && a.a == b.a && a.b == b.b;
 }
 
+// ----------------------------------------------------------------------------
+// HTML restart scan: a line is a safe start exactly when it begins in the
+// tokenizer's data state, so the state only tracks what crosses a line end:
+// a comment, a CDATA section, an open tag (with its quote), or the raw text of
+// script/style/textarea/title and their kin, which only their end tag closes.
+// ----------------------------------------------------------------------------
+
+enum : int32_t { RESTART_HTML_COMMENT = 4, RESTART_HTML_CDATA = 5, RESTART_HTML_TAG = 6,
+                 RESTART_HTML_RAW = 7 };
+
+static const char* const k_html_raw_tags[] = {
+    "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript",
+};
+static const int32_t k_html_raw_tag_count = 9;
+
+// Index of a raw-text tag name [name, name + len), or -1.
+static int32_t html_raw_tag(const char* name, size_t len) {
+    for (int32_t i = 0; i < k_html_raw_tag_count; i++) {
+        if (strlen(k_html_raw_tags[i]) == len && strncasecmp(name, k_html_raw_tags[i], len) == 0) return i;
+    }
+    return -1;
+}
+
+static bool html_name_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-';
+}
+
+// The end tag "</name" closing raw tag `raw` in [p, …), or null.
+static const char* html_raw_end(const char* p, int32_t raw) {
+    const char* name = k_html_raw_tags[raw];
+    size_t len = strlen(name);
+    for (const char* q = strstr(p, "</"); q; q = strstr(q + 2, "</")) {
+        if (strncasecmp(q + 2, name, len) == 0 && !html_name_char(q[2 + len])) return q + 2 + len;
+    }
+    return nullptr;
+}
+
+static void html_restart_step(RestartState* st, const char* line, int64_t index) {
+    (void)index;
+    const char* p = line;
+    while (*p) {
+        if (st->kind == RESTART_HTML_COMMENT || st->kind == RESTART_HTML_CDATA) {
+            const char* close = strstr(p, st->kind == RESTART_HTML_COMMENT ? "-->" : "]]>");
+            if (!close) return;
+            p = close + 3;
+            *st = RestartState{};
+        } else if (st->kind == RESTART_HTML_RAW) {
+            const char* close = html_raw_end(p, st->a);
+            if (!close) return;
+            p = close;
+            *st = RestartState{RESTART_HTML_TAG, 0, 0};   // the end tag runs to its '>'
+        } else if (st->kind == RESTART_HTML_TAG) {
+            if (st->a) {
+                const char* close = strchr(p, (char)st->a);
+                if (!close) return;
+                p = close + 1;
+                st->a = 0;
+            } else if (*p == '"' || *p == '\'') {
+                st->a = *p++;
+            } else if (*p == '>') {
+                p++;
+                // b holds the raw tag index + 1 of a start tag
+                *st = st->b > 0 ? RestartState{RESTART_HTML_RAW, st->b - 1, 0} : RestartState{};
+            } else {
+                p++;
+            }
+        } else {
+            const char* open = strchr(p, '<');
+            if (!open) return;
+            p = open + 1;
+            if (strncmp(p, "!--", 3) == 0) {
+                *st = RestartState{RESTART_HTML_COMMENT, 0, 0};
+                p += 3;
+            } else if (strncmp(p, "![CDATA[", 8) == 0) {
+                *st = RestartState{RESTART_HTML_CDATA, 0, 0};
+                p += 8;
+            } else if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')) {
+                const char* name = p;
+                while (html_name_char(*p)) p++;
+                int32_t raw = html_raw_tag(name, (size_t)(p - name));
+                *st = RestartState{RESTART_HTML_TAG, 0, raw + 1};
+            } else if (*p == '/' || *p == '!' || *p == '?') {
+                *st = RestartState{RESTART_HTML_TAG, 0, 0};
+            }
+        }
+    }
+}
+
+// Per-format restart rules: how a line moves the state, and whether a window
+// parse may begin at a line given the state before it.
+struct RestartRules {
+    void (*step)(RestartState* st, const char* line, int64_t index);
+    bool (*safe)(const RestartState& before, const char* line, bool prev_blank);
+};
+
+// Markdown: the first line of a block that follows a blank line, at column 0,
+// outside any fence, HTML block or front matter.
+static bool markdown_restart_safe(const RestartState& before, const char* line, bool prev_blank) {
+    return prev_blank && before.kind == RESTART_NONE && line[0] != ' ' && line[0] != '\t' &&
+           !line_blank(line);
+}
+
+static bool html_restart_safe(const RestartState& before, const char* line, bool prev_blank) {
+    (void)line; (void)prev_blank;
+    return before.kind == RESTART_NONE;
+}
+
+static const RestartRules k_markdown_rules = {restart_step, markdown_restart_safe};
+static const RestartRules k_html_rules = {html_restart_step, html_restart_safe};
+
 static const char* src_line(const HighlightLines* src, int64_t index) {
     size_t len = 0;
     const char* line = src->line(src->ctx, index, &len);
@@ -117,15 +228,15 @@ static int64_t chunk_index(const HighlightLines* src, int64_t line) {
 
 // Extend `states` (a valid prefix) through boundary `target`. A recomputed
 // suspect boundary equal to its cached state revalidates every later cached
-// entry, since nothing before it changed the scan (CED16v2).
-static void extend_states(const HighlightLines* src, const RestartState* cache,
-                          int64_t cache_count, lam::ArrayList<RestartState>* states,
-                          int64_t target) {
+// entry, since nothing before it changed the scan (CED16v3).
+static void extend_states(const RestartRules& rules, const HighlightLines* src,
+                          const RestartState* cache, int64_t cache_count,
+                          lam::ArrayList<RestartState>* states, int64_t target) {
     while ((int64_t)states->length() <= target) {
         int64_t k = (int64_t)states->length() - 1;
         RestartState st = (*states)[(size_t)k];
         for (int64_t i = src->chunk_starts[k]; i < chunk_end(src, k); i++) {
-            restart_step(&st, src_line(src, i), i);
+            rules.step(&st, src_line(src, i), i);
         }
         states->push_back(st);
         int64_t boundary = k + 1;
@@ -137,10 +248,9 @@ static void extend_states(const HighlightLines* src, const RestartState* cache,
     }
 }
 
-// The last line at or before `first` where a window parse may start: the
-// first line of a block that follows a blank line, at column 0, outside any
-// fence, HTML block or front matter. Line 0 always qualifies.
-static int64_t restart_line(const HighlightLines* src,
+// The last line at or before `first` where a window parse may start, by the
+// format's rule. Line 0 always qualifies.
+static int64_t restart_line(const RestartRules& rules, const HighlightLines* src,
                             const lam::ArrayList<RestartState>& states, int64_t first) {
     for (int64_t k = chunk_index(src, first); k >= 0; k--) {
         RestartState st = states[(size_t)k];
@@ -148,12 +258,9 @@ static int64_t restart_line(const HighlightLines* src,
         int64_t found = -1;
         for (int64_t i = src->chunk_starts[k]; i <= first; i++) {
             const char* line = src_line(src, i);
-            if (prev_blank && st.kind == RESTART_NONE && line[0] != ' ' && line[0] != '\t' &&
-                !line_blank(line)) {
-                found = i;
-            }
+            if (rules.safe(st, line, prev_blank)) found = i;
             prev_blank = st.kind == RESTART_NONE && line_blank(line);
-            restart_step(&st, line, i);
+            rules.step(&st, line, i);
         }
         if (found >= 0) return found;
     }
@@ -285,9 +392,63 @@ static int32_t code_points(const char* line, int32_t bytes) {
     return n;
 }
 
-bool markdown_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
-                               const RestartState* cache, int64_t cache_count, int64_t valid,
-                               HighlightResult* out) {
+// The format-specific step of a window parse: report spans of `text` (the
+// window's lines joined with '\n') into `sink`, in parser lines and bytes.
+typedef void (*WindowParse)(Input* input, const char* text, size_t len, MarkupSpanSink* sink);
+
+static void markdown_window_parse(Input* input, const char* text, size_t len, MarkupSpanSink* sink) {
+    (void)len;
+    ParseConfig cfg;
+    cfg.format = Format::MARKDOWN;
+    cfg.collect_metadata = false;
+    MarkupParser* parser = markup_parser_create(input, cfg);
+    if (!parser) return;
+    parser->span_sink = sink;
+    parser->parseContent(text);
+    markup_parser_destroy(parser);
+}
+
+// HTML spans arrive as byte ranges of the joined text; `starts` are its line
+// starts, so a range becomes a parser line and byte column.
+struct HtmlSpanCollector {
+    MarkupSpanSink* sink;
+    lam::ArrayList<size_t> starts;
+};
+
+static void html_text_position(const HtmlSpanCollector* c, size_t off, int32_t* line, int32_t* col) {
+    size_t lo = 0, hi = c->starts.length();
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (c->starts[mid] <= off) lo = mid + 1; else hi = mid;
+    }
+    size_t l = lo > 0 ? lo - 1 : 0;
+    *line = (int32_t)l;                          // INT_CAST_OK: window line index
+    *col = (int32_t)(off - c->starts[l]);        // INT_CAST_OK: byte column within a line
+}
+
+static void html_collect_span(void* ctx, const char* kind, size_t start, size_t end) {
+    HtmlSpanCollector* c = (HtmlSpanCollector*)ctx;
+    if (end <= start) return;
+    MarkupSpan span = {sink_kind(c->sink, kind), 0, 0, 0, 0, 0};
+    html_text_position(c, start, &span.line, &span.col);
+    html_text_position(c, end, &span.end_line, &span.end_col);
+    c->sink->spans.push_back(span);
+}
+
+static void html_window_parse(Input* input, const char* text, size_t len, MarkupSpanSink* sink) {
+    HtmlSpanCollector collector;
+    collector.sink = sink;
+    collector.starts.push_back(0);
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] == '\n') collector.starts.push_back(i + 1);
+    }
+    html5_lex_spans(input, text, len, html_collect_span, &collector);
+}
+
+static bool highlight_window(const RestartRules& rules, WindowParse parse,
+                             const HighlightLines* src, int64_t first, int64_t last,
+                             const RestartState* cache, int64_t cache_count, int64_t valid,
+                             HighlightResult* out) {
     if (!src || !out || src->count <= 0 || src->chunk_count <= 0) return false;
     first = first < 0 ? 0 : (first >= src->count ? src->count - 1 : first);
     last = last < first ? first : (last >= src->count ? src->count - 1 : last);
@@ -297,8 +458,8 @@ bool markdown_highlight_window(const HighlightLines* src, int64_t first, int64_t
     out->states.clear();
     for (int64_t k = 0; k < valid; k++) out->states.push_back(cache[k]);
     if (out->states.length() == 0) out->states.push_back(RestartState{});
-    extend_states(src, cache, cache_count, &out->states, chunk_index(src, first));
-    int64_t start = restart_line(src, out->states, first);
+    extend_states(rules, src, cache, cache_count, &out->states, chunk_index(src, first));
+    int64_t start = restart_line(rules, src, out->states, first);
     out->restart_line = start;
 
     int64_t stop = last + 1 + HIGHLIGHT_LOOKAHEAD;
@@ -320,18 +481,9 @@ bool markdown_highlight_window(const HighlightLines* src, int64_t first, int64_t
     InputAllocationContext allocation = {pool, input->arena, false, input};
     InputAllocationContext* saved_allocation = input_allocation_context;
     input_allocation_context = &allocation;
-
-    ParseConfig cfg;
-    cfg.format = Format::MARKDOWN;
-    cfg.collect_metadata = false;
     MarkupSpanSink sink;
     sink.line_base = start;
-    MarkupParser* parser = markup_parser_create(input, cfg);
-    if (parser) {
-        parser->span_sink = &sink;
-        parser->parseContent(text->str);
-        markup_parser_destroy(parser);
-    }
+    parse(input, text->str ? text->str : "", text->length, &sink);
     input_allocation_context = saved_allocation;
 
     // parser lines and byte columns become source lines and code points
@@ -354,6 +506,20 @@ bool markdown_highlight_window(const HighlightLines* src, int64_t first, int64_t
     log_debug("markup-highlight: window %lld-%lld restart %lld, %zu spans",
               (long long)first, (long long)last, (long long)start, out->spans.length());
     return true;
+}
+
+bool markdown_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
+                               const RestartState* cache, int64_t cache_count, int64_t valid,
+                               HighlightResult* out) {
+    return highlight_window(k_markdown_rules, markdown_window_parse, src, first, last,
+                            cache, cache_count, valid, out);
+}
+
+bool html_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
+                           const RestartState* cache, int64_t cache_count, int64_t valid,
+                           HighlightResult* out) {
+    return highlight_window(k_html_rules, html_window_parse, src, first, last,
+                            cache, cache_count, valid, out);
 }
 
 } // namespace markup

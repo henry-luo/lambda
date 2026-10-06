@@ -450,7 +450,7 @@ fn settle(hs, steps, b, top, rows) {
   if (mapped.lang == null or syn.covers(mapped.hl, b, top, top + rows - 1)) mapped
   else {
     let pad = highlight_pad(rows)
-    let r = syn.highlight(b, top - pad, top + rows + pad, mapped.scan)
+    let r = syn.highlight(b, top - pad, top + rows + pad, mapped.scan, mapped.lang)
     if (r == null) mapped else {*: mapped, hl: r.hl, scan: r.scan}
   }
 }

@@ -5819,9 +5819,9 @@ extern "C" Input* input_from_source(const char* source, Url* url, String* type, 
 extern "C" Input* input_from_source_with_positions(const char* source, Url* url, String* type, String* flavor);
 
 // ---------------------------------------------------------------------------
-// parse(src, {type: 'markdown', sourcepos: 'spans', window: [first, last],
+// parse(src, {type: 'markdown' | 'html', sourcepos: 'spans', window: [first, last],
 // prescan: {states, valid}}) — the source editor's highlight parse
-// (vibe/radiant/Radiant_Design_Source_Editor.md CED16v2). `src` is a string,
+// (vibe/radiant/Radiant_Design_Source_Editor.md CED16v3, CED18v2). `src` is a string,
 // an array of lines, or the editor buffer's array of line chunks, read in
 // place. The result is [kinds, spans, states, restart]: span kinds as symbols,
 // spans as flat ints (kind index, block flag, line, col, end line, end col; 0-based
@@ -5936,7 +5936,7 @@ static Item highlight_map_field(Item map_item, const char* key) {
     return found ? value : ItemNull;
 }
 
-static Item fn_parse_highlight_spans(Item src_item, Item window_item, Item prescan_item) {
+static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item, Item prescan_item) {
     using namespace lambda::markup;
     HighlightLineSource source;
     if (!highlight_source_init(&source, src_item)) {
@@ -5966,8 +5966,9 @@ static Item fn_parse_highlight_spans(Item src_item, Item window_item, Item presc
     HighlightLines lines = {&source, highlight_line_at, source.count,
                             source.starts.data(), (int64_t)source.starts.length()};
     HighlightResult hl;
-    bool ok = markdown_highlight_window(&lines, first, last, cache.data(),
-                                        (int64_t)cache.length(), valid, &hl);
+    bool ok = html
+        ? html_highlight_window(&lines, first, last, cache.data(), (int64_t)cache.length(), valid, &hl)
+        : markdown_highlight_window(&lines, first, last, cache.data(), (int64_t)cache.length(), valid, &hl);
     if (source.owned) mem_free(source.owned);
     if (!ok) {
         set_runtime_error(ERR_OUT_OF_MEMORY, "parse: the highlight parse could not allocate");
@@ -6085,11 +6086,12 @@ Item fn_parse2(Item str_item, Item type) {
     }
 
     if (highlight_spans) {
-        if (!type_str || strcmp(type_str->chars, "markdown") != 0) {
-            set_runtime_error(ERR_TYPE_MISMATCH, "parse: sourcepos 'spans' supports type 'markdown'");
+        bool html = type_str && strcmp(type_str->chars, "html") == 0;
+        if (!html && (!type_str || strcmp(type_str->chars, "markdown") != 0)) {
+            set_runtime_error(ERR_TYPE_MISMATCH, "parse: sourcepos 'spans' supports types 'markdown' and 'html'");
             return ItemError;
         }
-        return fn_parse_highlight_spans(str_item, window_item, prescan_item);
+        return fn_parse_highlight_spans(html, str_item, window_item, prescan_item);
     }
 
     // first arg must be a string
