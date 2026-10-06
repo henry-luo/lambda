@@ -51,7 +51,7 @@ button:focus { outline: 2px solid #57e4c2; }
 .controls .drop { background: #244c49; border-color: #3d8d7b; }
 footer { margin-top: 14px; color: #8594b2; font-size: 10px; line-height: 1.6; }
 @keyframes gravity { from { opacity: 0.9; } to { opacity: 1; } }
-.gravity-clock { position: absolute; top: 0; left: 0; width: 1px; height: 1px; pointer-events: none; animation-name: gravity; animation-timing-function: linear; animation-iteration-count: infinite; }
+.gravity-clock { position: absolute; top: 0; left: 0; width: 1px; height: 1px; pointer-events: none; animation-name: gravity; animation-duration: 100ms; animation-timing-function: linear; animation-iteration-count: infinite; }
 @media (max-width: 660px) {
   .game { width: 280px; margin: 20px auto; }
   .badge { display: none; }

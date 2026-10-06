@@ -188,5 +188,5 @@ This demonstrates Lambda Script's capability to implement sophisticated document
 
 ## Interactive Tetris
 
-Run `./lambda.exe view test/demo/tetris.ls` for a native, interactive Tetris
-game written in Lambda. See [TETRIS.md](TETRIS.md) for controls and test commands.
+Run `./lambda.exe view test/demo/tetris/tetris.ls` for a native, interactive Tetris
+game written in Lambda. See [TETRIS.md](tetris/TETRIS.md) for controls and test commands.

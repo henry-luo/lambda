@@ -1,7 +1,10 @@
-// Run: ./lambda.exe view test/demo/tetris.ls
+// Run: ./lambda.exe view test/demo/tetris/tetris.ls
 import rules: .tetris_core
+import dom
 
 let NAMES = ["I", "O", "T", "S", "Z", "J", "L"]
+let GAME_MODEL = <tetris_app>
+let RESET_GRAVITY = ["down", "drop", "hold", "restart", "pause"]
 fn piece_indices(piece) => [for (cell in rules.cells(piece) where cell[1] >= 0)
   cell[1] * 10 + cell[0]]
 fn cell_class(value, ghost) => "cell color-" ++ string(value) ++ (if (ghost) " ghost" else "")
@@ -32,11 +35,10 @@ fn mode_title(mode) {
   else "Game over."
 }
 
-view <tetris_app> state game: rules.new_game(42) {
+view <tetris_app> state game: rules.new_game(42), falling_ms: 0 {
   let active = piece_indices(game.piece)
   let ghost = piece_indices(rules.landing(game.board, game.piece));
-  // Own the body so keyboard input survives removal of the focused start button.
-  <body <main id:"tetris", class:"game", tabindex:"0", 'data-mode':game.mode,
+  <main id:"tetris", class:"game", tabindex:"0", 'data-mode':game.mode,
     'data-x':string(game.piece.x), 'data-y':string(game.piece.y),
     'data-rotation':string(game.piece.rotation), 'data-kind':string(game.piece.kind),
     <header
@@ -100,31 +102,48 @@ view <tetris_app> state game: rules.new_game(42) {
       <button class:"hold", title:"Hold / C", "HOLD">
     >
     <footer "← → move · ↑ / X rotate · Z reverse · ↓ soft drop · Space hard drop · C hold">
-    // Animation iterations provide a document-owned clock; no global mutable state.
-    <div id:"gravity-clock", class:"gravity-clock", 'aria-hidden':"true",
-      style:"animation-duration:" ++ string(rules.gravity_ms(game.level)) ++ "ms;animation-play-state:" ++
-        (if (game.mode == "playing") "running" else "paused")>
-  >>
+  >
+}
+on click(evt) {
+  let command = dom.get_attribute(evt.target, "class")
+  if (contains(["left", "right", "down", "cw", "ccw", "drop", "hold", "pause", "restart"], command)) {
+    game = rules.action(game, command)
+    if (contains(RESET_GRAVITY, command)) falling_ms = 0
+  }
+}
+on gravity(evt) {
+  if (game.mode == "playing") {
+    falling_ms = falling_ms + 100
+    let interval = rules.gravity_ms(game.level)
+    if (falling_ms >= interval) {
+      falling_ms = falling_ms - interval
+      game = rules.action(game, "tick")
+    }
+  }
+}
+
+// The shell never redraws: its clock continues while the game subtree changes.
+view <tetris_shell> {
+  <body apply(GAME_MODEL);
+    <div id:"gravity-clock", class:"gravity-clock", 'aria-hidden':"true">
+  >
 }
 on keydown(evt) {
   let command = key_command(evt.key)
   if (command != "") {
-    game = rules.action(game, command)
+    // Route keys through the same controls, including when the start button disappears.
+    let button = dom.query_selector(dom.root_node(evt.target), "button." ++ command)
+    dom.dispatch(button, "click")
     return 'prevent-default'
   }
 }
-on click(evt) {
-  let command = evt.target_class
-  if (contains(["left", "right", "down", "cw", "ccw", "drop", "hold", "pause", "restart"], command)) {
-    game = rules.action(game, command)
-  }
-}
 on animationiteration(evt) {
-  game = rules.action(game, "tick")
+  let target = dom.query_selector(dom.root_node(evt.target), "#tetris")
+  dom.dispatch(target, "gravity")
 }
 
 <html lang:"en",
   <head <meta charset:"UTF-8"> <title "Tetris — Lambda Playground">
     <link rel:"stylesheet", href:"tetris.css">>
-  apply(<tetris_app>)
+  apply(<tetris_shell>)
 >

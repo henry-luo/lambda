@@ -5310,6 +5310,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     LayoutContext lycon;
     if (!doc) return;
     LayoutDocumentActivity layout_activity(doc);
+    // Lambda and JS can replace DOM targets; discard their clocks before relayout.
+    if (doc->state) {
+        animation_scheduler_prune_disconnected_css_views(
+            doc->state->animation_scheduler, doc);
+    }
     if (!is_reflow && !doc->root && doc->view_tree && doc->view_tree->root) {
         doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
         return;
