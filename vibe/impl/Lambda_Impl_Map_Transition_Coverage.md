@@ -80,6 +80,20 @@ With external parents, construction rarely needs changing: a literal-born or doc
 - **JavaScript shapes, non-plain kinds, spread-slot types, VMap/Velmt/VArray** (no `TypeMap`), as listed in Shape_Transitions Appendix B.
 - **Foreign documents** — parsed under no Runtime, another Runtime, or a document whose own `Input` tree declined it — need no replay either: their types are external parents like any other, and the child copies the names. Replay is therefore not a phase of this plan.
 
+### 2.9 JavaScript keys in the one name space (proposal, not yet ruled)
+
+S8.2.2v4 identifies a key by its resolved namespace and its normalized characters, and a namespace is a name resolved recursively to a root. The user ruled on 2026-10-06 that JavaScript symbols join that space through a namespace convention. Proposed mapping, under a root namespace `js` (the host):
+
+| JavaScript key | Namespace | Characters | Identity it must reproduce |
+|---|---|---|---|
+| property name `"a"` | global | `a` | by spelling — already how Lambda and JS strings behave |
+| `Symbol.for("k")` | `js.symbol.for` (the registry) | `k`, every byte | `Symbol.for("k") === Symbol.for("k")` process-wide |
+| well-known `Symbol.iterator` | `js.symbol` | `iterator` | one singleton per well-known name |
+| `Symbol("d")` | `js.symbol.unique.<n>`, one anonymous namespace per creation | `d` (the description, diagnostic) | each creation distinct; equal descriptions never equal |
+| private `#x` | `js.private.<class>`, one anonymous namespace per class declaration | `x` | identity per declaration; the brand check is namespace membership |
+
+The convention is a reading of the records the runtime already keeps, not a new representation: a registered or well-known symbol's `NameRecord` is interned per (kind, characters), so the record stands for (namespace, characters); a unique symbol's or private name's record is fresh per creation, so the record *is* its anonymous namespace. The edge key `(name_id, key_kind)` that `transition_target_for_key` already compares for identity kinds is therefore exactly `(resolved namespace, characters)` under this mapping, and the tree admits JavaScript keys with no change beyond lifting the `property_key_requires_identity` gates (§2.5). What the convention adds is a spelling for interop — how such a key prints and is written from Lambda (`js.symbol.for.k`, `js.symbol.iterator`) — which is a separate, smaller ruling once the mapping is accepted. D3.4.4v3's sentence placing JS symbols "outside the Lambda name space" becomes v4 when this is ruled.
+
 ## 3. Phases
 
 Each phase lands on its own and is green on its gates before the next starts. Numbers are debug unless marked release.
@@ -135,6 +149,6 @@ JavaScript `map_put_heap` fallbacks beyond the identity-key gate (array-index sh
 
 1. **D3.4.4v3 — string identity is spelling.** *Ruled 2026-10-06 (user), as S8.2.2v4 (Formal Semantics 58.0.0) and D3.4.4v3 (Formal Design 25.0.0): one name space keyed by resolved namespace plus normalized characters; an interned id proves equality, never difference.* P0 implements it for the edges and the equality helpers. The namespace half has a separate gap at map writes and reads ([LR03-40](<../Lambda_Issue_Ledger.md#lr03-40>)), outside this plan.
 2. **Scope of external parents (D3.4.3v5).** *Ruled 2026-10-06 (user): plain maps, nominal instances and elements together from P1.* The child copies the parent's identity fields either way; P1's fixture and GTests cover all three.
-3. **Identity-key gates on the JavaScript and parser paths.** Lift them in P0 under a test262 gate, or defer to the JavaScript round? Lambda needs only the `type_tree_add_map_field` gate.
+3. **Identity-key gates on the JavaScript and parser paths.** *Ruled 2026-10-06 (user): JavaScript symbols join the one name space.* The namespace convention in §2.9 is proposed and awaits approval; once approved, P0 lifts all four gates under a test262 gate and D3.4.4 goes to v4.
 4. **Degradation past the budget.** Keep today's private copies (my recommendation, with the jq measurement in P1), or open a design for a hash-backed plain map past the budget now?
 5. **Fan-out.** Drop the 16-edge cap for the runtime tree's table edges (my recommendation: the cap bounds a linear walk that the table does not have), while parser trees keep it?

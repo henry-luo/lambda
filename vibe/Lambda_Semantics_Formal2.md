@@ -2573,3 +2573,17 @@ proves them different.
   characters alone (`fn_map_set`, `map_get`), so `ns.a` and `a` collide there — a
   conformance gap, LR03-40; element attribute access and equality already compare the
   namespace.
+
+**Follow-up rulings (2026-10-06, USER).**
+- **`ns.attr` is a qualified key, not a nested map.** The element-literal desugaring of
+  `ns.attr: v` into `ns: {attr: v}` was a workaround from before namespaces were defined
+  and must follow the namespace design; so must parsed XML, which keeps `prefix:local`
+  flat and resolves no `xmlns:` declaration. Both are LR03-40.
+- **No string literal as a literal key.** A map literal admits a name or a symbol as a key
+  and the parser rejects `{"a": 1}` (`error_map_string_key`). The reason: a symbol is
+  accepted nearly everywhere a name is, so admitting a string in key position would make
+  those positions ambiguous and the syntax heavier. There was no standalone clause for
+  it before — only S16.8.7 (`'a'` is a symbol) and Design_Syntax §7.8 — so S8.2.2v4 now
+  states it.
+- **JavaScript symbols join the one name space through a namespace convention**, to be
+  proposed before it is ruled (Impl_Map_Transition_Coverage §2.9).
