@@ -57,7 +57,7 @@ A field that alternates between kinds alternates between two sibling targets, O(
 ### 2.5 Keys (cases 1 and 2)
 
 - **Lambda `Symbol` keys** (`m['k'] = v`, every spread) are rejected today because `map_extend_via_runtime_tree` accepts only `LMD_TYPE_STRING` Items. The edge key is built from bytes (`transition_key_of_bytes`), and `Symbol`'s 16-byte header stops being an obstacle.
-- **JavaScript identity keys** already match edges by `(name_id, key_kind)` and sit in shape tables by identity; the `property_key_requires_identity` gate at four sites (`type_tree_add_map_field`, `map_put_with_data_growth` ×2, `elmt_put_tree`, `type_tree_follow`) is residue from byte-only edges. Lambda needs only the first lifted; the others are JavaScript and parser paths (§6, Q3).
+- **JavaScript identity keys** already match edges by `(name_id, key_kind)` and sit in shape tables by identity; the `property_key_requires_identity` gate at four sites (`type_tree_add_map_field`, `map_put_with_data_growth` ×2, `elmt_put_tree`, `type_tree_follow`) is residue from byte-only edges. All four are lifted in P0 (NI18; §6, Q3).
 - **Array-index keys: no.** They exist only on JavaScript array companion maps (`MAP_KIND_ARRAY_PROPS`/`ARRAY_SPARSE`); index sets are per array and unbounded, so edges would never repeat. Lambda has no such keys. Keep them private.
 - **Spelling identity (D3.4.4v3).** NameIds are per pool (`pool_number << 16 | ordinal`), so one spelling has a different id in the compiler's pool, each parse `Input`'s pool and the runtime pool, and none for `createString` keys or computed keys; edges split on that today. Rule: a `STRING`-kind name's identity is its spelling — equal non-`NONE` ids prove it, otherwise key kind, length and bytes confirm it; `SYMBOL`/`PRIVATE` by `NameId` alone. Applied to the edge table's key and compare, to the parser trees' edge lists (which then record spelling and hash for every `STRING` edge), to `typemap_shape_entries_equal`/`typemap_hash_holds_equal` (so a shared table never takes two entries for one spelling), and to `map_existing_shape_entry` (byte fallback after an id miss, so `map_put` never appends a duplicate).
 
@@ -80,9 +80,9 @@ With external parents, construction rarely needs changing: a literal-born or doc
 - **JavaScript shapes, non-plain kinds, spread-slot types, VMap/Velmt/VArray** (no `TypeMap`), as listed in Shape_Transitions Appendix B.
 - **Foreign documents** — parsed under no Runtime, another Runtime, or a document whose own `Input` tree declined it — need no replay either: their types are external parents like any other, and the child copies the names. Replay is therefore not a phase of this plan.
 
-### 2.9 JavaScript keys in the one name space (proposal, not yet ruled)
+### 2.9 JavaScript keys in the one name space (ruled 2026-10-06: NI18, D3.4.4v4)
 
-S8.2.2v4 identifies a key by its resolved namespace and its normalized characters, and a namespace is a name resolved recursively to a root. The user ruled on 2026-10-06 that JavaScript symbols join that space through a namespace convention. Proposed mapping, under a root namespace `js` (the host):
+S8.2.2v4 identifies a key by its resolved namespace and its normalized characters, and a namespace is a name resolved recursively to a root. JavaScript symbols join that space through this mapping, under a root namespace `js` (the host); proposed and accepted on 2026-10-06 as NI18 and D3.4.4v4:
 
 | JavaScript key | Namespace | Characters | Identity it must reproduce |
 |---|---|---|---|
@@ -92,7 +92,7 @@ S8.2.2v4 identifies a key by its resolved namespace and its normalized character
 | `Symbol("d")` | `js.symbol.unique.<n>`, one anonymous namespace per creation | `d` (the description, diagnostic) | each creation distinct; equal descriptions never equal |
 | private `#x` | `js.private.<class>`, one anonymous namespace per class declaration | `x` | identity per declaration; the brand check is namespace membership |
 
-The convention is a reading of the records the runtime already keeps, not a new representation: a registered or well-known symbol's `NameRecord` is interned per (kind, characters), so the record stands for (namespace, characters); a unique symbol's or private name's record is fresh per creation, so the record *is* its anonymous namespace. The edge key `(name_id, key_kind)` that `transition_target_for_key` already compares for identity kinds is therefore exactly `(resolved namespace, characters)` under this mapping, and the tree admits JavaScript keys with no change beyond lifting the `property_key_requires_identity` gates (§2.5). What the convention adds is a spelling for interop — how such a key prints and is written from Lambda (`js.symbol.for.k`, `js.symbol.iterator`) — which is a separate, smaller ruling once the mapping is accepted. D3.4.4v3's sentence placing JS symbols "outside the Lambda name space" becomes v4 when this is ruled.
+The convention is a reading of the records the runtime already keeps, not a new representation: a registered or well-known symbol's `NameRecord` is interned per (kind, characters), so the record stands for (namespace, characters); a unique symbol's or private name's record is fresh per creation, so the record *is* its anonymous namespace. The edge key `(name_id, key_kind)` that `transition_target_for_key` already compares for identity kinds is therefore exactly `(resolved namespace, characters)` under this mapping, and the tree admits JavaScript keys with no change beyond lifting the `property_key_requires_identity` gates (§2.5). What the convention adds is a spelling for interop — how such a key prints and is written from Lambda (`js.symbol.for.k`, `js.symbol.iterator`) — which is a separate, smaller ruling once the mapping is accepted. D3.4.4v4 states the mapping; the interop spelling is the one open item.
 
 ## 3. Phases
 
@@ -100,7 +100,7 @@ Each phase lands on its own and is green on its gates before the next starts. Nu
 
 ### P0 — Keys: byte-view edges, identity keys admitted, spelling identity (§2.5)
 
-- `input.cpp`: `transition_key_of_bytes`; `transition_target_for_key` mints from the view (`alloc_shape_entry_in` split into a bytes core and the `String*` wrapper); `TypeMapTransition` gains `name_hash`, every `STRING` edge records its spelling; the §2.5 match rule. `type_tree_add_map_field` takes the view; the Lambda identity gate lifted (the others per Q3).
+- `input.cpp`: `transition_key_of_bytes`; `transition_target_for_key` mints from the view (`alloc_shape_entry_in` split into a bytes core and the `String*` wrapper); `TypeMapTransition` gains `name_hash`, every `STRING` edge records its spelling; the §2.5 match rule. `type_tree_add_map_field` takes the view; all four `property_key_requires_identity` gates lifted (NI18).
 - `lambda-data.hpp`: `typemap_shape_entries_equal`, `typemap_hash_holds_equal`; `map_existing_shape_entry` byte fallback.
 - `lambda-eval.cpp`: `map_extend_via_runtime_tree` accepts `LMD_TYPE_SYMBOL` keys.
 - Tests: `TransitionTreeKeyIdentityTest` in `test/test_mark_builder_gtest.cpp` — pooled and unpooled spellings reach one node; two pools' ids reach one node; a JS `Symbol()` edge never matches by description bytes; `map_put` of a pooled key onto an unpooled entry updates, never duplicates. Fixture `test/lambda/proc/map_symbol_key_tree.ls` (symbol subscripts and `{*:base}` share with `{}` builds; `len`, order and values unchanged), in `kExtraLambdaScripts`.
@@ -147,8 +147,8 @@ JavaScript `map_put_heap` fallbacks beyond the identity-key gate (array-index sh
 
 ## 6. Open questions for the user
 
-1. **D3.4.4v3 — string identity is spelling.** *Ruled 2026-10-06 (user), as S8.2.2v4 (Formal Semantics 58.0.0) and D3.4.4v3 (Formal Design 25.0.0): one name space keyed by resolved namespace plus normalized characters; an interned id proves equality, never difference.* P0 implements it for the edges and the equality helpers. The namespace half has a separate gap at map writes and reads ([LR03-40](<../Lambda_Issue_Ledger.md#lr03-40>)), outside this plan.
+1. **D3.4.4v3 — string identity is spelling.** *Ruled 2026-10-06 (user), as S8.2.2v4 (Formal Semantics 58.0.0) and D3.4.4v3, since revised to v4 for JavaScript keys (Formal Design 26.0.0): one name space keyed by resolved namespace plus normalized characters; an interned id proves equality, never difference.* P0 implements it for the edges and the equality helpers. The namespace half has a separate gap at map writes and reads ([LR03-40](<../Lambda_Issue_Ledger.md#lr03-40>)), outside this plan.
 2. **Scope of external parents (D3.4.3v5).** *Ruled 2026-10-06 (user): plain maps, nominal instances and elements together from P1.* The child copies the parent's identity fields either way; P1's fixture and GTests cover all three.
-3. **Identity-key gates on the JavaScript and parser paths.** *Ruled 2026-10-06 (user): JavaScript symbols join the one name space.* The namespace convention in §2.9 is proposed and awaits approval; once approved, P0 lifts all four gates under a test262 gate and D3.4.4 goes to v4.
+3. **Identity-key gates on the JavaScript and parser paths.** *Ruled 2026-10-06 (user): JavaScript symbols join the one name space under the §2.9 mapping (NI18, D3.4.4v4).* P0 lifts all four gates under a test262 gate.
 4. **Degradation past the budget.** Keep today's private copies (my recommendation, with the jq measurement in P1), or open a design for a hash-backed plain map past the budget now?
 5. **Fan-out.** Drop the 16-edge cap for the runtime tree's table edges (my recommendation: the cap bounds a linear walk that the table does not have), while parser trees keep it?

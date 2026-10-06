@@ -2585,5 +2585,6 @@ proves them different.
   those positions ambiguous and the syntax heavier. There was no standalone clause for
   it before — only S16.8.7 (`'a'` is a symbol) and Design_Syntax §7.8 — so S8.2.2v4 now
   states it.
-- **JavaScript symbols join the one name space through a namespace convention**, to be
-  proposed before it is ruled (Impl_Map_Transition_Coverage §2.9).
+- **JavaScript symbols join the one name space through a namespace convention** under the
+  host root `js` — proposed in Impl_Map_Transition_Coverage §2.9 and accepted the same day
+  as NI18 and D3.4.4v4.
