@@ -8658,7 +8658,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const CssEnumInfo* info = css_enum_info(value->data.keyword);
                 if (info && info->group == CSS_VALUE_GROUP_SYSTEM_FONT) {
-                    radiant_retain_font_family(span->font, lam::GcPtr<char>((char*)"Arial"));
+                    radiant_retain_font_family(span->font, lam::static_borrow("Arial"));
                     span->font->font_size = 13.333f;
                     span->font->font_size_from_medium = false;
                     span->font->font_weight = CSS_VALUE_NORMAL;

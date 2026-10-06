@@ -376,6 +376,14 @@ Item parse_code_block(MarkupParser* parser, const char* line);
 Item parse_blockquote(MarkupParser* parser, const char* line);
 Item parse_table(MarkupParser* parser, const char* line);
 Item parse_math_block(MarkupParser* parser, const char* line);
+
+// Finish a <math> element whose source is `source` (`flavor` "latex" or
+// "ascii"). When the parse asked for embedded math (InputParseOptions), attach
+// the parsed `ast` and register the element on Input::embedded_math, so a
+// display renders it directly instead of walking the document; other parses
+// keep only the source.
+void finish_math_element(MarkupParser* parser, Element* math,
+                         const char* source, size_t length, const char* flavor);
 Item parse_thematic_break(MarkupParser* parser);
 Item parse_metadata(MarkupParser* parser);
 

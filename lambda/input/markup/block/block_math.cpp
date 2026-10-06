@@ -48,6 +48,7 @@ Item parse_math_block(MarkupParser* parser, const char* line) {
             Item text_item = {.item = s2it(content_str)};
             list_push((List*)math, text_item);
         }
+        finish_math_element(parser, math, pos, content_len, "latex");
         parser->current_line++;
         return Item{.item = (uint64_t)math};
     }
@@ -113,6 +114,7 @@ Item parse_math_block(MarkupParser* parser, const char* line) {
             Item text_item = {.item = s2it(content_str)};
             list_push((List*)math, text_item);
         }
+        finish_math_element(parser, math, sb->str->chars, sb->length, "latex");
     }
 
     return Item{.item = (uint64_t)math};

@@ -4,7 +4,7 @@
 // ByteCursor: a (cur, end) pair for recursive-descent parsers — advancing past the
 //             buffer is structurally impossible, so "read past end-of-input" cannot happen.
 // Both are pointer-pair sized, trivially copyable, and decay to raw pointers at the C/MIR edge.
-// See vibe/Memory_Safety_Template3.md §3.2.
+// See vibe/Memory_Safety_Template.md §5.1.
 
 #include <stddef.h>
 #include <stdint.h>

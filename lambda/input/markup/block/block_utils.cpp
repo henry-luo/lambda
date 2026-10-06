@@ -5,6 +5,7 @@
  * used by all block parsers.
  */
 #include "block_common.hpp"
+#include "../../input-parsers.h"
 
 namespace lambda {
 namespace markup {
@@ -28,6 +29,22 @@ void add_attribute_to_element(MarkupParser* parser, Element* elem,
     // Add attribute using putToElement
     Item lambda_value = {.item = s2it(val)};
     parser->builder.putToElement(lam::gc_borrow(elem), key, lambda_value);
+}
+
+void finish_math_element(MarkupParser* parser, Element* math,
+                         const char* source, size_t length, const char* flavor) {
+    Input* input = parser ? parser->input() : nullptr;
+    if (!input || !input->parse_embedded_math || !math || !source) return;
+    Item ast = parse_math_direct_to_ast(input, source, length, flavor ? flavor : "latex");
+    TypeId ast_type = get_type_id(ast);
+    if (ast_type != LMD_TYPE_NULL && ast_type != LMD_TYPE_ERROR) {
+        String* key = parser->builder.createString("ast");
+        if (key) parser->builder.putToElement(lam::gc_borrow(math), key, ast);
+    }
+    if (!input->embedded_math) input->embedded_math = array_pooled(input->pool);
+    if (input->embedded_math) {
+        array_append(input->embedded_math, Item{.element = math}, input->pool);
+    }
 }
 
 /**

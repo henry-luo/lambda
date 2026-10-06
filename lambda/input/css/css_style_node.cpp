@@ -1328,8 +1328,8 @@ void style_tree_get_statistics(StyleTree* style_tree, int* total_nodes,
 // Advanced Style Operations
 // ============================================================================
 
-// Lifetime contract (CSS value retention audit, Memory_Safety_Template4.md §10
-// Phase 4): this is a SHALLOW clone. clone_tree_callback re-applies the source
+// Lifetime contract (CSS value retention audit; Memory_Safety_Template.md §8.2,
+// retained CSS values): this is a SHALLOW clone. clone_tree_callback re-applies the source
 // node's CssDeclaration* (and therefore its CssValue*) into the cloned tree by
 // reference + refcount. Those declarations stay owned by SOURCE's pool, not by
 // target_pool. Refcounting does not protect across pools — pool free reclaims
@@ -1637,8 +1637,8 @@ StyleTree* style_tree_create_subset(StyleTree* source,
             StyleNode* node = (StyleNode*)avl_node->declaration;
 
             // Copy winning declaration.
-            // Lifetime contract (CSS value retention audit, Memory_Safety_Template4.md
-            // §10 Phase 4): the declaration struct is re-created in target_pool, but
+            // Lifetime contract (CSS value retention audit, Memory_Safety_Template.md
+            // §8.2): the declaration struct is re-created in target_pool, but
             // its CssValue* is ALIASED from source's pool (no deep value copy exists).
             // The pool backing `source` must therefore outlive `subset`. Only
             // exercised by tests today.

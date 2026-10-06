@@ -216,7 +216,7 @@ TEST_F(AnimationSchedulerTest, AddRemove) {
     EXPECT_FALSE(scheduler->has_active_animations);
 }
 
-// C3 regression (vibe/Memory_Safety_Template3.md §3.6): a full relayout frees the view
+// C3 regression (vibe/Memory_Safety_Template.md §1.3, §7): a full relayout frees the view
 // pool, so view-targeted CSS animations/transitions must be dropped (their View* targets
 // dangle) while surface-targeted GIF/Lottie animations survive.
 TEST_F(AnimationSchedulerTest, RemoveViewsDropsCssKeepsSurface) {

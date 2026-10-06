@@ -19,6 +19,7 @@
 #include "../jube/jube_interface.h"
 #include <math.h>
 #include "../io/mark_output_builder.hpp"
+#include "../io/input-allocation-context.h"
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
 
@@ -2989,33 +2990,18 @@ Element* elmt_with_tl(int64_t type_index, void* type_list_ptr) {
     return r;
 }
 
-// ui_mode helper: copy a GC-heap string into the result arena as a fat DomText node.
-// Returns the new String* (embedded in [DomText][String][chars]) on the arena.
-// Called by list_push() when adding a string to an element's content list in ui_mode.
-Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
-    String* src = str_item.get_safe_string();
-    if (!src) return str_item;
-    DomText* dt = DomText::create_in(arena, src->len);
-    if (!dt) return ItemNull;
-    String* dst = dom_text_to_string(dt);
-    dst->flags = 0;
-    dst->is_ascii = src->is_ascii;
-    memcpy(dst->chars, src->chars, src->len + 1);
-    return {.item = s2it(dst)};
-}
-
-// ui_mode helper: merge two strings into a new fat DomText on the result arena.
-// Called by list_push() string merge path in ui_mode.
-Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
-    size_t new_len = prev->len + next->len;
-    DomText* dt = DomText::create_in(arena, new_len);
-    if (!dt) return ItemNull;
-    String* merged = dom_text_to_string(dt);
-    merged->flags = 0;
-    merged->is_ascii = prev->is_ascii && next->is_ascii;
-    memcpy(merged->chars, prev->chars, prev->len);
-    str_copy(merged->chars + prev->len, next->len + 1, next->chars, next->len);
-    return {.item = s2it(merged)};
+// The document Input whose arena backs ui_mode content -- the runtime's result
+// Input, or the Input a parser is building -- so list_push can deep-copy
+// non-string content into it (ui_copy_content_to_input, D4.5.2).
+Input* ui_result_input(Arena* arena) {
+    Runtime* runtime = context ? context->runtime : nullptr;
+    if (runtime && runtime->result_input && runtime->result_input->arena == arena) {
+        return runtime->result_input;
+    }
+    InputAllocationContext* owner = input_allocation_context;
+    if (owner && owner->input && owner->arena == arena) return owner->input;
+    log_error("ui-content-copy: no document Input owns the UI arena; content left in place");
+    return nullptr;
 }
 
 Object* object(int64_t type_index) {
@@ -3249,6 +3235,17 @@ static RootVector* ui_attribute_roots(void) {
         root_vector_init(&state->values, (Context*)context, "ui-element-attributes");
     }
     return &state->values;
+}
+
+void* runtime_take_ui_attribute_roots(Runtime* runtime) {
+    EvalContext* owner = runtime ? runtime->eval_context : nullptr;
+    // the next build constructs a fresh vector on first use
+    return owner ? context_capsule_take(owner, CONTEXT_CAPSULE_UI_ATTRIBUTE_ROOTS) : nullptr;
+}
+
+void ui_attribute_roots_release(void* roots) {
+    // the vector unregisters from its recorded owner, not the bound context
+    if (roots) ui_attribute_roots_destroy(roots);
 }
 
 bool ui_prepare_element_field(Item* value) {

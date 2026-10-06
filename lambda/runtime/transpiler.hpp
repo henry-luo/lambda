@@ -147,10 +147,12 @@ struct Runtime {
     // runtime_scheduler() accessors. Runtime is a controller, not a second
     // owner; the old mirrored fields are gone.
 
-    // Phase 5: unified DOM — when ui_mode is true, elmt()/list_push()/elmt_fill()
-    // allocate fat DomElement/DomText on result_arena instead of the GC heap.
+    // Phase 5: unified DOM — a ui_mode runtime's elmt()/list_push()/elmt_fill()
+    // allocate fat DomElement/DomText in the arena of the bound result Input
+    // instead of the GC heap. UI content that is not already in that arena is
+    // deep-copied into it, never left pointing at the GC heap (D4.5.2).
     bool ui_mode;
-    Arena* result_arena;
+    Input* result_input;
 
     // Runtime-local load counters. InputManager owns process-wide artifact
     // identity and lifetime under D8.5.1v2.
@@ -284,6 +286,10 @@ struct LambdaDocumentTransformConfig {
     const char* package_module;
     const char* function_name;
     LambdaDocumentTransformSource source;
+    // A stateless transform keeps nothing between documents, so a window runs
+    // it on its one shared loader runtime; a stateful application (edit) keeps
+    // a runtime per document.
+    bool stateless;
 };
 
 enum LambdaDocumentTransformOptionKind {
@@ -303,8 +309,6 @@ const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
     const char* input_type);
 // Loads a file-backed package, parses the source through `input()`, and calls
 // its configured public transform without synthesizing a Lambda bridge script.
-Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
-                                     const LambdaDocumentTransformConfig* transform);
 Input* run_lambda_document_transform_with_options(Runtime* runtime,
     const char* input_target, const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count);
@@ -392,7 +396,19 @@ void preserve_context_last_error(Item result);
 void eval_context_set_last_error(EvalContext* ctx, LambdaError* error);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
 void runtime_init(Runtime* runtime);
-void runtime_set_ui_result_arena(Runtime* runtime, Arena* arena);
+void runtime_set_ui_result_input(Runtime* runtime, Input* input);
+// A runtime that outlives the documents it builds (a window's loader runtime)
+// binds a document's result Input only while it works on that document; null
+// releases the binding, so a closed document's arena never stays reachable.
+void runtime_bind_ui_result_input(Runtime* runtime, Input* input);
+// A context allocates UI results where its runtime's result binding says: in
+// the bound Input's arena, or the GC heap when none is bound. Returns whether
+// one is bound.
+bool runtime_context_follow_ui_result(Runtime* runtime, EvalContext* ctx);
+// Each document such a runtime builds takes the UI attribute roots its build
+// published and releases them when it closes (D4.5.2 rooted exemption).
+void* runtime_take_ui_attribute_roots(Runtime* runtime);
+void ui_attribute_roots_release(void* roots);
 // Non-blocking close notification: satellite workers observe this before the
 // document/runtime owner starts its full teardown.
 void runtime_request_satellite_cancel(Runtime* runtime);

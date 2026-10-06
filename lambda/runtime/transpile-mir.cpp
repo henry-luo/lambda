@@ -48735,14 +48735,14 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
-    {"pdf", "lambda.pdf.pdf", "pdf_to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
-    {"latex", "lambda.latex.latex", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
-    {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
-    {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
-    {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
+    {"pdf", "lambda.pdf.pdf", "pdf_to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"latex", "lambda.latex.latex", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     // edit mode selects the application; lambda.edit's registry selects the
     // format adapter and reads the source itself (Radiant_Design_Edit_Mode §4).
-    {"edit", "lambda.edit.edit", "open_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH},
+    {"edit", "lambda.edit.edit", "open_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
 };
 
 const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
@@ -48756,12 +48756,6 @@ const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
         if (strcmp(transform->input_type, input_type) == 0) return transform;
     }
     return NULL;
-}
-
-Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
-        const LambdaDocumentTransformConfig* transform) {
-    return run_lambda_document_transform_with_options(runtime, input_target, transform,
-        NULL, 0);
 }
 
 Input* run_lambda_package_module(Runtime* runtime, const char* package_module,

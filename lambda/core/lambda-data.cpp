@@ -15,16 +15,6 @@
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 
-#ifndef LAMBDA_IO_STATIC_VALUES
-// ui_mode helper: copy GC-heap string into result arena as fat DomText node
-// (defined in lambda-data-runtime.cpp which has access to DOM headers)
-Item ui_copy_string_to_arena(Arena* arena, Item str_item);
-
-// ui_mode helper: merge two strings into a new fat DomText on the result arena
-// (defined in lambda-data-runtime.cpp which has access to DOM headers)
-Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next);
-#endif
-
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 Type TYPE_UNDEFINED = {.type_id = LMD_TYPE_UNDEFINED};  // JavaScript undefined
 Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
