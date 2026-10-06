@@ -2537,6 +2537,17 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
     if (!parent || !old_child || !new_child) return false;
     if (old_child->parent != parent) return false;
 
+    // the documentElement omits its reverse doctype link; retain that forward sibling.
+    DomNode* previous = old_child->prev_sibling;
+    if (!previous && parent->first_child != old_child) {
+        for (DomNode* sibling = parent->first_child; sibling; sibling = sibling->next_sibling) {
+            if (sibling->next_sibling == old_child) {
+                previous = sibling;
+                break;
+            }
+        }
+    }
+
     // Reinsertion before the retirement checkpoint cancels deferred recycling.
     dom_node_cancel_detached(parent->doc, new_child);
 
@@ -2545,8 +2556,8 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
     new_child->prev_sibling = old_child->prev_sibling;
     new_child->next_sibling = old_child->next_sibling;
 
-    if (old_child->prev_sibling) {
-        old_child->prev_sibling->next_sibling = lam::own(new_child);
+    if (previous) {
+        previous->next_sibling = lam::own(new_child);
     } else {
         parent->first_child = lam::own(new_child);
     }

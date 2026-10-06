@@ -3408,7 +3408,9 @@ extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
                                                                const char* event_name) {
     (void)dispatch_author_template_participant(s_active_js_dispatch_event_context,
                                                dom_node, event, event_name,
-                                               nullptr);
+                                               s_active_js_dispatch_event_context
+                                                   ? s_active_js_dispatch_event_context->dom_event_intent
+                                                   : nullptr);
 }
 
 // Load the Lambda dom package into this document's script runtime, once, on the
@@ -7286,7 +7288,7 @@ static bool post_html_handler_incremental_rebuild(
     uint64_t t1 = time_now_ns();
 
     DocState* state = (DocState*)doc->state;
-    if (state) doc_state_close_context_menu(state);
+    // relayout retains DOM owners; the post-layout prune closes retired menus.
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
@@ -7410,9 +7412,8 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     DocState* state = (DocState*)doc->state;
 
-    // The fallback drops the layout epoch, not the DOM identity epoch. Keep
-    // the dropdown owner until the post-layout prune checks its DOM identity.
-    if (state) doc_state_close_context_menu(state);
+    // the fallback drops layout resources; transient owners survive until the
+    // post-layout prune checks their DOM identity (D4.5.1v4).
 
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
@@ -8055,6 +8056,26 @@ void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
     radiant_queue_timing_event(uicon, target, radiant_build_svg_timing_event, &data);
 }
 
+struct NativeEventPayloadScope {
+    EventContext* evcon;
+    View* previous_target;
+    const InputIntent* previous_intent;
+
+    NativeEventPayloadScope(EventContext* context, View* target,
+                            const InputIntent* intent) : evcon(context) {
+        previous_target = evcon->target;
+        previous_intent = evcon->dom_event_intent;
+        // synthetic input may target a different control than the physical hit.
+        evcon->target = target;
+        evcon->dom_event_intent = intent;
+    }
+
+    ~NativeEventPayloadScope() {
+        evcon->target = previous_target;
+        evcon->dom_event_intent = previous_intent;
+    }
+};
+
 static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
                                          RadiantJsEventBuilder build_event,
                                          void* userdata,
@@ -8073,6 +8094,7 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     }
     DomElement* dom_target = view_geometry_nearest_dom_element(target);
     if (!dom_target || !build_event) return false;
+    NativeEventPayloadScope payload_scope(evcon, target, intent);
     JsDispatchScope dispatch_scope(evcon);
     DomDocument* target_doc = event_context_target_document(evcon);
     bool active_batch_context = context && dom_get_document() == target_doc;

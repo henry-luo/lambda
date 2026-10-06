@@ -2788,9 +2788,10 @@ editor-4c: build-test
 	@echo "Stage 4C complete: parity (Phase A + jsdom oracle) + Phase B/C (view + event_sim) all green."
 
 # Browser-library DOM fixtures run through the real Radiant input/event/layout loop.
-dom-ui: build-test dom-ui-run
+dom-ui: dom-ui-run
 
-dom-ui-run: build-test
+# DOM fixtures need the Radiant host and runner, not optional database modules.
+dom-ui-run: build-radiant-baseline
 	@./test/test_ui_automation_gtest.exe --suite dom $(if $(or $(test),$(TEST)),--test "$(or $(test),$(TEST))") $(ARGS)
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline
