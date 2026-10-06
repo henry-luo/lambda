@@ -1,6 +1,6 @@
 {
   "name": "Superlambda full meadow traversal, checkpoint, finish and replay",
-  "html": "test/dema/superlambda/superlambda.ls",
+  "html": "test/demo/superlambda/superlambda.ls",
   "viewport": {"width":1024,"height":800},
   "events": [
     {"type":"advance_time","ms":80,"steps":2},

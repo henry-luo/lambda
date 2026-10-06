@@ -6,7 +6,7 @@ palette and smooth SVG artwork. Lambda wears a red cap with **λ** on it.
 From the repository root:
 
 ```sh
-./lambda.exe view test/dema/superlambda/superlambda.ls
+./lambda.exe view test/demo/superlambda/superlambda.ls
 ```
 
 Click **LET'S GO** or press Enter. The meadow spans 3,840 pixels: collect coins,
@@ -40,13 +40,13 @@ Run the rules and interaction regressions:
 
 ```sh
 mkdir -p temp
-./lambda.exe test/dema/superlambda/superlambda_test.ls > temp/superlambda_test.actual.txt
-diff -u test/dema/superlambda/superlambda_test.txt temp/superlambda_test.actual.txt
-./lambda.exe view test/dema/superlambda/superlambda.ls --headless --no-log \
-  --event-file test/dema/superlambda/superlambda_smoke.json \
+./lambda.exe test/demo/superlambda/superlambda_test.ls > temp/superlambda_test.actual.txt
+diff -u test/demo/superlambda/superlambda_test.txt temp/superlambda_test.actual.txt
+./lambda.exe view test/demo/superlambda/superlambda.ls --headless --no-log \
+  --event-file test/demo/superlambda/superlambda_smoke.json \
   --event-result temp/superlambda_smoke_result.json
-./lambda.exe view test/dema/superlambda/superlambda.ls --headless --no-log \
-  --event-file test/dema/superlambda/superlambda_course.json \
+./lambda.exe view test/demo/superlambda/superlambda.ls --headless --no-log \
+  --event-file test/demo/superlambda/superlambda_course.json \
   --event-result temp/superlambda_course_result.json
 ```
 

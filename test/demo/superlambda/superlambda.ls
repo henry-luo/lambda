@@ -1,4 +1,4 @@
-// Run: ./lambda.exe view test/dema/superlambda/superlambda.ls
+// Run: ./lambda.exe view test/demo/superlambda/superlambda.ls
 import world: .superlambda_core
 import dom
 
