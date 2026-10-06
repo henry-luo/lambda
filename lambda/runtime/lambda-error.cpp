@@ -1033,6 +1033,7 @@ void err_print_warning(LambdaError* error) {
 }
 
 void err_print_stack_trace(StackFrame* trace) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!trace) return;
     
     fprintf(stderr, "Stack trace:\n");
@@ -1051,6 +1052,7 @@ void err_print_stack_trace(StackFrame* trace) {
         trace = trace->next;
         depth++;
     }
+#endif
 }
 
 // ============================================================================

@@ -548,6 +548,7 @@ void lambda_profile_record_js_compilation(const char* script_path,
 }
 
 void profile_dump_to_file() {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!profile_enabled || profile_count == 0) return;
     create_dir_recursive("temp");
     FILE* f = fopen("temp/phase_profile.txt", "w");
@@ -569,6 +570,7 @@ void profile_dump_to_file() {
                 total, p->peak_rss_mb, p->code_len, p->worker_thread, p->thread_id);
     }
     fclose(f);
+#endif
 }
 
 // ============================================================================

@@ -2,7 +2,7 @@
 
 **Status**: IMPLEMENTED WITH USER-DEFERRED CLASS F — rev 29 (2026-07-24; revs 2–28 as recorded below; rev 28 physically relocated the remaining top-level core/rt translation units and headers into `lambda/core/` and `lambda/runtime/`, completing the P1b mechanical move; rev 29 then replaced every forwarding shim with direct `core/`/`io/`/`runtime/` includes at all active call sites and deleted all of them — the 28 from rev 28 plus 7 pre-existing transitional shims from earlier P1b work — leaving `lambda/` shim-free, and repaired the tooling paths the relocation had staled. Monolithic build, static module archives, the five-DSO boundary check at the unchanged 165-import Class-F baseline, and the Lambda baseline suite are all green)
 **Scope**: split the monolithic `lambda.exe` build into four static libraries + one executable, with a fixed, enforced inter-module interface.
-**Profile update (2026-10-06)**: SM17 specifies `lambda-wasm` for synchronous browser evaluation with a retained REPL (§13.4; D7.1.7v2). The optimized profile now builds and passes Node/Chromium embedding checks; build details and measured sizes are in `doc/dev/Lambda_WASM_Build.md`.
+**Profile update (2026-10-06)**: SM17 specifies `lambda-wasm` for synchronous browser evaluation with a retained REPL (§13.4; D7.1.7v4). The optimized profile now builds and passes Node/Chromium embedding checks; build details and measured sizes are in `doc/dev/Lambda_WASM_Build.md`.
 **Related**: `lib/mem_factory.h` / `vibe/Memory_Context.md` (allocator registry), `vibe/Lambda_Native_Module_Design.md` (Jube host API), `vibe/Lambda_Design_Code_Dedup.md` (DD1–DD5 coherent-header doctrine), `vibe/Lambda_Design_MIR_Cache.md` (MC1–MC8 — the rt-layer MIR cache of §2.1), `utils/check_hosted_python_architecture.py` (boundary-check precedent).
 
 ---
@@ -34,7 +34,7 @@ What each module contains, in general — the scope statement each boundary ques
 | **lambda-io** | Document and shared-resource IO: JSON/XML/HTML/CSS/Markdown/PDF/YAML/LaTeX/… inputs — including the HTML5 tree builder and the CSS parser/cascade engine with its DOM — output formatters, `MarkBuilder`/`MarkEditor`, Target/resource resolution, URL/file byte acquisition, curl-based HTTP fetching, cookie/public-suffix policy, downloader/scheduler/thread-pool, resource/file/network caches (`lambda/network/**`), and the input/doc manager + doc cache (§2.1). Builds/edits arena-owned Mark data over core values; never touches the GC. | in `liblambda-data.a` |
 | **lambda-rt** | The active script engines: Lambda parser (tree-sitter), AST builder, MIR-Direct transpiler/JIT, GC and runtime memory, evaluator + system functions, procedural runtime, the LambdaJS runtime, validator. Owns the active runtime C/C++ headers, runtime `Context`, root frames/side stacks, the script manager and script/MIR caches (§2.1), and language-runtime IO bindings whose event-loop/JS semantics are inseparable from rt (for example Node-compatible `fs`, `net`, `dns`, and TLS bindings; §2.2). Shared resource acquisition and caching are consumed from lambda-io. Retired C2MIR remains a frozen legacy enclave: no module-split edits, redesign, or validation work is performed on it. | `liblambda-rt.a` |
 | **radiant** | CSS style resolution, layout (block/inline/flex/grid/table/positioned), rendering (paint IR → SVG/PDF/PNG/GL), font & media *loading and rendering* — the files themselves arrive via lambda-io (§2.1) — events & UI (window shell, editing, interaction state). | `radiant.a` |
-| **lambda-exe / embedding shell** | CLI command wiring and the REPL (`main.cpp`, `main-repl.cpp`) compose the native full, `lambda-cli` and `lambda-headless` profiles (§13.1–§13.3). The proposed implementation of `lambda-wasm` retains the REPL through a browser embedding entry point and omits the native CLI entry (§13.4; D7.1.7v2). | Native executable; WASM embedding artifact (not implemented) |
+| **lambda-exe / embedding shell** | CLI command wiring and the REPL (`main.cpp`, `main-repl.cpp`) compose the native full, `lambda-cli` and `lambda-headless` profiles (§13.1–§13.3). `lambda-wasm` retains the shared REPL through a browser embedding entry point and omits the native CLI entry (§13.4; D7.1.7v4). | Native executable; WASM embedding artifact |
 
 ### 2.1 SM12 refined: managers and caches per layer
 
@@ -86,7 +86,7 @@ Tier 1 therefore enforces both dependency direction and capability ownership: di
 | SM14 | C2MIR is retired and frozen. The module split does not edit, redesign, regenerate for, or add validation gates for the C2MIR implementation/artifacts (§9.1) | **DECIDED** |
 | SM15 | `lambda-cli` is the runtime-only host: no Radiant, JS/TS runtime and DOM, Jube host modules, or HTTP server; excluded commands and imports fail explicitly (§13.2; D7.1.6) | **DECIDED** (USER 2026-10-03) |
 | SM16 | `lambda-headless` is headless profile C: the full engine (Lambda + Radiant + JS) linked against a null windowing backend instead of GLFW, OpenGL and the native GUI/webview toolkits; no `view`/`edit` (§13.3; D7.1.4v2) | **DECIDED** (USER 2026-10-03) |
-| SM17 | `lambda-wasm` is smaller than `lambda-cli`: synchronous AST evaluation and an in-memory REPL; no native CLI entry, MIR/JIT, network, system information, filesystem IO, image loading, libuv/threads/tasks/mailboxes, resource caches/SQLite/cookies, PDF/LaTeX parsers/packages, ambient clock/timezone discovery/entropy (§13.4; D7.1.7v2). Remaining reductions are proposals. | **DECIDED; NOT IMPLEMENTED** (USER 2026-10-06) |
+| SM17 | `lambda-wasm` is smaller than `lambda-cli`: synchronous AST evaluation and an in-memory REPL; no native CLI entry, MIR/JIT, network, system information, filesystem IO, image loading, libuv/threads/tasks/mailboxes, resource caches/SQLite/cookies, PDF/LaTeX parsers/packages, ambient clock/timezone discovery/entropy, logging providers, console inspection dumps or allocation tracking; the inactive native string-SIMD unit is omitted (§13.4; D7.1.7v4). Remaining reductions are proposals. | **IMPLEMENTED** (USER 2026-10-06) |
 
 ---
 
@@ -497,7 +497,7 @@ Consequences for the split:
 
 ### 13.4 SM17 — `lambda-wasm` is the browser evaluation profile (USER, 2026-10-06)
 
-**Ruling (D7.1.7v2).** `lambda-wasm` is smaller than `lambda-cli` (D7.1.6),
+**Ruling (D7.1.7v4).** `lambda-wasm` is smaller than `lambda-cli` (D7.1.6),
 embedding Lambda evaluation in a browser WASM module. Source and data arrive
 in memory from the embedding host. The Lambda engine itself has no resource
 acquisition capability. The browser's JavaScript glue is an embedding adapter;
@@ -507,7 +507,12 @@ it does not require the LambdaJS engine, DOM, Radiant, or Jube.
 including removal of the REPL. The user's v2 decision retains the REPL,
 removes only the native CLI entry, and approves the concurrency, resource,
 PDF/LaTeX and ambient-provider exclusions below. Other codec and validator
-choices remain proposals.
+choices remain proposals. The v3 decision disables logging and compiles out
+console dump implementations, retaining structured source diagnostics and
+explicit procedural `print` (D5.4.4).
+The v4 decision excludes allocation tracking and the unused native string-SIMD
+unit, retaining a lean allocation provider and ordinary scalar string search
+(D4.2.5v3).
 
 **Approved scope.**
 
@@ -526,6 +531,8 @@ choices remain proposals.
 | PDF and LaTeX | Exclude PDF and LaTeX parsers, LaTeX/Math Tree-sitter dependencies, and their packaged PDF/LaTeX functionality and assets. Other document formats remain a separate size choice. |
 | Ambient providers | Exclude the ambient clock, timezone discovery and entropy providers. Current-time and ambient-random operations fail explicitly; do not substitute constants or implicitly call browser providers. Parsing, formatting and arithmetic on explicitly supplied date/time values and offsets remain. |
 | Inherited exclusions | No Radiant/layout/render/GUI/fonts, LambdaJS/TS/DOM, Jube/native host modules, or HTTP server, as in D7.1.6. |
+| Logging and dumps | Use a disabled logging stub and remove diagnostic console dump code at compile time. Preserve structured source diagnostics, host-returned REPL values and explicit procedural `print`; diagnostics never feed semantics (D5.4.4). |
+| Allocation tracking and string SIMD | Exclude `lib/memtrack.c` and the inactive `lib/str_simd.c`. Retain the ordinary allocation API through a lean `lib/` provider, checked arithmetic, precise GC and allocator ownership (D4.2.5v3, D5.3.3). String search uses the existing scalar implementation. |
 
 This is a separate browser embedding artifact, not a fourth Radiant headless
 mode. The A/B/C distinction in D7.1.4v2 remains unchanged. It also differs from
@@ -533,7 +540,7 @@ running WASM *as a Jube guest*, discussed in `idea/Lambda_KIV_WASM.md`.
 
 **What else can be stripped?** The following are recommended candidates for
 the first implementation, pending capability decisions. They do not extend
-D7.1.7v2's approved exclusions silently.
+D7.1.7v4's approved exclusions silently.
 
 | Candidate | Benefit and boundary |
 |---|---|
@@ -548,14 +555,35 @@ Shrinking these changes the language rather than only its embedding surface
 (D2.1, D2.2, D5.3.3). RE2/Unicode and numeric libraries need an actual retained
 operation inventory before deciding which can be omitted.
 
-**Implementation (2026-10-06; D7.1.7v2).** `make lambda-wasm` now uses
+**Implementation (2026-10-06; D7.1.7v4).** `make lambda-wasm` now uses
 `utils/build_wasm.py` and the JSON profile's explicit retained manifest:
-211 project sources plus utf8proc 2.12.0, mpdecimal 4.0.1 and the existing
+209 project sources plus utf8proc 2.12.0, mpdecimal 4.0.1 and the existing
 unmodified RE2. Emscripten 6.0.11 builds with `-Oz`, LTO and `MEMORY64=2`,
 preserving the 64-bit C/Item ABI while lowering memory operations to wasm32
 (D2.1.1, D2.1.7). No native archives or MIR headers/backend enter this build.
 Other in-memory codecs and schema validation remain; the proposed extra
 removals above are still proposals.
+
+The JS well-known-name source is excluded too: `LAMBDA_NO_JS` makes the shared
+NamePool skip that catalog while preserving ordinary Lambda key interning
+(D4.6.1v3, D4.6.2v2). The manifest contains no `lambda/js/` sources.
+
+`LAMBDA_NO_LOG` selects the stub branch in `lib/log.c` and strips all logging
+call arguments in `lib/log.h`. `LAMBDA_NO_CONSOLE_DUMP` excludes AST, value,
+CSS/DOM, version, memory, stack and profile dump bodies and their traversal
+callbacks. The memory-tracker translation unit is excluded entirely.
+`LAMBDA_NO_CLI` excludes the validator's file-backed command/reporting layer;
+in-memory validation remains available. Structured source diagnostics use the
+separate error formatter and survive logging removal (D5.4.4).
+
+`LAMBDA_NO_MEMTRACK` selects the lean allocation provider in `lib/mem_alloc.c`;
+string allocation helpers are extracted there for both native and WASM builds,
+without duplication. Tracker initialization, state/counters and VM fault
+injection are omitted. MemContext, Pool/Arena and precise GC remain (D4.2.5v3,
+D5.3.3). `LAMBDA_NO_STR_SIMD` omits the native SIMD source and pair-search
+preparation/dispatch; the existing `str.c` rare-byte scalar scan handles search.
+WASM SIMD is available with suitable compiler flags, but this profile does not
+enable it and the omitted source had been taking its scalar fallback.
 
 `lambda/runtime/wasm_embed.cpp` exports init/eval/reset/shutdown from
 `lambda/lambda-wasm.h`, wrapping the shared stateful REPL. Each WASM instance
@@ -582,20 +610,21 @@ diagnostics, without a filesystem backend. The loader can receive WASM bytes
 directly; its optional acquisition of its own artifact is bootstrap transport
 and is inaccessible to Lambda evaluation.
 
-**Verification and size.** Node and Chromium each pass **134 checks**, including
+**Verification and size.** Node and Chromium each pass **145 checks**, including
 retained closures/arrays under allocation pressure, decimals, wide integers,
 Unicode/RE2, JSON, explicit UTC dates, capability rejection, failed-submission
 recovery, reset and reinitialization. Browser execution supplies the module in
 memory and denies fetch/XHR/WebSocket, Date, timezone formatting, performance
-clocks and entropy. Native REPL tests pass **40/40**. Retained closure coverage
+clocks and entropy. Native REPL tests pass **40/40**; the full native Lambda
+baseline passes **6,242/6,242** after the allocator/string-search changes. Retained closure coverage
 found and fixed a shared REPL defect: finalization reused the old module index
 and missed the new nested-function captures. Fragment analysis now owns its
 own graph before finalization (D6.2.3, D8.2.4). These checks do not certify the
 entire interpreter corpus or all browsers.
 
-The optimized WASM is **2,146,648 bytes** and the loader
-**14,626 bytes**; combined **2,161,274 bytes**, or
-**843,643 bytes gzipped**. The manifest and size report are published
+The optimized WASM is **2,084,174 bytes** and the loader
+**13,821 bytes**; combined **2,097,995 bytes**, or
+**817,899 bytes gzipped**. The manifest and size report are published
 under `build/wasm/`. Reproduction, ABI contracts, import audit and remaining
 limitations: `doc/dev/Lambda_WASM_Build.md`.
 

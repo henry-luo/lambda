@@ -63,6 +63,8 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document,
     return result;
 }
 
+#ifndef LAMBDA_NO_CLI
+// file acquisition and console reporting belong to the native validate command.
 // =============================================================================
 // Lambda Source File Validation (AST-based)
 // =============================================================================
@@ -655,3 +657,4 @@ extern "C" ValidationResult* run_validation(const char *data_file, const char *s
 
     return run_ast_validation(data_file, schema_file, input_format, &opts);
 }
+#endif // LAMBDA_NO_CLI

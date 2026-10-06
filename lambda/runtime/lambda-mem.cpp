@@ -532,6 +532,7 @@ extern "C" void lambda_jit_root_witness(uint64_t raw, int64_t claimed_type_id,
 }
 
 void lambda_root_witness_dump(void) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!lambda_root_witness_enabled()) return;
     if (lambda_root_witness_violation_count == 0) {
         log_info("root-witness: %zu unrooted values probed, 0 violations",
@@ -541,6 +542,7 @@ void lambda_root_witness_dump(void) {
             lambda_root_witness_probe_count,
             lambda_root_witness_violation_count);
     }
+#endif
 }
 
 static void init_ascii_char_table() {
@@ -1494,6 +1496,7 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
 }
 
 void print_heap_entries() {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     // A document can retain millions of objects; logging each one during
     // teardown blocks window close unless the heap dump was requested.
@@ -1512,11 +1515,14 @@ void print_heap_entries() {
         idx++;
     }
 #endif
+#endif
 }
 
 void check_memory_leak() {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     gc_heap_t *gc = context->heap->gc;
     log_debug("gc objects at shutdown: %zu (all freed by pool_destroy)", gc->object_count);
+#endif
 #endif
 }

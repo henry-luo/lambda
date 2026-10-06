@@ -829,6 +829,7 @@ char* mem_snapshot_to_json(const MemSnapshot* snap) {
 }
 
 void mem_context_log(MemContext* ctx) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     MemSnapshot* snap = mem_snapshot_capture(ctx);
     if (!snap) return;
     log_info("MEMCTX: snapshot seq=%llu nodes=%u reserved=%llu in_use=%llu",
@@ -846,6 +847,7 @@ void mem_context_log(MemContext* ctx) {
                  (unsigned long long)s->alloc_count);
     }
     mem_snapshot_free(snap);
+#endif
 }
 
 bool mem_context_dump_json_file(MemContext* ctx, const char* path) {

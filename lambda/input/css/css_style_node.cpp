@@ -12,7 +12,7 @@
 // Forward declarations for callback functions
 static bool collect_nodes_callback(AvlNode* avl_node, void* context);
 static bool collect_computed_callback(AvlNode* avl_node, void* context);
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !defined(LAMBDA_NO_CONSOLE_DUMP)
 static bool print_tree_callback(StyleNode* node, void* context);
 #endif
 static bool validate_tree_callback(StyleNode* node, void* context);
@@ -174,6 +174,7 @@ int css_specificity_compare(CssSpecificity a, CssSpecificity b) {
 }
 
 void css_specificity_print(CssSpecificity specificity) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     printf("(%d,%d,%d,%d)%s",
            specificity.inline_style,
@@ -181,6 +182,7 @@ void css_specificity_print(CssSpecificity specificity) {
            specificity.classes,
            specificity.elements,
            specificity.important ? "!" : "");
+#endif
 #endif
 }
 
@@ -1235,6 +1237,7 @@ int style_tree_foreach(StyleTree* style_tree, style_tree_callback_t callback, vo
 }
 
 void style_tree_print(StyleTree* style_tree) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     if (!style_tree) {
         printf("StyleTree: NULL\n");
@@ -1246,9 +1249,11 @@ void style_tree_print(StyleTree* style_tree) {
 
     style_tree_foreach(style_tree, print_tree_callback, NULL);
 #endif
+#endif
 }
 
 void style_node_print_cascade(StyleNode* node) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     if (!node) {
         printf("StyleNode: NULL\n");
@@ -1276,6 +1281,7 @@ void style_node_print_cascade(StyleNode* node) {
         printf(" (order: %d)\n", weak->declaration->source_order);
         weak = weak->next;
     }
+#endif
 #endif
 }
 
@@ -1674,7 +1680,7 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context) {
     return true;
 }
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !defined(LAMBDA_NO_CONSOLE_DUMP)
 static bool print_tree_callback(StyleNode* node, void* context) {
     printf("  Property %" PRIuPTR ": ", (uintptr_t)node->property_code);
 

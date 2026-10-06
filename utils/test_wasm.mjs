@@ -23,7 +23,15 @@ async function checkSession(create, wasmBinary) {
     ['9223372036854775806n + 1n', '9223372036854775807'],
     ['"héllo 🌍"', '"héllo 🌍"'],
     ['("5" is \\(d))', 'true'],
+    ['index_of("xxxxxxxxxxxxxxxx the the", "the")', '17'],
+    ['contains("xxxxxxxxxxxxxxxx the the", "THE")', 'false'],
+    ['replace("the the the", "the", "a")', '"a a a"'],
+    ['contains("é 🌍 thé end", "thé")', 'true'],
     ['(parse("{\\"a\\": 1}", "json")^).a', '1'],
+    // JS catalog spellings remain ordinary keys when its records are excluded.
+    ['let names = {constructor: 1, prototype: 2, name: "n", toString: 3, valueOf: 4}', 'null'],
+    ['[names.constructor, names.prototype, names.name, names.toString, names.valueOf]', '[1, 2, "n", 3, 4]'],
+    ['(parse("{\\"Symbol.iterator\\": 7}", "json")^)["Symbol.iterator"]', '7'],
     ['date(2026, 10, 6)', "t'2026-10-06'"],
     ['datetime(0).unix', '0'], ['datetime(-1).unix', '-1'],
     ['datetime(-2203977600000).unix', '-2203977600000'],
@@ -41,6 +49,8 @@ async function checkSession(create, wasmBinary) {
   equal(evaluate('held.a[2]'), '3', 'retained container');
   equal(evaluate('kept[2]'), '6', 'retained allocated array');
   equal(evaluate('add10(7)'), '17', 'retained closure');
+  equal(evaluate('names.toString'), '3', 'retained ordinary key');
+  equal(diagnostics.length, 0, 'successful evaluations produce no diagnostic dumps');
   for (const source of ['datetime()', 'date()', 'justnow()',
     'load("a.png")', 'input("file:///etc/passwd")^',
     'import "https://example.com/a.ls"', 'import lambda.latex',
@@ -50,6 +60,9 @@ async function checkSession(create, wasmBinary) {
     equal(evaluate('twice(x)'), '82', 'session after rejection');
   }
   equal(module.ccall('lambda_wasm_reset', 'number', [], []), 1, 'reset');
+  const beforeSourceError = diagnostics.length;
+  equal(evaluate('let ='), 'error', 'rejected syntax after reset');
+  equal(diagnostics.length > beforeSourceError, true, 'source errors survive disabled logging');
   equal(evaluate('x'), 'error', 'old binding after reset');
   equal(evaluate('1 + 2'), '3', 'evaluation after reset');
   module.ccall('lambda_wasm_shutdown', null, [], []);

@@ -10204,6 +10204,7 @@ void cow_profile_count_js_realm_reservation(void) {
 }
 
 void cow_profile_dump(void) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!cow_profile_enabled()) return;
     create_dir("temp");
     const char* output_path = getenv("COW_EXEC_PROFILE_OUT");
@@ -10357,6 +10358,7 @@ void cow_profile_dump(void) {
         log_error("cow profile sites: failed to write '%s'", sites_path);
     }
     strbuf_free(sites);
+#endif
 }
 
 typedef struct LambdaExecCallRow {
@@ -10374,6 +10376,7 @@ static uint64_t g_lambda_exec_call_overflow = 0;
 static int g_lambda_exec_profile_enabled = -1;
 
 static void lambda_exec_profile_dump(void) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     const char* path = getenv("LAMBDA_EXEC_PROFILE_OUT");
     if (!path || !path[0]) path = "temp/lambda_exec_profile.tsv";
     StrBuf* output = strbuf_new();
@@ -10405,6 +10408,7 @@ static void lambda_exec_profile_dump(void) {
         if (__atomic_load_n(&g_lambda_exec_calls[i].state,
                 __ATOMIC_ACQUIRE) == 2) free((void*)g_lambda_exec_calls[i].name);
     }
+#endif
 }
 
 extern "C" bool lambda_exec_profile_enabled(void) {

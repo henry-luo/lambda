@@ -313,7 +313,9 @@ void reset_dom_element_timing() {
 }
 
 void log_dom_element_timing() {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     log_info("[TIMING] cascade detail: decl_count: %lld", g_apply_decl_count);
+#endif
 }
 
 // Forward declaration

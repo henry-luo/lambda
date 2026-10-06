@@ -373,6 +373,7 @@ static bool print_style_property_callback(StyleNode* node, void* context) {
 void DomNode::print(StrBuf* buf, int indent) const {
     // If no buffer provided, print to console (legacy behavior)
     if (!buf) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
         for (int i = 0; i < indent; i++) printf("  ");
 
         const char* node_name = this->node_name();
@@ -418,6 +419,7 @@ void DomNode::print(StrBuf* buf, int indent) const {
                 child = child->next_sibling;
             }
         }
+#endif
         return;
     }
 

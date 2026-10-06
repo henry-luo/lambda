@@ -6,8 +6,59 @@
 /* Define POSIX feature test macro for fileno() and isatty() */
 #define _POSIX_C_SOURCE 200809L
 
-#include <string.h>
 #include "log.h"
+
+#ifdef LAMBDA_NO_LOG
+// keep the public ABI without configuration, formatting, IO or ambient providers.
+THREAD_LOCAL int log_indent = 0;
+log_category_t* log_default_category = NULL;
+
+#define LOG_STUB(type, name, parameters, value) \
+    type name parameters { return value; }
+
+LOG_STUB(int, log_init, (const char* config), LOG_OK)
+LOG_STUB(void, log_finish, (void), )
+LOG_STUB(int, log_reload, (const char* config), LOG_OK)
+LOG_STUB(log_category_t*, log_get_category, (const char* name), NULL)
+LOG_STUB(int, clog_raw, (log_category_t* category, const char* message), LOG_OK)
+LOG_STUB(void, log_mem_stage, (const char* stage), )
+LOG_STUB(int, log_level_enabled, (log_category_t* category, const int level), 0)
+LOG_STUB(void, log_set_level, (log_category_t* category, int level), )
+LOG_STUB(void, log_set_output, (log_category_t* category, FILE* output), )
+LOG_STUB(int, log_default_init, (const char* config, const char* category), LOG_OK)
+LOG_STUB(void, log_default_finish, (void), )
+LOG_STUB(void, log_enable_timestamps, (int enable), )
+LOG_STUB(void, log_enable_colors, (int enable), )
+LOG_STUB(void, log_disable_all, (void), )
+LOG_STUB(int, log_is_disabled, (void), 1)
+LOG_STUB(const char*, log_level_to_string, (int level), "")
+LOG_STUB(log_format_t*, log_get_format, (const char* name), NULL)
+LOG_STUB(int, log_add_format, (const char* name, const char* pattern), LOG_INIT_FAIL)
+LOG_STUB(void, log_set_default_format, (const char* pattern), )
+LOG_STUB(int, log_parse_config_file, (const char* filename), LOG_INIT_FAIL)
+LOG_STUB(int, log_parse_config_string, (const char* config), LOG_INIT_FAIL)
+LOG_STUB(void, log_set_indent, (int indent), )
+LOG_STUB(int, log_get_indent, (void), 0)
+LOG_STUB(void, log_reset_indent, (void), )
+
+#define LOG_STUB_LEVEL(level) \
+    LOG_STUB(int, log_##level, (const char* format, ...), LOG_OK) \
+    LOG_STUB(int, log_v##level, (const char* format, va_list args), LOG_OK) \
+    LOG_STUB(int, clog_##level, (log_category_t* category, const char* format, ...), LOG_OK) \
+    LOG_STUB(int, clog_v##level, (log_category_t* category, const char* format, va_list args), LOG_OK)
+
+LOG_STUB_LEVEL(fatal)
+LOG_STUB_LEVEL(error)
+LOG_STUB_LEVEL(warn)
+LOG_STUB_LEVEL(notice)
+LOG_STUB_LEVEL(info)
+LOG_STUB_LEVEL(debug)
+LOG_STUB_LEVEL(trace)
+#undef LOG_STUB_LEVEL
+#undef LOG_STUB
+
+#else
+#include <string.h>
 #include "str.h"
 #include <stdlib.h>
 
@@ -1429,3 +1480,4 @@ int log_get_indent(void) {
 void log_reset_indent(void) {
     log_indent = 0;
 }
+#endif // LAMBDA_NO_LOG

@@ -1,7 +1,7 @@
 # Lambda browser WASM build
 
 **Verified:** 2026-10-06, Emscripten 6.0.11, Node 24.7.0 and Chromium
-154.0.8037.57 on macOS arm64. Profile authority: **D7.1.7v2**;
+154.0.8037.57 on macOS arm64. Profile authority: **D7.1.7v4**;
 working design: `vibe/Lambda_Design_Static_Modules.md` §13.4 (SM17).
 
 ## Build
@@ -9,9 +9,34 @@ working design: `vibe/Lambda_Design_Static_Modules.md` §13.4 (SM17).
 `make lambda-wasm` builds the optimized browser profile from the explicit
 `platforms.lambda-wasm` manifest in `build_lambda_config.json`. The driver is
 `utils/build_wasm.py`; it does not use desktop archives or generated Lua.
-It compiles 211 project sources and utf8proc, plus WASM archives for mpdecimal
+It compiles 209 project sources and utf8proc, plus WASM archives for mpdecimal
 and the existing, unmodified RE2. Other in-memory document codecs and the
-schema validator remain; their removal was not approved by D7.1.7v2.
+schema validator remain; their removal was not approved by D7.1.7v4.
+
+No sources under `lambda/js/` enter this profile. The shared NamePool skips the
+JS well-known-name catalog under `LAMBDA_NO_JS`; those spellings still work as
+ordinary Lambda keys through normal interning (D4.6.1v3, D4.6.2v2).
+
+`LAMBDA_NO_LOG` selects the disabled stub inside `lib/log.c`. The header strips
+all logging levels and their arguments; the stub retains the callable ABI,
+reports logging disabled, and has no formatting, configuration or IO providers.
+`LAMBDA_NO_CONSOLE_DUMP` removes AST/value, CSS/DOM, version, memory, stack and
+profile dump bodies and traversal callbacks. `LAMBDA_NO_CLI` removes the
+validator's file-backed command and
+console reports while retaining in-memory validation. Host-returned REPL values,
+structured source diagnostics and explicit procedural `print` remain (D5.4.4).
+
+`LAMBDA_NO_MEMTRACK` excludes `lib/memtrack.c`, tracker initialization, counters,
+registries and fault injection. `lib/mem_alloc.c` supplies the lean allocation
+provider and the string-allocation helpers shared with native builds. Zero-size,
+checked multiplication/addition and failed-realloc ownership remain intact;
+precise GC, Pool/Arena and MemContext ownership are retained (D4.2.5v3, D5.3.3).
+
+`LAMBDA_NO_STR_SIMD` excludes `lib/str_simd.c` and its packed-pair preparation
+and dispatch. `str.c` uses its existing scalar rare-byte search instead. WASM
+[supports SIMD when enabled](https://emscripten.org/docs/porting/simd.html),
+but this profile has no `-msimd128`, SSE2 or NEON flags; the excluded file was
+using scalar fallback code. Unicode and ordinary string behavior remain.
 
 Prerequisites are Git, CMake, Make and an activated Emscripten SDK. Initial SDK
 installation needs Python 3.10 or newer. Downloads belong under `temp/`:
@@ -113,7 +138,8 @@ The browser test also requires the project's Puppeteer dependency. It supplies
 the loader through a data URL and WASM bytes directly, then denies fetch, XHR,
 WebSocket, Date, Intl timezone formatting, performance clocks and entropy.
 It covers retained functions/closures and arrays across allocation pressure,
-decimals, wide integers, Unicode/RE2, in-memory JSON, explicit UTC dates,
+decimals, wide integers, Unicode/RE2, ordinary keys matching JS catalog spellings,
+in-memory JSON, explicit UTC dates,
 failed-submission recovery, capability rejection, reset and reinitialization.
 This is a focused embedding suite, not a full interpreter corpus certification.
 
@@ -125,28 +151,30 @@ runtime's linear-memory footprint.
 
 | Artifact | Raw bytes | Gzip bytes |
 |---|---:|---:|
-| `lambda-wasm.wasm` | 2,146,648 | 839,355 |
-| `lambda-wasm.mjs` | 14,626 | 4,288 |
-| Total | 2,161,274 | 843,643 |
+| `lambda-wasm.wasm` | 2,084,174 | 813,663 |
+| `lambda-wasm.mjs` | 13,821 | 4,236 |
+| Total | 2,097,995 | 817,899 |
 
-Node and Chromium each pass **134 checks**. Native REPL tests pass **40/40**;
-the native REPL also returns 15 and 17 for retained `make_adder(10)` calls.
+Node and Chromium each pass **145 checks**. Native REPL tests pass **40/40**;
+focused native tracker/pool/arena/string suites pass **431/431**. The lean
+allocator also passes overflow, zero-size, string-copy/join, failed-realloc
+and scalar/folded string-search checks without linking the tracker or SIMD file.
+The embedding suite exercises literal string search and replacement as well.
+
+The native REPL also returns 15 and 17 for retained `make_adder(10)` calls.
 The new regression exposed and fixed a shared REPL defect: fragment finalization
 was reading the previous module's AST index and missed nested captures. Each
 fragment now owns and publishes its own analysis graph before finalization,
 then appends admitted nodes to the session index (D4.6.2v2, D6.2.3, D8.2.4).
 
-The latest full native baseline ran 6,240 tests: 6,239 passed and the LaTeX
-package-diagnostics golden failed while separate package changes were in
-progress. Its mismatch was the changed bibliography diagnostics, unrelated
-to the WASM profile. The expected output was subsequently updated by that
-work, but a focused rerun then encountered a new import/type error in the
-actively edited bibliography package. That failure remains; its log is
-`temp/wasm-profile/native-latex-rerun.log`. No package files or goldens were
-changed by the WASM implementation.
+After the WASM allocator/string-search changes, the full native Lambda baseline passes
+**6,242/6,242**. Its log is
+`temp/wasm-profile/no-memtrack-native-baseline.log`. The previously observed
+LaTeX package-diagnostics failure no longer occurs in this run. No package
+files or goldens were changed by the WASM implementation.
 
-A Node probe measured the module's linear-memory buffer at **21,889,024 bytes**
-after loading and **106,889,216 bytes** (about 102 MiB) after initialization
+A Node probe measured the module's linear-memory buffer at **21,823,488 bytes**
+after loading and **106,758,144 bytes** (about 102 MiB) after initialization
 and the first evaluation. This is addressable linear memory, not a process-RSS
 measurement. The shared side-stack and allocator reserve budgets are retained;
 reducing their eager WASM backing is a separate memory-footprint task.

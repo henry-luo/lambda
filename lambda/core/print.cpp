@@ -8,7 +8,7 @@
 #include <math.h>
 #include <inttypes.h>  // for PRId64
 #include <string.h>
-#ifndef LAMBDA_PRINT_VALUE_ONLY
+#if !defined(LAMBDA_PRINT_VALUE_ONLY) && !defined(LAMBDA_NO_CONSOLE_DUMP)
 #include "../runtime/ast.hpp"
 #endif
 
@@ -788,10 +788,12 @@ void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
 }
 
 void log_root_item(Item item, const char* indent) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     StrBuf *output = strbuf_new_cap(256);
     print_root_item(output, item, indent);
     log_debug("%s", output->str);
     strbuf_free(output);
+#endif
 }
 
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, const char* indent) {
@@ -800,10 +802,12 @@ extern "C" void format_item(StrBuf *strbuf, Item item, int depth, const char* in
 
 // Convenience wrapper for testing - prints to stdout
 void print_item(Item item, int depth) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     StrBuf *strbuf = strbuf_new_cap(1024);
     print_item(strbuf, item, depth, nullptr);
     printf("%s", strbuf->str);
     strbuf_free(strbuf);
+#endif
 }
 
 // print the type of the AST node
@@ -869,6 +873,7 @@ const char* format_type(Type *type) {
 }
 
 void log_item(Item item, const char* msg) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     // `--no-log` disables diagnostics entirely; traversing runtime values here
     // can touch representation-specific storage even though the message is discarded.
     if (log_is_disabled()) return;
@@ -876,9 +881,10 @@ void log_item(Item item, const char* msg) {
     print_item(strbuf, item, 0, NULL);
     log_debug("%s: %s", msg, strbuf->str);
     strbuf_free(strbuf);
+#endif
 }
 
-#ifndef LAMBDA_PRINT_VALUE_ONLY
+#if !defined(LAMBDA_PRINT_VALUE_ONLY) && !defined(LAMBDA_NO_CONSOLE_DUMP)
 void print_label(int indent, const char *label) {
     log_debug("  %s", label);
 }

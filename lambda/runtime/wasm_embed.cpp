@@ -5,7 +5,6 @@
 #include "lambda-root-frame.hpp"
 #include "../core/print.h"
 #include "../core/lambda-decimal.hpp"
-#include "../../lib/memtrack.h"
 
 // each WASM module instance owns one evaluator and one persistent REPL.
 static Runtime wasm_runtime = {};
@@ -15,7 +14,6 @@ static bool wasm_initialized = false;
 
 extern "C" int lambda_wasm_init(void) {
     if (wasm_initialized) return 1;
-    if (!memtrack_init(MEMTRACK_MODE_STATS)) return 0;
     decimal_init();
     runtime_init(&wasm_runtime);
     lambda_tier_set(LAMBDA_TIER_INTERP);

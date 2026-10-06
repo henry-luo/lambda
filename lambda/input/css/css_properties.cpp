@@ -3384,6 +3384,7 @@ bool css_parse_color(const char* value_str, CssColor* color) {
 // ============================================================================
 
 void css_property_print_info(CssPropertyCode property_code) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     const CssProperty* prop = css_property_get_by_code(property_code);
     if (!prop) {
         log_debug("CSS property code %u: not found", (unsigned int)property_code);
@@ -3396,6 +3397,7 @@ void css_property_print_info(CssPropertyCode property_code) {
     log_debug("  Initial: %s", prop->initial_value);
     log_debug("  Animatable: %s", prop->animatable ? "yes" : "no");
     log_debug("  Shorthand: %s", prop->shorthand ? "yes" : "no");
+#endif
 }
 
 int css_property_get_count(void) {

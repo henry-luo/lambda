@@ -885,6 +885,7 @@ void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* ru
 }
 
 void css_engine_print_stats(CssEngine* engine) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!engine) return;
 
     log_info("css engine stats: rules_parsed=%zu selectors_cached=%zu values_computed=%zu cascade_calcs=%zu",
@@ -896,6 +897,7 @@ void css_engine_print_stats(CssEngine* engine) {
              engine->features.css_nesting, engine->features.css_cascade_layers,
              engine->features.css_container_queries, engine->features.css_scope,
              engine->features.css_color_4);
+#endif
 }
 
 double css_engine_get_parse_time(CssEngine* engine) {

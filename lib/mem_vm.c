@@ -132,11 +132,13 @@ MemVmRegion* mem_vm_region_reserve(MemContext* context, MemNode* owner,
         return NULL;
     }
 
+#ifndef LAMBDA_NO_MEMTRACK
     if (memtrack_fault_should_fail()) {
         mem_free(committed_pages);
         mem_free(region);
         return NULL;
     }
+#endif
 
     void* base = vm_reserve_after_reclaim(context, reserved);
     if (!base) {
@@ -183,7 +185,9 @@ bool mem_vm_region_commit(MemVmRegion* region, size_t offset, size_t size) {
     for (size_t i = 0; i < page_count; i++) {
         if (region->committed_pages[first_page + i]) return false;
     }
+#ifndef LAMBDA_NO_MEMTRACK
     if (memtrack_fault_should_fail()) return false;
+#endif
     if (!vm_commit_after_reclaim(region->context, region->base, offset, size)) {
         return false;
     }
