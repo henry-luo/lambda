@@ -8,6 +8,7 @@
 // `items[]`/`data` pointer may ever be cached across an allocating call.
 
 #include "interp.hpp"
+#include "../io/mark_output_builder.hpp"
 #include "compiler_worker_stack.h"
 #include "lambda-root-frame.hpp"
 #include "write_set.hpp"
@@ -32,7 +33,9 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/atomic.h"
+#ifndef LAMBDA_NO_MIR
 #include "../../lib/thread_pool.h"
+#endif
 #include "../../lib/url.h"
 #include <stdlib.h>
 #include <pthread.h>
@@ -49,13 +52,33 @@ extern __thread Context* input_context;
 
 // auto is the shipped policy: cold definitions start in T0 and eligible hot
 // definitions promote through the per-function satellite path (D8.1.1v4).
+#ifdef LAMBDA_NO_MIR
+static LambdaTier g_lambda_tier = LAMBDA_TIER_INTERP;
+#else
 static LambdaTier g_lambda_tier = LAMBDA_TIER_AUTO;
+#endif
 
 static InterpState* interp_current_state(void);
 static bool interp_whole_script_poc_enabled(void);
 static bool interp_whole_script_publish_function(Script* script,
         AstFuncNode* def, Function* known_fn);
 
+LambdaTier lambda_tier_selected(void) { return g_lambda_tier; }
+void lambda_tier_set(LambdaTier tier) {
+#ifdef LAMBDA_NO_MIR
+    if (tier != LAMBDA_TIER_INTERP) {
+        log_error("interp-profile: MIR execution is excluded from this build");
+        return;
+    }
+#endif
+    g_lambda_tier = tier;
+}
+
+// absent MIR services own neither promotion state nor worker lifetimes.
+#define INTERP_DISABLED_MIR_HOOK(type, name, args, result) \
+    type name args { return result; }
+
+#ifndef LAMBDA_NO_MIR
 typedef struct AstPromotionOverlayEntry {
     const AstFuncNode* def;
     FnPromotionCell cell;
@@ -170,8 +193,6 @@ FnPromotionCell* interp_promotion_cell(Script* script, const AstFuncNode* def) {
     return &entry->cell;
 }
 
-LambdaTier lambda_tier_selected(void) { return g_lambda_tier; }
-void lambda_tier_set(LambdaTier tier) { g_lambda_tier = tier; }
 
 static void interp_satellite_compile_job(void* opaque) {
     InterpSatelliteJob* job = (InterpSatelliteJob*)opaque;
@@ -409,6 +430,13 @@ void interp_satellite_cancel_script(Script* script) {
     script->interp_satellite_queue = NULL;
 }
 
+#else
+INTERP_DISABLED_MIR_HOOK(FnPromotionCell*, interp_promotion_cell, (Script*, const AstFuncNode*), NULL)
+INTERP_DISABLED_MIR_HOOK(static void, interp_satellite_publish_ready, (Script*), )
+INTERP_DISABLED_MIR_HOOK(void, interp_satellite_request_cancel_script, (Script*), )
+INTERP_DISABLED_MIR_HOOK(void, interp_satellite_cancel_script, (Script*), )
+#endif
+
 bool lambda_tier_parse(const char* text, LambdaTier* out) {
     if (!text || !out) return false;
     if (strcmp(text, "jit") == 0)    { *out = LAMBDA_TIER_JIT;    return true; }
@@ -428,16 +456,24 @@ void interp_run_stats_reset(void) { memset(&g_interp_stats, 0, sizeof(g_interp_s
 // a constant fold is a bounded compiler attempt, not a second unbounded
 // evaluator. Invalid knobs retain the reviewed default.
 static uint32_t interp_const_fuel_budget(void) {
+#ifdef LAMBDA_NO_SYSINFO
+    return INTERP_DEFAULT_CONST_FUEL;
+#else
     const char* env = getenv("LAMBDA_CONST_FUEL");
     if (!env || !*env) return INTERP_DEFAULT_CONST_FUEL;
     long value = strtol(env, NULL, 10);
     if (value < 1 || value > 1000000L) return INTERP_DEFAULT_CONST_FUEL;
     return (uint32_t)value;
+#endif
 }
 
 static bool interp_const_fold_enabled(void) {
+#ifdef LAMBDA_NO_SYSINFO
+    return true;
+#else
     const char* env = getenv("LAMBDA_CONST_FOLD");
     return !env || env[0] != '0' || env[1] != '\0';
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -2134,6 +2170,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         return ItemNull;
     }
 
+#ifndef LAMBDA_NO_TASKS
     // `select` takes variadic handles and a named timeout; both tiers pack
     // them into the same pn_select(handles, timeout) call.
     if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
@@ -2160,6 +2197,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         return pn_select(packed, timeout.get());
     }
 
+
+#endif
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* sinfo = ((AstSysFuncNode*)callee)->fn_info;
         AstNode* owner_arg = !injected ? ast_unwrap_primary(node->argument) : NULL;
@@ -3062,7 +3101,9 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
 
     // A landing skips the scope exits of every abandoned callee frame; their
     // scoped children are cancelled and joined before `^` is bound.
+#ifndef LAMBDA_NO_TASKS
     LambdaTaskScope* saved_scope = lambda_task_scope_current();
+#endif
     InterpFrame* saved_top = st->top;
     InterpContext* saved_contexts = st->contexts;
     InterpErrorContext* saved_errors = st->errors;
@@ -3096,7 +3137,9 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
         f->cur = saved_cur;
         RootFrame fault_root(1);
         Rooted<Item> held(fault_root, fault);
+#ifndef LAMBDA_NO_TASKS
         (void)lambda_task_scope_unwind(saved_scope, true);
+#endif
         return held.get();
     }
     if (!lambda_recovery_frame_arm(recovery)) {
@@ -4098,7 +4141,14 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
         }
     }
 
+#ifdef LAMBDA_NO_FILE_IO
+    if (is_file_element_type(type)) {
+        log_error("interp-profile: file output elements are excluded");
+        return ItemError;
+    }
+#else
     elmt_content_begin((Element*)(uintptr_t)acc.get().item);
+#endif
     if (node->content) {
         // AstElementNode::content is the list wrapper, not its first child.
         // Evaluating that wrapper once collapses a multi-child element to its
@@ -4127,6 +4177,7 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
 // value passes through, several accumulate into a list.
 // `start(target, args)` launches the procedure on its own activation; the
 // same runtime entry serves both tiers (S13.1.3v2).
+#ifndef LAMBDA_NO_TASKS
 static Item eval_start(InterpFrame* f, AstStartNode* start_node) {
     AstCallNode* call = start_node ? start_node->call : NULL;
     if (!call) return ItemNull;
@@ -4154,10 +4205,15 @@ static Item eval_start(InterpFrame* f, AstStartNode* start_node) {
         (List*)(uintptr_t)args.get().item, start_node->escapes);
 }
 
+
+#endif
 // A block of a body that starts scoped children joins them when it exits.
 // T0 leaves blocks structurally, so one leave after the block covers return,
 // break, continue and error propagation alike.
 static Item eval_scoped_content(InterpFrame* f, AstListNode* list_node) {
+#ifdef LAMBDA_NO_TASKS
+    return eval_content(f, list_node, false);
+#else
     if (!f->fn || !f->fn->analysis || !f->fn->analysis->owns_task_scopes) {
         return eval_content(f, list_node, false);
     }
@@ -4171,6 +4227,7 @@ static Item eval_scoped_content(InterpFrame* f, AstListNode* list_node) {
         (void)lambda_task_scope_leave(scope, error_exit);
     }
     return result.get();
+#endif
 }
 
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
@@ -5067,12 +5124,16 @@ static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
 
 // `LAMBDA_LOOP_CENSUS=1`: log handoff-loop back-edge counts (Phase 1.1)
 static bool interp_loop_census_enabled(void) {
+#ifdef LAMBDA_NO_SYSINFO
+    return false;
+#else
     static int enabled = -1;
     if (enabled < 0) {
         const char* value = getenv("LAMBDA_LOOP_CENSUS");
         enabled = value && strcmp(value, "1") == 0;
     }
     return enabled != 0;
+#endif
 }
 
 // D8.1.1v14: makes a numbered top-level loop the activation's handoff loop
@@ -5599,6 +5660,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_PIPE:
         return eval_pipe(f, (AstBinaryNode*)node);
     case AST_NODE_PIPE_FILE_STAM: {
+#ifdef LAMBDA_NO_FILE_IO
+        log_error("interp-profile: file output is excluded");
+        return ItemError;
+#else
         // legacy pipe-to-file AST nodes are statement-shaped, but their runtime
         // contract is still the same boxed source/target call as MIR lowering;
         // evaluate the source first so a target allocation cannot observe a
@@ -5613,6 +5678,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return pipe->op == OPERATOR_PIPE_APPEND
             ? pn_output_append(source.get(), target.get())
             : pn_output2(source.get(), target.get());
+#endif
     }
     case AST_NODE_MATCH_EXPR:
         return eval_match(f, (AstMatchNode*)node);
@@ -5817,7 +5883,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_CONTENT:
         return eval_scoped_content(f, (AstListNode*)node);
     case AST_NODE_START:
+#ifdef LAMBDA_NO_TASKS
+        log_error("interp-profile: tasks are excluded");
+        return ItemError;
+#else
         return eval_start(f, (AstStartNode*)node);
+#endif
     case AST_NODE_LIST:
         return eval_list(f, (AstListNode*)node);
     case AST_NODE_FUNC:
@@ -6170,6 +6241,7 @@ static InterpState* interp_current_state(void);
 // unknown caller's argument gets, so no fact of the code before the loop is
 // assumed. Handoff is one-way.
 
+#ifndef LAMBDA_NO_MIR
 static uint32_t interp_jit_backedge_threshold(void);
 static bool interp_satellite_sync_enabled(void);
 
@@ -6598,6 +6670,15 @@ static bool interp_note_tail_call(InterpFrame* frame) {
     if (cell->tail_edge_count != UINT32_MAX) cell->tail_edge_count++;
     return cell->tail_edge_count >= interp_jit_threshold();
 }
+
+#else
+INTERP_DISABLED_MIR_HOOK(static FnPromotionCell*, interp_frame_cell, (InterpFrame*), NULL)
+INTERP_DISABLED_MIR_HOOK(static void, interp_note_backedges, (InterpFrame*, uint64_t), )
+INTERP_DISABLED_MIR_HOOK(static void, interp_note_backedge, (InterpFrame*), )
+INTERP_DISABLED_MIR_HOOK(static bool, interp_try_loop_handoff, (InterpFrame*, FnPromotionCell*, Item*), false)
+INTERP_DISABLED_MIR_HOOK(static bool, interp_tail_handoff_candidate, (const InterpFrame*), false)
+INTERP_DISABLED_MIR_HOOK(static bool, interp_note_tail_call, (InterpFrame*), false)
+#endif
 
 static Item interp_rejected_parameter_error(const TypeFunc* signature,
         const Item* args, int argc) {
@@ -7092,6 +7173,7 @@ static InterpState* interp_current_state(void) { return g_interp_state; }
 
 // The frame chain and every other LIFO list of the walker belong to the
 // native stack they were pushed on; an activation switch carries them (RA5).
+#ifndef LAMBDA_NO_TASKS
 typedef struct InterpAmbient {
     InterpState* st;
     InterpFrame* top;
@@ -7148,6 +7230,8 @@ static const ActivationAmbientHook interp_ambient_hook = {
 };
 [[maybe_unused]] static const bool interp_ambient_registered =
     activation_register_ambient_hook(&interp_ambient_hook);
+
+#endif
 bool interp_has_active_state(void) { return interp_current_state() != NULL; }
 static uint32_t interp_depth_budget(void);
 
@@ -7314,12 +7398,14 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
         // has no T0 module slot for its functions; its export is the boxed
         // `_b` entry in its JIT context (D7.2.2).
         void* boxed_entry = NULL;
+#ifndef LAMBDA_NO_MIR
         if (export_function && module->jit_context) {
             StrBuf* name = strbuf_new_cap(64);
             write_fn_name_ex(name, export_function, NULL, "_b");
             boxed_entry = find_func((MIR_context_t)module->jit_context, name->str);
             strbuf_free(name);
         }
+#endif
         if (!boxed_entry) {
             log_error("document-transform: module '%s' has no public function '%s'",
                 module->reference ? module->reference : "<unknown>", export_name);
@@ -7722,6 +7808,7 @@ bool interp_const_fold_script(Transpiler* tp) {
     return true;
 }
 
+#ifndef LAMBDA_NO_MIR
 static uint32_t interp_promotion_threshold(const char* env_name, uint32_t fallback) {
     const char* env = getenv(env_name);
     if (!env || !*env) return fallback;
@@ -8085,12 +8172,23 @@ static bool interp_promote_function_from_tail(Function* fn) {
     return interp_promote_function(fn, false);
 }
 
+#else
+INTERP_DISABLED_MIR_HOOK(bool, interp_promote_function_if_hot, (Function*), false)
+INTERP_DISABLED_MIR_HOOK(static bool, interp_promote_function_from_tail, (Function*), false)
+INTERP_DISABLED_MIR_HOOK(static bool, interp_whole_script_publish_function, (Script*, AstFuncNode*, Function*), false)
+#endif
+#undef INTERP_DISABLED_MIR_HOOK
+
 static uint32_t interp_depth_budget(void) {
+#ifdef LAMBDA_NO_SYSINFO
+    return INTERP_DEFAULT_DEPTH;
+#else
     const char* env = getenv("LAMBDA_INTERP_DEPTH");
     if (!env || !*env) return INTERP_DEFAULT_DEPTH;
     long value = strtol(env, NULL, 10);
     if (value < 16 || value > 10000000L) return INTERP_DEFAULT_DEPTH;
     return (uint32_t)value;
+#endif
 }
 
 static void interp_register_view_template(Script* script, AstViewNode* view,
@@ -8435,12 +8533,15 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
             }
             if (interp_frame_pending(frame)) break;
         }
+#ifndef LAMBDA_NO_TASKS
         // Tasks that outlive their starter still run before the script ends,
         // exactly as the MIR runner drains them (D6.3.1).
         if (st && st->ctx && st->ctx->scheduler &&
                 (!runner || !runner->runtime || !runner->runtime->no_task_drain)) {
             lambda_scheduler_drain(st->ctx->scheduler);
         }
+
+#endif
     }
 
     result = scalar_storage_read(tail.get(), false);
@@ -8472,6 +8573,7 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     }
     void* satellite_image = script->cache_template
         ? script->cache_template->jit_context : script->jit_context;
+#ifndef LAMBDA_NO_MIR
     if (satellite_image && !prepare_context_module_state(satellite_image,
             script->const_list ? script->const_list->data : NULL,
             script->type_list)) {
@@ -8482,6 +8584,7 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
             script->reference ? script->reference : "<none>");
         return ItemError;
     }
+#endif
     if (!module_state.activate(script->module_state_id)) {
         log_error("interp: could not activate module slab for '%s'", script->reference);
         return ItemError;
@@ -8583,11 +8686,13 @@ static Item interp_run_nodes(Runner* runner, bool run_main, AstNode* repl_fragme
     if (!runner || !runner->script || !runner->context) return ItemError;
     Script* script = runner->script;
     runner->context->run_main = run_main;
+#ifndef LAMBDA_NO_FILE_IO
     if (!runner->context->cwd) {
         // T0 bypasses the JIT output wrapper, which normally owns this URL at
         // one execution boundary; REPL fragments therefore recreate it here.
         runner->context->cwd = get_current_dir();
     }
+#endif
     List* saved_vargs = runner->context->current_vargs;
     RuntimeExecutionScope execution_scope(runner->context);
 

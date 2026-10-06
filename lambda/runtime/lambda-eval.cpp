@@ -5619,7 +5619,13 @@ static Item force_document(Path* doc_path, bool* raised) {
     } else {
         // PTH36: `input`/`fetch` are pn-family effectful readers, so an
         // unreadable document RAISES (S7.4.5) rather than answering null.
+#ifdef LAMBDA_NO_FILE_IO
+        set_runtime_error(ERR_IO_ERROR, "external document providers are excluded from this profile");
+        *raised = true;
+        return ItemError;
+#else
         head = fn_input1((Item){.item = (uint64_t)(uintptr_t)doc_path});
+#endif
         if (head.item == ItemError.item) { *raised = true; return ItemError; }
     }
     if (head.item == ItemNull.item) return ItemNull;
@@ -6450,7 +6456,7 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     if (strcmp(k, "extension") == 0) {
         // return file extension (e.g. "txt" from "file.txt")
         if (path->name) {
-            const char* ext = file_path_ext(path->name);
+            const char* ext = str_file_ext(path->name, strlen(path->name), NULL);
             if (ext) {
                 return {.item = s2it(heap_create_name(ext + 1))};
             }
@@ -6476,6 +6482,10 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     if (strcmp(k, "size") == 0 || strcmp(k, "modified") == 0 ||
         strcmp(k, "is_dir") == 0 || strcmp(k, "is_file") == 0 ||
         strcmp(k, "is_link") == 0 || strcmp(k, "mode") == 0) {
+#ifdef LAMBDA_NO_FILE_IO
+        set_runtime_error(ERR_IO_ERROR, "filesystem metadata provider is excluded");
+        return ItemError;
+#else
         if (!(path->flags & PATH_FLAG_META_LOADED)) {
             path_load_metadata(path);
         }
@@ -6496,6 +6506,7 @@ extern "C" Item path_property_get(Path* path, const char* k) {
         if (strcmp(k, "is_file") == 0) return {.item = b2it((meta->flags & PATH_META_IS_DIR) == 0)};
         if (strcmp(k, "is_link") == 0) return {.item = b2it((meta->flags & PATH_META_IS_LINK) != 0)};
         if (strcmp(k, "mode") == 0) return {.item = i2it(meta->mode)};
+#endif
     }
 
     log_debug("path_property_get: unknown path property '%s'", k);
@@ -10086,6 +10097,9 @@ static bool cow_profile_truthy(const char* value) {
 }
 
 static bool cow_profile_enabled(void) {
+#ifdef LAMBDA_NO_FILE_IO
+    return false;
+#else
     if (g_cow_profile_enabled >= 0) return g_cow_profile_enabled != 0;
     g_cow_profile_enabled = cow_profile_truthy(getenv("COW_EXEC_PROFILE")) ? 1 : 0;
     g_cow_profile_sites_enabled = g_cow_profile_enabled &&
@@ -10097,6 +10111,7 @@ static bool cow_profile_enabled(void) {
         g_cow_profile_registered = true;
     }
     return g_cow_profile_enabled != 0;
+#endif
 }
 
 bool cow_profile_sites_enabled(void) {
@@ -10393,6 +10408,9 @@ static void lambda_exec_profile_dump(void) {
 }
 
 extern "C" bool lambda_exec_profile_enabled(void) {
+#ifdef LAMBDA_NO_FILE_IO
+    return false;
+#else
     int state = __atomic_load_n(&g_lambda_exec_profile_enabled,
         __ATOMIC_ACQUIRE);
     if (state >= 0) return state != 0;
@@ -10410,6 +10428,7 @@ extern "C" bool lambda_exec_profile_enabled(void) {
             __ATOMIC_ACQUIRE);
     } while (state == -2);
     return state != 0;
+#endif
 }
 
 extern "C" uint64_t lambda_exec_profile_register_call(const char* name,

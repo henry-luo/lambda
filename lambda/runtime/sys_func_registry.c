@@ -286,6 +286,39 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
     {VALUE_REP_INT_LANE},
 };
 
+// keep builtin metadata, but expose no entry point for an excluded capability.
+#ifdef LAMBDA_NO_FILE_IO
+#define PROFILE_FILE_IO_FPTR(fn) NULL
+#else
+#define PROFILE_FILE_IO_FPTR(fn) FPTR(fn)
+#endif
+#ifdef LAMBDA_NO_NETWORK
+#define PROFILE_NETWORK_FPTR(fn) NULL
+#else
+#define PROFILE_NETWORK_FPTR(fn) FPTR(fn)
+#endif
+#ifdef LAMBDA_NO_TASKS
+#define PROFILE_TASKS_FPTR(fn) NULL
+#else
+#define PROFILE_TASKS_FPTR(fn) FPTR(fn)
+#endif
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+#define PROFILE_AMBIENT_PROVIDERS_FPTR(fn) NULL
+#else
+#define PROFILE_AMBIENT_PROVIDERS_FPTR(fn) FPTR(fn)
+#endif
+#ifdef LAMBDA_NO_PDF
+#define PROFILE_PDF_FPTR(fn) NULL
+#else
+#define PROFILE_PDF_FPTR(fn) FPTR(fn)
+#endif
+
+#ifdef LAMBDA_NO_JS
+#define PROFILE_JS_FPTR(fn) NULL
+#else
+#define PROFILE_JS_FPTR(fn) FPTR(fn)
+#endif
+
 SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Type/conversion functions — all method-eligible
@@ -372,13 +405,13 @@ SysFuncInfo sys_func_defs[] = {
     // DateTime functions — overloaded with arg count suffix
     // ========================================================================
     {SYSFUNC_DATETIME0, "datetime", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, NULL, "fn_datetime0", FPTR(fn_datetime0), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_datetime0", PROFILE_AMBIENT_PROVIDERS_FPTR(fn_datetime0), NULL, NULL, false, 0},
 
     {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_ANY, false,
      C_RET_DTIME, NULL, "fn_datetime1", FPTR(fn_datetime1), NULL, NULL, false, 0},
 
     {SYSFUNC_DATE0, "date", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, NULL, "fn_date0", FPTR(fn_date0), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_date0", PROFILE_AMBIENT_PROVIDERS_FPTR(fn_date0), NULL, NULL, false, 0},
 
     {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_DTIME, false,
      C_RET_DTIME, NULL, "fn_date1", FPTR(fn_date1), NULL, NULL, false, 0},
@@ -387,7 +420,7 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_DTIME, NULL, "fn_date3", FPTR(fn_date3), NULL, NULL, false, 0},
 
     {SYSFUNC_TIME0, "time", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, NULL, "fn_time0", FPTR(fn_time0), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_time0", PROFILE_AMBIENT_PROVIDERS_FPTR(fn_time0), NULL, NULL, false, 0},
 
     {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_DTIME, false,
      C_RET_DTIME, NULL, "fn_time1", FPTR(fn_time1), NULL, NULL, false, 0},
@@ -396,7 +429,7 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_DTIME, NULL, "fn_time3", FPTR(fn_time3), NULL, NULL, false, 0},
 
     {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, NULL, "fn_justnow", FPTR(fn_justnow), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_justnow", PROFILE_AMBIENT_PROVIDERS_FPTR(fn_justnow), NULL, NULL, false, 0},
 
     // ========================================================================
     // Collection functions
@@ -485,10 +518,10 @@ SysFuncInfo sys_func_defs[] = {
 
     // image I/O bridge
     {SYSFUNC_LOAD_IMAGE, "load", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_load", FPTR(fn_load), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_load", PROFILE_FILE_IO_FPTR(fn_load), NULL, NULL, false, 0},
     // a bad image, path, or write fails with an ordinary error, as any/all
     {SYSFUNC_SAVE_IMAGE, "save", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_BOOL, false,
-     C_RET_ITEM, NULL, "fn_save", FPTR(fn_save), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_save", PROFILE_FILE_IO_FPTR(fn_save), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
     {SYSFUNC_AS_FLOAT, "as_float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_as_float", FPTR(fn_as_float), NULL, NULL, false, 0},
@@ -609,10 +642,10 @@ SysFuncInfo sys_func_defs[] = {
     // I/O functions — can_raise=true for functions that may fail
     // ========================================================================
     {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "fn_input1", FPTR(fn_input1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_input1", PROFILE_FILE_IO_FPTR(fn_input1), NULL, NULL, false, 0},
 
     {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "fn_input2", FPTR(fn_input2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_input2", PROFILE_FILE_IO_FPTR(fn_input2), NULL, NULL, false, 0},
 
     // LR07-18: an error operand or a bad format returns an error (D6.4.1), so
     // a call types `string | error` and stays boxed (S7.8.1)
@@ -1036,22 +1069,22 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_varg1", FPTR(fn_varg1), NULL, NULL, false, 0},
 
     {SYSFUNC_TO_PROMISE, "toPromise", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_to_promise", FPTR(fn_to_promise), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_to_promise", PROFILE_JS_FPTR(fn_to_promise), NULL, NULL, false, 0},
 
     // ========================================================================
     // Procedural functions — not method-eligible (side effects)
     // ========================================================================
     {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, NULL, "pn_now", FPTR(pn_now), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "pn_now", PROFILE_AMBIENT_PROVIDERS_FPTR(pn_now), NULL, NULL, false, 0},
 
     {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, NULL, "pn_today", FPTR(pn_today), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "pn_today", PROFILE_AMBIENT_PROVIDERS_FPTR(pn_today), NULL, NULL, false, 0},
 
     {SYSPROC_PRINT, "print", -1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "pn_print", FPTR(pn_print), NULL, NULL, false, 0},
 
     {SYSPROC_CLOCK, "clock", 0, &TYPE_FLOAT, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_DOUBLE, NULL, "pn_clock", FPTR(pn_clock), NULL, NULL, false, 0},
+     C_RET_DOUBLE, NULL, "pn_clock", PROFILE_AMBIENT_PROVIDERS_FPTR(pn_clock), NULL, NULL, false, 0},
 
     // `start` uses ordinary call grammar but remains a compiler intrinsic so
     // structured ownership and capture checks stay visible in AstStartNode.
@@ -1059,117 +1092,117 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_start", NULL, NULL, NULL, false, 0, false},
 
     {SYSPROC_SEND, "send", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_send", FPTR(pn_send), NULL, NULL, false, 0, false},
+     C_RET_ITEM, NULL, "pn_send", PROFILE_TASKS_FPTR(pn_send), NULL, NULL, false, 0, false},
 
     {SYSPROC_RECEIVE, "receive", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_receive", FPTR(pn_receive), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_receive", PROFILE_TASKS_FPTR(pn_receive), NULL, NULL, false, 0, true},
 
     {SYSPROC_WAIT, "wait", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_wait1", FPTR(pn_wait1), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_wait1", PROFILE_TASKS_FPTR(pn_wait1), NULL, NULL, false, 0, true},
 
     {SYSPROC_WAIT, "wait", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_wait2", FPTR(pn_wait2), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_wait2", PROFILE_TASKS_FPTR(pn_wait2), NULL, NULL, false, 0, true},
 
     {SYSPROC_SELECT, "select", -1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_select", NULL, NULL, NULL, false, 0, true},
 
     {SYSPROC_SLEEP, "sleep", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_sleep", FPTR(pn_sleep), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_sleep", PROFILE_TASKS_FPTR(pn_sleep), NULL, NULL, false, 0, true},
 
     {SYSPROC_SELF, "self", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "pn_self", FPTR(pn_self), NULL, NULL, false, 0, false},
+     C_RET_ITEM, NULL, "pn_self", PROFILE_TASKS_FPTR(pn_self), NULL, NULL, false, 0, false},
 
     {SYSPROC_CANCEL, "cancel", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "pn_cancel", FPTR(pn_cancel), NULL, NULL, false, 0, false},
+     C_RET_ITEM, NULL, "pn_cancel", PROFILE_TASKS_FPTR(pn_cancel), NULL, NULL, false, 0, false},
 
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_fetch", FPTR(pn_fetch), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_fetch", PROFILE_NETWORK_FPTR(pn_fetch), NULL, NULL, false, 0},
 
     {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_output2", FPTR(pn_output2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_output2", PROFILE_FILE_IO_FPTR(pn_output2), NULL, NULL, false, 0},
 
     {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_output3", FPTR(pn_output3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_output3", PROFILE_FILE_IO_FPTR(pn_output3), NULL, NULL, false, 0},
 
     {SYSPROC_CMD1, "cmd", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_cmd1", FPTR(pn_cmd1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_cmd1", PROFILE_FILE_IO_FPTR(pn_cmd1), NULL, NULL, false, 0},
 
     {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_cmd2", FPTR(pn_cmd2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_cmd2", PROFILE_FILE_IO_FPTR(pn_cmd2), NULL, NULL, false, 0},
 
     // ========================================================================
     // IO module procedures — all can_raise=true for I/O errors
     // ========================================================================
     {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_copy", FPTR(pn_io_copy), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_copy", PROFILE_FILE_IO_FPTR(pn_io_copy), NULL, NULL, false, 0},
 
     {SYSPROC_IO_READ, "io_read", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_read", FPTR(pn_io_read), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_io_read", PROFILE_FILE_IO_FPTR(pn_io_read), NULL, NULL, false, 0, true},
 
     {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_move", FPTR(pn_io_move), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_move", PROFILE_FILE_IO_FPTR(pn_io_move), NULL, NULL, false, 0},
 
     {SYSPROC_IO_DELETE, "io_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_delete", FPTR(pn_io_delete), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_delete", PROFILE_FILE_IO_FPTR(pn_io_delete), NULL, NULL, false, 0},
 
     {SYSPROC_IO_MKDIR, "io_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_mkdir", FPTR(pn_io_mkdir), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_mkdir", PROFILE_FILE_IO_FPTR(pn_io_mkdir), NULL, NULL, false, 0},
 
     {SYSPROC_IO_TOUCH, "io_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_touch", FPTR(pn_io_touch), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_touch", PROFILE_FILE_IO_FPTR(pn_io_touch), NULL, NULL, false, 0},
 
     {SYSPROC_IO_SYMLINK, "io_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_symlink", FPTR(pn_io_symlink), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_symlink", PROFILE_FILE_IO_FPTR(pn_io_symlink), NULL, NULL, false, 0},
 
     {SYSPROC_IO_CHMOD, "io_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_chmod", FPTR(pn_io_chmod), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_chmod", PROFILE_FILE_IO_FPTR(pn_io_chmod), NULL, NULL, false, 0},
 
     {SYSPROC_IO_RENAME, "io_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_rename", FPTR(pn_io_rename), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_rename", PROFILE_FILE_IO_FPTR(pn_io_rename), NULL, NULL, false, 0},
 
     {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_fetch1", FPTR(pn_io_fetch1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_fetch1", PROFILE_NETWORK_FPTR(pn_io_fetch1), NULL, NULL, false, 0},
 
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_fetch2", FPTR(pn_io_fetch2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_fetch2", PROFILE_NETWORK_FPTR(pn_io_fetch2), NULL, NULL, false, 0},
 
     // io.grep(source, pattern, options?) - line-oriented search over files
     // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)
     {SYSPROC_IO_GREP, "io_grep", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_grep2", FPTR(pn_io_grep2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_grep2", PROFILE_FILE_IO_FPTR(pn_io_grep2), NULL, NULL, false, 0},
 
     {SYSPROC_IO_GREP, "io_grep", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_grep3", FPTR(pn_io_grep3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_grep3", PROFILE_FILE_IO_FPTR(pn_io_grep3), NULL, NULL, false, 0},
 
     // io.text_search(source, query, options?) - ranked full-text search over files
     // with lib/fts; a procedure since files change (FTX11, S12.1.1v2)
     {SYSPROC_IO_TEXT_SEARCH, "io_text_search", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_text_search2", FPTR(pn_io_text_search2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_text_search2", PROFILE_FILE_IO_FPTR(pn_io_text_search2), NULL, NULL, false, 0},
 
     {SYSPROC_IO_TEXT_SEARCH, "io_text_search", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_text_search3", FPTR(pn_io_text_search3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_text_search3", PROFILE_FILE_IO_FPTR(pn_io_text_search3), NULL, NULL, false, 0},
 
     // io.http module
     {SYSPROC_IO_HTTP_CREATE_SERVER, "io_http_create_server", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_http_create_server", FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_create_server", PROFILE_NETWORK_FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_LISTEN, "io_http_listen", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_http_listen", FPTR(pn_io_http_listen), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_listen", PROFILE_NETWORK_FPTR(pn_io_http_listen), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_ROUTE, "io_http_route", 4, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_http_route", FPTR(pn_io_http_route), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_route", PROFILE_NETWORK_FPTR(pn_io_http_route), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_USE, "io_http_use", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_http_use", FPTR(pn_io_http_use), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_use", PROFILE_NETWORK_FPTR(pn_io_http_use), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_STATIC, "io_http_static", 3, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_http_static", FPTR(pn_io_http_static), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_static", PROFILE_NETWORK_FPTR(pn_io_http_static), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_STOP, "io_http_stop", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_http_stop", FPTR(pn_io_http_stop), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_stop", PROFILE_NETWORK_FPTR(pn_io_http_stop), NULL, NULL, false, 0},
 
     {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_BOOL, NULL, "fn_exists", FPTR(fn_exists), NULL, NULL, false, 0},
+     C_RET_BOOL, NULL, "fn_exists", PROFILE_FILE_IO_FPTR(fn_exists), NULL, NULL, false, 0},
 
     // PTH76: `temp` creates or opens an in-memory document, pn-family because
     // installing a document is an effect on the evaluation's context. The
@@ -1273,11 +1306,11 @@ SysFuncInfo sys_func_defs[] = {
 
     // PDF package: native content stream tokenizer for dense vector pages
     {SYSFUNC_PDF_PARSE_CONTENT_STREAM, "pdf_parse_content_stream", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_pdf_parse_content_stream", PROFILE_PDF_FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
 
     // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
     {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_pdf_register_svg_image_resolver", PROFILE_PDF_FPTR(fn_pdf_register_svg_image_resolver), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -1287,6 +1320,7 @@ const int sys_func_def_count = SYS_FUNC_DEF_COUNT;
 
 
 // ============================================================================
+#ifndef LAMBDA_NO_MIR
 // JIT Runtime Imports: non-sys-func entries for MIR import resolution
 // ============================================================================
 // These are operators, runtime infrastructure, JS functions, etc. that the
@@ -3990,6 +4024,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
     return true;
 #endif
 }
+
+#endif
 
 // S17.8.1: the option names each system function defines. The AST builder
 // rejects any other name in a literal options map at the call; a function

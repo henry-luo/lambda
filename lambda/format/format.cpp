@@ -196,7 +196,9 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         { "css",        format_css },
         { "jsx",        format_jsx },
         { "mdx",        format_mdx },
+#ifndef LAMBDA_NO_LATEX
         { "latex",      format_latex },
+#endif
         { "text",       format_text_string },
         { NULL,         NULL }
     };

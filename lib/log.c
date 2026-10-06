@@ -127,6 +127,10 @@ static void get_timestamp(char *buffer, size_t size, int show_date) {
         return;
     }
 
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    // browser diagnostics have no ambient timestamp provider.
+    buffer[0] = '\0';
+#else
     time_t rawtime;
     struct tm *timeinfo;
     time(&rawtime);
@@ -137,6 +141,7 @@ static void get_timestamp(char *buffer, size_t size, int show_date) {
     } else {
         strftime(buffer, size, "%H:%M:%S", timeinfo);
     }
+#endif
 }
 
 /* Helper function to get color for log level */

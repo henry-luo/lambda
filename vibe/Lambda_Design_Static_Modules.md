@@ -2,7 +2,7 @@
 
 **Status**: IMPLEMENTED WITH USER-DEFERRED CLASS F — rev 29 (2026-07-24; revs 2–28 as recorded below; rev 28 physically relocated the remaining top-level core/rt translation units and headers into `lambda/core/` and `lambda/runtime/`, completing the P1b mechanical move; rev 29 then replaced every forwarding shim with direct `core/`/`io/`/`runtime/` includes at all active call sites and deleted all of them — the 28 from rev 28 plus 7 pre-existing transitional shims from earlier P1b work — leaving `lambda/` shim-free, and repaired the tooling paths the relocation had staled. Monolithic build, static module archives, the five-DSO boundary check at the unchanged 165-import Class-F baseline, and the Lambda baseline suite are all green)
 **Scope**: split the monolithic `lambda.exe` build into four static libraries + one executable, with a fixed, enforced inter-module interface.
-**Profile update (2026-10-06)**: SM17 specifies `lambda-wasm` for synchronous browser evaluation with a retained REPL (§13.4; D7.1.7v2). The profile is not implemented; the module-split status above does not imply a working WASM build.
+**Profile update (2026-10-06)**: SM17 specifies `lambda-wasm` for synchronous browser evaluation with a retained REPL (§13.4; D7.1.7v2). The optimized profile now builds and passes Node/Chromium embedding checks; build details and measured sizes are in `doc/dev/Lambda_WASM_Build.md`.
 **Related**: `lib/mem_factory.h` / `vibe/Memory_Context.md` (allocator registry), `vibe/Lambda_Native_Module_Design.md` (Jube host API), `vibe/Lambda_Design_Code_Dedup.md` (DD1–DD5 coherent-header doctrine), `vibe/Lambda_Design_MIR_Cache.md` (MC1–MC8 — the rt-layer MIR cache of §2.1), `utils/check_hosted_python_architecture.py` (boundary-check precedent).
 
 ---
@@ -548,57 +548,56 @@ Shrinking these changes the language rather than only its embedding surface
 (D2.1, D2.2, D5.3.3). RE2/Unicode and numeric libraries need an actual retained
 operation inventory before deciding which can be omitted.
 
-**Implementation seams and unresolved choices.**
+**Implementation (2026-10-06; D7.1.7v2).** `make lambda-wasm` now uses
+`utils/build_wasm.py` and the JSON profile's explicit retained manifest:
+211 project sources plus utf8proc 2.12.0, mpdecimal 4.0.1 and the existing
+unmodified RE2. Emscripten 6.0.11 builds with `-Oz`, LTO and `MEMORY64=2`,
+preserving the 64-bit C/Item ABI while lowering memory operations to wasm32
+(D2.1.1, D2.1.7). No native archives or MIR headers/backend enter this build.
+Other in-memory codecs and schema validation remain; the proposed extra
+removals above are still proposals.
 
-- Configure the profile through `build_lambda_config.json` and generated build
-  tooling; do not hand-edit generated Lua. Use an explicit retained source and
-  dependency manifest so desktop libraries cannot leak into the WASM link.
-- Separate MIR-owned declarations from the shared runtime/interpreter headers.
-  `lambda/runtime/transpiler.hpp` currently includes MIR even under `WASM_BUILD`;
-  substituting WASM MIR headers cannot satisfy D7.1.7v2. `interp.cpp` also contains
-  JIT handoff paths that must be removed from this profile at their ownership seam.
-- Separate resource acquisition from in-memory parse/format and pure evaluation
-  helpers. A runtime-only flag is insufficient if their shared translation units
-  still pull curl, filesystem or codecs into the artifact. Reuse existing
-  lower-owned hooks (D7.1.1); never fake successful IO or heap services.
-- Separate reusable REPL parsing, binding and evaluation from native command
-  startup, terminal transport and filesystem history. Preserve the session's
-  module-table/NamePool authority and precisely root retained values across
-  submissions; reuse the existing semantics rather than introducing another
-  evaluator (D4.6.2v2, D5.3.3).
-- Remove scheduler/thread/event-loop and ambient-provider dependencies at their
-  ownership seams. REPL submissions run synchronously; evaluation limits must
-  not depend on an excluded ambient clock or timer scheduler.
-- Keep the shared system-function registry authoritative for capability
-  availability. Whether rejection occurs at admission or invocation must be
-  specified for the supported surface; unavailable operations always fail
-  explicitly and cannot fall back to host filesystem/network access.
-- Choose the browser toolchain, WASM memory target and embedding ABI during
-  implementation. Audit pointer-width/layout assumptions while preserving the
-  64-bit Item and precise ownership contracts (D2.1.1, D2.1.7, D5.3.3); never
-  pass tagged Items through lossy JavaScript numbers or expose unrooted values.
-- Audit native virtual-memory, signal and stack-growth dependencies. Port the
-  required allocation/rooting mechanisms to linear memory and checked limits;
-  do not remove exhaustion checks or restore conservative native-stack scanning.
-- Imports need an explicit policy: reject source imports in the minimal profile,
-  or resolve only a host-supplied in-memory module map. Neither filesystem search
-  nor automatic URL fetching is available. Package contents are not implicit.
-- Specify per-instance lifetime, result ownership/release, diagnostics, evaluation
-  limits and REPL session reset before freezing the public API. No async or
-  ambient clock/timezone/entropy capability is retained in this profile.
+`lambda/runtime/wasm_embed.cpp` exports init/eval/reset/shutdown from
+`lambda/lambda-wasm.h`, wrapping the shared stateful REPL. Each WASM instance
+owns one synchronous runtime; results cross the host boundary as copied UTF-8
+Lambda text, with diagnostics through `print`/`printErr`. C result text is
+borrowed until the next eval/reset/shutdown. Repeated submissions retain the
+same NamePool and module state, with precise roots (D4.6.2v2, D5.3.3).
+Native virtual reservations become checked, eagerly backed linear-memory
+extents; WASM does not provide native per-page guard protection.
 
-**Status and acceptance.** This section defines the profile, not a functioning
-build. The existing `Makefile` target `build-wasm` calls `compile-wasm.sh`, which
-is absent in this checkout; `lambda/lambda-wasm.h` contains an old stub Runtime
-declaration and is not evidence of a compatible embedding API. Implementation
-must demonstrate browser evaluation of scalars, functions/closures, collections
-and errors; REPL binding persistence and repeated evaluation, session reset and
-result retention/release under GC stress; explicit capability rejection; and a
-link/import audit showing no MIR, network, filesystem, native system-info,
-image loading, libuv/threads/task/mailbox scheduling, resource caches,
-SQLite/cookies, PDF/LaTeX packages/parsers, or ambient clock/timezone discovery/
-entropy providers. Report optimized artifact
-size and retained dependencies only after a real release WASM build.
+The registry keeps builtin signatures but removes excluded entry pointers.
+Admission or invocation reports an error; no operation falls back to external
+IO or MIR. File-backed/package imports are rejected; built-in math/io
+namespaces retain only available capabilities. A host-supplied module map is
+not implemented. Profiling, wall-clock validation/GC timing and host-derived
+configuration are excluded; ordinary depth/allocation limits remain.
+
+RE2's C++ logging retains unused libc++ locale facets. Instead of changing
+the vendor, `utils/wasm_host.js` supplies the embedding capability boundary:
+environment requests return WASI `ENOSYS`, and timezone/timer requests throw
+explicit exclusion errors. No clock/timezone/environment/entropy provider is
+linked and no provider values are fabricated. Console stdio remains for
+diagnostics, without a filesystem backend. The loader can receive WASM bytes
+directly; its optional acquisition of its own artifact is bootstrap transport
+and is inaccessible to Lambda evaluation.
+
+**Verification and size.** Node and Chromium each pass **134 checks**, including
+retained closures/arrays under allocation pressure, decimals, wide integers,
+Unicode/RE2, JSON, explicit UTC dates, capability rejection, failed-submission
+recovery, reset and reinitialization. Browser execution supplies the module in
+memory and denies fetch/XHR/WebSocket, Date, timezone formatting, performance
+clocks and entropy. Native REPL tests pass **40/40**. Retained closure coverage
+found and fixed a shared REPL defect: finalization reused the old module index
+and missed the new nested-function captures. Fragment analysis now owns its
+own graph before finalization (D6.2.3, D8.2.4). These checks do not certify the
+entire interpreter corpus or all browsers.
+
+The optimized WASM is **2,146,648 bytes** and the loader
+**14,626 bytes**; combined **2,161,274 bytes**, or
+**843,643 bytes gzipped**. The manifest and size report are published
+under `build/wasm/`. Reproduction, ABI contracts, import audit and remaining
+limitations: `doc/dev/Lambda_WASM_Build.md`.
 
 ---
 

@@ -31,7 +31,9 @@ struct MemVmRegion {
 };
 
 size_t mem_vm_page_size(void) {
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    return 65536u;  // WASM linear-memory page granularity.
+#elif defined(_WIN32)
     SYSTEM_INFO info;
     GetSystemInfo(&info);
     return (size_t)info.dwPageSize;
@@ -42,7 +44,10 @@ size_t mem_vm_page_size(void) {
 }
 
 static void* vm_reserve(size_t size) {
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    // linear memory is eagerly backed; maintain bounds and logical commit accounting.
+    return aligned_alloc(mem_vm_page_size(), size);
+#elif defined(_WIN32)
     return VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_NOACCESS);
 #else
     void* base = mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -51,7 +56,10 @@ static void* vm_reserve(size_t size) {
 }
 
 static bool vm_commit(void* base, size_t offset, size_t size) {
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    memset((uint8_t*)base + offset, 0, size);
+    return true;
+#elif defined(_WIN32)
     return VirtualAlloc((uint8_t*)base + offset, size, MEM_COMMIT, PAGE_READWRITE) != NULL;
 #else
     return mprotect((uint8_t*)base + offset, size, PROT_READ | PROT_WRITE) == 0;
@@ -59,7 +67,11 @@ static bool vm_commit(void* base, size_t offset, size_t size) {
 }
 
 static bool vm_decommit(void* base, size_t offset, size_t size) {
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    // WASM cannot revoke individual pages; discard their contents before reuse.
+    memset((uint8_t*)base + offset, 0, size);
+    return true;
+#elif defined(_WIN32)
     return VirtualFree((uint8_t*)base + offset, size, MEM_DECOMMIT) != 0;
 #else
     bool protected = mprotect((uint8_t*)base + offset, size, PROT_NONE) == 0;
@@ -71,7 +83,10 @@ static bool vm_decommit(void* base, size_t offset, size_t size) {
 }
 
 static void vm_release(void* base, size_t size) {
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    (void)size;
+    free(base);
+#elif defined(_WIN32)
     (void)size;
     (void)VirtualFree(base, 0, MEM_RELEASE);
 #else

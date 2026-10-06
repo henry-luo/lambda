@@ -47,7 +47,9 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/shell.h"
+#ifndef LAMBDA_NO_TASKS
 #include "../../lib/uv_loop.h"
+#endif
 #include "../dom/dom.h"
 
 extern "C" Item js_get_key_default(Item object, Item key);
@@ -80,6 +82,7 @@ extern "C" double lambda_process_peak_rss_mb(void) {
 #endif
 }
 
+#ifndef LAMBDA_NO_RESOURCE_CACHE
 typedef struct LambdaAstPrebuildDiscoverState {
     const char* source;
     size_t source_length;
@@ -192,6 +195,8 @@ static bool lambda_ast_prebuild_imports(const char* path) {
         path, NULL, 0, &stats);
 }
 
+#endif
+
 static void record_direct_parse_error(Transpiler* tp, const char* script_path,
         const LambdaParseError* parse_error) {
     if (!tp || !tp->source) return;
@@ -301,10 +306,14 @@ static void free_transpiler_diagnostics(Transpiler* tp) {
 }
 
 extern "C" int lambda_compiler_timing_enabled(void) {
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    return false;
+#else
     if (g_compiler_timing_enabled >= 0) return g_compiler_timing_enabled;
     const char* value = shell_getenv("LAMBDA_COMPILER_TIMING");
     g_compiler_timing_enabled = value && value[0] && strcmp(value, "0") != 0;
     return g_compiler_timing_enabled;
+#endif
 }
 
 extern "C" void lambda_compiler_timing_reset(void) {
@@ -382,12 +391,16 @@ static pthread_mutex_t profile_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 bool is_profile_enabled() {
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    return false;
+#else
     if (!profile_checked) {
         const char* env = shell_getenv("LAMBDA_PROFILE");
         profile_enabled = (env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0));
         profile_checked = true;
     }
     return profile_enabled;
+#endif
 }
 
 extern "C" int lambda_compiler_timing_collecting(void) {
@@ -684,6 +697,7 @@ static void runtime_module_unit_index_delete_script(Runtime* runtime,
     runtime_module_state_unbind_unit(runtime, unit_id, script->module_state_id);
 }
 
+#ifndef LAMBDA_NO_RESOURCE_CACHE
 static int64_t script_file_mtime_nsec(const struct stat* stat_value) {
     if (!stat_value) return 0;
 #if defined(__APPLE__)
@@ -1162,6 +1176,8 @@ static Script* lambda_ast_template_clone_for_runtime(Runtime* runtime,
     return instance;
 }
 
+#endif
+
 Script* lambda_ast_overlay_import_script(const Script* importer,
         const AstImportNode* import_node) {
     if (!import_node || !importer || !importer->cache_template ||
@@ -1281,6 +1297,7 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
     }
 }
 
+#ifndef LAMBDA_NO_MIR
 static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
         const char* path, const char* source, bool inline_source,
         bool is_import) {
@@ -1439,6 +1456,8 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
     return true;
 }
 
+#endif
+
 static bool lambda_prepare_ast_interpreter(Transpiler* tp) {
     if (!tp || !tp->ast_root) return false;
     AstScript* interp_root = (AstScript*)tp->ast_root;
@@ -1489,6 +1508,7 @@ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
     return true;
 }
 
+#ifndef LAMBDA_NO_MIR
 static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         Script* script) {
     if (!runtime || !script) return false;
@@ -1520,6 +1540,8 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
     if (script->jit_context) (void)lambda_cache_promote_ast_shell_mir(runtime, script);
     return script->jit_context != NULL;
 }
+
+#endif
 
 typedef struct LambdaDirectFrontendPassContext {
     Transpiler* tp;
@@ -1616,7 +1638,9 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (own_timing_enabled) lambda_own_timing_enter(&own_timing);
     if (profiling || compiler_timing) profile_get_time(&p0);
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&start);
+#endif
     tp->source = script->source;
     // A non-main Script can be linked from a native parent. Keep its exports
     // callable even when automatic document policy prefers interpretation.
@@ -1641,8 +1665,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p1);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
     print_elapsed_time("parsing", start, end);
+#endif
 
     lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_BUILD);
     if (!compiler_pass_manager_add(&tp->pass_manager, &build_pass) ||
@@ -1652,8 +1678,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p2);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
     print_elapsed_time("building AST", start, end);
+#endif
 
     lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_BIND);
     if (!compiler_pass_manager_add(&tp->pass_manager, &bind_pass) ||
@@ -1663,8 +1691,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p3);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
     print_elapsed_time("binding AST", start, end);
+#endif
 
     CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
         COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED,
@@ -1681,8 +1711,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // Allocation reserves dense node IDs and bind publishes graph columns, so
     // no post-validation index walk remains (D8.2.4/D8.2.5v2).
     if (profiling || compiler_timing) p5 = p4;
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
     print_elapsed_time("building AST", start, end);
+#endif
 
     // ANY-census [Type_Infer TI3]: one line per compile naming where static
     // types fell back to `any`. Purely diagnostic — later inference slices
@@ -1773,12 +1805,15 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         interp_run_stats()->scripts_fallback++;
         log_debug("interp: fallback file=%s reason=node:%s",
             script_path, interp_node_kind_name(tp->interp_reject_kind));
+#ifndef LAMBDA_NO_MIR
         if (!interp_force_jit_import_cone(tp)) {
             if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
             return;
         }
+#endif
     }
 
+#ifndef LAMBDA_NO_MIR
     // compile the AST directly to MIR; this is the only supported Lambda backend.
     {
         double mir_jit_init_ms = 0, mir_transpile_ms = 0, mir_gen_ms = 0;
@@ -1837,6 +1872,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
     }
+#endif
+
 
 }
 
@@ -1845,6 +1882,16 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
 
+#ifdef LAMBDA_NO_RESOURCE_CACHE
+    // browser evaluation accepts source bytes only; native import providers are absent.
+    if (!runtime || !script_path || !source || is_import) {
+        log_error("wasm-loader: only in-memory main source is supported");
+        return NULL;
+    }
+    const char* lookup_path = script_path;
+    const char* exact_source = source;
+    char* canonical_path = NULL;
+#else
     // Build the static closure before the root enters its Runtime. Workers only
     // publish AST templates; import initialization and tier selection stay on
     // this execution path (D8.1.1v13, D8.5.1v7).
@@ -1906,7 +1953,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     bool cache_artifact_enabled = strcmp(lookup_path, "<repl-session>") != 0;
 
     // find the script in the path index (thread-safe)
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
     pthread_mutex_lock(&scripts_mutex);
 #endif
     Script* cached_script = runtime_loaded_script_get_current(runtime, lookup_path);
@@ -1930,7 +1977,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (cached_script) {
         // circular import detection: script is in list but still being loaded
         if (cached_script->is_loading) {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
             pthread_mutex_unlock(&scripts_mutex);
 #endif
             log_error("Circular import detected: %s", lookup_path);
@@ -1938,7 +1985,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             if (canonical_path) mem_free(canonical_path);
             return NULL;
         }
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
         pthread_mutex_unlock(&scripts_mutex);
 #endif
         runtime->script_load_hits++;
@@ -1975,7 +2022,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                     cached_template->cache_compilation_unit_id, lookup_path);
                 InputCacheScope* stale_scope = source_lease.release_scope();
                 input_script_cache_close_scope(stale_scope);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
                 pthread_mutex_unlock(&scripts_mutex);
 #endif
                 if (canonical_path) mem_free(canonical_path);
@@ -1992,7 +2039,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                 input_script_cache_mark_module_hit(script_cache);
                 log_info("script-cache: Lambda MIR hit path=%s unit=%u", lookup_path,
                     cached_template->cache_compilation_unit_id);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
                 // The common entry is immutable and its lease is now owned by
                 // the instance, so no Runtime-index mutation remains under
                 // this lock. Returning with it held deadlocks the next miss.
@@ -2021,7 +2068,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                     cached_template->cache_compilation_unit_id, lookup_path);
                 InputCacheScope* stale_scope = source_lease.release_scope();
                 input_script_cache_close_scope(stale_scope);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
                 pthread_mutex_unlock(&scripts_mutex);
 #endif
                 if (canonical_path) mem_free(canonical_path);
@@ -2035,7 +2082,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                 input_script_cache_mark_module_hit(script_cache);
                 log_info("script-cache: Lambda AST hit path=%s unit=%u", lookup_path,
                     cached_template->cache_compilation_unit_id);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
                 pthread_mutex_unlock(&scripts_mutex);
 #endif
                 if (!lambda_finalize_ast_template_for_execution(runtime, instance)) {
@@ -2059,7 +2106,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // of its imports. The registry lock protects this Runtime's short index
     // mutations only; holding it across that wait blocks the publisher at its
     // nested registration and deadlocks the whole prebuild pool.
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
     pthread_mutex_unlock(&scripts_mutex);
 #endif
     LambdaScriptBuildClaim build_claim(raw_lease, build_kind,
@@ -2087,13 +2134,15 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     runtime->script_load_misses++;
     log_info("runtime-script-registry: miss path=%s", lookup_path);
     // script not found — create stub and register immediately to prevent duplicates
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
     pthread_mutex_lock(&scripts_mutex);
+#endif
 #endif
     Script *new_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     new_script->reference = mem_strdup(lookup_path, MEM_CAT_SYSTEM);
     new_script->is_loading = true;
     new_script->profile = &lambda_profile;
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     uint32_t compilation_unit_id = input_script_compilation_unit_id(
         input_script_lease_input(raw_lease));
     // Every source-backed image receives a stable logical identity.  Its
@@ -2101,8 +2150,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // Runtime, keeping the EvalContext table compact across cache reuse.
     new_script->cache_compilation_unit_id = compilation_unit_id;
     new_script->cache_source_inline = source != NULL;
+    #endif
     runtime_register_script(runtime, new_script);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
     pthread_mutex_unlock(&scripts_mutex);
 #endif
 
@@ -2140,7 +2190,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
     log_debug("script directory: %s", new_script->directory);
     new_script->source = script_source;
+#ifndef LAMBDA_NO_FILE_IO
     capture_script_file_stat(new_script, lookup_path, source == NULL || is_import);
+#endif
     if (canonical_path) mem_free(canonical_path);
     log_debug("script source length: %d", (int)strlen(new_script->source));
     new_script->is_main = !is_import;  // main script is not an import
@@ -2197,6 +2249,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         log_error("Error: Failed to compile script %s", script_path);
         return NULL;
     }
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     // The common cache accepts only self-contained Lambda MIR images. A
     // cross-language import can retain guest-owned callbacks or module
     // namespaces, so it stays source-only until its adapter proves a fresh
@@ -2240,8 +2293,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
     build_claim.complete(cache_published);
+#endif
+
     runtime->script_load_compiles++;
 
+#ifndef LAMBDA_NO_JS
     // Register in unified module registry for cross-language imports.
     // A Lambda behavior package can compile inside an initialized evaluator
     // without a JS realm. Its exports need no JS callable wrappers, whose
@@ -2253,10 +2309,13 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             runtime, new_script->reference, "lambda", ns, new_script->jit_context);
     }
 
+#endif
+
     log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
     return new_script;
 }
 
+#ifndef LAMBDA_NO_MIR
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import) {
     if (!runtime) return NULL;
@@ -2264,6 +2323,9 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     // MIR Direct backend explicitly before loading the module.
     bool was_mir_direct = runtime->use_mir_direct;
     runtime->use_mir_direct = true;
+#ifdef LAMBDA_NO_MIR
+    runtime->use_mir_direct = false;
+#endif
     // The JS membrane reaches a Lambda export through a native function
     // pointer, so this module must actually be JIT-compiled. Under AUTO the
     // planner would stop at T0 and produce no MIR context at all, leaving
@@ -2276,6 +2338,8 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     runtime->use_mir_direct = was_mir_direct;
     return script;
 }
+
+#endif
 
 static void repl_restore_scope(NameScope* scope, NameEntry* first,
         NameEntry* last) {
@@ -2318,6 +2382,11 @@ static void repl_report_transpiler_errors(ArrayList* errors) {
 static void repl_free_transpiler_errors(ArrayList* errors) {
     free_transpiler_error_list(errors);
 }
+
+struct ReplFragmentIndexOwner {
+    AstIndex* index;
+    ~ReplFragmentIndexOwner() { ast_index_destroy(index); }
+};
 
 void interp_repl_session_destroy(InterpReplSession* session) {
     if (!session) return;
@@ -2409,6 +2478,10 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
 
     Transpiler tp = {};
     memcpy(&tp, script, sizeof(Script));
+    // fragment analysis must own a fresh graph: the retained module index has
+    // no new function/capture edges and its buffers cannot be shallow-copied.
+    tp.ast_index = {};
+    ReplFragmentIndexOwner fragment_index = {&tp.ast_index};
     tp.script_owner = script;
     tp.runtime = session->runner.runtime;
     tp.current_scope = globals;
@@ -2433,15 +2506,18 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         log_error("interp-repl: direct parser rejected completed input");
         return (session->last_input_rejected = true), ItemError;
     }
-    lambda_ast_finalize_script(&tp, parsed_root);
+    bool finalized = ast_index_build_profile(&tp.ast_index,
+        (AstNode*)parsed_root, script->profile) &&
+        lambda_ast_finalize_script(&tp, parsed_root);
 
     AstNode* fragment = parsed_root->child;
-    if (tp.error_count != 0 || !fragment) {
+    if (!finalized || tp.error_count != 0 || !fragment) {
         repl_restore_scope(globals, saved_scope_first, saved_scope_last);
         if (script->const_list) script->const_list->length = saved_const_count;
         if (script->type_list) script->type_list->length = saved_type_count;
         script->interp_slab_count = saved_slab_count;
         repl_restore_source(script, saved_source_length);
+        repl_report_transpiler_errors(tp.errors);
         repl_free_transpiler_errors(tp.errors);
         return (session->last_input_rejected = true), ItemError;
     }
@@ -2566,7 +2642,9 @@ void runner_setup_context(Runner* runner) {
         url_destroy(ctx->cwd);
         ctx->cwd = NULL;
     }
+#ifndef LAMBDA_NO_FILE_IO
     ctx->cwd = get_current_dir();  // proper URL object for current directory
+#endif
     // initialize decimal context (use shared fixed-precision context for runtime)
     ctx->decimal_ctx = decimal_fixed_context();
     ctx->context_alloc = heap_alloc;
@@ -2617,12 +2695,15 @@ void runner_setup_context(Runner* runner) {
     }
     path_register_pool_provider(runner_path_pool_provider);
 
+#ifndef LAMBDA_NO_TASKS
     if (rt && runtime_scheduler(rt)) {
         ctx->scheduler = runtime_scheduler(rt);
     } else {
         ctx->scheduler = lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
         if (rt) runtime_set_scheduler(rt, ctx->scheduler);
     }
+#endif
+
     // SCU15: cross-language JS imports compile on this same canonical context
     // (load_js_module binds runtime_get_eval_context), so their JS capsule is
     // already in ctx's JS capsule; there is no separate bootstrap context to adopt.
@@ -2810,11 +2891,15 @@ void runtime_init(Runtime* runtime) {
     // MIR Direct is the sole Lambda backend; keep the mode bit true for cache
     // and import scheduling code that still uses it as a fast-path predicate.
     runtime->use_mir_direct = true;
+#ifdef LAMBDA_NO_MIR
+    runtime->use_mir_direct = false;
+#endif
     runtime->scripts = arraylist_new(16);
     runtime->loaded_script_index = RuntimeLoadedScriptIndex::create(64);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
     runtime->dry_run = false;  // default: real IO
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     InputScriptCache* script_cache = input_manager_global_script_cache();
     const char* disable_mir_cache = shell_getenv("LAMBDA_DISABLE_MIR_CACHE");
     runtime->mir_cache_disabled = (LAMBDA_MIR_CACHE_DEFAULT == 0) ||
@@ -2825,12 +2910,18 @@ void runtime_init(Runtime* runtime) {
     if (runtime->mir_cache_disabled) {
         log_info("runtime-script-registry: process MIR artifacts disabled by build default or LAMBDA_DISABLE_MIR_CACHE");
     }
+#endif
+
     // The CLI creates a short-lived selector Runtime before some language
     // subcommands create their execution Runtime. Keep the registry lazy so
     // that selector never owns a module-registry allocation it cannot use;
     // module registration paths create it on their first real module.
+#ifndef LAMBDA_NO_JUBE
     jube_register_builtin_modules();
+#endif
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     rdb_host_install();  // RDB connections join the rid table; drivers resolve via Jube
+#endif
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 
@@ -2937,6 +3028,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     // releasing an execution shell, then release every private MIR context
     // that was already published into its Function entries.
     interp_satellite_cancel_script(script);
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     if (script->interp_satellite_images) {
         for (int index = 0; index < script->interp_satellite_images->length; index++) {
             interp_satellite_image_destroy((InterpSatelliteImage*)
@@ -2955,6 +3047,8 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         input_script_cache_close_scope(script->cache_scope);
         script->cache_scope = NULL;
     }
+#endif
+
     if (script->ast_overlay_strings) {
         for (int i = 0; i < script->ast_overlay_strings->length; i++) {
             mem_free(script->ast_overlay_strings->data[i]);
@@ -2980,11 +3074,13 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         // A cached AST shell can compile its own satellite image. The
         // immutable template never owns that context, so release it with the
         // shell rather than leaking it past the execution lease.
+#ifndef LAMBDA_NO_MIR
         if (!script->cache_mir_artifact && script->jit_context) {
             jit_cleanup_mode(script->jit_context,
                 script->mir_gen_initialized ? 1 : 0);
             script->jit_context = NULL;
         }
+#endif
         // Clone graphs allocate their own edge list even though the AST and
         // sealed code remain with the cache owner.
         if (script->direct_imports) arraylist_free(script->direct_imports);
@@ -3032,23 +3128,28 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (script->pool) pool_destroy(script->pool);
     if (script->direct_imports) arraylist_free(script->direct_imports);
     if (script->cache_direct_imports) arraylist_free(script->cache_direct_imports);
+#ifndef LAMBDA_NO_MIR
     if (script->jit_context) {
         jit_cleanup_mode(script->jit_context, script->mir_gen_initialized ? 1 : 0);
     }
+#endif
     // decimal context is shared global; cached/free paths only clear the borrowed pointer
     script->decimal_ctx = NULL;
     mem_free(script);
 }
 
+#ifndef LAMBDA_NO_RESOURCE_CACHE
 void runtime_destroy_cached_script_template(Script* script) {
     if (!script) return;
     if (script->cache_template && script->cache_mir_artifact) {
         // A promoted MIR owner borrows AST storage from the sibling AST image.
+#ifndef LAMBDA_NO_MIR
         if (script->jit_context) {
             jit_cleanup_mode(script->jit_context,
                 script->mir_gen_initialized ? 1 : 0);
             script->jit_context = NULL;
         }
+#endif
         if (script->cache_direct_imports) {
             arraylist_free(script->cache_direct_imports);
             script->cache_direct_imports = NULL;
@@ -3134,6 +3235,10 @@ void runtime_log_script_load_summary(Runtime* runtime) {
 // call will create fresh heap/name_pool state and store it back.
 static void runtime_quiesce_satellite_workers(Runtime* runtime);
 
+#endif
+
+static void runtime_quiesce_satellite_workers(Runtime* runtime);
+
 void runtime_reset_heap(Runtime* runtime) {
     if (!runtime) return;
     // A satellite still lowering the finished script reads types and names
@@ -3181,13 +3286,17 @@ void runtime_reset_heap(Runtime* runtime) {
             dom_batch_reset();
         }
 
+#ifndef LAMBDA_NO_TASKS
         if (runtime_scheduler(runtime)) {
             lambda_scheduler_destroy(runtime_scheduler(runtime));
             runtime_set_scheduler(runtime, NULL);
         }
+#endif
         if (runtime->js_runtime_used) {
             js_event_loop_shutdown();
-            if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
+    #ifndef LAMBDA_NO_TASKS
+        if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
+#endif
             runtime->js_runtime_used = false;
         }
 
@@ -3300,16 +3409,22 @@ void runtime_cleanup(Runtime* runtime) {
         if (js_runtime_state_for(cleanup_context)) {
             // Cancel host tasks while their roots and native owners are still
             // valid; scheduler teardown only drains their inert completions.
+#ifndef LAMBDA_NO_TASKS
             runtime_resource_table_clear(js_runtime_resource_table());
+#endif
         }
+#ifndef LAMBDA_NO_TASKS
         if (runtime_scheduler(runtime)) {
             cleanup_context->scheduler = runtime_scheduler(runtime);
             lambda_scheduler_destroy(runtime_scheduler(runtime));
             runtime_set_scheduler(runtime, NULL);
         }
+#endif
 
         if (js_runtime_state_for(cleanup_context)) js_event_loop_shutdown();
+#ifndef LAMBDA_NO_TASKS
         if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
+#endif
         event_loop_cleaned = true;
 
         dom_shutdown();
@@ -3388,7 +3503,9 @@ void runtime_cleanup(Runtime* runtime) {
             if (!js_runtime_state_init(runtime->eval_context)) return;
             js_event_loop_shutdown();
         }
+#ifndef LAMBDA_NO_TASKS
         if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
+#endif
     }
     if (runtime->eval_context) {
         EvalContext* retiring_context = runtime->eval_context;
@@ -3405,6 +3522,8 @@ void runtime_cleanup(Runtime* runtime) {
         runtime->eval_context = NULL;
     }
     lambda_stack_cleanup();
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     runtime_close_js_module_mir_scopes(runtime);
+#endif
     runtime_free_all_scripts(runtime);
 }

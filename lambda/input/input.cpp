@@ -1164,13 +1164,17 @@ static void parse_html_input(Input* input, const char* source) {
     input->root = (Item){.element = doc};
 }
 
+#ifndef LAMBDA_NO_LATEX
 static void parse_latex_input(Input* input, const char* source) {
     parse_latex_direct(input, source);
 }
+#endif
 
+#ifndef LAMBDA_NO_LATEX
 static void parse_tikz_input(Input* input, const char* source) {
     parse_tikz_direct(input, source);
 }
+#endif
 
 static void parse_mdx_input(Input* input, const char* source) {
     input->root = input_mdx(input, source);
@@ -1237,9 +1241,13 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"rst", parse_rst_input},
     {"html", parse_html_input},
     {"html5", parse_html_input},
+#ifndef LAMBDA_NO_LATEX
     {"latex", parse_latex_input},
     {"latex-ts", parse_latex_input},
+#endif
+#ifndef LAMBDA_NO_LATEX
     {"tikz", parse_tikz_input},
+#endif
     {"rtf", parse_rtf},
     {"wiki", parse_wiki_input},
     {"asciidoc", parse_asciidoc_input},
@@ -1463,11 +1471,15 @@ static Input* input_from_source_n_with_name_parent(const char* source,
             }
         }
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}
+#ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "pdf") == 0) {
             // PDF is binary; use the explicit length we received instead of strlen,
             // which would truncate at the first null byte inside the binary stream.
             parse_pdf(input, source, source_len);
         }
+
+#endif
+#ifndef LAMBDA_NO_LATEX
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor) ? flavor->chars : "latex";
             // Both ASCII and LaTeX math use the direct cursor parser.
@@ -1478,6 +1490,8 @@ static Input* input_from_source_n_with_name_parent(const char* source,
             const char* math_flavor = effective_type + 5; // Skip "math-" prefix
             parse_math(input, source, math_flavor);
         }
+
+#endif
         else if (strcmp(effective_type, "graph") == 0) {
             const char* graph_flavor = flavor ? flavor->chars
                 : (detected_graph_flavor ? detected_graph_flavor : "dot");
@@ -1926,17 +1940,24 @@ InputManager::InputManager() {
     }
     inputs = arraylist_new(16);
     thread_pools = arraylist_new(4);
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     script_cache = input_script_cache_create();
+#else
+    script_cache = nullptr;
+#endif
     // Use shared global decimal context
     decimal_ctx = decimal_fixed_context();
 }
 
 InputManager::~InputManager() {
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     if (script_cache) {
         input_script_cache_log_summary(script_cache);
         input_script_cache_destroy(script_cache);
         script_cache = nullptr;
     }
+
+#endif
     // clean up all tracked inputs
     reset_inputs();
     if (inputs) {

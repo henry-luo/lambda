@@ -20,7 +20,9 @@
 #include <cstdlib>
 #include <cstring>
 
-#if defined(__APPLE__)
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/stack.h>
+#elif defined(__APPLE__)
 #include <pthread.h>
 #include <signal.h>
 #include <execinfo.h>
@@ -64,7 +66,11 @@ static __thread bool _lambda_alt_stack_previous_valid = false;
 // ============================================================================
 
 static void init_stack_bounds(void) {
-#if defined(__APPLE__)
+#if defined(__EMSCRIPTEN__)
+    // use the real linear-memory stack bounds for recoverable recursion checks.
+    _lambda_stack_base = emscripten_stack_get_base();
+    _lambda_stack_limit = emscripten_stack_get_end() + LAMBDA_STACK_SAFETY_MARGIN;
+#elif defined(__APPLE__)
     pthread_t self = pthread_self();
     void* stack_addr = pthread_get_stackaddr_np(self);
     size_t stack_size = pthread_get_stacksize_np(self);
@@ -347,7 +353,9 @@ void lambda_stack_init(void) {
     }
 
     // Install signal/exception handler (process-wide, once)
+#if !defined(__EMSCRIPTEN__)
     install_signal_handler();
+#endif
 }
 
 void lambda_stack_detach_thread(void) {

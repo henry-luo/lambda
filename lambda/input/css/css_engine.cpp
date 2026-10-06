@@ -643,7 +643,9 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     const char* css_text, const char* base_url) {
     if (!engine || !css_text) return NULL;
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     clock_t start_time = clock();
+#endif
 
     log_debug("Starting enhanced CSS parsing: %zu chars, base_url=%s", strlen(css_text), base_url ? base_url : "(none)");
 
@@ -685,8 +687,10 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     if (token_count <= 0) {
         log_debug("CSS tokenization returned %d tokens", token_count);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
         clock_t end_time = clock();
         stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+#endif
         engine->stats.stylesheets_parsed++;
         pool_destroy(token_pool);
         return stylesheet;
@@ -847,8 +851,10 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     log_debug("Parsed %zu CSS rules", stylesheet->rule_count);
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     clock_t end_time = clock();
     stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+#endif
 
     // Update engine statistics
     engine->stats.rules_parsed += stylesheet->rule_count;

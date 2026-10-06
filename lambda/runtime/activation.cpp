@@ -743,10 +743,6 @@ extern "C" void activation_trace(const Activation* activation, gc_heap_t* gc) {
     mark_parked_roots(gc, activation);
 }
 
-static void mark_template_state_item(void* visitor_context, uint64_t item) {
-    gc_mark_item((gc_heap_t*)visitor_context, item);
-}
-
 extern "C" void activation_gc_visit_roots(gc_heap_t* gc) {
     ActivationThread* thread = &activation_thread;
     EvalContext* owner = context;
@@ -770,5 +766,5 @@ extern "C" void activation_gc_visit_roots(gc_heap_t* gc) {
         }
     }
     // Template state lives in a native hashmap, outside traced GC objects.
-    tmpl_state_visit_roots(gc, mark_template_state_item);
+    heap_gc_visit_template_roots(gc);
 }

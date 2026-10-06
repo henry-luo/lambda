@@ -15,12 +15,16 @@
 // ==================== Validation State Helpers ====================
 
 bool should_stop_for_timeout(SchemaValidator* validator) {
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    return false;
+#else
     if (validator->get_options()->timeout_ms <= 0) return false;
     if (validator->get_validation_start_time() == 0) return false;
 
     clock_t current = clock();
     double elapsed_ms = ((double)(current - validator->get_validation_start_time()) / CLOCKS_PER_SEC) * 1000.0;
     return elapsed_ms >= validator->get_options()->timeout_ms;
+#endif
 }
 
 bool should_stop_for_max_errors(ValidationResult* result, int max_errors) {
@@ -29,9 +33,11 @@ bool should_stop_for_max_errors(ValidationResult* result, int max_errors) {
 }
 
 void init_validation_session(SchemaValidator* validator) {
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     if (validator->get_options()->timeout_ms > 0) {
         validator->set_validation_start_time(clock());
     }
+#endif
 }
 
 // ==================== Error Helper Functions ====================

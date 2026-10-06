@@ -10,6 +10,7 @@
 
 extern Type TYPE_ANY, TYPE_INT;
 
+#ifndef LAMBDA_NO_MIR
 void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
                              uint64_t* out_function_count,
                              uint64_t* out_instruction_count,
@@ -44,6 +45,8 @@ void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
         *out_largest_function_instruction_count = largest_function_instruction_count;
     }
 }
+
+#endif
 
 bool has_typed_params(AstFuncNode* fn_node) {
     AstNamedNode *param = fn_node->param;
