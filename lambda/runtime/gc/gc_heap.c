@@ -1991,7 +1991,9 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_FUNC_: {
-        if (gc->js_function_trace && gc->js_function_trace(obj, gc)) break;
+        // only the JS callable ABI owns JS trace payloads
+        if (function_has_abi((Function*)obj, FN_ENTRY_ABI_JS_FUNCTION) &&
+                gc->js_function_trace && gc->js_function_trace(obj, gc)) break;
         // Function's GC-relevant fields are checked against LambdaGcFunctionLayout.
         uint8_t* p = (uint8_t*)obj;
         uint8_t field_count = *(uint8_t*)(p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT);
@@ -2413,7 +2415,8 @@ static void gc_compact_data(gc_heap_t* gc) {
             break;
         }
         case LMD_TYPE_FUNC_: {
-            if (gc->js_function_compact && gc->js_function_compact(obj, gc)) break;
+            if (function_has_abi((Function*)obj, FN_ENTRY_ABI_JS_FUNCTION) &&
+                    gc->js_function_compact && gc->js_function_compact(obj, gc)) break;
             uint8_t* p = (uint8_t*)obj;
             uint8_t field_count = *(uint8_t*)(
                 p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT);

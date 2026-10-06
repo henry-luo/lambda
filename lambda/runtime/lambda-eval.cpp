@@ -93,7 +93,6 @@ extern "C" Item vmap_set(Item vmap_item, Item key, Item value);
 extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index);
 
 // forward declaration of static error string (defined later in this file)
-extern String& STR_ERROR;
 
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);

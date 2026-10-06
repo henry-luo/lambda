@@ -178,6 +178,7 @@ static Item resolve_path_content(Path* path) {
 
 Array* array() {
     Array *arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    if (!arr) return NULL; // callers can propagate allocation failure before reserving storage
     arr->type_id = LMD_TYPE_ARRAY;
     return arr;
 }

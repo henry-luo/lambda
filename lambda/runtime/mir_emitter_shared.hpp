@@ -1186,6 +1186,17 @@ static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
     mir_append_emit_label(em->ctx, em->func_item, label);
 }
 
+// Argument spans occupy the suffix after semantic-root coloring (D5.3.1).
+static inline MIR_reg_t em_deferred_root_span_base(MirEmitter* em,
+        MIR_reg_t* base, MIR_insn_t* fixup) {
+    if (*base) return *base;
+    *base = em_new_reg(em, "argument_span", MIR_T_I64);
+    *fixup = MIR_new_insn(em->ctx, MIR_ADD, MIR_new_reg_op(em->ctx, *base),
+        MIR_new_reg_op(em->ctx, em->frame.root_base), MIR_new_int_op(em->ctx, 0));
+    MIR_insert_insn_after(em->ctx, em->func_item, em->frame.anchor, *fixup);
+    return *base;
+}
+
 static inline MIR_reg_t em_load_at(MirEmitter* em, MIR_reg_t base,
         MIR_disp_t offset, MIR_type_t type, const char* name) {
     MIR_reg_t value = em_new_reg(em, name,
@@ -1759,10 +1770,11 @@ static inline void em_build_pending_pair(MirEmitter* em, MIR_reg_t item,
 // ordinary Item. The 2-instruction test costs nothing on the resolved path;
 // the rare pending arm calls the runtime to allocate destination-owned storage.
 static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
-                                                MIR_reg_t companion) {
+                                                MIR_reg_t companion,
+                                                MIR_reg_t destination_home = 0) {
     // The patch allocates in this frame's number extent, so the epilogue must
     // restore the watermark even with no scalar homes present.
-    em->frame.number_extent_dirty = true;
+    if (!destination_home) em->frame.number_extent_dirty = true;
     MIR_reg_t result = em_new_reg(em, "resolved", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, item)));
@@ -1774,11 +1786,27 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
         MIR_new_label_op(em->ctx, l_done), MIR_new_reg_op(em->ctx, high),
         MIR_new_uint_op(em->ctx, ITEM_PENDING)));
-    MIR_type_t types[2] = {MIR_T_I64, MIR_T_I64};
-    MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
-        MIR_new_reg_op(em->ctx, companion)};
-    MIR_reg_t boxed = em_call_with_args(em, "lambda_item_resolve_pending",
-        MIR_T_I64, 2, types, args, true);
+    MIR_reg_t boxed;
+    if (destination_home) {
+        // Transported scalar bits can land directly in a reusable caller home (D5.2.1v3).
+        em_store_at(em, destination_home, 0, MIR_T_I64, companion);
+        MIR_reg_t kind = em_new_reg(em, "pending_kind", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, kind),
+            MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 3)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD, MIR_new_reg_op(em->ctx, kind),
+            MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, LMD_TYPE_INT64)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_LSH, MIR_new_reg_op(em->ctx, kind),
+            MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, 56)));
+        boxed = em_new_reg(em, "owned_scalar", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR, MIR_new_reg_op(em->ctx, boxed),
+            MIR_new_reg_op(em->ctx, destination_home), MIR_new_reg_op(em->ctx, kind)));
+    } else {
+        MIR_type_t types[2] = {MIR_T_I64, MIR_T_I64};
+        MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
+            MIR_new_reg_op(em->ctx, companion)};
+        boxed = em_call_with_args(em, "lambda_item_resolve_pending",
+            MIR_T_I64, 2, types, args, true);
+    }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, boxed)));
     em_emit_label(em, l_done);

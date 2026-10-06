@@ -67,6 +67,7 @@
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
+#include "js/mvp-lmd/mvp_lmd.h"
 #if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
 // the profile host also links MVP so both backends can be measured with release optimization.
 #include "js/mvp/mvp.h"
@@ -2618,6 +2619,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nOptions:\n");
             printf("  -h, --help              Show this help message\n");
             printf("  -e, --eval <script>     Evaluate JavaScript source text\n");
+            fputs("  --runtime=mvp-lmd      Scalar/dense-array MIR on the Lambda runtime\n", stdout);
+            fputs("  --timing               MVP-Lmd execution time, excluding compilation\n", stdout);
             printf("  --document <file.html>  Load HTML document for DOM API access\n");
             printf("  --diagnose              Enable extra JS fast-path diagnostic logging\n");
             printf("\nExamples:\n");
@@ -2634,6 +2637,51 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 runtime_cleanup(&runtime);
                 return lambda_main_finish(9);
             }
+        }
+
+        for (int selector = 2; selector < argc; selector++) {
+            if (strcmp(argv[selector], "--runtime=mvp-lmd") != 0) continue;
+            const char* source = NULL;
+            const char* filename = NULL;
+            char* loaded = NULL;
+            size_t length = 0;
+            bool print = false;
+            bool timing = false;
+            bool invalid = false;
+            for (int arg = 2; arg < argc; arg++) {
+                if (arg == selector || strcmp(argv[arg], "--no-log") == 0) continue;
+                if (strcmp(argv[arg], "--timing") == 0) { timing = true; continue; }
+                if ((!strcmp(argv[arg], "-e") || !strcmp(argv[arg], "--eval") ||
+                     !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print")) && arg + 1 < argc) {
+                    print = !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print");
+                    source = argv[++arg]; length = strlen(source);
+                } else if (argv[arg][0] == '-' || filename) invalid = true;
+                else filename = argv[arg];
+            }
+            if (!source && filename && !invalid &&
+                    file_read_all(filename, MEM_CAT_JS_RUNTIME, &loaded, &length)) source = loaded;
+            if (invalid || !source || (filename && !loaded)) {
+                fputs("MVP-Lmd accepts a script file, -e source, or -p source\n", stderr);
+                mem_free(loaded); runtime_cleanup(&runtime); return lambda_main_finish(1);
+            }
+            double execution_ms = 0;
+            MvpLmdExecution* execution = mvp_lmd_execute(source, length, timing ? &execution_ms : NULL);
+            const char* error = mvp_lmd_diagnostic(execution);
+            if (error) { fputs(error, stderr); fputc('\n', stderr); }
+            else if (print) {
+                Pool* output_pool = pool_create();
+                String* output = format_mark(output_pool, mvp_lmd_result(execution));
+                if (output) { fwrite(output->chars, 1, output->len, stdout); fputc('\n', stdout); }
+                pool_destroy(output_pool);
+            }
+            int status = error ? 1 : 0;
+            if (!error && timing) {
+                char report[64];
+                snprintf(report, sizeof(report), "__TIMING__:%.6f\n", execution_ms);
+                fputs(report, stdout);
+            }
+            mvp_lmd_destroy(execution); mem_free(loaded);
+            runtime_cleanup(&runtime); return lambda_main_finish(status);
         }
 
         JsDocumentSession js_document_session;
