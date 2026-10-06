@@ -2330,3 +2330,38 @@ TEST(TransitionTreeExternalParentTest, InadmissibleParentsAreDeclined) {
     EXPECT_NE(type_tree_add_map_field_chars(f.tree, plain, "a", 1, LMD_TYPE_INT, nullptr),
         nullptr);
 }
+
+TEST(TransitionTreeExternalParentTest, EqualShapesFromTwoDocumentsShareAChild) {
+    ExternalParentFixture f("test.tree.external.structural");
+    ASSERT_NE(f.tree, nullptr);
+    // two documents, each with its own tree, build the same shape
+    MarkBuilder first_builder(f.doc);
+    Item first = first_builder.map().put("a", (int64_t)1).put("b", "x").final();
+    Pool* other_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.external.other");
+    ASSERT_NE(other_pool, nullptr);
+    Input* other = Input::create(other_pool, nullptr);
+    ASSERT_NE(other, nullptr);
+    MarkBuilder other_builder(other);
+    Item second = other_builder.map().put("a", (int64_t)2).put("b", "y").final();
+    TypeMap* first_type = (TypeMap*)first.map->type;
+    TypeMap* second_type = (TypeMap*)second.map->type;
+    ASSERT_NE(first_type, second_type);
+
+    TypeMap* from_first = type_tree_add_map_field_chars(f.tree, first_type, "c", 1,
+        LMD_TYPE_INT, nullptr);
+    TypeMap* from_second = type_tree_add_map_field_chars(f.tree, second_type, "c", 1,
+        LMD_TYPE_INT, nullptr);
+    ASSERT_NE(from_first, nullptr);
+    EXPECT_EQ(from_second, from_first);
+    // the child outlives the document it was first minted from
+    f.release_doc();
+    EXPECT_EQ(type_tree_add_map_field_chars(f.tree, second_type, "c", 1, LMD_TYPE_INT, nullptr),
+        from_first);
+    // a different value type, or a different shape, is a different child
+    EXPECT_NE(type_tree_add_map_field_chars(f.tree, second_type, "c", 1, LMD_TYPE_STRING, nullptr),
+        from_first);
+    Item third = other_builder.map().put("a", (int64_t)3).put("b", (int64_t)4).final();
+    EXPECT_NE(type_tree_add_map_field_chars(f.tree, (TypeMap*)third.map->type, "c", 1,
+        LMD_TYPE_INT, nullptr), from_first);
+    mem_pool_destroy(other_pool);
+}

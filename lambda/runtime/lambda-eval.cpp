@@ -11237,6 +11237,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     }
     TypeId value_type = get_type_id(value);
     new_size += type_info[value_type].byte_size;
+    shape_tree_stats_note_private_copy(old_count);
 
     RootFrame roots(2);
     Rooted<Map*> rooted_map(roots, map);

@@ -459,6 +459,114 @@ static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* targe
 static const int MAX_SHAPE_GRAPH = 1024;
 static const int MAX_ELEMENT_SHAPE_GRAPH = 16384;
 
+// Impl_Map_Transition_Coverage P1.5 (Q5): measurement only. Process-wide tree
+// counters, split into the runtime tree [0] and every other tree [1] (parsed
+// documents, js_input). LAMBDA_SHAPE_TREE_STATS=<file> appends one line per
+// class to <file> at exit, so batch runners aggregate across processes.
+typedef struct ShapeTreeStats {
+    uint64_t hits;                 // adds that followed an existing edge
+    uint64_t mints;                // adds that minted a node
+    uint64_t declined_fanout;      // adds declined by a node's edge cap
+    uint64_t declined_budget;      // adds declined by the graph budget
+    uint64_t external_hits;        // the same three for external parents (D3.4.3v5)
+    uint64_t external_mints;
+    uint64_t external_declined_fanout;
+    uint64_t edges_walked;         // edge-list entries scanned, over all adds
+    uint64_t max_walk;             // the longest scan of one add
+    uint64_t decline_degree[4];    // out-degree at a fan-out decline: <=16 <=64 <=256 >256
+    uint64_t private_types;        // map_put fallbacks to a private type
+    uint64_t private_copies;       // runtime adds that copied a whole shape
+    uint64_t private_entries;      // entries those copies duplicated
+    uint64_t peak_nodes;           // the most map and element nodes one tree held
+} ShapeTreeStats;
+
+static ShapeTreeStats g_shape_tree_stats[2];
+static const char* g_shape_tree_stats_path = NULL;
+static int g_shape_tree_stats_state = -1;  // -1 unread, 0 off, 1 on
+static int g_shape_tree_fanout_table = -1;  // LAMBDA_SHAPE_TREE_FANOUT
+static int g_shape_tree_fanout_nodes = -1;  // LAMBDA_SHAPE_TREE_FANOUT_NODES
+
+static int shape_tree_env_int(const char* name) {
+    const char* value = getenv(name);
+    if (!value || !value[0]) return -1;
+    long parsed = strtol(value, NULL, 10);
+    return parsed < 0 ? -1 : (parsed > INT_MAX ? INT_MAX : (int)parsed);
+}
+
+static void shape_tree_stats_flush(void) {
+    static const char* const kClass[2] = {"runtime", "other"};
+    for (int c = 0; c < 2; c++) {
+        const ShapeTreeStats* s = &g_shape_tree_stats[c];
+        char line[768];
+        snprintf(line, sizeof(line),
+            "shape_tree_stats tree=%s fanout_table=%d fanout_nodes=%d hits=%llu mints=%llu "
+            "declined_fanout=%llu declined_budget=%llu ext_hits=%llu ext_mints=%llu "
+            "ext_declined_fanout=%llu edges_walked=%llu max_walk=%llu "
+            "decline_degree=%llu/%llu/%llu/%llu private_types=%llu private_copies=%llu "
+            "private_entries=%llu peak_nodes=%llu\n",
+            kClass[c], g_shape_tree_fanout_table, g_shape_tree_fanout_nodes,
+            (unsigned long long)s->hits, (unsigned long long)s->mints,
+            (unsigned long long)s->declined_fanout, (unsigned long long)s->declined_budget,
+            (unsigned long long)s->external_hits, (unsigned long long)s->external_mints,
+            (unsigned long long)s->external_declined_fanout,
+            (unsigned long long)s->edges_walked, (unsigned long long)s->max_walk,
+            (unsigned long long)s->decline_degree[0], (unsigned long long)s->decline_degree[1],
+            (unsigned long long)s->decline_degree[2], (unsigned long long)s->decline_degree[3],
+            (unsigned long long)s->private_types, (unsigned long long)s->private_copies,
+            (unsigned long long)s->private_entries, (unsigned long long)s->peak_nodes);
+        append_text_file(g_shape_tree_stats_path, line);
+    }
+}
+
+static bool shape_tree_stats_on(void) {
+    int state = __atomic_load_n(&g_shape_tree_stats_state, __ATOMIC_ACQUIRE);
+    if (state >= 0) return state == 1;
+    const char* path = getenv("LAMBDA_SHAPE_TREE_STATS");
+    int next = path && path[0] ? 1 : 0;
+    g_shape_tree_stats_path = path;
+    g_shape_tree_fanout_table = shape_tree_env_int("LAMBDA_SHAPE_TREE_FANOUT");
+    g_shape_tree_fanout_nodes = shape_tree_env_int("LAMBDA_SHAPE_TREE_FANOUT_NODES");
+    int expected = -1;
+    if (__atomic_compare_exchange_n(&g_shape_tree_stats_state, &expected, next, false,
+            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        if (next) atexit(shape_tree_stats_flush);
+        return next == 1;
+    }
+    return expected == 1;
+}
+
+static ShapeTreeStats* shape_tree_stats_for(const Input* input) {
+    if (!shape_tree_stats_on()) return NULL;
+    return &g_shape_tree_stats[input && input->keeps_external_edges ? 0 : 1];
+}
+
+static void shape_tree_stat_add(uint64_t* counter, uint64_t amount) {
+    __atomic_fetch_add(counter, amount, __ATOMIC_RELAXED);
+}
+
+static void shape_tree_stat_max(uint64_t* counter, uint64_t value) {
+    uint64_t seen = __atomic_load_n(counter, __ATOMIC_RELAXED);
+    while (value > seen && !__atomic_compare_exchange_n(counter, &seen, value, false,
+            __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+}
+
+void shape_tree_stats_note_private_copy(int64_t entries) {
+    if (!shape_tree_stats_on()) return;
+    shape_tree_stat_add(&g_shape_tree_stats[0].private_copies, 1);
+    shape_tree_stat_add(&g_shape_tree_stats[0].private_entries, (uint64_t)(entries > 0 ? entries : 0));
+}
+
+// The edge cap for a step from `parent`. P1.5's measurement-only overrides
+// apply to the runtime tree alone (0 = no cap); every other tree keeps its own.
+static int shape_tree_fanout_cap(const Input* input, const TypeMap* parent, bool external) {
+    int cap = parent->length == 0 ? 256 : 16;
+    if (!input->keeps_external_edges || !shape_tree_stats_on()) return cap;
+    int override = external ? g_shape_tree_fanout_table
+        : (parent->length > 0 ? g_shape_tree_fanout_nodes : -1);
+    if (override < 0) return cap;
+    return override == 0 ? INT_MAX : override;
+}
+
 // D4.1.4v4: a tree node and its edge are never freed on their own, so they
 // come from the Input's arena and go with the Input (D4.2.6).
 static TypeAlloc input_tree_alloc(Input* input) {
@@ -600,12 +708,13 @@ static bool external_parent_admissible(const TypeMap* parent) {
     return count == parent->length;
 }
 
-// D3.4.3v5: whether a cached child of an external parent still extends it by
-// exactly one field. The table is keyed by the parent's address, which a later
-// type may reuse once the parent's owner is freed. A child is reused only if
-// every value it copied from the parent -- each entry's spelling, identity,
-// contract, offset, flags, namespace and default, and the type's record
-// identity -- equals the live parent's, so it references nothing that died.
+// D3.4.3v5: whether a cached child of an external parent extends it by exactly
+// one field. Children are found by the parent's structural fingerprint, and a
+// child minted from another parent -- a document since freed, a colliding
+// shape -- is reused only if every value it copied equals this live parent's:
+// each entry's spelling, identity, contract, offset, flags, namespace and
+// default, and the type's record identity. It then references nothing that
+// died, and only what this parent references too.
 static bool external_child_matches_parent(const TypeMap* parent, const TypeMap* child) {
     if (!parent || !child || child->type_id != parent->type_id ||
             child->length != parent->length + 1 ||
@@ -642,27 +751,77 @@ static bool external_child_matches_parent(const TypeMap* parent, const TypeMap* 
 }
 
 // D3.4.3v5: the runtime tree's edges from external parents, one list per
-// parent, keyed by the parent's address. The list head lives in the tree's
-// arena so a pointer to it survives the table growing.
+// parent STRUCTURE. The key is a fingerprint of every value a child copies
+// from its parent -- the type's record identity and each entry's spelling,
+// identity, contract, offset, flags, namespace and default -- so equal shapes
+// from different documents, or different private types, share one list;
+// keying by address minted a separate path for every parsed document. A
+// fingerprint collision only shares a list: each child there is still matched
+// against the live parent in full (external_child_matches_parent). The list
+// head lives in the tree's arena so a pointer to it survives the table growing.
 typedef struct ExternalParentEdges {
-    const TypeMap* parent;
+    uint64_t fingerprint;
     TypeMapTransition** edges;
 } ExternalParentEdges;
 
+static uint64_t fingerprint_mix(uint64_t h, const void* data, size_t len) {
+    const unsigned char* bytes = (const unsigned char*)data;
+    for (size_t i = 0; i < len; i++) {
+        h ^= bytes[i];
+        h *= 0x100000001b3ull;
+    }
+    return h;
+}
+
+static uint64_t fingerprint_mix_ptr(uint64_t h, const void* ptr) {
+    uintptr_t value = (uintptr_t)ptr;
+    return fingerprint_mix(h, &value, sizeof(value));
+}
+
+// Hashes exactly what external_child_matches_parent compares.
+static uint64_t external_parent_fingerprint(const TypeMap* parent) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    uint8_t header[4] = {parent->type_id, (uint8_t)parent->is_nominal,
+        (uint8_t)parent->has_named_shape, 0};
+    h = fingerprint_mix(h, header, sizeof(header));
+    h = fingerprint_mix(h, &parent->length, sizeof(parent->length));
+    h = fingerprint_mix_ptr(h, parent->nominal);
+    h = fingerprint_mix_ptr(h, parent->struct_name);
+    if (parent->type_id == LMD_TYPE_ELEMENT) {
+        const TypeElmt* element = (const TypeElmt*)parent;
+        if (element->name.str) h = fingerprint_mix(h, element->name.str, element->name.length);
+        h = fingerprint_mix(h, &element->name_id, sizeof(element->name_id));
+        h = fingerprint_mix_ptr(h, element->ns);
+        h = fingerprint_mix_ptr(h, element->content_list);
+    }
+    FOR_EACH_MAP_FIELD(parent, field) {
+        if (field->name) h = fingerprint_mix(h, field->name->str, field->name->length);
+        uint8_t kinds[2] = {field->key_kind, field->flags};
+        h = fingerprint_mix(h, kinds, sizeof(kinds));
+        h = fingerprint_mix(h, &field->name_id, sizeof(field->name_id));
+        h = fingerprint_mix(h, &field->byte_offset, sizeof(field->byte_offset));
+        h = fingerprint_mix_ptr(h, field->type);
+        h = fingerprint_mix_ptr(h, field->ns);
+        h = fingerprint_mix_ptr(h, field->default_value);
+    }
+    return h;
+}
+
 static uint64_t external_parent_edges_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const ExternalParentEdges* record = (const ExternalParentEdges*)item;
-    return hashmap_sip(&record->parent, sizeof(record->parent), seed0, seed1);
+    (void)seed0;
+    (void)seed1;
+    return ((const ExternalParentEdges*)item)->fingerprint;
 }
 
 static int external_parent_edges_compare(const void* a, const void* b, void* udata) {
     (void)udata;
-    uintptr_t left = (uintptr_t)((const ExternalParentEdges*)a)->parent;
-    uintptr_t right = (uintptr_t)((const ExternalParentEdges*)b)->parent;
+    uint64_t left = ((const ExternalParentEdges*)a)->fingerprint;
+    uint64_t right = ((const ExternalParentEdges*)b)->fingerprint;
     return left < right ? -1 : (left > right ? 1 : 0);
 }
 
-// `parent`'s edge list in the tree's external table, made on first use; NULL
-// when this Input keeps no external edges.
+// The edge list for `parent`'s structure in the tree's external table, made on
+// first use; NULL when this Input keeps no external edges.
 static TypeMapTransition** external_parent_edges(Input* input, const TypeMap* parent) {
     if (!input || !input->keeps_external_edges || !parent) return NULL;
     if (!input->external_edges) {
@@ -670,7 +829,7 @@ static TypeMapTransition** external_parent_edges(Input* input, const TypeMap* pa
             external_parent_edges_hash, external_parent_edges_compare, NULL, NULL);
         if (!input->external_edges) return NULL;
     }
-    ExternalParentEdges probe = {parent, NULL};
+    ExternalParentEdges probe = {external_parent_fingerprint(parent), NULL};
     const ExternalParentEdges* found =
         (const ExternalParentEdges*)hashmap_get(input->external_edges, &probe);
     if (found) return found->edges;
@@ -719,7 +878,8 @@ static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges
     // a far larger budget than an interior shape needs. Capping it at 16 let it
     // saturate after a few hundred objects, after which every map fell back to
     // a private shape and the sharing bought nothing.
-    const int MAX_SHAPE_TRANSITIONS = parent->length == 0 ? 256 : 16;
+    const int MAX_SHAPE_TRANSITIONS = shape_tree_fanout_cap(input, parent, external);
+    ShapeTreeStats* stats = shape_tree_stats_for(input);
     int transition_count = 0;
     for (TypeMapTransition* tr = *edges; tr; tr = tr->next) {
         transition_count++;
@@ -727,14 +887,35 @@ static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges
                 !transition_names_key(tr, k)) continue;
         if (external ? external_child_matches_parent(parent, tr->target)
                      : map_transition_prefix_matches_parent(parent, tr->target)) {
+            if (stats) {
+                shape_tree_stat_add(external ? &stats->external_hits : &stats->hits, 1);
+                shape_tree_stat_add(&stats->edges_walked, (uint64_t)transition_count);
+                shape_tree_stat_max(&stats->max_walk, (uint64_t)transition_count);
+            }
             if (out_entry) *out_entry = tr->target->last;
             return tr->target;
         }
     }
+    if (stats) {
+        shape_tree_stat_add(&stats->edges_walked, (uint64_t)transition_count);
+        shape_tree_stat_max(&stats->max_walk, (uint64_t)transition_count);
+    }
 
-    if (transition_count >= MAX_SHAPE_TRANSITIONS) return NULL;
+    if (transition_count >= MAX_SHAPE_TRANSITIONS) {
+        if (stats) {
+            shape_tree_stat_add(external ? &stats->external_declined_fanout
+                                         : &stats->declined_fanout, 1);
+            int bucket = transition_count <= 16 ? 0 : transition_count <= 64 ? 1
+                : transition_count <= 256 ? 2 : 3;
+            shape_tree_stat_add(&stats->decline_degree[bucket], 1);
+        }
+        return NULL;
+    }
     bool is_element = parent->type_id == LMD_TYPE_ELEMENT;
-    if (!transition_graph_has_room(input, is_element)) return NULL;
+    if (!transition_graph_has_room(input, is_element)) {
+        if (stats) shape_tree_stat_add(&stats->declined_budget, 1);
+        return NULL;
+    }
 
     // an element's node is a TypeElmt: its tag, id and namespace ride along
     TypeAlloc tree = input_tree_alloc(input);
@@ -834,6 +1015,11 @@ static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges
     arraylist_append(input->type_list, child);
     child->type_index = input->type_list->length - 1;
     transition_graph_count(input, is_element);
+    if (stats) {
+        shape_tree_stat_add(external ? &stats->external_mints : &stats->mints, 1);
+        shape_tree_stat_max(&stats->peak_nodes, (uint64_t)(input->shape_transition_shapes +
+            input->element_transition_shapes));
+    }
 
     TypeMapTransition* tr = (TypeMapTransition*)type_alloc_zeroed(tree,
         sizeof(TypeMapTransition));
@@ -1003,6 +1189,9 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
             }
         }
         // alloc map type and data chunk
+        if (ShapeTreeStats* stats = shape_tree_stats_for(input)) {
+            shape_tree_stat_add(&stats->private_types, 1);
+        }
         map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
         if (!map_type) { return; }
         map_type->js_meta = js_meta;
@@ -1024,6 +1213,9 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         }
         // transition lookup is the fast path; if no compatible transition
         // exists, clone before appending a new ShapeEntry to this map only.
+        if (ShapeTreeStats* stats = shape_tree_stats_for(input)) {
+            shape_tree_stat_add(&stats->private_types, 1);
+        }
         TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
         if (clone) map_type = clone;
     }

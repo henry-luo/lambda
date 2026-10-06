@@ -104,6 +104,9 @@ TypeMap* type_tree_add_map_field_chars(Input* input, TypeMap* parent,
                                        TypeId type_id, ShapeEntry** out_entry);
 // Whether `type` is a node of `input`'s transition tree.
 bool type_tree_owns(const Input* input, const TypeMap* type);
+// Impl_Map_Transition_Coverage P1.5: a runtime add that copied a whole shape
+// of `entries` fields onto a private type (counted under LAMBDA_SHAPE_TREE_STATS).
+void shape_tree_stats_note_private_copy(int64_t entries);
 
 #include "../io/mark_builder.hpp"
 
