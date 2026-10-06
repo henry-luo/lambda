@@ -65,3 +65,23 @@ so **S12.1.3** redraws cannot swallow a release after retiring the focused node.
 
 Visual direction: [the supplied Craiyon reference](https://www.craiyon.com/en/image/JOMP3bAxTRaKtFaOhYb0OQ).
 All SVG artwork in `assets/` was drawn for this demo.
+
+For performance measurements, build the optimized host with `make release`.
+Final measurements used an isolated release executable under `temp/`, so
+concurrent debug builds could not replace the benchmark host.
+The physics clock runs at 25 Hz. Radiant resolves SVG font metrics only for
+`ex` lengths and uses geometric clip intersections for sprite batches, avoiding
+repeated font-directory scans and full-surface alpha-mask composites.
+The SVG resource lifetime follows **D4.2.2v2–D4.2.6/D4.5.1v4**.
+
+A release replay of 240 separately painted frames at 1024 × 800 took 58.52 s
+before these changes and a median 5.88 s after them (three runs, about 10.0×
+faster). Each frame used a separate `advance_time` event of 40 ms and one step;
+a single event containing many steps only paints the final frame and is not a
+rendering benchmark. These timings include startup and replay overhead and
+are not a claim of 60 Hz gameplay. Logs and captures belong under `temp/`.
+
+A 10-second windowed release replay averaged 4.2 rendered frames/s before and
+44.1 after; median render time fell from 228.88 ms to 15.30 ms. The window can
+paint between physics steps, so rendered frames/s and the 25 Hz game clock are
+different measurements. Both windowed replays closed successfully.

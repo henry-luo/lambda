@@ -981,7 +981,8 @@ float svg_resolve_length_unit(float number, CssUnit unit,
     switch (unit) {
         case CSS_UNIT_NONE: case CSS_UNIT_PX: return number;
         case CSS_UNIT_EM: return number * context->font_size;
-        case CSS_UNIT_EX: return number * context->x_height;
+        case CSS_UNIT_EX: return number * (context->fonts
+            ? svg_font_x_height(context->fonts, &context->font) : context->x_height);
         case CSS_UNIT_PT: return number * (96.0f / 72.0f);
         case CSS_UNIT_PC: return number * 16.0f;
         case CSS_UNIT_IN: return number * 96.0f;
@@ -1219,11 +1220,20 @@ static FontStyleDesc svg_context_font_descriptor(SvgInlineRenderContext* ctx) {
     return descriptor;
 }
 
+static float svg_context_font_size(const char* value, FontContext* fonts,
+    const FontStyleDesc* parent) {
+    char* end = nullptr;
+    strtof(value, &end);
+    // absolute and em/% sizes do not need a font database lookup.
+    float x_height = strcmp(str_skip_ascii_space(end), "ex") == 0
+        ? svg_font_x_height(fonts, parent) : 0.0f;
+    return svg_font_size_value(value, parent->size_px, x_height);
+}
+
 static SvgLengthContext svg_length_context(SvgInlineRenderContext* ctx, Element* elem = nullptr) {
     FontStyleDesc descriptor = svg_context_font_descriptor(ctx);
     const char* own_size = elem ? svg_style_property_value(ctx, elem, "font-size") : nullptr;
-    if (own_size) descriptor.size_px = svg_font_size_value(own_size, descriptor.size_px,
-        svg_font_x_height(ctx->font_ctx, &descriptor));
+    if (own_size) descriptor.size_px = svg_context_font_size(own_size, ctx->font_ctx, &descriptor);
     const char* family = elem ? svg_style_property_value(ctx, elem, "font-family") : nullptr;
     if (family) descriptor.family = family;
     const char* weight = elem ? svg_style_property_value(ctx, elem, "font-weight") : nullptr;
@@ -1232,7 +1242,7 @@ static SvgLengthContext svg_length_context(SvgInlineRenderContext* ctx, Element*
     if (slant) descriptor.slant = strcmp(slant, "italic") == 0 ? FONT_SLANT_ITALIC
         : strcmp(slant, "oblique") == 0 ? FONT_SLANT_OBLIQUE : FONT_SLANT_NORMAL;
     return {ctx->current_viewport_w, ctx->current_viewport_h, descriptor.size_px,
-        svg_font_x_height(ctx->font_ctx, &descriptor)};
+        descriptor.size_px * 0.5f, ctx->font_ctx, descriptor};
 }
 
 static const char* svg_scratch_text(SvgInlineRenderContext* ctx, const char* start, size_t length) {
@@ -1341,8 +1351,7 @@ static void svg_apply_inherited_paint_attrs(SvgInlineRenderContext* ctx, Element
     if (stroke_opacity) ctx->stroke_opacity = clamp_unit(parse_svg_pct_or_num(stroke_opacity, 1.0f));
     FontStyleDesc parent_font = svg_context_font_descriptor(ctx);
     const char* size = svg_style_property_value(ctx, elem, "font-size");
-    if (size) ctx->inherited_font_size = svg_font_size_value(size, parent_font.size_px,
-        svg_font_x_height(ctx->font_ctx, &parent_font));
+    if (size) ctx->inherited_font_size = svg_context_font_size(size, ctx->font_ctx, &parent_font);
     const char* family = svg_style_property_value(ctx, elem, "font-family");
     if (family) ctx->inherited_font_family = lam::up(family);
     const char* weight = svg_style_property_value(ctx, elem, "font-weight");
@@ -4314,19 +4323,16 @@ static FontStyleDesc svg_text_font_descriptor(const SvgTextStyle* style, const c
 }
 
 static SvgLengthContext svg_text_length_context(SvgInlineRenderContext* ctx, const SvgTextStyle* style) {
-    SvgLengthContext lengths = {ctx->current_viewport_w, ctx->current_viewport_h,
-        style->font_size, style->font_size * 0.5f};
     FontStyleDesc descriptor = svg_text_font_descriptor(style);
-    lengths.x_height = svg_font_x_height(ctx->font_ctx, &descriptor);
-    return lengths;
+    return {ctx->current_viewport_w, ctx->current_viewport_h,
+        style->font_size, style->font_size * 0.5f, ctx->font_ctx, descriptor};
 }
 
 static void svg_text_style_apply(SvgInlineRenderContext* ctx, Element* elem, SvgTextStyle* style) {
     char buf[256];
     FontStyleDesc parent_font = svg_text_font_descriptor(style);
     const char* value = get_svg_attr_or_style(ctx, elem, "font-size", buf, sizeof(buf));
-    if (value) style->font_size = svg_font_size_value(value, style->font_size,
-        svg_font_x_height(ctx->font_ctx, &parent_font));
+    if (value) style->font_size = svg_context_font_size(value, ctx->font_ctx, &parent_font);
     else style->font_size = get_svg_number_attr(elem, "font-size", style->font_size);
     value = get_svg_attr_or_style(ctx, elem, "font-family", buf, sizeof(buf));
     if (value) str_copy(style->font_family, sizeof(style->font_family), value, strlen(value));
@@ -6539,6 +6545,8 @@ static void svg_filter_resolve_lengths(RdtSvgFilterHost* host, Element* element,
     // font-relative lengths use the declaration's current font; percentages use the referencing viewport (§9.4).
     lengths->font_size = declared.font_size;
     lengths->x_height = declared.x_height;
+    lengths->fonts = declared.fonts;
+    lengths->font = declared.font;
 }
 
 static void svg_filter_draw_image(SvgInlineRenderContext* ctx, Element* element, void* data) {

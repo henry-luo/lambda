@@ -331,6 +331,9 @@ struct SvgLengthContext {
     float viewport_height;
     float font_size;
     float x_height;
+    // resolve font metrics only when an ex length consumes this declaration.
+    FontContext* fonts = nullptr;
+    FontStyleDesc font = {};
 };
 SvgLengthContext dom_svg_length_context(DomElement* element);
 SvgLengthAxis dom_svg_length_axis(const char* name);
