@@ -11080,8 +11080,9 @@ static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_c
 }
 
 // D3.4.3v4: runtime-grown plain maps share their types through one transition
-// tree per context. It is a capsule extension rather than an EvalContext slot,
-// so the context layout that separately built modules read is unchanged.
+// tree per heap generation of a context. It is a capsule extension rather than
+// an EvalContext slot, so the context layout that separately built modules read
+// is unchanged.
 #define RUNTIME_SHAPE_TREE_OWNER 0x53485054u  // 'SHPT'
 // Every runtime-grown map shares this one tree, so its budget sits far above an
 // Input's 1,024 map types; past it a map keeps a private type (D3.4.3v4).
@@ -11095,19 +11096,27 @@ static void runtime_shape_tree_destroy(void* capsule) {
 }
 
 static const ContextCapsuleOps runtime_shape_tree_ops = {
-    "runtime_shape_tree", CONTEXT_CAPSULE_LIFETIME_CONTEXT, 0, NULL, NULL,
+    "runtime_shape_tree", CONTEXT_CAPSULE_LIFETIME_REALM, 0, NULL, NULL,
     runtime_shape_tree_destroy
 };
 
-static Input* runtime_shape_tree(void) {
+void runtime_shape_tree_release(EvalContext* owner) {
+    // LR03-43: the tree's edges and entries carry NameIds of the runtime name
+    // pool, and every map on a tree node lives on the heap, so the tree ends
+    // with that heap generation. Kept across runtime_reset_heap, the next
+    // pool's recycled ids matched stale edges: a batch script's group-by
+    // `region` followed the previous script's `r` edge.
+    context_capsule_extensions_drop_owner(owner, RUNTIME_SHAPE_TREE_OWNER);
+}
+
+Input* runtime_shape_tree(void) {
     if (!context) return NULL;
     Input* tree = (Input*)context_capsule_extension(context, RUNTIME_SHAPE_TREE_OWNER, 0);
     if (tree) return tree;
-    // The capsule outlives heap replacement (CONTEXT lifetime), so the Input
-    // cannot live in context->pool: that is the heap's pool, and a heap reset
-    // between evaluations (runtime_reset_heap, test-batch) ran the Input's pool
-    // cleanup and freed its struct while the capsule still pointed at it. The
-    // tree owns a pool of its own, as InputManager's global_pool does.
+    // The tree owns a pool of its own, as InputManager's global_pool does, so
+    // its teardown is the capsule's alone: in context->pool (the heap's pool) a
+    // heap reset ran the Input's pool cleanup and freed its struct while the
+    // capsule still pointed at it.
     Pool* tree_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "runtime.shape_tree.pool");
     if (!tree_pool) return NULL;
     tree = Input::create(tree_pool, nullptr, nullptr);
@@ -11122,6 +11131,16 @@ static Input* runtime_shape_tree(void) {
     // types too, through edges this tree keeps in its own table
     tree->keeps_external_edges = true;
     return tree;
+}
+
+// Impl_Map_Transition_Coverage P3: the runtime tree's root for elements of one
+// tag, so runtime-built elements (group-by groups, join tuples) start on a
+// shared node; NULL keeps the caller on a private type.
+TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target* ns) {
+    Input* tree = runtime_shape_tree();
+    if (!tree || !tree->name_pool || !tag) return NULL;
+    String* name = name_pool_create_len(tree->name_pool, tag, length);
+    return name ? elmt_tree_root(tree, name, ns) : NULL;
 }
 
 // D3.4.3v5: an add to a plain map or an element follows (or mints) an edge of

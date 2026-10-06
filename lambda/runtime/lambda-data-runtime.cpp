@@ -2152,6 +2152,29 @@ static int group_compare_entry(const void* a, const void* b, void* udata) {
     return lambda_item_compare(ea->key, eb->key);
 }
 
+// Impl_Map_Transition_Coverage P3: a runtime-built element of a fixed tag (a
+// group-by group, a join tuple) starts on that tag's root in the runtime shape
+// tree, so elements with the same attributes share one type instead of each
+// minting its own. Without a tree it keeps a private type; its tag is a
+// literal, never a raw chars pointer into an otherwise unowned GC String.
+static TypeElmt* runtime_element_type(const char* tag, size_t length) {
+    if (TypeElmt* root = runtime_shape_tree_element_root(tag, length, NULL)) return root;
+    TypeElmt* type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT,
+        sizeof(TypeElmt));
+    if (!type) return NULL;
+    type->name.str = tag;
+    type->name.length = length;
+    return type;
+}
+
+// One attribute through fn_map_set's growth path, which follows the runtime
+// tree from a tree-owned type, updates a name the element already holds, and
+// stores a list as its array image (S2.5.6), as every attribute write does.
+static void runtime_element_put(Element* element, String* key, Item value) {
+    if (!element || !key) return;
+    fn_map_set((Item){.element = element}, (Item){.item = s2it(key)}, value);
+}
+
 static Item group_key_part(Item key, int64_t index, int64_t alias_count) {
     if (alias_count == 1) return key;
     if (get_type_id(key) == LMD_TYPE_ARRAY) return item_at(key, index);
@@ -2229,18 +2252,13 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
         Element* group = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
         group->type_id = LMD_TYPE_ELEMENT;
         rooted_group.set(group);
-        TypeElmt* group_type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        // The fixed tag belongs to type metadata; a literal avoids a dangling
-        // raw chars pointer into an otherwise unowned GC String.
-        group_type->name.str = "group";
-        group_type->name.length = 5;
         group = rooted_group.get();
-        group->type = group_type;
+        group->type = runtime_element_type("group", 5);
+        if (!group->type) return rooted_out.get();
 
         for (int64_t k = 0; k < alias_count; k++) {
             String* attr = heap_create_name(aliases[k]);
-            group = rooted_group.get();
-            elmt_put(group, attr, group_key_part(entry_key, k, alias_count), active_runtime->pool);
+            runtime_element_put(rooted_group.get(), attr, group_key_part(entry_key, k, alias_count));
         }
         for (int64_t m = 0; members && m < members->length; m++) {
             // S14.1.1/S2.6.4: group members are element content, so adjacent strings merge.
@@ -2337,13 +2355,8 @@ static Element* join_tuple_extend(Item prior_tuple, String* name, Item value,
     rooted_out.set(join_tuple_new());
     if (!rooted_out.get()) return NULL;
 
-    TypeElmt* tuple_type = (TypeElmt*)alloc_type(active_runtime->pool,
-        LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    TypeElmt* tuple_type = runtime_element_type("tuple", 5);
     if (!tuple_type) return NULL;
-    // The fixed tag belongs to pooled type metadata; do not retain a raw
-    // chars pointer from a transient scalar allocation.
-    tuple_type->name.str = "tuple";
-    tuple_type->name.length = 5;
     rooted_out.get()->type = tuple_type;
 
     if (get_type_id(rooted_prior_tuple.get()) != LMD_TYPE_NULL) {
@@ -2354,15 +2367,14 @@ static Element* join_tuple_extend(Item prior_tuple, String* name, Item value,
             if (!sym) continue;
             Item attr = item_attr(rooted_prior_tuple.get(), sym->chars);
             // Join tuple maps are freshly materialized so later phases can bind names by normal member lookup.
-            elmt_put(rooted_out.get(), heap_create_name(sym->chars, sym->len), attr,
-                active_runtime->pool);
+            runtime_element_put(rooted_out.get(), heap_create_name(sym->chars, sym->len), attr);
         }
         if (keys) symbol_key_list_free(keys);
     }
-    if (name) elmt_put(rooted_out.get(), name, rooted_value.get(), active_runtime->pool);
+    if (name) runtime_element_put(rooted_out.get(), name, rooted_value.get());
     // Index/key bindings (e.g. the `i` in `for (i, o in ...)`) travel in the tuple alongside values,
     // so joined/cross-product rows keep their position/key binding available in the body.
-    if (idx_name) elmt_put(rooted_out.get(), idx_name, rooted_idx_value.get(), active_runtime->pool);
+    if (idx_name) runtime_element_put(rooted_out.get(), idx_name, rooted_idx_value.get());
     return rooted_out.get();
 }
 

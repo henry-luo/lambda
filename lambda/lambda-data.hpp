@@ -1617,6 +1617,15 @@ typedef struct Input {
                                            NamePool* name_parent = nullptr);
 } Input;
 
+// D3.4.3v4/v5: the evaluation context's runtime shape tree (a capsule of the
+// Runtime's canonical EvalContext); NULL outside an evaluation.
+Input* runtime_shape_tree(void);
+// Drops that tree with its heap generation: after heap teardown, before the
+// runtime name pool its NameIds index is released.
+void runtime_shape_tree_release(EvalContext* owner);
+// Impl_Map_Transition_Coverage P3: that tree's root for elements of one tag.
+TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target* ns);
+
 #ifdef __cplusplus
 extern "C" {
 #endif

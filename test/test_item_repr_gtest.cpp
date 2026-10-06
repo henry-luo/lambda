@@ -760,6 +760,15 @@ TEST_F(RuntimeShapeTransition, MatchResultsDoNotExtendCompilerTypeList) {
         EXPECT_FALSE(type_tree_owns(&input, (TypeMap*)match.map->type));
     }
     EXPECT_EQ(input.type_list->length, source_type_count);
+    // Impl_Map_Transition_Coverage P3: every match map of one field list shares
+    // the runtime tree's node, rather than minting a TypeMap per match
+    EXPECT_EQ(matches.array->items[0].map->type, matches.array->items[1].map->type);
+    Item again = fn_find2({.item = s2it(source)}, {.item = s2it(needle)});
+    ASSERT_EQ(get_type_id(again), LMD_TYPE_ARRAY);
+    EXPECT_EQ(again.array->items[0].map->type, matches.array->items[0].map->type);
+    if (Input* tree = runtime_shape_tree()) {
+        EXPECT_TRUE(type_tree_owns(tree, (TypeMap*)matches.array->items[0].map->type));
+    }
 }
 
 TEST_F(RuntimeShapeTransition, ObjectShapeMutationRebuildsPackedFields) {

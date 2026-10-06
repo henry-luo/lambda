@@ -3212,6 +3212,7 @@ void runtime_reset_heap(Runtime* runtime) {
         heap_destroy();
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
+        runtime_shape_tree_release(cleanup_context);
         // D4.2.1v2/RN-NamePool: GC finalizers may still inspect NameRecords;
         // release the dedicated runtime pool only after heap destruction.
         if (runtime_name_pool(runtime)) {
@@ -3362,6 +3363,7 @@ void runtime_cleanup(Runtime* runtime) {
         heap_destroy();
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
+        runtime_shape_tree_release(cleanup_context);
         // D4.2.1v2/RN-NamePool: GC finalizers can traverse name-backed
         // shapes, so the dedicated runtime pool outlives heap teardown.
         if (runtime_name_pool(runtime)) {
