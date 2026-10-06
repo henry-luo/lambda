@@ -1,0 +1,28 @@
+"packages:"
+["amsmath", "amssymb", "graphicx", "hyperref", "xcolor", "booktabs", "enumitem", "siunitx", "tikz", "geometry", "biblatex", "microtype"]
+"diagnostics:"
+[]
+"mixed color:"
+true
+"scoped color:"
+true
+"number:"
+true
+"quantity:"
+true
+"uncertainty:"
+true
+"scientific:"
+true
+"decimal column:"
+true
+"shared width:"
+true
+"bibliography:"
+true
+"alignment:"
+true
+"list start:"
+true
+"no empty list item:"
+true

@@ -3,10 +3,10 @@
 8
 "=== Rendering ===<div class="latex-output"><article class="latex-document latex-article"><p> </p><header class="latex-title"><div class="title">Hello World</div><div class="author">Test Author</div></header><p> </p><h2 id="introduction"><span class="sec-num">1 </span>Introduction</h2><p>
 This is a <strong>bold</strong> and <em>italic</em> test.
-Here is some <code class="latex-code">inline code</code>.</p><p>A second paragraph with a footnote<sup class="latex-footnote-ref"><a href="#fn-1" id="fnref-1">1</a></sup>.</p><h3 id="lists"><span class="sec-num">1.1 </span>Lists</h3><p> </p><ul class="latex-itemize"><li> </li><li> First item
+Here is some <code class="latex-code">inline code</code>.</p><p>A second paragraph with a footnote<sup class="latex-footnote-ref"><a href="#fn-1" id="fnref-1">1</a></sup>.</p><h3 id="lists"><span class="sec-num">1.1 </span>Lists</h3><p> </p><ul class="latex-itemize"><li> First item
 </li><li> Second item
 </li><li> Third item
-</li></ul><ol class="latex-enumerate"><li> </li><li> Alpha
+</li></ul><ol class="latex-enumerate"><li> Alpha
 </li><li> Beta
 </li><li> Gamma
 </li></ol><h3 id="math"><span class="sec-num">1.2 </span>Math</h3><p>

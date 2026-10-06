@@ -5,7 +5,7 @@ fn tracking_value(raw) {
     if (raw == null or raw == "false" or raw == "0") null
     else if (raw == "true") "0.005em"
     else {
-        let value = float(raw)
+        let value = float(raw) ^ { null }
         if (value == null) null else string(value / 1000.0) ++ "em"
     }
 }
@@ -30,10 +30,10 @@ pub fn stylesheet(opts) {
             ".latex-document{word-spacing:0.01em;}\n" else "")
 }
 
-pub fn unsupported(opts) {
+pub fn unsupported(opts, offset) {
     if (opts == null) []
     else [for (key in ["protrusion", "expansion"]
           where util.option_enabled(opts[key]))
         util.diagnostic("unsupported-microtype-feature", "microtype", key,
-            "Exact microtype " ++ key ++ " is unavailable; CSS spacing only", null)]
+            "Exact microtype " ++ key ++ " is unavailable; CSS spacing only", offset)]
 }

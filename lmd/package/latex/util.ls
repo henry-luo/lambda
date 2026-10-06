@@ -325,21 +325,20 @@ pub fn unsupported_element(package, message, offset) {
         'data-latex-offset': offset, 'data-latex-package': package, message>
 }
 
-pub fn diagnostic(code, package, item, message, offset) {
+pub fn diagnostic(code, package, item, message, offset) map =>
     {code: code, package: package, item: item, message: message, offset: offset}
-}
 
 // TeX pt is 1/72.27 inch; CSS pt is 1/72 inch.
 let DIMENSION_UNITS = [
-    {suffix: "mm", factor: 1.0, css: "mm"},
-    {suffix: "cm", factor: 1.0, css: "cm"},
-    {suffix: "in", factor: 1.0, css: "in"},
-    {suffix: "px", factor: 1.0, css: "px"},
-    {suffix: "em", factor: 1.0, css: "em"},
-    {suffix: "ex", factor: 1.0, css: "ex"},
-    {suffix: "bp", factor: 1.0, css: "pt"},
-    {suffix: "pt", factor: 72.0 / 72.27, css: "pt"},
-    {suffix: "pc", factor: 12.0 * 72.0 / 72.27, css: "pt"}
+    {suffix: "mm", factor: 1.0, css: "mm", pixels: 96.0 / 25.4},
+    {suffix: "cm", factor: 1.0, css: "cm", pixels: 96.0 / 2.54},
+    {suffix: "in", factor: 1.0, css: "in", pixels: 96.0},
+    {suffix: "px", factor: 1.0, css: "px", pixels: 1.0},
+    {suffix: "em", factor: 1.0, css: "em", pixels: null},
+    {suffix: "ex", factor: 1.0, css: "ex", pixels: null},
+    {suffix: "bp", factor: 1.0, css: "pt", pixels: 96.0 / 72.0},
+    {suffix: "pt", factor: 72.0 / 72.27, css: "pt", pixels: 96.0 / 72.27},
+    {suffix: "pc", factor: 12.0 * 72.0 / 72.27, css: "pt", pixels: 12.0 * 96.0 / 72.27}
 ]
 
 pub fn css_dimension(raw) {
@@ -360,7 +359,7 @@ fn css_relative_at(source, names, i) {
     if (i >= len(names)) null
     else if (ends_with(source, names[i])) {
         let prefix = trim(slice(source, 0, len(source) - len(names[i])))
-        let factor = if (prefix == "") 1.0 else float(prefix)
+        let factor = if (prefix == "") 1.0 else float(prefix) ^ { null }
         if (factor == null) null else string(factor * 100.0) ++ "%"
     } else css_relative_at(source, names, i + 1)
 }
@@ -371,9 +370,28 @@ fn css_dimension_at(source, i) {
         let unit = DIMENSION_UNITS[i]
         if (ends_with(source, unit.suffix)) {
             let digits = slice(source, 0, len(source) - len(unit.suffix))
-            let number = float(digits)
-            if (number == null) null else string(number * unit.factor) ++ unit.css
+            let value = float(digits) ^ { null }
+            if (value == null) null else string(value * unit.factor) ++ unit.css
         } else css_dimension_at(source, i + 1)
+    }
+}
+
+// Raster and vector clip paths currently parse px/% lengths; convert TeX absolute units once.
+pub fn css_pixel_dimension(raw) {
+    let source = trim(raw)
+    if (source == "0") "0px" else css_pixel_dimension_at(source, 0)
+}
+
+fn css_pixel_dimension_at(source, i) {
+    if (i >= len(DIMENSION_UNITS)) null
+    else {
+        let unit = DIMENSION_UNITS[i]
+        if (ends_with(source, unit.suffix)) {
+            let digits = slice(source, 0, len(source) - len(unit.suffix))
+            let value = float(digits) ^ { null }
+            if (value == null or unit.pixels == null) null
+            else string(value * unit.pixels) ++ "px"
+        } else css_pixel_dimension_at(source, i + 1)
     }
 }
 

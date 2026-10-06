@@ -1,0 +1,14 @@
+\documentclass{article}
+\usepackage{amsmath,hyperref}
+\DeclareMathOperator{\foo}{Foo}
+\begin{document}
+\begin{align}
+a &= b\label{eq:first}\\
+c &= d\notag\\
+e &= f\tag{Special}\label{eq:special}
+\end{align}
+\begin{equation*}
+g = \foo(x)\tag*{Proof}
+\end{equation*}
+See \ref{eq:first} and \autoref{eq:special}.
+\end{document}

@@ -9,6 +9,8 @@ import dc_book: .docclass.book
 import dc_report: .docclass.report
 import color: .elements.color
 import enumitem: .packages.enumitem
+import amsmath: .packages.amsmath
+import registry: .packages.registry
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -19,8 +21,11 @@ fn add_entry(entries, k, v) {
 // Public API
 // ============================================================
 
-pub fn analyze(ast) {
+pub fn analyze(ast) => analyze_with_packages(ast, [])
+
+pub fn analyze_with_packages(ast, packages) {
     let st = {
+        packages: packages,
         docclass: "article",
         title: null,
         title_el: null,
@@ -46,13 +51,18 @@ pub fn analyze(ast) {
         theorems: [],
         bibitems: [],
         equation_nums: [],
+        amsmath_numbers: [],
         enumerate_starts: [],
-        last_enumerate_end: 0,
+        last_enumerate_by_depth: [],
+        list_depth: 0,
         slug_counts: [],
         in_appendix: false,
         secnumdepth: 3,
         custom_colors: [],
+        analysis_colors: [],
+        page_color: null,
         theorem_defs: [],
+        in_body: false,
         env_context: "section",
         env_context_num: ""
     }
@@ -78,9 +88,11 @@ pub fn analyze(ast) {
         theorems: result.theorems,
         bibitems: result.bibitems,
         equation_nums: result.equation_nums,
+        amsmath_numbers: result.amsmath_numbers,
         enumerate_starts: result.enumerate_starts,
         secnumdepth: result.secnumdepth,
         custom_colors: result.custom_colors,
+        page_color: result.page_color,
         theorem_defs: result.theorem_defs
     }
 }
@@ -103,6 +115,7 @@ fn walk_element(el, st) {
         case 'title': walk_title(el, st)
         case 'author': walk_author(el, st)
         case 'date': walk_date(el, st)
+        case 'document': walk_children(el, 0, len(el), {*:st, in_body: true})
 
         // ---- sections ----
         case 'part': walk_heading(el, st, "part", 0)
@@ -130,6 +143,8 @@ fn walk_element(el, st) {
 
         // ---- list counters ----
         case 'enumerate': walk_enumerate(el, st)
+        case 'itemize': walk_nonnumbered_list(el, st)
+        case 'description': walk_nonnumbered_list(el, st)
 
         // ---- theorem-like environments ----
         // check custom \newtheorem defs first (for shared counters, starred variants)
@@ -151,6 +166,7 @@ fn walk_element(el, st) {
 
         // ---- color definitions ----
         case 'definecolor': walk_definecolor(el, st)
+        case 'pagecolor': walk_pagecolor(el, st)
 
         // ---- \newtheorem definitions ----
         case 'newtheorem': walk_newtheorem(el, st)
@@ -291,6 +307,11 @@ fn walk_table(el, st) {
 }
 
 fn walk_equation(el, st) {
+    if (registry.active(st.packages, "amsmath")) walk_amsmath(el, st)
+    else walk_legacy_equation(el, st)
+}
+
+fn walk_legacy_equation(el, st) {
     let new_counters = step_counter(st.counters, "equation")
     let eq_num = new_counters.equation
     let numbers = if (el.source_offset != null)
@@ -299,6 +320,36 @@ fn walk_equation(el, st) {
         equation_nums: numbers,
         env_context: "equation", env_context_num: string(eq_num)}
     walk_children(el, 0, len(el), new_state)
+}
+
+fn walk_amsmath_rows(rows, i, st, numbered, entries) {
+    if (i >= len(rows)) {state: st, entries: entries}
+    else {
+        let row = rows[i]
+        let automatic = numbered and not row.suppress
+        let counters = if (automatic) step_counter(st.counters, "equation") else st.counters
+        let display = if (row.tag != null) row.tag
+            else if (automatic) string(counters.equation) else null
+        let labels = if (row.label != null)
+            add_entry(st.labels, row.label,
+                {type: "equation", number: if (display != null) display else "",
+                 id: util.slugify(row.label), title: null})
+            else st.labels
+        let next = {*:st, counters: counters, labels: labels}
+        walk_amsmath_rows(rows, i + 1, next, numbered,
+            entries ++ [{display: display, bare_tag: row.bare_tag}])
+    }
+}
+
+fn walk_amsmath(el, st) {
+    let tag = string(name(el))
+    let numbered = not ends_with(tag, "*") and tag != "aligned" and tag != "split"
+    let rows = amsmath.rows_for(el)
+    let folded = walk_amsmath_rows(rows, 0, st, numbered, [])
+    let stored = if (el.source_offset != null)
+        add_entry(folded.state.amsmath_numbers, string(el.source_offset), folded.entries)
+        else folded.state.amsmath_numbers
+    {*:folded.state, amsmath_numbers: stored}
 }
 
 fn count_list_items(node) {
@@ -319,14 +370,24 @@ fn count_list_items_children(node, i) {
 fn walk_enumerate(el, st) {
     let opts = enumitem.options(el)
     let explicit = enumitem.start(opts)
+    let depth = st.list_depth + 1
+    let prior = util.lookup(st.last_enumerate_by_depth, string(depth))
     let first = if (explicit != null) explicit
-        else if (util.option_enabled(opts.resume)) st.last_enumerate_end + 1 else 1
+        else if (util.option_enabled(opts.resume) and prior != null) prior + 1 else 1
     let starts = if (el.source_offset != null)
         add_entry(st.enumerate_starts, string(el.source_offset), first)
         else st.enumerate_starts
-    let walked = walk_children(el, 0, len(el), {*:st, enumerate_starts: starts})
-    // nested lists may run during the walk; resume at this level uses this list's last item.
-    {*:walked, last_enumerate_end: first + count_list_items_children(el, 0) - 1}
+    let walked = walk_children(el, 0, len(el), {*:st, enumerate_starts: starts,
+        list_depth: depth})
+    // restore the parent depth after nested lists and record only direct items.
+    {*:walked, list_depth: st.list_depth,
+        last_enumerate_by_depth: add_entry(walked.last_enumerate_by_depth,
+            string(depth), first + count_list_items_children(el, 0) - 1)}
+}
+
+fn walk_nonnumbered_list(el, st) {
+    let walked = walk_children(el, 0, len(el), {*:st, list_depth: st.list_depth + 1})
+    {*:walked, list_depth: st.list_depth}
 }
 
 fn walk_numbered_env(el, st, env_type) {
@@ -398,18 +459,19 @@ fn walk_setcounter(el, st) {
 }
 
 fn walk_definecolor(el, st) {
-    // children: [name, model, spec]
-    let args = util.command_args(el)
-    let n = len(args)
-    if (n >= 3) {
-        let cname = trim(util.text_of(args[0]))
-        let model = trim(util.text_of(args[1]))
-        let spec = trim(util.text_of(args[2]))
-        let css = color.parse_definecolor(cname, model, spec).css_color
-        let new_colors = add_entry(st.custom_colors, cname, css)
-        {*:st, custom_colors: new_colors}
+    let definition = color.definition(el)
+    if (definition.color_name == "") st
+    else {
+        let colors = add_entry(st.analysis_colors, definition.color_name,
+            color.definition_value(definition))
+        {*:st, analysis_colors: colors,
+            custom_colors: if (st.in_body) st.custom_colors else colors}
     }
-    else { st }
+}
+
+fn walk_pagecolor(el, st) {
+    let css = color.page_color(el, st.analysis_colors)
+    if (css == null) st else {*:st, page_color: css}
 }
 
 // ============================================================
@@ -474,7 +536,9 @@ fn get_newthm_child_text(el, idx) {
 fn walk_default(el, tag, st) {
     let tag_str = string(tag)
     let thm_def = util.lookup(st.theorem_defs, tag_str)
-    if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
+    if (registry.active(st.packages, "amsmath") and amsmath.is_environment(tag_str))
+        walk_amsmath(el, st)
+    else if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
     else { walk_children(el, 0, len(el), st) }
 }
 

@@ -48820,7 +48820,7 @@ Input* run_lambda_document_transform_with_options(Runtime* runtime,
         output->root = document.get();
         return output;
     }
-    if (option_count > 0) {
+    if (option_count > 0 || transform->source == LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED) {
         option_map.set(vmap_new());
         if (get_type_id(option_map.get()) != LMD_TYPE_VMAP) {
             log_error("document-transform: could not create transform options");
@@ -48847,6 +48847,17 @@ Input* run_lambda_document_transform_with_options(Runtime* runtime,
             if (item_is_error(vmap_set(option_map.get(), option_name.get(),
                     option_value.get()))) {
                 log_error("document-transform: could not set transform option '%s'", option->name);
+                output->root = ItemError;
+                return output;
+            }
+        }
+        if (transform->source == LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED) {
+            // parsed document adapters need the original path to resolve local resources.
+            option_name.set((Item){.item = s2it(heap_strcpy("source_path", 11))});
+            option_value.set(target.get());
+            if (item_is_error(vmap_set(option_map.get(), option_name.get(),
+                    option_value.get()))) {
+                log_error("document-transform: could not set source_path");
                 output->root = ItemError;
                 return output;
             }

@@ -8,6 +8,7 @@
 // `items[]`/`data` pointer may ever be cached across an allocating call.
 
 #include "interp.hpp"
+#include "compiler_worker_stack.h"
 #include "lambda-root-frame.hpp"
 #include "write_set.hpp"
 #include "runtime-state.h"
@@ -104,7 +105,9 @@ static int interp_satellite_pool_workers(void) {
 }
 
 static void interp_satellite_pool_init_once(void) {
-    g_interp_satellite_pool = tp_create(interp_satellite_pool_workers());
+    // macOS's default worker stack is too small for recursive MIR lowering.
+    g_interp_satellite_pool = tp_create_with_stack(interp_satellite_pool_workers(),
+        LAMBDA_COMPILER_WORKER_STACK_BYTES);
     if (!g_interp_satellite_pool) {
         log_error("interp-tier: could not create the satellite compiler pool");
     }

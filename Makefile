@@ -97,6 +97,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_js_regex_router_poc_gtest \
 	test_js_coerce_gtest \
 	test_lambda_std_gtest \
+	test_io_terminal_gtest \
 	test_ts_gtest
 # test-input-baseline invokes these five binaries directly, so keep their
 # build separate from the full test aggregate and reusable by both targets.

@@ -39,9 +39,9 @@ pub fn stylesheet(settings) {
     } else ""
 }
 
-pub fn output_diagnostics(settings, target) {
+pub fn output_diagnostics(settings, target, offset) {
     if (settings != null and target == "pdf")
         [util.diagnostic("unsupported-pdf-links", "hyperref", "annotations",
-          "PDF link annotations, outlines and metadata are unavailable", null)]
+          "PDF link annotations, outlines and metadata are unavailable", offset)]
     else []
 }

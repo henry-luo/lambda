@@ -20,4 +20,4 @@ false
 'span'
 "34. wrap color class:latex-color35. wrap color has style:"
 true
-"36. rgb model:rgb(255,127,0)37. RGB model:rgb(255,128,0)===== ALL COLOR TESTS DONE ====="
+"36. rgb model:rgb(255,128,0)37. RGB model:rgb(255,128,0)===== ALL COLOR TESTS DONE ====="

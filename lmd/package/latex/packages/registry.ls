@@ -3,6 +3,7 @@ import util: ~~.util
 import graphicx: .graphicx
 import enumitem: .enumitem
 import xcolor: .xcolor
+import color: ~~.elements.color
 import geometry: .geometry
 import microtype: .microtype
 
@@ -35,6 +36,11 @@ pub fn options_for(packages, name) {
     util.lookup(packages, canonical(name))
 }
 
+pub fn offset_for(packages, name) {
+    let matching = [for (entry in packages where entry.key == canonical(name)) entry.offset]
+    if (len(matching) == 0) null else matching[0]
+}
+
 pub fn package_for_command(command, packages) {
     let owner = if (command == "DeclareMathOperator" or command == "tag" or
                     command == "tag*" or command == "numberwithin") "amsmath"
@@ -49,12 +55,12 @@ pub fn package_for_command(command, packages) {
 }
 
 fn diagnostic(code, package, item, message, node) {
-    util.diagnostic(code, package, item, message,
-        if (node != null) node.source_offset else null)
+    let offset = if (node is element) node.source_offset else null
+    util.diagnostic(code, package, item, message, offset)
 }
 
 fn check_options(package, opts, node) {
-    let desc = CATALOG[package]
+    let desc = CATALOG[package];
     [for (key, value at opts
           where not any([for (allowed in desc.options) string(key) == allowed]))
         diagnostic("unsupported-option", package, string(key),
@@ -77,8 +83,19 @@ fn add_package(st, raw_name, opts, node) {
             option_issues("geometry", geometry.invalid_options(opts), node)
             else if (package == "microtype")
                 option_issues("microtype", microtype.invalid_options(opts), node)
+            else if (package == "biblatex") {
+                let style = if (opts.style != null) opts.style else "numeric"
+                let sorting = if (opts.sorting != null) opts.sorting else "nty";
+                (if (style != "numeric")
+                    [diagnostic("unsupported-bib-style", "biblatex", style,
+                        "Unsupported biblatex style " ++ style, node)] else []) ++
+                (if (sorting != "nty" and sorting != "none")
+                    [diagnostic("unsupported-bib-sorting", "biblatex", sorting,
+                        "Unsupported biblatex sorting " ++ sorting, node)] else [])
+            }
             else []
-        {*:st, packages: st.packages ++ [{key: package, val: opts}],
+        {*:st, packages: st.packages ++ [{key: package, val: opts,
+            offset: if (node is element) node.source_offset else null}],
          diagnostics: st.diagnostics ++ check_options(package, opts, node) ++ value_issues}
     }
 }
@@ -123,7 +140,7 @@ fn scan(node, packages, outside_body) {
     else {
         let tag = string(name(node))
         let owner = package_for_command(tag, packages)
-        let own = if (outside_body and owner != "latex")
+        let own = if (outside_body and owner != "latex" and tag != "DeclareMathOperator")
             [diagnostic("unsupported-command", owner, tag,
                 "Unsupported " ++ owner ++ " command: " ++ tag, node)]
         else if (tag == "includegraphics" and active(packages, "graphicx"))
@@ -135,6 +152,10 @@ fn scan(node, packages, outside_body) {
                  not xcolor.supported_model(trim(util.text_of_child(node, 1))))
             [diagnostic("unsupported-color-model", "xcolor", util.text_of_child(node, 1),
                 "Unsupported xcolor model: " ++ util.text_of_child(node, 1), node)]
+        else if (tag == "definecolor" and active(packages, "xcolor") and
+                 color.definition(node).css_color == null)
+            [diagnostic("invalid-color", "xcolor", util.text_of_child(node, 2),
+                "Invalid xcolor definition", node)]
         else if ((tag == "textcolor" or tag == "colorbox" or tag == "fcolorbox" or
                   tag == "color" or tag == "pagecolor") and active(packages, "xcolor") and
                  util.optional_raw(node) != null and
@@ -147,10 +168,6 @@ fn scan(node, packages, outside_body) {
         else if ((tag == "printbibliography" or tag == "addbibresource") and
                  active(packages, "biblatex") and util.optional_raw(node) != null)
             option_issues("biblatex", [tag ++ " options"], node)
-        else if (tag == "tabular" and active(packages, "siunitx") and
-                 node.columns != null and index_of(node.columns, "S") != null)
-            [diagnostic("unsupported-s-column", "siunitx", "S",
-                "Measured siunitx S columns are not supported", node)]
         else if (tag == "hypersetup" and active(packages, "hyperref")) {
             let stored = util.raw_argument(node, "required", 0)
             let raw = if (stored != null) stored else util.text_of(node)
@@ -206,8 +223,8 @@ pub fn reference_diagnostics(node, labels, bibitems, packages) {
                     if (active(packages, "hyperref")) "hyperref" else "latex", key,
                     "Unresolved reference " ++ key, node)]
             else []
-        } else if (tag == "cite") {
-            let keys = util.split_top_level(trim(util.text_of_skip_brack(node)), ",")
+        } else if (tag == "cite" or tag == "parencite" or tag == "textcite") {
+            let keys = util.split_top_level(trim(util.text_of_skip_brack(node)), ",");
             [for (key in keys
                   where not any([for (entry in bibitems) entry.key == trim(key)]))
                 diagnostic("unresolved-citation",

@@ -1,0 +1,28 @@
+\documentclass{article}
+\usepackage{xcolor,enumitem,graphicx,biblatex}
+\usepackage[style=alphabetic]{biblatex}
+\usepackage{unknownpkg}
+\addbibresource{missing.bib}
+\definecolor{broken}{RGB}{999,1,2}
+\pagecolor{white}
+\begin{document}
+\textcolor{red!oops!blue}{Invalid mix}
+\textcolor{broken}{Invalid definition}
+\begin{enumerate}[start=1,itemsep=2pt,topsep=4pt]
+\item First
+\begin{enumerate}[start=8]
+\item Nested
+\end{enumerate}
+\item Second
+\end{enumerate}
+\begin{enumerate}[resume,nosep]
+\item Third
+\end{enumerate}
+\includegraphics[width=bad]{missing.png}
+\includegraphics{missing.png}
+\includegraphics{diagram.eps}
+\cite{missing}
+\ref{missing}
+\unknowncommand{content}
+\usepackage{geometry}
+\end{document}

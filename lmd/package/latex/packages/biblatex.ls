@@ -54,13 +54,13 @@ fn parse_entries(text, from, acc) {
         let brace = index_of(tail, "{")
         if (brace == null) acc
         else {
-            let open = at + 1 + brace
-            let close = matching_brace(text, open, 0, false)
-            if (close == null) acc
+            let entry_open = at + 1 + brace
+            let entry_close = matching_brace(text, entry_open, 0, false)
+            if (entry_close == null) acc
             else {
-                let kind = lower(trim(slice(text, at + 1, open)))
-                let entry = parse_entry(slice(text, open + 1, close), kind)
-                parse_entries(text, close + 1, if (entry != null) acc ++ [entry] else acc)
+                let kind = lower(trim(slice(text, at + 1, entry_open)))
+                let entry = parse_entry(slice(text, entry_open + 1, entry_close), kind)
+                parse_entries(text, entry_close + 1, if (entry != null) acc ++ [entry] else acc)
             }
         }
     }
@@ -69,18 +69,19 @@ fn parse_entries(text, from, acc) {
 fn resources(node) {
     if (not (node is element)) []
     else if (string(name(node)) == "addbibresource")
-        [trim(util.text_of_skip_brack(node))]
+        [{source: trim(util.text_of_skip_brack(node)), offset: node.source_offset}]
     else [for (child in node, resource in resources(child)) resource]
 }
 
 fn load_one(resource, base_uri) {
-    let path = if (base_uri == null or starts_with(resource, "/")) resource
-        else paths.resolve_path(base_uri, resource)
+    let path = if (base_uri == null or starts_with(resource.source, "/")) resource.source
+        else paths.resolve_path(base_uri, resource.source)
     let source = input(path, "text") ^ { null }
     if (source == null)
         {entries: [], diagnostics: [util.diagnostic("missing-bib-resource", "biblatex",
-            resource, "Cannot read bibliography resource " ++ path, null)]}
-    else {entries: parse_entries(source, 0, []), diagnostics: []}
+            resource.source, "Cannot read bibliography resource " ++ path, resource.offset)]}
+    else {entries: [for (entry in parse_entries(source, 0, []))
+        {*:entry, resource_offset: resource.offset}], diagnostics: []}
 }
 
 fn load_resources(names, i, base_uri, entries, diagnostics) {
@@ -106,7 +107,7 @@ fn dedupe_entries(entries, i, seen, unique, issues) {
         let repeated = any([for (known in seen) known == key])
         let next = if (repeated) issues ++
             [util.diagnostic("duplicate-bib-key", "biblatex", key,
-              "Duplicate bibliography key " ++ key, null)]
+              "Duplicate bibliography key " ++ key, entries[i].resource_offset)]
             else issues
         dedupe_entries(entries, i + 1, seen ++ [key],
             if (repeated) unique else unique ++ [entries[i]], next)
@@ -116,22 +117,13 @@ fn dedupe_entries(entries, i, seen, unique, issues) {
 pub fn load(ast, base_uri, opts) {
     if (opts == null) {entries: [], diagnostics: []}
     else {
-        let style = if (opts.style != null) opts.style else "numeric"
         let sorting = if (opts.sorting != null) opts.sorting else "nty"
         let names = resources(ast)
         let loaded = load_resources(names, 0, base_uri, [], [])
-        let style_issue = if (style != "numeric")
-            [util.diagnostic("unsupported-bib-style", "biblatex", style,
-              "Unsupported biblatex style " ++ style, null)]
-            else []
-        let sorting_issue = if (sorting != "nty" and sorting != "none")
-            [util.diagnostic("unsupported-bib-sorting", "biblatex", sorting,
-              "Unsupported biblatex sorting " ++ sorting, null)]
-            else []
         let ordered = if (sorting == "nty") sort(loaded.entries, sort_key) else loaded.entries
         let unique = dedupe_entries(ordered, 0, [], [], [])
         {entries: unique.entries,
-         diagnostics: loaded.diagnostics ++ style_issue ++ sorting_issue ++ unique.diagnostics}
+         diagnostics: loaded.diagnostics ++ unique.diagnostics}
     }
 }
 
@@ -140,7 +132,7 @@ pub fn numbered_entries(entries, offset) {
 }
 
 fn entry_text(entry) {
-    let f = entry.fields
+    let f = entry.fields;
     (if (f.author != null) f.author ++ ". " else "") ++
     (if (f.title != null) f.title ++ ". " else "") ++
     (if (f.journal != null) f.journal ++ ". " else "") ++

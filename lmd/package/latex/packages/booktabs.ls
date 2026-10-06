@@ -11,23 +11,23 @@ pub fn cmidrule(el, columns) {
     let raw = trim(if (required != null) required else util.text_of_skip_brack(el))
     let trim_spec = util.raw_argument(el, "parenthesized", 0)
     let ends = split(raw, "-")
-    let first = if (len(ends) == 2) int(trim(ends[0])) else null
-    let last = if (len(ends) == 2) int(trim(ends[1])) else null
+    let first = if (len(ends) == 2) int(trim(ends[0])) ^ { null } else null
+    let final_column = if (len(ends) == 2) int(trim(ends[1])) ^ { null } else null
     let valid_trim = trim_spec == null or trim_spec == "l" or trim_spec == "r" or trim_spec == "lr"
-    if (first == null or last == null or first < 1 or last < first or last > columns or not valid_trim) {
+    if (first == null or final_column == null or first < 1 or final_column < first or final_column > columns or not valid_trim) {
         let message = "Invalid booktabs cmidrule range: " ++ raw
         unsupported_rule(message, el, columns)
     } else {
         let before = first - 1
-        let span = last - first + 1
-        let after = columns - last
+        let span = final_column - first + 1
+        let after = columns - final_column
         let trim_style = (if (trim_spec == "l" or trim_spec == "lr") "margin-left:0.5em;" else "") ++
-            (if (trim_spec == "r" or trim_spec == "lr") "margin-right:0.5em;" else "")
+            (if (trim_spec == "r" or trim_spec == "lr") "margin-right:0.5em;" else "");
         <tr class: "latex-cmidrule",
-            if (before > 0) <td colspan: string(before)>
+            if (before > 0) { <td colspan: string(before)> }
             <td class: "latex-cmidrule-segment", colspan: string(span),
                 <div class: "latex-cmidrule-line", style: trim_style>>
-            if (after > 0) <td colspan: string(after)>
+            if (after > 0) { <td colspan: string(after)> }
         >
     }
 }

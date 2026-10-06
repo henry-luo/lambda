@@ -17,6 +17,7 @@ import geometry: .packages.geometry
 import microtype: .packages.microtype
 import biblatex: .packages.biblatex
 import hyperref: .packages.hyperref
+import amsmath: .packages.amsmath
 import paths: lambda.edit.session
 import util: .util
 
@@ -54,21 +55,24 @@ pub fn render(ast, options) {
 
 // Structured result keeps diagnostics and package metadata beside the element tree.
 pub fn render_result(ast, options) {
+    let base_uri = resource_base(options)
     // extract macro definitions from AST (does not modify tree)
     let macro_defs = macros.get_defs(ast)
-    // pass 1: analyze AST to collect counters, headings, labels
-    let base_info = analyzer.analyze(ast)
     let loaded = registry.collect(ast)
-    let bibliography = biblatex.load(ast,
-        if (options != null) options.base_uri else null,
+    let math_operators = if (registry.active(loaded.packages, "amsmath"))
+        amsmath.operators(ast) else {definitions: [], diagnostics: []}
+    // package activation precedes counter and label analysis.
+    let base_info = analyzer.analyze_with_packages(ast, loaded.packages)
+    let bibliography = biblatex.load(ast, base_uri,
         registry.options_for(loaded.packages, "biblatex"))
     let numbered_bib = biblatex.numbered_entries(bibliography.entries, len(base_info.bibitems))
     let link_settings = hyperref.settings(ast, registry.options_for(loaded.packages, "hyperref"))
     // add macro definitions to info for render-time expansion
     let info = {macros: macro_defs, *:base_info, packages: loaded.packages,
-                base_uri: if (options != null) options.base_uri else null,
+                base_uri: base_uri,
                 bibitems: base_info.bibitems ++ numbered_bib,
-                biblatex_entries: numbered_bib, hyperref_settings: link_settings}
+                biblatex_entries: numbered_bib, hyperref_settings: link_settings,
+                math_operators: math_operators.definitions}
     // pass 2: render AST using pre-computed info
     let html = dispatcher.render_node(ast, info)
     let elements = if (is_standalone(options)) {
@@ -76,12 +80,15 @@ pub fn render_result(ast, options) {
     } else {
         postprocess(html, info)
     }
-    let diagnostics = loaded.diagnostics ++ bibliography.diagnostics ++
-        microtype.unsupported(registry.options_for(loaded.packages, "microtype")) ++
+    let diagnostics = loaded.diagnostics ++ math_operators.diagnostics ++ bibliography.diagnostics ++
+        microtype.unsupported(registry.options_for(loaded.packages, "microtype"),
+            registry.offset_for(loaded.packages, "microtype")) ++
         geometry.output_diagnostics(registry.options_for(loaded.packages, "geometry"),
-            if (options != null) options.target else null) ++
+            if (options != null) options.target else null,
+            registry.offset_for(loaded.packages, "geometry")) ++
         hyperref.output_diagnostics(link_settings,
-            if (options != null) options.target else null) ++
+            if (options != null) options.target else null,
+            registry.offset_for(loaded.packages, "hyperref")) ++
         registry.target_diagnostics(ast, loaded.packages,
             if (options != null) options.target else null) ++
         registry.reference_diagnostics(ast, info.labels, info.bibitems, info.packages) ++
@@ -91,6 +98,13 @@ pub fn render_result(ast, options) {
      metadata: hyperref.metadata(link_settings, info.title, info.author),
      packages: loaded.packages, diagnostics: diagnostics,
      assets: registry.assets(ast, info.base_uri)}
+}
+
+fn resource_base(options) {
+    if (options == null) null
+    else if (options.base_uri != null) options.base_uri
+    else if (options.source_path != null) paths.dirname(options.source_path)
+    else null
 }
 
 fn output_diagnostics(node) {
@@ -114,7 +128,10 @@ fn package_stylesheet(info) {
 
 // Native document-loader entry point keeps standalone output as the view default.
 pub fn render_document(ast, options) {
-    render(ast, if (options == null) {standalone: true} else options)
+    let effective = if (options == null) {standalone: true}
+        else if (options.standalone == null) {*:options, standalone: true}
+        else options
+    render(ast, effective)
 }
 
 fn is_standalone(options) {
@@ -195,9 +212,9 @@ fn wrap_standalone(html, info, options) {
             <meta charset: "utf-8">
             <meta name: "viewport", content: "width=device-width, initial-scale=1">
             <title title_text>
-            if (meta.author != null) <meta name: "author", content: meta.author>
-            if (meta.subject != null) <meta name: "description", content: meta.subject>
-            if (meta.keywords != null) <meta name: "keywords", content: meta.keywords>
+            if (meta.author != null) { <meta name: "author", content: meta.author> }
+            if (meta.subject != null) { <meta name: "description", content: meta.subject> }
+            if (meta.keywords != null) { <meta name: "keywords", content: meta.keywords> }
             <style stylesheet>
             <style math_stylesheet>
             <style package_stylesheet(info)>

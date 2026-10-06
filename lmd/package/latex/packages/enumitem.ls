@@ -17,17 +17,25 @@ pub fn list_style(opts, kind) {
     let margin = if (opts.leftmargin != null and util.css_dimension(opts.leftmargin) != null)
         "padding-left:" ++ util.css_dimension(opts.leftmargin) ++ ";" else ""
     let label = if (kind == "enumerate") label_type(opts.label) else null
-    margin ++ (if (label != null) "list-style-type:" ++ label ++ ";" else "")
+    let compact = util.option_enabled(opts.nosep)
+    let top = if (compact) "margin-top:0;margin-bottom:0;"
+        else if (opts.topsep != null) "margin-top:" ++ util.css_dimension(opts.topsep) ++
+            ";margin-bottom:" ++ util.css_dimension(opts.topsep) ++ ";" else ""
+    let item = if (compact) "--latex-itemsep:0;--latex-parsep:0;"
+        else (if (opts.itemsep != null) "--latex-itemsep:" ++ util.css_dimension(opts.itemsep) ++ ";" else "") ++
+             (if (opts.parsep != null) "--latex-parsep:" ++ util.css_dimension(opts.parsep) ++ ";" else "")
+    margin ++ top ++ item ++ (if (label != null) "list-style-type:" ++ label ++ ";" else "")
 }
 
 pub fn start(opts) {
-    let value = if (opts.start != null) int(opts.start) else null
+    let value = if (opts.start != null) int(opts.start) ^ { null } else null
     if (value != null and value > 0) value else null
 }
 
 pub fn unsupported_keys(opts, kind) {
-    let allowed = if (kind == "enumerate") ["label", "start", "resume", "leftmargin"]
-        else ["leftmargin"]
+    let spacing = ["leftmargin", "topsep", "itemsep", "parsep", "nosep"]
+    let allowed = if (kind == "enumerate") spacing ++ ["label", "start", "resume"]
+        else spacing
     let keys = [for (key, value at opts
                 where not any([for (name in allowed) string(key) == name])) string(key)]
     let label_issue = if (kind == "enumerate" and opts.label != null and label_type(opts.label) == null) ["label"] else []
@@ -37,5 +45,9 @@ pub fn unsupported_keys(opts, kind) {
         ["resume"] else []
     let margin_issue = if (opts.leftmargin != null and util.css_dimension(opts.leftmargin) == null)
         ["leftmargin"] else []
-    keys ++ label_issue ++ start_issue ++ resume_issue ++ margin_issue
+    let spacing_issues = [for (key in ["topsep", "itemsep", "parsep"]
+        where opts[key] != null and util.css_dimension(opts[key]) == null) key]
+    let nosep_issue = if (opts.nosep != null and opts.nosep != "true" and opts.nosep != "false")
+        ["nosep"] else []
+    keys ++ label_issue ++ start_issue ++ resume_issue ++ margin_issue ++ spacing_issues ++ nosep_issue
 }

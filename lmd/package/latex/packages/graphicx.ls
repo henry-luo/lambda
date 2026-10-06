@@ -33,9 +33,9 @@ fn style(opts) {
     let rotated = if (trim(transform) != "") "transform:" ++ trim(transform) ++ ";" else ""
     let trimmed = if (opts.trim != null) split(trim(opts.trim), null) else []
     let clipping = if (util.option_enabled(opts.clip) and len(trimmed) == 4)
-        "clip-path:inset(" ++ util.css_dimension(trimmed[3]) ++ " " ++
-        util.css_dimension(trimmed[2]) ++ " " ++ util.css_dimension(trimmed[1]) ++ " " ++
-        util.css_dimension(trimmed[0]) ++ ");"
+        "clip-path:inset(" ++ util.css_pixel_dimension(trimmed[3]) ++ " " ++
+        util.css_pixel_dimension(trimmed[2]) ++ " " ++ util.css_pixel_dimension(trimmed[1]) ++ " " ++
+        util.css_pixel_dimension(trimmed[0]) ++ ");"
         else ""
     size ++ fit ++ rotated ++ clipping
 }
@@ -68,7 +68,7 @@ fn render_pdf(src, opts, id_prefix, offset) {
     let parsed = input(src, "pdf") ^ { null }
     if (parsed == null) unsupported("Cannot read PDF graphic " ++ src, offset)
     else {
-        let page = if (opts.page != null) int(opts.page) else 1
+        let page = if (opts.page != null) int(opts.page) ^ { null } else 1
         if (page == null or page < 1 or page > pdf.pdf_page_count(parsed))
             unsupported("Invalid PDF page for graphic " ++ src, offset)
         else {
@@ -94,17 +94,19 @@ pub fn render(el, base_uri) {
         unsupported("Unsupported graphicx width: " ++ opts.width, el.source_offset)
     else if (opts.height != null and util.css_dimension(opts.height) == null)
         unsupported("Unsupported graphicx height: " ++ opts.height, el.source_offset)
-    else if (opts.scale != null and float(opts.scale) == null)
+    else if (opts.scale != null and (float(opts.scale) ^ { null }) == null)
         unsupported("Unsupported graphicx scale: " ++ opts.scale, el.source_offset)
-    else if (opts.angle != null and float(opts.angle) == null)
+    else if (opts.angle != null and (float(opts.angle) ^ { null }) == null)
         unsupported("Unsupported graphicx angle: " ++ opts.angle, el.source_offset)
     else if (opts.page != null and not pdf_source) unsupported("graphicx page requires a PDF source", el.source_offset)
     else if (opts.trim != null and (not util.option_enabled(opts.clip) or len(trim_values) != 4 or
-             not all([for (dimension in trim_values) util.css_dimension(dimension) != null])))
+             not all([for (dimension in trim_values) util.css_pixel_dimension(dimension) != null])))
         unsupported("graphicx trim requires four values and clip in this profile", el.source_offset)
     else if (ends_with(lower(src), ".eps")) unsupported("EPS graphics are not supported: " ++ src, el.source_offset)
     else if (pdf_source) render_pdf(src, opts,
         "latex-graphic-" ++ (if (el.source_offset != null) string(el.source_offset)
             else util.slugify(src)), el.source_offset)
+    else if (not starts_with(src, "data:") and index_of(src, "://") == null and
+             not exists(src)) unsupported("Cannot read graphicx image " ++ src, el.source_offset)
     else <img class: "latex-image", src: src, alt: src, style: style(opts)>
 }

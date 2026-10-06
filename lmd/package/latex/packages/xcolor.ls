@@ -1,7 +1,7 @@
 // sRGB mixing for the common xcolor A!percent!B form.
 import pdf_util: lambda.pdf.util
 
-fn valid_hex(hex, i) {
+pub fn valid_hex(hex, i) {
     if (i >= len(hex)) true
     else if (not pdf_util.is_hex_digit(hex[i])) false
     else valid_hex(hex, i + 1)
@@ -15,7 +15,7 @@ fn rgb(hex) {
          pdf_util.hex_digit_value(hex[5]) * 16 + pdf_util.hex_digit_value(hex[6])]
     else if (starts_with(hex, "rgb(") and ends_with(hex, ")")) {
         let parts = split(slice(hex, 4, len(hex) - 1), ",")
-        let channels = if (len(parts) == 3) [for (part in parts) int(trim(part))] else []
+        let channels = if (len(parts) == 3) [for (part in parts) int(trim(part)) ^ { null }] else []
         if (len(channels) == 3 and all([for (channel in channels)
             channel != null and channel >= 0 and channel <= 255])) channels
         else null
@@ -25,7 +25,7 @@ fn rgb(hex) {
 pub fn mix(first, second, percent) {
     let a = rgb(first)
     let b = rgb(second)
-    let p = float(percent)
+    let p = float(percent) ^ { null }
     if (a == null or b == null or p == null or p < 0 or p > 100) null
     else {
         let q = p / 100.0

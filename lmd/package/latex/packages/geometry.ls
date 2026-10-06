@@ -51,9 +51,9 @@ pub fn stylesheet(opts) {
     }
 }
 
-pub fn output_diagnostics(opts, target) {
+pub fn output_diagnostics(opts, target, offset) {
     if (opts != null and target == "pdf")
         [util.diagnostic("unsupported-page-export", "geometry", "@page",
-          "PDF export does not apply @page size or margins", null)]
+          "PDF export does not apply @page size or margins", offset)]
     else []
 }

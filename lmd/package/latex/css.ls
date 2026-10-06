@@ -101,6 +101,9 @@ table.latex-tabular tr.latex-bottomrule { border-bottom: 2px solid black; }
 table.latex-tabular tr.latex-cmidrule .latex-cmidrule-line { border-top: 1px solid black; height: 0; }
 table.latex-tabular tr.latex-cmidrule td { padding-top: 0; padding-bottom: 0; }
 table.latex-tabular tr.latex-addlinespace td { padding: 0; border: 0; }
+table.latex-tabular td.latex-si-column { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.latex-tabular .latex-si-whole { text-align: right; }
+table.latex-tabular .latex-si-point, table.latex-tabular .latex-si-fraction { text-align: left; }
 table.latex-tabular tr.latex-toprule,
 table.latex-tabular tr.latex-midrule,
 table.latex-tabular tr.latex-bottomrule,
@@ -134,6 +137,7 @@ table.latex-tabular tr.latex-cmidrule { height: 0; line-height: 0; }
 .latex-align-multline { width: 100%; }
 .latex-align-row { display: table-row; }
 .latex-align-cell { display: table-cell; padding: 0 0.25em; }
+.latex-align-number { display: table-cell; padding-left: 1em; text-align: right; white-space: nowrap; }
 .latex-multicol {
   column-gap: 2em;
 }
@@ -208,9 +212,14 @@ table.latex-tabular td[rowspan] {
 .latex-textcolor, .latex-color { }
 .latex-colorbox { padding: 0.1em 0.2em; }
 .latex-fcolorbox { padding: 0.1em 0.2em; }
-.latex-itemize { padding-left: 2em; }
-.latex-enumerate { padding-left: 2em; }
-.latex-description { padding-left: 2em; }
+.latex-itemize { padding-left: 2em; --latex-itemsep: 0; --latex-parsep: 0; }
+.latex-enumerate { padding-left: 2em; --latex-itemsep: 0; --latex-parsep: 0; }
+.latex-description { padding-left: 2em; --latex-itemsep: 0.3em; --latex-parsep: 0; }
+.latex-itemize > li, .latex-enumerate > li { margin-bottom: var(--latex-itemsep, 0); }
+.latex-description > dd { margin-bottom: var(--latex-itemsep, 0.3em); }
+.latex-itemize > li > p, .latex-enumerate > li > p, .latex-description > dd > p {
+  margin-top: var(--latex-parsep, 0); margin-bottom: var(--latex-parsep, 0);
+}
 .latex-description dt { font-weight: bold; }
 .latex-description dd { margin-left: 1.5em; margin-bottom: 0.3em; }
 .latex-itemize { list-style-type: disc; }
