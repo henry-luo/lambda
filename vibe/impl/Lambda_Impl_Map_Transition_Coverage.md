@@ -36,7 +36,7 @@ So "a literal resolves to a node per Runtime" is not a step at all. The literal 
 - One hash table per runtime tree, in the tree `Input` (`lib/hashmap.h`, pool-owned like the element-root table). Key: `(parent TypeMap*, op)`, where `op` is `add(key identity or spelling, value TypeId)` or `retype(entry position, value TypeId)` (§2.4). Value: the child `TypeMap*`.
 - `transition_target_for_key` consults the parent's own edge list when the tree owns the parent (`type_tree_owns`), else the table. Parser `Input`s keep their edge lists and are untouched.
 - A hit re-checks `map_transition_prefix_matches_parent(parent, child)` as every copied child does today: the parent's pointer could in principle be reused by a later type after its owner freed it, and the walk makes a stale entry a miss instead of a wrong layout.
-- Table edges have no fan-out cap: the 16-edge cap bounds a *linear* edge walk, and a table lookup is O(1). The 65,536-type budget still bounds the tree (§4).
+- Table edges keep the 16-edge fan-out cap when P1 lands, so P1 changes no bound. The cap exists to bound a *linear* edge walk, which a table lookup does not have, so whether table edges drop it, raise it, or keep it is decided by measurement in P1.5 (Q5). The 65,536-type budget bounds the tree in every case (§4).
 
 ### 2.2 What can be a parent
 
@@ -76,7 +76,7 @@ With external parents, construction rarely needs changing: a literal-born or doc
 
 ### 2.8 What stays private, and why there is no replay
 
-- **A tree decline by budget.** Past 65,536 types nothing can be minted; the map takes today's private copy. Replay could not help here: it would re-walk the same path and be declined at the same point. (The fan-out cap no longer applies to table edges, §2.1.)
+- **A tree decline by budget.** Past 65,536 types nothing can be minted; the map takes today's private copy. Replay could not help here: it would re-walk the same path and be declined at the same point. (Whether the fan-out cap stays on table edges is P1.5's measurement, §2.1.)
 - **JavaScript shapes, non-plain kinds, spread-slot types, VMap/Velmt/VArray** (no `TypeMap`), as listed in Shape_Transitions Appendix B.
 - **Foreign documents** — parsed under no Runtime, another Runtime, or a document whose own `Input` tree declined it — need no replay either: their types are external parents like any other, and the child copies the names. Replay is therefore not a phase of this plan.
 
@@ -113,6 +113,16 @@ Each phase lands on its own and is green on its gates before the next starts. Nu
 - Lint: a tree entry's `name` must be arena-owned (sibling of `no-raw-shape-chain-walk`).
 - Tests: `TransitionTreeExternalParentTest` — two maps born from one literal and grown alike share a child, and the literal is unchanged (no `transitions`, chain tail unlinked, table untouched); the same for two maps from one parsed node, with the parse `Input` released after growth and the grown map still readable; a nominal instance keeps `is T` and its methods after growth; a stale parent pointer misses on the prefix check. Fixture `test/lambda/proc/map_external_parent.ls` — grow from a literal, a parsed object, a contract record, a nominal instance, a retyped map; `is`, `len`, iteration order, `format(_, 'json')`, a COW sibling unchanged; all three tiers (a `LambdaTierParityTests` entry) and `kExtraLambdaScripts`.
 - Gates: Lambda baseline; GC stress; JIT golden sweep; MIR ratchet (no emission change expected — any change is a finding). Measurement: rows 2 and 3 of §1 within 10% of row 1; the jq rows re-timed (`run_benchmarks.py -s text -b jq_ -e c2mir --typed`, release) and the proposal table updated.
+
+### P1.5 — Fan-out profiling (Q5)
+
+The 16-edge cap bounds a linear walk that table edges do not have, but more sharing also spends the 65,536-type budget sooner, and a wide fan-out may mint paths nobody reuses. Neither effect is known in numbers, so the cap's fate is measured, not argued.
+
+- **Instrumentation** (kept, behind `LAMBDA_SHAPE_TREE_STATS=1`, printed with `log_notice` at context teardown so release builds report it): per tree — the parser `Input`s, `js_input` and the runtime tree — the number of adds that hit an edge, minted one, or were declined by fan-out or by budget; a histogram of out-degree at the nodes that declined; the mean and maximum edge-list length walked per add; the number of maps that ended on a private type and the entries they copied; peak node count against the budget.
+- **Settings**, as a measurement-only override `LAMBDA_SHAPE_TREE_FANOUT=<n>` applied to the runtime tree's table edges (0 = budget only); the constant is set once from the result and the override removed: 16 (today), 64, 256, and no cap.
+- **Workloads**: `run_benchmarks.py -s text --typed` (the jq rows, with their 2,048-key objects, and the JSON rows) and `-s beng`; the Lambda baseline corpus through `lambda.exe test-batch`; the JavaScript benchmarks (`deltablue2`, `havlak`, `prettier_ast2`, `cd2`) and the test262 batch, since `js_input`'s edges are the same mechanism. Each setting records wall time, peak RSS, the decline counts and the private-map count; benchmarks as medians of five interleaved runs, release.
+- **Decision rule**: the setting with the fewest fan-out declines that regresses neither time nor peak RSS beyond noise on every workload. If no cap wins on sharing but reaches the budget on the jq rows, raise the budget rather than keep the cap, and record both numbers. The outcome is written into §2.1, D3.4.3v5's footnote and Shape_Transitions §5.
+- Gates: the instrumentation changes no emission (MIR ratchet) and no output (Lambda baseline); the override is removed before P2.
 
 ### P2 — Retype edges (§2.4)
 
@@ -151,4 +161,4 @@ JavaScript `map_put_heap` fallbacks beyond the identity-key gate (array-index sh
 2. **Scope of external parents (D3.4.3v5).** *Ruled 2026-10-06 (user): plain maps, nominal instances and elements together from P1.* The child copies the parent's identity fields either way; P1's fixture and GTests cover all three.
 3. **Identity-key gates on the JavaScript and parser paths.** *Ruled 2026-10-06 (user): JavaScript symbols join the one name space under the §2.9 mapping (NI18, D3.4.4v4).* P0 lifts all four gates under a test262 gate.
 4. **Degradation past the budget.** Keep today's private copies (my recommendation, with the jq measurement in P1), or open a design for a hash-backed plain map past the budget now?
-5. **Fan-out.** Drop the 16-edge cap for the runtime tree's table edges (my recommendation: the cap bounds a linear walk that the table does not have), while parser trees keep it?
+5. **Fan-out.** *Ruled 2026-10-06 (user): decided by measurement, not by argument.* Whether the runtime tree's table edges drop the 16-edge cap, take a higher one, or keep it is P1.5's task: profile the benchmarks and the Lambda and JavaScript test corpora under each setting, then decide. Parser trees keep their caps regardless.
