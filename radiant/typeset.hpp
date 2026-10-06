@@ -82,6 +82,7 @@ struct TypesetParagraph {
 enum TypesetStatus : uint8_t {
     TYPESET_OK, TYPESET_INVALID, TYPESET_NO_PROGRESS, TYPESET_UNPLACEABLE,
     TYPESET_BUDGET_EXHAUSTED, TYPESET_STALE, TYPESET_OUT_OF_MEMORY,
+    TYPESET_DONE,
 };
 
 TypesetPacking typeset_pack_glue(const TypesetItem* items, size_t first, size_t end,
@@ -150,6 +151,33 @@ TypesetStatus typeset_page_select(const TypesetPagePolicy* policy,
 
 struct Pool;
 struct hashmap;
+struct TypesetPageConstraints {
+    float available_height;
+    size_t max_contributions, max_candidates;
+};
+// the producer measures nested contexts and auxiliary regions without publishing fragments.
+struct TypesetPageProbe {
+    void* context;
+    TypesetStatus (*measure)(void* context, const TypesetContribution* contributions,
+        size_t count, TypesetPageCandidate* candidate, bool* stop);
+};
+struct TypesetPagePlan {
+    Pool* scratch; // borrowed; the caller retains scratch, provider and policy until commitment or abandonment
+    const TypesetFlowProvider* provider;
+    const TypesetPagePolicy* policy;
+    TypesetPageCandidate candidate;
+    TypesetContribution* contributions;
+    size_t count;
+    TypesetAssemblyAction action;
+    bool complete, committed;
+};
+// every exit restores the provider's start checkpoint; commitment is a separate operation.
+// held/reinserted plans remain provisional; the caller may continue or replace them without shipout.
+TypesetStatus typeset_page_plan(const TypesetFlowProvider* provider, const TypesetResume* cursor,
+    const TypesetPageConstraints* constraints, const TypesetPageProbe* probe,
+    const TypesetPagePolicy* policy, Pool* scratch, TypesetPagePlan* result);
+TypesetStatus typeset_page_commit(TypesetPagePlan* plan, TypesetResume* next);
+
 struct TypesetTarget {
     const char* name;
     TypesetSource source;

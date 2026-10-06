@@ -399,6 +399,114 @@ TEST(TypesetTest, CheckpointsAndAssemblyDoNotCommitProviderSideEffects) {
     EXPECT_EQ(typeset_flow_next(&provider, &cursor, &contribution, &next), TYPESET_STALE);
 }
 
+struct NativePageFixture {
+    size_t expanded, committed;
+    size_t marks, pending;
+    TypesetAssemblyAction action;
+    TypesetStatus failure, commit_failure;
+    NativeRegionFixture native;
+};
+static TypesetStatus native_page_next(void* context, const TypesetResume* cursor,
+        TypesetContribution* contribution, TypesetResume* next) {
+    NativePageFixture* fixture = (NativePageFixture*)context;
+    if (cursor->state[0] == 4) return TYPESET_DONE;
+    if (fixture->failure != TYPESET_OK && cursor->state[0] == 2) return fixture->failure;
+    fixture->expanded++;
+    fixture->marks++; fixture->pending++;
+    *contribution = {}; contribution->kind = TYPESET_CONTRIBUTION_BOX;
+    contribution->metrics.height = 10.0f;
+    fixture->native.provider = cursor->provider;
+    fixture->native.scaled_points = UINT64_C(9007199254740993);
+    contribution->metrics.exact = lam::up((const TypesetRecord*)&fixture->native);
+    contribution->boundary = {TYPESET_BREAK_ALLOWED, TYPESET_BREAK_PAGE,
+        cursor->state[0] == 1 ? -50 : 0, 0};
+    *next = *cursor; next->serial++; next->state[0]++; next->state[1] = fixture->expanded;
+    next->state[2] = fixture->marks; next->state[3] = fixture->pending;
+    return TYPESET_OK;
+}
+static TypesetStatus native_page_restore(void* context, const TypesetResume* cursor, TypesetResume* restored) {
+    ((NativePageFixture*)context)->expanded = cursor->state[1];
+    ((NativePageFixture*)context)->marks = cursor->state[2];
+    ((NativePageFixture*)context)->pending = cursor->state[3];
+    *restored = *cursor; return TYPESET_OK;
+}
+static size_t native_page_choose(void*, const TypesetPageCandidate* candidates, size_t count) {
+    size_t selected = 0;
+    for (size_t i = 1; i < count; i++) if (candidates[i].cost < candidates[selected].cost) selected = i;
+    return selected;
+}
+static TypesetAssemblyAction native_page_assemble(void* context, const TypesetPageCandidate*) {
+    return ((NativePageFixture*)context)->action;
+}
+static TypesetStatus native_page_committed(void* context, const TypesetPageCandidate*) {
+    NativePageFixture* fixture = (NativePageFixture*)context;
+    if (fixture->commit_failure != TYPESET_OK) return fixture->commit_failure;
+    fixture->committed++; return TYPESET_OK;
+}
+
+TEST(TypesetTest, PageBuilderRestoresRejectedExpansionAndCommitsSelectedCheckpointOnce) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_LAYOUT, "test.typeset.page"); ASSERT_NE(pool, nullptr);
+    NativePageFixture fixture = {};
+    TypesetFlowProvider provider = {81, 9, &fixture, native_page_next, copy_resume, native_page_restore};
+    TypesetPagePolicy policy = {&fixture, native_page_choose, native_page_assemble, native_page_committed};
+    TypesetResume cursor = {81, 9, 0, {}}, next = {};
+    TypesetPageConstraints constraints = {35.0f, 8, 8}; TypesetPagePlan plan = {};
+    ASSERT_EQ(typeset_page_plan(&provider, &cursor, &constraints, nullptr, &policy, pool, &plan), TYPESET_OK);
+    EXPECT_EQ(plan.count, 2u); EXPECT_FALSE(plan.complete);
+    EXPECT_FLOAT_EQ(plan.candidate.body_height, 20.0f);
+    EXPECT_EQ(fixture.expanded, 0u); EXPECT_EQ(fixture.committed, 0u);
+    EXPECT_EQ(fixture.marks, 0u); EXPECT_EQ(fixture.pending, 0u);
+    EXPECT_EQ(plan.contributions[0].metrics.exact.get(), &fixture.native);
+    EXPECT_EQ(fixture.native.scaled_points, UINT64_C(9007199254740993));
+    ASSERT_EQ(typeset_page_commit(&plan, &next), TYPESET_OK);
+    EXPECT_EQ(next.state[0], 2u); EXPECT_EQ(fixture.expanded, 2u); EXPECT_EQ(fixture.committed, 1u);
+    EXPECT_EQ(fixture.marks, 2u); EXPECT_EQ(fixture.pending, 2u);
+    EXPECT_EQ(typeset_page_commit(&plan, &next), TYPESET_NO_PROGRESS); EXPECT_EQ(fixture.committed, 1u);
+    mem_pool_destroy(pool);
+}
+
+TEST(TypesetTest, HeldReinsertedFailedAndBudgetedPageTrialsLeaveTheProviderUnchanged) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_LAYOUT, "test.typeset.page.rollback"); ASSERT_NE(pool, nullptr);
+    NativePageFixture fixture = {};
+    TypesetFlowProvider provider = {82, 9, &fixture, native_page_next, copy_resume, native_page_restore};
+    TypesetPagePolicy policy = {&fixture, native_page_choose, native_page_assemble, native_page_committed};
+    TypesetResume cursor = {82, 9, 0, {}}, next = {};
+    TypesetPageConstraints constraints = {35.0f, 8, 8};
+    for (TypesetAssemblyAction action : {TYPESET_ASSEMBLY_HOLD, TYPESET_ASSEMBLY_REINSERT}) {
+        fixture.action = action; TypesetPagePlan plan = {};
+        ASSERT_EQ(typeset_page_plan(&provider, &cursor, &constraints, nullptr, &policy, pool, &plan), TYPESET_OK);
+        EXPECT_EQ(plan.action, action); EXPECT_EQ(typeset_page_commit(&plan, &next), TYPESET_NO_PROGRESS);
+        EXPECT_EQ(fixture.expanded, 0u); EXPECT_EQ(fixture.committed, 0u);
+    }
+    fixture.action = TYPESET_ASSEMBLY_FINALIZE; fixture.failure = TYPESET_STALE;
+    TypesetPagePlan failed = {};
+    EXPECT_EQ(typeset_page_plan(&provider, &cursor, &constraints, nullptr, &policy, pool, &failed), TYPESET_STALE);
+    EXPECT_EQ(fixture.expanded, 0u); EXPECT_EQ(failed.scratch, nullptr);
+    fixture.failure = TYPESET_OK; constraints.max_candidates = 1;
+    EXPECT_EQ(typeset_page_plan(&provider, &cursor, &constraints, nullptr, &policy, pool, &failed), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(fixture.expanded, 0u); EXPECT_EQ(fixture.committed, 0u);
+    EXPECT_EQ(fixture.marks, 0u); EXPECT_EQ(fixture.pending, 0u);
+    mem_pool_destroy(pool);
+}
+
+TEST(TypesetTest, FailedCommitAndStalePlansCannotPublishTrialState) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_LAYOUT, "test.typeset.page.commit"); ASSERT_NE(pool, nullptr);
+    NativePageFixture fixture = {};
+    TypesetFlowProvider provider = {83, 9, &fixture, native_page_next, copy_resume, native_page_restore};
+    TypesetPagePolicy policy = {&fixture, native_page_choose, native_page_assemble, native_page_committed};
+    TypesetResume cursor = {83, 9, 0, {}}, next = {};
+    TypesetPageConstraints constraints = {35.0f, 8, 8}; TypesetPagePlan plan = {};
+    ASSERT_EQ(typeset_page_plan(&provider, &cursor, &constraints, nullptr, &policy, pool, &plan), TYPESET_OK);
+    fixture.commit_failure = TYPESET_OUT_OF_MEMORY;
+    EXPECT_EQ(typeset_page_commit(&plan, &next), TYPESET_OUT_OF_MEMORY);
+    EXPECT_FALSE(plan.committed); EXPECT_EQ(fixture.expanded, 0u); EXPECT_EQ(fixture.committed, 0u);
+    EXPECT_EQ(fixture.marks, 0u); EXPECT_EQ(fixture.pending, 0u);
+    fixture.commit_failure = TYPESET_OK; provider.generation++;
+    EXPECT_EQ(typeset_page_commit(&plan, &next), TYPESET_STALE);
+    EXPECT_EQ(fixture.expanded, 0u); EXPECT_EQ(fixture.committed, 0u);
+    mem_pool_destroy(pool);
+}
+
 class SecondaryViewTest : public ::testing::Test {
 protected:
     Pool* input_pool = nullptr;
@@ -852,6 +960,37 @@ TEST_F(SecondaryViewTest, HiddenStringAssignmentsUseInheritedCountersWithoutIncr
     }
 }
 
+TEST_F(SecondaryViewTest, BlockPseudosHaveIndependentBoxesAndRetainTheirSourceCounterAcrossPages) {
+    stylesheet("@page { size: 200px 60px; margin: 0 } p, div { margin: 0; font-size: 10px; line-height: 12px; "
+        "white-space: pre-wrap; orphans: 1; widows: 1 } p { counter-reset: chapter 0 } div { counter-increment: chapter } "
+        "div::before { display: block; content: 'Chapter ' counter(chapter); padding: 2px; border: 2px solid blue; color: blue } "
+        "div::after { display: block; content: 'End ' counter(chapter); color: red }");
+    DomElement* body = block("A\nB\nC\nD\nE", nullptr, "div"); ASSERT_NE(body, nullptr);
+    DomNode* original = body->first_child;
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    ViewNodeState* state = view_tree_node_state(tree, body, false); ASSERT_NE(state, nullptr);
+    size_t before_boxes = 0, after_boxes = 0;
+    StrBuf* before = strbuf_new(); StrBuf* after = strbuf_new(); ASSERT_NE(before, nullptr); ASSERT_NE(after, nullptr);
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
+        if (!node->computed_style) continue;
+        uint8_t pseudo = node->computed_style->pseudo_element;
+        if (node->paint_box && pseudo == PSEUDO_ELEMENT_BEFORE) {
+            before_boxes++; EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.height, 20.0f);
+            ASSERT_NE(node->computed_boundary, nullptr); EXPECT_FLOAT_EQ(node->computed_boundary->padding.left, 2.0f);
+            append_fragment_text(node, before);
+        } else if (node->paint_box && pseudo == PSEUDO_ELEMENT_AFTER) {
+            after_boxes++; EXPECT_EQ(occurrence_page(node), 2u); append_fragment_text(node, after);
+        }
+    }
+    EXPECT_EQ(before_boxes, 1u); EXPECT_EQ(after_boxes, 1u);
+    EXPECT_STREQ(before->str, "Chapter 1"); EXPECT_STREQ(after->str, "End 1");
+    strbuf_free(before); strbuf_free(after);
+    EXPECT_EQ(body->first_child, original); EXPECT_EQ(body->last_child, original);
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/block-pseudos.pdf"));
+}
+
 TEST_F(SecondaryViewTest, BodyPageCounterBindingIsDiagnosedBeforePublishingPlaceholderText) {
     stylesheet("@page { size: 240px 120px; margin: 10px } div::before { content: counter(page) }");
     ASSERT_NE(block("Body"), nullptr);
@@ -1196,6 +1335,62 @@ TEST_F(SecondaryViewTest, FootnoteReservationMovesCallBeforePublishingItsFragmen
     }
     EXPECT_EQ(calls, 1u); EXPECT_EQ(notes, 1u);
     EXPECT_EQ(note->parent, paragraph); EXPECT_FLOAT_EQ(note->x, 91.25f); EXPECT_FLOAT_EQ(note->width, 7.5f);
+}
+
+TEST_F(SecondaryViewTest, BlockFootnotePolicyMovesTheWholeParagraphBeforePublishingText) {
+    stylesheet("@page { size: 200px 100px; margin: 10px; @top-center { content: string(heading) } } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 }");
+    ASSERT_NE(block("Prelude", "height: 36px; string-set: heading 'Prelude'"), nullptr);
+    DomElement* paragraph = block("First\nSecond\nThird ", "string-set: heading 'Moved'"); ASSERT_NE(paragraph, nullptr);
+    DomElement* note = block("Note A\nNote B", "float: footnote; footnote-policy: block; color: blue", "span", paragraph);
+    ASSERT_NE(note, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    ViewNodeState* text = view_tree_node_state(tree, paragraph->first_child, false); ASSERT_NE(text, nullptr);
+    size_t covered = 0;
+    for (LayoutViewNode* fragment = text->first_occurrence; fragment; fragment = fragment->next_occurrence) {
+        EXPECT_EQ(occurrence_page(fragment), 2u); covered += fragment->text_length;
+    }
+    EXPECT_EQ(covered, paragraph->first_child->as_text()->length);
+    ViewNodeState* notes = view_tree_node_state(tree, note, false); ASSERT_NE(notes, nullptr);
+    size_t calls = 0, bodies = 0;
+    for (LayoutViewNode* fragment = notes->first_occurrence; fragment; fragment = fragment->next_occurrence) {
+        if (fragment->role == VIEW_FRAGMENT_BODY && fragment->glyph_run) { calls++; EXPECT_EQ(occurrence_page(fragment), 2u); }
+        if (fragment->role == VIEW_FRAGMENT_NOTE && fragment->paint_box) { bodies++; EXPECT_EQ(occurrence_page(fragment), 2u); }
+    }
+    EXPECT_EQ(calls, 1u); EXPECT_EQ(bodies, 1u);
+    StrBuf* heading = strbuf_new(); ASSERT_NE(heading, nullptr);
+    append_fragment_text(tree->model->pages.get()[0]->margin_boxes[CSS_PAGE_TOP_CENTER], heading);
+    EXPECT_STREQ(heading->str, "Prelude"); strbuf_reset(heading);
+    append_fragment_text(tree->model->pages.get()[1]->margin_boxes[CSS_PAGE_TOP_CENTER], heading);
+    EXPECT_STREQ(heading->str, "Moved"); strbuf_free(heading);
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/block-footnote-policy.pdf"));
+}
+
+TEST_F(SecondaryViewTest, BlockFootnoteMinimaCanRelaxAfterItsRequiredNoteHasBeenAdmitted) {
+    stylesheet("@page { size: 200px 60px; margin: 0 } p, div, span { margin: 0; font-size: 10px; line-height: 12px; "
+        "white-space: pre-wrap; orphans: 10; widows: 10 }");
+    DomElement* paragraph = block("A "); ASSERT_NE(paragraph, nullptr);
+    DomElement* note = block("Note", "float: footnote; footnote-policy: block", "span", paragraph); ASSERT_NE(note, nullptr);
+    DomText* tail = DomText::create_copy("\nB\nC\nD\nE", 8, paragraph); ASSERT_NE(tail, nullptr);
+    ASSERT_TRUE(paragraph->DomNode::append_child(tail));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 2u); EXPECT_GT(diagnostic.relaxed_line_minima, 0u);
+    LayoutViewNode* call = source_fragment(tree, note, VIEW_FRAGMENT_BODY, false); ASSERT_NE(call, nullptr);
+    LayoutViewNode* body = source_fragment(tree, note, VIEW_FRAGMENT_NOTE, true); ASSERT_NE(body, nullptr);
+    EXPECT_EQ(occurrence_page(call), 1u); EXPECT_EQ(occurrence_page(body), 1u);
+}
+
+TEST_F(SecondaryViewTest, AnImpossibleBlockFootnoteStopsBeforePublishingAnEdition) {
+    stylesheet("@page { size: 200px 40px; margin: 0 } p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap }");
+    DomElement* paragraph = block("Call "); ASSERT_NE(paragraph, nullptr);
+    ASSERT_NE(block("One\nTwo\nThree\nFour", "float: footnote; footnote-policy: block", "span", paragraph), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    EXPECT_FALSE(tree->model->committed); EXPECT_LE(tree->model->page_count, 2u);
+    EXPECT_NE(diagnostic.reason, nullptr);
 }
 
 TEST_F(SecondaryViewTest, FootnoteCallAndMarkerStylesBelongToTheirViewOccurrences) {
@@ -2002,8 +2197,136 @@ TEST_F(SecondaryViewTest, GridGroupsFivePagesWithoutCreatingAnotherPage) {
     EXPECT_FLOAT_EQ(tree->model->pages.get()[0]->node.rect.width, 100.0f);
 }
 
-static uint32_t snapshot_pixel(ImageSurface* surface, size_t x, size_t y) {
+static uint32_t snapshot_pixel(const ImageSurface* surface, size_t x, size_t y) {
     return ((uint32_t*)((uint8_t*)surface->pixels + y * surface->pitch))[x];
+}
+
+struct PageSnapshotCacheScope {
+    RenderPageSnapshotCache* cache;
+    ~PageSnapshotCacheScope() { render_page_snapshot_cache_destroy(cache); }
+};
+
+TEST_F(SecondaryViewTest, PhysicalPageSnapshotsIgnoreThePreviewFilterAndPreserveGlyphPlacement) {
+    preview_document();
+    ViewTree* tree = secondary();
+    PagedLayoutOptions layout = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &layout, nullptr), TYPESET_OK);
+    ViewPageRange range = {3, 4}; ViewPageSelection selection = {false, &range, 1};
+    ViewPreviewOptions options = view_preview_options_default();
+    options.arrangement = VIEW_PAGES_BOOK; options.scale = 0.25f; options.padding = 20.0f;
+    ASSERT_EQ(view_tree_preview_arrange(tree, &selection, &options), VIEW_MODEL_OK);
+    LayoutViewRef page_ref = tree->model->pages.get()[0]->node.ref;
+    uint32_t presentation = tree->model->presentation_generation;
+    ImageSurface* surface = render_secondary_page_snapshot(tree, 1, 0.5f);
+    ASSERT_NE(surface, nullptr);
+    EXPECT_EQ(surface->width, 60); EXPECT_EQ(surface->height, 80);
+    EXPECT_EQ(snapshot_pixel(surface, 10, 35), 0xff0000ffu);
+    EXPECT_EQ(snapshot_pixel(surface, 2, 2), 0xffffffffu);
+    size_t ink = 0;
+    for (size_t y = 7; y < 18; y++) for (size_t x = 7; x < 35; x++) {
+        Color pixel = {snapshot_pixel(surface, x, y)};
+        if (pixel.r < 100 && pixel.g < 100 && pixel.b < 100) ink++;
+    }
+    EXPECT_GT(ink, 3u);
+    save_surface_to_png(surface, "temp/paged-media-impl/thumbnail-page-one.png");
+    image_surface_destroy(surface);
+    EXPECT_EQ(view_tree_node_resolve(tree, page_ref), &tree->model->pages.get()[0]->node);
+    EXPECT_EQ(tree->model->presentation_generation, presentation);
+    EXPECT_EQ(tree->model->page_count, 5u);
+    EXPECT_EQ(render_secondary_page_snapshot(tree, 0), nullptr);
+    EXPECT_EQ(render_secondary_page_snapshot(tree, 6), nullptr);
+    EXPECT_EQ(render_secondary_page_snapshot(tree, 1, NAN), nullptr);
+    EXPECT_EQ(render_secondary_page_snapshot(tree, 1, -1.0f), nullptr);
+    doc.mutation_epoch++;
+    EXPECT_EQ(render_secondary_page_snapshot(tree, 1), nullptr);
+}
+
+TEST_F(SecondaryViewTest, IndependentThumbnailCachesSurvivePresentationChangesAndSourceTreeRelease) {
+    preview_document();
+    ViewTree* tree = secondary();
+    PagedLayoutOptions layout = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &layout, nullptr), TYPESET_OK);
+    PageSnapshotCacheScope small = {render_page_snapshot_cache_create(4, 1024 * 1024)};
+    PageSnapshotCacheScope large = {render_page_snapshot_cache_create(4, 1024 * 1024)};
+    ASSERT_NE(small.cache, nullptr); ASSERT_NE(large.cache, nullptr);
+    const ImageSurface* thumbnail = render_page_snapshot_cache_get(small.cache, tree, 1, 0.5f);
+    const ImageSurface* full = render_page_snapshot_cache_get(large.cache, tree, 1);
+    ASSERT_NE(thumbnail, nullptr); ASSERT_NE(full, nullptr);
+    EXPECT_NE(thumbnail, full); EXPECT_EQ(thumbnail->width, 60); EXPECT_EQ(full->width, 120);
+    LayoutViewRef page_ref = tree->model->pages.get()[0]->node.ref;
+    DomElement* first = (DomElement*)source->first_child.get();
+    LayoutViewNode* glyph = source_fragment(tree, first->first_child, VIEW_FRAGMENT_BODY, false);
+    ASSERT_NE(glyph, nullptr); PaintGlyphRun* run = glyph->glyph_run;
+    ViewPageRange range = {3, 4}; ViewPageSelection selection = {false, &range, 1};
+    ViewPreviewOptions options = view_preview_options_default();
+    options.arrangement = VIEW_PAGES_BOOK; options.scale = 0.25f;
+    ASSERT_EQ(view_tree_preview_arrange(tree, &selection, &options), VIEW_MODEL_OK);
+    EXPECT_EQ(render_page_snapshot_cache_get(small.cache, tree, 1, 0.5f), thumbnail);
+    EXPECT_EQ(render_page_snapshot_cache_get(large.cache, tree, 1), full);
+    EXPECT_EQ(render_page_snapshot_cache_stats(small.cache).hits, 1u);
+    EXPECT_EQ(render_page_snapshot_cache_stats(large.cache).renders, 1u);
+    EXPECT_EQ(view_tree_node_resolve(tree, page_ref), &tree->model->pages.get()[0]->node);
+    EXPECT_EQ(glyph->glyph_run.get(), run);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    // raster copies remain valid after all source-view arenas and font handles have been released.
+    EXPECT_EQ(snapshot_pixel(thumbnail, 10, 35), 0xff0000ffu);
+    EXPECT_EQ(snapshot_pixel(full, 20, 70), 0xff0000ffu);
+    EXPECT_FLOAT_EQ(source->width, 640.0f);
+}
+
+TEST_F(SecondaryViewTest, ThumbnailCachesBoundBytesAndEntriesAndEvictTheLeastRecentlyUsedPage) {
+    preview_document();
+    ViewTree* tree = secondary();
+    PagedLayoutOptions layout = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &layout, nullptr), TYPESET_OK);
+    size_t page_bytes = 0; ASSERT_TRUE(render_surface_allocation_size(60.0f, 80.0f, &page_bytes));
+    PageSnapshotCacheScope cache = {render_page_snapshot_cache_create(2, page_bytes * 2)};
+    ASSERT_NE(cache.cache, nullptr);
+    ASSERT_NE(render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f), nullptr);
+    const ImageSurface* second = render_page_snapshot_cache_get(cache.cache, tree, 2, 0.5f);
+    ASSERT_NE(second, nullptr); auto second_handle = second->self;
+    ASSERT_NE(render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f), nullptr);
+    ASSERT_NE(render_page_snapshot_cache_get(cache.cache, tree, 3, 0.5f), nullptr);
+    EXPECT_EQ(image_surface_lookup(second_handle), nullptr);
+    RenderPageSnapshotCacheStats stats = render_page_snapshot_cache_stats(cache.cache);
+    EXPECT_EQ(stats.entries, 2u); EXPECT_EQ(stats.bytes, page_bytes * 2);
+    EXPECT_EQ(stats.renders, 3u); EXPECT_EQ(stats.hits, 1u); EXPECT_EQ(stats.evictions, 1u);
+    EXPECT_EQ(render_page_snapshot_cache_get(cache.cache, tree, 1), nullptr);
+    EXPECT_EQ(render_page_snapshot_cache_get(cache.cache, tree, 1, INFINITY), nullptr);
+    EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).renders, 3u);
+    PageSnapshotCacheScope byte_cache = {render_page_snapshot_cache_create(4, page_bytes)};
+    ASSERT_NE(byte_cache.cache, nullptr);
+    ASSERT_NE(render_page_snapshot_cache_get(byte_cache.cache, tree, 1, 0.5f), nullptr);
+    ASSERT_NE(render_page_snapshot_cache_get(byte_cache.cache, tree, 2, 0.5f), nullptr);
+    stats = render_page_snapshot_cache_stats(byte_cache.cache);
+    EXPECT_EQ(stats.entries, 1u); EXPECT_EQ(stats.bytes, page_bytes); EXPECT_EQ(stats.evictions, 1u);
+    EXPECT_EQ(render_page_snapshot_cache_create(0, page_bytes), nullptr);
+    EXPECT_EQ(render_page_snapshot_cache_create(SIZE_MAX, page_bytes), nullptr);
+}
+
+TEST_F(SecondaryViewTest, ThumbnailCachesRejectStaleLayoutsAndRebindAfterRecomposition) {
+    preview_document();
+    ViewTree* tree = secondary();
+    PagedLayoutOptions layout = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &layout, nullptr), TYPESET_OK);
+    PageSnapshotCacheScope cache = {render_page_snapshot_cache_create(4, 1024 * 1024)};
+    ASSERT_NE(cache.cache, nullptr);
+    const ImageSurface* first = render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f);
+    ASSERT_NE(first, nullptr); auto old_handle = first->self;
+    tree->model->environment.resource_generation++;
+    ASSERT_NE(render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f), nullptr);
+    EXPECT_EQ(image_surface_lookup(old_handle), nullptr);
+    EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).renders, 2u);
+    tree->reset_retained();
+    EXPECT_EQ(render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f), nullptr);
+    EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).entries, 0u);
+    ASSERT_EQ(layout_secondary_view(tree, &layout, nullptr), TYPESET_OK);
+    ASSERT_NE(render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f), nullptr);
+    EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).renders, 3u);
+    doc.mutation_epoch++;
+    EXPECT_EQ(render_page_snapshot_cache_get(cache.cache, tree, 1, 0.5f), nullptr);
+    EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).entries, 0u);
+    render_page_snapshot_cache_clear(cache.cache);
 }
 
 TEST_F(SecondaryViewTest, GridSnapshotsPaintPagesAndFurnitureWithoutRepagination) {

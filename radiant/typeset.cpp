@@ -190,7 +190,9 @@ TypesetStatus typeset_flow_checkpoint(const TypesetFlowProvider* provider,
     if (!provider || !cursor || !saved || !provider->checkpoint) return TYPESET_INVALID;
     if (!typeset_resume_valid(provider, cursor)) return TYPESET_STALE;
     TypesetStatus status = provider->checkpoint(provider->context, cursor, saved);
-    return status == TYPESET_OK && !typeset_resume_valid(provider, saved) ? TYPESET_STALE : status;
+    if (status != TYPESET_OK) return status;
+    if (!typeset_resume_valid(provider, saved)) return TYPESET_STALE;
+    return saved->serial == cursor->serial ? TYPESET_OK : TYPESET_NO_PROGRESS;
 }
 
 TypesetStatus typeset_flow_restore(const TypesetFlowProvider* provider,
@@ -198,7 +200,9 @@ TypesetStatus typeset_flow_restore(const TypesetFlowProvider* provider,
     if (!provider || !saved || !restored || !provider->restore) return TYPESET_INVALID;
     if (!typeset_resume_valid(provider, saved)) return TYPESET_STALE;
     TypesetStatus status = provider->restore(provider->context, saved, restored);
-    return status == TYPESET_OK && !typeset_resume_valid(provider, restored) ? TYPESET_STALE : status;
+    if (status != TYPESET_OK) return status;
+    if (!typeset_resume_valid(provider, restored)) return TYPESET_STALE;
+    return restored->serial == saved->serial ? TYPESET_OK : TYPESET_NO_PROGRESS;
 }
 
 TypesetStatus typeset_flow_next(const TypesetFlowProvider* provider, const TypesetResume* cursor,
@@ -224,5 +228,116 @@ TypesetStatus typeset_page_select(const TypesetPagePolicy* policy,
     if (assembly > TYPESET_ASSEMBLY_REINSERT) return TYPESET_INVALID;
     *selected = index;
     *action = assembly;
+    return TYPESET_OK;
+}
+
+static bool typeset_page_metrics_valid(const TypesetPageCandidate& candidate) {
+    return isfinite(candidate.body_height) && candidate.body_height >= 0.0f &&
+        isfinite(candidate.note_height) && candidate.note_height >= 0.0f &&
+        isfinite(candidate.float_height) && candidate.float_height >= 0.0f &&
+        !isnan(candidate.available_height) && candidate.available_height > 0.0f &&
+        isfinite(candidate.cost);
+}
+
+TypesetStatus typeset_page_plan(const TypesetFlowProvider* provider, const TypesetResume* cursor,
+        const TypesetPageConstraints* constraints, const TypesetPageProbe* probe,
+        const TypesetPagePolicy* policy, Pool* scratch, TypesetPagePlan* result) {
+    if (!provider || !cursor || !constraints || !policy || !scratch || !result || result->scratch ||
+        !policy->choose || !policy->assemble || !constraints->max_contributions || !constraints->max_candidates ||
+        isnan(constraints->available_height) || constraints->available_height <= 0.0f ||
+        (probe && !probe->measure)) return TYPESET_INVALID;
+    TypesetResume saved = {}, active = *cursor;
+    TypesetStatus status = typeset_flow_checkpoint(provider, cursor, &saved);
+    if (status != TYPESET_OK) return status;
+    TypesetContribution* contributions = nullptr;
+    TypesetPageCandidate* candidates = nullptr;
+    size_t* ends = nullptr;
+    size_t count = 0, capacity = 0, candidate_count = 0, candidate_capacity = 0, end_capacity = 0;
+    float height = 0.0f;
+    bool complete = false;
+    while (status == TYPESET_OK) {
+        TypesetContribution contribution = {}; TypesetResume next = {};
+        status = typeset_flow_next(provider, &active, &contribution, &next);
+        if (status == TYPESET_DONE) { complete = true; status = TYPESET_OK; break; }
+        if (status != TYPESET_OK) break;
+        if (contribution.kind > TYPESET_CONTRIBUTION_NESTED ||
+            contribution.boundary.legality > TYPESET_BREAK_FORCED ||
+            contribution.boundary.scope > TYPESET_BREAK_PAGE) { status = TYPESET_INVALID; break; }
+        if (count >= constraints->max_contributions) { status = TYPESET_BUDGET_EXHAUSTED; break; }
+        if (!lam::pool_grow_array(scratch, &contributions, &capacity, count + 1, 16)) {
+            status = TYPESET_OUT_OF_MEMORY; break;
+        }
+        contributions[count++] = contribution;
+        TypesetPageCandidate candidate = {};
+        candidate.start = saved; candidate.end = next;
+        candidate.boundary = contribution.boundary;
+        candidate.available_height = constraints->available_height;
+        candidate.cost = contribution.boundary.penalty;
+        bool stop = false;
+        if (probe) status = probe->measure(probe->context, contributions, count, &candidate, &stop);
+        else {
+            switch (contribution.kind) {
+                case TYPESET_CONTRIBUTION_BOX:
+                    height += contribution.metrics.height + contribution.metrics.depth; break;
+                case TYPESET_CONTRIBUTION_GLUE:
+                    height += contribution.glue.natural; break;
+                case TYPESET_CONTRIBUTION_BOUNDARY:
+                case TYPESET_CONTRIBUTION_MARK:
+                case TYPESET_CONTRIBUTION_TARGET: break;
+                default: status = TYPESET_INVALID; break;
+            }
+            candidate.body_height = height;
+        }
+        if (status != TYPESET_OK && status != TYPESET_UNPLACEABLE) break;
+        // a probe owns measurements and legality, while continuation identity stays with the provider.
+        candidate.start = saved; candidate.end = next;
+        if (candidate.available_height > constraints->available_height ||
+            candidate.boundary.legality > TYPESET_BREAK_FORCED) { status = TYPESET_INVALID; break; }
+        if (status == TYPESET_OK && !typeset_page_metrics_valid(candidate)) { status = TYPESET_INVALID; break; }
+        if (status == TYPESET_OK && candidate.body_height + candidate.note_height + candidate.float_height >
+            candidate.available_height) status = TYPESET_UNPLACEABLE;
+        if (status == TYPESET_OK && candidate.boundary.legality != TYPESET_BREAK_FORBIDDEN) {
+            if (candidate_count >= constraints->max_candidates) { status = TYPESET_BUDGET_EXHAUSTED; break; }
+            if (!lam::pool_grow_array(scratch, &candidates, &candidate_capacity, candidate_count + 1, 16) ||
+                !lam::pool_grow_array(scratch, &ends, &end_capacity, candidate_count + 1, 16)) {
+                status = TYPESET_OUT_OF_MEMORY; break;
+            }
+            status = typeset_flow_checkpoint(provider, &next, &candidate.end);
+            if (status != TYPESET_OK) break;
+            candidates[candidate_count] = candidate; ends[candidate_count++] = count;
+        }
+        status = TYPESET_OK; active = next;
+        if (stop || contribution.boundary.legality == TYPESET_BREAK_FORCED ||
+            candidate.boundary.legality == TYPESET_BREAK_FORCED) break;
+    }
+    // trial expansion and region/mark journals share the provider's checkpoint (D4.5.1v4).
+    TypesetResume restored = {};
+    TypesetStatus restoration = typeset_flow_restore(provider, &saved, &restored);
+    if (restoration != TYPESET_OK) return restoration;
+    if (status != TYPESET_OK) return status;
+    if (!candidate_count) return complete && !count ? TYPESET_DONE : TYPESET_UNPLACEABLE;
+    size_t selected = SIZE_MAX; TypesetAssemblyAction action = TYPESET_ASSEMBLY_FINALIZE;
+    status = typeset_page_select(policy, candidates, candidate_count, &selected, &action);
+    restoration = typeset_flow_restore(provider, &saved, &restored);
+    if (restoration != TYPESET_OK) return restoration;
+    if (status != TYPESET_OK) return status;
+    *result = {scratch, provider, policy, candidates[selected], contributions, ends[selected],
+        action, complete && ends[selected] == count, false};
+    return TYPESET_OK;
+}
+
+TypesetStatus typeset_page_commit(TypesetPagePlan* plan, TypesetResume* next) {
+    if (!plan || !plan->scratch || !plan->provider || !plan->policy || !next) return TYPESET_INVALID;
+    if (plan->committed || plan->action != TYPESET_ASSEMBLY_FINALIZE) return TYPESET_NO_PROGRESS;
+    TypesetResume restored = {};
+    TypesetStatus status = typeset_flow_restore(plan->provider, &plan->candidate.end, &restored);
+    if (status == TYPESET_OK && plan->policy->committed)
+        status = plan->policy->committed(plan->policy->context, &plan->candidate);
+    if (status != TYPESET_OK) {
+        TypesetResume start = {};
+        TypesetStatus restoration = typeset_flow_restore(plan->provider, &plan->candidate.start, &start);
+        return restoration == TYPESET_OK ? status : restoration;
+    }
+    *next = restored; plan->committed = true;
     return TYPESET_OK;
 }
