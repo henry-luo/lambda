@@ -3141,17 +3141,11 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
             return true;
         }
     }
-    // Phase 5: Set ui_mode + arena so retransformed body functions
-    // allocate fat DomElements/DomTexts on the result arena.
-    if (handler_ctx && rt && rt->ui_mode && rt->result_arena) {
-        handler_ctx->ui_mode = true;
-        handler_ctx->arena = rt->result_arena;
-        input_context = (Context*)handler_ctx;
-    } else {
-        // Clear input_context to prevent stale arena access
-        // during list expansion in retransformed body functions.
-        input_context = nullptr;
-    }
+    // Phase 5: retransformed body functions allocate fat DomElements/DomTexts
+    // in the runtime's result Input; without one, input_context stays clear
+    // so list expansion cannot reach a stale arena.
+    input_context = runtime_context_follow_ui_result(rt, handler_ctx)
+        ? (Context*)handler_ctx : nullptr;
 
     // F17: author/UA handlers receive the in-flight host record. When no JS
     // stage created it (a Lambda-only document), create the same record shape
@@ -3279,7 +3273,7 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     runtime_init(rt);
     // D8.1.1v13: behavior handlers can retain nodes in this document's arena;
     // mark even a script-less evaluator as UI-owned before loading dom.ls.
-    runtime_set_ui_result_arena(rt, doc->input ? doc->input->arena : nullptr);
+    runtime_set_ui_result_input(rt, doc->input);
     EvalContext* ctx = runtime_get_eval_context(rt);
     // A script-less parent may first need behavior while an iframe evaluator
     // is bound. Claim its own evaluator at this quiescent input boundary.
@@ -11058,7 +11052,10 @@ static bool navigation_schedule_async_document(UiContext* uicon, DomDocument* so
     if (!uicon || !uicon->async_script_navigation || !source || !source->url ||
         !url || !url[0]) return false;
     Url* target = url_parse_with_base(url, source->url);
-    if (!navigation_async_is_local_file(target)) {
+    // A top-level document whose loader runs on the window's loader runtime
+    // loads on the host thread that runtime lives on; iframes keep theirs.
+    if (!navigation_async_is_local_file(target) ||
+        (!iframe && layout_path_uses_loader_runtime(url_get_pathname(target)))) {
         if (target) url_destroy(target);
         return false;
     }

@@ -3847,7 +3847,7 @@ void css_transition_capture_before_change(DomElement* element, CssPropertyCode p
 // synthetic list built on the stack, the list must stay alive for the whole
 // resolve call. Manually assigning decl.value = &local_list is fragile: a
 // narrower lexical scope for the list leads to stack-use-after-scope (see
-// vibe/Memory_Safety_Template4.md §1).
+// vibe/Memory_Safety_Template.md §8.2).
 //
 // These helpers tie the scratch list storage to the resolve() call so the
 // stack value cannot outlive — or under-live — the call. The copied
@@ -4126,6 +4126,10 @@ typedef struct UiContext {
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
     lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
+    // One Lambda runtime for the window's stateless document loaders (LaTeX,
+    // PDF, TikZ, graph, math). Created by the first such load; released after
+    // the documents built on it.
+    lam::Own<Runtime> loader_runtime;
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
     int iframe_depth;
@@ -4278,11 +4282,26 @@ DomDocument* load_lambda_document_transform_doc(Url* document_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         int viewport_width, int viewport_height, Pool* pool, bool print_media = false);
-DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool);
+// Names the window whose shared loader runtime a top-level load on this thread
+// uses, for the duration of that load. Iframe and worker loads install none,
+// so their stateless loaders keep a runtime per document.
+struct LayoutLoaderHostScope {
+    lam::Up<struct UiContext> saved;  // the enclosing scope's window
+    explicit LayoutLoaderHostScope(struct UiContext* uicon);
+    ~LayoutLoaderHostScope();
+};
+// Whether a local document's loader can run on the window's loader runtime,
+// which lives on the host thread: the stateless transforms, and markdown for
+// its math.
+bool layout_path_uses_loader_runtime(const char* path);
+// Releases the window's loader runtime; its documents must already be gone.
+void ui_context_release_loader_runtime(struct UiContext* uicon);
+// Ends the loader runtime's work on one document: the document takes the UI
+// attribute roots that work published (with no document they are dropped),
+// and the runtime lets go of the document's Input.
+void loader_runtime_finish_document(DomDocument* doc, Runtime* loader);
 // The message of the error value a Lambda document or transform returned on
 // its most recent failed load, or null. The CLI reports it as the actionable
 // load diagnostic; a successful load clears it.
 const char* lambda_document_load_diagnostic(void);
-DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool);
 void free_document(DomDocument* doc);

@@ -514,6 +514,21 @@ void ui_context_cleanup(UiContext* uicon) {
     uicon->destroy();
 }
 
+void ui_context_release_loader_runtime(UiContext* uicon) {
+    if (!uicon || !uicon->loader_runtime) return;
+    Runtime* runtime = uicon->loader_runtime.get();
+    uicon->loader_runtime = nullptr;
+    // Teardown is quiescent: take the thread from whichever document
+    // evaluator ran last, so cleanup binds the loader's own context (EO5v2).
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    if (owner && !radiant_eval_context_switch(owner)) {
+        log_error("loader-runtime: could not bind the window loader runtime for release");
+    }
+    runtime_cleanup(runtime);
+    mem_free(runtime);
+    log_debug("loader-runtime: released the window loader runtime");
+}
+
 // the window shell owns the top-level document and releases it here; other
 // holders of `document` only borrow it
 void UiContext::destroy_document() {
@@ -533,6 +548,8 @@ void UiContext::destroy() {
     }
 
     destroy_document();
+    // its documents borrowed the loader runtime, so it goes after them
+    ui_context_release_loader_runtime(this);
 
     log_debug("cleaning up font resources");
     fontface_cleanup(this);  // free font cache

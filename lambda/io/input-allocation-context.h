@@ -5,6 +5,7 @@
 
 typedef struct Pool Pool;
 typedef struct Arena Arena;
+typedef struct Input Input;
 
 // Parsing and document construction need only pool/arena ownership and a
 // small UI policy. Keeping this separate from rt Context prevents an input
@@ -13,6 +14,7 @@ typedef struct InputAllocationContext {
     Pool* pool;
     Arena* arena;
     bool ui_mode;
+    Input* input;   // the owner; ui_mode content appends deep-copy into it (D4.5.2)
 } InputAllocationContext;
 
 extern __thread InputAllocationContext* input_allocation_context;

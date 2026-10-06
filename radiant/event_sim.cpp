@@ -5256,8 +5256,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: navigating to '%s'", ev->navigate_url);
             Url* base_url = uicon->document ? uicon->document->url : nullptr;
             if (!base_url) base_url = get_current_dir();
-            DomDocument* new_doc = load_html_doc(base_url, ev->navigate_url,
-                uicon->viewport_width, uicon->viewport_height);
+            DomDocument* new_doc = nullptr;
+            {
+                // a top-level load: its stateless loaders share the window's runtime
+                LayoutLoaderHostScope loader_host(uicon);
+                new_doc = load_html_doc(base_url, ev->navigate_url,
+                    uicon->viewport_width, uicon->viewport_height);
+            }
             if (!new_doc) {
                 log_error("event_sim: navigate FAIL - could not load '%s'", ev->navigate_url);
                 ctx->fail_count++;
