@@ -29,9 +29,6 @@
 
 String* heap_create_name(const char* name, size_t len);
 
-extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
-    bool track_source_lines, bool execute_scripts);
 extern void free_document(DomDocument* doc);
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item);

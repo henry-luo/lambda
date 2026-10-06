@@ -10752,6 +10752,7 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
         !iframe->doc || !url || !url[0] ||
         !iframe->set_attribute("src", url)) return false;
     DomDocument* owner = iframe->doc;
+    if (!document_dependency_admits(owner, url)) return false;
     View* iframe_view = owner->view_tree
         ? find_view(owner->view_tree->root, (DomNode*)iframe) : nullptr;
     if (!iframe_view || (iframe_view->view_type != RDT_VIEW_BLOCK &&

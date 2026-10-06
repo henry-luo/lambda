@@ -13,6 +13,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/file.h"
 #include "../../lib/str.h"
+#include "../io/resource_policy.h"
 #include <limits.h>
 #include <new>
 #include <pthread.h>
@@ -26,6 +27,24 @@ extern "C" {
 extern "C" Pool* path_get_pool(void);
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+bool input_resource_policy_admits(InputResourcePolicy policy, const char* source) {
+    if (!source || !*source) return false;
+    if (policy == INPUT_RESOURCE_ALLOW_NETWORK) return true;
+    if (policy != INPUT_RESOURCE_LOCAL_ONLY) return false;
+    // filesystem paths have no standalone URL parse; loaders resolve web-relative sources first.
+    if (!url_starts_with_scheme(source)) return !(source[0] == '/' && source[1] == '/');
+    Url* url = url_parse(source);
+    if (!url) return false;
+    UrlScheme scheme = url->scheme;
+    url_destroy(url);
+    switch (scheme) {
+        case URL_SCHEME_HTTP: case URL_SCHEME_HTTPS:
+        case URL_SCHEME_FTP: case URL_SCHEME_FTPS:
+        case URL_SCHEME_WS: case URL_SCHEME_WSS: return false;
+        default: return true;
+    }
+}
 
 __thread Context* input_context = NULL;
 __thread InputAllocationContext* input_allocation_context = NULL;

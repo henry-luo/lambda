@@ -1138,8 +1138,9 @@ void view_pool_init(ViewTree* tree, MemContext* owner) {
 }
 
 void ViewTree::reset_retained() {
-    layout_generation = generation_next32(layout_generation);
-    if (model) view_tree_model_reset(this);
+    if (model) {
+        if (!view_tree_model_reset(this)) return;
+    } else layout_generation = generation_next32(layout_generation);
     if (root) {
         // DOM mutation fallback keeps both DOM/view nodes and their owned prop
         // blocks; only external payloads and generation-local values reset.
@@ -1164,7 +1165,7 @@ void view_pool_reset_retained(ViewTree* tree) {
 }
 
 void ViewTree::destroy() {
-    view_tree_model_destroy(this);
+    if (!view_tree_model_destroy(this)) return;
     destroy_measurement_cache(this);
     if (root) {
         view_teardown_visit_node(this, root,

@@ -16,7 +16,7 @@
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
-static const char* counter_name_from_reversed_value(CssValue* item) {
+static const char* counter_name_from_reversed_value(const CssValue* item) {
     if (!item) return nullptr;
     if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function) {
         CssFunction* function = item->data.function;
@@ -27,16 +27,23 @@ static const char* counter_name_from_reversed_value(CssValue* item) {
     return layout_css_counter_name(item, false);
 }
 
+static const CssValue* list_counter_property(DomElement* elem, CssPropertyCode property,
+                                           const LayoutListCounterQuery* query) {
+    if (query) return query->property(query->context, elem, property);
+    if (!elem || !elem->specified_style || !elem->specified_style->tree) return nullptr;
+    CssDeclaration* declaration = style_tree_get_declaration(elem->specified_style, property);
+    return declaration ? declaration->value : nullptr;
+}
+
 static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode property,
                                                const char* counter_name,
-                                               int implicit_value, int* out_value) {
-    if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
-    AvlNode* node = avl_tree_search(elem->specified_style->tree, property);
-    if (!node) return false;
-    StyleNode* sn = (StyleNode*)node->declaration;
-    CssDeclaration* decl = style_node_resolve_cascade(sn);
-    if (!decl || !decl->value) return false;
-    CssValue* val = decl->value;
+                                               int implicit_value, int* out_value,
+                                               const LayoutListCounterQuery* query = nullptr) {
+    return layout_counter_named_value(list_counter_property(elem, property, query), counter_name, implicit_value, out_value);
+}
+
+bool layout_counter_named_value(const CssValue* val, const char* counter_name,
+                               int implicit_value, int* out_value) {
     if (!val) return false;
 
     if (val->type == CSS_VALUE_TYPE_LIST) {
@@ -62,21 +69,18 @@ static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode
     return false;
 }
 // Extract counter-increment value for a specific counter from element's CSS
-static bool get_element_counter_inc(DomElement* elem, const char* counter_name, int* out_value) {
+static bool get_element_counter_inc(DomElement* elem, const char* counter_name, int* out_value,
+                                   const LayoutListCounterQuery* query) {
     return get_element_counter_property_value(elem, CSS_PROPERTY_COUNTER_INCREMENT,
-                                              counter_name, 1, out_value);
+                                              counter_name, 1, out_value, query);
 }
 // Check if element's CSS counter-reset contains a specific counter name
-static bool element_resets_counter(DomElement* elem, const char* counter_name) {
-    if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
-    AvlNode* node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_COUNTER_RESET);
-    if (!node) return false;
-    StyleNode* sn = (StyleNode*)node->declaration;
-    CssDeclaration* decl = style_node_resolve_cascade(sn);
-    if (!decl || !decl->value) return false;
-    CssValue* val = decl->value;
+static bool element_resets_counter(DomElement* elem, const char* counter_name,
+                                   const LayoutListCounterQuery* query) {
+    const CssValue* val = list_counter_property(elem, CSS_PROPERTY_COUNTER_RESET, query);
+    if (!val) return false;
 
-    auto check_name = [&](CssValue* item) -> bool {
+    auto check_name = [&](const CssValue* item) -> bool {
         const char* name = counter_name_from_reversed_value(item);
         return name && strcmp(name, counter_name) == 0;
     };
@@ -91,37 +95,38 @@ static bool element_resets_counter(DomElement* elem, const char* counter_name) {
     return false;
 }
 // Get the counter-set integer value for a specific counter name on an element
-static bool get_element_counter_set_value(DomElement* elem, const char* counter_name, int* out_value) {
+static bool get_element_counter_set_value(DomElement* elem, const char* counter_name, int* out_value,
+                                         const LayoutListCounterQuery* query) {
     return get_element_counter_property_value(elem, CSS_PROPERTY_COUNTER_SET,
-                                              counter_name, 0, out_value);
+                                              counter_name, 0, out_value, query);
 }
-
-static bool is_html_list_container_tag(NameId tag);
 
 // DFS walk: calculate the dynamic initial value for a reversed counter.
 // Skips subtrees that create a new scope (counter-reset) for the same counter.
 // Per CSS Lists 3 §4.4.2: the last non-zero increment is added after the walk.
 // Returns true if a counter-set was encountered (caller should stop walking).
-static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_name,
+bool layout_sum_reversed_counter_incs(DomElement* parent, const char* counter_name,
                                       int* total, int* last_nonzero, int* set_value,
-                                      bool include_implicit_reversed_list_item) {
+                                      bool include_implicit_reversed_list_item,
+                                      const LayoutListCounterQuery* query) {
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
+        if (query && !query->visible(query->context, elem)) continue;
         // HTML list containers establish an implicit list-item scope even when
         // no authored counter-reset declaration is present.
         if (include_implicit_reversed_list_item &&
-            is_html_list_container_tag(elem->tag_id)) {
+            layout_is_html_list_container_tag(elem->tag_id)) {
             continue;
         }
         // skip subtree if this element resets the same counter (new scope)
-        if (element_resets_counter(elem, counter_name)) continue;
+        if (element_resets_counter(elem, counter_name, query)) continue;
         // CSS Lists 3 §4.4.2: negate increments for a reversed counter and
         // retain the last non-zero value for the post-walk correction.
         int inc = 0;
-        bool has_increment = get_element_counter_inc(elem, counter_name, &inc);
+        bool has_increment = get_element_counter_inc(elem, counter_name, &inc, query);
         if (!has_increment && include_implicit_reversed_list_item &&
-            elem->tag_id == MARKUP_NAME_LI) {
+            (query ? query->list_item(query->context, elem) : elem->tag_id == MARKUP_NAME_LI)) {
             inc = -1;
             has_increment = true;
         }
@@ -132,14 +137,14 @@ static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_na
         // CSS Lists 3 §4.4.2: a counter-set stops the walk before this element's
         // increment is added; the final correction still uses its last value.
         int sv = 0;
-        if (get_element_counter_set_value(elem, counter_name, &sv)) {
+        if (get_element_counter_set_value(elem, counter_name, &sv, query)) {
             *set_value = sv;
             return true;
         }
         *total += increment_negated;
         // recurse into children; stop if counter-set found in subtree
-        if (sum_reversed_counter_incs(elem, counter_name, total, last_nonzero,
-                                      set_value, include_implicit_reversed_list_item)) {
+        if (layout_sum_reversed_counter_incs(elem, counter_name, total, last_nonzero,
+                                      set_value, include_implicit_reversed_list_item, query)) {
             return true;
         }
     }
@@ -225,7 +230,7 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style) {
 }
 // List Container Counter Setup
 
-static bool is_html_list_container_tag(NameId tag) {
+bool layout_is_html_list_container_tag(NameId tag) {
     return tag == MARKUP_NAME_OL || tag == MARKUP_NAME_UL ||
         tag == MARKUP_NAME_MENU || tag == MARKUP_NAME_DIR;
 }
@@ -234,7 +239,7 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
     if (!lycon->counter_context || !dom_elem) return;
 
     NameId tag = dom_elem->tag_id;
-    if (!is_html_list_container_tag(tag)) return;
+    if (!layout_is_html_list_container_tag(tag)) return;
     // CSS 2.1 §12.5: OL, UL, MENU, DIR have implicit counter-reset: list-item
     // This creates a new list-item counter instance for each list container,
     // enabling counters(list-item, ".") to show nested numbering (e.g., "1.2.3").
@@ -267,7 +272,7 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
     // using the same DFS algorithm as CSS counter-reset: reversed(list-item)
     if (is_reversed_ol && start_value == 0) {
         int total = 0, last_nz = 0, set_val = 0;
-        bool has_set = sum_reversed_counter_incs(
+        bool has_set = layout_sum_reversed_counter_incs(
             dom_elem, "list-item", &total, &last_nz, &set_val, true);
         if (last_nz != 0 || has_set) {
             // CSS Lists 3 §4.4.2: the shared walk already negates implicit and
@@ -301,7 +306,7 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
         const char* rev_name = layout_css_counter_name(func->args[0], false);
         if (!rev_name) return;
         int total = 0, last_nz = 0, set_val = 0;
-        bool has_set = sum_reversed_counter_incs(dom_elem, rev_name, &total, &last_nz,
+        bool has_set = layout_sum_reversed_counter_incs(dom_elem, rev_name, &total, &last_nz,
                                                 &set_val, false);
         if (last_nz == 0 && !has_set) return; // no non-zero increments and no counter-set found
         int initial = total + last_nz + set_val;
@@ -483,14 +488,14 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     bool is_quirks = lycon->doc && lycon->doc->view_tree &&
         is_quirks_mode(lycon->doc->view_tree->html_version);
     marker_prop->reserves_first_line = is_quirks && is_outside &&
-        (!list_parent || !is_html_list_container_tag(list_parent->tag_id));
+        (!list_parent || !layout_is_html_list_container_tag(list_parent->tag_id));
     // CSS 2.1 §12.5: list-style-image overrides list-style-type when image loads successfully.
     if (image && image->gradient_type != GRADIENT_NONE) {
         marker_prop->image = *image;
         marker_prop->is_image_marker = true;
     } else if (image && image->url && strcmp(image->url, "none") != 0) {
         marker_prop->image.url = lam::shared(lam::promote_to_pool(lycon->pool, image->url).get());
-        marker_prop->loaded_image = lam::up(load_image(lycon->ui_context, marker_prop->image.url));
+        marker_prop->loaded_image = lam::up(load_document_image(lycon->doc, lycon->ui_context, marker_prop->image.url));
     }
 
     if (marker_css_content) {

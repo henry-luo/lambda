@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "radiant.hpp"
+#include "layout.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -87,49 +88,43 @@ bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
     return true;
 }
 
-Rect render_media_image_rect(ViewBlock* view, ImageSurface* img, Rect rect, float s) {
-    if (!view || !view->embed || !img || img->width <= 0 || img->height <= 0) return rect;
+Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* img, Rect rect, float s) {
+    if (!embed || !img || img->width <= 0 || img->height <= 0 ||
+        rect.width <= 0.0f || rect.height <= 0.0f || s <= 0.0f) return rect;
     // Apply object-fit: compute actual image render rect
-    CssEnum object_fit = view->embedp()->object_fit;
+    CssEnum object_fit = embed->object_fit;
     Rect img_rect = rect;  // default: fill (stretch to container)
-    // SVG images with a viewBox implicitly use preserveAspectRatio="xMidYMid meet"
-    // (equivalent to object-fit: contain) unless object-fit is explicitly set.
-    bool svg_default_contain = (img->format == IMAGE_FORMAT_SVG && !object_fit);
-    if ((object_fit && object_fit != CSS_VALUE_FILL && img->width > 0 && img->height > 0) ||
-        svg_default_contain) {
-        float img_w = (float)img->width;
-        float img_h = (float)img->height;
+    if (object_fit && object_fit != CSS_VALUE_FILL) {
+        ReplacedIntrinsicFacts facts = {}; layout_replaced_image_facts(&facts, img, true);
+        float img_w, img_h;
+        layout_replaced_default_object_size(&facts, rect.width / s, rect.height / s, &img_w, &img_h);
+        if (img_w <= 0.0f || img_h <= 0.0f) return rect;
         float box_w = rect.width;
         float box_h = rect.height;
-        float scale_x = box_w / img_w;
-        float scale_y = box_h / img_h;
-        float scale;
-
-        if (object_fit == CSS_VALUE_CONTAIN || svg_default_contain) {
-            scale = (scale_x < scale_y) ? scale_x : scale_y;
-        } else if (object_fit == CSS_VALUE_COVER) {
-            scale = (scale_x > scale_y) ? scale_x : scale_y;
-        } else if (object_fit == CSS_VALUE_NONE) {
-            scale = 1.0f * s;
-        } else if (object_fit == CSS_VALUE_SCALE_DOWN) {
-            // scale-down: use the smaller of none (1x) or contain
-            float contain_scale = (scale_x < scale_y) ? scale_x : scale_y;
-            scale = (contain_scale < s) ? contain_scale : s;
-        } else {
-            scale = scale_x; // fallback: fill-like
+        float rendered_w = img_w * s, rendered_h = img_h * s;
+        // SVG preserveAspectRatio is applied inside its viewport; object-fit uses only natural sizing facts.
+        if (object_fit == CSS_VALUE_CONTAIN || object_fit == CSS_VALUE_COVER || object_fit == CSS_VALUE_SCALE_DOWN) {
+            float fitted_w = box_w, fitted_h = box_h;
+            if (facts.has_natural_aspect_ratio) {
+                float ratio = facts.natural_aspect_ratio;
+                float fit = object_fit == CSS_VALUE_COVER ? fmaxf(box_w / ratio, box_h) : fminf(box_w / ratio, box_h);
+                fitted_w = fit * ratio; fitted_h = fit;
+            }
+            if (object_fit != CSS_VALUE_SCALE_DOWN || rendered_w > fitted_w || rendered_h > fitted_h) {
+                rendered_w = fitted_w; rendered_h = fitted_h;
+            }
+        } else if (object_fit != CSS_VALUE_NONE) {
+            return rect;
         }
-
-        float rendered_w = img_w * scale;
-        float rendered_h = img_h * scale;
         float pos_x = 50.0f;
         float pos_y = 50.0f;
         bool pos_x_is_percent = true;
         bool pos_y_is_percent = true;
-        if (view->embedp()->object_position_set) {
-            pos_x = view->embedp()->object_position_x;
-            pos_y = view->embedp()->object_position_y;
-            pos_x_is_percent = view->embedp()->object_position_x_is_percent;
-            pos_y_is_percent = view->embedp()->object_position_y_is_percent;
+        if (embed->object_position_set) {
+            pos_x = embed->object_position_x;
+            pos_y = embed->object_position_y;
+            pos_x_is_percent = embed->object_position_x_is_percent;
+            pos_y_is_percent = embed->object_position_y_is_percent;
         }
         img_rect.x = rect.x + render_media_object_position_offset(
             box_w, rendered_w, pos_x, pos_x_is_percent, s);
@@ -141,20 +136,23 @@ Rect render_media_image_rect(ViewBlock* view, ImageSurface* img, Rect rect, floa
     return img_rect;
 }
 
-bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
-                                    const Rect* content_rect) {
-    if (!paint || !view || !view->embed || !content_rect) return false;
-    ImageSurface* image = view->embedp()->img;
+Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect rect, float scale) {
+    return render_media_object_rect(view && view->embed ? view->embedp() : nullptr, image, rect, scale);
+}
+
+bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect rect,
+        const Rect* content_rect, float raster_scale, FontContext* fonts, UiContext* ui, uint8_t opacity) {
+    if (!paint || !content_rect) return false;
     Element* root = image && image->pic ? rdt_picture_get_svg_root(image->pic) : nullptr;
     if (!root) return false;
-    Rect rect = render_media_image_rect(view, image, *content_rect, 1.0f);
     if (rect.width <= 0 || rect.height <= 0) return true;
     RdtMatrix placement = rdt_matrix_translate(rect.x, rect.y);
     PaintSvgSubscene scene = {};
     render_svg_build_subscene(&scene, root, rect.width, rect.height,
-        rdt_picture_get_pool(image->pic), ui_context_raster_scale(ui),
-        ui ? ui->font_ctx : nullptr, &placement, nullptr, nullptr, nullptr,
+        rdt_picture_get_pool(image->pic), raster_scale,
+        fonts, &placement, nullptr, nullptr, nullptr,
         rdt_picture_get_source_path(image->pic), 1.0f, false, nullptr, true, -1.0f, ui);
+    scene.opacity = (float)opacity / 255.0f;
     scene.image_document = true;
     scene.clip_viewport = true;
     scene.animation_time = rdt_picture_animation_time(image->pic);
@@ -167,6 +165,33 @@ bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* 
     paint_svg_subscene(paint, &scene);
     paint_pop_clip(paint);
     rdt_path_free(clip);
+    return true;
+}
+
+bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
+        const Rect* content_rect) {
+    if (!view || !view->embed || !content_rect) return false;
+    ImageSurface* image = view->embedp()->img;
+    return render_media_paint_svg_image(paint, image,
+        render_media_image_rect(view, image, *content_rect, 1.0f), content_rect,
+        ui_context_raster_scale(ui), ui ? ui->font_ctx.get() : nullptr, ui);
+}
+
+bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
+    if (!paint || !box || !box->image) return false;
+    if (box->content_rect.width <= 0.0f || box->content_rect.height <= 0.0f) return true;
+    if (box->image->format == IMAGE_FORMAT_SVG) {
+        return render_media_paint_svg_image(paint, box->image, box->image_rect,
+            &box->content_rect, box->raster_scale, box->fonts, nullptr, box->opacity);
+    }
+    RdtPath* clip = rdt_path_new();
+    if (!clip) return false;
+    rdt_path_add_rect(clip, box->content_rect.x, box->content_rect.y,
+        box->content_rect.width, box->content_rect.height, 0.0f, 0.0f);
+    paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
+    paint_draw_image_resource(paint, box->image, box->image_rect.x, box->image_rect.y,
+        box->image_rect.width, box->image_rect.height, box->opacity, nullptr);
+    paint_pop_clip(paint);
     return true;
 }
 

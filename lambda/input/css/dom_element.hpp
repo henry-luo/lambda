@@ -15,6 +15,7 @@
 #include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
 #include "../../lambda.hpp"  // Full Element definition (needed for embedded Element field)
 #include "../../core/name_identity.h"
+#include "../../io/resource_policy.h"
 
 /**
  * DOM Element Extension for CSS Styling
@@ -319,6 +320,7 @@ struct DomDocument : DomDocumentResourceData {
 
     // Network support (Phase 4 integration)
     lam::Own<struct NetworkResourceManager> resource_manager;  // Network resource coordinator (nullptr for local-only docs)
+    InputResourcePolicy resource_policy;              // immutable dependency admission for this document
     double load_start_time;                           // Document load start timestamp (for total timeout)
     bool fully_loaded;                                // True when all network resources complete
 
@@ -446,7 +448,7 @@ struct DomDocument : DomDocumentResourceData {
                     font_faces_processed(false),
                     view_tree(nullptr), secondary_view_trees(nullptr),
                     secondary_views_cleanup_registered(false), state_store(nullptr), state(nullptr),
-                    resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
+                    resource_manager(nullptr), resource_policy(INPUT_RESOURCE_ALLOW_NETWORK), load_start_time(0.0), fully_loaded(true),
                     lambda_runtime(nullptr), embedding_document(nullptr),
                     embedding_element_ref({nullptr, 0}), resources(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),

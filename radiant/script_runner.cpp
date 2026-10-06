@@ -75,7 +75,8 @@ extern char* js_load_script_source_from_cache(const char* path,
                                               const char* profile,
                                               const char* execution_mode,
                                               bool module_mode,
-                                              size_t* out_length);
+                                              size_t* out_length,
+                                       InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK);
 extern void jm_cleanup_active_mir(void);
 extern void jm_abandon_active_mir_after_signal(void);
 
@@ -319,6 +320,7 @@ typedef enum JsScriptTaskStatus {
     JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE,
     JS_SCRIPT_TASK_SKIPPED_NON_SCRIPT_RESPONSE,
     JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED,
+    JS_SCRIPT_TASK_SKIPPED_RESOURCE_POLICY,
     JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED,
     JS_SCRIPT_TASK_SKIPPED_NOMODULE,
     JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER,
@@ -399,6 +401,7 @@ typedef struct JsScriptTaskCollection {
     size_t external_source_bytes;
     size_t onload_source_bytes;
     bool testharness_seen;
+    InputResourcePolicy resource_policy;
 } JsScriptTaskCollection;
 
 typedef struct JsScriptSchedulerQueues {
@@ -789,6 +792,7 @@ static const char* script_task_status_name(JsScriptTaskStatus status) {
         case JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE: return "skipped-unsupported-type";
         case JS_SCRIPT_TASK_SKIPPED_NON_SCRIPT_RESPONSE: return "skipped-non-script-response";
         case JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED: return "skipped-external-disabled";
+        case JS_SCRIPT_TASK_SKIPPED_RESOURCE_POLICY: return "skipped-resource-policy";
         case JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED: return "skipped-module-unsupported";
         case JS_SCRIPT_TASK_SKIPPED_NOMODULE: return "skipped-nomodule";
         case JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER: return "skipped-large-defer";
@@ -1526,6 +1530,12 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
                 return;
             }
             task->resolved_url = resolved;
+            if (!input_resource_policy_admits(collection->resource_policy, resolved)) {
+                task->status = JS_SCRIPT_TASK_SKIPPED_RESOURCE_POLICY;
+                collection->skipped_scripts++;
+                script_task_list_append(collection->scripts, task);
+                return;
+            }
             if (strcmp(task->resolved_url, "builtin:wpt-testharness.js") == 0) {
                 collection->testharness_seen = true;
             }
@@ -2368,6 +2378,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_error("execute_document_scripts: failed to initialize script task collection");
         return;
     }
+    script_tasks.resource_policy = dom_doc->resource_policy;
     collect_scripts_recursive(html_root, &script_tasks, base_url, 0);
     prefetch_external_script_sources(&script_tasks, dom_doc->resource_manager, timing);
     load_external_script_sources(&script_tasks, dom_doc->resource_manager, timing);
@@ -2424,6 +2435,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     runtime_set_ui_result_arena(runtime,
         dom_doc->input ? dom_doc->input->arena : nullptr);
     runtime->dom_doc = (void*)dom_doc;
+    runtime->resource_policy = dom_doc->resource_policy;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
     runtime->js_document_base_url = dom_doc->url ? url_get_href(dom_doc->url) :
         (base_url ? url_get_href(base_url) : nullptr);

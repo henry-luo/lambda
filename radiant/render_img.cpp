@@ -66,11 +66,12 @@ void save_surface_to_png(ImageSurface* surface, const char* filename) {
 }
 
 // Save surface to JPEG using TurboJPEG
-void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality) {
+bool save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality) {
+    if (!surface || !surface->pixels || surface->width <= 0 || surface->height <= 0 || !filename) return false;
     tjhandle tj_instance = tjInitCompress();
     if (!tj_instance) {
         log_error("Failed to initialize TurboJPEG compressor: %s", tjGetErrorStr());
-        return;
+        return false;
     }
 
     // Convert RGBA to RGB (JPEG doesn't support alpha channel)
@@ -81,15 +82,16 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     if (!rgb_buffer) {
         log_error("Failed to allocate memory for RGB buffer");
         tjDestroy(tj_instance);
-        return;
+        return false;
     }
 
     // Convert RGBA pixels to RGB
     uint8_t* src_pixels = (uint8_t*)surface->pixels;
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
-            int src_idx = (y * surface->pitch) + (x * 4); // RGBA = 4 bytes per pixel
-            int dst_idx = (y * width * 3) + (x * 3);      // RGB = 3 bytes per pixel
+            // preview grids can exceed signed pixel-offset arithmetic even though each extent fits int.
+            size_t src_idx = (size_t)y * surface->pitch + (size_t)x * 4;
+            size_t dst_idx = ((size_t)y * width + x) * 3;
 
             rgb_buffer[dst_idx + 0] = src_pixels[src_idx + 0]; // R
             rgb_buffer[dst_idx + 1] = src_pixels[src_idx + 1]; // G
@@ -107,8 +109,9 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 
     if (result != 0) {
         log_error("TurboJPEG compression failed: %s", tjGetErrorStr());
+        if (jpeg_buffer) tjFree(jpeg_buffer);
         tjDestroy(tj_instance);
-        return;
+        return false;
     }
 
     // Write JPEG data to file
@@ -117,7 +120,7 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
         log_error("Failed to open file for writing: %s", filename);
         tjFree(jpeg_buffer);
         tjDestroy(tj_instance);
-        return;
+        return false;
     }
 
     size_t written = fwrite(jpeg_buffer, 1, jpeg_size, fp);
@@ -128,9 +131,10 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     }
 
     // Clean up
-    fclose(fp);
+    bool closed = fclose(fp) == 0;
     tjFree(jpeg_buffer);
     tjDestroy(tj_instance);
+    return written == jpeg_size && closed;
 }
 
 // Main function to layout HTML and render to PNG

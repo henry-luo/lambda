@@ -142,6 +142,13 @@ static CssPropertyCode margin_longhands[] = {
 static CssPropertyCode padding_longhands[] = {
     CSS_PROPERTY_PADDING_TOP, CSS_PROPERTY_PADDING_RIGHT, CSS_PROPERTY_PADDING_BOTTOM, CSS_PROPERTY_PADDING_LEFT
 };
+static CssPropertyCode font_longhands[] = {
+    CSS_PROPERTY_FONT_SIZE, CSS_PROPERTY_FONT_WEIGHT, CSS_PROPERTY_FONT_STYLE,
+    CSS_PROPERTY_FONT_VARIANT, CSS_PROPERTY_LINE_HEIGHT, CSS_PROPERTY_FONT_FAMILY
+};
+static CssPropertyCode list_style_longhands[] = {
+    CSS_PROPERTY_LIST_STYLE_TYPE, CSS_PROPERTY_LIST_STYLE_POSITION, CSS_PROPERTY_LIST_STYLE_IMAGE
+};
 static CssPropertyCode border_longhands[] = {
     CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_RIGHT_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_LEFT_WIDTH,
     CSS_PROPERTY_BORDER_TOP_STYLE, CSS_PROPERTY_BORDER_RIGHT_STYLE, CSS_PROPERTY_BORDER_BOTTOM_STYLE, CSS_PROPERTY_BORDER_LEFT_STYLE,
@@ -501,7 +508,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TEXT_ALIGN_LAST, "text-align-last", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
 
     // List Properties
-    {CSS_PROPERTY_LIST_STYLE, "list-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc outside none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_LIST_STYLE, "list-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc outside none", false, true, list_style_longhands, 3, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_TYPE, "list-style-type", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_POSITION, "list-style-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "outside", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_IMAGE, "list-style-image", PROP_TYPE_URL, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_url, NULL},
@@ -516,7 +523,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_QUOTES, "quotes", PROP_TYPE_STRING, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_string, NULL},
 
     // Additional Typography Properties
-    {CSS_PROPERTY_FONT, "font", PROP_TYPE_STRING, PROP_INHERIT_YES, "medium serif", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_FONT, "font", PROP_TYPE_STRING, PROP_INHERIT_YES, "medium serif", false, true, font_longhands, 6, validate_string, NULL},
     {CSS_PROPERTY_FONT_STRETCH, "font-stretch", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_ORIENTATION, "text-orientation", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "mixed", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_COMBINE_UPRIGHT, "text-combine-upright", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},

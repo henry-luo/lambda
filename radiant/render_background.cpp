@@ -1853,7 +1853,7 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
     const char* image_url = bg->image;
 
     // Load image via the image cache
-    ImageSurface* img = load_image(rdcon->ui_context, image_url);
+    ImageSurface* img = load_document_image(rdcon->ui_context->document, rdcon->ui_context, image_url);
     if (!img) {
         // Background images are optional paint layers; network-managed pages
         // may skip late/blocking fetches and keep rendering the base layer.

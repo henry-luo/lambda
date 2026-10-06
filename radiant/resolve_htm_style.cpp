@@ -525,7 +525,7 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
             block->embed->has_controls = element->has_attribute("controls");
             const char* poster_src = element->get_attribute("poster");
             if (poster_src && *poster_src) {
-                block->embed->poster = lam::up(load_image(lycon->ui_context, poster_src));
+                block->embed->poster = lam::up(load_document_image(lycon->doc, lycon->ui_context, poster_src));
             }
         }
 

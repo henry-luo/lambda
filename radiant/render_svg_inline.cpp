@@ -619,6 +619,7 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
         style->isolated_document = input ? dom_document_create(input) : nullptr;
         style->document = style->isolated_document;
         if (!style->document) { svg_style_destroy(style); return false; }
+        style->document->resource_policy = host ? host->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
         dom_document_borrow_input_resources(style->document);
         style->document->services.svg_image_document = image_document;
         if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
@@ -1741,6 +1742,7 @@ static SvgResourceReference svg_resolve_reference(SvgInlineRenderContext* ctx, c
         (ctx->image_document && strncmp(file.get(), "data:", 5) != 0)) return result;
     lam::Temp<char> path(svg_resolve_resource_path(ctx, file.get())); file.reset();
     if (!path) return result;
+    if (style->document && !input_resource_policy_admits(style->document->resource_policy, path.get())) return result;
     SvgStyleContext* owner = style->resource_owner ? style->resource_owner : style;
     SvgResourceDocument* document = nullptr;
     int count = 0;
@@ -1750,7 +1752,7 @@ static SvgResourceReference svg_resolve_reference(SvgInlineRenderContext* ctx, c
     }
     if (!document && !svg_resource_stack_contains(path.get()) && count < SVG_MAX_ELEM_DEFS) {
         UiContext* ui = g_svg_active_rdcon ? g_svg_active_rdcon->ui_context : nullptr;
-        ImageSurface* image = ui ? load_image(ui, path.get()) : nullptr;
+        ImageSurface* image = ui ? load_document_image(style->document, ui, path.get()) : nullptr;
         RdtPicture* picture = image && image->format == IMAGE_FORMAT_SVG
             ? rdt_picture_dup(image->pic) : ui ? nullptr : rdt_picture_load(path.get());
         document = svg_resource_document_create(ctx, picture, path.get());
@@ -5579,12 +5581,15 @@ static void render_svg_image_resource(SvgInlineRenderContext* ctx, Element* elem
     lam::Temp<char> resolved(svg_resolve_resource_path(ctx, file ? file.get() : href));
     file.reset();
     if (!resolved) return;
+    SvgStyleContext* style = (SvgStyleContext*)ctx->style_context;
+    if (style && style->document &&
+        !input_resource_policy_admits(style->document->resource_policy, resolved.get())) return;
     ImageSurface* image = nullptr;
     RdtPicture* standalone_picture = nullptr;
     bool owns_image = false;
     UiContext* ui = g_svg_active_rdcon ? g_svg_active_rdcon->ui_context : nullptr;
     if (ui) {
-        image = load_image(ui, resolved.get());
+        image = load_document_image(style ? style->document : nullptr, ui, resolved.get());
     } else if (strncmp(resolved.get(), "data:", 5) == 0) {
         size_t length = 0;
         lam::Temp<unsigned char> data(parse_data_uri(resolved.get(), nullptr, 0, &length));

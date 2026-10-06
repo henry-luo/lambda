@@ -1803,9 +1803,13 @@ void preamble_state_destroy(JsPreambleState* state) {
 
 char* js_load_script_source_from_cache(const char* path,
         const char* profile, const char* execution_mode, bool module_mode,
-        size_t* out_length) {
+        size_t* out_length, InputResourcePolicy resource_policy) {
     if (out_length) *out_length = 0;
     if (!path || !path[0]) return NULL;
+    if (!input_resource_policy_admits(resource_policy, path)) {
+        log_info("resource-admission: denied script source %s", path);
+        return NULL;
+    }
 
     bool is_http = js_path_is_http_url(path);
     char* canonical = is_http ? NULL : file_realpath(path);
@@ -1862,7 +1866,8 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
     log_info("js-mir: loading JS module '%s' for cross-language import", js_path);
     if (runtime) runtime->js_runtime_used = true;
     char* source = js_load_script_source_from_cache(
-        js_path, "js-cross-language-module", "module", true, NULL);
+        js_path, "js-cross-language-module", "module", true, NULL,
+        runtime ? runtime->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK);
     if (!source) {
         log_error("js-mir: cannot read JS file '%s'", js_path);
         return ItemNull;
@@ -1938,10 +1943,13 @@ static bool js_require_path_is_json(const char* path) {
 }
 
 static char* js_require_read_source(const char* path) {
+    Runtime* runtime = js_current_runtime();
+    if (runtime && !input_resource_policy_admits(runtime->resource_policy, path)) return NULL;
     if (js_require_path_is_json(path)) return read_text_file(path);
     bool module_mode = !js_is_cjs_file(path);
     return js_load_script_source_from_cache(path, "js-require",
-        module_mode ? "module" : "cjs", module_mode, NULL);
+        module_mode ? "module" : "cjs", module_mode, NULL,
+        runtime ? runtime->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK);
 }
 
 static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf_size,
@@ -2332,6 +2340,11 @@ extern "C" Item js_require(Item specifier) {
     Item builtin = js_module_get_builtin(specifier);
     if (get_type_id(builtin) != LMD_TYPE_NULL) return builtin;
 
+    // retained namespaces obey the same admission as newly acquired source.
+    Runtime* active_runtime = js_current_runtime();
+    if (active_runtime && !input_resource_policy_admits(active_runtime->resource_policy, spec->chars))
+        return js_require_module_not_found(spec->chars);
+
     // Check if already loaded in module cache
     Item existing = js_cjs_cached_value(specifier);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
@@ -2484,6 +2497,11 @@ extern "C" Item js_dynamic_import(Item specifier) {
         snprintf(resolved_path, sizeof(resolved_path), "%.*s",
                  (int)spec->len, spec->chars);
     }
+    // reject before a warm namespace can bypass the active document's policy.
+    Runtime* active_runtime = js_current_runtime();
+    if (active_runtime && !input_resource_policy_admits(active_runtime->resource_policy, resolved_path)) {
+        return js_dynamic_import_reject_type_error("import(): module blocked by document resource policy");
+    }
     Rooted<Item> resolved_spec_root(roots, make_string_item(resolved_path));
 
     // Js56 P10: dynamic `import(...)` is ES-module-only — CommonJS uses
@@ -2502,7 +2520,8 @@ extern "C" Item js_dynamic_import(Item specifier) {
         char path_buf[2048];
         snprintf(path_buf, sizeof(path_buf), "%s", resolved_path);
         char* source = js_load_script_source_from_cache(
-            path_buf, "js-dynamic-import", "module", true, NULL);
+            path_buf, "js-dynamic-import", "module", true, NULL,
+            js_current_runtime() ? js_current_runtime()->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK);
         if (!source) {
             js_dynamic_import_suppress_module_drain--;
             char msg[256];

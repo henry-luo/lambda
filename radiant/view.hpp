@@ -626,13 +626,15 @@ typedef enum {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct ImageSurface {
     ImageFormat format;
-    int width;             // the intrinsic width of the surface/image (used for layout/intrinsic sizing)
-    int height;            // the intrinsic height of the surface/image
+    int width;             // integer source/decoder extent; SVG natural dimensions remain fractional below
+    int height;
     int encoded_width;     // raster source dimensions before image-orientation metadata
     int encoded_height;
     int orientation;       // EXIF orientation value, 1 when absent/normal/invalid
     bool has_intrinsic_size;
     bool has_intrinsic_aspect_ratio;
+    float natural_width, natural_height, natural_aspect_ratio; // SVG metadata, independent of decoder viewport
+    bool has_natural_width, has_natural_height;
     int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
@@ -4170,6 +4172,7 @@ typedef struct DocumentJsHostConfig {
     double post_load_settle_ms;
     bool redirect_stdout_to_stderr;
     bool disable_css_animations;
+    InputResourcePolicy resource_policy;
 } DocumentJsHostConfig;
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const struct DomDocument* source);
@@ -4180,6 +4183,11 @@ extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp*
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
+bool document_dependency_admits(const DomDocument* document, const char* source);
+ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source);
+ImageSurface* load_document_image_resource(DomDocument* document, lam::Own<struct hashmap>* cache,
+    const char* source);
+void image_resource_cache_cleanup(lam::Own<struct hashmap>* cache, UiContext* animation_ui = nullptr);
 // The image cache takes a surface decoded elsewhere under `key` and returns the
 // surface it holds for that key: `surface`, or an earlier one (then `surface`
 // is destroyed). Returns null, with `surface` destroyed, when it cannot store it.
@@ -4214,6 +4222,10 @@ typedef struct HtmlLoadPhaseTiming {
     double finalize_ms;
 } HtmlLoadPhaseTiming;
 
+DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
+    bool track_source_lines = false, bool execute_scripts = true,
+    const DocumentJsHostConfig* host_config = nullptr);
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config = nullptr,
                            struct CookieJar* top_level_cookie_jar = nullptr,
@@ -4230,7 +4242,8 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_filename, int viewport_
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
-    int viewport_width, int viewport_height, Pool* pool);
+    int viewport_width, int viewport_height, Pool* pool,
+    InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK);
 DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool);
 // The message of the error value a Lambda document or transform returned on
 // its most recent failed load, or null. The CLI reports it as the actionable

@@ -3947,6 +3947,9 @@ static Item jm_execute_cached_module_dependencies(Runtime* runtime,
         const char* path = artifact->static_dependency_paths
             ? artifact->static_dependency_paths[i] : NULL;
         if (!path || !path[0]) return ItemError;
+        if (!input_resource_policy_admits(runtime->resource_policy, path)) {
+            return js_throw_reference_error(js_make_string("Module blocked by document resource policy"));
+        }
         String* spec_str = heap_create_name(path, strlen(path));
         if (!spec_str) return ItemError;
         Item specifier = (Item){.item = s2it(spec_str)};
@@ -3956,7 +3959,7 @@ static Item jm_execute_cached_module_dependencies(Runtime* runtime,
         js_module_register(specifier, js_new_object());
         size_t source_length = 0;
         char* source = js_load_script_source_from_cache(path,
-            "js-static-import", "module", true, &source_length);
+            "js-static-import", "module", true, &source_length, runtime->resource_policy);
         if (!source) return js_throw_reference_error(
             js_make_string("Cannot find cached module dependency"));
         Item result = transpile_js_module_to_mir(runtime, source, path);
@@ -4494,6 +4497,19 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
                         (int)imp->source->len, imp->source->chars);
                 }
 
+                // admission also covers retained namespaces and cross-language imports.
+                if (runtime && !input_resource_policy_admits(runtime->resource_policy, resolved)) {
+                    RootFrame admission_roots(2);
+                    Rooted<Item> error(admission_roots,
+                        js_throw_reference_error(js_make_string("Module blocked by document resource policy")));
+                    if (filename) {
+                        Rooted<Item> importer(admission_roots,
+                            (Item){.item = s2it(heap_create_name(filename, strlen(filename)))});
+                        js_module_record_evaluation_error(importer.get(), error.get());
+                    }
+                    return false;
+                }
+
                 // Js57 P3 (Track B2): self-import — skip loading because the
                 // current module is its own dependency. The module's namespace
                 // gets registered by transpile_js_module_to_mir before js_main
@@ -4572,7 +4588,7 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
                     size_t mod_source_length = 0;
                     char* mod_source = js_load_script_source_from_cache(
                         resolved, "js-static-import", "module", true,
-                        &mod_source_length);
+                        &mod_source_length, runtime->resource_policy);
                     if (mod_source) {
                         if (record_cache_dependencies &&
                                 !js_module_mir_cache_record_dependency(

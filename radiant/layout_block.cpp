@@ -26,9 +26,6 @@
 #include <cstdlib>
 
 extern void adjust_text_bounds(ViewText* text);
-extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
-    bool track_source_lines, bool execute_scripts);
 
 static void align_and_discard_phantom_inline_line(LayoutContext* lycon);
 
@@ -1022,7 +1019,7 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
     if (!img_elem->embed) return nullptr;
     char* resolved_url = resolve_css_resource_url(lycon, content_decl, raw_url);
     if (!resolved_url) return nullptr;
-    img_elem->embed->img = lam::up(load_image(lycon->ui_context, resolved_url));
+    img_elem->embed->img = lam::up(load_document_image(lycon->doc, lycon->ui_context, resolved_url));
     return img_elem;
 }
 
@@ -4808,8 +4805,9 @@ static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
         pool_destroy(pool);
         return nullptr;
     }
+    DocumentJsHostConfig host_config = document_js_host_config_inherit(nullptr, lycon->ui_context->document);
     DomDocument* doc = load_lambda_html_doc(base_url, nullptr,
-        viewport_width, viewport_height, pool, srcdoc, false, true);
+        viewport_width, viewport_height, pool, srcdoc, false, true, &host_config);
     if (!doc) {
         url_destroy(base_url);
         pool_destroy(pool);
@@ -4821,7 +4819,7 @@ static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
     return doc;
 }
 
-static DomDocument* load_iframe_src_doc(LayoutContext* lycon,
+DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon,
                                         const char* src,
                                         int viewport_width,
                                         int viewport_height) {
@@ -4829,11 +4827,14 @@ static DomDocument* load_iframe_src_doc(LayoutContext* lycon,
         !lycon->ui_context->document->url || !src || !*src) {
         return nullptr;
     }
+    DomDocument* parent = lycon->ui_context->document;
+    if (!document_dependency_admits(parent, src)) return nullptr;
+    DocumentJsHostConfig host_config = document_js_host_config_inherit(nullptr, parent);
     size_t src_len = strlen(src);
     StrBuf* src_buf = strbuf_new_cap(src_len);
     strbuf_append_str_n(src_buf, src, src_len);
     DomDocument* doc = load_html_doc(lycon->ui_context->document->url,
-        src_buf->str, viewport_width, viewport_height);
+        src_buf->str, viewport_width, viewport_height, &host_config);
     strbuf_free(src_buf);
     return doc;
 }
@@ -4912,7 +4913,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 doc = load_iframe_srcdoc_doc(lycon, srcdoc,
                     iframe_width, iframe_height);
             } else {
-                doc = load_iframe_src_doc(lycon, src,
+                doc = layout_load_iframe_src_doc(lycon, src,
                     iframe_width, iframe_height);
             }
             if (!doc) {
@@ -8021,7 +8022,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 resolve_css_resource_url(lycon, content_replacement_decl, src->str) : nullptr;
             const char* image_url = resolved_content_url ? resolved_content_url : src->str;
             ImageSurface* loaded_img = block->embedp()->img ? block->embedp()->img :
-                load_image(lycon->ui_context, image_url);
+                load_document_image(lycon->doc, lycon->ui_context, image_url);
             // the image cache owns the surface; the element only borrows it
             if (loaded_img) block->embed->img = lam::up(loaded_img);
             strbuf_free(src);
@@ -8036,10 +8037,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             float w = 0.0f;
             float h = 0.0f;
             layout_image_intrinsic_size(block->as_element(), img, &w, &h);
-            bool image_has_intrinsic_ratio = img->has_intrinsic_size ||
-                img->has_intrinsic_aspect_ratio;
+            ReplacedIntrinsicFacts image_facts = {};
+            layout_replaced_image_facts(&image_facts, img, layout_image_orientation_uses_from_image(block->as_element()));
+            bool image_has_intrinsic_ratio = image_facts.has_natural_aspect_ratio;
             bool image_has_ratio_without_natural_size =
-                !img->has_intrinsic_size && img->has_intrinsic_aspect_ratio;
+                !image_facts.has_natural_width && !image_facts.has_natural_height && image_has_intrinsic_ratio;
             float image_resolution = block->embedp()->content_image_resolution > 0.0f ?
                 block->embedp()->content_image_resolution : 1.0f;
             w /= image_resolution;
@@ -8104,6 +8106,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     // Size containment freezes the given axis; its natural paired axis must
                     // survive instead of being recomputed through the aspect ratio.
                     if (contained_size[source_axis] && !contained_size[target_axis]) {
+                        target_size = natural_size[target_axis];
+                        *blocks_ratio_transfer[target_axis] = true;
+                    } else if (image_auto_size_aspect_ratio <= 0.0f) {
+                        // a ratio-less SVG retains the other natural/default axis after a definite-axis override.
                         target_size = natural_size[target_axis];
                         *blocks_ratio_transfer[target_axis] = true;
                     } else {

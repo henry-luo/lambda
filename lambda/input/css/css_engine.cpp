@@ -117,8 +117,6 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool marker_shorthand = str_icmp_cstr(declaration->property_name, "marker") == 0 &&
         (strcmp(query->property, "marker-start") == 0 || strcmp(query->property, "marker-mid") == 0 ||
          strcmp(query->property, "marker-end") == 0);
-    bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
-        css_font_shorthand_contains_property(query->property);
     CssPropertyCode requested = css_property_code_from_name(query->property);
     bool shorthand = requested > 0 && css_property_shorthand_contains(declaration->property_code, requested);
     bool break_alias = strncmp(query->property, "break-", 6) == 0 &&
@@ -127,7 +125,7 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool all_reset = strcmp(declaration->property_name, "all") == 0 &&
         strncmp(query->property, "--", 2) != 0 && strcmp(query->property, "direction") != 0 &&
         strcmp(query->property, "unicode-bidi") != 0;
-    if (!marker_shorthand && !font_shorthand && !shorthand && !break_alias && !all_reset &&
+    if (!marker_shorthand && !shorthand && !break_alias && !all_reset &&
         str_icmp_cstr(declaration->property_name, query->property) != 0) return;
     CssDeclaration candidate = *declaration;
     candidate.specificity = specificity;
