@@ -6,6 +6,7 @@ struct PaintList;
 struct PagedLayoutOptions {
     uint32_t max_pages, max_depth;
     size_t max_nodes, max_items;
+    size_t max_block_trials;
     uint32_t max_reference_passes;
     bool right_binding;
     ViewPageSide first_side;

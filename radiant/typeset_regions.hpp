@@ -51,12 +51,19 @@ struct TypesetRegionPlacement {
 };
 struct TypesetRegionPlan {
     Pool* scratch;
+    size_t* leases;
     const TypesetRegionQueue* queue;
     uint64_t version;
     TypesetRegionPlacement* placements;
     TypesetRegionPending* pending;
     size_t count, pending_count;
     float reserved_height;
+};
+struct TypesetRegionCheckpoint {
+    TypesetRegionQueue* queue;
+    uint64_t version;
+    TypesetRegionPending* entries;
+    size_t count;
 };
 
 // Required anchors receive a first slice; deferrable insertions preserve their cursor in the queue.
@@ -65,4 +72,8 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
     const TypesetRegionConstraints* constraints, float body_height, float separator_height,
     TypesetRegionPlan* result);
 TypesetStatus typeset_region_commit(TypesetRegionQueue* queue, const TypesetRegionPlan* plan);
+// retained plans keep exact scratch payloads alive across abandoned page trials.
+TypesetStatus typeset_region_plan_retain(const TypesetRegionPlan* plan, TypesetRegionPlan* retained);
+TypesetStatus typeset_region_checkpoint(TypesetRegionQueue* queue, Pool* scratch, TypesetRegionCheckpoint* checkpoint);
+TypesetStatus typeset_region_restore(TypesetRegionCheckpoint* checkpoint, TypesetRegionPlan* retained = nullptr);
 void typeset_region_plan_dispose(TypesetRegionPlan* plan);
