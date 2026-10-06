@@ -1,5 +1,6 @@
 #include "../lambda-data.hpp"
 #include "input-allocation-context.h"
+#include "mark_builder.hpp"
 #include "../core/collection_storage.h"
 #include "../input/css/dom_node.hpp"
 #include "../../lib/arena.h"
@@ -7,7 +8,13 @@
 #include "../../lib/mempool.h"
 #include "../../lib/math_checked.hpp"
 
-static Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
+// UI content helpers, shared by this Input-owned append and the runtime's
+// list_push: UI element content lives in an arena the collector never traces
+// (D4.1.1v2), so what it holds must be owned by the document (D4.5.2).
+
+// Copy a string into `arena` as a fat [DomText][String][chars] node, the form
+// the DOM build adopts in place.
+Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
     String* src = str_item.get_safe_string();
     if (!src) return str_item;
     DomText* text = DomText::create_in(arena, src->len);
@@ -19,7 +26,8 @@ static Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
     return {.item = s2it(dst)};
 }
 
-static Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
+// S2.6.4 merge of adjacent content strings into one fat DomText on `arena`.
+Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
     size_t new_len = prev->len + next->len;
     DomText* text = DomText::create_in(arena, new_len);
     if (!text) return ItemNull;
@@ -30,6 +38,30 @@ static Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) 
     memcpy(merged->chars + prev->len, next->chars, next->len);
     merged->chars[new_len] = '\0';
     return {.item = s2it(merged)};
+}
+
+// Deep-copy a non-string content value into `owner` unless the owner's arena or
+// pool already holds it: a GC symbol, array, element or other boxed value left
+// in UI content dangles once collected, while the DOM build and every later
+// rebuild read it again. Wide numbers need no copy (array_set rebases them into
+// the list's own storage), and an owned container needs no walk because its
+// content was normalized when it was built.
+Item ui_copy_content_to_input(Input* owner, Item item) {
+    void* storage = nullptr;
+    switch (get_type_id(item)) {
+    case LMD_TYPE_SYMBOL:  storage = item.get_safe_symbol();  break;
+    case LMD_TYPE_BINARY:  case LMD_TYPE_DECIMAL:  case LMD_TYPE_DTIME:
+        storage = (void*)item.string_ptr;  break;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:  case LMD_TYPE_RANGE:
+        storage = item.array;  break;
+    case LMD_TYPE_MAP:  storage = item.map;  break;
+    case LMD_TYPE_ELEMENT:  storage = item.element;  break;
+    default:  return item;
+    }
+    if (!storage || !owner) return item;
+    if (arena_owns(owner->arena, storage) || pool_owns(owner->pool, storage)) return item;
+    MarkBuilder builder(owner);
+    return builder.deep_copy(item);
 }
 
 bool list_grow_io(List* list, int64_t min_capacity, Pool* pool, Arena* arena) {
@@ -60,8 +92,9 @@ void array_append(Array* arr, Item item, Pool* pool, Arena* arena) {
     // S2.6.4: an element always appends content, including parser-owned elements.
     if (arr->type_id == LMD_TYPE_ELEMENT) {
         InputAllocationContext* owner = input_allocation_context;
-        bool ui_mode = owner && owner->pool == pool && owner->arena == arena && owner->ui_mode;
-        list_push_with_owner((List*)arr, item, pool, arena, ui_mode);
+        Input* ui_input = owner && owner->pool == pool && owner->arena == arena && owner->ui_mode
+            ? owner->input : nullptr;
+        list_push_with_owner((List*)arr, item, pool, arena, ui_input);
         return;
     }
     if (arr->length + arr->extra + 2 > arr->capacity &&
@@ -71,7 +104,7 @@ void array_append(Array* arr, Item item, Pool* pool, Arena* arena) {
 }
 
 void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena,
-        bool ui_mode) {
+        Input* ui_input) {
     if (!list || (!pool && !arena)) return;
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_NULL) return;
@@ -85,22 +118,26 @@ void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena,
                 return;
             }
             for (int64_t i = 0; i < nested->length; i++) {
-                list_push_with_owner(list, nested->items[i], pool, arena, ui_mode);
+                list_push_with_owner(list, nested->items[i], pool, arena, ui_input);
             }
             return;
         }
     }
 
+    bool ui_mode = ui_input && arena;
     if (type_id == LMD_TYPE_STRING) {
         String* text = item.get_safe_string();
         if (text && text->len == 0) return;  // S2.6.2: empty text contributes no content
-        if (ui_mode && arena) item = ui_copy_string_to_arena(arena, item);
+        if (ui_mode) item = ui_copy_string_to_arena(arena, item);
+    } else if (ui_mode && list->type_id == LMD_TYPE_ELEMENT) {
+        // D4.5.2: element content is document-owned, as in the runtime's list_push
+        item = ui_copy_content_to_input(ui_input, item);
     }
     if (type_id == LMD_TYPE_STRING && list->length > 0 && list->items) {
         String* previous = list->items[list->length - 1].get_safe_string();
         String* next = item.get_safe_string();
         if (previous && next) {
-            if (ui_mode && arena) {
+            if (ui_mode) {
                 list->items[list->length - 1] = ui_merge_strings_to_arena(arena, previous, next);
                 return;
             }
@@ -132,9 +169,9 @@ void list_push_io(List* list, Item item) {
         return;
     }
     list_push_with_owner(list, item, allocation->pool, allocation->arena,
-        allocation->ui_mode);
+        allocation->ui_mode ? allocation->input : nullptr);
 }
 
 void list_push_pooled(List* list, Item item, Pool* pool) {
-    list_push_with_owner(list, item, pool, nullptr, false);
+    list_push_with_owner(list, item, pool, nullptr, nullptr);
 }

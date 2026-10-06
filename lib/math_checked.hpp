@@ -1,6 +1,6 @@
 #pragma once
 // checked size arithmetic and alignment helpers.  Overflow is always an error.
-// See vibe/Memory_Safety_Template3.md §3.4.
+// See vibe/Memory_Safety_Template.md §5.2.
 
 #include <stdbool.h>
 #include <stddef.h>

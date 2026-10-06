@@ -14,11 +14,9 @@ extern __thread Context* input_context;
 extern "C" bool js_array_runtime_items_release(Array* owner);
 extern "C" bool js_array_immortal_props_store(Array* owner, Map* props);
 
-// These UI conversion helpers require the DOM representation and remain in the
-// runtime data implementation. Collection growth calls them only for an
-// explicitly input-owned UI result, never as an allocation fallback.
-Item ui_copy_string_to_arena(Arena* arena, Item str_item);
-Item ui_merge_strings_to_arena(Arena* arena, String* previous, String* next);
+// The UI content helpers (ui_copy_*_to_*) live with the Input-owned append in
+// lambda-data; this resolves the document Input that owns a UI arena.
+Input* ui_result_input(Arena* arena);
 
 static Arena* ui_collection_arena() {
     // UI-mode elements are arena-owned and therefore cannot keep a GC data
@@ -532,6 +530,13 @@ void list_push(List* list, Item item) {
         }
     }
 
+    // D4.5.2: UI element content lives in the untraced result arena, so every
+    // non-string value not already there is copied in (strings were above).
+    Arena* ui_content_arena = type_id != LMD_TYPE_STRING && list->type_id == LMD_TYPE_ELEMENT
+        ? ui_collection_arena() : nullptr;
+    Input* ui_content_input = ui_content_arena ? ui_result_input(ui_content_arena) : nullptr;
+    if (ui_content_input) item = ui_copy_content_to_input(ui_content_input, item);
+
     if (type_id == LMD_TYPE_BINARY && list->length > 0 && list->items &&
             get_type_id(list->items[list->length - 1]) == LMD_TYPE_BINARY) {
         // S2.6.4: adjacent binaries merge; the concatenation is a safepoint
@@ -542,7 +547,10 @@ void list_push(List* list, Item item) {
             list->items[list->length - 1].get_safe_binary(), item.get_safe_binary());
         list = rooted_list.get();
         if (merged) {
-            list->items[list->length - 1] = {.item = x2it(merged)};
+            Item merged_item = {.item = x2it(merged)};
+            // the concatenation is a GC binary; UI content keeps only arena data
+            if (ui_content_input) merged_item = ui_copy_content_to_input(ui_content_input, merged_item);
+            list->items[list->length - 1] = merged_item;
             return;
         }
         item = rooted_item.get();

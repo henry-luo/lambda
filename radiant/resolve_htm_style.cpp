@@ -172,13 +172,13 @@ static void apply_html_form_control_font(LayoutContext* lycon, ViewBlock* block)
     // Keep the UA font at its computed size; FontProp::used_zoom applies CSS
     // Viewport zoom once when the native control is measured and painted.
     apply_html_font_size(font, 13.3333f, false);
-    radiant_retain_font_family(font, lam::GcPtr<char>((char*)"Arial"));
+    radiant_retain_font_family(font, lam::static_borrow("Arial"));
 }
 
 static void apply_html_textarea_font(LayoutContext* lycon, ViewBlock* block) {
     // Textarea keeps its own monospace/normal-weight UA font policy.
     FontProp* font = block->ensure_font(lycon);
-    radiant_retain_font_family(font, lam::GcPtr<char>((char*)"monospace"));
+    radiant_retain_font_family(font, lam::static_borrow("monospace"));
     apply_html_font_size(font, 13.333333f, true);
     font->font_style = CSS_VALUE_NORMAL;
     apply_html_font_weight(font, CSS_VALUE_NORMAL, 400);
@@ -525,7 +525,7 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
             block->embed->has_controls = element->has_attribute("controls");
             const char* poster_src = element->get_attribute("poster");
             if (poster_src && *poster_src) {
-                block->embed->poster = lam::up(load_image(lycon->ui_context, poster_src));
+                block->embed->poster = lam::up(load_document_image(lycon->doc, lycon->ui_context, poster_src));
             }
         }
 
@@ -1191,7 +1191,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // monospace font family
         bool had_monospace_family = span->font && span->fontp()->family &&
             str_ieq_cstr(span->fontp()->family, "monospace");
-        radiant_retain_font_family(span->ensure_font(lycon), lam::GcPtr<char>((char*)"monospace"));
+        radiant_retain_font_family(span->ensure_font(lycon), lam::static_borrow("monospace"));
         // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
         // transitions to monospace and no explicit font-size on this element,
         // scale inherited size by 13/16. Only applies when the inherited font-size
@@ -1210,7 +1210,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     // ========== Block elements ==========
     case MARKUP_NAME_PRE:  case MARKUP_NAME_LISTING:  case MARKUP_NAME_XMP: {
         // preformatted: monospace, preserve whitespace, margin 1em 0
-        radiant_retain_font_family(block->ensure_font(lycon), lam::GcPtr<char>((char*)"monospace"));
+        radiant_retain_font_family(block->ensure_font(lycon), lam::static_borrow("monospace"));
         // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
         // transitions to monospace and no explicit font-size on this element,
         // scale inherited size by 13/16. Only applies when the inherited font-size

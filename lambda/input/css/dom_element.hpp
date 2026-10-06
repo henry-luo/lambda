@@ -15,6 +15,7 @@
 #include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
 #include "../../lambda.hpp"  // Full Element definition (needed for embedded Element field)
 #include "../../core/name_identity.h"
+#include "../../io/resource_policy.h"
 
 /**
  * DOM Element Extension for CSS Styling
@@ -48,7 +49,14 @@ int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir, bool first)
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct MarkerProp MarkerProp;  // From radiant/view.hpp
-typedef struct CssTransitionElemState CssTransitionElemState;  // From radiant/view.hpp
+typedef struct CssTransitionTrack CssTransitionTrack;  // From radiant/view.hpp
+// D4.5.1v4: DOM retirement owns the snapshot and its track allocation.
+typedef struct CssTransitionElemState {
+    lam::OwnArr<CssTransitionTrack> tracks;
+    int track_count;
+    int track_capacity;
+    Pool* pool;
+} CssTransitionElemState;
 typedef struct CssWebAnimationState CssWebAnimationState;  // From radiant/view.hpp
 typedef struct CustomLayoutPaintState CustomLayoutPaintState;  // From radiant/layout.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
@@ -323,6 +331,7 @@ struct DomDocument : DomDocumentResourceData {
 
     // Network support (Phase 4 integration)
     lam::Own<struct NetworkResourceManager> resource_manager;  // Network resource coordinator (nullptr for local-only docs)
+    InputResourcePolicy resource_policy;              // immutable dependency admission for this document
     double load_start_time;                           // Document load start timestamp (for total timeout)
     bool fully_loaded;                                // True when all network resources complete
 
@@ -441,6 +450,12 @@ struct DomDocument : DomDocumentResourceData {
     DomScrollAlign pending_scroll_into_view_inline;
     DomScrollBehavior pending_scroll_into_view_behavior;
 
+    // The window's shared loader runtime when a stateless loader built this
+    // document on it. The UiContext owns that runtime and releases it after
+    // its documents; the document borrows it for its package types and its
+    // custom layouts. Its UA behavior still gets its own evaluator.
+    lam::Up<Runtime> loader_runtime;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -450,7 +465,7 @@ struct DomDocument : DomDocumentResourceData {
                     font_faces_processed(false),
                     view_tree(nullptr), secondary_view_trees(nullptr),
                     secondary_views_cleanup_registered(false), state_store(nullptr), state(nullptr),
-                    resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
+                    resource_manager(nullptr), resource_policy(INPUT_RESOURCE_ALLOW_NETWORK), load_start_time(0.0), fully_loaded(true),
                     lambda_runtime(nullptr), embedding_document(nullptr),
                     embedding_element_ref({nullptr, 0}), resources(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
@@ -471,7 +486,8 @@ struct DomDocument : DomDocumentResourceData {
                     pending_scroll_into_view_if_needed(false),
                     pending_scroll_into_view_block(DOM_SCROLL_ALIGN_START),
                     pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST),
-                    pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO) {}
+                    pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO),
+                    loader_runtime(nullptr) {}
 
     bool init(Input* input);
     void destroy();
@@ -484,6 +500,14 @@ struct DomDocument : DomDocumentResourceData {
 static inline Runtime* dom_document_script_runtime(const DomDocument* doc) {
     if (!doc) return nullptr;
     return doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+}
+
+// The runtime whose packages built this document and serve its custom
+// layouts: the window's shared loader runtime when one built it, else the
+// document's own runtime.
+static inline Runtime* dom_document_loader_runtime(const DomDocument* doc) {
+    if (!doc) return nullptr;
+    return doc->loader_runtime ? doc->loader_runtime.get() : doc->lambda_runtime;
 }
 
 // Does this document own a live JS DOM script realm? Capability, not provenance:
@@ -584,6 +608,10 @@ struct CssCustomProp {
 // may omit the leading dashes from its lookup token.
 bool css_custom_property_name_matches(const char* stored_name,
                                       const char* lookup_name);
+DomElement* dom_parent_element(DomElement* element);
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name);
+const CssValue* dom_element_lookup_custom_property(DomElement* element,
+    const char* name, DomElement** owner);
 
 enum DomElementFlag : uint32_t {
     ELMT_FLAG_NEEDS_STYLE_RECOMPUTE = 1u << 0,

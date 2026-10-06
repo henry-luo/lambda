@@ -522,10 +522,10 @@ TEST(LambdaReplTests, test_multiline_startup_message) {
 static const char* const k_procedural[] = {"run", NULL};
 
 TEST(LambdaReplSessionTests, declaration_only_entry_echoes_nothing) {
-    // S16.7.4: `let`/`fn` produce no item; a bare `null` still echoes
+    // S16.7.4: declarations only emit the Unicode prompt; a bare `null` still echoes
     test_result result = run_lambda_repl("let x = 1\nfn f(a) { a + 1 }\nf(x)\nnull\nquit");
     ASSERT_NE(result.output, nullptr);
-    EXPECT_EQ(count_substr(result.output, "> > 2\n"), 1) << result.output;
+    EXPECT_EQ(count_substr(result.output, "λ> λ> 2\n"), 1) << result.output;
     EXPECT_EQ(count_substr(result.output, "null"), 1) << result.output;
     free_test_result(&result);
 }
@@ -570,9 +570,9 @@ TEST(LambdaReplSessionTests, procedural_session_runs_statements) {
         "pn p(n) { n * 10 }\np(k)\nquit", k_procedural);
     ASSERT_NE(result.output, nullptr);
     EXPECT_NE(strstr(result.output, "Procedural session"), nullptr) << result.output;
-    EXPECT_NE(strstr(result.output, "> > 42\n"), nullptr) << result.output;
-    EXPECT_NE(strstr(result.output, "> > > 3\n"), nullptr) << result.output;
-    EXPECT_NE(strstr(result.output, "> > 30\n"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "λ> λ> 42\n"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "λ> λ> λ> 3\n"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "λ> λ> 30\n"), nullptr) << result.output;
     EXPECT_EQ(strstr(result.output, "rolled back"), nullptr) << result.output;
     free_test_result(&result);
 }
@@ -614,11 +614,11 @@ TEST(LambdaReplSessionTests, tiers_agree) {
     ASSERT_NE(auto_run.output, nullptr);
     ASSERT_NE(interp_run.output, nullptr);
     ASSERT_NE(jit_run.output, nullptr);
-    EXPECT_NE(strstr(auto_run.output, "> > 4\n> 9\n> 16\n> 25\n> 36\n> 49\n"), nullptr)
+    EXPECT_NE(strstr(auto_run.output, "λ> λ> 4\nλ> 9\nλ> 16\nλ> 25\nλ> 36\nλ> 49\n"), nullptr)
         << auto_run.output;
-    EXPECT_NE(strstr(interp_run.output, "> > 4\n> 9\n> 16\n> 25\n> 36\n> 49\n"), nullptr)
+    EXPECT_NE(strstr(interp_run.output, "λ> λ> 4\nλ> 9\nλ> 16\nλ> 25\nλ> 36\nλ> 49\n"), nullptr)
         << interp_run.output;
-    EXPECT_NE(strstr(jit_run.output, "> > 4\n> 9\n> 16\n> 25\n> 36\n> 49\n"), nullptr)
+    EXPECT_NE(strstr(jit_run.output, "λ> λ> 4\nλ> 9\nλ> 16\nλ> 25\nλ> 36\nλ> 49\n"), nullptr)
         << jit_run.output;
     free_test_result(&auto_run);
     free_test_result(&interp_run);

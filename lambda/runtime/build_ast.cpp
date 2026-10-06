@@ -10640,6 +10640,33 @@ static void lambda_ast_note_returned_params(ArrayList* functions) {
     }
 }
 
+// LR12-38 (S9.1.2): flag each binding aliased from a plain parameter
+// (`var r = o`, `r = o`) that the body writes through, so both tiers mark that
+// alias (ast_parameter_alias_marks); a read-only alias keeps its typed lane.
+static void param_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
+    (void)parent;
+    if (!child) return;
+    AstNode* body = (AstNode*)opaque;
+    NameEntry* alias = NULL;
+    AstNode* source = NULL;
+    if (child->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        alias = ((AstDeclaratorNode*)child)->entry;
+        source = ((AstDeclaratorNode*)child)->init;
+    } else if (child->node_type == AST_NODE_ASSIGN_STAM) {
+        alias = ((AstAssignStamNode*)child)->target_entry;
+        source = ((AstAssignStamNode*)child)->value;
+    }
+    AstNode* root = source ? ast_unwrap_primary(source) : NULL;
+    if (alias && !alias->param_alias_written && root &&
+            root->node_type == AST_NODE_IDENT) {
+        NameEntry* origin = ((AstIdentNode*)root)->entry;
+        if (origin && origin->node && origin->node->node_type == AST_NODE_PARAM) {
+            alias->param_alias_written = ast_body_may_write_entry(body, alias, false);
+        }
+    }
+    ast_visit_core_children(child, param_alias_scan_cb, opaque);
+}
+
 static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
     bool note = cow_param_note_enabled();
     // the walk feeds the shipped CW29 semantics: entry->cow_param_mutated
@@ -10657,6 +10684,7 @@ static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
         }
     }
     if (((AstNode*)fn)->node_type != AST_NODE_PROC) return;
+    ast_visit_core_children(fn->body, param_alias_scan_cb, fn->body);
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
         TypeParam* pt = (TypeParam*)((AstNode*)param)->type;

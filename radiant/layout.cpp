@@ -1413,10 +1413,12 @@ bool layout_image_intrinsic_size(DomElement* element, ImageSurface* image,
                                  float* out_width, float* out_height) {
     if (!element || !image || !out_width || !out_height) return false;
     bool from_image = layout_image_orientation_uses_from_image(element);
-    float width = (from_image || image->encoded_width <= 0)
-        ? (float)image->width : (float)image->encoded_width;
-    float height = (from_image || image->encoded_height <= 0)
-        ? (float)image->height : (float)image->encoded_height;
+    float width = from_image || image->encoded_width <= 0 ? (float)image->width : (float)image->encoded_width;
+    float height = from_image || image->encoded_height <= 0 ? (float)image->height : (float)image->encoded_height;
+    if (image->format == IMAGE_FORMAT_SVG) {
+        ReplacedIntrinsicFacts facts = {}; layout_replaced_image_facts(&facts, image, from_image);
+        layout_replaced_default_object_size(&facts, 300.0f, 150.0f, &width, &height);
+    }
     if (width <= 0.0f || height <= 0.0f) return false;
     *out_width = width;
     *out_height = height;
@@ -2005,14 +2007,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 }
             }
 
-            css_web_animation_resolve(dom_elem, lycon);
-
-            if (lycon->ui_context) {
-                css_animation_resolve(dom_elem, lycon);
-                // (opacity/color/background-color) against the persistent per-element
-                css_transition_resolve(dom_elem, lycon);
-            }
-
             // CSS Zoom resolves author lengths after UA defaults; refresh only
             // untouched body sides so authored margins remain cascade winners.
             layout_refresh_html_body_ua_margin(lycon, dom_elem);
@@ -2023,6 +2017,13 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                                       ? font_prop_used_size(span->font)
                                       : lycon->font.style->font_size;
                 layout_reresolve_ua_em_margins(dom_elem, used_font_size);
+            }
+
+            // finalize HTML defaults before capturing or sampling animation values.
+            css_web_animation_resolve(dom_elem, lycon);
+            if (lycon->ui_context) {
+                css_animation_resolve(dom_elem, lycon);
+                css_transition_resolve(dom_elem, lycon);
             }
 
             if (!layout_context_is_measuring(lycon)) {

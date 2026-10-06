@@ -110,11 +110,28 @@ def expect_archive_link_deps(module) -> None:
         fail(f"static library LDDEPS gained archives it never reads: {sorted(archive_deps)}")
 
 
+def expect_module_only_libraries(module) -> None:
+    generator = linux_validation_generator(module)
+    generator.generate_main_program()
+    generated = "\n".join(generator.premake_content)
+    configured = {lib['name']: lib for lib in generator.config['libraries']
+                  if isinstance(lib, dict) and lib.get('module_only')}
+    for name, library in configured.items():
+        if f'"{library["lib"]}"' in generated:
+            fail(f"static host links module-only archive {name}")
+    module_target = next(target for target in generator.config['targets']
+                         if target['name'] == 'rdb-drivers')
+    closure = generator._executable_external_dependencies(module_target)
+    if not configured.keys() <= set(closure):
+        fail("RDB module lost its explicit external dependencies")
+
+
 def main() -> int:
     module = load_generator_module()
     expect_node_core_provider(module, "macos")
     expect_node_core_provider(module, "linux")
     expect_archive_link_deps(module)
+    expect_module_only_libraries(module)
     print("PREMAKE_GENERATOR_SELFTEST: passed")
     return 0
 

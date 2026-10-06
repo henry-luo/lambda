@@ -19,6 +19,7 @@
 #include "../jube/jube_interface.h"
 #include <math.h>
 #include "../io/mark_output_builder.hpp"
+#include "../io/input-allocation-context.h"
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
 
@@ -2152,6 +2153,29 @@ static int group_compare_entry(const void* a, const void* b, void* udata) {
     return lambda_item_compare(ea->key, eb->key);
 }
 
+// Impl_Map_Transition_Coverage P3: a runtime-built element of a fixed tag (a
+// group-by group, a join tuple) starts on that tag's root in the runtime shape
+// tree, so elements with the same attributes share one type instead of each
+// minting its own. Without a tree it keeps a private type; its tag is a
+// literal, never a raw chars pointer into an otherwise unowned GC String.
+static TypeElmt* runtime_element_type(const char* tag, size_t length) {
+    if (TypeElmt* root = runtime_shape_tree_element_root(tag, length, NULL)) return root;
+    TypeElmt* type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT,
+        sizeof(TypeElmt));
+    if (!type) return NULL;
+    type->name.str = tag;
+    type->name.length = length;
+    return type;
+}
+
+// One attribute through fn_map_set's growth path, which follows the runtime
+// tree from a tree-owned type, updates a name the element already holds, and
+// stores a list as its array image (S2.5.6), as every attribute write does.
+static void runtime_element_put(Element* element, String* key, Item value) {
+    if (!element || !key) return;
+    fn_map_set((Item){.element = element}, (Item){.item = s2it(key)}, value);
+}
+
 static Item group_key_part(Item key, int64_t index, int64_t alias_count) {
     if (alias_count == 1) return key;
     if (get_type_id(key) == LMD_TYPE_ARRAY) return item_at(key, index);
@@ -2229,18 +2253,13 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
         Element* group = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
         group->type_id = LMD_TYPE_ELEMENT;
         rooted_group.set(group);
-        TypeElmt* group_type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        // The fixed tag belongs to type metadata; a literal avoids a dangling
-        // raw chars pointer into an otherwise unowned GC String.
-        group_type->name.str = "group";
-        group_type->name.length = 5;
         group = rooted_group.get();
-        group->type = group_type;
+        group->type = runtime_element_type("group", 5);
+        if (!group->type) return rooted_out.get();
 
         for (int64_t k = 0; k < alias_count; k++) {
             String* attr = heap_create_name(aliases[k]);
-            group = rooted_group.get();
-            elmt_put(group, attr, group_key_part(entry_key, k, alias_count), active_runtime->pool);
+            runtime_element_put(rooted_group.get(), attr, group_key_part(entry_key, k, alias_count));
         }
         for (int64_t m = 0; members && m < members->length; m++) {
             // S14.1.1/S2.6.4: group members are element content, so adjacent strings merge.
@@ -2337,13 +2356,8 @@ static Element* join_tuple_extend(Item prior_tuple, String* name, Item value,
     rooted_out.set(join_tuple_new());
     if (!rooted_out.get()) return NULL;
 
-    TypeElmt* tuple_type = (TypeElmt*)alloc_type(active_runtime->pool,
-        LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    TypeElmt* tuple_type = runtime_element_type("tuple", 5);
     if (!tuple_type) return NULL;
-    // The fixed tag belongs to pooled type metadata; do not retain a raw
-    // chars pointer from a transient scalar allocation.
-    tuple_type->name.str = "tuple";
-    tuple_type->name.length = 5;
     rooted_out.get()->type = tuple_type;
 
     if (get_type_id(rooted_prior_tuple.get()) != LMD_TYPE_NULL) {
@@ -2354,15 +2368,14 @@ static Element* join_tuple_extend(Item prior_tuple, String* name, Item value,
             if (!sym) continue;
             Item attr = item_attr(rooted_prior_tuple.get(), sym->chars);
             // Join tuple maps are freshly materialized so later phases can bind names by normal member lookup.
-            elmt_put(rooted_out.get(), heap_create_name(sym->chars, sym->len), attr,
-                active_runtime->pool);
+            runtime_element_put(rooted_out.get(), heap_create_name(sym->chars, sym->len), attr);
         }
         if (keys) symbol_key_list_free(keys);
     }
-    if (name) elmt_put(rooted_out.get(), name, rooted_value.get(), active_runtime->pool);
+    if (name) runtime_element_put(rooted_out.get(), name, rooted_value.get());
     // Index/key bindings (e.g. the `i` in `for (i, o in ...)`) travel in the tuple alongside values,
     // so joined/cross-product rows keep their position/key binding available in the body.
-    if (idx_name) elmt_put(rooted_out.get(), idx_name, rooted_idx_value.get(), active_runtime->pool);
+    if (idx_name) runtime_element_put(rooted_out.get(), idx_name, rooted_idx_value.get());
     return rooted_out.get();
 }
 
@@ -2799,11 +2812,29 @@ static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
 // and threaded through the recursion. The previous shape re-ran strlen(key) for
 // every ShapeEntry compared, so a miss on an n-field map cost n strlens; the
 // name-id compare now rejects non-matching fields with a single int test.
+// A1: a spread-free tree node or trusted contract indexes every field it holds
+// (D3.4.3v4; the builder indexes declared shapes), so its table answers a read,
+// hit or miss. The walk below cost O(n) per read: a 2,048-key object lookup
+// walked every field (LR03-38), a 39-field record every member read.
+static inline bool map_table_answers_reads(TypeMap* map_type) {
+    return map_type && !map_type->has_spread && !map_type->js_meta &&
+        (map_type->is_transition_shared_shape || map_type->is_trusted_contract) &&
+        typemap_hash_is_usable(map_type);
+}
+
 static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* map_data,
                                     const char* key, int key_len, uint32_t key_id,
                                     bool* is_found) {
     Item result = ItemNull;
     *is_found = false;
+    if (map_table_answers_reads(map_type)) {
+        ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key, key_len, key_id);
+        if (field && field->key_kind == NAME_KEY_STRING) {
+            *is_found = true;
+            return map_read_field_for_owner(owner, field, map_data);
+        }
+        if (!field) return result;
+    }
     FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) {
             Map* nested_map = map_shape_field_to_map(map_data, field);
@@ -2839,6 +2870,14 @@ static Item _map_get_keyed(TypeMap* map_type, void* map_data, const char* key,
                            int key_len, uint32_t key_id, bool* is_found) {
     Item result = ItemNull;
     *is_found = false;
+    if (map_table_answers_reads(map_type)) {
+        ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key, key_len, key_id);
+        if (field && field->key_kind == NAME_KEY_STRING) {
+            *is_found = true;
+            return _map_read_field(field, map_data);
+        }
+        if (!field) return result;
+    }
     FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) {
             // spread/nested map — search recursively
@@ -2989,33 +3028,18 @@ Element* elmt_with_tl(int64_t type_index, void* type_list_ptr) {
     return r;
 }
 
-// ui_mode helper: copy a GC-heap string into the result arena as a fat DomText node.
-// Returns the new String* (embedded in [DomText][String][chars]) on the arena.
-// Called by list_push() when adding a string to an element's content list in ui_mode.
-Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
-    String* src = str_item.get_safe_string();
-    if (!src) return str_item;
-    DomText* dt = DomText::create_in(arena, src->len);
-    if (!dt) return ItemNull;
-    String* dst = dom_text_to_string(dt);
-    dst->flags = 0;
-    dst->is_ascii = src->is_ascii;
-    memcpy(dst->chars, src->chars, src->len + 1);
-    return {.item = s2it(dst)};
-}
-
-// ui_mode helper: merge two strings into a new fat DomText on the result arena.
-// Called by list_push() string merge path in ui_mode.
-Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
-    size_t new_len = prev->len + next->len;
-    DomText* dt = DomText::create_in(arena, new_len);
-    if (!dt) return ItemNull;
-    String* merged = dom_text_to_string(dt);
-    merged->flags = 0;
-    merged->is_ascii = prev->is_ascii && next->is_ascii;
-    memcpy(merged->chars, prev->chars, prev->len);
-    str_copy(merged->chars + prev->len, next->len + 1, next->chars, next->len);
-    return {.item = s2it(merged)};
+// The document Input whose arena backs ui_mode content -- the runtime's result
+// Input, or the Input a parser is building -- so list_push can deep-copy
+// non-string content into it (ui_copy_content_to_input, D4.5.2).
+Input* ui_result_input(Arena* arena) {
+    Runtime* runtime = context ? context->runtime : nullptr;
+    if (runtime && runtime->result_input && runtime->result_input->arena == arena) {
+        return runtime->result_input;
+    }
+    InputAllocationContext* owner = input_allocation_context;
+    if (owner && owner->input && owner->arena == arena) return owner->input;
+    log_error("ui-content-copy: no document Input owns the UI arena; content left in place");
+    return nullptr;
 }
 
 Object* object(int64_t type_index) {
@@ -3249,6 +3273,17 @@ static RootVector* ui_attribute_roots(void) {
         root_vector_init(&state->values, (Context*)context, "ui-element-attributes");
     }
     return &state->values;
+}
+
+void* runtime_take_ui_attribute_roots(Runtime* runtime) {
+    EvalContext* owner = runtime ? runtime->eval_context : nullptr;
+    // the next build constructs a fresh vector on first use
+    return owner ? context_capsule_take(owner, CONTEXT_CAPSULE_UI_ATTRIBUTE_ROOTS) : nullptr;
+}
+
+void ui_attribute_roots_release(void* roots) {
+    // the vector unregisters from its recorded owner, not the bound context
+    if (roots) ui_attribute_roots_destroy(roots);
 }
 
 bool ui_prepare_element_field(Item* value) {

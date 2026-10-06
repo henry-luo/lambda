@@ -351,6 +351,10 @@ struct NameEntry {
     // LR12-10: the plain parameter's own root (not only a child) may be kept
     // past the call -- returned, stored or bound (CW29 bare-only scan)
     bool cow_param_root_retained;
+    // LR12-38: this binding is aliased from a plain `pn` parameter (`var r = o`,
+    // `r = o`) and the body writes through it, so both tiers mark the alias
+    // and its first write detaches instead of reaching the caller's container.
+    bool param_alias_written;
     // LR12-11: the function result may be this parameter (plain or `var`) or
     // a part of it, so each direct call site share-marks the result
     bool cow_param_returned;
@@ -1305,6 +1309,16 @@ static inline bool ast_expr_insertion_needs_capture(AstNode* expr) {
         if (source && source->insertion_moves_value) return false;
     }
     return !ast_expr_produces_owned_container(root_expr);
+}
+
+// S9.1.2 (LR12-38): a parameter's value belongs to its caller, so a binding
+// aliased from it that the body writes through is an ownership boundary on
+// both tiers, as an owned binding's alias is. A read-only alias stays a borrow
+// and keeps its typed lane.
+static inline bool ast_parameter_alias_marks(const NameEntry* source,
+        const NameEntry* alias) {
+    return source && source->node && source->node->node_type == AST_NODE_PARAM &&
+        alias && alias->param_alias_written;
 }
 
 // Whether a binding's initializer may hand back a container the writer would

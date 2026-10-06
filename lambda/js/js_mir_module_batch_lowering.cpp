@@ -3557,17 +3557,29 @@ static void js_p2_remap_module_vars(JsAstNode* node, void* opaque) {
     js_ast_visit_children(node, js_p2_remap_module_vars, opaque);
 }
 
+// A refused satellite still owns the module js_mir_open_compile_unit opened.
+// Close it before the caller's failure cleanup calls MIR_finish: MIR reports an
+// open module through its error hook after freeing the module's name, which
+// crashed promotion of a hot function that the remap or plan check refused.
+static bool js_mir_refuse_function_satellite(JsMirTranspiler* mt) {
+    MIR_finish_module(mt->ctx);
+    return false;
+}
+
 static bool js_mir_lower_function_satellite(JsMirTranspiler* mt, JsScript* script,
         AstFunctionId function_id, const char** out_name) {
-    if (!mt || !out_name || function_id >= mt->tp->ast_index.function_count) return false;
+    if (!mt || !out_name) return false;
+    if (function_id >= mt->tp->ast_index.function_count) {
+        return js_mir_refuse_function_satellite(mt);
+    }
     // set before analysis: inferred local and return types must not assume a
     // direct callee the satellite does not define
     mt->p2_satellite_node = (JsFunctionNode*)mt->tp->ast_index.functions[function_id].node;
-    if (!js_mir_run_analysis_plan(mt)) return false;
+    if (!js_mir_run_analysis_plan(mt)) return js_mir_refuse_function_satellite(mt);
     JsFuncCollected* function = jm_collected_func_by_id(mt, function_id);
     if (!function || !function->node || JM_CAPTURE_COUNT(function) != 0) {
         log_error("js-p2: selected definition lacks a closed MIR plan");
-        return false;
+        return js_mir_refuse_function_satellite(mt);
     }
     JsP2ModuleVarRemap remap = {mt, mt->tp->global_scope, script->global_scope, NULL};
     for (JsAstNode* param = (JsAstNode*)function->node->params; param;
@@ -3577,7 +3589,7 @@ static bool js_mir_lower_function_satellite(JsMirTranspiler* mt, JsScript* scrip
     js_p2_remap_module_vars((JsAstNode*)function->node->body, &remap);
     if (remap.failure) {
         log_info("js-p2: satellite refused: %s", remap.failure);
-        return false;
+        return js_mir_refuse_function_satellite(mt);
     }
     jm_define_function(mt, function);
     MIR_finish_module(mt->ctx);
@@ -3947,6 +3959,9 @@ static Item jm_execute_cached_module_dependencies(Runtime* runtime,
         const char* path = artifact->static_dependency_paths
             ? artifact->static_dependency_paths[i] : NULL;
         if (!path || !path[0]) return ItemError;
+        if (!input_resource_policy_admits(runtime->resource_policy, path)) {
+            return js_throw_reference_error(js_make_string("Module blocked by document resource policy"));
+        }
         String* spec_str = heap_create_name(path, strlen(path));
         if (!spec_str) return ItemError;
         Item specifier = (Item){.item = s2it(spec_str)};
@@ -3956,7 +3971,7 @@ static Item jm_execute_cached_module_dependencies(Runtime* runtime,
         js_module_register(specifier, js_new_object());
         size_t source_length = 0;
         char* source = js_load_script_source_from_cache(path,
-            "js-static-import", "module", true, &source_length);
+            "js-static-import", "module", true, &source_length, runtime->resource_policy);
         if (!source) return js_throw_reference_error(
             js_make_string("Cannot find cached module dependency"));
         Item result = transpile_js_module_to_mir(runtime, source, path);
@@ -4494,6 +4509,19 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
                         (int)imp->source->len, imp->source->chars);
                 }
 
+                // admission also covers retained namespaces and cross-language imports.
+                if (runtime && !input_resource_policy_admits(runtime->resource_policy, resolved)) {
+                    RootFrame admission_roots(2);
+                    Rooted<Item> error(admission_roots,
+                        js_throw_reference_error(js_make_string("Module blocked by document resource policy")));
+                    if (filename) {
+                        Rooted<Item> importer(admission_roots,
+                            (Item){.item = s2it(heap_create_name(filename, strlen(filename)))});
+                        js_module_record_evaluation_error(importer.get(), error.get());
+                    }
+                    return false;
+                }
+
                 // Js57 P3 (Track B2): self-import — skip loading because the
                 // current module is its own dependency. The module's namespace
                 // gets registered by transpile_js_module_to_mir before js_main
@@ -4572,7 +4600,7 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
                     size_t mod_source_length = 0;
                     char* mod_source = js_load_script_source_from_cache(
                         resolved, "js-static-import", "module", true,
-                        &mod_source_length);
+                        &mod_source_length, runtime->resource_policy);
                     if (mod_source) {
                         if (record_cache_dependencies &&
                                 !js_module_mir_cache_record_dependency(

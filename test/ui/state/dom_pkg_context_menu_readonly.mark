@@ -19,7 +19,7 @@
   }, editing: {
     active_surface: true
   },
-  <html flags: ['hover', 'focus-within'],
+  <html index: 1, flags: ['hover', 'focus-within'],
     <body index: 2, flags: ['hover', 'focus-within'],
       <form index: 3, id: "the-form", flags: ['hover', 'focus-within'],
         <div index: 1,

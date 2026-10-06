@@ -837,7 +837,8 @@ char* js_load_script_source_from_cache(const char* path,
                                        const char* profile,
                                        const char* execution_mode,
                                        bool module_mode,
-                                       size_t* out_length);
+                                       size_t* out_length,
+                                       InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK);
 bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
     const char* importer_source, size_t importer_source_length,
     bool record_cache_dependencies);

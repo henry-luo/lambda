@@ -2854,12 +2854,8 @@ void runner_setup_context(Runner* runner) {
     if (!lambda_side_stack_bind()) {
         log_error("runner side-stack: failed to initialize execution regions");
     }
-    // Phase 5: propagate ui_mode and result_arena from Runtime to context
-    Runtime* ui_rt = runner->runtime;
-    if (ui_rt && ui_rt->ui_mode && ui_rt->result_arena) {
-        ctx->ui_mode = true;
-        ctx->arena = ui_rt->result_arena;
-    }
+    // Phase 5: the context allocates UI results in the runtime's bound Input
+    runtime_context_follow_ui_result(runner->runtime, ctx);
 
     // Reuse or create the GC heap and name_pool from the Runtime.
     // These persist across multiple evaluations on the same Runtime.
@@ -3112,10 +3108,24 @@ void runtime_init(Runtime* runtime) {
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 
-void runtime_set_ui_result_arena(Runtime* runtime, Arena* arena) {
+void runtime_set_ui_result_input(Runtime* runtime, Input* input) {
     if (!runtime) return;
     runtime->ui_mode = true;
-    runtime->result_arena = arena;
+    runtime->result_input = input;
+}
+
+bool runtime_context_follow_ui_result(Runtime* runtime, EvalContext* ctx) {
+    if (!ctx) return false;
+    Input* result = runtime && runtime->ui_mode ? runtime->result_input : nullptr;
+    ctx->ui_mode = result != nullptr;
+    ctx->arena = result ? result->arena : nullptr;
+    return ctx->ui_mode;
+}
+
+void runtime_bind_ui_result_input(Runtime* runtime, Input* input) {
+    if (!runtime) return;
+    runtime_set_ui_result_input(runtime, input);
+    runtime_context_follow_ui_result(runtime, runtime->eval_context);
 }
 
 void runtime_register_script(Runtime* runtime, Script* script) {
@@ -3512,6 +3522,7 @@ void runtime_reset_heap(Runtime* runtime) {
         heap_destroy();
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
+        runtime_shape_tree_release(cleanup_context);
         // D4.2.1v2/RN-NamePool: GC finalizers may still inspect NameRecords;
         // release the dedicated runtime pool only after heap destruction.
         if (runtime_name_pool(runtime)) {
@@ -3668,6 +3679,7 @@ void runtime_cleanup(Runtime* runtime) {
         heap_destroy();
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
+        runtime_shape_tree_release(cleanup_context);
         // D4.2.1v2/RN-NamePool: GC finalizers can traverse name-backed
         // shapes, so the dedicated runtime pool outlives heap teardown.
         if (runtime_name_pool(runtime)) {

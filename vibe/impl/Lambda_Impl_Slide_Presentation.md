@@ -350,6 +350,12 @@ at retirement only (D4.5.1v4); snapshots still survive relayout. A new release
 1514032 → 36235088, DOM 2995118 → 25465587 and view 728664 → 385294 bytes.
 Whole-session retention remains unbounded.
 
+Transition tracks now grow in a separate document-pool array. The DOM owner
+header defines the snapshot storage so retirement releases both that array and
+the outer state without depending on Radiant's track implementation (D4.5.1v4).
+The pinning and retirement plateau regressions allocate actual dynamic tracks
+and check their lifetime as well as the outer snapshot.
+
 Handler execution previously enabled UI allocation for its entire duration, so
 temporary elements constructed only to format HTML became fat nodes in the retained
 Input arena. Allocation is now scoped: handlers use runtime GC ownership, and

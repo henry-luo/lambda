@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 57.1.0 (2026-10-06)
+**Spec version:** 58.1.0 (2026-10-06)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1154,15 +1154,35 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   reaching the type's methods before yielding `null`.
   `for (k, v in c)` exposes the resulting canonical key uniformly
   (`[for (k, v in [10,20]) k]` → `[0, 1]`). [C5.3b, C8.6a]
-- **S8.2.2v3*** A *name* is a `NameKey`: string and symbol subscripts with the
-  same exact contents normalize to the same name, including the empty name.
-  Iteration exposes the empty name as `symbol.empty` (S2.2.2v2), so
+- **S8.2.2v4*** **One name space, keyed by namespace and normalized
+  spelling.** A *name* is a `NameKey`. Lambda spells a key three ways — a bare
+  name (`a`, `ns.a`), a symbol literal (`'a'`, S16.8.7) and a string (`"a"`,
+  as a subscript or a key carried by data; a map literal admits only a name
+  or a symbol as a key, since a symbol is accepted nearly everywhere a name
+  is and admitting a string there would make those positions ambiguous —
+  Design_Syntax §7.8, ruled 2026-10-06) — and all three denote keys in one
+  space: a key's
+  identity is its resolved namespace plus its normalized characters, the
+  characters of the literal once quotes are removed and escapes decoded. A
+  string key and an unqualified name or symbol live in the global namespace,
+  so `{a: 1}` and `{'a': 1}` declare one key, and `m.a`, `m['a']` and
+  `m["a"]` read it; the empty name is a valid, distinct key. A qualified name
+  `ns.a` is a key in namespace `ns`,
+  distinct from the global `a`; a namespace is itself a name, qualified
+  recursively, and two spellings name one namespace iff the evaluation's
+  resolver (S2.4.4) takes them to the same root — identity follows the
+  resolved namespace, never the prefix as written (S2.4.3v3). Iteration
+  exposes the empty name as `symbol.empty` (S2.2.2v2), so
   `for (k, v in {"": 1})` yields `k == symbol.empty` and `len` still counts
   every name the walk yields; `m[symbol.empty]` reads it. `at` ranges over
-  names, so
-  `1 at [10, 20, 30]` is **false** — the narrower reading is what lets
-  `for (k at e)` give an element's attributes without its children; an index
-  bound is written `i < len(arr)`. [C5.3b, C1.6b; §8.0.1 record]
+  names, so `1 at [10, 20, 30]` is **false** — the narrower reading is what
+  lets `for (k at e)` give an element's attributes without its children; an
+  index bound is written `i < len(arr)`. *An implementation identity — an
+  interned id, a pooled pointer — may prove two keys equal; it never proves
+  them different (D3.4.4v4).* (Revised 2026-10-06, v4: v3 normalized string
+  and symbol spellings by contents but left bare names and namespaces
+  unstated, so the design layer had taken interned ids as identity.) [C5.3b,
+  C1.6b, C21; §8.0.1 record]
 - **S8.2.3*** **Methods are members of the type, never of the value.** An
   object's key domain is its attributes and content; its methods live on the
   type value `T`. Everything that walks the key domain — `in`, `at`,
@@ -2653,6 +2673,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.1.1v3, S7.10.5v3 (numeric functions, unary operators) | **Conformant as of 2026-09-23 (USER ruling), both tiers.** A `null` argument makes a numeric function's result `null` -- `math.*`, `abs`/`round`/`floor`/`ceil`/`trunc`/`sign`, the scalar `min`/`max` pair, `clip` and `**` -- and so does the unary `-`/`+`; every one of them had returned `error`. The JIT's native libm, rounding and unary lowerings now test the argument's lane null: they had computed on the sentinel's bits, giving NaN for a `float[]` read out of range and, for an `int[]` read, the routine applied to 0.0 (`math.sqrt` gave 0, `-a[i]` gave -inf). `a[i] / 2` on an `int[]` read is null, not 0; a nullable float result boxes as null wherever it escapes (it printed as NaN, typed `int`); and a failed reassignment into a declared `float` is reported naming the binding on both tiers (S7.7.4). A `REAL_TO_FLOAT` sys-func result is typed `float` only when every argument is real (`math.pow(2, [1, 2])` had been typed `float` and unboxed as NaN). Fixtures: `proc/null_numeric_propagation.ls`, `negative/runtime/null_numeric_reassign_float.ls`. **Residue:** an untyped binding of a nullable float result (`let x = v[i] + 1.0`, or `var t = 0.0` reassigned `t + v[i]`) still loses the null on the JIT, because arithmetic inference drops D2.5.3's `?` and nothing marks the binding's lane nullable. |
 | S7.11.4 | Exec recovery implemented on POSIX. **Blocking hazard H1**: batch mode overwrites the stack-overflow handler, so fault capture differs between batch and standalone runs. Windows SEH never exercised. |
 | S8.2.1v4, S8.2.2v3, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains (the v4 object face is not built — see the S2.1.3v2 row), including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. VMap additionally admits its two canonical NameKey/IntKey classes and rejects fractional/poison keys. Specialized editor/host access sites still need the same audit. Empty-string map keys are semantically valid and round-trip through JSON; since 2026-09-30 every key walk (`for … in`/`at`, host VMap/VElmt keys) yields the empty name as `symbol.empty`, so `len` and iteration agree (`test/lambda/symbol_empty.ls`). `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v3 (this row previously recorded it as still true). |
+| S8.2.2v4 | **Ruled 2026-10-06 (USER); partially conformant.** Strings, symbol literals and bare names already compare by their decoded characters at every map and element access (`fn_map_set`, `_map_get_keyed`, `shape_field_name_equals`), and interned ids are only ever a fast path there. Namespaces: element attribute reads and map/element equality compare the namespace (`map_find_matching_field`, the element attribute getter, `target_equal`), but a namespaced symbol written through `fn_map_set` or read through `map_get` on a map is matched by its local characters alone, so `ns.a` and `a` collide there — [LR03-40](../vibe/Lambda_Issue_Ledger.md#lr03-40). Qualified keys are not yet represented as (namespace, name) anywhere: an element literal's `ns.attr: v` is desugared to the nested map `ns: {attr: v}`, parsed XML keeps `prefix:local` as a flat name and resolves no `xmlns:` declaration, and a source symbol's characters include its prefix — all ruled wrong on 2026-10-06 and listed in that entry. The transition trees' edges still split one spelling by name pool and by pooled versus unpooled key, so maps with identical fields do not share a type across those seams; that is D3.4.4v4's gap, closed by [Impl_Map_Transition_Coverage](../vibe/impl/Lambda_Impl_Map_Transition_Coverage.md) P0. Ruling record: `Lambda_Semantics_Formal2.md` C21. |
 | S8.1.3 | **Conformant as of 2026-08-24.** The paired `at` form bound both names to the key (a silent wrong answer); fixed in `build_ast`, one fix covering both tiers. Full record: [LR02-R9](../vibe/Lambda_Issue_Ledger.md). |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
 | S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap — **and, as of CW32v2 2026-08-29 on `nm-impl-work`, for plain ArrayNum**: binding aliases are O(1) mark-and-share, the eager bind clone is retired, marked roots' lane stores consult the shared bit once per store, and mask writes go through a preparing wrapper; fixture `cow_arraynum_alias.ls`, exact tier parity; mutable write-through views deliberately excluded — open/todo). Stage 2 pending: exclusivity checks (faces 1+3+4 landed, face 2 unreachable behind `E229`), capture-assignment compile errors, view-borrow confinement. The **module-`var` half of S9.2.4 needs no work** — it is vacuous by construction (S9.2.4v2); only the view-state half is outstanding. `var` params parse and mutate the caller's value today, but a *plain* param does so too — the snapshot half of S9.1.3 is **UNCONDITIONAL since the 2026-08-29 flip** (escape hatch retired; `is_proc_param` deleted) (CW29, COW doc §11.9; current tree): both tiers snapshot mutated plain params — flat, nested-path, and array writes all stay local (fixture `cow_param_snapshot.ls`); `var` is the sole write-through construct. Migration outcome: the 88-script sweep ceiling collapsed to **13 actual reliance sites** (7 ABI-pinning proc tests, 6 benchmarks — the SOM PRNG/out-param idiom), all migrated to `var` with goldens unchanged. **Mutated place-copy binds mark their value** (`var row = m.rows[i]` followed by a write through `row` is a true S9.1.2 snapshot on both tiers: the first write detaches), closing the get-modify aliasing half of C4.1; an UNMUTATED place copy stays a borrow — observationally identical to a copy (P6) — and expression-position reads still borrow, unobservable since no write occurs through an unnamed temporary. With CW32v2 landed, ArrayNum-through-plain-param snapshots too (probed both tiers); the residual write-through is only the declared typed-array *native-witness* path, whose raw pointer feeds a native body. |
@@ -2833,7 +2854,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
-| S8 membership | C5.3a, C5.3b; §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
+| S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20; OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md`, `Lambda_Expr_String_Pattern.md` |

@@ -10,6 +10,7 @@
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "../lambda.hpp"
 #include "heap_api.h"
+#include "../input/input.hpp"
 #endif
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/log.h"
@@ -1058,6 +1059,20 @@ static String* make_heap_string(const char* src, size_t len) {
 }
 
 TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int count) {
+    // Impl_Map_Transition_Coverage P3: every result map of one field list --
+    // each regex match, each grep record -- shares the runtime tree's node for
+    // it, found by following one edge per field from the root, instead of a
+    // fresh TypeMap and chain per call. The private build stays the fallback
+    // for a tree that declines.
+    if (Input* tree = runtime_shape_tree()) {
+        TypeMap* node = NULL;
+        for (int i = 0; i < count; i++) {
+            node = type_tree_add_map_field_chars(tree, node, names[i],
+                (uint32_t)strlen(names[i]), types[i], NULL);
+            if (!node) break;
+        }
+        if (node && count > 0) return node;
+    }
     Pool* pool = context->pool;
     ShapeEntry* first = NULL;
     ShapeEntry* prev = NULL;

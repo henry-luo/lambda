@@ -142,6 +142,51 @@ TEST_F(StateStoreDomMutationTest, DetachedRegisteredViewStopsResolvingBeforeReti
     EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(orphan)), nullptr);
 }
 
+TEST_F(StateStoreDomMutationTest, DocumentWrapperDoesNotKeepInteractionRepaintPending) {
+    DomElement* wrapper = make_element();
+    root->parent = lam::up(wrapper);
+    DocState* doc_state = state();
+    doc_state_set_hover_target(doc_state, static_cast<View*>(live));
+    doc_state_set_active_target(doc_state, static_cast<View*>(live));
+
+    // validation must not count rejected wrapper flags as fresh state changes.
+    doc_state_clear_render_flags(doc_state);
+    EXPECT_EQ(view_state_prune_orphans(doc_state), 0u);
+    EXPECT_FALSE(doc_state->is_dirty);
+    EXPECT_FALSE(doc_state->needs_repaint);
+    EXPECT_TRUE(state_get_bool(doc_state, root, STATE_HOVER));
+    EXPECT_TRUE(state_get_bool(doc_state, root, STATE_ACTIVE));
+    EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(wrapper)), nullptr);
+
+    root->parent = nullptr;
+    delete wrapper;
+}
+
+TEST_F(StateStoreDomMutationTest, RootReplacementKeepsForwardOnlyDoctypeSibling) {
+    DomElement* wrapper = make_element();
+    DomElement* replacement = make_element();
+    DomComment doctype = {};
+    doctype.node_type = DOM_NODE_DOCTYPE;
+    doctype.parent = lam::up(static_cast<DomNode*>(wrapper));
+    doctype.next_sibling = lam::own(static_cast<DomNode*>(root));
+    wrapper->first_child = lam::own(static_cast<DomNode*>(&doctype));
+    wrapper->last_child = lam::up(static_cast<DomNode*>(root));
+    root->parent = lam::up(wrapper);
+    ASSERT_EQ(root->prev_sibling, nullptr);
+
+    // document proxies intentionally omit the root's reverse doctype link.
+    EXPECT_TRUE(dom_node_replace_in_parent(wrapper, root, replacement));
+    EXPECT_EQ(wrapper->first_child, static_cast<DomNode*>(&doctype));
+    EXPECT_EQ(doctype.next_sibling, static_cast<DomNode*>(replacement));
+    EXPECT_EQ(wrapper->last_child, static_cast<DomNode*>(replacement));
+    EXPECT_EQ(replacement->parent, static_cast<DomNode*>(wrapper));
+    EXPECT_EQ(replacement->prev_sibling, nullptr);
+    EXPECT_EQ(root->parent, nullptr);
+
+    delete replacement;
+    delete wrapper;
+}
+
 TEST_F(StateStoreDomMutationTest, DetachedPointerPhasesDoNotRecreatePrunedState) {
     DocState* doc_state = state();
     ASSERT_TRUE(dom_lifecycle_init(&doc));

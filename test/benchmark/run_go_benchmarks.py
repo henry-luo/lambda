@@ -29,7 +29,8 @@ SUITES = {
     "larceny": ["array1", "deriv", "diviter", "divrec", "gcbench", "paraffins", "pnpoly", "primes", "puzzle", "quicksort", "ray", "triangl"],
     "beng": ["binarytrees", "fannkuch", "fasta", "knucleotide", "mandelbrot", "nbody", "pidigits", "regexredux", "revcomp", "spectralnorm"],
     "jetstream": ["base64", "bigdenary", "crypto_aes", "crypto_md5", "crypto_rsa", "crypto_sha1", "cube3d", "deltablue", "hashmap", "navier_stokes", "nbody", "raytrace3d", "regex_dna", "richards", "splay"],
-    "text": ["fast_diff", "text_search", "three_way_merge", "log_pipeline", "microdiff", "prettier_ast", "hyphen"],
+    "text": ["fast_diff", "text_search", "three_way_merge", "log_pipeline", "microdiff", "prettier_ast", "hyphen",
+             "jq_mix", "jq_records", "jq_bf", "jq_tree"],
     "standalone": ["cow_document_edit"],
 }
 

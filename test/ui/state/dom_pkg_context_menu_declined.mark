@@ -2,12 +2,12 @@
     target: "#submit-btn",
     from_mouse: true
   }, caret: {
-    target: "html.body.2.form.3.button.13",
+    target: "#document.html.1.body.2.form.3.button.13",
     offset: 3
-  }, hover: "html.body.2.form.3.button.13", render: {
+  }, hover: "#document.html.1.body.2.form.3.button.13", render: {
     repaint: true
   },
-  <html flags: ['hover', 'focus-within'],
+  <html index: 1, flags: ['hover', 'focus-within'],
     <body index: 2, flags: ['hover', 'focus-within'],
       <form index: 3, id: "the-form", flags: ['hover', 'focus-within'],
         <div index: 1,

@@ -1096,7 +1096,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     }
                     lycon->ui_context->iframe_depth++;
 
-                    DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
+                    DomDocument* doc = layout_load_iframe_src_doc(lycon, src_value,
                         // The embedded viewport excludes the flex item's border and padding.
                         (int)iframe_content.width, // INT_CAST_OK: viewport API expects int
                         (int)iframe_content.height); // INT_CAST_OK: viewport API expects int

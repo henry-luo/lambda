@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 extern "C" {
 #include "../../../lib/log.h"
@@ -9,6 +10,7 @@ extern "C" {
 }
 #include "css_value.hpp"
 #include "css_style.hpp"
+
 #include "../../../lib/color.h"
 #include "../../../lib/strbuf.h"
 #include <math.h>
@@ -403,6 +405,7 @@ const char* css_math_token_name(const CssValue* value) {
     if (value->type == CSS_VALUE_TYPE_CUSTOM)
         return value->data.custom_property.name;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->has_keyword_spelling) return value->data.keyword_token.spelling;
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
         return info ? info->name : NULL;
     }

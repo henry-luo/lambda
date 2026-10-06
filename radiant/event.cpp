@@ -655,6 +655,18 @@ struct DocumentAnimationTick {
     bool active;
 };
 
+bool radiant_tick_document_animation_scheduler(DomDocument* document, double now,
+                                               DirtyTracker* dirty_tracker) {
+    DocState* state = document ? document->state : nullptr;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    if (!scheduler || !scheduler->has_active_animations) return false;
+    bool active = animation_scheduler_tick(scheduler, now, dirty_tracker);
+    // sampled sizes must reach geometry before native or virtual frames paint.
+    if (scheduler->needs_layout) doc_state_request_reflow(state);
+    doc_state_request_repaint(state);
+    return active;
+}
+
 static void tick_document_animation_tree(DomDocument* document,
                                          DocumentAnimationTick* tick);
 
@@ -687,7 +699,8 @@ static void tick_document_animation_tree(DomDocument* document,
         // Embedded bounds are local to their own viewport; the host repaints
         // the complete frame after any child tick.
         DirtyTracker* dirty = tick->depth == 0 ? &state->dirty_tracker : nullptr;
-        tick->active = animation_scheduler_tick(scheduler, tick->now, dirty) || tick->active;
+        tick->active = radiant_tick_document_animation_scheduler(
+            document, tick->now, dirty) || tick->active;
         tick->ticked = true;
     }
     if (state && state->has_active_smooth_scroll &&
@@ -3052,14 +3065,17 @@ struct TemplateUiAllocationScope {
     Arena* previous_arena;
     Context* previous_input;
 
-    TemplateUiAllocationScope(EvalContext* target, bool ui_mode, Arena* arena = nullptr)
+    TemplateUiAllocationScope(EvalContext* target, bool ui_mode)
         : owner(target), previous_ui_mode(target && target->ui_mode),
           previous_arena(target ? target->arena : nullptr), previous_input(input_context) {
         if (owner) {
-            owner->ui_mode = ui_mode;
-            if (ui_mode) owner->arena = arena;
+            if (ui_mode) runtime_context_follow_ui_result(owner->runtime, owner);
+            else {
+                owner->ui_mode = false;
+                owner->arena = nullptr;
+            }
         }
-        input_context = ui_mode ? (Context*)owner : nullptr;
+        input_context = owner && owner->ui_mode ? (Context*)owner : nullptr;
     }
     ~TemplateUiAllocationScope() {
         if (owner) {
@@ -3076,11 +3092,8 @@ static bool settle_template_retransform(EventContext* evcon,
     RetransformResult results[16];
     int count = 0;
     {
-        Runtime* runtime = context ? context->runtime : nullptr;
-        // only published render results need fat nodes in the retained output arena.
-        TemplateUiAllocationScope render_scope(context,
-            runtime && runtime->ui_mode && runtime->result_arena,
-            runtime ? runtime->result_arena : nullptr);
+        // only published render results follow the runtime's canonical result Input.
+        TemplateUiAllocationScope render_scope(context, true);
         count = render_map_retransform_with_results(results, 16);
     }
     bool any_changed = false;
@@ -3355,7 +3368,7 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     runtime_init(rt);
     // D8.1.1v13: behavior handlers can retain nodes in this document's arena;
     // mark even a script-less evaluator as UI-owned before loading dom.ls.
-    runtime_set_ui_result_arena(rt, doc->input ? doc->input->arena : nullptr);
+    runtime_set_ui_result_input(rt, doc->input);
     EvalContext* ctx = runtime_get_eval_context(rt);
     // A script-less parent may first need behavior while an iframe evaluator
     // is bound. Claim its own evaluator at this quiescent input boundary.
@@ -3484,7 +3497,9 @@ extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
                                                                const char* event_name) {
     (void)dispatch_author_template_participant(s_active_js_dispatch_event_context,
                                                dom_node, event, event_name,
-                                               nullptr);
+                                               s_active_js_dispatch_event_context
+                                                   ? s_active_js_dispatch_event_context->dom_event_intent
+                                                   : nullptr);
 }
 
 // Load the Lambda dom package into this document's script runtime, once, on the
@@ -7400,7 +7415,7 @@ static bool post_html_handler_incremental_rebuild(
     frame_profile_cascade_finished(doc);
 
     DocState* state = (DocState*)doc->state;
-    if (state) doc_state_close_context_menu(state);
+    // relayout retains DOM owners; the post-layout prune closes retired menus.
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
@@ -7530,9 +7545,8 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     DocState* state = (DocState*)doc->state;
 
-    // The fallback drops the layout epoch, not the DOM identity epoch. Keep
-    // the dropdown owner until the post-layout prune checks its DOM identity.
-    if (state) doc_state_close_context_menu(state);
+    // the fallback drops layout resources; transient owners survive until the
+    // post-layout prune checks their DOM identity (D4.5.1v4).
 
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
@@ -8199,6 +8213,26 @@ void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
     radiant_queue_timing_event(uicon, target, radiant_build_svg_timing_event, &data);
 }
 
+struct NativeEventPayloadScope {
+    EventContext* evcon;
+    View* previous_target;
+    const InputIntent* previous_intent;
+
+    NativeEventPayloadScope(EventContext* context, View* target,
+                            const InputIntent* intent) : evcon(context) {
+        previous_target = evcon->target;
+        previous_intent = evcon->dom_event_intent;
+        // synthetic input may target a different control than the physical hit.
+        evcon->target = target;
+        evcon->dom_event_intent = intent;
+    }
+
+    ~NativeEventPayloadScope() {
+        evcon->target = previous_target;
+        evcon->dom_event_intent = previous_intent;
+    }
+};
+
 static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
                                          RadiantJsEventBuilder build_event,
                                          void* userdata,
@@ -8217,6 +8251,7 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     }
     DomElement* dom_target = view_geometry_nearest_dom_element(target);
     if (!dom_target || !build_event) return false;
+    NativeEventPayloadScope payload_scope(evcon, target, intent);
     JsDispatchScope dispatch_scope(evcon);
     DomDocument* target_doc = event_context_target_document(evcon);
     bool active_batch_context = context && dom_get_document() == target_doc;
@@ -11097,6 +11132,7 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
         !iframe->doc || !url || !url[0] ||
         !iframe->set_attribute("src", url)) return false;
     DomDocument* owner = iframe->doc;
+    if (!document_dependency_admits(owner, url)) return false;
     View* iframe_view = owner->view_tree
         ? find_view(owner->view_tree->root, (DomNode*)iframe) : nullptr;
     if (!iframe_view || (iframe_view->view_type != RDT_VIEW_BLOCK &&
@@ -11378,7 +11414,10 @@ static bool navigation_schedule_async_document(UiContext* uicon, DomDocument* so
     if (!uicon || !uicon->async_script_navigation || !source || !source->url ||
         !url || !url[0]) return false;
     Url* target = url_parse_with_base(url, source->url);
-    if (!navigation_async_is_local_file(target)) {
+    // A top-level document whose loader runs on the window's loader runtime
+    // loads on the host thread that runtime lives on; iframes keep theirs.
+    if (!navigation_async_is_local_file(target) ||
+        (!iframe && layout_path_uses_loader_runtime(url_get_pathname(target)))) {
         if (target) url_destroy(target);
         return false;
     }

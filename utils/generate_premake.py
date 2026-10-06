@@ -3431,6 +3431,11 @@ class PremakeGenerator:
                 vlog(f"DEBUG: Variant '{self.variant}' excluding libraries: {all_excluded}")
                 dependencies = [d for d in dependencies if d not in all_excluded]
 
+        # Module-only archives belong to explicit module targets, never the static host.
+        module_only = {lib['name'] for lib in self.config.get('libraries', [])
+                       if isinstance(lib, dict) and lib.get('module_only')}
+        dependencies = [d for d in dependencies if d not in module_only]
+
         # Keep the main executable's platform closure aligned with optional feature probes.
         dependencies = [d for d in dependencies
                          if d not in self.external_libraries or

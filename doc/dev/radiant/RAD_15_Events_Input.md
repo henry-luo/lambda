@@ -86,6 +86,34 @@ settled through the S12.1.3 regeneration path. Hit-test-only work such as
 cursor selection and scrollbar geometry stays native and is not a second event
 propagation path.
 
+### 4.1 Which runtime runs a handler
+
+Every handler runs on the target document's own runtime,
+`dom_document_script_runtime(doc)` (ES12v2 in
+`vibe/Lambda_Design_DOM_State.md`). The runtime that *built* the document
+never handles its events:
+
+| Handler | Runtime |
+|---|---|
+| Page JS (listeners, inline handlers, timers) | the document's JS realm runtime (`doc->js.runtime`) |
+| `.ls` page and edit-application template handlers | the page's own runtime (`doc->lambda_runtime`) |
+| dom package UA behavior on an HTML/JS page | the same runtime as its JS realm |
+| dom package UA behavior on a script-less page or a loader-built document (LaTeX, PDF, markdown, graph, TikZ) | a per-document evaluator, created when the document first needs behavior (ESO25) |
+
+The window's loader runtime ([RAD_20 §6.2](RAD_20_Application_Shell_Browsing.md#62-the-window-loader-runtime))
+runs only load-time package code and graph/TikZ custom-layout callbacks. The
+split holds by construction:
+- Template lookup reads the bound context's registry, and loader packages
+  register no templates.
+- `radiant_dom_package_ensure` loads the dom package only onto a runtime that
+  belongs to the document.
+
+`EventDocumentScope` hands the thread to the document's evaluator at dispatch
+entry (EO5v2). A later relayout that runs a custom-layout callback takes it
+back to the loader runtime at that quiescent layout boundary. A layout forced
+while a handler is still running cannot run the callback and logs
+`CUSTOM_LAYOUT_LAMBDA_BUSY`.
+
 ---
 
 ## 5. Mouse and drag-and-drop

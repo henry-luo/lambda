@@ -10,114 +10,9 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
+#include <limits.h>
 #include "../../../lib/math_utils.h"
 #include "../../../lib/str.h"
-
-static bool css_animation_time(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_TIME) &&
-        (value->data.length.unit == CSS_UNIT_S || value->data.length.unit == CSS_UNIT_MS);
-}
-
-static const char* css_animation_identifier(const CssValue* value) {
-    return value && value->type != CSS_VALUE_TYPE_STRING
-        ? css_value_identifier_name(value) : nullptr;
-}
-
-bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value) {
-    if (!value) return false;
-    int transition_index = css_transition_longhand_index(property);
-    if (transition_index > 0)
-        property = (CssPropertyCode)(CSS_PROPERTY_ANIMATION_NAME + transition_index);
-    const char* name = css_animation_identifier(value);
-    switch (property) {
-        case CSS_PROPERTY_TRANSITION_PROPERTY:
-            return name && !css_value_is_global_keyword(value) && !str_ieq_cstr(name, "default");
-        case CSS_PROPERTY_ANIMATION_NAME:
-            return value->type == CSS_VALUE_TYPE_STRING ||
-                (name && !css_value_is_global_keyword(value) && !str_ieq_cstr(name, "default"));
-        case CSS_PROPERTY_ANIMATION_DURATION:
-        case CSS_PROPERTY_ANIMATION_DELAY:
-            return css_animation_time(value) &&
-                (property == CSS_PROPERTY_ANIMATION_DELAY || value->data.length.value >= 0.0);
-        case CSS_PROPERTY_ANIMATION_ITERATION_COUNT:
-            return (name && str_ieq_cstr(name, "infinite")) ||
-                (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value >= 0.0);
-        case CSS_PROPERTY_ANIMATION_DIRECTION:
-            return name && (str_ieq_cstr(name, "normal") || str_ieq_cstr(name, "reverse") ||
-                str_ieq_cstr(name, "alternate") || str_ieq_cstr(name, "alternate-reverse"));
-        case CSS_PROPERTY_ANIMATION_FILL_MODE:
-            return name && (str_ieq_cstr(name, "none") || str_ieq_cstr(name, "forwards") ||
-                str_ieq_cstr(name, "backwards") || str_ieq_cstr(name, "both"));
-        case CSS_PROPERTY_ANIMATION_PLAY_STATE:
-            return name && (str_ieq_cstr(name, "running") || str_ieq_cstr(name, "paused"));
-        case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION:
-            if (name) return str_ieq_cstr(name, "ease") || str_ieq_cstr(name, "ease-in") ||
-                str_ieq_cstr(name, "ease-out") || str_ieq_cstr(name, "ease-in-out") ||
-                str_ieq_cstr(name, "linear") || str_ieq_cstr(name, "step-start") ||
-                str_ieq_cstr(name, "step-end");
-            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
-                const CssFunction* function = value->data.function;
-                if (str_ieq_cstr(function->name, "cubic-bezier") && function->arg_count == 4) {
-                    for (int i = 0; i < 4; i++) {
-                        const CssValue* arg = function->args[i];
-                        if (!arg || arg->type != CSS_VALUE_TYPE_NUMBER) return false;
-                        if ((i == 0 || i == 2) && (arg->data.number.value < 0.0 ||
-                            arg->data.number.value > 1.0)) return false;
-                    }
-                    return true;
-                }
-                if (str_ieq_cstr(function->name, "steps") && function->arg_count >= 1 &&
-                    function->arg_count <= 2 && function->args[0] &&
-                    function->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
-                    double count = function->args[0]->data.number.value;
-                    if (count < 1.0 || count != floor(count)) return false;
-                    if (function->arg_count == 1) return true;
-                    const char* position = css_animation_identifier(function->args[1]);
-                    return position && (str_ieq_cstr(position, "start") ||
-                        str_ieq_cstr(position, "end") || str_ieq_cstr(position, "jump-start") ||
-                        str_ieq_cstr(position, "jump-end") || str_ieq_cstr(position, "jump-both") ||
-                        (count > 1.0 && str_ieq_cstr(position, "jump-none")));
-                }
-            }
-            return false;
-        default: return false;
-    }
-}
-
-bool css_parse_motion_shorthand(CssPropertyCode shorthand, const CssValue* group,
-    CssMotionShorthandParts* parts) {
-    if (!parts || !group || css_value_is_global_keyword(group)) return false;
-    bool transition = shorthand == CSS_PROPERTY_TRANSITION;
-    CssPropertyCode base = transition ? CSS_PROPERTY_TRANSITION_PROPERTY : CSS_PROPERTY_ANIMATION_NAME;
-    memset(parts, 0, sizeof(*parts));
-    int count = group->type == CSS_VALUE_TYPE_LIST ? group->data.list.count : 1;
-    if (count < 1 || (group->type == CSS_VALUE_TYPE_LIST && group->data.list.comma_separated))
-        return false;
-    for (int i = 0; i < count; i++) {
-        const CssValue* item = group->type == CSS_VALUE_TYPE_LIST ? group->data.list.values[i] : group;
-        if (!item || css_value_is_global_keyword(item)) return false;
-        int component = -1;
-        if (css_animation_time(item)) {
-            component = !parts->values[1] ? 1 : !parts->values[3] ? 3 : -1;
-        } else {
-            // shorthand keywords fill their own component before they can name a keyframe.
-            for (int slot = 2; slot < (transition ? 4 : 8); slot++) {
-                if (slot == 3 || parts->values[slot]) continue;
-                if (css_motion_longhand_accepts(
-                    (CssPropertyCode)(base + slot), item)) {
-                    component = slot;
-                    break;
-                }
-            }
-            if (component < 0 && !parts->values[0] &&
-                css_motion_longhand_accepts(base, item)) component = 0;
-        }
-        if (component < 0 || !css_motion_longhand_accepts(
-            (CssPropertyCode)(base + component), item)) return false;
-        parts->values[component] = item;
-    }
-    return true;
-}
 
 // Forward declarations for validator functions
 static bool validate_length(const char* value_str, void** parsed_value, Pool* pool);
@@ -141,6 +36,13 @@ static CssPropertyCode margin_longhands[] = {
 };
 static CssPropertyCode padding_longhands[] = {
     CSS_PROPERTY_PADDING_TOP, CSS_PROPERTY_PADDING_RIGHT, CSS_PROPERTY_PADDING_BOTTOM, CSS_PROPERTY_PADDING_LEFT
+};
+static CssPropertyCode font_longhands[] = {
+    CSS_PROPERTY_FONT_SIZE, CSS_PROPERTY_FONT_WEIGHT, CSS_PROPERTY_FONT_STYLE,
+    CSS_PROPERTY_FONT_VARIANT, CSS_PROPERTY_LINE_HEIGHT, CSS_PROPERTY_FONT_FAMILY
+};
+static CssPropertyCode list_style_longhands[] = {
+    CSS_PROPERTY_LIST_STYLE_TYPE, CSS_PROPERTY_LIST_STYLE_POSITION, CSS_PROPERTY_LIST_STYLE_IMAGE
 };
 static CssPropertyCode border_longhands[] = {
     CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_RIGHT_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_LEFT_WIDTH,
@@ -501,7 +403,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TEXT_ALIGN_LAST, "text-align-last", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
 
     // List Properties
-    {CSS_PROPERTY_LIST_STYLE, "list-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc outside none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_LIST_STYLE, "list-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc outside none", false, true, list_style_longhands, 3, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_TYPE, "list-style-type", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_POSITION, "list-style-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "outside", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_IMAGE, "list-style-image", PROP_TYPE_URL, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_url, NULL},
@@ -516,7 +418,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_QUOTES, "quotes", PROP_TYPE_STRING, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_string, NULL},
 
     // Additional Typography Properties
-    {CSS_PROPERTY_FONT, "font", PROP_TYPE_STRING, PROP_INHERIT_YES, "medium serif", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_FONT, "font", PROP_TYPE_STRING, PROP_INHERIT_YES, "medium serif", false, true, font_longhands, 6, validate_string, NULL},
     {CSS_PROPERTY_FONT_STRETCH, "font-stretch", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_ORIENTATION, "text-orientation", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "mixed", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_COMBINE_UPRIGHT, "text-combine-upright", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},
@@ -937,6 +839,105 @@ CssMathResult css_math_evaluate(const CssValue* value,
 
 CssMathType css_math_value_type(const CssValue* value, int depth) {
     return css_math_evaluate(value, nullptr, depth).type;
+}
+
+static const CssTransformFunctionInfo CSS_TRANSFORM_FUNCTIONS[] = {
+    {"translate", TRANSFORM_TRANSLATE, 1, 2},
+    {"translateX", TRANSFORM_TRANSLATEX, 1, 1},
+    {"translateY", TRANSFORM_TRANSLATEY, 1, 1},
+    {"scale", TRANSFORM_SCALE, 1, 2},
+    {"scaleX", TRANSFORM_SCALEX, 1, 1},
+    {"scaleY", TRANSFORM_SCALEY, 1, 1},
+    {"rotate", TRANSFORM_ROTATE, 1, 1},
+    {"skew", TRANSFORM_SKEW, 1, 2},
+    {"skewX", TRANSFORM_SKEWX, 1, 1},
+    {"skewY", TRANSFORM_SKEWY, 1, 1},
+    {"matrix", TRANSFORM_MATRIX, 6, 6},
+    {"translate3d", TRANSFORM_TRANSLATE3D, 3, 3},
+    {"translateZ", TRANSFORM_TRANSLATEZ, 1, 1},
+    {"scale3d", TRANSFORM_SCALE3D, 3, 3},
+    {"scaleZ", TRANSFORM_SCALEZ, 1, 1},
+    {"rotateX", TRANSFORM_ROTATEX, 1, 1},
+    {"rotateY", TRANSFORM_ROTATEY, 1, 1},
+    {"rotateZ", TRANSFORM_ROTATEZ, 1, 1},
+    {"rotate3d", TRANSFORM_ROTATE3D, 4, 4},
+    {"perspective", TRANSFORM_PERSPECTIVE, 1, 1},
+    {"matrix3d", TRANSFORM_MATRIX3D, 16, 16},
+};
+
+const CssTransformFunctionInfo* css_transform_function_info(const char* name) {
+    if (!name) return nullptr;
+    for (const CssTransformFunctionInfo& info : CSS_TRANSFORM_FUNCTIONS)
+        if (str_ieq_cstr(name, info.name)) return &info;
+    return nullptr;
+}
+
+static bool css_transform_argument_valid(TransformFunctionType type, int index,
+                                          const CssValue* value) {
+    if (!value) return false;
+    CssMathType domain = css_math_value_type(value, 0);
+    bool zero = value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0;
+    switch (type) {
+        case TRANSFORM_TRANSLATE:
+        case TRANSFORM_TRANSLATEX:
+        case TRANSFORM_TRANSLATEY:
+        case TRANSFORM_TRANSLATE3D:
+        case TRANSFORM_TRANSLATEZ:
+        case TRANSFORM_PERSPECTIVE: {
+            if (type == TRANSFORM_PERSPECTIVE && value->type == CSS_VALUE_TYPE_KEYWORD &&
+                value->data.keyword == CSS_VALUE_NONE) return true;
+            bool percentage = type != TRANSFORM_TRANSLATEZ && type != TRANSFORM_PERSPECTIVE &&
+                !(type == TRANSFORM_TRANSLATE3D && index == 2);
+            if (type == TRANSFORM_PERSPECTIVE && value->type == CSS_VALUE_TYPE_LENGTH &&
+                value->data.length.value < 0.0) return false;
+            return zero || domain == CSS_MATH_LENGTH || (percentage &&
+                (domain == CSS_MATH_PERCENT || domain == CSS_MATH_LENGTH_PERCENT));
+        }
+        case TRANSFORM_SCALE:
+        case TRANSFORM_SCALEX:
+        case TRANSFORM_SCALEY:
+        case TRANSFORM_SCALE3D:
+        case TRANSFORM_SCALEZ:
+            return domain == CSS_MATH_NUMBER || domain == CSS_MATH_PERCENT;
+        case TRANSFORM_ROTATE3D:
+            if (index < 3) return domain == CSS_MATH_NUMBER;
+            // the fourth rotate3d component is an angle.
+            [[fallthrough]];
+        case TRANSFORM_ROTATE:
+        case TRANSFORM_ROTATEX:
+        case TRANSFORM_ROTATEY:
+        case TRANSFORM_ROTATEZ:
+        case TRANSFORM_SKEW:
+        case TRANSFORM_SKEWX:
+        case TRANSFORM_SKEWY:
+            return zero || domain == CSS_MATH_ANGLE;
+        default: return domain == CSS_MATH_NUMBER;
+    }
+}
+
+static bool css_transform_function_valid(const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return false;
+    const CssFunction* function = value->data.function;
+    const CssTransformFunctionInfo* info = css_transform_function_info(function->name);
+    if (!info || function->arg_count < info->min_args || function->arg_count > info->max_args)
+        return false;
+    for (int index = 0; index < function->arg_count; index++)
+        if (!css_transform_argument_valid(info->type, index, function->args[index])) return false;
+    return true;
+}
+
+static bool css_transform_value_valid(const CssValue* value) {
+    if (css_value_contains_var_reference(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return value->data.keyword == CSS_VALUE_NONE ||
+            (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST) return css_transform_function_valid(value);
+    if (value->data.list.comma_separated || value->data.list.count == 0) return false;
+    for (int index = 0; index < value->data.list.count; index++)
+        if (!css_transform_function_valid(value->data.list.values[index])) return false;
+    return true;
 }
 
 static bool css_value_is_length_expression(const CssValue* value,
@@ -1695,6 +1696,226 @@ bool css_split_border_image_shorthand(const CssValue* value,
     return parts->source || parts->slice_count || parts->repeat_count;
 }
 
+bool css_value_as_seconds(const CssValue* value, double* seconds) {
+    if (!value || !seconds || (value->type != CSS_VALUE_TYPE_LENGTH &&
+        value->type != CSS_VALUE_TYPE_TIME)) return false;
+    double time = value->data.length.value;
+    CssUnit unit = value->data.length.unit;
+    if (!isfinite(time) || (unit != CSS_UNIT_S && unit != CSS_UNIT_MS)) return false;
+    *seconds = unit == CSS_UNIT_MS ? time / 1000.0 : time;
+    return true;
+}
+
+bool css_value_is_timing_function(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        return keyword == CSS_VALUE_EASE || keyword == CSS_VALUE_EASE_IN ||
+            keyword == CSS_VALUE_EASE_OUT || keyword == CSS_VALUE_EASE_IN_OUT ||
+            keyword == CSS_VALUE_LINEAR || keyword == CSS_VALUE_STEP_START ||
+            keyword == CSS_VALUE_STEP_END;
+    }
+    if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return false;
+    const CssFunction* function = value->data.function;
+    if (!function->name || !function->args) return false;
+    if (str_ieq_cstr(function->name, "cubic-bezier")) {
+        if (function->arg_count != 4) return false;
+        for (int i = 0; i < 4; i++) {
+            const CssValue* arg = function->args[i];
+            if (!arg || arg->type != CSS_VALUE_TYPE_NUMBER ||
+                !isfinite(arg->data.number.value)) return false;
+            if ((i == 0 || i == 2) &&
+                (arg->data.number.value < 0.0 || arg->data.number.value > 1.0)) return false;
+        }
+        return true;
+    }
+    if (!str_ieq_cstr(function->name, "steps") ||
+        function->arg_count < 1 || function->arg_count > 2) return false;
+    const CssValue* count = function->args[0];
+    if (!count || count->type != CSS_VALUE_TYPE_NUMBER ||
+        !count->data.number.is_integer ||
+        !isfinite(count->data.number.value) || count->data.number.value < 1.0 ||
+        floor(count->data.number.value) != count->data.number.value) return false;
+    if (function->arg_count == 1) return true;
+    const char* position = css_math_token_name(function->args[1]);
+    if (!position) return false;
+    if (str_ieq_cstr(position, "jump-none")) return count->data.number.value >= 2.0;
+    return str_ieq_cstr(position, "jump-start") || str_ieq_cstr(position, "start") ||
+        str_ieq_cstr(position, "jump-end") || str_ieq_cstr(position, "end") ||
+        str_ieq_cstr(position, "jump-both");
+}
+
+static int css_timeline_property_index(CssPropertyCode property,
+                                       const CssPropertyCode* longhands, int count) {
+    for (int i = 0; i < count; i++) {
+        if (longhands[i] == property) return i;
+    }
+    return -1;
+}
+
+bool css_animation_property_is_longhand(CssPropertyCode property) {
+    return css_timeline_property_index(property, animation_longhands, 8) >= 0;
+}
+
+CssPropertyCode css_timeline_shorthand_for(CssPropertyCode property) {
+    if (css_animation_property_is_longhand(property)) return CSS_PROPERTY_ANIMATION;
+    return css_timeline_property_index(property, transition_longhands, 4) >= 0
+        ? CSS_PROPERTY_TRANSITION : CSS_PROPERTY_UNKNOWN;
+}
+
+bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value) {
+    if (!value) return false;
+    CssEnum keyword = value->type == CSS_VALUE_TYPE_KEYWORD
+        ? value->data.keyword : CSS_VALUE__UNDEF;
+    double seconds = 0.0;
+    switch (property) {
+        case CSS_PROPERTY_ANIMATION_NAME:
+        case CSS_PROPERTY_TRANSITION_PROPERTY: {
+            if (value->type == CSS_VALUE_TYPE_STRING) return
+                property == CSS_PROPERTY_ANIMATION_NAME && value->data.string != NULL;
+            if (value->flags & CSS_VALUE_NON_IDENTIFIER_TOKEN) return false;
+            const char* name = css_math_token_name(value);
+            const CssEnumInfo* info = css_enum_info(keyword);
+            return name && !str_ieq_cstr(name, "default") &&
+                (!info || info->group != CSS_VALUE_GROUP_GLOBAL);
+        }
+        case CSS_PROPERTY_ANIMATION_DURATION:
+        case CSS_PROPERTY_TRANSITION_DURATION:
+            return css_value_as_seconds(value, &seconds) && seconds >= 0.0;
+        case CSS_PROPERTY_ANIMATION_DELAY:
+        case CSS_PROPERTY_TRANSITION_DELAY:
+            return css_value_as_seconds(value, &seconds);
+        case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION:
+        case CSS_PROPERTY_TRANSITION_TIMING_FUNCTION:
+            return css_value_is_timing_function(value);
+        case CSS_PROPERTY_ANIMATION_ITERATION_COUNT:
+            return keyword == CSS_VALUE_INFINITE || (value->type == CSS_VALUE_TYPE_NUMBER &&
+                isfinite(value->data.number.value) && value->data.number.value >= 0.0);
+        case CSS_PROPERTY_ANIMATION_DIRECTION:
+            return keyword == CSS_VALUE_NORMAL || keyword == CSS_VALUE_REVERSE ||
+                keyword == CSS_VALUE_ALTERNATE || keyword == CSS_VALUE_ALTERNATE_REVERSE;
+        case CSS_PROPERTY_ANIMATION_FILL_MODE:
+            return keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_FORWARDS ||
+                keyword == CSS_VALUE_BACKWARDS || keyword == CSS_VALUE_BOTH;
+        case CSS_PROPERTY_ANIMATION_PLAY_STATE:
+            return keyword == CSS_VALUE_RUNNING || keyword == CSS_VALUE_PAUSED;
+        default: return false;
+    }
+}
+
+static bool css_timeline_assign_time(const CssValue* value, double seconds,
+                                     const CssValue** parts) {
+    // a negative time can only fill delay; a later nonnegative time fills duration.
+    int slot = !parts[1] && seconds >= 0.0 ? 1 : 3;
+    if (parts[slot]) return false;
+    parts[slot] = value;
+    return true;
+}
+
+static bool css_animation_split_group(const CssValue* group, const CssValue** parts) {
+    if (!group || !parts) return false;
+    int count = group->type == CSS_VALUE_TYPE_LIST ? group->data.list.count : 1;
+    if (count < 1 || count > 8 || (group->type == CSS_VALUE_TYPE_LIST &&
+        (group->data.list.comma_separated || !group->data.list.values))) return false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* token = group->type == CSS_VALUE_TYPE_LIST
+            ? group->data.list.values[i] : group;
+        double seconds = 0.0;
+        if (css_value_as_seconds(token, &seconds)) {
+            if (!css_timeline_assign_time(token, seconds, parts)) return false;
+            continue;
+        }
+        bool assigned = false;
+        // reserved component keywords take precedence over the keyframe name.
+        for (int slot = 2; slot < 8; slot++) {
+            if (slot == 3 || parts[slot]) continue;
+            if (css_motion_longhand_accepts(animation_longhands[slot], token)) {
+                parts[slot] = token;
+                assigned = true;
+                break;
+            }
+        }
+        if (assigned) continue;
+        if (parts[0] || !css_motion_longhand_accepts(CSS_PROPERTY_ANIMATION_NAME, token))
+            return false;
+        parts[0] = token;
+    }
+    return true;
+}
+
+static bool css_transition_split_group(const CssValue* group, const CssValue** parts) {
+    if (!group || !parts) return false;
+    int count = group->type == CSS_VALUE_TYPE_LIST ? group->data.list.count : 1;
+    if (count < 1 || count > 4 || (group->type == CSS_VALUE_TYPE_LIST &&
+        (group->data.list.comma_separated || !group->data.list.values))) return false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* token = group->type == CSS_VALUE_TYPE_LIST
+            ? group->data.list.values[i] : group;
+        double seconds = 0.0;
+        if (css_value_as_seconds(token, &seconds)) {
+            if (!css_timeline_assign_time(token, seconds, parts)) return false;
+        } else if (!parts[2] && css_value_is_timing_function(token)) {
+            parts[2] = token;
+        } else if (!parts[0] && css_motion_longhand_accepts(
+            CSS_PROPERTY_TRANSITION_PROPERTY, token)) {
+            parts[0] = token;
+        } else return false;
+    }
+    return true;
+}
+
+// parsing and cascade projection share the same motion component grammar.
+bool css_parse_motion_shorthand(CssPropertyCode shorthand, const CssValue* group,
+    CssMotionShorthandParts* parts) {
+    if (!parts || !group || css_value_is_global_keyword(group)) return false;
+    memset(parts, 0, sizeof(*parts));
+    if (shorthand == CSS_PROPERTY_ANIMATION)
+        return css_animation_split_group(group, parts->values);
+    if (shorthand == CSS_PROPERTY_TRANSITION)
+        return css_transition_split_group(group, parts->values);
+    return false;
+}
+
+struct CssTimelineGrammar {
+    CssPropertyCode shorthand;
+    const CssPropertyCode* longhands;
+    int count;
+    bool (*split_group)(const CssValue*, const CssValue**);
+};
+
+static const CssTimelineGrammar animation_grammar = {
+    CSS_PROPERTY_ANIMATION, animation_longhands, 8, css_animation_split_group
+};
+static const CssTimelineGrammar transition_grammar = {
+    CSS_PROPERTY_TRANSITION, transition_longhands, 4, css_transition_split_group
+};
+
+static bool css_timeline_value_valid(CssPropertyCode property, const CssValue* value,
+                                     const CssTimelineGrammar* grammar) {
+    if (!value) return false;
+    if (css_value_contains_var_reference(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+    }
+    bool list = value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated;
+    int count = list ? value->data.list.count : 1;
+    if (count < 1 || (list && !value->data.list.values)) return false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* group = list ? value->data.list.values[i] : value;
+        if (property == grammar->shorthand) {
+            const CssValue* parts[8] = {};
+            if (!grammar->split_group(group, parts)) return false;
+            group = parts[0];
+        } else if (!css_motion_longhand_accepts(property, group)) return false;
+        // `none` disables the entire transition list and cannot occupy one slot.
+        if (grammar == &transition_grammar && count > 1 && group &&
+            group->type == CSS_VALUE_TYPE_KEYWORD && group->data.keyword == CSS_VALUE_NONE)
+            return false;
+    }
+    return true;
+}
+
 static bool css_value_is_individual_transform(CssPropertyCode property, const CssValue* value) {
     if (css_value_contains_var_reference(value)) return true;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -1763,34 +1984,22 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         return css_value_identifier_name(name) != nullptr;
     }
     // Property-specific validation
-    if (id == CSS_PROPERTY_ANIMATION || css_animation_longhand_index(id) >= 0 ||
-        id == CSS_PROPERTY_TRANSITION || css_transition_longhand_index(id) >= 0) {
-        if (css_value_contains_var_reference(value)) return true;
-        const CssEnumInfo* info = value->type == CSS_VALUE_TYPE_KEYWORD
-            ? css_enum_info(value->data.keyword) : nullptr;
-        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
-        int count = css_value_comma_count(value);
-        if (count < 1) return false;
-        for (int i = 0; i < count; i++) {
-            const CssValue* item = css_value_comma_at(value, i);
-            CssMotionShorthandParts parts;
-            bool shorthand = id == CSS_PROPERTY_ANIMATION || id == CSS_PROPERTY_TRANSITION;
-            if (shorthand
-                ? !css_parse_motion_shorthand(id, item, &parts)
-                : !css_motion_longhand_accepts(id, item)) return false;
-            const CssValue* property = id == CSS_PROPERTY_TRANSITION ? parts.values[0] : item;
-            if (count > 1 && (id == CSS_PROPERTY_TRANSITION || id == CSS_PROPERTY_TRANSITION_PROPERTY) &&
-                property && property->type == CSS_VALUE_TYPE_KEYWORD &&
-                property->data.keyword == CSS_VALUE_NONE) return false;
-        }
-        return true;
-    }
+    if (id == CSS_PROPERTY_ANIMATION || css_animation_longhand_index(id) >= 0)
+        return css_timeline_value_valid(id, value, &animation_grammar);
+    if (id == CSS_PROPERTY_TRANSITION || css_transition_longhand_index(id) >= 0)
+        return css_timeline_value_valid(id, value, &transition_grammar);
     switch (id) {
+        case CSS_PROPERTY_TRANSFORM:
+            return css_transform_value_valid(value);
         case CSS_PROPERTY_OPACITY: {
-            // Reject identifiers before a used-value reader interprets the
-            // numeric union; opacity accepts number/percentage syntax.
             if (css_value_is_global_keyword(value) || css_value_contains_var_reference(value)) return true;
-            CssMathType type = css_math_value_type(value);
+            // a bare list is never a numeric expression outside a math function.
+            if (value->type != CSS_VALUE_TYPE_NUMBER &&
+                value->type != CSS_VALUE_TYPE_PERCENTAGE &&
+                value->type != CSS_VALUE_TYPE_FUNCTION &&
+                value->type != CSS_VALUE_TYPE_ENV &&
+                value->type != CSS_VALUE_TYPE_ATTR) return false;
+            CssMathType type = css_math_value_type(value, 0);
             return type == CSS_MATH_NUMBER || type == CSS_MATH_PERCENT || type == CSS_MATH_DEFERRED;
         }
         case CSS_PROPERTY_BREAK_BEFORE:
@@ -1858,6 +2067,22 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             return css_value_is_box_spacing_shorthand(value, true, quirks_mode);
         case CSS_PROPERTY_PADDING:
             return css_value_is_box_spacing_shorthand(value, false, quirks_mode);
+        case CSS_PROPERTY_MARGIN_TOP:
+        case CSS_PROPERTY_MARGIN_RIGHT:
+        case CSS_PROPERTY_MARGIN_BOTTOM:
+        case CSS_PROPERTY_MARGIN_LEFT:
+        case CSS_PROPERTY_TOP:
+        case CSS_PROPERTY_RIGHT:
+        case CSS_PROPERTY_BOTTOM:
+        case CSS_PROPERTY_LEFT:
+            return value->type != CSS_VALUE_TYPE_LIST &&
+                css_value_is_box_spacing_shorthand(value, true, quirks_mode);
+        case CSS_PROPERTY_PADDING_TOP:
+        case CSS_PROPERTY_PADDING_RIGHT:
+        case CSS_PROPERTY_PADDING_BOTTOM:
+        case CSS_PROPERTY_PADDING_LEFT:
+            return value->type != CSS_VALUE_TYPE_LIST &&
+                css_value_is_box_spacing_shorthand(value, false, quirks_mode);
         case CSS_PROPERTY_BORDER_IMAGE: {
             if (value->type == CSS_VALUE_TYPE_VAR) return true;
             if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
@@ -2305,25 +2530,22 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         case CSS_PROPERTY_BORDER_TOP_WIDTH:
         case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
         case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
-        case CSS_PROPERTY_BORDER_LEFT_WIDTH: {
-            // Longhand border-width properties accept a single value only
-            if (value->type == CSS_VALUE_TYPE_LIST) return false;
-            // CSS 2.1 §8.5.1: border-width accepts only <length> and thin|medium|thick.
-            // Percentage values are invalid and must be rejected.
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                return false;
+        case CSS_PROPERTY_BORDER_LEFT_WIDTH:
+        case CSS_PROPERTY_COLUMN_RULE_WIDTH: {
+            // border-like widths share a nonnegative length grammar without percentages.
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                return value->data.keyword == CSS_VALUE_THIN ||
+                    value->data.keyword == CSS_VALUE_MEDIUM ||
+                    value->data.keyword == CSS_VALUE_THICK ||
+                    (info && info->group == CSS_VALUE_GROUP_GLOBAL);
             }
-            // Border widths must be non-negative
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                if (value->data.length.value < 0) {
-                    return false;
-                }
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                if (value->data.number.value < 0) {
-                    return false;
-                }
-            }
-            break;
+            if (value->type == CSS_VALUE_TYPE_LENGTH)
+                return value->data.length.value >= 0.0 && css_unit_is_length(value->data.length.unit);
+            if (value->type == CSS_VALUE_TYPE_NUMBER)
+                return value->data.number.value == 0.0 ||
+                    (quirks_mode && id != CSS_PROPERTY_COLUMN_RULE_WIDTH && value->data.number.value >= 0.0);
+            return css_value_is_length_expression(value, false, false);
         }
 
         case CSS_PROPERTY_TEXT_INDENT: {

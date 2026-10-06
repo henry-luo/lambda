@@ -498,7 +498,8 @@ ElementBuilder& ElementBuilder::attr(String* key, bool value) {
 
 ElementBuilder& ElementBuilder::child(Item item) {
     // S2.6.4: strings merge in content; arrays retain argument boundaries.
-    list_push_with_owner((List*)elmt_, item, builder_->pool(), builder_->arena(), builder_->ui_mode());
+    list_push_with_owner((List*)elmt_, item, builder_->pool(), builder_->arena(),
+        builder_->ui_mode() ? builder_->input() : nullptr);
     return *this;
 }
 

@@ -68,7 +68,8 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
         !isfinite(constraints->inline_size) || constraints->inline_size <= 0.0f ||
         !isfinite(constraints->available_height) || constraints->available_height < 0.0f ||
         !isfinite(constraints->reference_height) || constraints->reference_height < 0.0f ||
-        !isfinite(body_height) || body_height < 0.0f || !isfinite(separator_height) || separator_height < 0.0f)
+        !isfinite(body_height) || body_height < 0.0f || !isfinite(separator_height) ||
+        !isfinite(constraints->minimum_height) || constraints->minimum_height < 0.0f)
         return TYPESET_INVALID;
     if (body_height > constraints->available_height) return TYPESET_UNPLACEABLE;
     if (queue->count > queue->limit || anchor_count > queue->limit - queue->count ||
@@ -104,7 +105,8 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
             if (prior->identity == material->identity) { status = TYPESET_INVALID; break; }
         }
         if (status != TYPESET_OK) break;
-        float available = constraints->available_height - body_height - separator_height - required;
+        float available = constraints->minimum_height > constraints->available_height - body_height ? 0.0f :
+            constraints->available_height - body_height - separator_height - required;
         TypesetRegionConstraints region = *constraints; region.available_height = fmaxf(0.0f, available);
         region.minimum = true;
         TypesetStatus measured = !eligible || admitted != i || (material->clear_before && i) || available <= 0.0f ? TYPESET_UNPLACEABLE :
@@ -141,8 +143,9 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
         if (!slice.complete) plan.pending[plan.pending_count++] = {material, slice.end, earliest};
     }
     if (status == TYPESET_OK) {
-        plan.reserved_height = plan.count ? separator_height + used : 0.0f;
-        float top = constraints->from_start ? separator_height : constraints->available_height - used;
+        // A region floor is empty space after its content, never a fabricated material slice.
+        plan.reserved_height = plan.count ? fmaxf(constraints->minimum_height, separator_height + used) : 0.0f;
+        float top = constraints->from_start ? separator_height : constraints->available_height - plan.reserved_height + separator_height;
         for (size_t i = 0; i < plan.count; i++) plan.placements[i].rect.y += top;
         *result = plan;
     } else typeset_region_plan_dispose(&plan);

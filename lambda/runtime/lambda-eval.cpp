@@ -15,6 +15,7 @@
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
 #include "../../lib/math_checked.hpp"
@@ -9136,6 +9137,18 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
     return true;
 }
 
+// The collector traces an object by its header tag, not by Container.type_id,
+// so an ArrayNum widened in place must be retagged in the same no-safepoint
+// step that installs its Items. Left tagged ArrayNum, it was traced as raw
+// numbers and the containers it now held were freed (D4.3.1).
+static void retag_widened_array_num(Array* arr) {
+    if (arr->is_heap) {
+        heap_retag_container((Container*)arr, LMD_TYPE_ARRAY_NUM, LMD_TYPE_ARRAY);
+    } else {
+        arr->type_id = LMD_TYPE_ARRAY;
+    }
+}
+
 static void convert_specialized_to_generic(Array* arr) {
     TypeId old_type = arr->type_id;
     int64_t len = arr->length;
@@ -9193,11 +9206,93 @@ static void convert_specialized_to_generic(Array* arr) {
 
     arr->items = new_items;
     arr->capacity = new_capacity;
-    arr->type_id = LMD_TYPE_ARRAY;
+    if (old_type == LMD_TYPE_ARRAY_NUM) retag_widened_array_num(arr);
     if (native_lane) array_native_lane_clear(arr);
     // Widening through an open write abandons the exact declared-array proof.
     arr->rep_cert = NULL;
     log_debug("convert_specialized_to_generic: converted type %d to generic Array, len=%lld", old_type, len);
+}
+
+// S1.6: an N-D ArrayNum is invisibly the sequence of its leading-axis rows, so
+// `m[i] = v` replaces row i. A rank-2 row replaced by a flat sequence of the
+// same length whose scalars all fit the lane keeps the packed carrier.
+static bool array_num_ndim_row_store(ArrayNum* arr, int64_t row, Item value) {
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    TypeId value_type = get_type_id(value);
+    if (shape->ndim != 2 || vector_is_ndim(value)) return false;
+    if (value_type != LMD_TYPE_ARRAY && value_type != LMD_TYPE_ARRAY_NUM) return false;
+    // a list written into a slot splices (S2.5.6), so it never stays a row
+    if (value.array->is_spreadable) return false;
+    int64_t row_len = array_num_shape_dims(shape)[1];
+    int64_t value_len = value_type == LMD_TYPE_ARRAY ? value.array->length
+        : array_num_iter_count(value.array_num);
+    if (value_len != row_len) return false;
+    for (int64_t j = 0; j < row_len; j++) {
+        if (!array_num_admits_value(arr, item_at(value, j))) return false;
+    }
+    for (int64_t j = 0; j < row_len; j++) {
+        int64_t coordinate[2] = {row, j};
+        if (item_is_error(array_num_set_nd_admitted(arr, 2, coordinate, item_at(value, j)))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Any other row write widens the N-D array in place to a generic Array of its
+// rows. Each row is an owned copy: a row view would alias the flat buffer this
+// conversion abandons. convert_specialized_to_generic widened the flat leaves
+// instead, so `m[0] = [9, 2]` on [[1, 2], [1, 2]] gave [[9, 2], 2, 1, 2].
+static bool convert_ndim_to_generic_rows(Array* arr) {
+    ArrayNum* source = (ArrayNum*)arr;
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)source->extra;
+    ArrayNumElemType elem_type = source->get_elem_type();
+    // the shape side table lives in a data zone that a collection may move
+    int ndim = shape->ndim;
+    int64_t dims[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    for (int ax = 0; ax < ndim; ax++) {
+        dims[ax] = array_num_shape_dims(shape)[ax];
+        strides[ax] = array_num_shape_strides(shape)[ax];
+    }
+    int64_t row_len = 1;
+    for (int ax = 1; ax < ndim; ax++) row_len *= dims[ax];
+
+    RootFrame roots(3);
+    Rooted<Array*> rooted_arr(roots, arr);
+    Rooted<Array*> rooted_rows(roots, array_plain());
+    Rooted<ArrayNum*> rooted_row(roots, (ArrayNum*)NULL);
+    if (!rooted_rows.get()) return false;
+    for (int64_t r = 0; r < dims[0]; r++) {
+        rooted_row.set(ndim == 2 ? array_num_new(elem_type, row_len)
+            : array_num_new_ndim(elem_type, row_len, ndim - 1, dims + 1));
+        if (!rooted_row.get()) return false;
+        for (int64_t j = 0; j < row_len; j++) {
+            // unravel leaf j of the row over the trailing axes
+            int64_t offset = r * strides[0], rest = j;
+            for (int ax = ndim - 1; ax >= 1; ax--) {
+                offset += (rest % dims[ax]) * strides[ax];
+                rest /= dims[ax];
+            }
+            Item leaf = array_num_read_item((ArrayNum*)rooted_arr.get(), offset);
+            array_num_store_admitted(rooted_row.get(), j, leaf);
+        }
+        array_push_verbatim(rooted_rows.get(), {.array_num = rooted_row.get()});
+    }
+
+    int64_t count = dims[0];
+    int64_t capacity = count < 8 ? 8 : count;
+    Item* items = (Item*)heap_data_calloc(capacity * sizeof(Item));
+    if (!items) return false;
+    for (int64_t r = 0; r < count; r++) items[r] = rooted_rows.get()->items[r];
+    arr = rooted_arr.get();
+    arr->items = items;
+    arr->length = count;
+    arr->capacity = capacity;
+    arr->extra = 0;
+    arr->is_ndim = 0;
+    retag_widened_array_num(arr);
+    arr->rep_cert = NULL;
+    return true;
 }
 
 // S9.1.1: `push(b, v)` is `b' = b ++ [v]`. An open packed array (one with no
@@ -9338,6 +9433,36 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     if (arr->is_static) {
         log_error("fn_array_set: cannot mutate static array");
         return ItemError;
+    }
+    // An N-D array's elements are its leading-axis rows; its `length` counts
+    // leaves, so the flat index paths below must not see it.
+    if (arr_type == LMD_TYPE_ARRAY_NUM && vector_is_ndim({.array_num = (ArrayNum*)arr})) {
+        ArrayNum* nd = (ArrayNum*)arr;
+        int64_t rows = array_num_iter_count(nd);
+        if (index < 0 || index >= rows) {
+            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+                "fn_array_set: index %lld out of bounds (length %lld)",
+                (long long)index, (long long)rows);
+            return ItemError;
+        }
+        if (nd->is_view && !nd->is_mutable_view) {
+            log_error("fn_array_set: cannot mutate a read-only view; copy() first");
+            return ItemError;
+        }
+        if (array_num_ndim_row_store(nd, index, value)) return ItemNull;
+        if (nd->is_view) {
+            // a view aliases its base's buffer and cannot change representation
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "fn_array_set: an N-D array view row takes only a row of its own shape; copy() first");
+            return ItemError;
+        }
+        RootFrame roots(2);
+        Rooted<Array*> rooted_arr(roots, arr);
+        Rooted<Item> rooted_value(roots, value);
+        if (!convert_ndim_to_generic_rows(rooted_arr.get())) return ItemError;
+        arr = rooted_arr.get();
+        value = rooted_value.get();
+        arr_type = arr->type_id;
     }
     // A borrowing view aliases someone else's buffer. `content(e)` is read-only
     // for now (LR09-9), so refuse rather than write through — the ARRAY_NUM arm
@@ -9768,6 +9893,12 @@ static void clone_mutable_container_flags(Container* dst, Container* src) {
     dst->is_heap = 1;
     dst->is_static = 0;
     dst->is_data_migrated = 0;
+    // The copy's storage is heap data written in the mutable encoding, never
+    // the input arena or const pool. Inheriting `is_immortal` from a parsed
+    // document made cow_prepare_write treat the copy as shared again, so every
+    // later write copied it once more and a write the compiler (rightly) did
+    // not republish was lost (LR12-39).
+    dst->is_immortal = 0;
 }
 
 static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
@@ -10863,7 +10994,10 @@ static MapContractRelation runtime_map_contract_relation_cached(
 
 static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
     expected = runtime_boundary_unwrap_type(expected);
-    if (!expected || expected->type_id != LMD_TYPE_MAP) return NULL;
+    // The open `map` annotation is the plain TYPE_MAP singleton, not a TypeMap:
+    // it declares no fields, and reading it as one walked past the struct
+    // (`var m: map = {}; m["a"] = 1` segfaulted on the JIT).
+    if (!expected || expected->type_id != LMD_TYPE_MAP || expected == &TYPE_MAP) return NULL;
     const char* chars = NULL;
     uint32_t length = 0;
     TypeId key_type = get_type_id(key);
@@ -10987,7 +11121,152 @@ static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_c
         rooted_value.get(), inplace);
 }
 
+// D3.4.3v4: runtime-grown plain maps share their types through one transition
+// tree per heap generation of a context. It is a capsule extension rather than
+// an EvalContext slot, so the context layout that separately built modules read
+// is unchanged.
+#define RUNTIME_SHAPE_TREE_OWNER 0x53485054u  // 'SHPT'
+// Every runtime-grown map shares this one tree, so its budget sits far above an
+// Input's 1,024 map types; past it a map keeps a private type (D3.4.3v4).
+static const int RUNTIME_SHAPE_GRAPH_BUDGET = 65536;
+
+static void runtime_shape_tree_destroy(void* capsule) {
+    // D4.2.6: the Input's arena holds every tree node, so it goes as a whole.
+    // Destroying the tree's own pool runs the Input's registered cleanup
+    // (input_pool_cleanup), which releases the document resources once.
+    mem_pool_destroy(((Input*)capsule)->pool);
+}
+
+static const ContextCapsuleOps runtime_shape_tree_ops = {
+    "runtime_shape_tree", CONTEXT_CAPSULE_LIFETIME_REALM, 0, NULL, NULL,
+    runtime_shape_tree_destroy
+};
+
+void runtime_shape_tree_release(EvalContext* owner) {
+    // LR03-43: the tree's edges and entries carry NameIds of the runtime name
+    // pool, and every map on a tree node lives on the heap, so the tree ends
+    // with that heap generation. Kept across runtime_reset_heap, the next
+    // pool's recycled ids matched stale edges: a batch script's group-by
+    // `region` followed the previous script's `r` edge.
+    context_capsule_extensions_drop_owner(owner, RUNTIME_SHAPE_TREE_OWNER);
+}
+
+Input* runtime_shape_tree(void) {
+    if (!context) return NULL;
+    Input* tree = (Input*)context_capsule_extension(context, RUNTIME_SHAPE_TREE_OWNER, 0);
+    if (tree) return tree;
+    // The tree owns a pool of its own, as InputManager's global_pool does, so
+    // its teardown is the capsule's alone: in context->pool (the heap's pool) a
+    // heap reset ran the Input's pool cleanup and freed its struct while the
+    // capsule still pointed at it.
+    Pool* tree_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "runtime.shape_tree.pool");
+    if (!tree_pool) return NULL;
+    tree = Input::create(tree_pool, nullptr, nullptr);
+    if (!tree || !tree->arena || !tree->type_list ||
+            !context_capsule_extension_install(context, RUNTIME_SHAPE_TREE_OWNER, 0, tree,
+                &runtime_shape_tree_ops)) {
+        mem_pool_destroy(tree_pool);
+        return NULL;
+    }
+    tree->shape_graph_budget = RUNTIME_SHAPE_GRAPH_BUDGET;
+    // D3.4.3v5: maps grow from literal, contract, nominal, parsed and private
+    // types too, through edges this tree keeps in its own table
+    tree->keeps_external_edges = true;
+    return tree;
+}
+
+// Impl_Map_Transition_Coverage P3: the runtime tree's root for elements of one
+// tag, so runtime-built elements (group-by groups, join tuples) start on a
+// shared node; NULL keeps the caller on a private type.
+TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target* ns) {
+    Input* tree = runtime_shape_tree();
+    if (!tree || !tree->name_pool || !tag) return NULL;
+    String* name = name_pool_create_len(tree->name_pool, tag, length);
+    return name ? elmt_tree_root(tree, name, ns) : NULL;
+}
+
+// D3.4.3v5: an add to a plain map or an element follows (or mints) an edge of
+// the runtime tree. An empty plain map starts at the root; a node of the tree
+// follows its own edges; any other type -- a literal's, a contract's, a
+// nominal type's, a parsed document's or a private type -- is an external
+// parent, which the tree grows from without writing it. Maps built from the
+// same start by the same adds then share one type, and a path of n fields
+// holds n entries; copying the whole shape into the pool per add cost O(n²)
+// entries that were never reclaimed (LR03-38). Data grows by doubling. A type
+// the tree declines -- fan-out, budget, JS shape metadata, spread slots --
+// keeps the private path.
+static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
+    TypeId container_type = get_type_id(map_item);
+    TypeId key_type = get_type_id(key);
+    if ((container_type != LMD_TYPE_MAP && container_type != LMD_TYPE_ELEMENT) ||
+            (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL)) {
+        return false;
+    }
+    // S8.2.2v4: a Lambda symbol without a namespace is the global STRING name
+    // of its characters, so `m['k'] = v` and every spread key share the edges
+    // `m["k"] = v` takes. A qualified symbol keeps the private path until keys
+    // carry their namespace (LR03-40); a JS Symbol never reaches a plain
+    // Lambda map's growth path.
+    String* key_string = NULL;
+    Symbol* key_symbol = NULL;
+    if (key_type == LMD_TYPE_STRING) {
+        key_string = key.get_safe_string();
+        if (!key_string) return false;
+    } else {
+        key_symbol = key.get_safe_symbol();
+        if (!key_symbol || !symbol_is_lambda_name(key_symbol) ||
+                symbol_lambda_namespace(key_symbol)) return false;
+    }
+    TypeId value_type = get_type_id(value);
+    bool is_element = container_type == LMD_TYPE_ELEMENT;
+    // D2.6.6v2: an element shares Map's attribute face (type, data, data_cap)
+    Map* map = map_item.map;
+    if (!map || value_type == LMD_TYPE_ERROR) return false;
+    if (!is_element && map->map_kind != MAP_KIND_PLAIN) return false;
+    // UI-mode elements keep their attribute buffers in the context arena, which
+    // only the private path allocates from
+    if (is_element && context && context->ui_mode && context->arena) return false;
+    TypeMap* old_type = (TypeMap*)map->type;
+    Input* tree = runtime_shape_tree();
+    // a tree node takes its kind from its parent, so a container whose type is
+    // of the other kind keeps the private path
+    if (!old_type || !tree || old_type->type_id != container_type) return false;
+    // `{}`, a fresh map and a computed-key literal all start at the root, so
+    // they share one path; every other type is the parent itself
+    bool empty_plain = !is_element && old_type->length == 0 && !old_type->shape &&
+        !old_type->nominal && !old_type->is_trusted_contract && !old_type->has_spread;
+    TypeMap* parent = empty_plain ? NULL : old_type;
+    ShapeEntry* entry = NULL;
+    TypeMap* target = key_string
+        ? type_tree_add_map_field(tree, parent, key_string, value_type, &entry)
+        : type_tree_add_map_field_chars(tree, parent, key_symbol->chars,
+            key_symbol->len, value_type, &entry);
+    if (!target || !entry) return false;
+
+    int64_t old_size = empty_plain ? 0 : old_type->byte_size;
+    int64_t needed = target->byte_size;
+    if (!map->data || map->data_cap < needed) {
+        int64_t capacity = map->data_cap > 0 ? (int64_t)map->data_cap : 32;
+        while (capacity < needed) capacity *= 2;
+        if (capacity > INT_MAX) return false;
+        RootFrame roots(2);
+        Rooted<Map*> rooted_map(roots, map);
+        Rooted<Item> rooted_value(roots, value);
+        void* new_data = heap_data_calloc((size_t)capacity);
+        if (!new_data) return false;
+        map = rooted_map.get();
+        value = rooted_value.get();
+        if (map->data && old_size > 0) memcpy(new_data, map->data, (size_t)old_size);
+        map->data = new_data;
+        map->data_cap = (int)capacity;
+    }
+    map_field_store((char*)map->data + entry->byte_offset, value, value_type);
+    map->type = target;
+    return true;
+}
+
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
+    if (map_extend_via_runtime_tree(map_item, key, value)) return true;
     // S2.1.4 part 3: a nominal instance is OPEN — it may hold fields its type
     // does not declare. Element-shaped values are admitted too: since D2.6.6v2
     // every container shares Map's attribute face at the same offsets, so the
@@ -11021,6 +11300,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     }
     TypeId value_type = get_type_id(value);
     new_size += type_info[value_type].byte_size;
+    shape_tree_stats_note_private_copy(old_count);
 
     RootFrame roots(2);
     Rooted<Map*> rooted_map(roots, map);
@@ -11039,10 +11319,13 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     if (is_element) {
         TypeElmt* old_element = (TypeElmt*)old_type;
         TypeElmt* new_element = (TypeElmt*)new_type;
-        new_element->name = old_element->name;
-        new_element->name_id = old_element->name_id;
-        new_element->content_list = old_element->content_list;
-        new_element->ns = old_element->ns;
+        // a plain map type on an element container has no element fields
+        if (typemap_has_element_layout(old_type)) {
+            new_element->name = old_element->name;
+            new_element->name_id = old_element->name_id;
+            new_element->content_list = old_element->content_list;
+            new_element->ns = old_element->ns;
+        }
     }
     // ui elements live in an arena; their dynamic attribute buffers must have
     // the same owner because the collector cannot trace pointers from that arena.
@@ -11128,6 +11411,16 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
 
 static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* expected,
         const char* boundary, bool publish_in_place) {
+    // The open `map` annotation admits every map, so a write needs no field or
+    // post-state check and therefore no cloned transaction: it is the untyped
+    // COW write. The transactional path cloned the whole map per store, which
+    // made a counting loop over a `var m: map` quadratic.
+    if (runtime_boundary_unwrap_type(expected) == &TYPE_MAP) {
+        TypeId owner_type = get_type_id(owner);
+        if (owner_type == LMD_TYPE_MAP || owner_type == LMD_TYPE_VMAP) {
+            return map_set_cow(owner, key, value);
+        }
+    }
     // A declared field write preserves every other field's established proof;
     // admit only the replacement, including T[] fields (D3.2.4v3/D3.3.3v3).
     Type* proven_contract = runtime_boundary_unwrap_type(expected);
@@ -11185,7 +11478,15 @@ static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* 
         rooted_candidate.set(vmap_clone_for_cow(rooted_owner.get()));
         if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR) return rooted_candidate.get();
     }
-    if (field) {
+    // An undeclared key the map already holds is an open member written before:
+    // update it in place. Extending the shape again stored a duplicate entry per
+    // write (S2.1.4 open instances), as the COW path writer below already avoids.
+    TypeId candidate_type = get_type_id(rooted_candidate.get());
+    bool open_member_present = !field &&
+        (candidate_type == LMD_TYPE_MAP || candidate_type == LMD_TYPE_ELEMENT) &&
+        runtime_named_map_field((Type*)lambda_attr_shape(candidate_type,
+            rooted_candidate.get().map), rooted_key.get());
+    if (field || open_member_present) {
         Item set_result = fn_map_set(rooted_candidate.get(), rooted_key.get(), rooted_value.get());
         if (get_type_id(set_result) == LMD_TYPE_ERROR) return set_result;
     } else if (!map_extend_open_shape(rooted_candidate.get(), rooted_key.get(),
@@ -12585,13 +12886,95 @@ static void container_rebuild_data_install(Container* container, void** data_slo
 // creates new ShapeEntry chain + TypeMap/TypeElmt, allocates new data buffer, copies fields
 // For markup containers (!is_heap), uses runtime pool instead of calloc/free to avoid
 // corrupting input pool memory. The is_data_migrated flag tracks this transition.
+// D3.4.5: move a container's fields from `old_map_type` onto `new_type` --
+// the same fields in order, `changed_entry` laid out anew and holding
+// `new_value` -- and install the pair. This is the shared half of a
+// type-changing write, whether `new_type` is a private rebuild or a shared
+// tree target (Impl_Map_Transition_Coverage P2).
+static void container_move_to_type(void** type_slot, void** data_slot, int* cap_slot,
+        Container* container, TypeMap* old_map_type, TypeMap* new_type,
+        ShapeEntry* changed_entry, Item new_value, int fixed_slot_count) {
+    void* old_data = NULL;
+    int64_t new_byte_size = new_type->byte_size;
+    int field_index = 0;
+    // allocate new data buffer
+    // Shape rebuild is already a cold path. A structured frame avoids leaving
+    // registered native addresses behind on a non-local recovery edge while
+    // keeping both unpublished owners exact through the data allocation.
+    RootFrame roots(2);
+    Rooted<Container*> rooted_container(roots, container);
+    // a borrowed scalar may point inside the old data buffer that GC moves.
+    uint64_t value_home = 0;
+    Rooted<Item> rooted_value(roots, lambda_item_adopt_scalar_home(new_value, &value_home));
+
+    void* new_data = container_rebuild_data_alloc(container, new_byte_size);
+    if (!new_data) {
+        log_error("map_rebuild: data allocation failed");
+        return;
+    }
+    container = rooted_container.get();
+    new_value = rooted_value.get();
+
+    // Re-read old_data after allocation: GC may have fired during
+    // heap_data_calloc, compacting *data_slot from nursery to tenured.
+    // The local old_data would then point to freed nursery memory.
+    old_data = *data_slot;
+
+    // copy field values from old buffer to new buffer
+    ShapeEntry* old_e = old_map_type->shape;
+    ShapeEntry* new_e = new_type->shape;
+    field_index = 0;
+    while (old_e && new_e) {
+        if (old_e->byte_offset < 0 || new_e->byte_offset < 0) {
+            old_e = typemap_next_field(old_map_type, old_e);
+            new_e = typemap_next_field(new_type, new_e);
+            field_index++;
+            continue;
+        }
+        void* old_field = (char*)old_data + old_e->byte_offset;
+        void* new_field = (char*)new_data + new_e->byte_offset;
+
+        if (old_e == changed_entry) {
+            // The new ShapeEntry owns the semantic contract. In particular,
+            // `int?` must encode null as its lane sentinel rather than using
+            // the historical raw Item fallback selected by TypeId alone.
+            if (!map_shape_field_store_native_lane(new_field, new_e, new_value)) {
+            // Store according to the rebuilt shape, not the source Item tag.
+            // Composite contracts such as `int[]` use the self-describing
+            // TypedItem slot even though their current value is an Array
+            // pointer; using the value tag here leaves `_map_read_field`
+            // interpreting that pointer as an uninitialized TypedItem.
+            map_field_store(new_field, new_value,
+                shape_entry_storage_type_id(new_e));
+            }
+        } else {
+            // unchanged field — copy the bytes across unchanged
+            int sz = field_index < fixed_slot_count ? (int)sizeof(void*) :
+                shape_entry_storage_size(old_e);
+            memcpy(new_field, old_field, sz);
+        }
+        field_index++;
+        old_e = typemap_next_field(old_map_type, old_e);
+        new_e = typemap_next_field(new_type, new_e);
+    }
+
+    *type_slot = new_type;
+
+    // replace data, retiring the old buffer with its allocator
+    container_rebuild_data_install(container, data_slot, cap_slot, new_data,
+        new_byte_size);
+
+    log_debug("map_rebuild: type change complete, fields=%lld, byte_size=%ld, migrated=%d",
+              (long long)new_type->length, new_byte_size, container->is_data_migrated);
+}
+
+
 static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int* cap_slot,
                                         TypeId container_type_id,
                                         Container* container,
                                         ShapeEntry* changed_entry,
                                         Type* new_field_contract, Item new_value) {
     TypeMap* old_map_type = (TypeMap*)*type_slot;
-    void* old_data = NULL;
     if (!new_field_contract) {
         log_error("map_rebuild: missing replacement field contract");
         return;
@@ -12665,67 +13048,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     }
     int64_t new_byte_size = byte_offset;
 
-    // allocate new data buffer
-    // Shape rebuild is already a cold path. A structured frame avoids leaving
-    // registered native addresses behind on a non-local recovery edge while
-    // keeping both unpublished owners exact through the data allocation.
-    RootFrame roots(2);
-    Rooted<Container*> rooted_container(roots, container);
-    // a borrowed scalar may point inside the old data buffer that GC moves.
-    uint64_t value_home = 0;
-    Rooted<Item> rooted_value(roots, lambda_item_adopt_scalar_home(new_value, &value_home));
-
-    void* new_data = container_rebuild_data_alloc(container, new_byte_size);
-    if (!new_data) {
-        log_error("map_rebuild: data allocation failed");
-        return;
-    }
-    container = rooted_container.get();
-    new_value = rooted_value.get();
-
-    // Re-read old_data after allocation: GC may have fired during
-    // heap_data_calloc, compacting *data_slot from nursery to tenured.
-    // The local old_data would then point to freed nursery memory.
-    old_data = *data_slot;
-
-    // copy field values from old buffer to new buffer
-    ShapeEntry* old_e = old_map_type->shape;
-    ShapeEntry* new_e = first;
-    field_index = 0;
-    while (old_e && new_e) {
-        if (old_e->byte_offset < 0 || new_e->byte_offset < 0) {
-            old_e = typemap_next_field(old_map_type, old_e);
-            new_e = shape_chain_next_until(new_e, last);
-            field_index++;
-            continue;
-        }
-        void* old_field = (char*)old_data + old_e->byte_offset;
-        void* new_field = (char*)new_data + new_e->byte_offset;
-
-        if (old_e == changed_entry) {
-            // The new ShapeEntry owns the semantic contract. In particular,
-            // `int?` must encode null as its lane sentinel rather than using
-            // the historical raw Item fallback selected by TypeId alone.
-            if (!map_shape_field_store_native_lane(new_field, new_e, new_value)) {
-            // Store according to the rebuilt shape, not the source Item tag.
-            // Composite contracts such as `int[]` use the self-describing
-            // TypedItem slot even though their current value is an Array
-            // pointer; using the value tag here leaves `_map_read_field`
-            // interpreting that pointer as an uninitialized TypedItem.
-            map_field_store(new_field, new_value,
-                shape_entry_storage_type_id(new_e));
-            }
-        } else {
-            // unchanged field — copy the bytes across unchanged
-            int sz = field_index < fixed_slot_count ? (int)sizeof(void*) :
-                shape_entry_storage_size(old_e);
-            memcpy(new_field, old_field, sz);
-        }
-        field_index++;
-        old_e = typemap_next_field(old_map_type, old_e);
-        new_e = shape_chain_next_until(new_e, last);
-    }
-
+    TypeMap* new_type = NULL;
     // rebuilt shapes belong to this execution pool, not the retained module's
     // compiler registry; the container owns their direct reference (D8.5.1v7).
 
@@ -12737,9 +13060,13 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_et->last = last;
         new_et->length = field_count;
         new_et->byte_size = new_byte_size;
-        new_et->name = old_et->name;
-        new_et->content_list = old_et->content_list;
-        new_et->ns = old_et->ns;
+        // an element container may carry a plain map type, whose allocation
+        // ends before these fields; reading them copied garbage into the tag
+        if (typemap_has_element_layout(old_map_type)) {
+            new_et->name = old_et->name;
+            new_et->content_list = old_et->content_list;
+            new_et->ns = old_et->ns;
+        }
         // S2.1.4/OB16: a nominal instance is OPEN — extending it with a field is
         // an ordinary member addition, and every shape reached that way must
         // keep pointing at the SAME nominal record, or the value would silently
@@ -12751,7 +13078,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         // Populate/grow hash table for O(1) property lookup.
         typemap_hash_build((TypeMap*)new_et, context->pool);
 
-        *type_slot = new_et;
+        new_type = (TypeMap*)new_et;
     } else {
         TypeMap* new_mt = (TypeMap*)alloc_type(context->pool,
             LMD_TYPE_MAP, sizeof(TypeMap));
@@ -12789,15 +13116,11 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
             }
         }
 
-        *type_slot = new_mt;
+        new_type = new_mt;
     }
 
-    // replace data, retiring the old buffer with its allocator
-    container_rebuild_data_install(container, data_slot, cap_slot, new_data,
-        new_byte_size);
-
-    log_debug("map_rebuild: type change complete, fields=%d, byte_size=%ld, migrated=%d",
-              field_count, new_byte_size, container->is_data_migrated);
+    container_move_to_type(type_slot, data_slot, cap_slot, container, old_map_type,
+        new_type, changed_entry, new_value, fixed_slot_count);
 }
 
 // map/element field assignment: obj.field = val
@@ -12977,13 +13300,22 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
     // The loop converts each field where it lies; fields written in another
     // order still sit at other offsets, so the contract's layout is reached
     // only by moving them (D3.2.4v4).
-    if (lambda_map_contract_relation((TypeMap*)admitted->type, expected_map) ==
-            MAP_CONTRACT_NEEDS_REIFICATION) {
+    TypeMap* reified = (TypeMap*)admitted->type;
+    MapContractRelation final_relation = lambda_map_contract_relation(reified, expected_map);
+    // the buffer's real size: a zero cap means the current type's byte size
+    int64_t data_size = admitted->data_cap > 0 ? admitted->data_cap : reified->byte_size;
+    if (final_relation == MAP_CONTRACT_NEEDS_REIFICATION) {
         if (!map_relayout_to_contract(admitted, expected_map)) return false;
-    } else if (relation_proven && admitted->data_cap >= expected_map->byte_size) {
+    } else if (data_size >= expected_map->byte_size && (relation_proven ||
+            (final_relation == MAP_CONTRACT_STORAGE_COMPATIBLE &&
+             reified->length == expected_map->length))) {
         // Reification constructed the expected lane layout field by field; use
         // the canonical contract descriptor so later exact admissions remain
-        // O(1) instead of validating this freshly converted root again.
+        // O(1) instead of validating this freshly converted root again. A root
+        // that ends storage-compatible with no open extras adopts it too
+        // (D3.2.4v4): kept on its private copy, every typed write missed the
+        // direct store's shape guard and took the checked setter (LR07-44).
+        admitted->data_cap = (int)data_size;
         admitted->type = expected_map;
     }
     *converted = rooted_candidate.get();
@@ -13784,6 +14116,21 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     // find field in shape
     TypeId value_type = get_type_id(value);
     ShapeEntry* entry = map_type->shape;
+    // A1: the hash table answers a plain Lambda string key, so a member write
+    // no longer walks every field; building an n-key map was O(n²) on these
+    // lookups alone (LR03-38). A hit is the field. A miss is final only on a
+    // tree node, whose table holds every field by construction (D3.4.3v4); a
+    // private type can gain entries its table never saw (elmt_put), so it
+    // keeps the walk, as JS shapes and identity keys do.
+    bool table_answers = false;
+    if (!identity_key && !map_type->js_meta && key_len <= INT_MAX &&
+            typemap_hash_is_usable(map_type)) {
+        ShapeEntry* hit = typemap_hash_lookup(map_type, key_cstr, (int)key_len);
+        if (hit ? hit->key_kind == NAME_KEY_STRING : map_type->is_transition_shared_shape) {
+            table_answers = true;
+            entry = hit;
+        }
+    }
     while (entry) {
         bool name_matches = false;
         if (identity_key) {
@@ -13844,6 +14191,18 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             }
             field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
+
+            // D3.2.4v4: an `any` field is a TypedItem lane that every value
+            // fits, so a write of another kind stores in place and the field
+            // keeps its declared contract. Comparing the wrapper's TypeId with
+            // the value's rebuilt the shape around the value's kind on every
+            // kind change, minting a pool shape each time (LR03-37).
+            const LaneStorageDesc* storage = shape_entry_storage(entry);
+            if (storage->kind == LANE_STORAGE_TYPED_ITEM &&
+                    storage->value_domain == LMD_TYPE_ANY && value_type != LMD_TYPE_ERROR) {
+                map_field_store(field_ptr, value, LMD_TYPE_ANY);
+                return ItemNull;
+            }
 
             if (field_type == LMD_TYPE_NULL && typemap_is_shared_shape(map_type)) {
                 // A shared constructor placeholder is a raw Item lane. Source
@@ -13956,12 +14315,28 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             log_debug("fn_map_set: type change for '%s' (%d → %d), rebuilding shape",
                       key_cstr, field_type, value_type);
             Container* cont = map_item.container;
+            // D3.4.5 through the runtime tree (Impl_Map_Transition_Coverage
+            // P2): a plain Lambda map or element retyped the same way as
+            // another takes one shared target instead of minting a private
+            // chain per write, and its later adds grow from that target in the
+            // tree. JS shapes keep their own transitions and the rebuild.
+            if (!map_type->js_meta && map_type->type_id == map_type_id &&
+                    (map_type_id != LMD_TYPE_MAP || map_item.map->map_kind == MAP_KIND_PLAIN)) {
+                Input* tree = runtime_shape_tree();
+                TypeMap* target = tree
+                    ? type_tree_retype_field(tree, map_type, entry, value_type) : NULL;
+                if (target) {
+                    container_move_to_type(type_slot, data_slot, cap_slot, cont, map_type,
+                        target, entry, value, 0);
+                    return ItemNull;
+                }
+            }
             map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
                                         map_type_id, cont, entry,
                                         type_info[value_type].type, value);
             return ItemNull;
         }
-        entry = typemap_next_field(map_type, entry);
+        entry = table_answers ? NULL : typemap_next_field(map_type, entry);
     }
     // S2.1.4 part 3 / S9.1.6: a name is in a map's key domain, so an unknown
     // member write GROWS the shape rather than failing. Growth was previously

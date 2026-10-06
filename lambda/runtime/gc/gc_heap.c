@@ -656,6 +656,9 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->tenured_data) {
         gc_data_zone_destroy(gc->tenured_data);
     }
+    if (gc->retired_tenured_data) {
+        gc_data_zone_destroy(gc->retired_tenured_data);
+    }
 
     log_debug("gc_heap_destroy: %zu objects, %zu collections, %zu bytes collected",
               gc->object_count, gc->collections, gc->bytes_collected);
@@ -2486,9 +2489,10 @@ static int gc_full_compact_tenured_data(gc_heap_t* gc,
     gc->data_zone = nursery;
 
     // Both source passes are idempotent for repeated base/view visits, so the
-    // fresh zone contains each retained buffer once and the old VM extents can
-    // be returned after every marked owner has been fixed up.
-    gc_data_zone_destroy(old_tenured);
+    // fresh zone contains each retained buffer once. The old VM extents are
+    // returned after sweep: dead owners are not fixed up, and their finalizers
+    // still read side tables in this zone (gc_finalize_dead_object).
+    gc->retired_tenured_data = old_tenured;
     gc->tune.full_data_compactions++;
     gc->tune.full_data_bytes_released += old_used;
     log_debug("gc-full-data-compact: released=%zu retained=%zu", old_used,
@@ -2764,6 +2768,10 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     uint64_t gc_sweep_token = GC_PROFILE_ENTER("gc_sweep");
     gc_sweep(gc);
     GC_PROFILE_LEAVE("gc_sweep", gc_sweep_token);
+    if (gc->retired_tenured_data) {
+        gc_data_zone_destroy(gc->retired_tenured_data);
+        gc->retired_tenured_data = NULL;
+    }
 
     // Phase 4: Reset nursery data zone (all surviving data copied to tenured)
     uint64_t gc_reset_token = GC_PROFILE_ENTER("gc_data_zone_reset");

@@ -325,13 +325,8 @@ static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
 void view_release_transform_functions(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->transform) return;
     if (elem->transform->functions_owner == TRANSFORM_FUNCTIONS_DOCUMENT_POOL) return;
-    // a view-pool chain is this element's private copy (functions_owner)
-    TransformFunction* function = elem->transform->functions;
-    while (function) {
-        TransformFunction* next = function->next;
-        view_pool_free_private(tree, function);
-        function = next;
-    }
+    if (!tree || !tree->prop_pool) return;
+    radiant::destroy_transform_list(tree->prop_pool, elem->transform->functions);
     elem->transform->functions = nullptr;
 }
 
@@ -1139,8 +1134,9 @@ void view_pool_init(ViewTree* tree, MemContext* owner) {
 }
 
 void ViewTree::reset_retained() {
-    layout_generation = generation_next32(layout_generation);
-    if (model) view_tree_model_reset(this);
+    if (model) {
+        if (!view_tree_model_reset(this)) return;
+    } else layout_generation = generation_next32(layout_generation);
     if (root) {
         // DOM mutation fallback keeps both DOM/view nodes and their owned prop
         // blocks; only external payloads and generation-local values reset.
@@ -1165,7 +1161,7 @@ void view_pool_reset_retained(ViewTree* tree) {
 }
 
 void ViewTree::destroy() {
-    view_tree_model_destroy(this);
+    if (!view_tree_model_destroy(this)) return;
     destroy_measurement_cache(this);
     if (root) {
         view_teardown_visit_node(this, root,

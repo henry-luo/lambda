@@ -19,7 +19,24 @@ extern TypeInfo type_info[];
 DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
 
-static bool mark_editor_should_preserve_ui_dom_child(Item child) {
+// The fat DOM node a UI child would be embedded in. Pointer arithmetic only:
+// the node header in front of the child may be read only once the storage is
+// known to hold a node.
+static const void* mark_editor_ui_node_storage(Item child) {
+    TypeId type_id = get_type_id(child);
+    if (type_id == LMD_TYPE_ELEMENT && child.element) {
+        return element_to_dom_element(child.element);
+    }
+    if (type_id == LMD_TYPE_STRING) {
+        String* s = child.get_safe_string();
+        return s ? string_to_dom_text(s) : nullptr;
+    }
+    return nullptr;
+}
+
+// Reads the node header in front of `child`; the caller must know the child is
+// node-backed (see mark_editor_ui_node_storage).
+static bool mark_editor_is_ui_dom_node(Item child) {
     TypeId type_id = get_type_id(child);
     if (type_id == LMD_TYPE_ELEMENT && child.element) {
         DomElement* elem = element_to_dom_element(child.element);
@@ -199,6 +216,7 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     , type_list_(input->type_list)
     , mode_(mode)
     , ui_mode_(input->ui_mode)
+    , ui_node_arena_(nullptr)
     , current_version_(nullptr)
     , version_head_(nullptr)
     , next_version_num_(0)
@@ -1215,9 +1233,18 @@ bool MarkEditor::reserve_children(List* list, int64_t dense_length) {
     return list_grow_io(list, needed, pool_, arena_);
 }
 
+bool MarkEditor::owns_ui_node_storage(const void* storage) const {
+    return storage && (arena_owns(arena_, storage) ||
+        (ui_node_arena_ && arena_owns(ui_node_arena_, storage)));
+}
+
 Item MarkEditor::import_child(Item child) {
-    if (builder_->is_in_arena(child) ||
-        (ui_mode_ && mark_editor_should_preserve_ui_dom_child(child))) return child;
+    if (builder_->is_in_arena(child)) return child;
+    // keep a live UI node by identity only when its storage is one this editor
+    // vouches for; reading a node header in front of a GC object would read
+    // garbage and could leave a GC pointer in the document (D4.5.2)
+    if (ui_mode_ && owns_ui_node_storage(mark_editor_ui_node_storage(child)) &&
+        mark_editor_is_ui_dom_node(child)) return child;
     return builder_->deep_copy(child);
 }
 
@@ -1295,7 +1322,8 @@ Item MarkEditor::elmt_edit_children(Item element, int64_t index, int64_t delete_
     List normalized = {};
     normalized.type_id = LMD_TYPE_ELEMENT;
     for (int64_t i = 0; i < edited.length; i++) {
-        list_push_with_owner(&normalized, edited.items[i], pool_, arena_, ui_mode_);
+        list_push_with_owner(&normalized, edited.items[i], pool_, arena_,
+            ui_mode_ ? input_ : nullptr);
     }
     return publish_child_edit(element.element, &normalized);
 }
@@ -1326,7 +1354,9 @@ Item MarkEditor::dom_edit_child(Item element, int64_t index, int64_t delete_coun
     Item imported;
     if (child) {
         // detached documents still own live wrappers even when their Input is non-UI.
-        imported = builder_->is_in_arena(*child) || mark_editor_should_preserve_ui_dom_child(*child)
+        // DOM callers pass a DomElement's backing element or a DomText's string,
+        // so the node header in front of the child is genuine.
+        imported = builder_->is_in_arena(*child) || mark_editor_is_ui_dom_node(*child)
             ? *child : import_child(*child);
     }
     Array edited = {};

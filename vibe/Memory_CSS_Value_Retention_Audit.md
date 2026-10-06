@@ -1,6 +1,6 @@
-# CSS Value Retention Audit (Memory_Safety_Template4.md §10 Phase 4)
+# CSS Value Retention Audit (Memory_Safety_Template.md §8.2)
 
-> Phase 4 of `Memory_Safety_Template4.md`: after shorthand resolve-only
+> Follow-up to `Memory_Safety_Template.md` §8.2: after shorthand resolve-only
 > temporaries were contained (Phases 1–3, `radiant/css_temp_decl.hpp` +
 > `make check-css-temp-decl`), audit the places that *retain* `CssValue*` /
 > `CssDeclaration*` pointers long-term and confirm each points into storage that

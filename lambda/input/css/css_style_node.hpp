@@ -126,8 +126,10 @@ CssDeclaration* css_declaration_clone_for_cascade(
 /** Return whether a declaration payload can be snapshotted into another pool. */
 bool css_declaration_can_clone_owned(const CssDeclaration* source);
 
-/** Copy value payload into the caller pool, preserving no borrowed child storage. */
+// copy/reclaim a complete value tree when computed data outlives its source pool.
 CssValue* css_value_clone_owned(const CssValue* source, Pool* pool);
+void css_value_destroy_owned(CssValue* value, Pool* pool);
+
 /** Copy declaration metadata and all mutable/pointer payload into target_pool. */
 CssDeclaration* css_declaration_clone_owned(
     const CssDeclaration* source, CssSpecificity specificity,
@@ -168,6 +170,10 @@ CssDeclaration* style_tree_get_inline_declaration(StyleTree* style_tree, CssProp
 CssDeclaration* style_tree_get_presentation_declaration(StyleTree* style_tree, CssPropertyCode property_code);
 bool style_tree_has_local_declarations(StyleTree* style_tree);
 bool style_tree_remove_presentation_declarations(StyleTree* style_tree, CssPropertyCode property_code);
+
+// declarations sharing a computed component compete in one rollback-aware cascade.
+CssDeclaration* style_tree_get_component_declaration(StyleTree* style_tree,
+    const CssPropertyCode* sources, size_t source_count);
 
 /**
  * Get the computed value for a property
@@ -222,6 +228,15 @@ int css_specificity_compare(CssSpecificity a, CssSpecificity b);
  * @return -1 if a loses to b, 0 if equal, 1 if a wins over b
  */
 int css_declaration_cascade_compare(const CssDeclaration* a, const CssDeclaration* b);
+
+struct CssRollbackFilter {
+    const CssDeclaration* rollback;
+    const CssRollbackFilter* previous;
+};
+
+bool css_declaration_is_rollback(const CssDeclaration* declaration);
+bool css_declaration_cascade_eligible(const CssDeclaration* candidate,
+    const CssDeclaration* ceiling, const CssRollbackFilter* filters);
 
 /**
  * Resolve CSS cascade for a property

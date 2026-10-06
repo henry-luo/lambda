@@ -114,6 +114,29 @@ TEST(JsModuleResolution, ClassifiesHttpModuleSourcesForUrlCacheEntries) {
     EXPECT_FALSE(js_path_is_http_url("main.js"));
 }
 
+TEST(JsModuleResolution, AdmissionPrecedesWarmNamespacesInBothExecutionBackends) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        SCOPED_TRACE(backend); JsExecutionBackendScope selected(backend);
+        Runtime runtime = {}; runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2, "admission-setup.js", nullptr)));
+        const char remote[] = "https://example.test/admission.mjs";
+        const char module[] = "export const answer=42;";
+        ASSERT_FALSE(item_is_error(transpile_js_module_to_mir(&runtime, module, remote)));
+        runtime.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+        {
+            RootFrame roots(1);
+            Rooted<Item> promise(roots, js_dynamic_import(js_make_string(remote)));
+            EXPECT_STREQ(js_promise_state_name(promise.get()), "rejected");
+            EXPECT_TRUE(item_is_error(js_require(js_make_string(remote))));
+        }
+        const char importer[] = "import {answer} from 'https://example.test/admission.mjs'; export const observed=answer;";
+        Item result = transpile_js_module_to_mir(&runtime, importer, "admission-local.mjs");
+        EXPECT_TRUE(item_is_error(result));
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {
     Runtime runtime = {};
     runtime_init(&runtime);

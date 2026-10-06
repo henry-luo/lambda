@@ -10,6 +10,7 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
+#include "../lib/mem_grow.hpp"
 
 DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
 
@@ -142,6 +143,21 @@ protected:
     bool attach(DomElement* parent, DomElement* child) {
         // lifecycle tests link the DOM chain without editing Lambda content.
         return static_cast<DomNode*>(parent)->append_child(child);
+    }
+
+    CssTransitionElemState* transition_snapshot(DomElement* child) {
+        auto* snapshot = static_cast<CssTransitionElemState*>(pool_calloc(
+            doc.document_pool, sizeof(CssTransitionElemState)));
+        if (!snapshot) return nullptr;
+        snapshot->pool = doc.document_pool;
+        if (!lam::pool_grow_array(snapshot->pool, &snapshot->tracks,
+                &snapshot->track_capacity, 1, 4)) {
+            pool_free(doc.document_pool, snapshot);
+            return nullptr;
+        }
+        snapshot->track_count = 1;
+        child->set_transition_state_prop(snapshot);
+        return snapshot;
     }
 };
 
@@ -616,19 +632,18 @@ TEST_F(DomRetirementTest, TransitionSnapshotLivesUntilUnpinnedRetirement) {
     DomElement* parent = root();
     DomElement* child = element("child");
     ASSERT_TRUE(attach(parent, child));
-    auto* snapshot = static_cast<CssTransitionElemState*>(pool_calloc(
-        doc.document_pool, sizeof(CssTransitionElemState)));
+    auto* snapshot = transition_snapshot(child);
     ASSERT_NE(snapshot, nullptr);
-    snapshot->track_count = 1;
+    CssTransitionTrack* tracks = snapshot->tracks;
     snapshot->tracks[0].has_snapshot = true;
     snapshot->tracks[0].snapshot.value.f = 0.25f;
-    child->set_transition_state_prop(snapshot);
     DomNodeRef ref = dom_node_ref(child);
     ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_WRAPPER));
 
     ASSERT_TRUE(parent->remove_child(child));
     EXPECT_EQ(dom_retire_sweep(&doc), 0u);
     EXPECT_TRUE(pool_owns(doc.document_pool, snapshot));
+    EXPECT_TRUE(pool_owns(doc.document_pool, tracks));
     EXPECT_EQ(child->transition_state_prop(), snapshot);
     EXPECT_FLOAT_EQ(snapshot->tracks[0].snapshot.value.f, 0.25f);
 
@@ -636,6 +651,7 @@ TEST_F(DomRetirementTest, TransitionSnapshotLivesUntilUnpinnedRetirement) {
     EXPECT_EQ(dom_retire_sweep(&doc), 1u);
     EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
     EXPECT_FALSE(pool_owns(doc.document_pool, snapshot));
+    EXPECT_FALSE(pool_owns(doc.document_pool, tracks));
 }
 
 TEST_F(DomRetirementTest, TransitionSnapshotStoragePlateausAcrossRetirements) {
@@ -643,10 +659,8 @@ TEST_F(DomRetirementTest, TransitionSnapshotStoragePlateausAcrossRetirements) {
     PoolStats warm = {};
     for (int i = 0; i < 1056; i++) {
         DomElement* child = element("child");
-        auto* snapshot = static_cast<CssTransitionElemState*>(pool_calloc(
-            doc.document_pool, sizeof(CssTransitionElemState)));
+        auto* snapshot = transition_snapshot(child);
         ASSERT_NE(snapshot, nullptr);
-        child->set_transition_state_prop(snapshot);
         ASSERT_TRUE(attach(parent, child));
         ASSERT_TRUE(parent->remove_child(child));
         ASSERT_EQ(dom_retire_sweep(&doc), 1u);

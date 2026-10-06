@@ -30,6 +30,85 @@ static void replaced_facts_set_pair(ReplacedIntrinsicFacts* facts,
     }
 }
 
+void layout_replaced_image_facts(ReplacedIntrinsicFacts* facts, ImageSurface* image,
+        bool from_image) {
+    if (!facts || !image) return;
+    if (image->format == IMAGE_FORMAT_SVG) {
+        if (image->has_natural_width) replaced_facts_set_axis(facts, true, image->natural_width, true);
+        if (image->has_natural_height) replaced_facts_set_axis(facts, false, image->natural_height, true);
+        if (image->has_intrinsic_aspect_ratio) {
+            facts->natural_aspect_ratio = image->natural_aspect_ratio;
+            facts->has_natural_aspect_ratio = image->natural_aspect_ratio > 0.0f;
+        }
+        // intrinsic consumers need concrete fallback axes without promoting them to natural metadata.
+        layout_replaced_default_object_size(facts, 300.0f, 150.0f, &facts->width, &facts->height);
+        facts->has_default_size = !facts->has_natural_width || !facts->has_natural_height;
+        return;
+    }
+    float width = from_image || image->encoded_width <= 0 ? (float)image->width : (float)image->encoded_width;
+    float height = from_image || image->encoded_height <= 0 ? (float)image->height : (float)image->encoded_height;
+    if (width <= 0.0f || height <= 0.0f) return;
+    if (image->has_intrinsic_size) replaced_facts_set_pair(facts, width, height, true);
+    else if (image->has_intrinsic_aspect_ratio) {
+        facts->natural_aspect_ratio = width / height; facts->has_natural_aspect_ratio = true;
+    }
+}
+
+void layout_replaced_default_object_size(const ReplacedIntrinsicFacts* facts,
+        float default_width, float default_height, float* width, float* height) {
+    if (!facts || !width || !height) return;
+    float ratio = facts->has_natural_aspect_ratio ? facts->natural_aspect_ratio : 0.0f;
+    float w = facts->has_natural_width ? facts->natural_width : default_width;
+    float h = facts->has_natural_height ? facts->natural_height : default_height;
+    // CSS Images 3 section 4.3.1: fill missing natural axes, or contain a ratio-only object in the default rectangle.
+    if (ratio > 0.0f) {
+        if (facts->has_natural_width && !facts->has_natural_height) h = w / ratio;
+        else if (!facts->has_natural_width && facts->has_natural_height) w = h * ratio;
+        else if (!facts->has_natural_width && !facts->has_natural_height) {
+            w = fminf(default_width, default_height * ratio); h = w / ratio;
+        }
+    }
+    *width = w; *height = h;
+}
+
+bool layout_replaced_content_size(const ReplacedIntrinsicFacts* facts,
+        const ReplacedSizeConstraints* constraints, float available_width, float* width, float* height) {
+    if (!facts || !constraints || !width || !height) return false;
+    const ReplacedSizeConstraints& c = *constraints;
+    bool auto_width = isnan(c.width), auto_height = isnan(c.height);
+    float ratio = c.preferred_ratio;
+    float edge_x = c.ratio_content_box ? 0.0f : c.horizontal_edges;
+    float edge_y = c.ratio_content_box ? 0.0f : c.vertical_edges;
+    float min_w = fmaxf(0.0f, c.min_width), min_h = fmaxf(0.0f, c.min_height);
+    float max_w = fmaxf(min_w, c.max_width), max_h = fmaxf(min_h, c.max_height);
+    float w = auto_width ? facts->has_natural_width ? facts->natural_width
+        : facts->has_natural_height && ratio > 0.0f ? facts->natural_height * ratio
+        : fminf(300.0f, available_width) : c.width;
+    float h = auto_height ? facts->has_natural_height ? facts->natural_height
+        : ratio > 0.0f ? fmaxf(0.0f, (w + edge_x) / ratio - edge_y) : 150.0f : c.height;
+    if (auto_width && !auto_height && ratio > 0.0f)
+        w = fmaxf(0.0f, (fmaxf(min_h, fminf(h, max_h)) + edge_y) * ratio - edge_x);
+    if (auto_height && !auto_width && ratio > 0.0f)
+        h = fmaxf(0.0f, (fmaxf(min_w, fminf(w, max_w)) + edge_x) / ratio - edge_y);
+    if (auto_width && auto_height && ratio > 0.0f) {
+        // CSS 2.2 section 10.4: preserve the ratio where both constraint intervals permit it.
+        // conflicting width/height intervals use independent bounds, as in the violation table.
+        h = fmaxf(0.0f, (w + edge_x) / ratio - edge_y);
+        float ratio_w = w + edge_x, ratio_h = h + edge_y;
+        if (ratio_w > 0.0f && ratio_h > 0.0f) {
+            float lower = fmaxf((min_w + edge_x) / ratio_w, (min_h + edge_y) / ratio_h);
+            float upper = fminf((max_w + edge_x) / ratio_w, (max_h + edge_y) / ratio_h);
+            if (lower <= upper) {
+                float scale = fmaxf(lower, fminf(1.0f, upper));
+                w = fmaxf(0.0f, ratio_w * scale - edge_x);
+                h = fmaxf(0.0f, ratio_h * scale - edge_y);
+            }
+        }
+    }
+    *width = fmaxf(min_w, fminf(w, max_w)); *height = fmaxf(min_h, fminf(h, max_h));
+    return isfinite(*width) && isfinite(*height) && *width >= 0.0f && *height >= 0.0f;
+}
+
 bool layout_replaced_default_size(NameId tag, float* width, float* height) {
     float default_width = 0.0f;
     float default_height = 0.0f;
@@ -95,17 +174,7 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
     // interpret its image slot as intrinsic content.
     if (layout_replaced_image_surface_contributes(block) &&
         block->embed && block->embedp()->img) {
-        ImageSurface* image = block->embedp()->img;
-        if (image->has_intrinsic_size && image->width > 0 && image->height > 0) {
-            replaced_facts_set_pair(&facts, (float)image->width,
-                                    (float)image->height, true);
-        } else if (image->has_intrinsic_aspect_ratio &&
-                   image->width > 0 && image->height > 0) {
-            // SVG's 300x150 fallback supplies usable axes, but only a viewBox
-            // contributes a natural ratio to `aspect-ratio: auto <ratio>`.
-            facts.natural_aspect_ratio = (float)image->width / (float)image->height;
-            facts.has_natural_aspect_ratio = true;
-        }
+        layout_replaced_image_facts(&facts, block->embedp()->img, true);
     }
 
     if (block->tag() == MARKUP_NAME_VIDEO && block->embed && block->embedp()->video) {
@@ -174,28 +243,29 @@ bool layout_replaced_flex_intrinsic_dimensions(ViewBlock* block,
     if (!block || !flex_layout || !facts || !width || !height) return false;
     *width = facts->has_natural_width ? facts->natural_width : facts->width;
     *height = facts->has_natural_height ? facts->natural_height : facts->height;
-    if (block->tag() == MARKUP_NAME_IMG && facts->has_natural_width &&
-        facts->has_natural_height) {
+    bool image = block->tag() == MARKUP_NAME_IMG;
+    bool specified_image_axis = image && (layout_axis_has_given_size(block, true) || layout_axis_has_given_size(block, false));
+    if (image && *width > 0.0f && *height > 0.0f) {
         float ratio = layout_used_preferred_aspect_ratio(block);
-        if (ratio <= 0.0f) ratio = facts->natural_width / facts->natural_height;
+        if (ratio <= 0.0f && facts->has_natural_aspect_ratio) ratio = facts->natural_aspect_ratio;
         if (layout_axis_has_given_size(block, true)) {
             *width = block->block()->given_width;
             *height = layout_axis_has_given_size(block, false)
-                ? block->block()->given_height : *width / ratio;
+                ? block->block()->given_height : ratio > 0.0f ? *width / ratio : *height;
         } else if (layout_axis_has_given_size(block, false)) {
             *height = block->block()->given_height;
-            *width = *height * ratio;
+            if (ratio > 0.0f) *width = *height * ratio;
         } else {
             float max_width = layout_positive_max_axis_or(block, true, -1.0f);
             if (max_width > 0.0f && max_width < *width) {
-                *height *= max_width / *width;
+                if (ratio > 0.0f) *height = max_width / ratio;
                 *width = max_width;
             }
         }
     }
     float ratio = facts->has_natural_aspect_ratio
         ? facts->natural_aspect_ratio : 0.0f;
-    if (ratio > 0.0f) {
+    if (ratio > 0.0f && !specified_image_axis) {
         if (facts->has_natural_width && !facts->has_natural_height) {
             *height = *width / ratio;
         } else if (facts->has_natural_height && !facts->has_natural_width) {
@@ -310,7 +380,10 @@ bool layout_measure_replaced_flex_intrinsic(LayoutContext* lycon,
     float width = 0.0f;
     float height = 0.0f;
     ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(lycon, block);
-    if (facts.has_natural_width && facts.has_natural_height) {
+    // a loaded SVG with partial or absent natural axes still has a valid concrete default size.
+    bool loaded_image_fallback = tag == MARKUP_NAME_IMG && facts.has_default_size &&
+        block->embed && block->embedp()->img;
+    if ((facts.has_natural_width && facts.has_natural_height) || loaded_image_fallback) {
         if (!layout_replaced_flex_intrinsic_dimensions(
                 block, flex_layout, &facts, &width, &height)) return false;
     } else if (tag == MARKUP_NAME_IMG && item->get_attribute("src")) {

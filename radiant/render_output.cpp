@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <float.h>
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
@@ -73,6 +74,7 @@ typedef DomDocument* (*RenderExportDocumentLoader)(RenderExportSession* session,
 
 typedef struct RenderExportHtmlRequest {
     const char* html_file;
+    InputResourcePolicy resource_policy;
 } RenderExportHtmlRequest;
 
 typedef struct RenderExportTransformRequest {
@@ -80,14 +82,18 @@ typedef struct RenderExportTransformRequest {
     const LambdaDocumentTransformConfig* transform;
     const LambdaDocumentTransformOption* options;
     int option_count;
+    InputResourcePolicy resource_policy;
 } RenderExportTransformRequest;
 
 static DomDocument* render_export_load_html_document(RenderExportSession* session,
         int layout_width, int layout_height, void* request) {
     RenderExportHtmlRequest* html_request = (RenderExportHtmlRequest*)request;
+    DocumentJsHostConfig config = {};
+    config.ui_context = session->ui_context;
+    config.resource_policy = html_request ? html_request->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
     return html_request && html_request->html_file
         ? load_html_doc(session->base_url, (char*)html_request->html_file,
-            layout_width, layout_height, nullptr, nullptr, false,
+            layout_width, layout_height, &config, nullptr, false,
             session->print_media)
         : nullptr;
 }
@@ -118,7 +124,8 @@ static DomDocument* render_export_load_transform_document(RenderExportSession* s
     }
     DomDocument* doc = load_lambda_document_transform_doc(document_url,
         transform_request->transform, transform_options, transform_option_count,
-        layout_width, layout_height, pool, session->print_media);
+        layout_width, layout_height, pool, transform_request->resource_policy,
+        session->print_media);
     if (!doc) {
         url_destroy(document_url);
         pool_destroy(pool);
@@ -201,6 +208,100 @@ void render_output_target_apply_session(RenderOutputTarget* target,
     target->device_scale = session->device_scale;
 }
 
+enum RenderPagedOptionCode : uint8_t {
+    PAGED_OPT_PAGES, PAGED_OPT_EXPORT, PAGED_OPT_THUMBNAIL, PAGED_OPT_GRID, PAGED_OPT_FILL,
+    PAGED_OPT_GROUPS, PAGED_OPT_SCALE, PAGED_OPT_PADDING, PAGED_OPT_COLUMN_GAP, PAGED_OPT_ROW_GAP,
+    PAGED_OPT_GROUP_GAP, PAGED_OPT_BOOK, PAGED_OPT_BOOK_PAGE, PAGED_OPT_RIGHT_BINDING, PAGED_OPT_LOCAL_RESOURCES,
+};
+struct RenderPagedOptionInfo { const char* name; RenderPagedOptionCode code; bool value; };
+static const RenderPagedOptionInfo paged_option_info[] = {
+    {"--pages", PAGED_OPT_PAGES, true}, {"--page-range", PAGED_OPT_PAGES, true},
+    {"--export-pages", PAGED_OPT_EXPORT, true}, {"--thumbnail-page", PAGED_OPT_THUMBNAIL, true},
+    {"--page-grid", PAGED_OPT_GRID, true}, {"--page-fill", PAGED_OPT_FILL, true},
+    {"--page-groups", PAGED_OPT_GROUPS, true}, {"--page-scale", PAGED_OPT_SCALE, true},
+    {"--page-padding", PAGED_OPT_PADDING, true}, {"--page-column-gap", PAGED_OPT_COLUMN_GAP, true},
+    {"--page-row-gap", PAGED_OPT_ROW_GAP, true}, {"--page-group-gap", PAGED_OPT_GROUP_GAP, true},
+    {"--book", PAGED_OPT_BOOK, false}, {"--book-page", PAGED_OPT_BOOK_PAGE, true},
+    {"--right-binding", PAGED_OPT_RIGHT_BINDING, false},
+    {"--block-remote-resources", PAGED_OPT_LOCAL_RESOURCES, false},
+};
+
+static const RenderPagedOptionInfo* paged_option_find(const char* name) {
+    if (name) for (const RenderPagedOptionInfo& info : paged_option_info)
+        if (strcmp(info.name, name) == 0) return &info;
+    return nullptr;
+}
+
+RenderPagedOptions render_paged_options_default() {
+    RenderPagedOptions options = {}; options.preview = view_preview_options_default(); return options;
+}
+
+int render_paged_option_arity(const char* name) {
+    const RenderPagedOptionInfo* info = paged_option_find(name);
+    return info ? info->value ? 1 : 0 : -1;
+}
+
+bool render_output_parse_extent(const char* text, float* result, bool zero) {
+    if (!text || !result) return false;
+    double value = 0.0; const char* end = nullptr;
+    if (!str_to_double(text, strlen(text), &value, &end) || *str_skip_ascii_space(end) ||
+        !isfinite(value) || value > FLT_MAX || (zero ? value < 0.0 : value <= 0.0)) return false;
+    *result = (float)value;
+    return isfinite(*result) && (zero || *result > 0.0f);
+}
+
+static bool paged_option_index(const char* text, uint32_t* result, const char** end = nullptr) {
+    if (!text) return false;
+    text = str_skip_ascii_space(text);
+    uint64_t value = 0; const char* tail = nullptr;
+    if (*text < '0' || *text > '9' || !str_to_uint64(text, strlen(text), &value, &tail) || !value || value > UINT32_MAX ||
+        (!end && *str_skip_ascii_space(tail))) return false;
+    *result = static_cast<uint32_t>(value); if (end) *end = tail; return true;
+}
+
+bool render_paged_option_apply(RenderPagedOptions* options, const char* name, const char* value, const char** error) {
+    if (error) *error = nullptr;
+    auto failed = [&](const char* reason) { if (error) *error = reason; return false; };
+    const RenderPagedOptionInfo* info = paged_option_find(name);
+    if (!options || !info) return failed("unknown paged render option");
+    if (info->value && !value) return failed("option requires a value");
+    ViewPreviewOptions& preview = options->preview;
+    switch (info->code) {
+        case PAGED_OPT_PAGES: case PAGED_OPT_EXPORT:
+            if (!view_page_selection_text_valid(value)) return failed("expected all, none, or positive page numbers/ranges such as 1,3-5");
+            (info->code == PAGED_OPT_PAGES ? options->preview_pages : options->export_pages) = lam::up(value); return true;
+        case PAGED_OPT_THUMBNAIL: case PAGED_OPT_BOOK_PAGE: {
+            uint32_t number = 0; if (!paged_option_index(value, &number)) return failed("expected a positive physical page number");
+            if (info->code == PAGED_OPT_THUMBNAIL) options->thumbnail_page = number;
+            else { preview.anchor_page = number; preview.arrangement = VIEW_PAGES_BOOK; }
+            return true;
+        }
+        case PAGED_OPT_GRID: {
+            uint32_t rows = 0, columns = 0; const char* end = nullptr;
+            if (!paged_option_index(value, &rows, &end) || (*end != 'x' && *end != 'X') ||
+                !paged_option_index(end + 1, &columns)) return failed("expected positive rows x columns, such as 2x2");
+            preview.rows = rows; preview.columns = columns; preview.arrangement = VIEW_PAGES_GRID; return true;
+        }
+        case PAGED_OPT_FILL:
+            if (strcmp(value, "row") && strcmp(value, "column")) return failed("expected row or column");
+            preview.column_major = strcmp(value, "column") == 0; return true;
+        case PAGED_OPT_GROUPS:
+            if (strcmp(value, "vertical") && strcmp(value, "horizontal")) return failed("expected vertical or horizontal");
+            preview.groups_horizontal = strcmp(value, "horizontal") == 0; return true;
+        case PAGED_OPT_SCALE: case PAGED_OPT_PADDING: case PAGED_OPT_COLUMN_GAP: case PAGED_OPT_ROW_GAP: case PAGED_OPT_GROUP_GAP: {
+            float number = 0.0f;
+            if (!render_output_parse_extent(value, &number, info->code != PAGED_OPT_SCALE)) return failed("expected a finite positive scale or nonnegative pixel extent");
+            float* destination = info->code == PAGED_OPT_SCALE ? &preview.scale : info->code == PAGED_OPT_PADDING ? &preview.padding :
+                info->code == PAGED_OPT_COLUMN_GAP ? &preview.column_gap : info->code == PAGED_OPT_ROW_GAP ? &preview.row_gap : &preview.group_gap;
+            *destination = number; return true;
+        }
+        case PAGED_OPT_BOOK: preview.arrangement = VIEW_PAGES_BOOK; return true;
+        case PAGED_OPT_RIGHT_BINDING: preview.right_binding = true; return true;
+        case PAGED_OPT_LOCAL_RESOURCES: options->block_remote_resources = true; return true;
+    }
+    return failed("unknown paged render option");
+}
+
 static bool render_export_session_begin_internal(
         RenderExportSession* session,
         int viewport_width, int viewport_height,
@@ -261,7 +362,11 @@ static bool render_export_session_begin_internal(
         return false;
     }
 
-    session->document = lam::up(loader(session, layout_width, layout_height, request));
+    {
+        // the session's UI context hosts the loader runtime for its document
+        LayoutLoaderHostScope loader_host(session->ui_context);
+        session->document = lam::up(loader(session, layout_width, layout_height, request));
+    }
     if (!session->document) {
         log_error("[EXPORT_SESSION] Could not load export document");
         render_export_session_end(session);
@@ -270,6 +375,11 @@ static bool render_export_session_begin_internal(
 
     // Every file exporter must lay out and measure the same scaled document before encoding.
     session->ui_context->document = session->document;
+    // exports sample the same initial CSS animation timeline as headless layout.
+    if (!radiant_document_ensure_state(session->document, "render_export_session")) {
+        render_export_session_end(session);
+        return false;
+    }
     if (session->document->services.cached_css_engine) {
         ((CssEngine*)session->document->services.cached_css_engine)->context.print_media = session->print_media;
     }
@@ -573,6 +683,13 @@ ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory
     return surface;
 }
 
+static bool render_secondary_snapshot_paint(ViewTree* tree, const ViewPageBox* page,
+        PaintList* paint, RdtLogicalRect* bounds) {
+    if (!view_tree_model_source_valid(tree) || !tree->model->committed) return false;
+    *bounds = page ? RdtLogicalRect{0, 0, page->node.rect.width, page->node.rect.height} : tree->model->root->rect;
+    return page ? layout_secondary_paint_page(tree, page, paint) : layout_secondary_paint_root(tree, paint);
+}
+
 static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox* page,
         float raster_scale, Color backdrop) {
     if (!view_tree_model_source_valid(tree) || !tree->model->committed ||
@@ -583,13 +700,14 @@ static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox
     // display-list replay consumes physical coordinates; apply output density once before lowering.
     RdtMatrix density = rdt_matrix_scale(raster_scale, raster_scale);
     paint_push_transform(&paint, &density);
-    bool painted = page ? layout_secondary_paint_page(tree, page, &paint) : layout_secondary_paint_root(tree, &paint);
+    RdtLogicalRect bounds = {};
+    bool painted = render_secondary_snapshot_paint(tree, page, &paint, &bounds);
     paint_pop_transform(&paint);
     if (painted && paint_ir_validate_or_log(&paint, "secondary snapshot")) {
+        // raster exports can be the first consumer of an SVG image subscene in this process.
+        render_svg_inline_register_paint_ir_lowerers();
         paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
         paint_ir_lower_raster(&paint, &list);
-        RdtLogicalRect bounds = page ? RdtLogicalRect{0, 0, page->node.rect.width, page->node.rect.height}
-                                    : tree->model->root->rect;
         MemContext* memory = (MemContext*)tree->model->document->services.mem_ctx;
         surface = render_display_list_snapshot(&list, memory,
             {bounds.x * raster_scale, bounds.y * raster_scale,
@@ -685,6 +803,11 @@ RenderPageSnapshotCacheStats render_page_snapshot_cache_stats(const RenderPageSn
 const ImageSurface* render_page_snapshot_cache_get(RenderPageSnapshotCache* cache, ViewTree* tree,
         uint32_t page_number, float raster_scale, Color backdrop) {
     if (!cache || !tree || !tree->model) return nullptr;
+    // instance roots key the immutable material page, including its retained font owner.
+    if (tree->model->page_instances) {
+        tree = view_tree_page_content_owner(tree);
+        if (!tree) return nullptr;
+    }
     ViewTreeModel* model = tree->model;
     uint64_t fonts = model->css ? font_context_resource_generation(model->css->fonts) : 0;
     // a presentation generation changes placement only; page content uses the layout/resource generations.
@@ -738,6 +861,37 @@ bool render_secondary_view_to_png(ViewTree* tree, const char* filename, float ra
     bool written = write_binary_file(filename, png->str, png->length) == 0;
     strbuf_free(png);
     return written;
+}
+
+bool render_secondary_view_to_svg(ViewTree* tree, const char* filename, float output_scale,
+        uint32_t thumbnail_page, Color backdrop) {
+    if (!filename || !view_tree_model_source_valid(tree) || !tree->model->committed ||
+        !isfinite(output_scale) || output_scale <= 0.0f) return false;
+    const ViewPageBox* page = thumbnail_page ? render_secondary_page(tree, thumbnail_page) : nullptr;
+    if (thumbnail_page && !page) return false;
+    RdtLogicalRect bounds = page ? RdtLogicalRect{0, 0, page->node.rect.width, page->node.rect.height} : tree->model->root->rect;
+    if (!isfinite(bounds.width * output_scale) || !isfinite(bounds.height * output_scale) ||
+        bounds.width * output_scale <= 0.0f || bounds.height * output_scale <= 0.0f) return false;
+    PaintList paint = {}; paint_list_init(&paint, nullptr);
+    paint_fill_rect(&paint, bounds.x, bounds.y, bounds.width, bounds.height, backdrop);
+    bool painted = render_secondary_snapshot_paint(tree, page, &paint, &bounds);
+    StrBuf* svg = strbuf_new();
+    bool ok = false;
+    if (svg && painted && paint_ir_validate_or_log(&paint, "secondary SVG preview")) {
+        strbuf_append_format(svg, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.6g\" height=\"%.6g\" viewBox=\"%.6g %.6g %.6g %.6g\">\n",
+            bounds.width * output_scale, bounds.height * output_scale, bounds.x, bounds.y, bounds.width, bounds.height);
+        PaintSvgLoweringOptions options = {}; options.indent_level = 1;
+        options.caps = lam::up(render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG));
+        PaintSvgLoweringStats stats = {};
+        render_svg_inline_register_paint_ir_lowerers();
+        paint_ir_lower_svg(&paint, svg, &options, &stats);
+        strbuf_append_str(svg, "</svg>\n");
+        ok = !stats.unsupported_count && write_binary_file(filename, svg->str, svg->length) == 0;
+    }
+    if (svg) strbuf_free(svg);
+    paint_list_destroy(&paint);
+    return ok;
 }
 
 static RenderOutputReplayResult render_output_replay_display_list(RasterRenderContext* rdcon,
@@ -959,15 +1113,72 @@ int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tr
     return 1;
 }
 
+static int render_output_paged_file(RenderOutputTarget* target,
+        RenderExportDocumentLoader loader, void* request) {
+    auto failed = [](const char* reason) {
+        log_error("[EXPORT_PAGED] File output failed: %s", reason);
+        fputs("Error: paged output: ", stderr); fputs(reason, stderr); fputc('\n', stderr);
+        return 1;
+    };
+    if (!isfinite(target->output_scale) || target->output_scale <= 0.0f ||
+        !isfinite(target->device_scale) || target->device_scale <= 0.0f ||
+        !isfinite(target->output_scale * target->device_scale)) return failed("invalid output density");
+    RenderPagedOptions options = target->paged_options ? *target->paged_options : render_paged_options_default();
+    if (options.export_pages && target->kind != RENDER_OUTPUT_PDF)
+        return failed("--export-pages requires PDF output");
+    if (options.thumbnail_page && target->kind == RENDER_OUTPUT_PDF)
+        return failed("--thumbnail-page requires PNG, JPEG or SVG output");
+    if (target->kind == RENDER_OUTPUT_SCREEN) return failed("file output requires an encoder");
+    RenderExportSession session = {};
+    if (!render_export_session_begin_internal(&session, target->viewport_width, target->viewport_height,
+        800, 1200, target->output_scale, target->device_scale, false, true, true, loader, request)) return 1;
+    // selection buffers live through this synchronous job; the committed view retains only placements.
+    Pool* pool = mem_pool_create((MemContext*)session.document->services.mem_ctx,
+        MEM_ROLE_RENDER, "render.paged.selection");
+    ViewPageSelection preview = {}, exporting = {};
+    ViewModelStatus status = pool ? view_page_selection_parse(pool, options.preview_pages, &preview) : VIEW_MODEL_OUT_OF_MEMORY;
+    if (status == VIEW_MODEL_OK) status = view_page_selection_parse(pool, options.export_pages, &exporting);
+    if (status == VIEW_MODEL_OK) status = view_tree_preview_arrange(session.paged_view, &preview, &options.preview);
+    bool ok = false;
+    const char* error = "encoding failed, output bounds are empty/too large, or the output file cannot be written";
+    if (status != VIEW_MODEL_OK) error = status == VIEW_MODEL_INVALID_PAGE_RANGE
+        ? "invalid page selection or book anchor for this document" : "invalid preview geometry or selection allocation failed";
+    else if (options.thumbnail_page > session.paged_view->model->page_count)
+        error = "thumbnail page is outside this document";
+    else if (target->kind == RENDER_OUTPUT_PDF) {
+        // physical pages bypass preview transforms and filters; selection is explicit and ordered by source page.
+        ok = render_secondary_view_to_pdf(session.paged_view, target->output_file, &exporting, session.ui_context);
+    } else if (target->kind == RENDER_OUTPUT_SVG) {
+        ok = render_secondary_view_to_svg(session.paged_view, target->output_file,
+            target->output_scale, options.thumbnail_page);
+    } else {
+        ImageSurface* surface = options.thumbnail_page
+            ? render_secondary_page_snapshot(session.paged_view, options.thumbnail_page, session.raster_scale)
+            : render_secondary_view_snapshot(session.paged_view, session.raster_scale);
+        if (surface) {
+            if (target->kind == RENDER_OUTPUT_JPEG) ok = save_surface_to_jpeg(surface, target->output_file, target->jpeg_quality);
+            else {
+                StrBuf* png = render_encode_surface_png(surface);
+                if (png) { ok = write_binary_file(target->output_file, png->str, png->length) == 0; strbuf_free(png); }
+            }
+            image_surface_destroy(surface);
+        }
+    }
+    if (pool) mem_pool_destroy(pool);
+    render_export_session_end(&session);
+    return ok ? 0 : failed(error);
+}
+
 static int render_output_render_html_file_to_target(const char* html_file,
                                                     RenderOutputTarget* target) {
     if (!html_file || !target || !target->output_file) {
         log_error("render_output_render_html_file_to_target: invalid file render job");
         return 1;
     }
-    if (target->paged && target->kind != RENDER_OUTPUT_PDF) {
-        log_error("[EXPORT_PAGED] Paged file output currently requires a PDF target");
-        return 1;
+    if (target->paged) {
+        RenderExportHtmlRequest request = {html_file, target->paged_options && target->paged_options->block_remote_resources
+            ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK};
+        return render_output_paged_file(target, render_export_load_html_document, &request);
     }
 
     float output_scale = target->output_scale > 0 ? target->output_scale : 1.0f;
@@ -1020,9 +1231,11 @@ static int render_output_render_document_transform_to_target(const char* documen
         log_error("render document transform: invalid export job");
         return 1;
     }
-    if (target->paged && target->kind != RENDER_OUTPUT_PDF) {
-        log_error("[EXPORT_PAGED] Paged transformed output currently requires a PDF target");
-        return 1;
+    if (target->paged) {
+        RenderExportTransformRequest request = {document_file, transform, options, option_count,
+            target->paged_options && target->paged_options->block_remote_resources
+                ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK};
+        return render_output_paged_file(target, render_export_load_transform_document, &request);
     }
 
     float output_scale = target->output_scale > 0 ? target->output_scale : 1.0f;
@@ -1058,7 +1271,7 @@ static int render_output_render_document_transform_to_target(const char* documen
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
                                  float output_scale, float device_scale,
-                                 int jpeg_quality, bool paged) {
+                                 int jpeg_quality, bool paged, const RenderPagedOptions* paged_options) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.viewport_width = viewport_width;
@@ -1067,6 +1280,7 @@ int render_html_to_output_target(const char* html_file, const char* output_file,
     target.device_scale = device_scale;
     target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
     target.paged = paged;
+    target.paged_options = lam::up(paged_options);
     return render_output_render_html_file_to_target(html_file, &target);
 }
 
@@ -1074,7 +1288,8 @@ int render_document_transform_to_output_target(const char* document_file,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         const char* output_file, int viewport_width, int viewport_height,
-        float output_scale, float device_scale, int jpeg_quality, bool paged) {
+        float output_scale, float device_scale, int jpeg_quality, bool paged,
+        const RenderPagedOptions* paged_options) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.viewport_width = viewport_width;
@@ -1083,6 +1298,7 @@ int render_document_transform_to_output_target(const char* document_file,
     target.device_scale = device_scale;
     target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
     target.paged = paged;
+    target.paged_options = lam::up(paged_options);
     return render_output_render_document_transform_to_target(document_file, transform, options,
         option_count, &target);
 }

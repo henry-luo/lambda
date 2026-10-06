@@ -483,6 +483,13 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.4.1v3 (LR03-13): a call through a declared function-type contract
     // checks its result; the JIT had read a string as 0.
     {"test/lambda/contract_return_check.ls", "test/lambda/contract_return_check.txt"},
+    // D3.4.3v5 / D3.4.4v4: maps grow through the runtime tree from symbol
+    // keys and from external parents (literal, parsed, contract, nominal,
+    // retyped, element types); the parsed copy also pins LR12-39
+    {"test/lambda/proc/map_symbol_key_tree.ls", "test/lambda/proc/map_symbol_key_tree.txt",
+     "AST_NODE_INDEX_ASSIGN_STAM"},
+    {"test/lambda/proc/map_external_parent.ls", "test/lambda/proc/map_external_parent.txt",
+     "AST_NODE_INDEX_ASSIGN_STAM"},
 };
 
 // explicit exclusions used to pass this test by silently executing MIR
@@ -559,6 +566,18 @@ TEST(LambdaTierParityTests, SatellitePublicationKeepsTailCallIdentity) {
             "test/lambda/tail_call.txt", false, "auto");
         test_lambda_script_against_file("test/lambda/proc/tail_call_proc.ls",
             "test/lambda/proc/tail_call_proc.txt", true, "auto");
+    }
+}
+
+// LR07-46 (D5.3.3): a map filter loop re-stored its frame top beneath the key
+// list's RootFrame on the JIT only (a crash, or lost string members), while the
+// auto tier ran it in T0 and printed the golden.
+TEST(LambdaRootPublicationTests, MapKeyLoopAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/root_publication_map_keys.ls",
+            "test/mir/lambda/root_publication_map_keys.txt", true, tiers[t]);
     }
 }
 

@@ -9,6 +9,7 @@
 #include <string.h>
 #include <thorvg_capi.h>
 #include "view.hpp"
+#include "view_tree_model.hpp"
 #include "event.hpp"
 #include "rdt_video.h"
 #include "../lambda/input/css/dom_node.hpp"
@@ -2590,8 +2591,11 @@ inline void radiant_retain_font_family(FontProp* font, lam::PoolPtr<char> family
     font->family = lam::up(family.get());
 }
 
-inline void radiant_retain_font_family(FontProp* font, lam::GcPtr<char> family) {
-    font->family = lam::up(family.get());
+// A built-in family name (a string literal). No GcPtr overload: retained props never
+// point into the GC heap (D4.5.2). family is never written through, so dropping the
+// literal's const here is safe.
+inline void radiant_retain_font_family(FontProp* font, lam::StaticPtr<const char> family) {
+    font->family = lam::up(const_cast<char*>(family.get()));
 }
 
 inline void radiant_clear_font_family(FontProp* font) {
@@ -3875,8 +3879,10 @@ const ImageSurface* render_page_snapshot_cache_get(RenderPageSnapshotCache* cach
     uint32_t page_number, float raster_scale = 1.0f, Color backdrop = Color{0});
 bool render_secondary_view_to_png(ViewTree* tree, const char* filename,
     float raster_scale = 1.0f, Color backdrop = Color{0xffe8e8e8u});
+bool render_secondary_view_to_svg(ViewTree* tree, const char* filename,
+    float output_scale = 1.0f, uint32_t thumbnail_page = 0, Color backdrop = Color{0xffe8e8e8u});
 void save_surface_to_png(ImageSurface* surface, const char* filename);
-void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality);
+bool save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality);
 int render_html_to_png(const char* html_file, const char* png_file,
                        int viewport_width, int viewport_height,
                        float output_scale = 1.0f, float device_scale = 1.0f);
@@ -3911,7 +3917,19 @@ void render_list_view(struct RasterRenderContext* rdcon, ViewBlock* view);
 // ===== media render declarations =====
 struct RasterRenderContext;
 
+struct PaintImageBox {
+    lam::Up<ImageSurface> image;
+    lam::Up<FontContext> fonts;
+    Rect content_rect, image_rect;
+    float raster_scale;
+    uint8_t opacity;
+};
+bool render_paint_image_box(PaintList* paint, const PaintImageBox* box);
+
 Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect content_rect, float raster_scale);
+Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* image, Rect content_rect, float raster_scale);
+bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect image_rect,
+    const Rect* content_rect, float raster_scale, FontContext* fonts, UiContext* ui = nullptr, uint8_t opacity = 255);
 bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
                                     const Rect* content_rect);
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
@@ -3936,6 +3954,20 @@ typedef enum RenderOutputKind {
     RENDER_OUTPUT_SVG
 } RenderOutputKind;
 
+struct RenderPagedOptions {
+    ViewPreviewOptions preview;
+    lam::Up<const char> preview_pages, export_pages;
+    uint32_t thumbnail_page;
+    bool block_remote_resources;
+};
+RenderPagedOptions render_paged_options_default();
+// complete finite numeric arguments shared by output density and preview geometry.
+bool render_output_parse_extent(const char* text, float* result, bool allow_zero = false);
+// -1 is unknown, 0 is a flag, 1 consumes an argument; values retain the caller's string lifetime.
+int render_paged_option_arity(const char* name);
+bool render_paged_option_apply(RenderPagedOptions* options, const char* name, const char* value,
+    const char** error);
+
 typedef struct RenderOutputTarget {
     RenderOutputKind kind;
     lam::Up<const char> output_file;
@@ -3948,6 +3980,7 @@ typedef struct RenderOutputTarget {
     float output_scale;
     float device_scale;
     bool paged;
+    lam::Up<const RenderPagedOptions> paged_options;
 } RenderOutputTarget;
 
 typedef struct RenderExportSession {
@@ -3995,12 +4028,13 @@ int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tr
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
                                  float output_scale, float device_scale,
-                                 int jpeg_quality, bool paged = false);
+                                 int jpeg_quality, bool paged = false, const RenderPagedOptions* paged_options = nullptr);
 int render_document_transform_to_output_target(const char* document_file,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     const char* output_file, int viewport_width, int viewport_height,
-    float output_scale, float device_scale, int jpeg_quality, bool paged = false);
+    float output_scale, float device_scale, int jpeg_quality, bool paged = false,
+    const RenderPagedOptions* paged_options = nullptr);
 
 // ===== render_overlay.hpp =====
 struct RasterRenderContext;

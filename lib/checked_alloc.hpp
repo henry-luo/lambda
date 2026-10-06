@@ -3,7 +3,7 @@
 // Every size computation is overflow-checked; every result is [[nodiscard]] so a caller
 // cannot silently dereference a NULL. The complementary infallible (NonNull) arena path
 // lives in ownership.hpp.
-// See vibe/Memory_Safety_Template3.md §3.3 and §3.7.
+// See vibe/Memory_Safety_Template.md §6.
 
 #include <stddef.h>
 #include <stdlib.h>   // realloc, free
