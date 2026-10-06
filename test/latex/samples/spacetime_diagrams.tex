@@ -1,0 +1,178 @@
+%-----------------------------------------------------------------------
+% Use TikZ/PGF to programmatically draw spacetime diagrams for 
+% uniformly accelerated observers. Set the acceleration, initial
+% conditions, and other paramters below.
+% 
+% Questions/Comments to Robert McNees at rmcnees@luc.edu
+% http://jacobi.luc.edu
+% January 2015
+%-----------------------------------------------------------------------
+
+
+\documentclass[11pt]{article}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{mathrsfs}
+
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,decorations.pathmorphing,math}
+
+
+%-----------------------------------------------------------------------
+% Custom colors used in links and graphics
+%-----------------------------------------------------------------------
+\definecolor{plum}{rgb}{0.36078, 0.20784, 0.4}
+\definecolor{chameleon}{rgb}{0.30588, 0.60392, 0.023529}
+\definecolor{cornflower}{rgb}{0.12549, 0.29020, 0.52941}
+\definecolor{scarlet}{rgb}{0.937, 0.161, 0.161}
+\definecolor{brick}{rgb}{0.64314, 0, 0}
+\definecolor{sunrise}{rgb}{0.80784, 0.36078, 0}
+
+\newcommand{\scri}{\mathscr{I}}
+
+\begin{document}
+		
+\pagestyle{empty} 
+
+%-----------------------------------------------------------------------
+% Set constants (speed of light, acceleration) 
+%-----------------------------------------------------------------------
+% The speed of light, c=1
+\newcommand*{\sol}{1.0}
+% The acceleration a
+\newcommand*{\accel}{0.8}%
+
+%-----------------------------------------------------------------------
+% Set initial values (initial t, x, and v)
+%-----------------------------------------------------------------------
+% The initial time t_0
+\newcommand*{\tinit}{-0.5}%
+% The initial position x_0
+\newcommand*{\xinit}{0.4}%
+% The initial velocity. Obviously the magnitude must be less than \sol!
+\newcommand*{\vinit}{-0.2}%
+
+%-----------------------------------------------------------------------
+% Set the maximum value of t
+%-----------------------------------------------------------------------
+\newcommand*{\tmax}{5.0}%
+
+%-----------------------------------------------------------------------
+% Set the number of time intervals
+%-----------------------------------------------------------------------
+\newcommand*{\numintervals}{4}
+
+%-----------------------------------------------------------------------
+% Calculate the intervals \Delta t.
+%-----------------------------------------------------------------------
+\pgfmathsetmacro{\tinterval}{divide(\tmax-\tinit,\numintervals+1)}
+
+%-----------------------------------------------------------------------
+% Calculate the initial proper velocity.
+%-----------------------------------------------------------------------
+\pgfmathsetmacro{\uinit}{divide(\vinit,sqrt(1-pow(divide(\vinit,\sol),2)))}%
+
+%-----------------------------------------------------------------------
+% Calculate the initial value of the relativistic parameter gamma.
+%-----------------------------------------------------------------------
+\pgfmathsetmacro{\gammainit}{divide(1,sqrt(1-divide(pow(\vinit,2),1)))}%
+
+%-----------------------------------------------------------------------
+% Now define the position x(t) of the accelerated observer. 
+%-----------------------------------------------------------------------
+\pgfmathdeclarefunction{pos}{1}{%
+  \pgfmathparse{divide(pow(\sol,2),\accel)*(sqrt(1+pow(divide(\accel,\sol)*(#1-\tinit) + divide(\uinit,\sol),2)) - sqrt(1 + pow(divide(\uinit,\sol),2)) ) + \xinit}
+}
+
+%-----------------------------------------------------------------------
+% Points on the observer's worldline are a constant proper distance 
+% from the point (\xstar,\tstar).
+%-----------------------------------------------------------------------
+% Define \xstar
+\pgfmathsetmacro{\xstar}{\xinit - divide(pow(\sol,2),\accel)*sqrt(1+pow(divide(\uinit,\sol),2))}%
+% Define \tstar
+\pgfmathsetmacro{\tstar}{\tinit - divide(\vinit,\accel)*\gammainit}%
+
+%-----------------------------------------------------------------------
+% Find the maximum value of x(t) so we know how big the plot should be.
+%-----------------------------------------------------------------------
+\pgfmathsetmacro{\xmax}{pos(\tmax)}%
+
+%-----------------------------------------------------------------------
+% Draw everything
+%-----------------------------------------------------------------------
+\begin{center}
+    \begin{tikzpicture}[>=LaTeX]
+	  %-----------------------------------------------------------------------
+	  % Clip a rectangular region so we can draw things later without 
+	  % worrying about them poking out the sides of the diagram.	
+	  %-----------------------------------------------------------------------
+	  % First, set a lower value of t depending on whether \tinit is positive or negative.
+	  \tikzmath{
+		  if \tinit>0.0 then {let \tlower = -0.5*\tmax;} else {let \tlower = \tinit-0.5*\tmax;};
+	  }
+	  % Now clip the region. The +0.1 and +0.3 add padding for x and t labels and make sure the clip region doesn't end on a grid line.
+	  \clip (-\xmax+0.1,\tlower) -- (\xmax+0.3,\tlower) -- (\xmax+0.3,\tmax+0.3) --  (-\xmax+0.1,\tmax+0.3) -- (-\xmax+0.1,\tlower);
+
+	  %-----------------------------------------------------------------------
+	  % Draw a background grid.
+	  %-----------------------------------------------------------------------
+	  \draw[step=.25,blue!15] (-\xmax,-\tmax) grid (\xmax+0.3,\tmax+0.3);
+
+	  %-----------------------------------------------------------------------
+	  % Draw the x and t axes.
+	  %-----------------------------------------------------------------------
+  	  \draw [-{Stealth[length=2.5mm]},thick] (-\xmax,0) -- (\xmax,0) node[above] {\large$x$};
+  	  \draw [-{Stealth[length=2.5mm]},thick] (0,-\tmax) -- (0,\tmax) node[right] {\large $t$};
+
+	  %-----------------------------------------------------------------------
+	  % Draw lines from (\xstar,\tstar) to \numintervals evenly-spaced 
+	  % points on the worldline.
+	  %-----------------------------------------------------------------------
+	  \foreach \x in {0,1,...,\numintervals} {
+	    \draw[cornflower] (\xstar,\tstar) -- ({pos(\tinit+\x*\tinterval)},{\tinit+\x*\tinterval});
+	  }
+
+	  %-----------------------------------------------------------------------
+	  % Plot the worldline of the observer as a smooth curve with no
+	  % arrows on it.
+	  %-----------------------------------------------------------------------
+	  % \draw[thick, chameleon, domain=\tinit:\tmax,smooth,variable=\t,->]
+      % 	 plot[] ({pos(\t)},{\t});
+	
+	  %-----------------------------------------------------------------------
+	  % Plot the worldline as \numintervals equally spaced (in t)
+	  % segments with an arrow on each one.
+	  %-----------------------------------------------------------------------
+	  \foreach \i in {0,1,...,\numintervals} {
+		  \pgfmathsetmacro{\tstart}{\tinit+\i*\tinterval-0.05};
+		  \pgfmathsetmacro{\tfin}{\tinit+(\i+1)*\tinterval};
+		  \draw[thick, chameleon, domain=\tstart:\tfin,smooth,variable=\t,->]
+			plot[] ({pos(\t)},{\t});
+  	  }
+
+
+	  %-----------------------------------------------------------------------
+	  % Make a small, filled circle at (\xinit,\tinit).
+	  %-----------------------------------------------------------------------
+	  \fill[chameleon,opacity=1] (\xinit,\tinit) circle (2pt);
+	  % Optionally add a label next to the point.
+	  %\node at (\xinit+.75,\tinit) {\small $(x_0,t_0)$};
+
+	  %-----------------------------------------------------------------------
+	  % Draw a small, filled circle at (\xstar, \tstar).
+	  %-----------------------------------------------------------------------
+	  \fill[scarlet] (\xstar,\tstar) circle (2pt);
+
+	  %-----------------------------------------------------------------------
+	  %Draw the light cone of (\xstar,\tstar).
+	  %-----------------------------------------------------------------------
+	  \draw[scarlet, thick, dashed, domain=-\tmax:\tmax,smooth,variable=\t] 
+	  	plot ({\sol*\t+\xstar},{\t+\tstar});
+	  \draw[scarlet, thick, dashed, domain=-\tmax:\tmax,smooth,variable=\t] 
+	  	plot ({-\sol*\t+\xstar},{\t+\tstar});
+	  
+    \end{tikzpicture}   
+  \end{center}
+  
+\end{document}

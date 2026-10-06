@@ -1,0 +1,10 @@
+@string{known = "Known"}
+@xdata{metadata, publisher={Only inherited data}}
+@book{duplicate, author={Ada Example}, title=known # " Book", year=2020}
+@book{duplicate, author={Ada Example}, title={Duplicate}, year=2021}
+@weird{odd, author={Odd Author}, title={Unknown Type}}
+@book{cyca, crossref={cycb}, title={Cycle A}}
+@book{cycb, crossref={cyca}, title={Cycle B}}
+@book{undef, title=missingmacro, year=2022, langid={spanish}}
+@book{missingparent, crossref={ghost}, title={Lost Parent}}
+@book{broken, title={Unclosed}

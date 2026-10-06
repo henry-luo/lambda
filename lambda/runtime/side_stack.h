@@ -57,6 +57,9 @@ typedef struct LambdaSideStackRegion {
 // swapped by the caller.
 void lambda_side_stack_regions_select(LambdaSideStackRegion* root,
                                       LambdaSideStackRegion* number);
+void lambda_side_stack_regions_current(LambdaSideStackRegion** root,
+                                       LambdaSideStackRegion** number);
+void lambda_side_stack_region_release(LambdaSideStackRegion* region);
 
 bool lambda_side_stack_bind(void);
 // MIR imports use the thread-bound evaluator rather than carrying Context*

@@ -1,0 +1,8 @@
+["active_authors", "authors", "books"]
+3
+3
+3
+["Lambda Calculus", "Type Theory", "Functional Programming"]
+["Alice", "Bob"]
+true
+false

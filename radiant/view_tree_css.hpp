@@ -1,0 +1,97 @@
+#pragma once
+#include "view.hpp"
+#include "view_tree_model.hpp"
+#include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/css_paged_media.hpp"
+
+struct SelectorMatcher;
+struct ViewCssVariable;
+struct CounterSnapshot;
+
+enum ViewBreak : uint8_t {
+    VIEW_BREAK_AUTO, VIEW_BREAK_AVOID, VIEW_BREAK_PAGE,
+    VIEW_BREAK_LEFT, VIEW_BREAK_RIGHT, VIEW_BREAK_RECTO, VIEW_BREAK_VERSO,
+};
+
+struct ViewCssStyle {
+    uint8_t pseudo_element;
+    lam::Up<DomElement> source;
+    lam::Up<ViewCssStyle> parent;
+    lam::Up<ViewCssStyle> next;
+    lam::Up<CssDeclaration*> inline_declarations;
+    size_t inline_count;
+    lam::Up<ViewCssVariable> variables;
+    DisplayValue display;
+    FontProp font;
+    FontBox font_box;
+    Color color, background;
+    lam::Up<const CssValue> width, height, min_width, max_width, min_height, max_height;
+    lam::Up<const CssValue> margin[4], padding[4], border_width[4];
+    Color border_color[4];
+    float line_height;
+    lam::Up<const CssValue> line_height_value;
+    CssEnum text_align, white_space, float_value, clear_value, position, box_sizing;
+    ViewBreak break_before, break_after, break_inside;
+    uint32_t orphans, widows;
+    bool decoration_clone;
+    lam::Up<const char> page_name;
+    lam::Up<const CssValue> content, string_set, counter_reset, counter_increment, counter_set;
+    lam::Up<const CounterSnapshot> counters;
+    lam::Up<const char> generated_text;
+    lam::Up<const CssValue> quotes;
+    lam::Up<const CssValue> vertical_align;
+    lam::Up<const CssValue> running_position, float_reference, float_defer, footnote_policy;
+    lam::Up<const CssValue> float_spec;
+};
+
+struct ViewCssContext {
+    lam::Own<Pool> pool;
+    lam::Up<CssEngine> engine;
+    lam::Up<SelectorMatcher> matcher;
+    lam::Counted<FontContext> fonts;
+    lam::Up<ViewCssStyle> styles;
+    float root_font_size;
+};
+
+struct ViewPageAreaStyle {
+    const CssDeclaration* max_height;
+    const CssDeclaration* padding[4];
+    const CssDeclaration* border_width[4];
+    const CssDeclaration* border_style[4];
+    const CssDeclaration* border_color[4];
+    const CssDeclaration* background;
+    const CssDeclaration* color;
+    const CssDeclaration* box_sizing;
+    const CssDeclaration* float_value;
+};
+struct ViewPageStyle {
+    float width, height;
+    float margin[4], padding[4], border_width[4];
+    Color background;
+    RdtLogicalRect content_rect;
+    const CssDeclaration* margin_content[CSS_PAGE_MARGIN_BOX_COUNT];
+    const CssDeclaration* margin_font_size[CSS_PAGE_MARGIN_BOX_COUNT];
+    const CssDeclaration* margin_color[CSS_PAGE_MARGIN_BOX_COUNT];
+    const CssDeclaration* margin_align[CSS_PAGE_MARGIN_BOX_COUNT];
+    const CssDeclaration* margin_overflow[CSS_PAGE_MARGIN_BOX_COUNT];
+    float bleed;
+    bool crop_marks;
+    ViewPageAreaStyle footnote;
+};
+
+bool view_css_context_begin(ViewTree* tree);
+void view_css_context_destroy(ViewTree* tree);
+ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element);
+ViewCssStyle* view_css_resolve_pseudo(ViewTree* tree, DomElement* element, uint8_t pseudo_element);
+const CssValue* view_css_property(ViewTree* tree, ViewCssStyle* style, const char* name,
+                                 CssDeclaration* winning = nullptr);
+const CssValue* view_css_resolve_value(ViewTree* tree, ViewCssStyle* style, const CssValue* value);
+const CssValue* view_css_declaration_value(ViewTree* tree, ViewCssStyle* style,
+    const CssDeclaration* declaration, const char* property);
+ViewCssStyle* view_css_generated_style(ViewTree* tree, ViewCssStyle* base,
+    const CssValue* font_size, const CssValue* color, CssEnum align);
+float view_css_length(ViewTree* tree, const ViewCssStyle* style, const CssValue* value,
+                     CssPropertyCode property, float inline_size, float block_size);
+ViewBreak view_css_break(const CssValue* value);
+ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t page_number,
+                                  ViewPageSide side, bool blank, ViewPageStyle* result);

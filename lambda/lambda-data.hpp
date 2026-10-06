@@ -1605,6 +1605,11 @@ typedef struct Input {
     // status bit instead of being inferred from the parsed root value.
     bool parse_failed;
     char* parse_error_message;   // formatted parser diagnostic, owned by pool (nullable)
+    // InputParseOptions::embedded_math: markup lists its <math> elements here in
+    // document order, each with a parse-time `ast`, so a display renders them
+    // without walking the tree (pool-owned; null when the document has no math)
+    bool parse_embedded_math;
+    Array* embedded_math;
     // StringBuf* sb;
 
     // member functions
@@ -1637,11 +1642,17 @@ void array_append(Array* arr, Item itm, Pool* pool, Arena* arena = nullptr);
 // append entry points keep parser-owned list growth in its Pool/Arena owner.
 void list_push_io(List* list, Item item);
 void list_push_pooled(List* list, Item item, Pool* pool);
-void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena, bool ui_mode);
+// `ui_input` is the document Input in ui_mode (its arena is `arena`), else null.
+void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena, Input* ui_input);
 // Grow an Input-owned list to at least `min_capacity` slots (doubling) from the
 // arena when given, else the pool. The old buffer stays with whoever owns it,
 // and an owned wide-scalar tail moves with the dense items that point into it.
 bool list_grow_io(List* list, int64_t min_capacity, Pool* pool, Arena* arena);
+// ui_mode content helpers shared by every content append path (collection_io.cpp):
+// UI element content must be document-owned (D4.5.2).
+Item ui_copy_string_to_arena(Arena* arena, Item str_item);
+Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next);
+Item ui_copy_content_to_input(Input* owner, Item item);
 #ifdef LAMBDA_IO_STATIC_VALUES
 // Static input sources select their explicit Pool/Arena provider at compile time.
 #define list_push list_push_io

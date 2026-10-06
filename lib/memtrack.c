@@ -167,6 +167,7 @@ static __thread size_t tls_fault_remaining = SIZE_MAX;
 // Internal Helpers
 // ============================================================================
 
+#ifndef LAMBDA_NO_LOG
 static void memtrack_console_report(const char* level, const char* fmt, ...) {
     char body[1024];
     va_list args;
@@ -196,6 +197,9 @@ static void memtrack_console_report(const char* level, const char* fmt, ...) {
     ssize_t ignored = write(STDERR_FILENO, line, (size_t)line_len);
     (void)ignored;
 }
+#else
+#define memtrack_console_report(...) ((void)0)
+#endif
 
 #define memtrack_report_error(...) \
     do { \
@@ -600,10 +604,6 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line)
     return user_ptr;
 }
 
-void* mem_alloc(size_t size, MemCategory category) {
-    return mem_alloc_loc(size, category, 0);
-}
-
 void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line)
 {
     size_t total = 0;
@@ -626,10 +626,6 @@ void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line)
         memset(ptr, 0, total);
     }
     return ptr;
-}
-
-void* mem_calloc(size_t count, size_t size, MemCategory category) {
-    return mem_calloc_loc(count, size, category, 0);
 }
 
 void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, int line)
@@ -695,10 +691,6 @@ void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, int line
     return new_ptr;
 }
 
-void* mem_realloc(void* ptr, size_t new_size, MemCategory category) {
-    return mem_realloc_loc(ptr, new_size, category, 0);
-}
-
 void mem_free_loc(void* ptr, int line)
 {
     if (!ptr) return;
@@ -758,95 +750,6 @@ void mem_free_loc(void* ptr, int line)
     free(real_ptr);
 
     unlock_tracker();
-}
-
-void mem_free(void* ptr) {
-    mem_free_loc(ptr, 0);
-}
-
-char* mem_dup_n_loc(const char* data, size_t len, MemCategory category, int line) {
-    if (!data) return NULL;
-    size_t alloc_size = 0;
-    if (!math_checked_add(len, 1, &alloc_size)) return NULL;
-    char* dup = (char*)mem_alloc_loc(alloc_size, category, line);
-    if (dup) {
-        memcpy(dup, data, len);
-        dup[len] = '\0';
-    }
-    return dup;
-}
-
-char* mem_dup_n(const char* data, size_t len, MemCategory category) {
-    return mem_dup_n_loc(data, len, category, 0);
-}
-
-typedef struct MemJoinContext {
-    MemCategory category;
-    int line;
-} MemJoinContext;
-
-static void* mem_join_alloc(void* context, size_t size) {
-    MemJoinContext* join = (MemJoinContext*)context;
-    return mem_alloc_loc(size, join->category, join->line);
-}
-
-char* mem_join_parts_loc(const char* const* parts, const size_t* lengths,
-                         size_t count, MemCategory category, int line) {
-    MemJoinContext context = {category, line};
-    return str_join_parts_alloc(parts, lengths, count, mem_join_alloc, &context);
-}
-
-char* mem_join_parts(const char* const* parts, const size_t* lengths, size_t count,
-                     MemCategory category) {
-    return mem_join_parts_loc(parts, lengths, count, category, 0);
-}
-
-char* mem_join2_loc(const char* first, size_t first_len,
-                    const char* second, size_t second_len,
-                    MemCategory category, int line) {
-    const char* parts[] = {first, second};
-    const size_t lengths[] = {first_len, second_len};
-    return mem_join_parts_loc(parts, lengths, 2, category, line);
-}
-
-char* mem_join2(const char* first, size_t first_len,
-                const char* second, size_t second_len, MemCategory category) {
-    return mem_join2_loc(first, first_len, second, second_len, category, 0);
-}
-
-char* mem_join3_loc(const char* first, size_t first_len,
-                    const char* second, size_t second_len,
-                    const char* third, size_t third_len,
-                    MemCategory category, int line) {
-    const char* parts[] = {first, second, third};
-    const size_t lengths[] = {first_len, second_len, third_len};
-    return mem_join_parts_loc(parts, lengths, 3, category, line);
-}
-
-char* mem_join3(const char* first, size_t first_len,
-                const char* second, size_t second_len,
-                const char* third, size_t third_len, MemCategory category) {
-    return mem_join3_loc(first, first_len, second, second_len, third, third_len, category, 0);
-}
-
-char* mem_strdup_loc(const char* str, MemCategory category, int line) {
-    if (!str) return NULL;
-    return mem_dup_n_loc(str, strlen(str), category, line);
-}
-
-char* mem_strdup(const char* str, MemCategory category) {
-    return mem_strdup_loc(str, category, 0);
-}
-
-char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int line) {
-    if (!str) return NULL;
-    size_t len = 0;
-    while (len < max_len && str[len] != '\0') len++;
-    return mem_dup_n_loc(str, len, category, line);
-}
-
-char* mem_strndup(const char* str, size_t max_len, MemCategory category) {
-    return mem_strndup_loc(str, max_len, category, 0);
 }
 
 // ============================================================================
@@ -980,6 +883,7 @@ size_t memtrack_request_free(size_t bytes_needed) {
 // ============================================================================
 
 void memtrack_log_usage(void) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     MemtrackStats stats;
     memtrack_stats_snapshot(&stats);
 
@@ -1001,8 +905,10 @@ void memtrack_log_usage(void) {
         }
     }
 
+#endif
 }
 
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 // Callback for iterating allocations
 typedef struct LogAllocCtx {
     int count;
@@ -1029,7 +935,10 @@ static bool log_alloc_iter(const void* item, void* udata) {
     return true;  // Continue iteration
 }
 
+#endif
+
 void memtrack_log_allocations(void) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (g_memtrack.mode != MEMTRACK_MODE_DEBUG) {
         memtrack_report_warn("memtrack: detailed allocation logging requires DEBUG mode");
         return;
@@ -1048,9 +957,11 @@ void memtrack_log_allocations(void) {
     }
 
     unlock_tracker();
+#endif
 }
 
 void memtrack_log_category(MemCategory category) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     // Would require storing per-category allocation lists
     // For now, just log category stats
     MemtrackCategoryStats stats;
@@ -1059,6 +970,7 @@ void memtrack_log_category(MemCategory category) {
     log_info("memtrack: Category '%s': %zu bytes, %zu allocs (peak: %zu bytes)",
             memtrack_category_names[category],
             stats.current_bytes, stats.current_count, stats.peak_bytes);
+#endif
 }
 
 size_t memtrack_check_leaks(void) {
@@ -1271,28 +1183,4 @@ int32_t memtrack_get_pool_count(void) {
 
 int32_t memtrack_get_arena_count(void) {
     return g_memtrack.arena_count;
-}
-
-// ============================================================================
-// Raw Allocation Escape Hatches
-// ============================================================================
-
-void* raw_malloc(size_t size) {
-    return malloc(size);
-}
-
-void* raw_calloc(size_t count, size_t size) {
-    return calloc(count, size);
-}
-
-void* raw_realloc(void* ptr, size_t new_size) {
-    return realloc(ptr, new_size);
-}
-
-void raw_free(void* ptr) {
-    free(ptr);
-}
-
-char* raw_strdup(const char* str) {
-    return str ? strdup(str) : NULL;
 }

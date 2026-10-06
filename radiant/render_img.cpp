@@ -432,7 +432,12 @@ static bool render_batch_single(
     ui_context->viewport_width = layout_width;
     ui_context->viewport_height = layout_height;
 
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
+    DomDocument* doc = nullptr;
+    {
+        // the batch's documents share one loader runtime, as a window's do
+        LayoutLoaderHostScope loader_host(ui_context);
+        doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
+    }
     if (!doc) {
         log_error("render-batch: failed to load %s", html_file);
         render_batch_cleanup_doc(ui_context, nullptr);

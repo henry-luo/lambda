@@ -2,6 +2,7 @@
 
 **Status**: IMPLEMENTED WITH USER-DEFERRED CLASS F — rev 29 (2026-07-24; revs 2–28 as recorded below; rev 28 physically relocated the remaining top-level core/rt translation units and headers into `lambda/core/` and `lambda/runtime/`, completing the P1b mechanical move; rev 29 then replaced every forwarding shim with direct `core/`/`io/`/`runtime/` includes at all active call sites and deleted all of them — the 28 from rev 28 plus 7 pre-existing transitional shims from earlier P1b work — leaving `lambda/` shim-free, and repaired the tooling paths the relocation had staled. Monolithic build, static module archives, the five-DSO boundary check at the unchanged 165-import Class-F baseline, and the Lambda baseline suite are all green)
 **Scope**: split the monolithic `lambda.exe` build into four static libraries + one executable, with a fixed, enforced inter-module interface.
+**Profile update (2026-10-06)**: SM17 specifies `lambda-wasm` for synchronous browser evaluation with a retained REPL (§13.4; D7.1.7v6). The optimized profile now builds and passes Node/Chromium embedding checks; build details and measured sizes are in `doc/dev/Lambda_WASM_Build.md`.
 **Related**: `lib/mem_factory.h` / `vibe/Memory_Context.md` (allocator registry), `vibe/Lambda_Native_Module_Design.md` (Jube host API), `vibe/Lambda_Design_Code_Dedup.md` (DD1–DD5 coherent-header doctrine), `vibe/Lambda_Design_MIR_Cache.md` (MC1–MC8 — the rt-layer MIR cache of §2.1), `utils/check_hosted_python_architecture.py` (boundary-check precedent).
 
 ---
@@ -33,7 +34,7 @@ What each module contains, in general — the scope statement each boundary ques
 | **lambda-io** | Document and shared-resource IO: JSON/XML/HTML/CSS/Markdown/PDF/YAML/LaTeX/… inputs — including the HTML5 tree builder and the CSS parser/cascade engine with its DOM — output formatters, `MarkBuilder`/`MarkEditor`, Target/resource resolution, URL/file byte acquisition, curl-based HTTP fetching, cookie/public-suffix policy, downloader/scheduler/thread-pool, resource/file/network caches (`lambda/network/**`), and the input/doc manager + doc cache (§2.1). Builds/edits arena-owned Mark data over core values; never touches the GC. | in `liblambda-data.a` |
 | **lambda-rt** | The active script engines: Lambda parser (tree-sitter), AST builder, MIR-Direct transpiler/JIT, GC and runtime memory, evaluator + system functions, procedural runtime, the LambdaJS runtime, validator. Owns the active runtime C/C++ headers, runtime `Context`, root frames/side stacks, the script manager and script/MIR caches (§2.1), and language-runtime IO bindings whose event-loop/JS semantics are inseparable from rt (for example Node-compatible `fs`, `net`, `dns`, and TLS bindings; §2.2). Shared resource acquisition and caching are consumed from lambda-io. Retired C2MIR remains a frozen legacy enclave: no module-split edits, redesign, or validation work is performed on it. | `liblambda-rt.a` |
 | **radiant** | CSS style resolution, layout (block/inline/flex/grid/table/positioned), rendering (paint IR → SVG/PDF/PNG/GL), font & media *loading and rendering* — the files themselves arrive via lambda-io (§2.1) — events & UI (window shell, editing, interaction state). | `radiant.a` |
-| **lambda-exe** | The shell: CLI command wiring and the REPL (`main.cpp`, `main-repl.cpp`). Two profiles: full `lambda.exe` and engine-only `lambda-cli` (§13.1). | `lambda.exe` |
+| **lambda-exe / embedding shell** | CLI command wiring and the REPL (`main.cpp`, `main-repl.cpp`) compose the native full, `lambda-cli` and `lambda-headless` profiles (§13.1–§13.3). `lambda-wasm` retains the shared REPL through a browser embedding entry point and omits the native CLI entry (§13.4; D7.1.7v6). | Native executable; WASM embedding artifact |
 
 ### 2.1 SM12 refined: managers and caches per layer
 
@@ -85,6 +86,7 @@ Tier 1 therefore enforces both dependency direction and capability ownership: di
 | SM14 | C2MIR is retired and frozen. The module split does not edit, redesign, regenerate for, or add validation gates for the C2MIR implementation/artifacts (§9.1) | **DECIDED** |
 | SM15 | `lambda-cli` is the runtime-only host: no Radiant, JS/TS runtime and DOM, Jube host modules, or HTTP server; excluded commands and imports fail explicitly (§13.2; D7.1.6) | **DECIDED** (USER 2026-10-03) |
 | SM16 | `lambda-headless` is headless profile C: the full engine (Lambda + Radiant + JS) linked against a null windowing backend instead of GLFW, OpenGL and the native GUI/webview toolkits; no `view`/`edit` (§13.3; D7.1.4v2) | **DECIDED** (USER 2026-10-03) |
+| SM17 | `lambda-wasm` is smaller than `lambda-cli`: synchronous AST evaluation and an in-memory REPL; no native CLI entry, MIR/JIT, network, system information, filesystem IO, image loading, libuv/threads/tasks/mailboxes, resource caches/SQLite/cookies, PDF/LaTeX parsers/packages, CSS/graph/math input parsers and CSS/graph/LaTeX/math formatting, image processing, public undo/redo/edit_commit/emit, ambient clock/timezone discovery/entropy, logging providers, console inspection dumps or allocation tracking; the inactive native string-SIMD unit is omitted (§13.4; D7.1.7v6). HTML input and template apply are retained; remaining reductions are proposals. | **IMPLEMENTED** (USER 2026-10-06) |
 
 ---
 
@@ -490,6 +492,197 @@ Consequences for the split:
 **Verification (2026-10-03, macOS arm64).** Builds clean, including a strict compile of the touched files; 19 MB stripped. `otool -L` shows no Cocoa, AppKit, Carbon, IOKit, OpenGL or WebKit. `render` to SVG/PNG matches the full build byte for byte on a sample page; the layout baseline category passes 4481/4481 with `--radiant-exe ./lambda-headless.exe`.
 
 **Open.** Linux and Windows are configured but not built or verified: the Linux library exclusions are untested, `ime_win.cpp` still needs a Windows answer (`glfwGetWin32Window`), and GLFW/GL *headers* are still required at build time on every platform.
+
+---
+
+### 13.4 SM17 — `lambda-wasm` is the browser evaluation profile (USER, 2026-10-06)
+
+**Ruling (D7.1.7v6).** `lambda-wasm` is smaller than `lambda-cli` (D7.1.6),
+embedding Lambda evaluation in a browser WASM module. Source and data arrive
+in memory from the embedding host. The Lambda engine itself has no resource
+acquisition capability. The browser's JavaScript glue is an embedding adapter;
+it does not require the LambdaJS engine, DOM, Radiant, or Jube.
+
+**Revision history.** The initial D7.1.7 proposed additional stripping,
+including removal of the REPL. The user's v2 decision retains the REPL,
+removes only the native CLI entry, and approves the concurrency, resource,
+PDF/LaTeX and ambient-provider exclusions below. Other codec and validator
+choices remain proposals. The v3 decision disables logging and compiles out
+console dump implementations, retaining structured source diagnostics and
+explicit procedural `print` (D5.4.4).
+The v4 decision excludes allocation tracking and the unused native string-SIMD
+unit, retaining a lean allocation provider and ordinary scalar string search
+(D4.2.5v3).
+The v5 decision excludes CSS and graph input parsers while explicitly retaining
+HTML document and fragment parsing. Style text/attributes and resource URLs in
+HTML remain data; no CSS parsing or resource acquisition follows.
+The v6 decision excludes image processing (including pixel conversions),
+CSS/graph/LaTeX/math formatting and math-expression input, plus public
+`undo`/`redo`/`edit_commit`/`emit`. Template `apply` remains, including
+in-memory state and the internal transaction machinery it uses.
+
+**Approved scope.**
+
+| Area | Retained / excluded |
+|---|---|
+| Evaluation | First-party Lambda lexer/parser, AST building/binding and interpreter execution; ordinary core expressions, functions, closures, collections, types and error handling retain their semantics. Interpreter support gaps must be reported explicitly. |
+| REPL and entry point | Retain a stateful REPL over host-supplied in-memory submissions, with bindings available across submissions and results/diagnostics returned to the host (D4.6.2v2). Exclude the native CLI entry and command dispatch. Separate REPL semantics from terminal/stdin/readline and file-backed history; browser transport needs none of them. |
+| Values and memory | Core Item representations, names/shapes, runtime allocation, precise GC roots, scalar homes and ownership (D2.1, D5.2, D5.3.3). Removing a compiler backend does not remove these lifetime contracts. |
+| MIR/JIT | Exclude MIR, MIR code generation and execution, transpilation/emission, promotion workers, JIT hotness machinery and MIR caches/dumps. AST is the only execution backend; a MIR interpreter is also excluded. |
+| Concurrency | Synchronous evaluation only. Exclude libuv, native threads/thread pools, task/mailbox/timer scheduling and async prebuild. `start`/`wait` and task/mailbox operations fail explicitly; no fabricated task handles or synchronous emulation of task semantics. Ordinary local procedural computation remains supported. |
+| Networking | Exclude all network access, curl/HTTP, TLS transport, sockets, DNS, transfer scheduling, network caches and cookies. Browser bindings must not expose an indirect fetch path to scripts. |
+| Resource infrastructure | Exclude resource caches, resource acquisition managers and SQLite/cookie storage. REPL session bindings and precisely rooted results are execution state, not resource caches; they remain. |
+| System information | Exclude OS/CPU/process/environment/home-directory discovery and the native `sysinfo` provider. |
+| File IO | Exclude file/directory acquisition and mutation, filesystem-backed source/import resolution, stdin and file-based output/logging/configuration. Host-supplied bytes and an in-memory result do not require an emulated filesystem. |
+| Images | Exclude image loading/decoding, codec dependencies and image-processing kernels/pixel conversions. Retain general numerical arrays, shape operations, arithmetic and statistics. |
+| PDF and LaTeX | Exclude PDF and LaTeX parsers, LaTeX/Math Tree-sitter dependencies, and their packaged PDF/LaTeX functionality and assets. Other document formats remain a separate size choice. |
+| CSS, graph, math and HTML codecs | Exclude CSS stylesheet/inline parsing, all graph input flavors (DOT, Mermaid, D2, Structurizr) and include resolution, document math-expression parsing, and CSS/graph/LaTeX/math formatting. Retain HTML document/fragment parsing, entities, raw style text/attributes and resource URLs as inert Lambda data; JSON/HTML output remains. |
+| Templates and editing/event builtins | Retain `apply`, template dispatch/state and its internal transactions. Exclude public `undo`, `redo`, both `edit_commit` overloads and procedural `emit`. REPL views persist across submissions; failed fragments roll back registration and reset retires template/state ownership before releasing AST names (D5.3.3). |
+| Ambient providers | Exclude the ambient clock, timezone discovery and entropy providers. Current-time and ambient-random operations fail explicitly; do not substitute constants or implicitly call browser providers. Parsing, formatting and arithmetic on explicitly supplied date/time values and offsets remain. |
+| Inherited exclusions | No Radiant/layout/render/GUI/fonts, LambdaJS/TS/DOM, Jube/native host modules, or HTTP server, as in D7.1.6. |
+| Logging and dumps | Use a disabled logging stub and remove diagnostic console dump code at compile time. Preserve structured source diagnostics, host-returned REPL values and explicit procedural `print`; diagnostics never feed semantics (D5.4.4). |
+| Allocation tracking and string SIMD | Exclude `lib/memtrack.c` and the inactive `lib/str_simd.c`. Retain the ordinary allocation API through a lean `lib/` provider, checked arithmetic, precise GC and allocator ownership (D4.2.5v3, D5.3.3). String search uses the existing scalar implementation. |
+
+This is a separate browser embedding artifact, not a fourth Radiant headless
+mode. The A/B/C distinction in D7.1.4v2 remains unchanged. It also differs from
+running WASM *as a Jube guest*, discussed in `idea/Lambda_KIV_WASM.md`.
+
+**What else can be stripped?** The following are recommended candidates for
+the first implementation, pending capability decisions. They do not extend
+D7.1.7v6's approved exclusions silently.
+
+| Candidate | Benefit and boundary |
+|---|---|
+| Native dynamic loading | Remove DSO loaders, native module search paths and hosted-language registries. Retain only the module/binding state actually needed by supported built-ins and Lambda evaluation. |
+| Remaining document codecs | Keep HTML input as explicitly requested. Consider omitting Markdown, XML, YAML, TOML, RTF and other nonessential input/output codecs beyond the approved exclusions. A small retained set could be JSON + HTML input and Lambda value printing. Unsupported formats must return an explicit error. |
+| Schema validator | Remove only standalone document/schema tooling after separating it from core type checks. `fn_is` uses `schema_validator_validate_type` for compound type values; deleting the validator directory would change retained language behavior (D3.2.4v4, D3.3.4). The native validator CLI is already excluded. |
+| Instrumentation and remaining packaged assets | Omit profiling, MIR/AST diagnostic dump commands, test machinery, batch-test runners and additional unrelated `lmd` packages/assets beyond PDF/LaTeX. Preserve REPL source diagnostics and runtime errors. |
+
+Keep Unicode/string operations, numerical semantics (including decimal and
+wide integers), equality/order, collection behavior and precise rooting.
+Shrinking these changes the language rather than only its embedding surface
+(D2.1, D2.2, D5.3.3). RE2/Unicode and numeric libraries need an actual retained
+operation inventory before deciding which can be omitted.
+
+**Function-level candidates (audit, 2026-10-06).** The shared registry still
+roots the following pure functionality. These are proposals, not additional
+exclusions under D7.1.7v6; actual size savings require a separate link comparison.
+
+| Candidate | Functions and boundary |
+|---|---|
+| Additional numerical operations | `matmul`, multidimensional `reshape`/`transpose`, `math_quantile`, `math_median`, `math_variance` and related statistics, if consumers only need basic math. Keep core numeric representation, arithmetic, collection operators and precise roots (D2.1, D2.2, D5.3.3). |
+| Codec branches under `parse`/`format` | Prune additional optional codec dispatch and its function roots, rather than dropping either whole builtin. Keep JSON and HTML input, REPL value printing and chosen serializers. CSS/graph/LaTeX/math dispatch and formatter sources are already excluded. |
+
+Filesystem/image IO, networking, grep/full-text search, task/mailbox operations,
+ambient date/time and JS `toPromise` already have excluded registry pointers.
+Explicit-date arithmetic, deterministic seeded `math_random`, Unicode/RE2,
+type checks, core collections and diagnostics should remain (D7.1.7v6,
+D3.3.4, D5.4.4). Removing capability signatures offers little implementation
+reduction and changes admission errors; keep them to report unavailable features.
+
+**Implementation (2026-10-06; D7.1.7v6).** `make lambda-wasm` now uses
+`utils/build_wasm.py` and the JSON profile's explicit retained manifest:
+189 project sources plus utf8proc 2.12.0, mpdecimal 4.0.1 and the existing
+unmodified RE2. Emscripten 6.0.11 builds with `-Oz`, LTO and `MEMORY64=2`,
+preserving the 64-bit C/Item ABI while lowering memory operations to wasm32
+(D2.1.1, D2.1.7). No native archives or MIR headers/backend enter this build.
+Other in-memory codecs and schema validation remain; the proposed extra
+removals above are still proposals.
+
+CSS/graph input exclusions remove 14 translation units. Profile guards remove
+CSS dispatch, shared DOM inline-style parsing, graph dispatch and Structurizr
+include resolution. HTML's four HTML5 units remain; shared CSS/DOM value support
+remains separate from input parser selection. Six additional formatter units are
+excluded, with guards around CSS/graph/math dispatch and shared CSS formatting
+callbacks. LaTeX formatting and math parsing were already absent; the explicit
+math-input flag records the latter boundary.
+
+`LAMBDA_NO_IMAGE_PROCESSING` excludes 22 builtin entries and the complete
+image-only kernel/conversion section of `lambda-vector.cpp`: `convolve`, `blur`,
+`erode`, `dilate`, `median_filter`, `maxpool`, `avgpool`, `as_float`, `as_ubyte`,
+`invert`, `gamma`, `threshold`, `grayscale`, `flip`, `rot90`, `crop`, `histogram`,
+`otsu`, `label`, `resize`, `rotate`, `affine_warp`. General numeric arrays and
+statistics remain (D2.1, D2.2). `LAMBDA_NO_EDIT_HISTORY` removes only public
+history wrappers; `LAMBDA_NO_EMIT` removes the public event emitter. `apply`
+and its internal transaction/state helpers remain.
+
+Retained-`apply` testing exposed an existing REPL defect: fragment execution
+never registered newly admitted view templates. The shared registration walker
+now accepts a fragment and registers only its declarations with fresh identities.
+Execution failure restores an append-only registry checkpoint, and session
+teardown clears borrowed reconciliation/state and removes its module's entries
+before freeing the AST (D5.3.3). Node/Chromium tests cover both `apply` overloads,
+templates/state across allocation pressure, rejection rollback and fresh reset;
+the native REPL has a matching regression.
+
+The JS well-known-name source is excluded too: `LAMBDA_NO_JS` makes the shared
+NamePool skip that catalog while preserving ordinary Lambda key interning
+(D4.6.1v3, D4.6.2v2). The manifest contains no `lambda/js/` sources.
+
+`LAMBDA_NO_LOG` selects the stub branch in `lib/log.c` and strips all logging
+call arguments in `lib/log.h`. `LAMBDA_NO_CONSOLE_DUMP` excludes AST, value,
+CSS/DOM, version, memory, stack and profile dump bodies and their traversal
+callbacks. The memory-tracker translation unit is excluded entirely.
+`LAMBDA_NO_CLI` excludes the validator's file-backed command/reporting layer;
+in-memory validation remains available. Structured source diagnostics use the
+separate error formatter and survive logging removal (D5.4.4).
+
+`LAMBDA_NO_MEMTRACK` selects the lean allocation provider in `lib/mem_alloc.c`;
+string allocation helpers are extracted there for both native and WASM builds,
+without duplication. Tracker initialization, state/counters and VM fault
+injection are omitted. MemContext, Pool/Arena and precise GC remain (D4.2.5v3,
+D5.3.3). `LAMBDA_NO_STR_SIMD` omits the native SIMD source and pair-search
+preparation/dispatch; the existing `str.c` rare-byte scalar scan handles search.
+WASM SIMD is available with suitable compiler flags, but this profile does not
+enable it and the omitted source had been taking its scalar fallback.
+
+`lambda/runtime/wasm_embed.cpp` exports init/eval/reset/shutdown from
+`lambda/lambda-wasm.h`, wrapping the shared stateful REPL. Each WASM instance
+owns one synchronous runtime; results cross the host boundary as copied UTF-8
+Lambda text, with diagnostics through `print`/`printErr`. C result text is
+borrowed until the next eval/reset/shutdown. Repeated submissions retain the
+same NamePool and module state, with precise roots (D4.6.2v2, D5.3.3).
+Native virtual reservations become checked, eagerly backed linear-memory
+extents; WASM does not provide native per-page guard protection.
+
+The registry keeps builtin signatures but removes excluded entry pointers.
+Admission or invocation reports an error; no operation falls back to external
+IO or MIR. File-backed/package imports are rejected; built-in math/io
+namespaces retain only available capabilities. A host-supplied module map is
+not implemented. Profiling, wall-clock validation/GC timing and host-derived
+configuration are excluded; ordinary depth/allocation limits remain.
+
+RE2's C++ logging retains unused libc++ locale facets. Instead of changing
+the vendor, `utils/wasm_host.js` supplies the embedding capability boundary:
+environment requests return WASI `ENOSYS`, and timezone/timer requests throw
+explicit exclusion errors. No clock/timezone/environment/entropy provider is
+linked and no provider values are fabricated. Console stdio remains for
+diagnostics, without a filesystem backend. The loader can receive WASM bytes
+directly; its optional acquisition of its own artifact is bootstrap transport
+and is inaccessible to Lambda evaluation.
+
+**Verification and size.** Node and Chromium each pass **283 checks**, including
+retained closures/arrays under allocation pressure, decimals, wide integers,
+Unicode/RE2, JSON, HTML document/fragment parsing and inert style/resource data,
+CSS/graph/math parser/formatter rejection, all image-processing admission
+exclusions, retained template `apply`/state/rollback/reset, explicit UTC dates,
+capability rejection, failed-submission
+recovery, reset and reinitialization. Browser execution supplies the module in
+memory and denies fetch/XHR/WebSocket, Date, timezone formatting, performance
+clocks and entropy. Native REPL tests pass **41/41**; the full native Lambda
+baseline passes **6,243/6,243** after the profile and template-registration changes. Retained closure coverage
+found and fixed a shared REPL defect: finalization reused the old module index
+and missed the new nested-function captures. Fragment analysis now owns its
+own graph before finalization (D6.2.3, D8.2.4). These checks do not certify the
+entire interpreter corpus or all browsers.
+
+The optimized WASM is **1,876,371 bytes** and the loader
+**15,034 bytes**; combined **1,891,405 bytes**, or
+**729,874 bytes gzipped** (26,341 bytes less than v5). A link with function
+names confirms no excluded parser/formatter, image-processing or public
+history/event entry points remain; HTML and `apply` remain. The manifest and size report are published
+under `build/wasm/`. Reproduction, ABI contracts, import audit and remaining
+limitations: `doc/dev/Lambda_WASM_Build.md`.
 
 ---
 

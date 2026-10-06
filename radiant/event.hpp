@@ -3353,6 +3353,9 @@ void editing_interaction_end_composition(DocState* state,
  */
 void doc_state_mark_dirty(DocState* state);
 void doc_state_request_repaint(DocState* state);
+// Sample one document's scheduler and invalidate layout/paint for both frame owners.
+bool radiant_tick_document_animation_scheduler(DomDocument* document, double now,
+                                               DirtyTracker* dirty_tracker);
 // Advance the visible document and its embedded documents on the UI thread.
 // Returns whether any scheduler still needs another frame.
 bool radiant_tick_document_animations(DomDocument* document, double now,
@@ -4529,6 +4532,8 @@ typedef struct EventContext {
     // legacy native call sites cannot replay the author walk after JS returns.
     bool dom_event_ua_handled;
     bool dom_event_author_dirty;
+    // borrowed only during synchronous native dispatch, including author bubbling.
+    const InputIntent* dom_event_intent;
 
     // Source-model actions can finish inside an author cascade whose DOM
     // reconciliation is deferred until propagation ends. Keep the requested

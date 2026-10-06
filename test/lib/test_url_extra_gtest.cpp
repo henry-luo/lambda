@@ -544,7 +544,7 @@ TEST_F(UrlExtraTest, EncodeWithTable) {
     free(e);
 }
 
-// --- Phase 1 memory-safety regressions (vibe/Memory_Safety_Template3.md §3.7 fixes) ---
+// --- memory-safety audit regressions C1/H5 (vibe/Memory_Safety_Template.md §1.3, §5.1) ---
 
 // C1: url_normalize_path must bound every write to the caller's buffer capacity.
 // Pre-fix, the collapse-to-root case did strncpy(path, "/", 2047), smashing any

@@ -19,6 +19,7 @@
 #include "side_stack.h"
 #include "activation.h"
 #include "sysinfo.h"
+#include "template_state.h"
 #include "../core/binary.h"
 #include <math.h>
 #include <errno.h>
@@ -352,6 +353,7 @@ static char ascii_char_storage[128 * ASCII_CHAR_ENTRY_SIZE];
 static String* ascii_char_table[128];
 static bool ascii_char_table_initialized = false;
 
+#ifndef LAMBDA_NO_SYSINFO
 static void heap_configure_gc_force_schedule(gc_heap_t* gc) {
     if (!gc) return;
     const char* requested = getenv("LAMBDA_GC_FORCE_EVERY");
@@ -411,6 +413,8 @@ static void heap_configure_gc_poisoning(gc_heap_t* gc) {
         GC_FREED_POISON_BYTE, (void*)gc);
 }
 
+#endif
+
 // ============================================================================
 // Root-honesty witness (LR07-7 / LR08-3)
 // ============================================================================
@@ -438,6 +442,9 @@ static size_t lambda_root_witness_probe_count = 0;
 //                 temporaries. Tens of thousands of probes per script, so it
 //                 is opt-in rather than the default.
 int lambda_root_witness_level(void) {
+#ifdef LAMBDA_NO_MIR
+    return 0;
+#else
     static int cached = -1;
     if (cached < 0) {
         const char* value = getenv("LAMBDA_ROOT_WITNESS");
@@ -459,6 +466,7 @@ int lambda_root_witness_level(void) {
         }
     }
     return cached;
+#endif
 }
 
 bool lambda_root_witness_enabled(void) {
@@ -524,6 +532,7 @@ extern "C" void lambda_jit_root_witness(uint64_t raw, int64_t claimed_type_id,
 }
 
 void lambda_root_witness_dump(void) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!lambda_root_witness_enabled()) return;
     if (lambda_root_witness_violation_count == 0) {
         log_info("root-witness: %zu unrooted values probed, 0 violations",
@@ -533,6 +542,7 @@ void lambda_root_witness_dump(void) {
             lambda_root_witness_probe_count,
             lambda_root_witness_violation_count);
     }
+#endif
 }
 
 static void init_ascii_char_table() {
@@ -554,6 +564,14 @@ extern "C" String* get_ascii_char_string(unsigned char ch) {
     return ascii_char_table[ch];
 }
 
+static void mark_template_state_item(void* visitor_context, uint64_t item) {
+    gc_mark_item((gc_heap_t*)visitor_context, item);
+}
+
+extern "C" void heap_gc_visit_template_roots(gc_heap_t* gc) {
+    tmpl_state_visit_roots(gc, mark_template_state_item);
+}
+
 static void heap_finish_init(void) {
     // register the stable result root and all GC callbacks after the allocator
     // has initialized the heap's VM-owned extents.
@@ -562,9 +580,15 @@ static void heap_finish_init(void) {
     context->heap->last_error_root = 0;
     gc_register_root(context->heap->gc, &context->heap->last_error_root);
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
+#ifdef LAMBDA_NO_TASKS
+    gc_set_root_visitor(context->heap->gc, heap_gc_visit_template_roots);
+#else
     gc_set_root_visitor(context->heap->gc, activation_gc_visit_roots);
+#endif
+#ifndef LAMBDA_NO_SYSINFO
     heap_configure_gc_force_schedule(context->heap->gc);
     heap_configure_gc_poisoning(context->heap->gc);
+#endif
     context->heap->gc->vmap_trace = vmap_gc_trace;
     context->heap->gc->vmap_destroy = gc_destroy_virtual_object;
     context->heap->gc->error_trace = err_gc_trace;
@@ -1360,12 +1384,16 @@ void heap_destroy() {
         }
         // Finalizers abandoned this heap's parked activations; their stacks
         // are now idle in the pool.
+#ifndef LAMBDA_NO_TASKS
         activation_release_pool();
+#endif
         lambda_region_destroy_caches(context->heap);
         if (context->heap->array_rep_cert_by_contract)
             hashmap_free(context->heap->array_rep_cert_by_contract);
         // sys.* Mark data and its Input belong to this heap generation.
+#ifndef LAMBDA_NO_SYSINFO
         sysinfo_shutdown();
+#endif
         if (context->heap->pool) {
             mem_pool_destroy(context->heap->pool);
             context->heap->pool = NULL;
@@ -1468,6 +1496,7 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
 }
 
 void print_heap_entries() {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     // A document can retain millions of objects; logging each one during
     // teardown blocks window close unless the heap dump was requested.
@@ -1486,11 +1515,14 @@ void print_heap_entries() {
         idx++;
     }
 #endif
+#endif
 }
 
 void check_memory_leak() {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     gc_heap_t *gc = context->heap->gc;
     log_debug("gc objects at shutdown: %zu (all freed by pool_destroy)", gc->object_count);
+#endif
 #endif
 }

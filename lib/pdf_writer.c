@@ -18,6 +18,7 @@
 #include "mem_factory.h"
 #include "log.h"
 #include "math_utils.h"
+#include "utf.h"
 #include <string.h>
 #include <math.h>
 
@@ -35,7 +36,8 @@ typedef enum {
     PDF_OBJ_IMAGE,
     PDF_OBJ_CONTENT,
     PDF_OBJ_RESOURCES,
-    PDF_OBJ_INFO
+    PDF_OBJ_INFO,
+    PDF_OBJ_ANNOTATION
 } PdfObjType;
 
 // Base14 fonts mapping
@@ -104,6 +106,20 @@ typedef struct HPDF_Image_Rec {
 
 typedef struct HPDF_Image_Rec* HPDF_Image;
 
+typedef struct PdfLinkAnnotation {
+    int obj_id;
+    float left, bottom, right, top;
+    char* target;
+    struct PdfLinkAnnotation* next;
+} PdfLinkAnnotation;
+
+typedef struct PdfNamedDestination {
+    char* name;
+    HPDF_Page page;
+    float x, y;
+    struct PdfNamedDestination* next;
+} PdfNamedDestination;
+
 // Page structure
 struct HPDF_Page_Rec {
     struct HPDF_Doc_Rec* doc;
@@ -131,6 +147,8 @@ struct HPDF_Page_Rec {
     ArrayList* used_fonts;      // list of HPDF_Font_Rec*
     ArrayList* used_ext_gstates; // list of HPDF_ExtGState_Rec*
     ArrayList* used_images;     // list of HPDF_Image_Rec*
+    PdfLinkAnnotation* first_annotation;
+    PdfLinkAnnotation* last_annotation;
 };
 
 // Document structure
@@ -170,6 +188,7 @@ struct HPDF_Doc_Rec {
     char* author;
     char* subject;
     char* keywords;
+    PdfNamedDestination* destinations;
     
     // Error handling
     HPDF_ErrorHandler error_fn;
@@ -244,6 +263,48 @@ static void pdf_append_hex_byte(StrBuf* buf, uint8_t value) {
     static const char* hex = "0123456789ABCDEF";
     strbuf_append_char(buf, hex[(value >> 4) & 0x0f]);
     strbuf_append_char(buf, hex[value & 0x0f]);
+}
+
+// PDF document strings use UTF-16BE when UTF-8 cannot be represented as ASCII.
+static void pdf_append_document_string(StrBuf* buf, const char* text) {
+    bool ascii = true;
+    for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
+        if (*p >= 0x80) { ascii = false; break; }
+    }
+    if (ascii) {
+        pdf_escape_text(buf, text);
+        return;
+    }
+    strbuf_append_str(buf, "<FEFF");
+    size_t remaining = strlen(text);
+    const char* cursor = text;
+    while (remaining > 0) {
+        uint32_t codepoint = 0;
+        int consumed = utf8_decode(cursor, remaining, &codepoint);
+        if (consumed < 1) { codepoint = 0xFFFD; consumed = 1; }
+        if (codepoint > 0xFFFF) {
+            codepoint -= 0x10000;
+            uint16_t high = (uint16_t)(0xD800 + (codepoint >> 10));
+            uint16_t low = (uint16_t)(0xDC00 + (codepoint & 0x3FF));
+            pdf_append_hex_byte(buf, (uint8_t)(high >> 8));
+            pdf_append_hex_byte(buf, (uint8_t)high);
+            pdf_append_hex_byte(buf, (uint8_t)(low >> 8));
+            pdf_append_hex_byte(buf, (uint8_t)low);
+        } else {
+            pdf_append_hex_byte(buf, (uint8_t)(codepoint >> 8));
+            pdf_append_hex_byte(buf, (uint8_t)codepoint);
+        }
+        cursor += consumed;
+        remaining -= (size_t)consumed;
+    }
+    strbuf_append_char(buf, '>');
+}
+
+static PdfNamedDestination* pdf_find_destination(HPDF_Doc doc, const char* name) {
+    for (PdfNamedDestination* dest = doc->destinations; dest; dest = dest->next) {
+        if (strcmp(dest->name, name) == 0) return dest;
+    }
+    return NULL;
 }
 
 // check if font is already in used_fonts list
@@ -407,7 +468,9 @@ HPDF_STATUS HPDF_SetInfoAttr(HPDF_Doc doc, HPDF_InfoType type, const char* value
     }
     
     // use arena_strdup - previous value is in arena and will be freed with doc
-    *target = arena_strdup(doc->arena, value);
+    char* copy = arena_strdup(doc->arena, value);
+    if (!copy) return HPDF_ERROR_OUT_OF_MEMORY;
+    *target = copy;
     
     return HPDF_OK;
 }
@@ -479,6 +542,43 @@ HPDF_STATUS HPDF_Page_SetWidth(HPDF_Page page, float width) {
 HPDF_STATUS HPDF_Page_SetHeight(HPDF_Page page, float height) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
     page->height = height;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_AddLink(HPDF_Page page, float left, float bottom,
+                             float right, float top, const char* target) {
+    if (!page || !target || !*target || !isfinite(left) || !isfinite(bottom) ||
+        !isfinite(right) || !isfinite(top) || right <= left || top <= bottom)
+        return HPDF_ERROR_INVALID_PARAM;
+    PdfLinkAnnotation* link = (PdfLinkAnnotation*)arena_calloc(page->doc->arena,
+        sizeof(PdfLinkAnnotation));
+    if (!link) return HPDF_ERROR_OUT_OF_MEMORY;
+    link->target = arena_strdup(page->doc->arena, target);
+    if (!link->target) return HPDF_ERROR_OUT_OF_MEMORY;
+    link->obj_id = alloc_obj_id(page->doc);
+    link->left = left; link->bottom = bottom;
+    link->right = right; link->top = top;
+    if (page->last_annotation) page->last_annotation->next = link;
+    else page->first_annotation = link;
+    page->last_annotation = link;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Doc_AddNamedDestination(HPDF_Doc doc, const char* name,
+                                        HPDF_Page page, float x, float y) {
+    if (!doc || !name || !*name || !page || page->doc != doc ||
+        !isfinite(x) || !isfinite(y)) return HPDF_ERROR_INVALID_PARAM;
+    // The first occurrence defines an HTML id when one source spans pages.
+    if (pdf_find_destination(doc, name)) return HPDF_OK;
+    PdfNamedDestination* dest = (PdfNamedDestination*)arena_calloc(doc->arena,
+        sizeof(PdfNamedDestination));
+    if (!dest) return HPDF_ERROR_OUT_OF_MEMORY;
+    dest->name = arena_strdup(doc->arena, name);
+    if (!dest->name) return HPDF_ERROR_OUT_OF_MEMORY;
+    dest->page = page;
+    dest->x = x; dest->y = y;
+    dest->next = doc->destinations;
+    doc->destinations = dest;
     return HPDF_OK;
 }
 
@@ -977,6 +1077,25 @@ static int compare_objects(const void* a, const void* b) {
     return obj_a->id - obj_b->id;
 }
 
+static bool pdf_write_info_entry(FILE* file, const char* key, const char* value) {
+    if (!value) return true;
+    StrBuf* encoded = strbuf_new();
+    if (!encoded) return false;
+    pdf_append_document_string(encoded, value);
+    bool ok = fprintf(file, "/%s %s\n", key, encoded->str) >= 0;
+    strbuf_free(encoded);
+    return ok;
+}
+
+static PdfNamedDestination* pdf_link_destination(HPDF_Doc doc,
+                                                 const PdfLinkAnnotation* link) {
+    return link->target[0] == '#' ? pdf_find_destination(doc, link->target + 1) : NULL;
+}
+
+static bool pdf_link_is_resolved(HPDF_Doc doc, const PdfLinkAnnotation* link) {
+    return link->target[0] != '#' || pdf_link_destination(doc, link) != NULL;
+}
+
 HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     if (!doc || !filename) return HPDF_ERROR_INVALID_PARAM;
     
@@ -1001,33 +1120,14 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     offset = ftell(file);
     record_obj_offset(doc, doc->info_id, offset, PDF_OBJ_INFO);
     fprintf(file, "%d 0 obj\n<<\n", doc->info_id);
-    if (doc->creator) {
-        fprintf(file, "/Creator ");
-        StrBuf* escaped = strbuf_new();
-        pdf_escape_text(escaped, doc->creator);
-        fprintf(file, "%s\n", escaped->str);
-        strbuf_free(escaped);
-    }
-    if (doc->producer) {
-        fprintf(file, "/Producer ");
-        StrBuf* escaped = strbuf_new();
-        pdf_escape_text(escaped, doc->producer);
-        fprintf(file, "%s\n", escaped->str);
-        strbuf_free(escaped);
-    }
-    if (doc->title) {
-        fprintf(file, "/Title ");
-        StrBuf* escaped = strbuf_new();
-        pdf_escape_text(escaped, doc->title);
-        fprintf(file, "%s\n", escaped->str);
-        strbuf_free(escaped);
-    }
-    if (doc->author) {
-        fprintf(file, "/Author ");
-        StrBuf* escaped = strbuf_new();
-        pdf_escape_text(escaped, doc->author);
-        fprintf(file, "%s\n", escaped->str);
-        strbuf_free(escaped);
+    if (!pdf_write_info_entry(file, "Creator", doc->creator) ||
+        !pdf_write_info_entry(file, "Producer", doc->producer) ||
+        !pdf_write_info_entry(file, "Title", doc->title) ||
+        !pdf_write_info_entry(file, "Author", doc->author) ||
+        !pdf_write_info_entry(file, "Subject", doc->subject) ||
+        !pdf_write_info_entry(file, "Keywords", doc->keywords)) {
+        fclose(file);
+        return HPDF_ERROR_OUT_OF_MEMORY;
     }
     fprintf(file, ">>\nendobj\n\n");
     
@@ -1113,6 +1213,31 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         fwrite(page->content->str, 1, content_len, file);
         fprintf(file, "\nendstream\nendobj\n\n");
     }
+
+    // --- Link annotations ---
+    for (int i = 0; i < doc->pages->length; i++) {
+        HPDF_Page page = (HPDF_Page)doc->pages->data[i];
+        for (PdfLinkAnnotation* link = page->first_annotation; link; link = link->next) {
+            if (!pdf_link_is_resolved(doc, link)) continue;
+            offset = ftell(file);
+            record_obj_offset(doc, link->obj_id, offset, PDF_OBJ_ANNOTATION);
+            fprintf(file, "%d 0 obj\n<<\n/Type /Annot\n/Subtype /Link\n", link->obj_id);
+            fprintf(file, "/Rect [%.3f %.3f %.3f %.3f]\n/Border [0 0 0]\n",
+                link->left, link->bottom, link->right, link->top);
+            PdfNamedDestination* dest = pdf_link_destination(doc, link);
+            if (dest) {
+                fprintf(file, "/Dest [%d 0 R /XYZ %.3f %.3f null]\n",
+                    dest->page->obj_id, dest->x, dest->y);
+            } else {
+                StrBuf* uri = strbuf_new();
+                if (!uri) { fclose(file); return HPDF_ERROR_OUT_OF_MEMORY; }
+                pdf_append_document_string(uri, link->target);
+                fprintf(file, "/A << /S /URI /URI %s >>\n", uri->str);
+                strbuf_free(uri);
+            }
+            fprintf(file, ">>\nendobj\n\n");
+        }
+    }
     
     // --- Page Objects ---
     for (int i = 0; i < doc->pages->length; i++) {
@@ -1126,6 +1251,14 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         fprintf(file, "/Parent %d 0 R\n", doc->pages_id);
         fprintf(file, "/MediaBox [0 0 %.2f %.2f]\n", page->width, page->height);
         fprintf(file, "/Contents %d 0 R\n", page->contents_id);
+        bool has_annotations = false;
+        for (PdfLinkAnnotation* link = page->first_annotation; link; link = link->next) {
+            if (!pdf_link_is_resolved(doc, link)) continue;
+            if (!has_annotations) fprintf(file, "/Annots [");
+            fprintf(file, "%d 0 R ", link->obj_id);
+            has_annotations = true;
+        }
+        if (has_annotations) fprintf(file, "]\n");
         
         if (page->used_fonts->length > 0 ||
             page->used_ext_gstates->length > 0 ||

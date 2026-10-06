@@ -84,6 +84,38 @@ void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* sc
     matcher->scope_element = scope_element;
 }
 
+void css_scope_visit_roots(CssRule* rule, DomElement* element, SelectorMatcher* matcher,
+                           CssScopeRootVisitor visitor, void* context) {
+    if (!rule || rule->type != CSS_RULE_SCOPE || rule->data.conditional_rule.invalid_scope ||
+        !element || !matcher || !visitor) return;
+    DomElement* outer = matcher->scope_element;
+    DomElement* implicit = rule->stylesheet && rule->stylesheet->owner_element
+        ? dom_parent_element(rule->stylesheet->owner_element) : nullptr;
+    if (!implicit && element->doc) implicit = element->doc->root;
+    uint32_t hops = 0;
+    for (DomElement* root = element; root; root = dom_parent_element(root), hops++) {
+        CssSelectorGroup* start = rule->data.conditional_rule.scope_start;
+        matcher->scope_element = outer;
+        bool matches = start ? selector_matcher_matches_group(matcher, start, root, nullptr)
+                             : root == implicit;
+        if (matches) {
+            matcher->scope_element = root;
+            bool excluded = false;
+            CssSelectorGroup* end = rule->data.conditional_rule.scope_end;
+            for (DomElement* candidate = element; end && candidate && candidate != root;
+                 candidate = dom_parent_element(candidate)) {
+                if (selector_matcher_matches_group(matcher, end, candidate, nullptr)) {
+                    excluded = true;
+                    break;
+                }
+            }
+            if (!excluded) visitor(context, hops + 1);
+        }
+        if (root == outer) break;
+    }
+    matcher->scope_element = outer;
+}
+
 void selector_matcher_destroy(SelectorMatcher* matcher) {
     if (!matcher) {
         return;
@@ -827,6 +859,8 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
         case CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP:
         case CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER:
         case CSS_SELECTOR_PSEUDO_ELEMENT_MARKER:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER:
             // Pseudo-elements are matched at a higher level (compound/selector matching)
             // Here we just return true to not block the match
             return true;
@@ -926,6 +960,10 @@ static PseudoElementType get_pseudo_element_from_compound(CssCompoundSelector* c
                 return PSEUDO_ELEMENT_PLACEHOLDER;
             case CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON:
                 return PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL:
+                return PSEUDO_ELEMENT_FOOTNOTE_CALL;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER:
+                return PSEUDO_ELEMENT_FOOTNOTE_MARKER;
             default:
                 break;
         }
@@ -1846,6 +1884,7 @@ void selector_matcher_reset_statistics(SelectorMatcher* matcher) {
 }
 
 void selector_matcher_print_info(SelectorMatcher* matcher) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!matcher) {
         log_info("Selector Matcher: NULL");
         return;
@@ -1863,6 +1902,7 @@ void selector_matcher_print_info(SelectorMatcher* matcher) {
         double hit_rate = (double)matcher->cache_hits / (double)matcher->total_matches;
         log_info("  Cache hit rate: %.2f%%", hit_rate * 100.0);
     }
+#endif
 }
 
 // ============================================================================

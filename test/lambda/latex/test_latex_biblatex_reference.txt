@@ -1,0 +1,60 @@
+"numeric"
+[]
+"citations:"
+[true, true, true]
+"bibliography:"
+[true, true]
+"links:"
+true
+"note tie:"
+true
+"numeric-comp"
+[]
+"citations:"
+[true, true]
+"bibliography:"
+[true, true]
+"links:"
+true
+"note tie:"
+true
+"authoryear"
+[]
+"citations:"
+[true, true, true]
+"bibliography:"
+[true, true]
+"links:"
+true
+"note tie:"
+true
+"authoryear-comp"
+[]
+"citations:"
+[true, true]
+"bibliography:"
+[true, true]
+"links:"
+true
+"note tie:"
+true
+"alphabetic"
+[]
+"citations:"
+[true, true, true]
+"bibliography:"
+[true, true]
+"links:"
+true
+"note tie:"
+true
+"authortitle"
+[]
+"citations:"
+[true, true, true]
+"bibliography:"
+[true, true]
+"links:"
+true
+"note tie:"
+true

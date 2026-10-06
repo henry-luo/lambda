@@ -1,0 +1,38 @@
+@string{seriesname = "Modern" # " Studies"}
+@book{parent,
+  author={Ada Lovelace}, title={Collected Notes}, publisher={Archive Press},
+  location={London}, year={1843}, series=seriesname
+}
+@article{article,
+  author={Jean de La Fontaine}, title={On Computing}, journal={Math Review},
+  volume={4}, number={2}, pages={12--19}, date={2020-05}, doi={10.1000/article}
+}
+@inbook{inbook,
+  title={Chapter One}, booktitle={Collected Notes}, crossref={parent}, pages={1--8}
+}
+@incollection{collection,
+  author={Grace Hopper}, title={A Chapter}, booktitle={Collected Essays},
+  editor={Jane Smith}, publisher={Archive Press}, year={1960}, pages={20--30}
+}
+@inproceedings{proceedings,
+  author={Alan Turing}, title={A Talk}, booktitle={Logic Meeting}, year={1950}
+}
+@thesis{thesis,
+  author={Marie Curie}, title={Research Thesis}, type={PhD thesis},
+  institution={Paris University}, year={1903}
+}
+@report{report,
+  author={{The Example Consortium}}, title={Annual Report},
+  institution={Example Institute}, year={2021}
+}
+@online{online,
+  author={Bea Beta}, title={Online Archive}, url={https://example.org/archive},
+  urldate={2024-03-02}, date={2022}
+}
+@misc{misc,
+  author={Alex Example}, title={Miscellaneous Work}, year={2019},
+  isbn={978-1-2345-6789-0}
+}
+@unpublished{unpublished,
+  author={John Smith}, title={Unpublished Result}, year={2023}, eprint={arXiv:1234}
+}

@@ -69,7 +69,8 @@ typedef enum PseudoElementType {
     PSEUDO_ELEMENT_PLACEHOLDER,   // ::placeholder
     // keep existing numeric values stable because cascade routing uses them
     PSEUDO_ELEMENT_BACKDROP,      // ::backdrop
-    PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON // ::file-selector-button
+    PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON, // ::file-selector-button
+    PSEUDO_ELEMENT_FOOTNOTE_CALL, PSEUDO_ELEMENT_FOOTNOTE_MARKER
 } PseudoElementType;
 
 /**
@@ -180,6 +181,11 @@ void selector_matcher_set_case_sensitive_attributes(SelectorMatcher* matcher, bo
 
 // Bind :scope for an Element query. Pass NULL for stylesheet matching.
 void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* scope_element);
+
+typedef void (*CssScopeRootVisitor)(void* context, uint32_t scope_proximity);
+// visit every eligible root while binding :scope, then restore the caller's context.
+void css_scope_visit_roots(CssRule* rule, DomElement* element, SelectorMatcher* matcher,
+                           CssScopeRootVisitor visitor, void* context);
 
 /**
  * Set dynamic pseudo-state resolver

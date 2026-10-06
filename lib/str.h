@@ -153,6 +153,14 @@ size_t str_needle_find_pair(const StrNeedle* needle, const char* s, size_t s_len
 /** whether the needle occurs at `at` (fold-aware), for the SIMD tier */
 bool str_needle_equal_at(const StrNeedle* needle, const char* at);
 
+/** str_simd.c: the length of the run of ASCII letters and digits [A-Za-z0-9]
+ *  that starts [s, s+len), 16 bytes at a time (NEON, SSE2; scalar elsewhere).
+ *  *has_upper (may be NULL) says whether the run holds an A-Z. */
+size_t str_ascii_alnum_span(const char* s, size_t len, bool* has_upper);
+/** the length of the run of ASCII bytes other than letters and digits that
+ *  starts [s, s+len); it stops at a letter, a digit, or a byte >= 0x80 */
+size_t str_ascii_nonalnum_span(const char* s, size_t len);
+
 /** str_teddy.c: Teddy multi-literal search (GRP29). Finds the leftmost
  *  occurrence of any of up to STR_TEDDY_MAX literals in one pass: each
  *  literal's first 1–4 bytes are a fingerprint in one of 8 buckets, nibble

@@ -1,0 +1,33 @@
+<!doctype html>
+<style>
+  html, body { margin: 0; background: white; }
+  #box {
+    position: absolute; left: 10px; top: 40px; width: 40px; height: 20px;
+    background: red; transform-origin: 0 0; transform: none;
+    translate: 50% 10px; scale: 200%; cursor: col-resize;
+  }
+  #identity { margin-left: 120px; margin-top: 120px; width: 40px; height: 40px; scale: 1; }
+  #fixed { position: fixed; left: 5px; top: 5px; width: 10px; height: 10px; background: blue; }
+  #nested { position: absolute; left: 80px; top: 160px; width: 40px; height: 20px;
+    translate: 20px; rotate: 90deg; transform-origin: 0 0; }
+  #nested-child { width: 20px; height: 10px; scale: 2; background: green; transform-origin: 0 0; cursor: row-resize; }
+  #under, #zero { position: absolute; left: 180px; top: 60px; width: 20px; height: 20px; background: blue; }
+  #zero { z-index: 2; scale: 0; background: red; }
+  #invalid { position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+    --bad-length: 2foo; --bad-scale: 90deg;
+    translate: 20px; translate: var(--bad-length); scale: 2; scale: var(--bad-scale); }
+</style>
+<div id="box"></div>
+<div id="identity"><div id="fixed"></div></div>
+<div id="nested"><div id="nested-child"></div></div>
+<div id="under"></div><div id="zero"></div>
+<div id="invalid"></div>
+<script>
+  document.getElementById('box').addEventListener('click', () => {
+    const box = document.getElementById('box');
+    box.style.translate = '10px';
+    box.style.scale = '50%';
+    box.style.rotate = '.25turn';
+    document.getElementById('identity').style.scale = 'none';
+  });
+</script>

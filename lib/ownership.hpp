@@ -16,6 +16,10 @@ struct GcHeapDomain {};
 struct PoolDomain {};
 struct LayoutSessionDomain {};
 struct InputScratchDomain {};
+// Static storage in the program image (string literals, constant tables). A label,
+// not an allocation mechanism: it is never owned, never freed, and never a storage
+// domain, so it has no DomainTraits and only appears as a source in DomainOutlives.
+struct StaticDomain {};
 
 template<bool Value>
 struct BoolConstant {
@@ -41,10 +45,15 @@ template<> struct DomainOutlives<GcHeapDomain, GcHeapDomain> : TrueType {};
 template<> struct DomainOutlives<LayoutSessionDomain, LayoutSessionDomain> : TrueType {};
 template<> struct DomainOutlives<PoolDomain, LayoutSessionDomain> : TrueType {};
 template<> struct DomainOutlives<GcHeapDomain, LayoutSessionDomain> : TrueType {};
-template<> struct DomainOutlives<GcHeapDomain, PoolDomain> : TrueType {};
+// No GcHeapDomain -> PoolDomain edge (D4.5.2): the collector never traces pool or
+// arena storage, so a pool holder keeps a GC value only by copying it into its pool.
 template<> struct DomainOutlives<InputScratchDomain, InputScratchDomain> : TrueType {};
 template<> struct DomainOutlives<GcHeapDomain, InputScratchDomain> : TrueType {};
 template<> struct DomainOutlives<PoolDomain, InputScratchDomain> : TrueType {};
+template<> struct DomainOutlives<StaticDomain, GcHeapDomain> : TrueType {};
+template<> struct DomainOutlives<StaticDomain, PoolDomain> : TrueType {};
+template<> struct DomainOutlives<StaticDomain, LayoutSessionDomain> : TrueType {};
+template<> struct DomainOutlives<StaticDomain, InputScratchDomain> : TrueType {};
 
 template<class Domain> struct DomainTraits;
 
@@ -139,6 +148,15 @@ public:
 template<class T> using GcPtr = BorrowedPtr<T, GcHeapDomain>;
 template<class T> using PoolPtr = BorrowedPtr<T, PoolDomain>;
 template<class T> using SessionPtr = OwnedPtr<T, LayoutSessionDomain>;
+template<class T> using StaticPtr = BorrowedPtr<T, StaticDomain>;
+
+// Only for storage that lives as long as the process: a string literal or a constant
+// table. Interned names and Input/const-pool data are not static; they take their
+// owner's domain.
+template<class T>
+StaticPtr<T> static_borrow(T* p) {
+    return StaticPtr<T>(p);
+}
 
 template<class T, class Domain>
 BorrowedPtr<const T, Domain> borrow_const(BorrowedPtr<T, Domain> b) {
@@ -327,7 +345,7 @@ T* unsafe_release(OwnedPtr<T, D>& p) {
 // A pointer that is guaranteed non-null by construction. Pointer-sized, zero-cost,
 // decays to a raw T* at the C/MIR boundary. Its honesty rests on the allocator's
 // contract (the arena aborts/reclaims on chunk failure — see Memory_Context.md),
-// not on a per-call null check. See vibe/Memory_Safety_Template3.md §3.7.
+// not on a per-call null check. See vibe/Memory_Safety_Template.md §6.
 // ---------------------------------------------------------------------------
 
 template<class T>

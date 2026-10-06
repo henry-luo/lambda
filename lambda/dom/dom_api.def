@@ -690,6 +690,16 @@ DOM_OP(CORE, set_close_guard, window, 2, "pn(n: any, armed: bool) -> bool", dom_
 DOM_OP(CORE, request_window_close, window, 1, "pn(n: any) -> bool", dom_engine_request_window_close, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, set_window_title, window, 2, "pn(n: any, title: string) -> bool", dom_engine_set_window_title, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
+// appended so published catalog ordinals remain stable
+DOM_OP(CORE, rule_get_parent_style_sheet, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_parent_style_sheet, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_get_scope_start, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_scope_start, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_get_scope_end, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_scope_end, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_get_property_name, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_name, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_get_property_syntax, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_syntax, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_get_property_inherits, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_inherits, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_get_property_initial_value, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_initial_value, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, css_register_property, style, 1, "pn(definition: map) -> null", dom_core_css_register_property, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

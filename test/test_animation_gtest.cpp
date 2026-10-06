@@ -117,9 +117,40 @@ TEST_F(TimingFunctionTest, StepsJumpStart) {
     tf.steps.position = STEP_JUMP_START;
 
     // steps(4, jump-start): immediately jumps to 0.25
-    EXPECT_FLOAT_EQ(timing_function_eval(&tf, 0.0f), 0.0f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&tf, 0.0f), 0.25f);
     float v01 = timing_function_eval(&tf, 0.01f);
     EXPECT_FLOAT_EQ(v01, 0.25f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&tf, 0.25f), 0.5f);
+}
+
+TEST_F(TimingFunctionTest, StepsEndpointModesKeepInputIntervals) {
+    TimingFunction timing = {};
+    timing.type = TIMING_STEPS;
+    timing.steps.count = 4;
+    timing.steps.position = STEP_JUMP_BOTH;
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.0f), 0.2f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.24f), 0.2f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.25f), 0.4f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.25f, true), 0.2f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 1.0f), 1.0f);
+    timing.steps.position = STEP_JUMP_NONE;
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.0f), 0.0f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.25f), 1.0f / 3.0f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.74f), 2.0f / 3.0f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.75f), 1.0f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.75f, true), 2.0f / 3.0f);
+}
+
+TEST_F(TimingFunctionTest, StepsDelayBoundaryAndLargeCountsAvoidIntegerNarrowing) {
+    TimingFunction timing = {};
+    timing.type = TIMING_STEPS;
+    timing.steps.count = 4;
+    timing.steps.position = STEP_JUMP_START;
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.0f, true), 0.0f);
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.0f), 0.25f);
+    timing.steps.count = 4294967296.0;
+    timing.steps.position = STEP_JUMP_END;
+    EXPECT_FLOAT_EQ(timing_function_eval(&timing, 0.5f), 0.5f);
 }
 
 // ============================================================================
@@ -185,7 +216,7 @@ TEST_F(AnimationSchedulerTest, AddRemove) {
     EXPECT_FALSE(scheduler->has_active_animations);
 }
 
-// C3 regression (vibe/Memory_Safety_Template3.md §3.6): a full relayout frees the view
+// C3 regression (vibe/Memory_Safety_Template.md §1.3, §7): a full relayout frees the view
 // pool, so view-targeted CSS animations/transitions must be dropped (their View* targets
 // dangle) while surface-targeted GIF/Lottie animations survive.
 TEST_F(AnimationSchedulerTest, RemoveViewsDropsCssKeepsSurface) {
@@ -267,7 +298,83 @@ TEST_F(AnimationSchedulerTest, TickLinearAnimation) {
     // tick at t=1.5 → animation should finish
     animation_scheduler_tick(scheduler, 1.5, nullptr);
     EXPECT_EQ(g_finish_count, 1);
-    EXPECT_EQ(scheduler->count, 0);
+    // the CSS timeline remains attached so a later relayout cannot restart it.
+    EXPECT_EQ(scheduler->count, 1);
+    EXPECT_EQ(anim->play_state, ANIM_PLAY_FINISHED);
+    animation_scheduler_tick(scheduler, 2.0, nullptr);
+    EXPECT_EQ(g_finish_count, 1);
+}
+
+TEST_F(AnimationSchedulerTest, RetainedFinishedTimelineWithoutFillStaysInactive) {
+    g_finish_count = 0;
+    g_tick_count = 0;
+    AnimationInstance* anim = animation_instance_create(scheduler);
+    ASSERT_NE(anim, nullptr);
+    anim->duration = 1.0;
+    anim->iteration_count = 1.0;
+    anim->retain_after_finish = true;
+    anim->tick = test_tick_fn;
+    anim->on_finish = test_finish_fn;
+    animation_scheduler_add(scheduler, anim);
+    animation_scheduler_tick(scheduler, 2.0, nullptr);
+    EXPECT_EQ(anim->play_state, ANIM_PLAY_FINISHED);
+    EXPECT_EQ(scheduler->count, 1);
+    EXPECT_EQ(g_finish_count, 1);
+    EXPECT_FALSE(scheduler->has_active_animations);
+    animation_scheduler_tick(scheduler, 3.0, nullptr);
+    animation_instance_sample(anim, 3.0);
+    EXPECT_EQ(g_finish_count, 1);
+    EXPECT_EQ(g_tick_count, 0);
+}
+
+TEST_F(AnimationSchedulerTest, LargeCycleIndicesKeepAlternatingDirection) {
+    AnimationInstance* anim = animation_instance_create(scheduler);
+    ASSERT_NE(anim, nullptr);
+    anim->duration = 1.0;
+    anim->iteration_count = -1.0;
+    anim->direction = ANIM_DIR_ALTERNATE;
+    anim->timing.type = TIMING_LINEAR;
+    anim->tick = test_tick_fn;
+    animation_scheduler_add(scheduler, anim);
+    animation_scheduler_tick(scheduler, 4294967297.25, nullptr);
+    EXPECT_NEAR(g_last_tick_value, 0.75f, 0.001f);
+    EXPECT_DOUBLE_EQ(anim->current_iteration, 4294967297.0);
+}
+
+TEST_F(AnimationSchedulerTest, FractionalIterationEndsWithinFinalCycle) {
+    AnimationInstance* anim = animation_instance_create(scheduler);
+    ASSERT_NE(anim, nullptr);
+    anim->duration = 2.0;
+    anim->iteration_count = 1.5;
+    anim->fill_mode = ANIM_FILL_FORWARDS;
+    anim->direction = ANIM_DIR_ALTERNATE;
+    anim->timing.type = TIMING_LINEAR;
+    anim->tick = test_tick_fn;
+    animation_scheduler_add(scheduler, anim);
+    animation_scheduler_tick(scheduler, 2.5, nullptr);
+    EXPECT_NEAR(g_last_tick_value, 0.75f, 0.001f);
+    animation_scheduler_tick(scheduler, 3.0, nullptr);
+    EXPECT_NEAR(g_last_tick_value, 0.5f, 0.001f);
+    EXPECT_EQ(anim->play_state, ANIM_PLAY_FINISHED);
+    g_last_tick_value = -1.0f;
+    animation_instance_sample(anim, 4.0);
+    EXPECT_NEAR(g_last_tick_value, 0.5f, 0.001f);
+}
+
+TEST_F(AnimationSchedulerTest, RetainedPausedSampleKeepsNegativeDelayAndDirection) {
+    AnimationInstance* anim = animation_instance_create(scheduler);
+    ASSERT_NE(anim, nullptr);
+    anim->duration = 2.0;
+    anim->delay = -0.5;
+    anim->play_state = ANIM_PLAY_PAUSED;
+    anim->direction = ANIM_DIR_REVERSE;
+    anim->fill_mode = ANIM_FILL_BOTH;
+    anim->timing.type = TIMING_LINEAR;
+    anim->tick = test_tick_fn;
+    animation_scheduler_add(scheduler, anim);
+    animation_instance_sample(anim, 100.0);
+    EXPECT_NEAR(g_last_tick_value, 0.75f, 0.001f);
+    EXPECT_EQ(anim->play_state, ANIM_PLAY_PAUSED);
 }
 
 TEST_F(AnimationSchedulerTest, TickWithDelay) {
@@ -288,6 +395,7 @@ TEST_F(AnimationSchedulerTest, TickWithDelay) {
     // tick at t=0.25 — still in delay, no tick should happen
     animation_scheduler_tick(scheduler, 0.25, nullptr);
     EXPECT_EQ(g_tick_count, 0);
+    EXPECT_TRUE(scheduler->has_active_animations);
 
     // tick at t=1.0 — active_time = 0.5, progress = 0.5
     animation_scheduler_tick(scheduler, 1.0, nullptr);
@@ -467,7 +575,7 @@ TEST_F(AnimationSchedulerTest, EasedTick) {
     g_tick_count = 0;
 
     AnimationInstance* anim = animation_instance_create(scheduler);
-    anim->type = ANIM_CSS_ANIMATION;
+    anim->type = ANIM_CSS_TRANSITION;
     anim->duration = 1.0;
     anim->start_time = 0.0;
     anim->delay = 0.0;
@@ -481,6 +589,17 @@ TEST_F(AnimationSchedulerTest, EasedTick) {
     animation_scheduler_tick(scheduler, 0.25, nullptr);
     EXPECT_LT(g_last_tick_value, 0.25f);
     EXPECT_GT(g_last_tick_value, 0.0f);
+}
+
+TEST_F(AnimationSchedulerTest, CssTickReceivesUneasedIterationProgress) {
+    AnimationInstance* animation = animation_instance_create(scheduler);
+    animation->type = ANIM_CSS_ANIMATION;
+    animation->duration = 1.0;
+    animation->timing = TIMING_EASE_IN;
+    animation->tick = test_tick_fn;
+    animation_scheduler_add(scheduler, animation);
+    animation_scheduler_tick(scheduler, .25, nullptr);
+    EXPECT_FLOAT_EQ(g_last_tick_value, .25f);
 }
 
 TEST_F(AnimationSchedulerTest, MultipleAnimations) {

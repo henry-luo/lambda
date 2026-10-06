@@ -13507,6 +13507,13 @@ JS_RUNTIME_ARGS_BODY(js_intrinsic_css_supports_body,
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_escape_body,
     jube_internal_host_api()->dom_catalog->css_escape(argc > 0 ? args[0] : ItemNull))
 
+Item js_intrinsic_css_register_property_body(Item callee, Item this_value, Item* args,
+        int argc, uint64_t* result_home) {
+    (void)callee; (void)this_value; (void)result_home;
+    JS_RETURN_IF_ERROR(jube_internal_host_api()->dom_catalog->css_register_property(js_intrinsic_arg(args, argc, 0)));
+    return make_js_undefined();
+}
+
 #undef JS_RUNTIME_BINARY_BODY
 #undef JS_RUNTIME_THIS_UNARY_BODY
 #undef JS_RUNTIME_UNARY_BODY
@@ -29536,17 +29543,20 @@ static Item js_iterator_cache_next_method(Item iterator) {
     return item_is_error(set_result) ? set_result : ItemNull;
 }
 
-static Item js_iterator_return_checked(Item iterator, bool cache_next,
+extern "C" Item js_iterator_return_checked(Item iterator, bool cache_next,
         const char* error_message) {
-    TypeId type = get_type_id(iterator);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && !js_is_js_array(iterator)) {
+    RootFrame roots(1);
+    Rooted<Item> iterator_root(roots, iterator);
+    TypeId type = get_type_id(iterator_root.get());
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && !js_is_js_array(iterator_root.get())) {
         return js_throw_type_error(error_message);
     }
     if (cache_next) {
-        Item status = js_iterator_cache_next_method(iterator);
+        // A next getter can collect; return the rooted iterator after that callback.
+        Item status = js_iterator_cache_next_method(iterator_root.get());
         if (item_is_error(status)) return status;
     }
-    return iterator;
+    return iterator_root.get();
 }
 
 static Item js_get_iterator_impl(Item iterable, bool cache_next) {

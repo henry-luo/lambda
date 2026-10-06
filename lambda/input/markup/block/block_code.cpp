@@ -410,6 +410,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
             String* math_str = parser->builder.createString(sb->str->chars, sb->length);
             Item math_item = {.item = s2it(math_str)};
             list_push((List*)math, math_item);
+            finish_math_element(parser, math, sb->str->chars, sb->length, "ascii");
 
             return Item{.item = (uint64_t)math};
         }

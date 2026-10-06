@@ -185,3 +185,8 @@ Potential improvements to explore:
 ---
 
 This demonstrates Lambda Script's capability to implement sophisticated document processing algorithms while maintaining clean, functional code structure.
+
+## Interactive Tetris
+
+Run `./lambda.exe view test/demo/tetris/tetris.ls` for a native, interactive Tetris
+game written in Lambda. See [TETRIS.md](tetris/TETRIS.md) for controls and test commands.

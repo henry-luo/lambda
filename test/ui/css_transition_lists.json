@@ -1,0 +1,20 @@
+{
+  "name": "Transition lists preserve late properties and cycle each timing list",
+  "html": "test/ui/css_transition_lists.html",
+  "viewport": {"width": 240, "height": 120},
+  "events": [
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "transition-duration", "equals": "2s, 4s"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "transition-delay", "equals": "0s, 0s"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "transition-property", "equals": "first, second, third, fourth, fifth, sixth, seventh, eighth, opacity, width"},
+    {"type": "mouse_move", "target": {"selector": "#box"}},
+    {"type": "assert_state", "target": {"selector": "#box"}, "state": ":hover", "value": true},
+    {"type": "advance_time", "ms": 500, "steps": 10},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "opacity", "equals": "0.75", "animated": true, "tolerance": 0.02},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "width", "equals": "90px", "animated": true, "tolerance": 1},
+    {"type": "advance_time", "ms": 1600, "steps": 16},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "opacity", "equals": "0", "animated": true, "tolerance": 0.01},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "width", "equals": "122px", "animated": true, "tolerance": 1},
+    {"type": "advance_time", "ms": 2000, "steps": 20},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "width", "equals": "160px", "animated": true, "tolerance": 0.1}
+  ]
+}

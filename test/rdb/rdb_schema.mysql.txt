@@ -1,0 +1,6 @@
+["id*", "title", "author_id", "price?", "published?", "metadata?", "cover?"]
+["int", "varchar(200)", "int", "decimal(8,2)", "datetime", "json", "blob"]
+["author_id -> authors.id"]
+["author_id", "PRIMARY!", "title!"]
+["trg_books_before_insert: BEFORE INSERT"]
+5

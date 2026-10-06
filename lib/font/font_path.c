@@ -14,34 +14,52 @@ static bool font_path_forward(void* context, FontPathCommand command, const floa
     return result;
 }
 
-// expose logical, baseline-relative outlines without retaining backend objects.
-bool font_visit_glyph_path(FontHandle* handle, uint32_t codepoint,
-    FontPathVisitFn visitor, void* context, Arena* arena) {
-    if (!handle || !visitor || handle->resources_destroyed) return false;
-    FontPathForwarder forward = {visitor, context, false, false};
-#ifdef __APPLE__
-    if (handle->ct_raster_ref) {
-        bool result = font_rasterize_ct_visit_path(handle->ct_raster_ref, codepoint, font_path_forward, &forward);
-        // aborting a visitor is not a missing backend outline.
-        if ((result && forward.visited) || forward.aborted) return result;
-    }
-#endif
+static bool font_visit_glyf_index_path(FontHandle* handle, uint32_t glyph,
+    FontPathForwarder* forward, Arena* arena) {
     if (!handle->tables || !arena) return false;
     // missing outline tables identify bitmap/CFF formats, not an empty space glyph.
     if (!font_tables_find(handle->tables, FONT_TAG('g','l','y','f'), NULL) ||
         !font_tables_find(handle->tables, FONT_TAG('l','o','c','a'), NULL)) return false;
     HeadTable* head = font_tables_get_head(handle->tables);
     if (!head || !head->units_per_em) return false;
-    uint32_t glyph = font_get_glyph_index(handle, codepoint);
-    if (!glyph || glyph > UINT16_MAX) return false;
     GlyphOutline outline = {0};
     if (glyf_get_outline(handle->tables, (uint16_t)glyph, &outline, arena) != 0) return false;
     // bitmap faces may carry empty glyf stubs; coverage determines their actual ink.
-    if (outline.num_contours == 0) return false;
+    if (outline.num_contours == 0) return true;
     float scale = handle->size_px / (float)head->units_per_em;
-    bool result = glyf_visit_outline(&outline, scale, -scale, 0.0f, 0.0f, font_path_forward, &forward);
+    bool result = glyf_visit_outline(&outline, scale, -scale, 0.0f, 0.0f, font_path_forward, forward);
     // empty outline stubs must fall through to the glyph bitmap.
-    return result && forward.visited;
+    return result && forward->visited;
+}
+
+// expose logical, baseline-relative outlines without retaining backend objects.
+bool font_visit_glyph_index_path(FontHandle* handle, uint32_t glyph,
+    FontPathVisitFn visitor, void* context, Arena* arena) {
+    if (!handle || !visitor || handle->resources_destroyed || glyph > UINT16_MAX) return false;
+    FontPathForwarder forward = {visitor, context, false, false};
+#ifdef __APPLE__
+    if (handle->ct_raster_ref) {
+        bool result = font_rasterize_ct_visit_index_path(handle->ct_raster_ref, glyph, font_path_forward, &forward);
+        if (result || forward.aborted) return result;
+    }
+#endif
+    return font_visit_glyf_index_path(handle, glyph, &forward, arena);
+}
+
+bool font_visit_glyph_path(FontHandle* handle, uint32_t codepoint,
+    FontPathVisitFn visitor, void* context, Arena* arena) {
+    if (!handle || !visitor || handle->resources_destroyed) return false;
+    FontPathForwarder forward = {visitor, context, false, false};
+#ifdef __APPLE__
+    // Unicode callers use the native cmap even when parsed font tables are absent.
+    if (handle->ct_raster_ref) {
+        bool result = font_rasterize_ct_visit_path(handle->ct_raster_ref, codepoint, font_path_forward, &forward);
+        if ((result && forward.visited) || forward.aborted) return result;
+    }
+#endif
+    uint32_t glyph = font_get_glyph_index(handle, codepoint);
+    if (!glyph || glyph > UINT16_MAX) return false;
+    return font_visit_glyf_index_path(handle, glyph, &forward, arena) && forward.visited;
 }
 
 static bool font_bitmap_covered(const GlyphBitmap* bitmap, int x, int y) {

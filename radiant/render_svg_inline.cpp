@@ -694,15 +694,25 @@ static CssValue* svg_parse_property_value(Pool* pool, const char* text, const ch
 
 typedef struct {
     SvgStyleContext* style;
-    DomElement* element;
     const SvgDomStyleScope* scope = nullptr;
 } SvgVariableContext;
 
-static const CssValue* svg_lookup_variable(void* context, const char* name) {
+static const CssValue* svg_lookup_variable(void* context, DomElement* element,
+                                           const char* name, DomElement** owner) {
+    if (owner) *owner = nullptr;
     SvgVariableContext* variables = (SvgVariableContext*)context;
     SvgStyleContext* style = variables->style;
     DomDocument* doc = style->document;
-    for (DomNode* node = variables->element; node && node->is_element();
+    if (strncmp(name, "--", 2) != 0) {
+        // the dedicated var parser omits dashes; declaration queries require the full name.
+        size_t length = strlen(name);
+        char* qualified = (char*)pool_alloc(style->pool, length + 3);
+        if (!qualified) return nullptr;
+        qualified[0] = qualified[1] = '-';
+        memcpy(qualified + 2, name, length + 1);
+        name = qualified;
+    }
+    for (DomNode* node = element; node && node->is_element();
         node = svg_dom_style_parent(node, variables->scope)) {
         SvgStyleEntry* entry = svg_style_entry(style, dom_element_to_element(node->as_element()));
         DomElement* current = node->as_element();
@@ -714,17 +724,24 @@ static const CssValue* svg_lookup_variable(void* context, const char* name) {
         CssDeclaration declaration = {};
         if (css_select_element_declaration(style->engine, style->matcher, current,
             doc->stylesheets, (size_t)doc->stylesheet_count, inline_declarations,
-            inline_count, name, &declaration)) return declaration.value;
+            inline_count, name, &declaration)) {
+            CssEnum keyword = declaration.value && declaration.value->type == CSS_VALUE_TYPE_KEYWORD
+                ? declaration.value->data.keyword : CSS_VALUE_NONE;
+            if (keyword == CSS_VALUE_INITIAL) return nullptr;
+            if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) continue;
+            if (owner) *owner = current;
+            return declaration.value;
+        }
     }
     return nullptr;
 }
 
 static const char* svg_resolve_property_declaration(SvgStyleContext* style, DomElement* element,
     const char* name, CssDeclaration* declaration, const SvgDomStyleScope* scope = nullptr) {
-    SvgVariableContext variables = {style, element, scope};
+    SvgVariableContext variables = {style, scope};
     const CssValue* authored = declaration->value;
     declaration->value = (CssValue*)css_resolve_var_value(
-        style->pool, authored, svg_lookup_variable, &variables);
+        style->pool, authored, svg_lookup_variable, &variables, element);
     // layout, DOM geometry and painting must all project the same resolved CSS tokens.
     if (declaration->value != authored) {
         declaration->value_text = nullptr; declaration->value_text_len = 0;
@@ -7257,21 +7274,10 @@ ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bo
     bounds.right = ceilf(bounds.right); bounds.bottom = ceilf(bounds.bottom);
     DomDocument* doc = subscene->ui_context ? subscene->ui_context->document : nullptr;
     MemContext* memory = doc ? (MemContext*)doc->services.mem_ctx : nullptr;
-    // D4.2.6: the shared surface allocator checks physical extents and coordinator pressure before casts.
-    ImageSurface* surface = render_surface_create_budgeted(memory, bounds.right - bounds.left, bounds.bottom - bounds.top);
-    if (surface && dl_validate_or_log(&dl, "svg_export_snapshot")) {
-        RdtVector vec = {}; rdt_vector_init(&vec, (uint32_t*)surface->pixels, surface->width, surface->height, surface->width);
-        ScratchArena scratch = {}; mem_scratch_init(memory, &scratch, arenas.scratch_arena,
-            MEM_ROLE_RENDER, "render.svg.export.replay");
-        dl_replay_tile(&dl, &vec, surface, &scratch, bounds.left, bounds.top,
-            (float)surface->width, (float)surface->height, scale);
-        rdt_vector_flush_batch(&vec); rdt_vector_destroy(&vec); scratch_release(&scratch);
-        // PNG/PDF image payloads use straight channels; vector replay writes premultiplied ABGR.
-        for (size_t i = 0, count = (size_t)surface->width * (size_t)surface->height; i < count; i++)
-            ((uint32_t*)surface->pixels)[i] = render_pixel_unpremultiply_abgr(((uint32_t*)surface->pixels)[i]);
-        surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
+    ImageSurface* surface = render_display_list_snapshot(&dl, memory, bounds, scale);
+    if (surface) {
         *logical_bounds = {bounds.left / scale, bounds.top / scale, bounds.right / scale, bounds.bottom / scale};
-    } else if (surface) { image_surface_destroy(surface); surface = nullptr; }
+    }
     dl_destroy(&dl); arenas.destroy();
     return surface;
 }
@@ -7790,7 +7796,7 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
     bool viewport_clip = !overflow || strcmp(overflow, "visible") != 0;
     // visible SVG ink may extend beyond a viewport that lies outside the paint clip.
     if (viewport_clip && !rdcon->has_transform &&
-        !(view->transform && view->transformp()->functions) &&
+        !transform_has_functions(view->transform) &&
         !view_geometry_bounds_intersect(view_geometry_rect_to_bound(content_rect), rdcon->block.clip)) return;
 
     Element* svg_elem = dom_element_to_element(dom_elem);

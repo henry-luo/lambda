@@ -7,6 +7,7 @@
 #include "../../lambda/input/css/css_parser.hpp"
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
+#include "../../lambda/input/css/css_formatter.hpp"
 
 extern "C" {
 #include "../../lib/mempool.h"
@@ -35,6 +36,7 @@ protected:
     void SetUp() override {
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
+        ASSERT_TRUE(css_property_system_init(pool));
 
         input = Input::create(pool);
         ASSERT_NE(input, nullptr);
@@ -53,6 +55,7 @@ protected:
         if (doc) {
             dom_document_destroy(doc);
         }
+        css_property_system_cleanup();
         if (pool) {
             pool_destroy(pool);
         }
@@ -62,11 +65,18 @@ protected:
     CssDeclaration* create_declaration(CssPropertyCode prop_id, const char* value,
                                       uint8_t ids = 0, uint8_t classes = 0,
                                       uint8_t elements = 0) {
-        char* val = (char*)pool_alloc(pool, strlen(value) + 1);
-        strcpy(val, value);
-
-        CssSpecificity spec = css_specificity_create(0, ids, classes, elements, false);
-        return css_declaration_create(prop_id, val, spec, CSS_ORIGIN_AUTHOR, pool);
+        const char* property = css_property_spelling_from_code(prop_id);
+        if (!property) return nullptr;
+        size_t length = strlen(property) + strlen(value) + 2;
+        char* text = (char*)pool_alloc(pool, length + 1);
+        if (!text) return nullptr;
+        snprintf(text, length + 1, "%s: %s", property, value);
+        // the cascade validates CssValue trees; raw string pointers are not values.
+        CssDeclaration* declaration = css_parse_declaration_text(text, length, pool);
+        if (!declaration) return nullptr;
+        declaration->specificity = css_specificity_create(0, ids, classes, elements, false);
+        declaration->origin = CSS_ORIGIN_AUTHOR;
+        return declaration;
     }
 
     // Helper: Create universal selector (simple selector version)
@@ -176,6 +186,34 @@ TEST_F(CssStyleApplicationTest, AllRevertExposesUserAgentDeclaration) {
     EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_WIDTH), nullptr);
 }
 
+TEST_F(CssStyleApplicationTest, ComponentRollbackSharesShorthandLonghandAndLogicalSources) {
+    StyleTree* tree = style_tree_create(pool);
+    ASSERT_NE(tree, nullptr);
+    const CssPropertyCode sources[] = {CSS_PROPERTY_MARGIN, CSS_PROPERTY_MARGIN_LEFT,
+        CSS_PROPERTY_MARGIN_INLINE_START, CSS_PROPERTY_ALL};
+    const char* values[] = {"margin:3px!important", "margin-left:5px!important",
+        "margin-inline-start:revert-layer!important", "all:revert!important"};
+    CssDeclaration* declarations[4] = {};
+    for (int index = 0; index < 4; index++) {
+        declarations[index] = css_parse_declaration_text(values[index], strlen(values[index]), pool);
+        ASSERT_NE(declarations[index], nullptr);
+        declarations[index]->origin = CSS_ORIGIN_AUTHOR;
+        declarations[index]->layer_order = index == 0 ? 2 : 1;
+    }
+    ASSERT_NE(style_tree_apply_declaration(tree, declarations[0]), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, declarations[1]), nullptr);
+    EXPECT_EQ(style_tree_get_component_declaration(tree, sources, 4), declarations[1]);
+    ASSERT_NE(style_tree_apply_declaration(tree, declarations[2]), nullptr);
+    EXPECT_EQ(style_tree_get_component_declaration(tree, sources, 4), declarations[0]);
+    ASSERT_NE(style_tree_apply_declaration(tree, declarations[3]), nullptr);
+    EXPECT_EQ(style_tree_get_component_declaration(tree, sources, 4), nullptr);
+    CssDeclaration* ua = css_parse_declaration_text("margin-left:7px", 15, pool);
+    ASSERT_NE(ua, nullptr);
+    ua->origin = CSS_ORIGIN_USER_AGENT;
+    ASSERT_NE(style_tree_apply_declaration(tree, ua), nullptr);
+    EXPECT_EQ(style_tree_get_component_declaration(tree, sources, 4), ua);
+}
+
 // ============================================================================
 // Issue 1: Universal Selector Tests
 // ============================================================================
@@ -211,7 +249,7 @@ TEST_F(CssStyleApplicationTest, UniversalSelector_AppliesMarginReset) {
     // Verify margin was applied
     CssDeclaration* retrieved = dom_element_get_specified_value(body, CSS_PROPERTY_MARGIN);
     ASSERT_NE(retrieved, nullptr) << "Margin property should be set by universal selector";
-    EXPECT_STREQ((char*)retrieved->value, "0");
+    EXPECT_STREQ(css_serialize_declaration_value(retrieved, pool), "0");
 }
 
 TEST_F(CssStyleApplicationTest, UniversalSelector_OverriddenByTypeSelector) {
@@ -220,7 +258,7 @@ TEST_F(CssStyleApplicationTest, UniversalSelector_OverriddenByTypeSelector) {
     // body { margin: 20px; } - specificity (0,0,0,1)
 
     CssDeclaration* universal_margin = create_declaration(CSS_PROPERTY_MARGIN, "0", 0, 0, 0);
-    CssDeclaration* body_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 0, 1);
+    CssDeclaration* body_margin = create_declaration(CSS_PROPERTY_MARGIN, "20px", 0, 0, 1);
 
     // Create body element
     DomElement* body = DomElement::create(doc, "body", nullptr);
@@ -236,7 +274,7 @@ TEST_F(CssStyleApplicationTest, UniversalSelector_OverriddenByTypeSelector) {
     ASSERT_NE(retrieved, nullptr);
     EXPECT_EQ(retrieved, body_margin)
         << "Body selector (0,0,0,1) should override universal selector (0,0,0,0)";
-    EXPECT_STREQ((char*)retrieved->value, "20");
+    EXPECT_STREQ(css_serialize_declaration_value(retrieved, pool), "20px");
 }
 
 // ============================================================================
@@ -268,7 +306,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_DoesNotMatchWithoutClass) {
 
 TEST_F(CssStyleApplicationTest, ClassSelector_AppliesMargin) {
     // CSS: .box { margin: 20px; }
-    CssDeclaration* margin_decl = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
+    CssDeclaration* margin_decl = create_declaration(CSS_PROPERTY_MARGIN, "20px", 0, 1, 0);
 
     // Create element with class
     DomElement* div = DomElement::create(doc, "div", nullptr);
@@ -280,7 +318,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_AppliesMargin) {
     // Verify margin was applied
     CssDeclaration* retrieved = dom_element_get_specified_value(div, CSS_PROPERTY_MARGIN);
     ASSERT_NE(retrieved, nullptr) << "Margin should be set by .box class selector";
-    EXPECT_STREQ((char*)retrieved->value, "20");
+    EXPECT_STREQ(css_serialize_declaration_value(retrieved, pool), "20px");
 }
 
 TEST_F(CssStyleApplicationTest, ClassSelector_OverridesUniversalSelector) {
@@ -289,7 +327,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_OverridesUniversalSelector) {
     // .box { margin: 20px; } - (0,0,1,0)
 
     CssDeclaration* universal_margin = create_declaration(CSS_PROPERTY_MARGIN, "0", 0, 0, 0);
-    CssDeclaration* class_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
+    CssDeclaration* class_margin = create_declaration(CSS_PROPERTY_MARGIN, "20px", 0, 1, 0);
 
     // Create element with class
     DomElement* div = DomElement::create(doc, "div", nullptr);
@@ -304,7 +342,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_OverridesUniversalSelector) {
     ASSERT_NE(retrieved, nullptr);
     EXPECT_EQ(retrieved, class_margin)
         << "Class selector (0,0,1,0) should override universal selector (0,0,0,0)";
-    EXPECT_STREQ((char*)retrieved->value, "20");
+    EXPECT_STREQ(css_serialize_declaration_value(retrieved, pool), "20px");
 }
 
 // ============================================================================
@@ -322,7 +360,7 @@ TEST_F(CssStyleApplicationTest, Baseline803_UniversalAndClassSelectors) {
     CssDeclaration* universal_margin = create_declaration(CSS_PROPERTY_MARGIN, "0", 0, 0, 0);
     CssDeclaration* universal_padding = create_declaration(CSS_PROPERTY_PADDING, "0", 0, 0, 0);
     CssDeclaration* body_font = create_declaration(CSS_PROPERTY_FONT_FAMILY, "Arial, sans-serif", 0, 0, 1);
-    CssDeclaration* box_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
+    CssDeclaration* box_margin = create_declaration(CSS_PROPERTY_MARGIN, "20px", 0, 1, 0);
 
     // Create DOM: <body><div class="box"></div></body>
     DomElement* body = DomElement::create(doc, "body", nullptr);
@@ -338,7 +376,7 @@ TEST_F(CssStyleApplicationTest, Baseline803_UniversalAndClassSelectors) {
     // Verify body has margin: 0 (from universal selector)
     CssDeclaration* body_margin_retrieved = dom_element_get_specified_value(body, CSS_PROPERTY_MARGIN);
     ASSERT_NE(body_margin_retrieved, nullptr) << "Body should have margin property from universal selector";
-    EXPECT_STREQ((char*)body_margin_retrieved->value, "0")
+    EXPECT_STREQ(css_serialize_declaration_value(body_margin_retrieved, pool), "0")
         << "Body margin should be 0 from universal selector, not 20";
 
     // Apply rules to div.box
@@ -350,7 +388,7 @@ TEST_F(CssStyleApplicationTest, Baseline803_UniversalAndClassSelectors) {
     ASSERT_NE(box_margin_retrieved, nullptr) << "Div.box should have margin property";
     EXPECT_EQ(box_margin_retrieved, box_margin)
         << "Div.box margin should be from .box class declaration";
-    EXPECT_STREQ((char*)box_margin_retrieved->value, "20")
+    EXPECT_STREQ(css_serialize_declaration_value(box_margin_retrieved, pool), "20px")
         << "Div.box margin should be 20px from .box class, not 0 from universal";
 }
 
@@ -364,8 +402,8 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_LaterRuleSameSpecificity) {
     // .box { margin: 20px; }
     // Later rule with same specificity should win
 
-    CssDeclaration* margin1 = create_declaration(CSS_PROPERTY_MARGIN, "10", 0, 1, 0);
-    CssDeclaration* margin2 = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
+    CssDeclaration* margin1 = create_declaration(CSS_PROPERTY_MARGIN, "10px", 0, 1, 0);
+    CssDeclaration* margin2 = create_declaration(CSS_PROPERTY_MARGIN, "20px", 0, 1, 0);
 
     DomElement* div = DomElement::create(doc, "div", nullptr);
     div->add_class("box");
@@ -381,7 +419,7 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_LaterRuleSameSpecificity) {
     ASSERT_NE(retrieved, nullptr);
     EXPECT_EQ(retrieved, margin2)
         << "Later declaration with same specificity should win";
-    EXPECT_STREQ((char*)retrieved->value, "20");
+    EXPECT_STREQ(css_serialize_declaration_value(retrieved, pool), "20px");
 }
 
 TEST_F(CssStyleApplicationTest, CascadeOrder_SpecificityOverridesSourceOrder) {
@@ -390,8 +428,8 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_SpecificityOverridesSourceOrder) {
     // * { margin: 20px; }         /* specificity: (0,0,0,0) */
     // Higher specificity wins even if it comes first
 
-    CssDeclaration* class_margin = create_declaration(CSS_PROPERTY_MARGIN, "10", 0, 1, 0);
-    CssDeclaration* universal_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 0, 0);
+    CssDeclaration* class_margin = create_declaration(CSS_PROPERTY_MARGIN, "10px", 0, 1, 0);
+    CssDeclaration* universal_margin = create_declaration(CSS_PROPERTY_MARGIN, "20px", 0, 0, 0);
 
     DomElement* div = DomElement::create(doc, "div", nullptr);
     div->add_class("box");
@@ -407,7 +445,7 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_SpecificityOverridesSourceOrder) {
     ASSERT_NE(retrieved, nullptr);
     EXPECT_EQ(retrieved, class_margin)
         << "Class selector should win over universal even when applied first";
-    EXPECT_STREQ((char*)retrieved->value, "10");
+    EXPECT_STREQ(css_serialize_declaration_value(retrieved, pool), "10px");
 }
 
 // ============================================================================
@@ -511,7 +549,7 @@ TEST_F(CssStyleApplicationTest, MultipleElements_UniversalSelectorAffectsAll) {
         CssDeclaration* retrieved = dom_element_get_specified_value(elements[i], CSS_PROPERTY_MARGIN);
         ASSERT_NE(retrieved, nullptr)
             << "Element " << i << " should have margin from universal selector";
-        EXPECT_STREQ((char*)retrieved->value, "0");
+        EXPECT_STREQ(css_serialize_declaration_value(retrieved, pool), "0");
     }
 }
 

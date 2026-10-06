@@ -20,12 +20,15 @@
 #include <string.h>
 #include <time.h>
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
 // Monotonic nanosecond clock for the mark-phase tuning counter.
 static inline uint64_t gc_now_nanos(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec;
 }
+
+#endif
 
 // Hosts may batch native-lifetime work released by weak callbacks. The weak
 // default keeps the collector independent when no host integration is linked.
@@ -260,6 +263,7 @@ static int gc_external_kind_index(int kind) {
         ? kind : GC_EXTERNAL_KIND_OTHER;
 }
 
+#ifndef LAMBDA_NO_SYSINFO
 static void gc_dump_tune_stats(const gc_heap_t* gc) {
     if (!gc || !getenv("LAMBDA_GC_STATS")) return;
     const gc_tune_stats_t* t = &gc->tune;
@@ -290,6 +294,8 @@ static void gc_dump_tune_stats(const gc_heap_t* gc) {
         gc->external.bytes_since_collection,
         (unsigned long long)gc->external.pressure_collections);
 }
+
+#endif
 
 // ============================================================================
 // Bump-Pointer Block Management
@@ -604,7 +610,9 @@ void gc_heap_destroy(gc_heap_t* gc) {
         gc->ephemerons = NULL;
     }
 
+#ifndef LAMBDA_NO_SYSINFO
     gc_dump_tune_stats(gc);
+#endif
     if (gc->large_objects.slots) {
         mem_free(gc->large_objects.slots);
         gc->large_objects.slots = NULL;
@@ -672,6 +680,7 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // a collection that cost `cost_ns` bought `mutator_ns` of mutator time. Grow
 // the trigger x4 while the collector's share of wall time exceeds 50%, x2
 // while it exceeds 10%; otherwise return `floor` unchanged.
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
 static size_t gc_paced_floor(size_t previous, uint64_t cost_ns, uint64_t mutator_ns,
                              size_t floor, size_t cap) {
     if (cost_ns * 2 > mutator_ns) {
@@ -682,6 +691,8 @@ static size_t gc_paced_floor(size_t previous, uint64_t cost_ns, uint64_t mutator
     if (floor > cap) floor = cap;
     return floor;
 }
+
+#endif
 
 static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
     if (!gc) return;
@@ -695,6 +706,7 @@ static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
     // wall time since the previous pressure collection exceeds the 10% budget;
     // shrink back toward 2x live when it is cheap.
     size_t floor = GC_OBJECT_HEAP_THRESHOLD;
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     if (gc->object_pressure_last_end_ns && gc->object_pressure_last_cost_ns) {
         uint64_t now = gc_now_nanos();
         uint64_t mutator = now > gc->object_pressure_last_end_ns
@@ -702,6 +714,8 @@ static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
         floor = gc_paced_floor(gc->object_threshold, gc->object_pressure_last_cost_ns,
                                mutator, floor, GC_OBJECT_HEAP_THRESHOLD_CAP);
     }
+#endif
+
     gc->object_threshold = next > floor ? next : floor;
 }
 
@@ -716,6 +730,7 @@ static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
 // itself, so a total-cost share never converges for a churn-heavy script with
 // a tiny live set (brainfuck ran the nursery to the cap for +100 MB RSS and
 // no speedup).
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
 static void gc_heap_rebase_data_threshold(gc_heap_t* gc, uint64_t start_ns,
                                           uint64_t cost_ns) {
     if (!gc->data_pressure_last_end_ns) return;
@@ -730,6 +745,8 @@ static void gc_heap_rebase_data_threshold(gc_heap_t* gc, uint64_t start_ns,
         gc->gc_threshold = paced;
     }
 }
+
+#endif
 
 void gc_external_preflight(gc_heap_t* gc, size_t bytes, int kind) {
     if (!gc || bytes == 0 || gc->collecting || gc->defer_collection_depth > 0 ||
@@ -789,14 +806,22 @@ static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* sit
     }
     log_debug("gc-object-pressure: allocated=%zu threshold=%zu site=%s",
               gc->total_allocated, gc->object_threshold, site ? site : "unknown");
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     uint64_t start = gc_now_nanos();
+#endif
     gc->collect_callback();
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     uint64_t end = gc_now_nanos();
+#endif
     // Rebase before recording this cycle so the pacing compares the previous
     // collection's cost against the mutator time it bought.
     gc_heap_rebase_object_threshold(gc);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     gc->object_pressure_last_cost_ns = end > start ? end - start : 1;
     gc->object_pressure_last_end_ns = end;
+#endif
+
+
 }
 
 int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
@@ -1049,14 +1074,19 @@ static void* gc_data_alloc_impl(gc_heap_t* gc, size_t size, int zeroed) {
         if (used >= gc->gc_threshold) {
             log_debug("gc_data_alloc: threshold exceeded (%zu >= %zu), triggering GC",
                       used, gc->gc_threshold);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
             uint64_t start = gc_now_nanos();
             uint64_t mark_before = gc->tune.mark_nanos;
+#endif
             gc->collect_callback();
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
             uint64_t end = gc_now_nanos();
             uint64_t mark_cost = gc->tune.mark_nanos - mark_before;
             gc_heap_rebase_data_threshold(gc, start, mark_cost ? mark_cost : 1);
             gc->data_pressure_last_cost_ns = mark_cost;
             gc->data_pressure_last_end_ns = end;
+#endif
+
         }
     }
 
@@ -2650,7 +2680,9 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
 
     // reset mark stack
     gc->mark_top = 0;
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     uint64_t mark_start_ns = gc_now_nanos();
+#endif
 
     // Phase 1a: Mark registered root slots (BSS globals, context->result, etc.)
     uint64_t gc_roots_token = GC_PROFILE_ENTER("gc_mark_roots");
@@ -2701,7 +2733,9 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     int traced_count = gc_drain_mark_stack(gc);
     traced_count += gc_process_ephemerons(gc);
     GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     gc->tune.mark_nanos += gc_now_nanos() - mark_start_ns;
+#endif
     gc->tune.mark_collections++;
 
     log_debug("gc_collect: traced %d objects total", traced_count);

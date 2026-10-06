@@ -1206,6 +1206,22 @@ static void svg_cb_end_transform(RenderContext* vctx) {
     }
 }
 
+static bool svg_cb_begin_clip(RenderContext* vctx, ViewElement* element,
+                              float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    if (!ctx || !render_clip_push_vector_css(svg_active_paint_list(ctx), element,
+            abs_x, abs_y)) return false;
+    svg_lower_paint_list(ctx);
+    return true;
+}
+
+static void svg_cb_end_clip(RenderContext* vctx) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    if (!ctx) return;
+    paint_pop_clip(svg_active_paint_list(ctx));
+    svg_lower_paint_list(ctx);
+}
+
 static void svg_cb_render_marker(RenderContext* vctx, ViewSpan* marker, float abs_x, float abs_y,
                                   FontBox* font, Color color) {
     if (!marker || !marker->is_element()) return;
@@ -1340,6 +1356,8 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     b.end_effect_group      = svg_cb_end_effect_group;
     b.begin_transform       = svg_cb_begin_transform;
     b.end_transform         = svg_cb_end_transform;
+    b.begin_clip            = svg_cb_begin_clip;
+    b.end_clip              = svg_cb_end_clip;
     b.render_column_rules   = svg_cb_render_column_rules;
     b.render_marker         = svg_cb_render_marker;
     b.on_font_change        = NULL;

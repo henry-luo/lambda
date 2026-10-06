@@ -82,9 +82,11 @@ Item pn_print(Item item) {
  * parent template handler that matches the event name.
  * The optional Radiant handler is registered by the upper UI layer.
  */
+#ifndef LAMBDA_NO_EMIT
 Item pn_emit(Item event_name, Item event_data) {
     return lambda_radiant_emit(event_name, event_data);
 }
+#endif
 
 double pn_clock() {
     struct timespec ts;

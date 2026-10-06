@@ -53,6 +53,9 @@ DOM_ENGINE_WEAK void* dom_engine_element_from_point(DomDocument* d, float x, flo
 DOM_ENGINE_WEAK void* dom_engine_subtree_element_from_point(DomElement* root, float x, float y) {
     (void)root; (void)x; (void)y; return nullptr;
 }
+DOM_ENGINE_WEAK bool dom_engine_hit_test_skips_subtree(DomElement* element) {
+    (void)element; return false;
+}
 DOM_ENGINE_WEAK void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail) {
     (void)target; (void)type; (void)bubbles; (void)detail;
 }

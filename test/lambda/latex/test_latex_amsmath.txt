@@ -1,0 +1,22 @@
+"diagnostics:"
+[]
+"numbered row:"
+true
+"suppressed row:"
+true
+"custom tag:"
+true
+"bare tag:"
+true
+"operator:"
+true
+"first reference:"
+true
+"tag reference:"
+true
+"operator issues:"
+["duplicate-operator", "unsupported-operator-limits"]
+"operator issue locations:"
+true
+"operator source order:"
+true

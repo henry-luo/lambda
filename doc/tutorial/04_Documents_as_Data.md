@@ -8,22 +8,18 @@ Lambda reads JSON, CSV, YAML, Markdown, HTML and dozens of other formats into on
 
 ```text repl
 λ> let books = input("books.json")^
-null
 λ> books[0].title
 "The Pragmatic Programmer"
 λ> let rows = input("sales.csv", 'csv')^
-null
 λ> rows[1].region
 "APAC"
 λ> let cfg = parse("name: Ada\nlangs: [en, fr]", 'yaml')^
-null
 λ> cfg
 {
   name: "Ada",
   langs: ["en", "fr"]
 }
 λ> let doc = input("notes.md")^
-null
 λ> doc.name
 'doc'
 λ> type(doc)
@@ -140,9 +136,7 @@ lambda outline.ls
 
 ```text repl
 λ> let doc = input("notes.md")^
-null
 λ> let first = (doc?<h2>)[0]
-null
 λ> first?<h2>
 null
 λ> first.?<h2> == first

@@ -5,6 +5,7 @@
 #include "recovery_frame.h"
 #include "side_stack.h"
 #include "lambda-stack.h"
+#include "template_state.h"
 #include "gc/gc_heap.h"
 #include "../../lib/fiber.h"
 #include "../../lib/log.h"
@@ -764,4 +765,6 @@ extern "C" void activation_gc_visit_roots(gc_heap_t* gc) {
             mark_parked_roots(gc, activation);
         }
     }
+    // Template state lives in a native hashmap, outside traced GC objects.
+    heap_gc_visit_template_roots(gc);
 }

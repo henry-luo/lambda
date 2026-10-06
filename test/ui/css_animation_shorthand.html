@@ -1,0 +1,44 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.box { width: 20px; height: 20px; background: red; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes grow { from { width: 20px; } to { width: 60px; } }
+@keyframes "quoted name" { from { opacity: 0; } to { opacity: 1; } }
+#single { animation: fade 2s linear -1s both; }
+#multiple { animation: fade 2s linear -1s both, grow 4s linear -2s both; }
+#paused { animation: fade 2s linear -1s both paused; }
+#override { animation-duration: 9s; animation: fade 2s linear -1s both; animation-duration: 4s; }
+#reset { animation: fade 2s linear -1s both; animation: none; }
+#variables { --effect: fade 2s linear -1s both; animation: var(--effect); }
+#repeated { animation: fade 4s linear -1s both, fade 2s linear -1s both; }
+#fraction { animation: fade 2s linear -1s 1.5 both; }
+#expired { animation: fade 2s linear -1s; }
+#quoted { animation: "quoted name" 2s linear -1s both paused; }
+#stepstart { animation: fade 2s steps(4, jump-start) both paused; }
+#stepboth { animation: fade 2s steps(4, jump-both) -0.5s both paused; }
+#stepnone { animation: fade 2s steps(4, jump-none) -0.5s both paused; }
+#delayed { animation: fade 2s steps(4, jump-start) 1s both paused; }
+</style>
+<button id="change">change duration</button>
+<div class="box" id="single"></div>
+<div class="box" id="multiple"></div>
+<div class="box" id="paused"></div>
+<div class="box" id="override"></div>
+<div class="box" id="reset"></div>
+<div class="box" id="variables"></div>
+<div class="box" id="repeated"></div>
+<div class="box" id="fraction"></div>
+<div class="box" id="expired"></div>
+<div class="box" id="quoted"></div>
+<div class="box" id="stepstart"></div>
+<div class="box" id="stepboth"></div>
+<div class="box" id="stepnone"></div>
+<div class="box" id="delayed"></div>
+<script>
+document.getElementById('change').addEventListener('click', function () {
+    // a paused timeline makes the post-click sample independent of pointer-event time.
+    document.getElementById('paused').style.animationDuration = '4s';
+    document.getElementById('expired').style.paddingLeft = '1px';
+});
+</script>

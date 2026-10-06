@@ -99,7 +99,7 @@ driver before vendoring): mix 1.79 s, records 1.58 s, bf 3.26 s, tree 7.53 s.
 `test/benchmark/jq_query_common.ls`. All four rows match their goldens on JIT
 and AUTO. Debug-build times are not yet benchmark numbers: mix 5.5 s, records
 1.1 s, bf 0.17 s, tree 2.5 s. `jq_records` uses a constant-key `m["k"] = v`
-that T0 cannot execute (LR12-36), so it runs on JIT and AUTO only.
+that T0 cannot execute (LR12-42), so it runs on JIT and AUTO only.
 
 Writing them turned up Lambda defects.
 
@@ -117,7 +117,7 @@ Writing them turned up Lambda defects.
 - LR07-43: the JIT truncates an `any` value into an int-inferred `var`.
 - LR09-32: JSON `compact: true` is ignored.
 - LR10-18: a value-bound handler on a `pn ... T^` call yields `null`.
-- LR12-36: T0 cannot execute a constant-key index assignment.
+- LR12-42: T0 cannot execute a constant-key index assignment.
 
 **Translation choices this forced:**
 - Float sums start at `0.0`. jq numbers are doubles, so this is faithful, and

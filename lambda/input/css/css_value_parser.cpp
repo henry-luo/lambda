@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <limits.h>
 #include <stdio.h>
 #include "../../../lib/str.h"
 
@@ -129,6 +130,11 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
         // Known keyword - store as enum
         value->type = CSS_VALUE_TYPE_KEYWORD;
         value->data.keyword = enum_id;
+        const CssEnumInfo* info = css_enum_info(enum_id);
+        if (info && strcmp(keyword_to_lookup, info->name) != 0) {
+            value->data.keyword_token.spelling = pool_strdup(pool, keyword_to_lookup);
+            value->has_keyword_spelling = value->data.keyword_token.spelling != nullptr;
+        }
     } else {
         // Unknown keyword - store as custom property string
         value->type = CSS_VALUE_TYPE_CUSTOM;
@@ -148,6 +154,7 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
 
     value->type = CSS_VALUE_TYPE_NUMBER;
     value->data.number.value = number;
+    value->data.number.is_integer = isfinite(number) && floor(number) == number;
 
     return value;
 }
@@ -170,6 +177,22 @@ CssValue* css_value_create_length_from_string(Pool* pool, double number, const c
     value->data.length.unit = css_value_parser_unit_from_string(unit);
 
     return value;
+}
+
+CssValue* css_value_create_list(Pool* pool, CssValue** values, size_t count) {
+    if (!pool || count > INT_MAX || count > SIZE_MAX / sizeof(CssValue*) ||
+        (count && !values)) return NULL;
+    CssValue* list = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!list) return NULL;
+    list->type = CSS_VALUE_TYPE_LIST;
+    list->data.list.count = (int)count;
+    if (count) {
+        // callers pass temporary token arrays; retain the pointer array in the value's pool.
+        list->data.list.values = (CssValue**)pool_alloc(pool, count * sizeof(CssValue*));
+        if (!list->data.list.values) return NULL;
+        memcpy(list->data.list.values, values, count * sizeof(CssValue*));
+    }
+    return list;
 }
 
 CssValue* css_value_create_string(Pool* pool, const char* string) {
@@ -215,9 +238,61 @@ CssValue* css_value_create_color_hex(Pool* pool, const char* hex) {
     if (!value) return NULL;
 
     value->type = CSS_VALUE_TYPE_COLOR;
-    value->data.color_hex = pool_strdup(pool, hex);
+    value->data.color.type = CSS_COLOR_HEX;
+    if (!css_parse_hex_to_rgba(hex, &value->data.color.data.rgba.r,
+        &value->data.color.data.rgba.g, &value->data.color.data.rgba.b,
+        &value->data.color.data.rgba.a)) return nullptr;
 
     return value;
+}
+
+CssValue* css_value_create_computed_color(Pool* pool, const CssComputedColor* color) {
+    if (!pool || !color) return nullptr;
+    if (color->type == CSS_COLOR_CURRENTCOLOR || color->type == CSS_COLOR_SYSTEM) {
+        const CssEnumInfo* keyword = css_enum_info(color->keyword);
+        return keyword ? css_value_create_keyword(pool, keyword->name) : nullptr;
+    }
+    if (color->type == CSS_COLOR_RGB && color->alpha_is_byte) {
+        CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+        if (!value) return nullptr;
+        value->type = CSS_VALUE_TYPE_COLOR;
+        value->data.color.type = CSS_COLOR_RGB;
+        if (!css_color_to_rgba(color, &value->data.color.data.rgba.r,
+            &value->data.color.data.rgba.g, &value->data.color.data.rgba.b,
+            &value->data.color.data.rgba.a)) return nullptr;
+        return value;
+    }
+    bool rgb = color->type == CSS_COLOR_RGB;
+    bool polar = color->type == CSS_COLOR_HSL || color->type == CSS_COLOR_HWB;
+    bool predefined = color->type == CSS_COLOR_COLOR;
+    if (!rgb && !polar && !predefined) return nullptr;
+    // Canonical function trees retain floating channels and `none` under D4.5.1v4.
+    CssValue** channels = (CssValue**)pool_alloc(pool, sizeof(CssValue*) * 6);
+    CssValue** args = (CssValue**)pool_alloc(pool, sizeof(CssValue*) * 4);
+    if (!channels || !args) return nullptr;
+    bool modern = color->missing || polar || predefined;
+    int offset = predefined ? 1 : 0;
+    if (predefined) {
+        channels[0] = css_value_create_keyword(pool, color->color_space);
+        if (!channels[0]) return nullptr;
+    }
+    for (int i = 0; i < 4; i++) {
+        CssValue* channel = color->missing & (1u << i) ? css_value_create_keyword(pool, "none")
+            : polar && i > 0 && i < 3 ? css_value_create_percentage(pool, color->components[i] * 100.0)
+            : css_value_create_number(pool, color->components[i] * (rgb && i < 3 ? 255.0 : 1.0));
+        if (!channel) return nullptr;
+        if (modern) channels[(i == 3 ? 4 : i) + offset] = channel;
+        else args[i] = channel;
+    }
+    int count = 4;
+    if (modern) {
+        channels[3 + offset] = css_value_create_keyword(pool, "/");
+        args[0] = css_value_create_list(pool, channels, 5 + offset);
+        if (!channels[3 + offset] || !args[0]) return nullptr;
+        count = 1;
+    }
+    return css_value_create_function(pool, predefined ? "color" : rgb ? "rgba" : color->type == CSS_COLOR_HSL ? "hsl" : "hwb",
+        args, count);
 }
 
 CssValue* css_value_create_unicode_range(Pool* pool, const char* range) {
@@ -275,8 +350,11 @@ CssValue* css_parse_single_value(CssPropertyValueParser* parser,
         case CSS_TOKEN_IDENT:
             return css_value_create_keyword(parser->pool, token->value);
 
-        case CSS_TOKEN_NUMBER:
-            return css_value_create_number(parser->pool, token->data.number_value);
+        case CSS_TOKEN_NUMBER: {
+            CssValue* value = css_value_create_number(parser->pool, token->data.number_value);
+            if (value) value->data.number.is_integer = css_token_is_integer(token);
+            return value;
+        }
 
         case CSS_TOKEN_DIMENSION:
             // reject dimension tokens with unknown/invalid units (e.g. "300x")
@@ -751,6 +829,17 @@ CSSVarRef* css_parse_var_function(CssPropertyValueParser* parser,
                                  int token_count) {
     if (!parser || !tokens || token_count < 1) return NULL;
 
+    while (token_count > 0 && tokens->type == CSS_TOKEN_WHITESPACE) {
+        tokens++;
+        token_count--;
+    }
+    while (token_count > 0 &&
+           (tokens[token_count - 1].type == CSS_TOKEN_WHITESPACE ||
+            tokens[token_count - 1].type == CSS_TOKEN_EOF)) token_count--;
+    if (token_count > 0 && tokens[token_count - 1].type == CSS_TOKEN_RIGHT_PAREN)
+        token_count--;
+    if (token_count == 0) return NULL;
+
     // First token should be the variable name (either CSS_TOKEN_IDENT or CSS_TOKEN_CUSTOM_PROPERTY)
     if (tokens[0].type != CSS_TOKEN_IDENT && tokens[0].type != CSS_TOKEN_CUSTOM_PROPERTY) {
         css_property_value_parser_add_error(parser, "var() function requires identifier argument");
@@ -771,9 +860,18 @@ CSSVarRef* css_parse_var_function(CssPropertyValueParser* parser,
     if (!var_ref->name) return NULL;
 
     // Check for fallback value
-    if (token_count > 2 && tokens[1].type == CSS_TOKEN_COMMA) {
-        // Parse fallback value
-        var_ref->fallback = css_parse_property_value(parser, tokens + 2, token_count - 2, NULL);
+    int fallback_start = 1;
+    while (fallback_start < token_count &&
+           tokens[fallback_start].type == CSS_TOKEN_WHITESPACE) fallback_start++;
+    if (fallback_start < token_count && tokens[fallback_start].type == CSS_TOKEN_COMMA) {
+        fallback_start++;
+        while (fallback_start < token_count &&
+               tokens[fallback_start].type == CSS_TOKEN_WHITESPACE) fallback_start++;
+        // the comma establishes a fallback even when its token sequence is empty.
+        var_ref->fallback = fallback_start == token_count
+            ? css_value_create_list(parser->pool, NULL, 0)
+            : css_parse_property_value(parser, tokens + fallback_start,
+                token_count - fallback_start, NULL);
         var_ref->has_fallback = var_ref->fallback != NULL;
     }
 
@@ -1112,6 +1210,7 @@ CssValue* css_value_create_length(Pool* pool, double value, CssUnit unit) {
     if (!css_value) return NULL;
 
     css_value->type = CSS_VALUE_TYPE_LENGTH;
+    css_value->flags = 0;
     css_value->data.length.value = value;
     css_value->data.length.unit = unit;
 

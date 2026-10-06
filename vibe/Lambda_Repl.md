@@ -1,350 +1,100 @@
 # Lambda REPL Design Document
 
+**Date:** 2026-10-06 (rewritten for the persistent interpreter session)
+**Authority:** `doc/Lambda_Formal_Semantics.md` S16.7.4–S16.7.6 (echo, no
+rebinding, session kinds); `doc/Lambda_Formal_Design.md` D8.1.1v17 (one T0
+session, no replay, no Tree-sitter, interrupt, unsupported entries). Decision
+record: [`Lambda_Design_Repl_Interp.md`](Lambda_Design_Repl_Interp.md) (RI1–RI6).
+Detailed design: `doc/dev/lambda/LR_01_Compilation_Pipeline.md` §6.
+
 ## Overview
 
-Lambda Script provides an interactive **Read-Eval-Print Loop (REPL)** for exploring the language, testing expressions, and rapid prototyping. The REPL is the default mode when `lambda.exe` is invoked without arguments.
+`lambda` with no arguments opens an interactive session. Each complete entry is
+parsed by the C parser, built against the session's retained global scope,
+planned into the persistent module slab, and executed by the T0 interpreter.
+Earlier entries are never re-parsed, re-compiled or re-run, so per-entry cost
+does not grow with session length. An entry is all-or-nothing: a rejected or
+failed entry is rolled back whole and the next entry sees the last good state.
 
-## Current Implementation Status
+## Session kinds (S16.7.6)
 
-### Implemented Features
+| Invocation | Kind | Entry context |
+|---|---|---|
+| `lambda` | functional | top-level content, exactly as in a script file; `var`, assignment and `pn` calls are E224 |
+| `lambda run` (no script) | procedural | statements of one persistent implicit `pn` body; `var` persists, `pn` calls run. The session announces at start that entries carry out effects |
 
-#### 1. Interactive Line Editor (`lib/cmdedit.c`)
-- Custom readline-compatible implementation (no external dependencies)
-- Cross-platform support: macOS, Linux, Windows
-- **Line editing features:**
-  - Cursor movement: Left/Right arrows, Home/End, Ctrl-A/Ctrl-E
-  - Character deletion: Backspace, Delete, Ctrl-D (at empty line = EOF)
-  - Word operations: Ctrl-W (backward kill word), Alt-D (forward kill word)
-  - Line operations: Ctrl-K (kill to end), Ctrl-U (kill whole line), Ctrl-Y (yank)
-  - Transpose: Ctrl-T (swap characters)
-- **History management:**
-  - Up/Down arrow navigation through command history
-  - History search (Ctrl-R for reverse search)
-  - Persistent history file support (`read_history`/`write_history`)
-- **Signal handling:**
-  - Ctrl-C (SIGINT) graceful handling
-  - Window resize (SIGWINCH) detection
-  - Proper terminal cleanup on exit
+## Entry lifecycle
 
-#### 2. REPL Commands
-| Command | Description |
-|---------|-------------|
-| `quit`, `q`, `exit` | Exit the REPL |
-| `help`, `h` | Show help message |
-| `clear` | Clear REPL history buffer |
+| Status | Meaning | Session state | Output |
+|---|---|---|---|
+| OK | built and ran | published | the value, unless the entry is only declarations or statements (S16.7.4) |
+| INCOMPLETE | the parser needs more input | untouched | continuation prompt `.. ` |
+| REJECTED | parse, type, plan or T0-support failure | rolled back | the diagnostic, then `Entry rolled back.` |
+| FAILED | the entry ran and completed with an error or a fault | rolled back, slab snapshot restored | the error, then `Entry rolled back.` |
 
-#### 3. Multi-line Input Support
-- **Continuation prompt (`.. `)** when statement is incomplete
-- Tree-sitter reference detection of incomplete statements (transitional)
-- Checks for `MISSING` nodes (parser-inserted expected tokens) while the
-  append-only fragment source/span transaction remains Tree-sitter-backed
-- Automatically continues collecting input until statement is complete
+- **Completeness.** An unclosed bracket, string or block comment keeps the
+  continuation prompt without parsing. Balanced input goes to the session; the
+  parser's INCOMPLETE status (`let x =`, a trailing `+`) also continues.
+- **Redefinition** of a session name is E209, as in a file (S16.7.5). `clear`
+  starts a new session.
+- **Imports** load and initialize their module cone before the entry runs; a
+  module whose initializer already ran in the session is not re-run.
+- **Unsupported entries.** An entry T0 cannot run is rejected with the
+  construct's name; it is never compiled on its own.
+- **Interrupt.** Ctrl-C while an entry runs faults it at the next T0 call or
+  loop back-edge; the entry is rolled back and the session continues. Code
+  already promoted to a MIR satellite is not polled and stops at its next
+  return to T0.
+- **Tiers.** The session is always T0. `--tier`/`LAMBDA_EXEC_BACKEND` governs
+  satellite promotion only: `auto` promotes hot functions at the ordinary
+  thresholds, `interp` never promotes, `jit` promotes at the first call.
 
-```
-λ> let add = fn(a, b) {
-..   a + b
-.. }
-λ> add(1, 2)
-3
-```
+## Commands
 
-#### 4. Syntax Error Recovery
-- If a statement has syntax errors, it is discarded
-- User can retry without corrupting the REPL history
-- Distinguishes between:
-  - **INCOMPLETE**: Missing closing braces/parens → continue with `..` prompt
-  - **ERROR**: Actual syntax error → discard input, show error message
+| Command | Effect |
+|---|---|
+| `quit`, `q`, `exit` | leave the REPL |
+| `help`, `h` | show help |
+| `clear` | start a new session; every binding is dropped |
+| `.env` | list the session's bindings with their current values |
+| `.type <expr>` | show the expression's static type without running it |
+| `.time <entry>` | run the entry and report its wall time |
+| `.load <file>` | run a file as one entry; a failure rolls the whole file back |
+| `.save <file>` | write the session's accepted entries to a file |
+| Tab | complete session names, system functions and keywords (interactive terminal only) |
 
-#### 5. Incremental Output Display
-- Tracks previous output to avoid reprinting unchanged lines
-- Only prints new output from the latest evaluation
-- Reduces visual clutter in long REPL sessions
+Commands are recognized only at the start of a fresh entry and only in these
+exact spellings.
 
-#### 6. Script Execution
-- MIR Direct compilation; normal file/module parsing uses the C RD/Pratt parser
-  while the REPL retains Tree-sitter fragment trees until its source-offset
-  transaction is migrated
-- Full Lambda language support in REPL mode
-- Error reporting with line/column information
+## History
 
-#### 7. Unicode Support
-- UTF-8 prompt display (λ> on supported terminals)
-- Automatic detection of UTF-8 locale
-- Fallback to ASCII prompt (>) when UTF-8 not available
+An interactive terminal restores history from `~/.lambda_history` at start and
+writes it back at exit. `LAMBDA_REPL_HISTORY` names another file; an empty value
+turns persistence off. Piped input never reads or writes the history file.
 
----
-
-## Design Architecture
-
-### Implementation Structure
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Lambda REPL                              │
-├─────────────────────────────────────────────────────────────┤
-│  main-repl.cpp                    │  main.cpp               │
-│  - Statement completeness check   │  - run_repl() loop      │
-│  - Reference-parser status        │  - Multi-line handling  │
-│  - Prompt functions               │  - Error recovery       │
-│  - Line editor wrappers           │  - Incremental output   │
-└─────────────────────────────────────────────────────────────┘
-         │                              │
-         ▼                              ▼
-┌─────────────────────┐      ┌─────────────────────┐
-│    runner.cpp       │      │  lib/cmdedit.c      │
-│  - load_script()    │      │  - Terminal I/O     │
-│  - transpile()      │      │  - Line editing     │
-│  - JIT compile      │      │  - History mgmt     │
-│  - execute()        │      │  - Signal handling  │
-└─────────────────────┘      └─────────────────────┘
-```
-
-### Key Files
+## Key files
 
 | File | Purpose |
-|------|---------|
-| [lambda/main-repl.cpp](../lambda/main-repl.cpp) | REPL init, completeness check, prompts |
-| [lambda/main.cpp](../lambda/main.cpp) | `run_repl()` - main loop with multi-line support |
-| [lambda/runner.cpp](../lambda/runner.cpp) | Script loading, transpilation, JIT execution |
-| [lib/cmdedit.c](../lib/cmdedit.c) | Custom command-line editor |
-| [lib/cmdedit.h](../lib/cmdedit.h) | cmdedit public API |
-
----
-
-## Core Design: Buffer-Based Evaluation
-
-### 1. Internal Buffer Accumulation
-
-When the user enters text, lines are accumulated in two buffers:
-
-```cpp
-StrBuf *repl_history = strbuf_new_cap(1024);  // accumulated script (all complete statements)
-StrBuf *pending_input = strbuf_new_cap(256);  // current multi-line input being collected
-StrBuf *last_output = strbuf_new_cap(256);    // previous output for incremental display
-```
-
-### 2. Statement Completeness Detection
-
-The current transitional implementation uses a **hybrid approach** combining
-lexical bracket counting and the retained Tree-sitter reference parser. The
-normal file/module cutover does not yet replace this append-only fragment path:
-
-```cpp
-enum StatementStatus {
-    STMT_COMPLETE,      // ready to execute
-    STMT_INCOMPLETE,    // needs more input (show continuation prompt)
-    STMT_ERROR          // syntax error (discard input)
-};
-
-StatementStatus check_statement_completeness(TSParser* parser, const char* source) {
-    // Step 1: Quick lexical check for unclosed brackets
-    // This catches incomplete statements that Tree-sitter would report as ERROR
-    if (has_unclosed_brackets(source)) {
-        return STMT_INCOMPLETE;
-    }
-
-    // Step 2: Use Tree-sitter for more sophisticated checking
-    TSTree* tree = lambda_parse_source(parser, source);
-    TSNode root = ts_tree_root_node(tree);
-
-    // If no errors, statement is complete
-    if (!ts_node_has_error(root)) {
-        return STMT_COMPLETE;
-    }
-
-    // Check for MISSING nodes (incomplete)
-    if (has_missing_nodes(root)) {
-        return STMT_INCOMPLETE;
-    }
-
-    // ERROR nodes without MISSING = syntax error
-    return STMT_ERROR;
-}
-```
-
-**Bracket Counting (`has_unclosed_brackets`):**
-- Handles `{ }`, `( )`, `[ ]`
-- Respects string literals (single and double quoted)
-- Handles escape sequences in strings
-- Recognizes line comments (`//`) and block comments (`/* */`)
-- Returns `true` if any bracket count is positive or still in string/comment
-```
-
-### 3. Multi-line REPL Loop
-
-```cpp
-while ((line = lambda_repl_readline(pending_input->length > 0 ? cont_prompt : main_prompt)) != NULL) {
-    // Append to pending input
-    strbuf_append_str(pending_input, line);
-
-    // Check completeness
-    StatementStatus status = check_statement_completeness(runtime->parser, pending_input->str);
-
-    if (status == STMT_INCOMPLETE) {
-        continue;  // show ".. " prompt and keep reading
-    }
-
-    if (status == STMT_ERROR) {
-        printf("Syntax error. Input discarded.\n");
-        strbuf_reset(pending_input);
-        continue;
-    }
-
-    // STMT_COMPLETE: add to history and execute
-    strbuf_append_str(repl_history, pending_input->str);
-    strbuf_reset(pending_input);
-
-    // Execute and print incremental output...
-}
-```
-
-### 4. Incremental Output Display
-
-```cpp
-// Print only the new portion of output
-if (full_output->length > last_output->length) {
-    if (strncmp(full_output->str, last_output->str, last_output->length) == 0) {
-        // Prefix matches - print only new part
-        printf("%s", full_output->str + last_output->length);
-    } else {
-        // Output structure changed - print all
-        printf("%s", full_output->str);
-    }
-}
-// Save for next comparison
-strbuf_reset(last_output);
-strbuf_append_str(last_output, full_output->str);
-```
-
----
-
-## Future Enhancements (Roadmap)
-
-### Short-term
-- [x] ~~Multi-line input with continuation prompt~~
-- [x] ~~Syntax error recovery (discard bad lines)~~
-- [x] ~~Incremental output display~~
-
-### Medium-term
-- [ ] **Tab completion** for:
-  - Built-in function names
-  - User-defined variables and functions
-  - Keywords and operators
-- [ ] **`.load <file>`** command to load script files into REPL
-- [ ] **`.save <file>`** command to save session to file
-- [ ] Reverse history search (Ctrl-R) improvements
-
-### Long-term
-- [ ] **Incremental compilation cache** (avoid full recompile)
-  - Cache compiled functions by hash
-  - Only recompile new/changed definitions
-- [ ] **Session state persistence**
-  - Save REPL state to disk on exit
-  - Restore state on startup with `--restore` flag
-- [ ] Context-aware completion using type information
-- [ ] REPL-specific error messages with suggestions
-- [ ] Debugger integration
-
----
-
-## Performance Considerations
-
-### Current Implementation Trade-offs
-
-**Pros:**
-- Simple, reliable implementation
-- Full language support (no special REPL mode)
-- Consistent behavior with script files
-- Proper error recovery without state corruption
-
-**Cons:**
-- Full re-compilation on each input (O(n) where n = total lines)
-- Full re-execution of all statements
-- Memory usage grows with session length
-
-### Future Optimization: Incremental Compilation
-
-When implementing incremental compilation:
-
-1. **Parse tree caching**
-   - Tree-sitter supports incremental parsing
-   - Reuse parse tree, only re-parse changed portions
-
-2. **Function-level caching**
-   ```cpp
-   struct CompiledCache {
-       HashMap<uint64_t, void*> func_cache;  // hash → compiled function
-
-       void* get_or_compile(const char* source, size_t len) {
-           uint64_t hash = hash_fnv64(source, len);
-           if (func_cache.contains(hash)) {
-               return func_cache.get(hash);
-           }
-           void* compiled = jit_compile(source);
-           func_cache.set(hash, compiled);
-           return compiled;
-       }
-   };
-   ```
-
-3. **State snapshots**
-   - Checkpoint execution state periodically
-   - Restore from checkpoint instead of re-running
-
----
+|---|---|
+| `lambda/main.cpp` | `run_repl`: the loop, commands, echo, SIGINT arming |
+| `lambda/main-repl.cpp` | prompts, bracket fast path, line editor wiring, completion, history file |
+| `lambda/runtime/runner.cpp` | `interp_repl_session_*`: the entry transaction, diagnostics, session services |
+| `lambda/runtime/interp.cpp` | fragment execution, import-cone initialization, interrupt polling |
+| `lambda/runtime/terminal_host.cpp` | completion request/reply and history transfer with `lambda.io.terminal` |
+| `lmd/package/io/terminal.ls` | the line editor (history, kill ring, completion insertion) |
 
 ## Testing
 
-### Manual Test Cases
+`test/test_lambda_repl_gtest.cpp` drives `lambda.exe` over a pipe. The
+`LambdaReplSessionTests` group covers the echo rule, E209, parser-driven
+continuation, both session kinds, rollback of a failed procedural entry, file
+imports, tier agreement and SIGINT.
 
-```bash
-# Basic REPL
-./lambda.exe
-λ> 1 + 2
-3
-λ> let x = 10
-10
-λ> x * 2
-20
+## Open items
 
-# Multi-line input (automatic continuation)
-λ> let double = fn(x) {
-..   x * 2
-.. }
-λ> double(5)
-10
-
-# Multi-line with nested braces
-λ> let complex = fn(a) {
-..   if a > 0 {
-..     a * 2
-..   } else {
-..     0 - a
-..   }
-.. }
-λ> complex(-5)
-5
-
-# Error recovery
-λ> let y = @#$
-Syntax error. Input discarded.
-λ> let y = 42
-42
-
-# REPL commands
-λ> clear
-REPL history cleared
-λ> help
-[shows help]
-λ> quit
-```
-
----
-
-## References
-
-- [lib/cmdedit.c](../lib/cmdedit.c) - Line editor implementation
-- [lambda/main.cpp](../lambda/main.cpp) - `run_repl()` function
-- [lambda/main-repl.cpp](../lambda/main-repl.cpp) - REPL utilities
-- [lambda/runner.cpp](../lambda/runner.cpp) - Script execution
-- [Tree-sitter API](https://tree-sitter.github.io/tree-sitter/) - `ts_node_is_missing()`, `ts_node_has_error()`
+- An unbound name and some operator type errors complete with a bare error that
+  has no diagnostic, in files and in the REPL alike. The REPL then prints a
+  generic "completed with an error and no diagnostic" line. Whether an unbound
+  name is a compile error needs a ruling.
+- Member completion after `.` offers nothing; it would need the receiver's
+  static shape.

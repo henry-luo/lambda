@@ -531,6 +531,8 @@ typedef enum SysFunc {
     SYSFUNC_FIND3,          // find(str, pattern, options) - with options
     SYSFUNC_ORD,            // ord(str) - Unicode code point of first character
     SYSFUNC_CHR,            // chr(int) - character from Unicode code point
+    SYSFUNC_IO_CELL_WIDTH,  // io.cell_width(int) - terminal cell width of a scalar
+    SYSFUNC_IO_UNICODE_CATEGORY, // io.unicode_category(int) - Unicode general category
     // vector functions
     SYSFUNC_PROD,
     SYSFUNC_CUMSUM,
@@ -687,6 +689,7 @@ typedef enum SysFunc {
     SYSFUNC_INTERSECT4,
     SYSFUNC_EXCEPT,
     SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
+    SYSPROC_IO_TEXT_SEARCH,       // io.text_search(source, query, options?) - ranked full-text file search (lib/fts, FTX11)
 } SysFunc;
 
 typedef struct Type {
@@ -3310,6 +3313,8 @@ extern "C" {
     int64_t fn_ord_str(String* str);    // native raw variant with C/JS -1 sentinel
     Item fn_ord_str_item(String* str);  // native Lambda-facing nullable result
     Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
+    Item fn_io_cell_width(Item codepoint);
+    Item fn_io_unicode_category(Item codepoint);
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
     Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace
@@ -3418,6 +3423,8 @@ extern "C" {
     Item pn_io_rename(Item old_path, Item new_path);
     Item pn_io_grep2(Item source, Item pattern);
     Item pn_io_grep3(Item source, Item pattern, Item options);
+    Item pn_io_text_search2(Item source, Item query);
+    Item pn_io_text_search3(Item source, Item query, Item options);
     Item pn_io_fetch1(Item target);
     Item pn_io_fetch2(Item target, Item options);
 

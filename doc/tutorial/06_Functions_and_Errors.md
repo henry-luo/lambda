@@ -163,7 +163,6 @@ Most operations that fail do not stop the program; they produce an **error value
 
 ```text repl
 λ> let e = error("no book titled SICP")
-null
 λ> e is error
 true
 λ> e.message

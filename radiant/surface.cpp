@@ -971,12 +971,19 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
     return img_surface;
 }
 
-ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height) {
+bool render_surface_allocation_size(float width, float height, size_t* bytes) {
     width = ceilf(width); height = ceilf(height);
-    if (!isfinite(width) || !isfinite(height) || width <= 0.0f || height <= 0.0f ||
+    if (!bytes || !isfinite(width) || !isfinite(height) || width <= 0.0f || height <= 0.0f ||
         width >= (float)(INT_MAX / 4) || height >= (float)INT_MAX ||
-        (double)width * (double)height > (double)((SIZE_MAX - sizeof(ImageSurface)) / 4)) return nullptr;
-    size_t bytes = (size_t)width * (size_t)height * 4 + sizeof(ImageSurface);
+        (double)width * (double)height > (double)((SIZE_MAX - sizeof(ImageSurface)) / 4)) return false;
+    *bytes = (size_t)width * (size_t)height * 4 + sizeof(ImageSurface);
+    return true;
+}
+
+ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height) {
+    size_t bytes = 0;
+    if (!render_surface_allocation_size(width, height, &bytes)) return nullptr;
+    width = ceilf(width); height = ceilf(height);
     if (!render_memory_allow_allocation(memory, bytes)) return nullptr;
     ImageSurface* surface = image_surface_create((int)width, (int)height); // INT_CAST_OK: checked physical raster extent
     if (!surface) {

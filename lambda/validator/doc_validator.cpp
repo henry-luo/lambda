@@ -543,9 +543,11 @@ ValidationResult* SchemaValidator::validate_type(ConstItem item, Type* type) {
     this->current_depth = 0;
 
     // initialize validation session for timeout tracking
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     if (this->options.timeout_ms > 0) {
         this->validation_start_time = clock();
     }
+#endif
 
     ValidationResult* result = validate_against_type(this, item, type);
     if (!result || this->fast_mode) return result;

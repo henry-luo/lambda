@@ -142,6 +142,14 @@ static bool edit_session_commit_selection(EditSession* session, int version_numb
     return true;
 }
 
+// An editor over a UI result tree keeps that tree's existing nodes by identity:
+// they live in the runtime's result arena, not in the editor's own Input.
+static void edit_bridge_register_ui_nodes(MarkEditor* editor) {
+    if (editor && active_runtime && active_runtime->ui_mode && active_runtime->arena) {
+        editor->set_ui_node_arena(active_runtime->arena);
+    }
+}
+
 static Input* edit_session_create_input(Item root) {
     if (!active_runtime || !active_runtime->pool) {
         log_error("edit_session_new: no runtime pool available");
@@ -517,6 +525,7 @@ EditSession* edit_session_new_with_input(void* input_ptr, Item root, EditSchema*
         mem_free(session);
         return NULL;
     }
+    edit_bridge_register_ui_nodes(session->editor);
     edit_session_init_pos(session);
     log_debug("edit_session_new_with_input: rich-text session created");
     return session;
@@ -668,6 +677,7 @@ int edit_bridge_init(void* input_ptr) {
         log_debug("edit_bridge_init: created Input from runtime pool");
     }
     s_editor = mark_editor_create(input, EDIT_MODE_INLINE);
+    edit_bridge_register_ui_nodes(s_editor);
     log_debug("edit_bridge_init: editor created (inline mode)");
     return 0;
 }
@@ -861,6 +871,8 @@ Item edit_current(void) {
 
 extern "C" {
 
+#ifndef LAMBDA_NO_EDIT_HISTORY
+// public history builtins are optional; apply/edit execution retains internal transactions.
 Item fn_undo(void) {
     bool ok = edit_undo();
     return (Item){.item = ok ? ITEM_TRUE : ITEM_FALSE};
@@ -886,4 +898,5 @@ Item fn_edit_commit1(Item description) {
     return (Item){.item = i2it(ver)};
 }
 
+#endif
 } // extern "C"

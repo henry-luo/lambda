@@ -2,6 +2,7 @@
 
 #include "../lambda.h"
 #include "../../lib/log.h"
+#include <stdlib.h>
 
 // The runtime-state header is C++-only; this C helper only needs its TLS
 // owner as an opaque pointer before handing it to the side-stack API.
@@ -43,7 +44,10 @@ static SideStackRegion* side_number_region(void) {
 
 static bool side_stack_region_reserve(SideStackRegion* region, size_t byte_size) {
     if (region->base) return true;
-#if defined(_WIN32)
+#if defined(__EMSCRIPTEN__)
+    // WASM has bounded linear memory rather than native virtual reservations.
+    void* memory = calloc(1, byte_size);
+#elif defined(_WIN32)
     void* memory = VirtualAlloc(NULL, byte_size, MEM_RESERVE, PAGE_NOACCESS);
 #else
     void* memory = mmap(NULL, byte_size, PROT_READ | PROT_WRITE,
@@ -322,7 +326,7 @@ static void side_stack_region_decommit(SideStackRegion* region, uint64_t* top) {
     if (start < end && VirtualFree((void*)start, end - start, MEM_DECOMMIT)) {
         region->committed = (uint64_t*)start;
     }
-#else
+#elif defined(MADV_DONTNEED)
     long page_size = sysconf(_SC_PAGESIZE);
     if (page_size <= 0) return;
     uintptr_t page_mask = (uintptr_t)page_size - 1u;
@@ -399,4 +403,24 @@ void lambda_side_stack_regions_select(LambdaSideStackRegion* root,
                                       LambdaSideStackRegion* number) {
     root_region_current = root;
     number_region_current = number;
+}
+
+void lambda_side_stack_regions_current(LambdaSideStackRegion** root,
+                                       LambdaSideStackRegion** number) {
+    if (root) *root = root_region_current;
+    if (number) *number = number_region_current;
+}
+
+void lambda_side_stack_region_release(LambdaSideStackRegion* region) {
+    if (!region || !region->base) return;
+#if defined(_WIN32)
+    VirtualFree(region->base, 0, MEM_RELEASE);
+#else
+#if defined(__EMSCRIPTEN__)
+    free(region->base);
+#else
+    munmap(region->base, region->byte_size);
+#endif
+#endif
+    *region = (LambdaSideStackRegion){0};
 }

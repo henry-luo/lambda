@@ -129,10 +129,10 @@ float render_geometry_block_visual_overflow(const ViewBlock* block) {
 bool render_geometry_transform_matrix(const TransformProp* transform,
                                       float x, float y, float width, float height,
                                       RdtMatrix* out_matrix) {
-    if (!transform || !transform->functions || !out_matrix) return false;
+    if (!transform_has_functions(transform) || !out_matrix) return false;
     RdtLogicalPoint origin = radiant::transform_origin(transform, x, y, width, height);
     // Export backends must use the screen path's origin composition and preserve scale(0).
     *out_matrix = radiant::compute_transform_matrix(
-        transform->functions, width, height, origin.x, origin.y);
+        transform, width, height, origin.x, origin.y);
     return !rdt_matrix_is_identity(out_matrix);
 }

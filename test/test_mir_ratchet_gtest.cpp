@@ -93,18 +93,37 @@ inline const char* platform_key() {
 #endif
 }
 
-// the host lambda.exe announces a debug build; thresholds may differ by config.
+// the host lambda.exe records a debug-build banner in its log; thresholds may differ by config.
 inline const char* host_config_key() {
     static std::string cached;
     if (!cached.empty()) return cached.c_str();
+    const char* log_path = "./temp/test_mir_ratchet_host_config.log";
+    remove(log_path);
     const char* args[] = {"./lambda.exe", "--help", NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", log_path},
+        {"LAMBDA_LOG_LEVEL", "DEBUG"},
+        {NULL, NULL},
+    };
     ShellOptions options = {0};
+    options.env = env;
     options.merge_stderr = true;
     ShellResult result = shell_exec("./lambda.exe", args, &options);
-    std::string text;
-    if (result.stdout_buf) text.assign(result.stdout_buf, result.stdout_len);
     shell_result_free(&result);
-    cached = (text.find("DEBUG build") != std::string::npos) ? "debug" : "release";
+    bool debug_host = false;
+    FILE* log_file = fopen(log_path, "rb");
+    if (log_file) {
+        char line[512];
+        while (fgets(line, sizeof(line), log_file)) {
+            if (strstr(line, "Running DEBUG build")) {
+                debug_host = true;
+                break;
+            }
+        }
+        fclose(log_file);
+    }
+    remove(log_path);
+    cached = debug_host ? "debug" : "release";
     return cached.c_str();
 }
 

@@ -600,10 +600,15 @@ bool path_file_authority_is_local(Path* path) {
     if (!path || path_get_scheme(path) != PATH_SCHEME_FILE) return false;
     Path* root = path_root_of(path);
     if (root->authority_kind != PATH_AUTHORITY_NAMED) return true;
+#ifdef LAMBDA_NO_SYSINFO
+    // a named file authority cannot be verified without host discovery.
+    return false;
+#else
     char* current = shell_get_hostname();
     bool local = current && root->authority_name && strcmp(current, root->authority_name) == 0;
     if (current) mem_free(current);
     return local;
+#endif
 }
 
 /**
@@ -757,6 +762,7 @@ Path* path_longest_existing_prefix(Path* path) {
     }
     Pool* pool = path_get_pool();
     if (!pool) return NULL;
+#ifndef LAMBDA_NO_FILE_IO
     for (Path* probe = path; probe && !path_is_root(probe); probe = probe->parent) {
         // A wildcard segment is a query, not a location; it can only be the
         // whole reference, never a prefix the trailing steps navigate into.
@@ -767,6 +773,8 @@ Path* path_longest_existing_prefix(Path* path) {
         strbuf_free(buf);
         if (fs.exists) return probe;
     }
+
+#endif
     return NULL;
 }
 
@@ -840,11 +848,16 @@ Item path_resolve_for_iteration(Path* path) {
     // sys.* values can expire independently; the sysinfo cache owns their TTL.
     PathScheme scheme = path_get_scheme(path);
     if (scheme == PATH_SCHEME_SYS) {
+#ifdef LAMBDA_NO_SYSINFO
+        log_error("path-profile: sys information provider is excluded");
+        return ITEM_ERROR;
+#else
         Item result = sysinfo_resolve_path(path);
         // Path formatting reads this result after the force operation returns.
         if (result != ITEM_NULL && result != ITEM_ERROR) path->result = result;
         else path->result = 0;
         return result;
+#endif
     }
 
     // Already resolved?
@@ -852,6 +865,10 @@ Item path_resolve_for_iteration(Path* path) {
         return path->result;
     }
     
+#ifdef LAMBDA_NO_FILE_IO
+    log_error("path-profile: external path providers are excluded");
+    return ITEM_ERROR;
+#else
     // Handle wildcards specially
     if (path_ends_with_wildcard(path)) {
         Path* parent = path->parent;
@@ -898,6 +915,7 @@ Item path_resolve_for_iteration(Path* path) {
     // Cache the result (even if null/error, to avoid re-trying)
     path->result = result;
     return result;
+#endif
 }
 
 /**

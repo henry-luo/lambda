@@ -1,0 +1,314 @@
+{
+  "name": "Registered custom properties validate at computed value time and control inheritance",
+  "html": "test/ui/css_registered_properties.html",
+  "viewport": {
+    "width": 240,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#default"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#invalid"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherit"
+      },
+      "property": "width",
+      "equals": "60px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#unset"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#basis"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#bad-registration"
+      },
+      "property": "width",
+      "equals": "40px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#default"
+      },
+      "property": "color",
+      "equals": "rgb(0, 0, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#initial"
+      },
+      "property": "color",
+      "equals": "rgb(0, 128, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#tokens"
+      },
+      "property": "color",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#default"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherit"
+      },
+      "property": "width",
+      "equals": "80px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#default"
+      },
+      "property": "color",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#initial"
+      },
+      "property": "color",
+      "equals": "rgb(0, 128, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#conditional"
+      },
+      "property": "width",
+      "equals": "12px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#scoped"
+      },
+      "property": "width",
+      "equals": "14px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inspect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-name",
+      "equals": "--size"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-syntax",
+      "equals": "<length>"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-inherits",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-initial",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-text",
+      "equals": "@property --size { syntax: \"<length>\"; inherits: false; initial-value: 20px; }"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-universal-initial",
+      "equals": "null"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-basis",
+      "equals": "20px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#default"
+      },
+      "property": "width",
+      "equals": "35px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#invalid"
+      },
+      "property": "width",
+      "equals": "35px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherit"
+      },
+      "property": "width",
+      "equals": "80px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert"
+      },
+      "equals": "35px",
+      "attribute": "data-size"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#delete"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#default"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#delete"
+      },
+      "equals": "20px",
+      "attribute": "data-size"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-angle",
+      "equals": "180deg"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-time",
+      "equals": "0.15s"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-density",
+      "equals": "2dppx"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#cycle"
+      },
+      "property": "width",
+      "equals": "5px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#cycle"
+      },
+      "property": "font-size",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#self"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 0, 255)"
+    }
+  ]
+}

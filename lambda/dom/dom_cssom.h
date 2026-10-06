@@ -178,6 +178,7 @@ Item js_get_css_object_value(void);
  */
 Item dom_css_supports_operation(Item* args, int argc);
 Item dom_css_escape_operation(Item* args, int argc);
+Item dom_css_register_property_operation(Item definition);
 
 /** Reset the CSS namespace object (for cleanup between tests) */
 void js_reset_css_namespace_object(void);

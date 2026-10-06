@@ -210,6 +210,7 @@ struct DomDocumentServices {
     void* mem_ctx;
     void* cached_css_engine;
     void* keyframe_registry;
+    void* registered_property_set; // document-owned CSS.registerProperty definitions
     uint32_t element_count;
     uint32_t ext_allocations;
     uint32_t layout_cache_allocations;
@@ -224,7 +225,7 @@ struct DomDocumentServices {
     bool svg_image_document; // SVG image processing forbids external subordinate resources
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
-        keyframe_registry(nullptr), element_count(0), ext_allocations(0),
+        keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), canvas_registry(nullptr),
         svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), svg_image_document(false) {}
@@ -309,6 +310,8 @@ struct DomDocument : DomDocumentResourceData {
 
     // Layout and state
     lam::Own<ViewTree> view_tree;   // View tree after layout
+    lam::Own<ViewTree> secondary_view_trees; // Independent layouts over this source DOM.
+    bool secondary_views_cleanup_registered;
     lam::Own<StateStore> state_store;  // Per-document state store owner
     lam::Up<DocState> state;        // Compatibility pointer to state_store->doc_state
 
@@ -434,6 +437,12 @@ struct DomDocument : DomDocumentResourceData {
     DomScrollAlign pending_scroll_into_view_inline;
     DomScrollBehavior pending_scroll_into_view_behavior;
 
+    // The window's shared loader runtime when a stateless loader built this
+    // document on it. The UiContext owns that runtime and releases it after
+    // its documents; the document borrows it for its package types and its
+    // custom layouts. Its UA behavior still gets its own evaluator.
+    lam::Up<Runtime> loader_runtime;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -441,7 +450,8 @@ struct DomDocument : DomDocumentResourceData {
                     next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
                     font_faces_processed(false),
-                    view_tree(nullptr), state_store(nullptr), state(nullptr),
+                    view_tree(nullptr), secondary_view_trees(nullptr),
+                    secondary_views_cleanup_registered(false), state_store(nullptr), state(nullptr),
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
                     lambda_runtime(nullptr), embedding_document(nullptr),
                     embedding_element_ref({nullptr, 0}), resources(nullptr),
@@ -463,7 +473,8 @@ struct DomDocument : DomDocumentResourceData {
                     pending_scroll_into_view_if_needed(false),
                     pending_scroll_into_view_block(DOM_SCROLL_ALIGN_START),
                     pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST),
-                    pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO) {}
+                    pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO),
+                    loader_runtime(nullptr) {}
 
     bool init(Input* input);
     void destroy();
@@ -476,6 +487,14 @@ struct DomDocument : DomDocumentResourceData {
 static inline Runtime* dom_document_script_runtime(const DomDocument* doc) {
     if (!doc) return nullptr;
     return doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+}
+
+// The runtime whose packages built this document and serve its custom
+// layouts: the window's shared loader runtime when one built it, else the
+// document's own runtime.
+static inline Runtime* dom_document_loader_runtime(const DomDocument* doc) {
+    if (!doc) return nullptr;
+    return doc->loader_runtime ? doc->loader_runtime.get() : doc->lambda_runtime;
 }
 
 // Does this document own a live JS DOM script realm? Capability, not provenance:
@@ -576,6 +595,10 @@ struct CssCustomProp {
 // may omit the leading dashes from its lookup token.
 bool css_custom_property_name_matches(const char* stored_name,
                                       const char* lookup_name);
+DomElement* dom_parent_element(DomElement* element);
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name);
+const CssValue* dom_element_lookup_custom_property(DomElement* element,
+    const char* name, DomElement** owner);
 
 enum DomElementFlag : uint32_t {
     ELMT_FLAG_NEEDS_STYLE_RECOMPUTE = 1u << 0,
@@ -677,6 +700,7 @@ struct CssSelectionCascadeValue {
     lam::Up<CssDeclaration> source;
     CssSpecificity specificity;
     CssOrigin origin;
+    uint32_t scope_proximity;
 };
 
 struct CssSelectionStyle {
@@ -1513,7 +1537,8 @@ void log_dom_element_timing();
  * @param specificity Selector specificity for cascade resolution
  * @return Number of declarations applied
  */
-int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity specificity);
+int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity specificity,
+                            uint32_t scope_proximity = 0);
 
 /**
  * Apply a CSS rule to a pseudo-element (::before or ::after)
@@ -1524,7 +1549,8 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
  * @return Number of declarations applied
  */
 int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
-                                          CssSpecificity specificity, int pseudo_element);
+                                          CssSpecificity specificity, int pseudo_element,
+                                          uint32_t scope_proximity = 0);
 
 /**
  * Get the specified value for a CSS property
@@ -1565,6 +1591,9 @@ bool dom_element_has_after_content(DomElement* element);
  * @return Content string or NULL if none
  */
 const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element);
+struct StrBuf;
+bool dom_element_append_content(DomElement* element, const CssValue* value,
+    void* counter_context, int* quote_depth, StrBuf* text);
 
 /**
  * Get pseudo-element content with counter resolution
@@ -1617,5 +1646,7 @@ void dom_element_get_style_stats(DomElement* element, int* specified_count,
  * @return Cloned element or NULL on failure
  */
 DomElement* dom_element_clone(DomElement* source, Pool* pool);
+
+DomElement* dom_parent_element(DomElement* element);
 
 #endif // DOM_ELEMENT_H

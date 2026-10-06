@@ -7,6 +7,11 @@ import util: .util
 import dc_article: .docclass.article
 import dc_book: .docclass.book
 import dc_report: .docclass.report
+import color: .elements.color
+import enumitem: .packages.enumitem
+import amsmath: .packages.amsmath
+import registry: .packages.registry
+import bib_style: .packages.bib_style
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -17,8 +22,16 @@ fn add_entry(entries, k, v) {
 // Public API
 // ============================================================
 
-pub fn analyze(ast) {
+pub fn analyze(ast) => analyze_with_packages(ast, [])
+
+pub fn analyze_with_packages(ast, packages) =>
+    analyze_with_language(ast, packages, "english")
+
+pub fn analyze_with_language(ast, packages, language) {
     let st = {
+        packages: packages,
+        language: language,
+        bibliography_count: 0,
         docclass: "article",
         title: null,
         title_el: null,
@@ -43,11 +56,19 @@ pub fn analyze(ast) {
         tables: [],
         theorems: [],
         bibitems: [],
+        equation_nums: [],
+        amsmath_numbers: [],
+        enumerate_starts: [],
+        last_enumerate_by_depth: [],
+        list_depth: 0,
         slug_counts: [],
         in_appendix: false,
         secnumdepth: 3,
         custom_colors: [],
+        analysis_colors: [],
+        page_color: null,
         theorem_defs: [],
+        in_body: false,
         env_context: "section",
         env_context_num: ""
     }
@@ -72,8 +93,12 @@ pub fn analyze(ast) {
         tables: result.tables,
         theorems: result.theorems,
         bibitems: result.bibitems,
+        equation_nums: result.equation_nums,
+        amsmath_numbers: result.amsmath_numbers,
+        enumerate_starts: result.enumerate_starts,
         secnumdepth: result.secnumdepth,
         custom_colors: result.custom_colors,
+        page_color: result.page_color,
         theorem_defs: result.theorem_defs
     }
 }
@@ -96,6 +121,7 @@ fn walk_element(el, st) {
         case 'title': walk_title(el, st)
         case 'author': walk_author(el, st)
         case 'date': walk_date(el, st)
+        case 'document': walk_children(el, 0, len(el), {*:st, in_body: true})
 
         // ---- sections ----
         case 'part': walk_heading(el, st, "part", 0)
@@ -117,9 +143,19 @@ fn walk_element(el, st) {
 
         // ---- footnotes ----
         case 'footnote': walk_footnote(el, st)
+        case 'footcite': if (registry.active(st.packages, "biblatex"))
+            walk_footnote(el, st) else walk_children(el, 0, len(el), st)
+
+        case 'printbibliography': if (registry.active(st.packages, "biblatex"))
+            walk_printbibliography(el, st) else walk_children(el, 0, len(el), st)
 
         // ---- equations ----
         case 'equation': walk_equation(el, st)
+
+        // ---- list counters ----
+        case 'enumerate': walk_enumerate(el, st)
+        case 'itemize': walk_nonnumbered_list(el, st)
+        case 'description': walk_nonnumbered_list(el, st)
 
         // ---- theorem-like environments ----
         // check custom \newtheorem defs first (for shared counters, starred variants)
@@ -141,6 +177,7 @@ fn walk_element(el, st) {
 
         // ---- color definitions ----
         case 'definecolor': walk_definecolor(el, st)
+        case 'pagecolor': walk_pagecolor(el, st)
 
         // ---- \newtheorem definitions ----
         case 'newtheorem': walk_newtheorem(el, st)
@@ -165,7 +202,7 @@ fn walk_children(el, i, n, st) {
 // ============================================================
 
 fn walk_documentclass(el, st) {
-    let cls = trim(util.text_of(el))
+    let cls = trim(util.text_of_skip_brack(el))
     if cls != "" { {*:st, docclass: cls} }
     else { st }
 }
@@ -190,10 +227,12 @@ fn walk_date(el, st) {
 // ============================================================
 
 fn walk_heading(el, st, counter_name, html_level) {
-    let new_counters = step_counter(st.counters, counter_name)
+    let starred = el.starred == true
+    // starred headings do not advance the section counter or enter the TOC.
+    let new_counters = if (starred) st.counters else step_counter(st.counters, counter_name)
     // determine numbering depth for this counter
     let counter_depth = counter_name_to_depth(counter_name)
-    let sec_num = if (counter_depth <= st.secnumdepth)
+    let sec_num = if (not starred and counter_depth <= st.secnumdepth)
         compute_section_num(new_counters, counter_name, st.docclass, st.in_appendix)
     else null
 
@@ -210,7 +249,7 @@ fn walk_heading(el, st, counter_name, html_level) {
     // record heading
     let entry = {level: html_level, number: sec_num, text: title_text, id: slug}
     let new_heading_nums = add_entry(st.heading_nums, slug, sec_num)
-    let new_headings = st.headings ++ [entry]
+    let new_headings = if (starred) st.headings else st.headings ++ [entry]
     let sec_num_str = sec_num_to_str(sec_num)
 
     let new_state = {
@@ -279,11 +318,87 @@ fn walk_table(el, st) {
 }
 
 fn walk_equation(el, st) {
+    if (registry.active(st.packages, "amsmath")) walk_amsmath(el, st)
+    else walk_legacy_equation(el, st)
+}
+
+fn walk_legacy_equation(el, st) {
     let new_counters = step_counter(st.counters, "equation")
     let eq_num = new_counters.equation
+    let numbers = if (el.source_offset != null)
+        add_entry(st.equation_nums, string(el.source_offset), eq_num) else st.equation_nums
     let new_state = {*:st, counters: new_counters,
+        equation_nums: numbers,
         env_context: "equation", env_context_num: string(eq_num)}
     walk_children(el, 0, len(el), new_state)
+}
+
+fn walk_amsmath_rows(rows, i, st, numbered, entries) {
+    if (i >= len(rows)) {state: st, entries: entries}
+    else {
+        let row = rows[i]
+        let automatic = numbered and not row.suppress
+        let counters = if (automatic) step_counter(st.counters, "equation") else st.counters
+        let display = if (row.tag != null) row.tag
+            else if (automatic) string(counters.equation) else null
+        let labels = if (row.label != null)
+            add_entry(st.labels, row.label,
+                {type: "equation", number: if (display != null) display else "",
+                 id: util.slugify(row.label), title: null})
+            else st.labels
+        let next = {*:st, counters: counters, labels: labels}
+        walk_amsmath_rows(rows, i + 1, next, numbered,
+            entries ++ [{display: display, bare_tag: row.bare_tag}])
+    }
+}
+
+fn walk_amsmath(el, st) {
+    let tag = string(name(el))
+    let numbered = not ends_with(tag, "*") and tag != "aligned" and tag != "split"
+    let rows = amsmath.rows_for(el)
+    let folded = walk_amsmath_rows(rows, 0, st, numbered, [])
+    let stored = if (el.source_offset != null)
+        add_entry(folded.state.amsmath_numbers, string(el.source_offset), folded.entries)
+        else folded.state.amsmath_numbers
+    {*:folded.state, amsmath_numbers: stored}
+}
+
+fn count_list_items(node) {
+    if (not (node is element)) 0
+    else {
+        let tag = string(name(node))
+        if (tag == "item") 1
+        else if (tag == "enumerate" or tag == "itemize" or tag == "description") 0
+        else count_list_items_children(node, 0)
+    }
+}
+
+fn count_list_items_children(node, i) {
+    if (i >= len(node)) 0
+    else count_list_items(node[i]) + count_list_items_children(node, i + 1)
+}
+
+fn walk_enumerate(el, st) {
+    let opts = enumitem.options(el)
+    let explicit = enumitem.start(opts)
+    let depth = st.list_depth + 1
+    let prior = util.lookup(st.last_enumerate_by_depth, string(depth))
+    let first = if (explicit != null) explicit
+        else if (util.option_enabled(opts.resume) and prior != null) prior + 1 else 1
+    let starts = if (el.source_offset != null)
+        add_entry(st.enumerate_starts, string(el.source_offset), first)
+        else st.enumerate_starts
+    let walked = walk_children(el, 0, len(el), {*:st, enumerate_starts: starts,
+        list_depth: depth})
+    // restore the parent depth after nested lists and record only direct items.
+    {*:walked, list_depth: st.list_depth,
+        last_enumerate_by_depth: add_entry(walked.last_enumerate_by_depth,
+            string(depth), first + count_list_items_children(el, 0) - 1)}
+}
+
+fn walk_nonnumbered_list(el, st) {
+    let walked = walk_children(el, 0, len(el), {*:st, list_depth: st.list_depth + 1})
+    {*:walked, list_depth: st.list_depth}
 }
 
 fn walk_numbered_env(el, st, env_type) {
@@ -311,6 +426,19 @@ fn make_thm_entry(k, n, c) {
 // ============================================================
 // Bibliography
 // ============================================================
+
+fn walk_printbibliography(el, st) {
+    let index = st.bibliography_count + 1
+    let opts = util.parse_kv_options(util.optional_raw(el))
+    let heading = if (opts.heading == null) "bibliography" else opts.heading
+    let title = if (opts.title != null) opts.title else bib_style.locale(st.language).references
+    // bibintoc contributes a heading entry using the renderer's print target.
+    let headings = if (heading == "bibintoc" and
+        len(registry.bib_print_issues(el)) == 0) st.headings ++
+        [{level: 2, number: null, text: title, id: "bibliography-" ++ string(index)}]
+        else st.headings
+    {*:st, headings: headings, bibliography_count: index}
+}
 
 fn walk_bibliography(el, st) {
     walk_children(el, 0, len(el), st)
@@ -355,49 +483,19 @@ fn walk_setcounter(el, st) {
 }
 
 fn walk_definecolor(el, st) {
-    // children: [name, model, spec]
-    let args = util.command_args(el)
-    let n = len(args)
-    if (n >= 3) {
-        let cname = trim(util.text_of(args[0]))
-        let model = trim(util.text_of(args[1]))
-        let spec = trim(util.text_of(args[2]))
-        let css = parse_color_model(model, spec)
-        let new_colors = add_entry(st.custom_colors, cname, css)
-        {*:st, custom_colors: new_colors}
+    let definition = color.definition(el)
+    if (definition.color_name == "") st
+    else {
+        let colors = add_entry(st.analysis_colors, definition.color_name,
+            color.definition_value(definition))
+        {*:st, analysis_colors: colors,
+            custom_colors: if (st.in_body) st.custom_colors else colors}
     }
-    else { st }
 }
 
-fn parse_color_model(model, spec) {
-    if (model == "HTML" or model == "html") "#" ++ spec
-    else if (model == "rgb") parse_rgb_float(spec)
-    else if (model == "RGB") parse_rgb_int(spec)
-    else if (model == "gray") parse_gray(spec)
-    else spec
-}
-
-fn parse_rgb_float(spec) {
-    let parts = split(spec, ",")
-    if (len(parts) >= 3) {
-        let r = int(float(trim(parts[0])) * 255.0)
-        let g = int(float(trim(parts[1])) * 255.0)
-        let b = int(float(trim(parts[2])) * 255.0)
-        "rgb(" ++ (r) ++ "," ++ (g) ++ "," ++ (b) ++ ")"
-    }
-    else { spec }
-}
-
-fn parse_rgb_int(spec) {
-    let parts = split(spec, ",")
-    if (len(parts) >= 3)
-        "rgb(" ++ trim(parts[0]) ++ "," ++ trim(parts[1]) ++ "," ++ trim(parts[2]) ++ ")"
-    else spec
-}
-
-fn parse_gray(spec) {
-    let val = int(float(spec) * 255.0)
-    "rgb(" ++ (val) ++ "," ++ (val) ++ "," ++ (val) ++ ")"
+fn walk_pagecolor(el, st) {
+    let css = color.page_color(el, st.analysis_colors)
+    if (css == null) st else {*:st, page_color: css}
 }
 
 // ============================================================
@@ -462,7 +560,9 @@ fn get_newthm_child_text(el, idx) {
 fn walk_default(el, tag, st) {
     let tag_str = string(tag)
     let thm_def = util.lookup(st.theorem_defs, tag_str)
-    if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
+    if (registry.active(st.packages, "amsmath") and amsmath.is_environment(tag_str))
+        walk_amsmath(el, st)
+    else if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
     else { walk_children(el, 0, len(el), st) }
 }
 

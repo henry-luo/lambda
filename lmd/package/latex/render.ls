@@ -11,7 +11,15 @@ import boxes: .elements.boxes
 import font_decl: .elements.font_decl
 import color: .elements.color
 import picture: .elements.picture
-import tikz_bridge: .tikz_bridge
+import registry: .packages.registry
+import graphicx: .packages.graphicx
+import enumitem: .packages.enumitem
+import siunitx: .packages.siunitx
+import booktabs: .packages.booktabs
+import biblatex: .packages.biblatex
+import amsmath: .packages.amsmath
+import amssymb: .packages.amssymb
+import tikz: .packages.tikz
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -59,7 +67,10 @@ fn render_symbol(s, info) {
 
 fn render_element(el, info) {
     let tag = name(el)
-    match tag {
+    if (registry.active(info.packages, "biblatex") and
+        biblatex.is_citation_command(string(tag)))
+        biblatex.render_citation(el, info.biblatex_context, info.footnotes)
+    else match tag {
         // ---- document structure ----
         case 'latex_document': render_document(el, info)
         case 'document': render_body(el, info)
@@ -70,6 +81,10 @@ fn render_element(el, info) {
         case 'title': null
         case 'author': null
         case 'date': null
+        case 'DeclareMathOperator': if (registry.active(info.packages, "amsmath")) null
+            else render_generic_default(el, info)
+        case 'DeclareMathOperator*': if (registry.active(info.packages, "amsmath")) null
+            else render_generic_default(el, info)
 
         // ---- title page ----
         case 'maketitle': render_maketitle(info)
@@ -122,11 +137,12 @@ fn render_element(el, info) {
         case 'appendix': null
 
         // ---- color commands ----
-        case 'textcolor': color.render_textcolor(el, render_children(el, 1, info), info.custom_colors)
-        case 'colorbox': color.render_colorbox(el, render_children(el, 1, info), info.custom_colors)
-        case 'fcolorbox': color.render_fcolorbox(el, render_children(el, 2, info), info.custom_colors)
+        case 'textcolor': color.render_textcolor(el, render_children(el, color.content_start(el, 1), info), info.custom_colors)
+        case 'colorbox': color.render_colorbox(el, render_children(el, color.content_start(el, 1), info), info.custom_colors)
+        case 'fcolorbox': color.render_fcolorbox(el, render_children(el, color.content_start(el, 2), info), info.custom_colors)
         case 'definecolor': null
-        case 'pagecolor': null
+        case 'pagecolor': if (color.page_color(el, info.custom_colors) == null)
+            color.invalid_color(el) else null
         case 'color': null
 
         // ---- font sizes ----
@@ -148,7 +164,7 @@ fn render_element(el, info) {
         case 'inline_math': math_bridge.render_inline_el(el)
         case 'display_math': math_bridge.render_display_el(el)
         case 'math_environment': render_math_env(el, info)
-        case 'equation': math_bridge.render_equation_el(el)
+        case 'equation': render_numbered_equation(el, info)
 
         // ---- lists ----
         case 'itemize': render_itemize(el, info)
@@ -168,7 +184,7 @@ fn render_element(el, info) {
         case 'abstract': render_abstract(el, info)
         case 'figure': render_figure(el, info)
         case 'picture': picture.render_picture(el, info.unitlength)
-        case 'tikzpicture': tikz_bridge.render_picture(el)
+        case 'tikzpicture': tikz.render_picture(el)
         case 'minipage': render_env_div(el, info, "latex-minipage", null)
         case 'multicols': render_multicols(el, info)
 
@@ -236,6 +252,14 @@ fn render_element(el, info) {
         // ---- bibliography ----
         case 'thebibliography': render_bibliography(el, info)
         case 'bibitem': null
+        case 'addbibresource': if (registry.active(info.packages, "biblatex")) null else render_generic_default(el, info)
+        case 'printbibliography': if (registry.active(info.packages, "biblatex"))
+            biblatex.render_bibliography(el, info.biblatex_context) else render_generic_default(el, info)
+        case 'refsection': if (registry.active(info.packages, "biblatex"))
+            render_children(el, 0, info) else render_generic_default(el, info)
+        case 'refsegment': if (registry.active(info.packages, "biblatex"))
+            render_children(el, 0, info) else render_generic_default(el, info)
+        case 'hypersetup': if (registry.active(info.packages, "hyperref")) null else render_generic_default(el, info)
 
         // ---- footnotes ----
         case 'footnote': render_footnote(el, info)
@@ -317,7 +341,13 @@ fn render_extended_or_generic(el, info) {
     // skip commands that are no-ops
     if (SKIP_COMMANDS[tag_str] == true) { null }
     // other specific commands
-    else if (tag_str == "includegraphics") { render_includegraphics(el) }
+    else if (tag_str == "includegraphics") { render_includegraphics(el, info) }
+    else if (registry.active(info.packages, "amsmath") and amsmath.is_environment(tag_str))
+        { amsmath.render_environment(el,
+            util.lookup(info.amsmath_numbers, string(el.source_offset)), info.math_operators) }
+    else if (registry.active(info.packages, "siunitx") and
+             (tag_str == "num" or tag_str == "si" or tag_str == "unit" or
+              tag_str == "SI" or tag_str == "qty")) { siunitx.render(el) }
     else if (tag_str == "marginpar") { render_marginpar(el, info) }
     else { resolve_extended_or_generic(tag_str, el, info) }
 }
@@ -325,6 +355,10 @@ fn render_extended_or_generic(el, info) {
 fn resolve_extended_or_generic(tag_str, el, info) {
     let ext = sym.resolve_extended(tag_str)
     if (ext != null) { ext }
+    else if (registry.active(info.packages, "amssymb")) {
+        let glyph = amssymb.render_symbol(tag_str)
+        if (glyph != null) glyph else render_generic(el, info)
+    }
     else { render_generic(el, info) }
 }
 
@@ -364,16 +398,25 @@ fn collect_children(el, i, n, acc, info) {
     else {
         let child = el[i]
         // track \setlength{\unitlength}{value} updates for picture rendering
-        let next_info = if (child is element and string(name(child)) == "setlength"
-                            and len(child) >= 2 and child[0] is element
-                            and string(name(child[0])) == "unitlength"
-                            and child[1] is string) {
-                            {*:info, unitlength: trim(child[1])}
-                        } else { info }
+        let next_info = next_render_info(child, info)
         let rendered = render_node(child, next_info)
         let new_acc = if (rendered != null) acc ++ [rendered] else acc
         collect_children(el, i + 1, n, new_acc, next_info)
     }
+}
+
+fn next_render_info(child, info) {
+    if (child is element and string(name(child)) == "definecolor") {
+        let definition = color.definition(child)
+        if (definition.color_name == "") info
+        else {*:info, custom_colors: info.custom_colors ++
+            [{key: definition.color_name, val: color.definition_value(definition)}]}
+    } else if (child is element and string(name(child)) == "setlength"
+                            and len(child) >= 2 and child[0] is element
+                            and string(name(child[0])) == "unitlength"
+                            and child[1] is string) {
+        {*:info, unitlength: trim(child[1])}
+    } else info
 }
 
 // ============================================================
@@ -386,6 +429,7 @@ fn render_document(el, info) {
     else {
         let items = render_children(el, 0, info);
         <article class: "latex-document latex-" ++ info.docclass,
+            style: if (info.page_color != null) "background-color:" ++ info.page_color else null,
             for c in items { c }
         >
     }
@@ -394,6 +438,7 @@ fn render_document(el, info) {
 fn render_body(el, info) {
     let items = render_children(el, 0, info);
     <article class: "latex-document latex-" ++ info.docclass,
+        style: if (info.page_color != null) "background-color:" ++ info.page_color else null,
         for c in items { c }
     >
 }
@@ -487,7 +532,7 @@ fn render_paragraph(el, info) {
         let decl_tag = find_leading_decl(el, 0, len(el))
         if (decl_tag != null) { render_paragraph_with_decl(el, info, decl_tag) }
         else {
-            let items = render_children(el, 0, info)
+            let items = render_children_with_color(el, info)
             if (len(items) == 0) { null }
             else if (has_block_child(items)) {
                 let parts = split_around_blocks(items)
@@ -545,15 +590,14 @@ fn split_parbreaks_rec(el, i, n, current_children, acc, info) {
 }
 
 fn render_paragraph_with_decl(el, info, decl_tag) {
-    let items = render_children(el, 0, info)
+    let items = render_children_with_color(el, info)
     if (len(items) == 0) { null }
     else if (font_decl.is_font_decl(decl_tag)) {
         let style = font_decl.font_decl_style(decl_tag);
         <p style: style, for c in items { c }>
     }
     else if (color.is_color_decl(decl_tag)) {
-        let style = color.color_decl_style(find_decl_el(el, decl_tag), info.custom_colors);
-        <p style: style, for c in items { c }>
+        <p for c in items { c }>
     }
     else {
         let style = font_decl.align_decl_style(decl_tag);
@@ -692,26 +736,49 @@ fn render_math_env(el, info) {
     math_bridge.render_math_env_el(el, env_name)
 }
 
+fn render_numbered_equation(el, info) {
+    let equation_number = util.lookup(info.equation_nums, string(el.source_offset))
+    if (registry.active(info.packages, "amsmath"))
+        amsmath.render_environment(el,
+            util.lookup(info.amsmath_numbers, string(el.source_offset)), info.math_operators)
+    else if (equation_number == null) math_bridge.render_equation_el(el)
+    else <div class: "latex-equation",
+        math_bridge.render_equation_math(el);
+        <span class: "latex-eq-number", "(" ++ equation_number ++ ")">
+    >
+}
+
 // ============================================================
 // Lists
 // ============================================================
 
 fn render_itemize(el, info) {
     let flat = flatten_paragraphs(el)
-    let items = split_list_items(flat, info);
-    <ul class: "latex-itemize", for li in items { li }>
+    let items = split_list_items(flat, info)
+    let opts = if (registry.active(info.packages, "enumitem")) enumitem.options(el) else {};
+    let list_style = enumitem.list_style(opts, "itemize");
+    <ul class: "latex-itemize", style: if (list_style != "") list_style else null,
+        for li in items { li }>
 }
 
 fn render_enumerate(el, info) {
     let flat = flatten_paragraphs(el)
-    let items = split_list_items(flat, info);
-    <ol class: "latex-enumerate", for li in items { li }>
+    let items = split_list_items(flat, info)
+    let opts = if (registry.active(info.packages, "enumitem")) enumitem.options(el) else {};
+    let first = if (registry.active(info.packages, "enumitem") and el.source_offset != null)
+        util.lookup(info.enumerate_starts, string(el.source_offset)) else enumitem.start(opts);
+    let list_style = enumitem.list_style(opts, "enumerate");
+    <ol class: "latex-enumerate", start: if (first != null) string(first) else null,
+        style: if (list_style != "") list_style else null, for li in items { li }>
 }
 
 fn render_description(el, info) {
     let flat = flatten_paragraphs(el)
-    let items = split_desc_items(flat, info);
-    <dl class: "latex-description", for item in items { item }>
+    let items = split_desc_items(flat, info)
+    let opts = if (registry.active(info.packages, "enumitem")) enumitem.options(el) else {};
+    let list_style = enumitem.list_style(opts, "description");
+    <dl class: "latex-description", style: if (list_style != "") list_style else null,
+        for item in items { item }>
 }
 
 fn flatten_paragraphs(node) {
@@ -744,46 +811,30 @@ fn is_item_node(child) {
 }
 
 fn split_list_items(flat, info) {
-    split_items_rec(flat, 0, len(flat), [], [], info)
+    split_items_rec(flat, 0, len(flat), [], false, [], info)
 }
 
-fn split_items_rec(flat, i, n, current, acc, info) {
-    if (i >= n) {
-        if (len(current) > 0) acc ++ [<li for c in current { c }>]
-        else acc
-    } else if (is_item_node(flat[i])) {
-        let flushed = if (len(current) > 0) acc ++ [<li for c in current { c }>]
-            else acc
-        // check for custom label on \item[label]
-        let custom = get_item_custom_label(flat[i])
-        if (custom != null)
-            split_items_custom_rec(flat, i + 1, n, [custom], flushed, info)
-        else
-            split_items_rec(flat, i + 1, n, [], flushed, info)
+fn has_list_content(items) {
+    any([for (item in items) not (item is string and trim(item) == "")])
+}
+
+fn flush_list_item(current, custom, acc) {
+    if (not has_list_content(current)) acc
+    else if (custom) acc ++ [<li style: "list-style-type:none", for c in current { c }>]
+    else acc ++ [<li for c in current { c }>]
+}
+
+fn split_items_rec(flat, i, n, current, custom, acc, info) {
+    if (i >= n) flush_list_item(current, custom, acc)
+    else if (is_item_node(flat[i])) {
+        let flushed = flush_list_item(current, custom, acc)
+        let label = get_item_custom_label(flat[i])
+        split_items_rec(flat, i + 1, n, if (label != null) [label] else [],
+            label != null, flushed, info)
     } else {
         let rendered = render_node(flat[i], info)
         let new_current = if (rendered != null) current ++ [rendered] else current
-        split_items_rec(flat, i + 1, n, new_current, acc, info)
-    }
-}
-
-// handle items with custom labels — suppress default marker
-fn split_items_custom_rec(flat, i, n, current, acc, info) {
-    if (i >= n) {
-        if (len(current) > 0) acc ++ [<li style: "list-style-type:none", for c in current { c }>]
-        else acc
-    } else if (is_item_node(flat[i])) {
-        let flushed = if (len(current) > 0) acc ++ [<li style: "list-style-type:none", for c in current { c }>]
-            else acc
-        let custom = get_item_custom_label(flat[i])
-        if (custom != null)
-            split_items_custom_rec(flat, i + 1, n, [custom], flushed, info)
-        else
-            split_items_rec(flat, i + 1, n, [], flushed, info)
-    } else {
-        let rendered = render_node(flat[i], info)
-        let new_current = if (rendered != null) current ++ [rendered] else current
-        split_items_custom_rec(flat, i + 1, n, new_current, acc, info)
+        split_items_rec(flat, i + 1, n, new_current, custom, acc, info)
     }
 }
 
@@ -814,9 +865,9 @@ fn split_desc_rec(flat, i, n, acc, term, content, info) {
 
 fn flush_desc(acc, term, content) {
     if (term != null) {
-        let dd = if (len(content) > 0) <dd for c in content { c }> else <dd>
+        let dd = if (has_list_content(content)) <dd for c in content { c }> else <dd>
         acc ++ [term, dd]
-    } else if (len(content) > 0) {
+    } else if (has_list_content(content)) {
         acc ++ [<dd for c in content { c }>]
     } else { acc }
 }
@@ -995,8 +1046,9 @@ fn check_table_match(tables, text, i) {
 }
 
 fn render_tabular(el, info) {
-    let col_spec = parse_col_spec(el)
     let content = find_tabular_content(el)
+    let raw_spec = parse_col_spec(el, registry.active(info.packages, "siunitx"))
+    let col_spec = siunitx.measure_columns(content, raw_spec)
     let rows = split_rows(content, col_spec, info);
     <table class: "latex-tabular",
         <tbody
@@ -1006,9 +1058,11 @@ fn render_tabular(el, info) {
 }
 
 // parse column spec from first curly_group child: "|l|c|r|" → ["left","center","right"]
-fn parse_col_spec(el) {
+fn parse_col_spec(el, si_active) {
     let cg = find_curly_group(el, 0)
-    if (cg != null) extract_alignments(trim(util.text_of(cg)), 0, [])
+    // the direct parser stores the tabular preamble in `columns`.
+    if (el.columns != null) extract_alignments(trim(el.columns), 0, [], si_active, el.source_offset)
+    else if (cg != null) extract_alignments(trim(util.text_of(cg)), 0, [], si_active, el.source_offset)
     else []
 }
 
@@ -1023,17 +1077,27 @@ fn check_curly(el, i) {
     else find_curly_group(el, i + 1)
 }
 
-fn extract_alignments(spec, i, acc) {
+fn extract_alignments(spec, i, acc, si_active, offset) {
     if (i >= len(spec)) acc
-    else extract_one_align(spec, i, acc)
+    else extract_one_align(spec, i, acc, si_active, offset)
 }
 
-fn extract_one_align(spec, i, acc) {
+fn extract_one_align(spec, i, acc, si_active, offset) {
     let ch = slice(spec, i, i + 1)
-    if (ch == "l") extract_alignments(spec, i + 1, acc ++ ["left"])
-    else if (ch == "c") extract_alignments(spec, i + 1, acc ++ ["center"])
-    else if (ch == "r") extract_alignments(spec, i + 1, acc ++ ["right"])
-    else extract_alignments(spec, i + 1, acc)
+    if (ch == "l") extract_alignments(spec, i + 1, acc ++ ["left"], si_active, offset)
+    else if (ch == "c") extract_alignments(spec, i + 1, acc ++ ["center"], si_active, offset)
+    else if (ch == "r") extract_alignments(spec, i + 1, acc ++ ["right"], si_active, offset)
+    else if (ch == "S") {
+        let tail = slice(spec, i + 1, len(spec))
+        let optioned = starts_with(tail, "[")
+        let closing = if (optioned) index_of(tail, "]") else null
+        let raw = if (closing != null) slice(tail, 1, closing)
+            else if (optioned) "[unterminated" else null
+        let next = if (closing != null) i + closing + 2
+            else if (optioned) len(spec) else i + 1
+        let column = if (si_active) siunitx.column_descriptor(raw, offset) else "right"
+        extract_alignments(spec, next, acc ++ [column], si_active, offset)
+    } else extract_alignments(spec, i + 1, acc, si_active, offset)
 }
 
 // find the paragraph child of tabular that contains the actual content
@@ -1103,10 +1167,16 @@ fn add_text_to_cell(el, i, n, current_cells, acc_rows, col_spec, info, trimmed) 
 fn handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
     let child_name = name(child)
     if (child_name == 'linebreak_command') handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info)
-    else if (child_name == 'hline') handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, "latex-hline")
-    else if (child_name == 'toprule') handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, "latex-toprule")
-    else if (child_name == 'midrule') handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, "latex-midrule")
-    else if (child_name == 'bottomrule') handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, "latex-bottomrule")
+    else if (child_name == 'hline') handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, <tr class: "latex-hline">)
+    else if (child_name == 'toprule') handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, <tr class: "latex-toprule">)
+    else if (child_name == 'midrule') handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, <tr class: "latex-midrule">)
+    else if (child_name == 'bottomrule') handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, <tr class: "latex-bottomrule">)
+    else if (child_name == 'cmidrule' and registry.active(info.packages, "booktabs"))
+        handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
+            booktabs.cmidrule(child, len(col_spec)))
+    else if (child_name == 'addlinespace' and registry.active(info.packages, "booktabs"))
+        handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
+            booktabs.addlinespace(child, len(col_spec)))
     else if (child_name == 'multicolumn') handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
     else if (child_name == 'multirow') handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
     else handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
@@ -1127,11 +1197,10 @@ fn append_row(rows, row) {
     rows ++ wrapped
 }
 
-// handle \hline, \toprule, \midrule, \bottomrule — apply border to previous/next row
-fn handle_hline_rule(el, i, n, current_cells, acc_rows, col_spec, info, css_class) {
+// flush cells before each horizontal rule so partial rules retain their column span.
+fn handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, rule_row) {
     // flush current cells if any, then add rule row
     let row = make_row(current_cells, col_spec)
-    let rule_row = <tr class: css_class>
     if (row != null) {
         let flushed = append_row(acc_rows, row)
         let new_rows = append_row(flushed, rule_row)
@@ -1215,7 +1284,8 @@ fn get_align(col_spec, idx) {
 }
 
 fn cell_to_td_aligned(c, align) {
-    if (align == "left") cell_to_td_plain(c)
+    if (align is map and align.kind == "si-decimal") siunitx.render_table_cell(c, align)
+    else if (align == "left") cell_to_td_plain(c)
     else cell_to_td_styled(c, align)
 }
 
@@ -1283,8 +1353,9 @@ fn emit_multirow_td(cells, col_spec, ci, col, acc, cell) {
 
 fn multirow_td(cell, align) {
     let c = cell.content
-    if (align == "left") { <td rowspan: string(cell.rowspan), c> }
-    else { <td rowspan: string(cell.rowspan), style: "text-align: " ++ align, c> }
+    let css_align = if (align is map) "right" else align
+    if (css_align == "left") { <td rowspan: string(cell.rowspan), c> }
+    else { <td rowspan: string(cell.rowspan), style: "text-align: " ++ css_align, c> }
 }
 
 fn emit_regular_td(cells, col_spec, ci, col, acc, cell) {
@@ -1410,7 +1481,22 @@ fn render_url(el) {
 }
 
 fn render_cite(el, info) {
-    let cite_key = trim(util.text_of(el))
+    let keys = util.split_top_level(trim(util.text_of_skip_brack(el)), ",")
+    if (len(keys) == 1) render_cite_key(trim(keys[0]), info)
+    else <span class: "latex-cites",
+        "["
+        for (i, key in keys)
+            <a class: "latex-cite", href: "#bib-" ++ trim(key),
+                (if (i > 0) ", " else "") ++ render_cite_number(trim(key), info)>
+        "]">
+}
+
+fn render_cite_number(cite_key, info) {
+    let bib_num = find_bib_num(info.bibitems, cite_key, 0)
+    if (bib_num > 0) string(bib_num) else "?"
+}
+
+fn render_cite_key(cite_key, info) {
     let bib_num = find_bib_num(info.bibitems, cite_key, 0)
     let display_num = if (bib_num > 0) string(bib_num) else "?";
     <a class: "latex-cite", href: "#bib-" ++ cite_key, "[" ++ display_num ++ "]">
@@ -1683,7 +1769,7 @@ fn render_group(el, info) {
     let decl_tag = find_leading_decl(el, 0, len(el))
     if (decl_tag != null) { render_group_with_decl(el, info, decl_tag) }
     else {
-        let items = render_children(el, 0, info)
+        let items = render_children_with_color(el, info)
         if (len(items) == 0) null
         else if (len(items) == 1) items[0]
         else <span for c in items { c }>
@@ -1711,13 +1797,47 @@ fn find_leading_decl(el, i, n) {
 // render a group whose first significant child is a font/alignment/color declaration
 fn render_group_with_decl(el, info, decl_tag) {
     // render children after the declaration (the decl itself returns null)
-    let items = render_children(el, 0, info)
+    let items = render_children_with_color(el, info)
     if (font_decl.is_font_decl(decl_tag))
         font_decl.wrap_font_decl(decl_tag, items)
     else if (color.is_color_decl(decl_tag))
-        color.wrap_color_decl(find_decl_el(el, decl_tag), items, info.custom_colors)
+        if (len(items) == 1) items[0] else <span for c in items { c }>
     else
         font_decl.wrap_align_decl(decl_tag, items)
+}
+
+fn has_color_decl(el) {
+    any([for (child in el) child is element and string(name(child)) == "color"])
+}
+
+fn render_children_with_color(el, info) {
+    if (has_color_decl(el)) color_segments(el, 0, len(el), info, null, [], [])
+    else render_children(el, 0, info)
+}
+
+fn flush_color_segment(items, style, acc) {
+    if (len(items) == 0) acc
+    else if (style == null) acc ++ items
+    else acc ++ [<span class: "latex-color", style: style, for c in items { c }>]
+}
+
+// a declaration changes only following siblings; recursive rendering keeps group scope.
+fn color_segments(el, i, n, info, style, current, acc) {
+    if (i >= n) flush_color_segment(current, style, acc)
+    else {
+        let child = el[i]
+        let next_info = next_render_info(child, info)
+        if (child is element and string(name(child)) == "color") {
+            let flushed = flush_color_segment(current, style, acc)
+            let next_style = color.color_decl_style(child, next_info.custom_colors)
+            let next_acc = if (next_style == null) flushed ++ [color.invalid_color(child)] else flushed
+            color_segments(el, i + 1, n, next_info, next_style, [], next_acc)
+        } else {
+            let rendered = render_node(child, next_info)
+            color_segments(el, i + 1, n, next_info, style,
+                if (rendered == null) current else current ++ [rendered], acc)
+        }
+    }
 }
 
 // find the declaration element node by tag name within a parent
@@ -1734,7 +1854,12 @@ fn find_decl_el_rec(el, i, n, tag_str) {
     }
 }
 
-fn render_includegraphics(el) {
+fn render_includegraphics(el, info) {
+    if (registry.active(info.packages, "graphicx")) graphicx.render(el, info.base_uri)
+    else render_legacy_includegraphics(el)
+}
+
+fn render_legacy_includegraphics(el) {
     // extract optional arguments [key=val,...] from brack_group
     let brack = util.find_child(el, 'brack_group')
     let opts = util.parse_kv_options(if (brack != null) util.text_of(brack) else null)
@@ -1852,12 +1977,8 @@ fn render_items(items, i, n, info, acc) {
 }
 
 fn render_generic_default(el, info) {
-    let n = len(el)
-    if (n == 0) { null }
-    else {
-        let items = render_children(el, 0, info)
-        if (len(items) == 0) null
-        else if (len(items) == 1) items[0]
-        else <span class: "latex-cmd-" ++ name(el), for c in items { c }>
-    }
+    let command = string(name(el))
+    let message = "Unsupported LaTeX command or environment: " ++ command
+    util.unsupported_element(registry.package_for_command(command, info.packages),
+        message, el.source_offset)
 }

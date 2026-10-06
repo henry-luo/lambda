@@ -106,6 +106,12 @@ TemplateRegistry* template_registry_new(void);
 // Destroy a template registry and clear its entries
 void template_registry_destroy(TemplateRegistry* registry);
 
+// restore an append-only registration checkpoint after a rejected REPL submission.
+void template_registry_restore(TemplateRegistry* registry,
+                               const TemplateRegistry* checkpoint);
+// remove interpreter entries before their owning module's AST is released.
+void template_registry_remove_module(TemplateRegistry* registry, struct Script* module);
+
 // Register a template entry in the registry
 void template_registry_add(TemplateRegistry* registry,
                            const char* name, bool is_edit,
@@ -119,6 +125,10 @@ void template_registry_add(TemplateRegistry* registry,
 // Attach an element pattern's TypeElmt to an entry, deriving its attribute
 // predicate counts. Call after template_registry_add for element patterns.
 void template_registry_set_element_pattern(TemplateEntry* entry, const void* elmt_type);
+void template_registry_set_state_declarations(TemplateEntry* entry,
+                                              struct AstViewNode* view);
+const char* template_entry_state_name(TemplateEntry* entry,
+                                      const char* name);
 
 // Behavior templates (UA default behavior; see vibe/Lambda_Design_DOM_State.md).
 // Raise behavior mode around the dom package's load so its templates register as
@@ -129,6 +139,17 @@ bool template_registry_has_behavior(TemplateRegistry* registry);
 // Find the handler an entry declares for an event, or NULL.
 TemplateHandlerEntry* template_entry_find_handler(TemplateEntry* entry,
                                                   const char* event_name);
+
+// Invoke one handler in the currently bound runtime, shared by GUI and
+// headless hosts. The caller owns event rooting and dispatch context.
+Item template_call_event_handler(TemplateHandlerEntry* entry,
+                                 Item model_item, Item event_item);
+
+// Headless host entry for a targeted template event. The active EvalContext
+// and registry must belong to the mounted session.
+Item template_dispatch_event(Item model_item, bool edit_mode,
+                             const char* event_name, Item event_item,
+                             bool* handled);
 
 // Fast, collision-tolerant event prefilters. A true result still requires the
 // exact handler lookup; false is definitive for the active registry entry.

@@ -1,0 +1,26 @@
+"entry types:"
+[true, true, true, true, true, true, true, true, true, true]
+"data diagnostics:"
+[]
+"render diagnostics:"
+[]
+"all entries printed:"
+true
+"type details:"
+[true, true, true, true, true, true, true, true, true]
+"external links:"
+true
+"fullcite identifiers:"
+true
+"basic citation commands:"
+[true, true, true, true]
+"plural citations:"
+[true, true, true, true, true, true, true]
+"protected title:"
+true
+"string concat:"
+true
+"cross-file resources:"
+true
+"name forms:"
+["Jean", "de", "La Fontaine", "Smith", "Jr.", "John", "The Example Consortium"]

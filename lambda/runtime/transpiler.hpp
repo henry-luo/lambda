@@ -66,6 +66,7 @@ extern "C" void heap_finalize_gc_objects(struct gc_heap* gc);
 void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
 extern "C" String* heap_strcpy(const char* src, int64_t len);  // callable from C code (path.c)
+extern "C" void heap_gc_visit_template_roots(struct gc_heap* gc);
 extern "C" void heap_gc_collect(void);                // trigger GC collection from runtime
 extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global as GC root
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
@@ -85,6 +86,8 @@ void expand_list(List *list, Arena* arena = nullptr);
 // a Rooted owner (or an external arena owner) across this allocating call.
 bool array_reserve_append_slots(Array* array, int64_t append_count);
 
+#ifndef LAMBDA_NO_MIR
+// interpreter-only profiles do not depend on MIR declarations or headers.
 extern "C" {
 #ifndef WASM_BUILD
 #include <mir.h>
@@ -94,6 +97,7 @@ extern "C" {
 #include "../../wasm-deps/include/mir-gen.h"
 #endif
 }
+#endif
 
 typedef struct Runner {
     Runtime* runtime;    // back-pointer to owning Runtime (for heap reuse)
@@ -143,10 +147,12 @@ struct Runtime {
     // runtime_scheduler() accessors. Runtime is a controller, not a second
     // owner; the old mirrored fields are gone.
 
-    // Phase 5: unified DOM — when ui_mode is true, elmt()/list_push()/elmt_fill()
-    // allocate fat DomElement/DomText on result_arena instead of the GC heap.
+    // Phase 5: unified DOM — a ui_mode runtime's elmt()/list_push()/elmt_fill()
+    // allocate fat DomElement/DomText in the arena of the bound result Input
+    // instead of the GC heap. UI content that is not already in that arena is
+    // deep-copied into it, never left pointing at the GC heap (D4.5.2).
     bool ui_mode;
-    Arena* result_arena;
+    Input* result_input;
 
     // Runtime-local load counters. InputManager owns process-wide artifact
     // identity and lifetime under D8.5.1v2.
@@ -235,6 +241,7 @@ TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);
 
+#ifndef LAMBDA_NO_MIR
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);
 // Hosted profiles that select native MIR must not inherit the process-wide
@@ -251,6 +258,7 @@ void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized);
 void register_dynamic_import(const char *name, void *addr);
 void clear_dynamic_imports(void);
 }
+#endif
 
 // Count finalized MIR volume once for all language front ends. Labels are
 // structural and excluded from the executable-instruction total.
@@ -278,6 +286,10 @@ struct LambdaDocumentTransformConfig {
     const char* package_module;
     const char* function_name;
     LambdaDocumentTransformSource source;
+    // A stateless transform keeps nothing between documents, so a window runs
+    // it on its one shared loader runtime; a stateful application (edit) keeps
+    // a runtime per document.
+    bool stateless;
 };
 
 enum LambdaDocumentTransformOptionKind {
@@ -297,8 +309,6 @@ const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
     const char* input_type);
 // Loads a file-backed package, parses the source through `input()`, and calls
 // its configured public transform without synthesizing a Lambda bridge script.
-Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
-                                     const LambdaDocumentTransformConfig* transform);
 Input* run_lambda_document_transform_with_options(Runtime* runtime,
     const char* input_target, const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count);
@@ -386,7 +396,19 @@ void preserve_context_last_error(Item result);
 void eval_context_set_last_error(EvalContext* ctx, LambdaError* error);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
 void runtime_init(Runtime* runtime);
-void runtime_set_ui_result_arena(Runtime* runtime, Arena* arena);
+void runtime_set_ui_result_input(Runtime* runtime, Input* input);
+// A runtime that outlives the documents it builds (a window's loader runtime)
+// binds a document's result Input only while it works on that document; null
+// releases the binding, so a closed document's arena never stays reachable.
+void runtime_bind_ui_result_input(Runtime* runtime, Input* input);
+// A context allocates UI results where its runtime's result binding says: in
+// the bound Input's arena, or the GC heap when none is bound. Returns whether
+// one is bound.
+bool runtime_context_follow_ui_result(Runtime* runtime, EvalContext* ctx);
+// Each document such a runtime builds takes the UI attribute roots its build
+// published and releases them when it closes (D4.5.2 rooted exemption).
+void* runtime_take_ui_attribute_roots(Runtime* runtime);
+void ui_attribute_roots_release(void* roots);
 // Non-blocking close notification: satellite workers observe this before the
 // document/runtime owner starts its full teardown.
 void runtime_request_satellite_cancel(Runtime* runtime);

@@ -1,0 +1,32 @@
+\documentclass{article}
+\usepackage{booktabs}
+
+\title{booktabs -- pakietomat.wordpress.com}
+\author{}
+\date{\relax}
+
+\begin{document}
+
+\begin{tabular}{lll} \hline
+ABC & 1 & 2 \\ \hline
+E & 3 & 4 \\ \hline
+F & 5 & 6 \\ \hline
+\end{tabular}
+
+\bigskip
+
+\begin{tabular}{lll} \toprule
+ABC & 1 & 2 \\ \midrule
+E & 3 & 4 \\
+F & 5 & 6 \\ \bottomrule
+\end{tabular}
+
+\bigskip
+
+\begin{tabular}{lll} \toprule
+ABC & 1 & 2 \\ \midrule
+E & 3 & 4 \\ \cmidrule{1-2}
+F & 5 & 6 \\ \bottomrule
+\end{tabular}
+
+\end{document}

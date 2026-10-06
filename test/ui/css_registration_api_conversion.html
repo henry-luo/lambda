@@ -1,0 +1,63 @@
+<!doctype html>
+<style>#parent{--Case:17px;--case:19px}#child{width:var(--live,3px);height:10px;--live:red}</style>
+<button id="inspect">inspect</button><div id="parent"><div id="child"></div></div>
+<script>
+document.getElementById('inspect').addEventListener('click', function () {
+    var button = this, child = document.getElementById('child');
+    function record(name, body) {
+        try {button.setAttribute('data-' + name, String(body()));}
+        catch (error) {button.setAttribute('data-' + name, error.name);}
+    }
+    record('null', function () {return CSS.registerProperty(null);});
+    record('primitive', function () {return CSS.registerProperty(1);});
+    record('conversion', function () {
+        var order = [];
+        var definition = {
+            get inherits() {order.push('inherits'); return {valueOf:function(){throw Error('unused');}};},
+            get initialValue() {order.push('initialValue'); return {toString:function(){order.push('initial-string'); return '12px';}};},
+            get name() {order.push('name'); return {toString:function(){order.push('name-string'); return '--converted';}};},
+            get syntax() {order.push('syntax'); return {toString:function(){order.push('syntax-string'); return '<length>';}};}
+        };
+        CSS.registerProperty(definition);
+        return order.join(',') + '|' + getComputedStyle(child).getPropertyValue('--converted');
+    });
+    record('inherited-members', function () {
+        var definition = Object.create({name:'--prototype', inherits:false, initialValue:'23px', syntax:'<length>'});
+        CSS.registerProperty(definition);
+        return getComputedStyle(child).getPropertyValue('--prototype');
+    });
+    record('getter-error', function () {
+        var marker = new Error('marker'), visited = [];
+        try {CSS.registerProperty({get inherits(){visited.push('inherits');throw marker;},get name(){visited.push('name');return '--unused';}});}
+        catch (error) {return (error === marker) + '|' + visited.join(',');}
+    });
+    record('reentrant', function () {
+        CSS.registerProperty({inherits:false,get name(){CSS.registerProperty({name:'--reentrant',inherits:false});return '--reentrant';}});
+    });
+    record('duplicate-conversion', function () {
+        var visited = [];
+        try {CSS.registerProperty({get inherits(){visited.push('inherits');return false;},get initialValue(){visited.push('initialValue');return '1px';},get name(){visited.push('name');return '--converted';},get syntax(){visited.push('syntax');return '<unknown>';}});}
+        catch (error) {return error.name + '|' + visited.join(',');}
+    });
+    record('case', function () {
+        CSS.registerProperty({name:'--Case',syntax:'<length>',inherits:true,initialValue:'5px'});
+        CSS.registerProperty({name:'--case',syntax:'<length>',inherits:true,initialValue:'6px'});
+        return getComputedStyle(child).getPropertyValue('--Case') + '|' + getComputedStyle(child).getPropertyValue('--case');
+    });
+    record('long-name', function () {
+        var name = '--' + new Array(241).join('x');
+        CSS.registerProperty({name:name,syntax:'<number>',inherits:false,initialValue:'31'});
+        return getComputedStyle(child).getPropertyValue(name);
+    });
+    record('nul-name', function () {
+        var a = '--same\u0000first', b = '--same\u0000second';
+        CSS.registerProperty({name:a,syntax:'<number>',inherits:false,initialValue:'11'});
+        CSS.registerProperty({name:b,syntax:'<number>',inherits:false,initialValue:'13'});
+        return getComputedStyle(child).getPropertyValue(a) + '|' + getComputedStyle(child).getPropertyValue(b) + '|' + getComputedStyle(child).getPropertyValue('--same');
+    });
+    record('live', function () {
+        CSS.registerProperty({name:'--live',syntax:'<length>',inherits:false,initialValue:'29px'});
+        return getComputedStyle(child).getPropertyValue('--live') + '|' + getComputedStyle(child).width;
+    });
+});
+</script>

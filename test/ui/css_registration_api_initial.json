@@ -1,0 +1,152 @@
+{
+  "name": "CSS.registerProperty validates and retains universal initial token values",
+  "html": "test/ui/css_registration_api_initial.html",
+  "viewport": {
+    "width": 240,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inspect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-empty",
+      "equals": "ok|"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-space",
+      "equals": "ok|"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-wide",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-inherit",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-revert",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-var",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-env",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-relative",
+      "equals": "ok|2em"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-current",
+      "equals": "ok|currentColor"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-important",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-bad-block",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-semicolon",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-null",
+      "equals": "ok|null"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-typed-wide",
+      "equals": "SyntaxError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-typed-percent",
+      "equals": "ok|20%"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-unclosed",
+      "equals": "ok|foo("
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-nul",
+      "equals": "ok|a\u0000b"
+    }
+  ]
+}

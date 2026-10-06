@@ -1,31 +1,18 @@
-#ifndef LAMBDA_WASM_H
-#define LAMBDA_WASM_H
+#pragma once
 
-#ifdef WASM_BUILD
+// browser embeddings exchange text; tagged Items never cross the JS boundary.
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-// Include Lambda types
-#include "lambda.h"
+// one synchronous REPL per module instance; init/reset return 1 on success.
+int lambda_wasm_init(void);
+// UTF-8 Lambda value text, or NULL on initialization/argument failure.
+// the result is borrowed until the next evaluation, reset or shutdown.
+const char* lambda_wasm_eval(const char* source);
+int lambda_wasm_reset(void);
+void lambda_wasm_shutdown(void);
 
-// Forward declarations for Lambda types (from transpiler.h)
-typedef struct Runtime {
-    // Simple stub fields for WASM build
-    int initialized;
-    void* reserved;
-} Runtime;
-// Item is already defined in lambda.h as uint64_t
-// #define ITEM_NULL is already defined in lambda.h
-
-// WASM function exports
-const char* lambda_version();
-int lambda_init();
-int lambda_process_string(const char* input, char* output, int max_output_len);
-
-// Runtime functions for WASM
-Runtime* lambda_runtime_new();
-void lambda_runtime_free(Runtime* runtime);
-Item lambda_run_code(Runtime* runtime, const char* source_code);
-const char* lambda_item_to_string(Item item);
-
-#endif // WASM_BUILD
-
-#endif // LAMBDA_WASM_H
+#ifdef __cplusplus
+}
+#endif

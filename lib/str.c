@@ -303,6 +303,7 @@ void str_needle_init(StrNeedle* needle, const char* bytes, size_t len, bool fold
     }
     needle->rare_rank = best_rank;
     needle->rare_alt = fold_ascii ? _ascii_upper(needle->rare) : needle->rare;
+#ifndef LAMBDA_NO_STR_SIMD
     // the second-rarest position completes a packed pair (str_simd.c)
     if (needle->len >= 2) {
         uint8_t pair_rank = 255;
@@ -328,6 +329,7 @@ void str_needle_init(StrNeedle* needle, const char* bytes, size_t len, bool fold
         // common one, or a letter scanned in both cases, gains from the pair
         needle->use_pair = needle->rare_rank >= STR_PAIR_MIN_RANK || needle->rare != needle->rare_alt;
     }
+#endif
 }
 
 bool str_needle_equal_at(const StrNeedle* needle, const char* at) {
@@ -342,7 +344,9 @@ size_t str_needle_find(const StrNeedle* needle, const char* s, size_t s_len) {
     if (!s) s_len = 0;
     if (needle->len == 0) return 0;
     if (needle->len > s_len) return STR_NPOS;
+#ifndef LAMBDA_NO_STR_SIMD
     if (needle->use_pair) return str_needle_find_pair(needle, s, s_len);
+#endif
     /* a match starting at `start` puts the scan byte at start + rare_at, so the
      * scan covers [rare_at, s_len - len + rare_at]; candidates appear in
      * increasing start order, so the first one that verifies is the leftmost */

@@ -21,6 +21,7 @@ typedef struct RenderWalkBlockPhase {
     FontBox pa_font;
     Color pa_color;
     bool opened_transform;
+    bool opened_clip;
     bool opened_effect_group;
     bool stop_after_self;
 } RenderWalkBlockPhase;
@@ -122,12 +123,18 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
 
     state->x = p->pa_x + block->x;
     state->y = p->pa_y + block->y;
+    if (backend->visit_element) {
+        backend->visit_element(backend->ctx, block, state->x, state->y);
+    }
 
-    bool has_transform = block->transform && block->transformp()->functions;
+    bool has_transform = transform_has_functions(block->transform);
     p->opened_transform = has_transform && backend->begin_transform && backend->end_transform;
     if (p->opened_transform) {
         backend->begin_transform(backend->ctx, block, state->x, state->y);
     }
+
+    p->opened_clip = backend->begin_clip && backend->end_clip &&
+        backend->begin_clip(backend->ctx, block, state->x, state->y);
 
     PaintEffectGroup group = {};
     bool has_effect_group = render_walk_block_effect_group(block, state->x, state->y, &group);
@@ -149,13 +156,15 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
 
-    if (block->bound && backend->render_bound) {
+    bool hidden = view_backface_is_hidden(block);
+    if (!hidden && block->bound && backend->render_bound) {
         backend->render_bound(backend->ctx, block, state->x, state->y);
     }
 
     if (block->in_line && block->inl()->has_color) {
         state->color = block->inl()->color;
     }
+    if (hidden) return true;
 
     if (block->tag_id == MARKUP_NAME_SVG) {
         if (backend->render_inline_svg) {
@@ -243,7 +252,7 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
 
-    if (!p->stop_after_self &&
+    if (!p->stop_after_self && !view_backface_is_hidden(block) &&
         block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
         if (backend->render_column_rules) {
             backend->render_column_rules(backend->ctx, block, state->x, state->y);
@@ -252,6 +261,10 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
 
     if (p->opened_effect_group) {
         backend->end_effect_group(backend->ctx);
+    }
+
+    if (p->opened_clip) {
+        backend->end_clip(backend->ctx);
     }
 
     if (p->opened_transform) {
@@ -266,6 +279,7 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
 
 void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
     if (!backend || !state || !block) return;
+    if (view_backface_is_hidden(block, BACKFACE_SUBTREE)) return;
 
     RenderWalkBlockDriver driver = {};
     driver.backend = backend;
@@ -297,6 +311,16 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
         state->color = span->inl()->color;
     }
 
+    if (backend->visit_element) {
+        backend->visit_element(backend->ctx, span,
+            state->x + span->x, state->y + span->y);
+    }
+
+    // Inline image wrappers carry graphicx trim/clip on their own element.
+    bool opened_clip = backend->begin_clip && backend->end_clip &&
+        backend->begin_clip(backend->ctx, span,
+            state->x + span->x, state->y + span->y);
+
     if (span->first_child) {
         PaintEffectGroup group = {};
         bool has_effect_group = render_walk_inline_effect_group(span, &group);
@@ -322,12 +346,15 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
         }
     }
 
+    if (opened_clip) backend->end_clip(backend->ctx);
+
     state->font = pa_font;
     state->color = pa_color;
 }
 
 static void render_walk_view(RenderBackend* backend, RenderWalkState* state, View* view) {
     if (!backend || !state || !view) return;
+    if (view_backface_is_hidden(view, view->is_block() ? BACKFACE_SUBTREE : BACKFACE_SELF)) return;
 
     switch (view->view_type) {
         case RDT_VIEW_BLOCK:
@@ -424,6 +451,7 @@ void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* st
 
     for (int i = 0; i < abs_children->length; i++) {
         ViewBlock* abs_child = (ViewBlock*)abs_children->data[i];
+        if (view_backface_is_hidden(abs_child, BACKFACE_SUBTREE)) continue;
         if (backend->render_block) {
             backend->render_block(backend->ctx, abs_child,
                                   state->x, state->y, &state->font, state->color);

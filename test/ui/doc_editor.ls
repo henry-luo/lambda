@@ -280,10 +280,11 @@ fn selected_preview(file) {
       else { pdf.pdf_to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PDF"> } }
     }
     else if (is_latex_document(file["extension"])) {
-      // The editor already owns the runtime, so render LaTeX inline instead of loading an iframe.
+      // Pass the selected file's path so local bibliography and image resources resolve.
       let parsed = input(selected_path, 'latex') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
-      else { latex.render(parsed, null) ^ { <p class:"preview-error", "Unable to render selected LaTeX"> } }
+      else { latex.render(parsed, {source_path:absolute_file_path(selected_path)}) ^ {
+        <p class:"preview-error", "Unable to render selected LaTeX"> } }
     }
     else if (is_pgf_document(file["extension"])) {
       // Reuse the parsed TikZ document so PGF fragments render inside the editor runtime.

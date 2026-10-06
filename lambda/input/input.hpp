@@ -114,6 +114,13 @@ void shape_tree_stats_note_private_copy(int64_t entries);
 
 #include "../io/mark_builder.hpp"
 
+// Parse options beyond type and flavor.
+typedef struct InputParseOptions {
+    bool source_positions;  // parse({sourcepos: true}): markup blocks carry their source lines
+    bool embedded_math;     // markup: attach each <math>'s parsed `ast` and list it on
+                            // Input::embedded_math, for a display that renders it directly
+} InputParseOptions;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -132,6 +139,8 @@ Input* input_from_source_with_name_parent(const char* source, Url* url,
 // source lines it spans (`sourcepos`, as in cmark)
 Input* input_from_source_with_positions(const char* source, Url* url,
     String* type, String* flavor);
+Input* input_from_source_with_options(const char* source, Url* url,
+    String* type, String* flavor, const InputParseOptions* options);
 Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
 Input* input_from_directory_with_name_parent(const char* directory_path,
     const char* original_url, bool recursive, int max_depth, NamePool* name_parent);

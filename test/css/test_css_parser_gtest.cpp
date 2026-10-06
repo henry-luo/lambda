@@ -3,6 +3,8 @@
 #include "../../lambda/input/css/css_value_parser.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
 #include "../../lambda/input/css/css_engine.hpp"
+#include "../../lambda/input/css/dom_element.hpp"
+#include "../../lambda/input/css/css_formatter.hpp"
 #include "../../lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
@@ -74,6 +76,29 @@ TEST_F(CssParserTest, ParseInvalidCSS) {
     validateTokenization(css, 3); // Should still tokenize even if semantically invalid
 }
 
+TEST_F(CssParserTest, VarReferencePreservesEmptyAndNestedFallbacks) {
+    CssPropertyValueParser* parser = css_property_value_parser_create(pool);
+    ASSERT_NE(parser, nullptr);
+    const char* cases[] = {" --missing , )", "--missing, rgb(255,0,0))"};
+    for (int i = 0; i < 2; i++) {
+        size_t count = 0;
+        CssToken* tokens = css_tokenize(cases[i], strlen(cases[i]), pool, &count);
+        ASSERT_NE(tokens, nullptr);
+        CSSVarRef* reference = css_parse_var_function(parser, tokens, (int)count);
+        ASSERT_NE(reference, nullptr);
+        EXPECT_TRUE(reference->has_fallback);
+        ASSERT_NE(reference->fallback, nullptr);
+        if (i == 0) {
+            EXPECT_EQ(reference->fallback->type, CSS_VALUE_TYPE_LIST);
+            EXPECT_EQ(reference->fallback->data.list.count, 0);
+        } else {
+            ASSERT_EQ(reference->fallback->type, CSS_VALUE_TYPE_FUNCTION);
+            ASSERT_NE(reference->fallback->data.function, nullptr);
+            EXPECT_EQ(reference->fallback->data.function->arg_count, 3);
+        }
+    }
+}
+
 // ============================================================================
 // CSS Engine Stylesheet Parsing Tests
 // ============================================================================
@@ -125,6 +150,69 @@ TEST_F(CssEngineParserTest, InvalidSizeValuesDoNotEnterCascade) {
     }
 }
 
+TEST_F(CssEngineParserTest, PhysicalSideLengthsValidateWholeValues) {
+    const char* valid[] = {"margin-left:-2px", "top:-5%", "padding-top:calc(-2px + 4px)",
+        "border-top-width:calc(1px + 2px)", "column-rule-width:thin", "right:auto"};
+    const char* invalid[] = {"margin-left:3", "left:calc(1px + wat)",
+        "padding-top:-1px", "padding-left:2px 3px", "border-top-width:3furlong",
+        "border-left-width:2%", "column-rule-width:3", "margin-right:2deg"};
+    for (const char* value : valid)
+        EXPECT_NE(css_parse_declaration_text(value, strlen(value), pool), nullptr) << value;
+    for (const char* value : invalid)
+        EXPECT_EQ(css_parse_declaration_text(value, strlen(value), pool), nullptr) << value;
+}
+
+TEST_F(CssEngineParserTest, ImportantMarkerRequiresTrailingCaseInsensitiveTokens) {
+    const char* important[] = {"width:20px !important", "width:20px !IMPORTANT",
+        "width:20px ! /*priority*/ ImPoRtAnT /*end*/", "--size:20px !IMPORTANT"};
+    for (const char* source : important) {
+        CssDeclaration* declaration = css_parse_declaration_text(source, strlen(source), pool);
+        ASSERT_NE(declaration, nullptr) << source;
+        EXPECT_TRUE(declaration->important) << source;
+    }
+    const char* nested[] = {"--size:[!important]", "--size:(!important)",
+        "--size:{!important}", "--size:var(--other, !important)"};
+    for (const char* source : nested) {
+        CssDeclaration* declaration = css_parse_declaration_text(source, strlen(source), pool);
+        ASSERT_NE(declaration, nullptr) << source;
+        EXPECT_FALSE(declaration->important) << source;
+    }
+    const char* invalid[] = {"width:20px !important junk", "width:20px !important 30px"};
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+}
+
+TEST_F(CssEngineParserTest, ImportantFontFamilyListValidatesWithoutPriorityTokens) {
+    const char* source = "h1,h2,h3,h4,h5,h6{font-family:Cairo,\"Helvetica Neue\","
+        "Helvetica,Arial,Geneva,sans-serif!important}";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, source, nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    CssRule* rule = sheet->rules[0];
+    ASSERT_NE(rule->data.style_rule.selector_group, nullptr);
+    ASSERT_EQ(rule->data.style_rule.selector_group->selector_count, 6);
+    ASSERT_EQ(rule->data.style_rule.declaration_count, 1u);
+    CssDeclaration* declaration = rule->data.style_rule.declarations[0];
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_TRUE(declaration->important);
+    ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_LIST);
+    EXPECT_EQ(declaration->value->data.list.count, 6);
+    EXPECT_EQ(declaration->value->data.list.values[5]->type, CSS_VALUE_TYPE_KEYWORD);
+    EXPECT_EQ(declaration->value->data.list.values[5]->data.keyword, CSS_VALUE_SANS_SERIF);
+}
+
+TEST_F(CssEngineParserTest, KeyframesPreserveMathWhitespace) {
+    const char* css = "@keyframes units { from { width:calc(2em + 10%); } "
+        "to { width:calc(4em + 20%); } }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    ASSERT_EQ(sheet->rules[0]->type, CSS_RULE_KEYFRAMES);
+    ASSERT_NE(sheet->rules[0]->data.generic_rule.content, nullptr);
+    EXPECT_NE(strstr(sheet->rules[0]->data.generic_rule.content, "calc(2em + 10%)"), nullptr);
+    EXPECT_NE(strstr(sheet->rules[0]->data.generic_rule.content, "calc(4em + 20%)"), nullptr);
+}
+
 TEST_F(CssEngineParserTest, SpacingShorthandsValidateTokensBeforeCascade) {
     const char* valid[] = {
         "margin: -2px 5% auto", "padding: calc(2px + 3px) 4px",
@@ -145,6 +233,136 @@ TEST_F(CssEngineParserTest, SpacingShorthandsValidateTokensBeforeCascade) {
         EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr)
             << text;
     }
+}
+
+TEST_F(CssEngineParserTest, AnimationValuesValidateWholeDeclaration) {
+    const char* valid[] = {
+        "animation:grow 1s linear -.5s 2 alternate both paused",
+        "animation:2s step-start none", "animation:spin 1s, grow 2s",
+        "animation:\"reverse\" 2s cubic-bezier(.1,2,.8,-1)",
+        "animation:var(--motion)", "animation-name:grow, \"Grow\"",
+        "animation:grow -1s", "animation:grow -1s 2s",
+        "animation-duration:1s, 250ms", "animation-delay:-1s, 0s",
+        "animation-iteration-count:0, .5, infinite",
+        "animation-timing-function:steps(2,jump-none), cubic-bezier(0,0,1,1)"
+    };
+    const char* invalid[] = {
+        "animation:grow -1s -2s", "animation:grow 1px", "animation:grow 1s 2s 3s",
+        "animation:grow spin 1s", "animation:grow 1s running paused",
+        "animation:grow 1s cubic-bezier(-.1,0,1,1)",
+        "animation:grow 1s steps(1,jump-none)", "animation:grow 1s steps(1.5)",
+        "animation:grow 1s steps(2.0)", "animation:grow 1s steps(2e0)",
+        "animation-name:default", "animation-name:grow spin",
+        "animation:grow 1foo", "animation-name:1foo",
+        "animation-duration:-1s", "animation-duration:1s 2s",
+        "animation-duration:0", "animation-iteration-count:-.5",
+        "animation-direction:normal, inherit", "animation-fill-mode:red"
+    };
+    for (const char* source : valid) {
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    }
+    for (const char* source : invalid) {
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    }
+}
+
+TEST_F(CssEngineParserTest, ColorVariableGrammarDefersUntilSubstitution) {
+    const char* valid[] = {
+        "color:var(--x)", "color:{var(--x)}", "color:{ var(--x) }",
+        "background-color:rgb(var(--channels) / .5)", "border-left-color:var(--border)"
+    };
+    const char* invalid[] = {
+        "color:1px", "color:{red}", "color:var(--x) {}", "color:{} var(--x)",
+        "color:{var(--x)} red", "color:red {var(--x)}"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, OpacityValidatesNumericDomainAndWholeValue) {
+    const char* valid[] = {
+        "opacity:50%", "opacity:-1", "opacity:2", "opacity:inherit",
+        "opacity:var(--fade)", "opacity:calc(20% + 30%)",
+        "opacity:clamp(0%, calc(10% + 20%), 100%)", "opacity:calc(50% * 2)",
+        "opacity:min(80%, 90%)", "opacity:sin(30deg)"
+    };
+    const char* invalid[] = {
+        "opacity:auto", "opacity:red", "opacity:1px", "opacity:1deg", "opacity:pi",
+        "opacity:.5 .2", "opacity:50%, 80%", "opacity:calc(.2 + 1px)",
+        "opacity:calc(10% + 2deg)", "opacity:calc(.2 + 30%)", "opacity:calc(50% * 50%)", "opacity:wobble(.5)", "opacity:calc(.2 +)"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, TransformValidatesFunctionArityAndNumericDomains) {
+    const char* valid[] = {
+        "transform:none", "transform:inherit", "transform:var(--motion)",
+        "transform:translateX(var(--end))", "transform:translate(1em, 50%) rotate(.5turn)",
+        "transform:scale(50%, 150%)", "transform:translate3d(10%, 1px, 2em)",
+        "transform:rotate3d(0, 1, 0, 90deg)", "transform:matrix(1,0,0,1,10,20)",
+        "transform:skewY(0)", "transform:perspective(100px)", "transform:perspective(none)",
+        "transform:perspective(0)", "transform:perspective(.5px)",
+        "transform:translateX(calc(10px + 50%))", "transform:scale(calc(50% * 2))"
+    };
+    const char* invalid[] = {
+        "transform:wobble(1)", "transform:translateX()", "transform:translateX(1px,2px)",
+        "transform:translate(10)", "transform:translateX(10deg)", "transform:rotate(10)",
+        "transform:rotate(2px)", "transform:scale(2px)", "transform:translate3d(1px,2px,3%)",
+        "transform:matrix(1,0,0,1,10)", "transform:perspective(-1px)",
+        "transform:perspective(50%)", "transform:translateX(1px), rotate(0)",
+        "transform:translateX(1px) garbage", "transform:none translateX(1px)",
+        "transform:translateX(calc(10px + 1deg))"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, TransitionValuesValidateWholeDeclaration) {
+    const char* valid[] = {
+        "transition:opacity 1s linear -.5s, width 250ms steps(2,jump-start)",
+        "transition:1s", "transition:none 2s", "transition:var(--motion)",
+        "transition:opacity -1s", "transition:opacity -1s 2s",
+        "transition-property:width, unknown-target, opacity",
+        "transition-duration:1s, 250ms", "transition-delay:-1s, 0s",
+        "transition-timing-function:steps(2,jump-none), ease", "transition:inherit"
+    };
+    const char* invalid[] = {
+        "transition:opacity -1s -2s", "transition:opacity 1px",
+        "transition:opacity 1s 2s 3s", "transition:opacity width 1s",
+        "transition:opacity 1s linear ease", "transition:none 1s, opacity 2s",
+        "transition-property:none, opacity", "transition-property:width opacity",
+        "transition-property:default", "transition-property:\"opacity\"",
+        "transition-property:1foo", "transition-duration:-1s",
+        "transition-duration:0", "transition-duration:1s 2s",
+        "transition-delay:1s, inherit", "transition-timing-function:steps(2.0)",
+        "transition-timing-function:cubic-bezier(-1,0,1,1)"
+    };
+    for (const char* source : valid) {
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    }
+    for (const char* source : invalid) {
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    }
+}
+
+TEST_F(CssEngineParserTest, CustomPropertiesPreserveEmptyValuesAndCommaBoundaries) {
+    const char* sources[] = {"--empty:;", "--space: ;", "--comma:,;", "--tail:red,;", "--leading:,blue;"};
+    for (int i = 0; i < 5; i++) {
+        CssDeclaration* declaration = css_parse_declaration_text(sources[i], strlen(sources[i]), pool);
+        ASSERT_NE(declaration, nullptr) << sources[i];
+        ASSERT_NE(declaration->value, nullptr) << sources[i];
+        ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_LIST) << sources[i];
+        EXPECT_EQ(declaration->value->data.list.count, i < 2 ? 0 : 2) << sources[i];
+        EXPECT_EQ(declaration->value->data.list.comma_separated, i >= 2) << sources[i];
+    }
+    EXPECT_EQ(css_parse_declaration_text("margin:;", 8, pool), nullptr);
 }
 
 TEST_F(CssEngineParserTest, LogicalOverflowValidatesAxisValues) {
@@ -320,6 +538,109 @@ TEST_F(CssEngineParserTest, LogicalBorderPartsValidateOneOrTwoSides) {
         EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr)
             << text;
     }
+}
+
+TEST_F(CssEngineParserTest, ResizeCursorsRetainComputedKeywordIdentity) {
+    // the enum serializer indexes the catalog directly, so appended rows must preserve its order.
+    for (int i = 0; i < CSS_VALUE__LAST_ENTRY; i++) {
+        EXPECT_EQ(css_enum_info((CssEnum)i)->enum_id, i);
+    }
+    const char* declarations[] = {"cursor: col-resize", "cursor: row-resize"};
+    const CssEnum expected[] = {CSS_VALUE_COL_RESIZE, CSS_VALUE_ROW_RESIZE};
+    for (size_t i = 0; i < sizeof(declarations) / sizeof(declarations[0]); i++) {
+        CssDeclaration* declaration = css_parse_declaration_text(
+            declarations[i], strlen(declarations[i]), pool);
+        ASSERT_NE(declaration, nullptr);
+        ASSERT_NE(declaration->value, nullptr);
+        EXPECT_EQ(declaration->value->type, CSS_VALUE_TYPE_KEYWORD);
+        EXPECT_EQ(declaration->value->data.keyword, expected[i]);
+    }
+}
+
+TEST_F(CssEngineParserTest, IndividualTransformsValidateAxisAndComponentGrammar) {
+    const char* valid[] = {
+        "translate: 10px", "translate: -25% 2em 3px", "translate: 0 0",
+        "translate: none", "translate: inherit", "translate: var(--move)",
+        "rotate: 90deg", "rotate: x .25turn", "rotate: .5rad y",
+        "rotate: 1 2 3 100grad", "rotate: 180deg 0 0 1",
+        "rotate: initial", "scale: 50%", "scale: -1 2 100%",
+        "scale: none", "scale: unset"
+    };
+    for (const char* text : valid) {
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    }
+    const char* invalid[] = {
+        "translate: 1", "translate: 1px 2px 3%", "translate: 1px, 2px",
+        "translate: 1px 2px 3px 4px", "translate: 3foo", "translate: auto",
+        "rotate: 10px", "rotate: 90", "rotate: w 90deg", "rotate: x y 90deg",
+        "rotate: 1 2 90deg", "rotate: 1 2 3 90deg 4", "rotate: none 90deg",
+        "scale: 2px", "scale: 1, 2", "scale: 1 2 3 4", "scale: auto"
+    };
+    for (const char* text : invalid) {
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    }
+}
+
+TEST_F(CssEngineParserTest, AnimationShorthandAndLonghandsValidateComponentGrammar) {
+    const char* valid[] = {
+        // a negative first time fills delay when the duration grammar rejects it.
+        "animation: fade -2s",
+        "animation: fade 2s linear -1s 1.5 alternate both paused",
+        "animation: 2s ease ease", "animation: 3s none backwards",
+        "animation: fade 1s, grow 2s steps(4, jump-none) forwards",
+        "animation: none", "animation: inherit", "animation: var(--effect)",
+        "animation: 1s linear Ease", "animation-name: EASE, Red, BLOCK",
+        "animation-duration: 0s, 200ms", "animation-delay: -2s, 1s",
+        "animation-iteration-count: 0, 1.5, infinite", "animation-name: \"ease\", fade"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    const char* invalid[] = {
+        "animation: fade 1s 2s 3s", "animation: fade grow 1s",
+        "animation: fade 1px", "animation: fade 1s inherit", "animation: fade -1",
+        "animation: fade 1s cubic-bezier(-1, 0, 1, 1)",
+        "animation: fade 1s steps(1, jump-none)", "animation: fade 1s steps(2.5)",
+        "animation-duration: -1s", "animation-duration: 1s, bogus",
+        "animation-iteration-count: -0.5", "animation-direction: normal reverse",
+        "animation-name: default", "animation-name: fade grow"
+    };
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, TransitionShorthandAndListsValidateBeforeCascade) {
+    const char* valid[] = {
+        "transition: opacity -1s",
+        "transition: opacity 2s linear -1s, width 4s steps(4, jump-both)",
+        "transition: 1s", "transition: none 2s", "transition: var(--motion)",
+        "transition-property: unknown-name, opacity, all, opacity",
+        "transition-duration: 0s, 200ms", "transition-delay: -1s, 2s",
+        "transition-timing-function: ease, steps(3, jump-none)"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    const char* invalid[] = {
+        "transition: opacity 1s 2s 3s",
+        "transition: opacity width 1s", "transition: opacity 1px",
+        "transition: none 1s, opacity 2s", "transition-property: none, opacity",
+        "transition-property: \"opacity\"", "transition-duration: -1s",
+        "transition-duration: 1px", "transition-timing-function: steps(1, jump-none)",
+        "transition: opacity 1s cubic-bezier(0, 0, 2, 1)"
+    };
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, BackfaceAndTransformStyleRejectOtherKeywords) {
+    const char* valid[] = {"backface-visibility:hidden", "backface-visibility:visible",
+        "backface-visibility:inherit", "backface-visibility:var(--side)",
+        "transform-style:flat", "transform-style:preserve-3d", "transform-style:initial"};
+    const char* invalid[] = {"backface-visibility:auto", "backface-visibility:none",
+        "backface-visibility:hidden visible", "transform-style:visible", "transform-style:3d"};
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
 }
 
 TEST_F(CssEngineParserTest, LogicalCornerRadiiValidatePhysicalValueGrammar) {
@@ -888,17 +1209,18 @@ TEST_F(CssEngineParserTest, TextJustifyAcceptsOnlyDefinedModes) {
     }
 }
 
-TEST_F(CssEngineParserTest, LogicalFloatAndClearRejectOtherKeywords) {
+TEST_F(CssEngineParserTest, LogicalAndPageFloatClearValuesRejectOtherKeywords) {
     const char* valid[] = {
         "float: inline-start", "float: inline-end", "float: left",
         "clear: inline-start", "clear: inline-end", "clear: both",
-        "float: initial", "clear: var(--side)"
+        "float: initial", "clear: var(--side)",
+        "float: top", "float: bottom", "float: footnote", "clear: top", "clear: bottom"
     };
     for (const char* text : valid) {
         EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
     }
     const char* invalid[] = {
-        "float: both", "float: top", "float: red",
+        "float: both", "float: red", "clear: footnote",
         "clear: 4px", "clear: auto", "clear: left right"
     };
     for (const char* text : invalid) {
@@ -1065,6 +1387,41 @@ TEST_F(CssEngineParserTest, NestedDeclarationsKeepInterleavedRuleOrder) {
               CSS_RULE_NESTED_DECLARATIONS);
 }
 
+TEST_F(CssEngineParserTest, CssomFragmentsRetainNestingContextAndConsumeOneRule) {
+    CssStylesheet* sheet = css_parse_stylesheet(engine, "#outer { color:red }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    CssRule* outer = sheet->rules[0];
+    CssSelectorGroup* group = outer->data.style_rule.selector_group;
+    const char* source = "> .child { color:green }";
+    CssRule* nested = css_parse_rule_text_in_context(source, strlen(source), pool, "#outer", group);
+    ASSERT_NE(nested, nullptr);
+    EXPECT_EQ(nested->type, CSS_RULE_STYLE);
+    EXPECT_NE(strstr(nested->data.style_rule.authored_selector_text, "> .child"), nullptr);
+    css_rule_attach(nested, outer, sheet);
+    EXPECT_EQ(nested->parent, outer);
+    EXPECT_EQ(nested->stylesheet, sheet);
+
+    source = "@media all { color:blue; > .child { color:purple } }";
+    CssRule* media = css_parse_rule_text_in_context(source, strlen(source), pool, "#outer", group);
+    ASSERT_NE(media, nullptr);
+    CssRuleChildList children = css_rule_child_list(media);
+    ASSERT_NE(children.count, nullptr);
+    ASSERT_EQ(*children.count, 2u);
+    EXPECT_EQ((*children.rules)[0]->type, CSS_RULE_NESTED_DECLARATIONS);
+    EXPECT_EQ((*children.rules)[0]->data.style_rule.selector_group, group);
+    css_rule_attach(media, outer, sheet);
+    EXPECT_EQ((*children.rules)[1]->parent, media);
+    EXPECT_EQ((*children.rules)[1]->stylesheet, sheet);
+    css_rule_attach(media, nullptr, nullptr);
+    EXPECT_EQ(media->stylesheet, nullptr);
+    EXPECT_EQ((*children.rules)[1]->parent, media);
+    EXPECT_EQ((*children.rules)[1]->stylesheet, nullptr);
+
+    source = "> .first {} > .second {}";
+    EXPECT_EQ(css_parse_rule_text_in_context(source, strlen(source), pool, "#outer", group), nullptr);
+}
+
 TEST_F(CssEngineParserTest, TopLevelNestingSelectorUsesScope) {
     CssStylesheet* stylesheet = css_parse_stylesheet(engine,
         "&.top, .plain { color:green }", nullptr);
@@ -1092,4 +1449,458 @@ TEST_F(CssEngineParserTest, InvalidDeclarationBlockDoesNotEscapeContainingRule) 
     ASSERT_NE(stylesheet, nullptr);
     EXPECT_EQ(stylesheet->rule_count, 2u)
         << "the declaration payload must not become a top-level rule";
+}
+
+TEST_F(CssEngineParserTest, ScopedRulesRetainBoundariesAndZeroSpecificityDeclarations) {
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@scope (.root) to (:scope > .limit) { color:purple; > .item { color:green } "
+        "@scope (.inner) { & { color:blue } } }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    CssRule* scope = sheet->rules[0];
+    EXPECT_EQ(scope->type, CSS_RULE_SCOPE);
+    EXPECT_NE(scope->data.conditional_rule.scope_start, nullptr);
+    EXPECT_NE(scope->data.conditional_rule.scope_end, nullptr);
+    CssRuleChildList children = css_rule_child_list(scope);
+    ASSERT_NE(children.count, nullptr);
+    ASSERT_EQ(*children.count, 3u);
+    EXPECT_EQ((*children.rules)[0]->type, CSS_RULE_NESTED_DECLARATIONS);
+    EXPECT_EQ((*children.rules)[0]->data.style_rule.selector_group,
+              scope->data.conditional_rule.scope_selector);
+    EXPECT_EQ((*children.rules)[1]->type, CSS_RULE_STYLE);
+    EXPECT_EQ((*children.rules)[2]->type, CSS_RULE_SCOPE);
+    EXPECT_EQ((*children.rules)[2]->stylesheet, sheet);
+}
+
+TEST_F(CssEngineParserTest, ScopeBoundariesRejectPseudoElementsAndMalformedLists) {
+    const char* sources[] = {
+        "@scope (::before) { .item { color:green } }",
+        "@scope (.root,) { .item { color:green } }",
+        "@scope (.root) to () { .item { color:green } }",
+        "@scope (.root) unexpected { .item { color:green } }"
+    };
+    for (const char* source : sources) {
+        CssStylesheet* sheet = css_parse_stylesheet(engine, source, nullptr);
+        ASSERT_NE(sheet, nullptr);
+        EXPECT_EQ(sheet->rule_count, 0u) << source;
+    }
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@scope to (.limit) { .item { color:green } } @scope { color:purple }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 2u);
+    EXPECT_EQ(sheet->rules[0]->data.conditional_rule.scope_start, nullptr);
+    EXPECT_NE(sheet->rules[0]->data.conditional_rule.scope_end, nullptr);
+}
+
+TEST_F(CssEngineParserTest, ScopeNamespaceBindingsUseTheirStylesheet) {
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@namespace ns 'urn:test'; @scope (ns|root) { ns|item { color:green } }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 2u);
+    EXPECT_EQ(sheet->rules[1]->type, CSS_RULE_SCOPE);
+    CssRuleChildList children = css_rule_child_list(sheet->rules[1]);
+    ASSERT_NE(children.count, nullptr);
+    EXPECT_EQ(*children.count, 1u);
+    sheet = css_parse_stylesheet(engine, "@scope (missing|root) { * { color:green } }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_EQ(sheet->rule_count, 0u);
+}
+
+TEST_F(CssEngineParserTest, PropertyRegistrationRetainsDescriptorsAndRejectsInvalidRules) {
+    const char* css = "@property --Length { syntax:'<length> | auto'; inherits:false; initial-value:1in; unknown:ignored }"
+        "@property --tokens {syntax:'*';inherits:true}"
+        "@property --missing {syntax:'<length>';inherits:false}"
+        "@property --relative {syntax:'<length>';inherits:false;initial-value:1em}"
+        "@property --invalid {syntax:'<length>';inherits:false;initial-value:red}"
+        "@property --bad-syntax {syntax:'<unknown>';inherits:false;initial-value:0}"
+        "@property --missing-inherits {syntax:'*'}"
+        "@property --dependent {syntax:'<color>';inherits:false;initial-value:currentColor}"
+        "div {width:12px}";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 3u);
+    EXPECT_EQ(sheet->rules[0]->type, CSS_RULE_PROPERTY);
+    EXPECT_STREQ(sheet->rules[0]->data.property_rule.name, "--Length");
+    EXPECT_STREQ(sheet->rules[0]->data.property_rule.syntax, "<length> | auto");
+    EXPECT_FALSE(sheet->rules[0]->data.property_rule.inherits);
+    EXPECT_EQ(sheet->rules[0]->data.property_rule.component_count, 2u);
+    EXPECT_EQ(sheet->rules[0]->stylesheet, sheet);
+    EXPECT_TRUE(sheet->rules[1]->data.property_rule.universal);
+    EXPECT_EQ(sheet->rules[1]->data.property_rule.initial_value, nullptr);
+    EXPECT_EQ(sheet->rules[2]->type, CSS_RULE_STYLE);
+}
+
+TEST_F(CssEngineParserTest, PropertySyntaxAlternativesMultipliersAndCaseAreTyped) {
+    struct SyntaxCase {const char* syntax; const char* value; bool valid;};
+    const SyntaxCase cases[] = {
+        {"<length>", "calc(2px + 3px)", true}, {"<length>", "calc(2px + 3%)", false},
+        {"<length-percentage>", "calc(2px + 3%)", true}, {"<length>", "var(--a)", false},
+        {"<number>", "3.5", true}, {"<integer>", "3.5", false},
+        {"<time>", "150ms", true}, {"<angle>", "0.5turn", true},
+        {"<resolution>", "2dppx", true}, {"<percentage>", "20%", true},
+        {"<length>+", "2px 3em", true}, {"<length>+", "2px,3em", false},
+        {"<color>#", "red,blue", true}, {"<color>#", "red blue", false},
+        {"Red | auto", "Red", true}, {"Red | auto", "red", false},
+        {"<string>", "'quoted'", true}, {"<string>", "unquoted", false},
+        {"<custom-ident>", "Block", true}, {"<custom-ident>", "default", false}
+    };
+    for (const SyntaxCase& entry : cases) {
+        CssPropertyRegistration registration = {};
+        ASSERT_TRUE(css_parse_property_syntax(entry.syntax, pool, &registration)) << entry.syntax;
+        CssDeclaration* declaration = css_parse_property_declaration("--test", 6,
+            entry.value, strlen(entry.value), pool);
+        ASSERT_NE(declaration, nullptr) << entry.value;
+        EXPECT_EQ(css_match_property_syntax(&registration, declaration->value) != nullptr,
+            entry.valid) << entry.syntax << ": " << entry.value;
+    }
+    const char* invalid[] = {"", "*+", "* | auto", "<unknown>", "<length> +",
+        "<transform-list>+", "initial", "<length> |", "<length> <color>"};
+    for (const char* syntax : invalid) {
+        CssPropertyRegistration registration = {};
+        EXPECT_FALSE(css_parse_property_syntax(syntax, pool, &registration)) << syntax;
+    }
+}
+
+TEST_F(CssEngineParserTest, PropertyRegistrationUsesLastActiveRuleAndGlobalScope) {
+    css_engine_set_viewport(engine, 240, 200);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@property --size {syntax:'<length>';inherits:false;initial-value:10px}"
+        "@media (min-width:500px) {@property --size {syntax:'<length>';inherits:false;initial-value:50px}}"
+        "@scope (.absent) {@property --size {syntax:'<length>';inherits:false;initial-value:20px}}", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 3u);
+    const CssPropertyRegistration* registration = css_find_property_registration(engine, &sheet, 1, "--size");
+    ASSERT_NE(registration, nullptr);
+    EXPECT_DOUBLE_EQ(registration->initial_value->data.length.value, 20.0);
+    sheet->rule_count = 2;
+    registration = css_find_property_registration(engine, &sheet, 1, "--size");
+    ASSERT_NE(registration, nullptr);
+    EXPECT_DOUBLE_EQ(registration->initial_value->data.length.value, 10.0);
+    css_engine_set_viewport(engine, 600, 200);
+    registration = css_find_property_registration(engine, &sheet, 1, "--size");
+    ASSERT_NE(registration, nullptr);
+    EXPECT_DOUBLE_EQ(registration->initial_value->data.length.value, 50.0);
+    sheet->disabled = true;
+    EXPECT_EQ(css_find_property_registration(engine, &sheet, 1, "--size"), nullptr);
+}
+
+TEST_F(CssEngineParserTest, PropertyRegistrationIndexReusesEmptyAndPopulatedTrees) {
+    CssStylesheet* sheet = css_parse_stylesheet(engine, "div {color:red} span {width:1px}", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_EQ(css_find_property_registration(engine, &sheet, 1, "--missing"), nullptr);
+    uint64_t rebuilds = engine->property_registration_rebuilds;
+    for (size_t i = 0; i < 100; i++)
+        EXPECT_EQ(css_find_property_registration(engine, &sheet, 1, "--missing"), nullptr);
+    EXPECT_EQ(engine->property_registration_rebuilds, rebuilds);
+
+    sheet = css_parse_stylesheet(engine,
+        "@property --z {syntax:'<length>';inherits:false;initial-value:3px}"
+        "@property --a {syntax:'<length>';inherits:false;initial-value:1px}"
+        "@property --a {syntax:'<length>';inherits:false;initial-value:2px}", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    const CssPropertyRegistration* registration = css_find_property_registration(engine, &sheet, 1, "--a");
+    ASSERT_NE(registration, nullptr);
+    EXPECT_DOUBLE_EQ(registration->initial_value->data.length.value, 2.0);
+    EXPECT_EQ(css_find_property_registration(engine, &sheet, 1, "a"), registration);
+    EXPECT_EQ(css_find_property_registration(engine, &sheet, 1, "--A"), nullptr);
+    EXPECT_EQ(css_find_property_registration(engine, &sheet, 1, "--b"), nullptr);
+    EXPECT_NE(css_find_property_registration(engine, &sheet, 1, "--z"), nullptr);
+    rebuilds = engine->property_registration_rebuilds;
+    EXPECT_EQ(css_find_property_registration(engine, &sheet, 1, "--a"), registration);
+    EXPECT_EQ(engine->property_registration_rebuilds, rebuilds);
+    sheet->rules[2] = sheet->rules[1];
+    css_stylesheet_mark_changed(sheet);
+    registration = css_find_property_registration(engine, &sheet, 1, "--a");
+    ASSERT_NE(registration, nullptr);
+    EXPECT_DOUBLE_EQ(registration->initial_value->data.length.value, 1.0);
+    EXPECT_EQ(engine->property_registration_rebuilds, rebuilds + 1);
+}
+
+TEST_F(CssEngineParserTest, PropertyRegistrationIndexTracksImportedSheetMutations) {
+    CssStylesheet* root = css_parse_stylesheet(engine, "@import 'child.css';", nullptr);
+    CssStylesheet* child = css_parse_stylesheet(engine,
+        "@property --size {syntax:'<length>';inherits:false;initial-value:10px}"
+        "@property --size {syntax:'<length>';inherits:false;initial-value:20px}", nullptr);
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(root->rule_count, 1u);
+    ASSERT_EQ(root->rules[0]->type, CSS_RULE_IMPORT);
+    ASSERT_NE(child, nullptr);
+    child->parent_stylesheet = root;
+    child->is_import_child = true;
+    root->rules[0]->data.import_rule.stylesheet = child;
+    const CssPropertyRegistration* registration = css_find_property_registration(engine, &root, 1, "--size");
+    ASSERT_NE(registration, nullptr);
+    EXPECT_DOUBLE_EQ(registration->initial_value->data.length.value, 20.0);
+    child->rule_count = 1;
+    css_stylesheet_mark_changed(child);
+    registration = css_find_property_registration(engine, &root, 1, "--size");
+    ASSERT_NE(registration, nullptr);
+    EXPECT_DOUBLE_EQ(registration->initial_value->data.length.value, 10.0);
+    child->disabled = true;
+    css_stylesheet_mark_changed(child);
+    EXPECT_EQ(css_find_property_registration(engine, &root, 1, "--size"), nullptr);
+}
+
+TEST_F(CssEngineParserTest, ScriptRegistrationOwnsItsDefinitionAndOverridesStylesheets) {
+    DomDocument document;
+    document.document_pool = lam::Own<Pool>(pool);
+    document.services.cached_css_engine = engine;
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@property --Owned {syntax:'<length>';inherits:false;initial-value:2px}", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    CssStylesheet** sheets = (CssStylesheet**)pool_alloc(pool, sizeof(CssStylesheet*));
+    ASSERT_NE(sheets, nullptr);
+    sheets[0] = sheet;
+    document.stylesheets = lam::OwnArr<CssStylesheet*>(sheets);
+    document.stylesheet_count = 1;
+    Pool* scratch = pool_create();
+    ASSERT_NE(scratch, nullptr);
+    CssPropertyRegistration source = {};
+    ASSERT_TRUE(css_parse_property_syntax("<length> | Auto", scratch, &source));
+    source.name = pool_strdup(scratch, "--Owned");
+    source.inherits = true;
+    const char* initial = "--initial:calc(1in + 4px)";
+    CssDeclaration* declaration = css_parse_declaration_text(initial, strlen(initial), scratch);
+    ASSERT_NE(declaration, nullptr);
+    source.initial_value = declaration->value;
+    source.initial_text = declaration->value_text;
+    ASSERT_TRUE(css_register_document_property(&document, &source, 7));
+    EXPECT_FALSE(css_register_document_property(&document, &source, 7));
+    pool_destroy(scratch);
+
+    const CssPropertyRegistration* retained = css_find_document_property_registration(&document, "--Owned");
+    ASSERT_NE(retained, nullptr);
+    EXPECT_STREQ(retained->name, "--Owned");
+    EXPECT_STREQ(retained->syntax, "<length> | Auto");
+    EXPECT_STREQ(retained->components[1].identifier, "Auto");
+    EXPECT_STREQ(retained->initial_text, "calc(1in + 4px)");
+    EXPECT_TRUE(retained->inherits);
+    EXPECT_EQ(css_find_document_property_registration(&document, "Owned"), retained);
+    EXPECT_EQ(css_find_document_property_registration(&document, "--owned"), nullptr);
+    CssMathEvaluationContext context = {nullptr, nullptr, 1.0, true};
+    CssMathResult result = css_math_evaluate(retained->initial_value, &context);
+    ASSERT_TRUE(result.resolved);
+    EXPECT_DOUBLE_EQ(result.value, 100.0);
+    EXPECT_FALSE(css_register_document_property(&document, retained, 2));
+}
+
+TEST_F(CssEngineParserTest, ScriptRegistrationComparesTheCompleteName) {
+    DomDocument document;
+    document.document_pool = lam::Own<Pool>(pool);
+    CssPropertyRegistration source = {};
+    ASSERT_TRUE(css_parse_property_syntax("*", pool, &source));
+    const char first[] = "--name\0first", second[] = "--name\0second";
+    source.name = first;
+    ASSERT_TRUE(css_register_document_property(&document, &source, sizeof(first) - 1));
+    source.name = second;
+    ASSERT_TRUE(css_register_document_property(&document, &source, sizeof(second) - 1));
+    const CssPropertyRegistration* a = css_find_script_property_registration(&document, first, sizeof(first) - 1);
+    const CssPropertyRegistration* b = css_find_script_property_registration(&document, second, sizeof(second) - 1);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_NE(a, b);
+    EXPECT_EQ(css_find_script_property_registration(&document, "--name", 6), nullptr);
+    EXPECT_EQ(css_find_script_property_registration(&document, first + 2, sizeof(first) - 3), a);
+    EXPECT_FALSE(css_register_document_property(&document, &source, sizeof(second) - 1));
+}
+
+TEST_F(CssEngineParserTest, UniversalRegistrationDefaultsRejectPendingAndCascadeValues) {
+    CssPropertyRegistration registration = {};
+    ASSERT_TRUE(css_parse_property_syntax("*", pool, &registration));
+    struct Case {const char* text; bool valid;};
+    const Case cases[] = {
+        {"", true}, {" ", true}, {"foo(", true}, {"currentColor", true}, {"2em", true},
+        {"initial", false}, {"inherit", false}, {"unset", false}, {"revert", false},
+        {"revert-layer", false}, {"var(--other)", false}, {"env(safe-area-inset-top)", false},
+        {"nested(var(--other))", false}, {"attr(data-value)", false}
+    };
+    for (const Case& entry : cases) {
+        CssDeclaration* declaration = css_parse_property_declaration("--initial", 9,
+            entry.text, strlen(entry.text), pool);
+        ASSERT_NE(declaration, nullptr) << entry.text;
+        ASSERT_NE(declaration->value, nullptr) << entry.text;
+        registration.initial_value = declaration->value;
+        EXPECT_EQ(css_property_registration_is_valid(&registration), entry.valid) << entry.text;
+    }
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@property --wide{syntax:'*';inherits:false;initial-value:initial}"
+        "@property --pending{syntax:'*';inherits:false;initial-value:var(--other)}"
+        "@property --empty{syntax:'*';inherits:false;initial-value:}"
+        "div{width:10px}", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 2u);
+    EXPECT_STREQ(sheet->rules[0]->data.property_rule.name, "--empty");
+    EXPECT_EQ(sheet->rules[0]->data.property_rule.initial_value->type, CSS_VALUE_TYPE_LIST);
+    EXPECT_EQ(sheet->rules[0]->data.property_rule.initial_value->data.list.count, 0);
+    EXPECT_EQ(sheet->rules[1]->type, CSS_RULE_STYLE);
+}
+
+TEST_F(CssEngineParserTest, RegistrationInitialParsingChecksCompleteNestedTokensAndPreservesRawSpans) {
+    struct Case {const char* text; bool valid; const char* raw;};
+    const Case cases[] = {
+        {"red;", false, nullptr}, {"!", false, nullptr}, {"red !other", false, nullptr},
+        {"nested([)]", false, nullptr}, {"nested(\"a\nb\")", false, nullptr},
+        {"nested(; !)", true, "nested(; !)"}, {" /*comment*/ ", true, ""},
+        {" /**/ red/**/ ", true, "red"}, {"foo(", true, "foo("},
+        {"\"initial\"", true, "\"initial\""}, {"{color:red;}", true, "{color:red;}"}
+    };
+    for (const Case& entry : cases) {
+        CssPropertyRegistration registration = {};
+        ASSERT_TRUE(css_parse_property_syntax("*", pool, &registration));
+        EXPECT_EQ(css_parse_property_initial_value(&registration, entry.text, strlen(entry.text), pool),
+            entry.valid) << entry.text;
+        if (entry.valid) EXPECT_STREQ(registration.initial_text, entry.raw);
+    }
+    const char raw[] = " /**/ a\0b/**/ ";
+    CssPropertyRegistration registration = {};
+    ASSERT_TRUE(css_parse_property_syntax("*", pool, &registration));
+    ASSERT_TRUE(css_parse_property_initial_value(&registration, raw, sizeof(raw) - 1, pool));
+    EXPECT_EQ(registration.initial_text_length, 3u);
+    EXPECT_EQ(memcmp(registration.initial_text, "a\0b", 3), 0);
+}
+
+TEST_F(CssEngineParserTest, SharedMathComputationKeepsCanonicalUnitsAndPercentageTerms) {
+    struct Case {const char* expression; CssMathType type; double value; double percent;};
+    const Case cases[] = {
+        {"calc(1in + 4px)", CSS_MATH_LENGTH, 100, 0},
+        {"calc(2 * 3 + 1)", CSS_MATH_NUMBER, 7, 0},
+        {"calc((20px + 10px) * 2)", CSS_MATH_LENGTH, 60, 0},
+        {"calc(-1.5)", CSS_MATH_NUMBER, -1.5, 0},
+        {"calc(.25turn + 45deg)", CSS_MATH_ANGLE, 135, 0},
+        {"calc(1s + 500ms)", CSS_MATH_TIME, 1.5, 0},
+        {"calc(96dpi + 1dppx)", CSS_MATH_RESOLUTION, 2, 0},
+        {"calc(10% + 5%)", CSS_MATH_PERCENT, 0, 15},
+        {"calc(20px + 10% + 3px)", CSS_MATH_LENGTH_PERCENT, 23, 10},
+        {"calc((20px + 10%) * 2)", CSS_MATH_LENGTH_PERCENT, 40, 20},
+        {"calc(10px + 0%)", CSS_MATH_LENGTH_PERCENT, 10, 0},
+        {"calc(100px * sin(30deg))", CSS_MATH_LENGTH, 50, 0},
+        {"sin(calc(.25turn))", CSS_MATH_NUMBER, 1, 0},
+        {"asin(1)", CSS_MATH_ANGLE, 90, 0},
+        {"atan2(1px,1px)", CSS_MATH_ANGLE, 45, 0},
+        {"hypot(3px,4px)", CSS_MATH_LENGTH, 5, 0},
+        {"round(up,13px,10px)", CSS_MATH_LENGTH, 20, 0},
+        {"round(-1.5)", CSS_MATH_NUMBER, -1, 0},
+        {"round(line-width,.1px)", CSS_MATH_LENGTH, 1, 0},
+        {"mod(-13px,10px)", CSS_MATH_LENGTH, 7, 0},
+        {"rem(-13px,10px)", CSS_MATH_LENGTH, -3, 0},
+        {"min(10px + 5px,20px)", CSS_MATH_LENGTH, 15, 0},
+        {"clamp(5px,20px,10px)", CSS_MATH_LENGTH, 10, 0},
+        {"pow(2,3)", CSS_MATH_NUMBER, 8, 0},
+        {"log(8,2)", CSS_MATH_NUMBER, 3, 0},
+    };
+    CssMathEvaluationContext context = {nullptr, nullptr, 1.0, true};
+    for (const Case& entry : cases) {
+        char text[160];
+        snprintf(text, sizeof(text), "--test:%s", entry.expression);
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
+        ASSERT_NE(declaration, nullptr) << entry.expression;
+        CssMathResult result = css_math_evaluate(declaration->value, &context);
+        EXPECT_EQ(css_math_value_type(declaration->value), entry.type) << entry.expression;
+        EXPECT_EQ(result.type, entry.type) << entry.expression;
+        EXPECT_TRUE(result.resolved) << entry.expression;
+        EXPECT_NEAR(result.value, entry.value, 0.000001) << entry.expression;
+        EXPECT_NEAR(result.percentage, entry.percent, 0.000001) << entry.expression;
+    }
+}
+
+static bool css_test_math_leaf(void* data, const CssValue* value, double* result) {
+    if (value->type != CSS_VALUE_TYPE_PERCENTAGE) return false;
+    *result = value->data.percentage.value * *(double*)data / 100.0;
+    return true;
+}
+
+TEST_F(CssEngineParserTest, SharedMathDefersMixedComparisonsUntilTheConsumerSuppliesABasis) {
+    const char* text = "--test:min(10% + 5px,30px)";
+    CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
+    ASSERT_NE(declaration, nullptr);
+    CssMathEvaluationContext context = {nullptr, nullptr, 1.0, true};
+    CssMathResult result = css_math_evaluate(declaration->value, &context);
+    EXPECT_EQ(result.type, CSS_MATH_LENGTH_PERCENT);
+    EXPECT_FALSE(result.resolved);
+    double basis = 200;
+    context = {css_test_math_leaf, &basis, 1.0, false};
+    result = css_math_evaluate(declaration->value, &context);
+    EXPECT_EQ(result.type, CSS_MATH_LENGTH_PERCENT);
+    EXPECT_TRUE(result.resolved);
+    EXPECT_DOUBLE_EQ(result.value, 25.0);
+}
+
+TEST_F(CssEngineParserTest, SharedColorComputationValidatesChannelsAndKeepsPrecision) {
+    struct Case {const char* value; double r, g, b, a;};
+    const Case cases[] = {
+        {"hsl(.5turn calc(25% + 25%) calc(20 + 30))", .25, .75, .75, 1},
+        {"hwb(60deg 0% 0%)", 1, 1, 0, 1},
+        {"hwb(30deg 80% 60%)", 4.0 / 7.0, 4.0 / 7.0, 4.0 / 7.0, 1},
+        {"rgb(calc(100 + 20) 0 0 / calc(.5))", 120.0 / 255.0, 0, 0, .5},
+        {"rgb(1.5 2.5 3.5 / .123456789)", 1.5 / 255.0, 2.5 / 255.0, 3.5 / 255.0, .123456789},
+        {"rgb(calc(infinity) calc(-infinity) calc(NaN))", 1, 0, 0, 1},
+        {"rebeccapurple", 102.0 / 255.0, 51.0 / 255.0, 153.0 / 255.0, 1},
+        {"transparent", 0, 0, 0, 0},
+    };
+    for (const Case& entry : cases) {
+        CssDeclaration* declaration = css_parse_property_declaration("--test", 6, entry.value, strlen(entry.value), pool);
+        ASSERT_NE(declaration, nullptr) << entry.value;
+        CssComputedColor color;
+        ASSERT_TRUE(css_color_compute(declaration->value, &color)) << entry.value;
+        EXPECT_EQ(color.type, CSS_COLOR_RGB) << entry.value;
+        EXPECT_NEAR(color.components[0], entry.r, 0.000000001) << entry.value;
+        EXPECT_NEAR(color.components[1], entry.g, 0.000000001) << entry.value;
+        EXPECT_NEAR(color.components[2], entry.b, 0.000000001) << entry.value;
+        EXPECT_NEAR(color.components[3], entry.a, 0.000000001) << entry.value;
+        CssValue* retained = css_value_create_computed_color(pool, &color);
+        ASSERT_NE(retained, nullptr);
+        CssComputedColor round_trip;
+        ASSERT_TRUE(css_color_compute(retained, &round_trip));
+        for (int i = 0; i < 4; i++) EXPECT_NEAR(color.components[i], round_trip.components[i], 0.000000001);
+    }
+    const char* invalid[] = {"rgb(1%,2,3)", "rgb(1 2 3 4)", "rgb(1 2 3 / .5 .6)",
+        "rgb(1 2)", "rgb(1px 2 3)", "hsl(1,50,50)", "hwb(1,0%,0%)", "rgb(none,0,0)",
+        "rgb(1 2 3 .5)", "rgb(calc(10 + 20%) 0 0)", "#abcde"};
+    for (const char* text : invalid) {
+        CssDeclaration* declaration = css_parse_property_declaration("--test", 6, text, strlen(text), pool);
+        ASSERT_NE(declaration, nullptr) << text;
+        CssComputedColor color;
+        EXPECT_FALSE(css_color_compute(declaration->value, &color)) << text;
+        EXPECT_FALSE(css_property_validate_value(CSS_PROPERTY_COLOR, declaration->value)) << text;
+    }
+}
+
+TEST_F(CssEngineParserTest, ComputedColorSerializationRetainsCurrentColorAndMissingChannels) {
+    struct Case {const char* value; const char* computed;};
+    const Case cases[] = {
+        {"currentColor", "currentcolor"},
+        {"red", "rgb(255, 0, 0)"},
+        {"#1234", "rgba(17, 34, 51, 0.267)"},
+        {"#00000080", "rgba(0, 0, 0, 0.5)"},
+        {"rgb(1.5 2.5 3.5 / .123456789)", "rgba(1.5, 2.5, 3.5, 0.123457)"},
+        {"rgb(none 20 30 / none)", "color(srgb none 0.078431 0.117647 / none)"},
+        {"hsl(none 50% 50% / none)", "hsl(none 50% 50% / none)"},
+        {"hwb(450deg none 10%)", "hwb(90 none 10%)"},
+        {"color(srgb 1.2 -0.5 25% / .123456789)", "color(srgb 1.2 -0.5 0.25 / 0.123457)"},
+    };
+    for (const Case& entry : cases) {
+        CssDeclaration* declaration = css_parse_property_declaration("--test", 6, entry.value, strlen(entry.value), pool);
+        ASSERT_NE(declaration, nullptr) << entry.value;
+        CssComputedColor color;
+        ASSERT_TRUE(css_color_compute(declaration->value, &color)) << entry.value;
+        CssValue* retained = css_value_create_computed_color(pool, &color);
+        ASSERT_NE(retained, nullptr);
+        CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        formatter->options.computed_colors = true;
+        css_format_value(formatter, retained);
+        const char* serialized = stringbuf_to_string(formatter->output)->chars;
+        EXPECT_STREQ(serialized, entry.computed) << entry.value;
+        CssDeclaration* parsed = css_parse_property_declaration("--test", 6, serialized, strlen(serialized), pool);
+        ASSERT_NE(parsed, nullptr);
+        CssComputedColor reparsed;
+        ASSERT_TRUE(css_color_compute(parsed->value, &reparsed)) << serialized;
+        EXPECT_EQ(color.missing, reparsed.missing) << serialized;
+        for (int i = 0; i < 4; i++) EXPECT_NEAR(color.components[i], reparsed.components[i],
+            color.alpha_is_byte && i == 3 ? 0.002 : 0.000001) << serialized;
+        if (color.missing & 8) {
+            uint8_t r, g, b, a;
+            ASSERT_TRUE(css_color_to_rgba(&color, &r, &g, &b, &a));
+            EXPECT_EQ(a, 0);
+        }
+    }
 }

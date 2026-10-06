@@ -1,0 +1,924 @@
+\documentclass[12pt,letterpaper]{article}
+\usepackage[spanish]{babel} % Para caracteres en español
+\usepackage[utf8]{inputenc}	% Para caracteres en español
+\spanishdecimal{.}
+\usepackage{amsmath,amsthm,amsfonts,amssymb,amscd}
+\usepackage{multirow,booktabs}
+\usepackage[table]{xcolor}
+\usepackage{fullpage}
+\usepackage{lastpage}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{mathrsfs}
+\usepackage{wrapfig}
+\usepackage{setspace}
+\usepackage{calc}
+\usepackage{multicol}
+\usepackage{cancel}
+\usepackage[retainorgcmds]{IEEEtrantools}
+\usepackage[margin=3cm]{geometry}
+\usepackage{floatrow}
+\newlength{\tabcont}
+\setlength{\parindent}{0.0in}
+\setlength{\parskip}{0.05in}
+
+
+\title{Álgebra}
+
+
+% Editar como se necesite para cambiar los títulos
+\newcommand\course{MATE IV}	% <-- nombre del curso
+\newcommand\semester{2015}  % <-- semestre
+\newcommand\asgnname{2}         % <-- numero o subtítulo de la tarea
+\newcommand\yourname{}  % <-- nombre
+\newcommand{\vect}[1]{\overline{#1}} % si se quiere cambiar a vector con flecha solo hay que sustituir boldsymbol por vec.
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}	% para denotar la norma euclidiana
+\theoremstyle{definition}
+\newtheorem{defn}{Definición}
+\newtheorem{reg}{Regla}
+\newtheorem{ejer}{EJERCICIO}
+\pagestyle{fancyplain}
+\headheight 32pt
+\lhead{\yourname\ \vspace{0.1cm} \\ \course}
+\chead{\textbf{\Large Serie Álgebra}}
+\rhead{2015/01/26}
+\cfoot{P\'agina \thepage \hspace{1pt} de \pageref{LastPage} \vspace{3mm} \\ \footnotesize \textcolor{gray}{Material realizado por Alberto Ordóñez Palafox, para uso exclusivo de su clase}}
+\textheight 580pt
+\headsep 10pt
+\footskip 40pt
+\topmargin = 7pt
+
+
+
+\begin{document}
+
+% Aquí empieza el contenido del documento
+
+\textbf{NOMENCLATURA ALGEBRAICA} %Baldor, 1983, pp. 14-15
+
+\begin{defn}[Término]
+Es una expresión algebraica que consta de un solo símbolo o de varios símbolos \emph{no separados entre sí por el signo + o -}. Por ejemplo
+\begin{equation*}
+a, \ 3b, \ 2xy, \ \dfrac{4a}{3x},
+\end{equation*}
+son términos.\\
+Los \emph{elementos de un término} son cuatro: el signo, el coeficiente, la parte variable y el grado.\\
+En el producto de dos factores, cualquiera de los factores es llamado \emph{coeficiente} del otro factor. Así, en el producto $3a$, el factor 3 es coeficiente (numérico) del factor $a$ e indica que el factor $a$ se toma como sumando tres veces, o sea $3a=a+a+a$; por otra parte, en el producto $ab$, el factor $a$ es coeficiente (literal) del factor $b$, e indica que el factor $b$ se toma como sumando $a$ veces, o sea $ab=b+b+b+\dots$, $a$ veces.
+\end{defn}
+
+\begin{defn}[El grado de un término con relación a una literal o variable]
+Es el exponente de la literal o variable. Por ejemplo, el término $bx^3$ es de \emph{primer grado} con relación a $b$ y de \emph{tercer grado} con relación a $x$.
+\end{defn}
+
+\smallskip
+
+\textbf{CLASIFICACIÓN DE LAS EXPRESIONES ALGEBRAICAS}%Baldor, 1983, pp. 16-17
+
+\begin{defn}[Monomio]
+Es una expresión algebraica que consta de un sólo término, como 
+\begin{equation*}
+3a, \ -5b, \ \dfrac{x^2y}{4a^3}
+\end{equation*}
+\end{defn}
+
+\begin{defn}[Polinomio]
+Es una expresión algebraica que consta de más de un término, como \begin{equation*}
+a+b, \ a+x-y, \ x^3+2x^2+x+7
+\end{equation*}
+
+\emph{Binomio} es un polinomio que consta de dos términos, como $a+b,x-y, \dfrac{1}{3}a^3-\dfrac{5mx^4}{6b^2}$\\
+\emph{Trinomio} es un polinomio que consta de tres términos, como $a+b+c$
+\end{defn}
+
+\begin{defn}[Grado de un polinomio con relación a una literal o variable]
+Es el mayor exponente de dicha literal en el polinomio. Así, el polinomio $a^2x^4-a^4x^2+a^6$ es de \emph{cuarto grado} con relación a la $x$ y de \emph{sexto grado} con relación a la $a$.
+\end{defn}
+
+\begin{defn}[Término independiente de un polinomio con relación a una literal o variable] %Baldor, 1983, pp. 18
+Es el término que no tiene dicha literal. Así, en el polinomio\\
+$x^4-6x^3+3bx^3-9x+20$ el término independiente con relación a la $x$ es 20; en $a^3-ba^2+3b^2a+b^3$ el término independiente con relación a la $a$ es $b^3$.
+\end{defn}
+
+\smallskip
+
+\begin{defn}[Términos semejantes] %Baldor, 1983, pp. 19
+Dos o más términos son semejantes cuanto tienen \emph{la misma parte literal}, o sea, cuando tienen \emph{letras iguales} afectadas de \emph{iguales exponentes}. Por ejemplo\\
+\begin{equation*}
+2a \ \text{ y } \ a; \ -2x^{m+1} \ \text{ y } \ 8x^{m+1}
+\end{equation*}
+$4ab$ \ y \ $-6a^2b$ no son semejantes, porque las letras no tienen los mismos exponentes.
+\end{defn}
+
+\begin{defn}[Reducción de términos semejantes] %Baldor, 1983, pp. 19
+Es una operación que tiene por objeto convertir en un solo término dos o más términos semejantes.
+\end{defn}
+
+\begin{reg} Se suman (algebraicamente) los coeficientes y a continuación se escribe la parte literal.
+\end{reg}
+
+\textbf{Ejemplos}:
+\begin{multicols}{2}
+\begin{enumerate}
+\item $3a+2a=5a$
+\item $3x^{m+1}+5x^{m+1}-9x{m+1}=-x^{m+1}$
+\item $-\dfrac{1}{2}a^2b+2a^2b=\dfrac{3}{2}a^2b$
+\item $x^4+\dfrac{5}{2}x^3y+3x^4-\dfrac{3}{2}x^3y=4x^4+x^3y$
+\end{enumerate}
+\end{multicols}
+
+\vspace{3mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, ejercicio 10, pp. 23
+Reducir (los términos semejantes de) los siguientes polinomios:
+\begin{enumerate}
+\begin{multicols}{2}
+\item $7a-9b+6a-4b$.
+\item $a+b-c-b-c+2c-a$.
+\item $5x-11y-9+20x-1-y$.
+\item $-6m+8n+5-m-n-6m-11$.
+\item $-1+b+2b-2c+3a+2c-3b$.
+\item $-81x+19y-30z+6y+80x+x-25y$.
+\item $15a^2-6ab-8a^2+20-5ab-31+a^2-ab$.
+\item $-3a+4b-6a+81b-114b+31a-a-b$.
+\end{multicols}
+\setlength{\itemindent}{+.5in}
+\item $-71a^3b-84a^4b^2+50a^3b+84a^4b^2-45a^3b+18a^3b$.
+\item $-a+b-c+8+2a+2b-19-2c-3a-3-3b+3c$. %hasta aquí es hasta el inciso 10 del ejercicio, luego hay algunos saltos
+\item $a^{m+2}-x^{m+3}-5+8-3a^{m+2}+5x^{m+3}-6+a^{m+2}-5x^{m+3}$. % No 14
+\item $\frac{1}{2}a+\frac{1}{3}b+2a-3b-\frac{3}{4}a-\frac{1}{6}b+\frac{3}{4}-\frac{1}{2}$. % No 16
+\item $\frac{3}{25}a^{m-1}-\frac{7}{50}b^{m-1} \frac{3}{5}a^{m-1} -\frac{1}{25}b^{m-1}-0.2a^{m-1}+\frac{1}{5}b^{m-1}$. % No 20, con exponentes de b modificados 
+\end{enumerate}
+
+\end{ejer}
+
+\pagebreak
+
+
+
+\textbf{AXIOMAS DE LOS NÚMEROS REALES}  %Baldor, 1983, ejercicio 10, pp. 32-33
+
+\begin{enumerate}[label=\Alph*.] 
+
+	\item IGUALDAD
+    \begin{enumerate}[label={\arabic*.}]
+    	\item Identidad: $a=a$.
+        \item Reciprocidad: si $a=b$, entonces $a=b$.
+        \item Transitividad: si $a=b$ y $b=c$, entonces $a=c$.
+    \end{enumerate}
+    
+	\item SUMA    
+    \begin{enumerate}[label={\arabic*.}]
+        \item Conmutatividad: $a+b=b+a$, $\forall a,b\in\mathbb{R}$
+        \item Asociativatividad: $a+(b+c)=(a+b)+c$, $\forall a,b,c\in\mathbb{R}$
+        \item Neutro: $\exists !\ 0 \in \mathbb{R}$, tal que $a+0=a$, $\forall a,\in\mathbb{R}$, \quad (el signo de exclamación después del símbolo de existencia significa único).
+    	\item Inverso: $\forall a,\in\mathbb{R}$, $\exists ! -a \in \mathbb{R}$, tal que $a+(-a)=0$.
+    \end{enumerate}
+    
+    \item MULTIPLICACIÓN (O PRODUCTO)
+    \begin{enumerate}[label={\arabic*.}]
+        \item Conmutatividad: $a\cdot b=b\cdot a$, $\forall a,b\in\mathbb{R}$
+        \item Asociativatividad: $a\cdot(b\cdot c)=(a\cdot b)\cdot c$, $\forall a,b,c\in\mathbb{R}$
+        \item Neutro: $\exists !\ 1 \in \mathbb{R}$, tal que $a\cdot 1=a=1\cdot a$, $\forall a,\in\mathbb{R}$
+    	\item Inverso: $\forall a,\in\mathbb{R}$, tal que $a\neq 0$, $\exists !\ a^{-1} \in \mathbb{R}$, tal que $a\cdot a^{-1}=1=a^{-1}\cdot x$ \label{ax:invmult}
+	\end{enumerate}
+    
+	\item DISTRIBUTIVIDAD (del producto con respecto a la suma, $\forall a,b,c\in\mathbb{R}$) \
+    
+        $a\cdot (b+c)=a\cdot b+a\cdot c$, y de forma equivalente $(a+b)\cdot c=a\cdot c+b\cdot c$
+        
+    \item AXIOMAS DE ORDEN
+    \begin{enumerate}[label={\arabic*.}]
+    \item Tricotomía: si $a,b\in \mathbb{R}$, se cumple una y solo una de las siguientes relaciones:
+    \begin{equation*}
+    a>b \quad\text{o}\quad a=b \quad\text{o}\quad a<b
+    \end{equation*}
+    \item Transitividad: si $a<b$ \ y \ $b<c$ $\Rightarrow a<c$
+    \item Monotonía, $\forall a,b,c\in\mathbb{R}$
+    	\begin{enumerate}[label=\alph*)]
+    	\item De la suma: si $a>b \Rightarrow a+c>b+c$
+        \item De la multiplicación: si $a>b$, \ y \ $c>0 \Rightarrow a\cdot c>b\cdot c$
+    	\end{enumerate}
+   	\end{enumerate}
+    
+    \item AXIOMA DE CONTINUIDAD \ 
+    
+    Si tenemos dos conjuntos de números reales $A$ y $B$, de modo que todo número de $A$ es menor que cualquier número de $B$, existirá siempre un número real $c$ con el que se verifique $a\leq c \leq b$, para todo $a\in A$, y $b\in B$.
+    
+\end{enumerate}
+
+\pagebreak
+
+
+
+\textbf{SIGNOS DE AGRUPACIÓN} %Baldor, 1983, ejercicio 10, p. 58-59
+
+Los signos de agrupación (generalmente paréntesis o corchetes), se emplean para indicar que las cantidades encerradas en ellos deben considerarse como \emph{un todo}, o sea, como \emph{una sola cantidad}.\\
+Así, $a+(b-c)$, indica que la diferencia $b-c$ debe sumarse con $a$, y sabemos que para efectuar esta suma escribimos a continuación de $a$ las demás cantidades \emph{con su propio signo}, tendremos:
+\begin{equation*}
+a+(b-c)=a+b-c.
+\end{equation*}
+Por otra parte, la expresión $a-(b+c)$, indica que de $a$ hay que restar la suma $b+c$ y como para restar escribimos el \emph{sustraendo con los signos cambiados} a continuación del minuendo, tendremos:
+\begin{equation*}
+a-(b+c)=a-b-c.
+\end{equation*}
+
+\begin{reg}[Para suprimir signos de agrupación] \ 
+\begin{enumerate}
+\item Para suprimir signos de agrupación precedidos del signo $+$ se deja el mismo signo que tengan a cada una de las cantidades que se hallan dentro de él.
+\item Para suprimir signos de agrupación precedidos del signo $-$ se cambia el signo a cada una de las cantidades que se hallan dentro de él.
+\end{enumerate}
+\end{reg}
+
+\textbf{Ejemplo}:
+\begin{enumerate}
+\item $a+(b-c)+2a-(a+b)=a+b-c+2a-a-b=2a-c$.
+\item $3a+\left\lbrack-5x-\left(-a+\left\lbrack9x-\left(a+x\right)\right\rbrack\right)\right\rbrack$. \ 
+
+Cuando unos signos de agrupación están incluidos dentro de otros, como en este ejemplo, se suprime uno en cada paso empezando por \emph{el más interior}. Así, en este caso, suprimimos primero el paréntesis que agrupa al binomio $a+x$, y se obtiene,
+\begin{equation*}
+3a+\left\lbrack-5x-\left(-a+\left\lbrack9x-a-x\right\rbrack\right)\right\rbrack
+\end{equation*}
+después, tenemos: $3a+\left\lbrack-5x-\left(-a+9x-a-x\right)\right\rbrack$\\
+luego, $3a+\left\lbrack-5x+a-9x+a+x\right\rbrack$\\
+por último, $3a-5x+a-9x+a+x$\\
+reduciendo términos semejantes, se obtiene:  $5a-13x$.
+\end{enumerate}
+
+\pagebreak
+
+
+
+\begin{ejer}\
+
+%Baldor, 1983, ejercicio 31, p. 60
+Simplificar, suprimiendo los signos de agrupación y reduciendo términos semejantes:
+\begin{enumerate}
+\begin{multicols}{2}
+\item $x-(x-y)$.
+\item $x^2+(-3x-x^2+5)$.
+\item $a+b-(-2a+3)$.
+\item $4m-(-2m-n)$.
+\item $2x+3y-(4x+3y)$.
+\item $a+(a-b)+(-a+b)$.
+\item $a-(b+a)+(-a+b)-(-a+2b)$. % ej 12
+\item $-(a+b)+(-a-b)-(-b+a)+(3a+b)$. % ej 15
+\item $2a+\lbrack a-(a+b)\rbrack$. % del ejercicio 32, No 1
+\item $3x-\lbrack x+y -(2x+y)\rbrack$. % No 2
+\item $2m-\lbrack(m-n)-(m+n)\rbrack$.
+\end{multicols}
+\setlength{\itemindent}{+1in}
+\item $4x^2+\lbrack-(x^2-xy)+(-3y^2+2xy)-(-3x^2+y^2)\rbrack$. 
+\item $a+\lbrack(-2a+b)-(-a+b-c)+a\rbrack$.
+\item $4m-\lbrack2m+(n-3)\rbrack+\lbrack-4n-(2m+1)\rbrack$.
+\item $2x+\lbrack-5x-(-2y+\lbrack-x+y\rbrack)\rbrack$.
+\item $x^2-\lbrack-7xy+(-y^2+\lbrack-x^2+3xy-2y^2\rbrack)\rbrack$.
+\item $-(a+b)+(-3a+b-\lbrack-2a+b-(a-b)\rbrack+2a)$.
+\item $(-x+y)-(4x+2y+\lbrack-x-y-(x+y)\rbrack)$. 
+\end{enumerate}
+
+\end{ejer}
+
+\vspace{4mm}
+
+\begin{reg}[Para introducir cantidades en signos de agrupación] \ 
+\begin{enumerate}
+\item Para introducir cantidades dentro de un signo de agrupación precedido del signo $+$ se deja a cada una de las cantidades con el mismo signo que tengan.
+\item Para suprimir signos de agrupación precedidos del signo $-$ se cambia el signo a cada una de las cantidades que se hallan dentro de él.
+\end{enumerate}
+\end{reg}
+
+\textbf{Ejemplo}:
+\begin{enumerate}
+\item $x^3-2x^2+3x-4=x^3+(-2x^2+3x-4)$.
+\item $x^2-a^2+2ab-b^2=x^2-(a^2-2ab+b^2)$.
+\end{enumerate}
+
+\pagebreak
+
+
+\textbf{MULTIPLICACIÓN}
+
+\emph{El orden de los factores no altera el producto}. Así, el producto $ab$ puede escribirse $ba$; el producto $abc$ puede escribirse también $bac$ o $acb$. Esta es la \emph{Ley conmutativa} de la multiplicación.
+
+\emph{Los factores de un producto pueden agruparse de cualquier modo}. Así, en el producto $abcd=a(bcd)=(ab)(cd)=(abc)d$. Esta es la \emph{Ley asociativa} de la multiplicación.\\
+
+\textbf{LEYES DE SIGNOS}
+
+\begin{reg}
+% El producto de dos números reales se halla multiplicando los valores absolutos de ambos. El producto hallado llevará signo positivo $(+)$, si los signos de ambos factores son iguales; llevará signo negativo $(-)$, si los factores tienen signos distintos. Si uno de los factores es 0 el producto será 0.
+\begin{IEEEeqnarray*}{rcl}
+&+& \text{ por } + \text{ da } + \qquad + \text{ por } - \text{ da } -\\
+&-& \text{ por } - \text{ da } + \qquad - \text{ por } + \text{ da } -
+\end{IEEEeqnarray*}
+
+Por el axioma C-\ref{ax:invmult} (existencia del inverso multiplicativo), a todo número real $a\neq 0$, corresponde un número real, y sólo uno, $a^{-1}$, de modo que $aa^{-1}=1$, este número $a^{-1}$ se llama \emph{inverso} o \emph{recíproco} de $a$, y también se representa como $1/a$.\\
+El inverso o recíproco de un número (cualquiera distinto de cero), tiene su mismo signo y por el mismo axioma de existencia del inverso, se puede deducir lo siguiente,
+\begin{IEEEeqnarray*}{rcl}
+&+& \text{ entre } + \text{ da } + \qquad + \text{ entre } - \text{ da } -\\
+&-& \text{ entre } - \text{ da } + \qquad - \text{ entre } + \text{ da } -
+\end{IEEEeqnarray*}
+\end{reg}
+
+El signo del producto de varios factores es $+$ cuando tiene un número par de factores negativos o ninguno. Así, $(-a)(-b)(-c)(-d)=abcd$\\
+El signo del producto de varios factores es $-$ cuando tiene un número impar de factores negativos. Así, $(-a)(-b)(-c))-abc$.\\
+
+\textbf{LEYES DE EXPONENTES}
+
+\begin{defn}[Potencia de un número]
+Llamamos potencia de un número real al producto de tomarlo como factor tantas veces como se quiera. Si $a$ es un número real cualquier y $n>1$ es un número natural, tendremos la notación $a^n$, que se lee $a$ elevado a la enésima potencia, e indica que $a$ debe tomarse como factor $n$ veces.
+\begin{equation*}
+a^n=a\cdot a\cdot a\cdot a \cdots a \qquad (n \text{ veces})
+\end{equation*}
+En la notación $a^n$, llamamos base al número $a$, y exponente a $n$, que nos indica las veces que debemos tomar como factor $a$.\\
+Conviene distinguir dos casos:
+\begin{enumerate}
+\item Si un número $a\neq 0$, se eleva a la potencia 0 es igual a 1. Así
+\begin{equation*}
+a^0=1; \quad 3^0=1
+\end{equation*}
+\item Si un número $a\neq 0$, se eleva a un exponente negativo cualquiera $-m$, es igual al recíproco de la potencia $a^m$ (de exponente positivo). Así
+\begin{equation*}
+a^{-m}=\dfrac{1}{a^m}; \quad 3^{-2}=\dfrac{1}{3^2}=\dfrac{1}{9}
+\end{equation*}
+\end{enumerate}
+
+\end{defn}
+
+\begin{reg}[Producto de dos potencias de igual base] %Baldor, 1983, ejercicio 10, p. 38
+Para multiplicar dos potencias de igual base, se eleva dicha base a la potencia que resulte de la suma de los exponentes respectivos. Por ejemplo:
+\begin{equation*}
+a^m\cdot a^n = a^{m+n}
+\end{equation*}
+\begin{equation*}
+2^2 \cdot 2^4 = 2^{2+4} = 2^6 = 64
+\end{equation*}
+\end{reg}
+
+\begin{reg}[División de dos potencias de igual base] %Baldor, 1983, ejercicio 10, p. 38
+La división de dos potencias de igual base es igual a la base elevada a la potencia que dé la diferencia de ambos exponentes. Así:
+\begin{equation*}
+\dfrac{a^m}{a^n} = a^{m-n}
+\end{equation*}
+\begin{equation*}
+\dfrac{3^4}{3^2} = 3^{4-2} = 3^2 = 9
+\end{equation*}
+\end{reg}
+
+\begin{reg}[Potencia de una potencia]%Baldor, 1983, ejercicio 10, p. 38
+Para hallar la potencia de una potencia se multiplican los exponentes y se mantiene la base. Por ejemplo:
+\begin{equation*}
+\left(a^n\right)^m = a^{n\cdot m}
+\end{equation*}
+\begin{equation*}
+\left(2^2\right)^3 = 2^{2\cdot 3}=2^6=64
+\end{equation*}
+Hay que tener cuidado en no confundir la potencia de una potencia, con la elevación de un número a una potencia cuyo exponente, a la vez esté afectado por otro exponente. Así, no es lo mismo $\left(4^2\right)^3$ que $4^{2^3}$. Ejemplo:
+\begin{equation*}
+\left(4^2\right)^3 = 4^{2\cdot 3}=4^6=4096 \quad \text{y por otra parte} \quad  4^{2^3}=4^{2\cdot 2\cdot 2}=4^8=65536
+\end{equation*}
+\end{reg}
+
+\vspace{1mm}
+
+\textbf{LEY DE LOS COEFICIENTES}
+
+\begin{reg} %Baldor, 1983, ejercicio 10, p. 65
+El coeficiente del producto de dos factores es el producto de los coeficientes de los factores. Así $(3a)(4b)=12ab$. En efecto, como el orden de los factores no altera el producto, tenemos:
+\begin{equation*}
+(3a)(4b)=3\cdot4\cdot a \cdot b=12ab
+\end{equation*}
+\end{reg}
+
+\vspace{1mm}
+
+\textbf{MULTIPLICACIÓN DE MONOMIOS}
+
+\begin{reg} %Baldor, 1983, ejercicio 10, p. 65
+Se multiplican los coeficientes y a continuación de este producto se escriben las letras de los factores en orden alfabético, poniéndole a cada letra un exponente igual a la suma de los exponentes que tenga en los factores. El signo del producto vendrá dado por la Ley de los signos.
+\end{reg}
+
+\textbf{Ejemplos}:
+\begin{enumerate}
+\item $(2a^2)(3a^3)=2\cdot 3 \cdot a^{2+3}=6a^5$.
+\item $(-xy^2)(-5mx^4y^3)=5mx^{1+4}y^{2+3}=5mx^5y^5$.
+\item $(-ab^2)(4a^mb^nc^3)=(-1)(4)a^{1+m}b^{2+n}c^3=-4a^{m+1}b^{n+2}c^3$.
+\end{enumerate}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, pp. 65-66
+Multiplicar: % ejercicio 35
+\begin{enumerate}
+\begin{multicols}{3}
+\item 2 por -3.
+\item -4 por -8.
+\item -15 por 16.
+\item $ab$ por $-ab$.
+\item $2x^2$ por $-3x$.
+\item $-4a^2b$ por $-ab^2$.
+\item $-5x^3y$ por $xy^2$.
+\item $a^2b^3$ por $3a^2x$.
+\item $-4m^2$ por $-5mn^2p$.
+\item $5a^2y$ por $-6x^2$.
+\item $-x^2y^3$ por $-4y^3z^4$.
+\item $abc$ por $cd$.
+\item $-15x^4y^3$ por $-16a^2x^3$.
+\item $3a^2b^3$ por $-4x^2y$.
+\item $3a^2bx$ por $7b^3x^5$.
+\item $-8m^2n^3$ por $-9a^2mx^4$.
+\item $a^mb^n$ por $-ab$.
+\item $-5a^mb^n$ por $-6a^2b^3x$.
+\item $x^my^nc$ por $-x^my^nc^x$.
+\item $-m^xn^a$ por $-6m^2n$.
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\vspace{1mm}
+
+\textbf{Ejemplos}:
+\begin{enumerate}
+\setcounter{enumi}{3}
+\item $(a^{x+1}b^{x+2})(-3a^{x+2}b^{3})=-3a^{x+1+x+2}b^{x+2+3}=-3a^{2x+3}b^{x+5}$.
+\item $(-a^{m+1}b^{n-2})(-4a^{m-2}b^{2n+4})=4a^{2m-1}b^{3n+2}$.
+\end{enumerate}
+
+\pagebreak
+
+
+\begin{ejer}\
+
+%Baldor, 1983, pp. 65-66
+Multiplicar: % ejercicio 36
+\begin{enumerate}
+\begin{multicols}{2}
+\item $a^m$ por $a^{m+1}$.
+\item $-x^a$ por $-x^{a+2}$.
+\item $4a^nb^x$ por $-ab^{x+1}$.
+\item $-a^{n+1}b^{n+2}$ por $a^{n+2}b^n$.
+\item $-3a^{n+4}b^{n+1}$ por $-4a^{n+2}b^{n+3}$.
+\item $3x^2y^3$ por $4x^{m+1}y^{m+2}$.
+\item $4x^{a+2}b^{a+4}$ por $-5x^{a+5}b^{a+1}$.
+\item $a^mb^nc$ por $-a^mb^{2n}$.
+\item $-x^{m+1}y^{a+2}$ por $-4x^{m-3}y^{a-5}c^2$.
+\item $-5m^an^{b-1}c$ por $-7m^{2a-3}n^{b-4}$.
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\vspace{1mm}
+
+\textbf{Ejemplos}:
+\begin{enumerate}
+\setcounter{enumi}{5}
+\item $\left(\frac{2}{3}a^2b\right)\left(-\frac{3}{4}a^3m\right)=\left(-\frac{2}{3}\right)\left(\frac{3}{4}\right)a^5bm=-\frac{1}{2}a^5bm$
+\item $\left(-\frac{5}{6}x^2y^3\right)\left(-\frac{3}{10}x^my^{n+1}\right)=\left(\frac{5}{6}\right)\left(\frac{3}{10}\right)x^{m+2}y^{n+1+3}=\frac{1}{4}x^{m+2}y^{n+4}$
+\end{enumerate}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, pp. 65-66
+Multiplicar: % ejercicio 37
+\begin{enumerate}
+\begin{multicols}{2}
+\item $\frac{1}{2}a^2$ por $\frac{4}{5}a^3b$.
+\item $-\frac{3}{7}m^2n$ por $-\frac{7}{14}a^2m^3$.
+\item $\frac{2}{3}x^2y^3$ por $-\frac{3}{5}a^2x^4y$.
+\item $-\frac{1}{8}m^3n^4$ por $-\frac{4}{5}a^3m^2n$.
+\item $-\frac{7}{8}abc$ por $\frac{2}{7}a^3$.
+\item $-\frac{3}{5}x^3y^4$ por $-\frac{5}{6}a^2by^5$.
+\item $\frac{1}{3}a$ por $\frac{3}{5}a^m$.
+\item $-\frac{3}{4}a^m$ por $-\frac{2}{5}ab^3$.
+\item $\frac{5}{6}a^mb^n$ por $-\frac{3}{10}ab^2c$.
+\item $-\frac{2}{9}a^xb^{m+1}$ por $-\frac{3}{5}a^{x-1}b^m$.
+\item $\frac{3}{8}a^mb^n$ por $-\frac{4}{5}a^{2m}b^n$.
+\item $-\frac{2}{11}a^{x+1}b^{x-3}c^2$ por $-\frac{44}{7}a^{x-3}b^2$.
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\vspace{1mm}
+
+\textbf{Multiplicación de más de dos monomios}
+
+\textbf{Ejemplos}:
+\begin{enumerate}
+\item $(2a)(-3a^2b)(-ab^3)=6a^4b^4$. El signo del producto es positivo porque hay un número par de factores negativos.
+\item $\left(-x^2y\right)\left(-\frac{2}{3}x^m\right)\left(-\frac{3}{4}a^2y^n\right))-\frac{1}{2}a^2x^{m+2}y^{n+1}$. El signo del producto es negativo porque tiene un número impar de factores negativos.
+\end{enumerate}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 67
+Multiplicar: % ejercicio 38
+\begin{enumerate}
+\begin{multicols}{2}
+\item $(a)(-3a)(a^2)$.
+\item $(3x^2)(-x^3y)(-a^2x)$.
+\item $(-m^2n)(-3m^2)(-5mn^3)$.
+\item $(4a^2)(-5a^3x^2)(-ay^2)$.
+\item $(-a^m)(-2ab)(-3a^2b^x)$.
+\item $\left(\frac{1}{2}x^3\right)\left(-\frac{2}{3}a^2x\right)\left(-\frac{3}{5}a^4m\right)$
+\item $\left(\frac{2}{3}a^m\right)\left(\frac{3}{4}a^2b^4\right)\left(-3a^4b^{x+1}\right)$.
+\item $\left(-\frac{3}{5}m^3\right)\left(-5a^2m\right)\left(-\frac{1}{10}a^xm^a\right)$
+\item $(2a)(-a^2)(-3a^3)(4a)$.
+\item $(-3b^2)(-4a^3b)(ab)(-5a^2x)$.
+\item $(a^mb^x)(-a^2)(-2ab)(-3a^2x)$.
+\item $\left(-\frac{1}{2}x^2y\right)\left(-\frac{3}{5}xy^2\right)\left(-\frac{3}{4}x^2y\right)$.
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\vspace{3mm}
+
+\textbf{MULTIPLICACIÓN DE POLINOMIOS POR MONOMIOS}
+
+Multiplicar $(a+b)$ por $c$ equivale a tomar la suma $(a+b)$ como sumando $c$ veces, así:
+\begin{IEEEeqnarray*}{rcl}
+(a+b)c&=&(a+b)+(a+b)+(a+b)+ \dots +(a+b), \quad c \text{ veces}\\
+&=& (a+a+\dots+a)+(b+b+\dots +b), \quad c \text{ veces en cada caso}\\
+&=&ac+bc.
+\end{IEEEeqnarray*}
+\begin{IEEEeqnarray*}{rcl}
+(a-b)c&=&(a-b)+(a-b)+(a-b)+ \dots +(a-b), \quad c \text{ veces}\\
+&=& (a+a+\dots+a)-(b+b+\dots +b), \quad c \text{ veces en cada caso}\\
+&=&ac-bc.
+\end{IEEEeqnarray*}
+Podemos, pues, enunciar la siguiente:
+
+\begin{reg}[Multiplicación de un polinomio por un monomio] %Baldor, 1983, p. 67
+Se multiplica el monomio por cada uno de los términos del polinomio, teniendo en cuenta en cada caso la Ley de los signos, y se separan los productos parciales con sus propios signos. Esta es la \emph{Ley distributiva} de la multiplicación.
+\end{reg}
+
+\textbf{Ejemplos}:
+\begin{enumerate}
+\item $(3x^2-6x+7)(4ax^2)=3x^2(4ax^2)-6x(4ax^2)+7(4ax^2)=12ax^4-24ax^3+28ax^2$.
+\item $(x^{a+1}y-3x^ay^2+2x^{a-1}y^3-x^{a-2}y^4)(-3x^2y^m)=-3x^{a+3}y^{m+1}+9x^{a+2}y^{m+2}-6x^{a+1}y^{m+3}+3x^ay^{m+4}$
+\item $(\frac{2}{3}x^4y^2-\frac{3}{5}x^2y^4+\frac{5}{6}y^6)(-\frac{2}{9}a^2x^3y^2)=-\frac{4}{27}a^2x^7y^4+\frac{2}{15}a^2x^5y^6-\frac{5}{27}a^2x^3y^8 $.
+\end{enumerate}
+
+\pagebreak
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 68
+Multiplicar: % ejercicio 39
+\begin{enumerate}
+\begin{multicols}{2}
+\item $3x^3-x^2$ por $-2x$.
+\item $8x^2y-3y^2$ por $2ax^3$.
+\item $x^2-4x+3$ por $-2x$.
+\item $a^3-4a^2+6a$ por $3ab$.
+\item $a^2-2ab+b^2$ por $-ab$.
+\item $x^5-6x^3-8x$ por $3a^2x^2$.
+\item $m^4-3m^2n^2+8n^4$ por $-4m^3x$.
+\item $x^3-4x^2y+6xy^2$ por $ax^3y$.
+\item $a^3-5a^2b-8ab^2$ por $-4a^4m^2$.
+\item $a^m-a^{m-1}+a^{m-2}$ por $-2a$.
+\item $x^{m+1}+3x^m-x^{m-1}$ por $3x^{2m}$.
+\item $a^mb^n+a^{m-1}b^{n+1}-a^{m-2}b^{n+2}$ por $3a^2b$.
+\item $x^3-3x^2+5x-6$ por $-4x^2$.
+\item $a^4-6a^3x+9a^2x^2-8$ por $3bx^3$.
+\item $a^{n+3}-3a^{n+2}-4a^{n+1}-a^n$ por $-a^nx^2$.
+\item $x^4-6x^3+8x^2-7x+5$ por $-3a^2x^3$.
+\item $-3x^3+5x^2y-7xy^2-4y^3 $ por $5a^2xy^2$.
+\item $x^{a+5}-3x^{a+4}+x^{a+3}-5x^{a+1}$ por $-2x^2$. % hasta el No. 18
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 68
+Multiplicar: % ejercicio 40
+\begin{enumerate}
+\begin{multicols}{2}
+\item $\frac{1}{2}a-\frac{2}{3}b$ por $\frac{2}{5}a^2$. 
+\item $\frac{2}{3}a-\frac{3}{4}b$ por $-\frac{2}{3}a^3b$.
+\item $\frac{3}{5}a-\frac{1}{6}b+\frac{2}{5}c$ por $-\frac{5}{3}ac^2$.
+\item $\frac{2}{5}a^2+\frac{1}{3}ab-\frac{2}{9}b^2$ por $3a^x$.
+\item $\frac{1}{3}x^2-\frac{2}{5}xy-\frac{1}{4}y^2$ por $\frac{3}{2}y^3$.
+\item $3a-5b+6c$ por $-\frac{3}{10}a^2x^3$.
+\item $\frac{2}{9}x^4-x^2y^2+\frac{1}{3}y^4$ por $\frac{3}{7}x^3y^4$.
+\item $\frac{1}{2}a^2-\frac{1}{3}b^2+\frac{1}{3}x^2-\frac{1}{5}y^2$ por $-\frac{5}{8}a^2m$.
+\item $\frac{2}{3}m^3+\frac{1}{2}m^2n-\frac{5}{6}mn^2-\frac{1}{9}n^3$ por $\frac{3}{4}m^2n^3$.
+\item $\frac{2}{5}x^6-\frac{1}{3}x^4y^2+\frac{3}{5}x^2y^4-\frac{1}{10}y^6$ por $-\frac{5}{7}a^3x^4y^3$.
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\vspace{3mm}
+
+\textbf{MULTIPLICACIÓN DE POLINOMIOS POR POLINOMIOS} %Baldor, 1983, p. 69
+
+Sea el producto $(a+b-c)(m+n)$. Haciendo $m+n=y$, tendremos:
+\begin{IEEEeqnarray*}{rcl}
+(a+b-c)(m+n)&=&(a+b-c)y=ay+by-cy, \quad (\text{sustituyendo } y \text{ por su valor } m+n)\\
+&=& a(m+n)+b(m+n)-c(m+n)\\
+&=&am+an+bm+bn-cm-cn\\
+&=&am+bm-cm+an+bn-cn.
+\end{IEEEeqnarray*}
+Podemos, pues, enunciar la siguiente:
+
+\begin{reg}[Multiplicación de dos polinomios] 
+Se multiplican todos los términos del primer factor por cada uno de los términos del segundo factor, teniendo en cuenta la Ley de los signos, y se reducen los términos semejantes.
+\end{reg}
+
+\textbf{Ejemplos}:
+\begin{enumerate}
+\item $(a-4)(3+a)=a^2-4a+3a-12=a^2-a-12$.
+\item $(4x-3y)(-2y+5x)=20x^2-15xy-8xy+6y^2=20x^2-23xy+6y^2$.
+\end{enumerate}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 69
+Multiplicar: % ejercicio 41
+\begin{enumerate}
+\begin{multicols}{3}
+\item $a+3$ por $a-1$.
+\item $a-3$ por $a+1$.
+\item $x+5$ por $x-4$.
+\item $m-6$ por $m-5$.
+\item $-x+3$ por $-x+5$
+\item $-a-2$ por $-a-3$.
+\item $3x-2y$ por $y+2x$.
+\item $-4y+5x$ por $-3x+2y$.
+\item $5a-7b$ por $a+3b$.
+\item $8n-9m$ por $4n+6m$. % No. 13
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\vspace{1mm}
+
+\textbf{Ejemplos}: %Baldor, 1983, p. 70
+\begin{enumerate}
+\setcounter{enumi}{2}
+\item $(2+a^2-2a-a^3)(a+1)=-a^4-a^2+2$.
+\item $(6y^2+2x^2-5xy)(3x^2-4y^2+2xy)=6x^4-11x^3y+32xy^3-24y^4$.
+\item $(x-4x^2+x^3-3)(x^3-1+4x^2)=x^6-15x^4-8x^2-x+3$.
+\item $(2x-y+3z)(x-3y-4z)=2x^2-7xy-5xz+3y^2-5yz-12z^2$.
+\end{enumerate}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 70
+Multiplicar: % ejercicio 42
+\begin{enumerate}
+\begin{multicols}{2}
+\item $x^2+xy+y^2$ por $x-y$.
+\item $a^2+b^2-2ab$ por $a-b$.
+\item $a^2+b^2+2ab$ por $a+b$.
+\item $x^3-3x^2+1$ por $x+3$.
+\item $a^2-a+a^2$ por $a-1$.
+\item $m^4+m^2n^2+n^4$ por $m^2-n^2$.
+\item $x^3-2x^2+3x-1$ por $2x+3$.
+\item $3y^3+5-6y$ por $y^2+2$.
+\item $m^3-m^2+m-2$ por $am+a$.
+\item $3a^2-5ab+2b^2$ por $4a-5b$.
+\item $5m^4-3m^2n^2+n^4$ por $3m-n$.
+\item $a^2+a+1$ por $a^2-a-1$.
+\item $x^3+2x^2-x$ por $x^2-2x+5$.
+\item $m^3-3m^2n+2mn^2$ por $m^2-2mn$. % ejercicio modificado
+\item $x^2+1+x$ por $x^2-x-1$.
+\item $2-3x^2+x^4$ por $x^2-2x+3$.
+\item $m^3-4m+m^2-1$ por $m^3+1$.
+\item $a^3-5a+2$ por $a^2-a+5$.
+\item $x^2-2xy+y^2$ por $xy-x^2+3y^2$.
+\item $n^2-2n+1$ por $n^2-1$.
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\vspace{1mm}
+
+\textbf{Multiplicación de polinomios con exponentes literales}
+
+\textbf{Ejemplos}: %Baldor, 1983, p. 71
+\begin{enumerate}
+\setcounter{enumi}{6}
+\item $(a^{m+2}-4a^m-2a^{m+1})(a^2-2a)=a^{m+4}-4a^{m+3}+8a^{m+1}$.
+\item $(x^{a+2}-3x^a-x^{a+1}+x^{a-1})(x^{a+1}+x^a+4x^{a-1})=x^{2a+3}-6x^{2a}-11x^{2a-1}+4x^{2a-2}$.
+\end{enumerate}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 71
+Multiplicar: % ejercicio 43
+\begin{enumerate}
+\item $a^x-a^{x+1}+a^{x+2}$ por $a+1$.
+\item $x^{n+1}+2x^{n+2}-x^{n+3}$ por $x^2+x$.
+\item $m^{a-1}+m^{a+1}+m^{a+2}-m^a$ por $m^2-2m+3$.
+\item $a^{n+2}-2a^n+2a^{n+1}$ por $a^n+a^{n+1}$.
+\item $x^{a+2}-x^a+2x^{a+1}$ por $x^{a+3}-2x^{a+1}$.
+\item $3a^{x-2}-2a^{x-1}+a^x$ por $a^2+2a-1$.
+\item $3a^{x-1}+a^x-2a^{x-2}$ por $a^x-a^{x-1}+a^{x-2}$.
+\item $m^{a+1}-2m^{a+2}-m^{a+3}+m^{a+4}$ por $m^{a-3}-m^{a-1}+m^{a-2}$.
+\item $x^{a-1}+2x^{a-2}-x^{a-3}+x^{a-4}$ por $-x^{a-3}+x^{a-1}-x^{a-2}$.
+\item $a^nb-a^{n-1}b^2+2a^{n-2}b^3-a^{n-3}b^4$ por $ a^nb^2-a^{n-2}b^4$.
+\item $a^x+b^x$ por $a^m+b^m$.
+\item $a^{x-1}-b^{n-1}$ por $a-b$.
+\item $a^{2m+1}-5a^{2m+2}+3a^{2m}$ por $a^{3m-3}+6a^{3m-1}-8a^{3m-2}$.
+\item $x^{a+2}y^{x-1}+3x^ay^{x+1}-4x^{a+1}y^x$ por $-2x^{2a-1}y^{x-2}-10x^{2a-3}y^x-4x^{2a-2}y^{x-1}$.
+\end{enumerate}
+\end{ejer}
+
+\pagebreak
+
+\textbf{Multiplicación de polinomios con coeficientes fraccionarios}
+
+\textbf{Ejemplos}: %Baldor, 1983, p. 72
+\begin{enumerate}
+\setcounter{enumi}{6}
+\item $\left(\frac{1}{2}x^2-\frac{1}{3}xy\right)\left(\frac{2}{3}x-\frac{4}{5}y\right)=\frac{1}{3}x^3-\frac{28}{45}x^2y+\frac{4}{15}xy^2$.
+\item $\left(\frac{1}{3}a^2+\frac{1}{2}b^2-\frac{1}{5}ab\right)\left(\frac{3}{4}a^2-\frac{1}{2}ab-\frac{1}{4}b^2\right)=\frac{1}{4}a^4-\frac{19}{60}a^3b+\frac{47}{120}a^2b^2-\frac{1}{5}ab^3-\frac{1}{8}b^4$.
+\end{enumerate}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 72
+Multiplicar: % ejercicio 44
+\begin{enumerate}
+\begin{multicols}{2}
+\item $\frac{1}{2}a-\frac{1}{3}$ por $\frac{1}{3}a+\frac{1}{2}b$.
+\item $x-\frac{2}{5}y$ por $\frac{5}{6}y+\frac{1}{3}x$.
+\item $\frac{1}{2}x^2-\frac{1}{3}xy+\frac{1}{4}y^2$ por $\frac{2}{3}x-\frac{3}{2}y$.
+\item $\frac{1}{4}a^2-ab+\frac{2}{3}b^2$ por $\frac{1}{4}a-\frac{3}{2}b$.
+\item $\frac{2}{5}m^2+\frac{1}{3}mn-1\frac{1}{2}n^2$ por $\frac{3}{2}m^2+2n^2-mn$.
+\item $\frac{3}{8}x^2+\frac{1}{4}x-\frac{2}{5}$ por $2x^3-\frac{1}{3}x+2$.
+\item $\frac{1}{3}ax-\frac{1}{2}x^2+\frac{3}{2}a^2$ por $\frac{3}{2}x^2-ax+\frac{2}{3}a^2$.
+\item $\frac{2}{7}x^3+\frac{1}{2}xy^2-\frac{1}{5}x^2y$ por $\frac{1}{4}x^2-\frac{2}{3}xy+\frac{5}{6}y^2$.
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\vspace{1mm}
+
+\textbf{Producto continuado de polinomios} %Baldor, 1983, p. 75
+
+\textbf{Ejemplo}: \\
+Desarrollar y simplificar $3x(x+3)(x-2)(x+1)$\\
+Observación: al poner los factores entre paréntesis la multiplicación está indicada.\\
+La operación se desarrolla efectuando el producto de dos factores cualesquiera; este producto se multiplica por el tercer factor y este nuevo producto por el factor que queda.\\
+Así, en este caso efectuamos el producto $3x(x+3)=3x^2+9x$. Este producto lo multiplicamos por $x-2$ y tendremos, $(3x^2+9x)(x-2)=3x^3+3x^2-18x$, este producto se multiplica por $x+1$, y se obtiene, $(3x^3+3x^2-18x)(x+1)=3x^4+6x^3-15x^2-18x$. Por lo tanto,
+\begin{equation*}
+3x(x+3)(x-2)(x+1)=3x^4+6x^3-15x^2-18x
+\end{equation*}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 72
+Desarrollar y simplificar: % ejercicio 44
+\begin{enumerate}
+\begin{multicols}{2}
+\item $4(a+5)(a-3)$.
+\item $3a^2(x+1)(x-1)$
+\item $2(a-3)(a-1)(a+4)$.
+\item $(x^2+1)(x^2-1)(x^2+1)$.
+\item $m(m-4)(m-6)(3m+2)$.
+\item $(a-b)(a^2-2ab+b^2)(a+b)$.
+\item $(a^m-3)(a^{m-1}+2)(a^{m-1}-1)$. % No. 9
+\item $a^x(a^{x+1}+b^{x+2})(a^{x+1}-b^{x+2})b^x$. % No. 14
+\end{multicols}
+\end{enumerate}
+\end{ejer}
+
+\pagebreak
+
+
+\textbf{Multiplicación combinada con suma y resta} %Baldor, 1983, p. 75
+
+\textbf{Ejemplos}:
+
+\begin{enumerate}
+\item Desarrollar y simplificar $(x+3)(x-4)+3(x-1)(x+2)$\\
+Efectuaremos el primer producto $(x+3)(x-4)$, después el segundo producto $3(x-1)(x+2)$ y sumaremos este segundo producto con el primero.\\
+Del primer producto, se obtiene: $(x+3)(x-4)=x^2-x-12$\\
+Del segundo: $3(x-1)(x+2)=3(x^2+x-2)=3x^2+3x-6$.\\
+Sumando este segundo producto con el primero:
+\begin{equation*}
+(x^2-x-12)+(3x^2+3x-6)=4x^2+2x-18
+\end{equation*}
+\item Desarrollar y simplificar $x(a-b)^2-4x(a+b)$\\
+Elevar una cantidad al cuadrado equivale a multiplicarla por sí misma; así $(a-b)^2$ equivale a $(a-b)(a-b)$.\\
+Desarrollando $x(a-b)^2$, se obtiene:
+\begin{equation*}
+x(a-b)^2=x(a^2-2ab+b^2)=a^2x-2abx+b^2x
+\end{equation*}
+Desarrollando $4x(a+b)^2$, se obtiene:
+\begin{equation*}
+4x(a+b)^2=4x(a^2+2ab+b^2)=4a^2x+8abx+4b^2x
+\end{equation*}
+Restando este segundo producto del primero primero:
+\begin{equation*}
+(a^2x-2abx+b^2x)-(4a^2x+8abx+4b^2x)=-3a^x-10abx-3b^2x
+\end{equation*}
+\end{enumerate}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 76
+Desarrollar y simplificar: % ejercicio 47
+\begin{enumerate}
+\item $4(x+3)+5(x+2)$.
+\item $6(x^2+4)-3(x^2+1)+5(x^2+2)$.
+\item $a(a-x)+3a(x+2a)-a(x-3a)$.
+\item $x^2(y^2+1)+y^2(x^2+1)-3x^2y^2$.
+\item $4m^3-5mn^2+3m^2(m^2+n^2)-3m(m^2-n^2)$.
+\item $y^2+x^2y^3-y^3(x^2+1)+y^2(x^2+1)-y^2(x^2-1)$.
+\item $5(x+2)-(x+1)(x+4)-6x$.
+\item $(a+5)(a-5)-3(a+2)(a-2)+5(a+4)$.
+\item $(a+b)(4a-3b)-(5a-2b)(3a+b)-(a+b)(3a-6b)$.
+\item $(a+c)^2-(a-c)^2$.
+\item $3(x+y)^2-4(x-y)^2+3x^2-3y^2$.
+\item $(m+n)^2-(2m+n)^2+(m-4n)^2$.
+\item $x(a+x)+3x(a+1)-(x+1)(a+2x)-(a-x)^2$.
+\item $(a+b-c)^2+(a-b+c)^2-(a+b+c)^2$.
+\item $(x^2+x-3)^2-(x^2-2+x)^2+(x^2-x-3)^3$
+\item $(x+y+z)^2-(x+y)(x-y)+3(x^2+xy+y^2)$.
+\item $[x+(2x-3)][3x-(x+1)]+4x-x^2$.
+\item $[3(x+1)-4(x+1)][3(x+4)-2(x+2)]$.
+\item $[(m+n)(m-n)-(m+n)(m+n)][2(m+n)-3(m-n)]$.
+\item $[(x+y)^2-3(x-y)^2][(x+y)(x-y)+x(y-x)]$.
+\end{enumerate}
+\end{ejer}
+
+\vspace{1mm}
+
+\textbf{Supresión de signos de agrupación con productos indicados} %Baldor, 1983, p. 76
+
+\textbf{Ejemplos}:
+
+\begin{enumerate}
+\item Desarrollar y simplificar $5a+\left(a-2\left(a+3b-4\left(a+b\right)\right)\right)$.\\
+Un coeficiente colocado junto a un signo de agrupación nos indica que hay que multiplicarlo por cada uno de los términos encerrados en el signo de agrupación. Así, en este caso multiplicamos -4 por $a+b$, para obtener
+\begin{equation*}
+5a+\left(a-2\left(a+3b-4a-4b\right)\right).
+\end{equation*}
+En el curso de la operación podemos (y es aconsejable) reducir términos semejantes. Así, reduciendo los términos semejantes dentro del paréntesis interior, tenemos:
+\begin{equation*}
+5a+\left(a-2\left(-3a-b\right)\right).
+\end{equation*}
+Efectuando la multiplicación de -2 por $(-3a-b)$, se obtiene,
+\begin{equation*}
+5a+\left(a+6a+2b\right)=5a+(7a+2b)=5a+7a+2b=12a+2b.
+\end{equation*}
+\item Desarrollar y simplificar $-3(x+y)-4(-x+2(-x+2y-3(x-(y+2)))-2x)$.
+\begin{IEEEeqnarray*}{rcl}
+&&-3(x+y)-4(-x+2(-x+2y-3(x-y-2))-2x)\\
+&=&-3x-3y-4(-x+2(-x+2y-3x+3y+6)-2x)\\
+&=&-3x-3y-4(-x+2(-4x+5y+6)-2x)\\
+&=&-3x-3y-4(-x-8x+10y+12-2x)\\
+&=&-3x-3y-4(-11x+10y+12)\\
+&=&-3x-3y+44x-40y+48\\
+&=&41x-43y-48.
+\end{IEEEeqnarray*}
+\end{enumerate}
+
+\vspace{1mm}
+
+\begin{ejer}\
+
+%Baldor, 1983, p. 72
+Desarrollar y simplificar: % ejercicio 44
+\begin{enumerate}
+\item $x-(3a+2(-x+1))$.
+\item $-(a+b)-3(2a+b(-a+2))$.
+\item $-(3x-2y+(x-2y)-2(x+y)-3(2x+1))$.
+\item $4x^2-(-3x+5-(-x+x(2-x)))$.
+\item $2a-(-3x+2(-a+3x-2(-a+b-(2+a))))$.
+\item $a-(x+y)-3(x-y)+2(-(x-2y)-2(-x-y))$.
+\item $m-(m+n)-3(-2m+(-2m+n+2(-1+n)-(m+n-1)))$.
+\item $-2(a-b)-3(a+2b)-4(a-2b+2(-a+b-1+2(a-b)))$.
+\item $-5(x+y)-(2x-y+2(-x+y-3-(x-y-1)))+2x$.
+\item $m-3(m+n)+(-(-(-2m+n-2-3(m-n+1))+m))$.
+\item $-3(x-2y)+2(-4(-2x-3(x+y)))-(-(-(x+y)))$.
+\item $5(-(a+b)-3(-2a+3b-(a+b)+(-a-b)+2(-a+b))-a)$.
+\item $-3(-(+(-a+b)))-4(-(-(-a-b)))$.
+\item $-(a+b-2(a-b)+3(-(2a+b-3(a+b-1)))-3(-a+2(-1+a)))$.
+\end{enumerate}
+\end{ejer}
+
+
+
+
+\end{document}

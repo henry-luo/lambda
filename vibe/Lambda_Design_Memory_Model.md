@@ -255,11 +255,16 @@ Lambda's GC.
 Where the two models meet is where the real design lives; each direction has a
 named mechanism:
 
-1. **Radiant holding Lambda data — pin, never borrow.** Retained Radiant structs
-   referencing Lambda-pool memory must pin it: `PersistentFieldRef`
-   (`radiant/retained_fields.hpp`). Finding S11 (webview `src/srcdoc`) is
-   precisely a missing-pin bug; S12's network-ctx borrow contract is the
-   documented scoped exception.
+1. **Radiant holding Lambda data — pin pool memory, copy GC values.** Retained
+   Radiant structs referencing Lambda-pool memory must pin it:
+   `PersistentFieldRef` (the retained-field setters, now in `radiant/render.hpp`
+   and `radiant/radiant.hpp`). Finding S11 (webview `src/srcdoc`) is precisely a
+   missing-pin bug; S12's network-ctx borrow contract is the documented scoped
+   exception. **GC values follow D4.5.2** (2026-10-06): the document arena, the
+   view tree and their pools never point into the GC heap — a GC value Radiant
+   must keep is copied into the document arena; passing it in only to be read
+   is a transient borrow, admitted provisionally. Argument and lattice:
+   `vibe/Memory_Safety_Template.md` §2.3.
 2. **Lambda/JS holding Radiant objects — generation-checked handles.**
    Script-visible DOM/View references must survive Radiant mutations safely:
    gen-stamps (robustness fix F4) make stale `View*` a deterministic fault, and
@@ -280,7 +285,8 @@ One system, two models, shared substrate: both sides sit on the same
 - **Lambda**: tracing GC now; Perceus-style uniqueness (§2.4) later.
 - **Radiant**: arenas-as-regions + type-stable pools + gen-handles + RAII;
   never GC'd.
-- **The seam**: pin (7.3.1), gen-check (7.3.2), copy-as-value (7.3.3).
+- **The seam**: pin pool memory / copy GC values (7.3.1, D4.5.2), gen-check
+  (7.3.2), copy-as-value (7.3.3).
 
 Notably, every memory-safety finding at the seam so far (S1, S11, T7) is a
 violation of one of the three boundary contracts, not of either side's internal

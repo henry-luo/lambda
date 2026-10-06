@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "view_tree_model.hpp"
 #include <assert.h>
 #include "event.hpp"
 #include "rdt_video.h"
@@ -324,13 +325,8 @@ static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
 static void free_transform_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->transform) return;
     if (elem->transform->functions_owner == TRANSFORM_FUNCTIONS_DOCUMENT_POOL) return;
-    // a view-pool chain is this element's private copy (functions_owner)
-    TransformFunction* function = elem->transform->functions;
-    while (function) {
-        TransformFunction* next = function->next;
-        view_pool_free_private(tree, function);
-        function = next;
-    }
+    if (tree && tree->prop_pool)
+        radiant::destroy_transform_list(tree->prop_pool, elem->transform->functions);
 }
 
 static void free_filter_chain(ViewTree* tree, FilterProp* filter) {
@@ -645,7 +641,8 @@ static_assert(view_slots_all_have_rows(), "an element view slot has no teardown 
 
 #ifndef NDEBUG
 // The value of a view slot, for the debug check that a pointer-clearing
-// teardown left none behind; release builds have no caller.
+// teardown left none behind. Compiled with its only caller, which is
+// debug-only: release builds would otherwise reject an unused static.
 static const void* view_slot_value(const DomElement* elem, DomViewSlot slot) {
     const DomElementExt* ext = elem->ext;
     switch (slot) {
@@ -915,21 +912,25 @@ static void view_teardown_visit_node(ViewTree* tree,
     }
 }
 
-void* alloc_prop(LayoutContext* lycon, size_t size) {
-    return lycon->doc->view_tree->alloc_prop(size);
-}
-
-void* ViewTree::alloc_prop(size_t size) {
-    void* prop = pool_calloc(prop_pool, size);
+static void* alloc_property_from_pool(Pool* pool, size_t size) {
+    void* prop = pool_calloc(pool, size);
     if (prop) {
         return prop;
     }
     else {
         // layout properties have no recovery path; aborting here avoids unchecked callers dereferencing NULL later.
         log_error("alloc_prop: pool_calloc returned NULL (pool=%p, size=%zu) - pool may be corrupt",
-                  (void*)prop_pool, size);
+                  (void*)pool, size);
         abort();
     }
+}
+
+void* alloc_prop(LayoutContext* lycon, size_t size) {
+    return alloc_property_from_pool(layout_prop_pool(lycon), size);
+}
+
+void* ViewTree::alloc_prop(size_t size) {
+    return alloc_property_from_pool(prop_pool, size);
 }
 
 TextRect* ViewTree::alloc_text_rect() {
@@ -1133,6 +1134,7 @@ void view_pool_init(ViewTree* tree, MemContext* owner) {
 
 void ViewTree::reset_retained() {
     layout_generation = generation_next32(layout_generation);
+    if (model) view_tree_model_reset(this);
     if (root) {
         // DOM mutation fallback keeps both DOM/view nodes and their owned prop
         // blocks; only external payloads and generation-local values reset.
@@ -1157,6 +1159,7 @@ void view_pool_reset_retained(ViewTree* tree) {
 }
 
 void ViewTree::destroy() {
+    view_tree_model_destroy(this);
     destroy_measurement_cache(this);
     if (root) {
         view_teardown_visit_node(this, root,
@@ -1419,7 +1422,7 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, Vie
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = lam::view_require_block(view);
-    if (!block->transform || !block->transformp()->functions) return false;
+    if (!transform_has_functions(block->transform)) return false;
 
     float abs_x = 0.0f, abs_y = 0.0f;
     calculate_absolute_position(view, nullptr, &abs_x, &abs_y, boundary);
@@ -1427,7 +1430,7 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, Vie
         block->transformp(), abs_x, abs_y, block->width, block->height);
 
     *out_matrix = radiant::compute_transform_matrix(
-        block->transformp()->functions, block->width, block->height, origin.x, origin.y);
+        block->transformp(), block->width, block->height, origin.x, origin.y);
     return true;
 }
 
@@ -1475,21 +1478,27 @@ static bool transform_function_is_3d(TransformFunctionType type) {
         type == TRANSFORM_PERSPECTIVE;
 }
 
-static bool view_chain_has_3d_transform(View* view) {
-    for (View* current = view; current; current = current->parent_view()) {
-        if (!current->is_block()) continue;
-        ViewBlock* block = lam::view_require_block(current);
-        if (!block->transform || !block->transformp()->functions) continue;
-        for (TransformFunction* function = block->transformp()->functions;
-             function; function = function->next) {
-            if (transform_function_is_3d(function->type)) return true;
-        }
+static bool view_has_3d_transform(View* view) {
+    if (!view || !view->is_block()) return false;
+    const TransformProp* transform = lam::view_require_block(view)->transform;
+    if (!transform_has_functions(transform)) return false;
+    for (const TransformFunction& function : transform->individual) {
+        if (transform_function_is_3d(function.type)) return true;
+    }
+    for (TransformFunction* function = transform->functions; function; function = function->next) {
+        if (transform_function_is_3d(function->type)) return true;
     }
     return false;
 }
 
-static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
-                                         float* width, float* height) {
+static bool view_chain_has_3d_transform(View* view) {
+    for (View* current = view; current; current = current->parent_view()) {
+        if (view_has_3d_transform(current)) return true;
+    }
+    return false;
+}
+
+static RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
     RdtMatrix4 accumulated = rdt_matrix4_identity();
     int depth = 0;
     for (View* current = view; current && depth < 256;
@@ -1512,7 +1521,9 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
                     transform->perspective, origin_x, origin_y);
                 accumulated = rdt_matrix4_multiply(&perspective, &accumulated);
             }
-            if (!transform || transform->transform_style != CSS_VALUE_PRESERVE_3D) {
+            if (!radiant::transform_preserves_3d(block)) {
+                // backface orientation is relative to this 3D context, before ancestor flattening.
+                if (context_only) break;
                 // CSS Transforms 2 §4.1.3: project descendant depth after the
                 // parent's perspective and before the parent's own transform.
                 RdtMatrix4 flatten = rdt_matrix4_identity();
@@ -1524,7 +1535,7 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
             }
         }
 
-        if (transform && transform->functions) {
+        if (transform_has_functions(transform)) {
             float block_x = 0.0f;
             float block_y = 0.0f;
             calculate_absolute_position(
@@ -1536,12 +1547,35 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
                 ? block->height * transform->origin_y / 100.0f
                 : transform->origin_y);
             RdtMatrix4 local = radiant::compute_transform_matrix_3d(
-                transform->functions, block->width, block->height,
+                transform, block->width, block->height,
                 origin_x, origin_y, transform->origin_z);
             accumulated = rdt_matrix4_multiply(&local, &accumulated);
         }
     }
+    return accumulated;
+}
 
+bool view_backface_is_hidden(View* view, BackfaceCheck check) {
+    bool independent_plane = false;
+    for (View* current = view; current; current = current->parent_view()) {
+        if (!current->is_block()) continue;
+        const TransformProp* transform = lam::view_require_block(current)->transform;
+        if (transform && transform->backface_visibility == CSS_VALUE_HIDDEN) {
+            RdtMatrix4 accumulated = view_accumulated_transform_3d(current, true);
+            if (rdt_matrix4_backface_visible(&accumulated)) {
+                // preserved child planes can paint independently; input still excludes the hidden ancestor.
+                if (check == BACKFACE_HIT_TEST || !radiant::transform_preserves_3d(lam::view_require_block(current)) ||
+                    (check == BACKFACE_SELF && (current == view || !independent_plane))) return true;
+            }
+        }
+        independent_plane = independent_plane || view_has_3d_transform(current);
+    }
+    return false;
+}
+
+static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
+                                         float* width, float* height) {
+    RdtMatrix4 accumulated = view_accumulated_transform_3d(view, false);
     float local_x[4] = {*x, *x + *width, *x + *width, *x};
     float local_y[4] = {*y, *y, *y + *height, *y + *height};
     float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;

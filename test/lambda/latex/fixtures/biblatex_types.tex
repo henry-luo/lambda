@@ -1,0 +1,13 @@
+\documentclass{article}
+\usepackage[style=authoryear,sorting=none,natbib=true]{biblatex}
+\addbibresource{biblatex_types.bib}
+\begin{document}
+\nocite{*}
+\cite{article}
+\citetitle{article}; \citeauthor{article}; \citeyear{article}
+\fullcite{article}
+\textcites[see][p. 1]{parent}[also][p. 2]{article}
+\parencites[cf.][p. 4]{collection}[p. 5]{proceedings}
+\autocites{thesis}{report}
+\printbibliography
+\end{document}

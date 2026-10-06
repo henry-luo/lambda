@@ -1,0 +1,52 @@
+\documentclass[border=3pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{lindenmayersystems}
+
+\begin{document}
+
+\begin{tikzpicture}
+\draw[line width=1pt,green,rounded corners=4pt] 
+  l-system
+  [l-system={
+    rule set={X -> X+YF+,Y->-FX-Y},
+    axiom=FX, 
+    angle=90,
+    order=11, 
+    step=10pt
+    }
+  ];
+\draw[line width=1pt,red,rounded corners=4pt, rotate=90] 
+  l-system
+  [l-system={
+    rule set={X -> X+YF+,Y->-FX-Y},
+    axiom=FX, 
+    angle=90,
+    order=11, 
+    step=10pt
+    }
+  ];  
+\draw[line width=1pt,blue,rounded corners=4pt, rotate=180] 
+  l-system
+  [l-system={
+    rule set={X -> X+YF+,Y->-FX-Y},
+    axiom=FX, 
+    angle=90,
+    order=11, 
+    step=10pt
+    }
+  ];  
+\draw[line width=1pt,orange,rounded corners=4pt, rotate=270] 
+  l-system
+  [l-system={
+    rule set={X -> X+YF+,Y->-FX-Y},
+    axiom=FX, 
+    angle=90,
+    order=11, 
+    step=10pt
+    }
+  ];  
+
+\end{tikzpicture}
+
+\end{document}
+

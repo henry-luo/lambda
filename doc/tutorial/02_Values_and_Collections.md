@@ -90,7 +90,6 @@ An array is an ordered collection in square brackets. Indexes start at 0, `last`
 
 ```text repl
 λ> let nums = [10, 20, 30]
-null
 λ> nums[0]
 10
 λ> nums[last]
@@ -115,7 +114,6 @@ A map holds named fields in braces. `.` reads a field, and a missing field reads
 
 ```text repl
 λ> let book = {title: "Clean Code", year: 2008}
-null
 λ> book.title
 "Clean Code"
 λ> book.price

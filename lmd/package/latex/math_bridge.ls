@@ -30,10 +30,13 @@ pub fn render_display_el(node) {
 // ============================================================
 
 pub fn render_equation_el(node) {
+    <div class: "latex-equation", render_equation_math(node)>
+}
+
+pub fn render_equation_math(node) {
     let math_ast = node.ast
     let src = if (node.source != null) node.source else ""
-    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>;
-    <div class: "latex-equation", math_html>
+    if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>
 }
 
 // ============================================================

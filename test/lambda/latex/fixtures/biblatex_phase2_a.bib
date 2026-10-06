@@ -1,0 +1,24 @@
+@string{journalabbr = "Math" # " Notes"}
+@xdata{common, publisher={Example Press}, location={Paris}}
+@book{ada1843,
+  author = {Ada Lovelace},
+  title = {Notes on the {Analytical Engine}},
+  date = {1843},
+  % this comment has a comma, a brace { and an equals sign =
+  xdata = {common},
+  keywords = {history, computing},
+  doi = {10.1000/example}
+}
+@article{smith2020a,
+  author = {John Smith}, title = {First Result}, year = 2020,
+  journaltitle = journalabbr, volume = 4, number = 2, pages = {12--19},
+  keywords = {core, methods}
+}
+@article{smith2020b,
+  author = {Jane Smith}, title = {Second Result}, year = 2020,
+  journaltitle = {Science}, keywords = {core}
+}
+@book{corp2021,
+  author = {{The Example Consortium}}, title = {Annual Report}, date = {2021-02},
+  isbn = {978-1-2345-6789-0}
+}

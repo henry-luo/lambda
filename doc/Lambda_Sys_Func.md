@@ -1178,8 +1178,17 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.rename(src, dst)` | Rename file or directory | `io.rename(/.'a.txt', /.'b.txt')` |
 | `io.fetch(url, options?)` | HTTP fetch; `fetch(url, options)` is the bare spelling | `io.fetch(https.'api.example.com', {method: 'POST'})` |
 | `io.grep(source, pattern, options?)` | Search files line by line, like grep | `io.grep(/.src, "TODO", {line: true})` |
+| `io.cell_width(codepoint)` | Terminal cell width from Unicode metadata; `null` for an invalid scalar | `io.cell_width(ord("界"))` |
+| `io.unicode_category(codepoint)` | Two-letter Unicode general category; `null` for an invalid scalar | `io.unicode_category(ord("界"))` |
+| `io.text_search(source, query, options?)` | Ranked full-text search over files | `io.text_search(/.doc, "memory -draft", {limit: 10})` |
 | `cmd(command, args?)` | Execute a shell command; `args` is one array (or string) | `cmd("ls", ["-la"])` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
+
+`io.cell_width` returns `-1` for a control scalar and uses the runtime's
+utf8proc width table for printable scalars. These are metadata queries; callers
+decide wrapping and word boundaries in Lambda. String offsets remain Unicode
+code-point offsets (S2.5.8), while `lambda.io.terminal` is a shipped package
+under the module path rules of D7.2.4.
 
 #### print(args...)
 
@@ -1434,6 +1443,54 @@ Matching is **line-oriented**: a match never spans a line terminator, so a patte
 `io.grep` is a procedure: its result depends on the file system. It runs on `lib/grep`, a line-oriented search library on RE2 (`vibe/Lambda_Lib_Grep.md`).
 
 `io.grep` only searches. Like `grep` and ripgrep, it never changes a file and has no replace option (ripgrep's `--replace` changes only what ripgrep prints). To change text in a file, read it with `input()`, apply `replace()`, and write the result back with `output()`.
+
+##### io.text_search(source, query, options?)
+
+Full-text search over files: find the documents that contain the query's words, best first, as a database's full-text search does, but with no index to build — every call reads the files, so results are always current. `source` is what `io.grep` takes: a file, a directory, a path ending in `*` or `**`, a string naming a local path, or an array of these. A document is a file by default, or each paragraph or line of a file with `unit`.
+
+`query` is a string in web-search syntax, and it is never an error:
+
+| Query | Matches documents with |
+|-------|------------------------|
+| `full text search` | all three words |
+| `"full text"` | the phrase: the words next to each other |
+| `lambda or scheme` | either word |
+| `-draft`, `-"to do"` | not the word or phrase |
+| `pars*`, `*port`, `*port*` | a word starting with, ending with, or containing the text |
+| `(lambda or scheme) jit` | grouping |
+
+A word is a run of letters, digits and combining marks; every other character separates words, and each Chinese or Japanese character and each Hangul syllable is a word of its own, so `"检索"` and `학교` find words without spaces. Query words are split the same way, so `full-text` is the phrase `full text`. Words are compared ignoring case, by the same folding as `find` (Unicode simple case folding).
+
+The result is an array of document maps, best first by BM25 relevance. Each has `file` (a path when the source was a path, otherwise text) and `score`; a paragraph or line adds `index` (its offset in code points from the start of the file) and `text`. Scores compare documents within one call: they depend on all the documents the call searched.
+
+`io.text_search` takes `io.grep`'s options where they apply, with the same meaning — `line`, `byte_offset`, `line_ending`, `context`/`before`/`after`, `limit`, `limit_per_file`, `files`, `count`, `include`, `exclude`, `max_depth`, `max_size`, `hidden`, `ignore`, `binary` — except that three default to true: `ignore_case`, `word` and `text`. `limit` keeps the best documents; `files` returns the paths of files with a matching document, and `count` one `{file, count}` per such file, both in path order. Its own options:
+
+| Option | Type | Default | Effect |
+|--------|------|---------|--------|
+| `unit` | `"file"`, `"paragraph"`, `"line"` | `"file"` | what a document is; a paragraph is a run of lines that are not blank |
+| `rank` | `"bm25"`, `"tf"`, `false` | `"bm25"` | the order; `"tf"` ignores how rare a word is; `false` gives path order and no `score` |
+| `word` | bool | true | `false` lets a plain word match any part of a word, as `*word*` |
+| `unaccent` | bool | false | ignore accents: `cafe` finds `café` |
+| `stopwords` | array of strings | none | words dropped from documents and queries; in a phrase they still take their place |
+| `matches` | bool | false | adds `matches`, `[{value, index}]` for each word occurrence that matched (`line` and `byte_offset` added by those options) |
+| `snippet` | int | 0 | adds `snippet`, the text of about this many words around the most query words, with `…` where it is cut |
+| `language` | string | none | stemming; not available yet |
+
+```lambda
+pn find_docs() {
+    // the ten files most about memory ownership, without drafts
+    for (h in io.text_search(/.doc, "memory ownership -draft", {limit: 10})^) {
+        print(h.file, " ", h.score, "\n")
+    }
+
+    // paragraphs of the design docs, with a short excerpt
+    let paras = io.text_search(/.vibe, "\"line delimiter\" or \"line join\"",
+                          {unit: "paragraph", line: true, snippet: 24, include: "*.md"})^
+    for (p in paras) print(p.file, ":", p.line, "  ", p.snippet, "\n")
+}
+```
+
+In a directory, files are selected as `io.grep` selects them. A source that does not exist raises an error (E401). `io.text_search` is a procedure: its result depends on the file system. It runs on `lib/fts`, which reuses `lib/grep`'s walk and its literal search to skip files that hold none of the query's words (`vibe/Lambda_IO_Fulltext_Search.md`). Files are searched as plain text; extracting the text of HTML, Markdown or PDF is planned.
 
 #### cmd(command, args?)
 

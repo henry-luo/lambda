@@ -12,7 +12,7 @@
 // Forward declarations for callback functions
 static bool collect_nodes_callback(AvlNode* avl_node, void* context);
 static bool collect_computed_callback(AvlNode* avl_node, void* context);
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !defined(LAMBDA_NO_CONSOLE_DUMP)
 static bool print_tree_callback(StyleNode* node, void* context);
 #endif
 static bool validate_tree_callback(StyleNode* node, void* context);
@@ -71,6 +71,21 @@ static bool css_rollback_allows_candidate(const CssDeclaration* rollback,
         return !candidate->specificity.inline_style;
     }
     return candidate->layer_order != rollback->layer_order;
+}
+
+bool css_declaration_is_rollback(const CssDeclaration* declaration) {
+    return declaration && (css_value_is_revert(declaration->value) ||
+                            css_value_is_revert_layer(declaration->value));
+}
+
+bool css_declaration_cascade_eligible(const CssDeclaration* candidate,
+    const CssDeclaration* ceiling, const CssRollbackFilter* filters) {
+    if (!candidate || (ceiling && css_declaration_cascade_compare(candidate, ceiling) >= 0))
+        return false;
+    for (const CssRollbackFilter* filter = filters; filter; filter = filter->previous) {
+        if (!css_rollback_allows_candidate(filter->rollback, candidate)) return false;
+    }
+    return true;
 }
 
 static CssDeclaration* style_node_resolve_rollback(StyleNode* node,
@@ -174,6 +189,7 @@ int css_specificity_compare(CssSpecificity a, CssSpecificity b) {
 }
 
 void css_specificity_print(CssSpecificity specificity) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     printf("(%d,%d,%d,%d)%s",
            specificity.inline_style,
@@ -181,6 +197,7 @@ void css_specificity_print(CssSpecificity specificity) {
            specificity.classes,
            specificity.elements,
            specificity.important ? "!" : "");
+#endif
 #endif
 }
 
@@ -288,9 +305,6 @@ bool css_declaration_can_clone_owned(const CssDeclaration* source) {
     return source && css_value_can_clone_owned(source->value);
 }
 
-static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool);
-static void css_value_destroy_owned(CssValue* value, Pool* pool);
-
 static CssValue** css_value_array_clone_owned(CssValue* const* source,
                                                int count, Pool* pool) {
     if (count <= 0) return NULL;
@@ -310,9 +324,13 @@ static CssValue** css_value_array_clone_owned(CssValue* const* source,
     return values;
 }
 
-static void css_value_destroy_owned(CssValue* value, Pool* pool) {
+void css_value_destroy_owned(CssValue* value, Pool* pool) {
     if (!value || !pool) return;
     switch (value->type) {
+        case CSS_VALUE_TYPE_KEYWORD:
+            if (value->has_keyword_spelling)
+                pool_free(pool, (void*)value->data.keyword_token.spelling);
+            break;
         case CSS_VALUE_TYPE_STRING:
             pool_free(pool, (void*)value->data.string);
             break;
@@ -388,7 +406,7 @@ static void css_value_destroy_owned(CssValue* value, Pool* pool) {
     pool_free(pool, value);
 }
 
-static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
+CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
     if (!source) return NULL;
     if (!css_value_can_clone_owned(source)) return NULL;
     CssValue* clone = (CssValue*)pool_calloc(pool, sizeof(CssValue));
@@ -396,6 +414,12 @@ static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
     *clone = *source;
 
     switch (source->type) {
+        case CSS_VALUE_TYPE_KEYWORD:
+            if (source->has_keyword_spelling) {
+                clone->data.keyword_token.spelling = pool_strdup(pool, source->data.keyword_token.spelling);
+                if (source->data.keyword_token.spelling && !clone->data.keyword_token.spelling) goto clone_failed;
+            }
+            break;
         case CSS_VALUE_TYPE_STRING:
             clone->data.string = pool_strdup(pool, source->data.string);
             if (source->data.string && !clone->data.string) goto clone_failed;
@@ -617,6 +641,13 @@ int css_declaration_cascade_compare(const CssDeclaration* a, const CssDeclaratio
     int spec_cmp = css_specificity_compare(a->specificity, b->specificity);
     if (spec_cmp != 0) {
         return spec_cmp;
+    }
+
+    // scope proximity follows specificity and precedes source order.
+    if (a->scope_proximity != b->scope_proximity) {
+        if (!a->scope_proximity) return -1;
+        if (!b->scope_proximity) return 1;
+        return a->scope_proximity < b->scope_proximity ? 1 : -1;
     }
 
     // Finally, source order comparison (later wins)
@@ -900,28 +931,18 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
     return NULL;
 }
 
-struct CssRollbackFilter {
-    const CssDeclaration* rollback;
-    const CssRollbackFilter* previous;
-};
-
 static CssDeclaration* style_tree_best_property_candidate(
-    StyleNode* property_node, StyleNode* all_node, StyleNode* shorthand_node,
+    StyleTree* style_tree, const CssPropertyCode* sources, size_t source_count,
     const CssDeclaration* ceiling, const CssRollbackFilter* filters) {
     CssDeclaration* best = NULL;
-    StyleNode* nodes[3] = {property_node, all_node, shorthand_node};
-    for (int source = 0; source < 3; source++) {
-        StyleNode* node = nodes[source];
+    for (size_t source = 0; source < source_count; source++) {
+        AvlNode* entry = avl_tree_search(style_tree->tree, sources[source]);
+        StyleNode* node = entry ? (StyleNode*)entry->declaration : NULL;
         if (!node) continue;
         CssDeclaration* candidate = node->winning_decl;
         WeakDeclaration* weak = node->weak_list;
         while (candidate) {
-            bool eligible = !ceiling ||
-                css_declaration_cascade_compare(candidate, ceiling) < 0;
-            for (const CssRollbackFilter* filter = filters;
-                 eligible && filter; filter = filter->previous) {
-                eligible = css_rollback_allows_candidate(filter->rollback, candidate);
-            }
+            bool eligible = css_declaration_cascade_eligible(candidate, ceiling, filters);
             if (eligible && (!best ||
                 css_declaration_cascade_compare(candidate, best) > 0)) {
                 best = candidate;
@@ -930,14 +951,19 @@ static CssDeclaration* style_tree_best_property_candidate(
             weak = weak ? weak->next : NULL;
         }
     }
-    if (best && (css_value_is_revert(best->value) ||
-                 css_value_is_revert_layer(best->value))) {
-        // `all` and a longhand share one cascade order, including rollback.
+    if (css_declaration_is_rollback(best)) {
+        // rollback removes its layer/origin across every source of the component.
         CssRollbackFilter filter = {best, filters};
         return style_tree_best_property_candidate(
-            property_node, all_node, shorthand_node, best, &filter);
+            style_tree, sources, source_count, best, &filter);
     }
     return best;
+}
+
+CssDeclaration* style_tree_get_component_declaration(StyleTree* style_tree,
+    const CssPropertyCode* sources, size_t source_count) {
+    if (!style_tree || !style_tree->tree || !sources || !source_count) return NULL;
+    return style_tree_best_property_candidate(style_tree, sources, source_count, NULL, NULL);
 }
 
 CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCode property_code) {
@@ -951,19 +977,14 @@ CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCod
         return style_node_resolve_cascade(node);
     }
 
-    bool border_image_part = property_code == CSS_PROPERTY_BORDER_IMAGE_SOURCE ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_SLICE ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_WIDTH ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_OUTSET ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_REPEAT;
-    AvlNode* shorthand_node = border_image_part
-        ? avl_tree_search(style_tree->tree, CSS_PROPERTY_BORDER_IMAGE) : NULL;
+    CssPropertyCode shorthand = css_property_cascade_shorthand(property_code);
+    AvlNode* shorthand_node = shorthand
+        ? avl_tree_search(style_tree->tree, shorthand) : NULL;
     AvlNode* all_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_ALL);
     if (!all_node && !shorthand_node) return style_node_resolve_cascade(node);
-    return style_tree_best_property_candidate(node,
-        all_node ? (StyleNode*)all_node->declaration : NULL,
-        shorthand_node ? (StyleNode*)shorthand_node->declaration : NULL,
-        NULL, NULL);
+    const CssPropertyCode sources[] = {property_code, CSS_PROPERTY_ALL, shorthand};
+    return style_tree_get_component_declaration(style_tree, sources,
+        sizeof(sources) / sizeof(sources[0]));
 }
 
 void* style_tree_get_computed_value(StyleTree* style_tree,
@@ -1232,6 +1253,7 @@ int style_tree_foreach(StyleTree* style_tree, style_tree_callback_t callback, vo
 }
 
 void style_tree_print(StyleTree* style_tree) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     if (!style_tree) {
         printf("StyleTree: NULL\n");
@@ -1243,9 +1265,11 @@ void style_tree_print(StyleTree* style_tree) {
 
     style_tree_foreach(style_tree, print_tree_callback, NULL);
 #endif
+#endif
 }
 
 void style_node_print_cascade(StyleNode* node) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     if (!node) {
         printf("StyleNode: NULL\n");
@@ -1273,6 +1297,7 @@ void style_node_print_cascade(StyleNode* node) {
         printf(" (order: %d)\n", weak->declaration->source_order);
         weak = weak->next;
     }
+#endif
 #endif
 }
 
@@ -1303,8 +1328,8 @@ void style_tree_get_statistics(StyleTree* style_tree, int* total_nodes,
 // Advanced Style Operations
 // ============================================================================
 
-// Lifetime contract (CSS value retention audit, Memory_Safety_Template4.md §10
-// Phase 4): this is a SHALLOW clone. clone_tree_callback re-applies the source
+// Lifetime contract (CSS value retention audit; Memory_Safety_Template.md §8.2,
+// retained CSS values): this is a SHALLOW clone. clone_tree_callback re-applies the source
 // node's CssDeclaration* (and therefore its CssValue*) into the cloned tree by
 // reference + refcount. Those declarations stay owned by SOURCE's pool, not by
 // target_pool. Refcounting does not protect across pools — pool free reclaims
@@ -1612,8 +1637,8 @@ StyleTree* style_tree_create_subset(StyleTree* source,
             StyleNode* node = (StyleNode*)avl_node->declaration;
 
             // Copy winning declaration.
-            // Lifetime contract (CSS value retention audit, Memory_Safety_Template4.md
-            // §10 Phase 4): the declaration struct is re-created in target_pool, but
+            // Lifetime contract (CSS value retention audit, Memory_Safety_Template.md
+            // §8.2): the declaration struct is re-created in target_pool, but
             // its CssValue* is ALIASED from source's pool (no deep value copy exists).
             // The pool backing `source` must therefore outlive `subset`. Only
             // exercised by tests today.
@@ -1671,7 +1696,7 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context) {
     return true;
 }
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !defined(LAMBDA_NO_CONSOLE_DUMP)
 static bool print_tree_callback(StyleNode* node, void* context) {
     printf("  Property %" PRIuPTR ": ", (uintptr_t)node->property_code);
 

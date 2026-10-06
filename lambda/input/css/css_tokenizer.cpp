@@ -505,6 +505,17 @@ void css_token_fix_common_errors(CssToken* token, Pool* pool) {
     }
 }
 // Basic CSS tokenizer compatibility functions
+bool css_token_is_integer(const CssToken* token) {
+    if (!token || token->type != CSS_TOKEN_NUMBER || !token->start || !token->length)
+        return false;
+    size_t offset = token->start[0] == '+' || token->start[0] == '-' ? 1 : 0;
+    if (offset == token->length) return false;
+    for (; offset < token->length; offset++) {
+        if (token->start[offset] < '0' || token->start[offset] > '9') return false;
+    }
+    return true;
+}
+
 CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count) {
     if (!input || !pool || !token_count) return NULL;
 

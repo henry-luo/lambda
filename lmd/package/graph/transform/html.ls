@@ -59,6 +59,10 @@ fn edge_class(assigned_classes) {
   else "graph-edge"
 }
 
+fn cylinder_rim_radius(node) =>
+  if (contains(["cylinder", "lin-cyl"], source_attr(node, "shape", "box"))) 12
+  else 0
+
 fn shape_css(node, palette) {
   let shape = string(source_attr(node, "shape", "box"));
   let sides = source_attr(node, "polygon-sides", null);
@@ -70,7 +74,9 @@ fn shape_css(node, palette) {
   else if (shape == "doublecircle") "border-radius:50%;"
   else if (shape == "stadium" or shape == "round" or shape == "rounded")
     "border-radius:999px;"
-  else if (shape == "cylinder") "border-radius:50% / 12px;"
+  else if (cylinder_rim_radius(node) > 0)
+    "position:relative;border-radius:50% / " ++ string(cylinder_rim_radius(node)) ++
+      "px;" ++ (if (shape == "lin-cyl") "border-width:3px 1px;" else "")
   else if (shape == "diamond") "clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);"
   else if (shape == "hexagon")
     "clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);"
@@ -129,7 +135,6 @@ fn shape_css(node, palette) {
   else if (shape == "lin-rect") "border-width:3px 1px;"
   else if (shape == "underline")
     "border-width:0 0 1px;border-radius:0;background:transparent;"
-  else if (shape == "lin-cyl") "border-radius:50% / 12px;border-width:3px 1px;"
   else if (shape == "text") "border-color:transparent;background:transparent;"
   else if (shape == "subroutine")
     "box-shadow:inset 4px 0 0 -3px " ++ palette.node_border ++
@@ -236,8 +241,30 @@ fn node_sizing_css(node) {
 fn node_padding_css(node) {
   let x = source_attr(node, "margin-x", null);
   let y = source_attr(node, "margin-y", null);
-  "padding:" ++ string(if (y != null) y else 10) ++ "px " ++
-    string(if (x != null) x else 14) ++ "px;"
+  let padding_y = if (y != null) y else 10;
+  let padding_x = if (x != null) x else 14;
+  let rim = cylinder_rim_radius(node);
+  if (rim == 0) "padding:" ++ string(padding_y) ++ "px " ++ string(padding_x) ++ "px;"
+  // reserve the lower half of the top oval above the node's content.
+  else "padding:" ++ string(padding_y + rim) ++ "px " ++ string(padding_x) ++
+    "px " ++ string(padding_y) ++ "px;"
+}
+
+fn node_rim(node, parsed) {
+  let radius = cylinder_rim_radius(node);
+  if (radius == 0 or source_attr(node, "peripheries", 1) == 0) []
+  else {
+    let border = if (parsed.stroke_width != null) parsed.stroke_width else 1;
+    let top_border = if (parsed.stroke_width == null and
+      source_attr(node, "shape", "box") == "lin-cyl") 3 else border;
+    // rounded outer borders cannot draw the interior arc; inherit the resolved outline.
+    [<'node-rim' 'aria-hidden': "true",
+      style: "display:block;position:absolute;box-sizing:border-box;pointer-events:none;" ++
+        "left:-" ++ string(border) ++ "px;right:-" ++ string(border) ++
+        "px;top:-" ++ string(top_border) ++ "px;height:" ++ string(radius * 2) ++
+        "px;max-height:100%;border:inherit;border-radius:50%;">
+    ]
+  }
 }
 
 fn node_style(node, parsed, palette) {
@@ -276,7 +303,8 @@ fn fixed_shape_style(node, parsed, palette) {
 }
 
 fn fixed_shape_content(content, node) =>
-  <content style: "display:block;box-sizing:border-box;grid-area:1/1;z-index:1;" ++
+  // keep the label above a positioned shape and its rim.
+  <content style: "display:block;position:relative;box-sizing:border-box;grid-area:1/1;z-index:1;" ++
       node_padding_css(node)
 , for (child in content) child
   >
@@ -360,10 +388,15 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
           (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++ ";"
         else node_style(node, parsed_style, palette)
 , if (fixed_shape) {
-      <'node-shape' style: fixed_shape_style(node, parsed_style, palette)>
+      <'node-shape' style: fixed_shape_style(node, parsed_style, palette),
+        for (rim in node_rim(node, parsed_style)) rim
+      >
       fixed_shape_content(content, node)
     }
-    else { for (child in content) child }
+    else {
+      for (rim in node_rim(node, parsed_style)) rim
+      for (child in content) child
+    }
   >
 }
 

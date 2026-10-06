@@ -159,7 +159,7 @@ JsMirLeaseSession* js_mir_lease_session_create(void) {
 
 void js_mir_lease_session_close(JsMirLeaseSession* session) {
     if (!session) return;
-    log_notice("js_mir_lease_summary: lookups=%llu hits=%llu misses=%llu compiles=%llu instantiations=%llu retained_entries=%zu retained_metadata_bytes=%zu",
+    log_debug("js_mir_lease_summary: lookups=%llu hits=%llu misses=%llu compiles=%llu instantiations=%llu retained_entries=%zu retained_metadata_bytes=%zu",
         (unsigned long long)session->stats.lookups,
         (unsigned long long)session->stats.hits,
         (unsigned long long)session->stats.misses,

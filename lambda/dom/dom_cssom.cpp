@@ -6,9 +6,11 @@
  */
 
 #include "dom_cssom.h"
+#include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom.h"
 #include "../js/js_runtime.h"
+#include "../js/js_function.hpp"
 #include "../js/js_class.h"
 #include "../js/js_object_meta.h"
 #include "../js/js_property_attrs.h"
@@ -51,14 +53,15 @@ static Pool* get_document_pool();
 static Pool* sheet_pool(CssStylesheet* sheet);
 extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 
-static void js_cssom_notify_stylesheet_mutation(CssStylesheet* stylesheet = nullptr) {
+static void js_cssom_notify_stylesheet_mutation(CssStylesheet* stylesheet) {
+    if (!stylesheet) return;
+    css_stylesheet_mark_changed(stylesheet);
     // stylesheet edits do not touch a DOM node, but they still require post-script cascade.
     DomDocument* doc = stylesheet && stylesheet->owner_element
         ? stylesheet->owner_element->doc : (DomDocument*)dom_get_document();
     style_epoch_mark_global_change(doc);
     DomElement* owner = stylesheet ? stylesheet->owner_element : nullptr;
-    // A rule declaration has no stylesheet back pointer. Invalidate the whole
-    // document when its owner is unknown so every matched element recascades.
+    // linked and imported sheets can require document-wide recascade.
     if (owner) dom_notify_mutation(DOM_JS_MUTATION_STYLE, owner, owner->parent);
     else if (doc && doc->root) {
         dom_notify_mutation(DOM_JS_MUTATION_UNKNOWN, doc->root, nullptr);
@@ -147,6 +150,7 @@ extern "C" Item dom_cssom_stylesheet_constructor(Item options) {
     CssEngine* engine = css_engine_create(pool);
     if (!engine) return ItemNull;
     CssStylesheet* sheet = css_parse_stylesheet(engine, "", "<constructed-stylesheet>");
+    if (sheet) sheet->constructed = true;
     css_engine_destroy(engine);
     return dom_cssom_wrap_stylesheet(sheet);
 }
@@ -197,6 +201,7 @@ static CssRule* get_font_face_as_style_rule(CssRule* rule) {
     shadow->data.style_rule.declaration_count = decl_count;
     shadow->data.style_rule.selector = nullptr;
     shadow->data.style_rule.selector_group = nullptr;
+    css_rule_attach(shadow, rule, rule->stylesheet);
 
     // cache the shadow rule in the original font-face rule's legacy fields
     rule->property_count = decl_count;
@@ -246,7 +251,9 @@ static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
     return wrapper;
 }
 
-static Item cssom_nested_css_text_getter(Item callee, Item receiver,
+enum CssomNestedRuleProperty {CSSOM_NESTED_TEXT, CSSOM_NESTED_PARENT, CSSOM_NESTED_SHEET};
+
+static Item cssom_nested_rule_getter(Item callee, Item receiver,
                                          Item* args, int argc,
                                          uint64_t* result_home);
 
@@ -255,16 +262,20 @@ static Item wrap_nested_declarations(CssRule* rule, Pool* pool) {
     Rooted<Item> result_root(roots,
         dom_realm_new_object_of_class(JS_CLASS_CSS_NESTED_DECLARATIONS));
     Rooted<Item> style_root(roots, wrap_rule_decl(rule, pool));
-    Rooted<Item> getter_root(roots, js_new_native_payload_function(
-        cssom_nested_css_text_getter, 0, 0));
+    Rooted<Item> getter_root(roots, ItemNull), name_root(roots, ItemNull);
     // Class metadata does not participate in ordinary instanceof; CSSOM
     // wrappers must inherit the realm's exposed interface prototype.
     dom_realm_apply_prototype(result_root.get(), "CSSNestedDeclarations");
     dom_realm_set_cstr(result_root.get(), "style", style_root.get());
     // Read the retained rule on access, since CSSStyleDeclaration edits can
     // change this serialization after the wrapper has been created.
-    dom_realm_install_accessor(result_root.get(), js_name_item("cssText"),
-        getter_root.get(), ItemNull, JSPD_NON_ENUMERABLE);
+    const char* names[] = {"cssText", "parentRule", "parentStyleSheet"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        getter_root.set(js_new_native_payload_function(cssom_nested_rule_getter, i, 0));
+        name_root.set(js_name_item(names[i]));
+        dom_realm_install_accessor(result_root.get(), name_root.get(),
+            getter_root.get(), ItemNull, JSPD_NON_ENUMERABLE);
+    }
     return result_root.get();
 }
 
@@ -386,10 +397,11 @@ static const char* serialize_cssom_rule_css_text(CssRule* rule, Pool* pool,
         }
         if (!nested_declarations) stringbuf_append_str(buf, "}");
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_LAYER) {
         const char* name = rule->type == CSS_RULE_MEDIA ? "media"
             : rule->type == CSS_RULE_SUPPORTS ? "supports"
-            : rule->type == CSS_RULE_CONTAINER ? "container" : "layer";
+            : rule->type == CSS_RULE_CONTAINER ? "container"
+            : rule->type == CSS_RULE_SCOPE ? "scope" : "layer";
         stringbuf_append_all(buf, 2, "@", name);
         if (rule->data.conditional_rule.condition) {
             const char* start = rule->data.conditional_rule.condition;
@@ -426,13 +438,18 @@ static const char* serialize_cssom_rule_css_text(CssRule* rule, Pool* pool,
     return result ? result->chars : "";
 }
 
-static Item cssom_nested_css_text_getter(Item /*callee*/, Item receiver,
+static Item cssom_nested_rule_getter(Item callee, Item receiver,
                                          Item* /*args*/, int /*argc*/,
                                          uint64_t* /*result_home*/) {
     Item style = js_get_key_cstr(receiver, "style");
     CssRule* rule = unwrap_rule_decl(style);
     if (!rule || rule->type != CSS_RULE_NESTED_DECLARATIONS)
-        return js_throw_type_error("CSSNestedDeclarations.cssText called on incompatible receiver");
+        return js_throw_type_error("CSSNestedDeclarations getter called on incompatible receiver");
+    JsFunction* function = (JsFunction*)callee.function;
+    CssomNestedRuleProperty property = function
+        ? (CssomNestedRuleProperty)js_fn_native(function)->target.bits : CSSOM_NESTED_TEXT;
+    if (property == CSSOM_NESTED_PARENT) return dom_cssom_wrap_rule(rule->parent, rule->pool);
+    if (property == CSSOM_NESTED_SHEET) return dom_cssom_wrap_stylesheet(rule->stylesheet);
     Pool* pool = rule->pool ? rule->pool : get_document_pool();
     return make_string_item(serialize_cssom_rule_css_text(rule, pool, 0));
 }
@@ -471,6 +488,14 @@ static CssRule* cssom_rule_list_at(CssStylesheet* sheet, int64_t index) {
     return nullptr;
 }
 
+static CssRule* cssom_owner_rule_at(Item owner, int64_t index) {
+    CssStylesheet* sheet = unwrap_stylesheet(owner);
+    if (sheet) return cssom_rule_list_at(sheet, index);
+    CssRuleChildList children = css_rule_child_list(unwrap_rule(owner));
+    return children.count && index >= 0 && (uint64_t)index < *children.count
+        ? (*children.rules)[index] : nullptr;
+}
+
 static int64_t cssom_varray_count(void* data) {
     CssomVArray* collection = (CssomVArray*)data;
     if (!collection) return 0;
@@ -478,7 +503,10 @@ static int64_t cssom_varray_count(void* data) {
         DomDocument* doc = (DomDocument*)dom_document_from_item(collection->owner);
         return doc && doc->stylesheet_count > 0 ? doc->stylesheet_count : 0;
     }
-    return cssom_rule_list_count(unwrap_stylesheet(collection->owner));
+    CssStylesheet* sheet = unwrap_stylesheet(collection->owner);
+    if (sheet) return cssom_rule_list_count(sheet);
+    CssRuleChildList children = css_rule_child_list(unwrap_rule(collection->owner));
+    return children.count ? (int64_t)*children.count : 0;
 }
 
 static VirtualOpStatus cssom_varray_get(void* data, int64_t index, Item* out) {
@@ -489,12 +517,12 @@ static VirtualOpStatus cssom_varray_get(void* data, int64_t index, Item* out) {
         if (!doc || index >= doc->stylesheet_count) return VIRTUAL_OP_MISSING;
         *out = dom_cssom_wrap_stylesheet(doc->stylesheets[index]);
     } else {
-        CssStylesheet* sheet = unwrap_stylesheet(collection->owner);
-        CssRule* rule = cssom_rule_list_at(sheet, index);
+        CssRule* rule = cssom_owner_rule_at(collection->owner, index);
         if (!rule) return VIRTUAL_OP_MISSING;
-        *out = dom_cssom_wrap_rule(rule, sheet_pool(sheet));
+        *out = rule->type == CSS_RULE_NESTED_DECLARATIONS
+            ? wrap_nested_declarations(rule, rule->pool) : dom_cssom_wrap_rule(rule, rule->pool);
     }
-    return get_type_id(*out) == LMD_TYPE_VMAP
+    return get_type_id(*out) == LMD_TYPE_MAP || get_type_id(*out) == LMD_TYPE_VMAP
         ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
 }
 
@@ -587,94 +615,189 @@ extern "C" Item dom_cssom_stylesheet_get_title(Item sheet_item) {
 extern "C" Item dom_cssom_stylesheet_index(Item sheet_item, int64_t index) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
-    // raw index into the rules array (charset rules included), matching the
-    // legacy bracket-access path
-    if (index < 0 || (size_t)index >= sheet->rule_count) return ItemNull;
-    return dom_cssom_wrap_rule(sheet->rules[index], sheet_pool(sheet));
+    return dom_cssom_wrap_rule(cssom_rule_list_at(sheet, index), sheet_pool(sheet));
 }
 
 // =============================================================================
 // CSSStyleSheet Method Dispatch
 // =============================================================================
 
-extern "C" Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg) {
-    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
-    if (!sheet) return ItemNull;
-    // index omitted (undefined/null) defaults to append-at-end per CSSOM
-    TypeId index_type = get_type_id(index_arg);
-    bool has_index = index_type == LMD_TYPE_INT || index_type == LMD_TYPE_INT64 ||
-                     index_type == LMD_TYPE_FLOAT;
-    Item args[2] = {text_arg, index_arg};
-    int argc = has_index ? 2 : 1;
-    (void)args; (void)argc;
-    if (argc < 1) return ItemNull;
+struct CssomRuleList {
+    CssRuleChildList storage;
+    CssStylesheet* sheet;
+    CssRule* parent;
+    Pool* pool;
+};
 
-    String* rule_string = it2s(args[0]);
-    const char* rule_text = rule_string ? rule_string->chars : fn_to_cstr(args[0]);
-    size_t rule_length = rule_string ? rule_string->len : (rule_text ? strlen(rule_text) : 0);
-    if (!rule_text) return ItemNull;
-
-    int index = (argc >= 2) ? (int)it2i(args[1]) : (int)sheet->rule_count;
-
-    // validate index
-    if (index < 0 || (size_t)index > sheet->rule_count) {
-        log_error("js_cssom_stylesheet_method insertRule: index %d out of range [0, %zu]", index, sheet->rule_count);
-        return ItemNull;
-    }
-
-    // parse the rule text
-    Pool* pool = sheet->pool ? sheet->pool : get_document_pool();
-    if (!pool) return ItemNull;
-
-    CssRule* new_rule = css_parse_rule_text(rule_text, rule_length, pool);
-    if (!new_rule) {
-        log_error("js_cssom_stylesheet_method insertRule: failed to parse rule '%s'", rule_text);
-        return ItemNull;
-    }
-
-    // ensure capacity
-    if (sheet->rule_count >= sheet->rule_capacity) {
-        if (!lam::pool_copy_grow_array(pool, &sheet->rules, &sheet->rule_capacity,
-                                       sheet->rule_count, sheet->rule_count + 1, 8, true)) {
-            log_error("js_cssom_stylesheet_method insertRule: failed to grow rule list");
-            return ItemNull;
-        }
-    }
-
-    // shift rules to make room
-    for (size_t i = sheet->rule_count; i > (size_t)index; i--) {
-        sheet->rules[i] = sheet->rules[i - 1];
-    }
-    sheet->rules[index] = new_rule;
-    sheet->rule_count++;
-
-    log_debug("js_cssom_stylesheet_method insertRule: inserted at index %d, count=%zu", index, sheet->rule_count);
-    js_cssom_notify_stylesheet_mutation(sheet);
-    return (Item){.item = i2it((int64_t)index)};
+static CssomRuleList cssom_mutable_rule_list(Item owner) {
+    CssStylesheet* sheet = unwrap_stylesheet(owner);
+    if (sheet) return {{&sheet->rules, &sheet->rule_count}, sheet, nullptr, sheet_pool(sheet)};
+    CssRule* rule = unwrap_rule(owner);
+    return {css_rule_child_list(rule), rule ? rule->stylesheet : nullptr,
+        rule, rule && rule->pool ? rule->pool : get_document_pool()};
 }
 
-extern "C" Item dom_cssom_delete_rule(Item sheet_item, Item index_arg) {
-    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
-    if (!sheet) return ItemNull;
-    Item args[1] = {index_arg};
-    int argc = 1;
-    (void)args; (void)argc;
-    if (argc < 1) return ItemNull;
-
-    int index = (int)it2i(args[0]);
-    if (index < 0 || (size_t)index >= sheet->rule_count) {
-        log_error("js_cssom_stylesheet_method deleteRule: index %d out of range", index);
-        return ItemNull;
+static size_t cssom_rule_storage_index(const CssomRuleList* list, uint32_t index) {
+    size_t visible = 0;
+    for (size_t i = 0; i < *list->storage.count; i++) {
+        CssRule* rule = (*list->storage.rules)[i];
+        if (!list->parent && rule && rule->type == CSS_RULE_CHARSET) continue;
+        if (visible++ == index) return i;
     }
+    return *list->storage.count;
+}
 
-    // shift rules down
-    for (size_t i = (size_t)index; i < sheet->rule_count - 1; i++) {
-        sheet->rules[i] = sheet->rules[i + 1];
+static CssRule* cssom_nesting_parent(CssRule* parent, bool scopes = false) {
+    while (parent && parent->type != CSS_RULE_STYLE &&
+        !(scopes && parent->type == CSS_RULE_SCOPE)) parent = parent->parent;
+    return parent;
+}
+
+static bool cssom_namespace_list_is_mutable(const CssomRuleList* list) {
+    for (size_t i = 0; i < *list->storage.count; i++) {
+        CssRule* rule = (*list->storage.rules)[i];
+        if (rule && rule->type != CSS_RULE_CHARSET && rule->type != CSS_RULE_IMPORT &&
+            rule->type != CSS_RULE_NAMESPACE) return false;
     }
-    sheet->rule_count--;
+    return true;
+}
 
-    log_debug("js_cssom_stylesheet_method deleteRule: removed index %d, count=%zu", index, sheet->rule_count);
-    js_cssom_notify_stylesheet_mutation(sheet);
+static const char* cssom_rule_insertion_error(const CssomRuleList* list,
+                                             CssRule* rule, size_t index) {
+    if (rule->type == CSS_RULE_CHARSET) return "SyntaxError";
+    if (list->parent) {
+        if (rule->type == CSS_RULE_IMPORT || rule->type == CSS_RULE_NAMESPACE)
+            return "HierarchyRequestError";
+        if (cssom_nesting_parent(list->parent) && rule->type != CSS_RULE_STYLE &&
+            rule->type != CSS_RULE_NESTED_DECLARATIONS && rule->type != CSS_RULE_MEDIA &&
+            rule->type != CSS_RULE_SUPPORTS && rule->type != CSS_RULE_CONTAINER &&
+            rule->type != CSS_RULE_SCOPE && rule->type != CSS_RULE_LAYER)
+            return "HierarchyRequestError";
+        return nullptr;
+    }
+    bool statement = rule->type == CSS_RULE_LAYER && rule->data.conditional_rule.layer_statement;
+    for (size_t i = 0; i < *list->storage.count; i++) {
+        CssRule* sibling = (*list->storage.rules)[i];
+        if (!sibling || sibling->type == CSS_RULE_CHARSET) continue;
+        bool sibling_statement = sibling->type == CSS_RULE_LAYER && sibling->data.conditional_rule.layer_statement;
+        if (rule->type == CSS_RULE_IMPORT && i < index && sibling->type != CSS_RULE_IMPORT &&
+            !sibling_statement) return "HierarchyRequestError";
+        if (i >= index && !statement &&
+            ((sibling->type == CSS_RULE_IMPORT && rule->type != CSS_RULE_IMPORT) ||
+             (sibling->type == CSS_RULE_NAMESPACE && rule->type != CSS_RULE_IMPORT && rule->type != CSS_RULE_NAMESPACE)))
+            return "HierarchyRequestError";
+    }
+    if (rule->type == CSS_RULE_NAMESPACE && !cssom_namespace_list_is_mutable(list))
+        return "InvalidStateError";
+    return nullptr;
+}
+
+extern "C" Item dom_cssom_insert_rule(Item owner, Item text_arg, Item index_arg) {
+    RootFrame roots(3);
+    Rooted<Item> owner_root(roots, owner), text_root(roots, text_arg), index_root(roots, index_arg);
+    JS_ASSIGN_OR_RETURN(text, js_to_string(text_root.get()));
+    text_root.set(text);
+    JS_ASSIGN_OR_RETURN(number, js_to_number(index_root.get()));
+    index_root.set(number);
+    uint32_t index = (uint32_t)js_to_int32(it2d(number));
+    CssomRuleList list = cssom_mutable_rule_list(owner_root.get());
+    if (!list.storage.count) return dom_raise_type_error("insertRule requires a stylesheet or grouping rule");
+    size_t count = *list.storage.count;
+    size_t visible_count = list.parent ? count : (size_t)cssom_rule_list_count(list.sheet);
+    if (list.parent && index > visible_count)
+        return dom_raise_exception("IndexSizeError", "CSS rule insertion index exceeds the list length");
+    if (!list.pool) return ItemError;
+    String* source = it2s(text_root.get());
+    CssRule* nesting = cssom_nesting_parent(list.parent, true);
+    bool scoped = nesting && nesting->type == CSS_RULE_SCOPE;
+    CssSelectorGroup* parent_group = nesting ? (scoped ? nesting->data.conditional_rule.scope_selector
+        : nesting->data.style_rule.selector_group) : nullptr;
+    CssFormatter* formatter = parent_group ? css_formatter_create(list.pool, CSS_FORMAT_COMPACT) : nullptr;
+    const char* parent_text = formatter ? css_format_selector_group(formatter, parent_group) : nullptr;
+    CssRule* rule = css_parse_rule_text_in_context(source->chars, source->len, list.pool, parent_text, parent_group, scoped);
+    if (!rule && nesting) {
+        size_t declaration_count = 0;
+        CssDeclaration** declarations = css_parse_declaration_list_text(source->chars, source->len, list.pool, &declaration_count);
+        if (declaration_count) {
+            rule = (CssRule*)pool_calloc(list.pool, sizeof(CssRule));
+            if (!rule) return ItemError;
+            rule->pool = list.pool;
+            rule->type = CSS_RULE_NESTED_DECLARATIONS;
+            rule->data.style_rule.selector_group = parent_group;
+            rule->data.style_rule.selector = parent_group && parent_group->selector_count ? parent_group->selectors[0] : nullptr;
+            rule->data.style_rule.declarations = declarations;
+            rule->data.style_rule.declaration_count = declaration_count;
+        }
+    }
+    if (!rule) return dom_raise_exception("SyntaxError", "CSS text does not parse as one rule or nested declaration block");
+    // stylesheet parsing and constructed-sheet restrictions precede its index check.
+    if (!list.parent && list.sheet->constructed && rule->type == CSS_RULE_IMPORT)
+        return dom_raise_exception("SyntaxError", "Constructed stylesheets cannot contain @import rules");
+    if (index > visible_count)
+        return dom_raise_exception("IndexSizeError", "CSS rule insertion index exceeds the list length");
+    size_t raw_index = cssom_rule_storage_index(&list, index);
+    const char* error = cssom_rule_insertion_error(&list, rule, raw_index);
+    if (error) return dom_raise_exception(error, "CSS rule is not allowed at this position");
+    if (list.sheet && !css_bind_rule_namespaces(rule, list.sheet))
+        return dom_raise_exception("SyntaxError", "CSS selector uses an undeclared namespace");
+    size_t capacity = list.parent ? count : list.sheet->rule_capacity;
+    if (!lam::pool_copy_grow_array(list.pool, list.storage.rules, &capacity, count, count + 1, 8, true))
+        return ItemError;
+    if (!list.parent) list.sheet->rule_capacity = capacity;
+    auto* namespaces = list.sheet ? list.sheet->namespaces : nullptr;
+    size_t namespace_index = 0;
+    if (rule->type == CSS_RULE_NAMESPACE) {
+        for (size_t i = 0; i < raw_index; i++)
+            if ((*list.storage.rules)[i]->type == CSS_RULE_NAMESPACE) namespace_index++;
+        namespaces = (decltype(namespaces))pool_calloc(list.pool, (list.sheet->namespace_count + 1) * sizeof(*namespaces));
+        if (!namespaces) return ItemError;
+        for (size_t i = 0; i < list.sheet->namespace_count + 1; i++) {
+            if (i == namespace_index) {
+                namespaces[i].prefix = rule->data.namespace_rule.prefix;
+                namespaces[i].url = rule->data.namespace_rule.namespace_url;
+            } else namespaces[i] = list.sheet->namespaces[i < namespace_index ? i : i - 1];
+        }
+    }
+    for (size_t i = count; i > raw_index; i--) (*list.storage.rules)[i] = (*list.storage.rules)[i - 1];
+    (*list.storage.rules)[raw_index] = rule;
+    *list.storage.count = count + 1;
+    css_rule_attach(rule, list.parent, list.sheet);
+    if (rule->type == CSS_RULE_NAMESPACE) {
+        list.sheet->namespaces = namespaces;
+        list.sheet->namespace_count++;
+    }
+    js_cssom_notify_stylesheet_mutation(list.sheet);
+    return (Item){.item = i2it(index)};
+}
+
+extern "C" Item dom_cssom_delete_rule(Item owner, Item index_arg) {
+    RootFrame roots(2);
+    Rooted<Item> owner_root(roots, owner), index_root(roots, index_arg);
+    JS_ASSIGN_OR_RETURN(number, js_to_number(index_root.get()));
+    index_root.set(number);
+    uint32_t index = (uint32_t)js_to_int32(it2d(number));
+    CssomRuleList list = cssom_mutable_rule_list(owner_root.get());
+    if (!list.storage.count) return dom_raise_type_error("deleteRule requires a stylesheet or grouping rule");
+    size_t count = *list.storage.count;
+    size_t visible_count = list.parent ? count : (size_t)cssom_rule_list_count(list.sheet);
+    if (index >= visible_count) return dom_raise_exception("IndexSizeError", "CSS rule deletion index exceeds the list length");
+    size_t raw_index = cssom_rule_storage_index(&list, index);
+    CssRule* removed = (*list.storage.rules)[raw_index];
+    if (removed->type == CSS_RULE_NAMESPACE && list.sheet) {
+        if (!cssom_namespace_list_is_mutable(&list))
+            return dom_raise_exception("InvalidStateError", "CSS namespaces cannot change after other rules exist");
+        size_t namespace_index = 0;
+        for (size_t i = 0; i < raw_index; i++)
+            if ((*list.storage.rules)[i]->type == CSS_RULE_NAMESPACE) namespace_index++;
+        for (size_t i = namespace_index; i + 1 < list.sheet->namespace_count; i++)
+            list.sheet->namespaces[i] = list.sheet->namespaces[i + 1];
+        list.sheet->namespace_count--;
+    }
+    for (size_t i = raw_index; i + 1 < count; i++) (*list.storage.rules)[i] = (*list.storage.rules)[i + 1];
+    *list.storage.count = count - 1;
+    // wrappers can retain deleted rules; detach associations without freeing pool-owned content.
+    css_rule_attach(removed, nullptr, nullptr);
+    js_cssom_notify_stylesheet_mutation(list.sheet);
     return ItemNull;
 }
 
@@ -713,28 +836,9 @@ extern "C" Item dom_cssom_rule_get_style(Item rule_item) {
 
 extern "C" Item dom_cssom_rule_get_css_rules(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
-    if (!rule) return ItemNull;
-    Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
-    (void)pool;
-    if (rule->type == CSS_RULE_STYLE) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        size_t nr_count = rule->data.style_rule.nested_rule_count;
-        CssRule** nr = rule->data.style_rule.nested_rules;
-        for (size_t i = 0; i < nr_count; i++) {
-            if (!nr[i]) continue;
-            if (nr[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
-                array_push(arr, wrap_nested_declarations(nr[i], pool));
-            } else {
-                array_push(arr, dom_cssom_wrap_rule(nr[i], pool));
-            }
-        }
-        return (Item){.array = arr};
-    }
-    return ItemNull;
+    if (!css_rule_child_list(rule).count) return ItemNull;
+    // retain the owner, then read its current child array on each list access.
+    return cssom_varray_new(rule_item, CSSOM_VARRAY_RULES, radiant_dom_css_rule_list_host_type());
 }
 
 extern "C" Item dom_cssom_rule_get_css_text(Item rule_item) {
@@ -746,7 +850,7 @@ extern "C" Item dom_cssom_rule_get_css_text(Item rule_item) {
     if (rule->type == CSS_RULE_STYLE ||
         rule->type == CSS_RULE_NESTED_DECLARATIONS ||
         rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-        rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
+        rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_LAYER) {
         return make_string_item(serialize_cssom_rule_css_text(rule, pool, 0));
     }
     CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
@@ -790,28 +894,55 @@ extern "C" Item dom_cssom_rule_get_parent_rule(Item rule_item) {
     return ItemNull;
 }
 
+extern "C" Item dom_cssom_rule_get_parent_style_sheet(Item rule_item) {
+    CssRule* rule = unwrap_rule(rule_item);
+    return rule ? dom_cssom_wrap_stylesheet(rule->stylesheet) : ItemNull;
+}
+
+static Item cssom_scope_boundary(Item rule_item, bool end) {
+    CssRule* rule = unwrap_rule(rule_item);
+    if (!rule || rule->type != CSS_RULE_SCOPE) return ItemNull;
+    const char* source = end ? rule->data.conditional_rule.scope_end_text
+        : rule->data.conditional_rule.scope_start_text;
+    if (!source) return ItemNull;
+    CssSelectorGroup* group = css_parse_selector_group_text(source, strlen(source), rule->pool, true);
+    CssFormatter* formatter = group ? css_formatter_create(rule->pool, CSS_FORMAT_COMPACT) : nullptr;
+    return formatter ? make_string_item(css_format_selector_group(formatter, group)) : ItemNull;
+}
+
+JS_FORWARD_EXPRESSION(Item, dom_cssom_rule_get_scope_start, (Item rule), (cssom_scope_boundary(rule, false)))
+JS_FORWARD_EXPRESSION(Item, dom_cssom_rule_get_scope_end, (Item rule), (cssom_scope_boundary(rule, true)))
+
+static Item cssom_property_descriptor(Item rule_item, unsigned descriptor) {
+    CssRule* rule = unwrap_rule(rule_item);
+    if (!rule || rule->type != CSS_RULE_PROPERTY) return ItemNull;
+    CssPropertyRegistration* property = &rule->data.property_rule;
+    if (descriptor == 2) return (Item){.item = b2it(property->inherits)};
+    const char* text = descriptor == 0 ? property->name : descriptor == 1 ? property->syntax
+        : property->initial_text;
+    return text ? make_string_item(text) : ItemNull;
+}
+
+JS_FORWARD_EXPRESSION(Item, dom_cssom_rule_get_property_name, (Item rule), (cssom_property_descriptor(rule, 0)))
+JS_FORWARD_EXPRESSION(Item, dom_cssom_rule_get_property_syntax, (Item rule), (cssom_property_descriptor(rule, 1)))
+JS_FORWARD_EXPRESSION(Item, dom_cssom_rule_get_property_inherits, (Item rule), (cssom_property_descriptor(rule, 2)))
+JS_FORWARD_EXPRESSION(Item, dom_cssom_rule_get_property_initial_value, (Item rule), (cssom_property_descriptor(rule, 3)))
+
 static void cssom_rebind_nested_children(CssRule* container,
                                          const char* parent_text,
                                          CssSelectorGroup* parent_group,
                                          Pool* pool, int depth) {
     if (!container || !parent_text || !parent_group || !pool || depth > 128)
         return;
-    CssRule** children = nullptr;
-    size_t count = 0;
-    if (container->type == CSS_RULE_STYLE) {
-        children = container->data.style_rule.nested_rules;
-        count = container->data.style_rule.nested_rule_count;
-    } else if (container->type == CSS_RULE_MEDIA ||
-               container->type == CSS_RULE_SUPPORTS ||
-               container->type == CSS_RULE_CONTAINER ||
-               container->type == CSS_RULE_LAYER) {
-        children = container->data.conditional_rule.rules;
-        count = container->data.conditional_rule.rule_count;
-    }
-    for (size_t i = 0; i < count; i++) {
-        CssRule* child = children[i];
+    CssRuleChildList children = css_rule_child_list(container);
+    if (!children.count) return;
+    for (size_t i = 0; i < *children.count; i++) {
+        CssRule* child = (*children.rules)[i];
         if (!child) continue;
-        if (child->type == CSS_RULE_NESTED_DECLARATIONS) {
+        if (child->type == CSS_RULE_SCOPE) {
+            // scope children stay relative to their root when an enclosing selector changes.
+            css_scope_rebind_prelude(child, parent_text, pool);
+        } else if (child->type == CSS_RULE_NESTED_DECLARATIONS) {
             child->data.style_rule.selector_group = parent_group;
             child->data.style_rule.selector = parent_group->selector_count
                 ? parent_group->selectors[0] : nullptr;
@@ -887,7 +1018,7 @@ extern "C" Item dom_cssom_rule_set_selector_text(Item rule_item, Item value) {
             rule, expanded_text, new_group, pool, 0);
 
         log_debug("js_cssom_rule_set_property: updated selectorText to '%s'", new_text);
-        js_cssom_notify_stylesheet_mutation();
+        js_cssom_notify_stylesheet_mutation(rule->stylesheet);
         return value;
     }
 
@@ -1013,7 +1144,7 @@ extern "C" Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name,
             if (d->property_name && strcmp(d->property_name, css_prop) == 0) {
                 rule->data.style_rule.declarations[i] = new_decl;
                 log_debug("dom_cssom_rule_decl_set_property: replaced unicode-range = '%s'", canonical);
-                js_cssom_notify_stylesheet_mutation();
+                js_cssom_notify_stylesheet_mutation(rule->stylesheet);
                 return value;
             }
         }
@@ -1028,7 +1159,7 @@ extern "C" Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name,
             rule->data.style_rule.declaration_count = count + 1;
         }
         log_debug("dom_cssom_rule_decl_set_property: added unicode-range = '%s'", canonical);
-        js_cssom_notify_stylesheet_mutation();
+        js_cssom_notify_stylesheet_mutation(rule->stylesheet);
         return value;
     }
 
@@ -1057,7 +1188,7 @@ extern "C" Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name,
         if (match) {
             rule->data.style_rule.declarations[i] = new_decl;
             log_debug("dom_cssom_rule_decl_set_property: replaced '%s' = '%s'", css_prop, val_str);
-            js_cssom_notify_stylesheet_mutation();
+            js_cssom_notify_stylesheet_mutation(rule->stylesheet);
             return value;
         }
     }
@@ -1074,7 +1205,7 @@ extern "C" Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name,
         rule->data.style_rule.declaration_count = count + 1;
     }
     log_debug("dom_cssom_rule_decl_set_property: added '%s' = '%s'", css_prop, val_str);
-    js_cssom_notify_stylesheet_mutation();
+    js_cssom_notify_stylesheet_mutation(rule->stylesheet);
     return value;
 }
 
@@ -1118,7 +1249,7 @@ extern "C" Item dom_cssom_rule_decl_remove_property(Item decl_item, Item prop_ar
                 rm_rule->data.style_rule.declarations[j] = rm_rule->data.style_rule.declarations[j + 1];
             }
             rm_rule->data.style_rule.declaration_count--;
-            js_cssom_notify_stylesheet_mutation();
+            js_cssom_notify_stylesheet_mutation(rm_rule->stylesheet);
             return make_string_item(old_val);
         }
     }
@@ -1453,6 +1584,71 @@ static Item js_css_supports(Item* args, int argc) {
     return (Item){.item = b2it(result)};
 }
 JS_FORWARD_ITEM(dom_css_supports_operation, (Item* args, int argc), js_css_supports, (args, argc))
+
+extern "C" Item dom_css_register_property_operation(Item definition) {
+    if (!js_is_object_value(definition)) return js_throw_type_error("CSS.registerProperty requires a property definition");
+    RootFrame roots(5);
+    Rooted<Item> definition_root(roots, definition), value_root(roots, ItemNull);
+    Rooted<Item> name_root(roots, ItemNull), syntax_root(roots, ItemNull), initial_root(roots, ItemNull);
+    // Web IDL dictionary members convert in name order; accessors may allocate or reenter registration (D5.3.3).
+    JS_ASSIGN_OR_RETURN(inherits_value, js_get_name_key(definition_root.get(), "inherits"));
+    value_root.set(inherits_value);
+    if (get_type_id(value_root.get()) == LMD_TYPE_UNDEFINED)
+        return js_throw_type_error("CSS.registerProperty requires inherits");
+    bool inherits = it2b(js_to_boolean(value_root.get()));
+    JS_ASSIGN_OR_RETURN(initial_value, js_get_name_key(definition_root.get(), "initialValue"));
+    value_root.set(initial_value);
+    bool has_initial = get_type_id(value_root.get()) != LMD_TYPE_UNDEFINED;
+    if (has_initial) {
+        JS_ASSIGN_OR_RETURN(initial_text, js_to_string(value_root.get()));
+        initial_root.set(initial_text);
+    }
+    JS_ASSIGN_OR_RETURN(name_value, js_get_name_key(definition_root.get(), "name"));
+    value_root.set(name_value);
+    if (get_type_id(value_root.get()) == LMD_TYPE_UNDEFINED)
+        return js_throw_type_error("CSS.registerProperty requires name");
+    JS_ASSIGN_OR_RETURN(name_text, js_to_string(value_root.get()));
+    name_root.set(name_text);
+    JS_ASSIGN_OR_RETURN(syntax_value, js_get_name_key(definition_root.get(), "syntax"));
+    value_root.set(syntax_value);
+    if (get_type_id(value_root.get()) == LMD_TYPE_UNDEFINED) syntax_root.set(js_name_item("*"));
+    else {
+        JS_ASSIGN_OR_RETURN(syntax_text, js_to_string(value_root.get()));
+        syntax_root.set(syntax_text);
+    }
+    String* name = it2s(name_root.get());
+    String* syntax = it2s(syntax_root.get());
+    if (!name || name->len <= 2 || name->chars[0] != '-' || name->chars[1] != '-')
+        return dom_raise_exception("SyntaxError", "Registered property names must start with -- and contain a name");
+    DomDocument* doc = (DomDocument*)dom_get_document();
+    if (!doc) return dom_raise_exception("InvalidStateError", "CSS.registerProperty requires an associated document");
+    if (css_find_script_property_registration(doc, name->chars, name->len))
+        return dom_raise_exception("InvalidModificationError", "The custom property is already registered by script");
+    Pool* scratch = pool_create();
+    if (!scratch) return ItemError;
+    auto register_definition = [&]() -> Item {
+        CssPropertyRegistration registration = {};
+        if (!syntax || memchr(syntax->chars, '\0', syntax->len) ||
+            !css_parse_property_syntax(syntax->chars, scratch, &registration))
+            return dom_raise_exception("SyntaxError", "The registered property syntax is invalid");
+        registration.name = name->chars;
+        registration.inherits = inherits;
+        if (has_initial) {
+            String* initial = it2s(initial_root.get());
+            if (!initial || !css_parse_property_initial_value(&registration, initial->chars, initial->len, scratch))
+                return dom_raise_exception("SyntaxError", "The registered initial value is invalid");
+        }
+        if (!css_property_registration_is_valid(&registration))
+            return dom_raise_exception("SyntaxError", "The initial value must match the syntax and be computationally independent");
+        if (!css_register_document_property(doc, &registration, name->len)) return ItemError;
+        style_epoch_mark_global_change(doc);
+        if (doc->root) dom_notify_mutation(DOM_JS_MUTATION_UNKNOWN, doc->root, nullptr);
+        return make_js_undefined();
+    };
+    Item result = register_definition();
+    pool_destroy(scratch);
+    return result;
+}
 
 extern "C" Item dom_css_escape_operation(Item* args, int argc) {
     // CSS.escape(ident) — serialize a CSS identifier. The intrinsic target

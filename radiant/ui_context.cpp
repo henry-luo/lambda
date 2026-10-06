@@ -1,4 +1,5 @@
 #include "view.hpp"
+#include "view_tree_model.hpp"
 #include "render.hpp"
 #include "event.hpp"
 #include "radiant.hpp"
@@ -390,7 +391,8 @@ void free_document(DomDocument* doc) {
     // Every check that can refuse teardown runs before the first release, so a
     // refused document stays whole and owned instead of half torn down (its
     // Input and loader pool used to be detached and then dropped on return).
-    Runtime* timer_runtime = doc->js.runtime;
+    // native timing jobs may be retained by a Lambda-only evaluator.
+    Runtime* timer_runtime = doc->js.runtime ? doc->js.runtime : doc->lambda_runtime;
     EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
     Runtime* state_runtime = dom_document_script_runtime(doc);
     EvalContext* state_owner = state_runtime
@@ -470,6 +472,7 @@ void free_document(DomDocument* doc) {
     // then dangle.
     if (doc->root) view_tree_release_detached_embedded_documents(doc->view_tree, doc->root);
 
+    view_tree_secondary_release_all(doc);
     view_tree_shell_destroy(doc, doc->view_tree);
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
@@ -511,6 +514,21 @@ void ui_context_cleanup(UiContext* uicon) {
     uicon->destroy();
 }
 
+void ui_context_release_loader_runtime(UiContext* uicon) {
+    if (!uicon || !uicon->loader_runtime) return;
+    Runtime* runtime = uicon->loader_runtime.get();
+    uicon->loader_runtime = nullptr;
+    // Teardown is quiescent: take the thread from whichever document
+    // evaluator ran last, so cleanup binds the loader's own context (EO5v2).
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    if (owner && !radiant_eval_context_switch(owner)) {
+        log_error("loader-runtime: could not bind the window loader runtime for release");
+    }
+    runtime_cleanup(runtime);
+    mem_free(runtime);
+    log_debug("loader-runtime: released the window loader runtime");
+}
+
 // the window shell owns the top-level document and releases it here; other
 // holders of `document` only borrow it
 void UiContext::destroy_document() {
@@ -530,6 +548,8 @@ void UiContext::destroy() {
     }
 
     destroy_document();
+    // its documents borrowed the loader runtime, so it goes after them
+    ui_context_release_loader_runtime(this);
 
     log_debug("cleaning up font resources");
     fontface_cleanup(this);  // free font cache

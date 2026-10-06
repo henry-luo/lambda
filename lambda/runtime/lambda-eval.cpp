@@ -5620,7 +5620,13 @@ static Item force_document(Path* doc_path, bool* raised) {
     } else {
         // PTH36: `input`/`fetch` are pn-family effectful readers, so an
         // unreadable document RAISES (S7.4.5) rather than answering null.
+#ifdef LAMBDA_NO_FILE_IO
+        set_runtime_error(ERR_IO_ERROR, "external document providers are excluded from this profile");
+        *raised = true;
+        return ItemError;
+#else
         head = fn_input1((Item){.item = (uint64_t)(uintptr_t)doc_path});
+#endif
         if (head.item == ItemError.item) { *raised = true; return ItemError; }
     }
     if (head.item == ItemNull.item) return ItemNull;
@@ -6451,7 +6457,7 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     if (strcmp(k, "extension") == 0) {
         // return file extension (e.g. "txt" from "file.txt")
         if (path->name) {
-            const char* ext = file_path_ext(path->name);
+            const char* ext = str_file_ext(path->name, strlen(path->name), NULL);
             if (ext) {
                 return {.item = s2it(heap_create_name(ext + 1))};
             }
@@ -6477,6 +6483,10 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     if (strcmp(k, "size") == 0 || strcmp(k, "modified") == 0 ||
         strcmp(k, "is_dir") == 0 || strcmp(k, "is_file") == 0 ||
         strcmp(k, "is_link") == 0 || strcmp(k, "mode") == 0) {
+#ifdef LAMBDA_NO_FILE_IO
+        set_runtime_error(ERR_IO_ERROR, "filesystem metadata provider is excluded");
+        return ItemError;
+#else
         if (!(path->flags & PATH_FLAG_META_LOADED)) {
             path_load_metadata(path);
         }
@@ -6497,6 +6507,7 @@ extern "C" Item path_property_get(Path* path, const char* k) {
         if (strcmp(k, "is_file") == 0) return {.item = b2it((meta->flags & PATH_META_IS_DIR) == 0)};
         if (strcmp(k, "is_link") == 0) return {.item = b2it((meta->flags & PATH_META_IS_LINK) != 0)};
         if (strcmp(k, "mode") == 0) return {.item = i2it(meta->mode)};
+#endif
     }
 
     log_debug("path_property_get: unknown path property '%s'", k);
@@ -8129,6 +8140,24 @@ Item fn_chr(Item cp_item) {
 
     String* result = heap_strcpy(buf, len);
     return {.item = s2it(result)};
+}
+
+// Expose only Unicode metadata; terminal width accumulation stays in Lambda.
+Item fn_io_cell_width(Item cp_item) {
+    GUARD_ERROR1(cp_item);
+    int64_t cp = 0;
+    if (!lambda_item_to_int64_exact(cp_item, &cp) || cp < 0 || cp > 0x10FFFF ||
+            (cp >= 0xD800 && cp <= 0xDFFF)) return ItemNull;
+    return {.item = i2it(utf8proc_charwidth((utf8proc_int32_t)cp))};
+}
+
+Item fn_io_unicode_category(Item cp_item) {
+    GUARD_ERROR1(cp_item);
+    int64_t cp = 0;
+    if (!lambda_item_to_int64_exact(cp_item, &cp) || cp < 0 || cp > 0x10FFFF ||
+            (cp >= 0xD800 && cp <= 0xDFFF)) return ItemNull;
+    const char* category = utf8proc_category_string((utf8proc_int32_t)cp);
+    return {.item = s2it(heap_strcpy(category, strlen(category)))};
 }
 
 // join(strs, sep) - join list of strings with separator
@@ -10199,6 +10228,9 @@ static bool cow_profile_truthy(const char* value) {
 }
 
 static bool cow_profile_enabled(void) {
+#ifdef LAMBDA_NO_FILE_IO
+    return false;
+#else
     if (g_cow_profile_enabled >= 0) return g_cow_profile_enabled != 0;
     g_cow_profile_enabled = cow_profile_truthy(getenv("COW_EXEC_PROFILE")) ? 1 : 0;
     g_cow_profile_sites_enabled = g_cow_profile_enabled &&
@@ -10210,6 +10242,7 @@ static bool cow_profile_enabled(void) {
         g_cow_profile_registered = true;
     }
     return g_cow_profile_enabled != 0;
+#endif
 }
 
 bool cow_profile_sites_enabled(void) {
@@ -10302,6 +10335,7 @@ void cow_profile_count_js_realm_reservation(void) {
 }
 
 void cow_profile_dump(void) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!cow_profile_enabled()) return;
     create_dir("temp");
     const char* output_path = getenv("COW_EXEC_PROFILE_OUT");
@@ -10455,6 +10489,7 @@ void cow_profile_dump(void) {
         log_error("cow profile sites: failed to write '%s'", sites_path);
     }
     strbuf_free(sites);
+#endif
 }
 
 typedef struct LambdaExecCallRow {
@@ -10472,6 +10507,7 @@ static uint64_t g_lambda_exec_call_overflow = 0;
 static int g_lambda_exec_profile_enabled = -1;
 
 static void lambda_exec_profile_dump(void) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     const char* path = getenv("LAMBDA_EXEC_PROFILE_OUT");
     if (!path || !path[0]) path = "temp/lambda_exec_profile.tsv";
     StrBuf* output = strbuf_new();
@@ -10503,9 +10539,13 @@ static void lambda_exec_profile_dump(void) {
         if (__atomic_load_n(&g_lambda_exec_calls[i].state,
                 __ATOMIC_ACQUIRE) == 2) free((void*)g_lambda_exec_calls[i].name);
     }
+#endif
 }
 
 extern "C" bool lambda_exec_profile_enabled(void) {
+#ifdef LAMBDA_NO_FILE_IO
+    return false;
+#else
     int state = __atomic_load_n(&g_lambda_exec_profile_enabled,
         __ATOMIC_ACQUIRE);
     if (state >= 0) return state != 0;
@@ -10523,6 +10563,7 @@ extern "C" bool lambda_exec_profile_enabled(void) {
             __ATOMIC_ACQUIRE);
     } while (state == -2);
     return state != 0;
+#endif
 }
 
 extern "C" uint64_t lambda_exec_profile_register_call(const char* name,

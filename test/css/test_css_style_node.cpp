@@ -66,6 +66,25 @@ TEST_F(CssStyleNodeTest, SpecificityComparison) {
     EXPECT_EQ(css_specificity_compare(low, low), 0);
 }
 
+TEST_F(CssStyleNodeTest, ScopeProximityFollowsSpecificityAndPrecedesSourceOrder) {
+    CssDeclaration near = {}, far = {}, unscoped = {};
+    near.origin = far.origin = unscoped.origin = CSS_ORIGIN_AUTHOR;
+    near.specificity = far.specificity = unscoped.specificity = create_specificity(0, 0, 1);
+    near.scope_proximity = 2;
+    far.scope_proximity = 4;
+    near.source_order = 1;
+    far.source_order = unscoped.source_order = 100;
+    EXPECT_GT(css_declaration_cascade_compare(&near, &far), 0);
+    EXPECT_GT(css_declaration_cascade_compare(&far, &unscoped), 0);
+    far.specificity.ids = 1;
+    EXPECT_GT(css_declaration_cascade_compare(&far, &near), 0);
+    far.specificity.ids = 0;
+    near.important = far.important = true;
+    EXPECT_GT(css_declaration_cascade_compare(&near, &far), 0);
+    far.scope_proximity = near.scope_proximity;
+    EXPECT_GT(css_declaration_cascade_compare(&far, &near), 0);
+}
+
 TEST_F(CssStyleNodeTest, SpecificityImportant) {
     // !important should win regardless of specificity
     CssSpecificity low_important = create_specificity(0, 0, 0, 1, true);

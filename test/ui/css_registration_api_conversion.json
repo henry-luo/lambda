@@ -1,0 +1,112 @@
+{
+  "name": "CSS.registerProperty dictionary conversion, complete names and live style updates",
+  "html": "test/ui/css_registration_api_conversion.html",
+  "viewport": {
+    "width": 240,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inspect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-null",
+      "equals": "TypeError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-primitive",
+      "equals": "TypeError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-conversion",
+      "equals": "inherits,initialValue,initial-string,name,name-string,syntax,syntax-string|12px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-inherited-members",
+      "equals": "23px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-getter-error",
+      "equals": "true|inherits"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-reentrant",
+      "equals": "InvalidModificationError"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-duplicate-conversion",
+      "equals": "InvalidModificationError|inherits,initialValue,name,syntax"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-case",
+      "equals": "17px|19px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-long-name",
+      "equals": "31"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-nul-name",
+      "equals": "11|13|"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-live",
+      "equals": "29px|29px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#child"
+      },
+      "property": "width",
+      "equals": "29px"
+    }
+  ]
+}
