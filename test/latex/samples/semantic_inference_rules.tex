@@ -1,0 +1,50 @@
+\documentclass[12pt]{article}
+
+\usepackage[T1]{fontenc}
+
+\usepackage{semantic}
+\usepackage{url}
+
+\title{Drawing Semantic Diagrams with the \texttt{semantic} Package}
+
+\begin{document}
+Some examples from \url{http://scholar.princeton.edu/scuellar/blog/2014/03/deduction-trees-latex}
+
+\[
+\inference {A \quad B}{C}[d]
+\]
+
+One of Demorgan's Law:
+
+\[
+\inference{\neg \phi \vee \neg \psi &
+  \inference{\inference{\inference{}{\phi \wedge \psi}[2]}{\phi} & \inference{}{\neg \phi}[1]}{\perp} &
+  \inference{\inference{\inference{}{\phi \wedge \psi}[2]}{\psi} & \inference{}{\neg \psi}[1]}{\perp}
+}{\inference{\perp}{\neg (\phi \wedge \psi)}}[2]
+\]
+
+
+Example from the \verb|semantic| package documentation: For the case where every expression is to be evaluated in an environment giving a
+value, and you would like to set all
+the environment's values in mathematics and 
+the expressions in typewriter font:
+
+\[
+\def\predicatebegin#1|-#2=>#3#4\predicateend{%
+$#1 \vdash$\texttt{#2}$\stackrel{#3}{\Rightarrow}_S #4$}
+%
+\inference[TlR]{D |- $s$ =>{v} s' & D |- $s$ =>{v'} s''}
+{D |- Tl($s$) =>{v'} s''}
+\]
+
+Example of a T-diagram from the package documentation:
+
+\begin{center}
+  \begin{picture}(230,100)(-90,-20)
+    \put(0,0){\compiler{\compiler{ML,ML,U},\machine[U$^{-}$]{U},\compiler{\compiler{ML,ML,U},\machine[U$^{-}$]{U},\compiler{ML,U,U}}}}
+  \end{picture}
+\end{center}
+
+See the documentation at \url{http://texdoc.net/pkg/semantic} for more information.
+
+\end{document}

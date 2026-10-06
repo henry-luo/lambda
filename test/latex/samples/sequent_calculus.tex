@@ -1,0 +1,70 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{bussproofs}
+\usepackage{comment}
+
+\title{}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{}
+
+Here's what an example tree would look like:
+
+\begin{prooftree}
+\def\fCenter{\mbox{\ $\Rightarrow$\ }}
+\AxiomC{$\Gamma \Rightarrow \Delta, D$}
+\AxiomC{$D,\Gamma' \Rightarrow \Delta'$}
+\RightLabel{R}
+\BinaryInf$\Gamma , \Gamma' \fCenter \Delta, \Delta'$
+\end{prooftree}
+
+If an inference is made from one premiss to a conclusion, it looks like this:
+\begin{prooftree}
+\def\fCenter{\mbox{\ $\Rightarrow$\ }}
+\AxiomC{$D,\Gamma' \Rightarrow \Delta'$}
+\RightLabel{R}
+\UnaryInfC{$\Gamma \Rightarrow \Delta, D$}
+\end{prooftree}
+
+If height needs to be kept track of, here's how I did it:
+\begin{prooftree}
+\def\fCenter{\mbox{\ $\Rightarrow$\ }}
+\AxiomC{$\vdash_{n+m}D,\Gamma' \Rightarrow \Delta'$}
+\RightLabel{R}
+\UnaryInfC{$\vdash_{n+m+1}\Gamma \Rightarrow \Delta, D$}
+\end{prooftree}
+
+An example of branching derivation with the heights kept at the left:
+
+\begin{prooftree}
+\def\fCenter{\mbox{\ $\Rightarrow$\ }}
+\newcommand{\and}{\wedge}
+\newcommand{\seq}{\Rightarrow}
+\begin{comment}
+Above is simply defined some custom commands for connectives
+\end{comment}
+
+\AxiomC{$init$}
+\UnaryInfC{$\vdash_{n+m-1}A, B \seq A$}
+\begin{comment}
+This is the leftmost branch
+\end{comment}
+
+\AxiomC{$init$}
+\UnaryInfC{$\vdash_{n+m-1}A, B \seq B$}
+\begin{comment}
+This is the rightmost branch
+\end{comment}
+
+\RightLabel{$R\and$}
+\BinaryInfC{$\vdash_{n+m}A,B \seq A \and B$}
+\RightLabel{$L\and$}
+\UnaryInfC{$\vdash_{n+m+1}A \and B \seq A \and B$}
+\end{prooftree}
+
+\end{document}

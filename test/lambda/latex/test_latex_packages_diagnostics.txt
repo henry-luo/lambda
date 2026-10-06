@@ -1,5 +1,5 @@
 "codes:"
-["conflicting-package-options", "unknown-package", "late-package", "invalid-color", "missing-bib-resource", "unresolved-citation", "unresolved-reference", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output"]
+["conflicting-package-options", "unknown-package", "late-package", "invalid-color", "missing-bib-resource", "unresolved-citation", "unresolved-reference", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output"]
 "all located:"
 true
 "resume skips nested:"
@@ -15,6 +15,6 @@ true
 "pdf diagnostics located:"
 true
 "bib options:"
-["unsupported-bib-style", "unsupported-bib-sorting"]
+[]
 "bib options located:"
 true

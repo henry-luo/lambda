@@ -7472,8 +7472,9 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
     s->handler_ctx = nullptr;
     s->doc = event_context_target_document(evcon);
-    if (!s->doc || !s->doc->js.runtime) return false;
-    Runtime* runtime = s->doc->js.runtime;
+    // native timing events also belong to Lambda-only document evaluators.
+    Runtime* runtime = dom_document_script_runtime(s->doc);
+    if (!runtime) return false;
     s->handler_ctx = runtime_get_eval_context(runtime);
     if (!s->handler_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
     s->handler_ctx->heap = runtime_heap(runtime);
@@ -7481,12 +7482,13 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx->type_list = runtime_type_list(runtime);
     s->handler_ctx->pool = runtime_heap(runtime)->pool;
     s->saved_input_ctx = input_context;
-    if (!eval_context_init(s->handler_ctx) ||
-            (js_runtime_state_for(s->handler_ctx) &&
-             !js_runtime_state_init(s->handler_ctx))) {
+    if (!js_runtime_context_enter_turn(runtime, s->handler_ctx)) {
         return false;
     }
     input_context = nullptr;
+    // timing support must use the viewer clock, not the static headless drain.
+    dom_set_host_driven_loop(s->doc->js.host_driven_loop);
+    dom_set_ui_context(evcon->ui_context);
     dom_set_document(s->doc);
     // A queued callback may change the DOM immediately before dispatching a
     // custom event. Its records belong to that callback turn and must survive

@@ -2795,6 +2795,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     // Use the parsed pathname so a query does not hide the file extension.
     doc = load_layout_special_file(full_url, url_get_pathname(full_url),
                                    viewport_width, viewport_height, pool, true, &handled);
+    // non-HTML documents still dispatch callbacks through their owning viewer.
+    if (handled) document_apply_js_host_config(doc, js_host_config);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
             viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing,

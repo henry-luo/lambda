@@ -1,0 +1,31 @@
+\documentclass{article}
+\usepackage[style=numeric,sorting=none,maxcitenames=2,mincitenames=1,uniquename=init,backend=biber,natbib=true]{biblatex}
+\addbibresource{biblatex_phase2_a.bib}
+\addbibresource{biblatex_phase2_b.bib}
+\begin{document}
+\tableofcontents
+\cite{ada1843,smith2020a,smith2020b}
+\parencite[see][p. 12]{corp2021}
+\textcite{web2022}
+\autocite{talk2023}
+\cite{multi2025}
+\cite{ada1843,ada1844}
+\cites[cf.][p. 8]{ada1843}[p. 2]{smith2020a}
+\citeauthor{smith2020a}; \citetitle{ada1843}; \citeyear{talk2023}
+\citet{ada1843}; \citep{web2022}
+Regular\footnote{A note}
+\footcite{corp2021}
+\printbibliography[title={Main sources},keyword=core]
+\printbibliography[heading=none,nottype=article]
+\begin{refsection}
+\cite{ada1843}
+\printbibliography
+\end{refsection}
+\begin{refsegment}
+\cite{ada1844}
+\printbibliography[segment=1,heading=subbibliography]
+\end{refsegment}
+\printbibliography[section=1,heading=none]
+\printbibliography[type=online,notkeyword=core,heading=none]
+\printbibliography[heading=bibintoc,title={Indexed Sources}]
+\end{document}

@@ -1,0 +1,56 @@
+{
+  board_size: true,
+  board_empty: true,
+  bag_unique: true,
+  bag_range: true,
+  reproducible: true,
+  ready: true,
+  start: true,
+  pause: true,
+  paused_input: true,
+  paused_tick: true,
+  resume: true
+}
+{
+  four_cells: true,
+  fits_spawn: true,
+  rejects_wall: true,
+  blocked_move: true,
+  moves: true,
+  ghost_bottom: true,
+  ghost_fits: true,
+  ghost_stops: true,
+  rotation_cycle: true,
+  wall_kick: true,
+  floor_kick: true,
+  square_fixed: true
+}
+{
+  clears_two: true,
+  compact_size: true,
+  compact_order: true,
+  no_clear: true,
+  clears_four: true,
+  clear_score: true,
+  level_up: true,
+  cleared_empty: true,
+  gravity: true
+}
+{
+  holds_current: true,
+  hold_advances: true,
+  hold_once: true,
+  lock_resets_hold: true,
+  swaps_hold: true,
+  soft_score: true,
+  hard_score: true,
+  locks_four: true,
+  next_advances: true,
+  preview_refills: true,
+  spawn_topout: true,
+  hidden_topout: true,
+  over_input: true,
+  restart: true,
+  restart_fresh: true,
+  snapshot: true
+}

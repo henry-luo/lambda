@@ -1,0 +1,92 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{cite}
+\usepackage{amsthm}
+\usepackage{amsmath}
+
+\newtheorem{theorem}{Theorem}
+
+
+\title{Fundamental Theorem of Calculus}
+\author{Mohammadreza Osouli}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+    The fundamental theorem of calculus is a theorem that links the concept of differentiating a function with the concept of integrating a function. In this note we discuss the fundamental theorem of calculus and its proof.
+\end{abstract}
+
+\section*{Introduction}
+The fundamental theorem of calculus relates differentiation and integration, showing that these two operations are essentially inverses of one another. “This result was known to NEWTON (1642–1727) and even—in a geometric form—to NEWTON’s teacher BARROW (1630–1677), but it became more transparent in LEIBNIZ’s formalism”. \cite{Stillwell}
+
+\section{The Theorem and Its Proof}
+Let $f$ be a continuous function on an open interval 
+$ I \subseteq \mathbf{R}.$
+Fix a point 
+$ a \in I. $ \\
+For any point 
+$ x \in I, $
+we define
+\begin{align}\tag{$\dagger$}
+   F(x) = \int^x_a f(t)dt 
+\end{align}
+
+The substance of the \textit{Fundamental Theorem of Calculus} is to claim  that the function $F$ is an anti-derivative for $f$.
+More precisely, we have
+
+\begin{theorem}
+The function $F$ defined above is differentiable, and
+\begin{align*}
+    \frac{d}{dx}F(x) = f(x)
+\end{align*}
+for every $x \in I. $
+\end{theorem}
+
+\begin{proof}
+We endeavor to calculate the derivative of $F$ by forming the difference or Newton quotient for $h \neq 0$:
+
+\begin{align*}
+  \underbrace{\frac{F(x+h) - F(x)}{h}}_{Newton \ qoutient} &= \frac{\int^{x+h}_{a} f(t)dt - \int^x_a f(t)dt }{h} \\
+   &= \frac{\int^{x+h}_{x} f(t)dt}{h}. \tag{1}
+  \end{align*}
+
+Now fix a point $x \in I.$ Let $\epsilon > 0.$ Choose $\delta > 0$ such that $|t - x| < \delta$ implies that 
+$|f(t) - f(x)| < \epsilon.$ Now we may rewrite (1) as 
+\begin{align*}
+  \begin{split}
+  \frac{\int^{x+h}_x f(t)dt}{h} &= \frac{\int^{x+h}_x f(t)dt}{h} + \frac{\int^{x+h}_x [f(t) - f(x)] dt }{h} \\
+   &= f(x) + \frac{\int^{x+h}_x [f(t) - f(x)]dt}{h}.
+  \end{split}
+\end{align*}
+
+If $|h| < \delta$, then we may estimate the last fraction as
+\begin{align*}
+    \left| \frac{\int^{x+h}_x [f(t) - f(x)]dt}{h} \right| \leq \frac{\int^{x+h}_x |f(t) - f(x)|dt}{h} \leq \epsilon.
+\end{align*}
+
+Thus, in summary, we have
+\begin{align*}
+    \frac{F(x+h) - F(x)}{h} = f(x) + error,
+\end{align*}
+
+where the error is not greater than $\epsilon$. In conclusion,
+\begin{align*}
+    \lim_{h \rightarrow 0}  \frac{F(x+h) - F(x)}{h} = f(x)
+\end{align*}
+
+as desired. 
+
+\end{proof}
+
+
+\begin{thebibliography}{9}
+\bibitem{Stillwell} 
+Stillwell, John.
+\textit{Mathematics and its History} (Undergraduate Texts in Mathematics). 
+ 3rd ed. Springer Science \& Business Media, 2010.
+\end{thebibliography}
+
+\end{document}

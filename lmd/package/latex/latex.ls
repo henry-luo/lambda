@@ -16,6 +16,7 @@ import registry: .packages.registry
 import geometry: .packages.geometry
 import microtype: .packages.microtype
 import biblatex: .packages.biblatex
+import bib_style: .packages.bib_style
 import hyperref: .packages.hyperref
 import amsmath: .packages.amsmath
 import paths: lambda.edit.session
@@ -62,25 +63,32 @@ pub fn render_result(ast, options) {
     let math_operators = if (registry.active(loaded.packages, "amsmath"))
         amsmath.operators(ast) else {definitions: [], diagnostics: []}
     // package activation precedes counter and label analysis.
-    let base_info = analyzer.analyze_with_packages(ast, loaded.packages)
-    let bibliography = biblatex.load(ast, base_uri,
-        registry.options_for(loaded.packages, "biblatex"))
-    let numbered_bib = biblatex.numbered_entries(bibliography.entries, len(base_info.bibitems))
+    let language = document_language(options, loaded.packages)
+    let base_info = analyzer.analyze_with_language(ast, loaded.packages, language)
+    let bibliography = biblatex.prepare(ast, base_uri,
+        registry.options_for(loaded.packages, "biblatex"), language)
+    let language_issues = if (registry.active(loaded.packages, "biblatex") and
+        not (bib_style.supported_language(language) ^ { false }))
+        [util.diagnostic("unsupported-bib-language", "biblatex", language,
+            "Unsupported bibliography language " ++ language,
+            registry.offset_for(loaded.packages, "biblatex"))] else []
     let link_settings = hyperref.settings(ast, registry.options_for(loaded.packages, "hyperref"))
     // add macro definitions to info for render-time expansion
     let info = {macros: macro_defs, *:base_info, packages: loaded.packages,
                 base_uri: base_uri,
-                bibitems: base_info.bibitems ++ numbered_bib,
-                biblatex_entries: numbered_bib, hyperref_settings: link_settings,
+                bibitems: base_info.bibitems,
+                biblatex_context: bibliography.context, hyperref_settings: link_settings,
                 math_operators: math_operators.definitions}
     // pass 2: render AST using pre-computed info
     let html = dispatcher.render_node(ast, info)
+    let completed = postprocess(html, info)
     let elements = if (is_standalone(options)) {
-        wrap_standalone(html, info, options)
+        wrap_standalone(completed, info, options)
     } else {
-        postprocess(html, info)
+        completed
     }
-    let diagnostics = loaded.diagnostics ++ math_operators.diagnostics ++ bibliography.diagnostics ++
+    let diagnostics = loaded.diagnostics ++ math_operators.diagnostics ++
+        bibliography.diagnostics ++ language_issues ++
         microtype.unsupported(registry.options_for(loaded.packages, "microtype"),
             registry.offset_for(loaded.packages, "microtype")) ++
         registry.reference_diagnostics(ast, info.labels, info.bibitems, info.packages) ++
@@ -90,6 +98,18 @@ pub fn render_result(ast, options) {
      metadata: hyperref.metadata(link_settings, info.title, info.author),
      packages: loaded.packages, diagnostics: diagnostics,
      assets: registry.assets(ast, info.base_uri)}
+}
+
+fn document_language(options, packages) {
+    if (options != null and options.language != null) options.language
+    else {
+        let babel = registry.options_for(packages, "babel")
+        if (babel == null) "english"
+        else if (babel.french != null) "french"
+        else if (babel.ngerman != null) "ngerman"
+        else if (babel.german != null) "german"
+        else "english"
+    }
 }
 
 fn resource_base(options) {
@@ -181,7 +201,10 @@ fn render_footnotes_section(info) {
 
 fn render_footnote_item(fn_entry, info) {
     let fn_num = fn_entry.number
-    let content = dispatcher.render_children_of(fn_entry.node, info);
+    let content = if (string(name(fn_entry.node)) == "footcite" and
+        info.biblatex_context != null)
+        [biblatex.render_footcite_content(fn_entry.node, info.biblatex_context)]
+        else dispatcher.render_children_of(fn_entry.node, info);
     <li id: "fn-" ++ (fn_num),
         for c in content { c }
         " "

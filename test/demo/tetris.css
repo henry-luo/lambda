@@ -1,0 +1,64 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #0b1020; color: #e8edf8; font-family: Arial, sans-serif; }
+.game { width: 556px; margin: 20px auto; outline: none; }
+header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+h1 { margin: 4px 0 0; font-size: 46px; letter-spacing: 5px; line-height: 1; }
+.title-dot { color: #57e4c2; }
+.eyebrow { margin: 0; font-size: 10px; letter-spacing: 2px; color: #8594b2; font-weight: bold; }
+.badge { border: 1px solid #33415d; border-radius: 20px; color: #57e4c2; padding: 9px 13px; font-size: 10px; letter-spacing: 1px; }
+.play-layout { display: flex; gap: 24px; }
+.board-panel { width: 280px; padding: 18px; background: #151d31; border: 1px solid #2b3751; border-radius: 14px; }
+.board-heading { display: flex; justify-content: space-between; margin-bottom: 14px; font-size: 10px; letter-spacing: 2px; color: #a0abc0; }
+.mode-label { color: #57e4c2; }
+.board-wrap { position: relative; width: 240px; height: 480px; }
+.board { display: grid; grid-template-columns: repeat(10, 24px); grid-template-rows: repeat(20, 24px); width: 240px; height: 480px; background: #080e1b; }
+.cell { width: 24px; height: 24px; background: #0c1426; border: 1px solid #182238; }
+.color-1 { background: #48cee2; border: 2px solid #94eaf4; }
+.color-2 { background: #f3c85c; border: 2px solid #ffe59a; }
+.color-3 { background: #a687ef; border: 2px solid #cfb7ff; }
+.color-4 { background: #64ce99; border: 2px solid #a3efc3; }
+.color-5 { background: #ec6f88; border: 2px solid #ffaaba; }
+.color-6 { background: #628de8; border: 2px solid #a6c3ff; }
+.color-7 { background: #ec9e5f; border: 2px solid #ffd0a2; }
+.ghost { background: #151f33; opacity: 0.65; }
+.overlay { position: absolute; top: 120px; left: 12px; width: 216px; padding: 28px 18px; background: #19243c; border: 1px solid #455470; border-radius: 12px; text-align: center; }
+.overlay h2 { margin: 14px 0 10px; font-size: 22px; }
+.overlay p { font-size: 12px; line-height: 1.6; color: #aab8d0; }
+.overlay .eyebrow { font-size: 9px; color: #57e4c2; }
+.overlay button { margin-top: 12px; background: #57e4c2; color: #102c29; border-color: #57e4c2; font-weight: bold; }
+.board-footnote { margin: 14px 0 0; color: #8996ae; font-size: 10px; }
+.sidebar { width: 252px; }
+.stats, .pieces, .held { padding: 18px; background: #151d31; border: 1px solid #2b3751; border-radius: 14px; margin-bottom: 16px; }
+.score { font-size: 42px; color: #f7faff; margin: 8px 0 18px; }
+.stat-row { display: flex; gap: 64px; }
+strong { display: block; margin-top: 6px; font-size: 25px; }
+.preview { display: grid; grid-template-columns: repeat(4, 22px); grid-template-rows: repeat(4, 22px); width: 88px; height: 88px; margin-top: 12px; }
+.preview .cell { width: 22px; height: 22px; }
+.preview .color-0 { background: transparent; border-color: transparent; }
+.pieces { display: flex; flex-wrap: wrap; gap: 0 14px; }
+.pieces .eyebrow { width: 100%; }
+.pieces .preview { grid-template-columns: repeat(4, 15px); grid-template-rows: repeat(4, 15px); width: 60px; height: 60px; }
+.pieces .cell { width: 15px; height: 15px; }
+.hint { font-size: 10px; color: #8996ae; margin: 10px 0 0; }
+.menu-buttons { display: flex; gap: 8px; }
+button { padding: 12px 14px; background: #202c44; color: #e8edf8; border: 1px solid #3a4863; border-radius: 8px; cursor: pointer; font-size: 12px; }
+button:hover { background: #33415e; border-color: #57e4c2; }
+button:focus { outline: 2px solid #57e4c2; }
+.menu-buttons button { flex: 1; padding: 12px 8px; font-size: 10px; }
+.controls { display: flex; gap: 8px; margin-top: 18px; }
+.controls button { flex: 1; font-size: 18px; }
+.controls .drop, .controls .hold { font-size: 11px; letter-spacing: 1px; }
+.controls .drop { background: #244c49; border-color: #3d8d7b; }
+footer { margin-top: 14px; color: #8594b2; font-size: 10px; line-height: 1.6; }
+@keyframes gravity { from { opacity: 0.9; } to { opacity: 1; } }
+.gravity-clock { position: absolute; top: 0; left: 0; width: 1px; height: 1px; pointer-events: none; animation-name: gravity; animation-timing-function: linear; animation-iteration-count: infinite; }
+@media (max-width: 660px) {
+  .game { width: 280px; margin: 20px auto; }
+  .badge { display: none; }
+  .play-layout { flex-direction: column; gap: 16px; }
+  .sidebar { width: 280px; display: flex; flex-wrap: wrap; gap: 12px; }
+  .stats { width: 280px; margin-bottom: 0; }
+  .pieces, .held { width: 134px; margin-bottom: 0; }
+  .menu-buttons { width: 280px; }
+  .controls { flex-wrap: wrap; }
+}

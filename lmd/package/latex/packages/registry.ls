@@ -6,6 +6,9 @@ import xcolor: .xcolor
 import color: ~~.elements.color
 import geometry: .geometry
 import microtype: .microtype
+import bib_style: .bib_style
+import bib_model: .bib_model
+import bib_data: .bib_data
 
 pub let CATALOG = {
     amsmath: {options: []},
@@ -15,7 +18,11 @@ pub let CATALOG = {
     geometry: {options: ["a4paper", "a5paper", "letterpaper", "legalpaper", "landscape", "portrait", "margin", "left", "right", "top", "bottom", "inner", "outer", "paperwidth", "paperheight"]},
     xcolor: {options: []},
     booktabs: {options: []},
-    biblatex: {options: ["style", "sorting"]},
+    babel: {options: ["english", "german", "ngerman", "french"]},
+    biblatex: {options: ["style", "citestyle", "bibstyle", "sorting",
+        "maxnames", "minnames", "maxcitenames", "mincitenames",
+        "maxbibnames", "minbibnames", "giveninits", "uniquename",
+        "doi", "url", "isbn", "natbib", "backend"]},
     enumitem: {options: []},
     microtype: {options: ["kerning", "tracking", "spacing", "protrusion", "expansion"]},
     siunitx: {options: []},
@@ -48,7 +55,8 @@ pub fn package_for_command(command, packages) {
         else if (command == "sisetup" or command == "ang") "siunitx"
         else if (command == "setlist") "enumitem"
         else if (command == "newgeometry" or command == "restoregeometry") "geometry"
-        else if (command == "parencite" or command == "textcite") "biblatex"
+        else if (bib_model.is_citation(command) or command == "nocite" or
+            command == "printbibliography" or command == "addbibresource") "biblatex"
         else if (command == "pdfbookmark" or command == "bookmark") "hyperref"
         else if (command == "usetikzlibrary" or command == "tikzset" or command == "pgfkeys") "tikz"
         else null
@@ -84,21 +92,65 @@ fn add_package(st, raw_name, opts, node) {
             option_issues("geometry", geometry.invalid_options(opts), node)
             else if (package == "microtype")
                 option_issues("microtype", microtype.invalid_options(opts), node)
-            else if (package == "biblatex") {
-                let style = if (opts.style != null) opts.style else "numeric"
-                let sorting = if (opts.sorting != null) opts.sorting else "nty";
-                (if (style != "numeric")
-                    [diagnostic("unsupported-bib-style", "biblatex", style,
-                        "Unsupported biblatex style " ++ style, node)] else []) ++
-                (if (sorting != "nty" and sorting != "none")
-                    [diagnostic("unsupported-bib-sorting", "biblatex", sorting,
-                        "Unsupported biblatex sorting " ++ sorting, node)] else [])
-            }
+            else if (package == "biblatex") bib_options_issues(opts, node)
             else []
         {*:st, packages: st.packages ++ [{key: package, val: opts,
             offset: if (node is element) node.source_offset else null}],
          diagnostics: st.diagnostics ++ check_options(package, opts, node) ++ value_issues}
     }
+}
+
+fn bib_options_issues(opts, node) {
+    let styles = [opts.style, opts.citestyle, opts.bibstyle]
+    let limits = [opts.maxnames, opts.minnames, opts.maxcitenames,
+        opts.mincitenames, opts.maxbibnames, opts.minbibnames]
+    let booleans = [opts.giveninits, opts.doi, opts.url, opts.isbn, opts.natbib];
+    [for (value in styles where value != null and not bib_style.supported_style(value))
+        diagnostic("unsupported-bib-style", "biblatex", value,
+            "Unsupported biblatex style " ++ value, node)] ++
+    (if (opts.sorting != null and not bib_style.supported_sorting(opts.sorting))
+        [diagnostic("unsupported-bib-sorting", "biblatex", opts.sorting,
+            "Unsupported biblatex sorting " ++ opts.sorting, node)] else []) ++
+    (if (opts.backend != null and opts.backend != "biber")
+        [diagnostic("unsupported-bib-backend", "biblatex", opts.backend,
+            "Unsupported biblatex backend " ++ opts.backend, node)] else []) ++
+    (if (opts.uniquename != null and opts.uniquename != "false" and
+        opts.uniquename != "init" and opts.uniquename != "full")
+        [diagnostic("unsupported-bib-uniquename", "biblatex", opts.uniquename,
+            "Unsupported uniquename option " ++ opts.uniquename, node)] else []) ++
+    [for (value in limits where value != null and
+        ((int(value) ^ { null }) == null or value == "0" or starts_with(value, "-")))
+        diagnostic("invalid-bib-name-limit", "biblatex", value,
+            "Name limits must be positive integers", node)] ++
+    [for (value in booleans where value != null and value != "true" and value != "false")
+        diagnostic("invalid-bib-boolean", "biblatex", value,
+            "Boolean biblatex option must be true or false", node)]
+}
+
+pub fn bib_profile_valid(opts) =>
+    len(check_options("biblatex", opts, null)) == 0 and
+    len(bib_options_issues(opts, null)) == 0
+
+pub fn bib_print_issues(node) {
+    let opts = util.parse_kv_options(util.optional_raw(node))
+    let allowed = ["title", "heading", "type", "nottype", "keyword", "notkeyword",
+        "section", "segment"]
+    let unknown = [for (key, value at opts
+        where not any([for (name in allowed) string(key) == name])) string(key)]
+    option_issues("biblatex", unknown, node) ++
+    (if (opts.heading != null and opts.heading != "bibliography" and
+        opts.heading != "subbibliography" and opts.heading != "bibintoc" and
+        opts.heading != "none")
+        [diagnostic("unsupported-bib-heading", "biblatex", opts.heading,
+            "Unsupported bibliography heading " ++ opts.heading, node)] else []) ++
+    [for (value in [opts.type, opts.nottype] where value != null and
+        not (bib_data.supported_entry_type(value) ^ { false }))
+        diagnostic("unsupported-bib-filter-type", "biblatex", value,
+            "Unsupported bibliography filter type " ++ value, node)] ++
+    [for (value in [opts.section, opts.segment] where value != null and
+        ((int(value) ^ { null }) == null or starts_with(value, "-")))
+        diagnostic("invalid-bib-scope", "biblatex", value,
+            "Bibliography section and segment must be nonnegative integers", node)]
 }
 
 fn add_names(st, names, opts, node, i) {
@@ -141,7 +193,8 @@ fn scan(node, packages, outside_body) {
     else {
         let tag = string(name(node))
         let owner = package_for_command(tag, packages)
-        let own = if (outside_body and owner != "latex" and tag != "DeclareMathOperator")
+        let own = if (outside_body and owner != "latex" and tag != "DeclareMathOperator" and
+            tag != "addbibresource")
             [diagnostic("unsupported-command", owner, tag,
                 "Unsupported " ++ owner ++ " command: " ++ tag, node)]
         else if (tag == "includegraphics" and active(packages, "graphicx"))
@@ -166,9 +219,11 @@ fn scan(node, packages, outside_body) {
         else if ((tag == "num" or tag == "si" or tag == "unit" or tag == "SI" or tag == "qty")
                  and active(packages, "siunitx") and util.optional_raw(node) != null)
             option_issues("siunitx", ["command options"], node)
-        else if ((tag == "printbibliography" or tag == "addbibresource") and
-                 active(packages, "biblatex") and util.optional_raw(node) != null)
-            option_issues("biblatex", [tag ++ " options"], node)
+        else if (tag == "printbibliography" and active(packages, "biblatex"))
+            bib_print_issues(node)
+        else if (tag == "addbibresource" and active(packages, "biblatex") and
+                 util.optional_raw(node) != null)
+            option_issues("biblatex", ["addbibresource options"], node)
         else if (tag == "hypersetup" and active(packages, "hyperref")) {
             let stored = util.raw_argument(node, "required", 0)
             let raw = if (stored != null) stored else util.text_of(node)
@@ -210,7 +265,7 @@ pub fn reference_diagnostics(node, labels, bibitems, packages) {
                     if (active(packages, "hyperref")) "hyperref" else "latex", key,
                     "Unresolved reference " ++ key, node)]
             else []
-        } else if (tag == "cite" or tag == "parencite" or tag == "textcite") {
+        } else if (tag == "cite" and not active(packages, "biblatex")) {
             let keys = util.split_top_level(trim(util.text_of_skip_brack(node)), ",");
             [for (key in keys
                   where not any([for (entry in bibitems) entry.key == trim(key)]))

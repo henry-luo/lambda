@@ -11,6 +11,7 @@ import color: .elements.color
 import enumitem: .packages.enumitem
 import amsmath: .packages.amsmath
 import registry: .packages.registry
+import bib_style: .packages.bib_style
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -23,9 +24,14 @@ fn add_entry(entries, k, v) {
 
 pub fn analyze(ast) => analyze_with_packages(ast, [])
 
-pub fn analyze_with_packages(ast, packages) {
+pub fn analyze_with_packages(ast, packages) =>
+    analyze_with_language(ast, packages, "english")
+
+pub fn analyze_with_language(ast, packages, language) {
     let st = {
         packages: packages,
+        language: language,
+        bibliography_count: 0,
         docclass: "article",
         title: null,
         title_el: null,
@@ -137,6 +143,11 @@ fn walk_element(el, st) {
 
         // ---- footnotes ----
         case 'footnote': walk_footnote(el, st)
+        case 'footcite': if (registry.active(st.packages, "biblatex"))
+            walk_footnote(el, st) else walk_children(el, 0, len(el), st)
+
+        case 'printbibliography': if (registry.active(st.packages, "biblatex"))
+            walk_printbibliography(el, st) else walk_children(el, 0, len(el), st)
 
         // ---- equations ----
         case 'equation': walk_equation(el, st)
@@ -415,6 +426,19 @@ fn make_thm_entry(k, n, c) {
 // ============================================================
 // Bibliography
 // ============================================================
+
+fn walk_printbibliography(el, st) {
+    let index = st.bibliography_count + 1
+    let opts = util.parse_kv_options(util.optional_raw(el))
+    let heading = if (opts.heading == null) "bibliography" else opts.heading
+    let title = if (opts.title != null) opts.title else bib_style.locale(st.language).references
+    // bibintoc contributes a heading entry using the renderer's print target.
+    let headings = if (heading == "bibintoc" and
+        len(registry.bib_print_issues(el)) == 0) st.headings ++
+        [{level: 2, number: null, text: title, id: "bibliography-" ++ string(index)}]
+        else st.headings
+    {*:st, headings: headings, bibliography_count: index}
+}
 
 fn walk_bibliography(el, st) {
     walk_children(el, 0, len(el), st)

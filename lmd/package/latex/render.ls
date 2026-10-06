@@ -67,7 +67,10 @@ fn render_symbol(s, info) {
 
 fn render_element(el, info) {
     let tag = name(el)
-    match tag {
+    if (registry.active(info.packages, "biblatex") and
+        biblatex.is_citation_command(string(tag)))
+        biblatex.render_citation(el, info.biblatex_context, info.footnotes)
+    else match tag {
         // ---- document structure ----
         case 'latex_document': render_document(el, info)
         case 'document': render_body(el, info)
@@ -251,7 +254,11 @@ fn render_element(el, info) {
         case 'bibitem': null
         case 'addbibresource': if (registry.active(info.packages, "biblatex")) null else render_generic_default(el, info)
         case 'printbibliography': if (registry.active(info.packages, "biblatex"))
-            biblatex.render_bibliography(info.biblatex_entries) else render_generic_default(el, info)
+            biblatex.render_bibliography(el, info.biblatex_context) else render_generic_default(el, info)
+        case 'refsection': if (registry.active(info.packages, "biblatex"))
+            render_children(el, 0, info) else render_generic_default(el, info)
+        case 'refsegment': if (registry.active(info.packages, "biblatex"))
+            render_children(el, 0, info) else render_generic_default(el, info)
         case 'hypersetup': if (registry.active(info.packages, "hyperref")) null else render_generic_default(el, info)
 
         // ---- footnotes ----

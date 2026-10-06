@@ -391,7 +391,8 @@ void free_document(DomDocument* doc) {
     // Every check that can refuse teardown runs before the first release, so a
     // refused document stays whole and owned instead of half torn down (its
     // Input and loader pool used to be detached and then dropped on return).
-    Runtime* timer_runtime = doc->js.runtime;
+    // native timing jobs may be retained by a Lambda-only evaluator.
+    Runtime* timer_runtime = doc->js.runtime ? doc->js.runtime : doc->lambda_runtime;
     EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
     Runtime* state_runtime = dom_document_script_runtime(doc);
     EvalContext* state_owner = state_runtime

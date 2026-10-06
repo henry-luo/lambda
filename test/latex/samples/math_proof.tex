@@ -1,0 +1,136 @@
+\documentclass[12pt]{amsart}
+
+\pagestyle{empty}
+
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\usepackage{enumerate}% http://ctan.org/pkg/enumerate
+\usepackage{eucal}
+
+\usepackage{graphicx,psfrag} %only include if using pictures
+
+\usepackage{ifthen} %only include if using conditional package
+
+%\usepackage{xymatrix}
+
+
+%keep this...%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\vfuzz2pt % Don't report over-full v-boxes if over-edge is small
+\hfuzz2pt % Don't report over-full h-boxes if over-edge is small
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%Side Margins
+\evensidemargin 0.1 in \oddsidemargin 0.1 in
+
+%Paragraph Size
+\parindent 24pt
+
+
+%size of page
+\textheight 9.6 in \textwidth 6.2 in
+\baselineskip 9.6 in \topmargin 0.005 in
+
+
+% ***********************************************************************
+\newcommand{\Normalstretch}{1.0} %change to define space between lines
+\renewcommand{\baselinestretch}{\Normalstretch}
+\newenvironment{singlespace}
+{\renewcommand{\baselinestretch}{1} \small \normalsize}
+{\renewcommand{\baselinestretch}{\Normalstretch} \small \normalsize}
+% ***********************************************************************
+\newcommand{\baseenvskip}{\baselineskip 2mm}
+
+% Standard Notation for Theorems and Lemmas
+\newtheorem{mydef}{Definition}
+
+\newtheorem{thm}{Theorem}
+
+\newtheorem{lemma}[thm]{Lemma}
+
+\newtheorem{claim}[thm]{Claim}
+
+\newtheorem{proposition}[thm]{Proposition}
+
+\newtheorem{conjecture}[thm]{Conjecture}
+
+\newtheorem{corollary}[thm]{Corollary}
+
+\theoremstyle{remark}
+\newtheorem{rmk}{Remark}[section]
+\newenvironment{remark}{\begin{rmk}\rm\baseenvskip}{\end{rmk}}
+\newtheorem{definition}[rmk]{Definition}
+
+%How numbering is defined in articles (standard)
+\numberwithin{equation}{section} \numberwithin{thm}{section}
+\numberwithin{rmk}{section} \numberwithin{figure}{section}
+
+% ************************ space ************************************
+\newcommand{\hhs}[1]{\hspace{#1mm}}
+\newcommand{\hs}{\hspace{5mm}}
+\newcommand{\vp}{\vspace{1mm}}
+\newcommand{\vs}{\vspace{5mm}}
+\newcommand{\jl}{$\frac{}{}$} %User defined for empty symbol to jump line
+% ********************** newcommand *********************************
+\newcommand{\mbf}[1]{\mbox{\boldmath $#1$}}
+\newcommand{\hb}[1]{\hspace{-#1 mm}}
+\newcommand{\ds}{\displaystyle}
+\newcommand{\QED}{\hfill $\Box$}
+% *********************** frequently used math symbols from AMS *******
+\newcommand{\norm}[1]{\left\Vert#1\right\Vert}
+\newcommand{\abs}[1]{\left\vert#1\right\vert}
+\newcommand{\set}[1]{\left\{#1\right\}}
+
+% ************** Some frequently used symbols - User defined ***********
+% ************** Also Called MACROS ************************************
+
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\Hv}{\mathcal{H}_v}
+\newcommand{\h}{\mathcal{H}}
+\newcommand{\Ov}{\mathcal{O}_v}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\Rn}{R^n}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\Ce}{\widehat{\mathbb{C}}}
+\newcommand{\si}{\sigma}
+\newcommand{\Cn}{\mathbb{C}^n}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\p}{\partial}
+\newcommand{\ep}{\varepsilon}
+\newcommand{\D}{\delta}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\finv}{f^{-1}}
+\newcommand{\im}{\imath}
+\newcommand{\ga}{\gamma}
+\newcommand{\ze}{\zeta}
+\newcommand{\fee}{\varphi}
+\newcommand{\noi}{\noindent}
+%
+% *******************************************************************
+% At First run of Template, only modify from here below........ *****
+% *******************************************************************
+
+
+\begin{document}
+
+\title{}
+
+% ******************** ABSTRACT *************************************
+%\begin{abstract}
+%Insert abstract
+%\end{abstract}
+% Must be present so the above information is displayed.
+% *******************************************************************
+% **** Begin Typing your work from here below ***********************
+% *******************************************************************
+
+
+Let $K$ be a compact set in a metric space $(X,d)$. Suppose $\mathcal{F}=\{U_\alpha\}_{\alpha \in A}$ is an open cover of $K$, then there exists a positive number $\lambda$ so that for every $p \in K$ the open ball $B(p,\lambda)$ is contained in one of the open sets of $\mathcal{F}$.
+
+
+\begin{proof}
+Since $K \subset \underset{\alpha \in A}\cup U_\alpha$, for each point $p$ in $K$ there is a positive number $2\varepsilon(p)$ so that the ball $B(p,2\varepsilon(p))$ is contained in one of the open sets of $\mathcal{F}$. Clearly $\{B(p,2\varepsilon(p)\}_{p \in K}$ forms an open cover of K, and so by compactness this admits a finite refinement
+
+
+\end{proof}
+
+\end{document}
