@@ -205,6 +205,7 @@ Defects found and fixed on the way:
 
 - The error formatter left its buffer unterminated after a caret line on the source's last line, so diagnostics printed stray bytes (`lambda-error.cpp`).
 - A grown module slab is sealed; restoring the plan count after a failed entry made the next entry fail with "sealed layout changed". The transaction keeps the grown count.
+- The LR_01 REPL diagram (`doc/dev/lambda/diagram/d01_repl.svg`) still showed replay; re-rendered from its `.mmd` with mermaid-cli.
 
 Not done, and why:
 

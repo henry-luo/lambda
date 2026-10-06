@@ -76,7 +76,7 @@ Document transforms do not synthesize Lambda source. `LambdaDocumentTransformCon
 
 > Section re-verified against the tree on 2026-10-06 (D8.1.1v17, S16.7.4–S16.7.6).
 
-The entry lifecycle is drawn in `diagram/d01_repl.mmd`; its rendered SVG predates this section and still shows the retired replay loop.
+<img alt="REPL entry lifecycle" src="diagram/d01_repl.svg" width="720">
 
 `run_repl(runtime, procedural)` (`main.cpp`) owns one `InterpReplSession` for the whole interactive run; `lambda` opens a functional session and `lambda run` without a script a procedural one (S16.7.6). The session is the only REPL engine: there is no accumulated history buffer and no `run_script_mir` replay (D8.1.1v17). Under `jit` the driver switches the tier to `auto` with a first-call promotion threshold, so the tier only governs satellite promotion.
 
