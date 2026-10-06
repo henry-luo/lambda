@@ -290,6 +290,9 @@ static CssProperty property_definitions[] = {
 
     // Transform Properties
     {CSS_PROPERTY_TRANSFORM, "transform", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TRANSLATE, "translate", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_ROTATE, "rotate", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_SCALE, "scale", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_TRANSFORM_ORIGIN, "transform-origin", PROP_TYPE_STRING, PROP_INHERIT_NO, "50% 50% 0", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_TRANSFORM_STYLE, "transform-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "flat", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BACKFACE_VISIBILITY, "backface-visibility", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
@@ -1360,6 +1363,52 @@ bool css_split_border_image_shorthand(const CssValue* value,
     return parts->source || parts->slice_count || parts->repeat_count;
 }
 
+static bool css_value_is_individual_transform(CssPropertyCode property, const CssValue* value) {
+    if (css_value_contains_var_reference(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return value->data.keyword == CSS_VALUE_NONE ||
+            (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+    }
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > 4 || (value->type == CSS_VALUE_TYPE_LIST &&
+        (!value->data.list.values || value->data.list.comma_separated))) return false;
+    bool angle = false;
+    int numbers = 0, axes = 0;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (!item) return false;
+        if (property == CSS_PROPERTY_TRANSLATE) {
+            if (count > 3) return false;
+            if (item->type == CSS_VALUE_TYPE_LENGTH && css_unit_is_length(item->data.length.unit)) continue;
+            if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.value == 0.0) continue;
+            if (i < 2 && item->type == CSS_VALUE_TYPE_PERCENTAGE) continue;
+            return false;
+        }
+        if (property == CSS_PROPERTY_SCALE) {
+            if (count > 3 || (item->type != CSS_VALUE_TYPE_NUMBER &&
+                item->type != CSS_VALUE_TYPE_PERCENTAGE)) return false;
+            continue;
+        }
+        if ((item->type == CSS_VALUE_TYPE_ANGLE || item->type == CSS_VALUE_TYPE_LENGTH) &&
+            css_unit_is_angle(item->data.length.unit)) {
+            if (angle || (i != 0 && i != count - 1)) return false;
+            angle = true;
+        } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
+            numbers++;
+        } else {
+            const char* name = css_text_emphasis_name(item);
+            if (!name || (!str_ieq_cstr(name, "x") && !str_ieq_cstr(name, "y") &&
+                !str_ieq_cstr(name, "z"))) return false;
+            axes++;
+        }
+    }
+    return property != CSS_PROPERTY_ROTATE ||
+        (angle && ((count == 1) || (count == 2 && axes == 1) ||
+                   (count == 4 && numbers == 3)));
+}
+
 bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode) {
@@ -1400,6 +1449,10 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             return !legacy && (keyword == CSS_VALUE_PAGE || keyword == CSS_VALUE_COLUMN || keyword == CSS_VALUE_REGION ||
                 keyword == CSS_VALUE_RECTO || keyword == CSS_VALUE_VERSO || keyword == CSS_VALUE_ALL);
         }
+        case CSS_PROPERTY_TRANSLATE:
+        case CSS_PROPERTY_ROTATE:
+        case CSS_PROPERTY_SCALE:
+            return css_value_is_individual_transform(id, value);
         case CSS_PROPERTY_SCROLL_SNAP_TYPE:
         case CSS_PROPERTY_SCROLL_SNAP_ALIGN:
             return css_value_is_scroll_snap(id, value);

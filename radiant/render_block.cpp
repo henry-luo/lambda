@@ -68,7 +68,7 @@ bool render_block_dirty_misses(RasterRenderContext* rdcon, ViewBlock* block) {
         rdcon->dirty_union.bottom * s
     };
     bool has_transform = rdcon->has_transform ||
-        (block->transform && block->transformp()->functions);
+        transform_has_functions(block->transform);
     return !has_transform &&
         !view_geometry_bounds_intersect(view_geometry_rect_to_bound(marker_rect), dirty);
 }
@@ -81,7 +81,7 @@ bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block) 
     if (block->tag_id == MARKUP_NAME_HTML || block->tag_id == MARKUP_NAME_BODY) return false;
 
     bool has_transform = rdcon->has_transform ||
-        (block->transform && block->transformp()->functions);
+        transform_has_functions(block->transform);
     if (has_transform) return false;
 
     if (block->position && block->positionp()->first_abs_child) {

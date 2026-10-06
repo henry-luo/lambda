@@ -27,6 +27,7 @@
 #include "../../lib/byte_builder.h"
 
 #include <curl/curl.h>
+#include "../network/curl_trust.h"
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -293,6 +294,7 @@ static void fetch_work_cb(uv_work_t* req) {
     curl_easy_setopt(fw->easy, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(fw->easy, CURLOPT_NOSIGNAL, 1L);  // thread-safe
     curl_easy_setopt(fw->easy, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
+    curl_use_host_trust_store(fw->easy);    // fetch() verifies by curl's default; same roots as everything else
     if (fw->cookie_jar) cookie_jar_import_curl(fw->cookie_jar, fw->easy);
 
     if (fw->method) {

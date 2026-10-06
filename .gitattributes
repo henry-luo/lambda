@@ -25,3 +25,4 @@ lambda/tree-sitter-latex-math/** text eol=lf
 # io.grep fixtures: keep their CRLF line endings (test/lambda/proc/io_grep.ls)
 test/input/grep_tree/crlf.txt -text
 test/input/grep_tree/eol.txt -text
+test/input/fts_tree/crlf.txt -text

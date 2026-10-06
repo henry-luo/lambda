@@ -2,7 +2,8 @@
  * @file rdb_sqlite.c
  * @brief SQLite backend driver for the generic RDB API.
  *
- * Implements the RdbDriver vtable using the vendored SQLite amalgamation.
+ * Implements the RdbDriver table (rdb_abi.h) using the vendored SQLite
+ * amalgamation; it reaches the host only through RdbHostAPI, like a module driver.
  * Schema introspection uses PRAGMA queries; queries use the standard
  * sqlite3_prepare_v2 / sqlite3_step / sqlite3_column_* API.
  */
@@ -13,42 +14,95 @@
 #include "strbuf.h"
 #include <string.h>
 #include <ctype.h>
-
-/* ══════════════════════════════════════════════════════════════════════
- * Internal statement wrapper — embeds back-pointer to RdbConn (first
- * field) so the generic rdb.c layer can reach the driver vtable.
- * ══════════════════════════════════════════════════════════════════════ */
-
-typedef struct {
-    RdbConn*       conn;    /* MUST be first — generic layer reads this */
-    sqlite3_stmt*  stmt;
-} SqliteStmt;
+#include <stdio.h>
 
 /* ══════════════════════════════════════════════════════════════════════
  * Connection
  * ══════════════════════════════════════════════════════════════════════ */
 
-static int sqlite_open(RdbConn* conn, const char* uri, bool readonly) {
-    int flags = readonly
+static const RdbDialect sqlite_dialect = { RDB_PLACEHOLDER_QNUM, '"' };
+
+/** a SQLite database is a file, or memory for ":memory:" and "" */
+static void sqlite_target(const char* uri, RdbTarget* out) {
+    memset(out, 0, sizeof(*out));
+    if (!uri[0] || strcmp(uri, ":memory:") == 0) {
+        out->kind = RDB_PEER_MEMORY;
+        return;
+    }
+    out->kind = RDB_PEER_FILE;
+    snprintf(out->path, sizeof(out->path), "%s", uri);
+}
+
+static int sqlite_resolve_targets(const char* uri, RdbTarget* out, int cap, int* out_count) {
+    if (!uri || cap < 1) return RDB_ERROR;
+    sqlite_target(uri, &out[0]);
+    *out_count = 1;
+    return RDB_OK;
+}
+
+static int sqlite_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
+                       const RdbOpenOptions* opts, void** out_conn) {
+    int flags = opts->readonly
         ? SQLITE_OPEN_READONLY
         : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
     sqlite3* db = NULL;
     int rc = sqlite3_open_v2(uri, &db, flags, NULL);
     if (rc != SQLITE_OK) {
-        log_error("rdb sqlite: failed to open '%s': %s", uri, sqlite3_errmsg(db));
+        log_error("rdb sqlite: open failed: %s", sqlite3_errmsg(db));
         if (db) sqlite3_close(db);
         return RDB_ERROR;
     }
-    conn->handle = db;
-    log_debug("rdb sqlite: opened '%s' (readonly=%d)", uri, readonly);
+    // JA16.1: the host owns the connection from here on
+    RdbConnInfo info;
+    memset(&info, 0, sizeof(info));
+    sqlite_target(uri, &info.peer);
+    info.socket_fd = -1;
+    snprintf(info.server_version, sizeof(info.server_version), "%s", sqlite3_libversion());
+    if (host->conn_register(open_ctx, db, &info) != RDB_OK) {
+        sqlite3_close(db);
+        return RDB_ERROR;
+    }
+    *out_conn = db;
     return RDB_OK;
 }
 
-static void sqlite_close(RdbConn* conn) {
-    if (conn->handle) {
-        sqlite3_close((sqlite3*)conn->handle);
-        conn->handle = NULL;
-    }
+static void sqlite_close(void* conn) {
+    if (conn) sqlite3_close((sqlite3*)conn);
+}
+
+static int sqlite_ping(void* conn) {
+    return conn ? RDB_OK : RDB_CONN_LOST;
+}
+
+static int sqlite_cancel(void* conn) {
+    // sqlite3_interrupt is the one SQLite call documented safe from any thread
+    sqlite3_interrupt((sqlite3*)conn);
+    return RDB_OK;
+}
+
+/** schema metadata goes through the host arena (RdbHostAPI.meta_*) */
+typedef struct {
+    const RdbHostAPI* host;
+    void*             meta;
+} SqliteMeta;
+
+static void* meta_calloc(const SqliteMeta* m, size_t size) {
+    return m->host->meta_alloc(m->meta, size);
+}
+
+static const char* meta_dup(const SqliteMeta* m, const char* s) {
+    return m->host->meta_strdup(m->meta, s ? s : "");
+}
+
+/** PRAGMA <name>("<ident>") with the identifier quoted for SQLite */
+static StrBuf* sqlite_pragma(const char* pragma, const char* ident) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "PRAGMA ");
+    strbuf_append_str(sb, pragma);
+    strbuf_append_char(sb, '(');
+    rdb_append_ident(sb, &sqlite_dialect, ident);
+    strbuf_append_char(sb, ')');
+    return sb;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -113,11 +167,8 @@ static int sqlite_count_tables(sqlite3* db) {
 /**
  * Load column metadata for a table via PRAGMA table_info.
  */
-static int sqlite_load_columns(sqlite3* db, Pool* pool, RdbTable* tbl) {
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "PRAGMA table_info(\"");
-    strbuf_append_str(sb, tbl->name);
-    strbuf_append_str(sb, "\")");
+static int sqlite_load_columns(sqlite3* db, const SqliteMeta* m, RdbTable* tbl) {
+    StrBuf* sb = sqlite_pragma("table_info", tbl->name);
 
     sqlite3_stmt* stmt = NULL;
     if (sqlite3_prepare_v2(db, sb->str, -1, &stmt, NULL) != SQLITE_OK) {
@@ -136,7 +187,7 @@ static int sqlite_load_columns(sqlite3* db, Pool* pool, RdbTable* tbl) {
         return RDB_OK;
     }
 
-    tbl->columns = (RdbColumn*)pool_calloc(pool, (size_t)col_count * sizeof(RdbColumn));
+    tbl->columns = (RdbColumn*)meta_calloc(m, (size_t)col_count * sizeof(RdbColumn));
     tbl->column_count = col_count;
 
     // second pass: populate
@@ -148,8 +199,8 @@ static int sqlite_load_columns(sqlite3* db, Pool* pool, RdbTable* tbl) {
         int notnull          = sqlite3_column_int(stmt, 3);
         int pk               = sqlite3_column_int(stmt, 5);
 
-        tbl->columns[i].name        = pool_strdup(pool, name ? name : "");
-        tbl->columns[i].type_decl   = pool_strdup(pool, type_str ? type_str : "");
+        tbl->columns[i].name        = meta_dup(m, name ? name : "");
+        tbl->columns[i].type_decl   = meta_dup(m, type_str ? type_str : "");
         tbl->columns[i].type        = sqlite_map_type(type_str);
         tbl->columns[i].nullable    = (notnull == 0);
         tbl->columns[i].primary_key = (pk > 0);
@@ -163,11 +214,8 @@ static int sqlite_load_columns(sqlite3* db, Pool* pool, RdbTable* tbl) {
 /**
  * Load index metadata for a table via PRAGMA index_list + PRAGMA index_info.
  */
-static int sqlite_load_indexes(sqlite3* db, Pool* pool, RdbTable* tbl) {
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "PRAGMA index_list(\"");
-    strbuf_append_str(sb, tbl->name);
-    strbuf_append_str(sb, "\")");
+static int sqlite_load_indexes(sqlite3* db, const SqliteMeta* m, RdbTable* tbl) {
+    StrBuf* sb = sqlite_pragma("index_list", tbl->name);
 
     sqlite3_stmt* stmt = NULL;
     if (sqlite3_prepare_v2(db, sb->str, -1, &stmt, NULL) != SQLITE_OK) {
@@ -186,7 +234,7 @@ static int sqlite_load_indexes(sqlite3* db, Pool* pool, RdbTable* tbl) {
         return RDB_OK;
     }
 
-    tbl->indexes = (RdbIndex*)pool_calloc(pool, (size_t)idx_count * sizeof(RdbIndex));
+    tbl->indexes = (RdbIndex*)meta_calloc(m, (size_t)idx_count * sizeof(RdbIndex));
     tbl->index_count = idx_count;
 
     int i = 0;
@@ -195,14 +243,11 @@ static int sqlite_load_indexes(sqlite3* db, Pool* pool, RdbTable* tbl) {
         const char* idx_name = (const char*)sqlite3_column_text(stmt, 1);
         int is_unique        = sqlite3_column_int(stmt, 2);
 
-        tbl->indexes[i].name   = pool_strdup(pool, idx_name ? idx_name : "");
+        tbl->indexes[i].name   = meta_dup(m, idx_name ? idx_name : "");
         tbl->indexes[i].unique = (is_unique != 0);
 
         // load columns for this index
-        StrBuf* sb2 = strbuf_new();
-        strbuf_append_str(sb2, "PRAGMA index_info(\"");
-        strbuf_append_str(sb2, idx_name ? idx_name : "");
-        strbuf_append_str(sb2, "\")");
+        StrBuf* sb2 = sqlite_pragma("index_info", idx_name ? idx_name : "");
 
         sqlite3_stmt* col_stmt = NULL;
         if (sqlite3_prepare_v2(db, sb2->str, -1, &col_stmt, NULL) == SQLITE_OK) {
@@ -212,13 +257,13 @@ static int sqlite_load_indexes(sqlite3* db, Pool* pool, RdbTable* tbl) {
             sqlite3_reset(col_stmt);
 
             if (col_count > 0) {
-                tbl->indexes[i].columns = (const char**)pool_calloc(pool, (size_t)col_count * sizeof(const char*));
+                tbl->indexes[i].columns = (const char**)meta_calloc(m, (size_t)col_count * sizeof(const char*));
                 tbl->indexes[i].column_count = col_count;
                 int j = 0;
                 while (sqlite3_step(col_stmt) == SQLITE_ROW && j < col_count) {
                     // PRAGMA index_info: seqno, cid, name
                     const char* col_name = (const char*)sqlite3_column_text(col_stmt, 2);
-                    tbl->indexes[i].columns[j] = pool_strdup(pool, col_name ? col_name : "");
+                    tbl->indexes[i].columns[j] = meta_dup(m, col_name ? col_name : "");
                     j++;
                 }
             }
@@ -234,11 +279,8 @@ static int sqlite_load_indexes(sqlite3* db, Pool* pool, RdbTable* tbl) {
 /**
  * Load foreign key metadata for a table via PRAGMA foreign_key_list.
  */
-static int sqlite_load_foreign_keys(sqlite3* db, Pool* pool, RdbTable* tbl) {
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "PRAGMA foreign_key_list(\"");
-    strbuf_append_str(sb, tbl->name);
-    strbuf_append_str(sb, "\")");
+static int sqlite_load_foreign_keys(sqlite3* db, const SqliteMeta* m, RdbTable* tbl) {
+    StrBuf* sb = sqlite_pragma("foreign_key_list", tbl->name);
 
     sqlite3_stmt* stmt = NULL;
     if (sqlite3_prepare_v2(db, sb->str, -1, &stmt, NULL) != SQLITE_OK) {
@@ -257,7 +299,7 @@ static int sqlite_load_foreign_keys(sqlite3* db, Pool* pool, RdbTable* tbl) {
         return RDB_OK;
     }
 
-    tbl->foreign_keys = (RdbForeignKey*)pool_calloc(pool, (size_t)fk_count * sizeof(RdbForeignKey));
+    tbl->foreign_keys = (RdbForeignKey*)meta_calloc(m, (size_t)fk_count * sizeof(RdbForeignKey));
     tbl->fk_count = fk_count;
 
     int i = 0;
@@ -267,22 +309,10 @@ static int sqlite_load_foreign_keys(sqlite3* db, Pool* pool, RdbTable* tbl) {
         const char* from_col   = (const char*)sqlite3_column_text(stmt, 3);
         const char* to_col     = (const char*)sqlite3_column_text(stmt, 4);
 
-        tbl->foreign_keys[i].column    = pool_strdup(pool, from_col ? from_col : "");
-        tbl->foreign_keys[i].ref_table = pool_strdup(pool, ref_table ? ref_table : "");
-        tbl->foreign_keys[i].ref_column = pool_strdup(pool, to_col ? to_col : "");
+        tbl->foreign_keys[i].column    = meta_dup(m, from_col ? from_col : "");
+        tbl->foreign_keys[i].ref_table = meta_dup(m, ref_table ? ref_table : "");
+        tbl->foreign_keys[i].ref_column = meta_dup(m, to_col ? to_col : "");
 
-        // derive link_name: strip _id suffix from column name
-        const char* col_name = from_col ? from_col : "";
-        size_t col_len = strlen(col_name);
-        if (col_len > 3 && strcmp(col_name + col_len - 3, "_id") == 0) {
-            char* link = (char*)pool_alloc(pool, col_len - 3 + 1);
-            memcpy(link, col_name, col_len - 3);
-            link[col_len - 3] = '\0';
-            tbl->foreign_keys[i].link_name = link;
-        } else {
-            // use ref_table name as fallback
-            tbl->foreign_keys[i].link_name = pool_strdup(pool, ref_table ? ref_table : "");
-        }
         i++;
     }
     sqlite3_finalize(stmt);
@@ -290,65 +320,11 @@ static int sqlite_load_foreign_keys(sqlite3* db, Pool* pool, RdbTable* tbl) {
 }
 
 /**
- * Populate reverse_fks for all tables by scanning forward FKs.
- * Must be called after all tables have their foreign_keys populated.
- */
-static void sqlite_build_reverse_fks(Pool* pool, RdbSchema* schema) {
-    // first pass: count reverse FKs per table
-    for (int t = 0; t < schema->table_count; t++) {
-        RdbTable* tbl = &schema->tables[t];
-        for (int f = 0; f < tbl->fk_count; f++) {
-            RdbTable* ref = NULL;
-            for (int r = 0; r < schema->table_count; r++) {
-                if (strcmp(schema->tables[r].name, tbl->foreign_keys[f].ref_table) == 0) {
-                    ref = &schema->tables[r];
-                    break;
-                }
-            }
-            if (ref) ref->reverse_fk_count++;
-        }
-    }
-
-    // allocate reverse FK arrays
-    for (int t = 0; t < schema->table_count; t++) {
-        RdbTable* tbl = &schema->tables[t];
-        if (tbl->reverse_fk_count > 0) {
-            tbl->reverse_fks = (RdbForeignKey*)pool_calloc(pool,
-                (size_t)tbl->reverse_fk_count * sizeof(RdbForeignKey));
-            tbl->reverse_fk_count = 0; // reset for filling
-        }
-    }
-
-    // second pass: fill reverse FKs
-    for (int t = 0; t < schema->table_count; t++) {
-        RdbTable* tbl = &schema->tables[t];
-        for (int f = 0; f < tbl->fk_count; f++) {
-            RdbForeignKey* fk = &tbl->foreign_keys[f];
-            RdbTable* ref = NULL;
-            for (int r = 0; r < schema->table_count; r++) {
-                if (strcmp(schema->tables[r].name, fk->ref_table) == 0) {
-                    ref = &schema->tables[r];
-                    break;
-                }
-            }
-            if (ref) {
-                int idx = ref->reverse_fk_count;
-                ref->reverse_fks[idx].column    = pool_strdup(pool, fk->ref_column);
-                ref->reverse_fks[idx].ref_table = pool_strdup(pool, tbl->name);
-                ref->reverse_fks[idx].ref_column = pool_strdup(pool, fk->column);
-                ref->reverse_fks[idx].link_name = pool_strdup(pool, tbl->name);
-                ref->reverse_fk_count++;
-            }
-        }
-    }
-}
-
-/**
  * Parse trigger timing from CREATE TRIGGER DDL text.
- * Returns a pool-owned string "BEFORE", "AFTER", or "INSTEAD OF".
+ * Returns a host-arena string "BEFORE", "AFTER", or "INSTEAD OF".
  */
-static const char* trigger_parse_timing(const char* sql, Pool* pool) {
-    if (!sql) return pool_strdup(pool, "AFTER");
+static const char* trigger_parse_timing(const char* sql, const SqliteMeta* m) {
+    if (!sql) return meta_dup(m, "AFTER");
     // "INSTEAD OF" must be checked before "AFTER" to avoid false positives
     char upper[32];
     const char* p = sql;
@@ -359,58 +335,58 @@ static const char* trigger_parse_timing(const char* sql, Pool* pool) {
             (p[2]=='S'||p[2]=='s') && (p[3]=='T'||p[3]=='t') &&
             (p[4]=='E'||p[4]=='e') && (p[5]=='A'||p[5]=='a') &&
             (p[6]=='D'||p[6]=='d')) {
-            return pool_strdup(pool, "INSTEAD OF");
+            return meta_dup(m, "INSTEAD OF");
         }
         // check BEFORE (length 6)
         if ((p[0]=='B'||p[0]=='b') && (p[1]=='E'||p[1]=='e') &&
             (p[2]=='F'||p[2]=='f') && (p[3]=='O'||p[3]=='o') &&
             (p[4]=='R'||p[4]=='r') && (p[5]=='E'||p[5]=='e')) {
-            return pool_strdup(pool, "BEFORE");
+            return meta_dup(m, "BEFORE");
         }
         // check AFTER (length 5)
         if ((p[0]=='A'||p[0]=='a') && (p[1]=='F'||p[1]=='f') &&
             (p[2]=='T'||p[2]=='t') && (p[3]=='E'||p[3]=='e') &&
             (p[4]=='R'||p[4]=='r')) {
-            return pool_strdup(pool, "AFTER");
+            return meta_dup(m, "AFTER");
         }
         p++;
     }
     (void)upper;
-    return pool_strdup(pool, "AFTER");
+    return meta_dup(m, "AFTER");
 }
 
 /**
  * Parse trigger event from CREATE TRIGGER DDL text.
- * Returns a pool-owned string "INSERT", "UPDATE", or "DELETE".
+ * Returns a host-arena string "INSERT", "UPDATE", or "DELETE".
  */
-static const char* trigger_parse_event(const char* sql, Pool* pool) {
-    if (!sql) return pool_strdup(pool, "INSERT");
+static const char* trigger_parse_event(const char* sql, const SqliteMeta* m) {
+    if (!sql) return meta_dup(m, "INSERT");
     const char* p = sql;
     while (*p) {
         if ((p[0]=='I'||p[0]=='i') && (p[1]=='N'||p[1]=='n') &&
             (p[2]=='S'||p[2]=='s') && (p[3]=='E'||p[3]=='e') &&
             (p[4]=='R'||p[4]=='r') && (p[5]=='T'||p[5]=='t')) {
-            return pool_strdup(pool, "INSERT");
+            return meta_dup(m, "INSERT");
         }
         if ((p[0]=='D'||p[0]=='d') && (p[1]=='E'||p[1]=='e') &&
             (p[2]=='L'||p[2]=='l') && (p[3]=='E'||p[3]=='e') &&
             (p[4]=='T'||p[4]=='t') && (p[5]=='E'||p[5]=='e')) {
-            return pool_strdup(pool, "DELETE");
+            return meta_dup(m, "DELETE");
         }
         if ((p[0]=='U'||p[0]=='u') && (p[1]=='P'||p[1]=='p') &&
             (p[2]=='D'||p[2]=='d') && (p[3]=='A'||p[3]=='a') &&
             (p[4]=='T'||p[4]=='t') && (p[5]=='E'||p[5]=='e')) {
-            return pool_strdup(pool, "UPDATE");
+            return meta_dup(m, "UPDATE");
         }
         p++;
     }
-    return pool_strdup(pool, "INSERT");
+    return meta_dup(m, "INSERT");
 }
 
 /**
  * Load trigger metadata for a table from sqlite_master.
  */
-static int sqlite_load_triggers(sqlite3* db, Pool* pool, RdbTable* tbl) {
+static int sqlite_load_triggers(sqlite3* db, const SqliteMeta* m, RdbTable* tbl) {
     const char* sql = "SELECT name, sql FROM sqlite_master "
                       "WHERE type = 'trigger' AND tbl_name = ?1";
     sqlite3_stmt* stmt = NULL;
@@ -429,7 +405,7 @@ static int sqlite_load_triggers(sqlite3* db, Pool* pool, RdbTable* tbl) {
         return RDB_OK;
     }
 
-    tbl->triggers = (RdbTrigger*)pool_calloc(pool, (size_t)trig_count * sizeof(RdbTrigger));
+    tbl->triggers = (RdbTrigger*)meta_calloc(m, (size_t)trig_count * sizeof(RdbTrigger));
     tbl->trigger_count = trig_count;
 
     int i = 0;
@@ -437,9 +413,9 @@ static int sqlite_load_triggers(sqlite3* db, Pool* pool, RdbTable* tbl) {
         const char* name     = (const char*)sqlite3_column_text(stmt, 0);
         const char* ddl_sql  = (const char*)sqlite3_column_text(stmt, 1);
 
-        tbl->triggers[i].name   = pool_strdup(pool, name ? name : "");
-        tbl->triggers[i].timing = trigger_parse_timing(ddl_sql, pool);
-        tbl->triggers[i].event  = trigger_parse_event(ddl_sql, pool);
+        tbl->triggers[i].name   = meta_dup(m, name ? name : "");
+        tbl->triggers[i].timing = trigger_parse_timing(ddl_sql, m);
+        tbl->triggers[i].event  = trigger_parse_event(ddl_sql, m);
         i++;
     }
     sqlite3_finalize(stmt);
@@ -448,16 +424,16 @@ static int sqlite_load_triggers(sqlite3* db, Pool* pool, RdbTable* tbl) {
 
 /* ─── SQL function introspection (database-level) ─── */
 
-static const char* func_type_str(const char* type_code, Pool* pool) {
-    if (!type_code || !type_code[0]) return pool_strdup(pool, "scalar");
+static const char* func_type_str(const char* type_code, const SqliteMeta* m) {
+    if (!type_code || !type_code[0]) return meta_dup(m, "scalar");
     switch (type_code[0]) {
-        case 'w': return pool_strdup(pool, "window");
-        case 'a': return pool_strdup(pool, "aggregate");
-        default:  return pool_strdup(pool, "scalar");
+        case 'w': return meta_dup(m, "window");
+        case 'a': return meta_dup(m, "aggregate");
+        default:  return meta_dup(m, "scalar");
     }
 }
 
-static int sqlite_load_functions(sqlite3* db, Pool* pool, RdbSchema* schema) {
+static int sqlite_load_functions(sqlite3* db, const SqliteMeta* m, RdbSchema* schema) {
     const char* sql = "SELECT name, builtin, type, narg FROM pragma_function_list "
                       "ORDER BY name, narg";
     sqlite3_stmt* stmt = NULL;
@@ -480,7 +456,7 @@ static int sqlite_load_functions(sqlite3* db, Pool* pool, RdbSchema* schema) {
         return RDB_OK;
     }
 
-    schema->functions = (RdbFunction*)pool_calloc(pool, (size_t)func_count * sizeof(RdbFunction));
+    schema->functions = (RdbFunction*)meta_calloc(m, (size_t)func_count * sizeof(RdbFunction));
     schema->function_count = func_count;
 
     int i = 0;
@@ -490,9 +466,9 @@ static int sqlite_load_functions(sqlite3* db, Pool* pool, RdbSchema* schema) {
         const char* type    = (const char*)sqlite3_column_text(stmt, 2);
         int         narg    = sqlite3_column_int(stmt, 3);
 
-        schema->functions[i].name    = pool_strdup(pool, name ? name : "");
+        schema->functions[i].name    = meta_dup(m, name ? name : "");
         schema->functions[i].builtin = (builtin != 0);
-        schema->functions[i].type    = func_type_str(type, pool);
+        schema->functions[i].type    = func_type_str(type, m);
         schema->functions[i].narg    = narg;
         i++;
     }
@@ -502,9 +478,11 @@ static int sqlite_load_functions(sqlite3* db, Pool* pool, RdbSchema* schema) {
     return RDB_OK;
 }
 
-static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
-    sqlite3* db = (sqlite3*)conn->handle;
-    Pool* pool = conn->pool;
+static int sqlite_load_schema(void* conn, const RdbHostAPI* host, void* meta,
+                              RdbSchema* out_schema) {
+    sqlite3* db = (sqlite3*)conn;
+    SqliteMeta meta_ctx = { host, meta };
+    const SqliteMeta* m = &meta_ctx;
 
     // enumerate tables and views
     const char* sql = "SELECT name, type FROM sqlite_master "
@@ -524,7 +502,7 @@ static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
         return RDB_OK;
     }
 
-    out_schema->tables = (RdbTable*)pool_calloc(pool, (size_t)table_count * sizeof(RdbTable));
+    out_schema->tables = (RdbTable*)meta_calloc(m, (size_t)table_count * sizeof(RdbTable));
     out_schema->table_count = table_count;
 
     int t = 0;
@@ -532,13 +510,13 @@ static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
         const char* name = (const char*)sqlite3_column_text(stmt, 0);
         const char* type = (const char*)sqlite3_column_text(stmt, 1);
 
-        out_schema->tables[t].name    = pool_strdup(pool, name ? name : "");
+        out_schema->tables[t].name    = meta_dup(m, name ? name : "");
         out_schema->tables[t].is_view = (type && strcmp(type, "view") == 0);
 
-        sqlite_load_columns(db, pool, &out_schema->tables[t]);
-        sqlite_load_indexes(db, pool, &out_schema->tables[t]);
-        sqlite_load_foreign_keys(db, pool, &out_schema->tables[t]);
-        sqlite_load_triggers(db, pool, &out_schema->tables[t]);
+        sqlite_load_columns(db, m, &out_schema->tables[t]);
+        sqlite_load_indexes(db, m, &out_schema->tables[t]);
+        sqlite_load_foreign_keys(db, m, &out_schema->tables[t]);
+        sqlite_load_triggers(db, m, &out_schema->tables[t]);
 
         log_debug("rdb sqlite: table '%s' (%d cols, %d idx, %d fk, %d trig, view=%d)",
                   out_schema->tables[t].name,
@@ -551,11 +529,8 @@ static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
     }
     sqlite3_finalize(stmt);
 
-    // build reverse FK cross-references
-    sqlite_build_reverse_fks(pool, out_schema);
-
     // load database-level SQL functions
-    sqlite_load_functions(db, pool, out_schema);
+    sqlite_load_functions(db, m, out_schema);
 
     log_debug("rdb sqlite: loaded schema with %d tables/views, %d functions",
               out_schema->table_count, out_schema->function_count);
@@ -563,26 +538,23 @@ static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
- * Query execution
+ * Query execution — statement handles are raw sqlite3_stmt pointers
  * ══════════════════════════════════════════════════════════════════════ */
 
-static int sqlite_prepare(RdbConn* conn, const char* sql, RdbStmt** out_stmt) {
-    sqlite3* db = (sqlite3*)conn->handle;
+static int sqlite_prepare(void* conn, const char* sql, void** out_stmt) {
+    sqlite3* db = (sqlite3*)conn;
     sqlite3_stmt* raw = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &raw, NULL);
     if (rc != SQLITE_OK) {
         log_error("rdb sqlite: prepare failed: %s", sqlite3_errmsg(db));
         return RDB_ERROR;
     }
-    SqliteStmt* s = (SqliteStmt*)pool_calloc(conn->pool, sizeof(SqliteStmt));
-    s->conn = conn;
-    s->stmt = raw;
-    *out_stmt = (RdbStmt*)s;
+    *out_stmt = raw;
     return RDB_OK;
 }
 
-static int sqlite_bind_param(RdbStmt* stmt, int index, const RdbParam* param) {
-    sqlite3_stmt* raw = ((SqliteStmt*)stmt)->stmt;
+static int sqlite_bind_param(void* stmt, int index, const RdbParam* param) {
+    sqlite3_stmt* raw = (sqlite3_stmt*)stmt;
     int rc;
     switch (param->type) {
         case RDB_TYPE_INT:
@@ -608,21 +580,31 @@ static int sqlite_bind_param(RdbStmt* stmt, int index, const RdbParam* param) {
     return (rc == SQLITE_OK) ? RDB_OK : RDB_ERROR;
 }
 
-static int sqlite_step(RdbStmt* stmt) {
-    int rc = sqlite3_step(((SqliteStmt*)stmt)->stmt);
+static int sqlite_step(void* stmt) {
+    int rc = sqlite3_step((sqlite3_stmt*)stmt);
     if (rc == SQLITE_ROW)  return RDB_ROW;
     if (rc == SQLITE_DONE) return RDB_DONE;
     log_error("rdb sqlite: step error: %s",
-              sqlite3_errmsg(sqlite3_db_handle(((SqliteStmt*)stmt)->stmt)));
+              sqlite3_errmsg(sqlite3_db_handle((sqlite3_stmt*)stmt)));
     return RDB_ERROR;
 }
 
-static int sqlite_column_count(RdbStmt* stmt) {
-    return sqlite3_column_count(((SqliteStmt*)stmt)->stmt);
+static int sqlite_column_count(void* stmt) {
+    return sqlite3_column_count((sqlite3_stmt*)stmt);
 }
 
-static RdbValue sqlite_column_value(RdbStmt* stmt, int col_index) {
-    sqlite3_stmt* raw = ((SqliteStmt*)stmt)->stmt;
+static int sqlite_column_desc(void* stmt, int col, RdbColumnDesc* out) {
+    sqlite3_stmt* raw = (sqlite3_stmt*)stmt;
+    if (col < 0 || col >= sqlite3_column_count(raw)) return RDB_ERROR;
+    out->name = sqlite3_column_name(raw, col);
+    // expression columns have no declared type; the host types them from data
+    const char* decl = sqlite3_column_decltype(raw, col);
+    out->type = decl ? sqlite_map_type(decl) : RDB_TYPE_UNKNOWN;
+    return RDB_OK;
+}
+
+static RdbValue sqlite_column_value(void* stmt, int col_index) {
+    sqlite3_stmt* raw = (sqlite3_stmt*)stmt;
     RdbValue val;
     memset(&val, 0, sizeof(val));
 
@@ -657,63 +639,41 @@ static RdbValue sqlite_column_value(RdbStmt* stmt, int col_index) {
     return val;
 }
 
-static void sqlite_finalize(RdbStmt* stmt) {
-    SqliteStmt* s = (SqliteStmt*)stmt;
-    if (s && s->stmt) {
-        sqlite3_finalize(s->stmt);
-        s->stmt = NULL;
-    }
-    // SqliteStmt itself is pool-allocated — freed when pool is destroyed
+static void sqlite_finalize(void* stmt) {
+    if (stmt) sqlite3_finalize((sqlite3_stmt*)stmt);
 }
 
-static int64_t sqlite_row_count(RdbConn* conn, const char* table_name) {
-    // validate table_name against schema to prevent injection
-    if (!rdb_get_table(conn, table_name)) {
-        log_error("rdb sqlite: row_count for unknown table '%s'", table_name);
-        return -1;
-    }
-
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "SELECT COUNT(*) FROM \"");
-    strbuf_append_str(sb, table_name);
-    strbuf_append_str(sb, "\"");
-
-    sqlite3_stmt* stmt = NULL;
-    int64_t count = -1;
-    if (sqlite3_prepare_v2((sqlite3*)conn->handle, sb->str, -1, &stmt, NULL) == SQLITE_OK) {
-        if (sqlite3_step(stmt) == SQLITE_ROW) {
-            count = sqlite3_column_int64(stmt, 0);
-        }
-        sqlite3_finalize(stmt);
-    }
-    strbuf_free(sb);
-    return count;
-}
-
-static const char* sqlite_error_msg(RdbConn* conn) {
-    if (!conn->handle) return "rdb sqlite: no connection";
-    return sqlite3_errmsg((sqlite3*)conn->handle);
+static const char* sqlite_error_msg(void* conn) {
+    if (!conn) return "rdb sqlite: no connection";
+    return sqlite3_errmsg((sqlite3*)conn);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
- * Driver vtable + registration
+ * Driver table + registration
  * ══════════════════════════════════════════════════════════════════════ */
 
 static const RdbDriver sqlite_driver = {
-    .name         = "sqlite",
-    .open         = sqlite_open,
-    .close        = sqlite_close,
-    .load_schema  = sqlite_load_schema,
-    .prepare      = sqlite_prepare,
-    .bind_param   = sqlite_bind_param,
-    .step         = sqlite_step,
-    .column_count = sqlite_column_count,
-    .column_value = sqlite_column_value,
-    .finalize     = sqlite_finalize,
-    .row_count    = sqlite_row_count,
-    .error_msg    = sqlite_error_msg,
+    .struct_size     = sizeof(RdbDriver),
+    .api_version     = RDB_DRIVER_API_VERSION,
+    .name            = "sqlite",
+    .dialect         = &sqlite_dialect,
+    .caps            = RDB_CAP_CANCEL | RDB_CAP_STREAMING,
+    .resolve_targets = sqlite_resolve_targets,
+    .open            = sqlite_open,
+    .close           = sqlite_close,
+    .ping            = sqlite_ping,
+    .cancel          = sqlite_cancel,
+    .load_schema     = sqlite_load_schema,
+    .prepare         = sqlite_prepare,
+    .bind_param      = sqlite_bind_param,
+    .step            = sqlite_step,
+    .column_count    = sqlite_column_count,
+    .column_desc     = sqlite_column_desc,
+    .column_value    = sqlite_column_value,
+    .finalize        = sqlite_finalize,
+    .error_msg       = sqlite_error_msg,
 };
 
 void rdb_sqlite_register(void) {
-    rdb_register_driver("sqlite", &sqlite_driver);
+    rdb_register_driver(&sqlite_driver);
 }

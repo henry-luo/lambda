@@ -2,6 +2,7 @@
 
 #include "../lambda-data.hpp"
 #include "../runtime/side_stack.h"
+#include "../../lib/rdb_abi.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -1745,6 +1746,12 @@ struct JubeModuleDef {
     // where no manifest loader exists to establish activation order.
     const char* const* dependencies;
     int32_t dependency_count;
+
+    // Host-subsystem providers (RDB2/RDB3): RDB driver tables this module
+    // registers behind lib/rdb.h. The manifest's `rdb:<name>` provides must
+    // name exactly these drivers (D7.3.4: the descriptor is ground truth).
+    const RdbDriver* const* rdb_drivers;
+    int32_t rdb_driver_count;
 };
 
 // Size of the frozen v1 layout: everything before the DOM3 additive tail.

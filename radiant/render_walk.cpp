@@ -123,7 +123,7 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     state->x = p->pa_x + block->x;
     state->y = p->pa_y + block->y;
 
-    bool has_transform = block->transform && block->transformp()->functions;
+    bool has_transform = transform_has_functions(block->transform);
     p->opened_transform = has_transform && backend->begin_transform && backend->end_transform;
     if (p->opened_transform) {
         backend->begin_transform(backend->ctx, block, state->x, state->y);

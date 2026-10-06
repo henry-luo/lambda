@@ -27,6 +27,7 @@ static Color get_current_color_for_view(ViewSpan* span);
 static Color get_current_color(LayoutContext* lycon);
 static void resolve_text_emphasis_longhands(DomElement* element, LayoutContext* lycon);
 static bool css_value_is_background_color_candidate(const CssValue* value);
+static const char* css_value_identifier_name(const CssValue* value);
 static CssEnum find_inherited_block_keyword(DomElement* element,
                                             CssPropertyCode property,
                                             bool check_specified,
@@ -411,6 +412,62 @@ bool resolve_transform_function_value(const CssValue* func_value, TransformFunct
 
 static float resolve_layout_transform_length(void* context, const CssValue* value) {
     return transform_length_value((LayoutContext*)context, CSS_PROPERTY_TRANSFORM, value);
+}
+
+static bool resolve_individual_transform_value(LayoutContext* lycon,
+    CssPropertyCode property, const CssValue* value, TransformFunction* out) {
+    if (!value || !out || !css_property_validate_value(property, value)) return false;
+    CssValue* args[4] = {};
+    CssValue axis[3] = {};
+    CssFunction function = {};
+    function.args = args;
+    int count = css_value_count(value, 0);
+    if (property == CSS_PROPERTY_ROTATE) {
+        const CssValue* angle = nullptr;
+        int numbers = 0;
+        for (int i = 0; i < count; i++) {
+            const CssValue* item = css_value_at(value, i);
+            if (item->type == CSS_VALUE_TYPE_ANGLE || item->type == CSS_VALUE_TYPE_LENGTH) {
+                angle = item;
+            } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
+                args[numbers++] = const_cast<CssValue*>(item);
+            } else {
+                const char* name = css_value_identifier_name(item);
+                for (int j = 0; j < 3; j++) {
+                    axis[j].type = CSS_VALUE_TYPE_NUMBER;
+                    const char* axes[] = {"x", "y", "z"};
+                    axis[j].data.number.value = str_ieq_cstr(name, axes[j]) ? 1.0 : 0.0;
+                    args[j] = &axis[j];
+                }
+            }
+        }
+        function.name = count == 1 ? "rotate" : "rotate3d";
+        function.arg_count = count == 1 ? 1 : 4;
+        args[function.arg_count - 1] = const_cast<CssValue*>(angle);
+    } else {
+        function.name = property == CSS_PROPERTY_TRANSLATE
+            ? (count == 3 ? "translate3d" : "translate")
+            : (count == 3 ? "scale3d" : "scale");
+        function.arg_count = count;
+        for (int i = 0; i < count; i++) args[i] = const_cast<CssValue*>(css_value_at(value, i));
+    }
+    CssValue wrapped = {};
+    wrapped.type = CSS_VALUE_TYPE_FUNCTION;
+    wrapped.data.function = &function;
+    if (!resolve_transform_function_value(&wrapped, out, resolve_layout_transform_length, lycon)) return false;
+    // default Z components remain 2D so ancestor flattening sees the correct transform mode.
+    if (out->type == TRANSFORM_TRANSLATE3D && out->params.translate3d.z == 0.0f) {
+        out->type = TRANSFORM_TRANSLATE;
+    } else if (out->type == TRANSFORM_SCALE3D && out->params.scale3d.z == 1.0f) {
+        out->type = TRANSFORM_SCALE;
+    } else if (out->type == TRANSFORM_ROTATE3D && out->params.rotate3d.x == 0.0f &&
+               out->params.rotate3d.y == 0.0f && out->params.rotate3d.z != 0.0f) {
+        float angle = out->params.rotate3d.angle;
+        if (out->params.rotate3d.z < 0.0f) angle = -angle;
+        out->type = TRANSFORM_ROTATE;
+        out->params.angle = angle;
+    }
+    return true;
 }
 
 static TransformFunction* resolve_transform_function(LayoutContext* lycon,
@@ -9740,7 +9797,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_TRANSFORM: {
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                span->transform = nullptr;
+                // transform:none clears only its list; independent transforms and origin still apply.
+                if (span->transform) span->transform->functions = nullptr;
                 break;
             }
             span->ensure_transform(lycon);
@@ -9750,6 +9808,24 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                     return resolve_transform_function(lycon, prop_id, item);
                 }, append_transform_function));
             span->transform->functions_owner = TRANSFORM_FUNCTIONS_VIEW_POOL;
+            break;
+        }
+        case CSS_PROPERTY_TRANSLATE:
+        case CSS_PROPERTY_ROTATE:
+        case CSS_PROPERTY_SCALE: {
+            TransformProp* transform = span->ensure_transform(lycon);
+            if (!transform) break;
+            int index = css_individual_transform_index(prop_id);
+            TransformFunction& target = transform->individual[index];
+            target = {};
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (value->data.keyword == CSS_VALUE_INHERIT) {
+                    DomElement* parent = dom_parent_element(current_element);
+                    if (parent && parent->transform) target = parent->transformp()->individual[index];
+                }
+            } else {
+                resolve_individual_transform_value(lycon, prop_id, value, &target);
+            }
             break;
         }
         case CSS_PROPERTY_TRANSFORM_ORIGIN: {

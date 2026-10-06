@@ -1163,34 +1163,6 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     log_leave();
 }
 
-// ESO47: map the hit point into a transformed block's own space.
-//
-// Hit-testing walks layout space and compares against untransformed boxes, so a
-// element moved by `transform` was tested where it was laid out rather than
-// where it is painted — CSS says transforms affect hit-testing, and a user
-// clicks what they see. Rather than touch all ~38 comparison sites, the point
-// itself is mapped once on entering a transformed subtree: every site reads
-// evcon->event.mouse_position, so they all follow.
-//
-// Deliberately limited to pure translations. Their inverse is exact, and they
-// commute, so composing them down a nesting chain needs no ordering argument —
-// which a general inverse would, since the matrices are built in absolute space
-// with absolute origins. Scale and rotation still hit-test untransformed; that
-// is the same behaviour as before this change, not a new gap.
-static bool event_translate_only_transform(View* view, float* out_dx, float* out_dy) {
-    RdtMatrix m;
-    if (!view || !view->is_block()) return false;
-    if (!view_get_transform_matrix(view, &m)) return false;
-    const float eps = 1e-4f;
-    if (fabsf(m.e11 - 1.0f) > eps || fabsf(m.e22 - 1.0f) > eps ||
-        fabsf(m.e12) > eps || fabsf(m.e21) > eps) {
-        return false;   // not a pure translation
-    }
-    *out_dx = m.e13;
-    *out_dy = m.e23;
-    return true;
-}
-
 // The top-level root's clip is the window edge, not an element overflow clip:
 // real pointer input only lands past it under capture, and synthetic input
 // aims at offscreen content in document space, so neither is clipped there.
@@ -1231,12 +1203,16 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         return;
     }
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
-    // Undo this block's translation for the duration of the subtree walk.
-    float tdx = 0.0f, tdy = 0.0f;
-    bool translated = event_translate_only_transform(static_cast<View*>(block), &tdx, &tdy);
-    if (translated) {
-        evcon->event.mouse_position.x -= tdx;
-        evcon->event.mouse_position.y -= tdy;
+    float pointer_x = evcon->event.mouse_position.x, pointer_y = evcon->event.mouse_position.y;
+    RdtMatrix matrix, inverse;
+    if (view_get_transform_matrix(static_cast<View*>(block), &matrix)) {
+        // inverse transforms compose in traversal order: undo the parent, then its child.
+        if (!rdt_matrix_inverse(&matrix, &inverse) ||
+            !rdt_matrix_project_point(&inverse, pointer_x, pointer_y,
+                &evcon->event.mouse_position.x, &evcon->event.mouse_position.y)) {
+            log_leave();
+            return; // a singular transform has no hittable painted area.
+        }
     }
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1430,10 +1406,6 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
 
     RETURN:
-    if (translated) {
-        evcon->event.mouse_position.x += tdx;
-        evcon->event.mouse_position.y += tdy;
-    }
     // Only restore block position if no target was found
     // When a target is found, keep block at the parent's position for coordinate calculations
     if (!evcon->target) {
@@ -1469,6 +1441,9 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 block->node_name(), x, y, event->x, event->y, x + block->width, y + block->height);
         }
     }
+    // keep the local point through the block's own test, then restore it for siblings.
+    evcon->event.mouse_position.x = pointer_x;
+    evcon->event.mouse_position.y = pointer_y;
     log_leave();
 }
 
@@ -12306,6 +12281,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             switch (evcon.new_cursor) {
             case CSS_VALUE_TEXT: cursor_type = GLFW_IBEAM_CURSOR; break;
             case CSS_VALUE_POINTER: cursor_type = GLFW_HAND_CURSOR; break;
+            case CSS_VALUE_COL_RESIZE: cursor_type = GLFW_HRESIZE_CURSOR; break;
+            case CSS_VALUE_ROW_RESIZE: cursor_type = GLFW_VRESIZE_CURSOR; break;
             default: cursor_type = GLFW_ARROW_CURSOR; break;
             }
             GLFWcursor* cursor = glfwCreateStandardCursor(cursor_type);

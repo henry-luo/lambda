@@ -595,6 +595,9 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_FOOTNOTE,
     // Radiant extensions
     CSS_VALUE__REPLACED,
+    // resize cursors must retain typed computed values rather than raw identifiers.
+    CSS_VALUE_COL_RESIZE,
+    CSS_VALUE_ROW_RESIZE,
     CSS_VALUE__LAST_ENTRY
 } CssEnum;
 

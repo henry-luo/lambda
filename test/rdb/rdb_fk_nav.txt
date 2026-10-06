@@ -1,0 +1,5 @@
+"Alice"
+["Alice", "Alice", "Bob"]
+[2, 1, 0]
+["Lambda Calculus", "Type Theory"]
+"author"

@@ -99,7 +99,7 @@ protected:
     RdbBuiltQuery build(const RdbQueryDesc& desc) {
         RdbBuiltQuery q;
         memset(&q, 0, sizeof(q));
-        int rc = rdb_query_build(pool, &conn->schema, &desc, &q);
+        int rc = rdb_query_build(pool, conn, &desc, &q);
         EXPECT_EQ(rc, RDB_OK);
         return q;
     }
@@ -549,7 +549,7 @@ TEST_F(RdbQueryTest, UnknownTable) {
 
     RdbBuiltQuery q;
     memset(&q, 0, sizeof(q));
-    int rc = rdb_query_build(pool, &conn->schema, &desc, &q);
+    int rc = rdb_query_build(pool, conn, &desc, &q);
     EXPECT_EQ(rc, RDB_ERROR);
 }
 
@@ -567,7 +567,7 @@ TEST_F(RdbQueryTest, UnknownColumnInWhere) {
 
     RdbBuiltQuery q;
     memset(&q, 0, sizeof(q));
-    int rc = rdb_query_build(pool, &conn->schema, &desc, &q);
+    int rc = rdb_query_build(pool, conn, &desc, &q);
     EXPECT_EQ(rc, RDB_ERROR);
 }
 
@@ -586,7 +586,7 @@ TEST_F(RdbQueryTest, UnknownColumnInOrderBy) {
 
     RdbBuiltQuery q;
     memset(&q, 0, sizeof(q));
-    int rc = rdb_query_build(pool, &conn->schema, &desc, &q);
+    int rc = rdb_query_build(pool, conn, &desc, &q);
     EXPECT_EQ(rc, RDB_ERROR);
 }
 
