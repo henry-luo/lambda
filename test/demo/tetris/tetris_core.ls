@@ -131,7 +131,7 @@ fn hold(game) {
     if (fits(next.board, next.piece)) next else {*:next, mode: "over"}
   }
 }
-pub fn gravity_ms(level) => max(100, 800 - (level - 1) * 65)
+pub fn gravity_ms(level) => max(100, 700 - (level - 1) * 65)
 pub fn action(game, command) {
   if (command == "restart") {*:new_game(game.seed), mode: "playing"}
   else if (command == "pause") {

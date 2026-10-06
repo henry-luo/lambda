@@ -23,9 +23,10 @@ clickable buttons.
 The game has a 10 × 20 board, all seven tetrominoes, SRS rotation kicks, a ghost
 piece, three next-piece previews, hold, spawn/ceiling top-out, and a seeded
 seven-bag generator. Clearing 1/2/3/4 lines earns 100/300/500/800 points times the
-current level. Each ten lines advances a level and speeds up gravity, down to
-100 ms per row. Pieces lock when a downward move is blocked; there is no lock
-delay, T-spin bonus, or persistent high score. The initial seed is 42; restart
+current level. Gravity starts at 700 ms per row. Each ten lines advances a level
+and speeds up gravity, down to 100 ms per row. Pieces lock when a downward move
+is blocked; there is no lock delay, T-spin bonus, or persistent high score.
+The initial seed is 42; restart
 continues from the generator's current seed.
 
 `tetris_core.ls` contains pure rules, `tetris.ls` the reactive view, and
