@@ -13762,8 +13762,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         focused_webview, 1, event->key.key, event->key.mods);
                     break;
                 }
-                if (focused) {
-                    radiant_dispatch_keyboard_event(&evcon, focused, "keyup",
+                // a reactive redraw can retire focus between press and release;
+                // use the same live document fallback as keydown to finish the gesture.
+                View* keyup_target = live_keyboard_event_target(
+                    state, event_context_target_document(&evcon), focused);
+                if (keyup_target) {
+                    radiant_dispatch_keyboard_event(&evcon, keyup_target, "keyup",
                                                     event->key.key, event->key.mods,
                                                     false);
                 }

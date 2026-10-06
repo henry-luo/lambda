@@ -105,6 +105,11 @@ paint; package handlers own policy under S12.1.3. `RDT_EVENT_KEY_UP` is
 lightweight, while `RDT_EVENT_TEXT_INPUT` delivers a committed Unicode
 codepoint into the focused editing surface.
 
+Both key phases resolve their target through `live_keyboard_event_target`:
+live focus or an editing selection wins, otherwise the document body receives
+the event. S12.1.3 reactive regeneration can retire focus between a press and
+its release; the body fallback keeps document-level gesture handlers paired.
+
 The three `RDT_EVENT_COMPOSITION_*` events (`event.cpp:9367`) carry native IME preedit/commit text. IME is platform-native and does **not** flow through GLFW keys — it enters at the shared C bridge `radiant_dispatch_editing_composition_event` (`event.cpp:3647`), which resolves the editing surface from focus/caret and re-enters `handle_event` with a `CompositionEvent`. On macOS, `ime_mac.mm` swaps GLFW's content-view class at runtime (`object_setClass`) with a subclass overriding the four `NSTextInputClient` methods (`setMarkedText:`/`insertText:`), forwarding to `ime_dispatch_editing` (`ime_mac.mm:78`) and falling back to `super` for non-editing elements; it deliberately avoids `view.hpp` to dodge AppKit's `Rect` clash (`ime_mac.mm:11-14`, `RADIANT_CAST_OK` at `ime_mac.mm:69`). On Windows, `ime_win.cpp` intercepts `WM_IME_STARTCOMPOSITION`/`WM_IME_COMPOSITION`/`WM_IME_ENDCOMPOSITION` (`ime_win.cpp:125`) and positions the candidate window via `ImmSetCandidateWindow` (`ime_win.cpp:89`) from `radiant_editing_focused_caret_rect`. The concrete editing semantics of a composition (marked-text ranges, commit) belong to [RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md).
 
 ---

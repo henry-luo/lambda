@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><title>Keyboard release after focus retirement</title></head>
+<body>
+  <button id="focused">Focus then remove on keydown</button>
+  <div id="status">ready</div>
+  <script>
+    document.body.addEventListener('keydown', function (event) {
+      event.preventDefault();
+      var focused = document.getElementById('focused');
+      if (focused) focused.remove();
+      document.getElementById('status').textContent = 'down';
+    });
+    document.body.addEventListener('keyup', function () {
+      document.getElementById('status').textContent = 'up';
+    });
+  </script>
+</body></html>

@@ -1138,6 +1138,27 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
     remove(view_log);
 }
 
+TEST(RadiantViewTest, TetrisClosesAfterSustainedReactiveRedraws) {
+    test_radiant_view_ensure_temp_dir();
+    const char* result_path = "./temp/test_radiant_view_tetris_close.json";
+    remove(result_path);
+    const char* args[] = {
+        "./lambda.exe", "view", "test/demo/tetris/tetris.ls", "--headless", "--no-log",
+        "--event-file", "test/demo/tetris/tetris_close.json",
+        "--event-result", result_path, nullptr,
+    };
+    ShellOptions options = {};
+    // bound a shutdown hang; the replay advances gameplay on the virtual clock.
+    options.timeout_ms = 30000;
+    options.merge_stderr = true;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    EXPECT_TRUE(test_radiant_view_file_contains(result_path, "\"result\":\"PASS\""));
+    remove(result_path);
+}
+
 TEST(RadiantViewTest, RendersObjectBoundingBoxPatternWithoutUserUnitTiling) {
     const char* page = "./temp/test_radiant_view_object_bounding_box_pattern.html";
     const char* view_log = "./temp/test_radiant_view_object_bounding_box_pattern.log";
