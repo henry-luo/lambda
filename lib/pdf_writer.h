@@ -152,6 +152,13 @@ HPDF_STATUS HPDF_Page_SetWidth(HPDF_Page page, float width);
  */
 HPDF_STATUS HPDF_Page_SetHeight(HPDF_Page page, float height);
 
+/* Coordinates are PDF points with a bottom-left origin. A target beginning
+ * with '#' resolves against a destination registered on this document. */
+HPDF_STATUS HPDF_Page_AddLink(HPDF_Page page, float left, float bottom,
+                             float right, float top, const char* target);
+HPDF_STATUS HPDF_Doc_AddNamedDestination(HPDF_Doc doc, const char* name,
+                                        HPDF_Page page, float x, float y);
+
 /*---------------------------------------------------------------------------*/
 /*  Font Functions                                                           */
 /*---------------------------------------------------------------------------*/

@@ -263,6 +263,9 @@ bool css_register_document_property(DomDocument* doc,
     const CssPropertyRegistration* registration, size_t name_length);
 void css_stylesheet_mark_changed(CssStylesheet* stylesheet);
 bool css_import_rule_is_active(CssRule* rule, CssEngine* engine);
+typedef bool (*CssActiveRuleVisitor)(void* context, const CssRule* rule);
+bool css_stylesheet_visit_active_rules(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context);
 
 // Cascade integration features
 int css_calculate_cascade_priority(CssEngine* engine,

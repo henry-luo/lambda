@@ -11,7 +11,7 @@ true
 "no invalid css:"
 true
 "pdf profile codes:"
-["unsupported-microtype-feature", "unsupported-microtype-feature", "unsupported-page-export", "unsupported-pdf-links"]
+["unsupported-microtype-feature", "unsupported-microtype-feature"]
 "pdf diagnostics located:"
 true
 "bib options:"

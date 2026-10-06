@@ -1,4 +1,4 @@
-// HTML link presentation and document metadata; PDF annotations remain a host export gap.
+// Link presentation and document metadata are carried by ordinary HTML semantics.
 import util: ~~.util
 
 fn collect_setup(node, settings) {
@@ -37,11 +37,4 @@ pub fn stylesheet(settings) {
         ".latex-document a.latex-url{color:" ++ url ++ ";}\n" ++
         ".latex-document a.latex-cite{color:" ++ cite ++ ";}\n"
     } else ""
-}
-
-pub fn output_diagnostics(settings, target, offset) {
-    if (settings != null and target == "pdf")
-        [util.diagnostic("unsupported-pdf-links", "hyperref", "annotations",
-          "PDF link annotations, outlines and metadata are unavailable", offset)]
-    else []
 }

@@ -1,4 +1,4 @@
-// Fixed-page CSS approximation. Radiant does not yet consume @page size/margins for PDF.
+// Fixed-page CSS stays declarative; PDF export uses @page for paper and insets.
 import util: ~~.util
 
 let DIMENSION_KEYS = ["margin", "left", "right", "top", "bottom", "inner", "outer",
@@ -47,13 +47,7 @@ pub fn stylesheet(opts) {
         let bottom = if (opts.bottom != null) util.css_dimension(opts.bottom) else margin
         "@page{size:" ++ size ++ ";margin:" ++ top ++ " " ++ right ++ " " ++ bottom ++ " " ++ left ++ ";}\n" ++
         ".latex-document{box-sizing:border-box;width:" ++ page_width ++ ";max-width:" ++ page_width ++
-        ";padding:" ++ top ++ " " ++ right ++ " " ++ bottom ++ " " ++ left ++ ";}\n"
+        ";padding:" ++ top ++ " " ++ right ++ " " ++ bottom ++ " " ++ left ++ ";}\n" ++
+        "@media print{html,body{margin:0;padding:0}.latex-document{width:auto;max-width:none;margin:0;padding:0}}\n"
     }
-}
-
-pub fn output_diagnostics(opts, target, offset) {
-    if (opts != null and target == "pdf")
-        [util.diagnostic("unsupported-page-export", "geometry", "@page",
-          "PDF export does not apply @page size or margins", offset)]
-    else []
 }

@@ -49,6 +49,7 @@ pub fn package_for_command(command, packages) {
         else if (command == "setlist") "enumitem"
         else if (command == "newgeometry" or command == "restoregeometry") "geometry"
         else if (command == "parencite" or command == "textcite") "biblatex"
+        else if (command == "pdfbookmark" or command == "bookmark") "hyperref"
         else if (command == "usetikzlibrary" or command == "tikzset" or command == "pgfkeys") "tikz"
         else null
     if (owner != null and active(packages, owner)) owner else "latex"
@@ -195,20 +196,6 @@ pub fn assets(node, base_uri) {
                 trim(util.text_of_skip_brack(node)), base_uri)}]
         else []
         own ++ [for (child in node, asset in assets(child, base_uri)) asset]
-    }
-}
-
-pub fn target_diagnostics(node, packages, target) {
-    if (not (node is element)) []
-    else {
-        let clipped_graphic = string(name(node)) == "includegraphics" and
-            active(packages, "graphicx") and
-            (target == "pdf" or target == "svg") and
-            graphicx.options(node).trim != null
-        let own = if (clipped_graphic)
-            [diagnostic("unsupported-vector-clip", "graphicx", "trim",
-                "Vector export does not apply graphicx CSS clipping", node)] else []
-        own ++ [for (child in node, issue in target_diagnostics(child, packages, target)) issue]
     }
 }
 

@@ -2641,7 +2641,7 @@ static DomDocument* load_lambda_html_doc_with_host_config(
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
-    int viewport_width, int viewport_height, Pool* pool);
+    int viewport_width, int viewport_height, Pool* pool, bool print_media);
 
 static DomDocument* load_pdf_transform_doc(Url* pdf_url, int viewport_width,
                                             int viewport_height, Pool* pool) {
@@ -3808,7 +3808,7 @@ const char* lambda_document_load_diagnostic(void) {
 static DomDocument* load_lambda_document_doc(Url* script_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool) {
+        int viewport_width, int viewport_height, Pool* pool, bool print_media) {
     auto total_start = time_now_ns();
 
     if (!script_url || !pool) {
@@ -4025,6 +4025,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         pool_destroy(result_pool);
         return nullptr;
     }
+    css_engine->context.print_media = print_media;
 
     auto step5_end = time_now_ns();
     log_info("[TIMING] Step 5 - Build DOM tree: %.1fms",
@@ -4093,14 +4094,14 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool) {
+        int viewport_width, int viewport_height, Pool* pool, bool print_media) {
     return load_lambda_document_doc(document_url, transform, options, option_count,
-        viewport_width, viewport_height, pool);
+        viewport_width, viewport_height, pool, print_media);
 }
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
     return load_lambda_document_doc(script_url, nullptr, nullptr, 0,
-        viewport_width, viewport_height, pool);
+        viewport_width, viewport_height, pool, false);
 }
 
 static View* find_matching_input(View* root, const char* match_tag, const char* match_class) {

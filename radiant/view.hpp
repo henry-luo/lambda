@@ -4228,9 +4228,9 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_filename, int viewport_
                                     struct DocumentScriptPhaseTiming* script_timing,
                                     bool print_media = false);
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
-    const LambdaDocumentTransformConfig* transform,
-    const LambdaDocumentTransformOption* options, int option_count,
-    int viewport_width, int viewport_height, Pool* pool);
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        int viewport_width, int viewport_height, Pool* pool, bool print_media = false);
 DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool);
 // The message of the error value a Lambda document or transform returned on
 // its most recent failed load, or null. The CLI reports it as the actionable

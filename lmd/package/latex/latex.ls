@@ -83,14 +83,6 @@ pub fn render_result(ast, options) {
     let diagnostics = loaded.diagnostics ++ math_operators.diagnostics ++ bibliography.diagnostics ++
         microtype.unsupported(registry.options_for(loaded.packages, "microtype"),
             registry.offset_for(loaded.packages, "microtype")) ++
-        geometry.output_diagnostics(registry.options_for(loaded.packages, "geometry"),
-            if (options != null) options.target else null,
-            registry.offset_for(loaded.packages, "geometry")) ++
-        hyperref.output_diagnostics(link_settings,
-            if (options != null) options.target else null,
-            registry.offset_for(loaded.packages, "hyperref")) ++
-        registry.target_diagnostics(ast, loaded.packages,
-            if (options != null) options.target else null) ++
         registry.reference_diagnostics(ast, info.labels, info.bibitems, info.packages) ++
         output_diagnostics(elements)
     {body: html, elements: elements,

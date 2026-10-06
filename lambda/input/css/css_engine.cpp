@@ -32,17 +32,16 @@ bool css_import_rule_is_active(CssRule* rule, CssEngine* engine) {
 
 typedef bool (*CssRegistrationVisitor)(void*, const CssPropertyRegistration*);
 
-static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
-    CssRegistrationVisitor visitor, void* context, size_t depth);
+static bool css_visit_active_rules_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context, size_t depth);
 
-static bool css_visit_registrations_in_rule(CssEngine* engine, CssRule* rule,
-    CssRegistrationVisitor visitor, void* context, size_t depth) {
+static bool css_visit_active_rules_in_rule(CssEngine* engine, CssRule* rule,
+    CssActiveRuleVisitor visitor, void* context, size_t depth) {
     if (!rule || depth > 512) return true;
-    if (rule->type == CSS_RULE_PROPERTY)
-        return visitor(context, &rule->data.property_rule);
+    if (!visitor(context, rule)) return false;
     if (rule->type == CSS_RULE_IMPORT) {
         return !css_import_rule_is_active(rule, engine) ||
-            css_visit_registrations_in_sheet(engine, rule->data.import_rule.stylesheet,
+            css_visit_active_rules_in_sheet(engine, rule->data.import_rule.stylesheet,
                 visitor, context, depth + 1);
     }
     // Registrations are global within the document, including within @scope.
@@ -52,19 +51,43 @@ static bool css_visit_registrations_in_rule(CssEngine* engine, CssRule* rule,
     if (!active) return true;
     CssRuleChildList children = css_rule_child_list(rule);
     for (size_t i = 0; children.count && i < *children.count; i++)
-        if (!css_visit_registrations_in_rule(engine, (*children.rules)[i], visitor, context, depth + 1))
+        if (!css_visit_active_rules_in_rule(engine, (*children.rules)[i], visitor, context, depth + 1))
             return false;
     return true;
 }
 
-static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
-    CssRegistrationVisitor visitor, void* context, size_t depth) {
+static bool css_visit_active_rules_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context, size_t depth) {
     if (!sheet || sheet->disabled || depth > 512 ||
         (sheet->media && !css_evaluate_media_query(engine, sheet->media))) return true;
     for (size_t i = 0; i < sheet->rule_count; i++)
-        if (!css_visit_registrations_in_rule(engine, sheet->rules[i], visitor, context, depth + 1))
+        if (!css_visit_active_rules_in_rule(engine, sheet->rules[i], visitor, context, depth + 1))
             return false;
     return true;
+}
+
+bool css_stylesheet_visit_active_rules(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context) {
+    return engine && visitor &&
+        css_visit_active_rules_in_sheet(engine, sheet, visitor, context, 0);
+}
+
+typedef struct CssRegistrationWalk {
+    CssRegistrationVisitor visitor;
+    void* context;
+} CssRegistrationWalk;
+
+static bool css_visit_registration_rule(void* context, const CssRule* rule) {
+    CssRegistrationWalk* walk = (CssRegistrationWalk*)context;
+    return rule->type != CSS_RULE_PROPERTY ||
+        walk->visitor(walk->context, &rule->data.property_rule);
+}
+
+static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssRegistrationVisitor visitor, void* context, size_t depth) {
+    CssRegistrationWalk walk = {visitor, context};
+    return css_visit_active_rules_in_sheet(engine, sheet,
+        css_visit_registration_rule, &walk, depth);
 }
 
 static bool css_index_property_registration(void* context, const CssPropertyRegistration* registration) {

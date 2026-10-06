@@ -21,6 +21,7 @@ typedef struct RenderWalkBlockPhase {
     FontBox pa_font;
     Color pa_color;
     bool opened_transform;
+    bool opened_clip;
     bool opened_effect_group;
     bool stop_after_self;
 } RenderWalkBlockPhase;
@@ -122,12 +123,18 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
 
     state->x = p->pa_x + block->x;
     state->y = p->pa_y + block->y;
+    if (backend->visit_element) {
+        backend->visit_element(backend->ctx, block, state->x, state->y);
+    }
 
     bool has_transform = transform_has_functions(block->transform);
     p->opened_transform = has_transform && backend->begin_transform && backend->end_transform;
     if (p->opened_transform) {
         backend->begin_transform(backend->ctx, block, state->x, state->y);
     }
+
+    p->opened_clip = backend->begin_clip && backend->end_clip &&
+        backend->begin_clip(backend->ctx, block, state->x, state->y);
 
     PaintEffectGroup group = {};
     bool has_effect_group = render_walk_block_effect_group(block, state->x, state->y, &group);
@@ -256,6 +263,10 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
         backend->end_effect_group(backend->ctx);
     }
 
+    if (p->opened_clip) {
+        backend->end_clip(backend->ctx);
+    }
+
     if (p->opened_transform) {
         backend->end_transform(backend->ctx);
     }
@@ -300,6 +311,16 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
         state->color = span->inl()->color;
     }
 
+    if (backend->visit_element) {
+        backend->visit_element(backend->ctx, span,
+            state->x + span->x, state->y + span->y);
+    }
+
+    // Inline image wrappers carry graphicx trim/clip on their own element.
+    bool opened_clip = backend->begin_clip && backend->end_clip &&
+        backend->begin_clip(backend->ctx, span,
+            state->x + span->x, state->y + span->y);
+
     if (span->first_child) {
         PaintEffectGroup group = {};
         bool has_effect_group = render_walk_inline_effect_group(span, &group);
@@ -324,6 +345,8 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
             backend->end_effect_group(backend->ctx);
         }
     }
+
+    if (opened_clip) backend->end_clip(backend->ctx);
 
     state->font = pa_font;
     state->color = pa_color;

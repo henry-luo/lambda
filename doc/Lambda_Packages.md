@@ -334,6 +334,8 @@ The latex package renders a parsed LaTeX document (`input(path, 'latex')` or `pa
 
 Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4**; document text is not executed as code (**S1.8**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex3.md#6-compatibility-matrix) lists supported commands and output limits.
 
+For PDF export, `hyperref` links and anchors become link annotations and destinations, and its title, author, subject and keywords become PDF Info metadata. `geometry` supplies fixed `@page` paper size and margins for a one-page export; automatic page breaking still requires the separate paged path. `graphicx` trim/clip uses the same supported CSS `clip-path` shapes in SVG and PDF. These remain Lambda-script package policies under **D7.2.1–D7.2.4**; unsupported options and commands follow **S7.4.1–S7.4.4** diagnostics.
+
 ```lambda
 import latex: lambda.latex.latex
 

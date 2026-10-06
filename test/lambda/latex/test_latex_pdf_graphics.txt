@@ -1,7 +1,7 @@
 "html diagnostics:"
 ["unsupported-output"]
 "vector diagnostics:"
-["unsupported-vector-clip", "unsupported-vector-clip", "unsupported-output"]
+["unsupported-output"]
 "svg page:"
 true
 "trim in pixels:"

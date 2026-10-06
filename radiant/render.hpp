@@ -2062,6 +2062,9 @@ struct RenderBackend {
                               FontBox* font, Color color);
     void (*render_svg_subscene)(RenderContext* ctx, const PaintSvgSubscene* subscene);
 
+    // Semantic export can attach destinations to elements with no paint box.
+    void (*visit_element)(RenderContext* ctx, ViewElement* view, float abs_x, float abs_y);
+
     // ── Children group wrappers ────────────────────────────────────────
     // Emits container markup around a block's children (e.g. <g class="block"> in SVG).
     // begin returns an opaque cookie; end receives it for matched close.
@@ -2069,6 +2072,10 @@ struct RenderBackend {
     void (*end_block_children)(RenderContext* ctx, ViewBlock* block);
     void (*begin_inline_children)(RenderContext* ctx, ViewSpan* span);
     void (*end_inline_children)(RenderContext* ctx, ViewSpan* span);
+
+    // CSS shape clips cover both self paint and descendants in vector output.
+    bool (*begin_clip)(RenderContext* ctx, ViewElement* element, float abs_x, float abs_y);
+    void (*end_clip)(RenderContext* ctx);
 
     // ── Semantic effect wrapper ────────────────────────────────────────
     // Called around content affected by CSS stacking effects.
@@ -3543,6 +3550,8 @@ typedef struct RenderClipScope {
 
 RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                            float parent_x, float parent_y, float scale);
+bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
+                                 float abs_x, float abs_y);
 RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip);
 RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon);
 void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope);
@@ -3947,6 +3956,11 @@ typedef struct RenderExportSession {
     float raster_scale;
     int content_width;
     int content_height;
+    float page_width;
+    float page_height;
+    float page_content_x;
+    float page_content_y;
+    bool has_page_geometry;
     int viewport_width;
     int viewport_height;
     bool auto_width;
@@ -3969,7 +3983,8 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     const char* document_file, const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     int viewport_width, int viewport_height, int fallback_width, int fallback_height,
-    float output_scale, float device_scale, bool raster_surface, bool paged = false);
+    float output_scale, float device_scale, bool raster_surface, bool paged = false,
+    bool print_media = false);
 void render_export_session_end(RenderExportSession* session);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
