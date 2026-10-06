@@ -886,7 +886,7 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     }
 
     DomDocument* saved_document = uicon->document;
-    uicon->document = doc;
+    uicon->document = lam::up(doc);
     dom_geometry_flush_in_progress = true;
 
     // Standalone callers synchronously flush style and layout. The host loop
@@ -903,7 +903,7 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     }
 
     dom_geometry_flush_in_progress = false;
-    uicon->document = saved_document;
+    uicon->document = lam::up(saved_document);
     return dom_has_committed_geometry_snapshot(doc);
 }
 
@@ -3409,7 +3409,7 @@ static void reset_foreign_document_cache() {
     }
     s_doc_with_window_count = 0;
 }
-JS_FORWARD_STATIC_VOID( dom_destroy_adopted_document, (void* data), free_document, ((DomDocument*)data))
+JS_FORWARD_STATIC_VOID( dom_destroy_adopted_document, (DomDocumentResourceData* data), free_document, (static_cast<DomDocument*>(data)))
 
 static bool dom_retains_adopted_document(DomDocument* owner,
                                            DomDocument* target) {
@@ -4951,6 +4951,15 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
     if (!elem) return js_name_item("");
     const char* js_prop = fn_to_cstr(prop_name);
     if (!js_prop) return js_name_item("");
+
+    // Custom names are literal DOM strings: preserve case, length and punctuation before camel-case conversion.
+    if (js_prop[0] == '-' && js_prop[1] == '-' && elem->doc && elem->doc->document_pool) {
+        size_t name_length = get_type_id(prop_name) == LMD_TYPE_STRING ? it2s(prop_name)->len : strlen(js_prop);
+        String* registered = css_prop_serialize_registered_custom_property(elem->doc->document_pool,
+            elem, js_prop, name_length);
+        if (registered) return js_make_string_len(registered->chars, registered->len);
+        if (memchr(js_prop, '\0', name_length)) return js_name_item("");
+    }
 
     // handle getPropertyValue method separately
     if (strcmp(js_prop, "getPropertyValue") == 0) {
@@ -11371,6 +11380,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 // e.g., "fontFamily" → "font-family", "borderWidth" → "border-width"
 // "cssFloat" → "float", "display" → "display"
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size) {
+    if (js_prop && js_prop[0] == '-' && js_prop[1] == '-') {
+        snprintf(css_buf, buf_size, "%s", js_prop);
+        return;
+    }
     // special cases
     if (strcmp(js_prop, "cssFloat") == 0) {
         snprintf(css_buf, buf_size, "float");
@@ -13832,8 +13845,7 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
     const RdtMatrix* instance_ctm, float viewport_x, float viewport_y);
 static bool dom_svg_element_skips_hit_test(DomElement* elem);
 
-static bool dom_svg_clip_path_contains(const RdtPath* path, const RdtMatrix* frame, RdtFillRule rule, void* data) {
-    const RdtLogicalPoint* point = (const RdtLogicalPoint*)data;
+static bool dom_svg_clip_path_contains(const RdtPath* path, const RdtMatrix* frame, RdtFillRule rule, const RdtLogicalPoint* point) {
     RdtPath* contour = rdt_path_new();
     if (!contour || !render_path_append_transformed(contour, path, frame)) {
         if (contour) rdt_path_free(contour);
@@ -14225,6 +14237,8 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
 
 static bool dom_element_from_point_skips_subtree(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
+    // fallback geometry must not resurrect a subtree rejected by the engine's face test.
+    if (dom_engine_hit_test_skips_subtree(elem)) return true;
     return _is_tag(elem, "head") ||
         _is_tag(elem, "style") ||
         _is_tag(elem, "script") ||

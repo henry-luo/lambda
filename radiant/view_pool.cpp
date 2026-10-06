@@ -1,5 +1,7 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "view_tree_model.hpp"
+#include <assert.h>
 #include "event.hpp"
 #include "rdt_video.h"
 #include "../lambda/input/css/dom_node.hpp"
@@ -170,8 +172,9 @@ typedef struct ViewPropTeardownEntry {
     const char* name;
     ViewPropReleaseFn release_external;
     ViewPropPayloadFreeFn free_payload;
-    ViewPropGetFn get_member;
+    ViewPropGetFn get_member;       // the block, for in-place reset
     ViewPropCustomFn clear_member;
+    ViewPropCustomFn free_member;   // typed: returns the block through its owning field
     ViewPropCustomFn custom_clear;
     ViewPropCustomFn custom_free;
     const void* reset_default;
@@ -182,10 +185,27 @@ typedef struct ViewPropTeardownEntry {
 
 static void view_teardown_visit_node(ViewTree* tree, DomNode* node, int flags, bool include_siblings);
 
-static void view_pool_free_ptr(ViewTree* tree, void* ptr) {
-    if (tree && tree->prop_pool && ptr) {
-        pool_free(tree->prop_pool, ptr);
-    }
+// A prop block or payload returns to the prop pool only through its owning
+// field: the field's kind proves this element owns it, so a shared or
+// borrowed prop cannot be freed here by mistake. Without a pool (a detached
+// walk) nothing is freed and the field is left as it is.
+template<class T> static void view_pool_free(ViewTree* tree, lam::Own<T>& field) {
+    if (field && tree && tree->prop_pool) lam::free_owned(tree->prop_pool, field);
+}
+template<class T> static void view_pool_free(ViewTree* tree, lam::OwnArr<T>& field) {
+    if (field && tree && tree->prop_pool) lam::free_owned(tree->prop_pool, field);
+}
+template<class T, auto Slot> static void view_pool_free(ViewTree* tree, lam::ViewProp<T, Slot>& field) {
+    if (field && tree && tree->prop_pool) lam::free_owned(tree->prop_pool, field);
+}
+// A `next`-linked payload list, each node owned by the previous one.
+template<class T> static void view_pool_free_list(ViewTree* tree, lam::Own<T>& head) {
+    if (tree && tree->prop_pool) lam::free_owned_list(tree->prop_pool, head);
+}
+// O4 (open): a private copy behind a Shared field (its own-or-shared flag says
+// private) is freed through this one typed path until that design lands.
+template<class T> static void view_pool_free_private(ViewTree* tree, T* block) {
+    if (block && tree && tree->prop_pool) pool_free(tree->prop_pool, (void*)block);
 }
 
 #define DEFINE_VIEW_PROP_ACCESSORS(field) \
@@ -263,65 +283,43 @@ static void free_element_font_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->font) return;
     // Font families may be borrowed from an ancestor or the document CSS
     // pool. Text-shadow nodes are created per resolved FontProp and are owned.
-    TextShadow* shadow = elem->font->text_shadow;
-    while (shadow) {
-        TextShadow* next = shadow->next;
-        view_pool_free_ptr(tree, shadow);
-        shadow = next;
-    }
-    elem->font->text_shadow = nullptr;
+    view_pool_free_list(tree, elem->font->text_shadow);
 }
 
-static void free_linear_gradient(ViewTree* tree, LinearGradient* gradient) {
+template<class G> static void free_gradient(ViewTree* tree, lam::Own<G>& gradient) {
     if (!gradient) return;
-    view_pool_free_ptr(tree, gradient->stops);
-    view_pool_free_ptr(tree, gradient);
+    view_pool_free(tree, gradient->stops);
+    view_pool_free(tree, gradient);
 }
 
-static void free_radial_gradient(ViewTree* tree, RadialGradient* gradient) {
-    if (!gradient) return;
-    view_pool_free_ptr(tree, gradient->stops);
-    view_pool_free_ptr(tree, gradient);
-}
-
-static void free_conic_gradient(ViewTree* tree, ConicGradient* gradient) {
-    if (!gradient) return;
-    view_pool_free_ptr(tree, gradient->stops);
-    view_pool_free_ptr(tree, gradient);
-}
-
-static void free_background_prop(ViewTree* tree, BackgroundProp* background) {
+static void free_background_prop(ViewTree* tree, lam::Own<BackgroundProp>& background) {
     if (!background) return;
-    free_linear_gradient(tree, background->linear_gradient);
-    free_radial_gradient(tree, background->radial_gradient);
-    free_conic_gradient(tree, background->conic_gradient);
+    free_gradient(tree, background->linear_gradient);
+    free_gradient(tree, background->radial_gradient);
+    free_gradient(tree, background->conic_gradient);
     for (int i = 0; i < background->radial_layer_count; i++) {
-        free_radial_gradient(tree, background->radial_layers[i]);
+        free_gradient(tree, background->radial_layers[i]);
     }
     for (int i = 0; i < background->linear_layer_count; i++) {
-        free_linear_gradient(tree, background->linear_layers[i]);
+        free_gradient(tree, background->linear_layers[i]);
     }
-    view_pool_free_ptr(tree, background->radial_layers);
-    view_pool_free_ptr(tree, background->linear_layers);
-    view_pool_free_ptr(tree, background);
+    view_pool_free(tree, background->radial_layers);
+    view_pool_free(tree, background->linear_layers);
+    view_pool_free(tree, background);
 }
 
 static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->bound) return;
-    free_background_prop(tree, elem->boundary()->background);
-    if (elem->boundary()->border) {
-        free_linear_gradient(tree, elem->boundary()->border->border_image_linear_gradient);
-        view_pool_free_ptr(tree, elem->boundary()->border->border_image_url);
+    BoundaryProp* boundary = elem->bound;
+    free_background_prop(tree, boundary->background);
+    if (boundary->border) {
+        free_gradient(tree, boundary->border->border_image_linear_gradient);
+        view_pool_free(tree, boundary->border->border_image_url);
     }
-    view_pool_free_ptr(tree, elem->boundary()->border);
-    view_pool_free_ptr(tree, elem->boundary()->mask);
-    BoxShadow* shadow = elem->boundary()->box_shadow;
-    while (shadow) {
-        BoxShadow* next = shadow->next;
-        view_pool_free_ptr(tree, shadow);
-        shadow = next;
-    }
-    view_pool_free_ptr(tree, elem->boundary()->outline);
+    view_pool_free(tree, boundary->border);
+    view_pool_free(tree, boundary->mask);
+    view_pool_free_list(tree, boundary->box_shadow);
+    view_pool_free(tree, boundary->outline);
 }
 
 static void free_transform_payload(DomElement* elem, ViewTree* tree) {
@@ -333,12 +331,7 @@ static void free_transform_payload(DomElement* elem, ViewTree* tree) {
 
 static void free_filter_chain(ViewTree* tree, FilterProp* filter) {
     if (!filter) return;
-    FilterFunction* function = filter->functions;
-    while (function) {
-        FilterFunction* next = function->next;
-        view_pool_free_ptr(tree, function);
-        function = next;
-    }
+    view_pool_free_list(tree, filter->functions);
 }
 
 static void free_filter_payload(DomElement* elem, ViewTree* tree) {
@@ -352,13 +345,8 @@ static void free_backdrop_filter_payload(DomElement* elem, ViewTree* tree) {
 static void free_vector_path_payload(DomElement* elem, ViewTree* tree) {
     VectorPathProp* path = elem ? elem->vector_path() : nullptr;
     if (!path) return;
-    VectorPathSegment* segment = path->segments;
-    while (segment) {
-        VectorPathSegment* next = segment->next;
-        view_pool_free_ptr(tree, segment);
-        segment = next;
-    }
-    view_pool_free_ptr(tree, path->dash_pattern);
+    view_pool_free_list(tree, path->segments);
+    view_pool_free(tree, path->dash_pattern);
 }
 
 static void release_embedded_document(DomElement* elem) {
@@ -435,8 +423,8 @@ static void release_embed_prop_for_reset(DomElement* elem, ViewTree* tree) {
 
 static void free_embed_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
-    view_pool_free_ptr(tree, elem->embedp()->flex);
-    view_pool_free_ptr(tree, elem->embedp()->grid);
+    view_pool_free(tree, elem->embed->flex);
+    view_pool_free(tree, elem->embed->grid);
 }
 
 static void reset_embed_prop(DomElement* elem, ViewTree* tree) {
@@ -449,7 +437,7 @@ static void reset_embed_prop(DomElement* elem, ViewTree* tree) {
 
 static void free_scroll_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->scroller) return;
-    view_pool_free_ptr(tree, elem->scroll()->pane);
+    view_pool_free(tree, elem->scroller->pane);
 }
 
 static void release_form_prop(DomElement* elem, ViewTree*) {
@@ -467,7 +455,12 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
         form->file_button_font = nullptr;
     }
     form_control_prop_release(elem, form);
-    if (form->heap_allocated) lam::free_owned(elem->form);
+    // a heap form prop (heap_allocated) is the one view slot whose storage is
+    // not the view tree's pool; the release hands it over here
+    if (form->heap_allocated) {
+        lam::Temp<FormControlProp> heap_form((FormControlProp*)elem->form);
+        elem->form = nullptr;
+    }
 }
 
 static void clear_item_prop(DomElement* elem, ViewTree*) {
@@ -485,23 +478,18 @@ static void free_item_prop(DomElement* elem, ViewTree* tree) {
     if (!elem) return;
     switch (elem->parent_item_kind()) {
         case DomElement::PARENT_ITEM_FLEX:
-            view_pool_free_ptr(tree, elem->fi);
+            view_pool_free(tree, elem->fi);
             break;
         case DomElement::PARENT_ITEM_GRID:
-            view_pool_free_ptr(tree, elem->gi);
+            view_pool_free(tree, elem->gi);
             break;
         default:
             break;
     }
-    if (elem->tb) {
-        view_pool_free_ptr(tree, elem->tb);
-    }
-    if (elem->td) {
-        view_pool_free_ptr(tree, elem->td);
-    }
-    if (elem->form && !elem->form->heap_allocated) {
-        view_pool_free_ptr(tree, elem->form);
-    }
+    view_pool_free(tree, elem->tb);
+    view_pool_free(tree, elem->td);
+    // a heap form prop is released by release_form_prop
+    if (elem->form && !elem->form->heap_allocated) view_pool_free(tree, elem->form);
     elem->fi = nullptr;
     elem->gi = nullptr;
     elem->tb = nullptr;
@@ -532,7 +520,7 @@ static void reset_pseudo_content_prop(DomElement*, ViewTree*) {
 static void free_inline_prop(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->in_line) return;
     if (!elem->inline_prop_shared()) {
-        view_pool_free_ptr(tree, elem->in_line);
+        view_pool_free_private(tree, (InlineProp*)elem->in_line);
     }
     elem->clear_inline_prop_binding();
 }
@@ -548,35 +536,142 @@ static void reset_inline_prop(DomElement* elem, ViewTree*) {
     memcpy(elem->in_line, &INLINE_PROP_DEFAULT, sizeof(InlineProp));
 }
 
-static void view_prop_free_member(DomElement* elem, ViewTree* tree,
-                                  ViewPropGetFn get_member,
-                                  ViewPropCustomFn clear_member) {
-    if (!get_member || !clear_member) return;
-    void* ptr = get_member(elem);
-    if (!ptr) return;
-    view_pool_free_ptr(tree, ptr);
-    clear_member(elem, tree);
+// Multicol fragment boxes: a `next`-linked list owned by the element.
+static void free_layout_fragments(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->ext || !elem->ext->layout_fragments) return;
+    lam::Own<LayoutFragmentBox> head = lam::own((LayoutFragmentBox*)elem->ext->layout_fragments);
+    elem->ext->layout_fragments = nullptr;
+    view_pool_free_list(tree, head);
+}
+static void* view_prop_get_layout_fragments(DomElement* elem) {
+    return elem && elem->ext ? (void*)elem->ext->layout_fragments : nullptr;
+}
+static void view_prop_clear_layout_fragments(DomElement* elem, ViewTree*) {
+    if (elem && elem->ext) elem->ext->layout_fragments = nullptr;
 }
 
+// Each prop block returns to the pool through its owning field.
+#define DEFINE_VIEW_PROP_FREE(name, field) \
+static void view_prop_free_##name(DomElement* elem, ViewTree* tree) { \
+    if (elem) view_pool_free(tree, elem->field); \
+}
+#define DEFINE_VIEW_EXT_PROP_FREE(name, field) \
+static void view_prop_free_##name(DomElement* elem, ViewTree* tree) { \
+    if (elem && elem->ext) view_pool_free(tree, elem->ext->field); \
+}
+DEFINE_VIEW_PROP_FREE(font, font)
+DEFINE_VIEW_PROP_FREE(bound, bound)
+DEFINE_VIEW_PROP_FREE(blk, blk)
+DEFINE_VIEW_PROP_FREE(scroller, scroller)
+DEFINE_VIEW_PROP_FREE(embed, embed)
+DEFINE_VIEW_PROP_FREE(position, position)
+DEFINE_VIEW_PROP_FREE(transform, transform)
+DEFINE_VIEW_PROP_FREE(pseudo, pseudo)
+DEFINE_VIEW_PROP_FREE(layout_cache, layout_cache)
+DEFINE_VIEW_EXT_PROP_FREE(filter, filter)
+DEFINE_VIEW_EXT_PROP_FREE(backdrop_filter, backdrop_filter)
+DEFINE_VIEW_EXT_PROP_FREE(multicol, multicol)
+DEFINE_VIEW_EXT_PROP_FREE(marker, marker)
+DEFINE_VIEW_EXT_PROP_FREE(vpath, vpath)
+#undef DEFINE_VIEW_PROP_FREE
+#undef DEFINE_VIEW_EXT_PROP_FREE
+
 static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
-    { "font",            release_element_font_prop, free_element_font_payload, view_prop_get_font,            view_prop_clear_font,            nullptr,         nullptr,       &FONT_PROP_DEFAULT,          sizeof(FontProp),          nullptr },
-    { "inline",          nullptr,                   nullptr,                   view_prop_get_in_line,         view_prop_clear_inline,          nullptr,         free_inline_prop, nullptr,                    sizeof(InlineProp),        reset_inline_prop },
-    { "boundary",        nullptr,                   free_boundary_payload,     view_prop_get_bound,           view_prop_clear_bound,           nullptr,         nullptr,       &BOUNDARY_PROP_DEFAULT,      sizeof(BoundaryProp),      nullptr },
-    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       &BLOCK_PROP_DEFAULT,         sizeof(BlockProp),         nullptr },
-    { "marker",          nullptr,                   nullptr,                   view_prop_get_marker,          view_prop_clear_marker,          nullptr,         nullptr,       nullptr,                      sizeof(MarkerProp),        reset_marker_prop },
-    { "scroll",          nullptr,                   free_scroll_payload,       view_prop_get_scroller,        view_prop_clear_scroller,        nullptr,         nullptr,       &SCROLL_PROP_DEFAULT,        sizeof(ScrollProp),        nullptr },
-    { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr,       &EMBED_PROP_DEFAULT,         sizeof(EmbedProp),         reset_embed_prop, release_embed_prop_for_reset },
-    { "position",        nullptr,                   nullptr,                   view_prop_get_position,        view_prop_clear_position,        nullptr,         nullptr,       &POSITION_PROP_DEFAULT,      sizeof(PositionProp),      nullptr },
-    { "transform",       nullptr,                   free_transform_payload,    view_prop_get_transform,       view_prop_clear_transform,       nullptr,         nullptr,       &TRANSFORM_PROP_DEFAULT,     sizeof(TransformProp),     nullptr },
-    { "filter",          nullptr,                   free_filter_payload,       view_prop_get_filter,          view_prop_clear_filter,          nullptr,         nullptr,       &FILTER_PROP_DEFAULT,        sizeof(FilterProp),        nullptr },
-    { "backdrop-filter", nullptr,                   free_backdrop_filter_payload, view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, nullptr,       nullptr,       &FILTER_PROP_DEFAULT,        sizeof(FilterProp),        nullptr },
-    { "multicol",        nullptr,                   nullptr,                   view_prop_get_multicol,        view_prop_clear_multicol,        nullptr,         nullptr,       &MULTICOL_PROP_DEFAULT,      sizeof(MultiColumnProp),   nullptr },
-    { "form",            release_form_prop,         nullptr,                   nullptr,                       nullptr,                       nullptr,         nullptr,       nullptr,                      0,                         nullptr },
-    { "item",            nullptr,                   nullptr,                   nullptr,                       nullptr,                       clear_item_prop, free_item_prop, nullptr,                   0,                         free_item_prop },
-    { "pseudo",          nullptr,                   nullptr,                   view_prop_get_pseudo,        view_prop_clear_pseudo,          nullptr,         nullptr,       &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
-    { "vector-path",     nullptr,                   free_vector_path_payload,  view_prop_get_vpath,           view_prop_clear_vpath,           nullptr,         nullptr,       &VECTOR_PATH_PROP_DEFAULT,   sizeof(VectorPathProp),    nullptr },
-    { "layout-cache",    nullptr,                   nullptr,                   view_prop_get_layout_cache,    view_prop_clear_layout_cache,    nullptr,         nullptr,       nullptr,                      sizeof(radiant::LayoutCache), reset_layout_cache },
+    { "font", release_element_font_prop, free_element_font_payload, view_prop_get_font, view_prop_clear_font, view_prop_free_font, nullptr, nullptr, &FONT_PROP_DEFAULT, sizeof(FontProp), nullptr },
+    { "inline", nullptr, nullptr, view_prop_get_in_line, view_prop_clear_inline, nullptr, nullptr, free_inline_prop, nullptr, sizeof(InlineProp), reset_inline_prop },
+    { "boundary", nullptr, free_boundary_payload, view_prop_get_bound, view_prop_clear_bound, view_prop_free_bound, nullptr, nullptr, &BOUNDARY_PROP_DEFAULT, sizeof(BoundaryProp), nullptr },
+    { "block", nullptr, nullptr, view_prop_get_blk, view_prop_clear_blk, view_prop_free_blk, nullptr, nullptr, &BLOCK_PROP_DEFAULT, sizeof(BlockProp), nullptr },
+    { "marker", nullptr, nullptr, view_prop_get_marker, view_prop_clear_marker, view_prop_free_marker, nullptr, nullptr, nullptr, sizeof(MarkerProp), reset_marker_prop },
+    { "scroll", nullptr, free_scroll_payload, view_prop_get_scroller, view_prop_clear_scroller, view_prop_free_scroller, nullptr, nullptr, &SCROLL_PROP_DEFAULT, sizeof(ScrollProp), nullptr },
+    { "embed", release_embed_prop_entry, free_embed_payload, view_prop_get_embed, view_prop_clear_embed, view_prop_free_embed, nullptr, nullptr, &EMBED_PROP_DEFAULT, sizeof(EmbedProp), reset_embed_prop, release_embed_prop_for_reset },
+    { "position", nullptr, nullptr, view_prop_get_position, view_prop_clear_position, view_prop_free_position, nullptr, nullptr, &POSITION_PROP_DEFAULT, sizeof(PositionProp), nullptr },
+    { "transform", nullptr, free_transform_payload, view_prop_get_transform, view_prop_clear_transform, view_prop_free_transform, nullptr, nullptr, &TRANSFORM_PROP_DEFAULT, sizeof(TransformProp), nullptr },
+    { "filter", nullptr, free_filter_payload, view_prop_get_filter, view_prop_clear_filter, view_prop_free_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
+    { "backdrop-filter", nullptr, free_backdrop_filter_payload, view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, view_prop_free_backdrop_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
+    { "multicol", nullptr, nullptr, view_prop_get_multicol, view_prop_clear_multicol, view_prop_free_multicol, nullptr, nullptr, &MULTICOL_PROP_DEFAULT, sizeof(MultiColumnProp), nullptr },
+    { "form", release_form_prop, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0, nullptr },
+    { "item", nullptr, nullptr, nullptr, nullptr, nullptr, clear_item_prop, free_item_prop, nullptr, 0, free_item_prop },
+    { "pseudo", nullptr, nullptr, view_prop_get_pseudo, view_prop_clear_pseudo, view_prop_free_pseudo, nullptr, nullptr, &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
+    { "vector-path", nullptr, free_vector_path_payload, view_prop_get_vpath, view_prop_clear_vpath, view_prop_free_vpath, nullptr, nullptr, &VECTOR_PATH_PROP_DEFAULT, sizeof(VectorPathProp), nullptr },
+    { "layout-fragments", nullptr, nullptr, view_prop_get_layout_fragments, view_prop_clear_layout_fragments, nullptr, nullptr, free_layout_fragments, nullptr, 0, free_layout_fragments },
+    { "layout-cache", nullptr, nullptr, view_prop_get_layout_cache, view_prop_clear_layout_cache, view_prop_free_layout_cache, nullptr, nullptr, nullptr, sizeof(radiant::LayoutCache), reset_layout_cache },
 };
+
+// Every element view slot (DOM_ELEMENT_VIEW_SLOTS) has its teardown row. The
+// switch lists every slot (-Werror=switch rejects a missing one) and the
+// static_assert checks each row index; the table keeps the release order the
+// rows depend on (the form row releases a heap form before the item row frees).
+static constexpr int view_slot_teardown_row(DomViewSlot slot) {
+    switch (slot) {
+        case DomViewSlot::font:             return 0;
+        case DomViewSlot::in_line:          return 1;
+        case DomViewSlot::bound:            return 2;
+        case DomViewSlot::blk:              return 3;
+        case DomViewSlot::marker:           return 4;
+        case DomViewSlot::scroller:         return 5;
+        case DomViewSlot::embed:            return 6;
+        case DomViewSlot::position:         return 7;
+        case DomViewSlot::transform:        return 8;
+        case DomViewSlot::filter:           return 9;
+        case DomViewSlot::backdrop_filter:  return 10;
+        case DomViewSlot::multicol:         return 11;
+        case DomViewSlot::form:             return 12;
+        case DomViewSlot::fi:               return 13;  // the item row frees fi/gi, tb, td
+        case DomViewSlot::gi:               return 13;
+        case DomViewSlot::tb:               return 13;
+        case DomViewSlot::td:               return 13;
+        case DomViewSlot::pseudo:           return 14;
+        case DomViewSlot::vpath:            return 15;
+        case DomViewSlot::layout_fragments: return 16;
+        case DomViewSlot::layout_cache:     return 17;
+        case DomViewSlot::count:            break;
+    }
+    return -1;
+}
+
+static constexpr bool view_slots_all_have_rows() {
+    constexpr int rows = (int)(sizeof(VIEW_PROP_TEARDOWN) / sizeof(VIEW_PROP_TEARDOWN[0]));
+    for (int slot = 0; slot < (int)DomViewSlot::count; slot++) {
+        int row = view_slot_teardown_row((DomViewSlot)slot);
+        if (row < 0 || row >= rows) return false;
+    }
+    return true;
+}
+static_assert(view_slots_all_have_rows(), "an element view slot has no teardown row");
+
+#ifndef NDEBUG
+// The value of a view slot, for the debug check that a pointer-clearing
+// teardown left none behind. Compiled with its only caller, which is
+// debug-only: release builds would otherwise reject an unused static.
+static const void* view_slot_value(const DomElement* elem, DomViewSlot slot) {
+    const DomElementExt* ext = elem->ext;
+    switch (slot) {
+        case DomViewSlot::font:             return elem->font;
+        case DomViewSlot::in_line:          return elem->in_line;
+        case DomViewSlot::bound:            return elem->bound;
+        case DomViewSlot::blk:              return elem->blk;
+        case DomViewSlot::scroller:         return elem->scroller;
+        case DomViewSlot::embed:            return elem->embed;
+        case DomViewSlot::position:         return elem->position;
+        case DomViewSlot::transform:        return elem->transform;
+        case DomViewSlot::pseudo:           return elem->pseudo;
+        case DomViewSlot::layout_cache:     return elem->layout_cache;
+        case DomViewSlot::fi:               return elem->fi;
+        case DomViewSlot::gi:               return elem->gi;
+        case DomViewSlot::tb:               return elem->tb;
+        case DomViewSlot::td:               return elem->td;
+        case DomViewSlot::form:             return elem->form;
+        case DomViewSlot::multicol:         return ext ? (const void*)ext->multicol : nullptr;
+        case DomViewSlot::vpath:            return ext ? (const void*)ext->vpath : nullptr;
+        case DomViewSlot::filter:           return ext ? (const void*)ext->filter : nullptr;
+        case DomViewSlot::backdrop_filter:  return ext ? (const void*)ext->backdrop_filter : nullptr;
+        case DomViewSlot::marker:           return ext ? (const void*)ext->marker : nullptr;
+        case DomViewSlot::layout_fragments: return ext ? (const void*)ext->layout_fragments : nullptr;
+        case DomViewSlot::count:            break;
+    }
+    return nullptr;
+}
+#endif
 
 static_assert(sizeof(FONT_PROP_DEFAULT) == sizeof(FontProp), "font reset metadata drift");
 static_assert(sizeof(INLINE_PROP_DEFAULT) == sizeof(InlineProp), "inline reset metadata drift");
@@ -630,6 +725,8 @@ static void view_teardown_apply_table(ViewTree* tree,
                                       DomElement* elem,
                                       int flags) {
     if (!elem) return;
+    // scratch-lived elements borrow their font and own nothing in the prop pool
+    assert(!elem->scratch_lived());
     int count = sizeof(VIEW_PROP_TEARDOWN) / sizeof(VIEW_PROP_TEARDOWN[0]);
     for (int i = 0; i < count; i++) {
         const ViewPropTeardownEntry* entry = &VIEW_PROP_TEARDOWN[i];
@@ -646,7 +743,7 @@ static void view_teardown_apply_table(ViewTree* tree,
                 if (entry->free_payload) {
                     entry->free_payload(elem, tree);
                 }
-                view_prop_free_member(elem, tree, entry->get_member, entry->clear_member);
+                if (entry->free_member) entry->free_member(elem, tree);
             }
         }
         if ((flags & VIEW_TEARDOWN_RESET_IN_PLACE)) {
@@ -674,6 +771,17 @@ static void view_teardown_apply_table(ViewTree* tree,
             }
         }
     }
+#ifndef NDEBUG
+    // a pointer-clearing teardown leaves no element pointer into view-tree storage
+    if ((flags & VIEW_TEARDOWN_CLEAR_POINTERS) && !(flags & VIEW_TEARDOWN_RESET_IN_PLACE)) {
+        for (int slot = 0; slot < (int)DomViewSlot::count; slot++) {
+            if (view_slot_value(elem, (DomViewSlot)slot)) {
+                log_error("view_teardown: element view slot %d still set after clearing", slot);
+                assert(!"view slot left set after a clearing teardown");
+            }
+        }
+    }
+#endif
 }
 
 static void view_teardown_clear_element_scalars(DomElement* elem) {
@@ -691,21 +799,29 @@ static void view_teardown_clear_element_scalars(DomElement* elem) {
     elem->reset_view_ext();
 }
 
+// Every text view slot (DOM_TEXT_VIEW_SLOTS) is cleared here; the switch lists
+// each one (-Werror=switch). Rects are recycled by the caller first; the font
+// is borrowed from the resolved ancestor FontProp, whose element owner
+// releases it exactly once.
+static void view_teardown_clear_text_slot(DomText* text, DomTextViewSlot slot) {
+    switch (slot) {
+        case DomTextViewSlot::rect:  text->rect = nullptr; break;
+        case DomTextViewSlot::font:  text->font = nullptr; break;
+        case DomTextViewSlot::count: break;
+    }
+}
+
 static void view_teardown_clear_text(DomText* text) {
     if (!text) return;
-    text->rect = nullptr;
-    text->font = nullptr;
+    for (int slot = 0; slot < (int)DomTextViewSlot::count; slot++)
+        view_teardown_clear_text_slot(text, (DomTextViewSlot)slot);
     text->view_type = RDT_VIEW_NONE;
 }
 
 static void view_teardown_reset_text(ViewTree* tree, DomText* text) {
     if (!tree || !text) return;
     tree->recycle_text_rects(text->rect);
-    text->rect = nullptr;
-    // Text nodes borrow the resolved ancestor FontProp; the element owner is
-    // responsible for releasing/resetting that prop exactly once.
-    text->font = nullptr;
-    text->view_type = RDT_VIEW_NONE;
+    view_teardown_clear_text(text);
 }
 
 static bool release_should_walk_dom_children(DomElement* elem) {
@@ -796,21 +912,25 @@ static void view_teardown_visit_node(ViewTree* tree,
     }
 }
 
-void* alloc_prop(LayoutContext* lycon, size_t size) {
-    return lycon->doc->view_tree->alloc_prop(size);
-}
-
-void* ViewTree::alloc_prop(size_t size) {
-    void* prop = pool_calloc(prop_pool, size);
+static void* alloc_property_from_pool(Pool* pool, size_t size) {
+    void* prop = pool_calloc(pool, size);
     if (prop) {
         return prop;
     }
     else {
         // layout properties have no recovery path; aborting here avoids unchecked callers dereferencing NULL later.
         log_error("alloc_prop: pool_calloc returned NULL (pool=%p, size=%zu) - pool may be corrupt",
-                  (void*)prop_pool, size);
+                  (void*)pool, size);
         abort();
     }
+}
+
+void* alloc_prop(LayoutContext* lycon, size_t size) {
+    return alloc_property_from_pool(layout_prop_pool(lycon), size);
+}
+
+void* ViewTree::alloc_prop(size_t size) {
+    return alloc_property_from_pool(prop_pool, size);
 }
 
 TextRect* ViewTree::alloc_text_rect() {
@@ -931,10 +1051,15 @@ void view_pool_release_detached_subtree(DomNode* root) {
     if (!root) return;
 
     // JS DOM removals can leave detached nodes alive after they stop being part
-    // of the document view tree; release handles and clear layout-pool pointers
-    // in the same visitor so pseudo nodes and replaced children cannot diverge.
-    view_teardown_visit_node(nullptr, root,
-        VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_CLEAR_POINTERS,
+    // of the document view tree; release handles, return prop blocks to the
+    // pool and clear the pointers in the same visitor so pseudo nodes and
+    // replaced children cannot diverge. Clearing without freeing stranded the
+    // blocks: retirement later found no pointer left to free them through.
+    DomElement* owner = root->is_element() ? root->as_element()
+        : root->parent && root->parent->is_element() ? root->parent->as_element() : nullptr;
+    ViewTree* tree = owner && owner->doc ? (ViewTree*)owner->doc->view_tree : nullptr;
+    view_teardown_visit_node(tree, root,
+        VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_FREE_POOL | VIEW_TEARDOWN_CLEAR_POINTERS,
         false);
 }
 
@@ -1009,6 +1134,7 @@ void view_pool_init(ViewTree* tree, MemContext* owner) {
 
 void ViewTree::reset_retained() {
     layout_generation = generation_next32(layout_generation);
+    if (model) view_tree_model_reset(this);
     if (root) {
         // DOM mutation fallback keeps both DOM/view nodes and their owned prop
         // blocks; only external payloads and generation-local values reset.
@@ -1033,6 +1159,7 @@ void view_pool_reset_retained(ViewTree* tree) {
 }
 
 void ViewTree::destroy() {
+    view_tree_model_destroy(this);
     destroy_measurement_cache(this);
     if (root) {
         view_teardown_visit_node(this, root,
@@ -1064,14 +1191,18 @@ void view_pool_destroy(ViewTree* tree) {
     if (tree) tree->destroy();
 }
 
-lam::Own<ViewTree> view_tree_shell_create() {
-    return lam::own((ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT)); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets; see view_tree_shell_create.
+lam::Own<ViewTree> view_tree_shell_create(DomDocument* doc) {
+    if (!doc || !doc->document_pool) {
+        log_error("view_tree_shell_create: document has no pool for its view tree");
+        return lam::Own<ViewTree>();
+    }
+    return lam::own((ViewTree*)pool_calloc(doc->document_pool, sizeof(ViewTree)));
 }
 
-void view_tree_shell_destroy(lam::Own<ViewTree>& tree) {
+void view_tree_shell_destroy(DomDocument* doc, lam::Own<ViewTree>& tree) {
     if (!tree) return;
     view_pool_destroy(tree);
-    lam::free_owned(tree);
+    lam::free_owned(doc ? (Pool*)doc->document_pool : nullptr, tree);
 }
 
 
@@ -1291,7 +1422,7 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, Vie
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = lam::view_require_block(view);
-    if (!block->transform || !block->transformp()->functions) return false;
+    if (!transform_has_functions(block->transform)) return false;
 
     float abs_x = 0.0f, abs_y = 0.0f;
     calculate_absolute_position(view, nullptr, &abs_x, &abs_y, boundary);
@@ -1299,7 +1430,7 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, Vie
         block->transformp(), abs_x, abs_y, block->width, block->height);
 
     *out_matrix = radiant::compute_transform_matrix(
-        block->transformp()->functions, block->width, block->height, origin.x, origin.y);
+        block->transformp(), block->width, block->height, origin.x, origin.y);
     return true;
 }
 
@@ -1347,21 +1478,27 @@ static bool transform_function_is_3d(TransformFunctionType type) {
         type == TRANSFORM_PERSPECTIVE;
 }
 
-static bool view_chain_has_3d_transform(View* view) {
-    for (View* current = view; current; current = current->parent_view()) {
-        if (!current->is_block()) continue;
-        ViewBlock* block = lam::view_require_block(current);
-        if (!block->transform || !block->transformp()->functions) continue;
-        for (TransformFunction* function = block->transformp()->functions;
-             function; function = function->next) {
-            if (transform_function_is_3d(function->type)) return true;
-        }
+static bool view_has_3d_transform(View* view) {
+    if (!view || !view->is_block()) return false;
+    const TransformProp* transform = lam::view_require_block(view)->transform;
+    if (!transform_has_functions(transform)) return false;
+    for (const TransformFunction& function : transform->individual) {
+        if (transform_function_is_3d(function.type)) return true;
+    }
+    for (TransformFunction* function = transform->functions; function; function = function->next) {
+        if (transform_function_is_3d(function->type)) return true;
     }
     return false;
 }
 
-static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
-                                         float* width, float* height) {
+static bool view_chain_has_3d_transform(View* view) {
+    for (View* current = view; current; current = current->parent_view()) {
+        if (view_has_3d_transform(current)) return true;
+    }
+    return false;
+}
+
+static RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
     RdtMatrix4 accumulated = rdt_matrix4_identity();
     int depth = 0;
     for (View* current = view; current && depth < 256;
@@ -1384,7 +1521,9 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
                     transform->perspective, origin_x, origin_y);
                 accumulated = rdt_matrix4_multiply(&perspective, &accumulated);
             }
-            if (!transform || transform->transform_style != CSS_VALUE_PRESERVE_3D) {
+            if (!radiant::transform_preserves_3d(block)) {
+                // backface orientation is relative to this 3D context, before ancestor flattening.
+                if (context_only) break;
                 // CSS Transforms 2 §4.1.3: project descendant depth after the
                 // parent's perspective and before the parent's own transform.
                 RdtMatrix4 flatten = rdt_matrix4_identity();
@@ -1396,7 +1535,7 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
             }
         }
 
-        if (transform && transform->functions) {
+        if (transform_has_functions(transform)) {
             float block_x = 0.0f;
             float block_y = 0.0f;
             calculate_absolute_position(
@@ -1408,12 +1547,35 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
                 ? block->height * transform->origin_y / 100.0f
                 : transform->origin_y);
             RdtMatrix4 local = radiant::compute_transform_matrix_3d(
-                transform->functions, block->width, block->height,
+                transform, block->width, block->height,
                 origin_x, origin_y, transform->origin_z);
             accumulated = rdt_matrix4_multiply(&local, &accumulated);
         }
     }
+    return accumulated;
+}
 
+bool view_backface_is_hidden(View* view, BackfaceCheck check) {
+    bool independent_plane = false;
+    for (View* current = view; current; current = current->parent_view()) {
+        if (!current->is_block()) continue;
+        const TransformProp* transform = lam::view_require_block(current)->transform;
+        if (transform && transform->backface_visibility == CSS_VALUE_HIDDEN) {
+            RdtMatrix4 accumulated = view_accumulated_transform_3d(current, true);
+            if (rdt_matrix4_backface_visible(&accumulated)) {
+                // preserved child planes can paint independently; input still excludes the hidden ancestor.
+                if (check == BACKFACE_HIT_TEST || !radiant::transform_preserves_3d(lam::view_require_block(current)) ||
+                    (check == BACKFACE_SELF && (current == view || !independent_plane))) return true;
+            }
+        }
+        independent_plane = independent_plane || view_has_3d_transform(current);
+    }
+    return false;
+}
+
+static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
+                                         float* width, float* height) {
+    RdtMatrix4 accumulated = view_accumulated_transform_3d(view, false);
     float local_x[4] = {*x, *x + *width, *x + *width, *x};
     float local_y[4] = {*y, *y, *y + *height, *y + *height};
     float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;

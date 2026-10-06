@@ -10,22 +10,332 @@ extern "C" {
 }
 #include "css_value.hpp"
 #include "css_style.hpp"
-#include "dom_element.hpp"
-#include "../../../lib/mem_grow.hpp"
 
-CssValue* css_value_create_list(Pool* pool, CssValue** values, size_t count) {
-    if (!pool || count > INT_MAX || count > SIZE_MAX / sizeof(CssValue*) ||
-        (count && !values)) return NULL;
-    CssValue* list = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    if (!list) return NULL;
-    list->type = CSS_VALUE_TYPE_LIST;
-    list->data.list.count = (int)count;
-    if (count) {
-        list->data.list.values = (CssValue**)pool_alloc(pool, count * sizeof(CssValue*));
-        if (!list->data.list.values) return NULL;
-        memcpy(list->data.list.values, values, count * sizeof(CssValue*));
+#include "../../../lib/color.h"
+#include "../../../lib/strbuf.h"
+#include <math.h>
+
+static double css_color_clamp(double value, double maximum = 1.0) {
+    return isnan(value) ? 0.0 : fmax(0.0, fmin(maximum, value));
+}
+
+static bool css_color_component(const CssValue* value, bool hue, bool percentage_only,
+    bool allow_missing, bool clamp_component, double percentage_scale, double number_scale, double* result,
+    bool* missing, CssMathType* type) {
+    if (!value) return false;
+    *missing = value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE;
+    if (*missing) {*result = 0.0; *type = CSS_MATH_NUMBER; return allow_missing;}
+    if (value->type != CSS_VALUE_TYPE_NUMBER && value->type != CSS_VALUE_TYPE_PERCENTAGE &&
+        value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_ANGLE &&
+        value->type != CSS_VALUE_TYPE_FUNCTION) return false;
+    CssMathEvaluationContext context = {nullptr, nullptr, 1.0, true};
+    CssMathResult computed = css_math_evaluate(value, &context);
+    *type = computed.type;
+    if (!computed.resolved) return false;
+    if (hue) {
+        if (*type != CSS_MATH_NUMBER && *type != CSS_MATH_ANGLE) return false;
+        *result = isfinite(computed.value) ? fmod(computed.value, 360.0) : 0.0;
+        if (*result < 0.0) *result += 360.0;
+    } else {
+        if (*type != CSS_MATH_PERCENT && (*type != CSS_MATH_NUMBER || percentage_only)) return false;
+        double amount = *type == CSS_MATH_PERCENT
+            ? computed.percentage * percentage_scale : computed.value * number_scale;
+        *result = clamp_component ? css_color_clamp(amount) : amount;
     }
-    return list;
+    return true;
+}
+
+static bool css_color_function_compute(const CssFunction* function, CssComputedColor* result) {
+    if (!function || !function->name || !function->args) return false;
+    bool rgb = str_ieq_cstr(function->name, "rgb") || str_ieq_cstr(function->name, "rgba");
+    bool hsl = str_ieq_cstr(function->name, "hsl") || str_ieq_cstr(function->name, "hsla");
+    bool hwb = str_ieq_cstr(function->name, "hwb");
+    bool predefined = str_ieq_cstr(function->name, "color");
+    if (!rgb && !hsl && !hwb && !predefined) return false;
+    const CssValue* channels[4] = {};
+    bool modern = function->arg_count == 1;
+    int count = function->arg_count;
+    if (modern) {
+        const CssValue* list = function->args[0];
+        if (!list || list->type != CSS_VALUE_TYPE_LIST || list->data.list.comma_separated ||
+            !list->data.list.values) return false;
+        count = list->data.list.count;
+        int offset = predefined ? 1 : 0;
+        if (predefined) {
+            if (count < 1) return false;
+            const char* space = css_value_identifier_name(list->data.list.values[0]);
+            if (!space || !str_ieq_cstr(space, "srgb")) return false;
+            result->color_space = "srgb";
+            count--;
+        }
+        if (count != 3 && count != 5) return false;
+        for (int i = 0; i < 3; i++) channels[i] = list->data.list.values[i + offset];
+        if (count == 5) {
+            const char* slash = css_math_token_name(list->data.list.values[3 + offset]);
+            if (!slash || strcmp(slash, "/") != 0) return false;
+            channels[3] = list->data.list.values[4 + offset];
+        }
+    } else {
+        if (hwb || predefined || count < 3 || count > 4) return false;
+        for (int i = 0; i < count; i++) channels[i] = function->args[i];
+    }
+    result->type = predefined ? CSS_COLOR_COLOR : rgb ? CSS_COLOR_RGB : hsl ? CSS_COLOR_HSL : CSS_COLOR_HWB;
+    result->components[3] = 1.0;
+    CssMathType first_type = CSS_MATH_INVALID;
+    for (int i = 0; i < 4; i++) {
+        if (i == 3 && !channels[i]) continue;
+        bool missing = false;
+        CssMathType type;
+        bool hue = (hsl || hwb) && i == 0;
+        if (!css_color_component(channels[i], hue, !modern && !rgb && i > 0 && i < 3,
+            modern, !predefined || i == 3, 0.01,
+            rgb && i < 3 ? 1.0 / 255.0 : (hsl || hwb) && i > 0 && i < 3 ? 0.01 : 1.0,
+            &result->components[i], &missing, &type)) return false;
+        if (missing) result->missing |= (uint8_t)(1u << i);
+        if (rgb && !modern && i < 3) {
+            if (i == 0) first_type = type;
+            else if (first_type != type) return false;
+        }
+    }
+    if ((hsl || hwb) && !result->missing) {
+        // HSL/HWB become sRGB; missing channels retain their source model for interpolation.
+        double red, green, blue;
+        if (hsl) color_hsl_to_rgb(result->components[0], result->components[1], result->components[2],
+            &red, &green, &blue);
+        else color_hwb_to_rgb(result->components[0], result->components[1], result->components[2],
+            &red, &green, &blue);
+        result->type = CSS_COLOR_RGB;
+        result->components[0] = red; result->components[1] = green; result->components[2] = blue;
+    }
+    return true;
+}
+
+bool css_color_compute(const CssValue* value, CssComputedColor* result) {
+    if (!value || !result) return false;
+    *result = {};
+    if (value->type == CSS_VALUE_TYPE_FUNCTION)
+        return css_color_function_compute(value->data.function, result);
+    CssEnum keyword = CSS_VALUE__UNDEF;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) keyword = value->data.keyword;
+    else if (value->type == CSS_VALUE_TYPE_COLOR) {
+        CssColorType type = value->data.color.type;
+        if (type == CSS_COLOR_CURRENT || type == CSS_COLOR_CURRENTCOLOR) keyword = CSS_VALUE_CURRENTCOLOR;
+        else if (type == CSS_COLOR_KEYWORD || type == CSS_COLOR_SYSTEM)
+            keyword = css_enum_by_name(value->data.color.data.keyword);
+        else if (type == CSS_COLOR_TRANSPARENT) keyword = CSS_VALUE_TRANSPARENT;
+        else if (type == CSS_COLOR_HEX || type == CSS_COLOR_RGB) {
+            result->type = CSS_COLOR_RGB;
+            result->alpha_is_byte = true;
+            result->components[0] = value->data.color.data.rgba.r / 255.0;
+            result->components[1] = value->data.color.data.rgba.g / 255.0;
+            result->components[2] = value->data.color.data.rgba.b / 255.0;
+            result->components[3] = value->data.color.data.rgba.a / 255.0;
+            return true;
+        } else if ((type == CSS_COLOR_HSL || type == CSS_COLOR_HWB) && value->data.color.data.components) {
+            const CssColorComponents* components = value->data.color.data.components;
+            result->type = CSS_COLOR_RGB;
+            if (type == CSS_COLOR_HSL) color_hsl_to_rgb(components->component1, components->component2,
+                components->component3, &result->components[0], &result->components[1], &result->components[2]);
+            else color_hwb_to_rgb(components->component1, components->component2,
+                components->component3, &result->components[0], &result->components[1], &result->components[2]);
+            result->components[3] = css_color_clamp(components->component4);
+            return true;
+        } else return false;
+    } else return false;
+    result->keyword = keyword;
+    if (keyword == CSS_VALUE_CURRENTCOLOR) {result->type = CSS_COLOR_CURRENTCOLOR; return true;}
+    const CssEnumInfo* info = css_enum_info(keyword);
+    if (info && info->group == CSS_VALUE_GROUP_SYSTEM_COLOR) {result->type = CSS_COLOR_SYSTEM; return true;}
+    uint8_t r, g, b, a;
+    if (!css_named_color_to_rgba(keyword, &r, &g, &b, &a)) return false;
+    result->type = CSS_COLOR_RGB;
+    result->alpha_is_byte = true;
+    result->components[0] = r / 255.0; result->components[1] = g / 255.0;
+    result->components[2] = b / 255.0; result->components[3] = a / 255.0;
+    return true;
+}
+
+const CssValue* css_background_color_component(const CssValue* value) {
+    if (!value) return nullptr;
+    CssComputedColor color;
+    if (css_color_compute(value, &color)) return value;
+    if (value->type != CSS_VALUE_TYPE_LIST || !value->data.list.values) return nullptr;
+    for (int i = value->data.list.count - 1; i >= 0; i--) {
+        const CssValue* found = css_background_color_component(value->data.list.values[i]);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+double css_color_legacy_alpha(uint8_t alpha) {
+    // CSS Color 4 §16.1.1; the rational form keeps the 50% half tie exact.
+    double percent = floor(alpha * 100.0 / 255.0 + 0.5);
+    return floor(percent * 255.0 / 100.0 + 0.5) == alpha ? percent / 100.0
+        : floor(alpha / 0.255 + 0.5) / 1000.0;
+}
+
+bool css_color_to_rgba(const CssComputedColor* color, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a) {
+    if (!color || !r || !g || !b || !a) return false;
+    double red = color->components[0], green = color->components[1], blue = color->components[2];
+    if (color->type == CSS_COLOR_HSL) color_hsl_to_rgb(red, green, blue, &red, &green, &blue);
+    else if (color->type == CSS_COLOR_HWB) color_hwb_to_rgb(red, green, blue, &red, &green, &blue);
+    else if (color->type != CSS_COLOR_RGB && !(color->type == CSS_COLOR_COLOR &&
+        color->color_space && strcmp(color->color_space, "srgb") == 0)) return false;
+    *r = (uint8_t)floor(css_color_clamp(red) * 255.0 + 0.5);
+    *g = (uint8_t)floor(css_color_clamp(green) * 255.0 + 0.5);
+    *b = (uint8_t)floor(css_color_clamp(blue) * 255.0 + 0.5);
+    *a = (uint8_t)floor(css_color_clamp(color->components[3]) * 255.0 + 0.5);
+    return true;
+}
+
+CssValue* css_value_create_function(Pool* pool, const char* name, CssValue** args, int count) {
+    if (!pool || !name || count < 0 || (count && !args)) return nullptr;
+    CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    CssFunction* function = (CssFunction*)pool_calloc(pool, sizeof(CssFunction));
+    if (!value || !function) return nullptr;
+    function->name = pool_strdup(pool, name);
+    if (!function->name) return nullptr;
+    function->args = args;
+    function->arg_count = count;
+    value->type = CSS_VALUE_TYPE_FUNCTION;
+    value->data.function = function;
+    return value;
+}
+
+CssRuleChildList css_rule_child_list(CssRule* rule) {
+    if (!rule) return {};
+    if (rule->type == CSS_RULE_STYLE)
+        return {&rule->data.style_rule.nested_rules, &rule->data.style_rule.nested_rule_count};
+    if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+        rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE ||
+        (rule->type == CSS_RULE_LAYER && !rule->data.conditional_rule.layer_statement))
+        return {&rule->data.conditional_rule.rules, &rule->data.conditional_rule.rule_count};
+    return {};
+}
+
+void css_rule_attach(CssRule* rule, CssRule* parent, CssStylesheet* stylesheet) {
+    if (!rule) return;
+    rule->parent = parent;
+    rule->stylesheet = stylesheet;
+    // descriptor declaration wrappers retain the existing lazy style-rule cache.
+    if ((rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_PAGE) &&
+        rule->property_count && rule->property_names && rule->property_values)
+        css_rule_attach((CssRule*)rule->property_values, rule, stylesheet);
+    CssRuleChildList children = css_rule_child_list(rule);
+    if (children.count) for (size_t i = 0; i < *children.count; i++)
+        css_rule_attach((*children.rules)[i], rule, stylesheet);
+}
+
+bool css_value_is_global_keyword(const CssValue* value) {
+    const CssEnumInfo* info = value && value->type == CSS_VALUE_TYPE_KEYWORD
+        ? css_enum_info(value->data.keyword) : nullptr;
+    return info && info->group == CSS_VALUE_GROUP_GLOBAL;
+}
+
+const char* css_value_identifier_name(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->has_keyword_spelling) return value->data.keyword_token.spelling;
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
+    return nullptr;
+}
+
+bool css_value_keyword_equals(const CssValue* value, CssEnum keyword) {
+    return value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == keyword;
+}
+
+bool css_function_name_is(const CssFunction* function, const char* name) {
+    return function && function->name && name && str_ieq_cstr(function->name, name);
+}
+
+bool css_value_is_inherit(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_INHERIT); }
+bool css_value_is_initial(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_INITIAL); }
+bool css_value_is_unset(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_UNSET); }
+bool css_value_is_auto(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_AUTO); }
+bool css_value_is_none(const CssValue* value) { return css_value_keyword_equals(value, CSS_VALUE_NONE); }
+
+int css_content_quote_type(const CssValue* value) {
+    if (!value || (value->type != CSS_VALUE_TYPE_CUSTOM && value->type != CSS_VALUE_TYPE_KEYWORD)) return 0;
+    const char* name = css_value_identifier_name(value);
+    const char* names[] = {"open-quote", "close-quote", "no-open-quote", "no-close-quote"};
+    for (int i = 0; name && i < 4; i++) if (str_ieq_cstr(name, names[i])) return i + 1;
+    return 0;
+}
+
+const char* css_content_quote_char(const CssValue* quotes, bool open, int depth) {
+    if (depth < 0) depth = 0;
+    if (css_value_is_none(quotes)) return "";
+    if (quotes && quotes->type == CSS_VALUE_TYPE_LIST && quotes->data.list.count >= 2) {
+        int pairs = quotes->data.list.count / 2;
+        int pair = depth < pairs ? depth : pairs - 1;
+        const CssValue* item = quotes->data.list.values[pair * 2 + (open ? 0 : 1)];
+        if (item && item->type == CSS_VALUE_TYPE_STRING) return item->data.string;
+    }
+    if (quotes && quotes->type == CSS_VALUE_TYPE_STRING) return quotes->data.string;
+    return open ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
+}
+
+const char* css_content_attribute_name(const CssValue* value, const char** type) {
+    if (type) *type = nullptr;
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_ATTR && value->data.attr_ref) {
+        if (type) *type = value->data.attr_ref->type_or_unit;
+        return value->data.attr_ref->name;
+    }
+    const CssFunction* function = value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    if (!css_function_name_is(function, "attr") || function->arg_count < 1 || function->arg_count > 2) return nullptr;
+    const CssValue* name = function->args[0];
+    // attr(name type) is one space-separated argument, followed by an optional comma fallback.
+    if (name && name->type == CSS_VALUE_TYPE_LIST) {
+        if (name->data.list.comma_separated || name->data.list.count < 1 || name->data.list.count > 2) return nullptr;
+        if (name->data.list.count == 2) {
+            const char* hint = css_value_identifier_name(name->data.list.values[1]);
+            if (!hint) return nullptr;
+            if (type) *type = hint;
+        }
+        name = name->data.list.values[0];
+    }
+    return css_value_identifier_name(name);
+}
+
+bool css_content_append(const CssValue* value, const CssContentBindings* bindings,
+                        int* quote_depth, StrBuf* text, size_t depth) {
+    if (!value || !bindings || !quote_depth || !text || depth > 64) return false;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++)
+            if (!css_content_append(value->data.list.values[i], bindings, quote_depth, text, depth + 1)) return false;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_STRING) {
+        if (value->data.string) strbuf_append_str(text, value->data.string);
+        return true;
+    }
+    const char* attribute = css_content_attribute_name(value);
+    const CssFunction* function = value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    if (attribute) {
+        const char* result = bindings->attribute ? bindings->attribute(bindings->context, attribute) : nullptr;
+        if (result) strbuf_append_str(text, result);
+        else if (value->type == CSS_VALUE_TYPE_ATTR && value->data.attr_ref->fallback)
+            return css_content_append(value->data.attr_ref->fallback, bindings, quote_depth, text, depth + 1);
+        return true;
+    }
+    int quote = css_content_quote_type(value);
+    if (quote) {
+        if (quote == 2 || quote == 4) { if (*quote_depth > 0) (*quote_depth)--; }
+        if ((quote == 1 || quote == 2) && bindings->quote) {
+            const char* result = bindings->quote(bindings->context, quote == 1, *quote_depth);
+            if (result) strbuf_append_str(text, result);
+        }
+        if (quote == 1 || quote == 3) (*quote_depth)++;
+        return true;
+    }
+    if (css_value_is_none(value) || (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL)) return true;
+    return function && function->name && bindings->function && bindings->function(bindings->context, function, text);
 }
 
 bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels) {
@@ -35,6 +345,32 @@ bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels) {
     };
     if (!pixels || unit < CSS_UNIT_PX || unit > CSS_UNIT_Q) return false;
     *pixels = value * scales[unit - CSS_UNIT_PX];
+    return true;
+}
+
+bool css_dimension_to_canonical(CssUnit unit, double value, CssUnit* canonical_unit,
+                                double* canonical_value) {
+    if (!canonical_unit || !canonical_value) return false;
+    double converted;
+    if (css_absolute_length_to_px(unit, value, &converted)) {
+        *canonical_unit = CSS_UNIT_PX;
+        *canonical_value = converted;
+        return true;
+    }
+    double factor;
+    switch (unit) {
+        case CSS_UNIT_DEG: factor = 1.0; *canonical_unit = CSS_UNIT_DEG; break;
+        case CSS_UNIT_GRAD: factor = 0.9; *canonical_unit = CSS_UNIT_DEG; break;
+        case CSS_UNIT_RAD: factor = 180.0 / acos(-1.0); *canonical_unit = CSS_UNIT_DEG; break;
+        case CSS_UNIT_TURN: factor = 360.0; *canonical_unit = CSS_UNIT_DEG; break;
+        case CSS_UNIT_S: factor = 1.0; *canonical_unit = CSS_UNIT_S; break;
+        case CSS_UNIT_MS: factor = 0.001; *canonical_unit = CSS_UNIT_S; break;
+        case CSS_UNIT_DPI: factor = 1.0 / 96.0; *canonical_unit = CSS_UNIT_DPPX; break;
+        case CSS_UNIT_DPCM: factor = 2.54 / 96.0; *canonical_unit = CSS_UNIT_DPPX; break;
+        case CSS_UNIT_DPPX: factor = 1.0; *canonical_unit = CSS_UNIT_DPPX; break;
+        default: return false;
+    }
+    *canonical_value = value * factor;
     return true;
 }
 
@@ -69,7 +405,7 @@ const char* css_math_token_name(const CssValue* value) {
     if (value->type == CSS_VALUE_TYPE_CUSTOM)
         return value->data.custom_property.name;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        if (value->flags & CSS_VALUE_AUTHORED_IDENTIFIER) return value->data.identifier.authored;
+        if (value->has_keyword_spelling) return value->data.keyword_token.spelling;
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
         return info ? info->name : NULL;
     }
@@ -77,29 +413,36 @@ const char* css_math_token_name(const CssValue* value) {
 }
 
 static bool css_value_contains_var_reference_inner(const CssValue* value,
-                                                   int depth) {
+                                                   int depth, bool include_pending) {
     if (!value || depth > 32) return false;
     if (value->type == CSS_VALUE_TYPE_VAR) return true;
+    if (include_pending && (value->type == CSS_VALUE_TYPE_ENV || value->type == CSS_VALUE_TYPE_ATTR)) return true;
     if (value->type == CSS_VALUE_TYPE_LIST) {
         if (!value->data.list.values) return false;
         for (int i = 0; i < value->data.list.count; i++) {
             if (css_value_contains_var_reference_inner(
-                    value->data.list.values[i], depth + 1)) return true;
+                    value->data.list.values[i], depth + 1, include_pending)) return true;
         }
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION &&
                value->data.function && value->data.function->name) {
         if (strcmp(value->data.function->name, "var") == 0) return true;
+        if (include_pending && (strcmp(value->data.function->name, "env") == 0 ||
+            strcmp(value->data.function->name, "attr") == 0)) return true;
         for (int i = 0; value->data.function->args &&
              i < value->data.function->arg_count; i++) {
             if (css_value_contains_var_reference_inner(
-                    value->data.function->args[i], depth + 1)) return true;
+                    value->data.function->args[i], depth + 1, include_pending)) return true;
         }
     }
     return false;
 }
 
 bool css_value_contains_var_reference(const CssValue* value) {
-    return css_value_contains_var_reference_inner(value, 0);
+    return css_value_contains_var_reference_inner(value, 0, false);
+}
+
+bool css_value_contains_pending_substitution(const CssValue* value) {
+    return css_value_contains_var_reference_inner(value, 0, true);
 }
 
 float css_font_size_keyword_px(CssEnum keyword) {
@@ -623,7 +966,16 @@ static const CssEnumInfo css_value_definitions[] = {
     {"preserve-3d", 11, CSS_VALUE_PRESERVE_3D, CSS_VALUE_GROUP_MISC},
     {"from-font", 9, CSS_VALUE_FROM_FONT, CSS_VALUE_GROUP_MISC},
     {"chain", 5, CSS_VALUE_CHAIN, CSS_VALUE_GROUP_MISC},
+    {"always", 6, CSS_VALUE_ALWAYS, CSS_VALUE_GROUP_MISC},
+    {"avoid-page", 10, CSS_VALUE_AVOID_PAGE, CSS_VALUE_GROUP_MISC},
+    {"avoid-column", 12, CSS_VALUE_AVOID_COLUMN, CSS_VALUE_GROUP_MISC},
+    {"avoid-region", 12, CSS_VALUE_AVOID_REGION, CSS_VALUE_GROUP_MISC},
+    {"recto", 5, CSS_VALUE_RECTO, CSS_VALUE_GROUP_MISC},
+    {"verso", 5, CSS_VALUE_VERSO, CSS_VALUE_GROUP_MISC},
+    {"footnote", 8, CSS_VALUE_FOOTNOTE, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
+    {"col-resize", 10, CSS_VALUE_COL_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"row-resize", 10, CSS_VALUE_ROW_RESIZE, CSS_VALUE_GROUP_CURSOR},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);
@@ -963,202 +1315,4 @@ bool css_unit_is_length(CssUnit unit) {
 
 bool css_unit_is_angle(CssUnit unit) {
     return unit >= CSS_UNIT_DEG && unit <= CSS_UNIT_TURN;
-}
-
-struct CssVariableFrame {
-    const char* name;
-    DomElement* owner;
-    bool cyclic;
-};
-
-static bool css_var_stack_cycle(CssVariableFrame* var_stack, int stack_count,
-                                const char* var_name, DomElement* owner) {
-    if (!var_stack || !var_name) return false;
-    for (int i = 0; i < stack_count; i++) {
-        if (var_stack[i].owner != owner ||
-            !css_custom_property_name_matches(var_stack[i].name, var_name)) continue;
-        // fallbacks inside a dependency cycle cannot make its properties valid.
-        for (int j = i; j < stack_count; j++) var_stack[j].cyclic = true;
-        return true;
-    }
-    return false;
-}
-
-static const char* css_var_function_name(const CssFunction* func) {
-    if (!func || !func->args || func->arg_count < 1 || !func->args[0]) return nullptr;
-    CssValue* first_arg = func->args[0];
-    if (first_arg->type == CSS_VALUE_TYPE_CUSTOM) {
-        return first_arg->data.custom_property.name;
-    }
-    return first_arg->type == CSS_VALUE_TYPE_STRING ? first_arg->data.string : nullptr;
-}
-
-struct CssSubstitutedTokens {
-    CssValue** values;
-    int count;
-    int capacity;
-};
-
-static bool css_append_substituted_tokens(Pool* pool, const CssValue* value,
-                                          CssSubstitutedTokens* tokens) {
-    if (value && value->type == CSS_VALUE_TYPE_LIST) {
-        if (value->data.list.count < 0 ||
-            (value->data.list.count && !value->data.list.values)) return false;
-        for (int i = 0; i < value->data.list.count; i++) {
-            if (i && value->data.list.comma_separated &&
-                !css_append_substituted_tokens(pool, nullptr, tokens)) return false;
-            if (!value->data.list.values[i] ||
-                !css_append_substituted_tokens(pool, value->data.list.values[i], tokens))
-                return false;
-        }
-        return true;
-    }
-    if (tokens->count == INT_MAX || !lam::pool_copy_grow_array(pool,
-            &tokens->values, &tokens->capacity, tokens->count,
-            tokens->count + 1, 4, false)) return false;
-    // null is a comma boundary here; empty lists contribute no tokens.
-    tokens->values[tokens->count++] = (CssValue*)value;
-    return true;
-}
-
-static CssValue* css_substituted_token_group(Pool* pool, CssValue** values, int count) {
-    return count == 1 ? values[0] : css_value_create_list(pool, values, (size_t)count);
-}
-
-static const CssValue* css_normalize_substituted_list(Pool* pool, const CssValue* value) {
-    CssSubstitutedTokens tokens = {};
-    if (!css_append_substituted_tokens(pool, value, &tokens)) return nullptr;
-    int groups = 1;
-    for (int i = 0; i < tokens.count; i++) {
-        if (!tokens.values[i]) groups++;
-    }
-    if (groups == 1) return css_substituted_token_group(pool, tokens.values, tokens.count);
-    CssValue** values = (CssValue**)pool_alloc(pool, (size_t)groups * sizeof(CssValue*));
-    if (!values) return nullptr;
-    int start = 0, next = 0;
-    for (int i = 0; i <= tokens.count; i++) {
-        if (i < tokens.count && tokens.values[i]) continue;
-        values[next] = css_substituted_token_group(pool, tokens.values + start, i - start);
-        if (!values[next++]) return nullptr;
-        start = i + 1;
-    }
-    CssValue* result = css_value_create_list(pool, values, (size_t)groups);
-    if (result) result->data.list.comma_separated = true;
-    return result;
-}
-
-static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* value,
-                                                  DomElement* context_element,
-                                                  CssVariableLookupFn lookup,
-                                                  void* lookup_context,
-                                                  CssVariableFrame* var_stack, int stack_count) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        CssValue** substituted = nullptr;
-        int count = value->data.list.count;
-        if (count < 0 || (count > 0 && !value->data.list.values)) return nullptr;
-        for (int i = 0; i < count; i++) {
-            const CssValue* item = value->data.list.values[i];
-            const CssValue* replacement = resolve_var_function_inner(
-                pool, item, context_element, lookup, lookup_context, var_stack, stack_count);
-            if (item && !replacement) return nullptr;
-            if (replacement != item && !substituted) {
-                if (!pool) return nullptr;
-                substituted = (CssValue**)pool_alloc(pool,
-                    (size_t)count * sizeof(CssValue*));
-                if (!substituted) return nullptr;
-                memcpy(substituted, value->data.list.values,
-                       (size_t)count * sizeof(CssValue*));
-            }
-            if (substituted) substituted[i] = (CssValue*)replacement;
-        }
-        if (!substituted) return value;
-        CssValue result = *value;
-        result.data.list.values = substituted;
-        // substitution joins adjacent tokens across comma and space boundaries.
-        return css_normalize_substituted_list(pool, &result);
-    }
-    const CssFunction* func = value->type == CSS_VALUE_TYPE_FUNCTION
-        ? value->data.function : nullptr;
-    const CSSVarRef* var_ref = value->type == CSS_VALUE_TYPE_VAR
-        ? value->data.var_ref : nullptr;
-    if (!func && !var_ref) return value;
-    if (func && !func->name) return value;
-    if (func && func->arg_count > 0 && !func->args) return nullptr;
-    if (func && strcmp(func->name, "var") != 0) {
-        CssValue arguments = {};
-        arguments.type = CSS_VALUE_TYPE_LIST;
-        arguments.data.list.values = func->args;
-        arguments.data.list.count = func->arg_count;
-        arguments.data.list.comma_separated = true;
-        const CssValue* substituted = resolve_var_function_inner(pool, &arguments,
-            context_element, lookup, lookup_context, var_stack, stack_count);
-        if (!substituted) return nullptr;
-        if (substituted == &arguments) return value;
-        CssFunction* new_func = (CssFunction*)pool_alloc(pool,
-                                                        sizeof(CssFunction));
-        CssValue* result = (CssValue*)pool_alloc(pool, sizeof(CssValue));
-        if (!new_func || !result) return nullptr;
-        *new_func = *func;
-        if (substituted->type == CSS_VALUE_TYPE_LIST &&
-            (substituted->data.list.comma_separated || substituted->data.list.count == 0)) {
-            new_func->args = substituted->data.list.values;
-            new_func->arg_count = substituted->data.list.count;
-        } else {
-            new_func->args = (CssValue**)pool_alloc(pool, sizeof(CssValue*));
-            if (!new_func->args) return nullptr;
-            new_func->args[0] = (CssValue*)substituted;
-            new_func->arg_count = 1;
-        }
-        *result = *value;
-        result->data.function = new_func;
-        return result;
-    }
-    CssValue fallback_tokens = {};
-    fallback_tokens.type = CSS_VALUE_TYPE_LIST;
-    if (func && func->arg_count >= 2) {
-        // every comma after the first belongs to the fallback token sequence.
-        fallback_tokens.data.list.values = func->args + 1;
-        fallback_tokens.data.list.count = func->arg_count - 1;
-        fallback_tokens.data.list.comma_separated = true;
-    }
-    const CssValue* fallback_value = var_ref
-        ? (var_ref->has_fallback ? var_ref->fallback : nullptr)
-        : (func->arg_count >= 2 ? (func->arg_count == 2 ? func->args[1] : &fallback_tokens)
-            : nullptr);
-    auto resolve_fallback = [&]() -> const CssValue* {
-        if (!fallback_value) return nullptr;
-        const CssValue* resolved = resolve_var_function_inner(pool, fallback_value,
-            context_element, lookup, lookup_context, var_stack, stack_count);
-        // synthetic fallback lists cannot escape their stack frame.
-        return resolved == &fallback_tokens
-            ? (pool ? css_normalize_substituted_list(pool, resolved) : nullptr) : resolved;
-    };
-    const char* var_name = var_ref ? var_ref->name : css_var_function_name(func);
-    if (!var_name) {
-        return resolve_fallback();
-    }
-    DomElement* owner = nullptr;
-    const CssValue* var_value = lookup
-        ? lookup(lookup_context, context_element, var_name, &owner)
-        : dom_element_lookup_custom_property(context_element, var_name, &owner);
-    if (var_value) {
-        if (css_var_stack_cycle(var_stack, stack_count, var_name, owner)) return nullptr;
-        if (stack_count >= 32) return resolve_fallback();
-        CssVariableFrame* frame = &var_stack[stack_count];
-        *frame = {var_name, owner, false};
-        const CssValue* resolved = resolve_var_function_inner(
-            pool, var_value, owner, lookup, lookup_context, var_stack, stack_count + 1);
-        if (frame->cyclic) resolved = nullptr;
-        if (resolved) return resolved;
-        return resolve_fallback();
-    }
-    return resolve_fallback();
-}
-
-const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
-                                     CssVariableLookupFn lookup, void* context,
-                                     DomElement* element) {
-    CssVariableFrame var_stack[32];
-    return resolve_var_function_inner(pool, value, element, lookup, context, var_stack, 0);
 }

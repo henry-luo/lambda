@@ -90,7 +90,7 @@ Color render_document_output_background(View* root_view) {
     return background;
 }
 
-void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
+void render_embed_doc(RasterRenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
 
@@ -133,7 +133,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 Color pa_color = rdcon->color;
                 DomDocument* pa_doc = rdcon->ui_context
                     ? rdcon->ui_context->document : nullptr;
-                if (rdcon->ui_context) rdcon->ui_context->document = doc;
+                if (rdcon->ui_context) rdcon->ui_context->document = lam::up(doc);
 
                 // Reset color to black for embedded document (don't inherit from parent doc)
                 // Each document should start with default black text color
@@ -177,7 +177,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 
                 rdcon->font = pa_font;
                 rdcon->color = pa_color;
-                if (rdcon->ui_context) rdcon->ui_context->document = pa_doc;
+                if (rdcon->ui_context) rdcon->ui_context->document = lam::up(pa_doc);
             }
             else {
             }
@@ -195,7 +195,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     rdcon->block = pa_block;
 }
 
-void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
+void render_inline_view(RasterRenderContext* rdcon, ViewSpan* view_span) {
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_INLINE);
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
 

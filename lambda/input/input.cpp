@@ -3,6 +3,7 @@
 #include "../core/lambda-decimal.hpp"
 #include "../io/mark_builder.hpp"
 #include "../../lib/url.h"
+#include "../../lib/rdb.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mime-detect.h"
 #include "../../lib/arena.h"
@@ -1163,13 +1164,17 @@ static void parse_html_input(Input* input, const char* source) {
     input->root = (Item){.element = doc};
 }
 
+#ifndef LAMBDA_NO_LATEX
 static void parse_latex_input(Input* input, const char* source) {
     parse_latex_direct(input, source);
 }
+#endif
 
+#ifndef LAMBDA_NO_LATEX
 static void parse_tikz_input(Input* input, const char* source) {
     parse_tikz_direct(input, source);
 }
+#endif
 
 static void parse_mdx_input(Input* input, const char* source) {
     input->root = input_mdx(input, source);
@@ -1236,9 +1241,13 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"rst", parse_rst_input},
     {"html", parse_html_input},
     {"html5", parse_html_input},
+#ifndef LAMBDA_NO_LATEX
     {"latex", parse_latex_input},
     {"latex-ts", parse_latex_input},
+#endif
+#ifndef LAMBDA_NO_LATEX
     {"tikz", parse_tikz_input},
+#endif
     {"rtf", parse_rtf},
     {"wiki", parse_wiki_input},
     {"asciidoc", parse_asciidoc_input},
@@ -1251,7 +1260,9 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"mark", parse_mark},
     {"org", parse_org_input},
     {"typst", parse_typst_input},
+#ifndef LAMBDA_NO_CSS_INPUT
     {"css", parse_css},
+#endif
     {"jsx", parse_jsx},
     {"mdx", parse_mdx_input},
 };
@@ -1462,11 +1473,15 @@ static Input* input_from_source_n_with_name_parent(const char* source,
             }
         }
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}
+#ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "pdf") == 0) {
             // PDF is binary; use the explicit length we received instead of strlen,
             // which would truncate at the first null byte inside the binary stream.
             parse_pdf(input, source, source_len);
         }
+
+#endif
+#if !defined(LAMBDA_NO_LATEX) && !defined(LAMBDA_NO_MATH_INPUT)
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor) ? flavor->chars : "latex";
             // Both ASCII and LaTeX math use the direct cursor parser.
@@ -1477,11 +1492,15 @@ static Input* input_from_source_n_with_name_parent(const char* source,
             const char* math_flavor = effective_type + 5; // Skip "math-" prefix
             parse_math(input, source, math_flavor);
         }
+
+#endif
+#ifndef LAMBDA_NO_GRAPH_INPUT
         else if (strcmp(effective_type, "graph") == 0) {
             const char* graph_flavor = flavor ? flavor->chars
                 : (detected_graph_flavor ? detected_graph_flavor : "dot");
             parse_graph(input, source, graph_flavor);
         }
+#endif
         else {
             input->parse_failed = true;
             log_error("input_from_source: unsupported input type '%s'", effective_type);
@@ -1544,6 +1563,7 @@ static Input* input_from_local_path(const char* pathname, Url* abs_url,
 
     Input* input = input_from_source_n_with_name_parent(source, src_len,
         abs_url, type, flavor, name_parent);
+#ifndef LAMBDA_NO_GRAPH_INPUT
     const bool explicit_structurizr = flavor &&
         (strcmp(flavor->chars, "structurizr") == 0 || strcmp(flavor->chars, "c4") == 0);
     const bool detected_structurizr = !flavor &&
@@ -1551,6 +1571,7 @@ static Input* input_from_local_path(const char* pathname, Url* abs_url,
     if (input && !is_binary_pdf && (explicit_structurizr || detected_structurizr)) {
         resolve_graph_structurizr_local_includes(input, pathname);
     }
+#endif
     mem_free(source);
     return input;
 }
@@ -1668,6 +1689,18 @@ static Input* input_from_target_impl(Target* target, String* type,
 
     log_debug("input_from_target: scheme=%d, type=%d", target->scheme, target->type);
 
+    // network database targets go to the RDB layer before generic URL/path
+    // handling, which neither knows their schemes nor may log their credentials:
+    // URIs (postgresql://, mysql://, ...) and, with an explicit driver type,
+    // libpq key/value strings ("host=... password=...")
+    if (target->type == TARGET_TYPE_URL && target->original &&
+            (strstr(target->original, "://") || type)) {
+        const char* rdb_driver = rdb_detect_format(target->original, type ? type->chars : NULL);
+        if (rdb_driver && strcmp(rdb_driver, "sqlite") != 0) {
+            return input_rdb_from_path_with_name_parent(target->original, rdb_driver, name_parent);
+        }
+    }
+
     // Check if target is a directory first (for local targets)
     if (target_is_dir(target)) {
         log_debug("input_from_target: directory detected, using directory listing");
@@ -1684,7 +1717,9 @@ static Input* input_from_target_impl(Target* target, String* type,
     // For URL targets, use the existing URL-based dispatch
     if (target->type == TARGET_TYPE_URL && target->url) {
         Url* url = target->url;
-        log_debug("input_from_target: URL target, href=%s", url->href ? url->href->chars : "null");
+        char redacted_href[1024];
+        rdb_redact_uri(url->href ? url->href->chars : "null", redacted_href, sizeof(redacted_href));
+        log_debug("input_from_target: URL target, href=%s", redacted_href);
 
         // Handle different URL schemes
         if (target->scheme == TARGET_SCHEME_FILE) {
@@ -1911,17 +1946,24 @@ InputManager::InputManager() {
     }
     inputs = arraylist_new(16);
     thread_pools = arraylist_new(4);
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     script_cache = input_script_cache_create();
+#else
+    script_cache = nullptr;
+#endif
     // Use shared global decimal context
     decimal_ctx = decimal_fixed_context();
 }
 
 InputManager::~InputManager() {
+#ifndef LAMBDA_NO_RESOURCE_CACHE
     if (script_cache) {
         input_script_cache_log_summary(script_cache);
         input_script_cache_destroy(script_cache);
         script_cache = nullptr;
     }
+
+#endif
     // clean up all tracked inputs
     reset_inputs();
     if (inputs) {

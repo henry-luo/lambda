@@ -9,7 +9,7 @@
 #include <math.h>
 #include <string.h>
 
-void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
+void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
     if (!marker || !marker->is_element()) return;
 
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
@@ -220,12 +220,12 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     }
 }
 
-void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
+void render_litem_view(RasterRenderContext* rdcon, ViewBlock* list_item) {
     rdcon->list.item_index++;
     render_block_view(rdcon, list_item);
 }
 
-void render_list_view(RenderContext* rdcon, ViewBlock* view) {
+void render_list_view(RasterRenderContext* rdcon, ViewBlock* view) {
     ViewBlock* list = lam::view_require_block(view);
     ListBlot pa_list = rdcon->list;
     rdcon->list.item_index = 0;

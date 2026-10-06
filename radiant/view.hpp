@@ -36,6 +36,7 @@ enum PropGroupKind : uint8_t {
     PROP_GROUP_FLEX_ITEM,
     PROP_GROUP_GRID_ITEM,
     PROP_GROUP_OUTLINE,
+    PROP_GROUP_TRANSFORM,
 };
 
 enum CssPropValueKind : uint8_t {
@@ -84,6 +85,8 @@ const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
+String* css_prop_serialize_registered_custom_property(Pool* pool, DomElement* element,
+    const char* name, size_t name_length);
 
 // Refresh one dynamic element's stylesheet declarations without constructing a
 // view tree; CSSOM and transition capture need the cascade, not committed layout.
@@ -175,14 +178,15 @@ typedef struct TimingFunction {
             float samples[11];
         } bezier;
         struct {
-            int count;
+            double count;
             StepPosition position;
         } steps;
     };
 } TimingFunction;
 
 void timing_cubic_bezier_init(TimingFunction* tf, float x1, float y1, float x2, float y2);
-float timing_function_eval(const TimingFunction* tf, float t);
+float timing_function_eval(const TimingFunction* tf, float t, bool before = false);
+bool animation_easing_before(const struct AnimationInstance* anim);
 
 extern TimingFunction TIMING_EASE;
 extern TimingFunction TIMING_EASE_IN;
@@ -196,7 +200,7 @@ typedef void (*AnimTickFn)(AnimationInstance* anim, float t);
 typedef void (*AnimFinishFn)(AnimationInstance* anim);
 typedef void (*AnimCancelFn)(AnimationInstance* anim);
 
-// document-pool: retained across relayout with the scheduler.
+// document-owned scheduler state survives retained relayout (D4.5.1v4).
 struct AnimationInstance {
     AnimationInstance* next;
     AnimationInstance* prev;
@@ -206,10 +210,11 @@ struct AnimationInstance {
     void* state;
 
     double start_time;
+    double sample_time;
     double duration;
     double delay;
     double iteration_count;
-    int current_iteration;
+    double current_iteration;
 
     AnimationDirection direction;
     AnimationFillMode fill_mode;
@@ -224,6 +229,7 @@ struct AnimationInstance {
     bool finish_notified;
     bool sampled;
     bool layout_changed;
+    bool retain_after_finish;   // CSS name reconciliation keeps an inactive timeline until removal
 
     float bounds[4];
     double pause_time;
@@ -251,6 +257,8 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
                               AnimationInstance* only = nullptr);
 void animation_scheduler_anchor_host_time(AnimationScheduler* scheduler, double now);
 void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim);
+void animation_scheduler_move_before(AnimationScheduler* scheduler,
+    AnimationInstance* anim, AnimationInstance* before);
 void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_move_before(AnimationScheduler* scheduler, AnimationInstance* anim,
                                      AnimationInstance* before);
@@ -261,6 +269,7 @@ void animation_scheduler_prune_disconnected_css_views(AnimationScheduler* schedu
                                                        DomDocument* document);
 AnimationInstance* animation_instance_create(AnimationScheduler* scheduler);
 void animation_instance_pause(AnimationInstance* anim, double now);
+void animation_instance_sample(AnimationInstance* anim, double now);
 void animation_instance_resume(AnimationInstance* anim, double now);
 
 // 3x3 affine transform matrix shared by view transforms and render backends.
@@ -330,6 +339,9 @@ static inline void rdt_matrix4_transform_point(const RdtMatrix4* matrix,
 
 // Per-view CSS transform matrix, for painted bounds and for hit-testing.
 bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
+enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
+bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
+bool rdt_matrix4_backface_visible(const RdtMatrix4* matrix);
 bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform = true);
 
 static inline RdtMatrix rdt_matrix_identity(void) {
@@ -663,16 +675,39 @@ typedef struct ImageSurface {
     // surfaces built on the stack or inside another object, which are never
     // referenced by a retained display list.
     lam::Handle<struct ImageSurface> self;
+    lam::Own<struct ImageSurface> retire_next;  // link in the retire queue once destroyed
 } ImageSurface;
 
 // The one allocation path for heap ImageSurfaces: zeroed and
 // registered in the slot table. image_surface_destroy releases the slot.
 extern ImageSurface* image_surface_alloc(void);
-// The live surface behind `handle`, or null once it was destroyed. Reads only
-// the slot table, never the surface.
+// The live surface behind `handle`, or null once it was destroyed. Lock-free;
+// reads only the slot table. Inside an ImageSurfaceReadScope the result stays
+// valid until the scope ends: destroyed surfaces are released only at a quiet
+// point, when no read scope is open anywhere.
 extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
-// Invalidates every handle to `surface`; image_surface_destroy calls it.
+// Invalidates every handle to `surface` and returns its slot at once (only for
+// surfaces no reader can hold; image_surface_destroy defers instead).
 extern void image_surface_release_slot(ImageSurface* surface);
+// A render session that reads surfaces through handles (display-list replay,
+// tile workers, retained checks, export lowering). While any scope is open,
+// image_surface_destroy queues surfaces; the scope that closes last, on a
+// thread that is not a render worker, releases the queue.
+struct ImageSurfaceReadScope {
+    ImageSurfaceReadScope();
+    ~ImageSurfaceReadScope();
+    ImageSurfaceReadScope(const ImageSurfaceReadScope&) = delete;
+    ImageSurfaceReadScope& operator=(const ImageSurfaceReadScope&) = delete;
+};
+// Render worker threads only count their scopes; they never release the queue.
+extern void image_surface_mark_render_worker_thread(void);
+// Releases queued surfaces now when no read scope is open (shutdown, teardown).
+extern void image_surface_drain_retired(void);
+// image_surface_destroy's work: frees the surface's storage and its slot.
+extern void image_surface_release_now(ImageSurface* surface);
+// Nulls the surface's slot and queues it when a read scope is open; returns
+// false when the caller may release it at once.
+extern bool image_surface_defer_release(ImageSurface* surface);
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern ImageSurface* image_surface_decode_file(const char* path);
@@ -1153,13 +1188,14 @@ inline CssBoxSide radiant_css_box_side(CssPropertyCode property) {
     }
 }
 
+inline CssPropertyCode radiant_box_side_property(CssPropertyCode shorthand, CssBoxSide side) {
+    const CssProperty* property = css_property_get_by_code(shorthand);
+    return property && property->longhand_count == 4
+        ? property->longhand_props[side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP] : shorthand;
+}
+
 inline CssPropertyCode radiant_border_width_property(CssBoxSide side) {
-    static const CssPropertyCode properties[4] = {
-        CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_RIGHT_WIDTH,
-        CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_LEFT_WIDTH
-    };
-    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
-    return properties[index];
+    return radiant_box_side_property(CSS_PROPERTY_BORDER_WIDTH, side);
 }
 
 inline CssPropertyCode radiant_inset_property(CssBoxSide side) {
@@ -1378,9 +1414,9 @@ typedef struct {
     lam::Own<RadialGradient> radial_gradient;
     lam::Own<ConicGradient> conic_gradient;
     // Multiple gradient layers (for stacked gradients)
-    lam::OwnArr<RadialGradient*> radial_layers;  // array of additional radial gradients
+    lam::OwnArr<lam::Own<RadialGradient>> radial_layers;  // array of additional radial gradients
     int radial_layer_count;
-    lam::OwnArr<LinearGradient*> linear_layers;  // array of additional linear gradients
+    lam::OwnArr<lam::Own<LinearGradient>> linear_layers;  // array of additional linear gradients
     int linear_layer_count;
     CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
@@ -1489,6 +1525,8 @@ typedef enum TransformFunctionOwner {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TransformProp {
     lam::Shared<TransformFunction> functions;    // Linked list of transform functions (applied in order)
+    // inline values survive transform-list replacement without borrowing another view's pool nodes.
+    TransformFunction individual[3];           // translate, rotate, scale; TRANSFORM_NONE means none
     // Keyframe samples borrow their immutable list from the document pool;
     // resolved CSS functions are owned by the mutable view-property pool.
     TransformFunctionOwner functions_owner;
@@ -1505,6 +1543,15 @@ typedef struct TransformProp {
     CssEnum transform_style;         // flat or preserve-3d
     CssEnum backface_visibility;     // visible or hidden
 } TransformProp;
+
+static inline bool transform_has_functions(const TransformProp* transform) {
+    if (!transform) return false;
+    if (transform->functions) return true;
+    for (const TransformFunction& function : transform->individual) {
+        if (function.type != TRANSFORM_NONE) return true;
+    }
+    return false;
+}
 
 /**
  * FilterFunction - Individual CSS filter function
@@ -2089,6 +2136,7 @@ typedef struct BlockProp {
     bool contain_size;
     bool contain_inline_size;
     bool contain_positioning;
+    bool contain_paint;
     bool content_visibility_hidden;
     float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
@@ -2774,6 +2822,8 @@ typedef struct CanonicalPropStats {
 
 // tier-2: view-pool, rebuilt each relayout
 struct ViewTree {
+    lam::Own<struct ViewTreeModel> model; // Secondary geometry; null for the DOM-backed default.
+    lam::Own<ViewTree> next_secondary;   // Document-owned secondary registry chain.
     lam::Own<Pool> prop_pool;       // Mutable element-owned view props; survives retained reflow.
     lam::Own<Arena> canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
     // The owning document's memory context (borrowed); every allocator below is
@@ -2787,7 +2837,7 @@ struct ViewTree {
     // scratch and the frame display list each get their own arena.
     lam::Own<Arena> render_scratch_arena;
     lam::Own<Arena> display_list_arena;
-    lam::OwnArr<CanonicalInlineEntry*> inline_canonical_buckets; // Resizable exact-value index in prop_pool.
+    lam::OwnArr<lam::Own<CanonicalInlineEntry>> inline_canonical_buckets; // Resizable exact-value index in prop_pool.
     size_t inline_canonical_bucket_count;
     size_t inline_canonical_count;
     size_t canonical_prop_cap_bytes;
@@ -2814,13 +2864,34 @@ struct ViewTree {
 uint64_t inline_prop_hash(const InlineProp* value);
 bool inline_prop_equal(const InlineProp* left, const InlineProp* right);
 LAM_NODE_OF(ViewTree, NodeViewTree);
+// Element and text props live in the view tree's storage; Document-level nodes
+// hold them through lam::ViewProp / lam::ViewRef.
+LAM_NODE_OF(FontProp, NodeViewTree);
+LAM_NODE_OF(InlineProp, NodeViewTree);
+LAM_NODE_OF(BoundaryProp, NodeViewTree);
+LAM_NODE_OF(BlockProp, NodeViewTree);
+LAM_NODE_OF(ScrollProp, NodeViewTree);
+LAM_NODE_OF(EmbedProp, NodeViewTree);
+LAM_NODE_OF(PositionProp, NodeViewTree);
+LAM_NODE_OF(TransformProp, NodeViewTree);
+LAM_NODE_OF(PseudoContentProp, NodeViewTree);
+LAM_NODE_OF(FlexItemProp, NodeViewTree);
+LAM_NODE_OF(GridItemProp, NodeViewTree);
+LAM_NODE_OF(TableProp, NodeViewTree);
+LAM_NODE_OF(TableCellProp, NodeViewTree);
+LAM_NODE_OF(FormControlProp, NodeViewTree);
+LAM_NODE_OF(MultiColumnProp, NodeViewTree);
+LAM_NODE_OF(VectorPathProp, NodeViewTree);
+LAM_NODE_OF(FilterProp, NodeViewTree);
+LAM_NODE_OF(MarkerProp, NodeViewTree);
+LAM_NODE_OF(TextRect, NodeViewTree);
+LAM_NODE_OF(LayoutFragmentBox, NodeViewTree);
 
-// The document's ViewTree shell. It stays on the memtracked heap: fixtures may
-// alias the document pool with the view tree's prop pool, which the tree
-// destroys before the shell is released.
-lam::Own<ViewTree> view_tree_shell_create();
-// Destroys the tree's storage and releases the shell; clears the field.
-void view_tree_shell_destroy(lam::Own<ViewTree>& tree);
+// The document's ViewTree shell lives in the document's pool; the document owns
+// it across retained layout resets.
+lam::Own<ViewTree> view_tree_shell_create(DomDocument* doc);
+// Destroys the tree's storage and releases the shell into `doc`'s pool; clears the field.
+void view_tree_shell_destroy(DomDocument* doc, lam::Own<ViewTree>& tree);
 LAM_NODE_OF(RadiantBorderSide, NodeStack);
 LAM_NODE_OF(RadiantInsetSide, NodeStack);
 
@@ -3580,16 +3651,18 @@ typedef struct CssAnimProp {
 
 // scratch configuration: values borrow the computed-value pool supplied by the caller.
 typedef struct CssTransitionProp {
-    const CssValue* properties;
-    const CssValue* durations;
-    const CssValue* delays;
-    const CssValue* timings;
+    double duration;            // transition-duration in seconds
+    double delay;               // transition-delay in seconds
+    TimingFunction timing;      // transition-timing-function
 } CssTransitionProp;
 
-const CssValue* css_timeline_computed_value(DomElement* element,
-                                           CssPropertyCode property, Pool* pool);
-void css_transition_resolve_config(DomElement* element, Pool* pool,
-                                   CssTransitionProp* transition);
+typedef struct CssTransitionList {
+    const CssValue* values[4];   // scratch computed lists, cycled against transition-property
+} CssTransitionList;
+
+void css_transition_resolve_config(DomElement* element, Pool* pool, CssTransitionList* list);
+bool css_transition_select_config(const CssTransitionList* list, CssPropertyCode property,
+    CssTransitionProp* transition);
 
 // Shared parser entry points used by CSS animations and Web Animations so both
 // paths apply the same property-value grammar and timing-function semantics.
@@ -3618,7 +3691,7 @@ typedef struct CssAnimState {
     bool event_started;
     bool suppress_events;
     bool matched;
-    int event_iteration;
+    double event_iteration;
     lam::OwnArr<CssAnimatedProp> underlying;
     int underlying_count;
     int underlying_capacity;
@@ -3741,6 +3814,8 @@ void css_animation_finish(AnimationInstance* anim);
 // Process animation properties during style resolution and start animations
 // if animation-name references valid @keyframes. Called after resolve_css_styles.
 void css_animation_resolve(DomElement* element, LayoutContext* lycon);
+const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
+    CssPropertyCode property);
 
 
 // ============================================================================
@@ -3801,12 +3876,20 @@ bool resolve_pseudo_color(LayoutContext* lycon, StyleTree* pseudo_style,
 Color radiant_caret_color_for_view(ViewSpan* span);
 Color get_current_color_for_view(ViewSpan* span);
 Color color_name_to_rgb(CssEnum color_name);
+Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+struct MultiValue { const CssValue* length; const CssValue* color; const CssValue* style; };
+void set_multi_value(LayoutContext* lycon, MultiValue* parts, const CssValue* value);
 float resolve_css_angle_value(const CssValue* value);
 float layout_effective_zoom(View* view);
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
                                const char* url);
+const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
+    const CssValue* value, CssPropertyCode property = CSS_PROPERTY_UNKNOWN);
+const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
+    const char* name, size_t name_length = (size_t)-1);
+bool css_compute_cascaded_font_size(DomElement* element, float* font_size);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
@@ -3818,10 +3901,12 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* view);
 DisplayValue resolve_display_value(void* child);
+DisplayValue css_default_display_for_element(DomElement* element, DomNode* node);
 bool css_resolve_display_css_value(DomElement* element, const CssValue* value,
                                    DisplayValue* out_display);
 bool css_display_contents_suppresses_element(DomElement* element);
 bool css_display_element_is_replaced(DomElement* element);
+bool css_content_value_has_image_url(const CssValue* value);
 bool css_is_mathml_element(const DomElement* element);
 bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* element,
                                            float* out_width, float* out_height);
@@ -3945,6 +4030,16 @@ TransformLengthTerm* clone_transform_length_terms(Pool* pool, const TransformLen
 TransformLengthTerm* interpolate_transform_length_terms(Pool* pool, const TransformLengthTerm* from,
     const TransformLengthTerm* to, float progress);
 float resolve_computed_transform_length(const CssValue* value, float reference_size);
+extern RdtMatrix compute_transform_matrix(const TransformProp* transform,
+                                          float width, float height,
+                                          float origin_x, float origin_y,
+                                          float perspective_distance = 0.0f,
+                                          float perspective_origin_x = 0.0f,
+                                          float perspective_origin_y = 0.0f);
+extern RdtMatrix4 compute_transform_matrix_3d(const TransformProp* transform,
+                                              float width, float height,
+                                              float origin_x, float origin_y,
+                                              float origin_z = 0.0f);
 extern RdtMatrix4 compute_parent_perspective_matrix_3d(float distance,
                                                         float origin_x, float origin_y);
 
@@ -3958,6 +4053,8 @@ inline float transform_perspective_origin_offset(const TransformProp* transform,
     return is_percent ? extent * origin / 100.0f : origin;
 }
 extern bool has_transform(DomElement* elem);
+extern bool transform_establishes_containing_block(DomElement* elem);
+extern bool transform_preserves_3d(DomElement* elem);
 extern void transform_point(float& x, float& y, const RdtMatrix& m);
 
 } // namespace radiant
@@ -4003,17 +4100,19 @@ typedef struct UiContext {
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)
     float viewport_height; // intended viewport height (CSS logical pixels, for vh/vw units)
-    ImageSurface* surface;  // rendering surface of a window
+    lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
+    lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
 
     // font handling
-    struct FontContext* font_ctx; // unified font context
-    Pool* font_pool;       // factory-registered root for font context allocations
-    Arena* font_arena;     // factory-registered arena for font strings/database
-    Arena* font_glyph_arena; // factory-registered arena for glyph bitmap caches
+    lam::Up<struct FontContext> font_ctx; // the font context in use: owned_font_ctx, or the host's for an isolated UI
+    lam::Own<struct FontContext> owned_font_ctx; // created by ui_context_init; destroy releases it
+    lam::Own<Pool> font_pool;       // factory-registered root for font context allocations
+    lam::Own<Arena> font_arena;     // factory-registered arena for font strings/database
+    lam::Own<Arena> font_glyph_arena; // factory-registered arena for glyph bitmap caches
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
     float minimum_logical_font_size;  // UA minimum for relative font sizes; zero disables
-    char** fallback_fonts;  // fallback fonts
+    lam::Up<char*> fallback_fonts;  // the static fallback font table
 
     // @font-face support
     lam::OwnArr<FontFaceDescriptor*> font_faces;    // Array of @font-face declarations
@@ -4021,12 +4120,12 @@ typedef struct UiContext {
     int font_face_capacity;
 
     // image cache
-    struct hashmap* image_cache;  // cache for images loaded
+    lam::Own<struct hashmap> image_cache;  // owns every loaded ImageSurface (O2)
 
     float device_scale_x;   // physical framebuffer px per logical window px on X
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
-    DomDocument* document;  // current document
+    lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
     int iframe_depth;
@@ -4176,9 +4275,9 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_filename, int viewport_
                                     struct DocumentScriptPhaseTiming* script_timing,
                                     bool print_media = false);
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
-    const LambdaDocumentTransformConfig* transform,
-    const LambdaDocumentTransformOption* options, int option_count,
-    int viewport_width, int viewport_height, Pool* pool);
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        int viewport_width, int viewport_height, Pool* pool, bool print_media = false);
 DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool);
 // The message of the error value a Lambda document or transform returned on
 // its most recent failed load, or null. The CLI reports it as the actionable

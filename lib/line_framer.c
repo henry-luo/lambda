@@ -34,6 +34,13 @@ const char* line_framer_peek(LineFramer* framer, size_t* out_length) {
     return start;
 }
 
+const char* line_framer_data(const LineFramer* framer, size_t* out_length) {
+    size_t unread = framer ? framer->bytes.length - framer->offset : 0;
+    if (out_length) *out_length = unread;
+    if (!framer || !framer->bytes.data) return NULL;
+    return (const char*)framer->bytes.data + framer->offset;
+}
+
 bool line_framer_consume(LineFramer* framer, size_t length) {
     if (!framer || length > framer->bytes.length - framer->offset) return false;
     framer->offset += length;

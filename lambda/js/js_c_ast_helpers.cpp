@@ -19,6 +19,7 @@ Type* js_set_type_any(JsTranspiler* tp, AnyReason reason) {
 }
 
 void js_report_any_census(JsTranspiler* tp) {
+#ifndef NDEBUG
     if (!tp) return;
     int any_total = 0;
     for (int reason = 0; reason < ANY_REASON_COUNT; reason++) {
@@ -33,8 +34,11 @@ void js_report_any_census(JsTranspiler* tp) {
         strbuf_append_format(census, " %s=%d",
             any_reason_name((AnyReason)reason), tp->any_census[reason]);
     }
-    log_notice("%s (js)", census->str);
+    log_debug("%s (js)", census->str);
     strbuf_free(census);
+#else
+    (void)tp;
+#endif
 }
 
 JsOperator js_operator_from_string(const char* op_str, size_t len) {

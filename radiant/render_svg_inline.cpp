@@ -50,7 +50,7 @@
 static const int SVG_RESOURCE_STACK_MAX = 32;
 static thread_local const char* g_svg_resource_stack[SVG_RESOURCE_STACK_MAX];
 static thread_local int g_svg_resource_stack_depth = 0;
-static thread_local RenderContext* g_svg_active_rdcon = nullptr;
+static thread_local RasterRenderContext* g_svg_active_rdcon = nullptr;
 
 struct SvgImageResolverEntry {
     Element* svg_root;
@@ -66,7 +66,7 @@ typedef struct SvgImageResolverRegistry {
 static SvgImageResolverRegistry g_svg_image_resolvers = {};
 
 static bool svg_item_number_equals(ItemReader item, int value);
-static const char* svg_pdf_registered_image_resolver(void* context, int object_num);
+static const char* svg_pdf_registered_image_resolver(Element* context, int object_num);
 
 typedef TypedHashMap<SvgImageResolverEntry,
     HashMapPointerMemberKeyOps<SvgImageResolverEntry, &SvgImageResolverEntry::svg_root>>
@@ -180,7 +180,7 @@ extern "C" void svg_unregister_image_resolvers_for_tree(Element* root) {
 
 extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
                                                    SvgImageResolverFn* out_resolver,
-                                                   void** out_context) {
+                                                   Element** out_context) {
     if (out_resolver) *out_resolver = nullptr;
     if (out_context) *out_context = nullptr;
     SvgImageResolverEntry* entry = svg_find_image_resolver_entry(svg_root);
@@ -578,7 +578,7 @@ static void svg_style_destroy(SvgStyleContext* style) {
     SvgStyleMap::destroy(style->entries);
     if (style->isolated_document) {
         // D4.2.6: layout payloads release borrowed fonts/images before their private document owner.
-        view_tree_shell_destroy(style->isolated_document->view_tree);
+        view_tree_shell_destroy(style->isolated_document, style->isolated_document->view_tree);
         if (style->isolated_ui) image_cache_cleanup(style->isolated_ui);
         if (style->isolated_surface) image_surface_destroy(style->isolated_surface);
         lam::free_owned(style->isolated_ui);
@@ -621,7 +621,7 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
         if (!style->document) { svg_style_destroy(style); return false; }
         dom_document_borrow_input_resources(style->document);
         style->document->services.svg_image_document = image_document;
-        if (source_path && *source_path) style->document->url = url_parse_path_or_url(source_path, nullptr);
+        if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
         style->document->root = lam::up(build_dom_tree_from_element(root, style->document, nullptr));
         style->engine = css_engine_create(style->document->document_pool);
         if (!style->document->root || !style->engine) { svg_style_destroy(style); return false; }
@@ -662,7 +662,7 @@ static FontContext* svg_style_font_context(SvgStyleContext* style, const char* s
         }
     }
     // D4: registration copies descriptors; the temporary UI bridge owns only its CSS metadata.
-    UiContext bridge = {}; bridge.font_ctx = fonts;
+    UiContext bridge = {}; bridge.font_ctx = lam::up(fonts);
     for (int i = 0; i < style->document->stylesheet_count; i++) {
         CssStylesheet* sheet = style->document->stylesheets[i];
         if (sheet && !sheet->disabled) process_font_face_rules_from_stylesheet(&bridge, sheet, source_path, image_document);
@@ -1674,13 +1674,13 @@ static SvgResourceDocument* svg_resource_document_create(SvgInlineRenderContext*
 }
 
 // the cache lives in `pool`, which the document's resource hook destroys
-struct SvgUseResourceCache {
+struct SvgUseResourceCache : DomDocumentResourceData {
     lam::Own<Pool> pool;
     lam::Up<DomDocument> document;
     SvgResourceDocument* documents;
 };
 
-static void svg_use_resource_cache_destroy(void* data) {
+static void svg_use_resource_cache_destroy(DomDocumentResourceData* data) {
     SvgUseResourceCache* cache = (SvgUseResourceCache*)data;
     for (SvgResourceDocument* document = cache->documents; document;) {
         SvgResourceDocument* next = document->next;
@@ -2581,7 +2581,7 @@ static void draw_svg_fill_stroke(SvgInlineRenderContext* ctx, RdtPath* path, Ele
         const char* clip_rule = svg_style_ancestor_property_value(ctx, elem, "clip-rule");
         RdtFillRule rule = clip_rule && strcmp(clip_rule, "evenodd") == 0 ? RDT_FILL_EVEN_ODD : RDT_FILL_WINDING;
         if (ctx->clip_hit_query) ctx->clip_hit_query->hit |=
-            ctx->clip_hit_query->contains(path, transform, rule, ctx->clip_hit_query->data);
+            ctx->clip_hit_query->contains(path, transform, rule, ctx->clip_hit_query->point);
         else svg_fill_path(ctx, path, parse_svg_color("white"), rule, transform);
         return;
     }
@@ -3968,7 +3968,7 @@ bool svg_measure_text_metrics(const char* text, float font_size_px,
     return true;
 }
 
-static void draw_glyph_affine(RenderContext* rdcon, GlyphBitmap* bitmap,
+static void draw_glyph_affine(RasterRenderContext* rdcon, GlyphBitmap* bitmap,
                               float x, float y, float scale_x, float shear_x,
                               float scale_y = 1.0f) {
     if (!rdcon || !bitmap || scale_x <= 0.0f || scale_y <= 0.0f) return;
@@ -4006,7 +4006,7 @@ static bool svg_glyph_font_open(SvgInlineRenderContext* ctx, const char* font_fa
                                 float font_size, int font_weight, FontSlant font_slant,
                                 const RdtMatrix* matrix, SvgGlyphFont* font) {
     *font = {};
-    RenderContext* rdcon = g_svg_active_rdcon;
+    RasterRenderContext* rdcon = g_svg_active_rdcon;
     if (!rdcon || !ctx || !ctx->font_ctx || !matrix) return false;
 
     font->sx = sqrtf(matrix->e11 * matrix->e11 + matrix->e21 * matrix->e21);
@@ -4045,7 +4045,7 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
                                                 Color fill_color, const RdtMatrix* matrix,
                                                 float base_x, float base_y, float text_length,
                                                 bool scale_glyphs_x) {
-    RenderContext* rdcon = g_svg_active_rdcon;
+    RasterRenderContext* rdcon = g_svg_active_rdcon;
     if (!text || !*text) return false;
     SvgGlyphFont font;
     if (!svg_glyph_font_open(ctx, font_family, font_size, font_weight, font_slant,
@@ -5540,8 +5540,8 @@ static bool svg_item_number_equals(ItemReader item, int value) {
     return false;
 }
 
-static const char* svg_pdf_registered_image_resolver(void* context, int object_num) {
-    SvgImageResolverEntry* entry = svg_find_image_resolver_entry((Element*)context);
+static const char* svg_pdf_registered_image_resolver(Element* context, int object_num) {
+    SvgImageResolverEntry* entry = svg_find_image_resolver_entry(context);
     if (!entry || object_num <= 0) return nullptr;
 
     MapReader pdf_root = MapReader::fromItem(entry->pdf_root);
@@ -5957,7 +5957,7 @@ struct SvgForeignObjectPaint {
     ViewBlock* block;
     Bound clip;
     float scale;
-    RenderContext* context;
+    RasterRenderContext* context;
 };
 
 struct SvgHtmlScratchScope {
@@ -5969,12 +5969,12 @@ static UiContext* svg_style_layout_html(SvgInlineRenderContext* ctx, SvgStyleCon
     if (!style || !style->isolated_document) return nullptr;
     if (style->isolated_ui) return style->isolated_ui;
     lam::Temp<UiContext> owned_ui((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: the SVG style context owns the isolated layout's headless UI shell; svg_style_destroy releases it
-    lam::Own<ViewTree> tree = view_tree_shell_create();
+    lam::Own<ViewTree> tree = view_tree_shell_create(style->isolated_document);
     if (!owned_ui || !tree) { lam::free_owned(tree); return nullptr; }
     UiContext* ui = owned_ui.get();
     style->isolated_ui = lam::own(owned_ui.release());
     DomDocument* doc = style->isolated_document;
-    ui->document = doc; ui->font_ctx = ctx->font_ctx; ui->headless = true;
+    ui->document = lam::up(doc); ui->font_ctx = ctx->font_ctx; ui->headless = true;
     ui->viewport_width = ctx->current_viewport_w; ui->viewport_height = ctx->current_viewport_h;
     ui->device_scale = ui->device_scale_x = ui->device_scale_y = ctx->raster_scale;
     ui_context_init_default_fonts(ui);
@@ -5990,14 +5990,14 @@ static UiContext* svg_style_layout_html(SvgInlineRenderContext* ctx, SvgStyleCon
 
 static void svg_draw_foreign_object_html(SvgInlineRenderContext* ctx, Element*, void* data) {
     SvgForeignObjectPaint* content = (SvgForeignObjectPaint*)data;
-    RenderContext html = *content->context;
+    RasterRenderContext html = *content->context;
     html.transform = rdt_matrix_identity(); html.has_transform = false;
     html.block = {}; html.block.clip = content->clip;
     html.clip_shape_depth = 0; html.has_dirty_union = false; html.dirty_tracker = nullptr;
     html.retained_dl_cache = nullptr; html.element_marker_suppression_depth++;
     html.dl = ctx->dl; html.paint_list = ctx->paint_list; html.raster_scale = content->scale;
     ScratchMark mark = scratch_mark(&html.scratch);
-    RenderContext* previous = g_svg_active_rdcon; g_svg_active_rdcon = &html;
+    RasterRenderContext* previous = g_svg_active_rdcon; g_svg_active_rdcon = &html;
     if (content->block->font && html.ui_context) setup_font(html.ui_context, &html.font, content->block->font);
     render_block_paint_children(&html, content->block);
     g_svg_active_rdcon = previous;
@@ -6008,8 +6008,8 @@ static void render_svg_foreign_object(SvgInlineRenderContext* ctx, Element* elem
     if (ctx->clip_geometry) return;
     SvgStyleContext* style = (SvgStyleContext*)ctx->style_context;
     UiContext* isolated_ui = svg_style_layout_html(ctx, style);
-    RenderContext isolated = g_svg_active_rdcon ? *g_svg_active_rdcon : RenderContext{};
-    RenderContext* html_context = g_svg_active_rdcon;
+    RasterRenderContext isolated = g_svg_active_rdcon ? *g_svg_active_rdcon : RasterRenderContext{};
+    RasterRenderContext* html_context = g_svg_active_rdcon;
     SvgHtmlScratchScope scratch_scope = {};
     if (isolated_ui) {
         isolated.ui_context = lam::up(isolated_ui);
@@ -6020,7 +6020,7 @@ static void render_svg_foreign_object(SvgInlineRenderContext* ctx, Element* elem
         else {
             if (!style->isolated_surface) style->isolated_surface = svg_create_paint_surface(
                 ctx->viewport_width * ctx->raster_scale, ctx->viewport_height * ctx->raster_scale);
-            isolated_ui->surface = style->isolated_surface;
+            isolated_ui->surface = lam::up(style->isolated_surface);
             if (!isolated_ui->surface) return;
             isolated.block.clip = {0, 0, (float)isolated_ui->surface->width, (float)isolated_ui->surface->height};
         }
@@ -6542,15 +6542,15 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
     return program;
 }
 
-struct SvgFilterImageContext {
+struct SvgFilterImageContext : RdtSvgFilterHost {
     SvgInlineRenderContext context;
     const RdtSvgFilterProgram* program;
     const RdtSvgFilterRun* run;
     Bound region;
 };
 
-static void svg_filter_resolve_lengths(void* data, Element* element, SvgLengthContext* lengths) {
-    SvgFilterImageContext* owner = (SvgFilterImageContext*)data;
+static void svg_filter_resolve_lengths(RdtSvgFilterHost* host, Element* element, SvgLengthContext* lengths) {
+    SvgFilterImageContext* owner = static_cast<SvgFilterImageContext*>(host);
     SvgInlineRenderContext resource = svg_resource_style_context(&owner->context, element);
     SvgLengthContext declared = svg_length_context(&resource);
     // font-relative lengths use the declaration's current font; percentages use the referencing viewport (§9.4).
@@ -6581,9 +6581,9 @@ static void svg_filter_draw_image(SvgInlineRenderContext* ctx, Element* element,
     } else render_svg_image_resource(ctx, element, href, image->region, &ctx->transform, false, false);
 }
 
-static bool svg_filter_render_image(void* data, const RdtSvgFilterNode* node, const RdtSvgFilterRun* run,
+static bool svg_filter_render_image(RdtSvgFilterHost* host, const RdtSvgFilterNode* node, const RdtSvgFilterRun* run,
     Bound region, Bound grid, ImageSurface* output) {
-    SvgFilterImageContext* owner = (SvgFilterImageContext*)data;
+    SvgFilterImageContext* owner = static_cast<SvgFilterImageContext*>(host);
     SvgFilterImageContext image = *owner; image.run = run; image.region = region;
     SvgInlineRenderContext context = svg_resource_style_context(&image.context, node->element);
     context.filter_work = lam::up(run);
@@ -6593,7 +6593,7 @@ static bool svg_filter_render_image(void* data, const RdtSvgFilterNode* node, co
     return svg_rasterize_traversal(&context, node->element, svg_filter_draw_image, &image, &output, &grid);
 }
 
-struct SvgFilterPaintContext {
+struct SvgFilterPaintContext : RdtSvgFilterHost {
     SvgInlineRenderContext context;
     Element* element;
     const RdtSvgFilterRun* run;
@@ -6616,8 +6616,8 @@ static void svg_filter_draw_paint(SvgInlineRenderContext* ctx, Element* element,
     rdt_path_free(path);
 }
 
-static bool svg_filter_render_input(void* data, int input, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output) {
-    SvgFilterPaintContext paint = *(SvgFilterPaintContext*)data;
+static bool svg_filter_render_input(RdtSvgFilterHost* host, int input, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output) {
+    SvgFilterPaintContext paint = *static_cast<SvgFilterPaintContext*>(host);
     paint.context.filter_work = lam::up(run);
     if (input == RDT_SVG_FILTER_BACKGROUND) {
         PaintRecordTarget prior = svg_record_target(&paint.context);
@@ -6644,15 +6644,15 @@ static bool svg_filter_render_input(void* data, int input, const RdtSvgFilterRun
     return svg_rasterize_traversal(&context, paint.element, svg_filter_draw_paint, &paint, &output, &grid);
 }
 
-struct SvgFilterSourceContext {
+struct SvgFilterSourceContext : RdtSvgFilterHost {
     SvgInlineRenderContext context;
     Element* element;
     SvgElementDrawFn draw;
     void* data;
 };
 
-static bool svg_filter_render_source(void* data, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output) {
-    SvgFilterSourceContext* owner = (SvgFilterSourceContext*)data;
+static bool svg_filter_render_source(RdtSvgFilterHost* host, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output) {
+    SvgFilterSourceContext* owner = static_cast<SvgFilterSourceContext*>(host);
     SvgInlineRenderContext context = owner->context; context.filter_work = lam::up(run);
     ImageSurface* source = nullptr; Bound capture = {};
     // only a reachable SourceGraphic/SourceAlpha input captures the original subtree.
@@ -6709,13 +6709,13 @@ static bool svg_render_effect_boundary(SvgInlineRenderContext* ctx, Element* ele
         run.geometry = geometry; run.frame = frame;
         run.lengths = svg_length_context(ctx, elem);
         run.density = fmaxf(hypotf(frame.e11, frame.e21), hypotf(frame.e12, frame.e22));
-        SvgFilterSourceContext source_context = {source, elem, draw, data};
-        run.draw_source = svg_filter_render_source; run.source_context = &source_context;
-        SvgFilterImageContext image_context = {svg_reference_render_context(ctx, &filter_reference), program, &run, {}};
-        run.draw_image = svg_filter_render_image; run.image_context = &image_context;
-        run.resolve_lengths = svg_filter_resolve_lengths; run.length_context = &image_context;
-        SvgFilterPaintContext paint_context = {*ctx, elem, &run, {}, false};
-        run.draw_input = svg_filter_render_input; run.input_context = &paint_context;
+        SvgFilterSourceContext source_context = {{}, source, elem, draw, data};
+        run.draw_source = svg_filter_render_source; run.source_context = lam::up(&source_context);
+        SvgFilterImageContext image_context = {{}, svg_reference_render_context(ctx, &filter_reference), program, &run, {}};
+        run.draw_image = svg_filter_render_image; run.image_context = lam::up(&image_context);
+        run.resolve_lengths = svg_filter_resolve_lengths;
+        SvgFilterPaintContext paint_context = {{}, *ctx, elem, &run, {}, false};
+        run.draw_input = svg_filter_render_input; run.input_context = lam::up(&paint_context);
         memtrack_get_limits(nullptr, nullptr, &run.work_limit);
         run.work_used = lam::up(ctx->filter_work ? ctx->filter_work->work_used : &work_used);
         ImageSurface* output = nullptr;
@@ -6759,7 +6759,7 @@ static bool svg_render_effect_boundary(SvgInlineRenderContext* ctx, Element* ele
 }
 
 bool svg_dom_clip_contains_point(DomElement* target, const SvgLengthContext* lengths,
-    FontContext* fonts, const RdtMatrix* frame, SvgPathContainsFn contains, void* data,
+    FontContext* fonts, const RdtMatrix* frame, SvgPathContainsFn contains, const RdtLogicalPoint* point,
     const SvgDomStyleScope* instance_scope) {
     if (!target || !target->doc || !lengths || !frame || !contains) return false;
     DomElement* root = target;
@@ -6782,7 +6782,7 @@ bool svg_dom_clip_contains_point(DomElement* target, const SvgLengthContext* len
         node = svg_dom_style_parent(node, instance_scope))
         if (!ancestors.append(dom_element_to_element(node->as_element()))) break;
     for (size_t index = ancestors.size(); index > 0; index--) svg_apply_inherited_paint_attrs(&ctx, ancestors[index - 1]);
-    SvgClipHitQuery query = {contains, data, false}; ctx.clip_hit_query = lam::up(&query);
+    SvgClipHitQuery query = {contains, lam::up(point), false}; ctx.clip_hit_query = lam::up(&query);
     lam::Temp<char> base(radiant_document_resource_base(target->doc, MEM_CAT_RENDER)); ctx.source_path = lam::up(base.get());
     Element* element = dom_element_to_element(target);
     SvgResourceReference clip = svg_effect_reference(&ctx, element, "clip-path");
@@ -6860,7 +6860,9 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     ctx.resource_scratch = lam::up(resource_scratch);
     ctx.source_path = lam::up(source_path);
     ctx.image_document = image_document;
-    svg_get_registered_image_resolver(svg_element, &ctx.image_resolver, &ctx.image_resolver_context);
+    Element* resolver_root = nullptr;
+    svg_get_registered_image_resolver(svg_element, &ctx.image_resolver, &resolver_root);
+    ctx.image_resolver_context = lam::up(resolver_root);
     ctx.raster_scale = raster_scale > 0.0f ? raster_scale : 1.0f;
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
@@ -7094,7 +7096,7 @@ static void render_svg_record_subscene(const PaintSvgSubscene* subscene,
     Pool* render_pool = subscene->pool ? (Pool*)subscene->pool : temp_pool;
 
     // export walks need the same host CSS/font/foreignObject context as interactive recording.
-    RenderContext bridge = {};
+    RasterRenderContext bridge = {};
     bridge.ui_context = lam::up(subscene->ui_context); bridge.dl = lam::up(dl); bridge.paint_list = lam::up(&nested_paint);
     bridge.raster_scale = subscene->raster_scale; bridge.scratch = resource_scratch;
     bridge.block.clip = subscene->clip_viewport
@@ -7102,7 +7104,7 @@ static void render_svg_record_subscene(const PaintSvgSubscene* subscene,
         : Bound{-FLT_MAX / 16, -FLT_MAX / 16, FLT_MAX / 16, FLT_MAX / 16};
     bridge.color.a = 255;
     if (subscene->has_color) bridge.color = subscene->color;
-    RenderContext* previous = g_svg_active_rdcon;
+    RasterRenderContext* previous = g_svg_active_rdcon;
     if (subscene->ui_context) g_svg_active_rdcon = &bridge;
     RdtPath* viewport_clip = nullptr;
     if (subscene->clip_viewport) {
@@ -7157,6 +7159,8 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
     render_svg_record_subscene(&logical, &dl, true);
     PaintList paint = {};
     bool valid = dl_validate_or_log(&dl, "svg_export_vector");
+    // resolved image pixels feed the paint list until the consumer has run
+    ImageSurfaceReadScope read_scope;
     // the consumer runs before the recording owner expires (D4.2.2v2); unrepresentable pixel operations select shared replay.
     for (int i = 0; valid && i < dl.item_count(); i++) {
         const DisplayItem& item = dl.data()[i];
@@ -7192,13 +7196,16 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
         }
         case DL_DRAW_IMAGE: {
             const DlDrawImage& p = item.draw_image;
+            DlResolvedImage resolved;
+            // a released owner draws nothing
+            if (!dl_draw_image_resolve(&p, &resolved)) break;
             // the display-list stack exclusively owns this arena until synchronous export ends.
             ImageSurface* image = (ImageSurface*)scratch_calloc(&dl.arena, sizeof(ImageSurface));
             if (!image) { valid = false; break; }
-            image->width = p.src_w; image->height = p.src_h; image->pitch = p.src_stride * 4;
-            image->pixels = (void*)p.pixels;
-            image->alpha_mode = p.straight_alpha ? IMAGE_ALPHA_STRAIGHT : IMAGE_ALPHA_PREMULTIPLIED;
-            paint_draw_image(&paint, p.pixels, p.src_w, p.src_h, p.src_stride,
+            image->width = resolved.width; image->height = resolved.height; image->pitch = resolved.stride * 4;
+            image->pixels = (void*)resolved.pixels;
+            image->alpha_mode = resolved.straight_alpha ? IMAGE_ALPHA_STRAIGHT : IMAGE_ALPHA_PREMULTIPLIED;
+            paint_draw_image(&paint, resolved.pixels, resolved.width, resolved.height, resolved.stride,
                 p.dst_x, p.dst_y, p.dst_w, p.dst_h, p.opacity,
                 p.has_transform ? &p.transform : nullptr, image); break;
         }
@@ -7267,21 +7274,10 @@ ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bo
     bounds.right = ceilf(bounds.right); bounds.bottom = ceilf(bounds.bottom);
     DomDocument* doc = subscene->ui_context ? subscene->ui_context->document : nullptr;
     MemContext* memory = doc ? (MemContext*)doc->services.mem_ctx : nullptr;
-    // D4.2.6: the shared surface allocator checks physical extents and coordinator pressure before casts.
-    ImageSurface* surface = render_surface_create_budgeted(memory, bounds.right - bounds.left, bounds.bottom - bounds.top);
-    if (surface && dl_validate_or_log(&dl, "svg_export_snapshot")) {
-        RdtVector vec = {}; rdt_vector_init(&vec, (uint32_t*)surface->pixels, surface->width, surface->height, surface->width);
-        ScratchArena scratch = {}; mem_scratch_init(memory, &scratch, arenas.scratch_arena,
-            MEM_ROLE_RENDER, "render.svg.export.replay");
-        dl_replay_tile(&dl, &vec, surface, &scratch, bounds.left, bounds.top,
-            (float)surface->width, (float)surface->height, scale);
-        rdt_vector_flush_batch(&vec); rdt_vector_destroy(&vec); scratch_release(&scratch);
-        // PNG/PDF image payloads use straight channels; vector replay writes premultiplied ABGR.
-        for (size_t i = 0, count = (size_t)surface->width * (size_t)surface->height; i < count; i++)
-            ((uint32_t*)surface->pixels)[i] = render_pixel_unpremultiply_abgr(((uint32_t*)surface->pixels)[i]);
-        surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
+    ImageSurface* surface = render_display_list_snapshot(&dl, memory, bounds, scale);
+    if (surface) {
         *logical_bounds = {bounds.left / scale, bounds.top / scale, bounds.right / scale, bounds.bottom / scale};
-    } else if (surface) { image_surface_destroy(surface); surface = nullptr; }
+    }
     dl_destroy(&dl); arenas.destroy();
     return surface;
 }
@@ -7323,7 +7319,7 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
 
 void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
                                ScratchArena* scratch, FontContext* font_ctx,
-                               RenderContext* glyph_rdcon, RdtPicture* picture,
+                               RasterRenderContext* glyph_rdcon, RdtPicture* picture,
                                uint8_t opacity, const RdtMatrix* transform) {
     Element* svg_root = rdt_picture_get_svg_root(picture);
     if (!svg_root || !paint_list || !dl || !scratch) return;
@@ -7331,9 +7327,9 @@ void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
     float height = 0.0f;
     rdt_picture_get_size(picture, &width, &height);
     RdtMatrix base = rdt_picture_compose_transform(picture, transform);
-    // glyph items go to the RenderContext recording `dl`, or, without one,
+    // glyph items go to the RasterRenderContext recording `dl`, or, without one,
     // text falls back to ThorVG paints
-    RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
+    RasterRenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = glyph_rdcon;
     // an SVG image is its own document: no inherited paint, its own id scope
     render_svg_to_display_list(svg_root, width, height, rdt_picture_get_pool(picture), 1.0f,
@@ -7375,8 +7371,8 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     paint_list_init(&paint_list, nullptr);
     mem_scratch_init(NULL, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "render.svg_inline.scratch");
 
-    // this list is private, so no RenderContext may receive its glyphs
-    RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
+    // this list is private, so no RasterRenderContext may receive its glyphs
+    RasterRenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = nullptr;
     render_svg_to_display_list(svg_element, viewport_width, viewport_height,
                                pool, raster_scale, font_ctx, base_transform, &dl,
@@ -7442,7 +7438,7 @@ struct SvgLayerEntry {
 
 // The registry and its entries live in one pool under the document's memory
 // context; entries are only ever added, so the pool is released whole.
-struct SvgLayerRegistry {
+struct SvgLayerRegistry : DomDocumentResourceData {
     lam::Own<SvgLayerEntry> entries;
     size_t cached_bytes;
     lam::Own<Pool> pool;  // holds this registry and its entries
@@ -7474,7 +7470,7 @@ static void svg_layer_entry_release_surface(SvgLayerRegistry* registry, SvgLayer
     entry->surface = nullptr;
 }
 
-static void svg_layer_registry_destroy(void* data) {
+static void svg_layer_registry_destroy(DomDocumentResourceData* data) {
     // the document resource hands its registry over for teardown
     SvgLayerRegistry* registry = (SvgLayerRegistry*)data;
     if (!registry) return;
@@ -7535,9 +7531,9 @@ static bool svg_layer_paint_equal(const SvgInitialPaint* a, const SvgInitialPain
 // pixel are recovered from the difference. Each pass records its own display
 // list: serial replay hands owned payloads such as pictures to the backend, so
 // one recorded list cannot be replayed twice. Glyph runs record through the
-// active RenderContext, so its list, clip, transform and dirty state are pointed
+// active RasterRenderContext, so its list, clip, transform and dirty state are pointed
 // at the private layer while recording.
-static bool svg_layer_render_pass(RenderContext* rdcon, Element* svg_elem, DomElement* dom_elem,
+static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem, DomElement* dom_elem,
                                   float viewport_width, float viewport_height, float scale,
                                   const SvgInitialPaint* paint, uint32_t* pixels,
                                   int width, int height, uint32_t backdrop) {
@@ -7637,7 +7633,7 @@ static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* 
     }
 }
 
-static bool svg_layer_capture(RenderContext* rdcon, SvgLayerRegistry* registry,
+static bool svg_layer_capture(RasterRenderContext* rdcon, SvgLayerRegistry* registry,
                               SvgLayerEntry* entry, Element* svg_elem, DomElement* dom_elem,
                               float viewport_width, float viewport_height, float scale,
                               const SvgInitialPaint* paint) {
@@ -7676,7 +7672,7 @@ static bool svg_layer_capture(RenderContext* rdcon, SvgLayerRegistry* registry,
 // A layer is blitted by the CPU painter, which has no transform: a pure
 // translation (the common CSS drift on a decorative layer) folds into the
 // destination, anything else disqualifies the layer.
-static bool svg_layer_transform_offset(const RenderContext* rdcon, float* dx, float* dy) {
+static bool svg_layer_transform_offset(const RasterRenderContext* rdcon, float* dx, float* dy) {
     *dx = 0.0f;
     *dy = 0.0f;
     if (!rdcon->has_transform) return true;
@@ -7694,7 +7690,7 @@ static bool svg_layer_transform_offset(const RenderContext* rdcon, float* dx, fl
 // false when the caller must record the SVG directly: the first paint of new
 // content (which also arms the capture), a layer that is too large, or a
 // transform the blit cannot express.
-static bool svg_layer_paint(RenderContext* rdcon, DomElement* dom_elem, Element* svg_elem,
+static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, Element* svg_elem,
                             const Rect* content_rect, float viewport_width,
                             float viewport_height, float scale, const SvgInitialPaint* paint) {
     SvgLayerMode mode = svg_layer_mode();
@@ -7777,7 +7773,7 @@ Element* render_svg_reference_scope(DomElement* svg_element) {
     return root->is_element() ? dom_element_backing(root->as_element()) : nullptr;
 }
 
-void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
+void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!rdcon || !view) return;
 
     DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(view));
@@ -7800,7 +7796,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     bool viewport_clip = !overflow || strcmp(overflow, "visible") != 0;
     // visible SVG ink may extend beyond a viewport that lies outside the paint clip.
     if (viewport_clip && !rdcon->has_transform &&
-        !(view->transform && view->transformp()->functions) &&
+        !transform_has_functions(view->transform) &&
         !view_geometry_bounds_intersect(view_geometry_rect_to_bound(content_rect), rdcon->block.clip)) return;
 
     Element* svg_elem = dom_element_to_element(dom_elem);
@@ -7841,7 +7837,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
     SvgInitialPaint initial_paint;
     render_svg_initial_paint(view, rdcon->color, &initial_paint);
-    RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
+    RasterRenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
     // unchanged content comes from its cached raster layer; otherwise record directly
     if (!viewport_clip || !svg_layer_paint(rdcon, dom_elem, svg_elem, &content_rect, viewport_width,
@@ -7868,7 +7864,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
 
 }
 
-void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
+void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element,
                                 float viewport_width, float viewport_height) {
     if (!rdcon || !svg_element || viewport_width <= 0.0f || viewport_height <= 0.0f ||
         !rdcon->dl || !rdcon->paint_list) {
@@ -7889,7 +7885,7 @@ void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
     Color current_color = rdcon->color;
     // generated SVG layers must retain the ancestor overflow clip during paint.
     RenderClipScope clip_scope = render_clip_push_rect_scope(rdcon, &rdcon->block.clip);
-    RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
+    RasterRenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
     render_svg_to_display_list(svg_element, viewport_width, viewport_height,
                                pool, scale, font_ctx, &base_transform, rdcon->dl,

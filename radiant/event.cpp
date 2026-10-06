@@ -60,10 +60,6 @@ extern Item js_make_number(double value);
 // thread-local eval context used by heap allocation functions
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
-extern "C" Item interp_eval_view_handler(Context* context, Script* module,
-                                           AstViewNode* view,
-                                           AstEventHandler* handler,
-                                           Item model, Item event);
 DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 
@@ -623,7 +619,7 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
     int saved_viewport_width = uicon->viewport_width;
     int saved_viewport_height = uicon->viewport_height;
 
-    uicon->document = doc;
+    uicon->document = lam::up(doc);
 
     if (iframe_container &&
         (iframe_container->view_type == RDT_VIEW_BLOCK ||
@@ -642,7 +638,7 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
         restore_embedded_document_scroll_model(doc);
     }
 
-    uicon->document = saved_doc;
+    uicon->document = lam::up(saved_doc);
     uicon->viewport_width = saved_viewport_width;
     uicon->viewport_height = saved_viewport_height;
 }
@@ -826,27 +822,6 @@ static DomDocument* event_context_find_focused_document(DomDocument* doc,
     if (!doc->view_tree || !doc->view_tree->root) return NULL;
     return event_context_find_focused_document_in_view(doc->view_tree->root,
                                                        depth, iframe_container);
-}
-
-static Item call_template_event_handler(TemplateHandlerEntry* entry,
-                                        Item model_item, Item event_item) {
-    if (!context) {
-        log_error("template event: no bound EvalContext");
-        return ItemError;
-    }
-    if (entry && entry->interp_handler) {
-        return interp_eval_view_handler((Context*)context, entry->interp_module,
-            entry->interp_view, entry->interp_handler, model_item, event_item);
-    }
-    typedef Item (*TemplateEventHandlerFn)(Context*, Item, Item);
-    union {
-        fn_ptr raw;
-        TemplateEventHandlerFn typed;
-    } handler;
-    // template_registry stores generated handlers as erased fn_ptr; event
-    // handlers receive the host-bound canonical context explicitly.
-    handler.raw = entry ? entry->handler_func : NULL;
-    return handler.typed((Context*)context, model_item, event_item);
 }
 
 static float pdf_text_run_visible_natural_width(FontBox* font, TextRect* rect, bool copy_space) {
@@ -1176,34 +1151,6 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     log_leave();
 }
 
-// ESO47: map the hit point into a transformed block's own space.
-//
-// Hit-testing walks layout space and compares against untransformed boxes, so a
-// element moved by `transform` was tested where it was laid out rather than
-// where it is painted — CSS says transforms affect hit-testing, and a user
-// clicks what they see. Rather than touch all ~38 comparison sites, the point
-// itself is mapped once on entering a transformed subtree: every site reads
-// evcon->event.mouse_position, so they all follow.
-//
-// Deliberately limited to pure translations. Their inverse is exact, and they
-// commute, so composing them down a nesting chain needs no ordering argument —
-// which a general inverse would, since the matrices are built in absolute space
-// with absolute origins. Scale and rotation still hit-test untransformed; that
-// is the same behaviour as before this change, not a new gap.
-static bool event_translate_only_transform(View* view, float* out_dx, float* out_dy) {
-    RdtMatrix m;
-    if (!view || !view->is_block()) return false;
-    if (!view_get_transform_matrix(view, &m)) return false;
-    const float eps = 1e-4f;
-    if (fabsf(m.e11 - 1.0f) > eps || fabsf(m.e22 - 1.0f) > eps ||
-        fabsf(m.e12) > eps || fabsf(m.e21) > eps) {
-        return false;   // not a pure translation
-    }
-    *out_dx = m.e13;
-    *out_dy = m.e23;
-    return true;
-}
-
 // The top-level root's clip is the window edge, not an element overflow clip:
 // real pointer input only lands past it under capture, and synthetic input
 // aims at offscreen content in document space, so neither is clipped there.
@@ -1216,6 +1163,10 @@ static bool event_block_is_top_level_viewport(ViewBlock* block) {
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
     log_enter();
+    if (view_backface_is_hidden(block, BACKFACE_HIT_TEST)) {
+        log_leave();
+        return;
+    }
     if (block && block->tag() == MARKUP_NAME_SVG) {
         // SVG subtrees have user-space geometry; HTML boxes inside foreignObject
         // must be walked only after the SVG frame has mapped the pointer locally.
@@ -1244,12 +1195,16 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         return;
     }
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
-    // Undo this block's translation for the duration of the subtree walk.
-    float tdx = 0.0f, tdy = 0.0f;
-    bool translated = event_translate_only_transform(static_cast<View*>(block), &tdx, &tdy);
-    if (translated) {
-        evcon->event.mouse_position.x -= tdx;
-        evcon->event.mouse_position.y -= tdy;
+    float pointer_x = evcon->event.mouse_position.x, pointer_y = evcon->event.mouse_position.y;
+    RdtMatrix matrix, inverse;
+    if (view_get_transform_matrix(static_cast<View*>(block), &matrix)) {
+        // inverse transforms compose in traversal order: undo the parent, then its child.
+        if (!rdt_matrix_inverse(&matrix, &inverse) ||
+            !rdt_matrix_project_point(&inverse, pointer_x, pointer_y,
+                &evcon->event.mouse_position.x, &evcon->event.mouse_position.y)) {
+            log_leave();
+            return; // a singular transform has no hittable painted area.
+        }
     }
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1443,10 +1398,6 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
 
     RETURN:
-    if (translated) {
-        evcon->event.mouse_position.x += tdx;
-        evcon->event.mouse_position.y += tdy;
-    }
     // Only restore block position if no target was found
     // When a target is found, keep block at the parent's position for coordinate calculations
     if (!evcon->target) {
@@ -1482,6 +1433,9 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 block->node_name(), x, y, event->x, event->y, x + block->width, y + block->height);
         }
     }
+    // keep the local point through the block's own test, then restore it for siblings.
+    evcon->event.mouse_position.x = pointer_x;
+    evcon->event.mouse_position.y = pointer_y;
     log_leave();
 }
 
@@ -1516,7 +1470,7 @@ static void* radiant_element_from_point(DomDocument* doc, DomElement* root, floa
     hit_event.mouse_position.y = y;
     EventContext evcon;
     DomDocument* saved_document = uicon->document;
-    uicon->document = doc;
+    uicon->document = lam::up(doc);
     event_context_init(&evcon, uicon, &hit_event);
     if (root) {
         float frame[6];
@@ -1527,7 +1481,7 @@ static void* radiant_element_from_point(DomDocument* doc, DomElement* root, floa
         ViewBlock* block = lam::view_as_block(root);
         if (block) target_block_view(&evcon, block);
     } else target_html_doc(&evcon, doc->view_tree);
-    uicon->document = saved_document;
+    uicon->document = lam::up(saved_document);
     DomElement* element = view_geometry_nearest_dom_element(
         static_cast<DomNode*>(evcon.target), 0);
     void* hit = element;
@@ -2845,7 +2799,7 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
                                     // been staged on the outer handler frame.
                                     RootFrame emit_result_roots(1);
                                     Rooted<Item> emit_result(emit_result_roots,
-                                        call_template_event_handler(h,
+                                        template_call_event_handler(h,
                                             lookup.source_item, event_data));
                                     stage_source_selection_from_edit_result(
                                         g_emit_handler_ctx, emit_result.get());
@@ -3227,7 +3181,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     uint64_t mutation_epoch = edit_bridge_mutation_epoch();
 
     // invoke handler: Item handler(Item model, Item event)
-    result_root.set(call_template_event_handler(h, model_item, event_item));
+    result_root.set(template_call_event_handler(h, model_item, event_item));
     Item verdict = result_root.get();
     bool declined = handler_verdict_is(verdict, "pass");
     if (evcon && handler_verdict_is(verdict, "prevent-default")) {
@@ -3778,8 +3732,20 @@ static bool radiant_dispatch_event_from_script_impl(void* dom_node,
         return false;
     }
     View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    // nested dispatch must retain the parent's record; otherwise its UA pass
+    // mistakes it for an undelivered event and invokes author handlers twice.
+    EventContext* evcon = ctx->evcon;
+    RootFrame roots(1);
+    Rooted<Item> parent_event(roots, evcon->dom_event);
+    bool parent_ua_handled = evcon->dom_event_ua_handled;
+    bool parent_author_dirty = evcon->dom_event_author_dirty;
+    bool parent_prevented = evcon->default_prevented;
     bool ok = radiant_dispatch_simple_event(
-        ctx->evcon, view, event_name, bubbles, cancelable);
+        evcon, view, event_name, bubbles, cancelable);
+    evcon->dom_event = parent_event.get();
+    evcon->dom_event_ua_handled = parent_ua_handled;
+    evcon->dom_event_author_dirty = parent_author_dirty || evcon->dom_event_author_dirty;
+    evcon->default_prevented = parent_prevented;
     if (report_flags) {
         log_debug("dispatch-from-script: '%s' (bubbles=%d cancelable=%d) -> %s",
                   event_name, bubbles ? 1 : 0, cancelable ? 1 : 0,
@@ -6283,7 +6249,7 @@ static void dom_js_record_reconcile(DomDocument* doc,
                                     int state_pruned) {
     if (!doc) return;
     doc->reconcile.mode = mode;
-    doc->reconcile.reason = reason ? reason : "none";
+    doc->reconcile.reason = lam::up(reason ? reason : "none");
     doc->reconcile.mutations = mutations;
     doc->reconcile.records = records;
     doc->reconcile.record_overflow = overflow;
@@ -6705,13 +6671,22 @@ static bool dom_js_rule_has_column_dependency(CssRule* rule, void*) {
     return dom_js_selector_has_column_dependency(rule->data.style_rule.selector);
 }
 
-static bool dom_js_document_has_column_css_dependency(DomDocument* doc) {
+static bool dom_js_document_rule_tree_has_match(DomDocument* doc,
+                                                DomJsRulePredicate predicate, void* context) {
     if (!doc || !doc->stylesheets) return false;
     for (int i = 0; i < doc->stylesheet_count; i++) {
         if (dom_js_stylesheet_tree_has_match(doc->stylesheets[i],
-                dom_js_rule_has_column_dependency, nullptr)) return true;
+                predicate, context)) return true;
     }
     return false;
+}
+
+static bool dom_js_document_has_column_css_dependency(DomDocument* doc) {
+    return dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_column_dependency, nullptr);
+}
+
+static bool dom_js_rule_is_scope(CssRule* rule, void*) {
+    return rule && rule->type == CSS_RULE_SCOPE;
 }
 
 static bool dom_js_rule_has_relational_mutation_attribute_dependency(
@@ -6736,16 +6711,8 @@ static bool dom_js_rule_has_relational_mutation_attribute_dependency(
 
 static bool dom_js_document_has_relational_mutation_attribute_dependency(
         DomDocument* doc, DomJsMutationAttribute attribute) {
-    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        if (dom_js_stylesheet_tree_has_match(
-                doc->stylesheets[i],
-                dom_js_rule_has_relational_mutation_attribute_dependency,
-                &attribute)) {
-            return true;
-        }
-    }
-    return false;
+    return dom_js_document_rule_tree_has_match(doc,
+        dom_js_rule_has_relational_mutation_attribute_dependency, &attribute);
 }
 
 static bool dom_js_selector_can_match_mutated_element(CssSelector* selector,
@@ -6826,14 +6793,8 @@ static bool dom_js_rule_has_relational_mutation_target_dependency(CssRule* rule,
 static bool dom_js_document_has_relational_mutation_target_dependency(
         DomDocument* doc, DomElement* target) {
     if (!doc || !target || !doc->stylesheets || doc->stylesheet_count <= 0) return true;
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        if (dom_js_stylesheet_tree_has_match(
-                doc->stylesheets[i],
-                dom_js_rule_has_relational_mutation_target_dependency, target)) {
-            return true;
-        }
-    }
-    return false;
+    return dom_js_document_rule_tree_has_match(doc,
+        dom_js_rule_has_relational_mutation_target_dependency, target);
 }
 
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
@@ -6864,6 +6825,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
     }
 
     bool checked_broad_structural_css = false;
+    // arbitrary root/limit selectors can change eligibility outside the mutated subtree.
+    bool has_scope_css = dom_js_document_rule_tree_has_match(doc, dom_js_rule_is_scope, nullptr);
     bool has_broad_structural_css = false;
     bool checked_class_relational_css = false;
     bool has_class_relational_css = false;
@@ -6873,6 +6836,12 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
             continue;
+        }
+        if (has_scope_css && (record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
+            record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
+            record->kind == DOM_JS_MUTATION_CHILD_REMOVE)) {
+            if (reason) *reason = "scope-boundary-mutation";
+            return false;
         }
         if (record->kind == DOM_JS_MUTATION_UNKNOWN ||
             record->kind == DOM_JS_MUTATION_TREE_REPLACE) {
@@ -7320,13 +7289,13 @@ static bool post_html_handler_incremental_rebuild(
     if (state) doc_state_close_context_menu(state);
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
-    if (evcon->ui_context) evcon->ui_context->document = doc;
+    if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
     doc->incremental_layout = true;
     doc->skip_style_reset = true;
     layout_html_doc(evcon->ui_context, doc, true);
     doc->skip_style_reset = false;
     doc->incremental_layout = false;
-    if (evcon->ui_context) evcon->ui_context->document = saved_doc;
+    if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
 
     if (doc->root) {
         view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
@@ -7448,23 +7417,16 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
     if (!doc->view_tree) {
-        doc->view_tree = view_tree_shell_create();
+        doc->view_tree = view_tree_shell_create(doc);
         view_pool_reset_retained(doc->view_tree);
     } else {
         view_pool_reset_retained(doc->view_tree);
     }
 
-    // CSS animation targets are retained DOM nodes, not view-pool allocations.
-    // Only a detached target is invalid across the layout-resource reset.
-    if (state) {
-        animation_scheduler_prune_disconnected_css_views(
-            state->animation_scheduler, doc);
-    }
-
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
-    if (evcon->ui_context) evcon->ui_context->document = doc;
+    if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
     layout_html_doc(evcon->ui_context, doc, true);
-    if (evcon->ui_context) evcon->ui_context->document = saved_doc;
+    if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
 
     int state_pruned = 0;
     if (state) {
@@ -7528,8 +7490,9 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
     s->handler_ctx = nullptr;
     s->doc = event_context_target_document(evcon);
-    if (!s->doc || !s->doc->js.runtime) return false;
-    Runtime* runtime = s->doc->js.runtime;
+    // native timing events also belong to Lambda-only document evaluators.
+    Runtime* runtime = dom_document_script_runtime(s->doc);
+    if (!runtime) return false;
     s->handler_ctx = runtime_get_eval_context(runtime);
     if (!s->handler_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
     s->handler_ctx->heap = runtime_heap(runtime);
@@ -7537,12 +7500,13 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx->type_list = runtime_type_list(runtime);
     s->handler_ctx->pool = runtime_heap(runtime)->pool;
     s->saved_input_ctx = input_context;
-    if (!eval_context_init(s->handler_ctx) ||
-            (js_runtime_state_for(s->handler_ctx) &&
-             !js_runtime_state_init(s->handler_ctx))) {
+    if (!js_runtime_context_enter_turn(runtime, s->handler_ctx)) {
         return false;
     }
     input_context = nullptr;
+    // timing support must use the viewer clock, not the static headless drain.
+    dom_set_host_driven_loop(s->doc->js.host_driven_loop);
+    dom_set_ui_context(evcon->ui_context);
     dom_set_document(s->doc);
     // A queued callback may change the DOM immediately before dispatching a
     // custom event. Its records belong to that callback turn and must survive
@@ -8027,7 +7991,17 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
 
 typedef Item (*RadiantJsEventBuilder)(void* userdata);
 
-static void radiant_dispatch_timing_event(UiContext* uicon, DomElement* target,
+static Item radiant_deliver_timing_event(Item env_item) {
+    JS_ENV_UNPACK(env, env_item);
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, env[0]);
+    Rooted<Item> event_root(roots, env[1]);
+    // document teardown invalidates wrappers and cancels its queued timer jobs.
+    if (!dom_unwrap_element(target_root.get())) return make_js_undefined();
+    return dom_dispatch_event(target_root.get(), event_root.get());
+}
+
+static void radiant_queue_timing_event(UiContext* uicon, DomElement* target,
     RadiantJsEventBuilder build, void* userdata) {
     if (!uicon || !target || !target->doc) return;
     EventContext evcon = {};
@@ -8039,8 +8013,10 @@ static void radiant_dispatch_timing_event(UiContext* uicon, DomElement* target,
     RootFrame roots(2);
     Rooted<Item> target_root(roots, dom_wrap_element(target));
     Rooted<Item> event_root(roots, build(userdata));
-    dom_dispatch_event(target_root.get(), event_root.get());
-    // Scheduler callbacks defer layout until the enclosing frame has finished.
+    Item values[2] = {target_root.get(), event_root.get()};
+    // listeners may mutate style; the traced task owns its arguments until layout has unwound.
+    js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
+        (Item){.item = i2it(0)}, values, 2);
     if (entered_scope) {
         input_context = scope.saved_input_ctx;
         scope.active = false;
@@ -8065,45 +8041,18 @@ static Item radiant_build_svg_timing_event(void* userdata) {
     return js_create_native_svg_time_event(data->type, data->detail, data->seconds);
 }
 
-static Item radiant_dispatch_queued_css_event(Item env_item) {
-    JS_ENV_UNPACK(env, env_item);
-    RootFrame roots(2);
-    Rooted<Item> target_root(roots, env[0]);
-    Rooted<Item> event_root(roots, env[1]);
-    if (dom_unwrap_element(target_root.get())) {
-        dom_dispatch_event(target_root.get(), event_root.get());
-    }
-    return make_js_undefined();
-}
-
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value, double elapsed_time) {
-    if (!uicon || !target || !target->doc || !type || !*type) return;
-    EventContext evcon = {};
-    evcon.ui_context = uicon;
-    evcon.target_document = target->doc;
-    JsCtxScope scope = {};
-    bool entered_scope = radiant_js_ctx_enter(&scope, &evcon);
-    if (!entered_scope && (!context || dom_get_document() != target->doc)) return;
+    if (!type || !*type) return;
     RadiantTimingEventData data = {type, detail_name, detail_value, elapsed_time, 0};
-    // CSS listeners run after sampling releases its layout/scheduler ownership.
-    RootFrame roots(2);
-    Rooted<Item> target_root(roots, dom_wrap_element(target));
-    Rooted<Item> event_root(roots, radiant_build_css_timing_event(&data));
-    Item values[2] = {target_root.get(), event_root.get()};
-    js_schedule_native_env(dom_schedule_animation_frame,
-        radiant_dispatch_queued_css_event, 0, values, 2);
-    if (entered_scope) {
-        input_context = scope.saved_input_ctx;
-        scope.active = false;
-    }
+    radiant_queue_timing_event(uicon, target, radiant_build_css_timing_event, &data);
 }
 
 void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
     const char* type, double detail, double seconds) {
     if (!type || !*type) return;
     RadiantTimingEventData data = {type, nullptr, nullptr, seconds, detail};
-    radiant_dispatch_timing_event(uicon, target, radiant_build_svg_timing_event, &data);
+    radiant_queue_timing_event(uicon, target, radiant_build_svg_timing_event, &data);
 }
 
 static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
@@ -8145,6 +8094,8 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     s_synthetic_dom_dispatch_raw_event = previous_raw_event;
     bool prevented = radiant_dom_event_default_prevented(event_root.get());
     evcon->default_prevented = prevented;
+    // cancellation suppresses UA behavior, but author state still needs its redraw.
+    if (prevented) settle_pending_author_templates(evcon);
     const char* resolved_event_name = fn_to_cstr(
         js_get_name_key(event_root.get(), "type"));
     if (run_ua_tier) {
@@ -10013,6 +9964,9 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
             return result;
         }
         const char* event_name = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
+        if (radiant_dom_event_default_prevented(event_root.get())) {
+            settle_pending_author_templates(&evcon);
+        }
         if (event_name && !radiant_dom_event_default_prevented(event_root.get())) {
             if (strcmp(event_name, "click") == 0) {
                 dispatch_click_default_actions(&evcon, evcon.target);
@@ -10516,7 +10470,7 @@ typedef struct RadiantNavigationRequest {
     RadiantNavigationTargetKind target_kind;
 } RadiantNavigationRequest;
 
-typedef struct RadiantNavigationQueue {
+typedef struct RadiantNavigationQueue : DomDocumentResourceData {
     Queue requests;
 } RadiantNavigationQueue;
 
@@ -10539,7 +10493,7 @@ static void navigation_request_destroy(RadiantNavigationRequest* request) {
     mem_free(request);
 }
 
-static void navigation_queue_destroy(void* data) {
+static void navigation_queue_destroy(DomDocumentResourceData* data) {
     RadiantNavigationQueue* queue = (RadiantNavigationQueue*)data;
     if (!queue) return;
     QueueNode* link = NULL;
@@ -10783,13 +10737,13 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
         DomDocument* saved_doc = uicon->document;
         float saved_viewport_width = uicon->viewport_width;
         float saved_viewport_height = uicon->viewport_height;
-        uicon->document = new_doc;
+        uicon->document = lam::up(new_doc);
         uicon->viewport_width = (float)css_vw;
         uicon->viewport_height = (float)css_vh;
         process_document_font_faces(uicon, new_doc);
         layout_html_doc(uicon, new_doc, false);
         radiant_dispatch_lambda_body_load(uicon, new_doc);
-        uicon->document = saved_doc;
+        uicon->document = lam::up(saved_doc);
         uicon->viewport_width = saved_viewport_width;
         uicon->viewport_height = saved_viewport_height;
     }
@@ -12346,6 +12300,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             switch (evcon.new_cursor) {
             case CSS_VALUE_TEXT: cursor_type = GLFW_IBEAM_CURSOR; break;
             case CSS_VALUE_POINTER: cursor_type = GLFW_HAND_CURSOR; break;
+            case CSS_VALUE_COL_RESIZE: cursor_type = GLFW_HRESIZE_CURSOR; break;
+            case CSS_VALUE_ROW_RESIZE: cursor_type = GLFW_VRESIZE_CURSOR; break;
             default: cursor_type = GLFW_ARROW_CURSOR; break;
             }
             GLFWcursor* cursor = glfwCreateStandardCursor(cursor_type);

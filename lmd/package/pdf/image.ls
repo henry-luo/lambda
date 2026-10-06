@@ -10,9 +10,9 @@
 //                preserveAspectRatio="none"
 //                transform="matrix(1 0 0 -1 0 1)"/>
 //       </g>
-//     The `img:<num>` URL is a *handle*, not a data URI: the C side owns
-//     the decoded bytes and the downstream renderer is expected to
-//     resolve the handle via the original PDF's `objects` array.
+//     Use an attached data URI when available. `img:<num>` remains a
+//     renderer-only handle for streams without one; the C side owns those
+//     decoded bytes and resolves the handle through the PDF objects array.
 //   - Form XObjects (Subtype = Form) are deferred to Phase 6; we emit a
 //     placeholder <g data-pdf-form="img:<num>"/> so the SVG remains valid.
 //
@@ -133,13 +133,12 @@ fn _img_url(obj_num) {
 }
 
 // Emit a single <g><image/></g> for an Image XObject. obj_num=0 is dropped.
-// `href_url` is the fallback URL to use when no indirect object handle is
-// available. For normal Image XObjects, pass the `img:<num>` handle and let
-// Radiant resolve it through the direct PDF root carried on the SVG tree.
+// Prefer a portable data URI when the PDF input already supplies one; the
+// img:<num> resolver remains for images requiring the live PDF object tree.
 fn _emit_image(ctm, obj_num, href_url) {
     if (obj_num == 0 and href_url == null) { [] }
     else {
-        let url = if (obj_num != 0) _img_url(obj_num) else href_url
+        let url = if (href_url != null) href_url else _img_url(obj_num)
         let outer = util.fmt_matrix(ctm)
         let elem =
             <g transform: outer,

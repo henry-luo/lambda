@@ -30,6 +30,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <climits>
+#include <cctype>
 
 extern "C" {
 #include "../../lib/str.h"
@@ -257,6 +258,163 @@ TEST_F(StrSearchTest, Find) {
     EXPECT_EQ(str_find("hello world", 11, "xyz", 3), STR_NPOS);
     EXPECT_EQ(str_find("hello world", 11, "", 0), 0u);
     EXPECT_EQ(str_find("aaa", 3, "aaaa", 4), STR_NPOS);
+}
+
+// naive references for the prepared-needle kernel (GRP8)
+static size_t naive_find(const char* s, size_t n, const char* t, size_t m, bool fold) {
+    if (m == 0) return 0;
+    for (size_t i = 0; m <= n && i <= n - m; i++) {
+        size_t j = 0;
+        for (; j < m; j++) {
+            unsigned char a = (unsigned char)s[i + j], b = (unsigned char)t[j];
+            if (fold) { a = (unsigned char)tolower(a); b = (unsigned char)tolower(b); }
+            if (a != b) break;
+        }
+        if (j == m) return i;
+    }
+    return STR_NPOS;
+}
+
+TEST_F(StrSearchTest, FindPicksRareByteAndStaysLeftmost) {
+    // 'q' is far rarer than 'e', so the scan anchors on it; every candidate
+    // start is still checked in order, so the first occurrence wins
+    StrNeedle n;
+    str_needle_init(&n, "eeeq", 4, false);
+    EXPECT_EQ(n.rare, 'q');
+    EXPECT_EQ(n.rare_at, 3u);
+    EXPECT_EQ(str_needle_find(&n, "eeeeeeeq eeeq", 13), 4u);
+    EXPECT_EQ(str_find("xxeeeqyyeeeq", 12, "eeeq", 4), 2u);
+    // a needle at the very start and the very end of the haystack
+    EXPECT_EQ(str_find("Zab", 3, "Za", 2), 0u);
+    EXPECT_EQ(str_find("abZ", 3, "bZ", 2), 1u);
+    EXPECT_EQ(str_find("abZ", 3, "abZ", 3), 0u);
+    EXPECT_EQ(str_find("ab", 2, "abZ", 3), STR_NPOS);
+}
+
+TEST_F(StrSearchTest, NeedleFoldFindsBothCases) {
+    StrNeedle n;
+    str_needle_init(&n, "hello", 5, true);
+    EXPECT_TRUE(n.fold_ascii);
+    EXPECT_EQ(str_needle_find(&n, "say HeLLo", 9), 4u);
+    EXPECT_EQ(str_needle_find(&n, "HELLO", 5), 0u);
+    EXPECT_EQ(str_needle_find(&n, "help", 4), STR_NPOS);
+    // a caseless scan byte takes the single-byte path but still verifies folded
+    str_needle_init(&n, "a$b", 3, true);
+    EXPECT_EQ(n.rare, '$');
+    EXPECT_EQ(str_needle_find(&n, "xA$B", 4), 1u);
+}
+
+TEST_F(StrSearchTest, NeedlePicksPairOrSingleByteScan) {
+    // a common rarest byte, or a letter folded to both cases, takes the
+    // packed-pair scan (str_simd.c); a genuinely rare byte takes memchr
+    StrNeedle n;
+    str_needle_init(&n, "there", 5, false);
+    EXPECT_TRUE(n.use_pair);
+    EXPECT_NE(n.rare_at, n.pair_at);
+    str_needle_init(&n, "aZb", 3, false);
+    EXPECT_FALSE(n.use_pair);
+    str_needle_init(&n, "hello", 5, true);
+    EXPECT_TRUE(n.use_pair);
+    // the pair kernel agrees with the single-byte scan across the vector
+    // width, at every alignment of the match
+    char hay[200];
+    for (size_t at = 0; at + 5 <= sizeof(hay); at++) {
+        memset(hay, 'e', sizeof(hay));
+        memcpy(hay + at, "there", 5);
+        EXPECT_EQ(str_find(hay, sizeof(hay), "there", 5), at);
+        memcpy(hay + at, "HeLLo", 5);
+        EXPECT_EQ(str_needle_find_pair(&n, hay, sizeof(hay)), at);
+    }
+}
+
+// leftmost position where any literal occurs (per-literal folding)
+static size_t naive_any(const char* s, size_t n, const char* const* lits, const size_t* lens,
+                        const bool* fold, int count) {
+    for (size_t i = 0; i < n; i++) {
+        for (int k = 0; k < count; k++) {
+            if (i + lens[k] <= n && naive_find(s + i, lens[k], lits[k], lens[k], fold[k]) == 0) return i;
+        }
+    }
+    return STR_NPOS;
+}
+
+TEST_F(StrSearchTest, TeddyFindsLeftmostOfAnyLiteral) {
+    const char* lits[] = {"alloc", "free", "calloc"};
+    size_t lens[] = {5, 4, 6};
+    bool fold[] = {false, false, false};
+    StrTeddy t;
+    ASSERT_TRUE(str_teddy_init(&t, lits, lens, fold, 3));
+    EXPECT_EQ(t.fp_len, 3);   // one literal per bucket: 3 bytes suffice
+    const char text[] = "mem_x mem_calloc mem_free";
+    int which = -1;
+    // "calloc" at 10 contains "alloc" at 11: the leftmost start wins
+    EXPECT_EQ(str_teddy_find(&t, text, strlen(text), &which), 10u);
+    EXPECT_EQ(which, 2);
+    EXPECT_EQ(str_teddy_find(&t, "nothing here", 12, NULL), STR_NPOS);
+    // folded literals match either case; a caseless literal matches as written
+    bool folded[] = {true, false, true};
+    ASSERT_TRUE(str_teddy_init(&t, lits, lens, folded, 3));
+    EXPECT_EQ(str_teddy_find(&t, "x FREE ALLOC", 12, &which), 7u);
+    EXPECT_EQ(which, 0);
+    EXPECT_FALSE(str_teddy_init(&t, lits, lens, fold, 0));
+#if defined(__aarch64__)
+    EXPECT_STREQ(str_teddy_kernel(), "neon");
+#endif
+}
+
+TEST_F(StrSearchTest, TeddyMatchesNaiveOnRandomSets) {
+    unsigned seed = 4242;
+    auto next = [&seed]() { seed = seed * 1103515245u + 12345u; return (seed >> 16) & 0x7fff; };
+    const char alphabet[] = "abcAB-ez";
+    static char store[64][8];
+    static char buf[400];
+    const char* lits[64];
+    size_t lens[64];
+    bool fold[64];
+    for (int iter = 0; iter < 3000; iter++) {
+        int count = 1 + next() % 64;
+        for (int k = 0; k < count; k++) {
+            lens[k] = 1 + next() % 6;
+            for (size_t j = 0; j < lens[k]; j++) store[k][j] = alphabet[next() % 8];
+            lits[k] = store[k];
+            fold[k] = (next() % 3) == 0;
+        }
+        StrTeddy t;
+        ASSERT_TRUE(str_teddy_init(&t, lits, lens, fold, count));
+        size_t offset = next() % 16, n = next() % 360;
+        char* hay = buf + offset;
+        for (size_t i = 0; i < n; i++) hay[i] = alphabet[next() % 8];
+        size_t want = naive_any(hay, n, lits, lens, fold, count);
+        int which = -1;
+        size_t got = str_teddy_find(&t, hay, n, &which);
+        ASSERT_EQ(got, want) << "iter " << iter << " count " << count << " n " << n;
+        ASSERT_EQ(str_teddy_find_portable(&t, hay, n, NULL), want) << "iter " << iter;
+        if (got != STR_NPOS) {
+            // the reported literal really occurs there
+            ASSERT_GE(which, 0);
+            ASSERT_EQ(naive_find(hay + got, lens[which], lits[which], lens[which], fold[which]), 0u);
+        }
+    }
+}
+
+TEST_F(StrSearchTest, NeedleMatchesNaiveOnRandomInput) {
+    // small alphabets make many partial matches; every alignment and length
+    // around the needle is exercised
+    unsigned seed = 12345;
+    auto next = [&seed]() { seed = seed * 1103515245u + 12345u; return (seed >> 16) & 0x7fff; };
+    const char alphabet[] = "abAB-e q";
+    char hay[300], needle[8];
+    for (int iter = 0; iter < 4000; iter++) {
+        size_t n = next() % 300, m = 1 + next() % 7;
+        for (size_t i = 0; i < n; i++) hay[i] = alphabet[next() % 8];
+        for (size_t i = 0; i < m; i++) needle[i] = alphabet[next() % 8];
+        bool fold = (iter & 1) != 0;
+        StrNeedle prepared;
+        str_needle_init(&prepared, needle, m, fold);
+        ASSERT_EQ(str_needle_find(&prepared, hay, n), naive_find(hay, n, needle, m, fold))
+            << "iter " << iter;
+        if (!fold) ASSERT_EQ(str_find(hay, n, needle, m), naive_find(hay, n, needle, m, false));
+    }
 }
 
 TEST_F(StrSearchTest, RFind) {
@@ -2215,5 +2373,36 @@ TEST(StrKernelTest, ByteSetFindMatchesNaive) {
         }
         ASSERT_EQ(str_find_not_byteset(buf, len, &set), naive_not) << "round " << round;
         ASSERT_EQ(str_find_not_byteset(buf, len, &with_x), naive_not_x) << "round " << round;
+    }
+}
+
+// lib/fts finds ASCII word runs 16 bytes at a time (FTX3); the SIMD forms must
+// agree with a byte-at-a-time reference at every length and alignment
+TEST(StrKernelTest, AsciiWordSpansMatchNaive) {
+    // letters, digits, punctuation, both cases, and bytes >= 0x80
+    const char alphabet[] = "aZm09_-. \tQ\x80\xC3\xA9z";
+    char buf[96];
+    unsigned seed = 7;
+    for (int round = 0; round < 4000; round++) {
+        size_t len = (size_t)(round % 80);
+        for (size_t i = 0; i < len; i++) {
+            seed = seed * 1103515245u + 12345u;
+            // long runs of one class now and then, to cross 16-byte blocks
+            buf[i] = (round % 7 == 0) ? (char)('a' + (seed >> 16) % 26)
+                                      : alphabet[(seed >> 16) % (sizeof(alphabet) - 1)];
+        }
+        for (size_t at = 0; at <= len; at++) {
+            const unsigned char* p = (const unsigned char*)buf + at;
+            size_t n = len - at, word = 0, other = 0;
+            bool upper = false;
+            for (; word < n && p[word] < 0x80 && isalnum(p[word]); word++) {
+                if (isupper(p[word])) upper = true;
+            }
+            while (other < n && p[other] < 0x80 && !isalnum(p[other])) other++;
+            bool got_upper = !upper;
+            ASSERT_EQ(str_ascii_alnum_span(buf + at, n, &got_upper), word) << round << " " << at;
+            ASSERT_EQ(got_upper, upper) << round << " " << at;
+            ASSERT_EQ(str_ascii_nonalnum_span(buf + at, n), other) << round << " " << at;
+        }
     }
 }

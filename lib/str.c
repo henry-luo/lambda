@@ -238,20 +238,141 @@ size_t str_find(const char* s, size_t s_len,
     if (needle_len == 1) return str_find_byte(s, s_len, needle[0]);
 
     /* Candidate scan, the one literal-search kernel (T28-5): memchr jumps to
-     * the next first byte among the positions a match can start at, the
-     * second byte filters, and memcmp checks only the rest at a candidate.
-     * The old loops called memcmp at every position. */
-    const unsigned char first = (unsigned char)needle[0];
-    const char second = needle[1];
-    const char* p = s;
-    const char* last = s + (s_len - needle_len);   /* last possible start */
-    while (p <= last) {
-        const char* hit = (const char*)memchr(p, first, (size_t)(last - p) + 1);
-        if (!hit) return STR_NPOS;
-        if (hit[1] == second && memcmp(hit + 2, needle + 2, needle_len - 2) == 0) {
-            return (size_t)(hit - s);
+     * the next occurrence of the needle's rarest byte (GRP8; it was the first
+     * byte, which stops at every 'e' of "e..." needles), and memcmp checks the
+     * whole needle only at a candidate. */
+    StrNeedle prepared;
+    str_needle_init(&prepared, needle, needle_len, false);
+    return str_needle_find(&prepared, s, s_len);
+}
+
+/* Byte frequency ranks measured over this repository's C/C++ sources, docs,
+ * Lambda scripts and JS (67 MB): 0 is the rarest byte, 255 the most common.
+ * Only the order matters; a scan anchored on a rare byte stops less often. */
+static const uint8_t str_byte_ranks[256] = {
+      0,   1,   2,   3,   4,   5,   6,   7,   8, 137, 245,   9,  10, 102,  11,  12,
+     13,  14,  15,  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,
+    255, 176, 219, 187, 148, 163, 185, 183, 231, 230, 226, 178, 238, 235, 227, 223,
+    220, 222, 217, 205, 206, 204, 201, 190, 192, 197, 212, 224, 174, 232, 210, 165,
+    157, 207, 177, 200, 193, 211, 184, 172, 169, 209, 175, 166, 203, 199, 202, 191,
+    196, 149, 208, 213, 215, 182, 173, 167, 164, 171, 147, 181, 170, 180, 150, 242,
+    229, 252, 233, 244, 243, 254, 236, 234, 237, 249, 189, 214, 246, 240, 250, 247,
+    241, 168, 251, 248, 253, 239, 225, 218, 221, 228, 179, 195, 216, 194, 159,  29,
+    186, 129, 152, 101, 106, 153, 161, 113, 144, 142, 110, 104, 141,  96, 112, 132,
+    156, 131, 162, 151, 188, 154, 140, 145, 133, 100, 127,  91, 158, 139,  90, 138,
+    128, 116, 111,  98, 134, 124, 143, 155,  92, 115,  99,  93, 120, 103,  81,  95,
+     94, 123, 119, 117, 109, 118, 107, 136, 125,  97, 105, 114, 126,  89,  87,  83,
+     30,  31, 160, 146,  84,  80,  61,  76,  78,  74,  62,  72,  73,  32, 130, 108,
+     86,  66,  33,  34,  67,  77,  60,  63,  70,  65,  35,  36,  37,  38,  39,  40,
+     68,  82, 198,  71,  85,  75,  88,  79,  69,  64,  41,  42,  43,  44, 121, 122,
+    135,  45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,
+};
+
+uint8_t str_byte_rank(uint8_t c) { return str_byte_ranks[c]; }
+
+/* below this rank a single scan byte is rare enough for memchr alone */
+#define STR_PAIR_MIN_RANK 160
+
+/* pure ASCII case mapping: the lazily built LUTs are not safe to initialize
+ * from several threads, and grep workers search concurrently */
+static inline uint8_t _ascii_lower(uint8_t c) { return (c >= 'A' && c <= 'Z') ? (uint8_t)(c + 32) : c; }
+static inline uint8_t _ascii_upper(uint8_t c) { return (c >= 'a' && c <= 'z') ? (uint8_t)(c - 32) : c; }
+
+void str_needle_init(StrNeedle* needle, const char* bytes, size_t len, bool fold_ascii) {
+    memset(needle, 0, sizeof(*needle));
+    needle->bytes = bytes;
+    needle->len = bytes ? len : 0;
+    needle->fold_ascii = fold_ascii;
+    uint8_t best_rank = 255;
+    for (size_t i = 0; i < needle->len; i++) {
+        uint8_t c = (uint8_t)bytes[i];
+        uint8_t rank = str_byte_ranks[c];
+        if (fold_ascii) {
+            /* a letter is scanned in both cases, so it is as common as the
+             * commoner of the two */
+            c = _ascii_lower(c);
+            uint8_t other = str_byte_ranks[_ascii_upper(c)];
+            uint8_t own = str_byte_ranks[c];
+            rank = own > other ? own : other;
         }
+        if (i == 0 || rank < best_rank) {
+            best_rank = rank;
+            needle->rare_at = i;
+            needle->rare = c;
+        }
+    }
+    needle->rare_rank = best_rank;
+    needle->rare_alt = fold_ascii ? _ascii_upper(needle->rare) : needle->rare;
+#ifndef LAMBDA_NO_STR_SIMD
+    // the second-rarest position completes a packed pair (str_simd.c)
+    if (needle->len >= 2) {
+        uint8_t pair_rank = 255;
+        bool have = false;
+        for (size_t i = 0; i < needle->len; i++) {
+            if (i == needle->rare_at) continue;
+            uint8_t c = (uint8_t)bytes[i];
+            uint8_t rank = str_byte_ranks[c];
+            if (fold_ascii) {
+                c = _ascii_lower(c);
+                uint8_t other = str_byte_ranks[_ascii_upper(c)];
+                rank = str_byte_ranks[c] > other ? str_byte_ranks[c] : other;
+            }
+            if (!have || rank < pair_rank) {
+                have = true;
+                pair_rank = rank;
+                needle->pair_at = i;
+                needle->pair = c;
+            }
+        }
+        needle->pair_alt = fold_ascii ? _ascii_upper(needle->pair) : needle->pair;
+        // a genuinely rare single byte is cheapest through libc memchr; a
+        // common one, or a letter scanned in both cases, gains from the pair
+        needle->use_pair = needle->rare_rank >= STR_PAIR_MIN_RANK || needle->rare != needle->rare_alt;
+    }
+#endif
+}
+
+bool str_needle_equal_at(const StrNeedle* needle, const char* at) {
+    if (!needle->fold_ascii) return memcmp(at, needle->bytes, needle->len) == 0;
+    for (size_t i = 0; i < needle->len; i++) {
+        if (_ascii_lower((uint8_t)at[i]) != _ascii_lower((uint8_t)needle->bytes[i])) return false;
+    }
+    return true;
+}
+
+size_t str_needle_find(const StrNeedle* needle, const char* s, size_t s_len) {
+    if (!s) s_len = 0;
+    if (needle->len == 0) return 0;
+    if (needle->len > s_len) return STR_NPOS;
+#ifndef LAMBDA_NO_STR_SIMD
+    if (needle->use_pair) return str_needle_find_pair(needle, s, s_len);
+#endif
+    /* a match starting at `start` puts the scan byte at start + rare_at, so the
+     * scan covers [rare_at, s_len - len + rare_at]; candidates appear in
+     * increasing start order, so the first one that verifies is the leftmost */
+    const char* p = s + needle->rare_at;
+    const char* end = s + (s_len - needle->len) + needle->rare_at + 1;
+    if (needle->rare == needle->rare_alt) {
+        while (p < end) {
+            const char* hit = (const char*)memchr(p, needle->rare, (size_t)(end - p));
+            if (!hit) return STR_NPOS;
+            const char* start = hit - needle->rare_at;
+            if (str_needle_equal_at(needle, start)) return (size_t)(start - s);
+            p = hit + 1;
+        }
+        return STR_NPOS;
+    }
+    /* two-byte scan for a folded letter: keep the next hit of each case and
+     * rescan only the one consumed */
+    const char* lo = (const char*)memchr(p, needle->rare, (size_t)(end - p));
+    const char* up = (const char*)memchr(p, needle->rare_alt, (size_t)(end - p));
+    while (lo || up) {
+        const char* hit = (!up || (lo && lo < up)) ? lo : up;
+        const char* start = hit - needle->rare_at;
+        if (str_needle_equal_at(needle, start)) return (size_t)(start - s);
         p = hit + 1;
+        if (hit == lo) lo = p < end ? (const char*)memchr(p, needle->rare, (size_t)(end - p)) : NULL;
+        else up = p < end ? (const char*)memchr(p, needle->rare_alt, (size_t)(end - p)) : NULL;
     }
     return STR_NPOS;
 }

@@ -18,9 +18,9 @@ static bool render_trace_enabled(void) {
     return enabled != 0;
 }
 
-typedef void (*RenderRasterBlockFn)(RenderContext*, ViewBlock*);
+typedef void (*RenderRasterBlockFn)(RasterRenderContext*, ViewBlock*);
 
-static void render_raster_profile_block(RenderContext* rdcon, ViewBlock* block,
+static void render_raster_profile_block(RasterRenderContext* rdcon, ViewBlock* block,
                                         RenderRasterBlockFn render,
                                         RenderProfileZone category) {
     uint64_t start = time_now_ns();
@@ -30,7 +30,7 @@ static void render_raster_profile_block(RenderContext* rdcon, ViewBlock* block,
         time_elapsed_ms_f(start, end));
 }
 
-static void render_raster_retained_media(RenderContext* rdcon, ViewBlock* block,
+static void render_raster_retained_media(RasterRenderContext* rdcon, ViewBlock* block,
                                          RenderRasterBlockFn render_content) {
     if (render_block_dirty_misses(rdcon, block) ||
         render_block_try_retained_fragment(rdcon, block)) return;
@@ -43,7 +43,7 @@ static void render_raster_retained_media(RenderContext* rdcon, ViewBlock* block,
     render_element_marker_end(rdcon, &marker_scope);
 }
 
-static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
+static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* block,
                                          bool skip_positioned_in_normal_flow) {
     if (!rdcon || !block) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
@@ -113,17 +113,17 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
     }
 }
 
-static void render_raster_walk_block(void* vctx, ViewBlock* block, float abs_x, float abs_y,
+static void render_raster_walk_block(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
                                      FontBox* font, Color color) {
     (void)abs_x; (void)abs_y; (void)font; (void)color;
-    RenderContext* rdcon = (RenderContext*)vctx;
+    RasterRenderContext* rdcon = (RasterRenderContext*)vctx;
     render_raster_dispatch_block(rdcon, block, true);
 }
 
-static void render_raster_walk_inline(void* vctx, ViewSpan* span, float abs_x, float abs_y,
+static void render_raster_walk_inline(RenderContext* vctx, ViewSpan* span, float abs_x, float abs_y,
                                       FontBox* font, Color color) {
     (void)abs_x; (void)abs_y; (void)font; (void)color;
-    RenderContext* rdcon = (RenderContext*)vctx;
+    RasterRenderContext* rdcon = (RasterRenderContext*)vctx;
     if (!rdcon || !span) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
 
@@ -143,10 +143,10 @@ static void render_raster_walk_inline(void* vctx, ViewSpan* span, float abs_x, f
         time_elapsed_ms_f(tiv1, tiv2));
 }
 
-static void render_raster_walk_text(void* vctx, ViewText* text, float abs_x, float abs_y,
+static void render_raster_walk_text(RenderContext* vctx, ViewText* text, float abs_x, float abs_y,
                                     FontBox* font, Color color) {
     (void)abs_x; (void)abs_y; (void)font; (void)color;
-    RenderContext* rdcon = (RenderContext*)vctx;
+    RasterRenderContext* rdcon = (RasterRenderContext*)vctx;
     if (!rdcon || !text) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
     uint64_t tt1 = time_now_ns();
@@ -156,33 +156,33 @@ static void render_raster_walk_text(void* vctx, ViewText* text, float abs_x, flo
         time_elapsed_ms_f(tt1, tt2));
 }
 
-static void render_raster_walk_marker(void* vctx, ViewSpan* marker, float abs_x, float abs_y,
+static void render_raster_walk_marker(RenderContext* vctx, ViewSpan* marker, float abs_x, float abs_y,
                                       FontBox* font, Color color) {
     (void)abs_x; (void)abs_y; (void)font; (void)color;
-    RenderContext* rdcon = (RenderContext*)vctx;
+    RasterRenderContext* rdcon = (RasterRenderContext*)vctx;
     if (!rdcon || !marker) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
     render_marker_view(rdcon, marker);
 }
 
-static void render_raster_walk_positioned_block(void* vctx, ViewBlock* block, float abs_x, float abs_y,
+static void render_raster_walk_positioned_block(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
                                                 FontBox* font, Color color) {
     (void)abs_x; (void)abs_y; (void)font; (void)color;
-    RenderContext* rdcon = (RenderContext*)vctx;
+    RasterRenderContext* rdcon = (RasterRenderContext*)vctx;
     render_raster_dispatch_block(rdcon, block, false);
 }
 
-static void render_raster_backend_init(RenderBackend* backend, RenderContext* rdcon) {
+static void render_raster_backend_init(RenderBackend* backend, RasterRenderContext* rdcon) {
     if (!backend) return;
     *backend = {};
-    backend->ctx = rdcon;
+    backend->ctx = lam::up(rdcon);
     backend->render_block = render_raster_walk_block;
     backend->render_inline = render_raster_walk_inline;
     backend->render_text = render_raster_walk_text;
     backend->render_marker = render_raster_walk_marker;
 }
 
-static void render_raster_walk_state_init(RenderWalkState* walk_state, RenderContext* rdcon) {
+static void render_raster_walk_state_init(RenderWalkState* walk_state, RasterRenderContext* rdcon) {
     if (!walk_state || !rdcon) return;
     *walk_state = {};
     walk_state->x = rdcon->block.x;
@@ -192,7 +192,7 @@ static void render_raster_walk_state_init(RenderWalkState* walk_state, RenderCon
     walk_state->ui_context = rdcon->ui_context;
 }
 
-void render_raster_positioned_children(RenderContext* rdcon, ViewBlock* block) {
+void render_raster_positioned_children(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !block->position) return;
     RenderBackend backend;
     render_raster_backend_init(&backend, rdcon);
@@ -202,7 +202,7 @@ void render_raster_positioned_children(RenderContext* rdcon, ViewBlock* block) {
     render_walk_positioned_children(&backend, &walk_state, block);
 }
 
-void render_raster_positive_z_descendants(RenderContext* rdcon, View* view) {
+void render_raster_positive_z_descendants(RasterRenderContext* rdcon, View* view) {
     if (!rdcon || !view) return;
     RenderBackend backend;
     render_raster_backend_init(&backend, rdcon);
@@ -211,7 +211,7 @@ void render_raster_positive_z_descendants(RenderContext* rdcon, View* view) {
     render_walk_positive_z_descendants(&backend, &walk_state, view);
 }
 
-bool render_raster_custom_layout_children(RenderContext* rdcon, ViewBlock* block) {
+bool render_raster_custom_layout_children(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !block->custom_layout_paint_prop()) return false;
     RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
     RenderBackend backend;
@@ -233,7 +233,7 @@ bool render_raster_custom_layout_children(RenderContext* rdcon, ViewBlock* block
     return true;
 }
 
-void render_children(RenderContext* rdcon, View* view) {
+void render_children(RasterRenderContext* rdcon, View* view) {
     if (!rdcon || !view) return;
     uint64_t trc_start = time_now_ns();
 
@@ -250,7 +250,7 @@ void render_children(RenderContext* rdcon, View* view) {
         time_elapsed_ms_f(trc_start, trc_end));
 }
 
-void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
+void render_raster_view_tree(RasterRenderContext* rdcon, ViewTree* view_tree) {
     if (!rdcon || !view_tree) return;
 
     View* root_view = view_tree->root;

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 55.0.0 (2026-10-02)
+**Spec version:** 57.1.0 (2026-10-06)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -954,17 +954,15 @@ it.* [TE-13, C14]
   `e^` catches errors only, propagating. `or` and `^` are *not* a soft/hard
   split — both work on both channels; the axis is coalescing-without-access
   vs error-specific handling. [TE-16]
-- **S7.6.7v3*** A statement-position procedure handler
-  `pn_call() ^ { error_body }` may protect a possibly-suspending call. No
-  `LambdaRecoveryFrame`, native frame address, or jump buffer survives a
-  scheduler yield. Ordinary errors are stored as the call's durable completion
-  and branch to the handler when the caller state machine resumes. If an S7.11
-  native system fault occurs after suspension, the task fault boundary may use
-  the temporary non-local carve-out, but it must materialize the fault as a
-  durable completion and resume the nearest active procedural handler state;
-  subsequent propagation is again frame-by-frame. A value-producing postfix
-  handler over a possibly-suspending `pn` remains a compile error because `pn`
-  handlers are statement-only. [TE-16, ER-D13, REH-D12, REH-D13]
+- **S7.6.7v4** A statement-position procedure handler
+  `pn_call() ^ { error_body }` may protect a possibly-suspending call. The
+  call parks and resumes in place, so its error reaches the handler exactly
+  as a non-suspending call's does; *suspension is invisible to error
+  handling*. A value-producing postfix handler over a possibly-suspending `pn`
+  remains a compile error because `pn` handlers are statement-only. (Revised
+  2026-10-05, v4: v3 routed the error through a durable completion and the
+  caller's state machine, with a non-local carve-out for a fault after
+  suspension.) [TE-16, ER-D13, REH-D12, REH-D13, Runtime_Async RA1]
 
 ### S7.7 Containment: the declaration-boundary skip
 
@@ -1088,10 +1086,13 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   recursion never forces `T^stack_overflow`. Structural-equality depth
   exhaustion is instead a language-visible ordinary error and propagates by
   explicit completion through each frame. [ER-D4, ER-D9, D1.4v3]
-- **S7.11.2** Faults pass transparently through `fn` frames; only `pn`
+- **S7.11.2v2** Faults pass transparently through `fn` frames; only `pn`
   boundaries and execution boundaries own them. A caught fault cannot resume
-  the abandoned expression. Recovery frames never survive a scheduler yield —
-  an async task completes with the fault result. [ER-D9, ER-D11]
+  the abandoned expression. A task's boundaries live on its own activation
+  and stay armed across its parks; a fault in a task is contained there, and
+  the task completes with the fault result. (Revised 2026-10-05, v2: v1 said
+  recovery frames never survive a scheduler yield.) [ER-D9, ER-D11,
+  Runtime_Async §4.5]
 - **S7.11.3** Transaction barriers (module init, hosted-guest entry) take
   priority over inner handlers: no handler may resume through a
   half-initialized module or abandoned guest activation. Fault delivery
@@ -2308,6 +2309,26 @@ below by its section.
 - **S16.7.3v2** **Lists spread and adjacent strings or binaries merge (S2.6.3,
   S2.6.4)**, after dropping, so `"a" ⏎ null ⏎ "b"` yields `"ab"` — the
   dropped null does not keep its neighbours apart.
+- **S16.7.4** **A REPL entry echoes its value unless it is declarations
+  only.** An interactive session evaluates each completed entry as a fragment
+  of one script (entries are separated per S16.2.3v3). An entry whose
+  top-level items are all declarations (`let`, `fn`, `pn`, `type`, `import`)
+  produces no item (S2.5.4v2) and prints nothing; every other entry prints
+  its value, a `null` result included — the S16.7.2v2 residual is a script's
+  value, not an entry's echo. [Repl_Interp RI1]
+- **S16.7.5** **A session top level rebinds nothing.** A later `let`/`fn`/
+  `pn`/`type` of a name already bound at the session top level is E209,
+  duplicate definition, exactly as in a file: the session's top level is one
+  scope, not a sequence of scopes. `clear` starts a new session.
+  [Repl_Interp RI2]
+- **S16.7.6** **Two session kinds.** `lambda` opens a **functional**
+  session: entries are top-level content (S16.7.1), and `var`, assignment and
+  procedure calls are rejected as they are at a file's top level. `lambda run`
+  without a script opens a **procedural** session: entries are statements
+  appended to one persistent implicit procedure body, so `var` bindings
+  persist across entries and procedure calls run; the session warns at start
+  that entries carry out effects. A trailing expression statement echoes per
+  S16.7.4. [Repl_Interp RI3]
 
 ### S16.8 Lexical forms
 
@@ -2578,6 +2599,22 @@ governs how an under-determined case here is resolved.
   kind: a symbol maps to a symbol. Mapping is not folding: case-insensitive
   matching follows S17.7.1, not `lower(a) == lower(b)`. [S17.7.1; SP23]
 
+### S17.8 Option maps
+
+- **S17.8.1*** **An option name a system function does not define is a
+  compile-time error where the compiler can see it, and a run-time warning
+  otherwise.** Where the options argument is a map literal, every field name
+  written in it is checked against the function's options and an unknown one
+  is an error. Where the options reach the call as a value — a variable, a
+  spread, a map built from data — an unknown name is ignored: the call
+  proceeds as if the field were absent, and a warning is issued. This is the
+  convention for every system function that takes an options map; `start`,
+  whose options are a compiler-recognized literal (S13.1.1v2), is its
+  compile-time arm. *Why: a misspelt name in a literal is a bug the compiler
+  can catch for free; a map that arrives as data may carry fields meant for
+  someone else, and failing the call over them would make shared option maps
+  unusable.* [S13.1.1v2; GRP28]
+
 ---
 
 ## Appendix A — Implementation Footnotes
@@ -2609,7 +2646,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.4.4 | **Partial as of 2026-09-27, both tiers.** An error value carries its code and message, `.source` (the wrapped error, from `error(msg, source)` or the parameter map's `source`), and `.file`/`.line`/`.column` of the `error()` call that built it; an absent member is `null`. Fixture `error_members.ls`. Residue: a payload-less sentinel still answers from `last_error` ([LR10-14](../vibe/Lambda_Issue_Ledger.md#lr10-14)), and a failed check's error carries no location ([LR10-15](../vibe/Lambda_Issue_Ledger.md#lr10-15)). |
 | S7.6.1 | The one- and two-arm postfix handler grammar and MIR/interpreter lowering conform to S7.6.1v4/S7.6.2v3/S7.6.6v2, including nested `^`/`~` scope restoration, direct raised-`pn` outcome routing, and rich-error preservation. |
 | S7.6.5 | Retired `^err` destructuring and prefix `^expr` error tests are removed from the grammar, AST/runtime, and active `.ls` corpus. The handler-local `^` remains scoped to the selected error arm. |
-| S7.6.7 | Landed 2026-08-17: statement-position `pn_call() ^ { error_body }` uses explicit ordinary completions before and after suspension; durable native-fault targets cover the S7.11 carve-out without retaining a recovery frame or jump buffer across a yield. Value-producing handlers over possibly-suspending `pn` calls remain rejected. |
+| S7.6.7v4 | **Implemented 2026-10-05** (Runtime_Async P1): a suspending `pn` call returns to its handler like any other call in both tiers; the durable completions, handler fault states and carve-out are deleted. Value-producing handlers over possibly-suspending `pn` calls remain rejected. Lambda concurrency scripts 25/25 in both tiers, plain and under forced GC. |
 | S7.7.1–S7.7.6 | **Partial as of 2026-09-27, both tiers.** Interiors flow: a system function's rejected operand (S11.4.3) and a defect-capable call's value (TE-17 I3) are values, not early returns, and a declaration or reassignment whose contract excludes error skips when its value is one, however it arose. Fixtures `proc/defect_value_flow.ls`, `proc/rejected_error_value_flow.ls`, `proc/rejected_error_any_operand.ls`. Residue ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)): the skip target is the function, not the declaring block (S7.7.2, S7.7.5); a failed parameter admission returns from the caller instead of being the call's value (S7.7.3); the element-store report (S7.7.6) is not emitted. `for x: T in e` does not parse yet — case 1 is `let`/`var`-only until the grammar is extended. |
 | S7.8.1 | **TE-17 lane gating built 2026-09-27** on the D6.1.3 fact: a defect-capable call's value, and a member, element or arithmetic result of one, never enters a native lane, and a literal slot fed by one is boxed on both tiers. Known violation V1 is unchanged: `fn_array_set` silently despecializes a declared `int[]`, so the dominance invariant (S7.7.2) is false today. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
 | S7.10.5v2 (v1 residue) | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
@@ -2644,6 +2681,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S16.4.2v2 | **Conformant; the v2 procedure-arrow clause since 2026-09-26** (S16.6.7v2's row): a procedure arrow's body parses as a `pn` body, so `pn () => {}` is the empty procedure. The v1 rule was **conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
 | S16.6.6, S16.6.7v2 | S16.6.6 and the v1 declaration rule **conformant in both front ends as of 2026-08-24** (C 140/140, Tree-sitter 135/135, zero corpus movement). Enforcement mechanics and findings: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 35. **S16.6.7v2 implemented 2026-09-26 in both front ends and on every tier.** The C parser's `parse_procedure_arrow` reduces an unnamed `AST_NODE_PROC`, so each tier treats it as a nested `pn`; the reference grammar's `proc_expr` is a closed tail. `fn` in value position is E100 naming the repair ([LR02-21](../vibe/Lambda_Issue_Ledger.md#lr02-21)'s `fn` half). S16 harnesses with the new cases: C 372/372, Tree-sitter 358/358. Fixture `proc/pn_arrow.ls` is pinned on interp, jit and auto: `function`, `pn (...)` and `start` targets, the run-time refusal in `fn` context, closures, a raised error, and promotion. `make test-lambda-baseline` 5949/5955 in the worktree; the six failures are test262 JS suites whose `ref/` data the worktree lacks, and the five `test_js_script_gtest` cases pass once it is linked. Captures behave as a named nested `pn`'s, including S9.1.4's pending capture-assignment error (its row). |
 | S16.6.8v2, S16.6.9 | v2 (2026-09-26): a procedure arrow's braced body is exempt (S16.6.7v2's row). **Conformant as of 2026-08-24** (`E312` in `build_ast` per S16.6.5; C 152/152, Tree-sitter 135/135, baseline 3868/3868). Classifier subtleties (three-way recursive `ast_branch_kind`, NEUTRAL empty branch) and migration: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 38 addendum. |
+| S16.7.4, S16.7.6 | **Implemented 2026-10-06** (branch `worktree-repl-interp`). An entry echoes unless every top-level item is a declaration or a statement (`repl_fragment_declarations_only`, `lambda/runtime/runner.cpp`); `lambda run` without a script opens the procedural session, which marks the session scope `is_proc`, treats the module level as `pn` context in the call-colour walk, and runs its top level as a procedure body; it announces at start that entries carry out effects. S16.7.5 is conformant, and a duplicate `fn` now reports E209 once (declarations are identified by node, not start byte). Fixtures: `LambdaReplSessionTests` in `test/test_lambda_repl_gtest.cpp`. [Repl_Interp §3.4, §3.7](../vibe/Lambda_Design_Repl_Interp.md) |
 | S16.8.4, S16.8.8, S16.9.2 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.9.4 was probed on 2026-09-21 on both tiers and in both front ends, and ships unmarked. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
 | S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** Residue: the marker wraps the field type in `OPERATOR_OPTIONAL` — the same representation `a: T?` produces — so the two spellings this ruling calls *distinct* are indistinguishable downstream until `ShapeEntry` carries a field-level flag; independently, the declaration binding checker treats an optional field as required for both spellings (`error[E205]`, pre-existing). History: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S12.3.7 | **Conformant as of 2026-08-27.** Module-local bindings win over same-named system functions, including non-callable shadows, and the compiler emits the required warning; explicit `lambda.sys.*` qualification remains the escape from that shadow under S17.2.2. Regression and implementation record: [LR02-15](<../vibe/Lambda_Issue_Ledger (fixed).md#lr02-15>). |
@@ -2663,6 +2701,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.1.1v3, S11.1.2v3, S11.1.6v3, S16.8.6v3 | **Ruled 2026-09-22; conformant since P5 of the list fixes (2026-09-23, both tiers).** The two families are split by bracket: `T{n}`, `T{n,m}`, `T{n+}` count a run and `T[]`, `T[n]` describe an array, in the C parser, the reference grammar and the pattern islands (`\(d{3})`). As a boundary type an occurrence admits what a run is (S2.5.5v2): `null` for zero, a bare `T` for one, a sequence of two or more for more, so `null is int*` is true while `[5] is int*` and `[] is int*` are false and `{f: int*}` admits `{f: null}` and `{f: [5, 6]}` but not `{f: [5]}`. A run whose operand is itself a container takes that container as its one item, which is how `int[]?` still holds `[]`. In a sequence-pattern slot an occurrence is a run of the sequence's items and zero is void, matched by backtracking over the counts a run can take: `[1, int*, 2]` matches `[1, 2]` and `[1, 5, 6, 2]`, never `[1, null, 2]` or `[1, [5, 6], 2]`. The array family admits only arrays, so `5 is int[]` is now false, and a counted array checks its length (`int[0]` is `[]`). `<:` relates the families: `int <: int*`, `int? <: int*` and `int[2] <: int*` hold while `int[] <: int*` and `int* <: int[]` do not, and `list <: array` and `range <: array` hold where `array <: list` does not (S2.5.1v2). `T[n+]` and `T[n, m]` are rejected with a diagnostic naming their replacement (`test/lambda/negative/semantic/occurrence_retired_*.ls`). Two spelling notes: the open count is `T{n+}` (2026-09-23, USER) — regex's `T{n,}` is rejected with a diagnostic naming it, since an exact `T{n}` would be a silently different type — and a `{` count binds tight (`int{2}`, never `int {2}`), since a spaced brace opens a body or a block, and a **return** type never takes one at all — there the body wins, so a counted return type goes through a type alias. Migration: every retired spelling in the tree (`type_pattern.ls` 18 sites, `type_occurrence.ls`, five island fixtures) and the user docs. **The v3 element-content clause is conformant since 2026-09-25 (both tiers):** an element pattern's content section resolves to `TypeElmt::content_list`, and `validate_against_element_type` — the path `is` and the validator share — matches the children against it with the bracket-pattern matcher, where it had compared counts ([LR13-10](<../vibe/Lambda_Issue_Ledger (fixed).md#lr13-10>)). The same change stopped a structural slot — `<p>`, `{y: int}`, `[int, int]`, `int[]`, a function signature — from reducing to a TypeId test, which had let `[<li>]` match `[<p>]` in bracket patterns too. Fixture `test/lambda/element_content_pattern.ls`; baseline 5869/5869. **Residue in the pattern islands (found 2026-09-27) is fixed the same day, on all three tiers:** a count inside an island takes exactly the type-position spellings, checked by one shared scanner, where its text had reached the regex unchecked (`\(d{2,})` had regex's meaning, `\(d{,5})` and `\(d{a})` matched literal text), plus the regex engine's bounds (`n ≤ m`, at most 1000); `...` matches newlines (S16.8.6v3's `...` ≡ `any*`), where it had stopped at one; a pattern's failures are compile-time diagnostics, where a name it could not use or a pattern RE2 refused had been logged while the pattern silently matched nothing or only `""` (an unknown or later-defined name is E204, a name that is no pattern E200, RE2's refusal E200); a pattern annotates a `let` or a parameter, where the static check had read it as the type of type values (E201, E207; a pattern contract now proves its tag's domain and defers membership, as a range contract does); and a pattern value prints as its canonical source, where printing one crashed ([Lambda_Expr_String_Pattern.md §7](../vibe/Lambda_Expr_String_Pattern.md#7-conformance-defects-found-by-the-audit)). Fixtures `pattern_annotation.ls`, `pattern_replace.ls` (S17.6.1), eight `negative/semantic/string_pattern_*.ls`, and count cases in both S16 harnesses. **S11.1.2v3's single-character `!` is implemented since 2026-09-27, on all three tiers:** the resolver rejects an operand that is not a single-character set (E200), where the regex compiler had silently left out a negation of anything but `d`, `w`, `s` or `a`; a set compiles to one RE2 class over code points. The same change made a range's bounds code points checked to be single characters (S11.1.3), where the regex had taken each bound's first byte, and let an island name a literal union (S11.1.2v3's literal-only identity) or a character range type (S11.1.3; `\(Lower+)` with `type Lower = "a" to "z"` had matched only the empty string). Fixtures `pattern_negation.ls`, `negative/semantic/string_pattern_negation_non_set.ls`, `negative/semantic/string_pattern_range_bound.ls`. **S11.1.2v3's tiers and its `\|`-only binary tier are conformant since 2026-09-27 in both front ends (SP19, SP20):** the reference grammar now reads `\(!d+)` as `(!d)+`, as the C parser already did, where it had rejected the form; and both reject an island `&`, which the C parser had taken onto one tier with `\|` and lowered to a lookahead RE2 rejects. Fixtures `pattern_precedence.ls` (all three tiers), `negative/semantic/string_pattern_intersection.ls`, and an island section in both S16 harnesses. [Impl_Element_Type_Sharing P0](../vibe/impl/Lambda_Impl_Element_Type_Sharing.md) |
 | S12.3.5v2 | **Ruled 2026-09-22; conformant since P4 of the list fixes (2026-09-23, both tiers).** `*x` builds the list of x's items instead of marking x, so spreading never modifies its operand and the JIT no longer rewrites a pooled literal (`fn g() => [1, "y"]` returned a list on every later call — the tier divergence is pinned on all three tiers by `test/lambda/spread_star.ls`). A range is materialized (`[*(1 to 3), 9]` is `[1, 2, 3, 9]`), `*null` splices nothing, and a non-sequence — text included — is one item, so `[*xs]` packages any value as an array. Because it is a value, `*x` also finishes by position (S2.5.5v2): `let b = *[2, 3]` is the list `(2, 3)`. |
 | S2.2.3, S2.6.1v2, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; conformant since P3 of the list fixes (2026-09-23, both tiers)**. The LaTeX parser deviation closed on 2026-10-02 (S2.6.1v2): consecutive command string arguments are array children. S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Closed by P3: (1) a lone `""` is dropped (`<e "">` has no children, and a bare `""` at the top level prints nothing); (2) adjacent binaries merge (`<e b'\x01' b'\x02'>` has one child); (3) content writes normalize — `e[1] = "m"` on `<e "x" 1 "y">` leaves one child `"xmy"`, `e[1] = null` removes the child and merges its neighbours, `e[0] = ""` removes it, `e[0] = (3, 4)` splices, and `push` on an element appends content. String merging no longer waits for an input context (D2.6.5v3). Parser-owned element construction now uses the content append; collection append helpers also normalize element destinations (D2.6.5v4), including the string and null members of group elements (S14.1.1). MarkEditor insert, batch insert, replace and delete now rebuild through the owner-aware content append in both edit modes, with 54/54 editor and 112/112 DOM node/range tests passing. Verified 2026-10-02: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
+| S17.8.1 | **Ruled 2026-10-04 (USER); partially implemented.** `io.grep` conforms on both arms (2026-10-04): the AST builder checks a literal options map against the registry table `sys_func_option_names` (`lambda/runtime/sys_func_registry.c`), and the function warns about an unknown name in an options value; registering another function's option names extends the compile-time arm to it. `start` already conforms to the compile-time arm: an unknown name in its options literal is an error. `find` and `replace` look up `limit`, `last` and `ignore_case` and ignore any other name silently in both cases — no error for a literal, no warning for a value. Other system functions with an options map (`input`, `output`, `fetch`, `cmd`) are not yet audited. Existing implementations are to be migrated. [Lambda_Lib_Grep.md Appendix C](../vibe/Lambda_Lib_Grep.md#appendix-c-unknown-option-names-current-state) |
 
 **S2.6.6v2 — MVP with dictionaries, 2026-10-02.** Raw strings/binaries, null/empty dropping,
 list spreading, computed selectors, empty files, and byte output are implemented
@@ -2793,7 +2832,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
-| S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
+| S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
 | S8 membership | C5.3a, C5.3b; §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
@@ -2802,8 +2841,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
-| S16 surface syntax | Design_Syntax §3–§7 (39 decided points) | `Lambda_Design_Syntax.md` |
-| S17 system library | C18, C15b.1; IL2-I11, IL2-I12, IL2-I25; SP21–SP23 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Int_Sized.md`, `Lambda_IO_Sysinfo.md`, `Lambda_Expr_String_Pattern.md` |
+| S16 surface syntax | Design_Syntax §3–§7 (39 decided points); RI1–RI3 | `Lambda_Design_Syntax.md`, `Lambda_Design_Repl_Interp.md` |
+| S17 system library | C18, C15b.1; IL2-I11, IL2-I12, IL2-I25; SP21–SP23; GRP28 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Int_Sized.md`, `Lambda_IO_Sysinfo.md`, `Lambda_Expr_String_Pattern.md`, `Lambda_Lib_Grep.md` |
 
 The decision records preserve the full deliberations — every alternative that
 lost and the arguments that did not persuade. This specification is their

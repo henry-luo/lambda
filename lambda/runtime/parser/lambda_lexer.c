@@ -190,9 +190,11 @@ static bool lexer_word_in(const char* source, size_t start, size_t end,
     return false;
 }
 
-static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size_t end) {
-    struct Keyword { const char* text; LambdaTokenKind kind; };
-    static const struct Keyword keywords[] = {
+// The lexer's vocabulary has one owner: these tables. lexer_keyword_kind
+// classifies with them and lambda_lexer_vocabulary_word enumerates them (REPL
+// completion), so a new keyword can never be missing from either.
+struct LexerKeyword { const char* text; LambdaTokenKind kind; };
+static const struct LexerKeyword lexer_keywords[] = {
         {"let", LAMBDA_TOK_LET}, {"pub", LAMBDA_TOK_PUB},
         {"var", LAMBDA_TOK_VAR}, {"type", LAMBDA_TOK_TYPE},
         {"fn", LAMBDA_TOK_FN}, {"pn", LAMBDA_TOK_PN},
@@ -221,28 +223,41 @@ static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size
         {"eq", LAMBDA_TOK_EQ_WORD}, {"ne", LAMBDA_TOK_NE_WORD},
         {"lt", LAMBDA_TOK_LT_WORD}, {"le", LAMBDA_TOK_LE_WORD},
         {"ge", LAMBDA_TOK_GE_WORD}, {"gt", LAMBDA_TOK_GT_WORD},
-    };
-    static const char* const base_types[] = {
-        "null", "any", "bool", "int64", "int", "float", "f64", "complex",
-        "decimal", "integer", "number", "none", "datetime", "date", "time", "binary",
-        "range", "list", "array", "map", "element", "object",
-        "function", "error", "string", "symbol", "i8", "i16", "i32", "i64",
-        "u8", "u16", "u32", "u64", "f16", "f32",
-    };
-    for (size_t i = 0; i < sizeof(keywords) / sizeof(keywords[0]); i++) {
-        if (lexer_word_equals(source, start, end, keywords[i].text)) return keywords[i].kind;
+};
+static const char* const lexer_base_types[] = {
+    "null", "any", "bool", "int64", "int", "float", "f64", "complex",
+    "decimal", "integer", "number", "none", "datetime", "date", "time", "binary",
+    "range", "list", "array", "map", "element", "object",
+    "function", "error", "string", "symbol", "i8", "i16", "i32", "i64",
+    "u8", "u16", "u32", "u64", "f16", "f32",
+};
+static const char* const lexer_named_values[] = {"true", "false", "inf", "nan"};
+#define LEXER_TABLE_COUNT(table) (sizeof(table) / sizeof((table)[0]))
+
+static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size_t end) {
+    for (size_t i = 0; i < LEXER_TABLE_COUNT(lexer_keywords); i++) {
+        if (lexer_word_equals(source, start, end, lexer_keywords[i].text)) {
+            return lexer_keywords[i].kind;
+        }
     }
-    if (lexer_word_in(source, start, end, base_types,
-            sizeof(base_types) / sizeof(base_types[0]))) {
+    if (lexer_word_in(source, start, end, lexer_base_types,
+            LEXER_TABLE_COUNT(lexer_base_types))) {
         return LAMBDA_TOK_BASE_TYPE;
     }
-    if (lexer_word_equals(source, start, end, "true") ||
-            lexer_word_equals(source, start, end, "false") ||
-            lexer_word_equals(source, start, end, "inf") ||
-            lexer_word_equals(source, start, end, "nan")) {
+    if (lexer_word_in(source, start, end, lexer_named_values,
+            LEXER_TABLE_COUNT(lexer_named_values))) {
         return LAMBDA_TOK_NAMED_VALUE;
     }
     return LAMBDA_TOK_IDENTIFIER;
+}
+
+const char* lambda_lexer_vocabulary_word(size_t index) {
+    if (index < LEXER_TABLE_COUNT(lexer_keywords)) return lexer_keywords[index].text;
+    index -= LEXER_TABLE_COUNT(lexer_keywords);
+    if (index < LEXER_TABLE_COUNT(lexer_base_types)) return lexer_base_types[index];
+    index -= LEXER_TABLE_COUNT(lexer_base_types);
+    if (index < LEXER_TABLE_COUNT(lexer_named_values)) return lexer_named_values[index];
+    return NULL;
 }
 
 // S16.10.1v2: a word is barred from binding names when it is *capture-real* —

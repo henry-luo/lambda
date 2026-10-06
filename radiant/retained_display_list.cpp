@@ -69,8 +69,8 @@ static void retained_dl_copy_clip_shape_stack(DisplayList* dst,
         }
         memcpy(vx, in->polygon_vx[i], sz);
         memcpy(vy, in->polygon_vy[i], sz);
-        out->polygon_vx[i] = vx;
-        out->polygon_vy[i] = vy;
+        out->polygon_vx[i] = lam::own_arr(vx);
+        out->polygon_vy[i] = lam::own_arr(vy);
     }
 }
 
@@ -442,12 +442,14 @@ bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fra
                                           uint64_t current_video_generation,
                                           uint64_t current_glyph_generation) {
     if (!fragment) return false;
+    // owners are read for their generation
+    ImageSurfaceReadScope read_scope;
     const DisplayList* list = &fragment->list;
     for (int i = 0; i < list->item_count(); i++) {
         const DisplayItem* item = &list->data()[i];
         switch (item->op) {
             case DL_DRAW_IMAGE: {
-                if (item->draw_image.pixels && !retained_dl_surface_generation_current(
+                if (!item->draw_image.resource.is_null() && !retained_dl_surface_generation_current(
                         item->draw_image.resource, item->draw_image.resource_generation)) return false;
                 break;
             }

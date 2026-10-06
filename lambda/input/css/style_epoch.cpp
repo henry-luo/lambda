@@ -17,6 +17,7 @@ typedef struct StyleRecipeEntry {
     CssSpecificity specificity;
     CssOrigin origin;
     uint32_t declaration_count;
+    uint32_t scope_proximity;
 } StyleRecipeEntry;
 
 struct StyleEpoch;
@@ -427,12 +428,13 @@ static void style_builder_add(StyleEpochManager* manager,
 
 static bool style_builder_append(StyleEpochManager* manager,
                                  StyleRecipeBuilder* builder,
-                                 CssRule* rule, CssSpecificity specificity) {
+                                 CssRule* rule, CssSpecificity specificity, uint32_t scope_proximity) {
     if (!lam::pool_grow_array(manager->doc->document_pool, &builder->entries,
             &builder->capacity, builder->count + 1, 8)) return false;
     StyleRecipeEntry* entry = &builder->entries[builder->count++];
     entry->rule = rule;
     entry->specificity = specificity;
+    entry->scope_proximity = scope_proximity;
     entry->origin = rule->origin;
     entry->declaration_count = (uint32_t)rule->data.style_rule.declaration_count;
     return true;
@@ -549,6 +551,7 @@ static bool style_apply_canonical_recipe_entries(StyleEpochManager* manager,
             CssDeclaration* source = rule->data.style_rule.declarations[d];
             CssDeclaration* copy = style_epoch_clone_declaration(
                 manager, source, entries[i].specificity, entries[i].origin, pool);
+            if (copy) copy->scope_proximity = entries[i].scope_proximity;
             if (!copy || !style_tree_apply_declaration(tree, copy)) {
                 css_declaration_destroy_owned(copy, pool);
                 return false;
@@ -570,6 +573,7 @@ static bool style_apply_recipe_entries(StyleTree* tree,
             CssDeclaration* source = rule->data.style_rule.declarations[d];
             CssDeclaration* copy = css_declaration_clone_owned(
                 source, entries[i].specificity, entries[i].origin, pool);
+            if (copy) copy->scope_proximity = entries[i].scope_proximity;
             if (!copy || !style_tree_apply_declaration(tree, copy)) return false;
         }
     }
@@ -606,7 +610,7 @@ static bool style_builder_materialize_owned(StyleEpochManager* manager,
 }
 
 bool style_epoch_record_rule(DomElement* element, CssRule* rule,
-                             CssSpecificity specificity) {
+                             CssSpecificity specificity, uint32_t scope_proximity) {
     if (!element || !element->doc) return false;
     StyleEpochManager* manager = style_manager(element->doc);
     if (!manager || !manager->collecting) return false;
@@ -616,7 +620,7 @@ bool style_epoch_record_rule(DomElement* element, CssRule* rule,
         style_builder_materialize_owned(manager, builder);
         return false;
     }
-    if (!style_builder_append(manager, builder, rule, specificity)) {
+    if (!style_builder_append(manager, builder, rule, specificity, scope_proximity)) {
         style_builder_materialize_owned(manager, builder);
         return false;
     }
@@ -634,6 +638,7 @@ static uint64_t style_recipe_hash(StyleEpochManager* manager,
         hash = style_hash_mix(hash, css_specificity_to_value(entry->specificity));
         hash = style_hash_mix(hash, (uint64_t)entry->origin);
         hash = style_hash_mix(hash, entry->declaration_count);
+        hash = style_hash_mix(hash, entry->scope_proximity);
     }
     return manager->force_hash_collision ? 0 : hash;
 }
@@ -649,6 +654,7 @@ static bool style_recipe_equal(StyleCanonicalEntry* canonical,
         StyleRecipeEntry* left = &canonical->recipe[i];
         StyleRecipeEntry* right = &builder->entries[i];
         if (left->rule != right->rule || left->origin != right->origin ||
+            left->scope_proximity != right->scope_proximity ||
             left->declaration_count != right->declaration_count ||
             left->specificity.inline_style != right->specificity.inline_style ||
             left->specificity.ids != right->specificity.ids ||

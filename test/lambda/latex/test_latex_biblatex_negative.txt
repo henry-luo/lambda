@@ -1,0 +1,18 @@
+"expected diagnostics:"
+[true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+"file and line:"
+true
+"unsupported output:"
+true
+"unknown type absent:"
+true
+"invalid print target absent:"
+true
+"invalid style codes:"
+["unsupported-bib-style", "unsupported-bib-sorting", "unsupported-bib-backend", "unsupported-output", "unsupported-output"]
+"invalid style output:"
+true
+"unsupported document language:"
+true
+"invalid options blocked:"
+true

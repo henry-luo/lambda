@@ -27,7 +27,7 @@ REGISTRY = ROOT / "lambda" / "runtime" / "sys_func_registry.c"
 SOURCE_ROOTS = (ROOT / "lambda", ROOT / "lib")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 SKIP_SOURCE_PARTS = {
-    "node_modules", "package", "sqlite", "tree-sitter", "tree-sitter-bash",
+    "node_modules", "package", "re2", "sqlite", "tree-sitter", "tree-sitter-bash",
     "tree-sitter-javascript", "tree-sitter-lambda", "tree-sitter-latex",
     "tree-sitter-latex-math", "tree-sitter-python", "tree-sitter-ruby",
     "tree-sitter-typescript",
@@ -81,6 +81,25 @@ VERIFIED_EXTERNAL_LEAVES = {
     "k2it",
     "l2it",
     "__builtin_memcpy",
+    # lib/str_simd.c (the str_find packed pair, GRP8): SSE2 and NEON
+    # intrinsics and a bit scan are register operations over the caller's
+    # bytes; they lower to instructions and cannot enter Lambda GC.
+    "__builtin_ctzll",
+    "_mm_and_si128",
+    "_mm_cmpeq_epi8",
+    "_mm_loadu_si128",
+    "_mm_movemask_epi8",
+    "_mm_or_si128",
+    "_mm_set1_epi8",
+    "vandq_u8",
+    "vceqq_u8",
+    "vdupq_n_u8",
+    "vget_lane_u64",
+    "vld1q_u8",
+    "vorrq_u8",
+    "vreinterpret_u64_u8",
+    "vreinterpretq_u16_u8",
+    "vshrn_n_u16",
     "lambda_float_ptr_to_item",
     "log_debug",
     # Diagnostic logging does not enter generated code or Lambda's collector.

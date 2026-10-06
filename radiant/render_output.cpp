@@ -1,10 +1,14 @@
 #include "render.hpp"
 #include "../lib/base64.h"
 #include "layout.hpp"
+#include "layout_paged.hpp"
+#include "view_tree_css.hpp"
+#include "render_glyph_run_raster_lower.hpp"
 #include "event.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/input/css/css_engine.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
@@ -16,6 +20,7 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
@@ -38,6 +43,25 @@ static int render_output_render_document_transform_to_target(const char* documen
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     RenderOutputTarget* target);
+
+static bool render_export_find_page_rule(void* context, const CssRule* rule) {
+    if (rule->type == CSS_RULE_PAGE && rule->page) {
+        *(bool*)context = true;
+        return false;
+    }
+    return true;
+}
+
+static bool render_export_has_page_rule(DomDocument* doc) {
+    if (!doc || !doc->services.cached_css_engine) return false;
+    CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
+    bool found = false;
+    for (int i = 0; i < doc->stylesheet_count && !found; i++) {
+        css_stylesheet_visit_active_rules(engine, doc->stylesheets.get()[i],
+            render_export_find_page_rule, &found);
+    }
+    return found;
+}
 static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
                                           const char* output_file);
 static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
@@ -94,7 +118,7 @@ static DomDocument* render_export_load_transform_document(RenderExportSession* s
     }
     DomDocument* doc = load_lambda_document_transform_doc(document_url,
         transform_request->transform, transform_options, transform_option_count,
-        layout_width, layout_height, pool);
+        layout_width, layout_height, pool, session->print_media);
     if (!doc) {
         url_destroy(document_url);
         pool_destroy(pool);
@@ -181,13 +205,21 @@ static bool render_export_session_begin_internal(
         RenderExportSession* session,
         int viewport_width, int viewport_height,
         int fallback_width, int fallback_height, float output_scale,
-        float device_scale, bool raster_surface, bool print_media,
+        float device_scale, bool raster_surface, bool print_media, bool paged,
         RenderExportDocumentLoader loader, void* request) {
     if (!session || !loader) return false;
     memset(session, 0, sizeof(*session));
 
     bool auto_width = viewport_width == 0;
     bool auto_height = viewport_height == 0;
+    ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+    if (paged) {
+        // The loader takes whole-pixel viewport extents; the secondary layout retains exact A4 geometry.
+        fallback_width = (int)ceilf(environment.viewport_width); // INT_CAST_OK: legacy loader viewport argument, bounded A4 extent.
+        fallback_height = (int)ceilf(environment.viewport_height); // INT_CAST_OK: legacy loader viewport argument, bounded A4 extent.
+        if (viewport_width > 0) environment.viewport_width = (float)viewport_width;
+        if (viewport_height > 0) environment.viewport_height = (float)viewport_height;
+    }
     int layout_width = viewport_width > 0 ? viewport_width : fallback_width;
     int layout_height = viewport_height > 0 ? viewport_height : fallback_height;
     session->output_scale = output_scale > 0.0f ? output_scale : 1.0f;
@@ -197,7 +229,7 @@ static bool render_export_session_begin_internal(
     session->viewport_height = viewport_height;
     session->auto_width = auto_width;
     session->auto_height = auto_height;
-    session->print_media = print_media;
+    session->print_media = print_media || paged;
 
     session->ui_context = lam::own((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
@@ -243,15 +275,69 @@ static bool render_export_session_begin_internal(
         render_export_session_end(session);
         return false;
     }
+    if (session->document->services.cached_css_engine) {
+        ((CssEngine*)session->document->services.cached_css_engine)->context.print_media = session->print_media;
+    }
     session->document->viewport.output_scale = session->output_scale;
     ui_context_sync_document_raster_scale(session->ui_context,
                                           session->document);
     process_document_font_faces(session->ui_context, session->document);
+    if (paged) {
+        // The settled shared DOM owns this output view; no embedded geometry is overwritten.
+        session->paged_view = lam::up(view_tree_secondary_create(session->document, &environment));
+        PagedLayoutOptions options = paged_layout_options_default();
+        PagedLayoutDiagnostic diagnostic = {};
+        TypesetStatus status = session->paged_view
+            ? layout_secondary_view(session->paged_view, &options, &diagnostic) : TYPESET_OUT_OF_MEMORY;
+        if (status != TYPESET_OK) {
+            const char* reason = diagnostic.reason ? diagnostic.reason : "secondary view initialization failed";
+            log_error("[EXPORT_PAGED] Composition failed: status=%u source=%llu page=%u reason=%s",
+                (unsigned)status, (unsigned long long)diagnostic.source.expected_id, diagnostic.page_number,
+                reason);
+            // Export errors are user output and remain visible when diagnostic logging is disabled.
+            fputs("Error: paged layout: ", stderr); fputs(reason, stderr); fputc('\n', stderr);
+            render_export_session_end(session);
+            return false;
+        }
+        return true;
+    }
+    if (session->print_media && render_export_has_page_rule(session->document)) {
+        // Query the existing page cascade before continuous layout so its content width
+        // determines line breaking while the PDF MediaBox retains the full paper size.
+        ViewTree* page_query = view_tree_secondary_create(session->document, &environment);
+        ViewPageStyle page_style = {};
+        ViewModelStatus status = page_query
+            ? view_css_page_style(page_query, nullptr, 1, VIEW_PAGE_RIGHT, false, &page_style)
+            : VIEW_MODEL_OUT_OF_MEMORY;
+        if (page_query) view_tree_secondary_release(session->document, page_query);
+        if (status != VIEW_MODEL_OK) {
+            log_error("[EXPORT_PAGE_GEOMETRY] Could not resolve @page size and margins: status=%u",
+                (unsigned)status);
+            render_export_session_end(session);
+            return false;
+        }
+        session->has_page_geometry = true;
+        session->page_width = page_style.width;
+        session->page_height = page_style.height;
+        session->page_content_x = page_style.content_rect.x;
+        session->page_content_y = page_style.content_rect.y;
+        session->ui_context->viewport_width = (int)ceilf(page_style.content_rect.width); // INT_CAST_OK: legacy viewport stores integral CSS pixels.
+        session->ui_context->viewport_height = (int)ceilf(page_style.content_rect.height); // INT_CAST_OK: legacy viewport stores integral CSS pixels.
+        ui_context_create_surface(session->ui_context,
+            session->ui_context->viewport_width, session->ui_context->viewport_height);
+        session->ui_context->window_width = session->ui_context->viewport_width;
+        session->ui_context->window_height = session->ui_context->viewport_height;
+        CssEngine* engine = (CssEngine*)session->document->services.cached_css_engine;
+        css_engine_set_viewport(engine, page_style.content_rect.width,
+            page_style.content_rect.height);
+    }
     layout_html_doc(session->ui_context, session->document, false);
 
-    session->content_width = layout_width;
-    session->content_height = layout_height;
-    if (session->document->view_tree && session->document->view_tree->root) {
+    session->content_width = session->has_page_geometry
+        ? (int)ceilf(session->page_width) : layout_width; // INT_CAST_OK: legacy export extent stores integral CSS pixels.
+    session->content_height = session->has_page_geometry
+        ? (int)ceilf(session->page_height) : layout_height; // INT_CAST_OK: legacy export extent stores integral CSS pixels.
+    if (!session->has_page_geometry && session->document->view_tree && session->document->view_tree->root) {
         int bounds_width = 0;
         int bounds_height = 0;
         calculate_content_bounds(
@@ -262,7 +348,7 @@ static bool render_export_session_begin_internal(
         if (auto_height || bounds_height > layout_height) session->content_height = bounds_height;
     }
 
-    if (auto_width || auto_height) {
+    if (!session->has_page_geometry && (auto_width || auto_height)) {
         log_info("[EXPORT_SESSION] Auto-sized output to %dx%d with content padding",
                  session->content_width, session->content_height);
     } else {
@@ -273,11 +359,11 @@ static bool render_export_session_begin_internal(
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media) {
+                                 bool print_media, bool paged) {
     RenderExportHtmlRequest request = {html_file};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
-        output_scale, 1.0f, false, print_media,
+        output_scale, 1.0f, false, print_media, paged,
         render_export_load_html_document, &request);
 }
 
@@ -288,18 +374,19 @@ bool render_export_session_begin_raster(RenderExportSession* session,
     RenderExportHtmlRequest request = {html_file};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, 1200, 800, output_scale,
-        device_scale, true, false, render_export_load_html_document, &request);
+        device_scale, true, false, false, render_export_load_html_document, &request);
 }
 
 bool render_export_session_begin_document_transform(RenderExportSession* session,
         const char* document_file, const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         int viewport_width, int viewport_height, int fallback_width,
-        int fallback_height, float output_scale, float device_scale, bool raster_surface) {
+        int fallback_height, float output_scale, float device_scale, bool raster_surface,
+        bool paged, bool print_media) {
     RenderExportTransformRequest request = {document_file, transform, options, option_count};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height, output_scale,
-        device_scale, raster_surface, false,
+        device_scale, raster_surface, print_media, paged,
         render_export_load_transform_document, &request);
 }
 
@@ -314,6 +401,7 @@ void render_export_session_end(RenderExportSession* session) {
         lam::free_owned(session->ui_context);
     }
     session->document = nullptr;
+    session->paged_view = nullptr;
 }
 
 static const char* render_output_path_trace_target(RenderOutputKind kind) {
@@ -358,9 +446,9 @@ static void render_output_trace_retained_stats(RenderPathTrace* trace,
     trace->retained_reuse_rejected_dirty = stats.reuse_rejected_dirty;
 }
 
-static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
+static void render_output_init_context(RasterRenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
                                        RenderProfiler* profiler) {
-    memset(rdcon, 0, sizeof(RenderContext));
+    memset(rdcon, 0, sizeof(RasterRenderContext));
     rdcon->ui_context = lam::up(uicon);
     rdcon->profiler = lam::up(profiler);
     if (uicon && uicon->document && uicon->document->state) {
@@ -386,7 +474,7 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
     rdcon->color.c = 0xFF000000;
 }
 
-static void render_output_cleanup_context(RenderContext* rdcon) {
+static void render_output_cleanup_context(RasterRenderContext* rdcon) {
     layout_content_bounds_cache_destroy(rdcon->content_bounds_cache);
     rdcon->content_bounds_cache = nullptr;
     if (rdcon->paint_list) {
@@ -403,7 +491,7 @@ static void render_output_cleanup_context(RenderContext* rdcon) {
     rdt_vector_destroy(&rdcon->vec);
 }
 
-RenderFrameScope::RenderFrameScope(RenderContext* r, UiContext* uicon, ViewTree* view_tree,
+RenderFrameScope::RenderFrameScope(RasterRenderContext* r, UiContext* uicon, ViewTree* view_tree,
                                    RenderProfiler* profiler)
     : rdcon(r), display_list{}, context_active(false), display_list_active(false) {
     if (!rdcon || !view_tree) return;
@@ -423,7 +511,7 @@ static uint32_t render_output_canvas_background(View* root_view) {
     return render_document_output_background(root_view).c;
 }
 
-static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon, ViewTree* view_tree,
+static RenderOutputClearResult render_output_clear_surface(RasterRenderContext* rdcon, ViewTree* view_tree,
                                                            DocState* state, uint32_t canvas_bg) {
     RenderOutputClearResult result = {};
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface || !view_tree) {
@@ -457,7 +545,7 @@ static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon,
     return result;
 }
 
-static void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
+static void render_output_render_view_tree(RasterRenderContext* rdcon, ViewTree* view_tree) {
     if (!rdcon || !view_tree) {
         return;
     }
@@ -465,7 +553,199 @@ static void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_
     render_raster_view_tree(rdcon, view_tree);
 }
 
-static RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
+ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory,
+        Bound physical_bounds, float raster_scale, Color backdrop) {
+    if (!list || !isfinite(raster_scale) || raster_scale <= 0.0f ||
+        !isfinite(physical_bounds.left) || !isfinite(physical_bounds.top) ||
+        !isfinite(physical_bounds.right) || !isfinite(physical_bounds.bottom) ||
+        !dl_validate_or_log(list, "render_display_list_snapshot")) return nullptr;
+    ImageSurface* surface = render_surface_create_budgeted(memory,
+        physical_bounds.right - physical_bounds.left, physical_bounds.bottom - physical_bounds.top);
+    if (!surface) return nullptr;
+    RasterPaintContext raster = raster_paint_context(surface, nullptr, nullptr, 0);
+    raster_fill_rect(&raster, nullptr, render_pixel_premultiply_abgr(backdrop.c));
+    RdtVector vec = {};
+    rdt_vector_init(&vec, (uint32_t*)surface->pixels, surface->width, surface->height, surface->width);
+    ScratchArena scratch = {};
+    mem_scratch_init(memory, &scratch, nullptr, MEM_ROLE_RENDER, "render.snapshot.replay");
+    dl_replay_tile(list, &vec, surface, &scratch, physical_bounds.left, physical_bounds.top,
+        (float)surface->width, (float)surface->height, raster_scale);
+    rdt_vector_flush_batch(&vec); rdt_vector_destroy(&vec); scratch_release(&scratch);
+    // encoders and snapshot callers consume straight channels; vector replay writes premultiplied ABGR.
+    for (size_t i = 0, count = (size_t)surface->width * (size_t)surface->height; i < count; i++)
+        ((uint32_t*)surface->pixels)[i] = render_pixel_unpremultiply_abgr(((uint32_t*)surface->pixels)[i]);
+    surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
+    return surface;
+}
+
+static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox* page,
+        float raster_scale, Color backdrop) {
+    if (!view_tree_model_source_valid(tree) || !tree->model->committed ||
+        !isfinite(raster_scale) || raster_scale <= 0.0f) return nullptr;
+    PaintList paint = {}; paint_list_init(&paint, nullptr);
+    DisplayList list = {}; dl_init(&list, nullptr);
+    ImageSurface* surface = nullptr;
+    // display-list replay consumes physical coordinates; apply output density once before lowering.
+    RdtMatrix density = rdt_matrix_scale(raster_scale, raster_scale);
+    paint_push_transform(&paint, &density);
+    bool painted = page ? layout_secondary_paint_page(tree, page, &paint) : layout_secondary_paint_root(tree, &paint);
+    paint_pop_transform(&paint);
+    if (painted && paint_ir_validate_or_log(&paint, "secondary snapshot")) {
+        paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+        paint_ir_lower_raster(&paint, &list);
+        RdtLogicalRect bounds = page ? RdtLogicalRect{0, 0, page->node.rect.width, page->node.rect.height}
+                                    : tree->model->root->rect;
+        MemContext* memory = (MemContext*)tree->model->document->services.mem_ctx;
+        surface = render_display_list_snapshot(&list, memory,
+            {bounds.x * raster_scale, bounds.y * raster_scale,
+             (bounds.x + bounds.width) * raster_scale, (bounds.y + bounds.height) * raster_scale},
+            raster_scale, backdrop);
+    }
+    dl_destroy(&list); paint_list_destroy(&paint);
+    return surface;
+}
+
+ImageSurface* render_secondary_view_snapshot(ViewTree* tree, float raster_scale, Color backdrop) {
+    return render_secondary_snapshot(tree, nullptr, raster_scale, backdrop);
+}
+
+static ViewPageBox* render_secondary_page(ViewTree* tree, uint32_t number) {
+    if (!view_tree_model_source_valid(tree) || !tree->model->committed || !number ||
+        number > tree->model->page_count) return nullptr;
+    ViewPageBox* page = tree->model->pages.get()[number - 1];
+    return page && page->page_number == number && view_tree_node_resolve(tree, page->node.ref) == &page->node
+        ? page : nullptr;
+}
+
+ImageSurface* render_secondary_page_snapshot(ViewTree* tree, uint32_t page_number,
+        float raster_scale, Color backdrop) {
+    ViewPageBox* page = render_secondary_page(tree, page_number);
+    return page ? render_secondary_snapshot(tree, page, raster_scale, backdrop) : nullptr;
+}
+
+struct RenderPageSnapshotEntry {
+    LayoutViewRef page;
+    uint64_t source_epoch, resources, fonts;
+    float scale;
+    Color backdrop;
+    size_t bytes;
+    lam::Own<ImageSurface> surface;
+    lam::Up<RenderPageSnapshotEntry> previous, next;
+};
+
+struct RenderPageSnapshotCache {
+    lam::Own<Pool> pool;
+    lam::Up<RenderPageSnapshotEntry> entries;
+    lam::Up<RenderPageSnapshotEntry> first, last;
+    size_t max_entries, max_bytes;
+    RenderPageSnapshotCacheStats stats;
+};
+
+RenderPageSnapshotCache* render_page_snapshot_cache_create(size_t max_entries, size_t max_bytes) {
+    if (!max_entries || max_entries > SIZE_MAX / sizeof(RenderPageSnapshotEntry) || !max_bytes) return nullptr;
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.page_snapshot_cache");
+    if (!pool) return nullptr;
+    RenderPageSnapshotCache* cache = (RenderPageSnapshotCache*)pool_calloc(pool, sizeof(RenderPageSnapshotCache));
+    RenderPageSnapshotEntry* entries = (RenderPageSnapshotEntry*)pool_calloc(pool,
+        max_entries * sizeof(RenderPageSnapshotEntry));
+    if (!cache || !entries) { mem_pool_destroy(pool); return nullptr; }
+    cache->pool = lam::own(pool); cache->entries = lam::up(entries);
+    cache->max_entries = max_entries; cache->max_bytes = max_bytes;
+    return cache;
+}
+
+static void render_page_snapshot_unlink(RenderPageSnapshotCache* cache, RenderPageSnapshotEntry* entry) {
+    if (entry->previous) entry->previous->next = entry->next; else cache->first = entry->next;
+    if (entry->next) entry->next->previous = entry->previous; else cache->last = entry->previous;
+    entry->previous = entry->next = nullptr;
+}
+
+static void render_page_snapshot_remove(RenderPageSnapshotCache* cache, RenderPageSnapshotEntry* entry) {
+    render_page_snapshot_unlink(cache, entry);
+    cache->stats.bytes -= entry->bytes; cache->stats.entries--;
+    image_surface_destroy(entry->surface);
+    *entry = {};
+}
+
+static void render_page_snapshot_promote(RenderPageSnapshotCache* cache, RenderPageSnapshotEntry* entry) {
+    entry->previous = nullptr; entry->next = cache->first;
+    if (cache->first) cache->first->previous = lam::up(entry); else cache->last = lam::up(entry);
+    cache->first = lam::up(entry);
+}
+
+void render_page_snapshot_cache_clear(RenderPageSnapshotCache* cache) {
+    if (cache) while (cache->last) render_page_snapshot_remove(cache, cache->last);
+}
+
+void render_page_snapshot_cache_destroy(RenderPageSnapshotCache* cache) {
+    if (!cache) return;
+    render_page_snapshot_cache_clear(cache);
+    mem_pool_destroy(cache->pool);
+}
+
+RenderPageSnapshotCacheStats render_page_snapshot_cache_stats(const RenderPageSnapshotCache* cache) {
+    return cache ? cache->stats : RenderPageSnapshotCacheStats{};
+}
+
+const ImageSurface* render_page_snapshot_cache_get(RenderPageSnapshotCache* cache, ViewTree* tree,
+        uint32_t page_number, float raster_scale, Color backdrop) {
+    if (!cache || !tree || !tree->model) return nullptr;
+    ViewTreeModel* model = tree->model;
+    uint64_t fonts = model->css ? font_context_resource_generation(model->css->fonts) : 0;
+    // a presentation generation changes placement only; page content uses the layout/resource generations.
+    for (size_t i = 0; i < cache->max_entries; i++) {
+        RenderPageSnapshotEntry* entry = cache->entries.get() + i;
+        if (entry->surface && entry->page.tree_id == model->tree_id &&
+            (!view_tree_model_source_valid(tree) || !model->committed ||
+             entry->page.generation != tree->layout_generation || entry->source_epoch != model->source_epoch ||
+             entry->resources != model->environment.resource_generation || entry->fonts != fonts))
+            render_page_snapshot_remove(cache, entry);
+    }
+    ViewPageBox* page = render_secondary_page(tree, page_number);
+    size_t bytes = 0;
+    if (!page || !isfinite(raster_scale) || raster_scale <= 0.0f ||
+        !render_surface_allocation_size(page->node.rect.width * raster_scale,
+            page->node.rect.height * raster_scale, &bytes) || bytes > cache->max_bytes) return nullptr;
+    RenderPageSnapshotEntry* free_entry = nullptr;
+    for (size_t i = 0; i < cache->max_entries; i++) {
+        RenderPageSnapshotEntry* entry = cache->entries.get() + i;
+        if (!entry->surface) { free_entry = entry; continue; }
+        if (entry->page.tree_id == page->node.ref.tree_id && entry->page.generation == page->node.ref.generation &&
+            entry->page.node_id == page->node.ref.node_id && entry->scale == raster_scale && entry->backdrop.c == backdrop.c) {
+            render_page_snapshot_unlink(cache, entry); render_page_snapshot_promote(cache, entry);
+            cache->stats.hits++;
+            return entry->surface;
+        }
+    }
+    while (cache->stats.entries == cache->max_entries || cache->stats.bytes > cache->max_bytes - bytes) {
+        free_entry = cache->last;
+        render_page_snapshot_remove(cache, free_entry); cache->stats.evictions++;
+    }
+    ImageSurface* surface = render_secondary_snapshot(tree, page, raster_scale, backdrop);
+    if (!surface) return nullptr;
+    free_entry->page = page->node.ref; free_entry->source_epoch = model->source_epoch;
+    free_entry->resources = model->environment.resource_generation;
+    free_entry->fonts = model->css ? font_context_resource_generation(model->css->fonts) : 0;
+    free_entry->scale = raster_scale; free_entry->backdrop = backdrop; free_entry->bytes = bytes;
+    free_entry->surface = lam::own(surface);
+    render_page_snapshot_promote(cache, free_entry);
+    cache->stats.entries++; cache->stats.bytes += bytes; cache->stats.renders++;
+    return surface;
+}
+
+bool render_secondary_view_to_png(ViewTree* tree, const char* filename, float raster_scale, Color backdrop) {
+    if (!filename) return false;
+    ImageSurface* surface = render_secondary_view_snapshot(tree, raster_scale, backdrop);
+    if (!surface) return false;
+    StrBuf* png = render_encode_surface_png(surface);
+    image_surface_destroy(surface);
+    if (!png) return false;
+    bool written = write_binary_file(filename, png->str, png->length) == 0;
+    strbuf_free(png);
+    return written;
+}
+
+static RenderOutputReplayResult render_output_replay_display_list(RasterRenderContext* rdcon,
                                                                   DisplayList* display_list,
                                                                   uint32_t canvas_bg,
                                                                   DirtyTracker* replay_dirty) {
@@ -553,7 +833,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
 
     RenderProfiler profiler;
     render_profiler_reset(&profiler);
-    RenderContext rdcon;
+    RasterRenderContext rdcon;
     RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
     DisplayList& display_list = *frame.list();
 
@@ -690,6 +970,10 @@ static int render_output_render_html_file_to_target(const char* html_file,
         log_error("render_output_render_html_file_to_target: invalid file render job");
         return 1;
     }
+    if (target->paged && target->kind != RENDER_OUTPUT_PDF) {
+        log_error("[EXPORT_PAGED] Paged file output currently requires a PDF target");
+        return 1;
+    }
 
     float output_scale = target->output_scale > 0 ? target->output_scale : 1.0f;
     float device_scale = target->device_scale > 0 ? target->device_scale : 1.0f;
@@ -712,7 +996,7 @@ static int render_output_render_html_file_to_target(const char* html_file,
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_html_to_pdf(html_file, target->output_file,
-                                      viewport_width, viewport_height, output_scale);
+                                      viewport_width, viewport_height, output_scale, target->paged);
         case RENDER_OUTPUT_SVG:
             return render_html_to_svg(html_file, target->output_file,
                                       viewport_width, viewport_height, output_scale);
@@ -741,6 +1025,10 @@ static int render_output_render_document_transform_to_target(const char* documen
         log_error("render document transform: invalid export job");
         return 1;
     }
+    if (target->paged && target->kind != RENDER_OUTPUT_PDF) {
+        log_error("[EXPORT_PAGED] Paged transformed output currently requires a PDF target");
+        return 1;
+    }
 
     float output_scale = target->output_scale > 0 ? target->output_scale : 1.0f;
     float device_scale = target->device_scale > 0 ? target->device_scale : 1.0f;
@@ -749,7 +1037,7 @@ static int render_output_render_document_transform_to_target(const char* documen
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_document_transform_to_pdf(document_file, transform, options,
-                option_count, target->output_file, viewport_width, viewport_height, output_scale);
+                option_count, target->output_file, viewport_width, viewport_height, output_scale, target->paged);
         case RENDER_OUTPUT_SVG:
             return render_document_transform_to_svg(document_file, transform, options,
                 option_count, target->output_file, viewport_width, viewport_height, output_scale);
@@ -775,7 +1063,7 @@ static int render_output_render_document_transform_to_target(const char* documen
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
                                  float output_scale, float device_scale,
-                                 int jpeg_quality) {
+                                 int jpeg_quality, bool paged) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.viewport_width = viewport_width;
@@ -783,6 +1071,7 @@ int render_html_to_output_target(const char* html_file, const char* output_file,
     target.output_scale = output_scale;
     target.device_scale = device_scale;
     target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
+    target.paged = paged;
     return render_output_render_html_file_to_target(html_file, &target);
 }
 
@@ -790,7 +1079,7 @@ int render_document_transform_to_output_target(const char* document_file,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         const char* output_file, int viewport_width, int viewport_height,
-        float output_scale, float device_scale, int jpeg_quality) {
+        float output_scale, float device_scale, int jpeg_quality, bool paged) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.viewport_width = viewport_width;
@@ -798,6 +1087,7 @@ int render_document_transform_to_output_target(const char* document_file,
     target.output_scale = output_scale;
     target.device_scale = device_scale;
     target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
+    target.paged = paged;
     return render_output_render_document_transform_to_target(document_file, transform, options,
         option_count, &target);
 }
@@ -880,12 +1170,12 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         return;
     }
 
-    uicon->surface = rec_surf;
+    uicon->surface = lam::up(rec_surf);
     uicon->window_height = first_h;
 
     RenderProfiler profiler;
     render_profiler_reset(&profiler);
-    RenderContext rdcon;
+    RasterRenderContext rdcon;
     RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
     DisplayList& display_list = *frame.list();
 
@@ -902,7 +1192,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         dl_item_count(&display_list));
     if (!dl_validate_or_log(&display_list, "render_output_tiled_png")) {
         image_surface_destroy(rec_surf);
-        uicon->surface = saved_surface;
+        uicon->surface = lam::up(saved_surface);
         uicon->window_height = saved_window_height;
         png_destroy_write_struct(&png, &info);
         fclose(fp);
@@ -968,7 +1258,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
 
     image_surface_destroy(rec_surf);
 
-    uicon->surface = saved_surface;
+    uicon->surface = lam::up(saved_surface);
     uicon->window_height = saved_window_height;
 
     png_write_end(png, NULL);

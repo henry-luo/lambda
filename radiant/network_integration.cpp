@@ -86,7 +86,7 @@ static bool queue_resolved_http_resource(DomDocument* doc, const char* href,
 // The loader can replace a document during script navigation before a window
 // takes ownership. Register manager cleanup with DomDocument so every destroy
 // path cancels its worker-owned resources before the DOM arena disappears.
-static void destroy_document_network_support(void* data) {
+static void destroy_document_network_support(DomDocumentResourceData* data) {
     DomDocument* doc = (DomDocument*)data;
     if (!doc || !doc->resource_manager) return;
     resource_manager_cancel_all(doc->resource_manager);

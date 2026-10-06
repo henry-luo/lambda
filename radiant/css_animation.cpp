@@ -467,7 +467,7 @@ KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool) {
 
 CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* name) {
     if (!registry || !name) return NULL;
-    for (int i = 0; i < registry->count; i++) {
+    for (int i = registry->count - 1; i >= 0; i--) {
         if (strcmp(registry->entries[i]->name, name) == 0) {
             return registry->entries[i];
         }
@@ -1468,7 +1468,7 @@ void css_animation_tick(AnimationInstance* anim, float t) {
             if (!css_animation_property_pair(state, property, t, &pair)) continue;
             float local_t = (t - pair.from.offset) / (pair.to.offset - pair.from.offset);
             const TimingFunction* timing = pair.from.timing ? pair.from.timing : &anim->timing;
-            local_t = timing_function_eval(timing, local_t);
+            local_t = timing_function_eval(timing, local_t, animation_easing_before(anim));
             css_animation_composite_endpoint(state, &pair.from.property);
             css_animation_composite_endpoint(state, &pair.to.property);
             CssAnimatedProp result = pair.to.property;
@@ -1490,12 +1490,18 @@ void css_animation_tick(AnimationInstance* anim, float t) {
 
 void css_animation_finish(AnimationInstance* anim) {
     CssAnimState* state = (CssAnimState*)anim->state;
-    if (state && !state->suppress_events) {
+    if (state) {
+        // zero-duration and no-fill effects can finish without a painted active sample.
         css_animation_dispatch_start(anim, state);
-        double elapsed = anim->duration * fmax(anim->iteration_count, 0.0);
-        radiant_dispatch_css_event(state->ui_context, state->element,
-            "animationend", "animationName",
-            state->keyframes ? state->keyframes->name : "", elapsed);
+        double elapsed = anim->iteration_count >= 0
+            ? anim->duration * (double)anim->iteration_count : anim->duration;
+        if (!state->suppress_events)
+            radiant_dispatch_css_event(state->ui_context, state->element,
+                "animationend", "animationName",
+                state->keyframes ? state->keyframes->name : "", elapsed);
+        // expired effects must restore the cascade even if their last sample changed geometry.
+        if (state->element && state->element->doc)
+            doc_state_request_reflow(state->element->doc->state);
         log_debug("css-anim: animation '%s' finished for element %p",
                   state->keyframes ? state->keyframes->name : "?", state->element);
     }
@@ -1505,11 +1511,17 @@ static void css_animation_cancel(AnimationInstance* anim) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (!state) return;
     if (!anim->suppress_cancel_event && !state->suppress_events && !anim->finish_notified) {
-        double duration = anim->iteration_count >= 0.0
-            ? anim->duration * anim->iteration_count : INFINITY;
+        double now = anim->play_state == ANIM_PLAY_PAUSED ? anim->pause_time : anim->sample_time;
+        if (anim->play_state != ANIM_PLAY_PAUSED && state->ui_context &&
+            state->ui_context->document && state->ui_context->document->state) {
+            AnimationScheduler* scheduler = state->ui_context->document->state->animation_scheduler;
+            if (scheduler) now = scheduler->current_time;
+        }
+        double elapsed = fmax(now - anim->start_time - anim->delay, 0.0);
+        if (anim->iteration_count >= 0.0)
+            elapsed = fmin(elapsed, anim->duration * anim->iteration_count);
         radiant_dispatch_css_event(state->ui_context, state->element,
-            "animationcancel", "animationName", state->keyframes->name,
-            fmin(fmax(anim->active_time, 0.0), duration));
+            "animationcancel", "animationName", state->keyframes->name, elapsed);
     }
     if (state->underlying) pool_free(state->pool, state->underlying);
     if (state->element && state->element->transform &&
@@ -1590,10 +1602,12 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
     }
 
     inst->type = ANIM_CSS_ANIMATION;
+    inst->retain_after_finish = true;
     inst->target = element;
     inst->state = state;
     css_animation_refresh_priority(state);
     inst->start_time = now;
+    inst->sample_time = now;
     inst->duration = anim_prop->duration;
     inst->delay = anim_prop->delay;
     inst->iteration_count = anim_prop->iteration_count;
@@ -1755,14 +1769,17 @@ static void parse_timing_function_value(const CssValue* value, TimingFunction* o
             return;
         } else if (str_ieq_cstr(func->name, "steps")) {
             out->type = TIMING_STEPS;
-            out->steps.count = (int)func->args[0]->data.number.value; // INT_CAST_OK: validated step count
+            out->steps.count = func->args[0]->data.number.value;
             out->steps.position = STEP_JUMP_END; // default
-            if (func->arg_count == 2) {
-                const char* position = css_math_token_name(func->args[1]);
-                if (str_ieq_cstr(position, "start") || str_ieq_cstr(position, "jump-start"))
-                    out->steps.position = STEP_JUMP_START;
-                else if (str_ieq_cstr(position, "jump-none")) out->steps.position = STEP_JUMP_NONE;
-                else if (str_ieq_cstr(position, "jump-both")) out->steps.position = STEP_JUMP_BOTH;
+            if (func->arg_count >= 2) {
+                const char* name = css_value_identifier_name(func->args[1]);
+                static const struct { const char* name; StepPosition position; } positions[] = {
+                    {"start", STEP_JUMP_START}, {"jump-start", STEP_JUMP_START},
+                    {"end", STEP_JUMP_END}, {"jump-end", STEP_JUMP_END},
+                    {"jump-both", STEP_JUMP_BOTH}, {"jump-none", STEP_JUMP_NONE}
+                };
+                for (const auto& position : positions)
+                    if (name && str_ieq_cstr(name, position.name)) out->steps.position = position.position;
             }
             return;
         }
@@ -1771,8 +1788,7 @@ static void parse_timing_function_value(const CssValue* value, TimingFunction* o
     *out = TIMING_EASE;
 }
 
-bool css_animation_parse_timing_function_text(const char* value,
-                                              TimingFunction* out) {
+bool css_animation_parse_timing_function_text(const char* value, TimingFunction* out) {
     if (!value || !out) return false;
     Pool* scratch = pool_create();
     if (!scratch) return false;
@@ -1799,28 +1815,73 @@ static int css_animation_keyword(const CssValue* value,
     return initial;
 }
 
-const CssValue* css_timeline_computed_value(DomElement* element,
-                                           CssPropertyCode property, Pool* pool) {
-    CssDeclaration* declaration = element
-        ? style_tree_get_declaration(element->specified_style, property) : nullptr;
-    if (!declaration) return nullptr;
-    const CssValue* value = css_resolve_var_value(pool, declaration->value,
-        nullptr, nullptr, element);
-    if (!value) return nullptr;
-    if (declaration->property_code == CSS_PROPERTY_ANIMATION) {
-        value = css_animation_shorthand_longhand(value, property, pool);
-    } else if (declaration->property_code == CSS_PROPERTY_TRANSITION) {
-        value = css_transition_shorthand_longhand(value, property, pool);
-    }
-    if (!value || !css_property_validate_value(property, value)) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        if (value->data.keyword == CSS_VALUE_INHERIT) {
-            return css_timeline_computed_value(dom_parent_element(element), property, pool);
+static const CssValue* css_motion_normalize_value(Pool* pool, const CssValue* value,
+    CssPropertyCode property) {
+    bool time = property == CSS_PROPERTY_ANIMATION_DURATION || property == CSS_PROPERTY_ANIMATION_DELAY ||
+        property == CSS_PROPERTY_TRANSITION_DURATION || property == CSS_PROPERTY_TRANSITION_DELAY;
+    int count = css_value_comma_count(value);
+    CssValue* output = nullptr;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = css_value_comma_at(value, i);
+        bool name = property == CSS_PROPERTY_ANIMATION_NAME && item &&
+            item->type == CSS_VALUE_TYPE_KEYWORD && item->data.keyword != CSS_VALUE_NONE;
+        if (!item || (!name && (!time || item->data.length.unit != CSS_UNIT_MS))) continue;
+        CssValue* normalized = (CssValue*)pool_alloc(pool, sizeof(CssValue));
+        if (!normalized) return nullptr;
+        *normalized = *item;
+        if (name) {
+            // a keyword in the name slot is a case-sensitive custom identifier.
+            normalized->type = CSS_VALUE_TYPE_CUSTOM;
+            normalized->data.custom_property.name = css_value_identifier_name(item);
+            normalized->data.custom_property.fallback = nullptr;
+        } else {
+            normalized->data.length.value /= 1000.0;
+            normalized->data.length.unit = CSS_UNIT_S;
         }
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return nullptr;
+        if (value->type != CSS_VALUE_TYPE_LIST) return normalized;
+        if (!output) {
+            output = (CssValue*)pool_alloc(pool, sizeof(CssValue));
+            CssValue** items = (CssValue**)pool_alloc(pool, count * sizeof(CssValue*));
+            if (!output || !items) return nullptr;
+            *output = *value;
+            memcpy(items, value->data.list.values, count * sizeof(CssValue*));
+            output->data.list.values = items;
+        }
+        output->data.list.values[i] = normalized;
     }
-    return value;
+    return output ? output : value;
+}
+
+const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
+    CssPropertyCode property) {
+    if (!pool || (css_animation_longhand_index(property) < 0 &&
+        css_transition_longhand_index(property) < 0)) return nullptr;
+    while (element) {
+        CssDeclaration* declaration = style_tree_get_declaration(element->specified_style, property);
+        const CssValue* value = declaration
+            ? css_resolve_element_var_value(pool, element, declaration->value) : nullptr;
+        if (value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+            value->data.keyword == CSS_VALUE_INHERIT) {
+            element = dom_parent_element(element);
+            continue;
+        }
+        if (value && (declaration->property_code == CSS_PROPERTY_ANIMATION ||
+            declaration->property_code == CSS_PROPERTY_TRANSITION)) {
+            value = css_motion_shorthand_longhand(value, property, pool);
+        }
+        if (value && css_property_validate_value(property, value) &&
+            !(value->type == CSS_VALUE_TYPE_KEYWORD &&
+              css_enum_info(value->data.keyword) &&
+              css_enum_info(value->data.keyword)->group == CSS_VALUE_GROUP_GLOBAL)) {
+            return css_motion_normalize_value(pool, value, property);
+        }
+        break;
+    }
+    const CssProperty* metadata = css_property_get_by_code(property);
+    if (!metadata) return nullptr;
+    CssDeclaration* initial = css_parse_property_declaration(metadata->name, strlen(metadata->name),
+        metadata->initial_value, strlen(metadata->initial_value), pool);
+    return initial ? initial->value : nullptr;
 }
 
 static const CssValue* css_animation_list_item(const CssValue* value, int index) {
@@ -1862,7 +1923,7 @@ bool css_animation_needs_computed_sample(DomElement* element, CssPropertyCode pr
     // first reads can precede effect creation; inspect the newly cascaded animation names.
     Pool* scratch = pool_create();
     if (!scratch) return false;
-    const CssValue* names = css_timeline_computed_value(element, CSS_PROPERTY_ANIMATION_NAME, scratch);
+    const CssValue* names = css_motion_computed_value(scratch, element, CSS_PROPERTY_ANIMATION_NAME);
     int count = names ? names->type == CSS_VALUE_TYPE_LIST ? names->data.list.count : 1 : 0;
     bool needs_sample = false;
     for (int index = 0; index < count && !needs_sample; index++) {
@@ -1894,7 +1955,7 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     };
     const CssValue* values[8] = {};
     for (int i = 0; i < 8; i++) {
-        values[i] = css_timeline_computed_value(element, properties[i], lycon->pool);
+        values[i] = css_motion_computed_value(lycon->pool, element, properties[i]);
     }
     int count = values[0] ? (values[0]->type == CSS_VALUE_TYPE_LIST
         ? values[0]->data.list.count : 1) : 0;
@@ -1965,7 +2026,13 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
             instance = css_animation_create(scheduler, element, &config, keyframes,
                 now, doc->document_pool);
         } else {
-            // changing timing properties preserves the existing timeline start.
+            // timing changes retain the original clock, including an expired effect.
+            bool phase_changed = instance->duration != config.duration ||
+                instance->delay != config.delay || instance->iteration_count != config.iteration_count;
+            if (phase_changed && instance->play_state == ANIM_PLAY_FINISHED) {
+                instance->play_state = ANIM_PLAY_RUNNING;
+                instance->finish_notified = false;
+            }
             instance->duration = config.duration;
             instance->delay = config.delay;
             instance->iteration_count = config.iteration_count;
@@ -2113,9 +2180,6 @@ static bool css_transition_read_style_value(DomElement* element,
     return true;
 }
 
-static bool css_transition_covers(const CssTransitionProp* tp, CssPropertyCode prop_id,
-                                  CssAnimProp* timing);
-
 void css_transition_capture_before_change(DomElement* element, CssPropertyCode prop_id) {
     if (!element || !element->doc) return;
 
@@ -2123,17 +2187,15 @@ void css_transition_capture_before_change(DomElement* element, CssPropertyCode p
     if (vt == ANIM_VAL_NONE) return;
 
     CssTransitionProp transition = {};
-    CssAnimProp timing = {};
     Pool* scratch = pool_create();
     if (!scratch) return;
-    css_transition_resolve_config(element, scratch, &transition);
-    bool has_transition = css_transition_covers(&transition, prop_id, &timing) &&
-        timing.duration + timing.delay > 0.0;
+    CssTransitionList list;
+    css_transition_resolve_config(element, scratch, &list);
+    bool has_transition = css_transition_select_config(&list, prop_id, &transition);
     if (!has_transition) {
         radiant_cascade_styles_for_element(element);
-        css_transition_resolve_config(element, scratch, &transition);
-        has_transition = css_transition_covers(&transition, prop_id, &timing) &&
-            timing.duration + timing.delay > 0.0;
+        css_transition_resolve_config(element, scratch, &list);
+        has_transition = css_transition_select_config(&list, prop_id, &transition);
     }
     pool_destroy(scratch);
     // Capture only after a transition is configured; the preceding inline write
@@ -2299,56 +2361,42 @@ static AnimationInstance* css_transition_find_running(AnimationScheduler* schedu
     return NULL;
 }
 
-// Unknown names retain their list slot; the last matching entry supplies timing.
-static bool css_transition_covers(const CssTransitionProp* tp, CssPropertyCode property,
-                                  CssAnimProp* timing) {
-    if (!tp || !timing) return false;
-    *timing = {};
-    timing->timing = TIMING_EASE;
-    int count = tp->properties && tp->properties->type == CSS_VALUE_TYPE_LIST
-        ? tp->properties->data.list.count : 1;
-    int match = -1;
-    for (int i = 0; i < count; i++) {
-        const CssValue* value = css_animation_list_item(tp->properties, i);
-        if (!value || (value->type == CSS_VALUE_TYPE_KEYWORD &&
-            value->data.keyword == CSS_VALUE_ALL)) {
-            match = i;
-            continue;
-        }
-        const char* name = css_math_token_name(value);
-        if (!name) continue;
-        CssPropertyCode named = (CssPropertyCode)css_property_code_from_name(name);
-        if (named == property) match = i;
-        const CssProperty* metadata = css_property_get_by_code(named);
-        if (!metadata || !metadata->longhand_props) continue;
-        for (int j = 0; j < metadata->longhand_count; j++) {
-            if (metadata->longhand_props[j] == property) match = i;
-        }
+// computed lists retain authored positions, including unknown property names.
+void css_transition_resolve_config(DomElement* element, Pool* pool, CssTransitionList* list) {
+    if (!list) return;
+    for (int i = 0; i < 4; i++) list->values[i] = css_motion_computed_value(pool, element,
+        (CssPropertyCode)(CSS_PROPERTY_TRANSITION_PROPERTY + i));
+}
+
+bool css_transition_select_config(const CssTransitionList* list, CssPropertyCode property,
+    CssTransitionProp* transition) {
+    if (!list || !transition) return false;
+    int count = css_value_comma_count(list->values[0]);
+    // the last matching entry wins; shorter timing lists repeat without deduplication.
+    for (int index = count - 1; index >= 0; index--) {
+        const CssValue* item = css_value_comma_at(list->values[0], index);
+        const char* name = css_value_identifier_name(item);
+        bool all = item && item->type == CSS_VALUE_TYPE_KEYWORD && item->data.keyword == CSS_VALUE_ALL;
+        CssPropertyCode named_property = name ? (CssPropertyCode)css_property_code_from_name(name)
+            : CSS_PROPERTY_UNKNOWN;
+        if (!all && named_property != property &&
+            !css_property_shorthand_contains(named_property, property)) continue;
+        const CssValue* duration = css_value_comma_at(list->values[1], index);
+        const CssValue* delay = css_value_comma_at(list->values[3], index);
+        transition->duration = 0.0;
+        if (duration) css_value_as_seconds(duration, &transition->duration);
+        transition->delay = 0.0;
+        if (delay) css_value_as_seconds(delay, &transition->delay);
+        transition->timing = TIMING_EASE;
+        const CssValue* timing = css_value_comma_at(list->values[2], index);
+        if (timing) parse_timing_function_value(timing, &transition->timing);
+        return transition->duration + transition->delay > 0.0f;
     }
-    if (match < 0) return false;
-    css_value_as_seconds(css_animation_list_item(tp->durations, match), &timing->duration);
-    css_value_as_seconds(css_animation_list_item(tp->delays, match), &timing->delay);
-    const CssValue* easing = css_animation_list_item(tp->timings, match);
-    if (easing) parse_timing_function_value(easing, &timing->timing);
-    return true;
+    return false;
 }
 
-void css_transition_resolve_config(DomElement* element, Pool* pool,
-                                   CssTransitionProp* transition) {
-    if (!transition) return;
-    transition->properties = css_timeline_computed_value(element,
-        CSS_PROPERTY_TRANSITION_PROPERTY, pool);
-    transition->durations = css_timeline_computed_value(element,
-        CSS_PROPERTY_TRANSITION_DURATION, pool);
-    transition->delays = css_timeline_computed_value(element,
-        CSS_PROPERTY_TRANSITION_DELAY, pool);
-    transition->timings = css_timeline_computed_value(element,
-        CSS_PROPERTY_TRANSITION_TIMING_FUNCTION, pool);
-}
-
-// Start (or restart) a transition for one property from `from` to `to`.
 static void css_transition_start(AnimationScheduler* scheduler, DomElement* element,
-                                 CssTransitionTrack* track, const CssAnimProp* tp,
+                                 CssTransitionTrack* track, const CssTransitionProp* tp,
                                  CssAnimValueType vt, float from_f, Color from_c,
                                  float from_ratio, float to_f, Color to_c,
                                  float to_ratio, double now, Pool* pool,
@@ -2437,9 +2485,9 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
 
     // Resolve the transition config. Even if no transition is declared we still
     // maintain the used-value snapshot below (so a later declaration starts from
-    // a correct "from"); a positive combined duration can include a delayed instant change.
-    CssTransitionProp tp;
-    css_transition_resolve_config(element, lycon->pool, &tp);
+    // a correct "from"), but we only START transitions when duration > 0.
+    CssTransitionList list;
+    css_transition_resolve_config(element, lycon->pool, &list);
 
     // Lazily allocate the persistent per-element transition state (survives the
     // view-pool relayout because it lives in the doc pool, not the view pool).
@@ -2475,9 +2523,8 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
         if (!track) continue;
 
         // compare with the active target before sampling overwrites the new cascade.
-        CssAnimProp timing = {};
-        bool covered = css_transition_covers(&tp, prop_id, &timing) &&
-            timing.duration + timing.delay > 0.0;
+        CssTransitionProp timing = {};
+        bool covered = css_transition_select_config(&list, prop_id, &timing);
         AnimationInstance* running = css_transition_find_running(scheduler, element, prop_id);
         if (running && !covered) {
             animation_scheduler_cancel(scheduler, running);

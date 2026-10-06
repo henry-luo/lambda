@@ -638,7 +638,7 @@ contact.phone          // "+1-555-0100"
 contact.name.given     // "Alice"
 
 let cards = input("contacts.vcf", 'vcf')^
-cards.contacts[0].full_name
+cards.contacts[0].full_name;
 [for (entry in cards.contacts[0].entries where entry.name == "email") entry.value]
 ```
 

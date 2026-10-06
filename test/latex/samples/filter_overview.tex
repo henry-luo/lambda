@@ -1,0 +1,142 @@
+\documentclass[a4paper]{article}
+
+\usepackage[english]{babel}
+\usepackage[utf8x]{inputenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage[left=3cm,right=1cm,top=1cm,bottom=1cm]{geometry}
+\usepackage{upquote}
+
+\title{Filter Overview}
+\author{Mirko Kunze}
+
+\begin{document}
+\pagestyle{empty}
+\section*{Notes}
+\begin{align*}
+T &- \text{sampling time}\\
+\omega_c &- \text{cutoff frequency}\\
+\omega_r &- \text{resonance frequency}\\
+\omega_l &- \text{lower band width limit}\\
+\omega_h &- \text{higher band width limit}
+\end{align*}
+\hspace{3cm} Discrete forms use Euler derivative ($s\rightarrow\frac{1-z^{-1}}{T}$)
+
+
+\section*{Low pass}
+\begin{align*}
+\omega_c &= \frac{1}{RC}\\
+H_{LP}(s) &= \frac{1}{RCs+1}
+= \frac{1}{\frac{1}{\omega_c}s+1}\\
+H_{LP}(z) &= \frac{\frac{T}{RC}}{[\frac{T}{RC} +1] - z^{-1}}
+= \frac{\omega_cT}{[\omega_cT +1] - z^{-1}}
+\end{align*}
+
+\section*{High pass}
+\begin{align*}
+H_{HP}(s) &= 1-H_{LP}(s)\\
+H_{HP}(s) &= \frac{RCs}{RCs+1}
+= \frac{\frac{1}{\omega_c}s}{\frac{1}{\omega_c}s+1}\\
+H_{HP}(z) &= \frac{1-z^{-1}}{[\frac{T}{RC} + 1] - z^{-1}}
+= \frac{1-z^{-1}}{[\omega_cT + 1] - z^{-1}}
+\end{align*}
+
+\section*{Band pass}
+\begin{align*}
+\omega_r &= \frac{1}{\sqrt{LC}}
+= \sqrt{\omega_l \omega_h}\\
+B &= \frac{R^2C}{L}
+= \frac{\omega_h}{\omega_l}\\
+H_{BP}(s) &= \frac{RCs}{LCs^2 + RCs + 1}
+= \frac{\frac{\sqrt{B}}{\omega_r}s}{\frac{1}{\omega_r^2}s^2 + \frac{\sqrt{B}}{\omega_r}s + 1}\\
+H_{BP}(z) &= \frac{1-z^{-1}}{[\frac{L}{RT}+\frac{T}{RC}+1] - [\frac{2L}{RT}+1]z^{-1} + \frac{L}{RT}z^{-2}}\\
+&= \frac{1-z^{-1}}{[\frac{1}{\omega_rT\sqrt{B}}+\frac{T}{\omega_r\sqrt{B}}+1] - [\frac{2}{\omega_rT\sqrt{B}}+1]z^{-1} + \frac{1}{\omega_rT\sqrt{B}}z^{-2}}
+\end{align*}
+
+\section*{Band stop\,/\,Notch}
+\begin{align*}
+H_{BS}(s) &= 1-H_{BP}(s)\\
+H_{BS}(s) &= \frac{LCs^2 + 1}{LCs^2 + RCs + 1}
+= \frac{\frac{1}{\omega_r^2}s^2 + 1}{\frac{1}{\omega_r^2}s^2 + \frac{\sqrt{B}}{\omega_r}s + 1}\\
+H_{BS}(z) &= \frac{[\frac{T^2}{LC}+1] -2z^{-1} + z^{-2}}{[\frac{T^2}{LC}+\frac{RT}{L}+1] - [\frac{RT}{L}+2] z^{-1} + z^{-2}}\\
+&= \frac{[\omega_r^2T^2+1] -2z^{-1} + z^{-2}}{[\omega_r^2T^2+\omega_rT\sqrt{B}+1] - [\omega_rT\sqrt{B}+2] z^{-1} + z^{-2}}
+\end{align*}
+
+\newpage
+
+\section*{MATLAB-Test}
+\begingroup
+\fontsize{9pt}{11pt}\selectfont
+\begin{verbatim}
+
+T = 0.001;
+wc = 10;
+wl = 1;
+wh = 100;
+
+disp('Low pass')
+
+RC = 1/wc;
+
+HLPs1 = tf(1, [RC, 1]) %#ok<*NOPTS>
+HLPs2 = tf(1, [1/wc, 1]) %#ok<*NASGU>
+
+HLPz1 = tf([T/RC, 0], [T/RC+1, -1], T)
+HLPz2 = tf([wc*T, 0], [wc*T+1, -1], T)
+
+disp('High pass')
+
+HHPs1 = 1-HLPs1
+HHPs2 = tf([RC, 0], [RC, 1])
+HHPs3 = tf([RC, 0], [1/wc, 1])
+
+HHPz1 = 1-HLPz1
+HHPz2 = tf([1, -1], [T/RC+1, -1], T)
+HHPz3 = tf([1, -1], [wc*T+1, -1], T)
+
+disp('Band pass')
+
+wr = sqrt(wl*wh);
+B = wh/wl;
+L = 0.123456;
+C = 1/L/wr^2;
+R = sqrt(B*L/C);
+
+HBPs1 = tf([R*C, 0], [L*C, R*C, 1])
+HBPs2 = tf([sqrt(B)/wr, 0], [1/wr^2, sqrt(B)/wr, 1])
+
+HBPz1 = tf([1, -1, 0], [L/R/T+T/R/C+1, -(2*L/R/T+1), L/R/T], T)
+HBPz2 = tf([1, -1, 0], ...
+    [1/wr/T/sqrt(B)+T/wr/sqrt(B)+1, -(2/wr/T/sqrt(B)+1), 1/wr/T/sqrt(B)], T)
+
+disp('Band stop')
+
+HBSs1 = 1-HBPs1
+HBSs2 = tf([L*C, 0, 1], [L*C, R*C, 1])
+HBSs3 = tf([1/wr^2, 0, 1], [1/wr^2, sqrt(B)/wr, 1])
+
+HBSz1 = 1-HBPz1
+HBSz2 = tf([T^2/L/C+1, -2, 1], [T^2/L/C+R*T/L+1, -(R*T/L+2), 1], T)
+HBSz3 = tf([wr^2*T^2+1, -2, 1], ...
+    [wr^2*T^2+wr*T*sqrt(B)+1, -(wr*T*sqrt(B)+2), 1], T)
+
+figure('name', 'Low Pass and High Pass')
+hold('on')
+bode(HHPs1)
+bode(HLPs1)
+bode(HLPz1)
+bode(HHPz1)
+
+figure('name', 'Band Pass and Band Stop')
+hold('on')
+bode(HBPs1)
+bode(HBPz1)
+bode(HBSs1)
+bode(HBSz1)
+chld = get(gcf, 'children');
+set(chld(3), 'ylim', [-50, 0]);
+\end{verbatim}
+\endgroup
+
+\end{document}

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 22.0.0 (2026-10-03)
+**Spec version:** 25.0.0 (2026-10-06)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -116,7 +116,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   arithmetic, compare, deref, or typed store; a plain-`T` carrier never
   holds a null sentinel; `box(NULL_LANE(T)) == ItemNull` exactly. [D2.5]
 - **DI6 — GC sees only pointers.** Numeric/bool sentinels and scalar homes
-  are never roots; the number stack is never scanned. [D2.5.1, D5.1.1v2, D5.2.2]
+  are never roots; the number stack is never scanned. [D2.5.1, D5.1.1v3, D5.2.2]
 - **DI7 — No scalar cells in the GC heap.** No `INT64`/`UINT64`/`FLOAT`
   payload is ever a standalone GC allocation; an Item with those tags can
   never point into the GC zone. [D2.7.1]
@@ -1047,19 +1047,22 @@ that carries them.
 
 ### D5.1 The stack model
 
-- **D5.1.1v2*** Three stack-like mechanisms with distinct owners: the native
+- **D5.1.1v3** Three stack-like mechanisms with distinct owners: the native
   C stack (invisible to GC); **watermarked side stacks** — the root stack,
   precisely scanned `[base, top)`, and the **number stack, never
-  scanned** — two strictly separate mappings; and heap async frames — **a
-  tail-bearing heap container whose Item region the collector traces
-  through its owner (the task, or the suspended generator/async object)
-  and whose tail is never scanned**. *LIFO lifetimes live on the side
-  stacks; non-LIFO lifetimes own their scalars in tail regions of their own
-  allocation.* (Revised 2026-09-07: v1 said the Item region is
-  "root-registered", which described only the native `LambdaAsyncFrame`;
-  v2 names the one carrier both languages suspend into — the
-  `GC_TYPE_JS_ENV` form — with the owner, not a root range, as the edge.)
-  [SF2, SF12, SF20, Stack_Frame §5.1, JSCU25, JSCU26]
+  scanned** — two strictly separate mappings; and **activation stacks** —
+  every suspendable body (a Lambda task; a JS generator, async function or
+  module body; in either tier) runs once on a native stack of its own, with
+  its own root and number segments, and parks in place. *A parked
+  activation's root segment is the one Item region it contributes, traced
+  through its owner (the task, or the generator/async carrier); its native
+  stack and number segment are never scanned.* LIFO lifetimes live on the
+  side stacks, an activation's included; non-LIFO lifetimes own their
+  scalars in tail regions of their own allocation. (Revised 2026-10-05, v3:
+  the third mechanism was the heap async frame, a tail-bearing container a
+  transformed function spilled into; no tier transforms a function in order
+  to suspend it.) [SF2, SF12, Stack_Frame §5.1, Runtime_Async RA1, RA3,
+  RA13–RA15]
 - **D5.1.2** Static per-function frame sizing, no `MIR_ALLOCA`, two saved
   watermarks per frame, virtual reservation + demand paging (decommit
   after GC), explicit frame-entry limit checks; no hotness detection —
@@ -1096,7 +1099,7 @@ that carries them.
   in a separate slot space from root slots; fully-unobserved lanes use a
   discard home; tail calls forward the incoming home. Destination-owned
   scalar storage exists at every ownership boundary (array tails, typed
-  fields, envs, module tables, async frames, task/message records) **and at
+  fields, envs, module tables, task/message records) **and at
   wide-capable mutable locals**: such a binding owns one slot allocated at
   its declaration and held for its scope, and assigning a wide value copies
   the payload into that slot rather than pushing a fresh home. A binding
@@ -1162,12 +1165,15 @@ that carries them.
   removed); fixed global Item storage uses epoch-guarded root ranges.
   Cross-semantic context-stack merges are rejected, as is any merge
   involving the number region. [Stack_API §17]
-- **D5.3.6** Recovery frames are **TLS-LIFO per boundary** (execution
-  entry, task poll, handler, module transaction, guest entry), each with
-  an exact side-root + number-stack checkpoint; landing restores the
-  watermarks before inspecting the fault; the outer barrier retires
-  abandoned inner chains. (Supersedes the single shared recovery point.)
-  [Rooting §2.1a, ER]
+- **D5.3.6v2** Recovery frames form **one LIFO chain per activation** (the
+  thread's base stack is one), a frame per boundary (execution entry, task
+  body, handler, module transaction, guest entry), each with an exact
+  side-root + number-stack checkpoint; landing restores the watermarks before
+  inspecting the fault; the outer barrier retires abandoned inner chains. A
+  frame may stay armed across a park on its own stack; *no jump ever crosses
+  a stack*. (Revised 2026-10-05, v2: v1 kept one chain per thread, which a
+  park on another stack would interleave. Supersedes the single shared
+  recovery point.) [Rooting §2.1a, ER, Runtime_Async §4.5]
 
 ### D5.4 Runtime globals and EvalContext
 
@@ -1211,11 +1217,13 @@ that carries them.
   suspension-free (no scheduling polls in pure code), and what makes the
   JS Promise membrane computable. **No reified effects**: a `pn` call
   executes; there is no held, unexecuted effect value. [U26, PD11, K19, K23, Features §3.6]
-- **D6.1.3*** Effect analyses beyond the bit are separate compiler
-  products: `may_await` (scheduling) and `may_defect` (fault
-  capability) — and a **missing analysis must mean defect-capable**,
-  never "trusted clean"; the reverse polarity was a measured live
-  divergence. [IEH §5.3, ER-D13]
+- **D6.1.3v2*** Effect analyses beyond the bit are separate compiler
+  facts: `may_await` (the call may park, so it may collect and re-enter)
+  and `may_defect` (fault capability) — and a **missing analysis must mean
+  defect-capable**, never "trusted clean"; the reverse polarity was a
+  measured live divergence. `may_await` drives no transform and no tier
+  choice. (Revised 2026-10-05, v2: it selected the state-machine transform
+  in v1.) [IEH §5.3, ER-D13, Runtime_Async RA1, RA11]
 
 ### D6.2 Function values and closures
 
@@ -1250,7 +1258,7 @@ that carries them.
 - **D6.2.4** The closure env is precisely traced (`closure_field_count`);
   wide scalars live in the env's tail region (SF18). Closures are
   **boxed-only** in the dual-func plan — the most valuable future
-  relaxation (§D8.3.4v3). [GC2 §8, DF11]
+  relaxation (§D8.3.4v4). [GC2 §8, DF11]
 
 ### D6.3 Concurrency runtime
 
@@ -1266,10 +1274,12 @@ that carries them.
   cross-isolate discriminator. Thread-mode prerequisites: the per-isolate
   runtime-state audit and the cross-isolate lifetime ruling (DO20).
   [K31/K32, CW3-C]
-- **D6.3.3** Faults are TLS-scoped — no jump ever crosses a thread
-  boundary; a worker publishes only an already-materialized fault result;
-  recovery frames never survive a scheduler yield (semantics S7.11).
-  [ER-D1, ER-D11]
+- **D6.3.3v2** Faults are scoped to one thread and one stack — no jump ever
+  crosses a thread or an activation; a worker publishes only an
+  already-materialized fault result; a task's boundary frames live on its
+  own activation and stay armed across its parks (semantics S7.11.2v2).
+  (Revised 2026-10-05, v2: v1 said recovery frames never survive a scheduler
+  yield.) [ER-D1, ER-D11, Runtime_Async §4.5]
 
 ### D6.4 System built-ins
 
@@ -1338,6 +1348,39 @@ loosely across the corpus — context disambiguates, and we live with it.
   of it. An excluded command fails with an explicit "excluded from this
   build" diagnostic; importing a `.js`/`.ts` or Jube module is an ordinary
   import error. Nothing degrades silently. [SM15]
+- **D7.1.7v6** **`lambda-wasm` is the browser evaluation profile**, smaller
+  than `lambda-cli` (D7.1.6). It embeds the Lambda parser, AST interpreter,
+  core values, precise GC and a **stateful in-memory REPL** over
+  host-supplied source and data; the native CLI entry point is excluded.
+  It excludes **MIR and all JIT machinery, network access (including
+  curl/HTTP), system information, filesystem IO, and image loading**, in
+  addition to D7.1.6's exclusions. Also excluded are **libuv, threads,
+  task/mailbox scheduling, resource caches, SQLite/cookies, PDF and LaTeX
+  parsers and their packages, ambient clock, timezone discovery, and entropy
+  providers**. **CSS and graph input parsers are excluded; HTML document and
+  fragment parsing are retained.** HTML style attributes/elements and resource
+  URLs remain inert data, without CSS parsing or resource acquisition.
+  **Image-processing kernels and pixel conversions, CSS/graph/LaTeX/math
+  formatting, and document math-expression parsing are excluded.** Core
+  numerical operations remain. **`undo`, `redo`, `edit_commit` and `emit`
+  are excluded; template `apply` is retained**, including stateful templates
+  across REPL submissions. Rejected submissions roll back template registration,
+  and session reset retires template entries and their borrowed state before
+  releasing the AST (D5.3.3).
+  Evaluation is synchronous and stays in AST: no native-code
+  promotion or MIR-interpreter fallback. REPL bindings and retained results
+  obey ordinary ownership contracts (D4.6.2v2, D5.3.3); no terminal or
+  filesystem transport is required. **Logging uses a disabled stub and
+  console inspection dumps are excluded at compile time**; structured source
+  diagnostics and explicit procedural `print` remain available (D5.4.4).
+  **Allocation tracking is excluded**: a lean `lib/` allocation provider
+  retains the ordinary allocation API, overflow checks and ownership without
+  tracker state or counters (D4.2.5v3). The initial browser artifact uses scalar
+  string search and excludes the inactive native SIMD translation unit.
+  Unavailable capabilities fail explicitly; retained values and operations
+  keep their ordinary semantics
+  and ownership contracts (D2.1, D5.3.3). This is a reduced build profile,
+  not a Jube bundle or a WASM guest language. [SM17, SM §13.4]
 
 ### D7.2 Script packages
 
@@ -1348,7 +1391,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   effectful even though the bindings are immutable. Package state lives
   in per-context slabs, never at code-baked addresses (D5.4.3). [RG14, U2]
 - **D7.2.2** Imports resolve to the **boxed `_b` symbol** of exported
-  functions (export ⇒ boxed entry mandatory, D8.3.4v3); package
+  functions (export ⇒ boxed entry mandatory, D8.3.4v4); package
   initialization is a **transaction barrier** — a failed init rolls back,
   and a module with half-established top-level state must never become
   importable (semantics S7.7.6). [DF15, ER-D2]
@@ -1435,11 +1478,16 @@ loosely across the corpus — context disambiguates, and we live with it.
   remain typed Maps. Brand, precise trace, and finalize are vtable-owned; raw
   C pointers never become script-visible, and system resources are integer
   **rids**.* [JA6, NM §6.3, §8; JR7]
-- **D7.4.2** Modules are **fully shielded from the async substrate** — no
+- **D7.4.2v2** Modules are **fully shielded from the async substrate** — no
   loop escape hatch, ever. A micro-kernel of five concepts (scheduling,
   thread-safe completion post, blocking pool, rid table, shutdown);
   completions delivered only on the JS thread in loop order; *modules
-  never pump, poll, or drain*. [JA7]
+  never pump, poll, or drain*. A task never parks while a `JubeHostAPI` frame
+  is on its stack: the host's call into script raises a native barrier on the
+  running activation, and a suspension beneath it is a reported fault.
+  (Revised 2026-10-05, v2: v1 held this by construction, since only a
+  transformed state machine could suspend.) [JA7, Concurrency §4.4,
+  Runtime_Async RA10]
 - **D7.4.3** Guest hosting crosses **no core types**: no `Runtime*`,
   `EvalContext*`, `Input*`, `MIR_context_t`, or `AstNode*` over the
   boundary — opaque handles and versioned sub-API tables only. Every
@@ -1519,7 +1567,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v15*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v17*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1530,9 +1578,13 @@ loosely across the corpus — context disambiguates, and we live with it.
   and an eligible hot definition may promote to its P2 boxed MIR satellite.
   *(v15, 2026-10-03, USER)* Explicit `LAMBDA_EXEC_BACKEND=interp` is strictly T0:
   unsupported scripts or imports fail with an unsupported-feature diagnostic
-  before execution; neither whole-module MIR fallback nor task-backed MIR
-  satellites are permitted. These fallback paths belong to AUTO only;
-  explicit `jit` selects the eager MIR path. [Ast_Interpreter AI24]
+  before execution; whole-module MIR fallback is not permitted. These fallback
+  paths belong to AUTO only; explicit `jit` selects the eager MIR path.
+  [Ast_Interpreter AI24] *(v16, 2026-10-05, USER)* T0 executes suspending
+  definitions (`start`, `wait`, scoped tasks) on their tasks' activations, so
+  no definition is excluded from a tier by its colour: promotion and loop
+  handoff read hit counters only, in both languages. [Runtime_Async RA11,
+  RA12]
   Ordinary interpreted entries promote at `LAMBDA_FUNC_JIT_THRESHOLD` (**5** by
   default). A direct, validated self-tail edge also increments the
   definition-site call and tail-edge counters; at the same threshold it may
@@ -1650,9 +1702,19 @@ loosely across the corpus — context disambiguates, and we live with it.
   later receives its MIR satellite. An AST shape outside T0's supported surface
   falls back only on that receiving runtime's established whole-MIR path. The
   scheduler is common infrastructure, not a shared language parser or
-  evaluator. [D8.5.1v7] The REPL and legacy inspection tools
-  may still use the reference Tree-sitter path until their fragment/source-span
-  migration is complete. *(Historical: v1 ruled the opposite — "no
+  evaluator. [D8.5.1v7] *(v17, 2026-10-06, USER)* **The REPL is one
+  persistent T0 session.** Each completed entry is parsed by the C parser,
+  built, planned and executed as a fragment against the retained Script,
+  global scope and module slab; a rejected or failed entry is rolled back
+  whole. No REPL or inspection path depends on Tree-sitter. Whole-history
+  replay is retired: in a session the tier selector governs satellites only
+  (`auto` promotes at the ordinary thresholds, `interp` never, `jit` at the
+  first call) and nothing compiles a whole module. An entry outside T0's
+  supported surface is rejected with a diagnostic naming the construct and is
+  never compiled as a per-entry MIR module. An interrupt (SIGINT) during an
+  entry raises a fault through the execution recovery frame; the session
+  reports the entry as failed and restores its snapshot. [Repl_Interp
+  RI4–RI6] *(Historical: v1 ruled the opposite — "no
   AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
   by user ruling 2026-08-15; the full record is
   `Lambda_Design_Unified_AST.md` §12.)* [CGP1, CGP2, AI1–AI22]
@@ -1886,7 +1948,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   The compiler admits distinct qualifying keys in deterministic source order up
   to its fixed implementation cap, then routes later, dynamic, partial, or
   ineligible shapes to `_b`. Per-parameter partial specialization remains
-  rejected. D8.3.4v3 still permits the single closed-world raw-only case. A
+  rejected. D8.3.4v4 still permits the single closed-world raw-only case. A
   declared, native-eligible function has **no boxed slow body**; a slow body
   exists iff a param is inference-specialized, unboxing is profitable, and the
   caller set is open. [S1.6, DF1–DF3]
@@ -1901,13 +1963,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   never reach the unboxed entry; the unboxed entry has exactly **two**
   proof-producing paths (statically-proven site, or `_b`) — *any third
   path is a bug, not a slow path*. [DF9, DF14]
-- **D8.3.4v3** **Visibility decides which versions exist**: exported ⇒ `_b`
+- **D8.3.4v4** **Visibility decides which versions exist**: exported ⇒ `_b`
   mandatory; non-exported with one exact visible call shape ⇒ unboxed
   only, no guard, no slow body. Caller-side guards are accepted **only as
   guard hoisting** (same predicate, failure edge lands on the `_b` path,
-  flag-gated, benchmark-justified).* A fixed-arity, task-free synchronous
-  `pn` may admit D8.3.1 raw variants at a direct exact edge; it retains `_b`,
-  and it is not guard-hoist eligible. **`var` parameters and methods are
+  flag-gated, benchmark-justified).* A fixed-arity `pn` may admit D8.3.1 raw
+  variants at a direct exact edge whether or not it can suspend (v4,
+  2026-10-05: a parking `pn` keeps one entry protocol, D5.1.1v3); it retains
+  `_b`, and it is not guard-hoist eligible. **`var` parameters and methods are
   eligible** (v3, 2026-09-16): a raw variant may take a `var` position when
   that edge carries the position's CW33 home exactly as `_b` does, so the
   callee consumes the home in its prologue and publishes through it in its
@@ -2339,14 +2402,15 @@ slice; no formal semantic ruling or document semver changes.
 | D4.4.4v2 | Revised 2026-09-14 (v2, Tune27 §10.12): sibling-member access to the root and a return that precedes every use of the handle are admitted inside the region; cd's table put (`var keys = t.keys; var vals = t.vals; …; t.keys = keys; t.vals = vals`) now borrows both handles — 2,000 → 2 array copies per 1,000 puts. Fixture `test/lambda/proc/cow_rmw_sibling_borrow.ls`. Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |
-| D5.1.1v2 | Revised 2026-09-07 (v2), not implemented: `LambdaAsyncFrame` still `mem_calloc`s its slots and root-registers the Item half (re-registering on growth, `concurrency.cpp:1120`); LambdaJS generators and async functions already suspend into the `GC_TYPE_JS_ENV` carrier but own it from context-wide index tables (`generators[4096]`, `async_contexts[256]`) rather than from the object. JSCU9–JSCU11 move JS ownership to the carrier; JSCU26 moves the Lambda frame onto the same carrier with strong task retention; JSCU25 makes a JS async activation a weakly registered `LambdaTask` resumed by its microtask job. Design and gates: `vibe/Lambda_Design_Structs_JS.md` item 1. |
+| D5.1.1v3 | **Implemented 2026-10-05** (Runtime_Async P0–P5): Lambda tasks and JS generator, async and module bodies of both tiers run on activations; the `LambdaAsyncFrame`, the JS MIR state machines and the interpreter replay are deleted. Parked root segments are traced through their carriers; beyond a warm window cold parks are compacted (RA13). Gates: Lambda baseline 6206/6206; test262 MIR with the untouched base's exact failure set, AST 40261/40261. Open: JSCU25 weak registration of JS async activations. ([Runtime_Async §10.1](../vibe/Lambda_Design_Runtime_Async.md)) |
 | D5.2.2v3 | Generated-function caller homes are deleted. The retained `MirScalarHomeBinding` coloring is payload ownership for C/helper and hosted-language boundaries, not an alternate function-return ABI. Per-source mutable-binding storage and loop back-edge reclaim remain unimplemented (DO24); they are independent of companion-lane transport. |
 | D5.2.3 | Lambda helper-adopt emission is retired as of 2026-08-17: its emitter sets the v3 no-rehome rule and fresh Lambda MIR has zero `lambda_item_adopt_scalar_home` calls. LambdaJS keeps the conservative helper rehome path because helpers may return module-state scalar Items; the attempted global skip changed `regression_side_stack_frame_gc` and was reverted. Shared machinery also remains for foreign hosted compilers and explicit C/host ownership boundaries. Loop back-edge reclaim and the associated peak-side-stack proof remain open under `DO24`; revisit JS only with a per-helper ownership proof. |
 | D5.2.1v3 | LambdaJS P2.5 and P5a landed 2026-08-17: Lambda and LambdaJS compile only the companion-lane ABI; `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, generated `_scalar_home` parameters, and direct-call donation are deleted. Record of the retired v2 design: every function carried a hidden trailing home address and copied a wide payload into it. Retained side-number-stack slots belong only to destination ownership, C helpers, or hosted-language APIs under D5.2.2v3. |
-| D6.1.3 | `may_await` analysis exists. **`may_defect` built 2026-09-27, fail-closed.** build_ast computes a conservative fact per function (`TypeFunc::defect_known`/`may_defect`); it fixes literal slot layouts and the S11.4.3 flag for both tiers and serves imports. The JIT solves the least fixed point per compile (`mir_solve_may_defect`), each origination site judged by the emitter's own gate, and treats anything outside its table as defect-capable. build_ast's fact over-approximates the solve, and the JIT narrows the S11.4.3 flag with its own answer except for an operand whose type admits error. `may_return_error` still carries both meanings in the variant effects. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
-| D6.3.1 | JS async activations as `LambdaTask`s (JSCU25, ratified 2026-09-07) are not implemented: readiness stays with the microtask queue (the reaction job resumes the task; the FIFO run queue never resumes a JS frame), the Promise is the handle, the mailbox is lazy, and the scheduler holds JS activation tasks weakly so an unreachable pending activation is collected. `lambda_task_create` today allocates a mailbox and registers four roots per task (`concurrency.cpp:737–774`). |
+| D6.1.3v2 | `may_await` (v2) feeds call metadata and GC planning as a may-park effect, and still gates the MIR region producer/consumer pass. **`may_defect` built 2026-09-27, fail-closed.** build_ast computes a conservative fact per function (`TypeFunc::defect_known`/`may_defect`); it fixes literal slot layouts and the S11.4.3 flag for both tiers and serves imports. The JIT solves the least fixed point per compile (`mir_solve_may_defect`), each origination site judged by the emitter's own gate, and treats anything outside its table as defect-capable. build_ast's fact over-approximates the solve, and the JIT narrows the S11.4.3 flag with its own answer except for an operand whose type admits error. `may_return_error` still carries both meanings in the variant effects. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
+| D6.3.1 | **JSCU25 implemented 2026-10-05, in the lean form** (Runtime_Async §10.1): a parked JS async activation registers weakly with the attached scheduler (`lambda_scheduler_weak_enter/leave`, a token naming the scheduler's serial). It counts in `lambda_scheduler_live_count` until it settles or its carrier is collected, so a Lambda run's end-of-run drain lets an unawaited JS async call finish. Readiness stays with the microtask queue, and the run queue never resumes a JS activation. The record is the GC-owned async carrier, and its Promise is the handle; there is no `LambdaTask` per JS call and no mailbox. A drain with only weak registrations left waits while anything besides its own watchdog keeps the loop alive; when idle it gives queued promise jobs a checkpoint, collects, and then ends without error. Fixture `test/lambda/conc/js_async_weak.ls`; gtest `WeakRegistrationsCountUntilTheyLeave`. |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
+| D7.1.7v6 | **Implemented 2026-10-06.** `make lambda-wasm` builds the synchronous browser REPL from an explicit source/dependency manifest, with no MIR, allocation tracker, native string-SIMD unit or excluded acquisition/ambient providers. CSS/graph/math input and CSS/graph/LaTeX/math formatting, image-processing kernels and public history/event builtins are excluded. HTML parsing and template apply are retained, with REPL registration/rollback/reset verified. Node and Chromium each pass 283 embedding checks; native REPL tests pass 41/41 and the full native Lambda baseline passes 6,243/6,243. Optimized WASM + loader: 1,891,405 bytes raw / 729,874 bytes gzipped. Interpreter corpus and broader browser coverage remain verification work; the C API is initial, and external imports are rejected. Working record: `vibe/Lambda_Design_Static_Modules.md` §13.4; reproduction and ABI: `doc/dev/Lambda_WASM_Build.md`. |
 | D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and resolves shipped source from `<lambda-home>/package/` while exposing `lambda/{chart,dom,edit,editor,graph,latex,openapi,pdf}` and typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths. Since 2026-09-29 the source checkout and the release share one home, `./lmd/`: the package tree moved from `lambda/package/` to `lmd/package/`, and the formerly separate `input/` assets moved into their packages (validator default schemas and view stylesheets under `package/doc/`, math/KaTeX CSS and fonts under `package/math/`, LaTeX CSS and CMU fonts under `package/latex/`); regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
 | D7.2.5 | Implemented 2026-09-07. The shipped `lmd/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.2.6 | **Implemented 2026-09-29.** `lambda_resolve_import_module_path` is the one resolver (AST import, dependency prebuild, document-transform package loader); it returns NULL for a bare root other than `lambda`, and `resolve_import` reports E216 after the built-in and registered-module checks. `run_source_fixture` in `test/test_lambda_opt_gtest.cpp` runs checked-in scripts in place for the same reason the ruling states. |
@@ -2363,6 +2427,8 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.1v13 | Revised 2026-09-22: static import prebuild moves from a per-root closure graph to a process-global canonical profile/path task-future registry and one bounded pool. Root discovery is fire-and-forget; tasks immediately request all children, deduplicate a shared child, and release only direct parents by continuation. AST build workers never wait on child work. Ordinary Lambda/JS import consumers wait only for their direct dependency future; prebuild-worker loaders bypass that wait. The cache separately validates exact source identity before an artifact is consumed, and cycle/prebuild failure falls back to ordinary-loader diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.1.1v14 | Ruled 2026-10-02 (USER); **partially implemented** 2026-10-02 (branch `worktree-interp-tune2`). Implemented: the per-loop back-edge trigger at 10000, retirement of the loop-owner first-entry trigger, and handoff at the loop head. The loop entry is a synthesized procedure over the live-in locals (the body's statements from the loop onward), entered through its boxed wrapper, so every live-in is admitted like an unknown caller's argument. Residue: eligible loops are only `while` statements directly in a `pn` body, and back-edges of their nested loops count toward them; the loop-triggered image does not carry the definition's own boxed entry. Under AUTO, `mandelbrot2` 12.0 s → 0.10 s and `matmul2` 6.3 s → 0.11 s (eager JIT 0.06 s / 0.05 s, debug build). AUTO corpus differential 1092/1092 identical; with `LAMBDA_LOOP_JIT_THRESHOLD=1 LAMBDA_SATELLITE_SYNC=1` every eligible loop hands off and the corpus matches `interp` except one pre-existing sync-mode satellite abort. Plan and evidence: `vibe/impl/Lambda_Impl_Interp_Tune2.md` §12.2. Working record: `vibe/Lambda_Design_Ast_Interpreter.md` §5.1.1. Renamed 2026-10-03 (USER), meaning unchanged: the tier selector `LAMBDA_TIER` is `LAMBDA_EXEC_BACKEND`, `LAMBDA_JIT_THRESHOLD` is `LAMBDA_FUNC_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE` is `LAMBDA_LOOP_JIT_THRESHOLD`, and LambdaJS's `JS_EXECUTION_BACKEND` is `JS_EXEC_BACKEND`; the old names are no longer read. |
 | D8.1.1v15 | **Implemented 2026-10-03.** Explicit interp rejects unsupported scripts/imports before execution, including task-backed MIR satellites and cached AST activation. AUTO retains fallback; explicit jit retains eager MIR. Lambda baseline: 6,180/6,180; strict-pin regression cases: 6/6. Evidence and existing differential failures: `vibe/impl/Lambda_Impl_Typed_Performance_Audit.md` §6–§7. |
+| D8.1.1v16 | **Implemented 2026-10-05** (Runtime_Async P1, P4): T0 evaluates `start`, `select` and scoped tasks, and the strict-`interp` rejection of task-backed bodies is gone; JS promotion admits async and generator definitions and loop handoff refuses only a loop whose tail can suspend. Forced-promotion sweep over every `test/js` golden identical to the base. |
+| D8.1.1v17 | **Implemented 2026-10-06** (branch `worktree-repl-interp`). `run_repl` owns one `InterpReplSession`; whole-history `run_script_mir` replay and the init-failure fallback are deleted, and a `jit` selection becomes `auto` with a first-call promotion threshold. The entry transaction (`ReplEntryTxn`, `runner.cpp`) returns OK, INCOMPLETE (the C parser's status, no pre-check), REJECTED or FAILED and prints each diagnostic once; an unsupported construct or import is rejected by name. Imported cones initialize before the entry runs. SIGINT is armed per entry; T0 polls it at call entry and back-edges (`LAMBDA_FAULT_INTERRUPTED`), and promoted satellite code is not polled. No Tree-sitter symbol is reachable from the REPL path. Session services: `.env`, `.type`, `.time`, `.load`, `.save`, Tab completion and a history file. Gates: `LambdaReplSessionTests` and `LambdaReplTests`. [Repl_Interp §3, §6](../vibe/Lambda_Design_Repl_Interp.md) |
 | D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
 | D8.1.3v19 | Revised 2026-09-23: the unset `JS_EXEC_BACKEND` now selects AUTO. Interpreter-supported units execute through the retained AST path and may promote admitted hot definitions to P2; unsupported units retain whole-module MIR. `ast` remains explicit and fail-closed, `mir` remains an explicit whole-module selector. MIR link-interface and O1 decisions are selected through shared `mir_select_link_interface`, so large modules/documents can install the MIR interpreter without changing generated MIR. The v18 parser, AST-interpreter, module-registry, and P2 admission record remains otherwise unchanged. Working record: `vibe/Lambda_Design_Compiling_Pipeline_JS.md` LC4.1–LC4.12. |
 | D8.1.3v20 | Revised 2026-09-24 (USER): dynamic source — direct/indirect `eval`, the `Function`-family constructors, string timers, and `$262.evalScript` — parses into a retained `JsScript` and executes only in the AST interpreter, whatever the caller's tier or the unit selector. The MIR dynamic-code service (expression-wrapper and whole-script eval tiers, the dynamic-Function MIR cache, eval preambles, the `is_eval_direct` lowering mode) is deleted; a MIR caller keeps only the direct-eval bridge projection and write-back. Script top-level lexical realm records link their module slots on both tiers, so interpreted readers see live values and TDZ, and a projected caller binding outranks a global lexical of the same name. Dynamic source shares the AST template cache (a direct eval naming private members is parsed per call); whitespace/comment-only and lone-RegExp sources create no script. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3754/3754 (incl. `test_js_gtest` 479/479, `test_js_script_gtest` 191/191); `test_js_gtest --baseline --full-mir` 477/477. Residue: eval-created closures lose projected caller locals after the eval returns, `eval("arguments")` in functions and `new.target` in direct eval remain unsupported (pre-existing). Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI35; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
@@ -2372,10 +2438,10 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.3v24 | Revised 2026-10-03 (USER): the `JS_FUNC_JIT_THRESHOLD` default is 5 calls (100 in v23), the same as Lambda's `LAMBDA_FUNC_JIT_THRESHOLD`. A release sweep of values 1–500 (AUTO, values interleaved, min of three) chose 5 for both languages on end-to-end wall time: Lambda 126 scripts, geomean vs 5 = 1.040 / 1.005 / 1.000 / 1.014 / 1.069 / 1.113 at 1 / 2 / 5 / 10 / 100 / 500; JS 73 rows, vs 100 = 0.983 / 0.978 / 0.984 / 1.000 / 1.008 at 2 / 5 / 10 / 100 / 500. JS at 1 (0.875) is first-call compilation, excluded by hotness-only promotion; its gain comes from rows whose once-called hot function reaches MIR only through a slower loop continuation, a separate defect. `JS_LOOP_JIT_THRESHOLD` stays 10000. Evidence: `vibe/impl/Lambda_Impl_JS_Interp_Tune.md` §11.6. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
 | D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v11**. The 2026-09-05 FunctionId follow-up retires `FnAnalysis::js_mir_backend`: JS MIR artifacts are reached only through the `func_entries_by_id` table keyed by the shared `FunctionId`; post-order storage remains a backend detail. The 2026-09-23 LC4 closeout adds preorder ranges, reverse query tables, function-child adjacency, synthetic-fragment overlays, named JS collection/capture/environment/inference/forward passes, and the shared MIR link policy. Current verification is 4,098 Lambda/Input and 40,261 Test262 baseline cases, with Lambda 0.512534 and JS 0.690065 release compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. **D8.2.5v2 (2026-09-11) is historical and superseded operationally by D8.2.5v3**: `AstNode.type` is the effective-type authority, declared annotations live on their declaring node, and the implemented v3 manager records named pass facts/timings without an ID-keyed per-node fact table. Rationale and the superseded U30 text: `vibe/Lambda_Design_Unified_AST.md` §13; plan: `vibe/Lambda_Proposal_JS_Unify_P7.md` U-D. |
-| D8.3.1v2–D8.3.3, D8.3.4v2 | **Binder TG8 direct-edge procedure slice implemented 2026-09-16.** Eligible fixed-arity `fn` and task-free synchronous `pn` binder functions with immutable parameters and exact scalar, normalized `array`/`map`/`range`, named/nominal map, or concrete element keys admit at most four immutable `__rawN` bodies in source order. `_b` shares one exact-key matcher: scalar tags, selected type-value identity, normalized container kinds, and descriptor-pointer identity for shape-bearing maps/elements. It retains the complete generic boxed fallback; later, partial, dynamic, capped, or ineligible keys consume no slot. A statically exact local call selects its predeclared `__rawN` body directly; a shape literal is exact when its AST descriptor is the raw key, while declared base-shape and other unproven edges retain `_b`. `var` parameters, task-context procedures, and may-await procedures retain `_b`. Fixtures: `test/lambda/type_binder_raw_variants.ls`, `test/lambda/proc/type_binder_proc_raw.ls`. [S1.6, D8.3.1v2–D8.3.4v2] |
+| D8.3.1v2–D8.3.3, D8.3.4v2 | **Binder TG8 direct-edge procedure slice implemented 2026-09-16.** Eligible fixed-arity `fn` and `pn` binder functions (task-free only until D8.3.4v4) with immutable parameters and exact scalar, normalized `array`/`map`/`range`, named/nominal map, or concrete element keys admit at most four immutable `__rawN` bodies in source order. `_b` shares one exact-key matcher: scalar tags, selected type-value identity, normalized container kinds, and descriptor-pointer identity for shape-bearing maps/elements. It retains the complete generic boxed fallback; later, partial, dynamic, capped, or ineligible keys consume no slot. A statically exact local call selects its predeclared `__rawN` body directly; a shape literal is exact when its AST descriptor is the raw key, while declared base-shape and other unproven edges retain `_b`. `var` parameters retain `_b` (task-context and may-await procedures no longer do, D8.3.4v4). Fixtures: `test/lambda/type_binder_raw_variants.ls`, `test/lambda/proc/type_binder_proc_raw.ls`. [S1.6, D8.3.1v2–D8.3.4v2] |
 | D4.4.6 | **Ruled 2026-09-16 (user), implemented same day (CW24v3).** The bind-time share-mark of a place copy was gated on `place_copy_mutated` -- whether the COPY is written -- and ignored writes through the PLACE, so an unmutated `let old = r.kid` aliased a later `r.kid.n = 7` on both tiers in every archived release back to Result42 (repros `temp/t28/value_semantics_bug/`). New static fact `NameEntry::place_copy_place_written`, computed at FUNCTION_END per binding from its live range (bind to last top-level statement naming it): root may be written in range (`ast_body_may_write_entry`, the CW30 gate, conservative on unknown callees and `var` passes) or the copy escapes (`ast_body_cow_param_effects` retention). Both tiers' bind gates mark on `mutated || place_written`. Deliberation: `vibe/Lambda_Design_Nested_Mutation.md` §4.3 (CW24v3). Blocks lifted: D4.4.4v3/CW36 (T28-8). **Conformance fix (same day, T28-8):** `ast_body_may_write_entry` did not look inside declarations, returns, blocks or several composites, so `let old = r.kid; var z = mutate(r)` still printed the new value; it now does. The same helper stopped counting a non-procedure system function or a known plain `pn` parameter as a writer (S9.1.3 keeps the callee's writes local); an unbuilt callee signature stays conservative. |
 | D8.3.4v3 | **Ruled 2026-09-16 (user): `var` parameters and methods leave the boxed-only exclusion list.** O11's reason was that a raw *scalar* carrier severs a borrowed position from the caller's storage; CW33/D8.1.1v10 later built the home transport that `_b` already uses, so a raw edge that carries the same home preserves the write-back. A method's receiver is admitted on the same exact-shape proof as any other raw argument, never on a dispatch guess. Obligations carried into the implementation: the home is consumed in the prologue and published in the epilogue; S9.1.3 exclusivity and the plain-parameter snapshot are untouched; pointer lanes keep a boxed source root; D8.3.3's two proof paths still hold. Remaining exclusions: closures, variadics, may-await/task-context procedures. Deliberation: `vibe/Lambda_Design_Compiling_Dual_Func.md` §O11v2. Implementation: `vibe/impl/Lambda_Impl_Tune28.md` T28-2. |
-| D8.3.4v2 | **DF16's caller-side guard-hoist slice is implemented, opt-in, 2026-09-15.** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` emits the very `_b` exact-key chain at an eligible local dynamic binder edge; a matching arm calls its immutable `__rawN`, and every miss calls `_b`. Its conservative loop-region case requires bounded raw keys, one unmodified identifier argument, and exactly one eligible dynamic call in a synchronous `while`; it evaluates that shared chain once, prepares the selected raw argument once, then enters its direct-`__rawN` sibling or an `_b`-only fallthrough sibling. Its straight-line CSE case shares a raw-index or boxed selection only between repeated eligible calls to the same callee with the same immutable identifier in one content sequence; both calls remain, while control, assignment, or an intervening different call clears the choice. It excludes closures, methods, `pn`/`var`, variadics, optional/named/spread arguments, mutable source identifiers, and may-await procedures. The fixed cap remains four (deterministic source order; no profile feedback); five release benchmark processes measured 0.26 s baseline versus 0.18 s enabled for `test/benchmark/tg8_guard_hoist.ls`. **DF12's scalar first slice is also opt-in:** `LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1` lets bare arithmetic body evidence select an `int` raw shape; the exact wrapper guard admits only `int` and every mismatch runs the complete boxed slow body. Direct float evidence remains `float`; broader speculative shapes await Result-suite measurement. [S1.6, D3.3.2v2, D8.3.1v2–D8.3.4v2, D8.4.1v2] |
+| D8.3.4v2 | **DF16's caller-side guard-hoist slice is implemented, opt-in, 2026-09-15.** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` emits the very `_b` exact-key chain at an eligible local dynamic binder edge; a matching arm calls its immutable `__rawN`, and every miss calls `_b`. Its conservative loop-region case requires bounded raw keys, one unmodified identifier argument, and exactly one eligible dynamic call in a synchronous `while`; it evaluates that shared chain once, prepares the selected raw argument once, then enters its direct-`__rawN` sibling or an `_b`-only fallthrough sibling. Its straight-line CSE case shares a raw-index or boxed selection only between repeated eligible calls to the same callee with the same immutable identifier in one content sequence; both calls remain, while control, assignment, or an intervening different call clears the choice. It excludes closures, methods, `pn`/`var`, variadics, optional/named/spread arguments, and mutable source identifiers. The fixed cap remains four (deterministic source order; no profile feedback); five release benchmark processes measured 0.26 s baseline versus 0.18 s enabled for `test/benchmark/tg8_guard_hoist.ls`. **DF12's scalar first slice is also opt-in:** `LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1` lets bare arithmetic body evidence select an `int` raw shape; the exact wrapper guard admits only `int` and every mismatch runs the complete boxed slow body. Direct float evidence remains `float`; broader speculative shapes await Result-suite measurement. [S1.6, D3.3.2v2, D8.3.1v2–D8.3.4v2, D8.4.1v2] |
 | D8.4.1v2 | ICs are retired in both lanes: the Lambda lane never had them; the LambdaJS per-site `JsLoadIC`/`JsStoreIC` machinery was deleted 2026-08-15 (IC_Retire IR1–IR8) and the LambdaJS carve-out in LC1 was closed 2026-09-09 (LC1v2). The replacement — compile-predicted literal/constructor shapes with an inline guard, an integer-index lane, and the shared kernel on a miss — is specified in `vibe/jube/JS_Tune10_Fast_Paths.md` (T10-1/T10-2) and is **not implemented**; Result38 measures LambdaJS at 4.35× QuickJS with the unspecialized kernel path. |
 | D8.4.2v2 | Core direct calls pass individual ABI operands. Internal shape-2 results use two MIR results and C-reachable entries use the context companion slot; the trailing scalar-home operand remains retired. Tune24 aggregate-construction plans carry precise record-field destinations as internal operands and return an Item completion. The numeric companion-return ABI is unchanged. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
@@ -2639,11 +2705,13 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
+| D5.1.1v3, D5.3.6v2, D6.1.3v2, D6.3.3v2, D7.4.2v2, D8.1.1v16, D8.3.4v4 | RA1–RA15 | `Lambda_Design_Runtime_Async.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM16 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
+| D8.1.1v17 | RI1–RI6 | `Lambda_Design_Repl_Interp.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune10_Fast_Paths.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |

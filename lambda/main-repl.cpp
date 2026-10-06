@@ -1,6 +1,8 @@
 
 #include "../lib/strbuf.h"
+#include "../lib/memtrack.h"
 #include "runtime/lambda-error.h"
+#include <string.h>
 #ifndef _WIN32
 #include <unistd.h>  // for isatty()
 #else
@@ -19,19 +21,62 @@
 #include <signal.h>  // for signal handling
 #include <setjmp.h>  // for setjmp/longjmp
 
-// Include our custom command line editor
-#include "../lib/cmdedit.h"
+#include "../lib/terminal_device.h"
+#include "../lib/file.h"
+#include "runtime/terminal_host.h"
+#include "runtime/interp.hpp"
+#include <ctype.h>
 
-// Result of checking statement completeness
-enum StatementStatus {
-    STMT_COMPLETE,      // statement is syntactically complete
-    STMT_INCOMPLETE,    // statement needs more input (missing closing braces, etc.)
-    STMT_ERROR          // statement has a syntax error
-};
+static TerminalDevice* g_repl_device = nullptr;
+static TerminalSession* g_repl_terminal = nullptr;
 
-// Helper: count unclosed brackets/parens in source
-// Returns true if there are unclosed brackets (meaning incomplete)
-static bool has_unclosed_brackets(const char* source) {
+static int repl_device_raw(void* device, bool enable) {
+    return terminal_device_set_raw((TerminalDevice*)device, enable);
+}
+
+static int repl_device_size(void* device, int* rows, int* columns) {
+    return terminal_device_size((TerminalDevice*)device, rows, columns);
+}
+
+static int repl_device_wait(void* device, int timeout_ms) {
+    return terminal_device_wait((TerminalDevice*)device, timeout_ms);
+}
+
+static int64_t repl_device_read(void* device, char* bytes, size_t capacity) {
+    return terminal_device_read((TerminalDevice*)device, bytes, capacity);
+}
+
+static int64_t repl_device_write(void* device, const char* bytes, size_t length) {
+    return terminal_device_write((TerminalDevice*)device, bytes, length);
+}
+
+// Only a missing/failed package mount uses this deliberately plain recovery
+// path. The normal REPL never enters cmdedit's native editor loop.
+static char* repl_basic_readline(const char* prompt) {
+    if (isatty(STDOUT_FILENO)) {
+        fputs(prompt, stdout);
+        fflush(stdout);
+    }
+    StrBuf* line = strbuf_new_cap(128);
+    if (!line) return nullptr;
+    int next = 0;
+    while ((next = fgetc(stdin)) != EOF && next != '\n') {
+        if (next != '\r') strbuf_append_char(line, (char)next);
+    }
+    if (next == EOF && line->length == 0) {
+        strbuf_free(line);
+        return nullptr;
+    }
+    char* result = (char*)mem_alloc(line->length + 1, MEM_CAT_SYSTEM);
+    if (result) memcpy(result, line->str, line->length + 1);
+    strbuf_free(line);
+    return result;
+}
+
+// Zero-cost completeness fast path: true while a bracket, string, or block
+// comment is still open. Balanced input goes to the session, whose C parser
+// decides completeness (an INCOMPLETE status keeps the continuation prompt).
+bool repl_has_unclosed_brackets(const char* source) {
     int brace_count = 0;   // { }
     int paren_count = 0;   // ( )
     int bracket_count = 0; // [ ]
@@ -101,28 +146,6 @@ static bool has_unclosed_brackets(const char* source) {
     return (brace_count > 0 || paren_count > 0 || bracket_count > 0);
 }
 
-// Check if a statement is complete, incomplete (needs continuation), or has error
-StatementStatus check_statement_completeness(const char* source) {
-    if (!source || !*source) {
-        return STMT_COMPLETE;  // empty input is "complete"
-    }
-
-    // First, do a quick lexical check for unclosed brackets
-    // This catches incomplete statements before the direct parser reports them
-    if (has_unclosed_brackets(source)) {
-        return STMT_INCOMPLETE;
-    }
-
-    // The direct parser owns the definitive syntax check. Once delimiters are
-    // balanced, let the evaluation path report a committed parse failure.
-    return STMT_COMPLETE;
-}
-
-void print_repl_syntax_error(const char* source) {
-    (void)source;
-    fputs("Syntax error.\n", stderr);
-}
-
 // Get the continuation prompt for multi-line input
 const char* get_continuation_prompt() {
     return ".. ";
@@ -130,21 +153,88 @@ const char* get_continuation_prompt() {
 
 
 
+// Tab completes the identifier run before the caret against the live session
+// (D8.1.1v17). A member step after `.` has no static candidate list, so it
+// completes nothing rather than offering unrelated top-level names.
+static size_t repl_complete(void* opaque, const char* line, size_t length,
+                            TerminalCompletionAdd add, void* sink) {
+    size_t start = length;
+    while (start > 0 && (isalnum((unsigned char)line[start - 1]) || line[start - 1] == '_')) {
+        start--;
+    }
+    size_t word = length - start;
+    if (word == 0 || (start > 0 && line[start - 1] == '.')) return 0;
+    interp_repl_session_complete((InterpReplSession*)opaque, line + start, word,
+        (InterpReplCompletionAdd)add, sink);
+    return word;
+}
+
+// The history file: LAMBDA_REPL_HISTORY names it (empty turns it off), else
+// ~/.lambda_history. Only an interactive terminal reads or writes it, so piped
+// input (tests, scripts) never lands in a user's history.
+static char g_repl_history_path[1024];
+
+static const char* repl_history_path(void) {
+    const char* configured = getenv("LAMBDA_REPL_HISTORY");
+    if (configured) return configured[0] ? configured : NULL;
+#ifdef _WIN32
+    const char* home = getenv("USERPROFILE");
+#else
+    const char* home = getenv("HOME");
+#endif
+    if (!home || !home[0]) return NULL;
+    snprintf(g_repl_history_path, sizeof(g_repl_history_path), "%s/.lambda_history", home);
+    return g_repl_history_path;
+}
+
 // Initialize command line editor
-int lambda_repl_init() {
-    // Use our custom cmdedit which handles all platforms
-    return repl_init();  // Our cmdedit's repl_init function
+int lambda_repl_init(InterpReplSession* session) {
+    g_repl_device = terminal_device_open();
+    if (!g_repl_device) return -1;
+    int rows = 0;
+    int columns = 80;
+    terminal_device_size(g_repl_device, &rows, &columns);
+    bool is_tty = terminal_device_is_tty(g_repl_device);
+    g_repl_terminal = terminal_session_open(is_tty, columns);
+    if (!g_repl_terminal) {
+        terminal_device_close(g_repl_device);
+        g_repl_device = nullptr;
+        return -1;
+    }
+    if (is_tty) {
+        // `clear` re-initializes the session in place, so the pointer holds
+        terminal_session_set_completer(g_repl_terminal, repl_complete, session);
+        const char* path = repl_history_path();
+        char* saved = NULL;
+        if (path && file_read_all(path, MEM_CAT_SYSTEM, &saved, NULL)) {
+            terminal_session_load_history(g_repl_terminal, saved);
+            mem_free(saved);
+        }
+    }
+    return 0;
 }
 
 // Clean up command line editor
 void lambda_repl_cleanup() {
-    repl_cleanup();  // Our cmdedit's cleanup function
+    if (g_repl_terminal && g_repl_device && terminal_device_is_tty(g_repl_device)) {
+        const char* path = repl_history_path();
+        char* history = path ? terminal_session_history_text(g_repl_terminal) : NULL;
+        if (history) {
+            write_text_file(path, history);
+            mem_free(history);
+        }
+    }
+    terminal_session_close(g_repl_terminal);
+    g_repl_terminal = nullptr;
+    terminal_device_close(g_repl_device);
+    g_repl_device = nullptr;
 }
 
 void print_help() {
     printf("Lambda Script Runtime v0.3 (alpha)\n");
     printf("Usage:\n");
-    printf("  lambda                       - Start REPL mode (default)\n");
+    printf("  lambda                       - Start a functional REPL session (default)\n");
+    printf("  lambda run                   - Start a procedural REPL session (entries run with effects)\n");
     printf("  lambda <script.ls>           - Run a script file\n");
     printf("  lambda run <script.ls>              - Run script with main function execution\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
@@ -171,7 +261,13 @@ void print_help() {
     printf("\nREPL Commands:\n");
     printf("  quit, q, exit        - Exit REPL\n");
     printf("  help, h              - Show help\n");
-    printf("  clear                - Clear REPL history\n");
+    printf("  clear                - Start a new session (drops every binding)\n");
+    printf("  .env                 - List the session's bindings and values\n");
+    printf("  .type <expr>         - Show an expression's static type without running it\n");
+    printf("  .time <entry>        - Run an entry and report its wall time\n");
+    printf("  .load <file>         - Run a file as one entry (rolled back whole on failure)\n");
+    printf("  .save <file>         - Write the session's accepted entries to a file\n");
+    printf("  Tab                  - Complete names (interactive terminal only)\n");
     printf("\nValidation Commands:\n");
     printf("  validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  validate <file>                 - Validate using doc_schema.ls (default)\n");
@@ -214,12 +310,21 @@ const char* get_repl_prompt() {
 #endif
 }
 
-char *lambda_repl_readline(const char *prompt) {
-    // Use our custom cmdedit which handles all platforms uniformly
-    return repl_readline(prompt);
-}
-
-int lambda_repl_add_history(const char *line) {
-    // Use our custom cmdedit history function
-    return repl_add_history(line);
+TerminalReadResult lambda_repl_readline(const char *prompt) {
+    // The host writes frame bytes directly; drain stdio output from the last
+    // evaluation first so redirected prompts cannot overtake its result.
+    fflush(stdout);
+    if (!g_repl_terminal || !g_repl_device) {
+        char* line = repl_basic_readline(prompt);
+        return {line ? TERMINAL_READ_LINE : TERMINAL_READ_EOF, line};
+    }
+    TerminalTransport transport = {};
+    transport.device = g_repl_device;
+    transport.is_tty = terminal_device_is_tty(g_repl_device);
+    transport.set_raw = repl_device_raw;
+    transport.size = repl_device_size;
+    transport.wait = repl_device_wait;
+    transport.read = repl_device_read;
+    transport.write = repl_device_write;
+    return terminal_session_readline(g_repl_terminal, &transport, prompt);
 }

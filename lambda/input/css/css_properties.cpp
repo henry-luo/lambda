@@ -31,6 +31,28 @@ static bool validate_time(const char* value_str, void** parsed_value, Pool* pool
 static CssPropertyCode text_align_longhands[] = {
     CSS_PROPERTY_TEXT_ALIGN_ALL, CSS_PROPERTY_TEXT_ALIGN_LAST
 };
+static CssPropertyCode margin_longhands[] = {
+    CSS_PROPERTY_MARGIN_TOP, CSS_PROPERTY_MARGIN_RIGHT, CSS_PROPERTY_MARGIN_BOTTOM, CSS_PROPERTY_MARGIN_LEFT
+};
+static CssPropertyCode padding_longhands[] = {
+    CSS_PROPERTY_PADDING_TOP, CSS_PROPERTY_PADDING_RIGHT, CSS_PROPERTY_PADDING_BOTTOM, CSS_PROPERTY_PADDING_LEFT
+};
+static CssPropertyCode border_longhands[] = {
+    CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_RIGHT_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_LEFT_WIDTH,
+    CSS_PROPERTY_BORDER_TOP_STYLE, CSS_PROPERTY_BORDER_RIGHT_STYLE, CSS_PROPERTY_BORDER_BOTTOM_STYLE, CSS_PROPERTY_BORDER_LEFT_STYLE,
+    CSS_PROPERTY_BORDER_TOP_COLOR, CSS_PROPERTY_BORDER_RIGHT_COLOR, CSS_PROPERTY_BORDER_BOTTOM_COLOR, CSS_PROPERTY_BORDER_LEFT_COLOR
+};
+static CssPropertyCode border_side_longhands[4][3] = {
+    {CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_TOP_STYLE, CSS_PROPERTY_BORDER_TOP_COLOR},
+    {CSS_PROPERTY_BORDER_RIGHT_WIDTH, CSS_PROPERTY_BORDER_RIGHT_STYLE, CSS_PROPERTY_BORDER_RIGHT_COLOR},
+    {CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_STYLE, CSS_PROPERTY_BORDER_BOTTOM_COLOR},
+    {CSS_PROPERTY_BORDER_LEFT_WIDTH, CSS_PROPERTY_BORDER_LEFT_STYLE, CSS_PROPERTY_BORDER_LEFT_COLOR}
+};
+static CssPropertyCode background_longhands[] = {
+    CSS_PROPERTY_BACKGROUND_COLOR, CSS_PROPERTY_BACKGROUND_IMAGE, CSS_PROPERTY_BACKGROUND_REPEAT,
+    CSS_PROPERTY_BACKGROUND_POSITION, CSS_PROPERTY_BACKGROUND_SIZE, CSS_PROPERTY_BACKGROUND_ATTACHMENT,
+    CSS_PROPERTY_BACKGROUND_ORIGIN, CSS_PROPERTY_BACKGROUND_CLIP
+};
 static CssPropertyCode text_emphasis_longhands[] = {
     CSS_PROPERTY_TEXT_EMPHASIS_STYLE, CSS_PROPERTY_TEXT_EMPHASIS_COLOR
 };
@@ -39,6 +61,11 @@ static CssPropertyCode animation_longhands[] = {
     CSS_PROPERTY_ANIMATION_TIMING_FUNCTION, CSS_PROPERTY_ANIMATION_DELAY,
     CSS_PROPERTY_ANIMATION_ITERATION_COUNT, CSS_PROPERTY_ANIMATION_DIRECTION,
     CSS_PROPERTY_ANIMATION_FILL_MODE, CSS_PROPERTY_ANIMATION_PLAY_STATE
+};
+static CssPropertyCode border_image_longhands[] = {
+    CSS_PROPERTY_BORDER_IMAGE_SOURCE, CSS_PROPERTY_BORDER_IMAGE_SLICE,
+    CSS_PROPERTY_BORDER_IMAGE_WIDTH, CSS_PROPERTY_BORDER_IMAGE_OUTSET,
+    CSS_PROPERTY_BORDER_IMAGE_REPEAT
 };
 static CssPropertyCode transition_longhands[] = {
     CSS_PROPERTY_TRANSITION_PROPERTY, CSS_PROPERTY_TRANSITION_DURATION,
@@ -121,13 +148,13 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_LEFT_COLOR, "border-left-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
 
     // Border shorthand properties
-    {CSS_PROPERTY_BORDER_WIDTH, "border-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, true, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_BORDER_STYLE, "border-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_BORDER_COLOR, "border-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, true, NULL, 0, validate_color, NULL},
-    {CSS_PROPERTY_BORDER_TOP, "border-top", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
-    {CSS_PROPERTY_BORDER_RIGHT, "border-right", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
-    {CSS_PROPERTY_BORDER_BOTTOM, "border-bottom", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
-    {CSS_PROPERTY_BORDER_LEFT, "border-left", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_WIDTH, "border-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, true, border_longhands, 4, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_STYLE, "border-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, border_longhands + 4, 4, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_COLOR, "border-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, true, border_longhands + 8, 4, validate_color, NULL},
+    {CSS_PROPERTY_BORDER_TOP, "border-top", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, border_side_longhands[0], 3, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_RIGHT, "border-right", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, border_side_longhands[1], 3, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BOTTOM, "border-bottom", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, border_side_longhands[2], 3, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_LEFT, "border-left", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, border_side_longhands[3], 3, validate_string, NULL},
 
     // CSS Logical border properties share the writing-mode side mapper.
     {CSS_PROPERTY_BORDER_INLINE, "border-inline", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
@@ -272,7 +299,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BACKGROUND_BLEND_MODE, "background-blend-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
 
     // Background shorthand and additional properties
-    {CSS_PROPERTY_BACKGROUND, "background", PROP_TYPE_STRING, PROP_INHERIT_NO, "transparent", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BACKGROUND, "background", PROP_TYPE_STRING, PROP_INHERIT_NO, "transparent", false, true, background_longhands, 8, validate_string, NULL},
 
     // Filter Properties
     {CSS_PROPERTY_FILTER, "filter", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
@@ -280,6 +307,9 @@ static CssProperty property_definitions[] = {
 
     // Transform Properties
     {CSS_PROPERTY_TRANSFORM, "transform", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TRANSLATE, "translate", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_ROTATE, "rotate", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_SCALE, "scale", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_TRANSFORM_ORIGIN, "transform-origin", PROP_TYPE_STRING, PROP_INHERIT_NO, "50% 50% 0", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_TRANSFORM_STYLE, "transform-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "flat", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BACKFACE_VISIBILITY, "backface-visibility", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
@@ -298,12 +328,12 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_ANIMATION_PLAY_STATE, "animation-play-state", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "running", false, false, NULL, 0, validate_keyword, NULL},
 
     // Transition Properties
-    {CSS_PROPERTY_TRANSITION, "transition", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "all", false, true, transition_longhands, 4, validate_keyword, NULL},
+    {CSS_PROPERTY_TRANSITION, "transition", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "all 0s ease 0s", false, true, transition_longhands, 4, validate_keyword, NULL},
 
     // Shorthand Properties
-    {CSS_PROPERTY_MARGIN, "margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_PADDING, "padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_BORDER, "border", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_MARGIN, "margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, margin_longhands, 4, validate_length, NULL},
+    {CSS_PROPERTY_PADDING, "padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, padding_longhands, 4, validate_length, NULL},
+    {CSS_PROPERTY_BORDER, "border", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, border_longhands, 12, validate_keyword, NULL},
     {CSS_PROPERTY_FLEX, "flex", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "0 1 auto", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_GRID, "grid", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
 
@@ -412,7 +442,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BOX_SHADOW, "box-shadow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
 
     // Border Properties (additional)
-    {CSS_PROPERTY_BORDER_IMAGE, "border-image", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_IMAGE, "border-image", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, border_image_longhands, 5, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_IMAGE_SOURCE, "border-image-source", PROP_TYPE_URL, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_url, NULL},
     {CSS_PROPERTY_BORDER_IMAGE_SLICE, "border-image-slice", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "100%", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_IMAGE_WIDTH, "border-image-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_length, NULL},
@@ -522,18 +552,6 @@ static CssProperty property_definitions[] = {
 
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))
 
-typedef enum CssMathType {
-    CSS_MATH_INVALID,
-    CSS_MATH_NUMBER,
-    CSS_MATH_LENGTH,
-    CSS_MATH_PERCENT,
-    CSS_MATH_LENGTH_PERCENT,
-    CSS_MATH_ANGLE,
-    CSS_MATH_DEFERRED,
-} CssMathType;
-
-static CssMathType css_math_value_type(const CssValue* value, int depth);
-
 static CssMathType css_math_common_type(CssMathType left,
                                          CssMathType right) {
     if (left == CSS_MATH_INVALID || right == CSS_MATH_INVALID)
@@ -549,189 +567,271 @@ static CssMathType css_math_common_type(CssMathType left,
         : CSS_MATH_INVALID;
 }
 
-static CssMathType css_math_parse_sum(CssValue* const* items, int count,
-                                      int* pos, int depth);
+// One expression walk validates types and evaluates operands supplied by each consumer.
+static CssMathResult css_math_invalid() {
+    return {CSS_MATH_INVALID, 0.0, 0.0, false};
+}
 
-static CssMathType css_math_parse_atom(CssValue* const* items, int count,
-                                       int* pos, int depth) {
-    if (!items || !pos || *pos >= count || depth > 32) return CSS_MATH_INVALID;
+static CssMathResult css_math_parse_sum(CssValue* const* items, int count,
+    int* pos, const CssMathEvaluationContext* context, int depth);
+
+static CssMathResult css_math_parse_atom(CssValue* const* items, int count,
+    int* pos, const CssMathEvaluationContext* context, int depth) {
+    if (!items || !pos || *pos >= count || depth > 32) return css_math_invalid();
     const char* token = css_math_token_name(items[*pos]);
     if (token && (strcmp(token, "+") == 0 || strcmp(token, "-") == 0)) {
         (*pos)++;
-        return css_math_parse_atom(items, count, pos, depth + 1);
+        CssMathResult result = css_math_parse_atom(items, count, pos, context, depth + 1);
+        if (*token == '-') {result.value = -result.value; result.percentage = -result.percentage;}
+        return result;
     }
     if (token && strcmp(token, "(") == 0) {
         (*pos)++;
-        CssMathType inner = css_math_parse_sum(items, count, pos, depth + 1);
-        const char* closing = *pos < count
-            ? css_math_token_name(items[*pos]) : NULL;
-        if (!closing || strcmp(closing, ")") != 0) return CSS_MATH_INVALID;
+        CssMathResult inner = css_math_parse_sum(items, count, pos, context, depth + 1);
+        const char* closing = *pos < count ? css_math_token_name(items[*pos]) : nullptr;
+        if (!closing || strcmp(closing, ")") != 0) return css_math_invalid();
         (*pos)++;
         return inner;
     }
-    if (token && strcmp(token, ")") == 0) return CSS_MATH_INVALID;
-    return css_math_value_type(items[(*pos)++], depth + 1);
+    if (token && strcmp(token, ")") == 0) return css_math_invalid();
+    return css_math_evaluate(items[(*pos)++], context, depth + 1);
 }
 
-static CssMathType css_math_parse_product(CssValue* const* items, int count,
-                                           int* pos, int depth) {
-    CssMathType result = css_math_parse_atom(items, count, pos, depth);
+static CssMathResult css_math_parse_product(CssValue* const* items, int count,
+    int* pos, const CssMathEvaluationContext* context, int depth) {
+    CssMathResult result = css_math_parse_atom(items, count, pos, context, depth);
     while (*pos < count) {
         const char* op = css_math_token_name(items[*pos]);
         if (!op || (strcmp(op, "*") != 0 && strcmp(op, "/") != 0)) break;
-        bool divide = op[0] == '/';
+        bool divide = *op == '/';
         (*pos)++;
-        CssMathType right = css_math_parse_atom(items, count, pos, depth);
-        if (result == CSS_MATH_INVALID || right == CSS_MATH_INVALID)
-            return CSS_MATH_INVALID;
-        if (result == CSS_MATH_DEFERRED || right == CSS_MATH_DEFERRED) {
-            result = CSS_MATH_DEFERRED;
-        } else if (divide) {
-            if (right != CSS_MATH_NUMBER) return CSS_MATH_INVALID;
-        } else if (result == CSS_MATH_NUMBER) {
-            result = right;
-        } else if (right != CSS_MATH_NUMBER) {
-            return CSS_MATH_INVALID;
+        CssMathResult right = css_math_parse_atom(items, count, pos, context, depth);
+        if (result.type == CSS_MATH_INVALID || right.type == CSS_MATH_INVALID) return css_math_invalid();
+        CssMathType type = result.type;
+        if (type == CSS_MATH_DEFERRED || right.type == CSS_MATH_DEFERRED) type = CSS_MATH_DEFERRED;
+        else if (divide) {
+            if (right.type != CSS_MATH_NUMBER) return css_math_invalid();
+        } else if (type == CSS_MATH_NUMBER) type = right.type;
+        else if (right.type != CSS_MATH_NUMBER) return css_math_invalid();
+        bool resolved = result.resolved && right.resolved;
+        if (resolved) {
+            if (divide) {result.value /= right.value; result.percentage /= right.value;}
+            else if (result.type == CSS_MATH_NUMBER) {
+                right.value *= result.value;
+                right.percentage *= result.value;
+                result = right;
+            } else {result.value *= right.value; result.percentage *= right.value;}
         }
+        result.type = type;
+        result.resolved = resolved;
     }
     return result;
 }
 
-static CssMathType css_math_parse_sum(CssValue* const* items, int count,
-                                      int* pos, int depth) {
-    CssMathType result = css_math_parse_product(items, count, pos, depth);
+static CssMathResult css_math_parse_sum(CssValue* const* items, int count,
+    int* pos, const CssMathEvaluationContext* context, int depth) {
+    CssMathResult result = css_math_parse_product(items, count, pos, context, depth);
     while (*pos < count) {
         const char* op = css_math_token_name(items[*pos]);
         if (!op || (strcmp(op, "+") != 0 && strcmp(op, "-") != 0)) break;
         (*pos)++;
-        result = css_math_common_type(result,
-            css_math_parse_product(items, count, pos, depth));
+        CssMathResult right = css_math_parse_product(items, count, pos, context, depth);
+        result.type = css_math_common_type(result.type, right.type);
+        result.resolved = result.resolved && right.resolved;
+        double sign = *op == '-' ? -1.0 : 1.0;
+        result.value += sign * right.value;
+        result.percentage += sign * right.percentage;
     }
     return result;
 }
 
-static CssMathType css_math_function_type(const CssFunction* function,
-                                           int depth) {
-    if (!function || !function->name || !function->args ||
-        function->arg_count < 1 || depth > 32) return CSS_MATH_INVALID;
-    const char* name = function->name;
-    int count = function->arg_count;
-    if (strcmp(name, "calc") == 0) {
-        return count == 1 ? css_math_value_type(function->args[0], depth + 1)
-            : CSS_MATH_INVALID;
-    }
-    if (strcmp(name, "abs") == 0 || strcmp(name, "sign") == 0) {
-        if (count != 1) return CSS_MATH_INVALID;
-        CssMathType type = css_math_value_type(function->args[0], depth + 1);
-        return strcmp(name, "sign") == 0 && type != CSS_MATH_INVALID
-            ? CSS_MATH_NUMBER : type;
-    }
-    if (strcmp(name, "sin") == 0 || strcmp(name, "cos") == 0 ||
-        strcmp(name, "tan") == 0) {
-        if (count != 1) return CSS_MATH_INVALID;
-        CssMathType type = css_math_value_type(function->args[0], depth + 1);
-        return type == CSS_MATH_NUMBER || type == CSS_MATH_ANGLE ||
-            type == CSS_MATH_DEFERRED ? CSS_MATH_NUMBER : CSS_MATH_INVALID;
-    }
-    if (strcmp(name, "asin") == 0 || strcmp(name, "acos") == 0 ||
-        strcmp(name, "atan") == 0) {
-        if (count != 1) return CSS_MATH_INVALID;
-        CssMathType type = css_math_value_type(function->args[0], depth + 1);
-        return type == CSS_MATH_NUMBER || type == CSS_MATH_DEFERRED
-            ? CSS_MATH_ANGLE : CSS_MATH_INVALID;
-    }
-    if (strcmp(name, "atan2") == 0 && count == 2) {
-        CssMathType left = css_math_value_type(function->args[0], depth + 1);
-        CssMathType right = css_math_value_type(function->args[1], depth + 1);
-        return css_math_common_type(left, right) != CSS_MATH_INVALID
-            ? CSS_MATH_ANGLE : CSS_MATH_INVALID;
-    }
-    if (strcmp(name, "pow") == 0 || strcmp(name, "sqrt") == 0 ||
-        strcmp(name, "log") == 0 || strcmp(name, "exp") == 0) {
-        if ((strcmp(name, "pow") == 0 && count != 2) ||
-            (strcmp(name, "log") == 0 && (count < 1 || count > 2)) ||
-            ((strcmp(name, "sqrt") == 0 || strcmp(name, "exp") == 0) &&
-             count != 1)) return CSS_MATH_INVALID;
-        for (int i = 0; i < count; i++) {
-            CssMathType type = css_math_value_type(function->args[i], depth + 1);
-            if (type != CSS_MATH_NUMBER && type != CSS_MATH_DEFERRED)
-                return CSS_MATH_INVALID;
-        }
-        return CSS_MATH_NUMBER;
-    }
-    if (strcmp(name, "min") == 0 || strcmp(name, "max") == 0 ||
-        strcmp(name, "clamp") == 0 || strcmp(name, "hypot") == 0 ||
-        strcmp(name, "mod") == 0 || strcmp(name, "rem") == 0) {
-        if ((strcmp(name, "clamp") == 0 && count != 3) ||
-            ((strcmp(name, "mod") == 0 || strcmp(name, "rem") == 0) &&
-             count != 2)) return CSS_MATH_INVALID;
-        CssMathType type = css_math_value_type(function->args[0], depth + 1);
-        for (int i = 1; i < count; i++) {
-            type = css_math_common_type(type,
-                css_math_value_type(function->args[i], depth + 1));
-        }
-        return type;
-    }
-    if (strcmp(name, "round") == 0) {
-        const char* first_name = css_math_token_name(function->args[0]);
-        bool strategy = first_name &&
-            (strcmp(first_name, "nearest") == 0 ||
-             strcmp(first_name, "up") == 0 ||
-             strcmp(first_name, "down") == 0 ||
-             strcmp(first_name, "to-zero") == 0 ||
-             strcmp(first_name, "line-width") == 0);
-        int value_index = strategy ? 1 : 0;
-        if (count <= value_index || count > value_index + 2)
-            return CSS_MATH_INVALID;
-        CssMathType type = css_math_value_type(
-            function->args[value_index], depth + 1);
-        if (strategy && strcmp(first_name, "line-width") == 0 &&
-            type != CSS_MATH_LENGTH) return CSS_MATH_INVALID;
-        if (count == value_index + 1) {
-            return type == CSS_MATH_NUMBER ||
-                (strategy && strcmp(first_name, "line-width") == 0 &&
-                 type == CSS_MATH_LENGTH) ? type : CSS_MATH_INVALID;
-        }
-        return css_math_common_type(type,
-            css_math_value_type(function->args[value_index + 1], depth + 1));
-    }
-    return CSS_MATH_INVALID;
+static double css_math_scalar(const CssMathResult& result,
+    const CssMathEvaluationContext* context) {
+    return context && context->preserve_percentages && result.type == CSS_MATH_PERCENT
+        ? result.percentage : result.value;
 }
 
-static CssMathType css_math_value_type(const CssValue* value, int depth) {
-    if (!value || depth > 32) return CSS_MATH_INVALID;
-    switch (value->type) {
-        case CSS_VALUE_TYPE_NUMBER: return CSS_MATH_NUMBER;
-        case CSS_VALUE_TYPE_PERCENTAGE: return CSS_MATH_PERCENT;
-        case CSS_VALUE_TYPE_LENGTH:
-            if (css_unit_is_length(value->data.length.unit)) return CSS_MATH_LENGTH;
-            if (value->data.length.unit >= CSS_UNIT_DEG &&
-                value->data.length.unit <= CSS_UNIT_TURN) return CSS_MATH_ANGLE;
-            return CSS_MATH_INVALID;
-        case CSS_VALUE_TYPE_VAR:
-        case CSS_VALUE_TYPE_ENV:
-        case CSS_VALUE_TYPE_ATTR: return CSS_MATH_DEFERRED;
-        case CSS_VALUE_TYPE_CUSTOM: {
-            const char* name = value->data.custom_property.name;
-            return name && (strcmp(name, "pi") == 0 || strcmp(name, "e") == 0 ||
-                strcmp(name, "infinity") == 0 || strcmp(name, "-infinity") == 0 ||
-                strcmp(name, "NaN") == 0) ? CSS_MATH_NUMBER : CSS_MATH_INVALID;
+static CssMathResult css_math_scalar_result(CssMathType type, double value,
+    const CssMathEvaluationContext* context, bool resolved) {
+    bool percent = context && context->preserve_percentages && type == CSS_MATH_PERCENT;
+    return {type, percent ? 0.0 : value, percent ? value : 0.0, resolved};
+}
+
+static bool css_math_scalar_type(CssMathType type, const CssMathEvaluationContext* context) {
+    return type != CSS_MATH_LENGTH_PERCENT || (context && !context->preserve_percentages);
+}
+
+static bool css_math_round_strategy(const char* name) {
+    return name && (strcmp(name, "nearest") == 0 || strcmp(name, "up") == 0 ||
+        strcmp(name, "down") == 0 || strcmp(name, "to-zero") == 0 || strcmp(name, "line-width") == 0);
+}
+
+static CssMathResult css_math_function_result(const CssFunction* function,
+    const CssMathEvaluationContext* context, int depth) {
+    if (!function || !function->name || !function->args || function->arg_count < 1 || depth > 32)
+        return css_math_invalid();
+    const char* name = function->name;
+    int count = function->arg_count;
+    if (strcmp(name, "calc") == 0)
+        return count == 1 ? css_math_evaluate(function->args[0], context, depth + 1) : css_math_invalid();
+    const char* strategy = strcmp(name, "round") == 0 ? css_math_token_name(function->args[0]) : nullptr;
+    int offset = css_math_round_strategy(strategy) ? 1 : 0;
+    if (count <= offset) return css_math_invalid();
+    CssMathResult first = css_math_evaluate(function->args[offset], context, depth + 1);
+    CssMathResult second = count > offset + 1
+        ? css_math_evaluate(function->args[offset + 1], context, depth + 1)
+        : CssMathResult{CSS_MATH_NUMBER, 1.0, 0.0, context != nullptr};
+    if (first.type == CSS_MATH_INVALID) return css_math_invalid();
+    double a = css_math_scalar(first, context), b = css_math_scalar(second, context);
+    bool scalar = css_math_scalar_type(first.type, context);
+    bool resolved = first.resolved && scalar;
+    CssMathType type = first.type;
+    double result = 0.0;
+    if (strcmp(name, "abs") == 0 || strcmp(name, "sign") == 0) {
+        if (count != 1) return css_math_invalid();
+        if (strcmp(name, "sign") == 0) {
+            type = CSS_MATH_NUMBER;
+            result = isnan(a) ? NAN : a == 0.0 ? a : copysign(1.0, a);
+        } else result = fabs(a);
+    } else if (strcmp(name, "sin") == 0 || strcmp(name, "cos") == 0 || strcmp(name, "tan") == 0) {
+        if (count != 1 || (type != CSS_MATH_NUMBER && type != CSS_MATH_ANGLE && type != CSS_MATH_DEFERRED))
+            return css_math_invalid();
+        if (type == CSS_MATH_ANGLE) a *= acos(-1.0) / 180.0;
+        type = CSS_MATH_NUMBER;
+        result = strcmp(name, "sin") == 0 ? sin(a) : strcmp(name, "cos") == 0 ? cos(a) : tan(a);
+    } else if (strcmp(name, "asin") == 0 || strcmp(name, "acos") == 0 || strcmp(name, "atan") == 0) {
+        if (count != 1 || (type != CSS_MATH_NUMBER && type != CSS_MATH_DEFERRED)) return css_math_invalid();
+        type = CSS_MATH_ANGLE;
+        result = (strcmp(name, "asin") == 0 ? asin(a) : strcmp(name, "acos") == 0 ? acos(a) : atan(a)) * 180.0 / acos(-1.0);
+    } else if (strcmp(name, "pow") == 0 || strcmp(name, "sqrt") == 0 ||
+               strcmp(name, "log") == 0 || strcmp(name, "exp") == 0) {
+        if ((strcmp(name, "pow") == 0 && count != 2) ||
+            (strcmp(name, "log") == 0 && count > 2) ||
+            ((strcmp(name, "sqrt") == 0 || strcmp(name, "exp") == 0) && count != 1)) return css_math_invalid();
+        for (int i = 0; i < count; i++) {
+            CssMathResult argument = i == 0 ? first : i == 1 ? second
+                : css_math_evaluate(function->args[i], context, depth + 1);
+            if (argument.type != CSS_MATH_NUMBER && argument.type != CSS_MATH_DEFERRED) return css_math_invalid();
+            resolved = resolved && argument.resolved;
         }
+        type = CSS_MATH_NUMBER;
+        result = strcmp(name, "pow") == 0 ? pow(a, b) : strcmp(name, "sqrt") == 0 ? sqrt(a)
+            : strcmp(name, "exp") == 0 ? exp(a) : log(a) / (count == 2 ? log(b) : 1.0);
+    } else if (strcmp(name, "atan2") == 0 || strcmp(name, "mod") == 0 || strcmp(name, "rem") == 0) {
+        if (count != 2 || css_math_common_type(type, second.type) == CSS_MATH_INVALID) return css_math_invalid();
+        type = css_math_common_type(type, second.type);
+        resolved = resolved && second.resolved && css_math_scalar_type(type, context);
+        if (strcmp(name, "atan2") == 0) {type = CSS_MATH_ANGLE; result = atan2(a, b) * 180.0 / acos(-1.0);}
+        else result = b == 0.0 ? NAN : strcmp(name, "mod") == 0 ? a - floor(a / b) * b : fmod(a, b);
+    } else if (strcmp(name, "min") == 0 || strcmp(name, "max") == 0 ||
+               strcmp(name, "clamp") == 0 || strcmp(name, "hypot") == 0) {
+        if (strcmp(name, "clamp") == 0 && count != 3) return css_math_invalid();
+        result = strcmp(name, "hypot") == 0 ? 0.0 : a;
+        double middle = b;
+        for (int i = 0; i < count; i++) {
+            CssMathResult argument = i == 0 ? first : i == 1 ? second
+                : css_math_evaluate(function->args[i], context, depth + 1);
+            type = css_math_common_type(type, argument.type);
+            if (type == CSS_MATH_INVALID) return css_math_invalid();
+            resolved = resolved && argument.resolved && css_math_scalar_type(type, context);
+            double part = css_math_scalar(argument, context);
+            if (strcmp(name, "hypot") == 0) result = hypot(result, part);
+            else if (strcmp(name, "min") == 0 || strcmp(name, "max") == 0) {
+                // NaN poisons a calculation; fmin/fmax alone would discard it.
+                result = isnan(result) || isnan(part) ? NAN
+                    : strcmp(name, "min") == 0 ? fmin(result, part) : fmax(result, part);
+            } else if (i == 2) result = isnan(a) || isnan(middle) || isnan(part) ? NAN : fmax(a, fmin(middle, part));
+        }
+    } else if (strcmp(name, "round") == 0) {
+        if (count > offset + 2) return css_math_invalid();
+        bool line_width = offset && strcmp(strategy, "line-width") == 0;
+        if (line_width && type != CSS_MATH_LENGTH) return css_math_invalid();
+        if (count == offset + 1) {
+            if (type != CSS_MATH_NUMBER && !line_width) return css_math_invalid();
+            b = line_width && context ? context->line_width_step : 1.0;
+        } else {
+            type = css_math_common_type(type, second.type);
+            if (type == CSS_MATH_INVALID) return css_math_invalid();
+            resolved = resolved && second.resolved && css_math_scalar_type(type, context);
+        }
+        if (isnan(a) || isnan(b) || b <= 0.0) result = NAN;
+        else if (isinf(a) && isinf(b)) result = NAN;
+        else if (isinf(a)) result = a;
+        else if (isinf(b)) {
+            bool up = offset && strcmp(strategy, "up") == 0;
+            bool down = offset && strcmp(strategy, "down") == 0;
+            result = up && a > 0.0 ? INFINITY : down && a < 0.0 ? -INFINITY : copysign(0.0, a);
+        } else {
+            double lower = floor(a / b) * b, upper = ceil(a / b) * b;
+            result = a == lower || a == upper ? a
+                : offset && strcmp(strategy, "up") == 0 ? upper
+                : offset && strcmp(strategy, "down") == 0 ? lower
+                : offset && strcmp(strategy, "to-zero") == 0 ? (fabs(lower) < fabs(upper) ? lower : upper)
+                : a - lower < upper - a ? lower : upper;
+            if (line_width && result == 0.0 && a != 0.0) result = a > 0.0 ? upper : lower;
+        }
+    } else return css_math_invalid();
+    return css_math_scalar_result(type, result, context, resolved);
+}
+
+CssMathResult css_math_evaluate(const CssValue* value,
+    const CssMathEvaluationContext* context, int depth) {
+    if (!value || depth > 32) return css_math_invalid();
+    const char* constant = css_math_token_name(value);
+    if (constant && (str_ieq_cstr(constant, "pi") || str_ieq_cstr(constant, "e") ||
+        str_ieq_cstr(constant, "infinity") || str_ieq_cstr(constant, "-infinity") || str_ieq_cstr(constant, "nan"))) {
+        double number = str_ieq_cstr(constant, "pi") ? acos(-1.0) : str_ieq_cstr(constant, "e") ? exp(1.0)
+            : str_ieq_cstr(constant, "infinity") ? INFINITY : str_ieq_cstr(constant, "-infinity") ? -INFINITY : NAN;
+        return {CSS_MATH_NUMBER, number, 0.0, context != nullptr};
+    }
+    CssMathType type = CSS_MATH_INVALID;
+    switch (value->type) {
+        case CSS_VALUE_TYPE_NUMBER:
+            return {CSS_MATH_NUMBER, value->data.number.value, 0.0, context != nullptr};
+        case CSS_VALUE_TYPE_PERCENTAGE:
+            if (context && context->preserve_percentages)
+                return {CSS_MATH_PERCENT, 0.0, value->data.percentage.value, true};
+            type = CSS_MATH_PERCENT;
+            break;
+        case CSS_VALUE_TYPE_LENGTH:
+            if (css_unit_is_length(value->data.length.unit)) type = CSS_MATH_LENGTH;
+            else if (value->data.length.unit >= CSS_UNIT_DEG && value->data.length.unit <= CSS_UNIT_TURN) type = CSS_MATH_ANGLE;
+            else if (value->data.length.unit == CSS_UNIT_S || value->data.length.unit == CSS_UNIT_MS) type = CSS_MATH_TIME;
+            else if (value->data.length.unit >= CSS_UNIT_DPI && value->data.length.unit <= CSS_UNIT_DPPX) type = CSS_MATH_RESOLUTION;
+            break;
+        case CSS_VALUE_TYPE_ANGLE: type = CSS_MATH_ANGLE; break;
+        case CSS_VALUE_TYPE_TIME: type = CSS_MATH_TIME; break;
+        case CSS_VALUE_TYPE_VAR: case CSS_VALUE_TYPE_ENV: case CSS_VALUE_TYPE_ATTR: type = CSS_MATH_DEFERRED; break;
         case CSS_VALUE_TYPE_FUNCTION:
             if (value->data.function && value->data.function->name &&
-                (strcmp(value->data.function->name, "var") == 0 ||
-                 strcmp(value->data.function->name, "env") == 0 ||
-                 strcmp(value->data.function->name, "attr") == 0))
-                return CSS_MATH_DEFERRED;
-            return css_math_function_type(value->data.function, depth + 1);
+                (strcmp(value->data.function->name, "var") == 0 || strcmp(value->data.function->name, "env") == 0 ||
+                 strcmp(value->data.function->name, "attr") == 0)) type = CSS_MATH_DEFERRED;
+            else return css_math_function_result(value->data.function, context, depth + 1);
+            break;
         case CSS_VALUE_TYPE_LIST: {
             int pos = 0;
-            CssMathType type = css_math_parse_sum(value->data.list.values,
-                value->data.list.count, &pos, depth + 1);
-            return pos == value->data.list.count ? type : CSS_MATH_INVALID;
+            if (value->data.list.comma_separated) return css_math_invalid();
+            CssMathResult result = css_math_parse_sum(value->data.list.values,
+                value->data.list.count, &pos, context, depth + 1);
+            return pos == value->data.list.count ? result : css_math_invalid();
         }
-        default: return CSS_MATH_INVALID;
+        default: return css_math_invalid();
     }
+    CssMathResult result = {type, 0.0, 0.0, false};
+    if (!context || type == CSS_MATH_INVALID) return result;
+    if (context->resolve_leaf)
+        result.resolved = context->resolve_leaf(context->context, value, &result.value);
+    if (!result.resolved && (value->type == CSS_VALUE_TYPE_LENGTH ||
+        value->type == CSS_VALUE_TYPE_ANGLE || value->type == CSS_VALUE_TYPE_TIME)) {
+        CssUnit canonical;
+        result.resolved = css_dimension_to_canonical(value->data.length.unit,
+            value->data.length.value, &canonical, &result.value);
+    }
+    return result;
+}
+
+CssMathType css_math_value_type(const CssValue* value, int depth) {
+    return css_math_evaluate(value, nullptr, depth).type;
 }
 
 static const CssTransformFunctionInfo CSS_TRANSFORM_FUNCTIONS[] = {
@@ -904,34 +1004,172 @@ static bool css_value_is_text_decoration_thickness(const CssValue* value) {
 
 static bool css_value_is_supported_color(const CssValue* value) {
     if (!value) return false;
-    // variable-bearing declarations defer their whole grammar until substitution.
-    if (css_value_contains_var_reference(value)) return true;
-    if (value->type == CSS_VALUE_TYPE_COLOR) return true;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info && (info->group == CSS_VALUE_GROUP_COLOR ||
-            info->group == CSS_VALUE_GROUP_SYSTEM_COLOR ||
-            info->group == CSS_VALUE_GROUP_GLOBAL);
+    if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+    CssComputedColor color;
+    return css_color_compute(value, &color);
+}
+
+bool css_value_is_custom_ident(const CssValue* value) {
+    const char* name = value && value->type != CSS_VALUE_TYPE_STRING
+        ? css_value_identifier_name(value) : nullptr;
+    const CssEnumInfo* keyword = css_enum_info(css_enum_by_name(name));
+    return name && keyword->group != CSS_VALUE_GROUP_GLOBAL &&
+        !str_ieq_cstr(name, "default");
+}
+
+static bool css_registered_transform_matches(const CssValue* value) {
+    const CssFunction* function = value && value->type == CSS_VALUE_TYPE_FUNCTION
+        ? value->data.function : nullptr;
+    if (!function || !function->name || !function->args) return false;
+    struct TransformGrammar {const char* name; int minimum, maximum; const char* arguments;};
+    static const TransformGrammar grammar[] = {
+        {"matrix",6,6,"n"},{"matrix3d",16,16,"n"},
+        {"translate",1,2,"pp"},{"translatex",1,1,"p"},{"translatey",1,1,"p"},
+        {"translatez",1,1,"l"},{"translate3d",3,3,"ppl"},
+        {"scale",1,2,"ss"},{"scalex",1,1,"s"},{"scaley",1,1,"s"},
+        {"scalez",1,1,"s"},{"scale3d",3,3,"sss"},
+        {"rotate",1,1,"a"},{"rotatex",1,1,"a"},{"rotatey",1,1,"a"},
+        {"rotatez",1,1,"a"},{"rotate3d",4,4,"nnna"},
+        {"skew",1,2,"aa"},{"skewx",1,1,"a"},{"skewy",1,1,"a"},
+        {"perspective",1,1,"l"},
+    };
+    for (const TransformGrammar& entry : grammar) {
+        if (!str_ieq_cstr(function->name, entry.name)) continue;
+        if (function->arg_count < entry.minimum || function->arg_count > entry.maximum) return false;
+        for (int i = 0; i < function->arg_count; i++) {
+            const CssValue* argument = function->args[i];
+            if (!argument) return false;
+            CssMathType type = css_math_value_type(argument);
+            char expected = entry.arguments[strlen(entry.arguments) == 1 ? 0 : (size_t)i];
+            bool zero = argument->type == CSS_VALUE_TYPE_NUMBER && argument->data.number.value == 0.0;
+            bool valid = expected == 'n' ? type == CSS_MATH_NUMBER
+                : expected == 's' ? type == CSS_MATH_NUMBER || type == CSS_MATH_PERCENT
+                : expected == 'a' ? type == CSS_MATH_ANGLE || zero
+                : type == CSS_MATH_LENGTH || zero || (expected == 'p' &&
+                  (type == CSS_MATH_PERCENT || type == CSS_MATH_LENGTH_PERCENT));
+            if (!valid) return false;
+            if (strcmp(entry.name, "perspective") == 0 && argument->type == CSS_VALUE_TYPE_LENGTH &&
+                argument->data.length.value < 0.0) return false;
+        }
+        return true;
     }
-    if (value->type != CSS_VALUE_TYPE_FUNCTION ||
-        !value->data.function || !value->data.function->name) return false;
-    const char* name = value->data.function->name;
-    return strcmp(name, "rgb") == 0 || strcmp(name, "rgba") == 0 ||
-        strcmp(name, "hsl") == 0 || strcmp(name, "hsla") == 0 ||
-        strcmp(name, "hwb") == 0 ||
-        strcmp(name, "var") == 0 || strcmp(name, "env") == 0 ||
-        strcmp(name, "attr") == 0;
+    return false;
+}
+
+static bool css_registered_atom_matches(const CssPropertySyntaxComponent* component,
+                                        const CssValue* value) {
+    if (!value || css_value_is_global_keyword(value) || css_value_contains_var_reference(value))
+        return false;
+    CssMathType math = css_math_value_type(value);
+    switch (component->type) {
+        case CSS_SYNTAX_IDENT: {
+            const char* name = css_value_is_custom_ident(value) ? css_value_identifier_name(value) : nullptr;
+            return name && strcmp(name, component->identifier) == 0;
+        }
+        case CSS_SYNTAX_CUSTOM_IDENT: return css_value_is_custom_ident(value);
+        case CSS_SYNTAX_LENGTH:
+            return math == CSS_MATH_LENGTH ||
+                (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0);
+        case CSS_SYNTAX_LENGTH_PERCENTAGE:
+            return math == CSS_MATH_LENGTH || math == CSS_MATH_PERCENT ||
+                math == CSS_MATH_LENGTH_PERCENT ||
+                (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0);
+        case CSS_SYNTAX_PERCENTAGE: return math == CSS_MATH_PERCENT;
+        case CSS_SYNTAX_NUMBER: return math == CSS_MATH_NUMBER;
+        case CSS_SYNTAX_INTEGER:
+            return math == CSS_MATH_NUMBER && (value->type != CSS_VALUE_TYPE_NUMBER ||
+                value->data.number.value == floor(value->data.number.value));
+        case CSS_SYNTAX_ANGLE: return math == CSS_MATH_ANGLE;
+        case CSS_SYNTAX_TIME: return math == CSS_MATH_TIME;
+        case CSS_SYNTAX_RESOLUTION: return math == CSS_MATH_RESOLUTION;
+        case CSS_SYNTAX_STRING: return value->type == CSS_VALUE_TYPE_STRING;
+        case CSS_SYNTAX_COLOR: return css_value_is_supported_color(value);
+        case CSS_SYNTAX_URL: return value->type == CSS_VALUE_TYPE_URL;
+        case CSS_SYNTAX_IMAGE:
+            return value->type == CSS_VALUE_TYPE_URL || (value->type == CSS_VALUE_TYPE_FUNCTION &&
+                value->data.function && value->data.function->name &&
+                (strcmp(value->data.function->name, "linear-gradient") == 0 ||
+                 strcmp(value->data.function->name, "repeating-linear-gradient") == 0 ||
+                 strcmp(value->data.function->name, "radial-gradient") == 0 ||
+                 strcmp(value->data.function->name, "repeating-radial-gradient") == 0 ||
+                 strcmp(value->data.function->name, "conic-gradient") == 0 ||
+                 strcmp(value->data.function->name, "repeating-conic-gradient") == 0 ||
+                 strcmp(value->data.function->name, "image-set") == 0));
+        case CSS_SYNTAX_TRANSFORM_FUNCTION:
+        case CSS_SYNTAX_TRANSFORM_LIST: return css_registered_transform_matches(value);
+    }
+    return false;
+}
+
+const CssPropertySyntaxComponent* css_match_property_syntax(
+    const CssPropertyRegistration* registration, const CssValue* value) {
+    if (!registration || !value) return nullptr;
+    for (size_t i = 0; i < registration->component_count; i++) {
+        const CssPropertySyntaxComponent* component = &registration->components[i];
+        bool list = component->multiplier || component->type == CSS_SYNTAX_TRANSFORM_LIST;
+        if (!list) {
+            if (css_registered_atom_matches(component, value)) return component;
+            continue;
+        }
+        if (value->type != CSS_VALUE_TYPE_LIST) {
+            if (css_registered_atom_matches(component, value)) return component;
+            continue;
+        }
+        if (value->data.list.count < 1 || !value->data.list.values ||
+            value->data.list.comma_separated != (component->multiplier == '#')) continue;
+        bool matched = true;
+        for (int j = 0; j < value->data.list.count; j++)
+            if (!css_registered_atom_matches(component, value->data.list.values[j])) matched = false;
+        if (matched) return component;
+    }
+    return nullptr;
+}
+
+bool css_property_registration_is_valid(const CssPropertyRegistration* registration) {
+    if (!registration || !registration->syntax) return false;
+    const CssValue* initial = registration->initial_value;
+    // Initial descriptors cannot defer substitution or select a CSS-wide cascade value.
+    if (initial && (css_value_is_global_keyword(initial) || css_value_contains_pending_substitution(initial)))
+        return false;
+    return registration->universal || (registration->initial_value &&
+         css_match_property_syntax(registration, registration->initial_value) &&
+         css_property_initial_is_independent(registration->initial_value));
+}
+
+bool css_property_initial_is_independent(const CssValue* value) {
+    if (!value || css_value_is_global_keyword(value)) return false;
+    switch (value->type) {
+        case CSS_VALUE_TYPE_VAR: case CSS_VALUE_TYPE_ENV: case CSS_VALUE_TYPE_ATTR: return false;
+        case CSS_VALUE_TYPE_LENGTH: {
+            double pixels;
+            return css_absolute_length_to_px(value->data.length.unit, value->data.length.value, &pixels) ||
+                !css_unit_is_length(value->data.length.unit);
+        }
+        case CSS_VALUE_TYPE_KEYWORD: {
+            const CssEnumInfo* info = css_enum_info(value->data.keyword);
+            return value->data.keyword != CSS_VALUE_CURRENTCOLOR &&
+                (!info || info->group != CSS_VALUE_GROUP_SYSTEM_COLOR);
+        }
+        case CSS_VALUE_TYPE_COLOR: return value->data.color.type != CSS_COLOR_CURRENTCOLOR;
+        case CSS_VALUE_TYPE_LIST:
+            for (int i = 0; i < value->data.list.count; i++)
+                if (!css_property_initial_is_independent(value->data.list.values[i])) return false;
+            return true;
+        case CSS_VALUE_TYPE_FUNCTION: {
+            const CssFunction* function = value->data.function;
+            if (!function || !function->name || strcmp(function->name, "var") == 0 ||
+                strcmp(function->name, "env") == 0 || strcmp(function->name, "attr") == 0) return false;
+            for (int i = 0; i < function->arg_count; i++)
+                if (!css_property_initial_is_independent(function->args[i])) return false;
+            return true;
+        }
+        default: return true;
+    }
 }
 
 static const char* css_text_emphasis_name(const CssValue* value) {
-    if (!value) return NULL;
-    if (value->type == CSS_VALUE_TYPE_CUSTOM)
-        return value->data.custom_property.name;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : NULL;
-    }
-    return NULL;
+    return value && value->type != CSS_VALUE_TYPE_STRING
+        ? css_value_identifier_name(value) : nullptr;
 }
 
 static bool css_text_emphasis_name_is(const CssValue* value, const char* name) {
@@ -1490,7 +1728,6 @@ bool css_value_is_timing_function(const CssValue* value) {
     if (!count || count->type != CSS_VALUE_TYPE_NUMBER ||
         !count->data.number.is_integer ||
         !isfinite(count->data.number.value) || count->data.number.value < 1.0 ||
-        count->data.number.value > INT_MAX ||
         floor(count->data.number.value) != count->data.number.value) return false;
     if (function->arg_count == 1) return true;
     const char* position = css_math_token_name(function->args[1]);
@@ -1519,7 +1756,7 @@ CssPropertyCode css_timeline_shorthand_for(CssPropertyCode property) {
         ? CSS_PROPERTY_TRANSITION : CSS_PROPERTY_UNKNOWN;
 }
 
-static bool css_timeline_component_valid(CssPropertyCode property, const CssValue* value) {
+bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value) {
     if (!value) return false;
     CssEnum keyword = value->type == CSS_VALUE_TYPE_KEYWORD
         ? value->data.keyword : CSS_VALUE__UNDEF;
@@ -1585,14 +1822,14 @@ static bool css_animation_split_group(const CssValue* group, const CssValue** pa
         // reserved component keywords take precedence over the keyframe name.
         for (int slot = 2; slot < 8; slot++) {
             if (slot == 3 || parts[slot]) continue;
-            if (css_timeline_component_valid(animation_longhands[slot], token)) {
+            if (css_motion_longhand_accepts(animation_longhands[slot], token)) {
                 parts[slot] = token;
                 assigned = true;
                 break;
             }
         }
         if (assigned) continue;
-        if (parts[0] || !css_timeline_component_valid(CSS_PROPERTY_ANIMATION_NAME, token))
+        if (parts[0] || !css_motion_longhand_accepts(CSS_PROPERTY_ANIMATION_NAME, token))
             return false;
         parts[0] = token;
     }
@@ -1612,12 +1849,24 @@ static bool css_transition_split_group(const CssValue* group, const CssValue** p
             if (!css_timeline_assign_time(token, seconds, parts)) return false;
         } else if (!parts[2] && css_value_is_timing_function(token)) {
             parts[2] = token;
-        } else if (!parts[0] && css_timeline_component_valid(
+        } else if (!parts[0] && css_motion_longhand_accepts(
             CSS_PROPERTY_TRANSITION_PROPERTY, token)) {
             parts[0] = token;
         } else return false;
     }
     return true;
+}
+
+// parsing and cascade projection share the same motion component grammar.
+bool css_parse_motion_shorthand(CssPropertyCode shorthand, const CssValue* group,
+    CssMotionShorthandParts* parts) {
+    if (!parts || !group || css_value_is_global_keyword(group)) return false;
+    memset(parts, 0, sizeof(*parts));
+    if (shorthand == CSS_PROPERTY_ANIMATION)
+        return css_animation_split_group(group, parts->values);
+    if (shorthand == CSS_PROPERTY_TRANSITION)
+        return css_transition_split_group(group, parts->values);
+    return false;
 }
 
 struct CssTimelineGrammar {
@@ -1651,7 +1900,7 @@ static bool css_timeline_value_valid(CssPropertyCode property, const CssValue* v
             const CssValue* parts[8] = {};
             if (!grammar->split_group(group, parts)) return false;
             group = parts[0];
-        } else if (!css_timeline_component_valid(property, group)) return false;
+        } else if (!css_motion_longhand_accepts(property, group)) return false;
         // `none` disables the entire transition list and cannot occupy one slot.
         if (grammar == &transition_grammar && count > 1 && group &&
             group->type == CSS_VALUE_TYPE_KEYWORD && group->data.keyword == CSS_VALUE_NONE)
@@ -1660,49 +1909,50 @@ static bool css_timeline_value_valid(CssPropertyCode property, const CssValue* v
     return true;
 }
 
-static const CssValue* css_timeline_shorthand_longhand(const CssValue* value,
-    CssPropertyCode property, Pool* pool, const CssTimelineGrammar* grammar) {
-    int slot = css_timeline_property_index(property, grammar->longhands, grammar->count);
-    if (!value || !pool || slot < 0 ||
-        !css_timeline_value_valid(grammar->shorthand, value, grammar))
-        return NULL;
+static bool css_value_is_individual_transform(CssPropertyCode property, const CssValue* value) {
+    if (css_value_contains_var_reference(value)) return true;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return value;
+        return value->data.keyword == CSS_VALUE_NONE ||
+            (info && info->group == CSS_VALUE_GROUP_GLOBAL);
     }
-    bool list = value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated;
-    int count = list ? value->data.list.count : 1;
-    CssValue** items = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * count);
-    if (!items) return NULL;
-    const CssValue* initial = NULL;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > 4 || (value->type == CSS_VALUE_TYPE_LIST &&
+        (!value->data.list.values || value->data.list.comma_separated))) return false;
+    bool angle = false;
+    int numbers = 0, axes = 0;
     for (int i = 0; i < count; i++) {
-        const CssValue* parts[8] = {};
-        if (!grammar->split_group(list ? value->data.list.values[i] : value, parts))
-            return NULL;
-        if (!parts[slot] && !initial) {
-            const CssProperty* metadata = css_property_get_by_code(property);
-            if (!metadata || !metadata->initial_value) return NULL;
-            CssDeclaration* declaration = css_parse_property_declaration(metadata->name,
-                strlen(metadata->name), metadata->initial_value, strlen(metadata->initial_value), pool);
-            initial = declaration ? declaration->value : NULL;
-            if (!initial) return NULL;
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (!item) return false;
+        if (property == CSS_PROPERTY_TRANSLATE) {
+            if (count > 3) return false;
+            if (item->type == CSS_VALUE_TYPE_LENGTH && css_unit_is_length(item->data.length.unit)) continue;
+            if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.value == 0.0) continue;
+            if (i < 2 && item->type == CSS_VALUE_TYPE_PERCENTAGE) continue;
+            return false;
         }
-        items[i] = (CssValue*)(parts[slot] ? parts[slot] : initial);
+        if (property == CSS_PROPERTY_SCALE) {
+            if (count > 3 || (item->type != CSS_VALUE_TYPE_NUMBER &&
+                item->type != CSS_VALUE_TYPE_PERCENTAGE)) return false;
+            continue;
+        }
+        if ((item->type == CSS_VALUE_TYPE_ANGLE || item->type == CSS_VALUE_TYPE_LENGTH) &&
+            css_unit_is_angle(item->data.length.unit)) {
+            if (angle || (i != 0 && i != count - 1)) return false;
+            angle = true;
+        } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
+            numbers++;
+        } else {
+            const char* name = css_text_emphasis_name(item);
+            if (!name || (!str_ieq_cstr(name, "x") && !str_ieq_cstr(name, "y") &&
+                !str_ieq_cstr(name, "z"))) return false;
+            axes++;
+        }
     }
-    if (count == 1) return items[0];
-    CssValue* result = css_value_create_list(pool, items, count);
-    if (result) result->data.list.comma_separated = true;
-    return result;
-}
-
-const CssValue* css_animation_shorthand_longhand(const CssValue* value,
-                                                CssPropertyCode property, Pool* pool) {
-    return css_timeline_shorthand_longhand(value, property, pool, &animation_grammar);
-}
-
-const CssValue* css_transition_shorthand_longhand(const CssValue* value,
-                                                 CssPropertyCode property, Pool* pool) {
-    return css_timeline_shorthand_longhand(value, property, pool, &transition_grammar);
+    return property != CSS_PROPERTY_ROTATE ||
+        (angle && ((count == 1) || (count == 2 && axes == 1) ||
+                   (count == 4 && numbers == 3)));
 }
 
 bool css_property_validate_value_mode(CssPropertyCode id,
@@ -1710,17 +1960,30 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                                       bool quirks_mode) {
     if (!value) return false;
 
+    if (id == CSS_PROPERTY_BACKFACE_VISIBILITY || id == CSS_PROPERTY_TRANSFORM_STYLE) {
+        if (css_value_contains_var_reference(value) || css_value_is_global_keyword(value)) return true;
+        CssEnum first = id == CSS_PROPERTY_BACKFACE_VISIBILITY ? CSS_VALUE_VISIBLE : CSS_VALUE_FLAT;
+        CssEnum second = id == CSS_PROPERTY_BACKFACE_VISIBILITY ? CSS_VALUE_HIDDEN : CSS_VALUE_PRESERVE_3D;
+        return value->type == CSS_VALUE_TYPE_KEYWORD &&
+            (value->data.keyword == first || value->data.keyword == second);
+    }
+
+    // Running positions retain an identifier, rather than accepting arbitrary functions.
+    if (id == CSS_PROPERTY_POSITION && value->type == CSS_VALUE_TYPE_FUNCTION && css_function_name_is(value->data.function, "running")) {
+        const CssFunction* function = value->data.function;
+        if (function->arg_count != 1 || !function->args[0] || function->args[0]->type == CSS_VALUE_TYPE_STRING) return false;
+        const CssValue* name = function->args[0];
+        if (name->type == CSS_VALUE_TYPE_KEYWORD && css_enum_info(name->data.keyword)->group == CSS_VALUE_GROUP_GLOBAL) return false;
+        return css_value_identifier_name(name) != nullptr;
+    }
     // Property-specific validation
+    if (id == CSS_PROPERTY_ANIMATION || css_animation_longhand_index(id) >= 0)
+        return css_timeline_value_valid(id, value, &animation_grammar);
+    if (id == CSS_PROPERTY_TRANSITION || css_transition_longhand_index(id) >= 0)
+        return css_timeline_value_valid(id, value, &transition_grammar);
     switch (id) {
         case CSS_PROPERTY_TRANSFORM:
             return css_transform_value_valid(value);
-        case CSS_PROPERTY_COLOR:
-        case CSS_PROPERTY_BACKGROUND_COLOR:
-        case CSS_PROPERTY_BORDER_TOP_COLOR:
-        case CSS_PROPERTY_BORDER_RIGHT_COLOR:
-        case CSS_PROPERTY_BORDER_BOTTOM_COLOR:
-        case CSS_PROPERTY_BORDER_LEFT_COLOR:
-            return css_value_is_supported_color(value);
         case CSS_PROPERTY_OPACITY: {
             if (css_value_contains_var_reference(value)) return true;
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -1734,22 +1997,35 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             CssMathType type = css_math_value_type(value, 0);
             return type == CSS_MATH_NUMBER || type == CSS_MATH_PERCENT;
         }
-        case CSS_PROPERTY_ANIMATION:
-        case CSS_PROPERTY_ANIMATION_NAME:
-        case CSS_PROPERTY_ANIMATION_DURATION:
-        case CSS_PROPERTY_ANIMATION_DELAY:
-        case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION:
-        case CSS_PROPERTY_ANIMATION_ITERATION_COUNT:
-        case CSS_PROPERTY_ANIMATION_DIRECTION:
-        case CSS_PROPERTY_ANIMATION_FILL_MODE:
-        case CSS_PROPERTY_ANIMATION_PLAY_STATE:
-            return css_timeline_value_valid(id, value, &animation_grammar);
-        case CSS_PROPERTY_TRANSITION:
-        case CSS_PROPERTY_TRANSITION_PROPERTY:
-        case CSS_PROPERTY_TRANSITION_DURATION:
-        case CSS_PROPERTY_TRANSITION_DELAY:
-        case CSS_PROPERTY_TRANSITION_TIMING_FUNCTION:
-            return css_timeline_value_valid(id, value, &transition_grammar);
+        case CSS_PROPERTY_BREAK_BEFORE:
+        case CSS_PROPERTY_BREAK_AFTER:
+        case CSS_PROPERTY_BREAK_INSIDE:
+        case CSS_PROPERTY_PAGE_BREAK_BEFORE:
+        case CSS_PROPERTY_PAGE_BREAK_AFTER:
+        case CSS_PROPERTY_PAGE_BREAK_INSIDE:
+        case CSS_PROPERTY_ORPHANS:
+        case CSS_PROPERTY_WIDOWS: {
+            if (value->type == CSS_VALUE_TYPE_VAR || (value->type == CSS_VALUE_TYPE_FUNCTION &&
+                value->data.function && strcmp(value->data.function->name, "var") == 0)) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && css_enum_info(value->data.keyword)->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            if (id == CSS_PROPERTY_ORPHANS || id == CSS_PROPERTY_WIDOWS)
+                return value->type == CSS_VALUE_TYPE_NUMBER && isfinite(value->data.number.value) &&
+                    value->data.number.value >= 1.0 && floor(value->data.number.value) == value->data.number.value;
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum keyword = value->data.keyword;
+            bool legacy = id == CSS_PROPERTY_PAGE_BREAK_BEFORE || id == CSS_PROPERTY_PAGE_BREAK_AFTER || id == CSS_PROPERTY_PAGE_BREAK_INSIDE;
+            bool inside = id == CSS_PROPERTY_BREAK_INSIDE || id == CSS_PROPERTY_PAGE_BREAK_INSIDE;
+            if (keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_AVOID) return true;
+            if (!legacy && (keyword == CSS_VALUE_AVOID_PAGE || keyword == CSS_VALUE_AVOID_COLUMN || keyword == CSS_VALUE_AVOID_REGION)) return true;
+            if (inside) return false;
+            if (keyword == CSS_VALUE_LEFT || keyword == CSS_VALUE_RIGHT || keyword == CSS_VALUE_ALWAYS) return true;
+            return !legacy && (keyword == CSS_VALUE_PAGE || keyword == CSS_VALUE_COLUMN || keyword == CSS_VALUE_REGION ||
+                keyword == CSS_VALUE_RECTO || keyword == CSS_VALUE_VERSO || keyword == CSS_VALUE_ALL);
+        }
+        case CSS_PROPERTY_TRANSLATE:
+        case CSS_PROPERTY_ROTATE:
+        case CSS_PROPERTY_SCALE:
+            return css_value_is_individual_transform(id, value);
         case CSS_PROPERTY_SCROLL_SNAP_TYPE:
         case CSS_PROPERTY_SCROLL_SNAP_ALIGN:
             return css_value_is_scroll_snap(id, value);
@@ -1904,8 +2180,9 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             const CssEnumInfo* info = css_enum_info(keyword);
             return keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_LEFT ||
                 keyword == CSS_VALUE_RIGHT || keyword == CSS_VALUE_INLINE_START ||
-                keyword == CSS_VALUE_INLINE_END ||
+                keyword == CSS_VALUE_INLINE_END || keyword == CSS_VALUE_TOP || keyword == CSS_VALUE_BOTTOM ||
                 (id == CSS_PROPERTY_CLEAR && keyword == CSS_VALUE_BOTH) ||
+                (id == CSS_PROPERTY_FLOAT && keyword == CSS_VALUE_FOOTNOTE) ||
                 (info && info->group == CSS_VALUE_GROUP_GLOBAL);
         }
         case CSS_PROPERTY_APPEARANCE: {
@@ -2316,6 +2593,13 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             return css_value_is_length_expression(value, false, false);
         }
 
+        case CSS_PROPERTY_COLOR:
+        case CSS_PROPERTY_BACKGROUND_COLOR:
+        case CSS_PROPERTY_BORDER_TOP_COLOR:
+        case CSS_PROPERTY_BORDER_RIGHT_COLOR:
+        case CSS_PROPERTY_BORDER_BOTTOM_COLOR:
+        case CSS_PROPERTY_BORDER_LEFT_COLOR:
+        case CSS_PROPERTY_OUTLINE_COLOR:
         case CSS_PROPERTY_COLUMN_RULE_COLOR: {
             return css_value_is_supported_color(value);
         }
@@ -2747,6 +3031,22 @@ bool css_property_is_animatable(CssPropertyCode property_code) {
 bool css_property_is_shorthand(CssPropertyCode property_code) {
     const CssProperty* prop = css_property_get_by_code(property_code);
     return prop && prop->shorthand;
+}
+
+CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property) {
+    // these consumers project the winning shorthand after the shared rollback cascade.
+    if (css_animation_longhand_index(property) >= 0) return CSS_PROPERTY_ANIMATION;
+    if (css_transition_longhand_index(property) >= 0) return CSS_PROPERTY_TRANSITION;
+    for (CssPropertyCode longhand : border_image_longhands)
+        if (longhand == property) return CSS_PROPERTY_BORDER_IMAGE;
+    return (CssPropertyCode)0;
+}
+
+bool css_property_shorthand_contains(CssPropertyCode shorthand, CssPropertyCode property) {
+    const CssProperty* prop = css_property_get_by_code(shorthand);
+    if (!prop || !prop->shorthand) return false;
+    for (int i = 0; i < prop->longhand_count; i++) if (prop->longhand_props[i] == property) return true;
+    return false;
 }
 
 int css_property_get_longhand_properties(CssPropertyCode shorthand_id,
@@ -3308,6 +3608,7 @@ bool css_parse_color(const char* value_str, CssColor* color) {
 // ============================================================================
 
 void css_property_print_info(CssPropertyCode property_code) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     const CssProperty* prop = css_property_get_by_code(property_code);
     if (!prop) {
         log_debug("CSS property code %u: not found", (unsigned int)property_code);
@@ -3320,6 +3621,7 @@ void css_property_print_info(CssPropertyCode property_code) {
     log_debug("  Initial: %s", prop->initial_value);
     log_debug("  Animatable: %s", prop->animatable ? "yes" : "no");
     log_debug("  Shorthand: %s", prop->shorthand ? "yes" : "no");
+#endif
 }
 
 int css_property_get_count(void) {

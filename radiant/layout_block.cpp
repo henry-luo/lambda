@@ -67,27 +67,10 @@ static const char* stabilize_custom_layout_name(const char* name, char* storage,
     return storage;
 }
 
-static const char* pseudo_css_value_extract_name(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
-    if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
-    return nullptr;
-}
-
 typedef struct CssContentImage {
     const char* url;
     float resolution;
 } CssContentImage;
-
-static bool css_function_name_is(const CssFunction* func, const char* name) {
-    return func && func->name && name &&
-        str_ieq_cstr(func->name, name);
-}
 
 static bool css_image_set_resolution_from_value(const CssValue* value, float* out_resolution) {
     if (!value || !out_resolution) return false;
@@ -127,7 +110,7 @@ static bool css_image_set_candidate_from_value(const CssValue* value, CssContent
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
                css_function_name_is(value->data.function, "url") &&
                value->data.function->arg_count > 0 && value->data.function->args[0]) {
-        url = pseudo_css_value_extract_name(value->data.function->args[0]);
+        url = css_value_identifier_name(value->data.function->args[0]);
     } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values) {
         for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
@@ -157,7 +140,7 @@ static bool css_content_replacement_image(const CssValue* value, CssContentImage
     if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
         css_function_name_is(value->data.function, "url") &&
         value->data.function->arg_count > 0 && value->data.function->args[0]) {
-        out_image->url = pseudo_css_value_extract_name(value->data.function->args[0]);
+        out_image->url = css_value_identifier_name(value->data.function->args[0]);
         out_image->resolution = 1.0f;
         return out_image->url && out_image->url[0];
     }
@@ -198,17 +181,6 @@ static bool block_has_auto_content_image_set(ViewBlock* block) {
         block->block()->given_height_type == CSS_VALUE_AUTO ||
         block->block()->given_height_type == CSS_VALUE__UNDEF;
     return width_auto || height_auto;
-}
-
-static int pseudo_check_quote_content(const CssValue* value) {
-    if (!value) return 0;
-    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-        if (strcmp(value->data.custom_property.name, "open-quote") == 0) return 1;
-        if (strcmp(value->data.custom_property.name, "close-quote") == 0) return 2;
-        if (strcmp(value->data.custom_property.name, "no-open-quote") == 0) return 3;
-        if (strcmp(value->data.custom_property.name, "no-close-quote") == 0) return 4;
-    }
-    return 0;
 }
 
 typedef struct ObjectViewBoxUsedRect {
@@ -1016,38 +988,6 @@ bool layout_apply_object_view_box_intrinsic_size(LayoutContext* lycon,
     return true;
 }
 
-static const char* pseudo_resolve_quote_char(DomElement* element, bool is_open_quote, int depth) {
-    DomElement* cur = element;
-    CssDeclaration* quotes_decl = nullptr;
-    while (cur) {
-        quotes_decl = dom_element_get_specified_value(cur, CSS_PROPERTY_QUOTES);
-        if (quotes_decl && quotes_decl->value) break;
-        cur = cur->parent_element();
-    }
-    if (!quotes_decl || !quotes_decl->value) {
-        return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
-    }
-    CssValue* qval = quotes_decl->value;
-    if (qval->type == CSS_VALUE_TYPE_KEYWORD && qval->data.keyword == CSS_VALUE_NONE) {
-        return "";
-    }
-    if (qval->type == CSS_VALUE_TYPE_LIST && qval->data.list.count >= 2) {
-        int pair_count = qval->data.list.count / 2;
-        int pair_index = depth < pair_count ? depth : pair_count - 1;
-        int str_index = pair_index * 2 + (is_open_quote ? 0 : 1);
-        if (str_index < qval->data.list.count) {
-            CssValue* sv = qval->data.list.values[str_index];
-            if (sv && sv->type == CSS_VALUE_TYPE_STRING && sv->data.string) {
-                return sv->data.string;
-            }
-        }
-    }
-    if (qval->type == CSS_VALUE_TYPE_STRING && qval->data.string) {
-        return qval->data.string;
-    }
-    return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
-}
-
 static void pseudo_append_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return;
     child->parent = lam::up(parent);
@@ -1086,68 +1026,6 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
     return img_elem;
 }
 
-static const char* pseudo_resolve_text_fragment(LayoutContext* lycon, DomElement* element,
-                                                const CssValue* item, int quote_depth) {
-    if (!element || !item) return nullptr;
-    if (item->type == CSS_VALUE_TYPE_STRING) {
-        return item->data.string ? item->data.string : "";
-    }
-    if (item->type == CSS_VALUE_TYPE_ATTR) {
-        CSSAttrRef* attr_ref = item->data.attr_ref;
-        if (attr_ref && attr_ref->name) {
-            const char* attr_value = element->get_attribute(attr_ref->name);
-            return attr_value ? attr_value : "";
-        }
-        return "";
-    }
-    if (item->type == CSS_VALUE_TYPE_FUNCTION) {
-        CssFunction* func = item->data.function;
-        if (!func || !func->name) return nullptr;
-        if (strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
-            const char* attr_name = pseudo_css_value_extract_name(func->args[0]);
-            if (!attr_name) return "";
-            const char* attr_value = element->get_attribute(attr_name);
-            return attr_value ? attr_value : "";
-        }
-        if (!lycon->counter_context) return nullptr;
-        if (strcmp(func->name, "counter") == 0 && func->arg_count >= 1) {
-            const char* counter_name = pseudo_css_value_extract_name(func->args[0]);
-            uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL
-            if (func->arg_count >= 2 && func->args[1] &&
-                func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
-                style_type = func->args[1]->data.keyword;
-            }
-            char* buffer = (char*)scratch_alloc(&lycon->scratch, 64);
-            if (!buffer || !counter_name) return "";
-            counter_format((CounterContext*)lycon->counter_context, counter_name, style_type, buffer, 64);
-            return buffer;
-        }
-        if (strcmp(func->name, "counters") == 0 && func->arg_count >= 2) {
-            const char* counter_name = pseudo_css_value_extract_name(func->args[0]);
-            const char* separator = func->args[1] ? func->args[1]->data.string : ".";
-            uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL
-            if (func->arg_count >= 3 && func->args[2] &&
-                func->args[2]->type == CSS_VALUE_TYPE_KEYWORD) {
-                style_type = func->args[2]->data.keyword;
-            }
-            char* buffer = (char*)scratch_alloc(&lycon->scratch, 128);
-            if (!buffer || !counter_name) return "";
-            counters_format((CounterContext*)lycon->counter_context, counter_name,
-                            separator ? separator : ".", style_type, buffer, 128);
-            return buffer;
-        }
-        return nullptr;
-    }
-    int quote_type = pseudo_check_quote_content(item);
-    if (quote_type == 1 || quote_type == 2) {
-        return pseudo_resolve_quote_char(element, quote_type == 1, quote_depth);
-    }
-    if (quote_type == 3 || quote_type == 4) {
-        return "";
-    }
-    return nullptr;
-}
-
 static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement* parent,
                                                 DomElement* pseudo_elem, bool is_before) {
     if (!lycon || !parent || !pseudo_elem) return false;
@@ -1180,14 +1058,8 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
                 appended_any = true;
             }
         } else {
-            const char* fragment = pseudo_resolve_text_fragment(lycon, parent, item, open_quote_count);
-            if (fragment && fragment[0]) {
-                strbuf_append_str(text_buf, fragment);
-            }
-        }
-        int quote_type = pseudo_check_quote_content(item);
-        if (quote_type == 1 || quote_type == 3) {
-            open_quote_count++;
+            // Append into the retained builder; unscoped scratch cannot live inside an inline trial.
+            dom_element_append_content(parent, item, lycon->counter_context, &open_quote_count, text_buf);
         }
     }
     if (text_buf->length > 0) {
@@ -1495,7 +1367,7 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // IMPORTANT: Do NOT share parent's FontProp pointer with pseudo-element!
     pseudo_elem->font = nullptr;
     if (parent_font) {
-        pseudo_elem->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+        pseudo_elem->font = lam::view_prop((FontProp*)alloc_prop(lycon, sizeof(FontProp)));
         if (pseudo_elem->font) font_prop_copy(pseudo_elem->font, parent_font);
     }
     // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
@@ -4992,13 +4864,13 @@ void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
     DomDocument* parent_doc = lycon->ui_context->document;
     int saved_viewport_width = lycon->ui_context->viewport_width;
     int saved_viewport_height = lycon->ui_context->viewport_height;
-    lycon->ui_context->document = doc;
+    lycon->ui_context->document = lam::up(doc);
     lycon->ui_context->viewport_width = iframe_width;
     lycon->ui_context->viewport_height = iframe_height;
     process_document_font_faces(lycon->ui_context, doc);
     layout_html_doc(lycon->ui_context, doc, false);
     radiant_dispatch_lambda_body_load(lycon->ui_context, doc);
-    lycon->ui_context->document = parent_doc;
+    lycon->ui_context->document = lam::up(parent_doc);
     lycon->ui_context->viewport_width = saved_viewport_width;
     lycon->ui_context->viewport_height = saved_viewport_height;
 }
@@ -5438,7 +5310,7 @@ static void insert_pseudo_into_rendered_tree(DomElement* element,
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker, bool create_first_letter) {
     if (!lycon || !block || !block->is_element()) return;
-    block->pseudo = lam::own(alloc_pseudo_content_prop(lycon, block));
+    block->pseudo = lam::view_prop(alloc_pseudo_content_prop(lycon, block));
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
         if (block->pseudo->before) {

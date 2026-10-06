@@ -602,7 +602,6 @@ cleanup_intermediate_files() {
     find . -name "*.o" -type f -delete 2>/dev/null || true
 
     # Clean dependency build files but keep source and built libraries
-    # Note: build_temp/re2-noabsl is needed at build time (Makefile references it)
     # Only clean cmake/meson build caches, not source trees
     rm -rf build_temp/mbedtls-*/build 2>/dev/null || true
     rm -f  build_temp/mbedtls-*.tar.bz2 2>/dev/null || true
@@ -782,33 +781,31 @@ is_elf_archive() {
     [ "$magic" = "7f454c46" ]
 }
 
-# Function to build RE2 for Linux (from build_temp/re2-noabsl source)
+# Function to build RE2 for Linux from the vendored source in lib/re2 (see
+# lib/re2/VENDOR.md). Same out-of-tree directory and Ninja generator as the
+# Makefile's RE2 rule, so either may (re)build it without a generator clash.
 build_re2_for_linux() {
     echo "Building RE2 for Linux..."
 
-    local RE2_SRC="build_temp/re2-noabsl"
-    local RE2_LIB="$RE2_SRC/cmake_build/libre2.a"
+    local RE2_SRC="lib/re2"
+    local RE2_BUILD="build_temp/re2_build"
+    local RE2_LIB="$RE2_BUILD/libre2.a"
 
     if [ -f "$RE2_LIB" ] && is_elf_archive "$RE2_LIB"; then
         echo "✅ RE2 already built for Linux"
         return 0
     fi
 
-    if [ ! -d "$RE2_SRC" ]; then
-        echo "RE2 source not found - cloning RE2 (no-abseil version)..."
-        mkdir -p build_temp
-        if ! git clone --depth 1 --branch 2023-03-01 https://github.com/google/re2.git "$RE2_SRC"; then
-            echo "❌ Failed to clone RE2"
-            return 1
-        fi
-        echo "✅ RE2 (2023-03-01, no-abseil) cloned to $RE2_SRC"
+    if [ ! -f "$RE2_SRC/CMakeLists.txt" ]; then
+        echo "❌ Vendored RE2 source missing at $RE2_SRC"
+        return 1
     fi
 
     echo "Building RE2 from $RE2_SRC..."
-    mkdir -p "$RE2_SRC/cmake_build"
-    cd "$RE2_SRC/cmake_build"
+    mkdir -p "$RE2_BUILD"
+    cd "$RE2_BUILD"
 
-    if cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON .. && \
+    if cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON ../../lib/re2 && \
        cmake --build . -j$(nproc); then
         if [ -f "libre2.a" ] && is_elf_archive "libre2.a"; then
             echo "✅ RE2 built successfully"
@@ -1039,7 +1036,7 @@ else
     fi
 fi
 
-# Build RE2 for Linux (from build_temp/re2-noabsl source; Mac-built archive won't link)
+# Build RE2 for Linux (from the vendored lib/re2 source; a Mac-built archive won't link)
 echo "Setting up RE2..."
 if ! build_re2_for_linux; then
     echo "❌ RE2 build failed - required for regex support"

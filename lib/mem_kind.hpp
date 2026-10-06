@@ -16,6 +16,12 @@
 //               copy-on-write gate has replaced it with the holder's private
 //               copy, and the holder records that it owns that copy
 //   Handle<T>   index + generation into a slot table; not dereferenceable
+//   ViewProp<T, Slot>  a Document-level node owns T in its document's view-tree
+//               storage; the view tree releases or clears it before that storage goes
+//   ViewRef<T, Slot>   a Document-level node borrows T from view-tree storage (or
+//               from something that outlives it); cleared the same way
+//   Slot names the holder's view slot; only a slot listed in the holder's
+//   slot X-macro exists, and the view-tree teardown handles every listed slot.
 //   Foreign<T>  an opaque vendor resource (ThorVG, FreeType, platform objects)
 //
 // The wrappers are pointer-sized, trivial and standard-layout, so structs that
@@ -105,6 +111,42 @@ template<class T> struct Foreign {
 #undef LAM_MEM_KIND_POINTER_BODY
 #undef LAM_MEM_KIND_UPCAST
 
+// A pointer from a Document-level node into its document's view tree. A
+// ViewTree exists only for a viewed document, so these are the one sanctioned
+// downward pointers: the slot ties each field to its view-tree teardown entry.
+template<class T> struct ViewPropInit { T* p_; };
+template<class T> struct ViewRefInit { T* p_; };
+
+template<class T, auto Slot> struct ViewProp {
+    static_assert(!KindIsVoid<T>::value, "ViewProp<void> has no static target type");
+    T* p_;
+    ViewProp() = default;
+    explicit constexpr ViewProp(T* p) : p_(p) {}
+    constexpr ViewProp(ViewPropInit<T> i) : p_(i.p_) {}
+    constexpr ViewProp(decltype(nullptr)) : p_(nullptr) {}
+    ViewProp& operator=(decltype(nullptr)) { p_ = nullptr; return *this; }
+    T* get() const { return p_; }
+    T* operator->() const { return p_; }
+    operator T*() const { return p_; }
+    template<class U> explicit operator U*() const { return (U*)p_; }
+    static constexpr auto slot = Slot;
+};
+
+template<class T, auto Slot> struct ViewRef {
+    static_assert(!KindIsVoid<T>::value, "ViewRef<void> has no static target type");
+    T* p_;
+    ViewRef() = default;
+    explicit constexpr ViewRef(T* p) : p_(p) {}
+    constexpr ViewRef(ViewRefInit<T> i) : p_(i.p_) {}
+    constexpr ViewRef(decltype(nullptr)) : p_(nullptr) {}
+    ViewRef& operator=(decltype(nullptr)) { p_ = nullptr; return *this; }
+    T* get() const { return p_; }
+    T* operator->() const { return p_; }
+    operator T*() const { return p_; }
+    template<class U> explicit operator U*() const { return (U*)p_; }
+    static constexpr auto slot = Slot;
+};
+
 // Kind constructors with the target type deduced, for write sites:
 // child->parent = lam::up(element) declares the store as an outliving link.
 template<class T> constexpr Up<T> up(T* p) { return Up<T>(p); }
@@ -112,11 +154,17 @@ template<class T> constexpr Up<T> up(T* p) { return Up<T>(p); }
 template<class T> constexpr Up<T> up(const Own<T>& o) { return Up<T>(o.p_); }
 template<class T> constexpr Up<T> up(const Up<T>& u) { return u; }
 template<class T> constexpr Up<T> up(const OwnArr<T>& a) { return Up<T>(a.p_); }
+// borrowing a view-tree field from a holder below the document (Stack, a pass)
+template<class T, auto S> constexpr Up<T> up(const ViewProp<T, S>& v) { return Up<T>(v.p_); }
+template<class T, auto S> constexpr Up<T> up(const ViewRef<T, S>& v) { return Up<T>(v.p_); }
 template<class T> constexpr Own<T> own(T* p) { return Own<T>(p); }
 template<class T> constexpr OwnArr<T> own_arr(T* p) { return OwnArr<T>(p); }
 template<class T> constexpr Counted<T> counted(T* p) { return Counted<T>(p); }
 template<class T> constexpr Shared<T> shared(T* p) { return Shared<T>(p); }
 template<class T> constexpr Foreign<T> foreign(T* p) { return Foreign<T>(p); }
+// the field's slot comes from its declaration, so write sites name only the target
+template<class T> constexpr ViewPropInit<T> view_prop(T* p) { return ViewPropInit<T>{p}; }
+template<class T> constexpr ViewRefInit<T> view_ref(T* p) { return ViewRefInit<T>{p}; }
 
 // An owned array and its element count in one field, so a tracer or an
 // external verifier can bound every element access by the recorded length.

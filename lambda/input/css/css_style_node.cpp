@@ -12,7 +12,7 @@
 // Forward declarations for callback functions
 static bool collect_nodes_callback(AvlNode* avl_node, void* context);
 static bool collect_computed_callback(AvlNode* avl_node, void* context);
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !defined(LAMBDA_NO_CONSOLE_DUMP)
 static bool print_tree_callback(StyleNode* node, void* context);
 #endif
 static bool validate_tree_callback(StyleNode* node, void* context);
@@ -189,6 +189,7 @@ int css_specificity_compare(CssSpecificity a, CssSpecificity b) {
 }
 
 void css_specificity_print(CssSpecificity specificity) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     printf("(%d,%d,%d,%d)%s",
            specificity.inline_style,
@@ -196,6 +197,7 @@ void css_specificity_print(CssSpecificity specificity) {
            specificity.classes,
            specificity.elements,
            specificity.important ? "!" : "");
+#endif
 #endif
 }
 
@@ -326,8 +328,8 @@ void css_value_destroy_owned(CssValue* value, Pool* pool) {
     if (!value || !pool) return;
     switch (value->type) {
         case CSS_VALUE_TYPE_KEYWORD:
-            if (value->flags & CSS_VALUE_AUTHORED_IDENTIFIER)
-                pool_free(pool, (void*)value->data.identifier.authored);
+            if (value->has_keyword_spelling)
+                pool_free(pool, (void*)value->data.keyword_token.spelling);
             break;
         case CSS_VALUE_TYPE_STRING:
             pool_free(pool, (void*)value->data.string);
@@ -413,9 +415,9 @@ CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
 
     switch (source->type) {
         case CSS_VALUE_TYPE_KEYWORD:
-            if (source->flags & CSS_VALUE_AUTHORED_IDENTIFIER) {
-                clone->data.identifier.authored = pool_strdup(pool, source->data.identifier.authored);
-                if (source->data.identifier.authored && !clone->data.identifier.authored) goto clone_failed;
+            if (source->has_keyword_spelling) {
+                clone->data.keyword_token.spelling = pool_strdup(pool, source->data.keyword_token.spelling);
+                if (source->data.keyword_token.spelling && !clone->data.keyword_token.spelling) goto clone_failed;
             }
             break;
         case CSS_VALUE_TYPE_STRING:
@@ -639,6 +641,13 @@ int css_declaration_cascade_compare(const CssDeclaration* a, const CssDeclaratio
     int spec_cmp = css_specificity_compare(a->specificity, b->specificity);
     if (spec_cmp != 0) {
         return spec_cmp;
+    }
+
+    // scope proximity follows specificity and precedes source order.
+    if (a->scope_proximity != b->scope_proximity) {
+        if (!a->scope_proximity) return -1;
+        if (!b->scope_proximity) return 1;
+        return a->scope_proximity < b->scope_proximity ? 1 : -1;
     }
 
     // Finally, source order comparison (later wins)
@@ -968,14 +977,8 @@ CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCod
         return style_node_resolve_cascade(node);
     }
 
-    bool border_image_part = property_code == CSS_PROPERTY_BORDER_IMAGE_SOURCE ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_SLICE ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_WIDTH ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_OUTSET ||
-        property_code == CSS_PROPERTY_BORDER_IMAGE_REPEAT;
-    CssPropertyCode shorthand = border_image_part ? CSS_PROPERTY_BORDER_IMAGE
-        : css_timeline_shorthand_for(property_code);
-    AvlNode* shorthand_node = shorthand != CSS_PROPERTY_UNKNOWN
+    CssPropertyCode shorthand = css_property_cascade_shorthand(property_code);
+    AvlNode* shorthand_node = shorthand
         ? avl_tree_search(style_tree->tree, shorthand) : NULL;
     AvlNode* all_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_ALL);
     if (!all_node && !shorthand_node) return style_node_resolve_cascade(node);
@@ -1250,6 +1253,7 @@ int style_tree_foreach(StyleTree* style_tree, style_tree_callback_t callback, vo
 }
 
 void style_tree_print(StyleTree* style_tree) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     if (!style_tree) {
         printf("StyleTree: NULL\n");
@@ -1261,9 +1265,11 @@ void style_tree_print(StyleTree* style_tree) {
 
     style_tree_foreach(style_tree, print_tree_callback, NULL);
 #endif
+#endif
 }
 
 void style_node_print_cascade(StyleNode* node) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
 #ifndef NDEBUG
     if (!node) {
         printf("StyleNode: NULL\n");
@@ -1291,6 +1297,7 @@ void style_node_print_cascade(StyleNode* node) {
         printf(" (order: %d)\n", weak->declaration->source_order);
         weak = weak->next;
     }
+#endif
 #endif
 }
 
@@ -1689,7 +1696,7 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context) {
     return true;
 }
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !defined(LAMBDA_NO_CONSOLE_DUMP)
 static bool print_tree_callback(StyleNode* node, void* context) {
     printf("  Property %" PRIuPTR ": ", (uintptr_t)node->property_code);
 

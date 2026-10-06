@@ -38,6 +38,7 @@ typedef struct MemVmRegion MemVmRegion;
 // Standalone lib tests intentionally link mempool without the tracker. These
 // weak definitions preserve that boundary; engine builds resolve them to the
 // hardened memtrack implementation.
+#ifndef LAMBDA_NO_MEMTRACK
 MEMPOOL_WEAK MemtrackMode memtrack_get_mode(void) {
     return MEMTRACK_MODE_OFF;
 }
@@ -52,6 +53,7 @@ MEMPOOL_WEAK void mem_free_loc(void* ptr, int line) {
     (void)line;
     free(ptr);
 }
+#endif
 
 // Some focused library targets intentionally omit the VM provider. These weak
 // fallbacks preserve that standalone boundary, but the engine library disables
@@ -378,12 +380,17 @@ static void pool_init_free_block(PoolBlock* block, PoolExtent* extent,
 }
 
 static Pool* pool_alloc_struct(void) {
+#ifdef LAMBDA_NO_MEMTRACK
+    bool tracked = false;
+    Pool* pool = (Pool*)malloc(sizeof(Pool));
+#else
     bool tracked = memtrack_get_mode &&
                    memtrack_get_mode() != MEMTRACK_MODE_OFF &&
                    mem_alloc_loc && mem_free_loc;
     Pool* pool = tracked
         ? (Pool*)mem_alloc_loc(sizeof(Pool), MEM_CAT_SYSTEM, 0)
         : (Pool*)malloc(sizeof(Pool));
+#endif
     if (!pool) return NULL;
     memset(pool, 0, sizeof(*pool));
     pool->struct_tracked = tracked;

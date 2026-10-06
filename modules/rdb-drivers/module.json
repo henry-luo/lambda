@@ -1,0 +1,18 @@
+{
+  "name": "rdb-drivers",
+  "version": "0.1.0",
+  "base_abi_version": 7,
+  "hosted_api_version": 1,
+  "kind": "runtime-library",
+  "engine": "rdb",
+  "provides": [
+    "rdb:postgresql",
+    "rdb:mysql"
+  ],
+  "dependencies": [],
+  "resources": [],
+  "library_macos": "rdb-drivers.dylib",
+  "library_linux": "rdb-drivers.so",
+  "library_windows": "rdb-drivers.dll",
+  "entry_symbol": "jube_module"
+}

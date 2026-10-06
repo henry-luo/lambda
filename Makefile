@@ -64,7 +64,7 @@ DOM_UI_JOBS ?= $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); e
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
-RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_rdt_vector_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
+RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_rdt_vector_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest test_view_reuse_gtest
 RADIANT_DOM2_WPT_RUNNERS := input_events
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
@@ -97,6 +97,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_js_regex_router_poc_gtest \
 	test_js_coerce_gtest \
 	test_lambda_std_gtest \
+	test_io_terminal_gtest \
 	test_ts_gtest
 # test-input-baseline invokes these five binaries directly, so keep their
 # build separate from the full test aggregate and reusable by both targets.
@@ -227,7 +228,15 @@ TREE_SITTER_TYPESCRIPT_LIB = lambda/tree-sitter-typescript/libtree-sitter-typesc
 TREE_SITTER_RUBY_LIB = lambda/tree-sitter-ruby/libtree-sitter-ruby.a
 TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
-RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
+# RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md), pinned to the last
+# release before upstream required Abseil. It is built out of tree with its own
+# CMake so the vendored directory stays clean. Like MIR, the patches under
+# patches/re2-*.patch are ALREADY APPLIED to the vendored source.
+RE2_SRC_DIR = lib/re2
+RE2_BUILD_DIR = build_temp/re2_build
+RE2_LIB = $(RE2_BUILD_DIR)/libre2.a
+RE2_UPSTREAM_COMMIT = 3a8436ac436124a57a4e22d5c8713a2d42b381d7
+RE2_SOURCES = $(wildcard $(RE2_SRC_DIR)/re2/*.cc $(RE2_SRC_DIR)/re2/*.h $(RE2_SRC_DIR)/util/*.cc $(RE2_SRC_DIR)/util/*.h)
 
 # MIR JIT library. The source is vendored in-tree at lambda/mir (see
 # lambda/mir/VENDOR.md) and built in place, so the path is the same on every
@@ -377,19 +386,21 @@ $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
 # On Windows/CLANG64: must pass explicit compiler flags so cmake uses clang++
 # with -stdlib=libc++ (matching the rest of the build) instead of defaulting
 # to GCC/libstdc++, which would cause an ABI mismatch at link time.
-$(RE2_LIB):
-	@echo "Building re2 library from source..."
-	@mkdir -p build_temp/re2-noabsl/cmake_build
+$(RE2_LIB): $(RE2_SOURCES)
+	@echo "Building re2 library from vendored source ($(RE2_SRC_DIR))..."
+	@mkdir -p $(RE2_BUILD_DIR)
 	@# CMake needs a single executable for CMAKE_*_COMPILER; if ccache is in
 	@# use, $(CC)/$(CXX) is "ccache gcc"/"ccache g++" — split into launcher
 	@# + real compiler so cmake's compiler-ID probe works. MSYS2's ccache
 	@# cannot resolve the Windows absolute compiler path emitted into Ninja
 	@# rules, so RE2 must use the compiler directly on that platform.
-	@cd build_temp/re2-noabsl/cmake_build && \
+	@# The source path is relative so MSYS2's native cmake needs no path
+	@# translation (build_temp/re2_build -> ../../lib/re2).
+	@cd $(RE2_BUILD_DIR) && \
 		RE2_CC="$(firstword $(filter-out ccache,$(CC)))" ; \
 		RE2_CXX="$(firstword $(filter-out ccache,$(CXX)))" ; \
 		RE2_LAUNCHER="$(if $(filter yes,$(IS_MSYS2)),,$(filter ccache,$(firstword $(CC))))" ; \
-		cmake .. \
+		cmake ../../$(RE2_SRC_DIR) \
 			-DCMAKE_C_COMPILER="$$RE2_CC$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
 			-DCMAKE_CXX_COMPILER="$$RE2_CXX$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
 			-DCMAKE_C_COMPILER_LAUNCHER="$$RE2_LAUNCHER" \
@@ -464,6 +475,34 @@ verify-mir-patches:
 		exit 1; \
 	fi; \
 	echo "✅ lambda/mir == upstream $(MIR_UPSTREAM_COMMIT) + patches/mir-*.patch"
+
+# Same invariant for the vendored RE2 at lib/re2: pristine upstream at
+# RE2_UPSTREAM_COMMIT plus every patches/re2-*.patch must equal the tree.
+# Only the vendored file set is compared (upstream also carries tests,
+# benchmarks and packaging that lib/re2 deliberately drops).
+verify-re2-patches:
+	@set -e; \
+	work=temp/re2-verify; \
+	rm -rf $$work; mkdir -p $$work; \
+	echo "Fetching pristine RE2 $(RE2_UPSTREAM_COMMIT)..."; \
+	git -c advice.detachedHead=false clone -q https://github.com/google/re2.git $$work/upstream; \
+	git -C $$work/upstream -c advice.detachedHead=false checkout -q $(RE2_UPSTREAM_COMMIT); \
+	for p in $$(ls patches/re2-*.patch 2>/dev/null); do \
+		echo "  applying $$p"; \
+		git -C $$work/upstream apply "$(CURDIR)/$$p" || { echo "ERROR: $$p does not apply to upstream" >&2; exit 1; }; \
+	done; \
+	fail=0; \
+	for f in $$(cd $(RE2_SRC_DIR) && find . -type f ! -name VENDOR.md); do \
+		if ! diff -q "$$work/upstream/$$f" "$(RE2_SRC_DIR)/$$f" >/dev/null 2>&1; then \
+			echo "DIFFERS: $$f"; fail=1; \
+		fi; \
+	done; \
+	if [ $$fail -ne 0 ]; then \
+		echo "ERROR: lib/re2 does not equal upstream + patches/. Either regenerate the" >&2; \
+		echo "       patch for your change or re-vendor from upstream." >&2; \
+		exit 1; \
+	fi; \
+	echo "✅ lib/re2 == upstream $(RE2_UPSTREAM_COMMIT) + patches/re2-*.patch"
 
 build-mir: $(MIR_LIB)
 
@@ -577,12 +616,12 @@ tree-sitter-libs: tree-sitter-jube-libs
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
-	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-lambda-inventory fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches \
+	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-lambda-inventory fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches verify-re2-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-parity test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
 	    coverage-tools coverage-build-config coverage-build-config-native coverage-build-config-js coverage-build-all coverage-build-js test-coverage test-js-coverage \
 	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
@@ -609,10 +648,13 @@ help:
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
 	@echo "  verify-mir-patches - Check lambda/mir == upstream MIR + patches/mir-*.patch"
+	@echo "  verify-re2-patches - Check lib/re2 == upstream RE2 + patches/re2-*.patch"
 	@echo "  build-jube    - Build the standard host plus hosted Python and a compatibility link"
 	@echo "  release-jube  - Package the full hosted-language bundle (same host binary)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
+	@echo "  lambda-wasm   - Build the optimized browser evaluator and stateful REPL"
+	@echo "  test-wasm     - Verify the WASM embedding (ARGS=--browser for Chromium)"
 	@echo "  all           - Build all projects"
 	@echo ""
 	@echo "Maintenance:"
@@ -1010,6 +1052,71 @@ build-node-zlib: build build-windows-host-import
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-zlib
 	@ls -lh modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll 2>/dev/null || true
 
+# rdb-drivers: the PostgreSQL and MySQL/MariaDB drivers, with libpq and
+# Connector/C linked in statically (vibe/Lambda_IO_RDB.md section 13). The host
+# does the TLS, so neither client library is built with one.
+build-rdb-deps:
+	utils/build-rdb-deps.sh
+
+build-rdb-drivers: build
+	@test -f mac-deps/rdb/lib/libpq.a -a -f mac-deps/rdb/lib/libmariadbclient.a || $(MAKE) build-rdb-deps
+	@echo "Building external rdb-drivers Jube module..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=debug_native rdb-drivers -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/rdb-drivers
+	@ls -lh modules/rdb-drivers/rdb-drivers.dylib modules/rdb-drivers/rdb-drivers.so 2>/dev/null || true
+
+# RDB module gates (vibe/Lambda_IO_RDB.md sections 13.8 and 13.11): the image
+# exports only jube_module, depends on OS libraries only and imports nothing from
+# the host; its licence material matches the archives linked into it.
+check-rdb-module-architecture: build-rdb-drivers
+	$(PYTHON) utils/check_rdb_module_architecture.py
+
+verify-rdb-module-licenses:
+	$(PYTHON) utils/verify_rdb_module_licenses.py
+
+# Release image of the module. RDB_*_ARCHIVE replaces a static archive before
+# linking, so users can relink against a modified Connector/C or libpq
+# (LGPL-2.1 section 6; modules/rdb-drivers/SOURCES.md).
+RDB_ARCHIVE_OVERRIDES = $(if $(RDB_PQ_ARCHIVE),$(RDB_PQ_ARCHIVE):libpq.a) \
+	$(if $(RDB_PGCOMMON_ARCHIVE),$(RDB_PGCOMMON_ARCHIVE):libpgcommon_shlib.a) \
+	$(if $(RDB_PGPORT_ARCHIVE),$(RDB_PGPORT_ARCHIVE):libpgport_shlib.a) \
+	$(if $(RDB_MARIADB_ARCHIVE),$(RDB_MARIADB_ARCHIVE):libmariadbclient.a)
+
+release-rdb-drivers: release
+	@test -f mac-deps/rdb/lib/libpq.a -a -f mac-deps/rdb/lib/libmariadbclient.a || $(MAKE) build-rdb-deps
+	@for pair in $(RDB_ARCHIVE_OVERRIDES); do \
+		echo "release-rdb-drivers: linking $${pair%%:*} as $${pair##*:}"; \
+		cp "$${pair%%:*}" "mac-deps/rdb/lib/$${pair##*:}" || exit 1; \
+	done
+	@echo "Building release rdb-drivers Jube module..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=release_native rdb-drivers -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/rdb-drivers
+	@rm -rf release/modules/rdb-drivers
+	@mkdir -p release/modules/rdb-drivers
+	@cp -R modules/rdb-drivers/module.json modules/rdb-drivers/SOURCES.md modules/rdb-drivers/LICENSES release/modules/rdb-drivers/
+	@cp modules/rdb-drivers/rdb-drivers.dylib modules/rdb-drivers/rdb-drivers.so modules/rdb-drivers/rdb-drivers.dll release/modules/rdb-drivers/ 2>/dev/null || true
+	$(PYTHON) utils/verify_rdb_module_licenses.py --module-dir release/modules/rdb-drivers
+
+# RDB driver corpus (vibe/Lambda_IO_RDB.md section 13.11). Backends come from
+# LAMBDA_TEST_PG_URI / LAMBDA_TEST_MYSQL_URI; an unset backend is reported as
+# skipped. test-rdb-drivers-local first starts TLS-enabled PostgreSQL and MySQL
+# servers with Apple's `container` tool and loads the fixtures.
+test-rdb-drivers: build-rdb-drivers
+	$(PYTHON) test/rdb/run_rdb_corpus.py
+
+test-rdb-drivers-local: build-rdb-drivers
+	@eval "$$(utils/rdb-test-servers.sh up | grep '^export')" && $(PYTHON) test/rdb/run_rdb_corpus.py
+
+rdb-test-servers-up:
+	@utils/rdb-test-servers.sh up
+
+rdb-test-servers-down:
+	@utils/rdb-test-servers.sh down
+
 define release_node_module
 release-node-$(1): release
 	@echo "Building release node-$(1) Jube module..."
@@ -1075,10 +1182,17 @@ package-standard: release-node-core release-node-fs release-node-net release-nod
 	# deterministic diagnostic without putting its grammar or native code in the host.
 	@mkdir -p release-standard/modules/lang-python
 	@cp modules/lang-python/module.json release-standard/modules/lang-python/module.json
+	# Likewise for the RDB drivers: postgresql:// and mysql:// resolve to a
+	# known-but-absent module instead of "cannot detect driver".
+	@mkdir -p release-standard/modules/rdb-drivers
+	@cp modules/rdb-drivers/module.json release-standard/modules/rdb-drivers/module.json
 
-package-jube: package-standard release-lang-python
+package-jube: package-standard release-lang-python release-rdb-drivers
 	@mkdir -p release-jube
 	@cp release-standard/lambda release-jube/lambda
+	@rm -rf release-jube/modules/rdb-drivers
+	@mkdir -p release-jube/modules
+	@cp -R release/modules/rdb-drivers release-jube/modules/rdb-drivers
 	@mkdir -p release-jube/modules/lang-python
 	@cp release/modules/lang-python/module.json release-jube/modules/lang-python/module.json
 	@cp release/modules/lang-python/lang-python.dylib release/modules/lang-python/lang-python.so release/modules/lang-python/lang-python.dll release-jube/modules/lang-python/ 2>/dev/null || true
@@ -1126,6 +1240,9 @@ verify-jube-package: package-jube
 	@cd release-standard && ./lambda js -e "console.log(require('fs').existsSync('../test/node/jube_fs_exists_registry.txt'))" --no-log | rg -x "true"
 	@cd release-standard && ./lambda js -e "console.log(require('net').isIP('127.0.0.1'))" --no-log | rg -x "4"
 	@cd release-jube && ./lambda py ../test/py/test_py_basic.py --no-log >/dev/null
+	$(PYTHON) utils/verify_rdb_module_licenses.py --module-dir release-jube/modules/rdb-drivers
+	$(PYTHON) utils/check_rdb_module_architecture.py --module-dir release-jube/modules/rdb-drivers --lambda release-jube/lambda --objects build/obj/rdb-drivers/native/release
+	$(PYTHON) utils/check_rdb_module_architecture.py --module-dir release-standard/modules/rdb-drivers --lambda release-standard/lambda --expect-absent
 
 verify-node-profile-packages: package-node-reduced package-minimal
 	@cmp -s release-node-reduced/lambda release-minimal/lambda
@@ -1471,9 +1588,15 @@ lambda: build
 all: lambda
 	@echo "All projects built successfully."
 
+.PHONY: lambda-wasm build-wasm test-wasm
+lambda-wasm: build-wasm
+
 build-wasm:
-	@echo "Building WebAssembly version..."
-	./compile-wasm.sh --linking-only
+	@echo "Building optimized browser WASM profile..."
+	$(PYTHON) utils/build_wasm.py --jobs $(JOBS)
+
+test-wasm:
+	node utils/test_wasm.mjs $(ARGS)
 
 # Clean targets
 clean:
@@ -1581,7 +1704,7 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-ruby/libtree-sitter-ruby.a lambda/tree-sitter-ruby/src/*.o
 	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
 	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
-	@rm -rf build_temp/re2-noabsl/cmake_build
+	@rm -rf $(RE2_BUILD_DIR)
 	@$(MAKE) --no-print-directory clean-mir
 	@echo "All build directories and tree-sitter libraries cleaned."
 
@@ -2163,6 +2286,7 @@ run-layout-baseline-suites:
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-radiant-baseline: build-radiant-baseline
+	@./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:FontPathTest.*'
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
 # Requires test/render Node dependencies, Chromium and Poppler's pdftocairo/pdfimages.

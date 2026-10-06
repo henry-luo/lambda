@@ -131,6 +131,9 @@ void lambda_recovery_publish_fault(Context* context,
 LambdaRecoveryFrame* lambda_recovery_frame_begin_for(Context* context,
                                                       uint32_t capabilities);
 bool lambda_recovery_frame_end(LambdaRecoveryFrame* frame);
+// Release the heap-owned frames of a chain whose native stack is abandoned
+// without running (an activation destroyed while parked).
+void lambda_recovery_frame_discard_chain(LambdaRecoveryFrame* top);
 
 // Explicit-owner setup is for tests and control-plane code. Runtime execution
 // pushes through the TLS-owner form above.

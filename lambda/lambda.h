@@ -531,6 +531,8 @@ typedef enum SysFunc {
     SYSFUNC_FIND3,          // find(str, pattern, options) - with options
     SYSFUNC_ORD,            // ord(str) - Unicode code point of first character
     SYSFUNC_CHR,            // chr(int) - character from Unicode code point
+    SYSFUNC_IO_CELL_WIDTH,  // io.cell_width(int) - terminal cell width of a scalar
+    SYSFUNC_IO_UNICODE_CATEGORY, // io.unicode_category(int) - Unicode general category
     // vector functions
     SYSFUNC_PROD,
     SYSFUNC_CUMSUM,
@@ -686,6 +688,8 @@ typedef enum SysFunc {
     SYSFUNC_INTERSECT3,
     SYSFUNC_INTERSECT4,
     SYSFUNC_EXCEPT,
+    SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
+    SYSPROC_IO_TEXT_SEARCH,       // io.text_search(source, query, options?) - ranked full-text file search (lib/fts, FTX11)
 } SysFunc;
 
 typedef struct Type {
@@ -1806,7 +1810,6 @@ Symbol* name_key_symbol(const char* name, size_t len);
 #define ITEM_NULL_SPREADABLE ((uint64_t)LMD_TYPE_NULL << 56 | 1)  // spreadable null (skip when spreading)
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
-#define ITEM_TASK_SUSPENDED ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 2)  // internal resumable-call sentinel
 // Internal call-ABI marker.  It never reaches a Lambda binding: public MIR
 // wrappers replace it with an optional null or evaluate the declared default.
 #define ITEM_MISSING_ARGUMENT ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 3)
@@ -2961,6 +2964,10 @@ extern "C" {
     // compile-proved plain primitive destination; preserve the count's native int lane
     Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
         const char* boundary);
+    // activation-local metadata resolution; certificates belong to the current heap
+    ArrayRepCert* lambda_array_rep_cert_resolve(Type* contract);
+    Item lambda_fill_for_contract_int_lane_resolved(int64_t count, Item value,
+        Type* expected, const char* boundary, ArrayRepCert* cert);
     // shared construction kernel; count and scalar lane are admitted by the caller
     Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane);
     bool lambda_try_fill_for_contract(Item count, Item value, Type* expected, Item* result);
@@ -3306,6 +3313,8 @@ extern "C" {
     int64_t fn_ord_str(String* str);    // native raw variant with C/JS -1 sentinel
     Item fn_ord_str_item(String* str);  // native Lambda-facing nullable result
     Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
+    Item fn_io_cell_width(Item codepoint);
+    Item fn_io_unicode_category(Item codepoint);
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
     Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace
@@ -3412,6 +3421,10 @@ extern "C" {
     Item pn_io_symlink(Item target, Item link);
     Item pn_io_chmod(Item path, Item mode);
     Item pn_io_rename(Item old_path, Item new_path);
+    Item pn_io_grep2(Item source, Item pattern);
+    Item pn_io_grep3(Item source, Item pattern, Item options);
+    Item pn_io_text_search2(Item source, Item query);
+    Item pn_io_text_search3(Item source, Item query, Item options);
     Item pn_io_fetch1(Item target);
     Item pn_io_fetch2(Item target, Item options);
 

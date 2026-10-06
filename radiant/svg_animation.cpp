@@ -81,7 +81,7 @@ struct SvgTimeline {
     SvgTimeline* next;
 };
 
-struct SvgAnimationRegistry {
+struct SvgAnimationRegistry : DomDocumentResourceData {
     DomDocument* document;
     DomDocument* owner_document;
     SvgAnimationRegistry* budget_owner;
@@ -495,7 +495,7 @@ static bool svg_animation_registry_stat(void* data, MemStatSample* sample) {
     return true;
 }
 
-static void svg_animation_registry_destroy(void* data) {
+static void svg_animation_registry_destroy(DomDocumentResourceData* data) {
     SvgAnimationRegistry* registry = (SvgAnimationRegistry*)data;
     // the destroy call hands the registry over
     lam::Temp<SvgAnimationRegistry> owned(registry);

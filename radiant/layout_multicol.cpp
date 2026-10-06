@@ -366,6 +366,7 @@ static bool multicol_last_fragment_flow_offset(
     int* out_fragment_index
 );
 static Pool* multicol_layout_fragment_pool(DomElement* elem);
+static void multicol_release_layout_fragments(DomElement* elem);
 static bool multicol_is_direct_br_node(DomNode* node);
 static bool multicol_has_nested_overwide_block(
     View* view, float column_width, float fragment_height);
@@ -1119,7 +1120,7 @@ bool multicol_spanner_can_escape_child(ViewBlock* child) {
     // css multicol: a spanner cannot escape an ancestor that establishes a
     // containing block for positioned descendants.
     if (child->blk && child->block()->contain_positioning) return false;
-    if (child->transform && child->transformp()->functions) return false;
+    if (transform_has_functions(child->transform)) return false;
     if (child->filter_prop() && child->filterp()->functions) return false;
     if (child->embed && (child->embedp()->flex || child->embedp()->grid)) return false;
     if (child->view_type == RDT_VIEW_INLINE_BLOCK || child->view_type == RDT_VIEW_TABLE) return false;
@@ -3474,7 +3475,7 @@ static bool multicol_store_nested_horizontal_fragments(
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
     Pool* pool = multicol_layout_fragment_pool(elem);
     if (!pool) return false;
-    elem->set_layout_fragment_list(nullptr);
+    multicol_release_layout_fragments(elem);
     elem->layout_fragments_count_ref() = 0;
 
     LayoutFragmentBox* first = nullptr;
@@ -4985,7 +4986,7 @@ static bool multicol_should_fragment_monolithic_child(
 static void multicol_clear_layout_fragments(ViewBlock* block) {
     if (!block) return;
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
-    elem->set_layout_fragment_list(nullptr);
+    multicol_release_layout_fragments(elem);
     elem->layout_fragments_count_ref() = 0;
 }
 
@@ -5010,6 +5011,20 @@ static Pool* multicol_layout_fragment_pool(DomElement* elem) {
         return elem->doc->view_tree->prop_pool;
     }
     return elem->doc->document_pool;
+}
+
+// A relayout replaces the element's fragment list; the old boxes return to the
+// pool they came from instead of being dropped until the view tree goes.
+static void multicol_release_layout_fragments(DomElement* elem) {
+    if (!elem || !elem->ext || !elem->ext->layout_fragments) return;
+    Pool* pool = multicol_layout_fragment_pool(elem);
+    lam::Own<LayoutFragmentBox> fragment = lam::own((LayoutFragmentBox*)elem->ext->layout_fragments);
+    elem->ext->layout_fragments = nullptr;
+    while (fragment) {
+        lam::Own<LayoutFragmentBox> next = fragment->next;
+        if (pool) lam::free_owned(pool, fragment);
+        fragment = next;
+    }
 }
 
 static LayoutFragmentBox* multicol_append_layout_fragment(

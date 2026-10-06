@@ -36,6 +36,8 @@
  */
 
 #include <gtest/gtest.h>
+#include "../lib/file.h"
+#include "../lib/mem.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -126,13 +128,6 @@ struct ImageData {
     int height;
     int channels;
 };
-
-static bool file_exists(const char* path) {
-    FILE* fp = fopen(path, "rb");
-    if (!fp) return false;
-    fclose(fp);
-    return true;
-}
 
 static bool path_is_dir(const char* path) {
     if (!path || !*path) return false;
@@ -256,20 +251,25 @@ static bool write_file_all(const char* path, const char* data, size_t len) {
     return written == len;
 }
 
-static bool render_html_fixture(const char* html_path, const char* output_path,
-                                    const char* html) {
-    if (!write_file_all(html_path, html, strlen(html))) return false;
+static bool render_document_fixture(const char* html_path, const char* output_path,
+                                    const char* options = "") {
     char qhtml[PATH_MAX + 8];
     char qoutput[PATH_MAX + 8];
     char cmd[PATH_MAX * 4 + 256];
     shell_quote(html_path, qhtml, sizeof(qhtml));
     shell_quote(output_path, qoutput, sizeof(qoutput));
     snprintf(cmd, sizeof(cmd),
-             "%s render %s%s -o %s > %s.out 2> %s.err",
-             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qoutput,
+             "%s render %s%s %s -o %s > %s.out 2> %s.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, options, qoutput,
              qoutput, qoutput);
     int status = system(cmd);
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static bool render_html_fixture(const char* html_path, const char* output_path,
+                                    const char* html, const char* options = "") {
+    return write_file_all(html_path, html, strlen(html)) &&
+        render_document_fixture(html_path, output_path, options);
 }
 
 static CommandResult run_html_fixture_script(const char* html_path, const char* js_path,
@@ -489,12 +489,16 @@ static int discover_pdfs(PdfFileInfo* files, int max_files) {
     return count;
 }
 
-static int pdf_page_count(const char* pdf_path) {
+static CommandResult pdf_info(const char* pdf_path) {
     char qpath[PATH_MAX + 8];
     char cmd[PATH_MAX + 128];
     shell_quote(pdf_path, qpath, sizeof(qpath));
     snprintf(cmd, sizeof(cmd), "pdfinfo %s 2>&1", qpath);
-    CommandResult result = run_command_capture(cmd);
+    return run_command_capture(cmd);
+}
+
+static int pdf_page_count(const char* pdf_path) {
+    CommandResult result = pdf_info(pdf_path);
     if (result.exit_code != 0) return 0;
 
     const char* pages = strstr(result.output, "Pages:");
@@ -536,13 +540,13 @@ static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int
              "import pdf: lambda.pdf.pdf\n"
              "\n"
              "let doc = input(\"%s\", 'pdf') ^ { null }\n"
-             "let page = pdf.pdf_to_svg(doc, %d, {show_label: false})\n"
-             "<html;\n"
-             "  <head;\n"
+             "let page = pdf.pdf_to_svg(doc, %d, {show_label: false});\n"
+             "<html\n"
+             "  <head\n"
              "    <meta charset: \"utf-8\">\n"
-             "    <style; \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%dpx;}\">\n"
+             "    <style \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%dpx;}\">\n"
              "  >\n"
-             "  <body; page>\n"
+             "  <body page>\n"
              ">\n",
              pdf_path_escaped, page_index, RENDER_WIDTH, height);
 
@@ -720,6 +724,36 @@ static void expect_pngs_exactly_equal(const char* expected_path, const char* act
     image_free(actual.pixels);
 }
 
+static void expect_html_pair_output_parity(const char* name, const char* actual, const char* reference) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* sources[] = {actual, reference};
+    char png_paths[2][PATH_MAX], pdf_png_paths[2][PATH_MAX], svg_paths[2][PATH_MAX];
+    bool pdf_available = command_exists("sips") || command_exists("pdftoppm");
+    for (size_t i = 0; i < 2; i++) {
+        char html_path[PATH_MAX], pdf_path[PATH_MAX];
+        const char* suffix = i ? "_reference" : "";
+        snprintf(html_path, sizeof(html_path), "temp/render_output_parity/%s%s.html", name, suffix);
+        snprintf(png_paths[i], sizeof(png_paths[i]), "temp/render_output_parity/%s%s.png", name, suffix);
+        snprintf(svg_paths[i], sizeof(svg_paths[i]), "temp/render_output_parity/%s%s.svg", name, suffix);
+        ASSERT_TRUE(render_html_fixture(html_path, png_paths[i], sources[i]));
+        ASSERT_TRUE(render_document_fixture(html_path, svg_paths[i]));
+        if (pdf_available) {
+            snprintf(pdf_path, sizeof(pdf_path), "temp/render_output_parity/%s%s.pdf", name, suffix);
+            snprintf(pdf_png_paths[i], sizeof(pdf_png_paths[i]), "temp/render_output_parity/%s%s_pdf.png", name, suffix);
+            ASSERT_TRUE(render_document_fixture(html_path, pdf_path));
+            ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, pdf_png_paths[i]));
+        }
+    }
+    expect_pngs_exactly_equal(png_paths[1], png_paths[0]);
+    if (pdf_available) expect_pngs_exactly_equal(pdf_png_paths[1], pdf_png_paths[0]);
+    char* svg[2] = {};
+    ASSERT_TRUE(file_read_all(svg_paths[0], MEM_CAT_TEMP, &svg[0], nullptr));
+    ASSERT_TRUE(file_read_all(svg_paths[1], MEM_CAT_TEMP, &svg[1], nullptr));
+    EXPECT_STREQ(svg[0], svg[1]);
+    mem_free(svg[0]);
+    mem_free(svg[1]);
+}
+
 static void report_pdf_failures(const PdfPageResult* results, int result_count) {
     int failure_count = 0;
     for (int i = 0; i < result_count; i++) {
@@ -767,6 +801,80 @@ static int count_pdf_regressions(const PdfPageResult* results, int result_count)
         if (results[i].regressed) count++;
     }
     return count;
+}
+
+TEST(RenderOutputParity, PagedPdfUsesCssSheetsAndA4FallbackWithoutRasterScaling) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_sheets.html";
+    const char* pdf_path = "temp/render_output_parity/paged_sheets.pdf";
+    const char* html = "<!doctype html><html><head><style>"
+        "@page { size: 320px 480px; margin: 40px; @bottom-center { content: counter(page) '/' counter(pages) } }"
+        "html,body { margin: 0; font: 16px Arial } section { height: 120px }"
+        "section + section { break-before: page } @media print { section { color: blue } }"
+        "</style></head><body><section>Page one</section><section>Page two</section><section>Page three</section></body></html>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged -s 2 -vw 900 -vh 700"));
+    EXPECT_EQ(pdf_page_count(pdf_path), 3);
+    CommandResult info = pdf_info(pdf_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0;
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 240.0, 0.01); EXPECT_NEAR(height, 360.0, 0.01);
+    const char* a4 = "<!doctype html><html><head><style>html,body { margin: 0 }"
+        "p + p { break-before: page }</style></head><body><p>First A4 sheet</p><p>Second A4 sheet</p></body></html>";
+    const char* a4_path = "temp/render_output_parity/paged_a4.pdf";
+    ASSERT_TRUE(render_html_fixture(html_path, a4_path, a4, "--paged"));
+    EXPECT_EQ(pdf_page_count(a4_path), 2);
+    info = pdf_info(a4_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 210.0 * 72.0 / 25.4, 0.01); EXPECT_NEAR(height, 297.0 * 72.0 / 25.4, 0.01);
+    const char* continuous = "temp/render_output_parity/continuous_sheets.pdf";
+    ASSERT_TRUE(render_html_fixture(html_path, continuous, html));
+    EXPECT_EQ(pdf_page_count(continuous), 1);
+}
+
+TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndRejectsUnimplementedContexts) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_settled.html";
+    const char* pdf_path = "temp/render_output_parity/paged_settled.pdf";
+    const char* html = "<!doctype html><html><head><style>html,body{margin:0}"
+        "@page{size:320px 480px;margin:40px}</style></head><body><p>First</p><p id='next'>Second</p>"
+        "<script>document.getElementById('next').style.breakBefore='page';</script></body></html>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged"));
+    EXPECT_EQ(pdf_page_count(pdf_path), 2);
+    const char* invalid = "<!doctype html><html><body><div style='display:grid'>Grid</div></body></html>";
+    const char* invalid_path = "temp/render_output_parity/paged_invalid.pdf";
+    remove(invalid_path);
+    EXPECT_FALSE(render_html_fixture(html_path, invalid_path, invalid, "--paged"));
+    EXPECT_FALSE(file_exists(invalid_path));
+    EXPECT_TRUE(file_contains_text("temp/render_output_parity/paged_invalid.pdf.err", "formatting context requires"));
+    const char* unsupported = "temp/render_output_parity/paged_unsupported.png";
+    remove(unsupported);
+    EXPECT_FALSE(render_html_fixture(html_path, unsupported, html, "--paged"));
+    EXPECT_FALSE(file_exists(unsupported));
+}
+
+TEST(RenderOutputParity, PagedPdfBacktracksLateBlockClosuresWithNotesAndFloats) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_rollback.html";
+    const char* pdf_path = "temp/render_output_parity/paged_rollback.pdf";
+    const char* html = "<!doctype html><html><head><style>"
+        "@page{size:220px 100px;margin:10px;@top-center{content:string(Title);font-size:7px}}"
+        "html,body{margin:0}body,div,span{font-size:10px;line-height:12px;white-space:pre-wrap;orphans:1;widows:1}"
+        "body{counter-reset:N}.prelude{height:20px;string-set:Title 'Prelude'}"
+        ".moved{padding-bottom:16px;break-inside:avoid;counter-increment:N;string-set:Title 'Moved';background:#eee}"
+        ".call::before{content:counter(N) ': '}.note{float:footnote;footnote-policy:line;color:blue}"
+        ".float{float:top;float-reference:page;color:red}.tail{padding-bottom:16px}"
+        "</style></head><body><div class='prelude'>Prelude</div><div class='moved' id='moved'>"
+        "<div class='call'>Call <span class='note'>Note A\nNote B</span></div><div class='float'>Float</div>"
+        "<div class='tail'></div></div></body></html>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged"));
+    EXPECT_EQ(pdf_page_count(pdf_path), 2);
+    CommandResult info = pdf_info(pdf_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0;
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 165.0, 0.01); EXPECT_NEAR(height, 75.0, 0.01);
 }
 
 TEST(RenderOutputParity, NormalPngMatchesForcedTiledPng) {
@@ -1112,7 +1220,7 @@ TEST(RenderOutputParity, TikzLatencyYLabelTracksAxisAtTwoX) {
     EXPECT_GT(label_ink, 40);
 }
 
-TEST(RenderOutputParity, PdfInlineSvgUsesRasterFallbackImage) {
+TEST(RenderOutputParity, PdfInlineSvgUsesVectorPaths) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";
     }
@@ -1148,8 +1256,27 @@ TEST(RenderOutputParity, PdfInlineSvgUsesRasterFallbackImage) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 40\n/H 30"))
-        << "PDF inline SVG fallback should emit an inline image";
+    EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
+    EXPECT_FALSE(file_contains_text(pdf_path, "BI\n/W"));
+    if (!command_exists("pdftoppm")) GTEST_SKIP() << "Poppler is needed to inspect vector PDF output";
+    ASSERT_TRUE(ensure_dir("temp/pdf_visual"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo rendered = {};
+    snprintf(rendered.path, sizeof(rendered.path), "%s", pdf_path);
+    snprintf(rendered.base, sizeof(rendered.base), "inline_svg_vector");
+    char png_path[PATH_MAX];
+    ASSERT_TRUE(render_reference_page(&rendered, 1, png_path, sizeof(png_path)));
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png_path, &image));
+    size_t blue = 0, gold = 0;
+    for (size_t i = 0; i < (size_t)image.width * image.height; i++) {
+        const unsigned char* pixel = image.pixels + i * 4;
+        if (pixel[2] > 180 && pixel[0] < 80 && pixel[1] < 140) blue++;
+        if (pixel[0] > 235 && pixel[1] > 220 && pixel[2] > 170 && pixel[2] < 220) gold++;
+    }
+    image_free(image.pixels);
+    EXPECT_GT(blue, 100u);
+    EXPECT_GT(gold, 100u);
 }
 
 TEST(RenderOutputParity, SvgExportInlineSvgUsesSubsceneLowering) {
@@ -1187,10 +1314,10 @@ TEST(RenderOutputParity, SvgExportInlineSvgUsesSubsceneLowering) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(svg_path));
-    EXPECT_TRUE(file_contains_text(svg_path, "<circle"))
-        << "SVG export should serialize the inline SVG subscene";
-    EXPECT_TRUE(file_contains_text(svg_path, "color=\"rgb(22,163,74)\""))
-        << "SVG subscene should carry inherited currentColor";
+    // Semantic SVG primitives share the vector path lowering used by PDF.
+    EXPECT_TRUE(file_contains_text(svg_path, "<path d=\"M30.00,15.00 C"));
+    EXPECT_TRUE(file_contains_text(svg_path, "fill=\"rgb(22,163,74)\""))
+        << "the vector path should carry inherited currentColor";
 }
 
 TEST(RenderOutputParity, SvgExportTextShadowWithoutAuthoredFont) {
@@ -1547,9 +1674,8 @@ TEST(RenderOutputParity, HwbColorsNormalizeWhitenessBlacknessAndAlpha) {
         ((size_t)10 * image.width + 110) * 4;
     const unsigned char* black = image.pixels +
         ((size_t)10 * image.width + 135) * 4;
-    EXPECT_LT(missing[0], 10);
-    EXPECT_GT(missing[1], 245);
-    EXPECT_LT(missing[2], 10);
+    // Missing alpha is zero at use time, exposing the white page (CSS Color 4 §4.4).
+    for (int channel = 0; channel < 3; channel++) EXPECT_GT(missing[channel], 245);
     for (int channel = 0; channel < 3; channel++) EXPECT_LT(black[channel], 10);
     image_free(image.pixels);
 }
@@ -2442,6 +2568,131 @@ TEST(RenderOutputParity, ColumnCombinatorStylesCellsAfterColumnMutation) {
     EXPECT_TRUE(file_contains_text(svg_path,
         "x=\"32.00\" y=\"22.00\" width=\"32.00\" height=\"22.00\" fill=\"rgb(0,128,0)\""));
     EXPECT_FALSE(file_contains_text(svg_path, "fill=\"rgb(0,0,255)\""));
+}
+
+TEST(RenderOutputParity, IndividualTransformsComposeBeforeTransformAndSurviveRestyle) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* individual =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#box{position:absolute;left:80px;top:80px;width:60px;height:40px;"
+        "background:red;transform-origin:0 0;transform:translateX(4px);"
+        "scale:50% 200%;rotate:90deg;--move:25% 10px;translate:var(--move)}"
+        "#box.before{translate:0;rotate:0deg;scale:1}"
+        "</style><div id='box' class='before'></div><script>"
+        "document.querySelector('#box').className='';</script>";
+    const char* equivalent =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#box{position:absolute;left:80px;top:80px;width:60px;height:40px;"
+        "background:red;transform-origin:0 0;"
+        "transform:translate(25%,10px) rotate(90deg) scale(.5,2) translateX(4px)}"
+        "</style><div id='box'></div>";
+    const char* actual = "temp/render_output_parity/individual_transforms.png";
+    const char* expected = "temp/render_output_parity/individual_transforms_reference.png";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transforms.html", actual, individual));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transforms_reference.html", expected, equivalent));
+    expect_pngs_exactly_equal(actual, expected);
+}
+
+TEST(RenderOutputParity, BackfacesRespectThreeDimensionalContextsInRasterAndSvg) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html = "test/ui/backface_visibility.html";
+    const char* png = "temp/render_output_parity/backface_visibility.png";
+    const char* svg = "temp/render_output_parity/backface_visibility.svg";
+    ASSERT_TRUE(render_document_fixture(html, png));
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png, &image));
+    ASSERT_GT(image.width, 500);
+    ASSERT_GT(image.height, 50);
+    const uint8_t colors[][3] = {{0, 0, 255}, {255, 128, 0}, {255, 0, 0},
+        {0, 0, 255}, {255, 0, 0}, {0, 0, 255}};
+    for (unsigned i = 0; i < sizeof(colors) / sizeof(*colors); i++) {
+        const uint8_t* pixel = image.pixels + ((size_t)50 * image.width + i * 90 + 50) * 4;
+        for (unsigned channel = 0; channel < 3; channel++)
+            EXPECT_EQ(pixel[channel], colors[i][channel]) << "face " << i;
+    }
+    image_free(image.pixels);
+    ASSERT_TRUE(render_document_fixture(html, svg));
+    EXPECT_FALSE(file_contains_text(svg, "rgb(255,0,255)"));
+    EXPECT_TRUE(file_contains_text(svg, "rgb(255,128,0)"));
+    if (command_exists("sips") || command_exists("pdftoppm")) {
+        const char* pdf = "temp/render_output_parity/backface_visibility.pdf";
+        const char* pdf_png = "temp/render_output_parity/backface_visibility_pdf.png";
+        ASSERT_TRUE(render_document_fixture(html, pdf));
+        ASSERT_TRUE(rasterize_fixture_pdf(pdf, pdf_png));
+        const char* reference_pdf = "temp/render_output_parity/backface_reference.pdf";
+        const char* reference_png = "temp/render_output_parity/backface_reference.png";
+        const char* reference_html = "<!doctype html><style>html,body{margin:0;background:white}"
+            ".face{position:absolute;top:20px;width:60px;height:60px}</style>"
+            "<div class=face style='left:20px;background:blue'></div>"
+            "<div class=face style='left:110px;background:#ff8000'></div>"
+            "<div class=face style='left:200px;background:red'></div>"
+            "<div class=face style='left:290px;background:blue'></div>"
+            "<div class=face style='left:380px;background:red'></div>"
+            "<div class=face style='left:470px;background:blue'></div>";
+        ASSERT_TRUE(render_html_fixture("temp/render_output_parity/backface_reference.html", reference_pdf, reference_html));
+        ASSERT_TRUE(rasterize_fixture_pdf(reference_pdf, reference_png));
+        // compare like PDF rasterizations: platform color management changes raw sRGB samples.
+        ImageData reference = {};
+        ASSERT_TRUE(load_png_rgba(pdf_png, &image));
+        ASSERT_TRUE(load_png_rgba(reference_png, &reference));
+        ASSERT_GT(image.width, 500);
+        ASSERT_GT(reference.width, 500);
+        ASSERT_GT(image.height, 50);
+        ASSERT_GT(reference.height, 50);
+        for (unsigned i = 0; i < sizeof(colors) / sizeof(*colors); i++) {
+            size_t x = i * 90 + 50;
+            const uint8_t* actual_pixel = image.pixels + ((size_t)50 * image.width + x) * 4;
+            const uint8_t* reference_pixel = reference.pixels + ((size_t)50 * reference.width + x) * 4;
+            EXPECT_EQ(memcmp(actual_pixel, reference_pixel, 4), 0) << "PDF face " << i;
+        }
+        image_free(image.pixels);
+        image_free(reference.pixels);
+    }
+}
+
+TEST(RenderOutputParity, IndividualThreeDimensionalTransformsReuseFunctionMatrices) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* individual =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#box{position:absolute;left:80px;top:80px;width:60px;height:40px;"
+        "background:red;transform-origin:0 0;perspective:500px;"
+        "scale:50% 200% 2;rotate:60deg 1 2 3;translate:25% 10px 20px}"
+        "</style><div id='box'></div>";
+    const char* equivalent =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#box{position:absolute;left:80px;top:80px;width:60px;height:40px;"
+        "background:red;transform-origin:0 0;perspective:500px;"
+        "transform:translate3d(25%,10px,20px) rotate3d(1,2,3,60deg) scale3d(.5,2,2)}"
+        "</style><div id='box'></div>";
+    const char* actual = "temp/render_output_parity/individual_transforms_3d.png";
+    const char* expected = "temp/render_output_parity/individual_transforms_3d_reference.png";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transforms_3d.html", actual, individual));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transforms_3d_reference.html", expected, equivalent));
+    expect_pngs_exactly_equal(actual, expected);
+}
+
+TEST(RenderOutputParity, IndividualTransformsKeepIndependentResetAndInheritance) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>html,body{margin:0}"
+        "#parent{translate:10px;rotate:20deg;scale:2}"
+        "#box{width:40px;height:40px;background:red;transform-origin:0 0;"
+        "translate:inherit;translate:2foo;scale:inherit;rotate:initial;transform:none}"
+        "</style><div id='parent'><div id='box'></div></div>";
+    const char* svg = "temp/render_output_parity/individual_transform_reset.svg";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transform_reset.html", svg, html));
+    EXPECT_TRUE(file_contains_text(svg, "transform=\"matrix(2 0 0 2 10 0)\""));
 }
 
 TEST(RenderOutputParity, PercentageScaleMatchesNumericTransform) {
@@ -3396,6 +3647,150 @@ TEST(RenderOutputParity, NestedSelectorsPaintAcrossDepthAndPreserveSpecificity) 
         EXPECT_GT(pixel[1], pixel[0]) << region;
     }
     image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, ScopeRootsLimitsAndProximityReachRasterSvgAndPdf) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* geometry = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".scope{position:relative;width:100px;height:40px}"
+        ".tile{position:absolute;top:0;width:20px;height:20px}"
+        ".near,.limit{position:absolute;top:0;width:20px;height:20px}"
+        ".near{left:30px}.limit{left:60px}</style>";
+    const char* tree = "<div class=scope><div class=tile></div>"
+        "<div class=near><div class=tile></div></div>"
+        "<div class=limit><div class=tile></div></div></div>";
+    const char* rules[] = {
+        "<style>@scope (.scope) to (.limit){.tile{background:green}}"
+        "@scope (.near){.tile{background:blue}}"
+        "@scope (.scope) to (.limit){.tile{background:green}}"
+        ".tile{background:red}</style>",
+        "<style>.tile{background:green}.near .tile{background:blue}"
+        ".limit .tile{background:red}</style>"
+    };
+    const char* html_paths[] = {"temp/render_output_parity/scopes.html",
+        "temp/render_output_parity/scopes_reference.html"};
+    const char* png_paths[] = {"temp/render_output_parity/scopes.png",
+        "temp/render_output_parity/scopes_reference.png"};
+    const char* svg_paths[] = {"temp/render_output_parity/scopes.svg",
+        "temp/render_output_parity/scopes_reference.svg"};
+    const char* pdf_paths[] = {"temp/render_output_parity/scopes.pdf",
+        "temp/render_output_parity/scopes_reference.pdf"};
+    const char* pdf_png_paths[] = {"temp/render_output_parity/scopes_pdf.png",
+        "temp/render_output_parity/scopes_reference_pdf.png"};
+    bool pdf_available = command_exists("sips") || command_exists("pdftoppm");
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    for (size_t i = 0; i < sizeof(rules) / sizeof(rules[0]); i++) {
+        strbuf_reset(source);
+        strbuf_append_str(source, geometry);
+        strbuf_append_str(source, rules[i]);
+        strbuf_append_str(source, tree);
+        ASSERT_TRUE(render_html_fixture(html_paths[i], png_paths[i], source->str));
+        ASSERT_TRUE(render_document_fixture(html_paths[i], svg_paths[i]));
+        if (pdf_available) {
+            ASSERT_TRUE(render_document_fixture(html_paths[i], pdf_paths[i]));
+            ASSERT_TRUE(rasterize_fixture_pdf(pdf_paths[i], pdf_png_paths[i]));
+        }
+    }
+    strbuf_free(source);
+    expect_pngs_exactly_equal(png_paths[1], png_paths[0]);
+    EXPECT_TRUE(file_contains_text(svg_paths[0], "rgb(0,128,0)"));
+    EXPECT_TRUE(file_contains_text(svg_paths[0], "rgb(0,0,255)"));
+    EXPECT_TRUE(file_contains_text(svg_paths[0], "rgb(255,0,0)"));
+    if (pdf_available) expect_pngs_exactly_equal(pdf_png_paths[1], pdf_png_paths[0]);
+}
+
+TEST(RenderOutputParity, RegisteredPropertyDefaultsInheritanceAndComputedUnitsReachAllOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    const char* sources[] = {
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "@property --size{syntax:'<length>';inherits:false;initial-value:20px}"
+        "@property --ink{syntax:'<color>';inherits:true;initial-value:green}"
+        "@property --basis{syntax:'<length>';inherits:true;initial-value:10px}"
+        "#parent{font-size:10px;--size:70px;--ink:blue;--basis:2em}"
+        ".box{height:20px;width:var(--size);background:var(--ink)}"
+        "#invalid{--size:red}#initial{--ink:initial}#basis{font-size:20px;width:var(--basis)}"
+        "</style><div id=parent><div class=box></div><div class=box id=invalid></div>"
+        "<div class=box id=initial></div><div class=box id=basis></div></div>",
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#parent{font-size:10px}.box{height:20px;width:20px;background:blue}"
+        "#initial{background:green}#basis{font-size:20px}</style>"
+        "<div id=parent><div class=box></div><div class=box id=invalid></div>"
+        "<div class=box id=initial></div><div class=box id=basis></div></div>"
+    };
+    expect_html_pair_output_parity("registered_properties", sources[0], sources[1]);
+}
+
+TEST(RenderOutputParity, RegisteredPropertyMathAndTransformsComputeBeforeInheritanceInAllOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    const char* sources[] = {
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "@property --size{syntax:'<length>';inherits:true;initial-value:calc(1in + 4px)}"
+        "@property --mix{syntax:'<length-percentage>';inherits:true;initial-value:0px}"
+        "@property --motion{syntax:'<transform-list>';inherits:true;initial-value:rotate(0deg)}"
+        "#parent{width:200px;font-size:calc(5px + 5px);--size:calc(2em + 5px);"
+        "--mix:calc(2em + 10% + 3px);--motion:translate(calc(2em + 5px),0px)}"
+        ".box{height:20px;background:red;font-size:30px;width:var(--size)}"
+        "#mixed{width:var(--mix);background:blue}#moved{transform:var(--motion);background:green}"
+        "</style><div class=box></div><div id=parent><div class=box></div>"
+        "<div class=box id=mixed></div><div class=box id=moved></div></div>",
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#parent{width:200px;font-size:10px}.box{height:20px;background:red;font-size:30px;width:100px}"
+        "#parent .box{width:25px}#parent #mixed{width:43px;background:blue}"
+        "#moved{transform:translate(25px,0px);background:green}</style>"
+        "<div class=box></div><div id=parent><div class=box></div>"
+        "<div class=box id=mixed></div><div class=box id=moved></div></div>"
+    };
+    expect_html_pair_output_parity("registered_math", sources[0], sources[1]);
+}
+
+TEST(RenderOutputParity, ScriptRegistrationOverridesCssAndPreservesOwnerComputationInAllOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    const char* sources[] = {
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "@property --size{syntax:'<length>';inherits:false;initial-value:5px}"
+        "#parent{font-size:10px;--size:calc(2em + 5px)}"
+        ".box{font-size:30px;height:20px;background:red;width:var(--size)}"
+        "#invalid{--size:red;background:blue}</style>"
+        "<div class=box></div><div id=parent><div class=box></div><div class=box id=invalid></div></div>"
+        "<script>CSS.registerProperty({name:'--size',syntax:'<length>',inherits:true,initialValue:'35px'});</script>",
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#parent{font-size:10px}.box{font-size:30px;height:20px;background:red;width:35px}"
+        "#parent .box{width:25px}#invalid{background:blue}</style>"
+        "<div class=box></div><div id=parent><div class=box></div><div class=box id=invalid></div></div>"
+    };
+    expect_html_pair_output_parity("script_registration", sources[0], sources[1]);
+}
+
+TEST(RenderOutputParity, RegisteredColorsPreserveCurrentColorAndComputeMathInAllOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    const char* sources[] = {
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "@property --ink{syntax:'<color>';inherits:true;initial-value:red}"
+        "#parent{color:red;--ink:currentColor}.box{width:30px;height:20px;background:var(--ink)}"
+        "#child{color:blue}#math{--ink:rgb(calc(100 + 20) 0 0 / calc(.5))}"
+        "#hue{--ink:hsl(.5turn 100% 50%)}#white{--ink:hwb(60deg 0% 0%)}"
+        "#missing{--ink:rgb(20 0 0 / none)}#invalid{--ink:rgb(1 2 3 4)}"
+        "#space{--ink:color(srgb 100% 0 0 / 50%)}"
+        "</style><div id=parent><div class=box id=child></div><div class=box id=math></div>"
+        "<div class=box id=hue></div><div class=box id=white></div>"
+        "<div class=box id=missing></div><div class=box id=invalid></div><div class=box id=space></div></div>",
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#parent{color:red}.box{width:30px;height:20px;background:red}"
+        "#child{color:blue;background:blue}#math{background:rgba(120,0,0,.5)}"
+        "#hue{background:cyan}#white{background:yellow}#missing{background:transparent}"
+        "#space{background:rgba(255,0,0,.5)}"
+        "</style><div id=parent><div class=box id=child></div><div class=box id=math></div>"
+        "<div class=box id=hue></div><div class=box id=white></div>"
+        "<div class=box id=missing></div><div class=box id=invalid></div><div class=box id=space></div></div>"
+    };
+    expect_html_pair_output_parity("registered_colors", sources[0], sources[1]);
 }
 
 TEST(RenderOutputParity, BorderImageWidthMultiplierAndOutsetPaintUsedAreas) {
@@ -4952,7 +5347,7 @@ TEST(RenderOutputParity, AnimationTypedOpacityAndColorReachPaintAndCssom) {
     CommandResult result = run_command_capture(command);
     ASSERT_EQ(result.exit_code, 0) << result.output;
     EXPECT_STREQ(result.output, "0.5\n0.5\n0.5\n0.5\n0.5\n0.5\n0.5\n0.4\n"
-        "rgb(128, 0, 128)\nrgb(0, 0, 128)\nrgba(128, 0, 128, 0.502)\n");
+        "rgb(128, 0, 128)\nrgb(0, 0, 128)\nrgba(128, 0, 128, 0.5)\n");
 }
 
 TEST(RenderOutputParity, AnimationTypedTransformsReachPaintAndComputedMatrices) {

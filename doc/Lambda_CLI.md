@@ -105,6 +105,8 @@ lambda run [options] <script.ls>
 
 **Options:** `--dry-run`, `--no-drain`, `--static-warning`, `--mir-interp` and `--tier=` as in script mode. `--max-errors`, `--optimize` and `-O*` are **not** accepted by `run`.
 
+Without a script, `lambda run` starts a procedural REPL session (see [REPL](#repl)).
+
 **Example:**
 
 ```bash
@@ -509,10 +511,12 @@ Runs a TypeScript file on LambdaJS. Type annotations are stripped; there is no t
 
 ## REPL
 
-When Lambda is started with no arguments, it enters the interactive REPL.
+When Lambda is started with no arguments, it enters the interactive REPL. `lambda run` without a script starts a **procedural** session instead: entries are statements of one persistent procedure body, so `var` bindings persist and procedures can be called, and the session warns that entries carry out effects.
 
 **Prompt:** `λ> ` (UTF-8 terminals) or `> ` (fallback)
-**Continuation prompt:** `.. `
+**Continuation prompt:** `.. ` — shown while a bracket, string or comment is open, or while the entry is incomplete (`let x =`)
+
+Each entry runs once against a persistent interpreter session; earlier entries are never re-run. An entry that fails is reported and rolled back whole. An entry made only of declarations or statements prints nothing; any other entry prints its value. Redefining a session name is an error (E209); `clear` starts a fresh session. Ctrl-C interrupts a running entry and rolls it back.
 
 ### REPL Commands
 
@@ -520,7 +524,15 @@ When Lambda is started with no arguments, it enters the interactive REPL.
 |---------|-------------|
 | `quit`, `q`, `exit` | Exit the REPL |
 | `help`, `h` | Show help |
-| `clear` | Clear REPL history |
+| `clear` | Start a fresh session (drops every binding) |
+| `.env` | List the session's bindings and their values |
+| `.type <expr>` | Show an expression's static type without running it |
+| `.time <entry>` | Run an entry and report its wall time |
+| `.load <file>` | Run a file as one entry (rolled back whole on failure) |
+| `.save <file>` | Write the session's accepted entries to a file |
+| Tab | Complete session names, system functions and keywords (interactive terminal) |
+
+An interactive terminal keeps its input history in `~/.lambda_history`; `LAMBDA_REPL_HISTORY` names another file, and an empty value turns history persistence off.
 
 ---
 
@@ -529,7 +541,8 @@ When Lambda is started with no arguments, it enters the interactive REPL.
 | Variable | Values | Description |
 |----------|--------|-------------|
 | `LAMBDA_HOME` | path | Runtime asset directory: packages, schemas, fonts. Default: `./lmd` (source checkout and release bundle alike), **relative to the current working directory** — set it to an absolute path to run `lambda` from anywhere |
-| `LAMBDA_EXEC_BACKEND` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL keeps a persistent interpreter session unless `jit` |
+| `LAMBDA_EXEC_BACKEND` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL always uses its persistent interpreter session; the tier only decides when hot functions compile (`jit`: at the first call) |
+| `LAMBDA_REPL_HISTORY` | path | REPL history file (default `~/.lambda_history`; empty disables) |
 | `JUBE_MODULE_PATH` | path | Where Node modules are discovered (default: `./modules` beside the executable) |
 | `LAMBDA_LOG_LEVEL` | level name | Minimum log level written to `log.txt` |
 | `LAMBDA_LOG_FILE` | path | Log file location (default: `./log.txt`) |

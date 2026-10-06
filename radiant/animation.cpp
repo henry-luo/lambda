@@ -103,38 +103,28 @@ static float timing_eval_cubic_bezier(const TimingFunction* tf, float t) {
     return bezier_calc(tForX, tf->bezier.y1, tf->bezier.y2);
 }
 
-static float timing_eval_steps(const TimingFunction* tf, float t) {
-    int n = tf->steps.count;
+static float timing_eval_steps(const TimingFunction* tf, float t, bool before) {
+    double n = tf->steps.count;
     if (n <= 0) return t;
 
-    float step;
-    switch (tf->steps.position) {
-        case STEP_JUMP_START:
-            step = (floorf(t * (float)n) + 1.0f) / (float)n;
-            break;
-        case STEP_JUMP_END:
-            step = floorf(t * (float)n) / (float)n;
-            break;
-        case STEP_JUMP_BOTH:
-            step = (floorf(t * (float)n) + 1.0f) / ((float)n + 1.0f);
-            break;
-        case STEP_JUMP_NONE:
-            if (n <= 1) return t;
-            step = floorf(t * (float)n) / ((float)n - 1.0f);
-            break;
-        default:
-            step = floorf(t * (float)n) / (float)n;
-            break;
-    }
-    step = clamp_unit(step);
-    return step;
+    // interval count stays fixed; endpoint jumps change the output denominator.
+    double step = floor((double)t * n);
+    double jumps = n;
+    if (tf->steps.position == STEP_JUMP_START || tf->steps.position == STEP_JUMP_BOTH)
+        step += 1.0f;
+    if (before && (double)t * n == floor((double)t * n)) step -= 1.0;
+    if (tf->steps.position == STEP_JUMP_BOTH) jumps += 1.0f;
+    if (tf->steps.position == STEP_JUMP_NONE) jumps -= 1.0f;
+    if (t >= 0.0f && step < 0.0f) step = 0.0f;
+    if (t <= 1.0f && step > jumps) step = jumps;
+    return jumps > 0.0 ? (float)(step / jumps) : t;
 }
 
-float timing_function_eval(const TimingFunction* tf, float t) {
+float timing_function_eval(const TimingFunction* tf, float t, bool before) {
     switch (tf->type) {
         case TIMING_LINEAR: return timing_eval_linear(t);
         case TIMING_CUBIC_BEZIER: return timing_eval_cubic_bezier(tf, t);
-        case TIMING_STEPS: return timing_eval_steps(tf, t);
+        case TIMING_STEPS: return timing_eval_steps(tf, t, before);
     }
     return t;
 }
@@ -218,45 +208,38 @@ AnimationInstance* animation_instance_create(AnimationScheduler* scheduler) {
     return anim;
 }
 
-void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim) {
-    if (!scheduler || !anim) return;
-
-    // append to end of doubly-linked list
-    anim->prev = scheduler->last;
-    anim->next = nullptr;
-    if (scheduler->last) {
-        scheduler->last->next = anim;
-    } else {
-        scheduler->first = anim;
-    }
-    scheduler->last = anim;
-    scheduler->count++;
-    scheduler->has_active_animations = true;
-
-    log_debug("anim: added animation type=%d target=%p duration=%.3fs count=%g (total active: %d)",
-              anim->type, anim->target, anim->duration, anim->iteration_count, scheduler->count);
-}
-
-static void animation_scheduler_unlink(AnimationScheduler* scheduler, AnimationInstance* anim) {
-    if (anim->prev) anim->prev->next = anim->next;
-    else scheduler->first = anim->next;
-
-    if (anim->next) anim->next->prev = anim->prev;
-    else scheduler->last = anim->prev;
-    anim->prev = nullptr;
-    anim->next = nullptr;
-}
-
-void animation_scheduler_move_before(AnimationScheduler* scheduler, AnimationInstance* anim,
-                                     AnimationInstance* before) {
-    if (!scheduler || !anim || anim == before || anim->next == before) return;
-    animation_scheduler_unlink(scheduler, anim);
+static void animation_scheduler_link_before(AnimationScheduler* scheduler,
+    AnimationInstance* anim, AnimationInstance* before) {
     anim->next = before;
     anim->prev = before ? before->prev : scheduler->last;
     if (anim->prev) anim->prev->next = anim;
     else scheduler->first = anim;
     if (before) before->prev = anim;
     else scheduler->last = anim;
+}
+
+static void animation_scheduler_unlink(AnimationScheduler* scheduler, AnimationInstance* anim) {
+    if (anim->prev) anim->prev->next = anim->next;
+    else scheduler->first = anim->next;
+    if (anim->next) anim->next->prev = anim->prev;
+    else scheduler->last = anim->prev;
+}
+
+void animation_scheduler_move_before(AnimationScheduler* scheduler,
+    AnimationInstance* anim, AnimationInstance* before) {
+    if (!scheduler || !anim || anim == before || anim->next == before) return;
+    animation_scheduler_unlink(scheduler, anim);
+    animation_scheduler_link_before(scheduler, anim, before);
+}
+
+void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim) {
+    if (!scheduler || !anim) return;
+    animation_scheduler_link_before(scheduler, anim, nullptr);
+    scheduler->count++;
+    scheduler->has_active_animations = true;
+
+    log_debug("anim: added animation type=%d target=%p duration=%.3fs count=%g (total active: %d)",
+              anim->type, anim->target, anim->duration, anim->iteration_count, scheduler->count);
 }
 
 void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim) {
@@ -338,7 +321,28 @@ void animation_scheduler_prune_disconnected_css_views(AnimationScheduler* schedu
 // ============================================================================
 
 // Compute normalized progress for an animation at the given time
+static bool animation_keeps_finished(const AnimationInstance* anim) {
+    return anim->type == ANIM_CSS_ANIMATION || anim->retain_after_finish || anim->fill_mode == ANIM_FILL_FORWARDS ||
+        anim->fill_mode == ANIM_FILL_BOTH;
+}
+
+static bool animation_is_reverse(const AnimationInstance* anim) {
+    bool odd = fmod(anim->current_iteration, 2.0) != 0.0;
+    return anim->direction == ANIM_DIR_REVERSE ||
+        (anim->direction == ANIM_DIR_ALTERNATE && odd) ||
+        (anim->direction == ANIM_DIR_ALTERNATE_REVERSE && !odd);
+}
+
+bool animation_easing_before(const AnimationInstance* anim) {
+    bool reversed = animation_is_reverse(anim);
+    bool delayed = anim->sample_time - anim->start_time < anim->delay;
+    bool completed = !delayed && (anim->duration <= 0.0 || (anim->iteration_count >= 0.0 &&
+        anim->sample_time - anim->start_time - anim->delay >= anim->duration * anim->iteration_count));
+    return (delayed && !reversed) || (completed && reversed);
+}
+
 static float compute_animation_progress(AnimationInstance* anim, double now) {
+    anim->sample_time = now;
     double elapsed = now - anim->start_time;
     anim->active_time = elapsed - anim->delay;
 
@@ -354,37 +358,33 @@ static float compute_animation_progress(AnimationInstance* anim, double now) {
 
     double active_time = elapsed - anim->delay;
 
-    double overall = anim->duration > 0.0 ? active_time / anim->duration
-        : (anim->iteration_count >= 0.0 ? anim->iteration_count : 1.0);
+    double cycles = anim->duration > 0.0 ? active_time / anim->duration :
+        (anim->iteration_count >= 0.0 ? anim->iteration_count : 1.0);
     bool finished = anim->duration <= 0.0 ||
-        (anim->iteration_count >= 0.0 && overall >= anim->iteration_count);
-    if (finished) {
-        if (anim->iteration_count >= 0.0) overall = anim->iteration_count;
-        anim->play_state = ANIM_PLAY_FINISHED;
-    }
-    double whole = floor(overall);
-    double iteration_progress = overall - whole;
-    // integral active ends belong to the end of the previous iteration.
-    if (finished && overall > 0.0 && iteration_progress == 0.0) {
+        (anim->iteration_count >= 0.0 && cycles >= anim->iteration_count);
+    if (finished) cycles = anim->iteration_count >= 0.0 ? anim->iteration_count : 1.0;
+    double whole = floor(cycles);
+    double iteration_progress = cycles - whole;
+    if (finished && cycles > 0.0 && iteration_progress == 0.0) {
         whole -= 1.0;
         iteration_progress = 1.0;
     }
-    int iteration = (int)fmin(whole, (double)INT_MAX); // INT_CAST_OK: animation iteration counter
-    anim->current_iteration = iteration;
-    if (finished && anim->fill_mode != ANIM_FILL_FORWARDS &&
-        anim->fill_mode != ANIM_FILL_BOTH) return -1.0f;
+    anim->current_iteration = whole;
+    if (finished) {
+        anim->play_state = ANIM_PLAY_FINISHED;
+
+        // fill-mode forwards/both: hold final value
+        if (anim->fill_mode == ANIM_FILL_FORWARDS || anim->fill_mode == ANIM_FILL_BOTH) {
+            // determine if final iteration was forward or reverse
+            return animation_is_reverse(anim) ? 1.0f - (float)iteration_progress : (float)iteration_progress;
+        }
+        return -1.0f; // finished, no fill
+    }
+
     float t = (float)iteration_progress;
 
     // apply direction
-    bool is_reverse = false;
-    bool odd_iteration = fmod(whole, 2.0) != 0.0;
-    switch (anim->direction) {
-        case ANIM_DIR_NORMAL: break;
-        case ANIM_DIR_REVERSE: is_reverse = true; break;
-        case ANIM_DIR_ALTERNATE: is_reverse = odd_iteration; break;
-        case ANIM_DIR_ALTERNATE_REVERSE: is_reverse = !odd_iteration; break;
-    }
-    if (is_reverse) t = 1.0f - t;
+    if (animation_is_reverse(anim)) t = 1.0f - t;
 
     return t;
 }
@@ -432,7 +432,7 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
         }
         if (anim->play_state == ANIM_PLAY_FINISHED && !css_animation) {
             // finished animations with fill mode stay in the list but don't tick
-            if (anim->fill_mode == ANIM_FILL_FORWARDS || anim->fill_mode == ANIM_FILL_BOTH) {
+            if (animation_keeps_finished(anim)) {
                 anim = next;
                 continue;
             }
@@ -457,7 +457,7 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
             // not yet active (in delay, no fill-backwards) or finished (no fill)
             if (finished) animation_notify_finished(anim);
             else any_active = true;
-            if (finished && !css_animation) {
+            if (finished && !animation_keeps_finished(anim)) {
                 animation_scheduler_remove(scheduler, anim);
             }
             anim = next;
@@ -465,7 +465,7 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
         }
 
         // CSS animation easing belongs to each property's keyframe interval.
-        float eased_t = css_animation ? raw_t : timing_function_eval(&anim->timing, raw_t);
+        float eased_t = css_animation ? raw_t : timing_function_eval(&anim->timing, raw_t, animation_easing_before(anim));
 
         // save previous bounds before tick updates them (needed to clear
         // the old visual position when transforms move the element)
@@ -498,7 +498,7 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
         // media tick callbacks may finish their own lifetime independently of duration.
         if (finished || anim->play_state == ANIM_PLAY_FINISHED) {
             animation_notify_finished(anim);
-            if (!css_animation && anim->fill_mode != ANIM_FILL_FORWARDS && anim->fill_mode != ANIM_FILL_BOTH) {
+            if (!animation_keeps_finished(anim)) {
                 animation_scheduler_remove(scheduler, anim);
                 anim = next;
                 continue;
@@ -523,6 +523,17 @@ void animation_instance_pause(AnimationInstance* anim, double now) {
     anim->play_state = ANIM_PLAY_PAUSED;
     anim->pause_time = now;
     log_debug("anim: paused animation type=%d target=%p", anim->type, anim->target);
+}
+
+void animation_instance_sample(AnimationInstance* anim, double now) {
+    if (!anim) return;
+    bool paused = anim->play_state == ANIM_PLAY_PAUSED;
+    float progress = compute_animation_progress(anim, paused ? anim->pause_time : now);
+    if (paused) anim->play_state = ANIM_PLAY_PAUSED;
+    // retained layout replaces view properties without changing the effect's timeline.
+    if (progress >= 0.0f && anim->tick)
+        anim->tick(anim, anim->type == ANIM_CSS_ANIMATION ? progress :
+            timing_function_eval(&anim->timing, progress, animation_easing_before(anim)));
 }
 
 void animation_instance_resume(AnimationInstance* anim, double now) {

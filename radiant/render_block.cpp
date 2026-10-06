@@ -31,7 +31,7 @@ static bool render_block_fully_transparent(ViewBlock* block) {
         block->inl()->opacity >= 0.0f && block->inl()->opacity <= 0.0005f;
 }
 
-static bool render_block_has_visible_child_overflow(RenderContext* rdcon, ViewBlock* block) {
+static bool render_block_has_visible_child_overflow(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!block || !block->is_element() || !block->first_child) return false;
     if (block->scroller &&
         (block->scroll()->overflow_x != CSS_VALUE_VISIBLE ||
@@ -52,7 +52,7 @@ static bool render_block_has_visible_child_overflow(RenderContext* rdcon, ViewBl
            min_y < 0.0f || max_y > block->height;
 }
 
-bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
+bool render_block_dirty_misses(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->has_dirty_union) return false;
     if (render_block_has_visible_child_overflow(rdcon, block)) return false;
 
@@ -68,12 +68,12 @@ bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
         rdcon->dirty_union.bottom * s
     };
     bool has_transform = rdcon->has_transform ||
-        (block->transform && block->transformp()->functions);
+        transform_has_functions(block->transform);
     return !has_transform &&
         !view_geometry_bounds_intersect(view_geometry_rect_to_bound(marker_rect), dirty);
 }
 
-bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
+bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block) return false;
 
     View* view = static_cast<View*>(block);
@@ -81,7 +81,7 @@ bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
     if (block->tag_id == MARKUP_NAME_HTML || block->tag_id == MARKUP_NAME_BODY) return false;
 
     bool has_transform = rdcon->has_transform ||
-        (block->transform && block->transformp()->functions);
+        transform_has_functions(block->transform);
     if (has_transform) return false;
 
     if (block->position && block->positionp()->first_abs_child) {
@@ -116,7 +116,7 @@ static bool render_retained_dirty_source_inside(void* userdata, uint32_t source_
     return render_view_subtree_contains_id((View*)userdata, source_view_id);
 }
 
-bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) {
+bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->dl || !rdcon->retained_dl_cache ||
         !rdcon->has_dirty_union || rdcon->element_marker_suppression_depth > 0) {
         return false;
@@ -167,7 +167,7 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     return true;
 }
 
-RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewBlock* block) {
+RenderElementMarkerScope render_element_marker_begin(RasterRenderContext* rdcon, ViewBlock* block) {
     RenderElementMarkerScope scope = { -1 };
     if (!rdcon || !rdcon->dl || !block || rdcon->element_marker_suppression_depth > 0) {
         return scope;
@@ -184,7 +184,7 @@ RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewB
     return scope;
 }
 
-void render_element_marker_end(RenderContext* rdcon, RenderElementMarkerScope* scope) {
+void render_element_marker_end(RasterRenderContext* rdcon, RenderElementMarkerScope* scope) {
     if (!rdcon || !rdcon->dl || !scope || scope->begin_index < 0) {
         return;
     }
@@ -192,7 +192,7 @@ void render_element_marker_end(RenderContext* rdcon, RenderElementMarkerScope* s
     scope->begin_index = -1;
 }
 
-void render_bound(RenderContext* rdcon, ViewBlock* view) {
+void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
     float s = rdcon->raster_scale;
     Rect rect;
     rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
@@ -308,7 +308,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     }
 }
 
-void render_outline_deferred(RenderContext* rdcon, ViewBlock* view) {
+void render_outline_deferred(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!view->bound || !view->boundary()->outline) return;
     float s = rdcon->raster_scale;
     BlockBlot saved = rdcon->block;
@@ -326,7 +326,7 @@ void render_outline_deferred(RenderContext* rdcon, ViewBlock* view) {
     rdcon->block = saved;
 }
 
-static void render_block_debug_rect(RenderContext* rdcon, Rect rect, Bound* clip) {
+static void render_block_debug_rect(RasterRenderContext* rdcon, Rect rect, Bound* clip) {
     RdtPath* p = rdt_path_new();
     rdt_path_move_to(p, rect.x, rect.y);
     rdt_path_line_to(p, rect.x + rect.width, rect.y);
@@ -373,10 +373,11 @@ typedef struct RenderBlockPaintResult {
     bool painted;
 } RenderBlockPaintResult;
 
-static bool render_block_skip_paint(RenderContext* rdcon, ViewBlock* block) {
+static bool render_block_skip_paint(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block) {
         return true;
     }
+    if (view_backface_is_hidden(block, BACKFACE_SUBTREE)) return true;
     if (render_block_clip_empty(&rdcon->block.clip)) {
         return true;
     }
@@ -399,7 +400,7 @@ static bool render_block_skip_paint(RenderContext* rdcon, ViewBlock* block) {
     return false;
 }
 
-static void render_block_log_begin(RenderContext* rdcon, ViewBlock* block) {
+static void render_block_log_begin(RasterRenderContext* rdcon, ViewBlock* block) {
     log_enter();
 }
 
@@ -416,7 +417,7 @@ static bool render_block_empty_cell_hides_bound(ViewBlock* block) {
     return false;
 }
 
-static void render_block_setup_font(RenderContext* rdcon, ViewBlock* block) {
+static void render_block_setup_font(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !block->font) return;
     uint64_t t1 = time_now_ns();
     setup_font(rdcon->ui_context, &rdcon->font, block->font);
@@ -425,7 +426,7 @@ static void render_block_setup_font(RenderContext* rdcon, ViewBlock* block) {
         time_elapsed_ms_f(t1, t2));
 }
 
-static RenderBlockPhase render_block_begin_phase(RenderContext* rdcon, ViewBlock* block) {
+static RenderBlockPhase render_block_begin_phase(RasterRenderContext* rdcon, ViewBlock* block) {
     RenderBlockPhase phase = {};
     phase.parent_block = rdcon->block;
     phase.parent_font = rdcon->font;
@@ -434,7 +435,8 @@ static RenderBlockPhase render_block_begin_phase(RenderContext* rdcon, ViewBlock
 
     // CSS 2.1 11.2: visibility:hidden suppresses own rendering but children
     // with visibility:visible should still appear.
-    phase.self_hidden = block->in_line && block->inl()->visibility == VIS_HIDDEN;
+    phase.self_hidden = (block->in_line && block->inl()->visibility == VIS_HIDDEN) ||
+        view_backface_is_hidden(block);
     phase.transform_scope = render_state_push_transform(rdcon, block, &phase.parent_block);
 
     render_block_setup_font(rdcon, block);
@@ -445,7 +447,7 @@ static RenderBlockPhase render_block_begin_phase(RenderContext* rdcon, ViewBlock
     return phase;
 }
 
-static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
+static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block,
                                     RenderBlockPhase* phase) {
     if (!rdcon || !block || !phase) return;
 
@@ -458,7 +460,7 @@ static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
             time_elapsed_ms_f(tb1, tb2));
     }
 
-    if (block->vector_path() && block->vector_path()->segments) {
+    if (!phase->self_hidden && block->vector_path() && block->vector_path()->segments) {
         render_vector_path(rdcon, block);
     }
 
@@ -492,7 +494,7 @@ static bool block_should_paint_children(ViewBlock* block) {
     return true;
 }
 
-static void render_block_apply_inherited_color(RenderContext* rdcon, ViewBlock* block) {
+static void render_block_apply_inherited_color(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block) return;
     if (block->in_line && block->inl()->has_color) {
         if (render_block_trace_enabled()) {
@@ -504,14 +506,14 @@ static void render_block_apply_inherited_color(RenderContext* rdcon, ViewBlock* 
     }
 }
 
-static void render_block_deferred_child_outlines(RenderContext* rdcon, ViewBlock* block) {
+static void render_block_deferred_child_outlines(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block) return;
     View* outline_view = block->first_child;
     while (outline_view) {
         if (outline_view->view_type == RDT_VIEW_BLOCK ||
             outline_view->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* outline_block = lam::view_require_block(outline_view);
-            if (outline_block->bound && outline_block->boundary_mut()->outline) {
+            if (!view_backface_is_hidden(outline_block) && outline_block->bound && outline_block->boundary_mut()->outline) {
                 render_outline_deferred(rdcon, outline_block);
             }
         }
@@ -519,7 +521,7 @@ static void render_block_deferred_child_outlines(RenderContext* rdcon, ViewBlock
     }
 }
 
-static RenderBlockChildrenPhase render_block_begin_children_phase(RenderContext* rdcon,
+static RenderBlockChildrenPhase render_block_begin_children_phase(RasterRenderContext* rdcon,
                                                                   ViewBlock* block) {
     RenderBlockChildrenPhase phase = {};
     phase.start_time = time_now_ns();
@@ -539,7 +541,7 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RenderContext*
     return phase;
 }
 
-static void render_block_walk_children_phase(RenderContext* rdcon, ViewBlock* block,
+static void render_block_walk_children_phase(RasterRenderContext* rdcon, ViewBlock* block,
                                              RenderBlockChildrenPhase* phase) {
     if (!rdcon || !block || !phase || !phase->has_children) return;
 
@@ -555,7 +557,7 @@ static void render_block_walk_children_phase(RenderContext* rdcon, ViewBlock* bl
     }
 }
 
-static double render_block_finish_children_phase(RenderContext* rdcon, ViewBlock* block,
+static double render_block_finish_children_phase(RasterRenderContext* rdcon, ViewBlock* block,
                                                  RenderBlockChildrenPhase* phase) {
     if (!phase) return 0;
 
@@ -574,13 +576,13 @@ static double render_block_finish_children_phase(RenderContext* rdcon, ViewBlock
     return time_elapsed_ms_f(phase->start_time, time_now_ns());
 }
 
-double render_block_paint_children(RenderContext* rdcon, ViewBlock* block) {
+double render_block_paint_children(RasterRenderContext* rdcon, ViewBlock* block) {
     RenderBlockChildrenPhase phase = render_block_begin_children_phase(rdcon, block);
     render_block_walk_children_phase(rdcon, block, &phase);
     return render_block_finish_children_phase(rdcon, block, &phase);
 }
 
-static void render_block_finish_phase(RenderContext* rdcon, ViewBlock* block,
+static void render_block_finish_phase(RasterRenderContext* rdcon, ViewBlock* block,
                                       RenderBlockPhase* phase) {
     if (!rdcon || !block || !phase) return;
 
@@ -610,13 +612,13 @@ static void render_block_finish_phase(RenderContext* rdcon, ViewBlock* block,
     render_element_marker_end(rdcon, &phase->marker_scope);
 }
 
-typedef struct RasterBlockPaintDriver {
-    RenderContext* rdcon;
+typedef struct RasterBlockPaintDriver : RenderPaintBlockDriver {
+    RasterRenderContext* rdcon;
     RenderBlockPhase phase;
 } RasterBlockPaintDriver;
 
-static bool raster_block_paint_begin(void* ctx, ViewBlock* block, void** phase) {
-    RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
+static bool raster_block_paint_begin(RenderPaintBlockDriver* ctx, ViewBlock* block, void** phase) {
+    RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block || !phase) return false;
     render_block_log_begin(driver->rdcon, block);
     driver->phase = render_block_begin_phase(driver->rdcon, block);
@@ -624,34 +626,34 @@ static bool raster_block_paint_begin(void* ctx, ViewBlock* block, void** phase) 
     return true;
 }
 
-static bool raster_block_paint_self(void* ctx, ViewBlock* block, void* phase) {
-    RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
+static bool raster_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
+    RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block || !phase) return false;
     render_block_paint_self(driver->rdcon, block, (RenderBlockPhase*)phase);
     return block_should_paint_children(block);
 }
 
-static double raster_block_paint_children(void* ctx, ViewBlock* block, void* phase) {
+static double raster_block_paint_children(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
     (void)phase;
-    RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
+    RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block) return 0.0;
     return render_block_paint_children(driver->rdcon, block);
 }
 
-static void raster_block_paint_finish(void* ctx, ViewBlock* block, void* phase) {
-    RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
+static void raster_block_paint_finish(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
+    RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block || !phase) return;
     render_block_finish_phase(driver->rdcon, block, (RenderBlockPhase*)phase);
     render_block_log_end();
 }
 
-static RenderBlockPaintResult render_block_run_paint_pipeline(RenderContext* rdcon,
+static RenderBlockPaintResult render_block_run_paint_pipeline(RasterRenderContext* rdcon,
                                                               ViewBlock* block) {
     RenderBlockPaintResult result = {};
     RasterBlockPaintDriver driver = {};
     driver.rdcon = rdcon;
     RenderPaintBlockOps ops = {};
-    ops.ctx = &driver;
+    ops.ctx = lam::up(&driver);
     ops.begin = raster_block_paint_begin;
     ops.paint_self = raster_block_paint_self;
     ops.paint_children = raster_block_paint_children;
@@ -662,7 +664,7 @@ static RenderBlockPaintResult render_block_run_paint_pipeline(RenderContext* rdc
     return result;
 }
 
-static void render_block_finish_profile(RenderContext* rdcon,
+static void render_block_finish_profile(RasterRenderContext* rdcon,
                                         RenderBlockPaintResult* result,
                                         uint64_t start_time) {
     if (!rdcon || !result || !result->painted) return;
@@ -671,7 +673,7 @@ static void render_block_finish_profile(RenderContext* rdcon,
                              this_total - result->children_time);
 }
 
-void render_block_view(RenderContext* rdcon, ViewBlock* block) {
+void render_block_view(RasterRenderContext* rdcon, ViewBlock* block) {
     uint64_t rbv_start = time_now_ns();
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_BLOCK);
 

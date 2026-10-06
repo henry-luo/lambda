@@ -6009,7 +6009,6 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
         if (fc->is_async) fc->is_generator = true;  // async def always compiles as generator
         if (fc->analysis && fc->is_async) {
             fc->analysis->may_await = true;
-            fc->analysis->needs_task_context = true;
         }
         if (fc->ext) {
             fc->ext->has_star_args = fc->has_star_args;
@@ -7889,7 +7888,7 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
     }
 
     // execute
-    log_notice("py-mir: executing JIT compiled Python code");
+    log_debug("py-mir: executing JIT compiled Python code");
     py_reset_module_vars();
     Item result = ItemError;
     if (!pm_run_hosted_guest_main(host_execution, (void*)py_main, &result)) {

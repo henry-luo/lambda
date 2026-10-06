@@ -46,7 +46,6 @@ struct VarEntry {
     MIR_reg_t reg;
     int root_slot;
     int gc_home_id;
-    int async_slot;
     MIR_type_t mir_type;
     TypeId type_id;
     // DOM4 flow fact: a declared Jube carrier type proven for this binding.
@@ -521,15 +520,14 @@ struct MirEmitter {
     void (*after_may_gc_call)(void* owner);
     void (*root_call_value)(void* owner, MIR_reg_t reg,
         JitValueClass value_class);
-    void (*after_call_result)(void* owner, MIR_reg_t reg, MIR_type_t type);
     void (*note_call_exception)(void* owner, JitExceptionEffect effect);
     MirValue (*convert_rep)(void* owner, MirValue value, ValueRep required);
     // Shared structural lowering recurses into the owning language through
     // these two hooks (D8.2.1: operator semantics dispatch through the
     // profile; D8.2.6: the common layer owns demand). Both receive
-    // `call_owner`, so a structural helper never needs a caller-built record
-    // to re-enter language lowering.
-    MirValue (*lower_value)(void* owner, AstNode* node);
+    // `call_owner`; lowering sees demand before producing the value, so a
+    // branch can avoid materializing an intermediate representation.
+    MirValue (*lower_value)(void* owner, AstNode* node, uint32_t demand);
     MIR_reg_t (*emit_condition)(void* owner, MirValue value);
     // Hosted compilers provide their build-coupled catalog lookup. Core
     // transpilers leave this NULL and retain the existing registry path.
@@ -1656,11 +1654,6 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, adopted)));
     em_emit_label(em, l_done);
-    // Scalar-home adoption creates the carrier that callers keep after an
-    // await; publish it to the async spill tracker just like a raw call result.
-    if (em->after_call_result) {
-        em->after_call_result(em->call_owner, result, MIR_T_I64);
-    }
     return result;
 }
 
@@ -1822,9 +1815,6 @@ static inline MirValue em_materialize_pending_value(MirEmitter* em,
     value.maybe_pending = false;
     // every wide lane was transported as raw bits and resolved in this frame.
     value.scalar_provenance = SCALAR_PROVENANCE_ACTIVATION_EXTENT;
-    if (em && em->after_call_result) {
-        em->after_call_result(em->call_owner, value.reg, value.mir_type);
-    }
     if (em && em->root_call_value && mir_gc_value_needs_root(
             value.value_class, value.mir_type)) {
         em->root_call_value(em->call_owner, value.reg, value.value_class);
@@ -1869,7 +1859,7 @@ static inline MirValue em_lower_value(MirEmitter* em, AstNode* node,
         log_error("mir-lowering: missing value hook");
         abort();
     }
-    return em_apply_value_demand(em, em->lower_value(em->call_owner, node), demand);
+    return em_apply_value_demand(em, em->lower_value(em->call_owner, node, demand), demand);
 }
 
 static inline MirValue em_load_module_slot(const MirModuleSlotProfile* profile,
@@ -4375,9 +4365,6 @@ static inline void em_publish_call_result(MirEmitter* em,
         const JitCallMetadata* metadata, MIR_reg_t result,
         MIR_type_t ret_type) {
     if (!em || !metadata || !result) return;
-    if (em->after_call_result) {
-        em->after_call_result(em->call_owner, result, ret_type);
-    }
     if (em->root_call_value && mir_gc_value_needs_root(
             metadata->normal_result.value.value_class, ret_type)) {
         em->root_call_value(em->call_owner, result,
@@ -4480,9 +4467,6 @@ static inline void em_emit_unclassified_call(MirEmitter* em,
         if (output && insn->ops[i].mode == MIR_OP_REG) {
             MIR_reg_t reg = insn->ops[i].u.reg;
             MIR_type_t type = MIR_reg_type(em->ctx, reg, em->func);
-            if (em->after_call_result) {
-                em->after_call_result(em->call_owner, reg, type);
-            }
             if (em->root_call_value) {
                 JitValueClass value_class = type == MIR_T_P
                     ? JIT_VALUE_RAW_GC_POINTER : JIT_VALUE_BOXED_ITEM;

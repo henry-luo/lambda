@@ -166,16 +166,15 @@ TEST_F(RdbTest, DetectDriver_MysqlScheme) {
     EXPECT_STREQ(rdb_detect_driver("mysql://localhost/mydb"), "mysql");
 }
 
-TEST_F(RdbTest, DetectDriver_DuckdbScheme) {
-    EXPECT_STREQ(rdb_detect_driver("duckdb://data.ddb"), "duckdb");
+TEST_F(RdbTest, DetectDriver_MariadbScheme) {
+    EXPECT_STREQ(rdb_detect_driver("mariadb://localhost/mydb"), "mysql");
 }
 
-TEST_F(RdbTest, DetectDriver_DuckdbExtDdb) {
-    EXPECT_STREQ(rdb_detect_driver("warehouse.ddb"), "duckdb");
-}
-
-TEST_F(RdbTest, DetectDriver_DuckdbExtDuckdb) {
-    EXPECT_STREQ(rdb_detect_driver("warehouse.duckdb"), "duckdb");
+TEST_F(RdbTest, DetectDriver_DuckdbNotSupported) {
+    // DuckDB is out of scope (RDB13): neither its scheme nor its files are claimed
+    EXPECT_EQ(rdb_detect_driver("duckdb://data.ddb"), nullptr);
+    EXPECT_EQ(rdb_detect_driver("warehouse.ddb"), nullptr);
+    EXPECT_EQ(rdb_detect_driver("warehouse.duckdb"), nullptr);
 }
 
 TEST_F(RdbTest, DetectDriver_Unknown) {
@@ -1734,3 +1733,760 @@ TEST_F(RdbTest, FunctionDetails) {
     }
     rdb_close(conn);
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §30 Credential redaction (RDB9)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static const char* redact(const char* uri) {
+    static char buf[512];
+    return rdb_redact_uri(uri, buf, sizeof(buf));
+}
+
+TEST(RdbRedact, UriUserinfoPassword) {
+    EXPECT_STREQ(redact("postgresql://bob:s3cret@db.local:5432/shop"),
+              "postgresql://bob:***@db.local:5432/shop");
+    EXPECT_STREQ(redact("postgres://bob@db.local/shop"), "postgres://bob@db.local/shop");
+    // the last '@' ends the userinfo; an unescaped '/' stays inside the secret
+    EXPECT_STREQ(redact("mysql://u:p@ss/x@h/db"), "mysql://u:***@h/db");
+}
+
+TEST(RdbRedact, QueryParameters) {
+    EXPECT_STREQ(redact("mysql://u@h/db?ssl-mode=REQUIRED&password=x&PWD=y#frag"),
+              "mysql://u@h/db?ssl-mode=REQUIRED&password=***&PWD=***#frag");
+}
+
+TEST(RdbRedact, LibpqKeyValue) {
+    EXPECT_STREQ(redact("host=localhost user=bob password=secret dbname=x"),
+              "host=localhost user=bob password=*** dbname=x");
+    EXPECT_STREQ(redact("host=h password = 'se cret\\'x' port=5"),
+              "host=h password = *** port=5");
+}
+
+TEST(RdbRedact, PathsUnchanged) {
+    EXPECT_STREQ(redact("temp/test_rdb.db"), "temp/test_rdb.db");
+    EXPECT_STREQ(redact("/data/a=b.db"), "/data/a=b.db");
+    EXPECT_STREQ(redact(":memory:"), ":memory:");
+}
+
+TEST(RdbRedact, TruncatesWithTerminator) {
+    char buf[8];
+    rdb_redact_uri("postgresql://bob:secret@h/db", buf, sizeof(buf));
+    EXPECT_STREQ(buf, "postgre");
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §31 Dialect rendering (RDB5)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+TEST(RdbDialect, IdentifierQuotesAreDoubled) {
+    RdbDialect ansi = { RDB_PLACEHOLDER_DOLLAR, '"' };
+    RdbDialect mysql = { RDB_PLACEHOLDER_QMARK, '`' };
+    StrBuf* sb = strbuf_new();
+    rdb_append_ident(sb, &ansi, "we\"ird");
+    strbuf_append_char(sb, ' ');
+    rdb_append_ident(sb, &mysql, "a`b");
+    EXPECT_STREQ(sb->str, "\"we\"\"ird\" `a``b`");
+    strbuf_free(sb);
+}
+
+TEST(RdbDialect, PlaceholderStyles) {
+    RdbDialect qnum = { RDB_PLACEHOLDER_QNUM, '"' };
+    RdbDialect dollar = { RDB_PLACEHOLDER_DOLLAR, '"' };
+    RdbDialect qmark = { RDB_PLACEHOLDER_QMARK, '`' };
+    StrBuf* sb = strbuf_new();
+    rdb_append_placeholder(sb, &qnum, 3);
+    rdb_append_placeholder(sb, &dollar, 12);
+    rdb_append_placeholder(sb, &qmark, 7);
+    EXPECT_STREQ(sb->str, "?3$12?");
+    strbuf_free(sb);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §32 Column batches through the shredding adapter (RDB7)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static int64_t arrow_i64(const struct ArrowArray* col, int64_t row) {
+    return ((const int64_t*)col->buffers[1])[row];
+}
+
+static const char* arrow_str(const struct ArrowArray* col, int64_t row) {
+    static char buf[256];
+    const int32_t* offsets = (const int32_t*)col->buffers[1];
+    const char* data = (const char*)col->buffers[2];
+    snprintf(buf, sizeof(buf), "%.*s", (int)(offsets[row + 1] - offsets[row]), data + offsets[row]);
+    return buf;
+}
+
+static bool arrow_valid(const struct ArrowArray* col, int64_t row) {
+    const uint8_t* validity = (const uint8_t*)col->buffers[0];
+    return !validity || (validity[row / 8] >> (row % 8)) & 1;
+}
+
+TEST_F(RdbTest, BatchSchemaFromDeclaredTypes) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT books.id AS id, title, price, published, metadata, rating FROM books "
+        "JOIN authors ON authors.id = books.author_id ORDER BY books.id");
+    ASSERT_NE(stmt, nullptr);
+    struct ArrowSchema schema;
+    ASSERT_EQ(rdb_result_schema(stmt, &schema), RDB_OK);
+    EXPECT_STREQ(schema.format, "+s");
+    ASSERT_EQ(schema.n_children, 6);
+    EXPECT_STREQ(schema.children[0]->format, "l");
+    EXPECT_STREQ(schema.children[0]->name, "id");
+    EXPECT_STREQ(schema.children[1]->format, "u");
+    EXPECT_STREQ(schema.children[2]->format, "u");   // DECIMAL travels as tagged text
+    ASSERT_NE(schema.children[2]->metadata, nullptr);
+    EXPECT_EQ(memcmp(schema.children[2]->metadata + 4 + 4 + 15 + 4, "decimal", 7), 0);
+    EXPECT_STREQ(schema.children[5]->format, "g");
+    schema.release(&schema);
+    EXPECT_EQ(schema.release, nullptr);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, BatchFetchSplitsRowsAndMarksNulls) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT id, title, price, metadata FROM books ORDER BY id");
+    ASSERT_NE(stmt, nullptr);
+
+    struct ArrowArray batch;
+    ASSERT_EQ(rdb_fetch_batch(stmt, 2, &batch), RDB_ROW);
+    EXPECT_EQ(batch.length, 2);
+    ASSERT_EQ(batch.n_children, 4);
+    EXPECT_EQ(arrow_i64(batch.children[0], 0), 1);
+    EXPECT_EQ(arrow_i64(batch.children[0], 1), 2);
+    EXPECT_STREQ(arrow_str(batch.children[1], 1), "Type Theory");
+    EXPECT_STREQ(arrow_str(batch.children[2], 0), "29.99");
+    batch.release(&batch);
+
+    ASSERT_EQ(rdb_fetch_batch(stmt, 2, &batch), RDB_ROW);
+    EXPECT_EQ(batch.length, 1);
+    EXPECT_STREQ(arrow_str(batch.children[1], 0), "Functional Programming");
+    EXPECT_STREQ(arrow_str(batch.children[2], 0), "24.5");
+    EXPECT_FALSE(arrow_valid(batch.children[3], 0));
+    EXPECT_EQ(batch.children[3]->null_count, 1);
+    batch.release(&batch);
+
+    EXPECT_EQ(rdb_fetch_batch(stmt, 2, &batch), RDB_DONE);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, BatchTypesExpressionColumnsFromFirstRow) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT COUNT(*) AS n, 'x' || 'y' AS s FROM books");
+    ASSERT_NE(stmt, nullptr);
+    struct ArrowSchema schema;
+    ASSERT_EQ(rdb_result_schema(stmt, &schema), RDB_OK);
+    EXPECT_STREQ(schema.children[0]->format, "l");
+    EXPECT_STREQ(schema.children[1]->format, "u");
+    schema.release(&schema);
+    // the row consumed to type the columns is still delivered
+    struct ArrowArray batch;
+    ASSERT_EQ(rdb_fetch_batch(stmt, 10, &batch), RDB_ROW);
+    EXPECT_EQ(batch.length, 1);
+    EXPECT_EQ(arrow_i64(batch.children[0], 0), 3);
+    EXPECT_STREQ(arrow_str(batch.children[1], 0), "xy");
+    batch.release(&batch);
+    EXPECT_EQ(rdb_fetch_batch(stmt, 10, &batch), RDB_DONE);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, BatchOutlivesStatementAndConnection) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT name FROM authors ORDER BY id");
+    struct ArrowArray batch;
+    ASSERT_EQ(rdb_fetch_batch(stmt, 100, &batch), RDB_ROW);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+    EXPECT_EQ(batch.length, 3);
+    EXPECT_STREQ(arrow_str(batch.children[0], 2), "Charlie");
+    batch.release(&batch);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §33 Host-owned connections (JA16.1–JA16.3) with a fake driver
+ * ══════════════════════════════════════════════════════════════════════ */
+
+struct FakeDriverState {
+    int  opens;
+    int  closes;
+    int  finalizes;
+    bool skip_register;     // contract violation: open without registering
+    bool wrong_peer;        // connects somewhere it was not authorised for
+};
+static FakeDriverState fake;
+static int fake_stmt_token;
+
+static int fake_resolve(const char* uri, RdbTarget* out, int cap, int* out_count) {
+    (void)uri;
+    if (cap < 1) return RDB_ERROR;
+    memset(out, 0, sizeof(*out));
+    out->kind = RDB_PEER_TCP;
+    out->port = 5432;
+    snprintf(out->host, sizeof(out->host), "db.example");
+    *out_count = 1;
+    return RDB_OK;
+}
+
+static int fake_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
+                     const RdbOpenOptions* opts, void** out_conn) {
+    (void)opts;
+    fake.opens++;
+    void* native = &fake;
+    if (!fake.skip_register) {
+        RdbConnInfo info;
+        memset(&info, 0, sizeof(info));
+        int n = 0;
+        fake_resolve(uri, &info.peer, 1, &n);
+        if (fake.wrong_peer) info.peer.port = 6543;
+        info.socket_fd = -1;
+        if (host->conn_register(open_ctx, native, &info) != RDB_OK) {
+            fake.closes++;      // a refused driver closes its own connection
+            return RDB_ERROR;
+        }
+    }
+    *out_conn = native;
+    return RDB_OK;
+}
+
+static void fake_close(void* conn) { (void)conn; fake.closes++; }
+static int fake_load_schema(void*, const RdbHostAPI*, void*, RdbSchema*) { return RDB_OK; }
+static int fake_prepare(void*, const char*, void** out) { *out = &fake_stmt_token; return RDB_OK; }
+static int fake_bind(void*, int, const RdbParam*) { return RDB_OK; }
+static int fake_step(void*) { return RDB_DONE; }
+static int fake_column_count(void*) { return 0; }
+static RdbValue fake_value(void*, int) { RdbValue v; memset(&v, 0, sizeof(v)); v.is_null = true; return v; }
+static void fake_finalize(void*) { fake.finalizes++; }
+static const char* fake_error(void*) { return "fake"; }
+
+static RdbDriver make_fake_driver(const char* name) {
+    RdbDriver d;
+    memset(&d, 0, sizeof(d));
+    d.struct_size = sizeof(RdbDriver);
+    d.api_version = RDB_DRIVER_API_VERSION;
+    d.name = name;
+    d.resolve_targets = fake_resolve;
+    d.open = fake_open;
+    d.close = fake_close;
+    d.load_schema = fake_load_schema;
+    d.prepare = fake_prepare;
+    d.bind_param = fake_bind;
+    d.step = fake_step;
+    d.column_count = fake_column_count;
+    d.column_value = fake_value;
+    d.finalize = fake_finalize;
+    d.error_msg = fake_error;
+    return d;
+}
+
+static RdbDriver fake_driver = make_fake_driver("fakedb");
+
+struct FakeRegistry {
+    int adds;
+    int removes;
+    int refused_authorizations;
+    bool refuse_authorize;
+    RdbConnLife* life;
+};
+static FakeRegistry registry;
+
+static int reg_authorize(const char*, const RdbTarget*, int) {
+    if (registry.refuse_authorize) registry.refused_authorizations++;
+    return registry.refuse_authorize ? RDB_ERROR : RDB_OK;
+}
+static int reg_add(RdbConnLife* life, const char*, uint32_t* rid, void** owner) {
+    registry.adds++;
+    registry.life = life;
+    *rid = 42;
+    *owner = &registry;
+    return RDB_OK;
+}
+static void reg_remove(void* owner, uint32_t rid) {
+    EXPECT_EQ(owner, &registry);
+    EXPECT_EQ(rid, 42u);
+    registry.removes++;
+    rdb_conn_life_close(registry.life);     // the registry is the close authority
+}
+static const RdbRegistryHooks test_hooks = { reg_authorize, reg_add, reg_remove };
+
+class RdbRegistryTest : public ::testing::Test {
+protected:
+    Pool* pool;
+    void SetUp() override {
+        pool = pool_create();
+        memset(&fake, 0, sizeof(fake));
+        memset(&registry, 0, sizeof(registry));
+        ASSERT_TRUE(rdb_register_driver(&fake_driver));
+        rdb_set_registry_hooks(&test_hooks);
+    }
+    void TearDown() override {
+        rdb_set_registry_hooks(NULL);
+        pool_destroy(pool);
+    }
+};
+
+TEST_F(RdbRegistryTest, OpenRegistersAndCloseGoesThroughRegistry) {
+    RdbConn* conn = rdb_open(pool, "fakedb://bob:pw@db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    EXPECT_EQ(conn->rid, 42u);
+    EXPECT_STREQ(conn->uri, "fakedb://bob:***@db.example/x");
+    EXPECT_EQ(conn->info.peer.port, 5432);
+    EXPECT_EQ(registry.adds, 1);
+    rdb_close(conn);
+    EXPECT_EQ(registry.removes, 1);
+    EXPECT_EQ(fake.closes, 1);
+    EXPECT_EQ(conn->life, nullptr);
+}
+
+TEST_F(RdbRegistryTest, CloseCascadesLiveStatements) {
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* a = rdb_prepare(conn, "SELECT 1");
+    RdbStmt* b = rdb_prepare(conn, "SELECT 2");
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    rdb_finalize(a);
+    EXPECT_EQ(fake.finalizes, 1);
+    rdb_close(conn);                        // b is finalized by the cascade
+    EXPECT_EQ(fake.finalizes, 2);
+    rdb_finalize(b);                        // a late finalize is a no-op
+    EXPECT_EQ(fake.finalizes, 2);
+    EXPECT_EQ(rdb_step(b), RDB_ERROR);
+}
+
+TEST_F(RdbRegistryTest, TeardownClosesLeakedConnection) {
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT 1");
+    // context teardown runs the registry's close callback without the owner
+    rdb_conn_life_close(registry.life);
+    EXPECT_EQ(fake.closes, 1);
+    EXPECT_EQ(fake.finalizes, 1);
+    EXPECT_EQ(rdb_step(stmt), RDB_ERROR);
+    EXPECT_EQ(rdb_ping(conn), RDB_CONN_LOST);
+    // the owner's late close releases its record without touching the registry
+    rdb_close(conn);
+    EXPECT_EQ(registry.removes, 0);
+    EXPECT_EQ(fake.closes, 1);
+}
+
+TEST_F(RdbRegistryTest, OpenWithoutRegistrationIsRejected) {
+    fake.skip_register = true;
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    EXPECT_EQ(conn, nullptr);
+    EXPECT_EQ(fake.opens, 1);
+    EXPECT_EQ(fake.closes, 1);              // the host closed the unregistered handle
+    EXPECT_EQ(registry.adds, 0);
+}
+
+TEST_F(RdbRegistryTest, UnauthorisedPeerIsRefused) {
+    fake.wrong_peer = true;
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    EXPECT_EQ(conn, nullptr);
+    EXPECT_EQ(fake.closes, 1);
+    EXPECT_EQ(registry.adds, 0);
+}
+
+TEST_F(RdbRegistryTest, AuthorisationHappensBeforeConnecting) {
+    registry.refuse_authorize = true;
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    EXPECT_EQ(conn, nullptr);
+    EXPECT_EQ(registry.refused_authorizations, 1);
+    EXPECT_EQ(fake.opens, 0);
+}
+
+TEST_F(RdbRegistryTest, OptionalOpsReportUnsupported) {
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    EXPECT_EQ(rdb_ping(conn), RDB_UNSUPPORTED);
+    EXPECT_EQ(rdb_cancel(conn), RDB_UNSUPPORTED);
+    EXPECT_EQ(rdb_set_timeout(conn, 1000), RDB_UNSUPPORTED);
+    rdb_close(conn);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §34 Driver tables and the resolver (RDB3/RDB4)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static RdbDriver resolved_driver = make_fake_driver("resolvedb");
+static int resolver_calls = 0;
+
+static const RdbDriver* test_resolver(const char* name) {
+    resolver_calls++;
+    return strcmp(name, "resolvedb") == 0 ? &resolved_driver : NULL;
+}
+
+TEST(RdbDriverTable, ResolverRegistersOnMiss) {
+    rdb_set_driver_resolver(test_resolver);
+    resolver_calls = 0;
+    EXPECT_EQ(rdb_get_driver("resolvedb"), &resolved_driver);
+    EXPECT_EQ(rdb_get_driver("resolvedb"), &resolved_driver);
+    EXPECT_EQ(resolver_calls, 1);           // registered after the first miss
+    EXPECT_EQ(rdb_get_driver("nosuchdb"), nullptr);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbDriverTable, IncompatibleTablesAreRejected) {
+    RdbDriver old_abi = make_fake_driver("oldabi");
+    old_abi.api_version = 1;
+    EXPECT_FALSE(rdb_register_driver(&old_abi));
+    RdbDriver truncated = make_fake_driver("truncated");
+    truncated.struct_size = offsetof(RdbDriver, prepare);
+    EXPECT_FALSE(rdb_register_driver(&truncated));
+    RdbDriver missing_open = make_fake_driver("noopen");
+    missing_open.open = NULL;
+    EXPECT_FALSE(rdb_register_driver(&missing_open));
+    EXPECT_EQ(rdb_get_driver("oldabi"), nullptr);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §35 Host TLS bridge without TLS (RDB11): protocol negotiation paths
+ *     against fake servers on the loopback interface
+ * ══════════════════════════════════════════════════════════════════════ */
+
+#ifndef _WIN32     // the bridge's AF_UNIX listener is POSIX-only so far
+
+#include "../lib/rdb_tunnel.h"
+#include <pthread.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+
+enum FakeServerMode {
+    FAKE_PG_REFUSE_TLS,     // read SSLRequest, answer 'N', then echo
+    FAKE_ECHO,              // echo from the first byte
+    FAKE_MYSQL_NO_TLS,      // send a greeting without CLIENT_SSL, then echo
+};
+
+struct FakeServer {
+    int listen_fd;
+    int port;
+    FakeServerMode mode;
+    pthread_t thread;
+    bool saw_ssl_request;
+};
+
+static const uint8_t fake_mysql_greeting[] = {
+    // protocol 10, "8.0\0", conn id, 8 bytes auth data, filler, caps low (no CLIENT_SSL)
+    10, '8', '.', '0', 0, 1, 0, 0, 0, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 0, 0xff, 0xf7,
+};
+
+static void* fake_server_main(void* arg) {
+    FakeServer* fs = (FakeServer*)arg;
+    int fd = accept(fs->listen_fd, NULL, NULL);
+    if (fd < 0) return NULL;
+    uint8_t buf[256];
+    if (fs->mode == FAKE_PG_REFUSE_TLS) {
+        ssize_t n = recv(fd, buf, 8, MSG_WAITALL);
+        fs->saw_ssl_request = n == 8 && buf[4] == 0x04 && buf[5] == 0xd2 && buf[6] == 0x16 && buf[7] == 0x2f;
+        send(fd, "N", 1, 0);
+    } else if (fs->mode == FAKE_MYSQL_NO_TLS) {
+        uint8_t header[4] = { sizeof(fake_mysql_greeting), 0, 0, 0 };
+        send(fd, header, 4, 0);
+        send(fd, fake_mysql_greeting, sizeof(fake_mysql_greeting), 0);
+    }
+    ssize_t n;
+    while ((n = recv(fd, buf, sizeof(buf), 0)) > 0) send(fd, buf, (size_t)n, 0);
+    close(fd);
+    return NULL;
+}
+
+static bool fake_server_start(FakeServer* fs, FakeServerMode mode) {
+    memset(fs, 0, sizeof(*fs));
+    fs->mode = mode;
+    fs->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t len = sizeof(addr);
+    if (bind(fs->listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0 ||
+            listen(fs->listen_fd, 4) < 0 ||
+            getsockname(fs->listen_fd, (struct sockaddr*)&addr, &len) < 0) {
+        return false;
+    }
+    fs->port = ntohs(addr.sin_port);
+    return pthread_create(&fs->thread, NULL, fake_server_main, fs) == 0;
+}
+
+static void fake_server_stop(FakeServer* fs) {
+    shutdown(fs->listen_fd, SHUT_RDWR);
+    close(fs->listen_fd);
+    pthread_join(fs->thread, NULL);
+}
+
+static RdbTarget loopback_target(int port) {
+    RdbTarget t;
+    memset(&t, 0, sizeof(t));
+    t.kind = RDB_PEER_TCP;
+    t.port = port;
+    snprintf(t.host, sizeof(t.host), "127.0.0.1");
+    return t;
+}
+
+static RdbTunnelSpec tunnel_spec(RdbWireProtocol protocol, RdbTlsMode tls) {
+    RdbTunnelSpec spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.struct_size = sizeof(spec);
+    spec.protocol = protocol;
+    spec.tls = tls;
+    return spec;
+}
+
+static int connect_local(const char* path) {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        close(fd);
+        return -1;
+    }
+    struct timeval tv = { 5, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    return fd;
+}
+
+/** send "ping" and return how many bytes of the echo came back (0 = EOF) */
+static ssize_t round_trip(int fd, char* reply, size_t cap) {
+    send(fd, "ping", 4, 0);
+    return recv(fd, reply, cap, MSG_WAITALL);
+}
+
+TEST(RdbTunnel, PostgresPreferFallsBackToPlaintextWhenRefused) {
+    FakeServer fs;
+    ASSERT_TRUE(fake_server_start(&fs, FAKE_PG_REFUSE_TLS));
+    RdbTarget target = loopback_target(fs.port);
+    RdbTunnelSpec spec = tunnel_spec(RDB_WIRE_POSTGRES, RDB_TLS_PREFER);
+    char endpoint[1024];
+    RdbTunnel* tunnel = rdb_tunnel_open(&target, &spec, endpoint, sizeof(endpoint));
+    ASSERT_NE(tunnel, nullptr);
+    char sock[1100];
+    snprintf(sock, sizeof(sock), "%s/.s.PGSQL.%d", endpoint, fs.port);
+    int fd = connect_local(sock);
+    ASSERT_GE(fd, 0);
+    char reply[4];
+    EXPECT_EQ(round_trip(fd, reply, sizeof(reply)), 4);
+    EXPECT_EQ(memcmp(reply, "ping", 4), 0);
+    EXPECT_TRUE(fs.saw_ssl_request);
+    close(fd);
+    rdb_tunnel_close(tunnel);
+    fake_server_stop(&fs);
+    struct stat st;
+    EXPECT_NE(stat(endpoint, &st), 0);      // the private directory is gone
+}
+
+TEST(RdbTunnel, PostgresRequireFailsWhenRefused) {
+    FakeServer fs;
+    ASSERT_TRUE(fake_server_start(&fs, FAKE_PG_REFUSE_TLS));
+    RdbTarget target = loopback_target(fs.port);
+    RdbTunnelSpec spec = tunnel_spec(RDB_WIRE_POSTGRES, RDB_TLS_REQUIRE);
+    char endpoint[1024];
+    RdbTunnel* tunnel = rdb_tunnel_open(&target, &spec, endpoint, sizeof(endpoint));
+    ASSERT_NE(tunnel, nullptr);
+    char sock[1100];
+    snprintf(sock, sizeof(sock), "%s/.s.PGSQL.%d", endpoint, fs.port);
+    int fd = connect_local(sock);
+    ASSERT_GE(fd, 0);
+    char reply[4];
+    EXPECT_EQ(round_trip(fd, reply, sizeof(reply)), 0);   // the bridge hangs up
+    close(fd);
+    rdb_tunnel_close(tunnel);
+    fake_server_stop(&fs);
+}
+
+TEST(RdbTunnel, DisableRelaysWithoutNegotiation) {
+    FakeServer fs;
+    ASSERT_TRUE(fake_server_start(&fs, FAKE_ECHO));
+    RdbTarget target = loopback_target(fs.port);
+    RdbTunnelSpec spec = tunnel_spec(RDB_WIRE_POSTGRES, RDB_TLS_DISABLE);
+    char endpoint[1024];
+    RdbTunnel* tunnel = rdb_tunnel_open(&target, &spec, endpoint, sizeof(endpoint));
+    ASSERT_NE(tunnel, nullptr);
+    char sock[1100];
+    snprintf(sock, sizeof(sock), "%s/.s.PGSQL.%d", endpoint, fs.port);
+    int fd = connect_local(sock);
+    ASSERT_GE(fd, 0);
+    char reply[4];
+    EXPECT_EQ(round_trip(fd, reply, sizeof(reply)), 4);
+    EXPECT_EQ(memcmp(reply, "ping", 4), 0);
+    close(fd);
+    rdb_tunnel_close(tunnel);
+    fake_server_stop(&fs);
+}
+
+TEST(RdbTunnel, MysqlPreferForwardsGreetingWithoutTls) {
+    FakeServer fs;
+    ASSERT_TRUE(fake_server_start(&fs, FAKE_MYSQL_NO_TLS));
+    RdbTarget target = loopback_target(fs.port);
+    RdbTunnelSpec spec = tunnel_spec(RDB_WIRE_MYSQL, RDB_TLS_PREFER);
+    char endpoint[1024];
+    RdbTunnel* tunnel = rdb_tunnel_open(&target, &spec, endpoint, sizeof(endpoint));
+    ASSERT_NE(tunnel, nullptr);
+    int fd = connect_local(endpoint);
+    ASSERT_GE(fd, 0);
+    uint8_t packet[4 + sizeof(fake_mysql_greeting)];
+    ASSERT_EQ(recv(fd, packet, sizeof(packet), MSG_WAITALL), (ssize_t)sizeof(packet));
+    EXPECT_EQ(packet[0], sizeof(fake_mysql_greeting));
+    EXPECT_EQ(memcmp(packet + 4, fake_mysql_greeting, sizeof(fake_mysql_greeting)), 0);
+    char reply[4];
+    EXPECT_EQ(round_trip(fd, reply, sizeof(reply)), 4);
+    close(fd);
+    rdb_tunnel_close(tunnel);
+    fake_server_stop(&fs);
+}
+
+TEST(RdbTunnel, MysqlRequireFailsWithoutServerTls) {
+    FakeServer fs;
+    ASSERT_TRUE(fake_server_start(&fs, FAKE_MYSQL_NO_TLS));
+    RdbTarget target = loopback_target(fs.port);
+    RdbTunnelSpec spec = tunnel_spec(RDB_WIRE_MYSQL, RDB_TLS_REQUIRE);
+    char endpoint[1024];
+    RdbTunnel* tunnel = rdb_tunnel_open(&target, &spec, endpoint, sizeof(endpoint));
+    ASSERT_NE(tunnel, nullptr);
+    int fd = connect_local(endpoint);
+    ASSERT_GE(fd, 0);
+    uint8_t packet[64];
+    EXPECT_EQ(recv(fd, packet, sizeof(packet), 0), 0);      // nothing reaches the client
+    close(fd);
+    rdb_tunnel_close(tunnel);
+    fake_server_stop(&fs);
+}
+
+TEST(RdbTunnel, RejectsFileTargets) {
+    RdbTarget target;
+    memset(&target, 0, sizeof(target));
+    target.kind = RDB_PEER_FILE;
+    RdbTunnelSpec spec = tunnel_spec(RDB_WIRE_POSTGRES, RDB_TLS_DISABLE);
+    char endpoint[1024];
+    EXPECT_EQ(rdb_tunnel_open(&target, &spec, endpoint, sizeof(endpoint)), nullptr);
+}
+
+#endif  // _WIN32
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §36 OS trust store (Q5): the platform roots load once and include a
+ *     well-known public root
+ * ══════════════════════════════════════════════════════════════════════ */
+
+#include "../lib/trust_store.h"
+#include <mbedtls/x509_crt.h>
+
+TEST(TrustStore, LoadsPlatformRoots) {
+    if (getenv("SSL_CERT_FILE")) GTEST_SKIP() << "SSL_CERT_FILE replaces the platform store";
+    struct mbedtls_x509_crt* roots = trust_store_roots();
+    ASSERT_NE(roots, nullptr);
+    EXPECT_GT(trust_store_root_count(), 50);
+    // ISRG Root X1 (Let's Encrypt) ships in every current platform store
+    bool found = false;
+    char subject[512];
+    for (const mbedtls_x509_crt* c = roots; c && c->raw.len && !found; c = c->next) {
+        if (mbedtls_x509_dn_gets(subject, sizeof(subject), &c->subject) > 0) {
+            found = strstr(subject, "ISRG Root X1") != NULL;
+        }
+    }
+    EXPECT_TRUE(found);
+    EXPECT_EQ(trust_store_roots(), roots);      // loaded once, shared
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §37 Live cancel (§13.5.4): cancel from another thread interrupts an
+ *     in-flight query and leaves the session usable. Needs the built
+ *     rdb-drivers module and LAMBDA_TEST_PG_URI / LAMBDA_TEST_MYSQL_URI
+ *     (make test-rdb-drivers-local); skipped otherwise.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+#ifndef _WIN32
+
+#include "../lambda/jube/jube.h"
+#include <dlfcn.h>
+#include <time.h>
+
+static const JubeModuleDef* live_module = NULL;
+
+/** the module's drivers, loaded straight from the dylib (no Jube registry) */
+static const RdbDriver* live_resolver(const char* name) {
+    if (!live_module) {
+        void* image = dlopen("modules/rdb-drivers/rdb-drivers.dylib", RTLD_NOW | RTLD_LOCAL);
+        if (!image) image = dlopen("modules/rdb-drivers/rdb-drivers.so", RTLD_NOW | RTLD_LOCAL);
+        typedef const JubeModuleDef* (*EntryFn)(void);
+        EntryFn entry = image ? (EntryFn)dlsym(image, "jube_module") : NULL;
+        const JubeModuleDef* def = entry ? entry() : NULL;
+        if (!def || def->init(NULL) != 0) return NULL;   // the module ignores the Jube host
+        live_module = def;
+    }
+    for (size_t i = 0; i < live_module->rdb_driver_count; i++) {
+        if (strcmp(live_module->rdb_drivers[i]->name, name) == 0) return live_module->rdb_drivers[i];
+    }
+    return NULL;
+}
+
+static double live_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+struct LiveCancel {
+    RdbConn* conn;
+    int rc;
+};
+
+static void* live_cancel_main(void* arg) {
+    LiveCancel* lc = (LiveCancel*)arg;
+    usleep(500 * 1000);     // let the query reach the server first
+    lc->rc = rdb_cancel(lc->conn);
+    return NULL;
+}
+
+/** run a 30 s sleep, cancel it after 0.5 s, then check the session still answers */
+static void live_cancel_check(const char* env, const char* driver, const char* sleep_sql) {
+    const char* uri = getenv(env);
+    if (!uri) GTEST_SKIP() << env << " not set (make test-rdb-drivers-local)";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver(driver)) GTEST_SKIP() << "rdb-drivers module not built (make build-rdb-drivers)";
+    Pool* pool = pool_create();
+    RdbConn* conn = rdb_open(pool, uri, driver, true);
+    ASSERT_NE(conn, nullptr);
+    EXPECT_TRUE(conn->driver->caps & RDB_CAP_CANCEL);
+
+    RdbStmt* stmt = rdb_prepare(conn, sleep_sql);
+    ASSERT_NE(stmt, nullptr);
+    LiveCancel lc = { conn, RDB_ERROR };
+    pthread_t canceller;
+    ASSERT_EQ(pthread_create(&canceller, NULL, live_cancel_main, &lc), 0);
+    double start = live_now();
+    rdb_step(stmt);         // PostgreSQL fails with 57014; MySQL's SLEEP returns 1
+    double elapsed = live_now() - start;
+    pthread_join(canceller, NULL);
+    rdb_finalize(stmt);
+    EXPECT_EQ(lc.rc, RDB_OK);
+    EXPECT_LT(elapsed, 10.0) << "the query ran to completion instead of being cancelled";
+
+    RdbStmt* again = rdb_prepare(conn, "SELECT 1");
+    ASSERT_NE(again, nullptr);
+    EXPECT_EQ(rdb_step(again), RDB_ROW);
+    rdb_finalize(again);
+    rdb_close(conn);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbLiveCancel, PostgresqlInterruptsSleep) {
+    live_cancel_check("LAMBDA_TEST_PG_URI", "postgresql", "SELECT pg_sleep(30)");
+}
+
+TEST(RdbLiveCancel, MysqlInterruptsSleep) {
+    live_cancel_check("LAMBDA_TEST_MYSQL_URI", "mysql", "SELECT SLEEP(30)");
+}
+
+#endif  // _WIN32

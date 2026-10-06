@@ -10,7 +10,9 @@
 #endif
 
 #include "../lambda/runtime/concurrency.h"
+#include "../lambda/runtime/activation.h"
 #include "../lambda/lambda.hpp"
+#include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/recovery_frame.h"
 #include "../lambda/runtime/lambda-stack.h"
@@ -856,16 +858,24 @@ typedef struct RecordFrame {
     Item send_value;
 } RecordFrame;
 
-static LambdaTaskPoll record_and_complete(
-    LambdaTask* task, void* data, Item* out) {
-    RecordFrame* frame = (RecordFrame*)data;
+// Test frames are plain C structs owned by the test; an entry receives one as
+// a raw pointer Item, which the collector ignores as unmanaged.
+static Item frame_arg(void* frame) {
+    return (Item){.item = (uint64_t)(uintptr_t)frame};
+}
+
+static LambdaTask* entry_task(Activation* self) {
+    return (LambdaTask*)activation_user(self);
+}
+
+static Item record_and_complete(Activation* self, Item arg) {
+    RecordFrame* frame = (RecordFrame*)(uintptr_t)arg.item;
     frame->order[(*frame->order_count)++] = frame->id;
     if (frame->send_target) {
-        EXPECT_EQ(lambda_task_send(task, frame->send_target, frame->send_value),
-            LAMBDA_SEND_OK);
+        EXPECT_EQ(lambda_task_send(entry_task(self), frame->send_target,
+            frame->send_value), LAMBDA_SEND_OK);
     }
-    *out = frame->result;
-    return LAMBDA_TASK_POLL_DONE;
+    return frame->result;
 }
 
 typedef struct ParkFrame {
@@ -878,42 +888,41 @@ typedef struct WaitFrame {
     Item timeout;
 } WaitFrame;
 
-static LambdaTaskPoll park_then_finish(LambdaTask* task, void* data, Item* out) {
-    ParkFrame* frame = (ParkFrame*)data;
+// Parks once with no registered wakeup; the test supplies the wake.
+static Item park_then_finish(Activation* self, Item arg) {
+    ParkFrame* frame = (ParkFrame*)(uintptr_t)arg.item;
     frame->runs++;
-    if (frame->runs == 1) {
-        lambda_task_park(task);
-        return LAMBDA_TASK_POLL_PARKED;
-    }
-    if (!lambda_task_take_resume_value(task, &frame->resumed)) {
-        frame->resumed = ItemNull;
-    }
-    *out = frame->resumed;
-    return LAMBDA_TASK_POLL_DONE;
+    frame->resumed = lambda_task_suspend(entry_task(self));
+    frame->runs++;
+    return frame->resumed;
 }
 
-static LambdaTaskPoll wait_with_timeout(LambdaTask* task, void* data, Item* out) {
-    (void)task;
-    WaitFrame* frame = (WaitFrame*)data;
-    Item result = pn_wait2(frame->handle, frame->timeout);
-    if (result.item == ITEM_TASK_SUSPENDED) {
-        return LAMBDA_TASK_POLL_PARKED;
-    }
-    *out = result;
-    return LAMBDA_TASK_POLL_DONE;
+static Item wait_with_timeout(Activation* self, Item arg) {
+    (void)self;
+    WaitFrame* frame = (WaitFrame*)(uintptr_t)arg.item;
+    return pn_wait2(frame->handle, frame->timeout);
 }
 
-static LambdaTaskPoll raise_task_fault(LambdaTask* task, void* data, Item* out) {
-    (void)task;
-    (void)data;
-    (void)out;
-    // The scheduler must own the native target for this poll; it cannot
-    // survive into a later resumption after the task yields.
+static Item raise_task_fault(Activation* self, Item arg) {
+    (void)self;
+    (void)arg;
+    // The activation owns the native target for this fault; it can never
+    // jump to the scheduler's stack.
     if (!lambda_recovery_frame_raise_fault(
             LAMBDA_FAULT_SIDE_STACK_EXHAUSTION, ERR_TYPE_MISMATCH)) {
-        ADD_FAILURE() << "task fault had no scheduler recovery target";
+        ADD_FAILURE() << "task fault had no recovery target";
     }
-    return LAMBDA_TASK_POLL_DONE;
+    return ItemNull;
+}
+
+// Holds a fresh VMap in the parked task's own root segment.
+static Item hold_vmap_then_park(Activation* self, Item arg) {
+    VMap** held_out = (VMap**)(uintptr_t)arg.item;
+    RootFrame roots(1);
+    Rooted<Item> held(roots, (Item){.vmap = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP)});
+    *held_out = held.get().vmap;
+    (void)lambda_task_suspend(entry_task(self));
+    return held.get();
 }
 
 class LambdaConcurrencyRuntime : public ::testing::Test {
@@ -933,6 +942,7 @@ protected:
         eval.heap = &heap;
         ASSERT_TRUE(eval_context_init(&eval));
         err_set_heap_allocator(heap_calloc);
+        gc_set_root_visitor(concurrency_test_gc, activation_gc_visit_roots);
         scheduler = lambda_scheduler_create(3);
         ASSERT_NE(scheduler, nullptr);
         eval.scheduler = scheduler;
@@ -960,9 +970,9 @@ TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
         {2, order, &count, {.item = i2it(22)}, NULL, ItemNull},
         {3, order, &count, {.item = i2it(33)}, NULL, ItemNull},
     };
-    LambdaTask* first = lambda_task_create(scheduler, record_and_complete, &frames[0], NULL);
-    LambdaTask* second = lambda_task_create(scheduler, record_and_complete, &frames[1], NULL);
-    LambdaTask* third = lambda_task_create(scheduler, record_and_complete, &frames[2], NULL);
+    LambdaTask* first = lambda_task_create(scheduler, record_and_complete, frame_arg(&frames[0]));
+    LambdaTask* second = lambda_task_create(scheduler, record_and_complete, frame_arg(&frames[1]));
+    LambdaTask* third = lambda_task_create(scheduler, record_and_complete, frame_arg(&frames[2]));
 
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
@@ -975,9 +985,32 @@ TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
     EXPECT_EQ(lambda_scheduler_live_count(scheduler), 0);
 }
 
+// JSCU25: a weak registration counts as live until it leaves, a drain with
+// nothing left to settle it ends without error, and a token from a destroyed
+// scheduler is ignored by its successor.
+TEST_F(LambdaConcurrencyRuntime, WeakRegistrationsCountUntilTheyLeave) {
+    uint64_t token = lambda_scheduler_weak_enter();
+    ASSERT_NE(token, 0u);
+    EXPECT_EQ(lambda_scheduler_live_count(scheduler), 1);
+    EXPECT_EQ(lambda_scheduler_drain(scheduler), 0);
+    EXPECT_EQ(lambda_scheduler_live_count(scheduler), 1);
+    lambda_scheduler_weak_leave(token);
+    EXPECT_EQ(lambda_scheduler_live_count(scheduler), 0);
+
+    uint64_t stale = lambda_scheduler_weak_enter();
+    lambda_scheduler_destroy(scheduler);
+    scheduler = lambda_scheduler_create(3);
+    ASSERT_NE(scheduler, nullptr);
+    uint64_t fresh = lambda_scheduler_weak_enter();
+    lambda_scheduler_weak_leave(stale);
+    EXPECT_EQ(lambda_scheduler_live_count(scheduler), 1);
+    lambda_scheduler_weak_leave(fresh);
+    EXPECT_EQ(lambda_scheduler_live_count(scheduler), 0);
+}
+
 TEST_F(LambdaConcurrencyRuntime, TaskPollFaultCompletesWithDurableStaticResult) {
-    LambdaTask* first = lambda_task_create(scheduler, raise_task_fault, NULL, NULL);
-    LambdaTask* second = lambda_task_create(scheduler, raise_task_fault, NULL, NULL);
+    LambdaTask* first = lambda_task_create(scheduler, raise_task_fault, ItemNull);
+    LambdaTask* second = lambda_task_create(scheduler, raise_task_fault, ItemNull);
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
 
@@ -1053,7 +1086,7 @@ TEST_F(LambdaConcurrencyRuntime, GcRejectsEveryScalarObjectAllocationRoute) {
 
 TEST_F(LambdaConcurrencyRuntime, MailboxIsBoundedAndDequeuesOnlyFromFifoHead) {
     ParkFrame target_frame = {};
-    LambdaTask* target = lambda_task_create(scheduler, park_then_finish, &target_frame, NULL);
+    LambdaTask* target = lambda_task_create(scheduler, park_then_finish, frame_arg(&target_frame));
     ASSERT_NE(target, nullptr);
 
     EXPECT_EQ(lambda_task_mailbox_capacity(target), 3);
@@ -1079,14 +1112,14 @@ TEST_F(LambdaConcurrencyRuntime, TaskPersistentSlotsOwnWideIntegerPayloads) {
     RecordFrame result_frame = {
         1, order, &count, {.item = l2it(&result_source)}, NULL, ItemNull};
     LambdaTask* completed = lambda_task_create(
-        scheduler, record_and_complete, &result_frame, NULL);
+        scheduler, record_and_complete, frame_arg(&result_frame));
     ASSERT_NE(completed, nullptr);
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
     result_source = 0;
 
     ParkFrame parked_frame = {};
     LambdaTask* parked = lambda_task_create(
-        scheduler, park_then_finish, &parked_frame, NULL);
+        scheduler, park_then_finish, frame_arg(&parked_frame));
     ASSERT_NE(parked, nullptr);
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
     uint64_t message_source = UINT64_MAX;
@@ -1116,9 +1149,11 @@ TEST_F(LambdaConcurrencyRuntime, CompletionIsPublishedAfterFinalSend) {
     RecordFrame sender_frame = {
         7, order, &count, {.item = i2it(99)}, NULL, {.item = i2it(42)}};
     LambdaTask* sender = lambda_task_create(
-        scheduler, record_and_complete, &sender_frame, NULL);
+        scheduler, record_and_complete, frame_arg(&sender_frame));
     ASSERT_NE(sender, nullptr);
-    LambdaTask* receiver = lambda_task_create(scheduler, NULL, NULL, NULL);
+    ParkFrame receiver_frame = {};
+    LambdaTask* receiver = lambda_task_create(scheduler, park_then_finish,
+        frame_arg(&receiver_frame));
     ASSERT_NE(receiver, nullptr);
     sender_frame.send_target = receiver;
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
@@ -1133,7 +1168,7 @@ TEST_F(LambdaConcurrencyRuntime, CompletionIsPublishedAfterFinalSend) {
 
 TEST_F(LambdaConcurrencyRuntime, CancellationUnparksAndIsIdempotent) {
     ParkFrame frame = {};
-    LambdaTask* task = lambda_task_create(scheduler, park_then_finish, &frame, NULL);
+    LambdaTask* task = lambda_task_create(scheduler, park_then_finish, frame_arg(&frame));
     ASSERT_NE(task, nullptr);
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
     ASSERT_EQ(lambda_task_state(task), LAMBDA_TASK_PARKED);
@@ -1150,7 +1185,7 @@ TEST_F(LambdaConcurrencyRuntime, CancellationUnparksAndIsIdempotent) {
 
 TEST_F(LambdaConcurrencyRuntime, CleanupMaskDefersCancellationUntilUnmasked) {
     ParkFrame frame = {};
-    LambdaTask* task = lambda_task_create(scheduler, park_then_finish, &frame, NULL);
+    LambdaTask* task = lambda_task_create(scheduler, park_then_finish, frame_arg(&frame));
     ASSERT_NE(task, nullptr);
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
     ASSERT_EQ(lambda_task_state(task), LAMBDA_TASK_PARKED);
@@ -1166,14 +1201,14 @@ TEST_F(LambdaConcurrencyRuntime, CleanupMaskDefersCancellationUntilUnmasked) {
 
 TEST_F(LambdaConcurrencyRuntime, WaitTimeoutDoesNotCancelObservedTask) {
     ParkFrame target_frame = {};
-    LambdaTask* target = lambda_task_create(scheduler, park_then_finish, &target_frame, NULL);
+    LambdaTask* target = lambda_task_create(scheduler, park_then_finish, frame_arg(&target_frame));
     ASSERT_NE(target, nullptr);
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
     ASSERT_EQ(lambda_task_state(target), LAMBDA_TASK_PARKED);
 
     WaitFrame waiter_frame = {
         lambda_task_handle(target), (Item){.item = i2it(1)}};
-    LambdaTask* waiter = lambda_task_create(scheduler, wait_with_timeout, &waiter_frame, NULL);
+    LambdaTask* waiter = lambda_task_create(scheduler, wait_with_timeout, frame_arg(&waiter_frame));
     ASSERT_NE(waiter, nullptr);
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
     ASSERT_EQ(lambda_task_state(waiter), LAMBDA_TASK_PARKED);
@@ -1197,14 +1232,14 @@ TEST_F(LambdaConcurrencyRuntime, WaitTimeoutDoesNotCancelObservedTask) {
 TEST_F(LambdaConcurrencyRuntime, SchedulerOwnsEveryTaskGcEdge) {
     int initial_slots = concurrency_test_gc->root_slot_count;
     int initial_ranges = concurrency_test_gc->root_range_count;
-    Item frame_roots[2] = {ItemNull, ItemNull};
     ParkFrame frame = {};
-    LambdaTask* task = lambda_task_create(scheduler, park_then_finish, &frame, NULL);
+    LambdaTask* task = lambda_task_create(scheduler, park_then_finish, frame_arg(&frame));
     ASSERT_NE(task, nullptr);
-    lambda_task_set_frame_roots(task, frame_roots, 2);
 
+    // handle, result, resume value and the mailbox; the task's own frames
+    // live in its activation's segment, traced without registration (RA3).
     EXPECT_EQ(concurrency_test_gc->root_slot_count, initial_slots + 3);
-    EXPECT_EQ(concurrency_test_gc->root_range_count, initial_ranges + 2);
+    EXPECT_EQ(concurrency_test_gc->root_range_count, initial_ranges + 1);
 
     lambda_scheduler_destroy(scheduler);
     scheduler = NULL;
@@ -1214,26 +1249,272 @@ TEST_F(LambdaConcurrencyRuntime, SchedulerOwnsEveryTaskGcEdge) {
 }
 
 TEST_F(LambdaConcurrencyRuntime, ParkedFramesAndMailboxesSurviveCollection) {
-    ParkFrame frame = {};
-    LambdaTask* task = lambda_task_create(scheduler, park_then_finish, &frame, NULL);
+    VMap* frame_value = NULL;
+    LambdaTask* task = lambda_task_create(scheduler, hold_vmap_then_park,
+        frame_arg(&frame_value));
     ASSERT_NE(task, nullptr);
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
-
-    VMap* frame_value = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP);
-    VMap* message_value = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP);
     ASSERT_NE(frame_value, nullptr);
+
+    VMap* message_value = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP);
     ASSERT_NE(message_value, nullptr);
-    Item frame_roots[1] = {{.vmap = frame_value}};
-    lambda_task_set_frame_roots(task, frame_roots, 1);
     ASSERT_EQ(lambda_task_send(NULL, task, (Item){.vmap = message_value}), LAMBDA_SEND_OK);
 
     gc_collect(concurrency_test_gc, NULL, 0);
 
-    EXPECT_TRUE(gc_is_managed(concurrency_test_gc, frame_roots[0].vmap));
+    EXPECT_TRUE(gc_is_managed(concurrency_test_gc, frame_value));
     Item message = ItemNull;
     ASSERT_TRUE(lambda_task_mailbox_receive(task, &message));
     EXPECT_EQ(message.vmap, message_value);
     EXPECT_TRUE(gc_is_managed(concurrency_test_gc, message.vmap));
+}
+
+// ---------------------------------------------------------------------------
+// Activation core (vibe/Lambda_Design_Runtime_Async.md P0)
+// ---------------------------------------------------------------------------
+
+extern "C" void heap_gc_collect(void);
+
+class ActivationCore : public LambdaConcurrencyRuntime {
+protected:
+    void SetUp() override {
+        LambdaConcurrencyRuntime::SetUp();
+        gc_set_poison_freed(concurrency_test_gc, 1);
+    }
+};
+
+static Item activation_count_up(Activation* self, Item arg) {
+    (void)self;
+    int64_t total = lambda_int_item_to_i64(arg);
+    for (int i = 0; i < 3; i++) {
+        Item input = activation_suspend((Item){.item = i2it(total)});
+        total += lambda_int_item_to_i64(input);
+    }
+    return (Item){.item = i2it(total)};
+}
+
+TEST_F(ActivationCore, SuspendAndResumeExchangeValues) {
+    Activation* activation = activation_create(activation_count_up,
+        (Item){.item = i2it(1)}, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    EXPECT_EQ(activation_status(activation), ACTIVATION_NEW);
+    EXPECT_EQ(activation_resume(activation, ItemNull), ACTIVATION_SUSPENDED);
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(activation)), 1);
+    EXPECT_EQ(activation_resume(activation, (Item){.item = i2it(10)}), ACTIVATION_SUSPENDED);
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(activation)), 11);
+    EXPECT_EQ(activation_resume(activation, (Item){.item = i2it(100)}), ACTIVATION_SUSPENDED);
+    EXPECT_EQ(activation_resume(activation, (Item){.item = i2it(1000)}), ACTIVATION_DONE);
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(activation)), 1111);
+    EXPECT_EQ(activation_current(), nullptr);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+    activation_destroy(activation);
+}
+
+// RA10: beneath a native barrier the activation cannot park; once the
+// barrier is left it can. A barrier pins only the stack that raised it.
+static Item activation_barriered(Activation* self, Item arg) {
+    (void)self;
+    activation_barrier_enter();
+    Item refused = activation_suspend(arg);
+    activation_barrier_leave();
+    if (get_type_id(refused) != LMD_TYPE_ERROR) return ItemNull;
+    return activation_suspend(arg);
+}
+
+TEST_F(ActivationCore, NativeBarrierRefusesSuspension) {
+    Activation* activation = activation_create(activation_barriered,
+        (Item){.item = i2it(7)}, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    EXPECT_EQ(activation_resume(activation, ItemNull), ACTIVATION_SUSPENDED);
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(activation)), 7);
+    EXPECT_EQ(activation_resume(activation, (Item){.item = i2it(9)}), ACTIVATION_DONE);
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(activation)), 9);
+    activation_destroy(activation);
+}
+
+// RA6: work run through activation_call_on_base runs on the thread's base
+// stack — about 3 MB of live frames, more than an activation's 2 MB stack
+// holds, completes there — and it cannot park.
+// Each frame's array is read after the recursive call returns, so every frame
+// stays live: no loop transformation can fold the recursion away.
+__attribute__((noinline)) static int64_t base_stack_depth_probe(int64_t depth) {
+    volatile char pad[1024];
+    pad[depth & 1023] = 1;
+    if (depth <= 0) return 0;
+    int64_t below = base_stack_depth_probe(depth - 1);
+    return below + pad[depth & 1023];
+}
+
+static void* base_stack_work(void* data) {
+    int64_t* out = (int64_t*)data;
+    out[0] = base_stack_depth_probe(3 * 1024);  // about 3 MB of frames
+    out[1] = get_type_id(activation_suspend(ItemNull)) == LMD_TYPE_ERROR ? 1 : 0;
+    return out;
+}
+
+static Item activation_calls_on_base(Activation* self, Item arg) {
+    (void)self;
+    (void)arg;
+    int64_t out[2] = {0, 0};
+    bool faulted = true;
+    void* result = activation_call_on_base(base_stack_work, out, &faulted);
+    if (faulted || result != out || out[1] != 1) return ItemNull;
+    return (Item){.item = i2it(out[0])};
+}
+
+TEST_F(ActivationCore, StackHungryWorkRunsOnTheBaseStack) {
+    Activation* activation = activation_create(activation_calls_on_base,
+        ItemNull, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    EXPECT_EQ(activation_resume(activation, ItemNull), ACTIVATION_DONE);
+    EXPECT_EQ(activation_fault(activation), nullptr);
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(activation)), 3 * 1024);
+    activation_destroy(activation);
+}
+
+static Item activation_inner(Activation* self, Item arg) {
+    (void)self;
+    Item input = activation_suspend(arg);
+    return (Item){.item = i2it(lambda_int_item_to_i64(input) * 2)};
+}
+
+static Item activation_outer(Activation* self, Item arg) {
+    Activation* inner = activation_create(activation_inner, arg, true, NULL);
+    EXPECT_EQ(activation_resume(inner, ItemNull), ACTIVATION_SUSPENDED);
+    EXPECT_EQ(activation_current(), self);
+    // The outer stack parks while the inner one is parked too.
+    Item from_base = activation_suspend(activation_value(inner));
+    EXPECT_EQ(activation_resume(inner, from_base), ACTIVATION_DONE);
+    Item result = activation_value(inner);
+    activation_destroy(inner);
+    return result;
+}
+
+TEST_F(ActivationCore, NestedActivationsReturnToTheirResumer) {
+    Activation* outer = activation_create(activation_outer,
+        (Item){.item = i2it(7)}, true, NULL);
+    ASSERT_NE(outer, nullptr);
+    EXPECT_EQ(activation_resume(outer, ItemNull), ACTIVATION_SUSPENDED);
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(outer)), 7);
+    EXPECT_EQ(activation_resume(outer, (Item){.item = i2it(21)}), ACTIVATION_DONE);
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(outer)), 42);
+    activation_destroy(outer);
+}
+
+static Item activation_hold_string(Activation* self, Item arg) {
+    (void)self;
+    (void)arg;
+    RootFrame roots(1);
+    Rooted<Item> held(roots, (Item){.item = s2it(heap_strcpy("parked-root", 11))});
+    // A collection runs while this frame is parked off the running stack.
+    activation_suspend(ItemNull);
+    String* string = (String*)(uintptr_t)(held.get().item & ~ITEM_HIGH_BYTE_MASK);
+    bool intact = string && string->len == 11 &&
+        memcmp(string->chars, "parked-root", 11) == 0;
+    return (Item){.item = b2it(intact ? 1 : 0)};
+}
+
+TEST_F(ActivationCore, ParkedRootSegmentSurvivesCollection) {
+    Activation* activation = activation_create(activation_hold_string,
+        ItemNull, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    ASSERT_EQ(activation_resume(activation, ItemNull), ACTIVATION_SUSPENDED);
+    for (int i = 0; i < 3; i++) {
+        (void)heap_strcpy("garbage", 7);
+        heap_gc_collect();
+    }
+    ASSERT_EQ(activation_resume(activation, ItemNull), ACTIVATION_DONE);
+    EXPECT_EQ(activation_value(activation).item, (uint64_t)ITEM_TRUE);
+    activation_destroy(activation);
+}
+
+TEST_F(ActivationCore, WeakParkedActivationIsTracedOnlyThroughItsOwner) {
+    Activation* activation = activation_create(activation_hold_string,
+        ItemNull, false, NULL);
+    ASSERT_NE(activation, nullptr);
+    ASSERT_EQ(activation_resume(activation, ItemNull), ACTIVATION_SUSPENDED);
+    // No owner trace runs here, so the string the weak activation holds is
+    // unreachable; its destroy must still release the stack cleanly.
+    heap_gc_collect();
+    activation_destroy(activation);
+    EXPECT_EQ(activation_current(), nullptr);
+}
+
+static int activation_recurse(volatile int depth) {
+    volatile char pad[512];
+    pad[0] = (char)depth;
+    return activation_recurse(depth + 1) + pad[0];
+}
+
+static Item activation_overflow(Activation* self, Item arg) {
+    (void)self;
+    (void)arg;
+    return (Item){.item = i2it(activation_recurse(0))};
+}
+
+TEST_F(ActivationCore, StackOverflowLandsOnTheActivationsOwnBoundary) {
+    lambda_stack_init();
+    Activation* activation = activation_create(activation_overflow,
+        ItemNull, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    ASSERT_EQ(activation_resume(activation, ItemNull), ACTIVATION_DONE);
+    const LambdaFaultRecord* fault = activation_fault(activation);
+    ASSERT_NE(fault, nullptr);
+    EXPECT_EQ(fault->error.code, ERR_STACK_OVERFLOW);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+    activation_destroy(activation);
+    // The base stack is untouched and can host another activation.
+    Activation* again = activation_create(activation_count_up,
+        (Item){.item = i2it(0)}, true, NULL);
+    EXPECT_EQ(activation_resume(again, ItemNull), ACTIVATION_SUSPENDED);
+    activation_destroy(again);
+}
+
+TEST_F(ActivationCore, ColdParkedActivationsCompactAndRestore) {
+    // Past the warm window the oldest parked activations are copied out and
+    // their pages returned; a collection must still see their roots, and a
+    // resume must find every frame and root exactly where it left them.
+    const int count = 64;
+    Activation* held[count];
+    Activation* counters[count];
+    for (int i = 0; i < count; i++) {
+        held[i] = activation_create(activation_hold_string, ItemNull, true, NULL);
+        ASSERT_NE(held[i], nullptr);
+        ASSERT_EQ(activation_resume(held[i], ItemNull), ACTIVATION_SUSPENDED);
+        counters[i] = activation_create(activation_count_up,
+            (Item){.item = i2it(i)}, true, NULL);
+        ASSERT_NE(counters[i], nullptr);
+        ASSERT_EQ(activation_resume(counters[i], ItemNull), ACTIVATION_SUSPENDED);
+    }
+    for (int round = 0; round < 3; round++) {
+        (void)heap_strcpy("garbage", 7);
+        heap_gc_collect();
+    }
+    // The first counter is long compacted; its parked value reads from the image.
+    EXPECT_EQ(lambda_int_item_to_i64(activation_value(counters[0])), 0);
+    for (int i = 0; i < count; i++) {
+        ASSERT_EQ(activation_resume(held[i], ItemNull), ACTIVATION_DONE);
+        EXPECT_EQ(activation_value(held[i]).item, (uint64_t)ITEM_TRUE) << "held " << i;
+        activation_destroy(held[i]);
+        EXPECT_EQ(activation_resume(counters[i], (Item){.item = i2it(1)}),
+            ACTIVATION_SUSPENDED);
+        EXPECT_EQ(lambda_int_item_to_i64(activation_value(counters[i])), i + 1);
+    }
+    // Abandoning compacted and warm activations alike releases them.
+    for (int i = 0; i < count; i++) activation_destroy(counters[i]);
+    EXPECT_EQ(activation_current(), nullptr);
+}
+
+TEST_F(ActivationCore, AbandonedParkedActivationsAreReleased) {
+    for (int i = 0; i < 100; i++) {
+        Activation* activation = activation_create(activation_count_up,
+            (Item){.item = i2it(i)}, true, NULL);
+        ASSERT_NE(activation, nullptr);
+        ASSERT_EQ(activation_resume(activation, ItemNull), ACTIVATION_SUSPENDED);
+        activation_destroy(activation);
+    }
+    EXPECT_EQ(activation_current(), nullptr);
+    EXPECT_EQ(activation_suspend(ItemNull).item != ItemNull.item, true);
 }
 
 #ifndef _WIN32

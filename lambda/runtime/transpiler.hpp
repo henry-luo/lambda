@@ -66,6 +66,7 @@ extern "C" void heap_finalize_gc_objects(struct gc_heap* gc);
 void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
 extern "C" String* heap_strcpy(const char* src, int64_t len);  // callable from C code (path.c)
+extern "C" void heap_gc_visit_template_roots(struct gc_heap* gc);
 extern "C" void heap_gc_collect(void);                // trigger GC collection from runtime
 extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global as GC root
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
@@ -85,6 +86,8 @@ void expand_list(List *list, Arena* arena = nullptr);
 // a Rooted owner (or an external arena owner) across this allocating call.
 bool array_reserve_append_slots(Array* array, int64_t append_count);
 
+#ifndef LAMBDA_NO_MIR
+// interpreter-only profiles do not depend on MIR declarations or headers.
 extern "C" {
 #ifndef WASM_BUILD
 #include <mir.h>
@@ -94,6 +97,7 @@ extern "C" {
 #include "../../wasm-deps/include/mir-gen.h"
 #endif
 }
+#endif
 
 typedef struct Runner {
     Runtime* runtime;    // back-pointer to owning Runtime (for heap reuse)
@@ -235,6 +239,7 @@ TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);
 
+#ifndef LAMBDA_NO_MIR
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);
 // Hosted profiles that select native MIR must not inherit the process-wide
@@ -251,6 +256,7 @@ void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized);
 void register_dynamic_import(const char *name, void *addr);
 void clear_dynamic_imports(void);
 }
+#endif
 
 // Count finalized MIR volume once for all language front ends. Labels are
 // structural and excluded from the executable-instruction total.

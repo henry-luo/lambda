@@ -1,0 +1,24 @@
+"html diagnostics:"
+["unsupported-output"]
+"vector diagnostics:"
+["unsupported-output"]
+"svg page:"
+true
+"trim in pixels:"
+true
+"sized:"
+true
+"crop and rotation:"
+true
+"selected second page:"
+true
+"graphic angle:"
+true
+"portable embedded image:"
+true
+"host source path:"
+true
+"host standalone:"
+true
+"malformed pdf located:"
+true

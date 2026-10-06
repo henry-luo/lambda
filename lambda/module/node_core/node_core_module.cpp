@@ -7,6 +7,7 @@
 #include "node_perf_hooks.hpp"
 #include "node_process.hpp"
 #include "node_querystring.hpp"
+#include "node_readline.hpp"
 #include "node_punycode.hpp"
 #include "node_string_decoder.hpp"
 #include "node_timers.hpp"
@@ -214,11 +215,11 @@ static Item node_core_cluster_namespace(void) {
 }
 
 static Item node_core_readline_namespace(void) {
-    return node_core_host_namespace("readline");
+    return node_readline_namespace();
 }
 
 static Item node_core_readline_promises_namespace(void) {
-    return node_core_host_namespace("readline/promises");
+    return node_readline_promises_namespace();
 }
 
 static Item node_core_test_namespace(void) {
@@ -593,10 +594,12 @@ static int node_core_init(const JubeHostAPI* host) {
         node_path_shutdown();
         return -1;
     }
+    if (node_readline_init(host) != 0) return -1;
     return 0;
 }
 
 static void node_core_shutdown(void) {
+    node_readline_shutdown();
     node_process_shutdown();
     node_tty_shutdown();
     node_workers_shutdown();
@@ -633,6 +636,7 @@ static void node_core_runtime_attach(void* session) {
     node_workers_runtime_attach(session);
     node_tty_runtime_attach(session);
     node_process_runtime_attach(session);
+    node_readline_runtime_attach(session);
     // Activate util's formatter hook before console output can observe the
     // Node profile; minimal never attaches node-core and uses the hook's
     // deliberate generic formatter fallback.
@@ -654,9 +658,11 @@ static void node_core_runtime_reset(void* session) {
     node_workers_runtime_reset(session);
     node_tty_runtime_reset(session);
     node_process_runtime_reset(session);
+    node_readline_runtime_reset(session);
 }
 
 static void node_core_runtime_detach(void* session) {
+    node_readline_runtime_detach(session);
     node_path_runtime_detach(session);
     node_string_decoder_runtime_detach(session);
     node_querystring_runtime_detach(session);

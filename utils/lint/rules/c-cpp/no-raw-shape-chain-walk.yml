@@ -27,3 +27,4 @@ files:
 ignores:
   - "**/tree-sitter*/**"
   - "lambda/mir/**"
+  - "lib/re2/**"                    # vendored RE2 (lib/re2/VENDOR.md)

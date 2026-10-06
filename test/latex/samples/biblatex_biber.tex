@@ -1,0 +1,52 @@
+\documentclass{article}
+
+% for choosing the proper font encoding
+\usepackage[T1]{fontenc}
+% for proper encoding
+\usepackage[utf8]{inputenc}
+% enhanced font Latin Modern
+\usepackage{lmodern}
+% multi-language support
+\usepackage[english]{babel}
+% for inline and display quotations.
+\usepackage[autostyle]{csquotes}
+
+% set the default 4 inches margin to be 1 inch
+\usepackage{fullpage}
+% for colorful link
+\usepackage[ocgcolorlinks,pdfusetitle]{hyperref}
+% for doi link
+\usepackage{doi}
+%
+\usepackage{filecontents}
+\begin{filecontents}{bib}
+@article{black1973poa,
+  title = {The pricing of options and corporate liabilities},
+  author = {Fishcer Black and Myron Scholes},
+  doi = {10.1086/260062},
+  journal = {Journal of Political Economy},
+  number = 3,
+  pages = {637--654},
+  publisher = {UChicago Press},
+  volume = 81,
+  year = 1973,
+}
+\end{filecontents}
+% for back reference in bibliography
+\usepackage[style=alphabetic,citestyle=alphabetic,backend=biber,backref=true]{biblatex}
+\addbibresource{bib}
+\DeclareFieldFormat[inbook]{citetitle}{#1}
+\DeclareFieldFormat[inbook]{title}{#1}
+
+\begin{document}
+\title{Bibliographies with biber and biblatex}
+\author{Frank the Giant Bunny}
+\date{August 27, 2014}
+\maketitle
+
+Nunc auctor nunc in nisi suscipit tempus \cite{black1973poa}.
+
+% bibliography
+\printbibliography
+\end{document}
+

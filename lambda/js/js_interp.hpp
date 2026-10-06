@@ -90,20 +90,10 @@ bool js_interp_promote_function_if_hot(JsFunction* function);
 Item js_interp_start_async_function(JsFunction* function, Item* args,
                                     int arg_count);
 Item js_interp_create_generator(JsFunction* function, Item* args, int arg_count);
-struct JsGeneratorStateRecord;
-extern "C" Item js_interp_resume_generator(Item generator,
-                                            JsGeneratorStateRecord* state,
-                                            Item input);
-struct gc_heap;
-void js_interp_generator_trace_continuations(JsGeneratorStateRecord* state,
-                                             struct gc_heap* gc);
-void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
-struct JsAsyncContextStateRecord;
-void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state);
-void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state,
-        struct gc_heap* gc);
-extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
-                                        Item input);
-extern "C" Item js_interp_resume_module_async(JsAsyncContextStateRecord* state,
-                                               Item input);
+// The bodies a generator or async carrier runs on its activation (RA1).
+struct Activation;
+extern "C" Item js_interp_generator_body(Activation* self, Item generator);
+extern "C" Item js_interp_async_body(Activation* self, Item unused);
+extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
+extern "C" Item js_mir_module_async_body(Activation* self, Item unused);
 bool js_interp_script_is_supported(JsScript* script);

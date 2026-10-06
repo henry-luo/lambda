@@ -149,20 +149,25 @@ static void font_ct_path_element(void* info, const CGPathElement* element) {
     walk->success = walk->visitor(walk->context, command, args, count);
 }
 
+bool font_rasterize_ct_visit_index_path(void* ct_font_ref, uint32_t glyph_index,
+    FontPathVisitFn visitor, void* context) {
+    if (!ct_font_ref || !visitor || glyph_index > UINT16_MAX) return false;
+    CTFontRef font = (CTFontRef)ct_font_ref;
+    CGPathRef path = CTFontCreatePathForGlyph(font, (CGGlyph)glyph_index, NULL);
+    if (!path) return false;
+    FontCtPathVisit walk = {visitor, context, 0.0f, 0.0f, 0.0f, 0.0f, true};
+    CGPathApply(path, &walk, font_ct_path_element);
+    CGPathRelease(path);
+    return walk.success;
+}
+
 bool font_rasterize_ct_visit_path(void* ct_font_ref, uint32_t codepoint,
     FontPathVisitFn visitor, void* context) {
     if (!ct_font_ref || !visitor) return false;
     UniChar utf16[2]; CGGlyph glyphs[2] = {0};
     CFIndex length = utf16_encode(codepoint, (uint16_t*)utf16);
-    CTFontRef font = (CTFontRef)ct_font_ref;
-    if (!length || !CTFontGetGlyphsForCharacters(font, utf16, glyphs, length) || !glyphs[0]) return false;
-    CGPathRef path = CTFontCreatePathForGlyph(font, glyphs[0], NULL);
-    if (!path) return false;
-    if (CGPathIsEmpty(path)) { CGPathRelease(path); return false; }
-    FontCtPathVisit walk = {visitor, context, 0.0f, 0.0f, 0.0f, 0.0f, true};
-    CGPathApply(path, &walk, font_ct_path_element);
-    CGPathRelease(path);
-    return walk.success;
+    if (!length || !CTFontGetGlyphsForCharacters((CTFontRef)ct_font_ref, utf16, glyphs, length) || !glyphs[0]) return false;
+    return font_rasterize_ct_visit_index_path(ct_font_ref, glyphs[0], visitor, context);
 }
 
 // ============================================================================

@@ -11,6 +11,7 @@
 #include "../../../lib/mem_grow.hpp"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/str.h"
+#include "../../../lib/hash.h"
 
 static uint64_t css_condition_hash_bytes(const char* text, size_t length) {
     uint64_t hash = UINT64_C(1469598103934665603);
@@ -21,15 +22,116 @@ static uint64_t css_condition_hash_bytes(const char* text, size_t length) {
     return hash;
 }
 
+bool css_import_rule_is_active(CssRule* rule, CssEngine* engine) {
+    if (!rule || rule->type != CSS_RULE_IMPORT || rule->data.import_rule.invalid) return false;
+    if (rule->data.import_rule.supports &&
+        !css_evaluate_supports_condition(engine, rule->data.import_rule.supports)) return false;
+    return !rule->data.import_rule.media ||
+        css_evaluate_media_query(engine, rule->data.import_rule.media);
+}
+
+typedef bool (*CssRegistrationVisitor)(void*, const CssPropertyRegistration*);
+
+static bool css_visit_active_rules_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context, size_t depth);
+
+static bool css_visit_active_rules_in_rule(CssEngine* engine, CssRule* rule,
+    CssActiveRuleVisitor visitor, void* context, size_t depth) {
+    if (!rule || depth > 512) return true;
+    if (!visitor(context, rule)) return false;
+    if (rule->type == CSS_RULE_IMPORT) {
+        return !css_import_rule_is_active(rule, engine) ||
+            css_visit_active_rules_in_sheet(engine, rule->data.import_rule.stylesheet,
+                visitor, context, depth + 1);
+    }
+    // Registrations are global within the document, including within @scope.
+    bool active = rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_LAYER ||
+        (rule->type == CSS_RULE_MEDIA && css_evaluate_media_query(engine, rule->data.conditional_rule.condition)) ||
+        (rule->type == CSS_RULE_SUPPORTS && css_evaluate_supports_condition(engine, rule->data.conditional_rule.condition));
+    if (!active) return true;
+    CssRuleChildList children = css_rule_child_list(rule);
+    for (size_t i = 0; children.count && i < *children.count; i++)
+        if (!css_visit_active_rules_in_rule(engine, (*children.rules)[i], visitor, context, depth + 1))
+            return false;
+    return true;
+}
+
+static bool css_visit_active_rules_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context, size_t depth) {
+    if (!sheet || sheet->disabled || depth > 512 ||
+        (sheet->media && !css_evaluate_media_query(engine, sheet->media))) return true;
+    for (size_t i = 0; i < sheet->rule_count; i++)
+        if (!css_visit_active_rules_in_rule(engine, sheet->rules[i], visitor, context, depth + 1))
+            return false;
+    return true;
+}
+
+bool css_stylesheet_visit_active_rules(CssEngine* engine, CssStylesheet* sheet,
+    CssActiveRuleVisitor visitor, void* context) {
+    return engine && visitor &&
+        css_visit_active_rules_in_sheet(engine, sheet, visitor, context, 0);
+}
+
+typedef struct CssRegistrationWalk {
+    CssRegistrationVisitor visitor;
+    void* context;
+} CssRegistrationWalk;
+
+static bool css_visit_registration_rule(void* context, const CssRule* rule) {
+    CssRegistrationWalk* walk = (CssRegistrationWalk*)context;
+    return rule->type != CSS_RULE_PROPERTY ||
+        walk->visitor(walk->context, &rule->data.property_rule);
+}
+
+static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
+    CssRegistrationVisitor visitor, void* context, size_t depth) {
+    CssRegistrationWalk walk = {visitor, context};
+    return css_visit_active_rules_in_sheet(engine, sheet,
+        css_visit_registration_rule, &walk, depth);
+}
+
+static bool css_index_property_registration(void* context, const CssPropertyRegistration* registration) {
+    CssEngine* engine = (CssEngine*)context;
+    size_t count = engine->property_registration_count;
+    if (!lam::pool_grow_array(engine->pool, &engine->property_registrations,
+        &engine->property_registration_capacity, count + 1, (size_t)8)) return false;
+    engine->property_registrations[count] = {registration, count};
+    engine->property_registration_count++;
+    return true;
+}
+
+static int css_compare_property_registrations(const void* left, const void* right) {
+    const CssPropertyRegistrationEntry* a = (const CssPropertyRegistrationEntry*)left;
+    const CssPropertyRegistrationEntry* b = (const CssPropertyRegistrationEntry*)right;
+    int names = strcmp(a->registration->name, b->registration->name);
+    return names ? names : (a->source_order > b->source_order) - (a->source_order < b->source_order);
+}
+
+struct CssRegistrationLookup {const char* name; const CssPropertyRegistration* result;};
+
+static bool css_lookup_property_registration(void* context, const CssPropertyRegistration* registration) {
+    CssRegistrationLookup* lookup = (CssRegistrationLookup*)context;
+    if (css_custom_property_name_matches(registration->name, lookup->name)) lookup->result = registration;
+    return true;
+}
+
+void css_stylesheet_mark_changed(CssStylesheet* stylesheet) {
+    // Imported edits invalidate the root sheet's index without scanning its rule tree.
+    for (size_t depth = 0; stylesheet && depth <= 512; depth++, stylesheet = stylesheet->parent_stylesheet)
+        stylesheet->mutation_generation++;
+}
+
 struct CssElementDeclarationQuery {
     CssEngine* engine;
     SelectorMatcher* matcher;
     DomElement* element;
     const char* property;
+    uint8_t pseudo_element;
     CssDeclaration best;
     const CssDeclaration* ceiling;
     const CssRollbackFilter* filters;
     uint32_t order;
+    uint32_t scope_proximity;
     bool found;
 };
 
@@ -46,12 +148,21 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool same_property = custom_property
         ? strcmp(declaration->property_name, query->property) == 0
         : str_icmp_cstr(declaration->property_name, query->property) == 0;
-    if (!marker_shorthand && !font_shorthand && !same_property) return;
+    CssPropertyCode requested = css_property_code_from_name(query->property);
+    bool shorthand = requested > 0 && css_property_shorthand_contains(declaration->property_code, requested);
+    bool break_alias = strncmp(query->property, "break-", 6) == 0 &&
+        strncmp(declaration->property_name, "page-break-", 11) == 0 &&
+        strcmp(query->property + 6, declaration->property_name + 11) == 0;
+    bool all_reset = strcmp(declaration->property_name, "all") == 0 &&
+        strncmp(query->property, "--", 2) != 0 && strcmp(query->property, "direction") != 0 &&
+        strcmp(query->property, "unicode-bidi") != 0;
+    if (!marker_shorthand && !font_shorthand && !shorthand && !break_alias && !all_reset && !same_property) return;
     CssDeclaration candidate = *declaration;
     candidate.specificity = specificity;
     candidate.specificity.important = declaration->important;
     candidate.origin = origin;
     candidate.source_order = query->order++;
+    candidate.scope_proximity = query->scope_proximity;
     if (!css_declaration_cascade_eligible(&candidate, query->ceiling, query->filters)) return;
     if (!query->found || css_declaration_cascade_compare(&candidate, &query->best) >= 0) {
         query->best = candidate;
@@ -59,9 +170,28 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     }
 }
 
+static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* rule, size_t depth);
+
+struct CssScopeQueryContext {CssElementDeclarationQuery* query; CssRule* rule; size_t depth;};
+
+static void css_query_scope_root(void* data, uint32_t scope_proximity) {
+    CssScopeQueryContext* context = (CssScopeQueryContext*)data;
+    uint32_t saved = context->query->scope_proximity;
+    context->query->scope_proximity = scope_proximity;
+    CssRuleChildList children = css_rule_child_list(context->rule);
+    for (size_t i = 0; children.count && i < *children.count; i++)
+        css_query_element_rule(context->query, (*children.rules)[i], context->depth + 1);
+    context->query->scope_proximity = saved;
+}
+
 static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* rule,
                                     size_t depth) {
     if (!rule || depth > 512) return;
+    if (rule->type == CSS_RULE_SCOPE) {
+        CssScopeQueryContext context = {query, rule, depth};
+        css_scope_visit_roots(rule, query->element, query->matcher, css_query_scope_root, &context);
+        return;
+    }
     if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
         rule->type == CSS_RULE_LAYER) {
         bool active = rule->type == CSS_RULE_LAYER || (query->engine &&
@@ -73,7 +203,7 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
         }
         return;
     }
-    if (rule->type != CSS_RULE_STYLE) return;
+    if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTED_DECLARATIONS) return;
     CssSpecificity specificity = {};
     bool matched = false;
     CssSelectorGroup* group = rule->data.style_rule.selector_group;
@@ -86,7 +216,7 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
             selector->specificity = selector_matcher_calculate_specificity(query->matcher, selector);
         }
         if (selector && selector_matcher_matches(query->matcher, selector, query->element, &match) &&
-            match.pseudo_element == PSEUDO_ELEMENT_NONE &&
+            match.pseudo_element == query->pseudo_element &&
             (!matched || css_specificity_compare(match.specificity, specificity) > 0)) {
             specificity = match.specificity;
             matched = true;
@@ -96,11 +226,16 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
         css_query_consider_declaration(query, rule->data.style_rule.declarations[i],
                                        specificity, rule->origin);
     }
+    CssRuleChildList children = css_rule_child_list(rule);
+    for (size_t i = 0; children.count && i < *children.count; i++)
+        css_query_element_rule(query, (*children.rules)[i], depth + 1);
 }
 
 static void css_query_element_sheet(CssElementDeclarationQuery* query, CssStylesheet* sheet,
                                      size_t depth) {
     if (!sheet || sheet->disabled || depth > 512) return;
+    if (sheet->media && *sheet->media && query->engine &&
+        !css_evaluate_media_query(query->engine, sheet->media)) return;
     for (size_t i = 0; i < sheet->imported_count; i++) {
         css_query_element_sheet(query, sheet->imported_stylesheets[i], depth + 1);
     }
@@ -113,7 +248,7 @@ static bool css_select_element_declaration_inner(CssEngine* engine, SelectorMatc
     DomElement* element, CssStylesheet** sheets, size_t sheet_count,
     CssDeclaration** inline_declarations, size_t inline_count,
     const char* property_name, CssDeclaration* result,
-    const CssDeclaration* ceiling, const CssRollbackFilter* filters) {
+    const CssDeclaration* ceiling, const CssRollbackFilter* filters, uint8_t pseudo_element) {
     if (!matcher || !element || !property_name || !result) return false;
     CssElementDeclarationQuery query = {};
     query.engine = engine;
@@ -122,11 +257,12 @@ static bool css_select_element_declaration_inner(CssEngine* engine, SelectorMatc
     query.property = property_name;
     query.ceiling = ceiling;
     query.filters = filters;
+    query.pseudo_element = pseudo_element;
     for (size_t i = 0; sheets && i < sheet_count; i++) {
         css_query_element_sheet(&query, sheets[i], 0);
     }
     CssSpecificity inline_specificity = {1, 0, 0, 0, false};
-    for (size_t i = 0; inline_declarations && i < inline_count; i++) {
+    for (size_t i = 0; !pseudo_element && inline_declarations && i < inline_count; i++) {
         css_query_consider_declaration(&query, inline_declarations[i],
                                        inline_specificity, CSS_ORIGIN_AUTHOR);
     }
@@ -134,7 +270,7 @@ static bool css_select_element_declaration_inner(CssEngine* engine, SelectorMatc
         // SVG queries share the style tree's origin and layer rollback rules.
         CssRollbackFilter filter = {&query.best, filters};
         return css_select_element_declaration_inner(engine, matcher, element, sheets, sheet_count,
-            inline_declarations, inline_count, property_name, result, &query.best, &filter);
+            inline_declarations, inline_count, property_name, result, &query.best, &filter, pseudo_element);
     }
     if (query.found) *result = query.best;
     return query.found;
@@ -143,9 +279,9 @@ static bool css_select_element_declaration_inner(CssEngine* engine, SelectorMatc
 bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
     DomElement* element, CssStylesheet** sheets, size_t sheet_count,
     CssDeclaration** inline_declarations, size_t inline_count,
-    const char* property_name, CssDeclaration* result) {
+    const char* property_name, CssDeclaration* result, uint8_t pseudo_element) {
     return css_select_element_declaration_inner(engine, matcher, element, sheets, sheet_count,
-        inline_declarations, inline_count, property_name, result, nullptr, nullptr);
+        inline_declarations, inline_count, property_name, result, nullptr, nullptr, pseudo_element);
 }
 
 static uint64_t css_condition_environment_key(const CssEngine* engine,
@@ -169,6 +305,130 @@ static uint64_t css_condition_environment_key(const CssEngine* engine,
         key ^= engine->features.css_logical_properties ? UINT64_C(0xd6e8feb86659fd93) : 0;
     }
     return key ? key : 1;
+}
+
+const CssPropertyRegistration* css_find_property_registration(CssEngine* engine,
+    CssStylesheet** sheets, size_t sheet_count, const char* name) {
+    if (!name || !sheets) return nullptr;
+    uint64_t key = css_condition_environment_key(engine, CSS_CONDITION_SUPPORTS);
+    key = hash_combine_u64(key, sheet_count);
+    for (size_t i = 0; i < sheet_count; i++) {
+        CssStylesheet* sheet = sheets[i];
+        key = hash_combine_u64(key, (uintptr_t)sheet);
+        if (!sheet) continue;
+        key = hash_combine_u64(key, sheet->mutation_generation);
+        key = hash_combine_u64(key, sheet->rule_count);
+        key = hash_combine_u64(key, sheet->disabled | (sheet->is_import_child << 1));
+        if (sheet->media) key = hash_combine_u64(key, css_condition_hash_bytes(sheet->media, strlen(sheet->media)));
+    }
+    if (engine && (!engine->property_registration_index_valid || engine->property_registration_key != key)) {
+        engine->property_registration_index_valid = false;
+        engine->property_registration_count = 0;
+        bool complete = true;
+        for (size_t i = 0; i < sheet_count && complete; i++) {
+            if (!sheets[i] || sheets[i]->is_import_child) continue;
+            complete = css_visit_registrations_in_sheet(engine, sheets[i], css_index_property_registration, engine, 0);
+        }
+        if (complete) {
+            if (engine->property_registration_count > 1)
+                qsort(engine->property_registrations, engine->property_registration_count,
+                    sizeof(CssPropertyRegistrationEntry), css_compare_property_registrations);
+            engine->property_registration_key = key;
+            engine->property_registration_index_valid = true;
+            engine->property_registration_rebuilds++;
+        }
+    }
+    if (!engine || !engine->property_registration_index_valid) {
+        CssRegistrationLookup lookup = {name, nullptr};
+        for (size_t i = 0; i < sheet_count; i++) {
+            if (!sheets[i] || sheets[i]->is_import_child) continue;
+            css_visit_registrations_in_sheet(engine, sheets[i], css_lookup_property_registration, &lookup, 0);
+        }
+        return lookup.result;
+    }
+    // The last equal entry wins. Names retain their authored case.
+    const char* body = strncmp(name, "--", 2) == 0 ? name + 2 : name;
+    size_t low = 0, high = engine->property_registration_count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        const char* registered = engine->property_registrations[mid].registration->name;
+        if (strncmp(registered, "--", 2) == 0) registered += 2;
+        if (strcmp(registered, body) <= 0) low = mid + 1;
+        else high = mid;
+    }
+    if (!low) return nullptr;
+    const CssPropertyRegistration* result = engine->property_registrations[low - 1].registration;
+    return css_custom_property_name_matches(result->name, name) ? result : nullptr;
+}
+
+struct CssScriptPropertyRegistration {
+    CssPropertyRegistration registration;
+    size_t name_length;
+    CssScriptPropertyRegistration* next;
+};
+
+const CssPropertyRegistration* css_find_script_property_registration(DomDocument* doc,
+    const char* name, size_t name_length) {
+    if (!doc || !name) return nullptr;
+    if (name_length >= 2 && name[0] == '-' && name[1] == '-') {
+        name += 2;
+        name_length -= 2;
+    }
+    for (CssScriptPropertyRegistration* entry = (CssScriptPropertyRegistration*)doc->services.registered_property_set;
+         entry; entry = entry->next) {
+        if (entry->name_length - 2 == name_length &&
+            memcmp(entry->registration.name + 2, name, name_length) == 0) return &entry->registration;
+    }
+    return nullptr;
+}
+
+const CssPropertyRegistration* css_find_document_property_registration(DomDocument* doc,
+    const char* name, size_t name_length) {
+    if (!doc || !name) return nullptr;
+    if (name_length == (size_t)-1) name_length = strlen(name);
+    const CssPropertyRegistration* script = css_find_script_property_registration(doc, name, name_length);
+    // Script registrations override every active stylesheet registration (Properties and Values API 1 §2.1).
+    if (script || memchr(name, '\0', name_length)) return script;
+    return css_find_property_registration((CssEngine*)doc->services.cached_css_engine,
+        doc->stylesheets, (size_t)doc->stylesheet_count, name);
+}
+
+bool css_register_document_property(DomDocument* doc,
+    const CssPropertyRegistration* source, size_t name_length) {
+    if (!doc || !doc->document_pool || !source || !source->name || name_length <= 2 ||
+        source->name[0] != '-' || source->name[1] != '-' ||
+        css_find_script_property_registration(doc, source->name, name_length) ||
+        !css_property_registration_is_valid(source)) return false;
+    Pool* pool = doc->document_pool;
+    CssScriptPropertyRegistration* entry = (CssScriptPropertyRegistration*)pool_calloc(pool, sizeof(CssScriptPropertyRegistration));
+    if (!entry) return false;
+    entry->registration = *source;
+    CssPropertyRegistration* target = &entry->registration;
+    // The document retains an owned definition after argument conversion and parser scratch are released (D4.5.1v4).
+    target->name = pool_dup_n(pool, source->name, name_length);
+    target->syntax = pool_strdup(pool, source->syntax);
+    target->initial_text_length = source->initial_text_length ? source->initial_text_length :
+        source->initial_text ? strlen(source->initial_text) : 0;
+    target->initial_text = source->initial_text ? pool_dup_n(pool, source->initial_text,
+        target->initial_text_length) : nullptr;
+    target->initial_value = source->initial_value ? css_value_clone_owned(source->initial_value, pool) : nullptr;
+    if (!target->name || !target->syntax || (source->initial_text && !target->initial_text) ||
+        (source->initial_value && !target->initial_value)) return false;
+    if (source->component_count) {
+        target->components = (CssPropertySyntaxComponent*)pool_alloc(pool,
+            source->component_count * sizeof(CssPropertySyntaxComponent));
+        if (!target->components) return false;
+        memcpy(target->components, source->components, source->component_count * sizeof(CssPropertySyntaxComponent));
+        for (size_t i = 0; i < source->component_count; i++) {
+            if (!source->components[i].identifier) continue;
+            target->components[i].identifier = pool_strdup(pool, source->components[i].identifier);
+            if (!target->components[i].identifier) return false;
+        }
+    }
+    entry->name_length = name_length;
+    entry->next = (CssScriptPropertyRegistration*)doc->services.registered_property_set;
+    doc->services.registered_property_set = entry;
+    return true;
 }
 
 static bool css_condition_cache_lookup(CssEngine* engine, CssConditionKind kind,
@@ -278,6 +538,11 @@ void css_engine_destroy(CssEngine* engine) {
         engine->condition_cache[i].condition = nullptr;
     }
 
+    pool_free(engine->pool, engine->property_registrations);
+    engine->property_registrations = nullptr;
+    engine->property_registration_count = engine->property_registration_capacity = 0;
+    engine->property_registration_index_valid = false;
+
     // Cleanup components
     // Removed: css_selector_parser_destroy (legacy parser removed)
     css_property_value_parser_destroy(engine->value_parser);
@@ -358,40 +623,41 @@ static const char* css_stylesheet_namespace_lookup(void* context,
     return NULL;
 }
 
-static bool css_bind_rule_namespaces(CssRule* rule, CssStylesheet* stylesheet) {
+static bool css_bind_selector_group_namespaces(CssSelectorGroup* group, CssStylesheet* stylesheet) {
+    for (size_t i = 0; group && i < group->selector_count; i++)
+        if (!css_resolve_selector_namespaces(group->selectors[i],
+                css_stylesheet_namespace_lookup, stylesheet)) return false;
+    return true;
+}
+
+bool css_bind_rule_namespaces(CssRule* rule, CssStylesheet* stylesheet) {
     if (!rule) return true;
     if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING ||
         rule->type == CSS_RULE_NESTED_DECLARATIONS) {
         CssSelectorGroup* group = rule->data.style_rule.selector_group;
         if (group) {
-            for (size_t i = 0; i < group->selector_count; i++) {
-                if (!css_resolve_selector_namespaces(group->selectors[i],
-                        css_stylesheet_namespace_lookup, stylesheet)) {
-                    return false;
-                }
-            }
+            if (!css_bind_selector_group_namespaces(group, stylesheet)) return false;
         } else if (!css_resolve_selector_namespaces(rule->data.style_rule.selector,
                        css_stylesheet_namespace_lookup, stylesheet)) {
             return false;
         }
+    }
+    if (rule->type == CSS_RULE_SCOPE) {
+        CssSelectorGroup* groups[] = {rule->data.conditional_rule.scope_start,
+            rule->data.conditional_rule.scope_end};
+        for (size_t g = 0; g < sizeof(groups) / sizeof(groups[0]); g++)
+            if (!css_bind_selector_group_namespaces(groups[g], stylesheet)) return false;
+    }
+    CssRuleChildList children = css_rule_child_list(rule);
+    if (children.count) {
         size_t write = 0;
-        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
-            CssRule* nested = rule->data.style_rule.nested_rules[i];
+        for (size_t i = 0; i < *children.count; i++) {
+            CssRule* nested = (*children.rules)[i];
             if (css_bind_rule_namespaces(nested, stylesheet)) {
-                rule->data.style_rule.nested_rules[write++] = nested;
+                (*children.rules)[write++] = nested;
             }
         }
-        rule->data.style_rule.nested_rule_count = write;
-    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
-        size_t write = 0;
-        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-            CssRule* nested = rule->data.conditional_rule.rules[i];
-            if (css_bind_rule_namespaces(nested, stylesheet)) {
-                rule->data.conditional_rule.rules[write++] = nested;
-            }
-        }
-        rule->data.conditional_rule.rule_count = write;
+        *children.count = write;
     }
     return true;
 }
@@ -400,7 +666,9 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     const char* css_text, const char* base_url) {
     if (!engine || !css_text) return NULL;
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     clock_t start_time = clock();
+#endif
 
     log_debug("Starting enhanced CSS parsing: %zu chars, base_url=%s", strlen(css_text), base_url ? base_url : "(none)");
 
@@ -442,8 +710,10 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     if (token_count <= 0) {
         log_debug("CSS tokenization returned %d tokens", token_count);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
         clock_t end_time = clock();
         stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+#endif
         engine->stats.stylesheets_parsed++;
         pool_destroy(token_pool);
         return stylesheet;
@@ -557,6 +827,7 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
                 }
 
                 if (stylesheet->rule_count < stylesheet->rule_capacity) {
+                    css_rule_attach(rule, NULL, stylesheet);
                     stylesheet->rules[stylesheet->rule_count++] = rule;
 
                     // Update feature usage flags
@@ -603,8 +874,10 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     log_debug("Parsed %zu CSS rules", stylesheet->rule_count);
 
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     clock_t end_time = clock();
     stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+#endif
 
     // Update engine statistics
     engine->stats.rules_parsed += stylesheet->rule_count;
@@ -635,6 +908,7 @@ void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* ru
 }
 
 void css_engine_print_stats(CssEngine* engine) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!engine) return;
 
     log_info("css engine stats: rules_parsed=%zu selectors_cached=%zu values_computed=%zu cascade_calcs=%zu",
@@ -646,6 +920,7 @@ void css_engine_print_stats(CssEngine* engine) {
              engine->features.css_nesting, engine->features.css_cascade_layers,
              engine->features.css_container_queries, engine->features.css_scope,
              engine->features.css_color_4);
+#endif
 }
 
 double css_engine_get_parse_time(CssEngine* engine) {

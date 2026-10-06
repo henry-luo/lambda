@@ -2,7 +2,7 @@
 #include "view.hpp"
 #include "../lib/log.h"
 
-RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock* block,
+RenderTransformScope render_state_push_transform(RasterRenderContext* rdcon, ViewBlock* block,
                                                  const BlockBlot* parent_block) {
     RenderTransformScope scope = {
         lam::up(rdcon),
@@ -31,7 +31,7 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
             block->node_name(), rdcon->perspective_distance);
     }
 
-    if (!block->transform || !block->transformp()->functions) {
+    if (!transform_has_functions(block->transform)) {
         return scope;
     }
 
@@ -39,7 +39,7 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
         block->transformp(), elem_x, elem_y, block->width, block->height);
 
     RdtMatrix next_transform = radiant::compute_transform_matrix(
-        block->transformp()->functions, block->width, block->height, origin.x, origin.y,
+        block->transformp(), block->width, block->height, origin.x, origin.y,
         rdcon->perspective_distance, rdcon->perspective_origin_x, rdcon->perspective_origin_y);
     next_transform.e13 *= scale;
     next_transform.e23 *= scale;
@@ -71,7 +71,7 @@ void render_state_pop_transform(RenderTransformScope* scope) {
     scope->active = false;
 }
 
-const RdtMatrix* render_state_current_transform(RenderContext* rdcon) {
+const RdtMatrix* render_state_current_transform(RasterRenderContext* rdcon) {
     if (!rdcon || !rdcon->has_transform) {
         return nullptr;
     }

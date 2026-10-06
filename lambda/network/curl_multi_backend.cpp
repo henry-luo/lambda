@@ -12,6 +12,7 @@
 #include "../../lib/str.h"
 #include "../../lib/byte_builder.h"
 #include <curl/curl.h>
+#include "curl_trust.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -286,6 +287,7 @@ static bool configure_transfer(CurlMultiTransfer* transfer) {
     }
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_use_host_trust_store(easy);
     curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
     curl_easy_setopt(easy, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
     curl_easy_setopt(easy, CURLOPT_MAXCONNECTS, 6L);

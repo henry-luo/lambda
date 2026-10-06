@@ -38,12 +38,16 @@ extern "C" int compiler_pass_manager_run(CompilerPassManager* manager, void* con
     for (uint32_t i = manager->next_pass; i < manager->pass_count; i++) {
         CompilerPassSpec* pass = &manager->passes[i];
         if ((manager->facts & pass->required_facts) != pass->required_facts) return 0;
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
         uint64_t started = manager->observer ? time_now_us() : 0;
+#endif
         int succeeded = pass->run(pass->context ? pass->context : context);
+#ifndef LAMBDA_NO_AMBIENT_PROVIDERS
         if (manager->observer) {
             manager->observer(pass->name, time_now_us() - started,
                 manager->observer_context);
         }
+#endif
         if (!succeeded) return 0;
         manager->facts |= pass->produced_facts;
         manager->next_pass = i + 1;

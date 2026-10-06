@@ -1,18 +1,17 @@
 stateDiagram-v2
     [*] --> Reading
-    Reading --> CommandCheck: line read (top of input)
+    Reading --> CommandCheck: line read (fresh entry)
     CommandCheck --> Exit: quit / q / exit
-    CommandCheck --> Reading: help / clear
+    CommandCheck --> Reading: help / clear / .env / .type / .save
     CommandCheck --> Accumulate: ordinary line
     Reading --> Accumulate: continuation line
-    Accumulate --> Completeness: check_statement_completeness
-    Completeness --> Reading: INCOMPLETE (continuation prompt)
-    Completeness --> Discard: ERROR (discard pending input)
-    Discard --> Reading
-    Completeness --> Execute: COMPLETE (append to repl_history)
-    Execute --> RunWholeHistory: run_script_mir over entire repl_history
-    RunWholeHistory --> Rollback: result is ERROR
-    Rollback --> Reading: truncate repl_history to saved length
-    RunWholeHistory --> Display: success
-    Display --> Reading: incremental prefix diff vs last_output
+    Accumulate --> Reading: unclosed bracket, string or comment
+    Accumulate --> Build: balanced (interp_repl_session_eval)
+    Build --> Reading: INCOMPLETE (parser needs more)
+    Build --> Rollback: REJECTED (parse, type, plan, T0 support)
+    Build --> Execute: plan, link, snapshot slab
+    Execute --> Rollback: FAILED (error or fault, Ctrl-C included)
+    Rollback --> Reading: restore scope, lists, index, source, slab
+    Execute --> Echo: OK (fragment only, nothing replayed)
+    Echo --> Reading: value, unless declarations or statements only
     Exit --> [*]

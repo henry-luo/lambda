@@ -1,0 +1,12 @@
+\documentclass{article}
+\usepackage[style=numeric,backend=biber]{biblatex}
+\addbibresource{biblatex_negative.bib}
+\addbibresource{absent.bib}
+\begin{document}
+\cite{duplicate,odd,ghost}
+\cite{metadata}
+\cite*{duplicate}
+\citet{duplicate}
+\printbibliography[heading=unknown]
+\printbibliography[type=alien]
+\end{document}

@@ -87,7 +87,7 @@ These libraries and tools are required on every platform.
 | **tree-sitter-latex** | Built from `lambda/tree-sitter-latex/` | LaTeX document parsing |
 | **tree-sitter-latex-math** | Built from `lambda/tree-sitter-latex-math/` | LaTeX math expression parsing |
 | **MIR** | Built from `mac-deps/mir/` | JIT compiler backend (Medium Internal Representation) |
-| **RE2** | Built from `build_temp/re2-noabsl/` | Regular expression engine (no Abseil dependency) |
+| **RE2** | Vendored at `lib/re2/` (`lib/re2/VENDOR.md`), built into `build_temp/re2_build/` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
 | **utf8proc** | Built from `build_temp/utf8proc/` | Unicode text processing and normalization |
 | **mpdecimal** | System package or built from source | Multi-precision decimal arithmetic |
 | **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |

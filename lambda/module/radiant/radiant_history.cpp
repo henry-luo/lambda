@@ -13,7 +13,7 @@ typedef struct RadiantHistoryEntry {
     bool rooted;
 } RadiantHistoryEntry;
 
-typedef struct RadiantHistoryState {
+typedef struct RadiantHistoryState : DomDocumentResourceData {
     DomDocument* document;
     ArrayList* entries;
     int index;
@@ -34,7 +34,7 @@ static void history_entry_destroy(RadiantHistoryEntry* entry) {
     mem_free(entry);
 }
 
-static void history_state_destroy(void* data) {
+static void history_state_destroy(DomDocumentResourceData* data) {
     RadiantHistoryState* history = (RadiantHistoryState*)data;
     if (!history) return;
     if (history->entries) {

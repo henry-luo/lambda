@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../lambda.h"
+#include "activation.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -12,7 +13,6 @@ extern "C" {
 
 typedef struct LambdaScheduler LambdaScheduler;
 typedef struct LambdaTask LambdaTask;
-typedef struct LambdaAsyncFrame LambdaAsyncFrame;
 typedef struct LambdaTaskScope LambdaTaskScope;
 typedef void (*LambdaTaskCompletionFn)(LambdaTask* task, Item result, void* data);
 typedef void (*LambdaTaskObserverDestroyFn)(void* data);
@@ -26,12 +26,6 @@ typedef enum LambdaTaskState {
     LAMBDA_TASK_DONE,
 } LambdaTaskState;
 
-typedef enum LambdaTaskPoll {
-    LAMBDA_TASK_POLL_READY = 0,
-    LAMBDA_TASK_POLL_PARKED,
-    LAMBDA_TASK_POLL_DONE,
-} LambdaTaskPoll;
-
 typedef enum LambdaSendStatus {
     LAMBDA_SEND_OK = 0,
     LAMBDA_SEND_FULL,
@@ -39,22 +33,31 @@ typedef enum LambdaSendStatus {
     LAMBDA_SEND_INVALID_HANDLE,
 } LambdaSendStatus;
 
-typedef LambdaTaskPoll (*LambdaTaskResumeFn)(LambdaTask* task, void* frame, Item* out);
-typedef void (*LambdaTaskFrameDestroyFn)(void* frame);
-
 LambdaScheduler* lambda_scheduler_create(int mailbox_capacity);
 void lambda_scheduler_destroy(LambdaScheduler* scheduler);
 int lambda_scheduler_run_one(LambdaScheduler* scheduler);
 int lambda_scheduler_run_ready(LambdaScheduler* scheduler);
 int lambda_scheduler_drain(LambdaScheduler* scheduler);
 int lambda_scheduler_live_count(const LambdaScheduler* scheduler);
+// JSCU25: a parked JS async activation registers weakly with the attached
+// scheduler. It counts as live while it waits and leaves when it settles or
+// its carrier is collected; it keeps a drain going only while the loop could
+// still settle it. Enter returns a token (0 without a scheduler); leave
+// ignores a token whose scheduler is gone.
+uint64_t lambda_scheduler_weak_enter(void);
+void lambda_scheduler_weak_leave(uint64_t token);
 LambdaTask* lambda_scheduler_current(LambdaScheduler* scheduler);
 
-LambdaTask* lambda_task_create(LambdaScheduler* scheduler, LambdaTaskResumeFn resume,
-    void* frame, LambdaTaskFrameDestroyFn destroy_frame);
-void lambda_task_set_frame_roots(LambdaTask* task, Item* roots, int count);
+// A task runs `entry(arg)` on its own activation; it is runnable at once.
+LambdaTask* lambda_task_create(LambdaScheduler* scheduler, ActivationEntry entry,
+    Item arg);
 Item lambda_task_handle(LambdaTask* task);
+#ifdef LAMBDA_NO_TASKS
+// no task capability objects can be constructed in a synchronous profile.
+static inline bool lambda_task_handle_is(Item item) { (void)item; return false; }
+#else
 bool lambda_task_handle_is(Item item);
+#endif
 LambdaTask* lambda_task_from_handle(Item item);
 LambdaTaskState lambda_task_state(const LambdaTask* task);
 Item lambda_task_result(const LambdaTask* task);
@@ -73,36 +76,16 @@ void lambda_task_resume(LambdaTask* task);
 void lambda_task_resume_external(LambdaTask* task, Item result);
 void lambda_task_complete(LambdaTask* task, Item result);
 bool lambda_task_cancel(LambdaTask* task);
-bool lambda_task_take_resume_value(LambdaTask* task, Item* out);
+// The one park point: park the running task (its wakeup is already
+// registered) and return the value it is resumed with.
+Item lambda_task_suspend(LambdaTask* task);
 bool lambda_task_on_complete(LambdaTask* task, LambdaTaskCompletionFn callback,
     void* data, LambdaTaskObserverDestroyFn destroy_data);
 void lambda_concurrency_set_promise_bridge(LambdaPromiseIsFn is_promise,
     LambdaPromiseWaitFn wait_promise, LambdaHandleToPromiseFn handle_to_promise);
 
-LambdaAsyncFrame* lambda_async_frame_enter_current(int slot_capacity);
-int lambda_async_frame_state(LambdaAsyncFrame* frame);
-void lambda_async_frame_set_state(LambdaAsyncFrame* frame, int state);
-Item lambda_async_frame_get(LambdaAsyncFrame* frame, int slot);
-void lambda_async_frame_set(LambdaAsyncFrame* frame, int slot, Item value);
-uint64_t lambda_async_frame_get_raw(LambdaAsyncFrame* frame, int slot);
-void lambda_async_frame_set_raw(LambdaAsyncFrame* frame, int slot, uint64_t value);
-uint64_t lambda_async_frame_get_word(LambdaAsyncFrame* frame, int slot);
-void lambda_async_frame_set_word(LambdaAsyncFrame* frame, int slot, uint64_t value);
-void lambda_async_frame_set_fault_target(LambdaAsyncFrame* frame, int state);
-void lambda_async_frame_clear_fault_target(LambdaAsyncFrame* frame);
-Item lambda_async_frame_take_fault(LambdaAsyncFrame* frame);
-LambdaTaskScope* lambda_async_frame_fault_scope_base(LambdaAsyncFrame* frame);
-void lambda_async_frame_complete(LambdaAsyncFrame* frame);
-LambdaTaskScope* lambda_async_frame_scope_base(LambdaAsyncFrame* frame);
-int lambda_task_has_current(void);
-
 Item lambda_task_start_function(Item function, List* args);
 Item lambda_task_start_function_scoped(Item function, List* args, bool escapes);
-// Drives a procedure through the context scheduler so task-only builtins see
-// the same root task at every execution tier (D6.3.1, S7.11.2).
-Item lambda_task_run_root_function(Item function, List* args);
-Item lambda_task_run_root_raw(void* function_ptr, void* env, int env_count,
-    List* args);
 LambdaTaskScope* lambda_task_scope_enter(void);
 LambdaTaskScope* lambda_task_scope_current(void);
 Item lambda_task_scope_leave(LambdaTaskScope* scope, bool error_exit);

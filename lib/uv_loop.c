@@ -45,6 +45,10 @@ static void check_cb(uv_check_t *handle) {
     if (g_task_drain) g_task_drain();
 }
 
+void lambda_uv_checkpoint(void) {
+    drain_task_checkpoint();
+}
+
 uv_loop_t* lambda_uv_loop(void) {
     return g_loop;
 }

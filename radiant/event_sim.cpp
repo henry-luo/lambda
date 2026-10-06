@@ -5267,7 +5267,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (uicon->document && ctx->nav_history_depth < 16) {
                 ctx->nav_history[ctx->nav_history_depth++] = uicon->document;
             }
-            uicon->document = new_doc;
+            uicon->document = lam::up(new_doc);
             if (!radiant_document_ensure_state(new_doc, "event_sim:navigate")) {
                 log_error("event_sim: navigate FAIL - could not create DocState");
                 ctx->fail_count++;
@@ -5286,7 +5286,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             DomDocument* prev_doc = (DomDocument*)ctx->nav_history[--ctx->nav_history_depth];
-            uicon->document = prev_doc;
+            uicon->document = lam::up(prev_doc);
             layout_html_doc(uicon, prev_doc, false);
             render_html_doc(uicon, prev_doc->view_tree, nullptr);
             log_info("event_sim: navigate_back to previous page (history depth now %d)", ctx->nav_history_depth);
@@ -5297,7 +5297,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (!ev->frame_selector) {
                 // switch back to main frame
                 if (ctx->original_document) {
-                    uicon->document = (DomDocument*)ctx->original_document;
+                    uicon->document = lam::up((DomDocument*)ctx->original_document);
                     ctx->frame_stack_depth = 0;
                     log_info("event_sim: switch_frame back to main");
                 } else {
@@ -5330,7 +5330,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             ctx->frame_stack[ctx->frame_stack_depth++] = cur_doc;
-            uicon->document = iframe_elem->embedp()->doc;
+            uicon->document = lam::up(iframe_elem->embedp()->doc);
             log_info("event_sim: switch_frame to '%s'", ev->frame_selector);
             break;
         }
@@ -5687,7 +5687,7 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
         log_info("event_sim: simulation complete");
         replay_check_final_state(ctx, uicon);
         if (ctx->original_document) {
-            uicon->document = (DomDocument*)ctx->original_document;
+            uicon->document = lam::up((DomDocument*)ctx->original_document);
             ctx->frame_stack_depth = 0;
         }
         event_sim_print_results(ctx);

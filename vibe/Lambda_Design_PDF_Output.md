@@ -76,7 +76,7 @@ Source inspection gives the following result:
 
 The output options form also appears in
 `test/lambda/proc/test_pipe_file.ls:69` and the working design
-[Lambda Shell](Lambda_Shell.md). The example at
+[Lambda I/O Shell](Lambda_IO_Shell.md). The example at
 `doc/Lambda_Sys_Func.md:1213` instead uses `{type: 'json'}` for `output`,
 which disagrees with that implementation and working record. This proposal
 records the inconsistency; it does not silently unify or rename the I/O APIs.

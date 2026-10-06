@@ -29,6 +29,10 @@ extern "C" {
 extern THREAD_LOCAL int log_indent;
 
 /* Indentation control macros */
+#ifdef LAMBDA_NO_LOG
+#define log_enter() ((void)0)
+#define log_leave() ((void)0)
+#else
 #define log_enter() do { \
     if (log_indent < LOG_MAX_INDENT_LEVEL * 2) log_indent += 2; \
 } while(0)
@@ -36,6 +40,7 @@ extern THREAD_LOCAL int log_indent;
 #define log_leave() do { \
     if (log_indent >= 2) log_indent -= 2; \
 } while(0)
+#endif
 
 /* log version */
 #define LOG_VERSION_MAJOR 1
@@ -108,7 +113,7 @@ int clog_raw(log_category_t *category, const char *message);
  * When NDEBUG is defined (release builds), these become no-ops.
  * LOG_IMPL is defined by log.c to prevent macro replacement of function definitions.
  */
-#if defined(NDEBUG) && !defined(LOG_IMPL)
+#if (defined(NDEBUG) || defined(LAMBDA_NO_LOG)) && !defined(LOG_IMPL)
     #define clog_info(category, ...) ((void)0)
     #define clog_debug(category, ...) ((void)0)
     #define clog_trace(category, ...) ((void)0)
@@ -124,7 +129,7 @@ int clog_verror(log_category_t *category, const char *format, va_list args);
 int clog_vwarn(log_category_t *category, const char *format, va_list args);
 int clog_vnotice(log_category_t *category, const char *format, va_list args);
 
-#if defined(NDEBUG) && !defined(LOG_IMPL)
+#if (defined(NDEBUG) || defined(LAMBDA_NO_LOG)) && !defined(LOG_IMPL)
     #define clog_vinfo(category, format, args) ((void)0)
     #define clog_vdebug(category, format, args) ((void)0)
     #define clog_vtrace(category, format, args) ((void)0)
@@ -149,7 +154,7 @@ void log_mem_stage(const char *stage);
  * compiler will completely eliminate, reducing binary size and overhead.
  * LOG_IMPL is defined by log.c to prevent macro replacement of function definitions.
  */
-#if defined(NDEBUG) && !defined(LOG_IMPL)
+#if (defined(NDEBUG) || defined(LAMBDA_NO_LOG)) && !defined(LOG_IMPL)
     /* Release build: strip debug and info logging completely */
     #define log_info(...) ((void)0)
     #define log_debug(...) ((void)0)
@@ -167,7 +172,7 @@ int log_verror(const char *format, va_list args);
 int log_vwarn(const char *format, va_list args);
 int log_vnotice(const char *format, va_list args);
 
-#if defined(NDEBUG) && !defined(LOG_IMPL)
+#if (defined(NDEBUG) || defined(LAMBDA_NO_LOG)) && !defined(LOG_IMPL)
     #define log_vinfo(format, args) ((void)0)
     #define log_vdebug(format, args) ((void)0)
     #define log_vtrace(format, args) ((void)0)
@@ -175,6 +180,28 @@ int log_vnotice(const char *format, va_list args);
     int log_vinfo(const char *format, va_list args);
     int log_vdebug(const char *format, va_list args);
     int log_vtrace(const char *format, va_list args);
+#endif
+
+/* strip arguments too: disabled logging must not allocate diagnostic values. */
+#if defined(LAMBDA_NO_LOG) && !defined(LOG_IMPL)
+static inline int log_noop_status(void) { return LOG_OK; }
+#define log_fatal(...) log_noop_status()
+#define log_error(...) log_noop_status()
+#define log_warn(...) log_noop_status()
+#define log_notice(...) log_noop_status()
+#define log_vfatal(...) log_noop_status()
+#define log_verror(...) log_noop_status()
+#define log_vwarn(...) log_noop_status()
+#define log_vnotice(...) log_noop_status()
+#define clog_fatal(...) log_noop_status()
+#define clog_error(...) log_noop_status()
+#define clog_warn(...) log_noop_status()
+#define clog_notice(...) log_noop_status()
+#define clog_vfatal(...) log_noop_status()
+#define clog_verror(...) log_noop_status()
+#define clog_vwarn(...) log_noop_status()
+#define clog_vnotice(...) log_noop_status()
+#define clog_raw(...) log_noop_status()
 #endif
 
 /* Level check functions */

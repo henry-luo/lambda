@@ -4,7 +4,7 @@
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 
-void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
+void render_column_rules(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!block->multicol_prop()) return;
 
     MultiColumnProp* mc = block->multicol_prop();

@@ -31,6 +31,7 @@ ANNOTATION_CASES = {
     "fasta": "beng/fasta2.ls", "deriv": "larceny/deriv2.ls",
     "towers": "awfy/towers2.ls", "sieve": "awfy/sieve2.ls",
     "primes": "larceny/primes2.ls", "quicksort": "larceny/quicksort2.ls",
+    "kostya_primes": "kostya/primes2.ls",
     "binarytrees": "beng/binarytrees2.ls", "gcbench": "larceny/gcbench2.ls",
     "Richards": "awfy/richards2.ls", "prettier_ast": "text/prettier_ast2.ls",
 }
@@ -166,7 +167,8 @@ def interp_diagnostic(binary, script, directory, label, timeout):
     profile = directory / (label + ".exec.tsv")
     profile.unlink(missing_ok=True)
     result = run_lambda_process(binary, script, "interp", timeout,
-        procedural=True, extra_env={"LAMBDA_EXEC_PROFILE": "1",
+        # archived comparison binaries still read the retired selector spelling
+        procedural=True, extra_env={"LAMBDA_TIER": "interp", "LAMBDA_EXEC_PROFILE": "1",
             "LAMBDA_EXEC_PROFILE_OUT": str(profile)})
     stats = re.search(r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+)",
                       result.stderr)

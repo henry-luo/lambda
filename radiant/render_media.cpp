@@ -8,7 +8,7 @@
 #include <math.h>
 #include <string.h>
 
-static bool render_media_push_content_clip(RenderContext* rdcon, const Rect* content_rect,
+static bool render_media_push_content_clip(RasterRenderContext* rdcon, const Rect* content_rect,
                                            const Rect* image_rect) {
     if (!rdcon || !content_rect || !image_rect ||
         view_geometry_rect_contains_rect(*content_rect, *image_rect, 0.01f)) {
@@ -68,7 +68,7 @@ bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
     int saved_clip_depth = rdt_clip_save_depth();
 
     // Intentional local/offscreen draw: this rasterizes an SVG resource into
-    // its ImageSurface cache, outside the live RenderContext painter pipeline.
+    // its ImageSurface cache, outside the live RasterRenderContext painter pipeline.
     RdtPicture* pic = rdt_picture_dup(surface->pic);
     if (pic) {
         rdt_picture_set_size(pic, (float)target_width, (float)target_height);
@@ -170,7 +170,7 @@ bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* 
     return true;
 }
 
-static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
+static void render_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embedp()->img) return;
 
     ImageSurface* img = view->embedp()->img;
@@ -247,7 +247,7 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     }
 }
 
-void render_image_view(RenderContext* rdcon, ViewBlock* view) {
+void render_image_view(RasterRenderContext* rdcon, ViewBlock* view) {
     log_enter();
     if (render_block_dirty_misses(rdcon, view)) {
         log_leave();
@@ -282,7 +282,7 @@ bool render_media_is_webview_layer(ViewBlock* view) {
            view->embedp()->webview->mode == WEBVIEW_MODE_LAYER;
 }
 
-void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
+void render_webview_layer_content(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embedp()->webview) return;
     WebViewProp* wv = view->embedp()->webview;
     if (wv->mode != WEBVIEW_MODE_LAYER || !wv->surface || !wv->surface->pixels) return;
@@ -301,7 +301,7 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
                                  wv->surface ? wv->surface->generation : 0);
 }
 
-void render_video_content(RenderContext* rdcon, ViewBlock* view) {
+void render_video_content(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embedp()->video) return;
 
     float s = rdcon->raster_scale;

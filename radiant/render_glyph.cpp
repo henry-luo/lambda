@@ -1,6 +1,6 @@
 #include "render.hpp"
 
-void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y) {
+void draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y) {
     if (!rdcon || !bitmap || rdcon->color.a == 0) return;
     if (!bitmap->buffer || bitmap->width <= 0 || bitmap->height <= 0 || bitmap->pitch <= 0) return;
     bool is_color = (bitmap->pixel_mode == GLYPH_PIXEL_BGRA);

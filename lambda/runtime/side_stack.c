@@ -2,6 +2,7 @@
 
 #include "../lambda.h"
 #include "../../lib/log.h"
+#include <stdlib.h>
 
 // The runtime-state header is C++-only; this C helper only needs its TLS
 // owner as an opaque pointer before handing it to the side-stack API.
@@ -23,19 +24,30 @@ extern void* eval_context_tls_runtime(void);
 #define SIDE_STACK_TLS __thread
 #endif
 
-typedef struct SideStackRegion {
-    uint64_t* base;
-    uint64_t* committed;
-    uint64_t* limit;
-    size_t byte_size;
-} SideStackRegion;
+typedef LambdaSideStackRegion SideStackRegion;
 
-static SIDE_STACK_TLS SideStackRegion root_region = {0};
-static SIDE_STACK_TLS SideStackRegion number_region = {0};
+// The thread's own regions back the base stack. An activation running on its
+// own native stack selects its own pair instead, so every LIFO frame on a
+// stack lives in that stack's segments (RA3).
+static SIDE_STACK_TLS SideStackRegion thread_root_region = {0};
+static SIDE_STACK_TLS SideStackRegion thread_number_region = {0};
+static SIDE_STACK_TLS SideStackRegion* root_region_current = NULL;
+static SIDE_STACK_TLS SideStackRegion* number_region_current = NULL;
+
+static SideStackRegion* side_root_region(void) {
+    return root_region_current ? root_region_current : &thread_root_region;
+}
+
+static SideStackRegion* side_number_region(void) {
+    return number_region_current ? number_region_current : &thread_number_region;
+}
 
 static bool side_stack_region_reserve(SideStackRegion* region, size_t byte_size) {
     if (region->base) return true;
-#if defined(_WIN32)
+#if defined(__EMSCRIPTEN__)
+    // WASM has bounded linear memory rather than native virtual reservations.
+    void* memory = calloc(1, byte_size);
+#elif defined(_WIN32)
     void* memory = VirtualAlloc(NULL, byte_size, MEM_RESERVE, PAGE_NOACCESS);
 #else
     void* memory = mmap(NULL, byte_size, PROT_READ | PROT_WRITE,
@@ -80,27 +92,29 @@ static bool side_stack_region_ensure(SideStackRegion* region, uint64_t* end) {
 
 bool lambda_side_stack_bind_for(Context* runtime_context) {
     if (!runtime_context) return false;
-    if (!side_stack_region_reserve(&root_region,
+    SideStackRegion* root_region_ptr = side_root_region();
+    SideStackRegion* number_region_ptr = side_number_region();
+    if (!side_stack_region_reserve(root_region_ptr,
                                    LAMBDA_SIDE_ROOT_RESERVE_BYTES) ||
-        !side_stack_region_reserve(&number_region,
+        !side_stack_region_reserve(number_region_ptr,
                                    LAMBDA_SIDE_NUMBER_RESERVE_BYTES)) {
         log_error("side-stack reserve: unable to reserve root/number regions");
         return false;
     }
-    bool root_bound = runtime_context->side_root_base == root_region.base &&
-        runtime_context->side_root_top >= root_region.base &&
-        runtime_context->side_root_top <= root_region.limit;
-    bool number_bound = runtime_context->side_number_base == number_region.base &&
-        runtime_context->side_number_top >= number_region.base &&
-        runtime_context->side_number_top <= number_region.limit;
-    runtime_context->side_root_base = root_region.base;
-    if (!root_bound) runtime_context->side_root_top = root_region.base;
-    runtime_context->side_root_commit_limit = root_region.committed;
-    runtime_context->side_root_limit = root_region.limit;
-    runtime_context->side_number_base = number_region.base;
-    if (!number_bound) runtime_context->side_number_top = number_region.base;
-    runtime_context->side_number_commit_limit = number_region.committed;
-    runtime_context->side_number_limit = number_region.limit;
+    bool root_bound = runtime_context->side_root_base == root_region_ptr->base &&
+        runtime_context->side_root_top >= root_region_ptr->base &&
+        runtime_context->side_root_top <= root_region_ptr->limit;
+    bool number_bound = runtime_context->side_number_base == number_region_ptr->base &&
+        runtime_context->side_number_top >= number_region_ptr->base &&
+        runtime_context->side_number_top <= number_region_ptr->limit;
+    runtime_context->side_root_base = root_region_ptr->base;
+    if (!root_bound) runtime_context->side_root_top = root_region_ptr->base;
+    runtime_context->side_root_commit_limit = root_region_ptr->committed;
+    runtime_context->side_root_limit = root_region_ptr->limit;
+    runtime_context->side_number_base = number_region_ptr->base;
+    if (!number_bound) runtime_context->side_number_top = number_region_ptr->base;
+    runtime_context->side_number_commit_limit = number_region_ptr->committed;
+    runtime_context->side_number_limit = number_region_ptr->limit;
     return true;
 }
 
@@ -123,12 +137,12 @@ bool lambda_side_stack_ensure_for(Context* runtime_context, size_t root_slots,
     }
     uint64_t* root_end = runtime_context->side_root_top + root_slots;
     uint64_t* number_end = runtime_context->side_number_top + number_slots;
-    if (!side_stack_region_ensure(&root_region, root_end) ||
-        !side_stack_region_ensure(&number_region, number_end)) {
+    if (!side_stack_region_ensure(side_root_region(), root_end) ||
+        !side_stack_region_ensure(side_number_region(), number_end)) {
         return false;
     }
-    runtime_context->side_root_commit_limit = root_region.committed;
-    runtime_context->side_number_commit_limit = number_region.committed;
+    runtime_context->side_root_commit_limit = side_root_region()->committed;
+    runtime_context->side_number_commit_limit = side_number_region()->committed;
     return true;
 }
 
@@ -312,7 +326,7 @@ static void side_stack_region_decommit(SideStackRegion* region, uint64_t* top) {
     if (start < end && VirtualFree((void*)start, end - start, MEM_DECOMMIT)) {
         region->committed = (uint64_t*)start;
     }
-#else
+#elif defined(MADV_DONTNEED)
     long page_size = sysconf(_SC_PAGESIZE);
     if (page_size <= 0) return;
     uintptr_t page_mask = (uintptr_t)page_size - 1u;
@@ -324,10 +338,10 @@ static void side_stack_region_decommit(SideStackRegion* region, uint64_t* top) {
 
 static void lambda_side_stack_decommit_unused_for(Context* runtime_context) {
     if (!runtime_context) return;
-    side_stack_region_decommit(&root_region, runtime_context->side_root_top);
-    side_stack_region_decommit(&number_region, runtime_context->side_number_top);
-    runtime_context->side_root_commit_limit = root_region.committed;
-    runtime_context->side_number_commit_limit = number_region.committed;
+    side_stack_region_decommit(side_root_region(), runtime_context->side_root_top);
+    side_stack_region_decommit(side_number_region(), runtime_context->side_number_top);
+    runtime_context->side_root_commit_limit = side_root_region()->committed;
+    runtime_context->side_number_commit_limit = side_number_region()->committed;
 }
 
 void lambda_side_stack_decommit_unused(void) {
@@ -383,4 +397,30 @@ void lambda_root_frame_end(LambdaRootFrame* frame) {
         log_error("native-root-frame: non-LIFO frame restoration");
     }
     frame->active = false;
+}
+
+void lambda_side_stack_regions_select(LambdaSideStackRegion* root,
+                                      LambdaSideStackRegion* number) {
+    root_region_current = root;
+    number_region_current = number;
+}
+
+void lambda_side_stack_regions_current(LambdaSideStackRegion** root,
+                                       LambdaSideStackRegion** number) {
+    if (root) *root = root_region_current;
+    if (number) *number = number_region_current;
+}
+
+void lambda_side_stack_region_release(LambdaSideStackRegion* region) {
+    if (!region || !region->base) return;
+#if defined(_WIN32)
+    VirtualFree(region->base, 0, MEM_RELEASE);
+#else
+#if defined(__EMSCRIPTEN__)
+    free(region->base);
+#else
+    munmap(region->base, region->byte_size);
+#endif
+#endif
+    *region = (LambdaSideStackRegion){0};
 }

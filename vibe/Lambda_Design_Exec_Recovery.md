@@ -213,6 +213,8 @@ currently violated in practice.
 
 ### ER-D11 — Re-entry: modules, async, workers, guests
 
+*[Async revised 2026-10-05 (D6.3.3v2, S7.11.2v2, `Lambda_Design_Runtime_Async.md` §4.5): a task's boundaries live on its own activation and stay armed across its parks; a fault in a task is contained there and the task completes with the fault result. Where the text below says a frame never survives a yield, read it for the retired state machines.]*
+
 - **Nested eval / import / module execution.** Every execution entry pushes an execution-boundary
   frame and restores the previous target on normal return. Module and eval initialization is a
   **transaction barrier**: it restores, marks the partial module failed or discardable, then

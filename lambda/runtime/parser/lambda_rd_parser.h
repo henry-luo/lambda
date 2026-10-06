@@ -399,6 +399,9 @@ LambdaToken lambda_lexer_rescan_dot_step(LambdaLexer* lexer, LambdaToken number)
 // a base-type name, or a named value. Clause words and infix word operators
 // are capture-safe and return false. See S16.10.1v2.
 bool lambda_lexer_word_bars_binding(const char* text, size_t length);
+// The index-th word of the lexer vocabulary (keywords, base type names, named
+// values), or NULL past the end. Used by REPL completion.
+const char* lambda_lexer_vocabulary_word(size_t index);
 
 // This entry point is implemented by the recursive-descent/Pratt core and is
 // consumed by the direct AST sink.

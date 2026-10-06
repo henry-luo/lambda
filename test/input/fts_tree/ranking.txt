@@ -1,0 +1,1 @@
+BM25 ranks search results by term frequency.

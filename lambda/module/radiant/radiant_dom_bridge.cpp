@@ -2087,14 +2087,14 @@ extern "C" bool dom_engine_set_image_source(DomElement* element,
     DomDocument* saved_document = uicon->document;
     uicon->document = element->doc;
     ImageSurface* surface = load_image(uicon, source);
-    uicon->document = saved_document;
+    uicon->document = lam::up(saved_document);
     if (!surface) return false;
 
     if (!element->embed) {
         if (element->doc->view_tree) {
             element->ensure_embed(element->doc->view_tree);
         } else if (element->doc->document_pool) {
-            element->embed = lam::own((EmbedProp*)pool_calloc(
+            element->embed = lam::view_prop((EmbedProp*)pool_calloc(
                 element->doc->document_pool, sizeof(EmbedProp)));
             if (element->embed) *element->embed = EMBED_PROP_DEFAULT;
         }
@@ -2798,7 +2798,7 @@ static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
     // geometry reads must reconcile pending DOM mutations before the first snapshot.
     s_radiant_dom_geometry_layout_active = true;
     DomDocument* saved_document = uicon->document;
-    uicon->document = doc;
+    uicon->document = lam::up(doc);
     bool establishing_first_snapshot = !doc->view_tree || !doc->view_tree->root;
     bool needs_geometry_commit = doc->js.mutation_count > 0 || establishing_first_snapshot;
     if (needs_geometry_commit) {
@@ -2813,7 +2813,7 @@ static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
         }
         if (establishing_first_snapshot) script_runner_resume_js_watchdog();
     }
-    uicon->document = saved_document;
+    uicon->document = lam::up(saved_document);
     s_radiant_dom_geometry_layout_active = false;
 }
 

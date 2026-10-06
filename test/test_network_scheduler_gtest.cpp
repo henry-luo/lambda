@@ -121,7 +121,7 @@ TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {
     mem_free(stored_path);
 
     DomDocument document = {};
-    document.url = url_parse("https://docs.example.test/guide");
+    document.url = lam::own(url_parse("https://docs.example.test/guide"));
     ASSERT_NE(document.url, nullptr);
     NetworkResourceManager* manager = resource_manager_create(&document, NULL, cache);
     ASSERT_NE(manager, nullptr);

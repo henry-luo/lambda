@@ -91,7 +91,7 @@ struct RdtPicture {
 };
 
 // Process-wide font context for SVG-DOM pictures (set by ui_context).
-// Inline <svg> uses RenderContext->ui_context->font_ctx; standalone pictures
+// Inline <svg> uses RasterRenderContext->ui_context->font_ctx; standalone pictures
 // rasterized off-screen by media helpers do not have a render context, so
 // we keep a global pointer set once at startup.
 static FontContext* g_picture_font_ctx = nullptr;

@@ -1,0 +1,40 @@
+\documentclass[12pt]{article}
+
+\usepackage{polyglossia}
+\setdefaultlanguage[numerals=thai]{thai}
+\newfontfamily{\thaifont}{Norasi}[Script=Thai]
+\newfontfamily{\thaifontsf}{Garuda}[Script=Thai]
+\newfontfamily{\thaifonttt}{Noto Sans Thai}
+\XeTeXlinebreaklocale "th"
+
+\setotherlanguage{english}
+\newfontfamily\englishfont{FreeSerif}[Ligatures=TeX]
+\renewfontfamily\sffamilylatin{FreeSans}[Ligatures=TeX]
+\renewfontfamily\ttfamilylatin{FreeMono}
+
+\usepackage{hyperref}
+\renewcommand{\UrlFont}{\ttfamilylatin}
+
+\title{ตัวอย่างเช่นไทย}
+\author{Lim Lian Tze}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\section{บทนำ}
+คอรัปชันจุ๊ยโปรดิวเซอร์ สถาปัตย์จ๊าบ แจ็กพ็อต ม้าหินอ่อน ซากุระคันถธุระ ฟีดสตาร์ท งี้ บอยคอตอิ่มแปร้สังโฆคำสาปแฟนซี ศิลปวัฒนธรรมไฟลท์จิ๊กโก๋กับดัก เจลพล็อตมาม่าซากุระดีลเลอร์ ซีนดัมพ์ แฮปปี้ เอ๊าะอุรังคธาตุซิม ฟินิกซ์เทรลเล่อร์อวอร์ด แคนยอนสมาพันธ์ ครัวซองฮัมอาข่าเอ็กซ์เพรส 
+
+\begin{otherlanguage}{english}
+Some maths and some English: $\sqrt{x + y - \alpha \times 2}$ 
+\end{otherlanguage}
+
+\textsf{ฟินิกซ์เทรลเล่อร์อวอร์ด} \textenglish{\sffamily `Sans-serif' Thai font!}
+
+\begin{otherlanguage}{english}
+A list of available Thai fonts on the Overleaf server can be found at \url{https://www.overleaf.com/help/193#!Thai}. You can upload your own .otf and .ttf fonts to use them with XeLaTeX.
+\end{otherlanguage}
+
+\end{document}

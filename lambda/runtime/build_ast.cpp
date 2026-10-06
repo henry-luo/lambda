@@ -20,7 +20,9 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
+#ifndef LAMBDA_NO_TASKS
 #include "../../lib/uv_loop.h"
+#endif
 #include <errno.h>
 #include <stdlib.h>
 
@@ -84,8 +86,6 @@ static int source_span_start_line(Transpiler* tp, SourceSpan span) {
 }
 
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
-bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
-    SourceSpan diagnostic_span, int arg_count);
 
 // Forward declaration for imported module resolution
 static const char* resolve_imported_module(Transpiler* tp, StrView* name);
@@ -141,7 +141,11 @@ typedef struct {
 static struct hashmap* sys_func_map = NULL;       // (name, arg_count) → SysFuncInfo*
 static struct hashmap* sys_func_name_set = NULL;   // name → exists
 // AST closure workers can reach this cold process-wide table concurrently.
+#ifndef LAMBDA_NO_TASKS
 static uv_once_t sys_func_maps_once = UV_ONCE_INIT;
+#else
+static bool sys_func_maps_initialized = false;
+#endif
 
 typedef struct JubeSysFuncRecord {
     SysFuncInfo info;
@@ -427,7 +431,15 @@ static void init_sys_func_maps_once() {
 }
 
 static void init_sys_func_maps() {
+#ifndef LAMBDA_NO_TASKS
     uv_once(&sys_func_maps_once, init_sys_func_maps_once);
+#else
+    // synchronous profiles have no concurrent AST workers.
+    if (!sys_func_maps_initialized) {
+        init_sys_func_maps_once();
+        sys_func_maps_initialized = true;
+    }
+#endif
 }
 
 void ensure_sys_func_maps_initialized() {
@@ -1807,9 +1819,10 @@ static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self) {
     TypeFunc* signature = lambda_type_func_signature(((AstNode*)target)->type);
     if (target != self && (!signature || !signature->defect_known ||
             signature->may_defect)) return true;
-    int count = ast_linked_node_count(call->argument);
+    int source_count = ast_linked_node_count(call->argument);
+    int count = source_count + (call->pipe_inject ? 1 : 0);
     AstNode* args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-    ast_resolve_call_args(call->argument, target, count, args);
+    ast_resolve_call_arguments(call, target, source_count, args);
     TypeParam* parameter = signature ? signature->param : NULL;
     for (int i = 0; i < count && i < LAMBDA_MAX_FUNCTION_ARGS; i++,
             parameter = parameter ? parameter->next : NULL) {
@@ -2472,6 +2485,23 @@ NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
     return name_scope_lookup_name(tp->current_scope, name);
 }
 
+// The current-scope entry that binds exactly this declaration node, if any.
+// A declaration is identified by its node, never by its source offset: a REPL
+// entry is built with fragment-local spans, so two entries' `fn f` both start
+// at byte 0 (S16.7.5), and in a file the offset test registered a duplicate
+// `fn` twice and reported its E209 twice.
+static NameEntry* lookup_declaration_in_current_scope(Transpiler* tp,
+        String* name, const AstNode* node) {
+    NameEntry* entry = lookup_name_in_current_scope(tp, name);
+    if (!entry || !node) return NULL;
+    if (entry->node == node) return entry;
+    // the name has several entries only after an E209; scan for this node
+    for (entry = tp->current_scope->first; entry; entry = entry->next) {
+        if (entry->node == node) return entry;
+    }
+    return NULL;
+}
+
 static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
     if (!node || !entry) return;
     if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
@@ -2871,6 +2901,36 @@ static SysFuncInfo* lookup_builtin_module_member(const char* module,
     return lookup_module_prefixed_sys_func(module, member, arg_count);
 }
 
+// S17.8.1: an option name a system function does not define is a compile-time
+// error where its options argument is a map literal at the call. Names the
+// literal cannot show (a spread) are left to the function's run-time warning.
+static void direct_check_literal_options(Transpiler* tp, SysFuncInfo* info,
+        AstNode* arguments, int injected) {
+    int index = -1;
+    if (!sys_func_option_names(info->fn, &index) || index < 0 ||
+            info->arg_count <= index) return;
+    AstNode* arg = arguments;
+    for (int i = injected; arg && i < index; i++) arg = arg->next;
+    AstNode* root = ast_unwrap_primary(arg);
+    if (!root || root->node_type != AST_NODE_MAP) return;
+    // registry names spell a module member with '_' (io_grep is io.grep)
+    const char* display = info->name;
+    char dotted[64];
+    if (strncmp(display, "io_", 3) == 0) {
+        snprintf(dotted, sizeof(dotted), "io.%s", display + 3);
+        display = dotted;
+    }
+    for (AstNode* item = ((AstMapNode*)root)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) continue;
+        AstNamedNode* option = (AstNamedNode*)item;
+        if (!option->name || sys_func_option_known(info->fn, option->name->chars,
+                (size_t)option->name->len)) continue;
+        record_semantic_error_span(tp, item->source_span, ERR_INVALID_OPERATION,
+            "unknown option '%.*s' for %s (S17.8.1)",
+            (int)option->name->len, option->name->chars, display);
+    }
+}
+
 static bool start_option_name_is(AstNamedNode* option, const char* name) {
     size_t length = strlen(name);
     return option && option->name && option->name->len == (int)length &&
@@ -3109,7 +3169,7 @@ static bool report_missing_named_parameter(Transpiler* tp, AstCallNode* call,
 }
 
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
-        SourceSpan diagnostic_span, int arg_count) {
+        SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
     // a `function`-typed callee has no signature to validate against
     TypeFunc* func_type = call && call->function
         ? lambda_type_func_signature(call->function->type) : NULL;
@@ -3129,12 +3189,14 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     // order was rejected with E207 (found with LR07-19). A parameter with no
     // argument, or a skipped one (ast_is_omitted_argument), has none to check.
     AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-    int slot_count = 0;
+    // S10.1.2v4: the pipe receiver fills slot zero outside the written argument list
+    int slot_count = call->pipe_inject ? 1 : 0;
+    if (slot_count) by_param[0] = injected;
     AstFuncNode* named_callee = ast_call_has_named_args(call)
         ? ast_direct_call_function(call) : NULL;
     if (named_callee) {
         ast_resolve_call_args(call->argument, named_callee,
-            ast_linked_node_count(call->argument), by_param);
+            ast_linked_node_count(call->argument), by_param, slot_count);
         slot_count = LAMBDA_MAX_FUNCTION_ARGS;
     } else {
         for (AstNode* a = call->argument; a && slot_count < LAMBDA_MAX_FUNCTION_ARGS;
@@ -3208,7 +3270,8 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     for (int index = 0; named_param && index < LAMBDA_MAX_FUNCTION_ARGS;
             named_param = (AstNamedNode*)((AstNode*)named_param)->next, index++) {
         TypeParam* parameter = (TypeParam*)named_param->type;
-        if (by_param[index] || !parameter || parameter->is_optional) continue;
+        if (by_param[index] || (call->pipe_inject && index == 0) ||
+                !parameter || parameter->is_optional) continue;
         if (!report_missing_named_parameter(tp, call, diagnostic_span, named_param)) {
             return false;
         }
@@ -4842,6 +4905,9 @@ static Type* infer_if_result_type(Transpiler* tp, AstNode* then_branch,
         join->op = OPERATOR_UNION;
         return (Type*)join;
     }
+    // one branch's nominal record cannot certify the other branch (S11.3.1v2)
+    if (type_nominal_record(then_contrib) != type_nominal_record(else_contrib))
+        return lambda_type_union_normalized(tp->pool, then_contrib, else_contrib);
     // Reuse container types to retain their complete shape metadata.
     return then_contrib;
 }
@@ -7517,11 +7583,10 @@ static bool collect_concurrency_function(AstNode* node, void* data) {
 
 typedef struct MayAwaitScan {
     bool found;
-    bool indirect;
     const char* cause;
 } MayAwaitScan;
 
-static bool call_may_await(AstCallNode* call, bool* indirect, const char** cause) {
+static bool call_may_await(AstCallNode* call, const char** cause) {
     AstNode* function = call ? unwrap_primary_ast(call->function) : NULL;
     if (function && function->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
@@ -7534,7 +7599,6 @@ static bool call_may_await(AstCallNode* call, bool* indirect, const char** cause
     if (!function || !lambda_type_func_is_proc(function->type)) return false;
     AstFuncNode* callee = direct_pn_callee(call);
     if (!callee) {
-        if (indirect) *indirect = true;
         if (cause) *cause = "indirect pn call";
         return true;
     }
@@ -7562,30 +7626,25 @@ static bool scan_may_await_node(AstNode* node, void* data) {
             node->node_type == AST_NODE_PROC) return false;
     if (node->node_type != AST_NODE_CALL_EXPR) return true;
 
-    bool indirect = false;
     const char* cause = NULL;
-    if (call_may_await((AstCallNode*)node, &indirect, &cause)) {
+    if (call_may_await((AstCallNode*)node, &cause)) {
         scan->found = true;
-        scan->indirect = indirect;
         scan->cause = cause;
     }
     return !scan->found;
 }
 
-// The old concurrency planner independently walked each body for await
-// closure, task context, continuation count, and handler states. Keep the
-// AST traversal linear by recording the syntax facts once, then solve only
-// the direct-call dependency edges to a fixed point.
+// Record each body's syntax facts in one walk, then solve only the direct-call
+// dependency edges of the may-await closure to a fixed point. Suspension needs
+// no codegen (vibe/Lambda_Design_Runtime_Async.md RA1); the closure only
+// serves the handler diagnostic and GC planning.
 typedef struct ConcurrencyBodyFacts {
     AstFuncNode* function;
     ArrayList* calls;
-    ArrayList* async_handlers;
     bool static_may_await;
-    bool static_task_context;
-    bool indirect;
+    bool owns_task_scopes;
     bool failed;
     const char* cause;
-    int await_point_base;
 } ConcurrencyBodyFacts;
 
 static bool concurrency_record_node(ArrayList** nodes, AstNode* node) {
@@ -7600,67 +7659,28 @@ static bool scan_concurrency_body_node(AstNode* node, void* data) {
             node->node_type == AST_NODE_PROC) return false;
     if (node->node_type == AST_NODE_START) {
         AstStartNode* start = (AstStartNode*)node;
-        facts->static_task_context = true;
-        if (!start->escapes && !facts->static_may_await) {
-            facts->static_may_await = true;
-            facts->cause = "implicit scoped-task join";
+        // A non-escaping child is joined when its block exits, so the body's
+        // blocks enter task scopes (and the join can suspend).
+        if (!start->escapes) {
+            facts->owns_task_scopes = true;
+            if (!facts->static_may_await) {
+                facts->static_may_await = true;
+                facts->cause = "implicit scoped-task join";
+            }
         }
         return false;
     }
-    if (node->node_type == AST_NODE_HANDLER_STAM) {
-        AstHandlerNode* handler = (AstHandlerNode*)node;
-        if (handler->is_statement && handler_operand_is_proc(handler->operand) &&
-                !concurrency_record_node(&facts->async_handlers, node)) {
-            facts->failed = true;
-            return false;
-        }
-    }
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
-        // Dynamic call and argument checks own continuation labels. The final
-        // suspend bit is added after the direct-call dependency closure.
-        facts->await_point_base++;
-        for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            facts->await_point_base++;
-        }
-        if (call->propagate) facts->await_point_base++;
         if (!concurrency_record_node(&facts->calls, node)) {
             facts->failed = true;
             return false;
         }
-        bool indirect = false;
         const char* cause = NULL;
-        if (call_may_await(call, &indirect, &cause)) {
-            facts->static_task_context = true;
-            if (!facts->static_may_await) {
-                facts->static_may_await = true;
-                facts->indirect = indirect;
-                facts->cause = cause;
-            }
+        if (call_may_await(call, &cause) && !facts->static_may_await) {
+            facts->static_may_await = true;
+            facts->cause = cause;
         }
-    }
-    if (node->node_type == AST_NODE_LET_STAM ||
-            node->node_type == AST_NODE_VAR_STAM ||
-            node->node_type == AST_NODE_PUB_STAM) {
-        // A declared binding can lower to a runtime type check whose failure
-        // leaves the current task scope. Untyped bindings reserve an unused
-        // label, keeping this planner conservative and syntax-directed.
-        facts->await_point_base++;
-    }
-    if (node->node_type == AST_NODE_RETURN_STAM ||
-            node->node_type == AST_NODE_RAISE_STAM ||
-            node->node_type == AST_NODE_ASSIGN_STAM ||
-            node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
-            node->node_type == AST_NODE_MEMBER_ASSIGN_STAM ||
-            node->node_type == AST_NODE_PIPE_FILE_STAM) {
-        // These syntax edges can leave a lexical block before its tail, so
-        // each owns an unwind continuation in the resumable transform.
-        facts->await_point_base++;
-    }
-    if (node->node_type == AST_NODE_CONTENT) {
-        // Every lexical content block in a resumable pn has a synthetic scope
-        // leave. Empty scopes return immediately; owning scopes may park.
-        facts->await_point_base++;
     }
     return true;
 }
@@ -7679,21 +7699,10 @@ static bool concurrency_fact_calls_may_await(ConcurrencyBodyFacts* facts,
     return false;
 }
 
-static bool concurrency_fact_needs_task_context(ConcurrencyBodyFacts* facts) {
-    if (!facts || !facts->calls) return false;
-    for (int i = 0; i < facts->calls->length; i++) {
-        AstFuncNode* callee = direct_pn_callee((AstCallNode*)facts->calls->data[i]);
-        if (callee && callee->analysis && (callee->analysis->may_await ||
-                callee->analysis->needs_task_context)) return true;
-    }
-    return false;
-}
-
 static void concurrency_body_facts_destroy(ConcurrencyBodyFacts* facts,
         int count) {
     for (int i = 0; facts && i < count; i++) {
         arraylist_free(facts[i].calls);
-        arraylist_free(facts[i].async_handlers);
     }
 }
 
@@ -7750,9 +7759,10 @@ static bool validate_handler_await_node(AstNode* node, void* data) {
     bool proc_statement = handler->is_statement &&
         handler_operand_is_proc(handler->operand);
     if (scan.found && !proc_statement) {
-        // A statement pn handler consumes the call's explicit Item completion
-        // after the async resume point; only value handlers still require a
-        // live native result context that cannot span a scheduler yield.
+        // A statement pn handler may protect a call that parks: the call
+        // resumes in place and returns its completion to the handler
+        // (S7.6.7v4). `pn` handlers are statement-only, so a value handler
+        // over a suspending operand stays a compile error.
         record_semantic_error_span(validation->tp, node->source_span, ERR_INVALID_EXPR_CONTEXT,
             "error handler operand may suspend (%s); await before applying `^ { ... }`",
             scan.cause ? scan.cause : "possible await");
@@ -7775,10 +7785,7 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
         AstFuncNode* fn = (AstFuncNode*)functions->data[i];
         if (!fn->analysis) fn->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
         fn->analysis->may_await = false;
-        fn->analysis->needs_task_context = false;
-        fn->analysis->has_indirect_pn_call = false;
-        fn->analysis->await_point_count = 0;
-        fn->analysis->async_fault_handler_count = 0;
+        fn->analysis->owns_task_scopes = false;
         fn->analysis->may_await_cause = NULL;
     }
 
@@ -7799,6 +7806,7 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
         if (facts[i].function->node_type == AST_NODE_PROC) {
             walk_lambda_ast(facts[i].function->body, scan_concurrency_body_node,
                 &facts[i], false);
+            facts[i].function->analysis->owns_task_scopes = facts[i].owns_task_scopes;
         }
         if (facts[i].failed) {
             log_error("concurrency planner could not record procedure body facts");
@@ -7820,7 +7828,6 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
             if (facts[i].static_may_await || concurrency_fact_calls_may_await(
                     &facts[i], &cause)) {
                 fn->analysis->may_await = true;
-                fn->analysis->has_indirect_pn_call = facts[i].indirect;
                 fn->analysis->may_await_cause = cause;
                 changed = true;
                 if (cause && strcmp(cause, "implicit scoped-task join") == 0) {
@@ -7840,43 +7847,6 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
     HandlerAwaitValidation handler_validation = {.tp = tp};
     walk_lambda_ast((AstNode*)script, validate_handler_await_node,
         &handler_validation, true);
-
-    // A procedure that starts a child but never parks still needs a scheduler
-    // task so `self()` and scoped ownership have a concrete parent. Propagate
-    // that requirement independently from the may-await closure.
-    changed = true;
-    while (changed) {
-        changed = false;
-        for (int i = 0; i < functions->length; i++) {
-            AstFuncNode* fn = (AstFuncNode*)functions->data[i];
-            if (fn->node_type != AST_NODE_PROC || fn->analysis->needs_task_context) continue;
-            if (facts[i].static_task_context || concurrency_fact_needs_task_context(
-                    &facts[i])) {
-                fn->analysis->needs_task_context = true;
-                changed = true;
-            }
-        }
-    }
-
-    for (int i = 0; i < functions->length; i++) {
-        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
-        if (fn->node_type != AST_NODE_PROC || !fn->analysis->may_await) continue;
-        int await_points = facts[i].await_point_base;
-        for (int call_index = 0; facts[i].calls && call_index < facts[i].calls->length;
-                call_index++) {
-            if (call_may_await((AstCallNode*)facts[i].calls->data[call_index],
-                    NULL, NULL)) await_points++;
-        }
-        fn->analysis->await_point_count = await_points;
-        fn->analysis->async_fault_handler_count = facts[i].async_handlers
-            ? facts[i].async_handlers->length : 0;
-        for (int handler_index = 0; facts[i].async_handlers &&
-                handler_index < facts[i].async_handlers->length; handler_index++) {
-            AstHandlerNode* handler = (AstHandlerNode*)facts[i].async_handlers->data[
-                handler_index];
-            handler->async_fault_state = await_points + handler_index + 1;
-        }
-    }
 
     concurrency_body_facts_destroy(facts, functions->length);
     if (owns_functions) arraylist_free(functions);
@@ -8077,6 +8047,8 @@ typedef enum CallColour {
 typedef struct CallColourWalk {
     Transpiler* tp;
     AstFuncNode* function;  // innermost enclosing function; NULL at module level
+    // S16.7.6: a procedural REPL session's module level is a `pn` body
+    bool module_is_proc;
 } CallColourWalk;
 
 static bool colour_walk_is_passthrough(CallColourWalk* walk, AstNode* node) {
@@ -8127,15 +8099,15 @@ static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     int argc = 0;
     for (AstNode* arg = call->argument; arg; arg = arg->next) argc++;
-    ast_resolve_call_args(call->argument, callee, argc, resolved);
     // a pipe-injected receiver fills slot 0, so the source arguments shift
     int shift = call->pipe_inject ? 1 : 0;
+    ast_resolve_call_arguments(call, callee, argc, resolved);
     uint32_t guard = 0;
     int index = 0;
     for (AstNamedNode* param = callee->param; param && index < LAMBDA_MAX_FUNCTION_ARGS;
             param = (AstNamedNode*)((AstNode*)param)->next, index++) {
         if (!lambda_type_param_is_colour_poly(lambda_type_param(param->type))) continue;
-        AstNode* value = index >= shift ? resolved[index - shift] : NULL;
+        AstNode* value = resolved[index];
         CallColour colour = value ? colour_walk_value(walk, value) :
             (index < shift ? CALL_COLOUR_UNKNOWN : CALL_COLOUR_FN);
         if (colour == CALL_COLOUR_PN) {
@@ -8206,7 +8178,7 @@ static bool colour_walk_visit(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) {
         AstFuncNode* fn = (AstFuncNode*)node;
-        CallColourWalk inner = {walk->tp, fn};
+        CallColourWalk inner = {walk->tp, fn, false};
         walk_lambda_ast(fn->body, colour_walk_visit, &inner, true);
         return false;
     }
@@ -8216,7 +8188,8 @@ static bool colour_walk_visit(AstNode* node, void* data) {
             colour_walk_constraint(walk->tp, constraint);
         }
     }
-    bool in_proc = walk->function && walk->function->node_type == AST_NODE_PROC;
+    bool in_proc = walk->function ? walk->function->node_type == AST_NODE_PROC
+        : walk->module_is_proc;
     if (node->node_type == AST_NODE_CALL_EXPR && !in_proc) {
         colour_walk_call(walk, (AstCallNode*)node);
     }
@@ -8229,7 +8202,7 @@ static bool colour_walk_visit(AstNode* node, void* data) {
 // walked from the type list, and an object type's own constraints where the
 // walk meets the type.
 static void colour_walk_constraint(Transpiler* tp, AstNode* constraint) {
-    CallColourWalk walk = {tp, NULL};
+    CallColourWalk walk = {tp, NULL, false};   // `that` is fn context everywhere
     walk_lambda_ast(constraint, colour_walk_visit, &walk, true);
 }
 
@@ -8266,7 +8239,8 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
     // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
     walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
     if (tp->error_count != 0) return false;
-    CallColourWalk colour_walk = {tp, NULL};
+    CallColourWalk colour_walk = {tp, NULL,
+        script->global_vars && script->global_vars->is_proc};
     walk_lambda_ast((AstNode*)script, colour_walk_visit, &colour_walk, true);
     colour_walk_constrained_types(tp);
     if (tp->error_count != 0) return false;
@@ -8907,8 +8881,14 @@ static Type* direct_pipe_call_result_type(Transpiler* tp, AstNode* source,
     if (!target || target->node_type != AST_NODE_CALL_EXPR) return NULL;
     AstCallNode* call = (AstCallNode*)target;
     if (!call->pipe_inject) return NULL;
+    call->pipe_receiver = source;
     AstNode* callee = ast_unwrap_primary(call->function);
-    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return NULL;
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) {
+        // validate the complete call once the aggregate pipe's receiver is known
+        if (!lambda_ast_validate_call_arguments(tp, call, call->source_span,
+                ast_linked_node_count(call->argument) + 1, source)) call->type = &TYPE_ERROR;
+        return call->type;
+    }
     SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
     if (!info) return NULL;
 
@@ -9742,6 +9722,8 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                 lookup_arg_count);
         }
     }
+    // user callees share the same injected parameter position as system callees
+    call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
     if (info && info->fn == SYSPROC_START) {
         direct_start_node(tp, call, arg_count);
         return;
@@ -9762,7 +9744,8 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             direct_note_place_copy_var_borrow(span, call->argument);
         }
         call->can_raise = info->can_raise;
-        call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
+        direct_check_literal_options(tp, info, call->argument,
+            call->pipe_inject ? tp->pipe_inject_args : 0);
         call->type = sys_func_call_result_type(tp, info,
             sys_func_call_may_return_error(tp, info, call->argument, NULL),
             call->argument, NULL);
@@ -9860,7 +9843,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             break;
         }
     }
-    if (!lambda_ast_validate_call_arguments(tp, call, span,
+    if (!call->pipe_inject && !lambda_ast_validate_call_arguments(tp, call, span,
             lookup_arg_count + (method_call ? 1 : 0))) {
         call->type = &TYPE_ERROR;
     }
@@ -10284,8 +10267,12 @@ void lambda_ast_mark_place_copy(AstDeclaratorNode* named) {
 // Diagnostic only: it changes no behavior and exists to measure the
 // migration blast radius before CW29 ships (COW §11.9 rollout).
 static bool cow_param_note_enabled(void) {
+#ifdef LAMBDA_NO_SYSINFO
+    return false;
+#else
     static const bool enabled = getenv("LAMBDA_COW_PARAM_NOTE") != NULL;
     return enabled;
+#endif
 }
 
 typedef struct CowParamEffectScan {
@@ -13035,11 +13022,24 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
         source_prefix = "math/";
     } else if (strview_starts_with(&module, "lambda.") &&
             !strview_starts_with(&module, "lambda.math.") &&
-            !strview_starts_with(&module, "lambda.io.") &&
             !strview_starts_with(&module, "lambda.sys.")) {
         namespace_prefix = "lambda.";
     } else {
         return false;
+    }
+
+    // A shipped io leaf must not shadow an exact built-in io export.
+    if (strview_starts_with(&module, "lambda.io.")) {
+        StrView leaf = strview_sub(&module, strlen("lambda.io."), module.length);
+        if (!memchr(leaf.str, '.', leaf.length)) {
+            StrBuf* builtin_name = strbuf_new();
+            if (!builtin_name) return false;
+            strbuf_append_str(builtin_name, "io_");
+            strbuf_append_str_n(builtin_name, leaf.str, leaf.length);
+            bool collision = is_sys_func_name(builtin_name->str, (int)builtin_name->length);
+            strbuf_free(builtin_name);
+            if (collision) return false;
+        }
     }
 
     // D7.2.4 separates the public lambda.* namespace from the packaged
@@ -13115,6 +13115,11 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
         else tp->builtin_import_io = true;
         return import_resolves_to_marker(node);
     }
+#ifdef LAMBDA_NO_FILE_IO
+    record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
+        "external modules and packages are excluded from this profile: '%.*s'",
+        (int)module.length, module.str);
+#else
 #ifndef SIMPLE_SCHEMA_PARSER
     char module_buf[128];
     if (module.length < sizeof(module_buf)) {
@@ -13189,6 +13194,7 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
             (int)module.length, module.str, path);
     }
     mem_free(path);
+#endif
 }
 
 // S16.6.8/S16.6.9 branch classification, by INTERIOR on the S12.1 boundary.
@@ -15374,10 +15380,9 @@ static AstFuncNode* resolver_function_begin(LambdaResolver* r, AstFuncNode* fn) 
     bool declares_name = fn->name && !r->type_object_depth;
     AstFuncNode* target = NULL;
     if (declares_name) {
-        NameEntry* existing = lookup_name_in_current_scope(tp, fn->name);
-        if (existing && existing->node &&
-                existing->node->source_span.start_byte == fn->source_span.start_byte &&
-                (existing->node->node_type == AST_NODE_FUNC ||
+        NameEntry* existing = lookup_declaration_in_current_scope(tp, fn->name,
+            (AstNode*)fn);
+        if (existing && (existing->node->node_type == AST_NODE_FUNC ||
                  existing->node->node_type == AST_NODE_PROC)) {
             target = (AstFuncNode*)existing->node;
         }
@@ -16712,9 +16717,9 @@ static void resolver_predeclare_functions(LambdaResolver* r) {
     for (int i = 0; i < list->length; i++) {
         AstFuncNode* fn = (AstFuncNode*)list->data[i];
         uint16_t facts = fn->syntax_aux;
-        NameEntry* existing = lookup_name_in_current_scope(tp, fn->name);
-        if (!existing || !existing->node ||
-                existing->node->source_span.start_byte != fn->source_span.start_byte) {
+        NameEntry* existing = lookup_declaration_in_current_scope(tp, fn->name,
+            (AstNode*)fn);
+        if (!existing) {
             init_function_placeholder(tp, fn);
             ((TypeFunc*)fn->type)->is_public = (facts & LSF_FN_PUBLIC) != 0;
             ((TypeFunc*)fn->type)->is_colour_poly = (facts & LSF_FN_COLOUR_POLY) != 0;

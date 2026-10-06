@@ -7,7 +7,9 @@
 #include "well_known_markup_names.h"
 #include "well_known_lambda_names.h"
 #include "well_known_name_lookup.h"
+#ifndef LAMBDA_NO_JS
 #include "../js/js_well_known_names.h"
+#endif
 
 static const WellKnownNameRecord* find_well_known_record(NameId id) {
     const WellKnownNameRecord* records = NULL;
@@ -15,7 +17,9 @@ static const WellKnownNameRecord* find_well_known_record(NameId id) {
     switch (id >> 16) {
     case 0: records = g_well_known_markup_names; count = g_well_known_markup_name_count; break;
     case 1: records = g_well_known_lambda_names; count = g_well_known_lambda_name_count; break;
+#ifndef LAMBDA_NO_JS
     case 2: records = g_well_known_js_names; count = g_well_known_js_name_count; break;
+#endif
     default: return NULL;
     }
     uint16_t ordinal = (uint16_t)id;
@@ -34,6 +38,7 @@ NameId well_known_name_id(StrView name) {
         if (candidate_id == NAME_ID_NONE) {
             return NAME_ID_NONE;
         }
+        // skip disabled catalogs without ending a shared-table probe chain.
         const WellKnownNameRecord* record = find_well_known_record(candidate_id);
         if (record && record->meta.hash == hash && record->len == name.length &&
                 memcmp(record->chars, name.str, name.length) == 0) {
@@ -305,7 +310,7 @@ static NamePool* name_pool_allocate_segment(Pool* memory_pool,
 
     pool->pool = backing;
     pool->parent = parent ? name_pool_retain(parent) : nullptr;
-    pool->ref_count = 1;
+    ref_count_init(&pool->ref_count);
     pool->next_unique_key_hash = 0x80000000u;
     pool->id_mode = (uint8_t)mode;
     pool->identity_backing = owned_backing;
@@ -399,7 +404,7 @@ NamePool* name_pool_retain(NamePool* pool) {
 void name_pool_release(NamePool* pool) {
     if (!pool) return;
 
-    if (ref_counted_pool_release_count(pool) == 0) {
+    if (ref_counted_pool_release_last(pool)) {
         NamePool* root = pool->identity_root ? pool->identity_root : pool;
         if (pool->id_mode == NAME_POOL_DYNAMIC && root->dynamic_child == pool) {
             uint32_t end = root->next_dynamic_pool ? root->next_dynamic_pool : 0x10000u;
@@ -601,13 +606,14 @@ size_t name_pool_count(NamePool* pool) {
 }
 
 void name_pool_print_stats(NamePool* pool) {
+#ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!pool) {
         log_debug("NamePool: null");
         return;
     }
 
     log_debug("NamePool: %p", pool);
-    log_debug("  ref_count: %u", __atomic_load_n(&pool->ref_count, __ATOMIC_RELAXED));
+    log_debug("  ref_count: %d", ref_count_get(&pool->ref_count));
     log_debug("  names count: %zu", name_pool_count(pool));
     log_debug("  parent: %p", pool->parent);
 
@@ -615,6 +621,7 @@ void name_pool_print_stats(NamePool* pool) {
         log_debug("  parent stats:");
         name_pool_print_stats(pool->parent);
     }
+#endif
 }
 
 static bool verify_name_pool_entry(const void* item, void*) {

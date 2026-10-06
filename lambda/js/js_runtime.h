@@ -1161,9 +1161,10 @@ Item js_make_iter_result(Item value, bool done);
  * v15: Create a 2-element array [value, next_state] for generator state machine returns.
  * Called from MIR-compiled generator state machine functions at each yield point.
  */
-Item js_gen_yield_result(Item value, int64_t next_state);
-Item js_gen_await_result(Item value, int64_t next_state);
-Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state);
+// How a generator body is parked (its record's `state`): at a yield, at an
+// async generator's await, or at a yield* whose delegate the driver steps.
+enum { JS_GEN_PARK_YIELD = 1, JS_GEN_PARK_AWAIT = 2, JS_GEN_PARK_DELEGATE = 3 };
+Item js_gen_park(Item value, int64_t kind);
 Item js_gen_return_signal(Item value);
 int64_t js_gen_is_return_signal(Item value);
 Item js_gen_return_signal_value(Item value);
@@ -1219,18 +1220,16 @@ Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 Item js_promise_finally(Item promise, Item on_finally);
 Item js_promise_all(Item iterable);              // Promise.all([...])
 Item js_promise_with_resolvers(void);            // Promise.withResolvers()
-Item js_await_sync(Item value);                  // Phase 5: synchronous await unwrap
-Item js_await_sync_incremental(Item value);      // wait without draining unrelated jobs
+// An await outside any activation; runs jobs only until this promise settles.
+Item js_await_sync(Item value);
 
 // Phase 6: Async state machine runtime
-Item js_async_prepare_await(Item value);
 Item js_async_wrap_return(Item value);           // fresh async-function result promise
-Item js_async_get_resolved(void);                // get prepared await promise
 Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
                                  Item this_val);
 Item js_async_context_create_ast(Item function, Item arguments, Item this_val);
-Item js_async_context_create_module(struct JsScript* script, uint32_t module_state_id,
-                                    Item specifier);
+Item js_async_context_create_module(struct JsScript* script, void* mir_main,
+    uint32_t module_state_id, Item specifier);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 
@@ -1353,8 +1352,9 @@ Item js_module_get(Item specifier);
 Item js_get_live_binding_default(Item specifier);
 
 /**
- * Js57 P4 (Track B3): register a post-await chunk to be invoked after the
- * outermost module-load call unwinds. See js_runtime.cpp for details.
+ * Module graph depth: 1 while the entry module compiles, >= 2 for a nested
+ * import. Exiting depth 0 starts the module bodies whose async dependencies
+ * have completed. See js_runtime.cpp for details.
  */
 void js_tla_enter_module(void);
 void js_tla_exit_module(void);
@@ -1363,15 +1363,17 @@ int js_tla_module_depth_get(void);
 
 /**
  * Js57 P5 (fulfillment/rejection-order): TLA awaited-target tracking on the
- * module registry. Used to make dynamic imports wait on the same Promise the
- * imported module's first top-level await is blocked on, and to propagate
- * that wait through static-import edges so siblings end up chained on the
- * same target.
+ * module registry. Used to make dynamic imports wait on the imported module's
+ * carrier promise, which settles when its parked body finishes, and to
+ * propagate that wait through static-import edges so siblings end up chained
+ * on the same target.
  */
 void js_module_set_awaited_target(Item specifier, Item target);
 Item js_module_get_awaited_target(Item specifier);
 void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier);
-Item js_p5_module_await(Item specifier, Item value);
+// An async function's await on its own activation: parks it until the promise
+// settles (RA1).
+Item js_await_park(Item value);
 void js_module_record_evaluation_error(Item specifier, Item error);
 // An async module must reject its own evaluation promise before notifying
 // async importers, preserving leaf-to-root rejection reaction order.
@@ -1386,15 +1388,10 @@ int  js_module_needs_async_settle(Item specifier);
 void js_tla_drain_pending_modules(void);
 void js_module_register_static_dependency(Item parent_specifier, Item dep_specifier);
 void js_module_register_async_parent(Item dep_specifier, Item parent_specifier);
-void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr);
 void js_module_set_deferred_async_frame(Item specifier, Item frame);
 int  js_module_pending_async_deps(Item specifier);
 void js_module_mark_post_await_pending(Item specifier);
-int  js_module_get_body_state(Item specifier);
-void js_module_set_body_state(Item specifier, int state);
-int  js_module_assign_async_eval_order(Item specifier);
 void js_module_complete_tla_body(Item specifier);
-void js_module_save_context(Item specifier, uint32_t module_state_id);
 
 /**
  * Current namespace object for the module being evaluated.

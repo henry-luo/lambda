@@ -12,7 +12,7 @@
 static inline Color ctx_make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
     Color c; c.r = r; c.g = g; c.b = b; c.a = a; return c;
 }
-static inline void ctx_fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
+static inline void ctx_fill_rect(RasterRenderContext* rdcon, float x, float y, float w, float h, Color color) {
     Rect rect = {x, y, w, h};
     rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
                          rdcon->clip_shapes, rdcon->clip_shape_depth);
@@ -22,7 +22,7 @@ static const char* CTX_MENU_LABELS[CTX_MENU_ITEM_COUNT] = {
     "Cut", "Copy", "Paste", "Delete", "Select All",
 };
 
-// Logical CSS-pixel sizing — multiplied by RenderContext::raster_scale at draw.
+// Logical CSS-pixel sizing — multiplied by RasterRenderContext::raster_scale at draw.
 static const float CTX_MENU_WIDTH       = 140.0f;
 static const float CTX_MENU_ITEM_HEIGHT = 24.0f;
 static const float CTX_MENU_PADDING_X   = 12.0f;
@@ -105,7 +105,7 @@ int context_menu_item_at(DocState* state, float x, float y) {
     return idx >= 0 && idx < CTX_MENU_ITEM_COUNT ? idx : -1;
 }
 
-void context_menu_render(RenderContext* rdcon, DocState* state) {
+void context_menu_render(RasterRenderContext* rdcon, DocState* state) {
     if (!state || !state->context_menu_target) return;
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface) return;
 

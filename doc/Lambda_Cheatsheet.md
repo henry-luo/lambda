@@ -1,6 +1,6 @@
 ## CLI Commands
 ```bash
-lambda                    # Start REPL (cmds: quit, help)
+lambda                    # Start REPL (cmds: quit, help, clear, .env, .type, .load)
 lambda script.ls          # Eval a functional script
 lambda run script.ls      # Run a procedural script
 lambda --help             # Show help

@@ -1,0 +1,136 @@
+{
+  "name": "Registered color channel grammar and computation",
+  "html": "test/ui/css_registered_color_channels.html",
+  "viewport": {
+    "width": 300,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inspect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-c3",
+      "equals": "rgba(17, 34, 51, 0.267)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-c4",
+      "equals": "rgba(0, 0, 0, 0.5)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-c9",
+      "equals": "rgb(255, 0, 255)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-c10",
+      "equals": "rgb(255, 0, 255)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-c11",
+      "equals": "rgb(255, 0, 255)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-c12",
+      "equals": "rgb(255, 0, 255)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-c14",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#c2"
+      },
+      "property": "background-color",
+      "equals": "rgba(32, 57, 85, 0.5)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#c8"
+      },
+      "property": "background-color",
+      "equals": "rgb(64, 191, 191)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#c13"
+      },
+      "property": "background-color",
+      "equals": "rgb(64, 191, 191)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#c15"
+      },
+      "property": "background-color",
+      "equals": "rgb(146, 146, 146)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-srgb",
+      "equals": "color(srgb 1 0 0 / 0.5)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-api",
+      "equals": "rgb(0, 255, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#srgb"
+      },
+      "property": "background-color",
+      "equals": "color(srgb 1 0 0 / 0.5)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#api"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 255, 255)"
+    }
+  ]
+}

@@ -28,6 +28,7 @@ files:
   - "lib/**/*.{c,cpp,h,hpp}"
 ignores:
   - "**/tree-sitter*/**"
+  - "lib/re2/**"                    # vendored RE2 (lib/re2/VENDOR.md)
   - "**/sqlite/**"
   - "**/*sqlite*"
   - "lib/str.c"

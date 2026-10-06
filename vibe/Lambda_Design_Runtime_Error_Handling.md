@@ -298,6 +298,8 @@ system faults that have already made normal return unsafe.
 
 ### REH-D12 — Suspension converts a live completion into durable state
 
+*[Superseded 2026-10-05 (S7.6.7v4, `Lambda_Design_Runtime_Async.md` RA1): a suspending call parks with its native frame intact, so its completion stays live and reaches the handler as a non-suspending call's does. The durable completions were deleted with the state machines. Kept as the record of the state-machine design.]*
+
 No ordinary failure path depends on a native frame surviving suspension:
 
 - A task poll returns `DONE`, `READY`, or `PARKED` plus an explicit result.
@@ -324,6 +326,8 @@ This rule remains true even while native system-fault recovery is retained:
 ## 8. Native system-fault carve-out
 
 ### REH-D13 — `LambdaRecoveryFrame` is fault-only and temporary
+
+*[Revised 2026-10-05 (S7.11.2v2, D5.3.6v2, D6.3.3v2): recovery frames remain fault-only, but each activation has its own LIFO chain and a frame may stay armed across a park on its own stack; no jump crosses a stack. The task-owned durable fault target below is deleted.]*
 
 For the time being, native system faults may use non-local recovery because
 normal return can be impossible after stack exhaustion or during OOM/resource
@@ -417,8 +421,8 @@ LambdaJS, Jube, and hosted-language paths. The audit result is:
 | Area | Landed result | Authority |
 |---|---|---|
 | Lambda ordinary failures | Returned ERROR/companion completions are checked in the immediate activation; handler bodies are outside the consumed fault-only frame. | D1.4v3, REH-D2, REH-D8 |
-| Suspended `pn` handlers | `pn_call() ^ { ... }` is a statement-position state-machine edge; its completion is rooted and selected after resume exactly once. | S7.6.7v3, REH-D12 |
-| Native faults | The scheduler materializes only S7.11 faults, routes them to a task-owned durable target, and never carries a `jmp_buf` across a park. | D6.3.3, S7.11, REH-D13 |
+| Suspended `pn` handlers | `pn_call() ^ { ... }` stays statement-only; the call parks and resumes in place, so its completion reaches the handler as any call's does. | S7.6.7v4, REH-D12 (superseded) |
+| Native faults | Each activation has its own recovery chain; a fault in a task lands on the task's boundary and completes the task with the fault result; no jump crosses a stack. | D6.3.3v2, S7.11.2v2, REH-D13 |
 | AST interpreter | Handler evaluation and current-error scope use explicit frame signals and rooted scratch slots; recursion-budget errors are ordinary rich completions. | D8.1.1v2, S7.6.1v4 |
 | LambdaJS | The existing explicit completion/error lane remains the sole ordinary exception path; the JS entry boundary is fault-only. | D8.4.3v2, REH-D9 |
 | Jube/host adapters | Guest/module failures are returned at the immediate adapter boundary; recovery frames remain limited to host execution/transaction containment. | D8.4.3v2, REH-D10/REH-D11 |

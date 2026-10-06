@@ -45,7 +45,7 @@ protected:
         svg = element("svg", root); ASSERT_NE(svg, nullptr);
         ASSERT_TRUE(svg->set_attribute("width", "200"));
         ASSERT_TRUE(svg->set_attribute("height", "200"));
-        ui.document = &doc; doc.js.host_ui_context = &ui;
+        ui.document = lam::up(&doc); doc.js.host_ui_context = &ui;
         doc.js.host_driven_loop = true;
         ASSERT_NE(state_store_create(&doc), nullptr);
     }
@@ -639,6 +639,34 @@ TEST(SvgAnimationTest, PictureDuplicatesRetainPrivateTimeWithoutChangingTheParse
     rdt_picture_free(cached); rdt_picture_free(duplicate); rdt_picture_free(picture);
 }
 
+// M6 gate: a picture held the way a display list holds one (a counted
+// duplicate) outlives the picture cache evicting its parsed original.
+TEST(SvgPictureCacheTest, EvictionKeepsHeldDuplicatesAlive) {
+    const char held_source[] = "<svg xmlns='http://www.w3.org/2000/svg' width='30' height='20'>"
+        "<rect width='30' height='20' fill='red'/></svg>";
+    RdtPicture* original = rdt_picture_load_data(held_source, sizeof(held_source) - 1, "svg");
+    ASSERT_NE(original, nullptr);
+    RdtPicture* held = rdt_picture_dup(original);
+    ASSERT_NE(held, nullptr);
+    rdt_picture_free(original);
+    // distinct documents push the original's entry out of the LRU cache
+    char source[160];
+    for (int i = 0; i < 160; i++) {
+        int length = snprintf(source, sizeof(source),
+            "<svg xmlns='http://www.w3.org/2000/svg' width='%d' height='10'><rect width='%d' height='10'/></svg>",
+            i + 1, i + 1);
+        RdtPicture* filler = rdt_picture_load_data(source, length, "svg");
+        ASSERT_NE(filler, nullptr);
+        rdt_picture_free(filler);
+    }
+    float width = 0.0f, height = 0.0f;
+    rdt_picture_get_size(held, &width, &height);
+    EXPECT_FLOAT_EQ(width, 30.0f);
+    EXPECT_FLOAT_EQ(height, 20.0f);
+    EXPECT_NE(rdt_picture_get_svg_root(held), nullptr);
+    rdt_picture_free(held);
+}
+
 TEST(RenderCompositeTest, MultiplyPreservesSurfaceAlphaRepresentation) {
     const struct {
         ImageAlphaMode mode;
@@ -855,18 +883,21 @@ static RdtSvgFilterProgram* svg_filter_test_program(DomDocument* document, Eleme
     return program;
 }
 
-static bool svg_filter_test_input(void* data, int input, const RdtSvgFilterRun*, Bound, ImageSurface* output) {
-    unsigned* calls = (unsigned*)data;
+// filter-run host doubles: call counters and a declaring resource
+struct SvgFilterTestCalls : RdtSvgFilterHost { unsigned count[3]; };
+struct SvgFilterTestResource : RdtSvgFilterHost { Element* resource; };
+
+static bool svg_filter_test_input(RdtSvgFilterHost* host, int input, const RdtSvgFilterRun*, Bound, ImageSurface* output) {
     unsigned slot = input == RDT_SVG_FILTER_FILL ? 0 : input == RDT_SVG_FILTER_STROKE ? 1 : 2;
     const uint32_t colors[] = {0x80000080u, 0x40004000u, 0x80800000u};
-    calls[slot]++;
+    static_cast<SvgFilterTestCalls*>(host)->count[slot]++;
     for (size_t index = 0, count = (size_t)output->width * (size_t)output->height; index < count; index++)
         ((uint32_t*)output->pixels)[index] = colors[slot];
     return true;
 }
 
-static bool svg_filter_test_source(void* data, const RdtSvgFilterRun* run, Bound, ImageSurface* output) {
-    unsigned* calls = (unsigned*)data; (*calls)++;
+static bool svg_filter_test_source(RdtSvgFilterHost* host, const RdtSvgFilterRun* run, Bound, ImageSurface* output) {
+    static_cast<SvgFilterTestCalls*>(host)->count[0]++;
     if (!render_svg_filter_spend_work(run, 16)) return false;
     for (size_t index = 0, count = (size_t)output->width * (size_t)output->height; index < count; index++)
         ((uint32_t*)output->pixels)[index] = 0xff808080u;
@@ -890,9 +921,10 @@ TEST(SvgFilterTest, ResourceFontsAndReferencingViewportHaveDistinctLengthBases) 
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
     RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,20,80};
     run.lengths = {200,160,100,50}; run.frame = rdt_matrix_identity(); run.density = 1;
-    run.length_context = &filter;
-    run.resolve_lengths = [](void* context, Element* resource, SvgLengthContext* lengths) {
-        lengths->font_size = resource == context ? 10.0f : 5.0f;
+    SvgFilterTestResource declaring = {}; declaring.resource = &filter;
+    run.image_context = lam::up(&declaring);
+    run.resolve_lengths = [](RdtSvgFilterHost* host, Element* resource, SvgLengthContext* lengths) {
+        lengths->font_size = resource == static_cast<SvgFilterTestResource*>(host)->resource ? 10.0f : 5.0f;
         lengths->x_height = lengths->font_size * .5f;
     };
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
@@ -915,16 +947,16 @@ TEST(SvgFilterTest, CaptureAndFinalColorConversionShareTheGraphWorkBudget) {
     RdtSvgFilterNode* node = program->nodes; node->kind = RDT_SVG_FILTER_OFFSET;
     node->valid = true; node->input = RDT_SVG_FILTER_SOURCE;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    unsigned calls = 0; size_t used = 0;
+    SvgFilterTestCalls calls = {}; size_t used = 0;
     RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1; run.draw_source = svg_filter_test_source;
-    run.source_context = &calls; run.work_used = lam::up(&used); run.work_limit = 23;
+    run.source_context = lam::up(&calls); run.work_used = lam::up(&used); run.work_limit = 23;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
     EXPECT_FALSE(render_svg_filter_execute(program, &run, &result, &bounds, &placement)); EXPECT_EQ(result, nullptr);
-    EXPECT_EQ(calls, 1u); EXPECT_EQ(used, 20u);
+    EXPECT_EQ(calls.count[0], 1u); EXPECT_EQ(used, 20u);
     used = 0; run.work_limit = 24;
     ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
-    EXPECT_EQ(used, 24u); EXPECT_EQ(calls, 2u); EXPECT_EQ(((uint32_t*)result->pixels)[0], 0xff808080u);
+    EXPECT_EQ(used, 24u); EXPECT_EQ(calls.count[0], 2u); EXPECT_EQ(((uint32_t*)result->pixels)[0], 0xff808080u);
     image_surface_destroy(result);
     node->kind = RDT_SVG_FILTER_MATRIX; node->linear = true;
     node->values[0] = node->values[6] = node->values[12] = node->values[18] = 1;
@@ -948,12 +980,12 @@ TEST(SvgFilterTest, StandardInputsAreCapturedLazilyAndBackgroundAlphaSharesItsIm
     node->merge_count = 4; node->merge_inputs = lam::own_arr((int*)arena_alloc(program->arena, sizeof(inputs)));
     ASSERT_NE(node->merge_inputs, nullptr); memcpy(node->merge_inputs, inputs, sizeof(inputs));
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    unsigned calls[3] = {};
+    SvgFilterTestCalls calls = {};
     RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
-    run.frame = rdt_matrix_identity(); run.density = 1; run.draw_input = svg_filter_test_input; run.input_context = calls;
+    run.frame = rdt_matrix_identity(); run.density = 1; run.draw_input = svg_filter_test_input; run.input_context = lam::up(&calls);
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
     ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
-    for (unsigned slot = 0; slot < 3; slot++) EXPECT_EQ(calls[slot], 1u);
+    for (unsigned slot = 0; slot < 3; slot++) EXPECT_EQ(calls.count[slot], 1u);
     for (unsigned index = 0; index < 4; index++) EXPECT_EQ(((uint32_t*)result->pixels)[index], 0xe8401018u);
     image_surface_destroy(result); scratch_release(&scratch); arena_destroy(arena);
     render_svg_filter_program_release(program); document.destroy();
@@ -1188,11 +1220,11 @@ TEST(SvgFilterTest, UnusedTreeDoesNotSpendWorkOrCaptureSource) {
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
     RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f; run.work_limit = 64;
-    unsigned calls = 0; run.draw_source = svg_filter_test_source; run.source_context = &calls;
+    SvgFilterTestCalls calls = {}; run.draw_source = svg_filter_test_source; run.source_context = lam::up(&calls);
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
     ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
     ASSERT_NE(result, nullptr); EXPECT_EQ(((uint32_t*)result->pixels)[0], 0xff0000ffu);
-    EXPECT_EQ(calls, 0u);
+    EXPECT_EQ(calls.count[0], 0u);
     image_surface_destroy(result); scratch_release(&scratch); arena_destroy(arena);
     render_svg_filter_program_release(program); document.destroy();
 }

@@ -1,0 +1,83 @@
+\documentclass[12pt]{amsart}
+
+
+\usepackage{amsmath, amssymb}
+
+\theoremstyle{plain}
+\newtheorem{thm}{Theorem}
+\newtheorem{theorem}[thm]{Theorem}
+%\newtheorem{lem}[thm]{Lemma}
+%\newtheorem{cor}[thm]{Corollary}
+\newtheorem{proposition}[thm]{Proposition}
+
+\theoremstyle{definition}
+\newtheorem{remark}[thm]{Remark}
+\newtheorem{definition}[thm]{Definition}
+\newtheorem{example}[thm]{Example}
+\newtheorem{exercise}[thm]{Exercise}
+
+
+\newcommand{\R}{\mathbb R}
+\newcommand{\Q}{\mathbb Q}
+
+
+\begin{document}
+{\center{\bf The symbols $\in$ and $\subseteq$}.} 
+
+\medskip
+I received several questions whether the symbols $\in$ and $\subseteq$ mean the same thing. 
+The answer is, {\bf NO} -- please read this handout carefully and do not confuse them! 
+
+\medskip
+
+The symbol $\in$ is used to express that something is an element of a set:
+$a\in A$ means that $a$ is an element of the set $A$. In short, when we use this symbol,
+we always have an \emph{element} on the left, and a \emph{set} on the right.
+
+On the other hand, $\subseteq$ is a symbol for a relationship between two sets:
+$A\subseteq B$ means that $A$ is a subset of $B$. 
+So when we use this symbol, both $A$ and $B$ \emph{have to be  sets}. 
+
+Here is a simple example:
+
+\begin{example}
+Let $A=\{1, 2,3,4\}$. The elements of the set $A$ are numbers. 
+We have $1\in A$ (that is, the number $1$ is an element of the set $A$), 
+and, for example,  $7\notin A$ -- the number $7$ is not an element of the set $A$.
+It would be incorrect to write $1\subseteq A$, because $1$ is not a set, and $\subseteq$ can be used only when it has sets on the both sides. 
+
+
+Let $B=\{2, 3\}$ -- it is also a set of numbers. Every element of $B$ (that  is, the numbers $2$ and $3$)  is also an element of $A$, so we have $B\subseteq A$. 
+
+Note, it would be incorrect to write $B\in A$, because the set $B$ is itself not an element in $A$. 
+\end{example} 
+
+Please note that if $a\in A$ (that is, $a$ is an element of $A$), then we can always make a one-element set $\{a\}$ consisting of the element $a$; then it is true that 
+$\{a\}\subseteq A$. So, in the above example, it would be correct to write 
+$\{1\}\subseteq A$ (then we have sets on both sides). 
+\medskip
+
+Things get more complicated if we consider sets whose elements can themselves be sets -- here you have to be patient and careful not to get confused. 
+
+Consider an example, where the set $A$ has some numbers in it, but also has some sets.
+
+\begin{example}
+Let $A=\{1,2,3,4, \{2, 3\}\}$. Do you see the difference with the previous example?
+(If you do not see a difference, pay close attention to the braces!)
+Now $A$ has the following elements: the numbers $1$, $2$, $3$, $4$, and the set 
+$\{2,3\}$.
+%, which consists of the numbers $2$ and $3$. 
+
+Let $B=\{2,3\}$ as in the previous example.
+
+Then we have a strange situation: $B\subseteq A$ is true as before: every element of $B$ is also an element of $A$ (since our set $A$ still includes the numbers $2$ and $3$); 
+but now we also have $B\in A$, because the whole set $B$ is also an element of $A$. 
+\end{example}
+
+So as you see, one can make an artificial example where both $B\in A$ and $B\subseteq A$,
+but this requires making a set with different types of elements -- some of the elements of $A$ are just numbers, and some elements are sets of numbers. Such examples usually do not arise in mathematics when you are solving some natural problems (they may arise in this homework though, so please be careful!). 
+
+
+
+
+\end{document}

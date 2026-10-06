@@ -53,7 +53,7 @@ TEST_F(NamePoolTest, ConcurrentImmutableParentReferencesAreCountedExactly) {
     }
     for (int index = 0; index < started; index++) pthread_join(threads[index], nullptr);
     EXPECT_EQ(started, 4);
-    uint32_t retained = names->ref_count;
+    uint32_t retained = (uint32_t)ref_count_get(&names->ref_count);
     EXPECT_EQ(retained, 1u + (uint32_t)started * 100000u);
     if (retained == 1u + (uint32_t)started * 100000u) {
         work.release = true;
@@ -63,12 +63,12 @@ TEST_F(NamePoolTest, ConcurrentImmutableParentReferencesAreCountedExactly) {
         }
         for (int index = 0; index < releasing; index++) pthread_join(threads[index], nullptr);
         EXPECT_EQ(releasing, started);
-        EXPECT_EQ(names->ref_count, 1u);
+        EXPECT_EQ(ref_count_get(&names->ref_count), 1);
     }
     EXPECT_EQ(name_pool_lookup(names, "concurrent_parent_name"), sentinel);
     // keep failed-counter cleanup bounded by the observed references, so an
     // assertion failure cannot become a separate underflow in the test.
-    retained = names->ref_count;
+    retained = (uint32_t)ref_count_get(&names->ref_count);
     for (uint32_t index = 0; index < retained; index++) name_pool_release(names);
 }
 

@@ -72,7 +72,9 @@ typedef enum RadiantJsLoopAction {
 static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction action,
                                           int wait_ms, double delta_ms, int frame_steps) {
     DomDocument* doc = uicon ? uicon->document : nullptr;
-    if (!doc || !doc->js.runtime) {
+    // CSS/SVG timing jobs use the document evaluator even without page JS.
+    Runtime* runtime = dom_document_script_runtime(doc);
+    if (!runtime) {
         bool pumped = false;
         if (action == RADIANT_JS_LOOP_ADVANCE) {
             pumped = js_event_loop_advance_virtual_time(delta_ms, frame_steps) > 0;
@@ -87,7 +89,6 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
             (action == RADIANT_JS_LOOP_PUMP && wait_ms < 0);
     }
 
-    Runtime* runtime = doc->js.runtime;
     EvalContext* pump_ctx = runtime_get_eval_context(runtime);
     if (!pump_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
     Context* saved_input_ctx = input_context;
@@ -104,6 +105,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         input_context = saved_input_ctx;
         return false;
     }
+    dom_set_host_driven_loop(doc->js.host_driven_loop);
     dom_set_document(doc);
     DocState* state = (DocState*)doc->state;
     // A host-loop turn is one browser task.  Defer debug state validation until
@@ -159,7 +161,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
 bool radiant_document_virtual_clock(UiContext* uicon, double* now_ms) {
     if (now_ms) *now_ms = 0.0;
     DomDocument* doc = uicon ? uicon->document : nullptr;
-    Runtime* runtime = doc ? doc->js.runtime : nullptr;
+    Runtime* runtime = dom_document_script_runtime(doc);
     if (!runtime) {
         // no document realm: the thread's loop is the only clock there is
         if (now_ms && js_event_loop_virtual_clock_enabled()) *now_ms = js_event_loop_virtual_clock_now_ms();
@@ -532,7 +534,7 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
 
     // BrowsingSession owns replacement of the previously presented document;
     // this presentation helper only publishes the newly loaded document.
-    ui_context.document = doc;
+    ui_context.document = lam::up(doc);
     ui_context_sync_document_raster_scale(&ui_context, doc);
 
     radiant_document_ensure_state(doc, "show_html_doc");
@@ -1105,7 +1107,7 @@ static int window_finish_event_sim(EventSimContext* sim_ctx) {
     if (!sim_ctx) return 0;
     int fail_count = sim_ctx->fail_count;
     if (sim_ctx->original_document) {
-        ui_context.document = (DomDocument*)sim_ctx->original_document;
+        ui_context.document = lam::up((DomDocument*)sim_ctx->original_document);
         sim_ctx->frame_stack_depth = 0;
     }
     event_sim_free(sim_ctx);
@@ -1517,7 +1519,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             doc->viewport.output_scale = 1.0f;
         }
 
-        ui_context.document = doc;
+        ui_context.document = lam::up(doc);
         ui_context_sync_document_raster_scale(&ui_context, doc);
 
         // Initialize network support for HTTP-loaded documents.

@@ -16,7 +16,7 @@
 // flushes while preserving paint order.
 // ---------------------------------------------------------------------------
 
-static inline PaintRecordTarget rc_record_target(RenderContext* rdcon) {
+static inline PaintRecordTarget rc_record_target(RasterRenderContext* rdcon) {
     PaintRecordTarget target = {
         rdcon ? rdcon->paint_list : nullptr,
         rdcon ? rdcon->dl : nullptr,
@@ -25,25 +25,25 @@ static inline PaintRecordTarget rc_record_target(RenderContext* rdcon) {
     return target;
 }
 
-void rc_fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
+void rc_fill_rect(RasterRenderContext* rdcon, float x, float y, float w, float h, Color color) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_fill_rect(&target, "rc_fill_rect", x, y, w, h, color);
 }
 
-void rc_fill_rounded_rect(RenderContext* rdcon, float x, float y, float w, float h,
+void rc_fill_rounded_rect(RasterRenderContext* rdcon, float x, float y, float w, float h,
                           float rx, float ry, Color color) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_fill_rounded_rect(&target, "rc_fill_rounded_rect",
                                    x, y, w, h, rx, ry, color);
 }
 
-void rc_fill_path(RenderContext* rdcon, RdtPath* path, Color color,
+void rc_fill_path(RasterRenderContext* rdcon, RdtPath* path, Color color,
                   RdtFillRule rule, const RdtMatrix* transform) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_fill_path(&target, "rc_fill_path", path, color, rule, transform);
 }
 
-void rc_stroke_path(RenderContext* rdcon, RdtPath* path, Color color, float width,
+void rc_stroke_path(RasterRenderContext* rdcon, RdtPath* path, Color color, float width,
                     RdtStrokeCap cap, RdtStrokeJoin join,
                     const float* dash_array, int dash_count,
                     const RdtMatrix* transform, float dash_phase) {
@@ -53,7 +53,7 @@ void rc_stroke_path(RenderContext* rdcon, RdtPath* path, Color color, float widt
                              dash_phase, transform);
 }
 
-void rc_fill_linear_gradient(RenderContext* rdcon, RdtPath* path,
+void rc_fill_linear_gradient(RasterRenderContext* rdcon, RdtPath* path,
                              float x1, float y1, float x2, float y2,
                              const RdtGradientStop* stops, int stop_count,
                              RdtFillRule rule, const RdtMatrix* transform) {
@@ -63,7 +63,7 @@ void rc_fill_linear_gradient(RenderContext* rdcon, RdtPath* path,
                                       stops, stop_count, rule, transform, nullptr);
 }
 
-void rc_fill_radial_gradient(RenderContext* rdcon, RdtPath* path,
+void rc_fill_radial_gradient(RasterRenderContext* rdcon, RdtPath* path,
                              float cx, float cy, float r,
                              const RdtGradientStop* stops, int stop_count,
                              RdtFillRule rule, const RdtMatrix* transform) {
@@ -73,7 +73,7 @@ void rc_fill_radial_gradient(RenderContext* rdcon, RdtPath* path,
                                       stops, stop_count, rule, transform, nullptr);
 }
 
-void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
+void rc_draw_image(RasterRenderContext* rdcon, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
@@ -84,7 +84,7 @@ void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
                             opacity, transform, resource_owner);
 }
 
-void rc_draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
+void rc_draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
                    Color color, bool is_color_emoji, const Bound* clip,
                    const RdtMatrix* transform, uint64_t resource_generation) {
     PaintRecordTarget target = rc_record_target(rdcon);
@@ -92,7 +92,7 @@ void rc_draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
                             is_color_emoji, clip, transform, resource_generation);
 }
 
-void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
+void rc_draw_picture(RasterRenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform) {
     if (rdcon && rdt_picture_get_svg_root(picture)) {
         // An SVG picture is painted into the recording here, like inline SVG:
@@ -108,7 +108,7 @@ void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
     paint_record_draw_picture(&target, "rc_draw_picture", picture, opacity, transform);
 }
 
-void rc_video_placeholder(RenderContext* rdcon, struct RdtVideo* video,
+void rc_video_placeholder(RasterRenderContext* rdcon, struct RdtVideo* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation) {
@@ -118,7 +118,7 @@ void rc_video_placeholder(RenderContext* rdcon, struct RdtVideo* video,
                                    object_fit, clip, video_generation);
 }
 
-void rc_webview_layer_placeholder(RenderContext* rdcon, ImageSurface* surface,
+void rc_webview_layer_placeholder(RasterRenderContext* rdcon, ImageSurface* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation) {
@@ -128,42 +128,42 @@ void rc_webview_layer_placeholder(RenderContext* rdcon, ImageSurface* surface,
                                            clip, surface_generation);
 }
 
-void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform) {
+void rc_push_clip(RasterRenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_push_clip(&target, "rc_push_clip", clip_path, transform);
 }
 
-void rc_pop_clip(RenderContext* rdcon) {
+void rc_pop_clip(RasterRenderContext* rdcon) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_pop_clip(&target, "rc_pop_clip");
 }
 
-void rc_save_backdrop(RenderContext* rdcon, int x0, int y0, int w, int h) {
+void rc_save_backdrop(RasterRenderContext* rdcon, int x0, int y0, int w, int h) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_save_backdrop(&target, "rc_save_backdrop", x0, y0, w, h);
 }
 
-void rc_composite_opacity(RenderContext* rdcon, int x0, int y0, int w, int h,
+void rc_composite_opacity(RasterRenderContext* rdcon, int x0, int y0, int w, int h,
                           float opacity, bool premultiplied_source) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_composite_opacity(&target, "rc_composite_opacity", x0, y0, w, h,
                                    opacity, premultiplied_source);
 }
 
-void rc_apply_blend_mode(RenderContext* rdcon, int x0, int y0, int w, int h,
+void rc_apply_blend_mode(RasterRenderContext* rdcon, int x0, int y0, int w, int h,
                          int blend_mode) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_apply_blend_mode(&target, "rc_apply_blend_mode",
                                   x0, y0, w, h, blend_mode);
 }
 
-void rc_apply_filter(RenderContext* rdcon, float x, float y, float w, float h,
+void rc_apply_filter(RasterRenderContext* rdcon, float x, float y, float w, float h,
                      FilterProp* filter, const Bound* clip) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_apply_filter(&target, "rc_apply_filter", x, y, w, h, filter, clip);
 }
 
-void rc_box_blur_region(RenderContext* rdcon, int rx, int ry, int rw, int rh,
+void rc_box_blur_region(RasterRenderContext* rdcon, int rx, int ry, int rw, int rh,
                         float blur_radius, int clip_type, const float* clip_params,
                         int exclude_type, const float* exclude_params,
                         bool premultiply_source,
@@ -175,19 +175,19 @@ void rc_box_blur_region(RenderContext* rdcon, int rx, int ry, int rw, int rh,
                                  premultiply_source, tint_source, tint_color);
 }
 
-void rc_box_blur_inset(RenderContext* rdcon, int rx, int ry, int rw, int rh,
+void rc_box_blur_inset(RasterRenderContext* rdcon, int rx, int ry, int rw, int rh,
                        int pad, float blur_radius, uint32_t bg_color) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_box_blur_inset(&target, "rc_box_blur_inset",
                                 rx, ry, rw, rh, pad, blur_radius, bg_color);
 }
 
-void rc_shadow_clip_save(RenderContext* rdcon, int rx, int ry, int rw, int rh) {
+void rc_shadow_clip_save(RasterRenderContext* rdcon, int rx, int ry, int rw, int rh) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_shadow_clip_save(&target, "rc_shadow_clip_save", rx, ry, rw, rh);
 }
 
-void rc_shadow_clip_restore(RenderContext* rdcon, int exclude_type, const float* exclude_params,
+void rc_shadow_clip_restore(RasterRenderContext* rdcon, int exclude_type, const float* exclude_params,
                             int save_rx, int save_ry, int save_rw, int save_rh,
                             int restore_inside) {
     PaintRecordTarget target = rc_record_target(rdcon);
@@ -197,7 +197,7 @@ void rc_shadow_clip_restore(RenderContext* rdcon, int exclude_type, const float*
                                      restore_inside);
 }
 
-void rc_outer_shadow(RenderContext* rdcon,
+void rc_outer_shadow(RasterRenderContext* rdcon,
                      float shadow_x, float shadow_y, float shadow_w, float shadow_h,
                      float sr_tl, float sr_tr, float sr_br, float sr_bl,
                      Color color, float blur_radius,
@@ -212,7 +212,7 @@ void rc_outer_shadow(RenderContext* rdcon,
                               clip_type, clip_params);
 }
 
-void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
+void render_painter_draw_picture_rect(RasterRenderContext* rdcon, RdtPicture* picture,
                                       Rect* dst_rect, Bound* clip,
                                       uint8_t opacity) {
     if (!picture || !dst_rect) return;
@@ -243,7 +243,7 @@ void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
     if (clip) rc_pop_clip(rdcon);
 }
 
-void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixels,
+void render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t* pixels,
                                      int src_w, int src_h, int src_stride,
                                      Rect* dst_rect, Bound* clip,
                                      uint8_t opacity,
@@ -264,7 +264,7 @@ void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixel
     if (clip) rc_pop_clip(rdcon);
 }
 
-void render_painter_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
+void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth) {
     (void)surface;
@@ -274,7 +274,7 @@ void render_painter_fill_surface_rect(RenderContext* rdcon, ImageSurface* surfac
                                    color, clip, clip_shapes, clip_depth);
 }
 
-void render_painter_blit_surface_scaled(RenderContext* rdcon,
+void render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,
                                         ScaleMode scale_mode,
@@ -290,7 +290,7 @@ void render_painter_blit_surface_scaled(RenderContext* rdcon,
                                      clip_depth, opacity);
 }
 
-void rc_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
+void rc_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
                           Rect* rect, uint32_t color, Bound* clip,
                           ClipShape** clip_shapes, int clip_depth) {
     render_painter_fill_surface_rect(rdcon, surface, rect, color, clip, clip_shapes, clip_depth);

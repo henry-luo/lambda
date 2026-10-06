@@ -1,0 +1,36 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.box { width: 20px; height: 20px; background: red; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes Ease { from { opacity: 0; } to { opacity: 1; } }
+#delayed { animation: fade 1s linear 1s both; }
+#negative { animation: fade 2s linear -1s paused; }
+#instant { animation: fade 0s; }
+#iterated { animation: fade 0.5s linear 2; }
+#cancelled { animation: fade 10s linear 1s paused; }
+#keyword { --name: Ease; animation: 2s linear -1s var(--name) both paused; }
+</style>
+<button id="cancel">cancel</button>
+<div class="box" id="delayed"></div>
+<div class="box" id="negative"></div>
+<div class="box" id="instant"></div>
+<div class="box" id="iterated"></div>
+<div class="box" id="cancelled"></div>
+<div class="box" id="keyword"></div>
+<script>
+['delayed', 'negative', 'instant', 'iterated', 'cancelled'].forEach(function (id) {
+    var box = document.getElementById(id);
+    ['animationstart', 'animationiteration', 'animationend', 'animationcancel'].forEach(function (type) {
+        box.setAttribute('data-' + type, '0');
+        box.addEventListener(type, function (event) {
+            box.setAttribute('data-' + type, String(Number(box.getAttribute('data-' + type)) + 1));
+            box.setAttribute('data-' + type + '-elapsed', String(event.elapsedTime));
+            if (id === 'delayed' && type === 'animationstart') box.style.width = '44px';
+        });
+    });
+});
+document.getElementById('cancel').addEventListener('click', function () {
+    document.getElementById('cancelled').style.animationName = 'none';
+});
+</script>

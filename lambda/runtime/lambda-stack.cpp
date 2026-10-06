@@ -20,7 +20,9 @@
 #include <cstdlib>
 #include <cstring>
 
-#if defined(__APPLE__)
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/stack.h>
+#elif defined(__APPLE__)
 #include <pthread.h>
 #include <signal.h>
 #include <execinfo.h>
@@ -64,7 +66,11 @@ static __thread bool _lambda_alt_stack_previous_valid = false;
 // ============================================================================
 
 static void init_stack_bounds(void) {
-#if defined(__APPLE__)
+#if defined(__EMSCRIPTEN__)
+    // use the real linear-memory stack bounds for recoverable recursion checks.
+    _lambda_stack_base = emscripten_stack_get_base();
+    _lambda_stack_limit = emscripten_stack_get_end() + LAMBDA_STACK_SAFETY_MARGIN;
+#elif defined(__APPLE__)
     pthread_t self = pthread_self();
     void* stack_addr = pthread_get_stackaddr_np(self);
     size_t stack_size = pthread_get_stacksize_np(self);
@@ -261,12 +267,11 @@ static void install_signal_handler(void) {
         return;
     }
 
-#if defined(__linux__)
-    // Linux may also deliver SIGBUS for some stack faults
+    // Linux may deliver SIGBUS for some stack faults, and macOS delivers it
+    // for the PROT_NONE guard page of an mmap'd activation stack.
     if (sigaction(SIGBUS, &sa, NULL) != 0) {
         log_error("stack init: sigaction(SIGBUS) failed");
     }
-#endif
 
     _signal_handler_installed = true;
     log_debug("stack init: signal-based overflow handler installed (alt stack=%zu KB)",
@@ -348,7 +353,9 @@ void lambda_stack_init(void) {
     }
 
     // Install signal/exception handler (process-wide, once)
+#if !defined(__EMSCRIPTEN__)
     install_signal_handler();
+#endif
 }
 
 void lambda_stack_detach_thread(void) {
@@ -382,9 +389,7 @@ void lambda_stack_cleanup(void) {
     sa.sa_handler = SIG_DFL;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGSEGV, &sa, NULL);
-#if defined(__linux__)
     sigaction(SIGBUS, &sa, NULL);
-#endif
     _signal_handler_installed = false;
     log_debug("stack cleanup: signal-based overflow handler released");
 #elif defined(_WIN32)
@@ -399,14 +404,34 @@ void lambda_stack_set_budget(size_t bytes) {
     _lambda_stack_budget = bytes ? bytes : LAMBDA_STACK_DEFAULT_BUDGET;
 }
 
+uintptr_t lambda_stack_recoverable_limit_for(LambdaStackBounds bounds) {
+    uintptr_t fault_floor = bounds.limit + LAMBDA_STACK_THROW_HEADROOM;
+    uintptr_t budget_limit = bounds.base > _lambda_stack_budget
+        ? bounds.base - _lambda_stack_budget : 0;
+    return budget_limit > fault_floor ? budget_limit : fault_floor;
+}
+
 uintptr_t lambda_stack_recoverable_limit(void) {
     // bounds are per-thread; a context bound on a thread that never ran
     // lambda_stack_init still needs a limit for its own stack
     if (_lambda_stack_limit == 0) init_stack_bounds();
-    uintptr_t fault_floor = _lambda_stack_limit + LAMBDA_STACK_THROW_HEADROOM;
-    uintptr_t budget_limit = _lambda_stack_base > _lambda_stack_budget
-        ? _lambda_stack_base - _lambda_stack_budget : 0;
-    return budget_limit > fault_floor ? budget_limit : fault_floor;
+    return lambda_stack_recoverable_limit_for(lambda_stack_bounds_get());
+}
+
+LambdaStackBounds lambda_stack_bounds_get(void) {
+    if (_lambda_stack_limit == 0) init_stack_bounds();
+    LambdaStackBounds bounds = {_lambda_stack_base, _lambda_stack_limit};
+    return bounds;
+}
+
+void lambda_stack_bounds_set(LambdaStackBounds bounds) {
+    _lambda_stack_base = bounds.base;
+    _lambda_stack_limit = bounds.limit;
+}
+
+LambdaStackBounds lambda_stack_bounds_for(uintptr_t low, uintptr_t high) {
+    LambdaStackBounds bounds = {high, low + LAMBDA_STACK_SAFETY_MARGIN};
+    return bounds;
 }
 
 extern "C" uint64_t lambda_stack_is_exhausted(uintptr_t stack_limit) {

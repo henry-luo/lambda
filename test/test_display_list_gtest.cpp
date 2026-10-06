@@ -108,9 +108,9 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     clear_list.data()[0].fill_linear_gradient.owned_stops = lam::own_arr(stops);
 
     PaintGlyphRun run = {};
-    run.text = mem_strdup("owned glyph text", MEM_CAT_RENDER);
+    run.text = lam::up((const char*)mem_strdup("owned glyph text", MEM_CAT_RENDER));
     ASSERT_NE(run.text, nullptr);
-    run.owned_text = lam::own(run.text);
+    run.owned_text = lam::own((const char*)run.text);
     paint_glyph_run(&clear_list, &run);
     ASSERT_EQ(clear_list.size(), 2u);
 
@@ -125,9 +125,9 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     PaintList destroy_list = {};
     paint_list_init(&destroy_list, nullptr);
     PaintGlyphRun destroy_run = {};
-    destroy_run.text = mem_strdup("destroy owned glyph text", MEM_CAT_RENDER);
+    destroy_run.text = lam::up((const char*)mem_strdup("destroy owned glyph text", MEM_CAT_RENDER));
     ASSERT_NE(destroy_run.text, nullptr);
-    destroy_run.owned_text = lam::own(destroy_run.text);
+    destroy_run.owned_text = lam::own((const char*)destroy_run.text);
     paint_glyph_run(&destroy_list, &destroy_run);
     ASSERT_EQ(destroy_list.size(), 1u);
     paint_list_destroy(&destroy_list);
@@ -310,6 +310,7 @@ TEST_F(DisplayListTest, DrawImageStoresGenerationOpacityAndTransformedBounds) {
     ImageSurface* owner = image_surface_alloc();
     ASSERT_NE(owner, nullptr);
     owner->generation = 42;
+    owner->pixels = pixels; owner->width = owner->height = 2; owner->pitch = 8;
     RdtMatrix transform = rdt_matrix_translate(5.0f, -2.0f);
 
     dl_draw_image(&dl, pixels, 2, 2, 2, 10.0f, 20.0f, 30.0f, 40.0f,
@@ -318,7 +319,11 @@ TEST_F(DisplayListTest, DrawImageStoresGenerationOpacityAndTransformedBounds) {
     ASSERT_EQ(dl.size(), 1u);
     const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_DRAW_IMAGE);
-    EXPECT_EQ(item->draw_image.pixels, pixels);
+    // pixels inside the owner's buffer are recorded as a region of the owner
+    EXPECT_EQ(item->draw_image.local_pixels, nullptr);
+    EXPECT_EQ(item->draw_image.src_x, 0);
+    EXPECT_EQ(item->draw_image.src_y, 0);
+    EXPECT_EQ(item->draw_image.surface_w, 2);
     EXPECT_TRUE(item->draw_image.resource == owner->self);
     EXPECT_EQ(image_surface_lookup(item->draw_image.resource), owner);
     EXPECT_EQ(item->draw_image.resource_generation, 42u);
@@ -469,7 +474,8 @@ TEST_F(DisplayListTest, BlitAndExternalLayerCommandsStoreGenerations) {
 
     ASSERT_EQ(dl.size(), 3u);
     EXPECT_EQ(dl.data()[0].op, DL_BLIT_SURFACE_SCALED);
-    EXPECT_EQ(dl.data()[0].blit_surface_scaled.src_surface, &src);
+    // an unregistered source stays frame-local
+    EXPECT_EQ(dl.data()[0].blit_surface_scaled.local_source, &src);
     EXPECT_EQ(dl.data()[0].blit_surface_scaled.src_generation, 17u);
     EXPECT_EQ(dl.data()[0].blit_surface_scaled.opacity, 77);
     EXPECT_FLOAT_EQ(dl.data()[0].bounds[0], 10.0f);
@@ -681,6 +687,60 @@ static void expect_matrix_eq(const RdtMatrix& a, const RdtMatrix& b) {
     EXPECT_FLOAT_EQ(a.e21, b.e21); EXPECT_FLOAT_EQ(a.e22, b.e22); EXPECT_FLOAT_EQ(a.e23, b.e23);
 }
 
+TEST_F(PaintIrParityTest, RasterScopesComposeNestedPlacementAndLocalTransforms) {
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 0.0f, 0.0f, 10.0f, 12.0f, 0.0f, 0.0f);
+    RdtMatrix parent = rdt_matrix_translate(10.0f, 20.0f);
+    RdtMatrix nested = {2, 0, 0, 0, 3, 0, 0, 0, 1};
+    RdtMatrix local = rdt_matrix_translate(4.0f, 5.0f);
+    Color color = {0xff112233u};
+    paint_push_transform(&pl, &parent);
+    paint_push_clip(&pl, path, &local);
+    paint_push_transform(&pl, &nested);
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, color);
+    paint_fill_path(&pl, path, color, RDT_FILL_WINDING, &local);
+    paint_pop_transform(&pl);
+    paint_fill_rounded_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, 1.0f, 1.0f, color);
+    paint_pop_clip(&pl); paint_pop_transform(&pl);
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, color);
+    lower();
+    ASSERT_EQ(lowered.item_count(), 6);
+    ASSERT_EQ(lowered.data()[0].op, DL_PUSH_CLIP);
+    RdtMatrix expected_clip = rdt_matrix_translate(14.0f, 25.0f);
+    expect_matrix_eq(lowered.data()[0].push_clip.transform, expected_clip);
+    ASSERT_EQ(lowered.data()[1].op, DL_FILL_PATH);
+    RdtMatrix expected_nested = {2, 0, 10, 0, 3, 20, 0, 0, 1};
+    expect_matrix_eq(lowered.data()[1].fill_path.transform, expected_nested);
+    RdtMatrix expected_local = {2, 0, 18, 0, 3, 35, 0, 0, 1};
+    expect_matrix_eq(lowered.data()[2].fill_path.transform, expected_local);
+    expect_matrix_eq(lowered.data()[3].fill_path.transform, parent);
+    EXPECT_EQ(lowered.data()[4].op, DL_POP_CLIP);
+    EXPECT_EQ(lowered.data()[5].op, DL_FILL_RECT);
+    expect_matrix_eq(pl.data()[4].fill_path.transform, local);
+    expect_matrix_eq(pl.data()[1].push_clip.transform, local);
+    rdt_path_free(path);
+}
+
+TEST_F(PaintIrParityTest, RasterScopeMapsLogicalEffectBoundsBeforePixelReservation) {
+    RdtMatrix parent = {2, 0, 10, 0, 3, 20, 0, 0, 1};
+    PaintEffectGroup group = {}; group.bounds = {0, 0, 10, 12}; group.opacity = 0.5f;
+    paint_push_transform(&pl, &parent); paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 0.0f, 0.0f, 10.0f, 12.0f, Color{0xff112233u});
+    paint_end_effect_group(&pl); paint_pop_transform(&pl);
+    lower();
+    ASSERT_EQ(lowered.item_count(), 3);
+    EXPECT_EQ(lowered.data()[0].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.x0, 10);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.y0, 20);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.w, 20);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.h, 36);
+    EXPECT_EQ(lowered.data()[2].op, DL_COMPOSITE_OPACITY);
+    EXPECT_EQ(lowered.data()[2].composite_opacity.x0, 10);
+    EXPECT_EQ(lowered.data()[2].composite_opacity.h, 36);
+    EXPECT_FLOAT_EQ(pl.data()[1].effect_group.bounds.left, 0.0f);
+    EXPECT_FLOAT_EQ(pl.data()[1].effect_group.bounds.right, 10.0f);
+}
+
 // Op-aware comparison: variable-length payloads (gradient stops, dash arrays)
 // are copied into each DisplayList's own arena, so compare values not pointers.
 static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
@@ -743,7 +803,9 @@ static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
     case DL_DRAW_IMAGE: {
         const DlDrawImage& x = a.draw_image;
         const DlDrawImage& y = b.draw_image;
-        EXPECT_EQ(x.pixels, y.pixels);
+        EXPECT_EQ(x.local_pixels, y.local_pixels);
+        EXPECT_TRUE(x.resource == y.resource);
+        EXPECT_EQ(x.src_x, y.src_x); EXPECT_EQ(x.src_y, y.src_y);
         EXPECT_EQ(x.src_w, y.src_w); EXPECT_EQ(x.src_h, y.src_h);
         EXPECT_EQ(x.src_stride, y.src_stride);
         EXPECT_FLOAT_EQ(x.dst_x, y.dst_x); EXPECT_FLOAT_EQ(x.dst_y, y.dst_y);
@@ -1096,7 +1158,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsBackgroundAndSolidBorder) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1132,7 +1194,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsUniformRoundedBackground) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1161,7 +1223,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsOpaqueUniformRoundedBorder) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1204,7 +1266,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1261,7 +1323,7 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsLinearGradientPaint) {
     RdtGradientStop stops[2] = {};
     BoundaryLinearGradientPaint paint = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1305,7 +1367,7 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsRadialGradientPaint) {
     RdtGradientStop stops[2] = {};
     BoundaryRadialGradientPaint paint = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 120.0f;
     view.height = 80.0f;
     bound.background = lam::own(&bg);
@@ -1389,7 +1451,7 @@ TEST_F(PaintIrParityTest, GatewayRequiresPaintIrAndDisplayListTargets) {
     expect_lists_equal(lowered, direct);
 }
 
-typedef struct PaintBlockDriverProbe {
+typedef struct PaintBlockDriverProbe : RenderPaintBlockDriver {
     int begin_count;
     int self_count;
     int children_count;
@@ -1397,34 +1459,34 @@ typedef struct PaintBlockDriverProbe {
     bool continue_children;
 } PaintBlockDriverProbe;
 
-static bool probe_block_begin(void* ctx, ViewBlock* block, void** phase) {
+static bool probe_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* block, void** phase) {
     (void)block;
-    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    PaintBlockDriverProbe* probe = static_cast<PaintBlockDriverProbe*>(ctx);
     probe->begin_count++;
     *phase = probe;
     return true;
 }
 
-static bool probe_block_self(void* ctx, ViewBlock* block, void* phase) {
+static bool probe_block_self(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
     (void)block;
     (void)phase;
-    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    PaintBlockDriverProbe* probe = static_cast<PaintBlockDriverProbe*>(ctx);
     probe->self_count++;
     return probe->continue_children;
 }
 
-static double probe_block_children(void* ctx, ViewBlock* block, void* phase) {
+static double probe_block_children(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
     (void)block;
     (void)phase;
-    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    PaintBlockDriverProbe* probe = static_cast<PaintBlockDriverProbe*>(ctx);
     probe->children_count++;
     return 7.0;
 }
 
-static void probe_block_finish(void* ctx, ViewBlock* block, void* phase) {
+static void probe_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
     (void)block;
     (void)phase;
-    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    PaintBlockDriverProbe* probe = static_cast<PaintBlockDriverProbe*>(ctx);
     probe->finish_count++;
 }
 
@@ -1432,7 +1494,7 @@ TEST_F(PaintIrParityTest, SharedBlockPaintDriverSkipsChildrenButFinishes) {
     PaintBlockDriverProbe probe = {};
     probe.continue_children = false;
     RenderPaintBlockOps ops = {};
-    ops.ctx = &probe;
+    ops.ctx = lam::up(&probe);
     ops.begin = probe_block_begin;
     ops.paint_self = probe_block_self;
     ops.paint_children = probe_block_children;
@@ -1453,7 +1515,7 @@ TEST_F(PaintIrParityTest, SharedBlockPaintDriverRecordsChildrenTime) {
     PaintBlockDriverProbe probe = {};
     probe.continue_children = true;
     RenderPaintBlockOps ops = {};
-    ops.ctx = &probe;
+    ops.ctx = lam::up(&probe);
     ops.begin = probe_block_begin;
     ops.paint_self = probe_block_self;
     ops.paint_children = probe_block_children;
@@ -1539,8 +1601,10 @@ TEST_F(PaintIrParityTest, SemanticBuildersValidateAndLowerEffectGroupRasterOps) 
     uint32_t glyph_ids[2] = {11, 12};
     float xs[2] = {3.0f, 8.0f};
     float ys[2] = {5.0f, 5.0f};
+    // A missing font handle tests unsupported output without aliasing an unrelated payload.
+    FontBox missing_font = {};
     PaintGlyphRun glyph_run = {};
-    glyph_run.font = lam::up((FontBox*)&group);
+    glyph_run.font = lam::up(&missing_font);
     glyph_run.color = test_color(0xff102030);
     glyph_run.glyph_ids = lam::up(glyph_ids);
     glyph_run.xs = lam::up(xs);
@@ -2085,7 +2149,7 @@ TEST_F(PaintIrParityTest, SvgStreamingLoweringKeepsOpacityOpenAcrossFragments) {
 
 TEST_F(PaintIrParityTest, SvgLoweringEmitsNativeTextRun) {
     PaintGlyphRun run = {};
-    run.text = "A < B & C";
+    run.text = lam::up("A < B & C");
     run.text_len = -1;
     run.font_family = lam::up("A&B Sans");
     run.font_size = 13.5f;

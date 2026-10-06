@@ -4520,6 +4520,8 @@ Item fn_cumsum_axis(Item arr, Item axis)  { return array_num_cumulative_axis(arr
 Item fn_cumprod_axis(Item arr, Item axis) { return array_num_cumulative_axis(arr, axis, true,  "cumprod"); }
 
 //==============================================================================
+#ifndef LAMBDA_NO_IMAGE_PROCESSING
+// image kernels and pixel conversions are optional; core array operations stay above/below.
 // Image stencil engine — windowed neighbourhood ops over ArrayNum
 //
 // Slide a Kh×Kw window (centred on each output's input position) over the spatial
@@ -5207,6 +5209,8 @@ Item fn_affine_warp(Item img, Item m_item) {
             *sy = d * (double)oj + e * (double)oi + f;
         });
 }
+
+#endif // LAMBDA_NO_IMAGE_PROCESSING
 
 // Overload wrappers — the sysfunc dispatcher resolves to fn_<name><argcount>.
 // The 1-arg forms delegate to the existing whole-array reductions.

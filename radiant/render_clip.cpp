@@ -61,6 +61,13 @@ static RdtPath* render_clip_create_shape_path(ClipShape* shape) {
     return p;
 }
 
+static const char* render_clip_css_value(ViewElement* view) {
+    if (!view) return nullptr;
+    DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
+    CssDeclaration* declaration = dom_element_get_specified_value(element, CSS_PROPERTY_CLIP_PATH);
+    return declaration && declaration->value_text_len > 0 ? declaration->value_text : nullptr;
+}
+
 // Owned clip shapes (and polygon vertices) live in the clip scope's scratch
 // scope, which render_clip_pop_scope ends.
 static ClipShape* render_clip_alloc_shape(ScratchArena* scratch, ScratchMark* mem) {
@@ -375,7 +382,7 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, ScratchMark
     return nullptr;
 }
 
-static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* scope,
+static bool render_clip_push_shape_scope(RasterRenderContext* rdcon, RenderClipScope* scope,
                                          ClipShape* shape) {
     if (!rdcon || !scope || !shape) {
         return false;
@@ -400,7 +407,7 @@ static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* 
 }
 
 // On success the clip scope takes over `mem`; on failure `mem` is ended here.
-static bool render_clip_push_owned_shape(RenderContext* rdcon,
+static bool render_clip_push_owned_shape(RasterRenderContext* rdcon,
                                          RenderClipScope* scope,
                                          ClipShape* shape, ScratchMark* mem) {
     if (!shape || !render_clip_push_shape_scope(rdcon, scope, shape)) {
@@ -412,18 +419,13 @@ static bool render_clip_push_owned_shape(RenderContext* rdcon,
     return true;
 }
 
-RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
+RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                            float parent_x, float parent_y, float scale) {
     RenderClipScope scope = {};
     if (!rdcon || !block) {
         return scope;
     }
-    DomElement* element = lam::dom_require_element(lam::view_dom_node(block));
-    CssDeclaration* clip_decl = dom_element_get_specified_value(element, CSS_PROPERTY_CLIP_PATH);
-    if (!clip_decl || !clip_decl->value_text || clip_decl->value_text_len <= 0) {
-        return scope;
-    }
-    const char* clip_str = clip_decl->value_text;
+    const char* clip_str = render_clip_css_value(block);
     if (!clip_str || strncmp(clip_str, "none", 4) == 0) {
         return scope;
     }
@@ -449,7 +451,33 @@ RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* bloc
     return scope;
 }
 
-RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* clip) {
+bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
+                                 float abs_x, float abs_y) {
+    const char* value = render_clip_css_value(element);
+    if (!paint || !value || strncmp(value, "none", 4) == 0) return false;
+
+    RdtPath* path = render_clip_parse_path_function(value, abs_x, abs_y);
+    if (!path) {
+        Arena* backing = arena_create_default();
+        if (!backing) return false;
+        ScratchArena scratch = {};
+        scratch_init(&scratch, backing);
+        ScratchMark scope = scratch_scope_begin(&scratch);
+        ClipShape* shape = render_clip_parse_css_shape(&scratch, &scope, value,
+            element->width, element->height, abs_x, abs_y);
+        if (shape) path = render_clip_create_shape_path(shape);
+        scratch_scope_end(&scratch, &scope);
+        scratch_release(&scratch);
+        arena_destroy(backing);
+    }
+    if (!path) return false;
+    int before = paint_list_count(paint);
+    paint_push_clip(paint, path, nullptr);
+    rdt_path_free(path);
+    return paint_list_count(paint) > before;
+}
+
+RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip) {
     RenderClipScope scope = {};
     if (!rdcon || !clip) {
         return scope;
@@ -471,7 +499,7 @@ RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* c
     return scope;
 }
 
-RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
+RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon) {
     RenderClipScope scope = {};
     if (!rdcon || !rdcon->block.has_clip_radius) {
         return scope;
@@ -500,7 +528,7 @@ RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
     return scope;
 }
 
-void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope) {
+void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope) {
     if (!rdcon || !scope || !scope->active) {
         return;
     }

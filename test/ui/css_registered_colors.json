@@ -1,0 +1,64 @@
+{
+  "name": "Registered color values compute before inheritance",
+  "html": "test/ui/css_registered_colors.html",
+  "viewport": {
+    "width": 240,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#child"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 0, 255)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inspect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-parent",
+      "equals": "currentcolor"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-child",
+      "equals": "currentcolor"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-colors",
+      "equals": "rgb(0, 255, 255) rgb(255, 255, 0)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-color-list",
+      "equals": "rgba(120, 0, 0, 0.5), rgb(0, 0, 255)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inspect"
+      },
+      "attribute": "data-literal",
+      "equals": "red"
+    }
+  ]
+}

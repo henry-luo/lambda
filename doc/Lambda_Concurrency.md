@@ -59,7 +59,7 @@ pn main() {
 
 ## Colorless Calls
 
-A procedure that suspends is called like any other: the compiler finds the procedures that can park and turns them into resumable state machines, so nothing at the call site changes (S13.1.2v2). A direct call through several ordinary `pn` frames can suspend without any annotation:
+A procedure that suspends is called like any other: each task runs on a stack of its own, so a park pauses the task where it is, however deep in its calls, and nothing at the call site changes (S13.1.2v2). This holds in the interpreter and in compiled code alike. A direct call through several ordinary `pn` frames can suspend without any annotation:
 
 ```lambda
 pn scaled(n) { sleep(n)^; return n * 10 }
@@ -257,7 +257,7 @@ pn main() {
 [319, "task cancelled"]
 ```
 
-Because the task operations are procedures, their errors are engaged in one of three ways: propagate with postfix `^`, receive the outcome in a binding typed `T | error` as above, or handle it with a **statement-position handler**, which runs its body on error and continues with the next statement (S7.6.7v3):
+Because the task operations are procedures, their errors are engaged in one of three ways: propagate with postfix `^`, receive the outcome in a binding typed `T | error` as above, or handle it with a **statement-position handler**, which runs its body on error and continues with the next statement (S7.6.7v4):
 
 ```lambda
 pn forever() { sleep(10000)^; return 1 }
@@ -296,7 +296,7 @@ gave up: task wait timed out
 "done"
 ```
 
-A value-producing handler over a procedure call, such as `let r = wait(h) ^ { 0 }`, is not one of the forms: a `pn` handler is statement-only (S7.6.7v3).
+A value-producing handler over a procedure call, such as `let r = wait(h) ^ { 0 }`, is not one of the forms: a `pn` handler is statement-only (S7.6.7v4).
 
 > **Not yet implemented.** The compiler does not yet reject a value-producing handler over a procedure call; it compiles, and the binding receives `null` whether the call succeeds or fails. Use one of the three forms above.
 
@@ -381,5 +381,5 @@ Error codes: 310 *task wait timed out*, 319 *task cancelled*, 320 *task mailbox 
 | Isolated workers: `mode: 'thread'` and `mode: 'process'` | Not yet implemented — compile error E501 (S13.1.3v2) |
 | Pairwise, bit-reproducible numeric reductions | Not yet implemented (S13.4.1) |
 | Parallel stream pipelines | Not yet implemented; streams themselves are pending (S13.4.2, S14.3) |
-| Value-producing handler over a procedure call | Should be a compile error (S7.6.7v3); currently compiles and yields `null` |
+| Value-producing handler over a procedure call | Should be a compile error (S7.6.7v4); currently compiles and yields `null` |
 | Capture rule for procedure arrows passed to `start` | Not yet enforced (S13.1.4) |

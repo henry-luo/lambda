@@ -2492,47 +2492,8 @@ MIR_reg_t jm_build_args_array_from_regs(JsMirTranspiler* mt,
 MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg_count) {
     if (arg_count == 0) return 0;
 
-    // Generator/async mode: if any argument contains a suspend point, we cannot
-    // keep the call argument buffer in raw registers across suspend/resume.
-    // Instead, spill each evaluated arg to an env slot, then copy to ALLOCA after all done.
-    bool has_yield_in_args = false;
-    if (mt->in_generator) {
-        JsAstNode* chk = first_arg;
-        while (chk) {
-            if (jm_can_suspend(mt, chk)) {
-                has_yield_in_args = true;
-                break;
-            }
-            chk = chk->next;
-        }
-    }
-
-    if (has_yield_in_args) {
-        // Allocate env spill slots for each argument
-        int base_spill = mt->gen_spill_slot_next;
-        mt->gen_spill_slot_next += arg_count;
-
-        // Evaluate each argument and store to env
-        JsAstNode* arg = first_arg;
-        for (int i = 0; i < arg_count && arg; i++) {
-            MIR_reg_t val = jm_transpile_box_item(mt, arg);
-            jm_emit_error_lane_propagate_check(mt);
-            jm_emit_store_i64(mt, (base_spill + i) * (int)sizeof(uint64_t), mt->gen_env_reg, val);
-            arg = arg->next;
-        }
-
-        // Now all args are safely in env. Copy to heap alloc for the call.
-        // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.
-        MIR_reg_t args_ptr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
-        for (int i = 0; i < arg_count; i++) {
-            MIR_reg_t tmp = jm_new_reg(mt, "arl", MIR_T_I64);
-            jm_emit_load_i64(mt, tmp, (base_spill + i) * (int)sizeof(uint64_t), mt->gen_env_reg);
-            jm_emit_store_i64(mt, i * 8, args_ptr, tmp);
-        }
-        return args_ptr;
-    }
-
+    // The canonical argument slots are frame roots; a suspending argument
+    // parks the whole frame with them (RA1).
     MIR_reg_t args_ptr = jm_reserve_args_array(mt, arg_count);
 
     // Evaluate and store each argument
@@ -2553,23 +2514,12 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
     MIR_reg_t array = jm_call_1(mt, "js_array_new", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
 
-    // Generator spill: if any argument contains yield, save array ref to env
-    int arr_spill_slot = -1;
-    if (mt->in_generator) {
-        JsAstNode* cy = first_arg;
-        while (cy) { if (jm_can_suspend(mt, cy)) { arr_spill_slot = jm_gen_spill_save(mt, array); break; } cy = cy->next; }
-    }
-
     JsAstNode* arg = first_arg;
     while (arg) {
         if (arg->node_type == AST_NODE_SPREAD) {
             JsSpreadElementNode* spread = (JsSpreadElementNode*)arg;
             MIR_reg_t src_raw = jm_transpile_box_item(mt, spread->argument);
             jm_emit_error_lane_propagate_check(mt);
-            // Generator spill: restore array after yield in spread argument
-            if (arr_spill_slot >= 0 && jm_can_suspend(mt, spread->argument)) {
-                jm_gen_spill_load(mt, array, arr_spill_slot);
-            }
             // Convert any iterable to array first
             MIR_reg_t src = jm_callr_1(mt, "js_iterable_to_array", MIR_T_I64, src_raw);
             jm_emit_error_lane_propagate_check(mt);
@@ -2598,10 +2548,6 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
         } else {
             MIR_reg_t val = jm_transpile_box_item(mt, arg);
             jm_emit_error_lane_propagate_check(mt);
-            // Generator spill: restore array after yield in argument
-            if (arr_spill_slot >= 0 && jm_can_suspend(mt, arg)) {
-                jm_gen_spill_load(mt, array, arr_spill_slot);
-            }
             jm_callr_2(mt, "js_array_push", MIR_T_I64, array, val);
             jm_emit_error_lane_propagate_check(mt);
         }

@@ -43,6 +43,24 @@ typedef struct LambdaRootFrame {
     bool active;
 } LambdaRootFrame;
 
+// One reserved, lazily committed region of side-stack slots.
+typedef struct LambdaSideStackRegion {
+    uint64_t* base;
+    uint64_t* committed;
+    uint64_t* limit;
+    size_t byte_size;
+} LambdaSideStackRegion;
+
+// Activations own a root and a number region each, carved from their stack's
+// mapping. Selecting a pair makes them the running stack's regions for commit
+// and decommit; NULL selects the thread's own. The Context watermarks are
+// swapped by the caller.
+void lambda_side_stack_regions_select(LambdaSideStackRegion* root,
+                                      LambdaSideStackRegion* number);
+void lambda_side_stack_regions_current(LambdaSideStackRegion** root,
+                                       LambdaSideStackRegion** number);
+void lambda_side_stack_region_release(LambdaSideStackRegion* region);
+
 bool lambda_side_stack_bind(void);
 // MIR imports use the thread-bound evaluator rather than carrying Context*
 // through every native helper call.

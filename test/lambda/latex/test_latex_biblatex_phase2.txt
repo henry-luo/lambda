@@ -1,0 +1,206 @@
+"numeric"
+[]
+"has cited text:"
+true
+"has scope target:"
+true
+"has segment target:"
+true
+"has filtered list:"
+true
+"type and notkeyword:"
+true
+"bibintoc target:"
+true
+"has DOI link:"
+true
+"has inherited publisher:"
+true
+"has footcite:"
+true
+"uncited hidden:"
+true
+"numeric range:"
+true
+"author year comp:"
+true
+"citation name limit:"
+true
+"numeric-comp"
+[]
+"has cited text:"
+true
+"has scope target:"
+true
+"has segment target:"
+true
+"has filtered list:"
+true
+"type and notkeyword:"
+true
+"bibintoc target:"
+true
+"has DOI link:"
+true
+"has inherited publisher:"
+true
+"has footcite:"
+true
+"uncited hidden:"
+true
+"numeric range:"
+true
+"author year comp:"
+true
+"citation name limit:"
+true
+"authoryear"
+[]
+"has cited text:"
+true
+"has scope target:"
+true
+"has segment target:"
+true
+"has filtered list:"
+true
+"type and notkeyword:"
+true
+"bibintoc target:"
+true
+"has DOI link:"
+true
+"has inherited publisher:"
+true
+"has footcite:"
+true
+"uncited hidden:"
+true
+"numeric range:"
+true
+"author year comp:"
+true
+"citation name limit:"
+true
+"authoryear-comp"
+[]
+"has cited text:"
+true
+"has scope target:"
+true
+"has segment target:"
+true
+"has filtered list:"
+true
+"type and notkeyword:"
+true
+"bibintoc target:"
+true
+"has DOI link:"
+true
+"has inherited publisher:"
+true
+"has footcite:"
+true
+"uncited hidden:"
+true
+"numeric range:"
+true
+"author year comp:"
+true
+"citation name limit:"
+true
+"alphabetic"
+[]
+"has cited text:"
+true
+"has scope target:"
+true
+"has segment target:"
+true
+"has filtered list:"
+true
+"type and notkeyword:"
+true
+"bibintoc target:"
+true
+"has DOI link:"
+true
+"has inherited publisher:"
+true
+"has footcite:"
+true
+"uncited hidden:"
+true
+"numeric range:"
+true
+"author year comp:"
+true
+"citation name limit:"
+true
+"authortitle"
+[]
+"has cited text:"
+true
+"has scope target:"
+true
+"has segment target:"
+true
+"has filtered list:"
+true
+"type and notkeyword:"
+true
+"bibintoc target:"
+true
+"has DOI link:"
+true
+"has inherited publisher:"
+true
+"has footcite:"
+true
+"uncited hidden:"
+true
+"numeric range:"
+true
+"author year comp:"
+true
+"citation name limit:"
+true
+"nocite all:"
+true
+"xdata hidden:"
+true
+"nocite keyed:"
+true
+"German heading:"
+true
+"French heading:"
+true
+"entry language:"
+true
+"German et al:"
+true
+"given initials:"
+true
+"link toggles:"
+true
+"sorting none:"
+["a", "b", "c"]
+"sorting nty:"
+["b", "a", "c"]
+"sorting nyt:"
+["a", "b", "c"]
+"sorting ynt:"
+["c", "a", "b"]
+"independent styles:"
+true
+"uniquename false:"
+true
+"uniquename full:"
+true
+"generic name limits:"
+true
+"segment resets per section:"
+true
+"scoped labels restart:"
+true

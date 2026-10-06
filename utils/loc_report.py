@@ -199,6 +199,7 @@ RADIANT_SUBMODULES = [
 
 LIB_SUBMODULES = [
     ('sqlite (vendored)', under('lib/sqlite')),
+    ('re2 (vendored)', under('lib/re2')),
     ('woff2 (vendored)', under('lib/font/woff2')),
     ('font engine', under('lib/font')),
     ('gc heap', under('lib/gc')),
@@ -208,7 +209,7 @@ LIB_SUBMODULES = [
 # buckets that are third-party or machine-generated, reported separately from
 # the hand-written total
 VENDORED = {
-    'sqlite (vendored)', 'woff2 (vendored)',
+    'sqlite (vendored)', 'woff2 (vendored)', 're2 (vendored)',
     'tree-sitter runtime (vendored)', 'generated language parsers',
 }
 

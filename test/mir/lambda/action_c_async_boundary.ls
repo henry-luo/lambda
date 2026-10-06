@@ -1,5 +1,5 @@
-// Action C: an async wait is a suspension/restore boundary. Any pending pair
-// must be resolved before the async frame stores its live words.
+// Action C (revised by RA1): a wait suspends the task's own stack, so the
+// procedure needs no async-frame stores and no pending-pair resolution.
 
 pn delayed_value() {
     sleep(0)^

@@ -1,6 +1,6 @@
 # Lambda Concurrency Design — Colorless Concurrency: the Evolution to v3 (One Start Procedure, Two Tiers)
 
-**Status:** **v3 adopted** (§10), amended as **v3.1** (K31, K32) and **v3.2** (K12v2, K31v2) — v1 and v2 preserved below as design history
+**Status:** **v3 adopted** (§10), amended as **v3.1** (K31, K32), **v3.2** (K12v2, K31v2) and **v3.3** (K14v2, K15v2, K17v2 — 2026-10-05: the suspension mechanism is stackful activations, `Lambda_Design_Runtime_Async.md` RA1; K2-R retired, Stage B withdrawn) — v1 and v2 preserved below as design history
 **Date:** v1 2026-07-06 (fibers) · v2 2026-07-08 (declared-`async` + K2-R state machines) · v3 2026-07-08: one `start` entry, two tiers · v3.1 2026-07-26: worker thread/process modes · **v3.2 2026-08-19 (current): `start(target, args, options)` is an ordinary-call system `pn`; `{mode: 'task' | 'thread' | 'process'}` selects execution**
 **Context:** realizes decision **J4** (BEAM-style concurrency, stated explicitly) from the Jube runtime ledger — Part 1 of `Lambda_Semantics_Features.md`. Addresses the #1 structural gap from the six-language feature comparison (Part 3 of the same doc).
 
@@ -142,6 +142,8 @@ Two suspended call chains cannot interleave on one contiguous stack (stacks are 
 
 #### 4.2.3 ADOPTED (2026-07-08, K2-R): may-await state-machine compilation
 
+*[Retired 2026-10-05 by K14v2: suspension is stackful (`Lambda_Design_Runtime_Async.md` RA1, D5.1.1v3). Built and then deleted for both languages; the section is kept as the record of why it was first chosen. The comparison that reversed it is in that doc's §14.]*
+
 The color goes **into the compiler**, along exactly the calls that need it:
 
 - **The may-await closure**: seeded by `async` declarations and `await` expressions, propagated along call edges (a `pn` calling a may-await `pn` is itself may-await). Indirect `pn` calls (through closures/HOFs) are conservatively may-await; **`fn`s are exempt by construction** — and Lambda's idiomatic HOF surface (pipes, `map`, `where`) takes `fn` arguments, so the conservative case is rare in practice. This is O9, upgraded from inference to declared-and-checked.
@@ -159,6 +161,8 @@ Why this beats fibers *for Lambda specifically* (the four factors):
 Honest costs: two `pn` calling conventions (suspendable vs plain) and a suspension-check branch at may-await call sites; conservative transformation at indirect `pn` calls; transform complexity lands in `transpile-mir`; debugging shows chopped stacks (like JS async today) instead of real ones.
 
 #### 4.2.4 Reference: the stackful-fiber design (v1, superseded but viable)
+
+*[Adopted 2026-10-05 as K14v2, in the form of `Lambda_Design_Runtime_Async.md`: one activation per task with its own native stack plus root and number side-stack segments. The G1 objection below no longer holds, because a parked activation's roots are a precise segment traced through its owner (RA3) and nothing is scanned conservatively (RA4).]*
 
 Kept as the documented alternative — it would be revived if the transform proves worse than expected, and levels 2/3 are unaffected either way. The design was the cheap slice of Go/Loom: **fixed mmap'd fiber stacks, a ~30-line context switch, park/resume at `pn` await points.**
 
@@ -184,10 +188,14 @@ The decisive rows are GC interaction (factor 4 — G1 was the scariest dependenc
 
 ### 4.3 GC interaction (revised under K2-R)
 
+*[Revised again 2026-10-05: parked state is an activation's root segment, traced through its task or carrier (D5.1.1v3, RA3); cold parked stacks are compacted (RA13). The paragraph below describes the retired state-machine frames.]*
+
 - Parked state = **ordinary heap objects** (state-machine frames holding boxed Items). They are rooted, traced, and collected like any other value — **no parked-stack scanning exists, and level 1 is no longer gated on G1**.
 - G1 (`Lambda_GC_Root_Issue.md`) remains the top runtime-honesty work item for the *running* frame's rooting — unchanged by this design, neither worsened nor gated. The fiber alternative (§4.2.4) would reinstate the gate; that asymmetry was decision-relevant (factor 4).
 
 ### 4.4 Native frames — the module-ABI clause (unretrofittable; write into JubeHostAPI v1)
+
+*[2026-10-05: with stackful activations the clause is no longer true by construction, so it is enforced at run time (D7.4.2v2, RA10): the host's call into script raises a native barrier on the running activation, and a suspension beneath it is a reported fault.]*
 
 - A task **must not suspend while a `JubeHostAPI` frame is on the stack**, unless the module declares that entry point await-safe. Under K2-R this is *impossible by construction* (a state machine can only suspend at Lambda-level await points, never inside a C frame) — under the fiber alternative it was a rule to enforce (Loom's pinning problem, Go's cgo case). Either way the clause stays in the ABI: it documents the invariant modules may rely on.
 - A host call that genuinely blocks (sync file I/O in a module, a C library call) **detaches the OS thread** Go-style: the context's loop continues on another thread, the blocking call completes on the detached one. v1 may simplify to "blocking host calls pin the context" with a documented list, but the ABI *clause* — modules must declare blocking/await-safety — goes in v1, because it cannot be retrofitted once modules exist.
@@ -199,6 +207,8 @@ The decisive rows are GC interaction (factor 4 — G1 was the scariest dependenc
 - One loop (K3) makes the bridge mechanical: promise settlement and fiber resume are entries on the same queue. No cross-loop marshalling exists because there is no second loop.
 
 ### 4.6 JS coexistence — two continuation mechanisms, one reactor (K10)
+
+*[Layer 2 revised 2026-10-05: JS semantics are unchanged, but JS generators, async functions and module bodies now suspend on activations in both tiers, as Lambda tasks do (`Lambda_Design_Runtime_Async.md` P2, P4, P5). There is one continuation mechanism, not two; the reactor is unchanged (K3).]*
 
 The question "should JS async migrate to fibers, or keep libuv?" dissolves into three layers with different answers. Grounded in the current code: LambdaJS's loop is already **libuv** (`js_event_loop.h` — drain via `uv_run` + microtask flush), and JS `async/await` is already lowered to **state machines** in the MIR compiler (`js_mir_function_class_lowering.cpp`, Phase 6 — resume slots sized by yield+await count).
 
@@ -489,6 +499,8 @@ Lambda `pn` closures *can* mutate captured vars today (`proc_closure_mutation` t
 
 ### 10.5 Mechanism: K2-R state machines confirmed — precisely *because* of the threading goal
 
+*[Superseded 2026-10-05 by K14v2 (stackful activations). The thread-portability argument below assumed Stage B, which K15v2 withdraws; multicore rests on worker isolates (K31), where no task ever migrates (K7).]*
+
 v3 keeps v2's compilation strategy (may-await closure → resumable state machines, Phase-6 family, `value | suspended` convention), with the closure now seeded by **builtins + native-module declarations only** (no user `async`). The threading goal *strengthens* this choice:
 
 - A parked state machine is a heap object; **resuming it on any pool thread is a function call** — exactly how Kotlin coroutines, C# tasks, and Rust/tokio do M:N today. Proven, boring, portable.
@@ -496,6 +508,8 @@ v3 keeps v2's compilation strategy (may-await closure → resumable state machin
 - The fiber design (§4.2.4) remains the documented fallback, revivable only if the transform underdelivers — but note it would reinstate both the G1 gate and the harder Stage-B road.
 
 ### 10.6 The multicore roadmap: worker isolates, Stage A (fn, fork-join), then Stage B (pn tasks, M:N)
+
+*[K15v2, 2026-10-05: **Stage B is withdrawn as a road.** M:N of parked tasks over a thread pool would migrate native stacks (activations), the bill §10.5 warned about; worker isolates (K31) and Stage A deliver multicore without it. K7 and K31 stand.]*
 
 **Committed goal (user): real multi-core utilization, including for pure `fn`s — internal, never user-visible.**
 
@@ -522,6 +536,8 @@ The important consequence: **worker isolates deliver real multicore without Stag
 - **Recorded alternative if Stage B stalls — now partly shipped as K31:** BEAM's road — many cheap *isolated-heap* units scheduled M:N over scheduler threads (at most one scheduler runs a given isolate at a time; even V8 permits thread migration under that rule). Compatible with C4's economics; requires making contexts cheap rather than making the heap concurrent. K31's worker tier takes the first half of this (isolated-heap units on threads, 1:1); the remaining half — scheduling *many* isolates M:N over fewer scheduler threads — stays the recorded escape hatch, and needs only cheap contexts, not a concurrent heap.
 
 ### 10.7 Unifying with JS async at the implementation level (K17)
+
+*[K17v2, 2026-10-05: layers 1, 2 and 4 cease to exist. There is no transform and no resume frame, and both languages use one calling convention: a call that parks simply has not returned yet. Layer 3 stays per language (RA9: a JS activation resumes from its reaction job on the microtask lane, a Lambda task from the run queue, D6.3.1). Layer 5 is unchanged.]*
 
 Both languages' async decomposes into five layers; **three unify, two must not**:
 
@@ -587,7 +603,10 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 - **K14** — Mechanism: K2-R state machines confirmed for phase 1 *because of* thread-portability (Kotlin/C#/tokio M:N precedent); fibers (§4.2.4) remain the documented fallback. *(user: "fine with state machines if it goes well with threading")*
 - **K15** — Multicore is committed: **Stage A** fork-join parallel-`fn` (arenas + GC blackout + runtime-globals audit; internal, invisible) → **Stage B** M:N `pn` tasks (thread-safe runtime); BEAM-style M:N isolates recorded as the Stage-B alternative. *(user: "run pn on thread is 100% what I want"; fn too, internal)*
 - **K16** — `async` removed from user grammar; async-ness declared only in native-module signatures; **JS membrane: all exposed `pn`s uniformly Promise-returning** (opt-in `sync` annotation possible later). *(user)*
-- **K17** — JS implementation unification per §10.7: share layers 1/2/5, keep 3/4 per-language; Lambda transform built first, common core extracted after two working clients. *(user)*
+- **K17** — JS implementation unification per §10.7: share layers 1/2/5, keep 3/4 per-language; Lambda transform built first, common core extracted after two working clients. *(user)* — **revised by K17v2**.
+- **K14v2** *(2026-10-05, user)* — Mechanism: **stackful activations** for both languages and both tiers (`Lambda_Design_Runtime_Async.md` RA1); the K2-R state machines are retired and K14 is superseded. D5.1.1v3, D5.3.6v2, D6.3.3v2.
+- **K15v2** *(2026-10-05, user)* — Stage B (M:N `pn` tasks over a thread pool) is withdrawn as a road; Stage A and worker isolates (K31) carry multicore. K7 and K31 stand.
+- **K17v2** *(2026-10-05, user)* — Layers 1, 2 and 4 of §10.7 cease to exist; layer 3 stays per language (RA9); layer 5 as is.
 - **K18** — Tier-2 units are simple: no supervision trees, links, green processes, or distribution in v1; handle-as-`T^E` is the entire failure surface. BEAM-likeness caveat recorded. *(user: "simple child process, not BEAM's kind")* — **scoped by K31**: the `T^E` surface is *total* only under process isolation; under thread isolation a hard fault is a process-wide fatal, not a value (§10.3.2).
 - **K19** — **Pairwise-by-spec numeric reductions** (closes O-B): builtin reductions defined as a fixed n-only tree order, identical across scalar/SIMD/parallel backends → bit-identical everywhere; user folds stay sequential; Kahan-style accuracy modes deferred to explicit opt-in. Full rationale + prior art (NumPy/Julia/MKL CNR/CUB/IEEE 754-2019) in §10.8. *(user: "Option 2 should definitely be the policy")*
 - **K20** — **Mailbox messaging, actor-model** (closes O-A): handle = address, no channel type (K20a); N:1 by design, pools via explicit dispatcher (K20b); heterogeneous messages with **FIFO-head receive — no in-queue selective receive**, making BEAM's scan trap unrepresentable (K20c); **async bounded send returning `ok^E`** — backpressure as an error value, blocking variants (`wait(send(...))` / `sync:` option) deferred to explicit opt-in (K20d); **signal-ordering guarantee** — sent messages outlive the sender, termination observable only after all prior sends, end-of-stream = handle completion (K20e). Full reasoning + actor-vs-CSP comparison in §10.8. *(user decision + two accepted refinements)*
@@ -602,8 +621,8 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 | Entry | v3 status |
 |---|---|
 | K1 (`fn` never suspends; suspension is `pn`-only) | **kept** — unchanged foundation |
-| K2 (fibers) | superseded (was already superseded by K2-R); reference design §4.2.4 |
-| K2-R (state machines) | **kept as mechanism** (K14); its `async`-declaration surface removed by K16 |
+| K2 (fibers) | superseded by K2-R, then **adopted 2026-10-05 in activation form** (K14v2, `Lambda_Design_Runtime_Async.md`) |
+| K2-R (state machines) | kept as mechanism (K14) until **retired 2026-10-05 by K14v2**; its `async`-declaration surface removed by K16 |
 | K3 (one loop per context, shared with JS) | **kept** |
 | K4 (unified isolate API, isolation as option) | **reinstated by K31 and simplified by K31v2** — the `mode` field on `start` picks task/thread/process; uniform handles throughout |
 | K5 (copy messages; share flat immutables; Mark wire) | **kept, extended by K32** — sharing is no longer limited to flats: a thread isolate shares pointer-ful immutable Items too; process isolation keeps the pointerless-only rule and the Mark wire |
@@ -611,7 +630,7 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 | K7 (no migration; 1 thread/isolate) | revised: phase-1 true; "never" dropped — Stage B schedules tasks M:N (K15); semantics made migration-safe by K13. **K31 does not touch this**: a worker is one isolate on one thread, no migration — a different question from Stage B's M:N *within* a context |
 | K8 (channels excluded; mailbox + select) | **REOPENED** → O-A; `select` and boundedness survive regardless |
 | K9 (level 0 par-map) | revised → internal parallel-`fn`, Stage A of K15; determinism principle kept, float caveat added (O-B) |
-| K10 (libuv shared reactor; JS async untouched; membrane rule) | **kept**; extended by K17 (shared transform layers) and K16 (uniform-Promise membrane) |
+| K10 (libuv shared reactor; JS async untouched; membrane rule) | **kept**; extended by K17 (shared transform layers) and K16 (uniform-Promise membrane); layer 2 revised 2026-10-05 — JS suspends on activations, semantics unchanged (K17v2) |
 
 ### 10.10 Dependencies & sequencing (v3)
 
