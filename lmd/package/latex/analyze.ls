@@ -7,6 +7,8 @@ import util: .util
 import dc_article: .docclass.article
 import dc_book: .docclass.book
 import dc_report: .docclass.report
+import color: .elements.color
+import enumitem: .packages.enumitem
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -43,6 +45,9 @@ pub fn analyze(ast) {
         tables: [],
         theorems: [],
         bibitems: [],
+        equation_nums: [],
+        enumerate_starts: [],
+        last_enumerate_end: 0,
         slug_counts: [],
         in_appendix: false,
         secnumdepth: 3,
@@ -72,6 +77,8 @@ pub fn analyze(ast) {
         tables: result.tables,
         theorems: result.theorems,
         bibitems: result.bibitems,
+        equation_nums: result.equation_nums,
+        enumerate_starts: result.enumerate_starts,
         secnumdepth: result.secnumdepth,
         custom_colors: result.custom_colors,
         theorem_defs: result.theorem_defs
@@ -121,6 +128,9 @@ fn walk_element(el, st) {
         // ---- equations ----
         case 'equation': walk_equation(el, st)
 
+        // ---- list counters ----
+        case 'enumerate': walk_enumerate(el, st)
+
         // ---- theorem-like environments ----
         // check custom \newtheorem defs first (for shared counters, starred variants)
         case 'theorem': walk_theorem_like(el, st, "theorem")
@@ -165,7 +175,7 @@ fn walk_children(el, i, n, st) {
 // ============================================================
 
 fn walk_documentclass(el, st) {
-    let cls = trim(util.text_of(el))
+    let cls = trim(util.text_of_skip_brack(el))
     if cls != "" { {*:st, docclass: cls} }
     else { st }
 }
@@ -190,10 +200,12 @@ fn walk_date(el, st) {
 // ============================================================
 
 fn walk_heading(el, st, counter_name, html_level) {
-    let new_counters = step_counter(st.counters, counter_name)
+    let starred = el.starred == true
+    // starred headings do not advance the section counter or enter the TOC.
+    let new_counters = if (starred) st.counters else step_counter(st.counters, counter_name)
     // determine numbering depth for this counter
     let counter_depth = counter_name_to_depth(counter_name)
-    let sec_num = if (counter_depth <= st.secnumdepth)
+    let sec_num = if (not starred and counter_depth <= st.secnumdepth)
         compute_section_num(new_counters, counter_name, st.docclass, st.in_appendix)
     else null
 
@@ -210,7 +222,7 @@ fn walk_heading(el, st, counter_name, html_level) {
     // record heading
     let entry = {level: html_level, number: sec_num, text: title_text, id: slug}
     let new_heading_nums = add_entry(st.heading_nums, slug, sec_num)
-    let new_headings = st.headings ++ [entry]
+    let new_headings = if (starred) st.headings else st.headings ++ [entry]
     let sec_num_str = sec_num_to_str(sec_num)
 
     let new_state = {
@@ -281,9 +293,40 @@ fn walk_table(el, st) {
 fn walk_equation(el, st) {
     let new_counters = step_counter(st.counters, "equation")
     let eq_num = new_counters.equation
+    let numbers = if (el.source_offset != null)
+        add_entry(st.equation_nums, string(el.source_offset), eq_num) else st.equation_nums
     let new_state = {*:st, counters: new_counters,
+        equation_nums: numbers,
         env_context: "equation", env_context_num: string(eq_num)}
     walk_children(el, 0, len(el), new_state)
+}
+
+fn count_list_items(node) {
+    if (not (node is element)) 0
+    else {
+        let tag = string(name(node))
+        if (tag == "item") 1
+        else if (tag == "enumerate" or tag == "itemize" or tag == "description") 0
+        else count_list_items_children(node, 0)
+    }
+}
+
+fn count_list_items_children(node, i) {
+    if (i >= len(node)) 0
+    else count_list_items(node[i]) + count_list_items_children(node, i + 1)
+}
+
+fn walk_enumerate(el, st) {
+    let opts = enumitem.options(el)
+    let explicit = enumitem.start(opts)
+    let first = if (explicit != null) explicit
+        else if (util.option_enabled(opts.resume)) st.last_enumerate_end + 1 else 1
+    let starts = if (el.source_offset != null)
+        add_entry(st.enumerate_starts, string(el.source_offset), first)
+        else st.enumerate_starts
+    let walked = walk_children(el, 0, len(el), {*:st, enumerate_starts: starts})
+    // nested lists may run during the walk; resume at this level uses this list's last item.
+    {*:walked, last_enumerate_end: first + count_list_items_children(el, 0) - 1}
 }
 
 fn walk_numbered_env(el, st, env_type) {
@@ -362,42 +405,11 @@ fn walk_definecolor(el, st) {
         let cname = trim(util.text_of(args[0]))
         let model = trim(util.text_of(args[1]))
         let spec = trim(util.text_of(args[2]))
-        let css = parse_color_model(model, spec)
+        let css = color.parse_definecolor(cname, model, spec).css_color
         let new_colors = add_entry(st.custom_colors, cname, css)
         {*:st, custom_colors: new_colors}
     }
     else { st }
-}
-
-fn parse_color_model(model, spec) {
-    if (model == "HTML" or model == "html") "#" ++ spec
-    else if (model == "rgb") parse_rgb_float(spec)
-    else if (model == "RGB") parse_rgb_int(spec)
-    else if (model == "gray") parse_gray(spec)
-    else spec
-}
-
-fn parse_rgb_float(spec) {
-    let parts = split(spec, ",")
-    if (len(parts) >= 3) {
-        let r = int(float(trim(parts[0])) * 255.0)
-        let g = int(float(trim(parts[1])) * 255.0)
-        let b = int(float(trim(parts[2])) * 255.0)
-        "rgb(" ++ (r) ++ "," ++ (g) ++ "," ++ (b) ++ ")"
-    }
-    else { spec }
-}
-
-fn parse_rgb_int(spec) {
-    let parts = split(spec, ",")
-    if (len(parts) >= 3)
-        "rgb(" ++ trim(parts[0]) ++ "," ++ trim(parts[1]) ++ "," ++ trim(parts[2]) ++ ")"
-    else spec
-}
-
-fn parse_gray(spec) {
-    let val = int(float(spec) * 255.0)
-    "rgb(" ++ (val) ++ "," ++ (val) ++ "," ++ (val) ++ ")"
 }
 
 // ============================================================

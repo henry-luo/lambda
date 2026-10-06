@@ -12,6 +12,13 @@ import dispatcher: .render
 import css: .css
 import math_css: lambda.doc.math.css
 import html_ser: .to_html
+import registry: .packages.registry
+import geometry: .packages.geometry
+import microtype: .packages.microtype
+import biblatex: .packages.biblatex
+import hyperref: .packages.hyperref
+import paths: lambda.edit.session
+import util: .util
 
 // ============================================================
 // Public API — HTML string output
@@ -20,7 +27,7 @@ import html_ser: .to_html
 // parse and render a LaTeX file to HTML string
 pub fn render_file_to_html(file_path) {
     let ast = input(file_path, {type: "latex"}) ^ { null }
-    render_to_html(ast, null)
+    render_to_html(ast, {base_uri: paths.dirname(file_path)})
 }
 
 // parse and render a LaTeX string to HTML string
@@ -42,20 +49,67 @@ pub fn render_to_html(ast, options) {
 // render a LaTeX AST (already parsed) to HTML elements
 // options: {docclass, standalone, numbering, toc}
 pub fn render(ast, options) {
+    render_result(ast, options).elements
+}
+
+// Structured result keeps diagnostics and package metadata beside the element tree.
+pub fn render_result(ast, options) {
     // extract macro definitions from AST (does not modify tree)
     let macro_defs = macros.get_defs(ast)
     // pass 1: analyze AST to collect counters, headings, labels
     let base_info = analyzer.analyze(ast)
+    let loaded = registry.collect(ast)
+    let bibliography = biblatex.load(ast,
+        if (options != null) options.base_uri else null,
+        registry.options_for(loaded.packages, "biblatex"))
+    let numbered_bib = biblatex.numbered_entries(bibliography.entries, len(base_info.bibitems))
+    let link_settings = hyperref.settings(ast, registry.options_for(loaded.packages, "hyperref"))
     // add macro definitions to info for render-time expansion
-    let info = {macros: macro_defs, *:base_info}
+    let info = {macros: macro_defs, *:base_info, packages: loaded.packages,
+                base_uri: if (options != null) options.base_uri else null,
+                bibitems: base_info.bibitems ++ numbered_bib,
+                biblatex_entries: numbered_bib, hyperref_settings: link_settings}
     // pass 2: render AST using pre-computed info
     let html = dispatcher.render_node(ast, info)
-
-    if (is_standalone(options)) {
+    let elements = if (is_standalone(options)) {
         wrap_standalone(html, info, options)
     } else {
         postprocess(html, info)
     }
+    let diagnostics = loaded.diagnostics ++ bibliography.diagnostics ++
+        microtype.unsupported(registry.options_for(loaded.packages, "microtype")) ++
+        geometry.output_diagnostics(registry.options_for(loaded.packages, "geometry"),
+            if (options != null) options.target else null) ++
+        hyperref.output_diagnostics(link_settings,
+            if (options != null) options.target else null) ++
+        registry.target_diagnostics(ast, loaded.packages,
+            if (options != null) options.target else null) ++
+        registry.reference_diagnostics(ast, info.labels, info.bibitems, info.packages) ++
+        output_diagnostics(elements)
+    {body: html, elements: elements,
+     stylesheet: css.get_stylesheet() ++ math_css.get_stylesheet(options) ++ package_stylesheet(info),
+     metadata: hyperref.metadata(link_settings, info.title, info.author),
+     packages: loaded.packages, diagnostics: diagnostics,
+     assets: registry.assets(ast, info.base_uri)}
+}
+
+fn output_diagnostics(node) {
+    if (node is array or node is list)
+        [for (child in node, issue in output_diagnostics(child)) issue]
+    else if (node == null or not (node is element)) []
+    else {
+        let message = node["data-latex-error"]
+        let own = if (message != null)
+            [util.diagnostic("unsupported-output", node["data-latex-package"], null,
+              message, node["data-latex-offset"])] else []
+        own ++ [for (child in node, issue in output_diagnostics(child)) issue]
+    }
+}
+
+fn package_stylesheet(info) {
+    geometry.stylesheet(registry.options_for(info.packages, "geometry")) ++
+    microtype.stylesheet(registry.options_for(info.packages, "microtype")) ++
+    hyperref.stylesheet(info.hyperref_settings)
 }
 
 // Native document-loader entry point keeps standalone output as the view default.
@@ -77,7 +131,7 @@ pub fn render_default(ast) {
 // parse and render a LaTeX file
 pub fn render_file(file_path) {
     let ast = input(file_path, {type: "latex"}) ^ { null }
-    render(ast, null)
+    render(ast, {base_uri: paths.dirname(file_path)})
 }
 
 // parse and render a LaTeX string
@@ -133,15 +187,20 @@ fn render_footnote_item(fn_entry, info) {
 fn wrap_standalone(html, info, options) {
     let stylesheet = css.get_stylesheet()
     let math_stylesheet = math_css.get_stylesheet(options)
-    let title_text = get_title_or_default(info.title);
+    let meta = hyperref.metadata(info.hyperref_settings, info.title, info.author)
+    let title_text = get_title_or_default(meta.title);
 
     <html lang: "en",
         <head
             <meta charset: "utf-8">
             <meta name: "viewport", content: "width=device-width, initial-scale=1">
             <title title_text>
+            if (meta.author != null) <meta name: "author", content: meta.author>
+            if (meta.subject != null) <meta name: "description", content: meta.subject>
+            if (meta.keywords != null) <meta name: "keywords", content: meta.keywords>
             <style stylesheet>
             <style math_stylesheet>
+            <style package_stylesheet(info)>
         >
         <body
             html

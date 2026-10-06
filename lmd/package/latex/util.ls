@@ -232,7 +232,7 @@ pub fn text_of_child(el, idx) {
 // Key-value option parsing (for \includegraphics[key=val,...])
 // ============================================================
 
-// parse "key1=val1, key2=val2, flag" → {key1: "val1", key2: "val2", flag: "true"}
+// parse balanced comma-separated keys; grouped values may contain commas.
 pub fn parse_kv_options(text) {
     if (text == null) { {} }
     else {
@@ -241,7 +241,7 @@ pub fn parse_kv_options(text) {
             // empty option text is a present-but-empty option list, not absence.
             {}
         } else {
-            let parts = split(trimmed, ",")
+            let parts = split_top_level(trimmed, ",")
             let pairs = build_kv_pairs(parts, 0, len(parts), [])
             map(pairs)
         }
@@ -254,17 +254,134 @@ fn build_kv_pairs(parts, i, n, acc) {
         let part = trim(parts[i])
         if (part == "") { build_kv_pairs(parts, i + 1, n, acc) }
         else {
-            let eq_pos = index_of(part, "=")
+            let eq_pos = top_level_separator(part, "=")
             if (eq_pos == null) {
                 // flag without value: keepaspectratio → "true"
                 build_kv_pairs(parts, i + 1, n, acc ++ [part, "true"])
             } else {
                 let key = trim(slice(part, 0, eq_pos))
-                let val = trim(slice(part, eq_pos + 1, len(part)))
+                let val = unwrap_braces(trim(slice(part, eq_pos + 1, len(part))))
                 build_kv_pairs(parts, i + 1, n, acc ++ [key, val])
             }
         }
     }
+}
+
+pub fn split_top_level(source, separator) {
+    split_top_level_rec(source, separator, 0, 0, 0, 0, false, false, 0, [])
+}
+
+fn split_top_level_rec(s, sep, i, braces, brackets, parens, quoted, escaped, start, acc) {
+    if (i >= len(s)) acc ++ [slice(s, start, len(s))]
+    else {
+        let ch = slice(s, i, i + 1)
+        if (escaped) split_top_level_rec(s, sep, i + 1, braces, brackets, parens, quoted, false, start, acc)
+        else if (ch == "\\") split_top_level_rec(s, sep, i + 1, braces, brackets, parens, quoted, true, start, acc)
+        else if (ch == "\"") split_top_level_rec(s, sep, i + 1, braces, brackets, parens, not quoted, false, start, acc)
+        else if (quoted) split_top_level_rec(s, sep, i + 1, braces, brackets, parens, quoted, false, start, acc)
+        else if (ch == "{") split_top_level_rec(s, sep, i + 1, braces + 1, brackets, parens, quoted, false, start, acc)
+        else if (ch == "}") split_top_level_rec(s, sep, i + 1, braces - 1, brackets, parens, quoted, false, start, acc)
+        else if (ch == "[") split_top_level_rec(s, sep, i + 1, braces, brackets + 1, parens, quoted, false, start, acc)
+        else if (ch == "]") split_top_level_rec(s, sep, i + 1, braces, brackets - 1, parens, quoted, false, start, acc)
+        else if (ch == "(") split_top_level_rec(s, sep, i + 1, braces, brackets, parens + 1, quoted, false, start, acc)
+        else if (ch == ")") split_top_level_rec(s, sep, i + 1, braces, brackets, parens - 1, quoted, false, start, acc)
+        else if (ch == sep and braces == 0 and brackets == 0 and parens == 0)
+            split_top_level_rec(s, sep, i + 1, braces, brackets, parens, quoted, false, i + 1, acc ++ [slice(s, start, i)])
+        else split_top_level_rec(s, sep, i + 1, braces, brackets, parens, quoted, false, start, acc)
+    }
+}
+
+pub fn top_level_separator(source, separator) {
+    let parts = split_top_level(source, separator)
+    if (len(parts) < 2) null else len(parts[0])
+}
+
+pub fn unwrap_braces(source) {
+    if (len(source) >= 2 and starts_with(source, "{") and ends_with(source, "}"))
+        slice(source, 1, len(source) - 1)
+    else source
+}
+
+pub fn optional_raw(el) {
+    let raw = raw_argument(el, "optional", 0)
+    if (raw != null) raw
+    else {
+        let bracket = find_child(el, "brack_group")
+        if (bracket != null) text_of(bracket) else null
+    }
+}
+
+pub fn raw_argument(el, kind, ordinal) {
+    let groups = el.argument_groups
+    if (groups == null) null else raw_argument_at(groups, kind, ordinal, 0)
+}
+
+pub fn option_enabled(value) {
+    value != null and value != "false" and value != "0"
+}
+
+pub fn unsupported_element(package, message, offset) {
+    <span class: "latex-unsupported", 'data-latex-error': message,
+        'data-latex-offset': offset, 'data-latex-package': package, message>
+}
+
+pub fn diagnostic(code, package, item, message, offset) {
+    {code: code, package: package, item: item, message: message, offset: offset}
+}
+
+// TeX pt is 1/72.27 inch; CSS pt is 1/72 inch.
+let DIMENSION_UNITS = [
+    {suffix: "mm", factor: 1.0, css: "mm"},
+    {suffix: "cm", factor: 1.0, css: "cm"},
+    {suffix: "in", factor: 1.0, css: "in"},
+    {suffix: "px", factor: 1.0, css: "px"},
+    {suffix: "em", factor: 1.0, css: "em"},
+    {suffix: "ex", factor: 1.0, css: "ex"},
+    {suffix: "bp", factor: 1.0, css: "pt"},
+    {suffix: "pt", factor: 72.0 / 72.27, css: "pt"},
+    {suffix: "pc", factor: 12.0 * 72.0 / 72.27, css: "pt"}
+]
+
+pub fn css_dimension(raw) {
+    let source = trim(raw)
+    if (source == "0") "0"
+    else {
+        let relative = css_relative_dimension(source)
+        if (relative != null) relative else css_dimension_at(source, 0)
+    }
+}
+
+fn css_relative_dimension(source) {
+    let names = ["\\linewidth", "\\textwidth", "\\columnwidth"]
+    css_relative_at(source, names, 0)
+}
+
+fn css_relative_at(source, names, i) {
+    if (i >= len(names)) null
+    else if (ends_with(source, names[i])) {
+        let prefix = trim(slice(source, 0, len(source) - len(names[i])))
+        let factor = if (prefix == "") 1.0 else float(prefix)
+        if (factor == null) null else string(factor * 100.0) ++ "%"
+    } else css_relative_at(source, names, i + 1)
+}
+
+fn css_dimension_at(source, i) {
+    if (i >= len(DIMENSION_UNITS)) null
+    else {
+        let unit = DIMENSION_UNITS[i]
+        if (ends_with(source, unit.suffix)) {
+            let digits = slice(source, 0, len(source) - len(unit.suffix))
+            let number = float(digits)
+            if (number == null) null else string(number * unit.factor) ++ unit.css
+        } else css_dimension_at(source, i + 1)
+    }
+}
+
+fn raw_argument_at(groups, kind, ordinal, i) {
+    if (i >= len(groups)) null
+    else if (groups[i].kind != kind) raw_argument_at(groups, kind, ordinal, i + 1)
+    else if (ordinal == 0) groups[i].raw
+    else raw_argument_at(groups, kind, ordinal - 1, i + 1)
 }
 
 // extract text from element children, skipping brack_group elements

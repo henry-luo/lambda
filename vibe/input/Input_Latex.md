@@ -3,6 +3,16 @@
 ## Current command content contract (2026-10-02)
 
 **Spec linkage:** S2.6.1v2, S2.6.3, S2.6.4 and D2.6.5v4.
+The 2026-10-06 package extension keeps that positional-content contract.
+Generic commands now also expose `source_offset`, `starred` when present,
+and `argument_groups`: ordered maps with `kind` (`required`/`optional`/
+`parenthesized`),
+`raw` group content, and `start`/`end` source offsets. `\item[label]` stores
+the bracket group inside the item node; section commands retain `starred`,
+and list environments retain `options_raw`. These attributes preserve syntax
+for Lambda-script package adapters without changing content normalization
+under **S2.6.1v2, S2.6.3–S2.6.5, D2.6.5v4**.
+
 All parser-owned elements merge adjacent strings through the content append.
 Consecutive string arguments of a command are collected in a non-spreading
 array child: `\definecolor{accent}{HTML}{FF8000}` produces

@@ -3,6 +3,7 @@
 // \fcolorbox{border}{bg}{text}, \definecolor{name}{model}{spec}, \pagecolor{color}
 
 import util: lambda.latex.util
+import xcolor: lambda.latex.packages.xcolor
 
 // ============================================================
 // Named color map (LaTeX xcolor standard named colors)
@@ -39,9 +40,21 @@ let NAMED_COLORS = {
 // custom_colors: map or entry-list of user-defined colors from \definecolor (may be null)
 pub fn resolve_color(raw, custom_colors) {
     let trimmed = trim(raw)
+    let mix_parts = split(trimmed, "!")
     // check custom colors first (supports both map and entry-list formats)
     let custom_val = lookup_custom_color(custom_colors, trimmed)
     if (custom_val != null) custom_val
+    else if (len(mix_parts) == 3) {
+        let first = resolve_color(trim(mix_parts[0]), custom_colors)
+        let second = resolve_color(trim(mix_parts[2]), custom_colors)
+        let mixed = xcolor.mix(first, second, trim(mix_parts[1]))
+        if (mixed != null) mixed else trimmed
+    }
+    else if (len(mix_parts) == 2) {
+        let first = resolve_color(trim(mix_parts[0]), custom_colors)
+        let mixed = xcolor.mix(first, "#ffffff", trim(mix_parts[1]))
+        if (mixed != null) mixed else trimmed
+    }
     // check if already a CSS color (#hex)
     else if (len(trimmed) > 0 and slice(trimmed, 0, 1) == "#") trimmed
     // check named colors
@@ -108,24 +121,20 @@ fn parse_gray(spec) {
 
 // \textcolor{color}{text} → <span style="color:...">text</span>
 pub fn render_textcolor(el, items, custom_colors) {
-    let color_raw = get_first_text(el)
-    let css_color = resolve_color(color_raw, custom_colors);
+    let css_color = resolve_command_color(el, 0, custom_colors);
     <span class: "latex-textcolor", style: "color:" ++ css_color, for c in items { c }>
 }
 
 // \colorbox{color}{text} → <span style="background-color:...;padding:...">text</span>
 pub fn render_colorbox(el, items, custom_colors) {
-    let color_raw = get_first_text(el)
-    let css_color = resolve_color(color_raw, custom_colors);
+    let css_color = resolve_command_color(el, 0, custom_colors);
     <span class: "latex-colorbox", style: "background-color:" ++ css_color ++ ";padding:0.1em 0.2em", for c in items { c }>
 }
 
 // \fcolorbox{border}{bg}{text} → <span style="border:...;background-color:...">text</span>
 pub fn render_fcolorbox(el, items, custom_colors) {
-    let border_raw = get_child_text(el, 0)
-    let bg_raw = get_child_text(el, 1)
-    let border_color = resolve_color(border_raw, custom_colors)
-    let bg_color = resolve_color(bg_raw, custom_colors);
+    let border_color = resolve_command_color(el, 0, custom_colors)
+    let bg_color = resolve_command_color(el, 1, custom_colors);
     <span class: "latex-fcolorbox", style: "border:1px solid " ++ border_color ++ ";background-color:" ++ bg_color ++ ";padding:0.1em 0.2em", for c in items { c }>
 }
 
@@ -137,8 +146,7 @@ pub fn render_pagecolor(el, custom_colors) {
 
 // \color{blue} — scoped declaration, returns CSS color string for wrapping
 pub fn color_decl_style(el, custom_colors) {
-    let color_raw = get_first_text(el)
-    let css_color = resolve_color(color_raw, custom_colors)
+    let css_color = resolve_command_color(el, 0, custom_colors)
     "color:" ++ css_color
 }
 
@@ -162,9 +170,15 @@ fn child_text(child) {
     trim(util.text_of(child))
 }
 
-// get text of first child (the color argument)
-fn get_first_text(el) {
-    get_child_text(el, 0)
+pub fn content_start(el, color_args) {
+    color_args + (if (util.optional_raw(el) != null) 1 else 0)
+}
+
+fn resolve_command_color(el, color_index, custom_colors) {
+    let model = util.optional_raw(el)
+    let spec = get_child_text(el, color_index + (if (model != null) 1 else 0))
+    if (model != null) parse_color_model(trim(model), spec)
+    else resolve_color(spec, custom_colors)
 }
 
 // get text of child at index

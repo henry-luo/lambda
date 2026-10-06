@@ -26,6 +26,13 @@ pub fn fmt_matrix(m) {
                  fmt_num(m[4]) ++ " " ++ fmt_num(m[5]) ++ ")"
 }
 
+// CSS matrix() uses comma separators; SVG transform attributes use spaces.
+pub fn fmt_css_matrix(m) {
+    "matrix(" ++ fmt_num(m[0]) ++ "," ++ fmt_num(m[1]) ++ "," ++
+                 fmt_num(m[2]) ++ "," ++ fmt_num(m[3]) ++ "," ++
+                 fmt_num(m[4]) ++ "," ++ fmt_num(m[5]) ++ ")"
+}
+
 // Format an RGB triple (0..1 floats) as "rgb(r,g,b)" with 0..255 ints.
 pub fn fmt_rgb(r, g, b) {
     let ri = int(round(float(r) * 255.0));
