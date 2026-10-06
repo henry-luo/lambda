@@ -1,0 +1,42 @@
+Keep a phi's old value for the terminating branch of a single-block loop.
+
+make_conventional_ssa puts the phi-argument moves of each predecessor at the
+end of that block, before its terminating branch. When every use of the phi
+result r is in the phi's own block, it then renames r to the new variable
+instead of adding `r = new` after the phi. That shortcut is wrong when the
+block is its own predecessor (a single-block loop) and r is used by the
+block's terminating branch: the back-edge move now precedes the branch, so the
+branch reads the next iteration's value. `while (hops-- > 0) f = f->env;`
+ran one iteration short at -O2/-O3 (the C2MIR jq-core VM's frame_hop).
+Take the ordinary path (keep r, copy from the new variable after the phi) in
+that case.
+
+--- a/mir-gen.c
++++ b/mir-gen.c
+@@ -2706,6 +2706,12 @@
+     VARR_TRUNC (size_t, curr_reg_indexes, 0);
+     rename_regs (gen_ctx);
+   }
++}
++
++static int bb_self_pred_p (bb_t bb) {
++  for (edge_t e = DLIST_HEAD (in_edge_t, bb->in_edges); e != NULL; e = DLIST_NEXT (in_edge_t, e))
++    if (e->src == bb) return TRUE;
++  return FALSE;
+ }
+ 
+ static void make_conventional_ssa (gen_ctx_t gen_ctx) { /* requires life info */
+@@ -2760,7 +2766,12 @@
+         e = DLIST_NEXT (in_edge_t, e);
+       }
+       for (se = insn->ops[0].data; se != NULL; se = se->next_use)
+-        if (se->use->bb != bb) break;
++        if (se->use->bb != bb
++            /* in a block that is its own predecessor, the moves above were put before the
++               block's terminating branch: a branch use of r must still see the old value */
++            || (se->use == DLIST_TAIL (bb_insn_t, bb->bb_insns)
++                && MIR_any_branch_code_p (se->use->insn->code) && bb_self_pred_p (bb)))
++          break;
+       if (se == NULL) { /* we should do this only after adding moves at the end of bbs */
+         /* r=phi(...), all r uses in the same bb: change new_r = phi(...) and all uses by new_r */
+         insn->ops[0].u.var = dest_var;

@@ -1,0 +1,40 @@
+literal: {
+  "a": 1,
+  "b": "x",
+  "g0": 0,
+  "g1": 1,
+  "g2": 2
+} {
+  "a": 2,
+  "b": "y",
+  "g0": 10,
+  "g1": 11,
+  "g2": 12
+} fresh=2
+literal order: a b g0 g1 g2 
+parsed: {
+  "a": 1,
+  "b": 2,
+  "c": 3,
+  "d": "four"
+} doc=2 a b c d 
+contract: {
+  "a": 1,
+  "b": "s",
+  "extra": true
+} is R=true len=3
+nominal: 10 12 true true 3 10
+retyped: {
+  "a": "text",
+  "b": 2,
+  "c": 3
+} a b c 
+element: box main 2 content 4
+cow: {
+  "k": 10
+} {
+  "k": 1,
+  "extra": 2
+}
+wide: len=301 g0=0 g150=150 g299=299 seed=0
+

@@ -14,6 +14,7 @@
 #include "../../lib/file.h"
 #include "../../lib/str.h"
 #include "../io/resource_policy.h"
+#include "../../lib/hashmap.h"
 #include <limits.h>
 #include <new>
 #include <pthread.h>
@@ -60,44 +61,58 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
     return alloc_shape_entry_in(type_alloc_of_pool(pool), key, type_id, prev_entry);
 }
 
-ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
-        ShapeEntry* prev_entry) {
-    ShapeEntry* shape_entry = NULL;
-    if (key) {
-        // Allocate ShapeEntry + StrView + a copy of the key string data in one block.
-        // This ensures the string data has the same lifetime as the ShapeEntry, even
-        // when the original key String lives in a shorter-lived pool (e.g. a JS
-        // transpiler's name_pool that is freed by js_transpiler_destroy).
-        size_t str_copy_size = key->len + 1;
-        shape_entry = (ShapeEntry*)type_alloc_zeroed(alloc,
-            sizeof(ShapeEntry) + sizeof(StrView) + str_copy_size);
-        if (!shape_entry) return NULL;
-        StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
-        char* str_copy = (char*)nv + sizeof(StrView);
-        ::str_copy(str_copy, str_copy_size, key->chars, key->len);
-        nv->str = str_copy;  nv->length = key->len;
-        shape_entry->name = nv;
-        shape_entry->name_hash = property_key_requires_identity(key)
-            ? property_key_hash(key) : typemap_name_hash(nv->str, (int)nv->length);
-        // Input copies spelling for its own lifetime; only an already-owned
-        // generated identity may cross this construction seam.
-        shape_entry->name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
-        shape_entry->key_kind = property_key_kind(key);
-        shape_entry_set_type(shape_entry, type_info[type_id].type);
-    } else {
-        // no key, for nested map
-        log_debug("alloc_shape_entry: null key for nested map, type_id=%d", type_id);
-        shape_entry = (ShapeEntry*)type_alloc_zeroed(alloc, sizeof(ShapeEntry));
-        if (!shape_entry) return NULL;
-        shape_entry->name = NULL;
-        shape_entry_set_type(shape_entry, type_info[type_id].type);
-    }
+static void shape_entry_append_after(ShapeEntry* shape_entry, ShapeEntry* prev_entry) {
     if (prev_entry) {
         prev_entry->chain_next = shape_entry;
         int prev_size = prev_entry->type ? shape_entry_storage_size(prev_entry) : (int)sizeof(Item);
         shape_entry->byte_offset = prev_entry->byte_offset + prev_size;
     }
     else { shape_entry->byte_offset = 0; }
+}
+
+// One named entry in one block -- the ShapeEntry, its StrView and a copy of the
+// spelling -- so the name lives as long as the entry, even when the key came
+// from a shorter-lived pool (e.g. a JS transpiler's name_pool that is freed by
+// js_transpiler_destroy) or is a transient Lambda Symbol (D3.4.4v4). A zero
+// `name_hash` routes by the spelling.
+static ShapeEntry* alloc_named_shape_entry_in(TypeAlloc alloc, const char* chars,
+        size_t len, NameId name_id, uint8_t key_kind, uint32_t name_hash,
+        TypeId type_id, ShapeEntry* prev_entry) {
+    size_t str_copy_size = len + 1;
+    ShapeEntry* shape_entry = (ShapeEntry*)type_alloc_zeroed(alloc,
+        sizeof(ShapeEntry) + sizeof(StrView) + str_copy_size);
+    if (!shape_entry) return NULL;
+    StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
+    char* str_copy = (char*)nv + sizeof(StrView);
+    ::str_copy(str_copy, str_copy_size, chars, len);
+    nv->str = str_copy;  nv->length = len;
+    shape_entry->name = nv;
+    shape_entry->name_hash = name_hash ? name_hash : typemap_name_hash(nv->str, (int)nv->length);
+    shape_entry->name_id = name_id;
+    shape_entry->key_kind = key_kind;
+    shape_entry_set_type(shape_entry, type_info[type_id].type);
+    shape_entry_append_after(shape_entry, prev_entry);
+    return shape_entry;
+}
+
+ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
+        ShapeEntry* prev_entry) {
+    if (key) {
+        // Input copies spelling for its own lifetime; only an already-owned
+        // generated identity may cross this construction seam.
+        return alloc_named_shape_entry_in(alloc, key->chars, key->len,
+            string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE,
+            property_key_kind(key),
+            property_key_requires_identity(key) ? property_key_hash(key) : 0,
+            type_id, prev_entry);
+    }
+    // no key, for nested map
+    log_debug("alloc_shape_entry: null key for nested map, type_id=%d", type_id);
+    ShapeEntry* shape_entry = (ShapeEntry*)type_alloc_zeroed(alloc, sizeof(ShapeEntry));
+    if (!shape_entry) return NULL;
+    shape_entry->name = NULL;
+    shape_entry_set_type(shape_entry, type_info[type_id].type);
+    shape_entry_append_after(shape_entry, prev_entry);
     return shape_entry;
 }
 
@@ -464,6 +479,100 @@ static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* targe
 static const int MAX_SHAPE_GRAPH = 1024;
 static const int MAX_ELEMENT_SHAPE_GRAPH = 16384;
 
+// Impl_Map_Transition_Coverage P1.5 (Q5): measurement only. Process-wide tree
+// counters, split into the runtime tree [0] and every other tree [1] (parsed
+// documents, js_input). LAMBDA_SHAPE_TREE_STATS=<file> appends one line per
+// class to <file> at exit, so batch runners aggregate across processes.
+typedef struct ShapeTreeStats {
+    uint64_t hits;                 // adds that followed an existing edge
+    uint64_t mints;                // adds that minted a node
+    uint64_t declined_fanout;      // adds declined by a node's edge cap
+    uint64_t declined_budget;      // adds declined by the graph budget
+    uint64_t external_hits;        // the same three for external parents (D3.4.3v5)
+    uint64_t external_mints;
+    uint64_t external_declined_fanout;
+    uint64_t edges_walked;         // edge-list entries scanned, over all adds
+    uint64_t max_walk;             // the longest scan of one add
+    uint64_t decline_degree[4];    // out-degree at a fan-out decline: <=16 <=64 <=256 >256
+    uint64_t private_types;        // map_put fallbacks to a private type
+    uint64_t private_copies;       // runtime adds that copied a whole shape
+    uint64_t private_entries;      // entries those copies duplicated
+    uint64_t peak_nodes;           // the most map and element nodes one tree held
+} ShapeTreeStats;
+
+static ShapeTreeStats g_shape_tree_stats[2];
+static const char* g_shape_tree_stats_path = NULL;
+static int g_shape_tree_stats_state = -1;  // -1 unread, 0 off, 1 on
+
+static void shape_tree_stats_flush(void) {
+    static const char* const kClass[2] = {"runtime", "other"};
+    for (int c = 0; c < 2; c++) {
+        const ShapeTreeStats* s = &g_shape_tree_stats[c];
+        char line[768];
+        snprintf(line, sizeof(line),
+            "shape_tree_stats tree=%s hits=%llu mints=%llu "
+            "declined_fanout=%llu declined_budget=%llu ext_hits=%llu ext_mints=%llu "
+            "ext_declined_fanout=%llu edges_walked=%llu max_walk=%llu "
+            "decline_degree=%llu/%llu/%llu/%llu private_types=%llu private_copies=%llu "
+            "private_entries=%llu peak_nodes=%llu\n",
+            kClass[c], (unsigned long long)s->hits, (unsigned long long)s->mints,
+            (unsigned long long)s->declined_fanout, (unsigned long long)s->declined_budget,
+            (unsigned long long)s->external_hits, (unsigned long long)s->external_mints,
+            (unsigned long long)s->external_declined_fanout,
+            (unsigned long long)s->edges_walked, (unsigned long long)s->max_walk,
+            (unsigned long long)s->decline_degree[0], (unsigned long long)s->decline_degree[1],
+            (unsigned long long)s->decline_degree[2], (unsigned long long)s->decline_degree[3],
+            (unsigned long long)s->private_types, (unsigned long long)s->private_copies,
+            (unsigned long long)s->private_entries, (unsigned long long)s->peak_nodes);
+        append_text_file(g_shape_tree_stats_path, line);
+    }
+}
+
+static bool shape_tree_stats_on(void) {
+    int state = __atomic_load_n(&g_shape_tree_stats_state, __ATOMIC_ACQUIRE);
+    if (state >= 0) return state == 1;
+    const char* path = getenv("LAMBDA_SHAPE_TREE_STATS");
+    int next = path && path[0] ? 1 : 0;
+    g_shape_tree_stats_path = path;
+    int expected = -1;
+    if (__atomic_compare_exchange_n(&g_shape_tree_stats_state, &expected, next, false,
+            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        if (next) atexit(shape_tree_stats_flush);
+        return next == 1;
+    }
+    return expected == 1;
+}
+
+static ShapeTreeStats* shape_tree_stats_for(const Input* input) {
+    if (!shape_tree_stats_on()) return NULL;
+    return &g_shape_tree_stats[input && input->keeps_external_edges ? 0 : 1];
+}
+
+static void shape_tree_stat_add(uint64_t* counter, uint64_t amount) {
+    __atomic_fetch_add(counter, amount, __ATOMIC_RELAXED);
+}
+
+static void shape_tree_stat_max(uint64_t* counter, uint64_t value) {
+    uint64_t seen = __atomic_load_n(counter, __ATOMIC_RELAXED);
+    while (value > seen && !__atomic_compare_exchange_n(counter, &seen, value, false,
+            __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+}
+
+void shape_tree_stats_note_private_copy(int64_t entries) {
+    if (!shape_tree_stats_on()) return;
+    shape_tree_stat_add(&g_shape_tree_stats[0].private_copies, 1);
+    shape_tree_stat_add(&g_shape_tree_stats[0].private_entries, (uint64_t)(entries > 0 ? entries : 0));
+}
+
+// The edge cap for a step from `parent`, for every tree and for external-table
+// edges alike: each list is walked linearly per add (the table only finds a
+// parent's list). Impl_Map_Transition_Coverage P1.5 measured it (Q5): no
+// benchmark or corpus script reached 16 below the root, and lifting the root's
+// 256 to share jq_mix's 2,048 one-key objects cost 9-10% CPU in edge walks.
+static int shape_tree_fanout_cap(const TypeMap* parent) {
+    return parent->length == 0 ? 256 : 16;
+}
+
 // D4.1.4v4: a tree node and its edge are never freed on their own, so they
 // come from the Input's arena and go with the Input (D4.2.6).
 static TypeAlloc input_tree_alloc(Input* input) {
@@ -472,8 +581,10 @@ static TypeAlloc input_tree_alloc(Input* input) {
 }
 
 static bool transition_graph_has_room(Input* input, bool element) {
+    int map_budget = input->shape_graph_budget > 0
+        ? input->shape_graph_budget : MAX_SHAPE_GRAPH;
     return element ? input->element_transition_shapes < MAX_ELEMENT_SHAPE_GRAPH
-                   : input->shape_transition_shapes < MAX_SHAPE_GRAPH;
+                   : input->shape_transition_shapes < map_budget;
 }
 
 static void transition_graph_count(Input* input, bool element) {
@@ -486,30 +597,43 @@ static void transition_graph_count(Input* input, bool element) {
     }
 }
 
-// A field's identity on a transition edge (D3.4.4v2): its NameId, or for an
-// id-less Input name its bytes, plus its key kind. A new edge's entry is made
-// from `key`, or copied from `like` when an editor rebuild replays a field.
+// A field's identity on a transition edge (D3.4.4v4): its key kind, then for
+// a JS Symbol or private name its record (NameId), and for a STRING name its
+// spelling, of which an equal NameId is only a fast proof. A new edge's entry
+// is minted from the spelling, or copied from `like` when an editor rebuild
+// replays a field.
 typedef struct TransitionKey {
     NameId name_id;
     uint8_t key_kind;
+    uint32_t name_hash;  // routing only: the spelling's, or a record's unique hash
     const char* name;
     uint32_t name_len;
-    String* key;
     const ShapeEntry* like;
 } TransitionKey;
 
 static TransitionKey transition_key_of_string(String* key) {
-    // D4.6.1v2: a pooled name's identity is its NameId. The record side below
-    // stores name_id for every entry but keeps `name` only for the id-less
-    // Input seam, so matching on `name` alone could never hit for a
-    // runtime-created property — which is why two objects that added the same
-    // fields in the same order never shared a shape.
+    // D4.6.1v2: a pooled name carries its NameId, which proves two STRING
+    // names equal at once; an unpooled or computed key has none and is
+    // matched by its spelling (D3.4.4v4).
     TransitionKey k = {};
     k.name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
     k.key_kind = property_key_kind(key);
     k.name = key->chars;
     k.name_len = (uint32_t)key->len;
-    k.key = key;
+    k.name_hash = property_key_requires_identity(key)
+        ? property_key_hash(key) : typemap_name_hash(key->chars, (int)key->len);
+    return k;
+}
+
+// A Lambda name given only by its characters -- a Symbol key, which is a
+// STRING name in the global namespace (S8.2.2v4).
+static TransitionKey transition_key_of_chars(const char* chars, uint32_t len) {
+    TransitionKey k = {};
+    k.name_id = NAME_ID_NONE;
+    k.key_kind = NAME_KEY_STRING;
+    k.name = chars;
+    k.name_len = len;
+    k.name_hash = typemap_name_hash(chars, (int)len);
     return k;
 }
 
@@ -517,6 +641,8 @@ static TransitionKey transition_key_of_entry(const ShapeEntry* like) {
     TransitionKey k = {};
     k.name_id = like->name_id;
     k.key_kind = like->key_kind;
+    k.name_hash = like->name_hash ? like->name_hash
+        : typemap_name_hash(like->name->str, (int)like->name->length);
     k.name = like->name->str;
     k.name_len = (uint32_t)like->name->length;
     k.like = like;
@@ -539,12 +665,265 @@ ShapeEntry* shape_entry_copy_as(TypeAlloc alloc, const ShapeEntry* like,
     return entry;
 }
 
-static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* k,
-        TypeId type_id, Input* input, ShapeEntry** out_entry) {
+// A copy of `src`'s characters in `alloc`; false when the allocation fails.
+static bool strview_copy_into(TypeAlloc alloc, StrView* out, StrView src) {
+    if (!src.str) { *out = src; return true; }
+    char* chars = (char*)type_alloc_zeroed(alloc, src.length + 1);
+    if (!chars) return false;
+    memcpy(chars, src.str, src.length);
+    out->str = chars;
+    out->length = src.length;
+    return true;
+}
+
+// clone_shape_entries for a parent the tree does not own (D3.4.3v5): the names
+// move into `alloc` too, since the parent's owner -- a module, a parsed Input,
+// a context pool -- may be freed while the tree lives on.
+static ShapeEntry* clone_shape_entries_owned(TypeAlloc alloc, const TypeMap* source,
+        ShapeEntry** out_last) {
+    if (out_last) *out_last = NULL;
+    ShapeEntry* last = NULL;
+    ShapeEntry* first = clone_shape_entries(alloc, source, &last);
+    for (ShapeEntry* e = first; e; e = shape_chain_next_until(e, last)) {
+        if (!e->name) continue;
+        StrView* name = (StrView*)type_alloc_zeroed(alloc, sizeof(StrView));
+        if (!name || !strview_copy_into(alloc, name, *e->name)) return NULL;
+        e->name = name;
+    }
+    if (out_last) *out_last = last;
+    return first;
+}
+
+// D3.4.3v5: a type the runtime tree may grow from without owning it -- a
+// literal's, a contract's, a nominal, a parsed or a private type. JS shapes
+// (class metadata, fixed slots, descriptor flags, accessors), array-index
+// shapes and spread link slots keep their own paths.
+static bool external_parent_admissible(const TypeMap* parent) {
+    if (!parent || (parent->type_id != LMD_TYPE_MAP && parent->type_id != LMD_TYPE_ELEMENT)) {
+        return false;
+    }
+    if (parent->js_meta || parent->has_spread || parent->has_array_index_shape ||
+            parent->slot_entries || parent->slot_count > 0) return false;
+    int64_t count = 0;
+    FOR_EACH_MAP_FIELD(parent, field) {
+        if (!field->name || field->byte_offset < 0 || field->flags != 0 || field->accessor) {
+            return false;
+        }
+        count++;
+    }
+    return count == parent->length;
+}
+
+// D3.4.3v5: whether a cached child of an external parent extends it by exactly
+// one field. Children are found by the parent's structural fingerprint, and a
+// child minted from another parent -- a document since freed, a colliding
+// shape -- is reused only if every value it copied equals this live parent's:
+// each entry's spelling, identity, contract, offset, flags, namespace and
+// default, and the type's record identity. It then references nothing that
+// died, and only what this parent references too.
+// The type-level part of the match: the record identity, and for an element
+// its tag, namespace and declared content.
+static bool external_identity_matches(const TypeMap* parent, const TypeMap* child) {
+    if (!parent || !child || child->type_id != parent->type_id ||
+            child->nominal != parent->nominal || child->is_nominal != parent->is_nominal ||
+            child->struct_name != parent->struct_name ||
+            child->has_named_shape != parent->has_named_shape) {
+        return false;
+    }
+    if (parent->type_id == LMD_TYPE_ELEMENT) {
+        const TypeElmt* pe = (const TypeElmt*)parent;
+        const TypeElmt* ce = (const TypeElmt*)child;
+        if (ce->name_id != pe->name_id || ce->ns != pe->ns ||
+                ce->content_list != pe->content_list ||
+                ce->name.length != pe->name.length ||
+                (pe->name.length && memcmp(ce->name.str, pe->name.str, pe->name.length) != 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The entry-level part: `copy`'s first parent->length entries carry the
+// parent's spelling, identity, contract, flags, namespace and default, and,
+// when `same_offsets`, its offsets. The entry at `retyped` (-1: none) carries
+// `retyped_to` instead of the parent's contract.
+static bool external_entries_match(const TypeMap* parent, const TypeMap* copy,
+        bool same_offsets, int64_t retyped, const Type* retyped_to) {
+    const ShapeEntry* c = typemap_first_field(copy);
+    int64_t count = 0;
+    FOR_EACH_MAP_FIELD(parent, p) {
+        const Type* expected = count == retyped ? retyped_to : p->type;
+        if (!c || !p->name || !c->name || c->name->length != p->name->length ||
+                memcmp(c->name->str, p->name->str, p->name->length) != 0 ||
+                c->name_id != p->name_id || c->key_kind != p->key_kind ||
+                c->type != expected || (same_offsets && c->byte_offset != p->byte_offset) ||
+                c->flags != p->flags || c->ns != p->ns ||
+                c->default_value != p->default_value) {
+            return false;
+        }
+        c = typemap_next_field(copy, c);
+        count++;
+    }
+    return count == parent->length;
+}
+
+static bool external_child_matches_parent(const TypeMap* parent, const TypeMap* child) {
+    return external_identity_matches(parent, child) &&
+        child->length == parent->length + 1 &&
+        external_entries_match(parent, child, true, -1, NULL);
+}
+
+// Impl_Map_Transition_Coverage P2: whether a cached retype target is `parent`
+// with the field at `position` laid out for `retyped_to` (offsets after it
+// may move).
+static bool retype_target_matches_parent(const TypeMap* parent, const TypeMap* target,
+        int64_t position, const Type* retyped_to) {
+    return external_identity_matches(parent, target) &&
+        target->length == parent->length &&
+        external_entries_match(parent, target, false, position, retyped_to);
+}
+
+// The identity a node minted from an external parent copies: the record, and
+// an element's tag -- whose spelling lives with the parent's owner, so it is
+// copied into the tree -- namespace and declared content.
+static bool copy_external_identity(TypeAlloc tree, TypeMap* child, const TypeMap* parent) {
+    child->nominal = parent->nominal;
+    child->is_nominal = parent->is_nominal;
+    child->struct_name = parent->struct_name;
+    child->has_named_shape = parent->has_named_shape;
+    if (parent->type_id != LMD_TYPE_ELEMENT) return true;
+    const TypeElmt* element_parent = (const TypeElmt*)parent;
+    TypeElmt* element_child = (TypeElmt*)child;
+    element_child->name_id = element_parent->name_id;
+    element_child->ns = element_parent->ns;
+    element_child->content_list = element_parent->content_list;
+    return strview_copy_into(tree, &element_child->name, element_parent->name);
+}
+
+// D3.4.3v5: the runtime tree's edges from external parents, one list per
+// parent STRUCTURE. The key is a fingerprint of every value a child copies
+// from its parent -- the type's record identity and each entry's spelling,
+// identity, contract, offset, flags, namespace and default -- so equal shapes
+// from different documents, or different private types, share one list;
+// keying by address minted a separate path for every parsed document. A
+// fingerprint collision only shares a list: each child there is still matched
+// against the live parent in full (external_child_matches_parent). The list
+// head lives in the tree's arena so a pointer to it survives the table growing.
+typedef struct ExternalParentEdges {
+    uint64_t fingerprint;
+    TypeMapTransition** edges;
+} ExternalParentEdges;
+
+static uint64_t fingerprint_mix(uint64_t h, const void* data, size_t len) {
+    const unsigned char* bytes = (const unsigned char*)data;
+    for (size_t i = 0; i < len; i++) {
+        h ^= bytes[i];
+        h *= 0x100000001b3ull;
+    }
+    return h;
+}
+
+static uint64_t fingerprint_mix_ptr(uint64_t h, const void* ptr) {
+    uintptr_t value = (uintptr_t)ptr;
+    return fingerprint_mix(h, &value, sizeof(value));
+}
+
+// Hashes exactly what external_child_matches_parent compares.
+static uint64_t external_parent_fingerprint(const TypeMap* parent) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    uint8_t header[4] = {parent->type_id, (uint8_t)parent->is_nominal,
+        (uint8_t)parent->has_named_shape, 0};
+    h = fingerprint_mix(h, header, sizeof(header));
+    h = fingerprint_mix(h, &parent->length, sizeof(parent->length));
+    h = fingerprint_mix_ptr(h, parent->nominal);
+    h = fingerprint_mix_ptr(h, parent->struct_name);
+    if (parent->type_id == LMD_TYPE_ELEMENT) {
+        const TypeElmt* element = (const TypeElmt*)parent;
+        if (element->name.str) h = fingerprint_mix(h, element->name.str, element->name.length);
+        h = fingerprint_mix(h, &element->name_id, sizeof(element->name_id));
+        h = fingerprint_mix_ptr(h, element->ns);
+        h = fingerprint_mix_ptr(h, element->content_list);
+    }
+    FOR_EACH_MAP_FIELD(parent, field) {
+        if (field->name) h = fingerprint_mix(h, field->name->str, field->name->length);
+        uint8_t kinds[2] = {field->key_kind, field->flags};
+        h = fingerprint_mix(h, kinds, sizeof(kinds));
+        h = fingerprint_mix(h, &field->name_id, sizeof(field->name_id));
+        h = fingerprint_mix(h, &field->byte_offset, sizeof(field->byte_offset));
+        h = fingerprint_mix_ptr(h, field->type);
+        h = fingerprint_mix_ptr(h, field->ns);
+        h = fingerprint_mix_ptr(h, field->default_value);
+    }
+    return h;
+}
+
+static uint64_t external_parent_edges_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    (void)seed0;
+    (void)seed1;
+    return ((const ExternalParentEdges*)item)->fingerprint;
+}
+
+static int external_parent_edges_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    uint64_t left = ((const ExternalParentEdges*)a)->fingerprint;
+    uint64_t right = ((const ExternalParentEdges*)b)->fingerprint;
+    return left < right ? -1 : (left > right ? 1 : 0);
+}
+
+// The edge list for one fingerprint in the tree's external table, made on
+// first use; NULL when this Input keeps no external edges.
+static TypeMapTransition** external_edges_for(Input* input, uint64_t fingerprint) {
+    if (!input || !input->keeps_external_edges) return NULL;
+    if (!input->external_edges) {
+        input->external_edges = hashmap_new(sizeof(ExternalParentEdges), 64, 0, 0,
+            external_parent_edges_hash, external_parent_edges_compare, NULL, NULL);
+        if (!input->external_edges) return NULL;
+    }
+    ExternalParentEdges probe = {fingerprint, NULL};
+    const ExternalParentEdges* found =
+        (const ExternalParentEdges*)hashmap_get(input->external_edges, &probe);
+    if (found) return found->edges;
+    TypeMapTransition** head = (TypeMapTransition**)type_alloc_zeroed(
+        input_tree_alloc(input), sizeof(TypeMapTransition*));
+    if (!head) return NULL;
+    probe.edges = head;
+    hashmap_set(input->external_edges, &probe);
+    if (hashmap_oom(input->external_edges)) return NULL;
+    return head;
+}
+
+// The add edges from `parent`'s structure.
+static TypeMapTransition** external_parent_edges(Input* input, const TypeMap* parent) {
+    return parent ? external_edges_for(input, external_parent_fingerprint(parent)) : NULL;
+}
+
+// D3.4.4v4: whether an edge carries `k`'s name. A JS Symbol or private name is
+// its record, never its description bytes. A STRING name is its spelling:
+// equal ids prove it at once, while differing or absent ids fall back to the
+// bytes -- ids are per name pool, and an unpooled or computed key has none, so
+// comparing ids alone split one spelling into one edge per pool.
+static bool transition_names_key(const TypeMapTransition* tr, const TransitionKey* k) {
+    if (tr->key_kind != k->key_kind) return false;
+    if (k->key_kind != NAME_KEY_STRING) {
+        return tr->name_id != NAME_ID_NONE && tr->name_id == k->name_id;
+    }
+    if (tr->name_id != NAME_ID_NONE && tr->name_id == k->name_id) return true;
+    return tr->name && tr->name_len == k->name_len &&
+        (tr->name_hash == 0 || tr->name_hash == k->name_hash) &&
+        memcmp(tr->name, k->name, k->name_len) == 0;
+}
+
+// One step through a tree from `parent`, whose outgoing edges are `*edges`.
+// For a node the tree owns that is `&parent->transitions`. For an external
+// parent (D3.4.3v5) it is the parent's list in the tree's own table, and the
+// parent is never written: its chain is copied rather than extended, names
+// included, and a cached child must match it in full (see
+// external_child_matches_parent).
+static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges,
+        bool external, const TransitionKey* k, TypeId type_id, Input* input,
+        ShapeEntry** out_entry) {
     if (out_entry) *out_entry = NULL;
-    if (!parent || !k || !input || !input->pool || !input->type_list) return NULL;
-    NameId key_name_id = k->name_id;
-    uint8_t key_kind = k->key_kind;
+    if (!parent || !edges || !k || !input || !input->pool || !input->type_list) return NULL;
     // The list is scanned per add, so it is bounded: a shape with more outgoing
     // edges than this is a dictionary-shaped site (parsed data, per-record
     // keys) where sharing cannot pay for a linear walk on every property.
@@ -554,58 +933,77 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
     // a far larger budget than an interior shape needs. Capping it at 16 let it
     // saturate after a few hundred objects, after which every map fell back to
     // a private shape and the sharing bought nothing.
-    const int MAX_SHAPE_TRANSITIONS = parent->length == 0 ? 256 : 16;
+    const int MAX_SHAPE_TRANSITIONS = shape_tree_fanout_cap(parent);
+    ShapeTreeStats* stats = shape_tree_stats_for(input);
     int transition_count = 0;
-    for (TypeMapTransition* tr = parent->transitions; tr; tr = tr->next) {
+    for (TypeMapTransition* tr = *edges; tr; tr = tr->next) {
         transition_count++;
-        if (tr->value_type != type_id || tr->flags != 0 || !tr->target) continue;
-        bool same_name;
-        if (tr->name_id != NAME_ID_NONE) {
-            same_name = tr->name_id == key_name_id && tr->key_kind == key_kind;
-        } else {
-            // The byte seam confirms Input-owned fields only; it must never
-            // select a runtime-created property that merely spells the same.
-            same_name = key_name_id == NAME_ID_NONE &&
-                tr->key_kind == NAME_KEY_STRING && tr->name &&
-                tr->name_len == k->name_len &&
-                memcmp(tr->name, k->name, k->name_len) == 0;
-        }
-        if (!same_name) continue;
-        if (map_transition_prefix_matches_parent(parent, tr->target)) {
+        if (tr->value_type != type_id || tr->flags != 0 || !tr->target ||
+                !transition_names_key(tr, k)) continue;
+        if (external ? external_child_matches_parent(parent, tr->target)
+                     : map_transition_prefix_matches_parent(parent, tr->target)) {
+            if (stats) {
+                shape_tree_stat_add(external ? &stats->external_hits : &stats->hits, 1);
+                shape_tree_stat_add(&stats->edges_walked, (uint64_t)transition_count);
+                shape_tree_stat_max(&stats->max_walk, (uint64_t)transition_count);
+            }
             if (out_entry) *out_entry = tr->target->last;
             return tr->target;
         }
     }
+    if (stats) {
+        shape_tree_stat_add(&stats->edges_walked, (uint64_t)transition_count);
+        shape_tree_stat_max(&stats->max_walk, (uint64_t)transition_count);
+    }
 
-    if (transition_count >= MAX_SHAPE_TRANSITIONS) return NULL;
+    if (transition_count >= MAX_SHAPE_TRANSITIONS) {
+        if (stats) {
+            shape_tree_stat_add(external ? &stats->external_declined_fanout
+                                         : &stats->declined_fanout, 1);
+            int bucket = transition_count <= 16 ? 0 : transition_count <= 64 ? 1
+                : transition_count <= 256 ? 2 : 3;
+            shape_tree_stat_add(&stats->decline_degree[bucket], 1);
+        }
+        return NULL;
+    }
     bool is_element = parent->type_id == LMD_TYPE_ELEMENT;
-    if (!transition_graph_has_room(input, is_element)) return NULL;
+    if (!transition_graph_has_room(input, is_element)) {
+        if (stats) shape_tree_stat_add(&stats->declined_budget, 1);
+        return NULL;
+    }
 
     // an element's node is a TypeElmt: its tag, id and namespace ride along
     TypeAlloc tree = input_tree_alloc(input);
     TypeMap* child = (TypeMap*)alloc_type_in(tree, parent->type_id,
         is_element ? sizeof(TypeElmt) : sizeof(TypeMap));
     if (!child) return NULL;
-    if (is_element) {
+    if (external) {
+        if (!copy_external_identity(tree, child, parent)) return NULL;
+    } else if (is_element) {
+        TypeElmt* element_parent = (TypeElmt*)parent;
         TypeElmt* element_child = (TypeElmt*)child;
-        element_child->name = ((TypeElmt*)parent)->name;
-        element_child->name_id = ((TypeElmt*)parent)->name_id;
-        element_child->ns = ((TypeElmt*)parent)->ns;
+        element_child->name = element_parent->name;
+        element_child->name_id = element_parent->name_id;
+        element_child->ns = element_parent->ns;
+        element_child->content_list = element_parent->content_list;
     }
 
     // D3.4.3v3: while the parent still owns its chain's tail -- no other child
     // has extended it -- the child extends it in place, so a linear path keeps
-    // one chain. Once the tail is taken, this branch copies the prefix.
-    bool in_place = parent->last && !parent->last->chain_next;  // SHAPE_CHAIN_OK: tail ownership
+    // one chain. Once the tail is taken, this branch copies the prefix. An
+    // external parent is never extended (D3.4.3v5).
+    bool in_place = !external && parent->last && !parent->last->chain_next;  // SHAPE_CHAIN_OK: tail ownership
     ShapeEntry* first = parent->shape;
     ShapeEntry* prefix_last = parent->last;
     if (!in_place) {
-        first = clone_shape_chain_for_transition(tree, parent, &prefix_last);
+        first = external ? clone_shape_entries_owned(tree, parent, &prefix_last)
+                         : clone_shape_chain_for_transition(tree, parent, &prefix_last);
         if (parent->shape && !first) return NULL;
     }
-    ShapeEntry* added = k->key
-        ? alloc_shape_entry_in(tree, k->key, type_id, prefix_last)
-        : shape_entry_copy_as(tree, k->like, type_id, prefix_last);
+    ShapeEntry* added = k->like
+        ? shape_entry_copy_as(tree, k->like, type_id, prefix_last)
+        : alloc_named_shape_entry_in(tree, k->name, k->name_len, k->name_id,
+            k->key_kind, k->name_hash, type_id, prefix_last);
     if (!added) return NULL;
     added->byte_offset = parent->byte_size;
     added->chain_index = (uint32_t)parent->length;
@@ -625,6 +1023,10 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
     child->transitions = NULL;
     child->js_meta = parent->js_meta;
     child->has_array_index_shape = parent->has_array_index_shape;
+    // S2.1.4/OB16: a nominal instance stays an instance of its type through
+    // every shape it grows into, as the private path ensures (LR03-8)
+    child->nominal = parent->nominal;
+    child->is_nominal = parent->is_nominal;
 
     // D3.4.3v3: an in-place child shares the parent's hash table while the
     // table has room for it and holds no entry with the added field's
@@ -666,23 +1068,37 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
     arraylist_append(input->type_list, child);
     child->type_index = input->type_list->length - 1;
     transition_graph_count(input, is_element);
+    if (stats) {
+        shape_tree_stat_add(external ? &stats->external_mints : &stats->mints, 1);
+        shape_tree_stat_max(&stats->peak_nodes, (uint64_t)(input->shape_transition_shapes +
+            input->element_transition_shapes));
+    }
 
     TypeMapTransition* tr = (TypeMapTransition*)type_alloc_zeroed(tree,
         sizeof(TypeMapTransition));
     if (!tr) return child;
     tr->name_id = added->name_id;
     tr->key_kind = added->key_kind;
-    tr->name = added->name_id == NAME_ID_NONE && added->key_kind == NAME_KEY_STRING &&
-        added->name ? added->name->str : NULL;
+    // D3.4.4v4: every STRING edge keeps its spelling, so a key with another
+    // pool's id, or none, still finds it; the entry's name lives in this arena
+    tr->name = added->key_kind == NAME_KEY_STRING && added->name ? added->name->str : NULL;
     tr->name_len = added->name ? (uint32_t)added->name->length : 0;
+    tr->name_hash = added->name_hash;
     tr->value_type = type_id;
     tr->flags = 0;
     tr->target = child;
-    tr->next = parent->transitions;
-    parent->transitions = tr;
+    tr->next = *edges;
+    *edges = tr;
 
     if (out_entry) *out_entry = added;
     return child;
+}
+
+static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* k,
+        TypeId type_id, Input* input, ShapeEntry** out_entry) {
+    if (!parent) return NULL;
+    return transition_target_via(parent, &parent->transitions, false, k, type_id,
+        input, out_entry);
 }
 
 static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
@@ -715,12 +1131,159 @@ static TypeMap* map_shape_transition_root(Input* input,
     return root;
 }
 
+// D3.4.3v5: one field added to a runtime-grown map or element through
+// `input`'s tree. A NULL `parent` starts at the tree's root; a node of this
+// tree follows its own edges; any other admissible type is an external parent
+// when the tree keeps external edges -- its edges live in the tree's table,
+// keyed by the parent's address, and the parent is never written.
+static TypeMap* type_tree_step(Input* input, TypeMap* parent, const TransitionKey* k,
+        TypeId type_id, ShapeEntry** out_entry) {
+    if (!parent) parent = map_shape_transition_root(input, NULL);
+    if (!parent) return NULL;
+    if (parent == input->shape_transition_root || type_tree_owns(input, parent)) {
+        return transition_target_for_key(parent, k, type_id, input, out_entry);
+    }
+    if (!external_parent_admissible(parent)) return NULL;
+    TypeMapTransition** edges = external_parent_edges(input, parent);
+    if (!edges) return NULL;
+    return transition_target_via(parent, edges, true, k, type_id, input, out_entry);
+}
+
+// Every key kind may take an edge (D3.4.4v4): a JS Symbol or private name is
+// matched by its record, as the edge already compares it.
+TypeMap* type_tree_add_map_field(Input* input, TypeMap* parent, String* key,
+        TypeId type_id, ShapeEntry** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!input || !key) return NULL;
+    TransitionKey k = transition_key_of_string(key);
+    return type_tree_step(input, parent, &k, type_id, out_entry);
+}
+
+// The same add for a key given by its characters alone: a Lambda Symbol, a
+// STRING name in the global namespace (S8.2.2v4).
+TypeMap* type_tree_add_map_field_chars(Input* input, TypeMap* parent,
+        const char* chars, uint32_t len, TypeId type_id, ShapeEntry** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!input || !chars) return NULL;
+    TransitionKey k = transition_key_of_chars(chars, len);
+    return type_tree_step(input, parent, &k, type_id, out_entry);
+}
+
+// Marks a retype edge (Impl_Map_Transition_Coverage P2); an add lookup only
+// ever follows edges with no flags, so the two never match each other.
+static const uint8_t TYPE_TREE_RETYPE_EDGE = 0x80;
+
+// Impl_Map_Transition_Coverage P2 (D3.4.5 through the tree): the type a map
+// takes when the value of one field changes kind -- `parent`'s fields in
+// order, the one at `field` laid out for `value_type`, every other field
+// keeping its full contract (a `number` or union contract is not its TypeId,
+// so the path cannot simply be replayed from the root). The target is minted
+// once per parent structure and shared by every map retyped the same way;
+// its own adds then follow its edges like any node's. NULL when the tree
+// declines (an inadmissible parent, the fan-out cap, the budget).
+TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
+        TypeId value_type) {
+    if (!input || !input->keeps_external_edges || !parent || !field ||
+            !input->pool || !input->type_list) return NULL;
+    if (!external_parent_admissible(parent)) return NULL;
+    int64_t position = 0;
+    bool found = false;
+    FOR_EACH_MAP_FIELD(parent, entry) {
+        if (entry == field) { found = true; break; }
+        position++;
+    }
+    if (!found) return NULL;
+    const Type* retyped_to = type_info[value_type].type;
+    uint8_t op[sizeof(int64_t) + 2] = {TYPE_TREE_RETYPE_EDGE, value_type};
+    memcpy(op + 2, &position, sizeof(position));
+    uint64_t fingerprint = fingerprint_mix(external_parent_fingerprint(parent), op, sizeof(op));
+    TypeMapTransition** edges = external_edges_for(input, fingerprint);
+    if (!edges) return NULL;
+
+    ShapeTreeStats* stats = shape_tree_stats_for(input);
+    const int MAX_SHAPE_TRANSITIONS = shape_tree_fanout_cap(parent);
+    int transition_count = 0;
+    for (TypeMapTransition* tr = *edges; tr; tr = tr->next) {
+        transition_count++;
+        if (tr->flags == TYPE_TREE_RETYPE_EDGE && tr->value_type == value_type && tr->target &&
+                retype_target_matches_parent(parent, tr->target, position, retyped_to)) {
+            if (stats) shape_tree_stat_add(&stats->external_hits, 1);
+            return tr->target;
+        }
+    }
+    if (transition_count >= MAX_SHAPE_TRANSITIONS) {
+        if (stats) shape_tree_stat_add(&stats->external_declined_fanout, 1);
+        return NULL;
+    }
+    bool is_element = parent->type_id == LMD_TYPE_ELEMENT;
+    if (!transition_graph_has_room(input, is_element)) {
+        if (stats) shape_tree_stat_add(&stats->declined_budget, 1);
+        return NULL;
+    }
+
+    TypeAlloc tree = input_tree_alloc(input);
+    TypeMap* target = (TypeMap*)alloc_type_in(tree, parent->type_id,
+        is_element ? sizeof(TypeElmt) : sizeof(TypeMap));
+    if (!target || !copy_external_identity(tree, target, parent)) return NULL;
+    ShapeEntry* last = NULL;
+    ShapeEntry* first = clone_shape_entries_owned(tree, parent, &last);
+    if (parent->shape && !first) return NULL;
+    // D3.4.5: the layout is repacked from the start, the retyped field at its
+    // new width, as map_rebuild_for_type_change packs a private chain
+    int64_t offset = 0;
+    int64_t index = 0;
+    for (ShapeEntry* e = first; e; e = shape_chain_next_until(e, last), index++) {
+        if (index == position) shape_entry_set_type(e, (Type*)retyped_to);
+        e->byte_offset = offset;
+        offset += shape_entry_storage_size(e);
+    }
+    target->shape = first;
+    target->last = last;
+    target->length = parent->length;
+    target->byte_size = offset;
+    target->is_trusted_contract = false;
+    target->is_private_clone = false;
+    target->is_shared_constructor_shape = false;
+    target->is_transition_shared_shape = true;
+    target->transitions = NULL;
+    typemap_hash_build_in(target, tree);
+    arraylist_append(input->type_list, target);
+    target->type_index = input->type_list->length - 1;
+    transition_graph_count(input, is_element);
+    if (stats) {
+        shape_tree_stat_add(&stats->external_mints, 1);
+        shape_tree_stat_max(&stats->peak_nodes, (uint64_t)(input->shape_transition_shapes +
+            input->element_transition_shapes));
+    }
+
+    TypeMapTransition* tr = (TypeMapTransition*)type_alloc_zeroed(tree,
+        sizeof(TypeMapTransition));
+    if (!tr) return target;
+    tr->value_type = value_type;
+    tr->flags = TYPE_TREE_RETYPE_EDGE;
+    tr->target = target;
+    tr->next = *edges;
+    *edges = tr;
+    return target;
+}
+
+bool type_tree_owns(const Input* input, const TypeMap* type) {
+    if (!input || !input->type_list || !type || type->type_index < 0 ||
+            type->type_index >= input->type_list->length) {
+        return false;
+    }
+    return input->type_list->data[type->type_index] == type;
+}
+
 static ShapeEntry* map_existing_shape_entry(TypeMap* map_type, String* key) {
     if (!map_type || !key) return NULL;
     NameId key_id = property_key_id(key);
     if (key_id != NAME_ID_NONE) {
-        return typemap_hash_lookup_by_name_id(map_type, key_id,
+        ShapeEntry* hit = typemap_hash_lookup_by_name_id(map_type, key_id,
             property_key_hash(key));
+        // D3.4.4v4: an id proves a STRING name equal, never different, so a
+        // miss falls back to the spelling, which an id-less entry carries
+        if (hit || property_key_requires_identity(key)) return hit;
     }
     return typemap_hash_lookup(map_type, key->chars, (int)key->len);
 }
@@ -767,9 +1330,9 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         // metadata is initialized — because children inherit it and it is part
         // of shape identity; gating on `!js_meta` instead made this path dead
         // for every JS object and silently dropped their class brand.
-        if (!array_index_shape && key &&
-                !property_key_requires_identity(key) &&
-                mp->map_kind == MAP_KIND_PLAIN) {
+        // Every key kind may take an edge (D3.4.4v4, NI18): a JS Symbol or
+        // private name is matched by its record, never by its description.
+        if (!array_index_shape && key && mp->map_kind == MAP_KIND_PLAIN) {
             TypeMap* root = map_shape_transition_root(input, js_meta);
             if (root && map_put_via_shape_transition(&mp, root, key, value,
                     type_id, input, 64, grow, grow_context)) {
@@ -777,6 +1340,9 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
             }
         }
         // alloc map type and data chunk
+        if (ShapeTreeStats* stats = shape_tree_stats_for(input)) {
+            shape_tree_stat_add(&stats->private_types, 1);
+        }
         map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
         if (!map_type) { return; }
         map_type->js_meta = js_meta;
@@ -791,14 +1357,16 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         key = keys[0];
         value = values[0];
     } else if (typemap_is_shared_shape(map_type)) {
-        if (key && !property_key_requires_identity(key) &&
-                mp->map_kind == MAP_KIND_PLAIN &&
+        if (key && mp->map_kind == MAP_KIND_PLAIN &&
                 map_put_via_shape_transition(&mp, map_type, key, value, type_id,
                     input, 0, grow, grow_context)) {
             return;
         }
         // transition lookup is the fast path; if no compatible transition
         // exists, clone before appending a new ShapeEntry to this map only.
+        if (ShapeTreeStats* stats = shape_tree_stats_for(input)) {
+            shape_tree_stat_add(&stats->private_types, 1);
+        }
         TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
         if (clone) map_type = clone;
     }
@@ -940,11 +1508,16 @@ static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
 // walks shape order while dynamic lookup is hashed, so a same-typed duplicate
 // key overwrites instead of appending, or the two APIs would disagree.
 static ShapeEntry* elmt_same_typed_attr(TypeElmt* elmt_type, String* key, TypeId type_id) {
+    // D3.4.4v4: a JS Symbol or private name is its record; only a STRING name
+    // is matched by its spelling
+    bool identity = property_key_requires_identity(key);
+    NameId key_id = identity ? name_ref_id(key) : NAME_ID_NONE;
     FOR_EACH_MAP_FIELD(elmt_type, field) {
-        if (field->name && field->type->type_id == type_id &&
-            strview_equal(field->name, key->chars)) {
-            return field;
-        }
+        if (!field->name || field->type->type_id != type_id) continue;
+        bool same = identity
+            ? field->key_kind == property_key_kind(key) && field->name_id == key_id
+            : field->key_kind == NAME_KEY_STRING && strview_equal(field->name, key->chars);
+        if (same) return field;
     }
     return NULL;
 }
@@ -1070,8 +1643,7 @@ TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns) {
 // a private type and appends there.
 void elmt_put_tree(Element* elmt, String* key, Item value, Input* input) {
     TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-    if (input && key && elmt_type && elmt_type->is_transition_shared_shape &&
-            !property_key_requires_identity(key)) {
+    if (input && key && elmt_type && elmt_type->is_transition_shared_shape) {
         TypeId type_id = get_type_id(value);
         if (ShapeEntry* field = elmt_same_typed_attr(elmt_type, key, type_id)) {
             elmt_store_value((char*)elmt->data + field->byte_offset, type_id, value);
@@ -1109,19 +1681,18 @@ TypeMap* type_tree_root_like(Input* input, Map* container) {
 }
 
 // The tree node reached from `start` by adding `steps` in order, minting the
-// edges that are missing. Only ordinary named data fields take edges, as in
-// map_put; NULL when the tree declines any step.
+// edges that are missing. Named data fields of every key kind take edges, as
+// in map_put (D3.4.4v4); NULL when the tree declines any step.
 TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* steps, int count) {
     TypeMap* node = start;
     for (int i = 0; node && i < count; i++) {
         const TypeTreeStep* step = &steps[i];
         TransitionKey k;
         if (step->like) {
-            if (!step->like->name || step->like->flags != 0 ||
-                    step->like->key_kind != NAME_KEY_STRING) return NULL;
+            if (!step->like->name || step->like->flags != 0) return NULL;
             k = transition_key_of_entry(step->like);
         } else {
-            if (!step->key || property_key_requires_identity(step->key)) return NULL;
+            if (!step->key) return NULL;
             k = transition_key_of_string(step->key);
         }
         node = transition_target_for_key(node, &k, step->type_id, input, NULL);
@@ -1895,10 +2466,13 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     // Leaving this one uninitialized made map_put dereference pool garbage.
     input->shape_transition_root = nullptr;
     input->shape_transition_shapes = 0;
+    input->shape_graph_budget = 0;
     input->element_roots = nullptr;
     input->element_root_cap = 0;
     input->element_root_count = 0;
     input->element_transition_shapes = 0;
+    input->keeps_external_edges = false;
+    input->external_edges = nullptr;
     input->url = abs_url;
     input->path = nullptr;
     input->parent = parent;     // Set parent Input for hierarchical ownership
@@ -1944,6 +2518,11 @@ void input_release_document_resources(Input* input) {
         input->arena = nullptr;
     }
     // The transition tree lived in that arena (D3.4.3v3); drop its entry points.
+    // The external-parent table (D3.4.3v5) holds only arena pointers.
+    if (input->external_edges) {
+        hashmap_free(input->external_edges);
+        input->external_edges = nullptr;
+    }
     if (input->element_roots) {
         pool_free(input->pool, input->element_roots);
         input->element_roots = nullptr;

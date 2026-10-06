@@ -595,6 +595,15 @@ S8.2.4v3 gives `doc[<title>]` as the lone-match idiom of the type-key subscript.
 
 ## 3. Value & type model (LR_03)
 
+<a id="lr03-40"></a>**LR03-40 · Qualified keys are not represented as (namespace, name): the map face ignores a symbol's namespace, `ns.attr:` in an element literal is desugared to a nested map, and parsed XML keeps `prefix:local` flat (S8.2.2v4) · OPEN (found 2026-10-06, while ruling key identity; ruled the same day)**
+S8.2.2v4 makes a key's identity its resolved namespace plus its normalized characters, so `ns.a` and the global `a` are different keys and two prefixes that resolve to one namespace are one key. Four places disagree, and the user ruled on 2026-10-06 that each must follow the namespace design:
+1. **The map face compares local characters only.** `fn_map_set` takes a `Symbol` key's `chars`/`len`, `map_get` goes through `key.get_chars()` into `_map_get` by bytes, and `shape_field_name_equals` and the hash lookups carry no namespace, so a qualified symbol written to a map lands on, or reads, the unqualified field of the same spelling. Element attribute reads (`target_equal(field->ns, symbol_lambda_namespace(key))`) and map/element equality (`map_find_matching_field`) already compare the namespace.
+2. **An element literal desugars `ns.attr: v` into a nested map.** `<a xlink.href: "x", href: "y">` becomes `<a xlink: {href: "x"}, href: "y">` through `build_ns_attr_map_from_parts` (build_ast.cpp, the "legacy desugaring" at the element-attribute reduction). Ruled wrong: it was a workaround from before namespaces were defined; `xlink.href` is one qualified attribute key, keyed by the resolved namespace of `xlink` and the local name `href`.
+3. **Parsed XML resolves nothing.** `parse("<a xmlns:xlink=… xlink:href=…/>", 'xml')` yields the attributes `xmlns:xlink` and `xlink:href` as flat names with the colon kept and `ShapeEntry::ns` NULL; no parser sets a namespace target. Ruled wrong for the same reason: a prefix declared by `xmlns:` must resolve to its namespace target and the attribute be keyed by (target, local name); the same holds for prefixed tags and `TypeElmt::ns`.
+4. **A qualified symbol's characters include its prefix.** `namespace_symbol_type` (build_ast.cpp) spells the symbol `prefix.field` and attaches the resolved `Target*`; under S8.2.2v4 the normalized characters are the local name and the prefix is only how the namespace was written, so two prefixes bound to one namespace must compare equal.
+
+Transition-tree edges split one spelling by name pool as well, which is D3.4.4v3's gap, planned in [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0; the four items above need their own plan (parser, builder, map face), not that one.
+
 <a id="lr03-2"></a>**LR03-2 · Hard-coded capacity caps · OPEN**
 `TYPEMAP_HASH_CAPACITY` 32 and `TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY` 32768
 (`lambda/lambda-data.hpp:346`–`347`) bound the per-map hash table; on saturation
@@ -650,6 +659,13 @@ With `type D = \(d+)`, `fn f(x: D) => x` then `f("12")` is E207 ("argument 1 exp
 
 <a id="lr03-35"></a>**LR03-35 · An object literal drops a field its type does not declare (S2.1.4) · OPEN (found 2026-09-26, while fixing LR03-19)**
 With `type P { a: int, b: string }`, `<P a: 1, b: "x", extra: 5>` prints `<P a: 1, b: "x">` and `.extra` is `null`, on both tiers and with no diagnostic. S2.1.4(3) makes an instance open: it may hold fields the type does not declare. A member addition does keep one (`p.z = 9`, fixture `proc/object_open_instance.ls`). No ruling says whether the literal keeps the field, as a shape transition, or rejects it; dropping it silently fits neither.
+
+<a id="lr03-36"></a>**LR03-36 · A widened `var`'s earlier reads keep the initializer's lane in derived types (S12.2.1) · PARTIAL (found 2026-10-05, while writing the jq benchmark translations)**
+`build_ast` sets `type_widened` when it builds the first assignment that changes an unannotated `var`'s type, and identifier reads typed after that point read as `any`. Reads typed before it keep the initializer's type. That includes the right-hand side of the widening assignment itself and anything above it in a loop body, which the back edge reaches with the new value. Both tiers trust some types derived from those stale reads. **Fixed (T0, direct case):** `interp_array_kind` no longer builds a compact numeric literal around a widened identifier, as MIR already did (`w = [w, w]` stored the array as 0 on T0; fixture `proc/interp_widened_var_literal.ls`). **Still open:**
+- On T0, `var t = 0; ... let c = t; t = [c, c]` still gives `[0, 0]`. `c` is a `let` whose type was copied from the stale read. MIR is correct here.
+- On both tiers, `var w = 0; ... w = [[w, w]]` and `var z = 0; ... z = [z + 1]` raise "array_num_set_item: non-numeric value rejected by numeric lane". `detect_ndim_literal`, which both tiers share, and expression types inherit the stale lane.
+
+A sound fix types the reads before the widening assignment: either a declaration-time scan, as MIR's `mir_nested_control_writes_binding` does, or re-resolving the scope once an entry widens.
 
 ---
 
@@ -884,6 +900,9 @@ Possible fixes, independent and combinable:
 
 Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide.ls` on a debug build, then `wc -l temp/mir_dump.txt`, and count `lambda_async_frame_set_state` in `_main`. Analysis record: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) §12.6.
 
+<a id="lr07-43"></a>**LR07-43 · JIT: an `any` value assigned to an int-inferred `var` is truncated to the int lane (S12.2.1) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
+`let data = parse("[1.5, 2.25]", 'json')^; var t = 0; ... t = t + data[j]` ends with `t` = 3 on the JIT and 3.75 on T0. The JSON orders' `total = total + qty * price` lost every fraction the same way. The declaration-time widening (`transpile_let_stam`'s `mir_nested_control_writes_binding` scan) boxes the binding only when an assignment's carrier is predicted `float`. An `any` right-hand side keeps the int lane, and each assigned value is coerced into it. S12.2.1 lets an unannotated `var` change type and forbids silent corruption, so an `any` assignment must either widen the binding or keep it int only behind a runtime proof. Boxing every such binding at the declaration costs untyped loops their int lanes, so it needs a performance decision before it is fixed. The jq translations sidestep it by starting float sums at `0.0`, which is faithful because jq numbers are doubles.
+
 ## 8. Memory management & GC (LR_08)
 
 
@@ -965,6 +984,9 @@ The markup formatters skip any text string above a size cap, log an error and ca
 - **Why filed here:** the formatters sit outside LR_09's scope (`lambda/format/`, which `lambda convert` also uses), but the wrong value is observed through the `format()` builtin.
 - **Fix:** needs a decision — remove the caps, or make an oversized string an error.
 
+<a id="lr09-32"></a>**LR09-32 · `format(x, {type: 'json', compact: true})` is documented but ignored · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
+`doc/Lambda_Sys_Func.md` gives `format(data, {type: 'json', compact: true})` as compact JSON. `lambda/format/format-json.cpp` has no compact path, so the output is indented exactly as with `indent: 2`. `indent: 0` is ignored as well. Either implement the option or drop it from the reference.
+
 ## 10. Error handling (LR_10)
 
 <a id="lr10-11"></a>**LR10-11 · T0 binds a stack overflow into a `let` instead of faulting · OPEN (found 2026-09-25)**
@@ -1019,6 +1041,9 @@ A stack overflow is a fault that lands on its boundary (S7.11.1v2, S7.11.2v2), a
 - **Script reachability.** Generated Lambda and JS code checks the recoverable stack limit at frame entry and faults softly, so a script overflow is not known to reach the guard page. Native recursion is the exposure: runtime C helpers, parsers, and hosted-module code running on an activation.
 - **Gate for the fix.** The probe above, run directly on an activation, must complete with `activation_fault()` set and the process alive. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (RA6 entry).
 
+<a id="lr10-18"></a>**LR10-18 · A one-arm handler bound from a non-suspending `pn ... T^` call yields `null` on success (S7.6.1v4, S7.6.7v4) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
+`pn p_str(x) string^ { if (x < 0) { raise error("neg") }; return "ab" }` then `let d = p_str(1) ^ { "ERR" }` binds `""` on both tiers. With `int^` and `map^` returns it binds `null`. S7.6.1v4 says a non-error operand passes through unchanged and that the binding's static type is never a lie. Propagation (`p_str(1)^`) and `fn ... T^` with a one-arm handler both give `"ab"`. S7.6.7v4 forbids value-producing handlers only over *possibly-suspending* `pn` calls. `doc/Lambda_Error_Handling.md` says more broadly that "a `pn` handler cannot be used in a binding or another value context". Whichever ruling governs, the form must either be rejected statically or yield the value. Today it compiles and silently binds a stand-in. Needs a ruling on whether non-suspending `pn` calls take value-producing handlers.
+
 ## 11. Mark data API (LR_11)
 
 <a id="lr11-1"></a>**LR11-1 · Reader traversal is stubbed · OPEN**
@@ -1046,6 +1071,13 @@ Every CSV read logs `[ERR!] Parse errors (0 errors):` followed by "CSV has 2 col
 
 
 ## 12. Procedural runtime (LR_12)
+
+<a id="lr12-40"></a>**LR12-40 · A `var` bound to a container member read aliases it, so an index write through the `var` changes the source (S9.1.2) · OPEN (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
+`let lit = {arr: [1, 2]}; var b = lit.arr; b[0] = 10` leaves `lit.arr == [10, 2]` on JIT and auto; the same holds for a parsed document (`let d = parse("{\"arr\": [1, 2]}", 'json')^; var a = d.arr; a[0] = 10` changes `d.arr`). A `let` binding's value, and a parsed document, are changed in place, which S9.1.2's value semantics forbid. LR12-38 fixed the parameter form (`var r = o` with `o` a parameter); this is the member-read form, where the declaration binds a child container of another value without marking it shared, and the index write takes the unique in-place path.
+
+<a id="lr12-41"></a>**LR12-41 · An index write on a copy of a parsed element is lost (S9.1.6) · OPEN (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
+`let x = parse("<r><i k=\"1\"/></r>", 'xml')^; var e = x[0]; e["z"] = "4"` reads `e.z` back as `null` on JIT and auto, while `e.z = "4"` keeps it, and an index write on an element literal (`var e = <div k: "1">; e["z"] = "4"`) keeps it too. LR12-39's `is_immortal` fix does not change it. The index-assign lowering for an element-typed `var` seen through a parsed document's content does not republish, or does not reach, the copy the write makes; it needs the MIR of the write traced as LR12-39's was.
+
 
 <a id="lr12-1"></a>**LR12-1 · `fetch_response_to_item` returns a bare String · OPEN**
 `// TODO: Implement proper map structure when the complex type system is
@@ -1313,6 +1345,9 @@ Reported by the LR12-14 investigation, reproduced 2026-09-25.
 
 <a id="lr12-35"></a>**LR12-35 · A binding from an expression that returns its operand aliases it (S9.1.2) · OPEN (found 2026-09-25)**
 `var xs = [1, 2, 3]; var y = xs or null; y[0] = 99` leaves `xs[0] == 99` on both tiers; so do `if (true) xs else null`, `match (1) { case 1: xs default: null }`, and the S10.1.5v3 proviso `xs that true`. A plain `var y = xs` marks its source and detaches on the write. The alias-bind test (`mir_expr_is_owned_binding_alias`, and T0's declaration bind) recognises only a bare name, so an operand returned through `or`, a branch, an arm, or a proviso is never marked. The same root as LR12-34's reassignment half. Found while implementing `|:` (S10.1.6), reproduced 2026-09-25.
+
+<a id="lr12-42"></a>**LR12-42 · T0 cannot execute `m["key"] = v` with a constant key on a `var` map · OPEN (found 2026-10-05, while writing the jq benchmark translations; first logged as a second LR12-36, renumbered 2026-10-06)**
+`pn main() { var c = {}; c["a"] = 1 }` under `LAMBDA_EXEC_BACKEND=interp` stops with E501 "cannot execute AST_NODE_INDEX_ASSIGN_STAM; MIR fallback is disabled". The same assignment works with a variable key (`c[k] = 1`) and with `c.a = 1`. AUTO hides the gap by falling back to MIR. `test/benchmark/text/jq_records.ls` therefore runs on AUTO and JIT only.
 
 ## 13. Schema validator (LR_13)
 

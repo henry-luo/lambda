@@ -655,8 +655,31 @@ inline void run_sub_batch(
         }
     }
 
-    pclose(pipe);
+    int batch_exit = pclose(pipe);
     unlink(manifest_path);
+    // A crash after the last BATCH_END (runtime teardown) left every result
+    // intact, so the harness never saw it: the runtime shape tree's Input was
+    // freed by the per-script heap reset and released again at cleanup, and
+    // the baseline stayed green. Charge such an exit to the last completed
+    // script so the run fails loudly. A crash mid-script keeps today's path:
+    // that script and the ones after it are missing and are retried singly.
+    bool batch_failed = batch_exit == -1;
+#ifndef _WIN32
+    if (!batch_failed && WIFSIGNALED(batch_exit)) batch_failed = true;
+#endif
+    if (!batch_failed && WEXITSTATUS(batch_exit) != 0) batch_failed = true;
+    if (batch_failed && !in_script && !current_script.empty()) {
+        auto last = results.find(current_script);
+        if (last != results.end()) {
+            char note[192];
+            snprintf(note, sizeof(note),
+                "\n[batch %d] lambda.exe test-batch exited abnormally (wait status %d) "
+                "after its last script, %s, had finished\n",
+                batch_id, batch_exit, current_script.c_str());
+            last->second.output += note;
+            if (last->second.status == 0) last->second.status = batch_exit != 0 ? batch_exit : -1;
+        }
+    }
 }
 
 // Max scripts per lambda.exe process for ordinary regression runs.

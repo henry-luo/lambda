@@ -4618,6 +4618,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
         DomElement* parent_dom = lam::dom_require_element(old_dom->parent);
+        bool replaces_document_root = old_dom == doc->root;
         DomNode* old_previous = old_dom->prev_sibling;
         DomNode* old_next = old_dom->next_sibling;
 
@@ -4661,6 +4662,11 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
                 log_error("rebuild_lambda_doc_incremental: failed to replace entry %d", i);
                 continue;
             }
+        }
+        if (replaces_document_root) {
+            // the retained #document links and layout must publish the same root.
+            doc->root = lam::up(new_dom);
+            doc->input->root = {.element = html_elem};
         }
         if (i < 16) new_doms[i] = new_dom;
 

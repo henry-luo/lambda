@@ -10,7 +10,7 @@ native reference.
 |---|---|
 | Upstream | https://github.com/vnmakarov/mir |
 | Commit | `99c65079038f3ba9242ef646f308c266cfd7a8e5` (2024-08-29) |
-| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch` |
+| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch`, `patches/mir-conventional-ssa-self-loop.patch` |
 
 **The patches under `patches/` are already applied to the source here.** They
 are kept as the record of our delta versus upstream, so a future re-sync can
@@ -133,6 +133,23 @@ removes its loop. Other phi copies continue to optimize normally. The focused
 standalone MIR replay and the Navier–Stokes release/ASAN runs cover this case.
 The diagnostic and original ASAN trace are preserved under
 `temp/tune32-phase2/` (D8.6.2–D8.6.3).
+
+### `mir-conventional-ssa-self-loop.patch` — keep a phi's old value for a self-loop's branch
+
+`make_conventional_ssa` puts each phi argument's move at the end of the
+predecessor block, before that block's terminating branch. When every use of
+the phi result is in the phi's own block, it renames the result to the new
+variable instead of copying it after the phi. That shortcut is wrong for a
+single-block loop whose terminating branch uses the phi result: the back-edge
+move now runs before the branch, so the branch reads the next iteration's
+value. At `-O2`/`-O3`, `while (hops-- > 0) f = f->env;` ran one iteration short.
+The C front end's MIR is correct at every level; only the generator's
+out-of-SSA step was wrong. It was found through the C2MIR jq-core VM's
+`frame_hop` (`vibe/impl/Lambda_Impl_Jq_Tests.md`).
+
+The patch keeps the ordinary path (the result stays live, copied from the new
+variable after the phi) when the use is the terminating branch of a block that
+is its own predecessor. All other phis keep the shortcut.
 
 ## Not vendored: the NULL-label workaround
 

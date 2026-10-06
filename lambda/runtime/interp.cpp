@@ -2706,6 +2706,20 @@ static bool interp_array_has_spread(AstArrayNode* node, bool* pipe_spread) {
     return spreadable;
 }
 
+// An unannotated var that an assignment widens reads as `any` only from that
+// assignment on (build_ast); reads typed earlier -- the RHS of `w = [w, w]`, or
+// anything above it in a loop body -- keep the initializer's lane, which is no
+// proof of the value at run time (S12.2.1). MIR's literal sites make the same
+// `type_widened` check before trusting a member's lane.
+static bool interp_item_type_is_lane_proof(AstNode* item) {
+    AstNode* node = ast_unwrap_primary(item);
+    if (node && node->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (entry && entry->type_widened) return false;
+    }
+    return true;
+}
+
 static InterpArrayKind interp_array_kind(AstArrayNode* node,
                                          ArrayNumElemType* sized_elem) {
     TypeArray* arr_type = (TypeArray*)node->type;
@@ -2719,7 +2733,9 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
     for (AstNode* item = node->item; item; item = item->next) {
         TypeId item_type = item->type ? item->type->type_id : LMD_TYPE_ANY;
         if (item_type == LMD_TYPE_ANY || item_type == LMD_TYPE_NULL ||
-                item_type == LMD_TYPE_ERROR) return INTERP_ARRAY_GENERIC;
+                item_type == LMD_TYPE_ERROR || !interp_item_type_is_lane_proof(item)) {
+            return INTERP_ARRAY_GENERIC;
+        }
     }
     switch (arr_type->nested->type_id) {
     case LMD_TYPE_INT:   return INTERP_ARRAY_INT;
@@ -4531,8 +4547,11 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                 bool declared_open_any_array =
                     ast_declared_type_is_open_any_array(named->declared_type);
                 // LR12-10 (S9.1.2): a `var` parameter's root is written in
-                // place, so an alias of it is an ownership boundary too
-                if (src && (src->cow_owned || src->is_var_param) && (declared_open_any_array ||
+                // place, so an alias of it is an ownership boundary too, and
+                // so is a plain parameter's: its value is the caller's
+                if (src && (src->cow_owned || src->is_var_param ||
+                        ast_parameter_alias_marks(src, named->entry)) &&
+                        (declared_open_any_array ||
                         ast_expr_may_return_container(named->init, init_tid, var_tid))) {
                     // cow_bind_var may detach a copy, so it is a safepoint: the
                     // operand has to be reachable from a frame slot, not a C++
@@ -6044,7 +6063,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                     ? assign->value->type->type_id : LMD_TYPE_ANY;
                 TypeId target_tid = target->declared_type
                     ? target->declared_type->type_id : LMD_TYPE_ANY;
-                if (src && src != target && (src->cow_owned || src->is_var_param) &&
+                if (src && src != target &&
+                        (src->cow_owned || src->is_var_param ||
+                            ast_parameter_alias_marks(src, target)) &&
                         ast_expr_may_return_container(assign->value, value_tid, target_tid)) {
                     // a safepoint: keep the operand in a frame slot
                     Scratch alias_slot(f);

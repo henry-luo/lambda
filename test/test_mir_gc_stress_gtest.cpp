@@ -65,6 +65,15 @@ static const char* kExtraLambdaScripts[] = {
     // a gather allocates a row view or slice per position between its reads,
     // and a partial N-D read allocates a view between its keys
     "test/lambda/subscript_selection.ls",
+    // an index write widens a packed array in place to hold containers; the
+    // collector must trace it as an Array from then on
+    "test/lambda/proc/ndim_row_assign.ls",
+    // runtime-grown maps share tree types and grow their data by doubling
+    "test/lambda/proc/map_runtime_shape_tree.ls",
+    // symbol subscripts and spreads grow through the same tree edges
+    "test/lambda/proc/map_symbol_key_tree.ls",
+    // maps and elements grow from external parents; their data relocates
+    "test/lambda/proc/map_external_parent.ls",
     // a container evaluated once is held across its key's allocations
     "test/lambda/proc/subscript_last_scope.ls",
 };

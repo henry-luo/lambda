@@ -542,9 +542,13 @@ static_assert(offsetof(TypeMap, byte_size) == LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE &
 
 typedef struct TypeMapTransition {
     NameId name_id;
-    uint8_t key_kind;
-    const char* name; // retained only for the explicit id-less Input seam
+    // D3.4.4v4: a STRING edge keeps its spelling and its routing hash, since an
+    // id proves a STRING name equal but never different; identity kinds match
+    // by name_id alone
+    uint32_t name_hash;
+    const char* name;
     uint32_t name_len;
+    uint8_t key_kind;
     TypeId value_type;
     uint8_t flags;
     TypeMap* target;
@@ -797,14 +801,18 @@ static inline bool typemap_shape_name_equals_hash(ShapeEntry* e, const char* key
            memcmp(e->name->str, key, (size_t)key_len) == 0;
 }
 
+// D3.4.4v4: a JS Symbol or private name is its record; a STRING name is its
+// spelling, of which equal ids are only a fast proof -- ids are per name pool,
+// and an unpooled key has none, so two entries with different ids may still
+// name one field, and a shared table must not take both.
 static inline bool typemap_shape_entries_equal(ShapeEntry* left, ShapeEntry* right) {
     if (!left || !right) return false;
-    if (left->name_id != NAME_ID_NONE && right->name_id != NAME_ID_NONE) {
-        return left->name_id == right->name_id;
+    if (left == right) return true;
+    if (left->key_kind != right->key_kind) return false;
+    if (left->key_kind != NAME_KEY_STRING) {
+        return left->name_id != NAME_ID_NONE && left->name_id == right->name_id;
     }
-    if (left->key_kind != NAME_KEY_STRING || right->key_kind != NAME_KEY_STRING) {
-        return false;
-    }
+    if (left->name_id != NAME_ID_NONE && left->name_id == right->name_id) return true;
     if (!left->name || !right->name) return !left->name && !right->name;
     return typemap_shape_name_equals_hash(left, right->name->str,
         (int)right->name->length,
@@ -962,6 +970,14 @@ static inline void typemap_hash_insert_owned(TypeMap* tm, ShapeEntry* entry, Poo
     typemap_hash_insert(tm, entry);
 }
 
+// A1: whether the table answers a lookup, a miss included. Without one (or
+// when it is full) a lookup falls back to the shape chain.
+static inline bool typemap_hash_is_usable(TypeMap* tm) {
+    if (!tm || !typemap_hash_slots(tm)) return false;
+    int capacity = typemap_hash_capacity(tm);
+    return capacity > 0 && tm->field_count > 0 && tm->field_count < (uint16_t)capacity;
+}
+
 // A1: Lookup a ShapeEntry by name through the hash table.
 // Returns the ShapeEntry or NULL if not found.
 // A6: Uses pointer comparison first (interned strings via name pool share
@@ -1007,6 +1023,13 @@ typedef struct TypeElmt : TypeMap {
     TypeList* content_list;
     Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;
+
+// Whether `tm` has TypeElmt's layout, so its element fields may be read. Only an
+// element-kinded type is allocated that large; a plain TypeMap ends before
+// them, even when an element container carries it.
+static inline bool typemap_has_element_layout(const TypeMap* tm) {
+    return tm && tm->type_id == LMD_TYPE_ELEMENT;
+}
 
 // TypeMethod: entry in the method table of a TypeObject
 typedef struct TypeMethod {
@@ -1554,6 +1577,9 @@ typedef struct Input {
     NamePool* name_pool;        // centralized name management
     TypeMap* shape_transition_root;
     int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
+    // D3.4.3v4: the map graph's budget; 0 means MAX_SHAPE_GRAPH. The runtime
+    // tree raises it, since every runtime-grown map shares that one tree.
+    int shape_graph_budget;
     // D3.4.3v3: one empty root per element tag and namespace, a pool-owned
     // open-addressing table keyed by the pooled tag-name pointer; element
     // nodes (roots included) count against their own budget
@@ -1561,6 +1587,12 @@ typedef struct Input {
     int element_root_cap;
     int element_root_count;
     int element_transition_shapes;    // bounded by MAX_ELEMENT_SHAPE_GRAPH
+    // D3.4.3v5: the runtime tree also grows from parents it does not own -- a
+    // literal's, contract's, nominal, parsed or private type. Their edges live
+    // here, keyed by the parent's address, so the parent is never written.
+    // Only the runtime tree sets `keeps_external_edges`; the table is lazy.
+    bool keeps_external_edges;
+    struct hashmap* external_edges;
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)
@@ -1589,6 +1621,15 @@ typedef struct Input {
                                            Input* parent = nullptr,
                                            NamePool* name_parent = nullptr);
 } Input;
+
+// D3.4.3v4/v5: the evaluation context's runtime shape tree (a capsule of the
+// Runtime's canonical EvalContext); NULL outside an evaluation.
+Input* runtime_shape_tree(void);
+// Drops that tree with its heap generation: after heap teardown, before the
+// runtime name pool its NameIds index is released.
+void runtime_shape_tree_release(EvalContext* owner);
+// Impl_Map_Transition_Coverage P3: that tree's root for elements of one tag.
+TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target* ns);
 
 #ifdef __cplusplus
 extern "C" {

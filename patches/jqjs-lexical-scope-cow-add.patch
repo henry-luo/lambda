@@ -1,0 +1,324 @@
+jqjs (https://github.com/mwh/jqjs) at f2894f6 — Lambda benchmark patch.
+Applied to test/benchmark/text/jq/vendor/jqjs.js; see test/benchmark/text/jq/VENDOR.md.
+
+1. Lexical environments. `conf` is never mutated: a call or an `as`/reduce/
+   foreach binding derives a new one. A call's argument frame chains to the
+   frame of the lexically enclosing def (not the caller's), and each argument
+   is a closure over the caller's conf. Upstream grew the frame chain by one
+   prototype link per active call (O(call depth) argument lookups, 79% of
+   jq_bf's time) and evaluated arguments in the callee's scope (wrong results
+   for e.g. recursive `def ack($m; $n)`).
+2. Copy-on-write assignment. `|=` and `=` copy only the containers on each
+   updated path, once per assignment, and read paths from the original input
+   (jq's reduce-over-path(f) definition). Upstream deep-copied the whole input
+   with JSON.parse(JSON.stringify(...)) per assignment and re-walked it after.
+3. Linear `add/0` for arrays and objects (upstream re-copied the running sum
+   per element).
+
+jq 1.7.1 tests/jq.test via run-test.js: 339 passed / 94 failed before,
+341 / 92 after, no newly failing case.
+
+diff --git a/jq.js b/jq.js
+index 22973ac..3b5915d 100644
+--- a/jq.js
++++ b/jq.js
+@@ -225,22 +225,63 @@ function makeFunc(params, body, pathFunc=false) {
+     return makeUserFuncFromNode(params, c, pathFunc)
+ }
+ 
++// [lambda patch] Lexical environments. A conf is never mutated after it is
++// made: a call or a variable binding derives a new one, so a suspended
++// generator keeps the scope it was created in. A call's argument frame
++// chains to the frame of the def that lexically encloses the callee, not
++// to the caller's frame, so a lookup costs the def nesting depth instead
++// of the dynamic call depth, and each argument is a closure over the
++// caller's conf.
++const FRAME_DEF = Symbol('jqjs.frameDef')
++// innermost def being parsed; a nested def records its nearest enclosing
++// def that has parameters (only those make frames)
++const defParseStack = []
++
++function bindVariable(conf, name, value) {
++    let variables = Object.create(conf.variables)
++    variables[name] = value
++    return {userFuncArgs: conf.userFuncArgs, variables}
++}
++
++function frameOwnerOf(frame) {
++    return Object.prototype.hasOwnProperty.call(frame, FRAME_DEF) ? frame[FRAME_DEF] : null
++}
++
++// The frame of `def` on the lexical chain from `frame` (the root frame when
++// def is null). A def called outside its lexical scope, which jqjs allows
++// because definitions are global, falls back to the caller's frame.
++function enclosingFrame(frame, def) {
++    for (let f = frame; f; f = Object.getPrototypeOf(f)) {
++        let owner = frameOwnerOf(f)
++        if (owner === def) return f
++        if (owner === null) return def === null ? f : frame
++    }
++    return frame
++}
++
++function enclosingFrameDef() {
++    for (let i = defParseStack.length - 1; i >= 0; i--)
++        if (defParseStack[i].params.length > 0) return defParseStack[i]
++    return null
++}
++
+ // Lift a node to a function
+-function makeUserFuncFromNode(params, node, pathFunc=false) {
++function makeUserFuncFromNode(params, node, pathFunc=false, def=null, frameParent=null) {
+     let c = node
+     let f = (x, conf) => c.apply(x, conf)
+     if (pathFunc)
+         f = (x, conf) => c.paths(x, conf)
++    // every parameterised function owns its frames, shorthands included
++    if (def === null) def = {params}
+     let ret = function*(input, conf, args) {
+-        let origArgs = conf.userFuncArgs
+-        conf.userFuncArgs = Object.create(origArgs)
+-        for (let i = 0; i < params.length; i++) {
+-            let pn = params[i]
+-            let pv = args[i]
+-            conf.userFuncArgs[pn + '/0'] = pv
++        let frame = enclosingFrame(conf.userFuncArgs, frameParent)
++        if (params.length > 0) {
++            frame = Object.create(frame)
++            frame[FRAME_DEF] = def
++            for (let i = 0; i < params.length; i++)
++                frame[params[i] + '/0'] = {node: args[i], conf}
+         }
+-        yield* f(input, conf)
+-        conf.userFuncArgs = origArgs
++        yield* f(input, {userFuncArgs: frame, variables: conf.variables})
+     }
+     ret.params = Array.prototype.map.call(params, label => ({label, mode: 'defer'}))
+     return ret;
+@@ -804,15 +845,25 @@ function parse(tokens, startAt=0, until=[], maybePrefix=false) {
+             if (!tokens[i] || tokens[i].type != 'colon')
+                 throw 'expected : when defining function ' + nameTok.value + ' at ' + t.location
+ 
+-            let {node, i: j} = parse(tokens, i + 1, ['semicolon']);
++            // [lambda patch] record the lexical def nesting for frame lookup
++            let def = {name, params}
++            let frameParent = enclosingFrameDef()
++            defParseStack.push(def)
++            let parsed
++            try {
++                parsed = parse(tokens, i + 1, ['semicolon']);
++            } finally {
++                defParseStack.pop()
++            }
++            let {node, i: j} = parsed;
+             // If there are $var parameters, bind the arguments as single values
+             for (let vp of varParams) {
+                 let lhs = new VariableBinding(new FunctionCall(vp.truename, []), vp.bindname);
+                 node = new PipeNode(lhs, node);
+             }
+-            let func = makeUserFuncFromNode(params, node);
++            let func = makeUserFuncFromNode(params, node, false, def, frameParent);
+             functions[name + '/' + params.length] = func;
+-            let pathFunc = makeUserFuncFromNode(params, node, true);
++            let pathFunc = makeUserFuncFromNode(params, node, true, def, frameParent);
+             functions[name + '/' + params.length + '-paths'] = pathFunc;
+             i = j;
+         } else if (t.type == '<end-of-program>' && until.length == 0) {
+@@ -1524,11 +1575,22 @@ class PipeNode extends ParseNode {
+         return `${this.lhs} | ${this.rhs}`
+     }
+     * apply(input, conf) {
++        // [lambda patch] `E as $x | body` runs body in a derived conf
++        if (this.lhs instanceof VariableBinding) {
++            for (let v of this.lhs.value.apply(input, conf))
++                yield* this.rhs.apply(input, bindVariable(conf, this.lhs.name, v))
++            return
++        }
+         for (let v of this.lhs.apply(input, conf))
+             for (let q of this.rhs.apply(v, conf))
+                 yield q
+     }
+     * paths(input, conf) {
++        if (this.lhs instanceof VariableBinding) {
++            for (let v of this.lhs.value.apply(input, conf))
++                yield* this.rhs.paths(input, bindVariable(conf, this.lhs.name, v))
++            return
++        }
+         for (let [p, v] of this.zip(this.lhs.paths(input, conf),
+                 this.lhs.apply(input, conf))) {
+             for (let p2 of this.rhs.paths(v, conf)) {
+@@ -1918,6 +1980,49 @@ class AlternativeOperator extends ParseNode {
+         return this.l + ' // ' + this.r
+     }
+ }
++// [lambda patch] Copy-on-write support for assignments. Values are shared
++// between outputs, so an assignment may only write into containers it has
++// copied itself; `owned` holds those copies so each is made once.
++function copyContainerForWrite(value, owned) {
++    if (owned.has(value)) return value
++    let copy = Array.isArray(value) ? value.slice() : Object.assign({}, value)
++    owned.add(copy)
++    return copy
++}
++
++function isWritableContainer(value) {
++    return value !== null && typeof value == 'object'
++}
++
++// Return `root` with the root and every existing container above the last
++// path step replaced by an owned copy. The path array is not modified.
++function copyPathForWrite(root, path, owned) {
++    if (!isWritableContainer(root)) return root
++    root = copyContainerForWrite(root, owned)
++    let parent = root
++    for (let j = 0; j < path.length - 1; j++) {
++        let key = path[j]
++        if (typeof key != 'string' && typeof key != 'number') break
++        let child = parent[key]
++        if (!isWritableContainer(child)) break
++        child = copyContainerForWrite(child, owned)
++        parent[key] = child
++        parent = child
++    }
++    return root
++}
++
++// deletions leave holes in the arrays they touch, all of which are owned
++function compactOwnedArrays(owned) {
++    for (let a of owned) {
++        if (!Array.isArray(a)) continue
++        let w = 0
++        for (let i = 0; i < a.length; i++)
++            if (Object.prototype.hasOwnProperty.call(a, i)) a[w++] = a[i]
++        a.length = w
++    }
++}
++
+ class UpdateAssignment extends ParseNode {
+     constructor(l, r) {
+         super()
+@@ -1925,16 +2030,21 @@ class UpdateAssignment extends ParseNode {
+         this.r = r
+     }
+     * apply(input, conf) {
+-        input = JSON.parse(JSON.stringify(input))
++        // [lambda patch] copy only the containers on each updated path,
++        // once per assignment, instead of deep-copying the whole input; the
++        // paths come from the original input, as jq's reduce over path(f)
++        let owned = new Set()
++        let result = input
+         for (let p of this.l.paths(input, conf)) {
+-            let it = this.r.apply(this.get(input, p), conf).next()
++            let it = this.r.apply(this.get(result, p), conf).next()
++            result = copyPathForWrite(result, p, owned)
+             if (it.done)
+-                input = this.update(input, p, null, true)
++                result = this.update(result, p, null, true)
+             else
+-                input = this.update(input, p, it.value)
++                result = this.update(result, p, it.value)
+         }
+-        input = this.normaliseDenseJson(input)
+-        yield input
++        compactOwnedArrays(owned)
++        yield result
+     }
+     // Pluck the value at a path out of an object
+     get(obj, p) {
+@@ -2048,8 +2158,11 @@ class PlainAssignment extends ParseNode {
+     }
+     * apply(input, conf) {
+         for (let it of this.r.apply(input, conf)) {
+-            let innerInput = JSON.parse(JSON.stringify(input))
+-            for (let p of this.l.paths(innerInput, conf)) {
++            // [lambda patch] path-local copies, as in UpdateAssignment
++            let owned = new Set()
++            let innerInput = input
++            for (let p of this.l.paths(input, conf)) {
++                innerInput = copyPathForWrite(innerInput, p, owned)
+                 innerInput = this.update(innerInput, p, it)
+             }
+             yield innerInput
+@@ -2131,7 +2244,8 @@ class FunctionCall extends ParseNode {
+         let ufa = conf.userFuncArgs[this.name]
+         if (ufa)
+             func = function(input, conf, args) {
+-                return ufa.apply(input, conf)
++                // [lambda patch] an argument runs in its caller's scope
++                return ufa.node.apply(input, ufa.conf)
+             }
+         else if (!func)
+             func = functions[this.name]
+@@ -2143,7 +2257,7 @@ class FunctionCall extends ParseNode {
+     paths(input, conf) {
+         let ufa = conf.userFuncArgs[this.name]
+         if (ufa)
+-            return ufa.paths(input, conf)
++            return ufa.node.paths(input, ufa.conf)
+         let func = functions[this.name + '-paths']
+         if (!func)
+             throw 'no paths for ' + this.name
+@@ -2321,11 +2435,11 @@ class ReduceNode extends ParseNode {
+         // errors in mixed cases that seem unnecessary.
+         for (let accum of this.init.apply(input, conf)) {
+             for (let v of this.generator.apply(input, conf)) {
+-                conf.variables[this.name] = v
+-                for (let a of this.expr.apply(accum, conf))
++                // [lambda patch] bind in a derived conf, never in place
++                let inner = bindVariable(conf, this.name, v)
++                for (let a of this.expr.apply(accum, inner))
+                     accum = a
+             }
+-            delete conf.variables[this.name]
+             yield accum
+         }
+     }
+@@ -2345,13 +2459,12 @@ class ForeachNode extends ParseNode {
+     * apply(input, conf) {
+         for (let accum of this.init.apply(input, conf)) {
+             for (let v of this.generator.apply(input, conf)) {
+-                conf.variables[this.name] = v
+-                for (let a of this.update.apply(accum, conf))
++                let inner = bindVariable(conf, this.name, v)
++                for (let a of this.update.apply(accum, inner))
+                     accum = a
+-                for (let e of this.extract.apply(accum, conf))
++                for (let e of this.extract.apply(accum, inner))
+                     yield e;
+             }
+-            delete conf.variables[this.name]
+         }
+     }
+     toString() {
+@@ -2704,11 +2817,26 @@ const functions = {
+             throw 'can only add up arrays'
+         if (input.length == 0) return yield null
+         if (input.length == 1) return yield input[0]
+-        let ret = AdditionOperator.prototype.combine(input[0], input[1],
+-            nameType(input[0]), nameType(input[1]))
+-        for (let i = 2; i < input.length; i++)
+-            ret = AdditionOperator.prototype.combine(ret, input[i],
+-                nameType(ret), nameType(input[i]))
++        // [lambda patch] accumulate arrays and objects into one fresh
++        // container instead of re-copying the running sum per element
++        let ret = input[0]
++        let retType = nameType(ret)
++        let fresh = false
++        for (let i = 1; i < input.length; i++) {
++            let item = input[i]
++            let itemType = nameType(item)
++            if (retType == 'array' && itemType == 'array') {
++                if (!fresh) { ret = ret.slice(); fresh = true }
++                for (let x of item) ret.push(x)
++            } else if (retType == 'object' && itemType == 'object') {
++                if (!fresh) { ret = Object.assign({}, ret); fresh = true }
++                Object.assign(ret, item)
++            } else {
++                ret = AdditionOperator.prototype.combine(ret, item, retType, itemType)
++                retType = nameType(ret)
++                fresh = false
++            }
++        }
+         yield ret
+     },
+     'add/1': Object.assign(function*(input, conf, args) {

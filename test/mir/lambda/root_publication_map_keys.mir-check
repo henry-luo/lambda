@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "LR07-46 (D5.3.3): main publishes its frame before item_keys pushes the key list's RootFrame, and every path into the filter loop has crossed that safepoint, so the loop stores nothing into the runtime context until the key list is freed. A store there would rewind side_root_top beneath the key frame.",
+  "checks": [
+    {
+      "in_func": "main",
+      "in_range": {
+        "from": "call\titem_keys_p, item_keys",
+        "to": "call\tsymbol_key_list_free_p, symbol_key_list_free"
+      },
+      "expect": [
+        "call\tpipe_map_val_p, pipe_map_val"
+      ],
+      "forbid": [
+        "(runtime), {{r}}"
+      ]
+    }
+  ]
+}

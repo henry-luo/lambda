@@ -4532,6 +4532,8 @@ typedef struct EventContext {
     // legacy native call sites cannot replay the author walk after JS returns.
     bool dom_event_ua_handled;
     bool dom_event_author_dirty;
+    // borrowed only during synchronous native dispatch, including author bubbling.
+    const InputIntent* dom_event_intent;
 
     // Source-model actions can finish inside an author cascade whose DOM
     // reconciliation is deferred until propagation ends. Keep the requested

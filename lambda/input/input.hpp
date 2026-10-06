@@ -92,6 +92,26 @@ ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
 ShapeEntry* shape_entry_copy_as(TypeAlloc alloc, const ShapeEntry* like, TypeId type_id,
                                 ShapeEntry* prev_entry);
 
+// D3.4.3v4: the runtime-grown map's step through a transition tree. NULL
+// `parent` starts at the root; a non-NULL one must satisfy type_tree_owns.
+// Returns NULL when the key, the fan-out or the budget rules the tree out.
+TypeMap* type_tree_add_map_field(Input* input, TypeMap* parent, String* key,
+                                 TypeId type_id, ShapeEntry** out_entry);
+// The same step for a key given by its characters: a Lambda Symbol, which is
+// a STRING name in the global namespace (S8.2.2v4).
+TypeMap* type_tree_add_map_field_chars(Input* input, TypeMap* parent,
+                                       const char* chars, uint32_t len,
+                                       TypeId type_id, ShapeEntry** out_entry);
+// Whether `type` is a node of `input`'s transition tree.
+bool type_tree_owns(const Input* input, const TypeMap* type);
+// Impl_Map_Transition_Coverage P2: the shared type for `parent` with `field`
+// laid out for `value_type` (D3.4.5 through the tree); NULL when declined.
+TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
+                                TypeId value_type);
+// Impl_Map_Transition_Coverage P1.5: a runtime add that copied a whole shape
+// of `entries` fields onto a private type (counted under LAMBDA_SHAPE_TREE_STATS).
+void shape_tree_stats_note_private_copy(int64_t entries);
+
 #include "../io/mark_builder.hpp"
 
 // Parse options beyond type and flavor.

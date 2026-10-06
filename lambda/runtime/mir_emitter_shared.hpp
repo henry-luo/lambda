@@ -2762,10 +2762,11 @@ static inline bool em_root_call_may_collect(MIR_insn_t insn,
         const MirGcCallSite* call_sites, int call_site_count);
 
 // A frame needs publication only on the first MAY_GC boundary reachable along
-// a path.  A runtime guard is still needed for loops, but placing it at every
-// call made the E6 precision change dominate the MIR ratchet.  This forward
-// dataflow marks blocks whose every incoming path has already crossed a
-// safepoint, so straight-line calls pay no repeated publication code.
+// a path.  A runtime guard is still needed where paths merge, but placing it
+// at every call made the E6 precision change dominate the MIR ratchet.  This
+// forward dataflow marks blocks whose every incoming path has already crossed
+// a safepoint, so straight-line calls pay no repeated publication code, and
+// keeps a guard wherever some incoming path already published.
 static inline void em_compute_root_publication_frontier(
         MIR_insn_t* instructions, MirRootLivenessBlock* blocks,
         int block_count, uint64_t* successors, int successor_word_count,
@@ -2850,47 +2851,114 @@ static inline void em_compute_root_publication_frontier(
         }
     }
 
+    // Block zero is the only normal entry. Unreachable cycles must not become
+    // published merely because every member points at another, so both
+    // dataflows below run over the blocks reachable from it.
+    uint8_t* reachable = (uint8_t*)mem_calloc((size_t)block_count, 1,
+        MEM_CAT_TEMP);
+    uint8_t* maybe_published_out = (uint8_t*)mem_calloc((size_t)block_count,
+        1, MEM_CAT_TEMP);
+    int* reach_worklist = (int*)mem_alloc((size_t)block_count * sizeof(int),
+        MEM_CAT_TEMP);
+    if (!reachable || !maybe_published_out || !reach_worklist) {
+        log_error("mir-root-publication-frontier: reachability allocation failed");
+        abort();
+    }
+    int reach_count = 0;
+    reachable[0] = 1;
+    reach_worklist[reach_count++] = 0;
+    for (int wi = 0; wi < reach_count; wi++) {
+        const uint64_t* row = successors +
+            (size_t)reach_worklist[wi] * (size_t)successor_word_count;
+        for (int word = 0; word < successor_word_count; word++) {
+            uint64_t bits = row[word];
+            while (bits != 0) {
+                int succ = word * 64 + __builtin_ctzll(bits);
+                if (succ < block_count && !reachable[succ]) {
+                    reachable[succ] = 1;
+                    reach_worklist[reach_count++] = succ;
+                }
+                bits &= bits - 1;
+            }
+        }
+    }
+
+    // "Every incoming path has crossed a safepoint" is an all-paths property,
+    // so it is the GREATEST fixpoint: start every reachable non-entry block
+    // published and let unpublished paths clear it. Iterating up from zero
+    // instead left a loop unproven whenever one path through its body was
+    // call-free (an inline compare fast path), although its entry was already
+    // published (LR07-46).
+    for (int bi = 0; bi < block_count; bi++) {
+        published_in[bi] = (uint8_t)(reachable[bi] && bi != 0);
+        published_out[bi] = (uint8_t)(reachable[bi] &&
+            (published_in[bi] || has_may_gc[bi]));
+    }
     bool changed = true;
     while (changed) {
         changed = false;
-        for (int bi = 0; bi < block_count; bi++) {
-            bool has_predecessor = predecessor_counts[bi] > 0;
+        for (int bi = 1; bi < block_count; bi++) {
+            if (!reachable[bi]) continue;
             bool all_predecessors_published = true;
             for (int pi = predecessor_offsets[bi];
                     pi < predecessor_offsets[bi + 1]; pi++) {
                 int pred = predecessors[pi];
-                if (!published_out[pred]) all_predecessors_published = false;
+                if (reachable[pred] && !published_out[pred]) {
+                    all_predecessors_published = false;
+                    break;
+                }
             }
-            // Block zero is the only normal entry. Unreachable cycles must not
-            // become published merely because every member points at another.
-            bool next_in = bi != 0 && has_predecessor &&
-                all_predecessors_published;
-            bool next_out = next_in || has_may_gc[bi];
-            if (published_in[bi] != (uint8_t)next_in ||
+            bool next_out = all_predecessors_published || has_may_gc[bi];
+            if (published_in[bi] != (uint8_t)all_predecessors_published ||
                     published_out[bi] != (uint8_t)next_out) {
-                published_in[bi] = (uint8_t)next_in;
+                published_in[bi] = (uint8_t)all_predecessors_published;
                 published_out[bi] = (uint8_t)next_out;
+                changed = true;
+            }
+        }
+    }
+    // "Some incoming path may have published" is the any-path dual (least
+    // fixpoint). Once a path has published, a native RootFrame that outlives
+    // its call (an item_keys key list) may sit above root_end, and an
+    // unconditional store would rewind side_root_top beneath it so the next
+    // callee overwrote its slots (D5.3.3, LR07-46).
+    changed = true;
+    while (changed) {
+        changed = false;
+        for (int bi = 0; bi < block_count; bi++) {
+            if (!reachable[bi]) continue;
+            bool maybe_in = false;
+            for (int pi = predecessor_offsets[bi];
+                    pi < predecessor_offsets[bi + 1]; pi++) {
+                if (maybe_published_out[predecessors[pi]]) {
+                    maybe_in = true;
+                    break;
+                }
+            }
+            bool next_out = maybe_in || has_may_gc[bi];
+            if (maybe_published_out[bi] != (uint8_t)next_out) {
+                maybe_published_out[bi] = (uint8_t)next_out;
                 changed = true;
             }
         }
     }
     for (int bi = 0; bi < block_count; bi++) {
         frontier[bi] = 0;
-        if (has_may_gc[bi] && !published_in[bi]) {
-            bool has_published_predecessor = false;
-            for (int pi = predecessor_offsets[bi];
-                    pi < predecessor_offsets[bi + 1]; pi++) {
-                if (published_out[predecessors[pi]]) {
-                    has_published_predecessor = true;
-                    break;
-                }
+        if (!has_may_gc[bi] || published_in[bi]) continue;
+        bool maybe_published_in = !reachable[bi];
+        for (int pi = predecessor_offsets[bi];
+                !maybe_published_in && pi < predecessor_offsets[bi + 1]; pi++) {
+            if (maybe_published_out[predecessors[pi]]) {
+                maybe_published_in = true;
             }
-            // An entry-only frontier cannot have a child RootFrame yet. A merge
-            // or loop frontier can, so retain the non-rewinding runtime check only
-            // for those paths.
-            frontier[bi] = has_published_predecessor ? 2 : 1;
         }
+        // Only a frontier that no path has published yet can store root_end
+        // outright; every other one keeps the non-rewinding runtime check.
+        frontier[bi] = maybe_published_in ? 2 : 1;
     }
+    mem_free(reachable);
+    mem_free(maybe_published_out);
+    mem_free(reach_worklist);
     mem_free(has_may_gc);
     mem_free(published_in);
     mem_free(published_out);
