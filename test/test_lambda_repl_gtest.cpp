@@ -20,6 +20,7 @@ extern "C" {
     #define LAMBDA_EXE "lambda.exe"
 #else
     #include <unistd.h>
+    #include <signal.h>
     #include <sys/wait.h>
     #define LAMBDA_EXE "./lambda.exe"
 #endif
@@ -30,7 +31,9 @@ struct test_result {
     int exit_code;
 };
 
-test_result run_lambda_repl(const char* input) {
+// `session_args` (NULL-terminated, may be NULL) go after --no-log, so `run`
+// opens a procedural session and `--tier=...` selects the satellite tier.
+test_result run_lambda_repl_with(const char* input, const char* const* session_args) {
     test_result result = {nullptr, -1};
 
     // Create a temporary file for input
@@ -43,7 +46,12 @@ test_result run_lambda_repl(const char* input) {
     fprintf(temp, "%s\n", input);
     fclose(temp);
 
-    const char* args[] = {LAMBDA_EXE, "--no-log", NULL};
+    const char* args[8] = {LAMBDA_EXE, "--no-log", NULL};
+    int argc = 2;
+    for (int i = 0; session_args && session_args[i] && argc < 7; i++) {
+        args[argc++] = session_args[i];
+    }
+    args[argc] = NULL;
     ShellOptions options = {0};
     options.stdin_path = temp_file;
     options.merge_stderr = true;
@@ -55,6 +63,10 @@ test_result run_lambda_repl(const char* input) {
 
     unlink(temp_file);
     return result;
+}
+
+test_result run_lambda_repl(const char* input) {
+    return run_lambda_repl_with(input, NULL);
 }
 
 void free_test_result(test_result* result) {
@@ -123,10 +135,12 @@ TEST(LambdaReplTests, test_views_apply_across_submissions_and_rollback) {
 }
 
 TEST(LambdaReplTests, test_runtime_error_does_not_replay_previous_output) {
+    // D8.1.1v17: an entry that completes with an error is reported and rolled
+    // back; earlier entries are never re-run, so their output appears once
     test_result result = run_lambda_repl("1 + 1\n[1, 2, 3] + \"hello\"\n2 + 2\nquit");
     ASSERT_NE(result.output, nullptr);
     EXPECT_EQ(count_substr(result.output, "> 2\n"), 1) << result.output;
-    EXPECT_EQ(count_substr(result.output, "> error\n"), 1) << result.output;
+    EXPECT_EQ(count_substr(result.output, "Entry rolled back."), 1) << result.output;
     EXPECT_EQ(count_substr(result.output, "> 4\n"), 1) << result.output;
     free_test_result(&result);
 }
@@ -500,6 +514,162 @@ TEST(LambdaReplTests, test_multiline_startup_message) {
                 strstr(result.output, "continuation") != nullptr) << "Expected multi-line info in startup";
     free_test_result(&result);
 }
+
+// ============================================================================
+// Persistent interpreter session (D8.1.1v17, S16.7.4-S16.7.6)
+// ============================================================================
+
+static const char* const k_procedural[] = {"run", NULL};
+
+TEST(LambdaReplSessionTests, declaration_only_entry_echoes_nothing) {
+    // S16.7.4: `let`/`fn` produce no item; a bare `null` still echoes
+    test_result result = run_lambda_repl("let x = 1\nfn f(a) { a + 1 }\nf(x)\nnull\nquit");
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_EQ(count_substr(result.output, "> > 2\n"), 1) << result.output;
+    EXPECT_EQ(count_substr(result.output, "null"), 1) << result.output;
+    free_test_result(&result);
+}
+
+TEST(LambdaReplSessionTests, redefinition_is_e209_reported_once) {
+    // S16.7.5: the session top level is one scope; `clear` is the reset
+    test_result result = run_lambda_repl(
+        "fn f(a) { a + 1 }\nfn f(a) { a + 2 }\nf(1)\nlet x = 1\nlet x = 2\nx\nquit");
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_EQ(count_substr(result.output, "error[E209]"), 2) << result.output;
+    EXPECT_EQ(count_substr(result.output, "Entry rolled back."), 2) << result.output;
+    EXPECT_NE(strstr(result.output, "> 2\n"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "> 1\n"), nullptr) << result.output;
+    free_test_result(&result);
+}
+
+TEST(LambdaReplSessionTests, parser_decides_incomplete_entry) {
+    // D8.1.1v17: balanced input the C parser reports INCOMPLETE continues
+    test_result result = run_lambda_repl("let y =\n5\ny\n1 +\n2\nquit");
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_GE(count_substr(result.output, ".. "), 2) << result.output;
+    EXPECT_NE(strstr(result.output, "5\n"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "3\n"), nullptr) << result.output;
+    EXPECT_EQ(strstr(result.output, "rolled back"), nullptr) << result.output;
+    free_test_result(&result);
+}
+
+TEST(LambdaReplSessionTests, functional_session_rejects_procedural_entries) {
+    // S16.7.6: `lambda` is functional, as a file's top level is
+    test_result result = run_lambda_repl("var v = 1\npn p() { 1 }\np()\nquit");
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_GE(count_substr(result.output, "error[E224]"), 2) << result.output;
+    EXPECT_EQ(strstr(result.output, "Procedural session"), nullptr) << result.output;
+    free_test_result(&result);
+}
+
+TEST(LambdaReplSessionTests, procedural_session_runs_statements) {
+    // S16.7.6: `lambda run` warns, keeps `var` across entries, calls `pn`,
+    // and statements echo nothing
+    test_result result = run_lambda_repl_with(
+        "var v = 1\nv = v + 41\nv\nvar k = 0\nwhile (k < 3) { k = k + 1 }\nk\n"
+        "pn p(n) { n * 10 }\np(k)\nquit", k_procedural);
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_NE(strstr(result.output, "Procedural session"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "> > 42\n"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "> > > 3\n"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "> > 30\n"), nullptr) << result.output;
+    EXPECT_EQ(strstr(result.output, "rolled back"), nullptr) << result.output;
+    free_test_result(&result);
+}
+
+TEST(LambdaReplSessionTests, failed_entry_restores_procedural_state) {
+    // D8.1.1v17: a failing entry's writes are rolled back with it
+    test_result result = run_lambda_repl_with(
+        "var v = 1\n{ v = 99; error(\"boom\") }\nv\nquit", k_procedural);
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_NE(strstr(result.output, "boom"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "Entry rolled back."), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "> 1\n"), nullptr) << result.output;
+    free_test_result(&result);
+}
+
+TEST(LambdaReplSessionTests, file_import_initializes_module) {
+    // D7.2.2: an entry's import cone initializes before the entry runs
+    FILE* module = fopen("temp/repl_session_import_mod.ls", "w");
+    ASSERT_NE(module, nullptr);
+    fputs("pub fn twice(n) { n * 2 }\npub let base = 40\n", module);
+    fclose(module);
+    test_result result = run_lambda_repl(
+        "import m: .temp.repl_session_import_mod\nm.twice(4)\nm.base + 2\nquit");
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_NE(strstr(result.output, "> 8\n"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output, "> 42\n"), nullptr) << result.output;
+    free_test_result(&result);
+    unlink("temp/repl_session_import_mod.ls");
+}
+
+TEST(LambdaReplSessionTests, tiers_agree) {
+    // D8.1.1v17: the tier governs satellites only, so output is identical
+    const char* input = "fn sq(n) { n * n }\nsq(2)\nsq(3)\nsq(4)\nsq(5)\nsq(6)\nsq(7)\nquit";
+    static const char* const k_interp[] = {"--tier=interp", NULL};
+    static const char* const k_jit[] = {"--tier=jit", NULL};
+    test_result auto_run = run_lambda_repl(input);
+    test_result interp_run = run_lambda_repl_with(input, k_interp);
+    test_result jit_run = run_lambda_repl_with(input, k_jit);
+    ASSERT_NE(auto_run.output, nullptr);
+    ASSERT_NE(interp_run.output, nullptr);
+    ASSERT_NE(jit_run.output, nullptr);
+    EXPECT_NE(strstr(auto_run.output, "> > 4\n> 9\n> 16\n> 25\n> 36\n> 49\n"), nullptr)
+        << auto_run.output;
+    EXPECT_NE(strstr(interp_run.output, "> > 4\n> 9\n> 16\n> 25\n> 36\n> 49\n"), nullptr)
+        << interp_run.output;
+    EXPECT_NE(strstr(jit_run.output, "> > 4\n> 9\n> 16\n> 25\n> 36\n> 49\n"), nullptr)
+        << jit_run.output;
+    free_test_result(&auto_run);
+    free_test_result(&interp_run);
+    free_test_result(&jit_run);
+}
+
+#ifndef _WIN32
+TEST(LambdaReplSessionTests, sigint_interrupts_the_running_entry) {
+    // RI4: SIGINT faults the entry, rolls it back, and the session continues
+    const char* input_path = "temp/repl_session_sigint_input.txt";
+    const char* output_path = "temp/repl_session_sigint_output.txt";
+    FILE* input = fopen(input_path, "w");
+    ASSERT_NE(input, nullptr);
+    fputs("var k = 0\nwhile (true) { k = k + 1 }\nk > 0\n1 + 1\nquit\n", input);
+    fclose(input);
+    pid_t pid = fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+        freopen(input_path, "r", stdin);
+        freopen(output_path, "w", stdout);
+        dup2(fileno(stdout), fileno(stderr));
+        execl(LAMBDA_EXE, LAMBDA_EXE, "--no-log", "run", (char*)NULL);
+        _exit(127);
+    }
+    usleep(1500 * 1000);
+    kill(pid, SIGINT);
+    int status = 0;
+    pid_t done = 0;
+    for (int i = 0; i < 50 && done == 0; i++) {
+        done = waitpid(pid, &status, WNOHANG);
+        if (done == 0) usleep(100 * 1000);
+    }
+    if (done == 0) {
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+        FAIL() << "the session did not finish after SIGINT";
+    }
+    EXPECT_TRUE(WIFEXITED(status)) << "the session was terminated by the signal";
+    FILE* output = fopen(output_path, "r");
+    ASSERT_NE(output, nullptr);
+    char text[8192] = {0};
+    size_t length = fread(text, 1, sizeof(text) - 1, output);
+    fclose(output);
+    text[length] = '\0';
+    EXPECT_NE(strstr(text, "Interrupted"), nullptr) << text;
+    EXPECT_NE(strstr(text, "> false\n"), nullptr) << text;
+    EXPECT_NE(strstr(text, "> 2\n"), nullptr) << text;
+    unlink(input_path);
+    unlink(output_path);
+}
+#endif
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);

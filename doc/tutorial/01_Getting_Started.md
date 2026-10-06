@@ -14,8 +14,8 @@ lambda --help
 
 ```text partial
 Usage:
-  lambda                       - Start REPL mode (default)
-  lambda [script.ls]           - Run a script file
+  lambda                       - Start a functional REPL session (default)
+  lambda <script.ls>           - Run a script file
 ```
 
 The help lists every command. [Lambda_CLI.md](../Lambda_CLI.md) describes each one in full.
@@ -28,7 +28,6 @@ Run `lambda` with no arguments to start the REPL (read–eval–print loop). Typ
 λ> 1 + 2
 3
 λ> let x = 5
-null
 λ> x * 3
 15
 λ> [1, 2] ++ [3]
@@ -40,10 +39,11 @@ null
 }
 ```
 
-- A `let` binding has no value of its own, so the REPL shows `null` for it; the name stays bound for later lines.
+- A `let` binding produces no value, so the REPL prints nothing for it; the name stays bound for later lines.
 - Values print in Lambda's own notation: strings in double quotes, symbols such as `'en'` in single quotes, maps in braces.
 - An incomplete line continues on the next one, with the continuation prompt `..`.
-- `help` lists the REPL commands, `clear` clears the history, and `quit` exits. The prompt is `λ>` on UTF-8 terminals and `>` elsewhere.
+- Each line runs once: earlier lines are never re-run. A line that fails is reported and rolled back, so the session keeps its last good state.
+- `help` lists the REPL commands, `clear` starts a fresh session, and `quit` exits. The prompt is `λ>` on UTF-8 terminals and `>` elsewhere.
 
 ## Your First Script
 

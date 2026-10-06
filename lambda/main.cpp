@@ -986,7 +986,7 @@ extern void event_sim_set_replay_assert_state(bool assert_state);
 extern void event_sim_set_result_path(const char* result_path);
 
 // REPL functions from main-repl.cpp
-extern int lambda_repl_init();
+extern int lambda_repl_init(InterpReplSession* session);
 extern void lambda_repl_cleanup();
 
 // MIR interpreter mode (from mir.c)
@@ -1062,14 +1062,9 @@ const char* get_continuation_prompt();
 TerminalReadResult lambda_repl_readline(const char *prompt);
 void print_help();
 
-// Statement completeness check for multi-line REPL input
-enum StatementStatus {
-    STMT_COMPLETE,      // statement is syntactically complete
-    STMT_INCOMPLETE,    // statement needs more input (missing closing braces, etc.)
-    STMT_ERROR          // statement has a syntax error
-};
-StatementStatus check_statement_completeness(const char* source);
-void print_repl_syntax_error(const char* source);
+// Lexical completeness fast path for multi-line REPL input; the session's
+// parser decides everything else.
+bool repl_has_unclosed_brackets(const char* source);
 
 // Linux-specific compatibility functions
 #ifdef NATIVE_LINUX_BUILD
@@ -1109,34 +1104,192 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 }
 #endif
 
-void run_repl(Runtime *runtime) {
+// RI4 (D8.1.1v17): while an entry runs, SIGINT requests an interrupt instead
+// of terminating the process; T0 turns the request into a fault at its next
+// call entry or back-edge and the session rolls the entry back. The line
+// editor owns SIGINT while it reads, so the handler is armed per entry.
+static void repl_sigint_handler(int signal_number) {
+    (void)signal_number;
+    interp_interrupt_request();
+}
+
+#ifndef _WIN32
+static struct sigaction g_repl_saved_sigint;
+#else
+static void (*g_repl_saved_sigint)(int) = NULL;
+#endif
+
+static void repl_arm_interrupt(bool arm) {
+#ifndef _WIN32
+    if (arm) {
+        struct sigaction action;
+        memset(&action, 0, sizeof(action));
+        action.sa_handler = repl_sigint_handler;
+        sigemptyset(&action.sa_mask);
+        sigaction(SIGINT, &action, &g_repl_saved_sigint);
+    } else {
+        sigaction(SIGINT, &g_repl_saved_sigint, NULL);
+    }
+#else
+    if (arm) g_repl_saved_sigint = signal(SIGINT, repl_sigint_handler);
+    else signal(SIGINT, g_repl_saved_sigint ? g_repl_saved_sigint : SIG_DFL);
+#endif
+    if (!arm) interp_interrupt_clear();
+}
+
+// Runs one complete entry with SIGINT armed, then echoes its value or reports
+// the rollback. INCOMPLETE is returned untouched for the caller to decide.
+static ReplEntryStatus repl_run_entry(InterpReplSession* session,
+                                      const char* source, bool timed) {
+    Item result = ItemNull;
+    uint64_t started = time_now_ns();
+    repl_arm_interrupt(true);
+    ReplEntryStatus status = interp_repl_session_eval(session, source, &result);
+    repl_arm_interrupt(false);
+    double elapsed = time_elapsed_ms_f(started, time_now_ns());
+    if (status == REPL_ENTRY_INCOMPLETE) return status;
+    if (status != REPL_ENTRY_OK) {
+        // the session printed the diagnosis; this line reports the rollback
+        fflush(stderr);
+        printf("Entry rolled back.\n");
+    } else if (!session->declarations_only) {   // S16.7.4: no item, no echo
+        StrBuf* output = strbuf_new_cap(256);
+        print_root_item(output, result);
+        if (output->length > 0) printf("%s", output->str);
+        strbuf_free(output);
+    }
+    if (timed) printf("time: %.3f ms\n", elapsed);
+    return status;
+}
+
+// `.name` or `.name <arg>` at the start of a fresh entry. Only these exact
+// spellings are commands, so no Lambda entry is ever taken for one.
+static bool repl_command(const char* line, const char* name, const char** arg) {
+    size_t length = strlen(name);
+    if (line[0] != '.' || strncmp(line + 1, name, length) != 0) return false;
+    const char* rest = line + 1 + length;
+    if (*rest && *rest != ' ' && *rest != '\t') return false;
+    while (*rest == ' ' || *rest == '\t') rest++;
+    *arg = rest;
+    return true;
+}
+
+// `.env`: one line per session binding, latest value from the module slab.
+static void repl_print_binding(void* opaque, const char* name, size_t length,
+                               Item value, bool imported) {
+    (void)opaque;
+    if (imported) {
+        printf("%.*s (import)\n", (int)length, name);
+        return;
+    }
+    if (get_type_id(value) == LMD_TYPE_FUNC) {
+        // the value printer shows a function's address; its colour is the fact
+        TypeFunc* signature = (TypeFunc*)((Function*)(uintptr_t)value.item)->fn_type;
+        printf("%.*s = %s\n", (int)length, name,
+            signature && signature->is_proc ? "pn" : "fn");
+        return;
+    }
+    StrBuf* text = strbuf_new_cap(64);
+    print_root_item(text, value);
+    // one line per binding: fold the printer's layout whitespace
+    StrBuf* line = strbuf_new_cap(text->length + 1);
+    bool space = false;
+    for (size_t i = 0; i < text->length; i++) {
+        char c = text->str[i];
+        bool blank = c == '\n' || c == ' ' || c == '\t';
+        if (blank) { space = line->length > 0; continue; }
+        if (space) strbuf_append_char(line, ' ');
+        space = false;
+        strbuf_append_char(line, c);
+    }
+    if (line->length > 72) printf("%.*s = %.69s...\n", (int)length, name, line->str);
+    else printf("%.*s = %s\n", (int)length, name, line->str);
+    strbuf_free(line);
+    strbuf_free(text);
+}
+
+// Session commands (D8.1.1v17 services). Returns false when `line` is not one.
+static bool repl_session_command(InterpReplSession* session, const char* line) {
+    const char* arg = NULL;
+    if (repl_command(line, "env", &arg)) {
+        interp_repl_session_each_binding(session, repl_print_binding, NULL);
+        return true;
+    }
+    if (repl_command(line, "type", &arg)) {
+        const char* type = NULL;
+        ReplEntryStatus status = interp_repl_session_type(session, arg, &type);
+        if (status == REPL_ENTRY_OK) printf("%s\n", type ? type : "unknown");
+        else if (status == REPL_ENTRY_INCOMPLETE) fputs("error: .type needs a complete expression\n", stderr);
+        return true;
+    }
+    if (repl_command(line, "time", &arg)) {
+        if (repl_run_entry(session, arg, true) == REPL_ENTRY_INCOMPLETE) {
+            fputs("error: .time needs a complete entry\n", stderr);
+        }
+        return true;
+    }
+    if (repl_command(line, "load", &arg)) {
+        // the file is one entry, so a failure anywhere rolls all of it back
+        char* source = NULL;
+        if (!arg[0] || !file_read_all(arg, MEM_CAT_SYSTEM, &source, NULL)) {
+            fprintf(stderr, "error: cannot read '%s'\n", arg);
+            return true;
+        }
+        if (repl_run_entry(session, source, false) == REPL_ENTRY_INCOMPLETE) {
+            fprintf(stderr, "error: '%s' ends in an incomplete entry\n", arg);
+        }
+        mem_free(source);
+        return true;
+    }
+    if (repl_command(line, "save", &arg)) {
+        if (!arg[0]) {
+            fputs("error: .save needs a file name\n", stderr);
+            return true;
+        }
+        const char* source = interp_repl_session_source(session);
+        StrBuf* text = strbuf_new_cap(strlen(source) + 2);
+        strbuf_append_str(text, source);
+        if (text->length > 0) strbuf_append_char(text, '\n');
+        write_text_file(arg, text->str);
+        printf("Saved the session's accepted entries to %s\n", arg);
+        strbuf_free(text);
+        return true;
+    }
+    return false;
+}
+
+// One persistent T0 session is the only REPL engine (D8.1.1v17): each complete
+// entry is parsed, planned and executed as a fragment; nothing is replayed.
+// `procedural` selects the `lambda run` session kind (S16.7.6).
+int run_repl(Runtime *runtime, bool procedural) {
     printf("Lambda Script REPL v1.0\n");
     printf("Type help for commands, quit to exit\n");
     printf("Multi-line input: use continuation prompt (.. ) for incomplete statements\n");
+    if (procedural) {
+        // S16.7.6: the session kind is announced so it is never mistaken for
+        // the functional default
+        printf("Procedural session: entries carry out effects "
+               "(files, network, process state) as they run.\n");
+    }
 
-    // Initialize command line editor
-    if (lambda_repl_init() != 0) {
+    // The session is always T0; the tier only governs satellite promotion,
+    // and `jit` promotes at the first call instead of compiling a module.
+    if (lambda_tier_selected() == LAMBDA_TIER_JIT) {
+        lambda_tier_set(LAMBDA_TIER_AUTO);
+        interp_set_func_jit_threshold_default(1);
+    }
+    InterpReplSession session = {};
+    if (!interp_repl_session_init(&session, runtime, procedural)) {
+        fprintf(stderr, "error: REPL unavailable: could not create the interpreter session\n");
+        return 1;
+    }
+
+    if (lambda_repl_init(&session) != 0) {
         printf("Warning: Failed to initialize readline, using basic input\n");
     }
-
-    // Get the best prompt for this system
     const char* main_prompt = get_repl_prompt();
     const char* cont_prompt = get_continuation_prompt();
-
-    StrBuf *repl_history = strbuf_new_cap(1024);  // accumulated script buffer
-    StrBuf *pending_input = strbuf_new_cap(256);  // current multi-line input
-    StrBuf *last_output = strbuf_new_cap(256);    // last output for incremental display
-    char *line;
-    int exec_count = 0;
-    InterpReplSession interp_session = {};
-    // P4 is opt-in through the existing interpreter tiers. The shipped JIT
-    // REPL retains its historical whole-history behavior until P5 flips the
-    // default execution policy (D8.1.1v2).
-    bool persistent_interp = lambda_tier_selected() != LAMBDA_TIER_JIT &&
-        interp_repl_session_init(&interp_session, runtime);
-    if (lambda_tier_selected() != LAMBDA_TIER_JIT && !persistent_interp) {
-        log_error("interp-repl: falling back to historical REPL execution");
-    }
+    StrBuf *pending_input = strbuf_new_cap(256);  // current multi-line entry
 
     while (true) {
         TerminalReadResult read = lambda_repl_readline(
@@ -1146,7 +1299,7 @@ void run_repl(Runtime *runtime) {
             continue;
         }
         if (read.status != TERMINAL_READ_LINE) break;
-        line = read.line;
+        char* line = read.line;
         // Skip empty lines when not in multi-line mode
         if (strlen(line) == 0 && pending_input->length == 0) {
             mem_free(line);
@@ -1159,147 +1312,42 @@ void run_repl(Runtime *runtime) {
                 mem_free(line);
                 break;
             }
-
             if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
                 print_help();
                 mem_free(line);
                 continue;
             }
-
             if (strcmp(line, "clear") == 0) {
-                strbuf_reset(repl_history);
-                strbuf_reset(last_output);
-                if (persistent_interp) {
-                    interp_repl_session_destroy(&interp_session);
-                    persistent_interp = interp_repl_session_init(&interp_session, runtime);
-                    if (!persistent_interp) {
-                        log_error("interp-repl: failed to reset persistent session");
-                    }
-                }
-                printf("REPL history cleared\n");
                 mem_free(line);
+                // S16.7.5: `clear` is the only way to rebind a session name
+                interp_repl_session_destroy(&session);
+                if (!interp_repl_session_init(&session, runtime, procedural)) {
+                    fprintf(stderr, "error: REPL unavailable: could not reset the session\n");
+                    break;
+                }
+                printf("Session cleared\n");
                 continue;
             }
         }
 
-        // Append line to pending input
-        if (pending_input->length > 0) {
-            strbuf_append_str(pending_input, "\n");
+        if (pending_input->length == 0 && repl_session_command(&session, line)) {
+            mem_free(line);
+            continue;
         }
+
+        if (pending_input->length > 0) strbuf_append_str(pending_input, "\n");
         strbuf_append_str(pending_input, line);
         mem_free(line);
-
-        // Check whether the statement has balanced delimiters before parsing.
-        StatementStatus status = check_statement_completeness(pending_input->str);
-
-        if (status == STMT_INCOMPLETE) {
-            // Need more input - continue with continuation prompt
-            continue;
-        }
-
-        if (status == STMT_ERROR) {
-            // Syntax error - discard the pending input and let user retry
-            print_repl_syntax_error(pending_input->str);
-            printf("Input discarded.\n");
-            strbuf_reset(pending_input);
-            continue;
-        }
-
-        if (persistent_interp) {
-            Item result = interp_repl_session_eval(&interp_session, pending_input->str);
-            strbuf_reset(pending_input);
-            if (get_type_id(result) == LMD_TYPE_ERROR && interp_session.last_input_rejected) {
-                // The session restores its slab and AST append transaction
-                // before returning an error, so the next input sees the last
-                // successful environment rather than a partially evaluated cell.
-                // Print the diagnosis first: the rollback notice alone told the
-                // user nothing about WHY, which silently dropped every parse and
-                // type diagnostic the REPL is supposed to teach with.
-                LambdaError* last_error = get_persistent_last_error();
-                if (last_error) err_print(last_error);
-                printf("Error during execution. Last input rolled back.\n");
-                continue;
-            }
-            StrBuf* output = strbuf_new_cap(256);
-            print_root_item(output, result);
-            if (output->length > 0) printf("%s", output->str);
-            strbuf_free(output);
-            continue;
-        }
-
-        // Statement is complete - add to history and execute
-        size_t saved_history_len = repl_history->length;
-        if (repl_history->length > 0) {
-            // S16.2.3: each REPL entry is its own statement. Joining them with a
-            // bare newline let a dual-role lead (`[`, `(`, `-`, ...) read as a
-            // continuation of the previous entry, so `1 + 1` then `[1,2,3]`
-            // failed to parse instead of evaluating. `;` is the explicit
-            // separator that repair calls for; skip it when one is already
-            // there, since an empty statement slot is itself an error.
-            size_t tail = repl_history->length;
-            while (tail > 0 && (repl_history->str[tail - 1] == '\n' ||
-                    repl_history->str[tail - 1] == ' ' ||
-                    repl_history->str[tail - 1] == '\t')) { tail--; }
-            if (tail > 0 && repl_history->str[tail - 1] != ';') {
-                strbuf_append_str(repl_history, ";");
-            }
-            strbuf_append_str(repl_history, "\n");
-        }
-        strbuf_append_str(repl_history, pending_input->str);
+        if (repl_has_unclosed_brackets(pending_input->str)) continue;
+        if (repl_run_entry(&session, pending_input->str, false) == REPL_ENTRY_INCOMPLETE) continue;
         strbuf_reset(pending_input);
-
-        // Create a unique script path for each execution
-        char script_path[64];
-        snprintf(script_path, sizeof(script_path), "<repl-%d>", ++exec_count);
-
-        // Run the accumulated script through the sole MIR Direct backend.
-        Input* output_input = run_script_mir(runtime, repl_history->str, script_path, false);
-
-        if (output_input) {
-            if (output_input->root.type_id() == LMD_TYPE_ERROR) {
-                // Runtime error - rollback the last input, after reporting why.
-                LambdaError* last_error = get_persistent_last_error();
-                if (last_error) err_print(last_error);
-                printf("Error during execution. Last input rolled back.\n");
-                repl_history->str[saved_history_len] = '\0';
-                repl_history->length = saved_history_len;
-            } else {
-                // Success - print only new output (incremental display)
-                StrBuf *full_output = strbuf_new_cap(256);
-                print_root_item(full_output, output_input->root);
-
-                // Print only the portion after last_output
-                if (full_output->length > last_output->length) {
-                    // check if prefix matches
-                    if (last_output->length == 0 ||
-                        strncmp(full_output->str, last_output->str, last_output->length) == 0) {
-                        // print only the new part
-                        printf("%s", full_output->str + last_output->length);
-                    } else {
-                        // output structure changed, print all
-                        printf("%s", full_output->str);
-                    }
-                } else if (full_output->length > 0) {
-                    // output got shorter or same - just print it
-                    printf("%s", full_output->str);
-                }
-
-                // save for next incremental display
-                strbuf_reset(last_output);
-                strbuf_append_str(last_output, full_output->str);
-                strbuf_free(full_output);
-            }
-        }
     }
     printf("\n");  // print one last '\n', otherwise, may see '%' at the end of the line
 
-    // Cleanup command line editor
     lambda_repl_cleanup();
-
-    interp_repl_session_destroy(&interp_session);
-    strbuf_free(repl_history);
+    interp_repl_session_destroy(&session);
     strbuf_free(pending_input);
-    strbuf_free(last_output);
+    return 0;
 }
 
 // Run a script file and return 0 on success, 1 on failure
@@ -5411,7 +5459,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Script Runner v1.0\n\n");
-            printf("Usage: %s run <script>\n", argv[0]);
+            printf("Usage: %s run [script]\n", argv[0]);
+            printf("  Without a script, opens a procedural REPL session.\n");
             printf("\nOptions:\n");
             printf("  --no-drain      Return without draining spawned tasks\n");
             printf("  -h, --help     Show this help message\n");
@@ -5450,9 +5499,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
 
         if (!script_file) {
-            printf("Error: run command requires a script file\n");
-            printf("Usage: %s run <script>\n", argv[0]);
-            return lambda_main_finish(1);
+            // S16.7.6: `lambda run` without a script is a procedural session
+            int result = run_repl(&runtime, true);
+            runtime_cleanup(&runtime);
+            return lambda_main_finish(result);
         }
 
         // Check if script file exists
@@ -5557,8 +5607,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         ret_code = run_script_file(&runtime, script_file, false);  // false for run_main in regular execution
         emit_lambda_compiler_timing(script_file);
     } else {
-        // Start the MIR-Direct REPL by default.
-        run_repl(&runtime);
+        // Start the functional REPL session by default (S16.7.6).
+        ret_code = run_repl(&runtime, false);
     }
 
     cleanup_utf8proc_support();

@@ -118,6 +118,8 @@ bool lambda_module_state_copy_var_prefix(uint32_t source_module_id,
 // Interpreter REPL modules append bindings after their first entry. This
 // grows the precise root range while preserving the existing slot values.
 bool lambda_module_state_grow_vars(uint32_t module_id, uint32_t var_count);
+// One module slot of the calling thread's context, ItemNull when absent.
+Item lambda_module_state_var(uint32_t module_id, int32_t slot);
 bool lambda_module_state_snapshot(uint32_t module_id,
                                   LambdaModuleStateSnapshot* snapshot);
 bool lambda_module_state_restore(uint32_t module_id,

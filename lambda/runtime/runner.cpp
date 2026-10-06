@@ -2381,8 +2381,96 @@ static void repl_report_transpiler_errors(ArrayList* errors) {
     }
 }
 
-static void repl_free_transpiler_errors(ArrayList* errors) {
-    free_transpiler_error_list(errors);
+// One entry's append transaction over the session Script. Every rejection
+// or failure restores exactly these fields, so an entry is all-or-nothing
+// (D8.1.1v17) and the next one sees the last successful environment.
+typedef struct ReplEntryTxn {
+    Script* script;
+    AstScript* root;
+    size_t source_length;
+    NameEntry* scope_first;
+    NameEntry* scope_last;
+    int const_count;
+    int type_count;
+    uint32_t slab_count;
+    AstNode* prior_last;
+    bool linked;  // the fragment is on the root chain and in the AST index
+} ReplEntryTxn;
+
+static void repl_entry_begin(ReplEntryTxn* txn, Script* script) {
+    memset(txn, 0, sizeof(*txn));
+    txn->script = script;
+    txn->root = (AstScript*)script->ast_root;
+    txn->source_length = script->repl_source->length;
+    NameScope* globals = txn->root->global_vars;
+    txn->scope_first = globals ? globals->first : NULL;
+    txn->scope_last = globals ? globals->last : NULL;
+    txn->const_count = script->const_list ? script->const_list->length : 0;
+    txn->type_count = script->type_list ? script->type_list->length : 0;
+    txn->slab_count = script->interp_slab_count;
+    txn->prior_last = script->repl_last_top_level;
+}
+
+static void repl_entry_rollback(ReplEntryTxn* txn) {
+    Script* script = txn->script;
+    if (txn->linked) {
+        if (txn->prior_last) txn->prior_last->next = NULL;
+        else txn->root->child = NULL;
+    }
+    repl_restore_scope(txn->root->global_vars, txn->scope_first, txn->scope_last);
+    if (script->const_list) script->const_list->length = txn->const_count;
+    if (script->type_list) script->type_list->length = txn->type_count;
+    // a plan rejection restores the count; once the slab has grown its
+    // layout is sealed at the larger count, so a failed entry's slots stay
+    // allocated (the snapshot restore zeroed them) and are simply unused
+    script->interp_slab_count = txn->slab_count;
+    if (txn->linked) {
+        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
+    }
+    repl_restore_source(script, txn->source_length);
+}
+
+static ReplEntryStatus repl_entry_reject(ReplEntryTxn* txn) {
+    repl_entry_rollback(txn);
+    return REPL_ENTRY_REJECTED;
+}
+
+// S16.7.4/S16.7.6: declarations (`let`, `fn`, `pn`, `type`, `import`, ...)
+// and statements (assignment, `while`, a statement `for`, a control `if`)
+// produce no item. A named function definition is a declaration; an anonymous
+// arrow is a value and echoes.
+static bool repl_item_produces_no_item(AstNode* item) {
+    if (!item) return true;
+    if (item->node_type == AST_NODE_IMPORT) return true;
+    if (item->node_type == AST_NODE_CONTENT) {
+        for (AstNode* inner = ((AstListNode*)item)->item; inner; inner = inner->next) {
+            if (!repl_item_produces_no_item(inner)) return false;
+        }
+        return true;
+    }
+    if (item->node_type == AST_NODE_FUNC_EXPR) return ((AstFuncNode*)item)->name != NULL;
+    if ((item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_MATCH_EXPR) &&
+            ast_branch_kind(item) == AST_BRANCH_CONTROL) return true;
+    return is_declaration_node(item->node_type) ||
+        is_side_effect_stam(item->node_type) ||
+        is_procedural_only_stam(item->node_type) || ast_for_discards_result(item);
+}
+
+static bool repl_fragment_declarations_only(AstNode* fragment) {
+    for (AstNode* item = fragment; item; item = item->next) {
+        if (!repl_item_produces_no_item(item)) return false;
+    }
+    return true;
+}
+
+// A failed entry reports the error it completed with; a fault or a payload-less
+// error falls back to the context's diagnostic mirror.
+static void repl_report_failure(Item result) {
+    LambdaError* error = it2err(result);
+    if (!error) error = get_persistent_last_error();
+    if (error) err_print(error);
+    else fputs("error: the entry completed with an error and no diagnostic\n", stderr);
+    clear_persistent_last_error();
 }
 
 struct ReplFragmentIndexOwner {
@@ -2413,15 +2501,18 @@ void interp_repl_session_destroy(InterpReplSession* session) {
             runtime->scripts->data[index] = NULL;
         }
     }
+    if (session->initialized_modules) arraylist_free(session->initialized_modules);
     memset(session, 0, sizeof(*session));
 }
 
-bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
+bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime,
+        bool procedural) {
     if (!session || !runtime) return false;
     interp_repl_session_destroy(session);
 
     // The normal loader owns AST/pool initialization. Build the empty session
-    // through its T0 branch even when the shell's default remains eager JIT.
+    // through its T0 branch whatever tier the shell selected: the session is
+    // always T0, and the tier only governs satellite promotion (D8.1.1v17).
     LambdaTier saved_tier = lambda_tier_selected();
     lambda_tier_set(LAMBDA_TIER_INTERP);
     Script* script = load_script(runtime, "<repl-session>", "", false);
@@ -2431,10 +2522,11 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
         return false;
     }
     script->repl_source = strbuf_new_cap(256);
-    if (!script->repl_source) {
-        log_error("interp-repl: could not allocate retained source state");
-        // The bootstrap source still has Script ownership until both retained
-        // buffers exist; clear partial replacements before common teardown.
+    session->initialized_modules = arraylist_new(4);
+    if (!script->repl_source || !session->initialized_modules) {
+        log_error("interp-repl: could not allocate retained session state");
+        // The bootstrap source still has Script ownership until the retained
+        // buffer exists; clear a partial replacement before common teardown.
         if (script->repl_source) {
             strbuf_free(script->repl_source);
             script->repl_source = NULL;
@@ -2449,8 +2541,14 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
     mem_free((void*)script->source);
     script->source = script->repl_source->str;
 
+    // S16.7.6: a procedural session's top level is one persistent `pn` body;
+    // the resolver's procedure checks read this scope flag.
+    AstScript* root = (AstScript*)script->ast_root;
+    if (root && root->global_vars) root->global_vars->is_proc = procedural;
+
     runner_init(runtime, &session->runner);
     session->runner.script = script;
+    session->procedural = procedural;
     runner_setup_context(&session->runner);
     if (!session->runner.context || !lambda_module_state_prepare(
             script->module_state_id, script->interp_slab_count)) {
@@ -2462,29 +2560,26 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
     return true;
 }
 
-Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
-    if (session) session->last_input_rejected = false;
+// Appends `source` and builds it against the retained scope. On OK the entry
+// is built (spans rebased) but neither planned nor linked; every other status
+// has already rolled the transaction back and reported its diagnostics.
+static ReplEntryStatus repl_entry_build(InterpReplSession* session,
+        const char* source, ReplEntryTxn* txn, AstNode** out_fragment) {
+    *out_fragment = NULL;
     if (!session || !session->initialized || !session->runner.runtime ||
-            !session->runner.script || !source) return (session->last_input_rejected = true), ItemError;
+            !session->runner.script || !source) return REPL_ENTRY_REJECTED;
     Script* script = session->runner.script;
     AstScript* root = (AstScript*)script->ast_root;
-    if (!root || !script->repl_source) return (session->last_input_rejected = true), ItemError;
+    if (!root || !script->repl_source) return REPL_ENTRY_REJECTED;
 
-    size_t saved_source_length = script->repl_source->length;
-    size_t prefix_length = saved_source_length;
+    repl_entry_begin(txn, script);
+    size_t prefix_length = txn->source_length;
     if (prefix_length) {
         strbuf_append_char(script->repl_source, '\n');
         prefix_length++;
     }
     strbuf_append_str(script->repl_source, source);
     script->source = script->repl_source->str;
-
-    NameScope* globals = root->global_vars;
-    NameEntry* saved_scope_first = globals ? globals->first : NULL;
-    NameEntry* saved_scope_last = globals ? globals->last : NULL;
-    int saved_const_count = script->const_list ? script->const_list->length : 0;
-    int saved_type_count = script->type_list ? script->type_list->length : 0;
-    uint32_t saved_slab_count = script->interp_slab_count;
 
     Transpiler tp = {};
     memcpy(&tp, script, sizeof(Script));
@@ -2494,7 +2589,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     ReplFragmentIndexOwner fragment_index = {&tp.ast_index};
     tp.script_owner = script;
     tp.runtime = session->runner.runtime;
-    tp.current_scope = globals;
+    tp.current_scope = root->global_vars;
     tp.max_errors = session->runner.runtime->max_errors > 0
         ? session->runner.runtime->max_errors : 10;
     tp.errors = arraylist_new(4);
@@ -2504,17 +2599,19 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     const char* fragment_source = script->source + prefix_length;
     LambdaParseStatus parse_status = lambda_rd_reduce_ast(&tp, fragment_source,
         strlen(source), &parsed_root, &parse_error);
+    if (parse_status == LAMBDA_PARSE_INCOMPLETE) {
+        // The C parser is the completeness authority (D8.1.1v17): the driver
+        // keeps collecting lines, and nothing of this probe is retained.
+        free_transpiler_error_list(tp.errors);
+        repl_entry_rollback(txn);
+        return REPL_ENTRY_INCOMPLETE;
+    }
     if (parse_status != LAMBDA_PARSE_OK || !parsed_root) {
         record_direct_parse_diagnostics(&tp, "<repl>", &parse_error);
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        script->interp_slab_count = saved_slab_count;
-        repl_restore_source(script, saved_source_length);
         repl_report_transpiler_errors(tp.errors);
-        repl_free_transpiler_errors(tp.errors);
+        free_transpiler_error_list(tp.errors);
         log_error("interp-repl: direct parser rejected completed input");
-        return (session->last_input_rejected = true), ItemError;
+        return repl_entry_reject(txn);
     }
     bool finalized = ast_index_build_profile(&tp.ast_index,
         (AstNode*)parsed_root, script->profile) &&
@@ -2522,19 +2619,28 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
 
     AstNode* fragment = parsed_root->child;
     if (!finalized || tp.error_count != 0 || !fragment) {
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        script->interp_slab_count = saved_slab_count;
-        repl_restore_source(script, saved_source_length);
         repl_report_transpiler_errors(tp.errors);
-        repl_free_transpiler_errors(tp.errors);
-        return (session->last_input_rejected = true), ItemError;
+        free_transpiler_error_list(tp.errors);
+        return repl_entry_reject(txn);
     }
+    free_transpiler_error_list(tp.errors);
     // Direct parsing is intentionally fragment-local for REPL latency. Rebase
     // every retained AST span before the fragment sees the append-only source.
     lambda_ast_shift_source_spans(fragment, (uint32_t)prefix_length);
-    repl_free_transpiler_errors(tp.errors);
+    *out_fragment = fragment;
+    return REPL_ENTRY_OK;
+}
+
+ReplEntryStatus interp_repl_session_eval(InterpReplSession* session,
+        const char* source, Item* out) {
+    if (out) *out = ItemNull;
+    if (session) session->declarations_only = false;
+    ReplEntryTxn txn;
+    AstNode* fragment = NULL;
+    ReplEntryStatus built = repl_entry_build(session, source, &txn, &fragment);
+    if (built != REPL_ENTRY_OK) return built;
+    Script* script = session->runner.script;
+    AstScript* root = txn.root;
 
     AstScript scan_root = {};
     scan_root.node_type = AST_SCRIPT;
@@ -2543,68 +2649,136 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     scan_script.ast_root = (AstNode*)&scan_root;
     scan_script.profile = script->profile;
     AstNodeType reject = AST_NODE_NULL;
-    bool supported = interp_scan_supported(&scan_script, &reject);
-    bool planned = supported && interp_plan_repl_fragment(script, fragment);
-    bool slab_grown = planned && lambda_module_state_grow_vars(
-        script->module_state_id, script->interp_slab_count);
-    if (!supported || !planned || !slab_grown) {
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        if (!slab_grown) script->interp_slab_count = saved_slab_count;
-        repl_restore_source(script, saved_source_length);
-        log_error("interp-repl: rejected fragment node=%s",
+    if (!interp_scan_supported(&scan_script, &reject)) {
+        // RI5: T0 coverage is the fix; an entry is never compiled on its own.
+        fprintf(stderr, "error: %s is not supported in the REPL yet\n",
             interp_node_kind_name(reject));
-        return (session->last_input_rejected = true), ItemError;
+        log_error("interp-repl: rejected fragment node=%s", interp_node_kind_name(reject));
+        return repl_entry_reject(&txn);
     }
+    Script* unsupported_import = interp_repl_fragment_unsupported_import(fragment);
+    if (unsupported_import) {
+        fprintf(stderr, "error: imported module '%s' is not supported in the REPL yet\n",
+            unsupported_import->reference ? unsupported_import->reference : "<module>");
+        return repl_entry_reject(&txn);
+    }
+    if (!interp_plan_repl_fragment(script, fragment) ||
+            !lambda_module_state_grow_vars(script->module_state_id,
+                script->interp_slab_count)) {
+        fputs("error: the REPL could not plan storage for this entry\n", stderr);
+        return repl_entry_reject(&txn);
+    }
+    txn.slab_count = script->interp_slab_count;   // the grown layout is sealed
 
-    AstNode* prior_last = script->repl_last_top_level;
     AstNode* fragment_last = fragment;
     while (fragment_last->next) fragment_last = fragment_last->next;
-    if (prior_last) prior_last->next = fragment;
+    if (txn.prior_last) txn.prior_last->next = fragment;
     else root->child = fragment;
+    txn.linked = true;
     if (!ast_index_append_profile(&script->ast_index, fragment,
             (AstNode*)root, script->profile)) {
-        if (prior_last) prior_last->next = NULL;
-        else root->child = NULL;
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
-        repl_restore_source(script, saved_source_length);
-        return (session->last_input_rejected = true), ItemError;
+        fputs("error: the REPL could not index this entry\n", stderr);
+        return repl_entry_reject(&txn);
     }
 
     LambdaModuleStateSnapshot snapshot = {};
     if (!lambda_module_state_snapshot(script->module_state_id, &snapshot)) {
-        if (prior_last) prior_last->next = NULL;
-        else root->child = NULL;
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
-        repl_restore_source(script, saved_source_length);
-        return (session->last_input_rejected = true), ItemError;
+        fputs("error: the REPL could not snapshot the session\n", stderr);
+        return repl_entry_reject(&txn);
     }
-    TemplateRegistry* templates = session->runner.context->template_registry;
-    TemplateRegistry template_checkpoint = templates ? *templates : TemplateRegistry{};
-    Item result = interp_run_repl_fragment(&session->runner, fragment);
+    clear_persistent_last_error();   // a stale mirror must not explain this entry
+    InterpReplTemplateCheckpoint template_checkpoint = {};
+    InterpReplFragmentRun run = {fragment, session->initialized_modules,
+        session->procedural, &template_checkpoint};
+    Item result = interp_run_repl_fragment(&session->runner, &run);
     if (item_is_error(result)) {
-        template_registry_restore(templates, &template_checkpoint);
+        repl_report_failure(result);
+        if (template_checkpoint.ready) {
+            template_registry_restore(template_checkpoint.registry,
+                &template_checkpoint.snapshot);
+        }
         lambda_module_state_restore(script->module_state_id, &snapshot);
-        if (prior_last) prior_last->next = NULL;
-        else root->child = NULL;
-        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
-        if (script->const_list) script->const_list->length = saved_const_count;
-        if (script->type_list) script->type_list->length = saved_type_count;
-        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
-        repl_restore_source(script, saved_source_length);
         lambda_module_state_snapshot_dispose(&snapshot);
-        return result;
+        repl_entry_rollback(&txn);
+        return REPL_ENTRY_FAILED;
     }
     lambda_module_state_snapshot_dispose(&snapshot);
     script->repl_last_top_level = fragment_last;
-    return result;
+    session->declarations_only = repl_fragment_declarations_only(fragment);
+    if (out) *out = result;
+    return REPL_ENTRY_OK;
+}
+
+// ---------------------------------------------------------------------------
+// Session services (D8.1.1v17): each reads the live scope and slab or builds
+// an entry without running it; none re-runs anything.
+// ---------------------------------------------------------------------------
+
+const char* interp_repl_session_source(const InterpReplSession* session) {
+    Script* script = session ? session->runner.script : NULL;
+    return script && script->repl_source ? script->repl_source->str : "";
+}
+
+void interp_repl_session_each_binding(InterpReplSession* session,
+        InterpReplBindingVisitor visit, void* opaque) {
+    Script* script = session ? session->runner.script : NULL;
+    AstScript* root = script ? (AstScript*)script->ast_root : NULL;
+    if (!root || !root->global_vars || !visit) return;
+    for (NameEntry* entry = root->global_vars->first; entry; entry = entry->next) {
+        if (!entry->name) continue;
+        bool imported = entry->import != NULL;
+        // an imported name's slot indexes its owner's slab, not the session's
+        Item value = !imported && entry->storage_assigned &&
+                entry->binding_storage == BINDING_STORAGE_MODULE
+            ? lambda_module_state_var(script->module_state_id, entry->slot) : ItemNull;
+        visit(opaque, entry->name->chars, (size_t)entry->name->len, value, imported);
+    }
+}
+
+ReplEntryStatus interp_repl_session_type(InterpReplSession* session,
+        const char* source, const char** out_type) {
+    *out_type = NULL;
+    ReplEntryTxn txn;
+    AstNode* fragment = NULL;
+    ReplEntryStatus built = repl_entry_build(session, source, &txn, &fragment);
+    if (built != REPL_ENTRY_OK) return built;
+    AstNode* last = fragment;
+    while (last->next) last = last->next;
+    *out_type = type_contract_display_name(last->type);
+    repl_entry_rollback(&txn);   // typed, never run (S2.5.4v2 still holds)
+    return REPL_ENTRY_OK;
+}
+
+// Completion candidates for `word`: session names, then system functions,
+// then the lexer vocabulary. Duplicates (overloaded system functions, a
+// shadowing user name) are reported once.
+void interp_repl_session_complete(InterpReplSession* session, const char* word,
+        size_t length, InterpReplCompletionAdd add, void* sink) {
+    if (!word || !add) return;
+    ArrayList* seen = arraylist_new(16);
+    auto offer = [&](const char* text, size_t text_length) {
+        if (!text || text_length < length || strncmp(text, word, length) != 0) return;
+        for (int i = 0; seen && i < seen->length; i++) {
+            const char* prior = (const char*)seen->data[i];
+            if (strlen(prior) == text_length && strncmp(prior, text, text_length) == 0) return;
+        }
+        if (seen) arraylist_append(seen, (void*)text);
+        add(sink, text, text_length);
+    };
+    Script* script = session ? session->runner.script : NULL;
+    AstScript* root = script ? (AstScript*)script->ast_root : NULL;
+    for (NameEntry* entry = root && root->global_vars ? root->global_vars->first : NULL;
+            entry; entry = entry->next) {
+        if (entry->name) offer(entry->name->chars, (size_t)entry->name->len);
+    }
+    for (int i = 0; i < sys_func_def_count; i++) {
+        const char* name = sys_func_defs[i].name;
+        if (name) offer(name, strlen(name));
+    }
+    for (size_t i = 0; const char* text = lambda_lexer_vocabulary_word(i); i++) {
+        offer(text, strlen(text));
+    }
+    if (seen) arraylist_free(seen);
 }
 
 void runner_init(Runtime *runtime, Runner* runner) {

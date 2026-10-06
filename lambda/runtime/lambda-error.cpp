@@ -354,6 +354,7 @@ const char* lambda_fault_reason_name(LambdaFaultReason reason) {
     case LAMBDA_FAULT_SIDE_STACK_EXHAUSTION: return "side_stack_exhaustion";
     case LAMBDA_FAULT_OUT_OF_MEMORY: return "out_of_memory";
     case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT: return "runtime_boundary_defect";
+    case LAMBDA_FAULT_INTERRUPTED: return "interrupted";
     case LAMBDA_FAULT_NONE: return "none";
     }
     return "unknown";
@@ -368,6 +369,8 @@ static LambdaErrorCode lambda_fault_error_code(LambdaFaultReason reason) {
         return ERR_OUT_OF_MEMORY;
     case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT:
         return ERR_INVALID_STATE;
+    case LAMBDA_FAULT_INTERRUPTED:
+        return ERR_CANCELLED;
     case LAMBDA_FAULT_NONE:
         return ERR_OK;
     }
@@ -384,6 +387,8 @@ static const char* lambda_fault_error_message(LambdaFaultReason reason) {
         return "Out of memory";
     case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT:
         return "Runtime boundary invariant failed";
+    case LAMBDA_FAULT_INTERRUPTED:
+        return "Interrupted";
     case LAMBDA_FAULT_NONE:
         return "No fault";
     }
@@ -973,6 +978,10 @@ char* err_format_with_context_labeled(LambdaError* error, int context_lines,
                     buffer[pos++] = '^';
                 }
                 buffer[pos++] = '\n';
+                // the caret run is written byte-wise; when the target is the
+                // source's last line nothing re-terminates the buffer, and
+                // mem_strdup below copied stack bytes after the caret line
+                buffer[pos] = '\0';
             } else {
                 pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%*u | %s\n", 
                     line_width, line_num, line_text);

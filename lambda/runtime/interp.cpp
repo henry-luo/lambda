@@ -9,6 +9,7 @@
 
 #include "interp.hpp"
 #include "../io/mark_output_builder.hpp"
+#include <signal.h>
 #include "compiler_worker_stack.h"
 #include "lambda-root-frame.hpp"
 #include "write_set.hpp"
@@ -193,6 +194,21 @@ FnPromotionCell* interp_promotion_cell(Script* script, const AstFuncNode* def) {
     return &entry->cell;
 }
 
+
+// D8.1.1v17: an interactive session arms this around each entry. The SIGINT
+// handler only stores the flag (async-signal-safe); T0 raises the fault at its
+// next call entry or loop back-edge. The flag stays set until the session
+// clears it, so a procedure-boundary handler that consumes the fault is
+// re-faulted at the next poll and the entry still ends.
+static volatile sig_atomic_t g_interp_interrupt_requested = 0;
+void interp_interrupt_request(void) { g_interp_interrupt_requested = 1; }
+void interp_interrupt_clear(void) { g_interp_interrupt_requested = 0; }
+
+static inline void interp_poll_interrupt(void) {
+    if (g_interp_interrupt_requested) {
+        lambda_recovery_frame_raise_fault(LAMBDA_FAULT_INTERRUPTED, ERR_OK);
+    }
+}
 
 static void interp_satellite_compile_job(void* opaque) {
     InterpSatelliteJob* job = (InterpSatelliteJob*)opaque;
@@ -899,13 +915,7 @@ static LambdaModuleState* interp_module_state(Script* module) {
 }
 
 static Item interp_read_module_slot(Script* module, int32_t slot) {
-    LambdaModuleState* state = interp_module_state(module);
-    if (!state || slot < 0 || (uint32_t)slot >= state->var_count) return ItemNull;
-    // Read the stored Item verbatim, as generated code's slab load does. The
-    // wide-scalar payload lives in the module state's own var_payloads array,
-    // which outlives every reader, so re-homing is unnecessary — and lossy:
-    // it would collapse a small u64 back into the int lane and change type().
-    return state->vars[slot];
+    return module ? lambda_module_state_var(module->module_state_id, slot) : ItemNull;
 }
 
 static void interp_write_module_slot(Script* module, int32_t slot, Item value) {
@@ -5117,6 +5127,9 @@ static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
             frame->slots[ops[i].target->slot] = i2it(next_values[i]);
         }
         (*trips)++;
+        // fast loops bypass interp_note_backedges; slots already hold the
+        // completed iteration, so a fault here abandons nothing half-written
+        interp_poll_interrupt();
     }
     *result = ItemNull;
     return true;
@@ -5227,6 +5240,7 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
             return false;
         }
         tally.trips++;
+        interp_poll_interrupt();   // see interp_fast_int_linear_while
     }
     *result = ItemNull;
     return true;
@@ -6560,6 +6574,7 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
 }
 
 static void interp_note_backedges(InterpFrame* frame, uint64_t trips) {
+    interp_poll_interrupt();   // every T0 back-edge is an interrupt point
     AstLoopControlNode* loop = frame ? (AstLoopControlNode*)frame->handoff_loop : NULL;
     if (!loop || trips == 0) return;
     FnPromotionCell* cell = interp_frame_cell(frame);
@@ -6817,6 +6832,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
         // consume it; only a fresh conversion error below exits the caller.
         return rejected;
     }
+    interp_poll_interrupt();   // call entry is the other interrupt point
     if (st->depth == 0) {
         // The interpreter budget is a language/runtime completion, not the
         // native stack-fault carve-out. Return it through this call frame so a
@@ -7818,8 +7834,16 @@ static uint32_t interp_promotion_threshold(const char* env_name, uint32_t fallba
     return (uint32_t)value;
 }
 
+// D8.1.1v17: a REPL session selected with `jit` promotes at the first call
+// instead of compiling a whole module; the environment knob still wins.
+static uint32_t g_interp_func_jit_threshold_default = 5;
+void interp_set_func_jit_threshold_default(uint32_t threshold) {
+    g_interp_func_jit_threshold_default = threshold ? threshold : 1;
+}
+
 static uint32_t interp_jit_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_FUNC_JIT_THRESHOLD", 5);
+    return interp_promotion_threshold("LAMBDA_FUNC_JIT_THRESHOLD",
+        g_interp_func_jit_threshold_default);
 }
 
 // back-edges of one handoff loop's subtree before its continuation compiles;
@@ -8448,10 +8472,11 @@ extern "C" Item interp_eval_view_handler(Context* host, Script* module,
 // import cone and for the main script, so an initializer sees exactly the same
 // environment either way.
 static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
-        Script* script, AstNode* first, bool run_main) {
+        Script* script, AstNode* first, bool run_main, bool procedural = false) {
     InterpFrameGuard guard(st, NULL, script, &script->interp_plan, NULL, 0);
     if (!guard.valid()) return ItemError;
     InterpFrame* frame = guard.frame();
+    frame->proc_handler = procedural;
 
     // The script body is a chain of top-level content lists; evaluate them the
     // way transpile_content does and keep the last value as the result.
@@ -8595,10 +8620,77 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     return interp_execute_top_level_nodes(runner, st, script, root->child, run_main);
 }
 
+static Item interp_run_module_init(Runner* runner, InterpState* st, Script* module);
+
+// Each import edge of an entry, in fragment order; cross-language namespaces
+// are evaluated by their own runtime and have no Lambda initializer.
+static Script* interp_repl_item_import(AstNode* item) {
+    if (!item || item->node_type != AST_NODE_IMPORT) return NULL;
+    AstImportNode* import_node = (AstImportNode*)item;
+    return import_node->is_cross_lang ? NULL : import_node->script;
+}
+
+static ArrayList* interp_repl_import_cone(Script* imported) {
+    ArrayList* cone = arraylist_new(4);
+    ArrayList* seen = arraylist_new(4);
+    interp_cone_postorder(imported, cone, seen);
+    arraylist_free(seen);
+    return cone;
+}
+
+Script* interp_repl_fragment_unsupported_import(AstNode* fragment) {
+    for (AstNode* item = fragment; item; item = item->next) {
+        Script* imported = interp_repl_item_import(item);
+        if (!imported) continue;
+        ArrayList* cone = interp_repl_import_cone(imported);
+        Script* unsupported = NULL;
+        for (int i = 0; i < cone->length && !unsupported; i++) {
+            Script* module = (Script*)cone->data[i];
+            if (module && module->ast_root && !module->interp_planned) unsupported = module;
+        }
+        arraylist_free(cone);
+        if (unsupported) return unsupported;
+    }
+    return NULL;
+}
+
+// D7.2.2: an entry's imports initialize before the entry runs, in the same
+// post-order a script's cone uses. A module whose initializer already ran in
+// this session is not re-run; a failed initializer is not recorded, so the
+// next import retries it.
+static Item interp_init_repl_fragment_imports(Runner* runner, InterpState* st,
+        const InterpReplFragmentRun* run) {
+    ArrayList* done = run->initialized_modules;
+    for (AstNode* item = run->fragment; item; item = item->next) {
+        Script* imported = interp_repl_item_import(item);
+        if (!imported) continue;
+        ArrayList* cone = interp_repl_import_cone(imported);
+        for (int i = 0; i < cone->length; i++) {
+            Script* module = (Script*)cone->data[i];
+            bool initialized = false;
+            for (int j = 0; done && j < done->length && !initialized; j++) {
+                initialized = done->data[j] == module;
+            }
+            if (initialized || !module || !module->ast_root) continue;
+            Item init = interp_run_module_init(runner, st, module);
+            if (item_is_error(init)) {
+                arraylist_free(cone);
+                return init;
+            }
+            if (done) arraylist_append(done, module);
+        }
+        arraylist_free(cone);
+    }
+    return ItemNull;
+}
+
 static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
-        AstNode* fragment) {
+        const InterpReplFragmentRun* run) {
     Script* script = runner ? runner->script : NULL;
+    AstNode* fragment = run ? run->fragment : NULL;
     if (!script || !fragment) return ItemError;
+    Item imports = interp_init_repl_fragment_imports(runner, st, run);
+    if (item_is_error(imports)) return imports;
     RuntimeModuleStateScope module_state(runner->context);
     if (!lambda_module_state_prepare(script->module_state_id,
             script->interp_slab_count)) {
@@ -8617,9 +8709,18 @@ static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
     }
     runner->context->consts = script->const_list ? script->const_list->data : NULL;
     runner->context->type_list = script->type_list;
+    // imported modules may have registered templates; only this fragment's
+    // append belongs to the entry transaction if execution fails.
+    if (run->templates) {
+        TemplateRegistry* templates = runner->context->template_registry;
+        run->templates->registry = templates;
+        run->templates->snapshot = templates ? *templates : TemplateRegistry{};
+        run->templates->ready = true;
+    }
     // each admitted REPL fragment adds only its own templates before apply dispatch.
     interp_register_view_templates(script, fragment);
-    return interp_execute_top_level_nodes(runner, st, script, fragment, false);
+    return interp_execute_top_level_nodes(runner, st, script, fragment, false,
+        run->procedural);
 }
 
 // Module initialization is transactional (D7.2.2/S7.7.6): a fault inside an
@@ -8684,7 +8785,8 @@ static Item interp_execute(Runner* runner, InterpState* st) {
         runner->context->run_main);
 }
 
-static Item interp_run_nodes(Runner* runner, bool run_main, AstNode* repl_fragment) {
+static Item interp_run_nodes(Runner* runner, bool run_main,
+        const InterpReplFragmentRun* repl_fragment) {
     if (!runner || !runner->script || !runner->context) return ItemError;
     Script* script = runner->script;
     runner->context->run_main = run_main;
@@ -8767,6 +8869,6 @@ Item interp_run_script(Runner* runner, bool run_main) {
     return interp_run_nodes(runner, run_main, NULL);
 }
 
-Item interp_run_repl_fragment(Runner* runner, AstNode* fragment) {
-    return interp_run_nodes(runner, false, fragment);
+Item interp_run_repl_fragment(Runner* runner, const InterpReplFragmentRun* run) {
+    return interp_run_nodes(runner, false, run);
 }
