@@ -1582,6 +1582,49 @@ TEST(SvgCascadeTest, FontShorthandProjectsResetsAndPreservesDeferredVariables) {
     pool_destroy(pool);
 }
 
+TEST(CssVariableSubstitutionTest, CommasRegroupFunctionArgumentsAndAdjacentTokens) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    const char* text =
+        "--value:linear-gradient(to right,red var(--missing,0%,blue) 100%)";
+    CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
+    ASSERT_NE(declaration, nullptr);
+    const CssValue* value = css_resolve_var_value(pool, declaration->value, nullptr, nullptr);
+    ASSERT_NE(value, nullptr);
+    ASSERT_EQ(value->type, CSS_VALUE_TYPE_FUNCTION);
+    const CssFunction* function = value->data.function;
+    ASSERT_NE(function, nullptr);
+    ASSERT_EQ(function->arg_count, 3);
+    for (int i = 1; i < 3; i++) {
+        ASSERT_NE(function->args[i], nullptr);
+        ASSERT_EQ(function->args[i]->type, CSS_VALUE_TYPE_LIST);
+        EXPECT_FALSE(function->args[i]->data.list.comma_separated);
+        EXPECT_EQ(function->args[i]->data.list.count, 2);
+    }
+    EXPECT_EQ(function->args[1]->data.list.values[1]->data.percentage.value, 0);
+    EXPECT_EQ(function->args[2]->data.list.values[1]->data.percentage.value, 100);
+    pool_destroy(pool);
+}
+
+TEST(CssVariableSubstitutionTest, EmptyFallbackIsRemovedButMissingValueIsInvalid) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    const char* sources[] = {"--value:var(--missing,) 4px", "--value:var(--missing) 4px"};
+    for (int i = 0; i < 2; i++) {
+        CssDeclaration* declaration = css_parse_declaration_text(sources[i], strlen(sources[i]), pool);
+        ASSERT_NE(declaration, nullptr);
+        const CssValue* value = css_resolve_var_value(pool, declaration->value, nullptr, nullptr);
+        if (i == 0) {
+            ASSERT_NE(value, nullptr);
+            ASSERT_EQ(value->type, CSS_VALUE_TYPE_LENGTH);
+            EXPECT_EQ(value->data.length.value, 4);
+        } else {
+            EXPECT_EQ(value, nullptr);
+        }
+    }
+    pool_destroy(pool);
+}
+
 TEST(SvgConditionalTest, LanguageMatchingUsesPreferencePrefixesAndRefreshesDocumentEpoch) {
     EXPECT_TRUE(dom_svg_conditions_match(nullptr, nullptr, ""));
     EXPECT_FALSE(dom_svg_conditions_match("", nullptr, "en"));
@@ -1644,6 +1687,31 @@ TEST(SvgCascadeTest, InlineImportanceAndSelectorListSpecificity) {
     EXPECT_STREQ(result.value_text, "red");
     selector_matcher_destroy(matcher);
     css_engine_destroy(engine);
+    css_property_system_cleanup();
+    pool_destroy(pool);
+}
+
+TEST(SvgCascadeTest, CustomPropertiesDoNotAliasOrdinaryPropertyQueries) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    ASSERT_TRUE(css_property_system_init(pool));
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    ASSERT_NE(matcher, nullptr);
+    DomElement node = {};
+    node.tag_name = lam::up("rect");
+    const char* source = "fill:red;--fill:blue!important;--Fill:green";
+    size_t count = 0;
+    CssDeclaration** declarations = css_parse_declaration_list_text(source, strlen(source), pool, &count);
+    ASSERT_EQ(count, 3u);
+    const char* properties[] = {"fill", "--fill", "--Fill"};
+    const char* expected[] = {"red", "blue", "green"};
+    for (int i = 0; i < 3; i++) {
+        CssDeclaration result = {};
+        ASSERT_TRUE(css_select_element_declaration(nullptr, matcher, &node, nullptr, 0,
+            declarations, count, properties[i], &result));
+        EXPECT_STREQ(result.value_text, expected[i]) << properties[i];
+    }
+    selector_matcher_destroy(matcher);
     css_property_system_cleanup();
     pool_destroy(pool);
 }

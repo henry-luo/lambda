@@ -6,6 +6,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/memtrack.h"
 #include "../lib/math_utils.h"
@@ -22,7 +23,6 @@
 
 // Forward declaration for CSS variable lookup
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
-static Color get_current_color_for_view(ViewSpan* span);
 static Color get_current_color(LayoutContext* lycon);
 static void resolve_text_emphasis_longhands(DomElement* element, LayoutContext* lycon);
 static bool css_value_is_background_color_candidate(const CssValue* value);
@@ -37,19 +37,6 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
 static void copy_spacing_side(Spacing* target, const Spacing* source,
                               Margin* target_margin, const Margin* source_margin,
                               CssBoxSide side, int64_t specificity);
-
-static DomElement* dom_parent_element(DomElement* element) {
-    if (!element || !element->parent) return nullptr;
-    DomElement* parent = lam::dom_require_element(element->parent);
-    if (parent && parent->tag_name &&
-        strcmp(parent->tag_name, "#document-fragment") == 0 &&
-        parent->shadow_host_element()) {
-        // CSS Shadow DOM: a shadow fragment inherits the host's computed style;
-        // projected light-DOM nodes must not fall back to UA defaults.
-        return parent->shadow_host_element();
-    }
-    return parent;
-}
 
 static BackgroundProp* parent_computed_background(LayoutContext* lycon) {
     if (!lycon || !lycon->view || !lycon->view->is_element()) return nullptr;
@@ -225,58 +212,41 @@ float resolve_css_angle_value(const CssValue* value) {
         ? math_degrees_to_radians(degrees) : 0.0f;
 }
 
-typedef struct TransformFunctionSpec {
-    const char* name;
-    TransformFunctionType type;
-} TransformFunctionSpec;
-
-static const TransformFunctionSpec TRANSFORM_FUNCTION_SPECS[] = {
-    {"translate", TRANSFORM_TRANSLATE},
-    {"translateX", TRANSFORM_TRANSLATEX},
-    {"translateY", TRANSFORM_TRANSLATEY},
-    {"scale", TRANSFORM_SCALE},
-    {"scaleX", TRANSFORM_SCALEX},
-    {"scaleY", TRANSFORM_SCALEY},
-    {"rotate", TRANSFORM_ROTATE},
-    {"skew", TRANSFORM_SKEW},
-    {"skewX", TRANSFORM_SKEWX},
-    {"skewY", TRANSFORM_SKEWY},
-    {"matrix", TRANSFORM_MATRIX},
-    {"translate3d", TRANSFORM_TRANSLATE3D},
-    {"translateZ", TRANSFORM_TRANSLATEZ},
-    {"scale3d", TRANSFORM_SCALE3D},
-    {"scaleZ", TRANSFORM_SCALEZ},
-    {"rotateX", TRANSFORM_ROTATEX},
-    {"rotateY", TRANSFORM_ROTATEY},
-    {"rotateZ", TRANSFORM_ROTATEZ},
-    {"rotate3d", TRANSFORM_ROTATE3D},
-    {"perspective", TRANSFORM_PERSPECTIVE},
-    {"matrix3d", TRANSFORM_MATRIX3D},
-};
-
-static TransformFunctionType transform_function_type(const char* name) {
-    if (!name) return TRANSFORM_NONE;
-    for (const TransformFunctionSpec& spec : TRANSFORM_FUNCTION_SPECS) {
-        if (str_ieq_cstr(name, spec.name)) return spec.type;
-    }
-    return TRANSFORM_NONE;
-}
-
-static float transform_number_value(const CssValue* value, float fallback = 0.0f) {
+static float transform_number_value(const CssValue* value, TransformNumericResolver resolve_numeric,
+                                     void* context, float fallback = 0.0f) {
+    if (value && resolve_numeric) return resolve_numeric(context, value, false);
     return value && value->type == CSS_VALUE_TYPE_NUMBER
         ? (float)value->data.number.value : fallback;
 }
 
-static float transform_scale_value(const CssValue* value) {
+static float transform_scale_value(const CssValue* value, TransformNumericResolver resolve_numeric, void* context) {
     // CSS Transforms 2 converts percentage scale components into unit factors.
     if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE)
         return (float)value->data.percentage.value / 100.0f;
-    return transform_number_value(value, 1.0f);
+    return transform_number_value(value, resolve_numeric, context, 1.0f);
+}
+
+static float transform_angle_value(const CssValue* value, TransformNumericResolver resolve_numeric,
+                                    void* context) {
+    return value && resolve_numeric ? resolve_numeric(context, value, true)
+        : resolve_css_angle_value(value);
 }
 
 static float transform_length_value(LayoutContext* lycon, CssPropertyCode prop_id,
                                     const CssValue* value) {
     return value ? resolve_length_value(lycon, prop_id, value) : 0.0f;
+}
+
+static const CssValue* transform_translate_axis_value(const CssFunction* function,
+                                                       TransformFunctionType type, int axis) {
+    if (!function || !function->args) return nullptr;
+    if (type == TRANSFORM_TRANSLATEY) {
+        return axis == 1 && function->arg_count > 0 ? function->args[0] : nullptr;
+    }
+    if (type != TRANSFORM_TRANSLATE && type != TRANSFORM_TRANSLATEX && type != TRANSFORM_TRANSLATE3D)
+        return nullptr;
+    if (type == TRANSFORM_TRANSLATEX && axis == 1) return nullptr;
+    return axis < function->arg_count ? function->args[axis] : nullptr;
 }
 
 static void resolve_transform_translate_arg(TransformLengthResolver resolve_length, void* context,
@@ -292,10 +262,11 @@ static void resolve_transform_translate_arg(TransformLengthResolver resolve_leng
 }
 
 bool resolve_transform_function_value(const CssValue* func_value, TransformFunction* tf,
-    TransformLengthResolver resolve_length, void* context) {
+    TransformLengthResolver resolve_length, void* context, TransformNumericResolver resolve_numeric) {
     if (!tf || !func_value || func_value->type != CSS_VALUE_TYPE_FUNCTION) return false;
     const CssFunction* func = func_value->data.function;
-    TransformFunctionType type = transform_function_type(func ? func->name : nullptr);
+    const CssTransformFunctionInfo* info = css_transform_function_info(func ? func->name : nullptr);
+    TransformFunctionType type = info ? info->type : TRANSFORM_NONE;
     if (type == TRANSFORM_NONE) return false;
     memset(tf, 0, sizeof(TransformFunction));
     tf->type = type;
@@ -307,45 +278,40 @@ bool resolve_transform_function_value(const CssValue* func_value, TransformFunct
     const CssValue* arg3 = func->arg_count >= 4 ? func->args[3] : nullptr;
     switch (type) {
         case TRANSFORM_TRANSLATE:
-            resolve_transform_translate_arg(resolve_length, context, arg0,
-                                            &tf->params.translate.x,
-                                            &tf->translate_x_percent);
-            resolve_transform_translate_arg(resolve_length, context, arg1,
-                                            &tf->params.translate.y,
-                                            &tf->translate_y_percent);
-            break;
         case TRANSFORM_TRANSLATEX:
-            resolve_transform_translate_arg(resolve_length, context, arg0,
-                                            &tf->params.translate.x,
-                                            &tf->translate_x_percent);
-            break;
         case TRANSFORM_TRANSLATEY:
-            resolve_transform_translate_arg(resolve_length, context, arg0,
-                                            &tf->params.translate.y,
-                                            &tf->translate_y_percent);
+        case TRANSFORM_TRANSLATE3D:
+            resolve_transform_translate_arg(resolve_length, context,
+                transform_translate_axis_value(func, type, 0),
+                &tf->params.translate3d.x, &tf->translate_x_percent);
+            resolve_transform_translate_arg(resolve_length, context,
+                transform_translate_axis_value(func, type, 1),
+                &tf->params.translate3d.y, &tf->translate_y_percent);
+            if (type == TRANSFORM_TRANSLATE3D)
+                tf->params.translate3d.z = resolve_length ? resolve_length(context, arg2) : 0.0f;
             break;
         case TRANSFORM_SCALE:
-            tf->params.scale.x = transform_scale_value(arg0);
-            tf->params.scale.y = arg1 ? transform_scale_value(arg1)
+            tf->params.scale.x = transform_scale_value(arg0, resolve_numeric, context);
+            tf->params.scale.y = arg1 ? transform_scale_value(arg1, resolve_numeric, context)
                                       : tf->params.scale.x;
             break;
         case TRANSFORM_SCALEX:
-            tf->params.scale.x = transform_scale_value(arg0);
+            tf->params.scale.x = transform_scale_value(arg0, resolve_numeric, context);
             tf->params.scale.y = 1.0f;
             break;
         case TRANSFORM_SCALEY:
             tf->params.scale.x = 1.0f;
-            tf->params.scale.y = transform_scale_value(arg0);
+            tf->params.scale.y = transform_scale_value(arg0, resolve_numeric, context);
             break;
         case TRANSFORM_SCALE3D:
-            tf->params.scale3d.x = transform_scale_value(arg0);
-            tf->params.scale3d.y = transform_scale_value(arg1);
-            tf->params.scale3d.z = transform_scale_value(arg2);
+            tf->params.scale3d.x = transform_scale_value(arg0, resolve_numeric, context);
+            tf->params.scale3d.y = transform_scale_value(arg1, resolve_numeric, context);
+            tf->params.scale3d.z = transform_scale_value(arg2, resolve_numeric, context);
             break;
         case TRANSFORM_SCALEZ:
             tf->params.scale3d.x = 1.0f;
             tf->params.scale3d.y = 1.0f;
-            tf->params.scale3d.z = transform_scale_value(arg0);
+            tf->params.scale3d.z = transform_scale_value(arg0, resolve_numeric, context);
             break;
         case TRANSFORM_ROTATE:
         case TRANSFORM_SKEWX:
@@ -353,53 +319,46 @@ bool resolve_transform_function_value(const CssValue* func_value, TransformFunct
         case TRANSFORM_ROTATEX:
         case TRANSFORM_ROTATEY:
         case TRANSFORM_ROTATEZ:
-            tf->params.angle = resolve_css_angle_value(arg0);
+            tf->params.angle = transform_angle_value(arg0, resolve_numeric, context);
             break;
         case TRANSFORM_SKEW:
-            tf->params.skew.x = resolve_css_angle_value(arg0);
-            tf->params.skew.y = resolve_css_angle_value(arg1);
+            tf->params.skew.x = transform_angle_value(arg0, resolve_numeric, context);
+            tf->params.skew.y = transform_angle_value(arg1, resolve_numeric, context);
             break;
         case TRANSFORM_ROTATE3D:
-            tf->params.rotate3d.x = transform_number_value(arg0);
-            tf->params.rotate3d.y = transform_number_value(arg1);
-            tf->params.rotate3d.z = transform_number_value(arg2);
-            tf->params.rotate3d.angle = resolve_css_angle_value(arg3);
+            tf->params.rotate3d.x = transform_number_value(arg0, resolve_numeric, context);
+            tf->params.rotate3d.y = transform_number_value(arg1, resolve_numeric, context);
+            tf->params.rotate3d.z = transform_number_value(arg2, resolve_numeric, context);
+            tf->params.rotate3d.angle = transform_angle_value(arg3, resolve_numeric, context);
             break;
         case TRANSFORM_MATRIX:
             tf->params.matrix.a = 1.0f;
             tf->params.matrix.d = 1.0f;
             if (func->arg_count >= 6 && func->args[0] && func->args[1] &&
                 func->args[2] && func->args[3] && func->args[4] && func->args[5]) {
-                tf->params.matrix.a = transform_number_value(func->args[0]);
-                tf->params.matrix.b = transform_number_value(func->args[1]);
-                tf->params.matrix.c = transform_number_value(func->args[2]);
-                tf->params.matrix.d = transform_number_value(func->args[3]);
-                tf->params.matrix.e = transform_number_value(func->args[4]);
-                tf->params.matrix.f = transform_number_value(func->args[5]);
+                tf->params.matrix.a = transform_number_value(func->args[0], resolve_numeric, context);
+                tf->params.matrix.b = transform_number_value(func->args[1], resolve_numeric, context);
+                tf->params.matrix.c = transform_number_value(func->args[2], resolve_numeric, context);
+                tf->params.matrix.d = transform_number_value(func->args[3], resolve_numeric, context);
+                tf->params.matrix.e = transform_number_value(func->args[4], resolve_numeric, context);
+                tf->params.matrix.f = transform_number_value(func->args[5], resolve_numeric, context);
             }
             break;
         case TRANSFORM_MATRIX3D:
             if (func->arg_count >= 16) {
                 for (int i = 0; i < 16; i++) {
-                    tf->params.matrix3d[i] = transform_number_value(func->args[i]);
+                    tf->params.matrix3d[i] = transform_number_value(func->args[i], resolve_numeric, context);
                 }
             }
-            break;
-        case TRANSFORM_TRANSLATE3D:
-            // Percentage translate components resolve against this element's transform box.
-            resolve_transform_translate_arg(resolve_length, context, arg0,
-                                            &tf->params.translate3d.x,
-                                            &tf->translate_x_percent);
-            resolve_transform_translate_arg(resolve_length, context, arg1,
-                                            &tf->params.translate3d.y,
-                                            &tf->translate_y_percent);
-            tf->params.translate3d.z = resolve_length ? resolve_length(context, arg2) : 0.0f;
             break;
         case TRANSFORM_TRANSLATEZ:
             tf->params.translate3d.z = resolve_length ? resolve_length(context, arg0) : 0.0f;
             break;
         case TRANSFORM_PERSPECTIVE:
-            tf->params.perspective = resolve_length ? resolve_length(context, arg0) : 0.0f;
+            // an infinite distance represents none; zero lengths still have a 1px used minimum.
+            tf->params.perspective = arg0 && arg0->type == CSS_VALUE_TYPE_KEYWORD &&
+                arg0->data.keyword == CSS_VALUE_NONE ? INFINITY
+                : resolve_length ? resolve_length(context, arg0) : 0.0f;
             break;
         default:
             break;
@@ -409,17 +368,83 @@ bool resolve_transform_function_value(const CssValue* func_value, TransformFunct
 
 
 static float resolve_layout_transform_length(void* context, const CssValue* value) {
-    return transform_length_value((LayoutContext*)context, CSS_PROPERTY_TRANSFORM, value);
+    // percentages in calculations remain unresolved until the transform reference box exists.
+    if (value && value->type != CSS_VALUE_TYPE_PERCENTAGE && layout_css_value_has_percentage(value))
+        return 0.0f;
+    if (context) return transform_length_value((LayoutContext*)context, CSS_PROPERTY_TRANSFORM, value);
+    // context-free keyframe literals use the same decoder without inventing a font size.
+    if (value && value->type == CSS_VALUE_TYPE_NUMBER) return (float)value->data.number.value;
+    double pixels = 0.0;
+    return value && value->type == CSS_VALUE_TYPE_LENGTH &&
+        css_absolute_length_to_px(value->data.length.unit, value->data.length.value, &pixels)
+        ? (float)pixels : NAN;
+}
+
+static float resolve_layout_transform_numeric(void* context, const CssValue* value, bool angle) {
+    if (!value) return 0.0f;
+    LayoutContext* lycon = (LayoutContext*)context;
+    if (angle && value->type != CSS_VALUE_TYPE_FUNCTION)
+        return resolve_css_angle_value(value);
+    if (!lycon) return value->type == CSS_VALUE_TYPE_NUMBER
+        ? (float)value->data.number.value : NAN;
+    bool saved_angle_math = lycon->transform_angle_math;
+    lycon->transform_angle_math = angle;
+    // percentages in scale math are unit factors; angle math uses one common degree domain.
+    float result = resolve_length_value(lycon, angle ? CSS_PROPERTY_TRANSFORM : CSS_PROPERTY_OPACITY, value);
+    lycon->transform_angle_math = saved_angle_math;
+    return angle ? math_degrees_to_radians(result) : result;
+}
+
+static void normalize_transform_math_lengths(LayoutContext* context, CssValue* value) {
+    if (!value) return;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        float degrees;
+        if (!resolve_css_angle_degrees(value, &degrees)) {
+            value->data.length.value = resolve_layout_transform_length(context, value);
+            value->data.length.unit = CSS_UNIT_PX;
+        }
+    } else if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int index = 0; index < value->data.list.count; index++)
+            normalize_transform_math_lengths(context, value->data.list.values[index]);
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
+        for (int index = 0; index < value->data.function->arg_count; index++)
+            normalize_transform_math_lengths(context, value->data.function->args[index]);
+    }
+}
+
+float radiant::resolve_computed_transform_length(const CssValue* value, float reference_size) {
+    LayoutContext context = {};
+    context.transform_length_math = true;
+    context.transform_percentage_base = reference_size;
+    return resolve_length_value(&context, CSS_PROPERTY_TRANSFORM, value);
 }
 
 static TransformFunction* resolve_transform_function(LayoutContext* lycon,
-    CssPropertyCode prop_id, const CssValue* value) {
+    const CssValue* value, Pool* document_pool) {
     TransformFunction function = {};
-    if (!resolve_transform_function_value(value, &function, resolve_layout_transform_length, lycon)) {
+    if (!resolve_transform_function_value(value, &function, resolve_layout_transform_length, lycon,
+            resolve_layout_transform_numeric)) {
         return nullptr;
     }
-    TransformFunction* stored = (TransformFunction*)alloc_prop(lycon, sizeof(TransformFunction));
+    Pool* pool = document_pool ? document_pool : layout_prop_pool(lycon);
+    for (int axis = 0; axis < 2; axis++) {
+        const CssValue* argument = transform_translate_axis_value(value->data.function, function.type, axis);
+        if (!argument || argument->type == CSS_VALUE_TYPE_PERCENTAGE ||
+            !layout_css_value_has_percentage(argument)) continue;
+        TransformLengthTerm* term = (TransformLengthTerm*)pool_calloc(pool, sizeof(TransformLengthTerm));
+        if (!term) { radiant::destroy_transform_function_payload(pool, &function); return nullptr; }
+        function.translate_math[axis] = lam::own(term);
+        term->coefficient = 1.0f;
+        term->expression = lam::own(css_value_clone_owned(argument, pool));
+        if (!term->expression) { radiant::destroy_transform_function_payload(pool, &function); return nullptr; }
+        // D4.5.1v4: copied computed trees cannot retain variable-substitution scratch values.
+        normalize_transform_math_lengths(lycon, term->expression);
+    }
+    TransformFunction* stored = document_pool
+        ? (TransformFunction*)pool_calloc(document_pool, sizeof(TransformFunction))
+        : (TransformFunction*)alloc_prop(lycon, sizeof(TransformFunction));
     if (stored) *stored = function;
+    else radiant::destroy_transform_function_payload(pool, &function);
     return stored;
 }
 static void append_transform_function(TransformFunction** head,
@@ -448,6 +473,13 @@ static FunctionType* resolve_css_function_list(
         append_value(css_value_at(value, i));
     }
     return head;
+}
+
+TransformFunction* resolve_transform_value(LayoutContext* context, const CssValue* value,
+                                            Pool* document_pool) {
+    return resolve_css_function_list<TransformFunction>(value,
+        [&](const CssValue* item) { return resolve_transform_function(context, item, document_pool); },
+        append_transform_function);
 }
 
 static void resolve_origin_keyword(CssEnum keyword, int index,
@@ -1558,39 +1590,6 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
         lycon, shorthand_value, 1, shorthand_count,
         true, ", ", 2, first);
     return combined ? combined : first;
-}
-
-// Return the declaration owner so inherited custom properties resolve their
-// references in the environment where they were specified.
-static const CssValue* lookup_css_variable_from(DomElement* element,
-                                                  const char* var_name,
-                                                  DomElement** owner) {
-    if (owner) *owner = nullptr;
-    if (!element || !var_name) return nullptr;
-    while (element) {
-        // Check if this element has CSS variables
-        if (element->css_variables) {
-            CssCustomProp* winner = nullptr;
-            for (CssCustomProp* var = element->css_variables; var; var = var->next) {
-                if (!css_custom_property_name_matches(var->name, var_name)) continue;
-                if (!winner || !winner->declaration || !var->declaration ||
-                    css_declaration_cascade_compare(var->declaration,
-                                                    winner->declaration) > 0) {
-                    winner = var;
-                }
-            }
-            if (winner) {
-                if (owner) *owner = element;
-                return winner->value;
-            }
-        }
-        if (element->parent && element->parent->is_element()) {
-            element = lam::dom_require<DOM_NODE_ELEMENT>(element->parent);
-        } else {
-            break;
-        }
-    }
-    return nullptr;
 }
 
 static bool css_value_is_slash(const CssValue* value) {
@@ -2855,178 +2854,12 @@ static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner*
     return true;
 }
 
-static bool css_var_stack_contains(const char** var_stack, int stack_count, const char* var_name) {
-    if (!var_stack || !var_name) return false;
-    for (int i = 0; i < stack_count; i++) {
-        if (css_custom_property_name_matches(var_stack[i], var_name)) return true;
-    }
-    return false;
-}
-
-static const char* css_var_function_name(const CssFunction* func) {
-    if (!func || !func->args || func->arg_count < 1 || !func->args[0]) return nullptr;
-    CssValue* first_arg = func->args[0];
-    if (first_arg->type == CSS_VALUE_TYPE_CUSTOM) {
-        return first_arg->data.custom_property.name;
-    }
-    return first_arg->type == CSS_VALUE_TYPE_STRING ? first_arg->data.string : nullptr;
-}
-
-static bool css_value_is_var_reference(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_TYPE_VAR ||
-        (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-         value->data.function->name &&
-         strcmp(value->data.function->name, "var") == 0));
-}
-
-static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* value,
-                                                  DomElement* context_element,
-                                                  CssVariableLookupFn lookup,
-                                                  void* lookup_context,
-                                                  const char** var_stack, int stack_count) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        CssValue** substituted = nullptr;
-        int count = value->data.list.count;
-        int expanded_count = count;
-        if (count > 0 && !value->data.list.values) return nullptr;
-        for (int i = 0; i < count; i++) {
-            const CssValue* item = value->data.list.values[i];
-            const CssValue* replacement = resolve_var_function_inner(
-                pool, item, context_element, lookup, lookup_context, var_stack, stack_count);
-            if (item && !replacement) return nullptr;
-            if (replacement != item && !substituted) {
-                if (!pool) return nullptr;
-                substituted = (CssValue**)pool_alloc(pool,
-                    (size_t)count * sizeof(CssValue*));
-                if (!substituted) return nullptr;
-                memcpy(substituted, value->data.list.values,
-                       (size_t)count * sizeof(CssValue*));
-            }
-            if (substituted) substituted[i] = (CssValue*)replacement;
-            // A var() replaces tokens in its surrounding list. Keep a list
-            // nested only when its separator differs from the outer list.
-            if (css_value_is_var_reference(item) && replacement &&
-                replacement->type == CSS_VALUE_TYPE_LIST &&
-                replacement->data.list.comma_separated ==
-                    value->data.list.comma_separated) {
-                int replacement_count = replacement->data.list.count;
-                if (replacement_count < 0 ||
-                    replacement_count > INT_MAX - expanded_count + 1)
-                    return nullptr;
-                expanded_count += replacement_count - 1;
-            }
-        }
-        if (!substituted) return value;
-        if (expanded_count != count) {
-            CssValue** expanded = (CssValue**)pool_alloc(pool,
-                (size_t)expanded_count * sizeof(CssValue*));
-            if (!expanded) return nullptr;
-            int next = 0;
-            for (int i = 0; i < count; i++) {
-                const CssValue* item = value->data.list.values[i];
-                const CssValue* replacement = substituted[i];
-                if (css_value_is_var_reference(item) && replacement &&
-                    replacement->type == CSS_VALUE_TYPE_LIST &&
-                    replacement->data.list.comma_separated ==
-                        value->data.list.comma_separated) {
-                    for (int j = 0; j < replacement->data.list.count; j++)
-                        expanded[next++] = replacement->data.list.values[j];
-                } else {
-                    expanded[next++] = (CssValue*)replacement;
-                }
-            }
-            substituted = expanded;
-        }
-        CssValue* result = (CssValue*)pool_alloc(pool, sizeof(CssValue));
-        if (!result) return nullptr;
-        *result = *value;
-        result->data.list.values = substituted;
-        result->data.list.count = expanded_count;
-        return result;
-    }
-    const CssFunction* func = value->type == CSS_VALUE_TYPE_FUNCTION
-        ? value->data.function : nullptr;
-    const CSSVarRef* var_ref = value->type == CSS_VALUE_TYPE_VAR
-        ? value->data.var_ref : nullptr;
-    if (!func && !var_ref) return value;
-    if (func && !func->name) return value;
-    if (func && func->arg_count > 0 && !func->args) return nullptr;
-    if (func && strcmp(func->name, "var") != 0) {
-        CssValue** substituted = nullptr;
-        for (int i = 0; i < func->arg_count; i++) {
-            const CssValue* arg = func->args[i];
-            const CssValue* replacement = resolve_var_function_inner(
-                pool, arg, context_element, lookup, lookup_context, var_stack, stack_count);
-            if (arg && !replacement) return nullptr;
-            if (replacement != arg && !substituted) {
-                if (!pool) return nullptr;
-                substituted = (CssValue**)pool_alloc(pool,
-                    (size_t)func->arg_count * sizeof(CssValue*));
-                if (!substituted) return nullptr;
-                memcpy(substituted, func->args,
-                       (size_t)func->arg_count * sizeof(CssValue*));
-            }
-            if (substituted) substituted[i] = (CssValue*)replacement;
-        }
-        if (!substituted) return value;
-        CssFunction* new_func = (CssFunction*)pool_alloc(pool,
-                                                        sizeof(CssFunction));
-        CssValue* result = (CssValue*)pool_alloc(pool, sizeof(CssValue));
-        if (!new_func || !result) return nullptr;
-        *new_func = *func;
-        new_func->args = substituted;
-        *result = *value;
-        result->data.function = new_func;
-        return result;
-    }
-    const CssValue* fallback_value = var_ref
-        ? (var_ref->has_fallback ? var_ref->fallback : nullptr)
-        : (func->arg_count >= 2 ? func->args[1] : nullptr);
-    auto resolve_fallback = [&]() -> const CssValue* {
-        return fallback_value
-            ? resolve_var_function_inner(pool, fallback_value, context_element,
-                                         lookup, lookup_context, var_stack, stack_count)
-            : nullptr;
-    };
-    const char* var_name = var_ref ? var_ref->name : css_var_function_name(func);
-    if (!var_name) {
-        return resolve_fallback();
-    }
-    // Cyclic custom properties are invalid and must not recurse forever.
-    if (stack_count >= 32 || css_var_stack_contains(var_stack, stack_count, var_name)) {
-        return resolve_fallback();
-    }
-    DomElement* owner = nullptr;
-    const CssValue* var_value = lookup
-        ? lookup(lookup_context, var_name)
-        : lookup_css_variable_from(context_element, var_name, &owner);
-    if (var_value) {
-        const char* next_stack[32];
-        for (int i = 0; i < stack_count; i++) next_stack[i] = var_stack[i];
-        next_stack[stack_count] = var_name;
-        const CssValue* resolved = resolve_var_function_inner(
-            pool, var_value, owner, lookup, lookup_context, next_stack, stack_count + 1);
-        if (resolved) return resolved;
-        return resolve_fallback();
-    }
-    return resolve_fallback();
-}
-
-const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
-                                     CssVariableLookupFn lookup, void* context) {
-    const char* var_stack[32];
-    return resolve_var_function_inner(pool, value, nullptr, lookup, context, var_stack, 0);
-}
-
 // Resolve in the declaration owner's environment for inherited custom properties.
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
     if (!lycon || !lycon->pool) return nullptr;
-    const char* var_stack[32];
     DomElement* context = lycon && lycon->view
         ? view_geometry_nearest_dom_element(lycon->view, 0) : nullptr;
-    return resolve_var_function_inner(lycon->pool, value, context,
-                                      nullptr, nullptr, var_stack, 0);
+    return css_resolve_var_value(lycon->pool, value, nullptr, nullptr, context);
 }
 
 // Helper: extract a numeric value from a CssValue (number, percentage, length)
@@ -3045,7 +2878,7 @@ static double resolve_color_component(const CssValue* v, bool is_alpha = false) 
 }
 
 static uint8_t css_color_byte(double value) {
-    return (uint8_t)lib_math::clamp(value, 0.0, 255.0);
+    return clamp_byte_round((float)value);
 }
 
 // CSS Color Level 4 §4.2.4: Convert HSL to RGB
@@ -3245,7 +3078,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
 
 // Get the CSS currentColor value for the element being styled.
 // Since 'color' may not be resolved yet on the current element (border properties
-static Color get_current_color_for_view(ViewSpan* span) {
+Color get_current_color_for_view(ViewSpan* span) {
     if (span && span->in_line && span->inl()->has_color) {
         return span->inl()->color;
     }
@@ -3277,6 +3110,41 @@ Color radiant_caret_color_for_view(ViewSpan* span) {
 
 static Color get_current_color(LayoutContext* lycon) {
     return get_current_color_for_view(lam::view_as_element(lycon->view));
+}
+
+Color resolve_text_color_value(LayoutContext* lycon, const CssValue* value) {
+    value = resolve_var_function(lycon, value);
+    bool inherited = !value ||
+        (value->type == CSS_VALUE_TYPE_KEYWORD &&
+         (value->data.keyword == CSS_VALUE_INHERIT || value->data.keyword == CSS_VALUE_UNSET ||
+          value->data.keyword == CSS_VALUE_CURRENTCOLOR)) ||
+        (value->type == CSS_VALUE_TYPE_COLOR &&
+         value->data.color.type == CSS_COLOR_CURRENTCOLOR);
+    if (inherited) {
+        // currentColor on color itself uses the parent's resolved text color.
+        DomElement* current = lycon ? lam::view_as_element(lycon->view) : nullptr;
+        DomElement* parent = current ? dom_parent_element(current) : nullptr;
+        return get_current_color_for_view(parent ? lam::view_require_element(parent) : nullptr);
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INITIAL)
+        return Color{0xFF000000};
+    return resolve_color_value(lycon, value);
+}
+
+float resolve_css_opacity_value(LayoutContext* lycon, const CssValue* value) {
+    value = resolve_var_function(lycon, value);
+    if (!value || !css_property_validate_value(CSS_PROPERTY_OPACITY, value)) return 1.0f;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->data.keyword == CSS_VALUE_INHERIT) {
+            DomElement* current = lycon ? lam::view_as_element(lycon->view) : nullptr;
+            DomElement* parent = current ? dom_parent_element(current) : nullptr;
+            return parent && parent->in_line ? parent->inl()->opacity : 1.0f;
+        }
+        return 1.0f;
+    }
+    float opacity = resolve_length_value(lycon, CSS_PROPERTY_OPACITY, value);
+    // range clipping occurs at computed-value time, before keyframe interpolation.
+    return isnan(opacity) ? 0.0f : clamp_unit(opacity);
 }
 
 
@@ -3574,17 +3442,16 @@ static DisplayValue resolve_variable_display_value(DomElement* element,
     DisplayValue initial = {CSS_VALUE_INLINE,
         css_display_element_is_replaced(element)
             ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW};
-    const char* var_stack[32];
     // Most whole-value references resolve without an allocation. Nested token
     // substitution uses a short-lived pool because display is queried before
     // a LayoutContext exists and no result may retain scratch memory.
-    const CssValue* value = resolve_var_function_inner(
-        nullptr, raw_value, element, nullptr, nullptr, var_stack, 0);
+    const CssValue* value = css_resolve_var_value(
+        nullptr, raw_value, nullptr, nullptr, element);
     Pool* scratch_pool = nullptr;
     if (!value) {
         scratch_pool = pool_create();
-        if (scratch_pool) value = resolve_var_function_inner(
-            scratch_pool, raw_value, element, nullptr, nullptr, var_stack, 0);
+        if (scratch_pool) value = css_resolve_var_value(
+            scratch_pool, raw_value, nullptr, nullptr, element);
     }
     DisplayValue resolved = initial;
     if (value && css_property_validate_value(CSS_PROPERTY_DISPLAY, value)) {
@@ -4236,6 +4103,8 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     case CSS_VALUE_TYPE_LENGTH: {
         double num = value->data.length.value;
         CssUnit unit = value->data.length.unit;
+        if (lycon->transform_angle_math && effective_property == CSS_PROPERTY_TRANSFORM &&
+            resolve_css_angle_degrees(value, &result)) break;
         double absolute_pixels = 0.0;
         if (css_absolute_length_to_px(unit, num, &absolute_pixels)) {
             result = absolute_pixels;
@@ -4343,7 +4212,11 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     }
     case CSS_VALUE_TYPE_PERCENTAGE: {
         double percentage = value->data.percentage.value;
-        if (effective_property == CSS_PROPERTY_SCROLL_PADDING &&
+        if (effective_property == CSS_PROPERTY_TRANSFORM && lycon->transform_length_math) {
+            result = percentage * lycon->transform_percentage_base / 100.0;
+        } else if (effective_property == CSS_PROPERTY_OPACITY) {
+            result = percentage / 100.0;
+        } else if (effective_property == CSS_PROPERTY_SCROLL_PADDING &&
             lycon->scroll_percentage_base > 0.0f) {
             result = percentage * lycon->scroll_percentage_base / 100.0;
         } else if (effective_property == CSS_PROPERTY_FONT_SIZE || effective_property == CSS_PROPERTY_LINE_HEIGHT || effective_property == CSS_PROPERTY_VERTICAL_ALIGN) {
@@ -4544,11 +4417,12 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         break;
     }
     if (value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result) &&
-        effective_property != CSS_PROPERTY_FONT_SIZE) {
+        effective_property != CSS_PROPERTY_FONT_SIZE &&
+        !(lycon->transform_angle_math && effective_property == CSS_PROPERTY_TRANSFORM)) {
         // CSS Viewport 1 applies effective zoom to every resolved CSS length,
         result *= layout_effective_zoom(lycon->view);
     }
-    if (length_resolve_depth == 1 && !isnan(result)) {
+    if (length_resolve_depth == 1 && !isnan(result) && !lycon->transform_angle_math) {
         // percentages remain percentage values and use the scaled CB; only
         // css Values 4 permits approximating an actual value that cannot be
         // represented by the layout coordinate range; apply that invariant to
@@ -5512,14 +5386,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         pseudo_style, CSS_PROPERTY_OPACITY);
     if (opacity_decl && opacity_decl->value) {
         const CssValue* value = resolve_var_function(lycon, opacity_decl->value);
-        float opacity = 1.0f;
-        if (value && value->type == CSS_VALUE_TYPE_NUMBER) {
-            opacity = (float)value->data.number.value;
-        } else if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-            opacity = (float)(value->data.percentage.value / 100.0);
-        }
-        opacity = clamp_unit(opacity);
-        form->placeholder_opacity = opacity;
+        form->placeholder_opacity = resolve_css_opacity_value(lycon, value);
         form->placeholder_has_opacity = 1;
     }
     CssDeclaration* font_size_decl = style_tree_get_declaration(
@@ -6164,24 +6031,56 @@ static void resolve_scroll_snap(DomElement* element, LayoutContext* lycon) {
 
 static CssEnum logical_inline_direction(DomElement* element);
 
+// each family lists its shorthand, physical sides and logical block/inline members.
+static const CssPropertyCode box_component_families[][11] = {
+    {CSS_PROPERTY_MARGIN, CSS_PROPERTY_MARGIN_TOP, CSS_PROPERTY_MARGIN_RIGHT,
+     CSS_PROPERTY_MARGIN_BOTTOM, CSS_PROPERTY_MARGIN_LEFT, CSS_PROPERTY_MARGIN_BLOCK,
+     CSS_PROPERTY_MARGIN_BLOCK_START, CSS_PROPERTY_MARGIN_BLOCK_END, CSS_PROPERTY_MARGIN_INLINE,
+     CSS_PROPERTY_MARGIN_INLINE_START, CSS_PROPERTY_MARGIN_INLINE_END},
+    {CSS_PROPERTY_PADDING, CSS_PROPERTY_PADDING_TOP, CSS_PROPERTY_PADDING_RIGHT,
+     CSS_PROPERTY_PADDING_BOTTOM, CSS_PROPERTY_PADDING_LEFT, CSS_PROPERTY_PADDING_BLOCK,
+     CSS_PROPERTY_PADDING_BLOCK_START, CSS_PROPERTY_PADDING_BLOCK_END, CSS_PROPERTY_PADDING_INLINE,
+     CSS_PROPERTY_PADDING_INLINE_START, CSS_PROPERTY_PADDING_INLINE_END},
+    {CSS_PROPERTY_INSET, CSS_PROPERTY_TOP, CSS_PROPERTY_RIGHT,
+     CSS_PROPERTY_BOTTOM, CSS_PROPERTY_LEFT, CSS_PROPERTY_INSET_BLOCK,
+     CSS_PROPERTY_INSET_BLOCK_START, CSS_PROPERTY_INSET_BLOCK_END, CSS_PROPERTY_INSET_INLINE,
+     CSS_PROPERTY_INSET_INLINE_START, CSS_PROPERTY_INSET_INLINE_END},
+    {CSS_PROPERTY_BORDER_WIDTH, CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_RIGHT_WIDTH,
+     CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_LEFT_WIDTH, CSS_PROPERTY_BORDER_BLOCK_WIDTH,
+     CSS_PROPERTY_BORDER_BLOCK_START_WIDTH, CSS_PROPERTY_BORDER_BLOCK_END_WIDTH, CSS_PROPERTY_BORDER_INLINE_WIDTH,
+     CSS_PROPERTY_BORDER_INLINE_START_WIDTH, CSS_PROPERTY_BORDER_INLINE_END_WIDTH},
+    {CSS_PROPERTY_BORDER_COLOR, CSS_PROPERTY_BORDER_TOP_COLOR, CSS_PROPERTY_BORDER_RIGHT_COLOR,
+     CSS_PROPERTY_BORDER_BOTTOM_COLOR, CSS_PROPERTY_BORDER_LEFT_COLOR, CSS_PROPERTY_BORDER_BLOCK_COLOR,
+     CSS_PROPERTY_BORDER_BLOCK_START_COLOR, CSS_PROPERTY_BORDER_BLOCK_END_COLOR, CSS_PROPERTY_BORDER_INLINE_COLOR,
+     CSS_PROPERTY_BORDER_INLINE_START_COLOR, CSS_PROPERTY_BORDER_INLINE_END_COLOR},
+    {CSS_PROPERTY_BORDER, CSS_PROPERTY_BORDER_TOP, CSS_PROPERTY_BORDER_RIGHT,
+     CSS_PROPERTY_BORDER_BOTTOM, CSS_PROPERTY_BORDER_LEFT, CSS_PROPERTY_BORDER_BLOCK,
+     CSS_PROPERTY_BORDER_BLOCK_START, CSS_PROPERTY_BORDER_BLOCK_END, CSS_PROPERTY_BORDER_INLINE,
+     CSS_PROPERTY_BORDER_INLINE_START, CSS_PROPERTY_BORDER_INLINE_END},
+    {CSS_PROPERTY_SCROLL_MARGIN, CSS_PROPERTY_SCROLL_MARGIN_TOP, CSS_PROPERTY_SCROLL_MARGIN_RIGHT,
+     CSS_PROPERTY_SCROLL_MARGIN_BOTTOM, CSS_PROPERTY_SCROLL_MARGIN_LEFT, CSS_PROPERTY_SCROLL_MARGIN_BLOCK,
+     CSS_PROPERTY_SCROLL_MARGIN_BLOCK_START, CSS_PROPERTY_SCROLL_MARGIN_BLOCK_END, CSS_PROPERTY_SCROLL_MARGIN_INLINE,
+     CSS_PROPERTY_SCROLL_MARGIN_INLINE_START, CSS_PROPERTY_SCROLL_MARGIN_INLINE_END},
+    {CSS_PROPERTY_SCROLL_PADDING, CSS_PROPERTY_SCROLL_PADDING_TOP, CSS_PROPERTY_SCROLL_PADDING_RIGHT,
+     CSS_PROPERTY_SCROLL_PADDING_BOTTOM, CSS_PROPERTY_SCROLL_PADDING_LEFT, CSS_PROPERTY_SCROLL_PADDING_BLOCK,
+     CSS_PROPERTY_SCROLL_PADDING_BLOCK_START, CSS_PROPERTY_SCROLL_PADDING_BLOCK_END, CSS_PROPERTY_SCROLL_PADDING_INLINE,
+     CSS_PROPERTY_SCROLL_PADDING_INLINE_START, CSS_PROPERTY_SCROLL_PADDING_INLINE_END}
+};
+
+static const CssPropertyCode* box_component_family(CssPropertyCode property) {
+    for (const auto& family : box_component_families) {
+        for (CssPropertyCode member : family) {
+            if (member == property) return family;
+        }
+    }
+    return nullptr;
+}
+
 static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
                                    bool padding) {
     if (!element || !element->specified_style) return;
-    static const CssPropertyCode properties[2][11] = {
-        {CSS_PROPERTY_SCROLL_MARGIN, CSS_PROPERTY_SCROLL_MARGIN_TOP,
-         CSS_PROPERTY_SCROLL_MARGIN_RIGHT, CSS_PROPERTY_SCROLL_MARGIN_BOTTOM,
-         CSS_PROPERTY_SCROLL_MARGIN_LEFT, CSS_PROPERTY_SCROLL_MARGIN_BLOCK,
-         CSS_PROPERTY_SCROLL_MARGIN_BLOCK_START, CSS_PROPERTY_SCROLL_MARGIN_BLOCK_END,
-         CSS_PROPERTY_SCROLL_MARGIN_INLINE, CSS_PROPERTY_SCROLL_MARGIN_INLINE_START,
-         CSS_PROPERTY_SCROLL_MARGIN_INLINE_END},
-        {CSS_PROPERTY_SCROLL_PADDING, CSS_PROPERTY_SCROLL_PADDING_TOP,
-         CSS_PROPERTY_SCROLL_PADDING_RIGHT, CSS_PROPERTY_SCROLL_PADDING_BOTTOM,
-         CSS_PROPERTY_SCROLL_PADDING_LEFT, CSS_PROPERTY_SCROLL_PADDING_BLOCK,
-         CSS_PROPERTY_SCROLL_PADDING_BLOCK_START, CSS_PROPERTY_SCROLL_PADDING_BLOCK_END,
-         CSS_PROPERTY_SCROLL_PADDING_INLINE, CSS_PROPERTY_SCROLL_PADDING_INLINE_START,
-         CSS_PROPERTY_SCROLL_PADDING_INLINE_END}
-    };
-    const CssPropertyCode* family = properties[padding ? 1 : 0];
+    const CssPropertyCode* family = box_component_family(
+        padding ? CSS_PROPERTY_SCROLL_PADDING : CSS_PROPERTY_SCROLL_MARGIN);
     const CssDeclaration* winners[4] = {};
     int parts[4] = {};
     CssEnum specified_direction = layout_specified_keyword(
@@ -6867,7 +6766,7 @@ static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, Cs
     }
 }
 
-static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
+void resolve_css_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
                                        CssPropertyCode prop_id, const CssValue* value) {
     BlockProp* props = block->ensure_block(lycon);
     DomElement* parent = (lycon->elmt && lycon->elmt->parent)
@@ -7206,7 +7105,7 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
     }
 }
 
-static void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
+void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
                                   const CssValue* value,
                                   LayoutAxis axis) {
     const CssValue* fit_limit = css_fit_content_function_limit(value);
@@ -8387,20 +8286,7 @@ static void resolve_inline_color_property(LayoutContext* lycon, ViewSpan* span,
                                           const CssValue* value) {
     span->ensure_inline(lycon);
     if (property == CSS_PROPERTY_COLOR) {
-        if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-            (value->data.keyword == CSS_VALUE_INHERIT ||
-             value->data.keyword == CSS_VALUE_UNSET)) {
-            DomElement* current = lam::dom_require_element(lycon->view);
-            DomElement* parent = current ? dom_parent_element(current) : nullptr;
-            span->in_line->color = parent
-                ? get_current_color_for_view(lam::view_require_element(parent))
-                : color_name_to_rgb(CSS_VALUE_BLACK);
-        } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-                   value->data.keyword == CSS_VALUE_INITIAL) {
-            span->in_line->color = color_name_to_rgb(CSS_VALUE_BLACK);
-        } else {
-            span->in_line->color = resolve_color_value(lycon, value);
-        }
+        span->in_line->color = resolve_text_color_value(lycon, value);
         span->in_line->has_color = true;
     } else if (property == CSS_PROPERTY_ACCENT_COLOR) {
         span->in_line->has_accent_color =
@@ -8457,22 +8343,7 @@ static void resolve_inline_visibility_opacity(LayoutContext* lycon, ViewSpan* sp
         }
         return;
     }
-    float opacity;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) opacity =
-        (float)value->data.percentage.value / 100.0f;
-    else if (value->type == CSS_VALUE_TYPE_NUMBER) opacity =
-        (float)value->data.number.value;
-    else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-             value->data.keyword == CSS_VALUE_INHERIT) {
-        DomElement* current = lam::dom_require_element(lycon->view);
-        DomElement* parent = current ? dom_parent_element(current) : nullptr;
-        opacity = parent ? parent->inl()->opacity : INLINE_PROP_DEFAULT.opacity;
-    } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-               (value->data.keyword == CSS_VALUE_INITIAL ||
-                value->data.keyword == CSS_VALUE_UNSET)) {
-        opacity = INLINE_PROP_DEFAULT.opacity;
-    } else return;
-    span->in_line->opacity = clamp_unit(opacity);
+    span->in_line->opacity = resolve_css_opacity_value(lycon, value);
 }
 
 static void resolve_line_count_property(LayoutContext* lycon, ViewBlock* block,
@@ -9095,6 +8966,75 @@ static CssPropertyCode css_physical_size_alias(CssPropertyCode property,
     }
 }
 
+struct LayoutComponentCascade {
+    CssPropertyCode property;
+    bool vertical_inline_axis;
+    LayoutLogicalSides sides;
+    const CssPropertyCode* family;
+    CssPropertyCode* sources;
+    size_t count;
+};
+
+static bool box_component_source_matches(const CssPropertyCode* family,
+                                         CssPropertyCode source, CssBoxSide side,
+                                         const LayoutLogicalSides& sides) {
+    if (!family) return false;
+    for (int index = 0; index < 11; index++) {
+        if (family[index] != source) continue;
+        if (index == 0) return true;
+        if (index <= 4) return side == index - 1;
+        bool pair_follows_start = family[0] != CSS_PROPERTY_MARGIN &&
+            family[0] != CSS_PROPERTY_PADDING;
+        LayoutPhysicalSides physical = layout_logical_physical_sides(
+            layout_logical_property(source), sides, pair_follows_start);
+        return side == physical.first || (physical.pair && side == physical.second);
+    }
+    return false;
+}
+
+static bool collect_component_cascade_source(StyleNode* node, void* context) {
+    LayoutComponentCascade* query = (LayoutComponentCascade*)context;
+    CssPropertyCode source = node->property_code;
+    if (source <= CSS_PROPERTY_UNKNOWN || source >= CSS_PROPERTY_COUNT) return true;
+    bool matches = source == query->property ||
+        css_physical_size_alias(source, query->vertical_inline_axis) == query->property;
+    if (source == CSS_PROPERTY_ALL && query->property != CSS_PROPERTY_DIRECTION &&
+        query->property != CSS_PROPERTY_UNICODE_BIDI) matches = true;
+    if (query->property == CSS_PROPERTY_BACKGROUND_COLOR && source == CSS_PROPERTY_BACKGROUND)
+        matches = true;
+    if (query->family) {
+        CssBoxSide side = radiant_css_box_side(query->property);
+        matches |= box_component_source_matches(query->family, source, side, query->sides);
+        if (query->family[0] == CSS_PROPERTY_BORDER_WIDTH ||
+            query->family[0] == CSS_PROPERTY_BORDER_COLOR) {
+            matches |= box_component_source_matches(box_component_family(CSS_PROPERTY_BORDER),
+                source, side, query->sides);
+        }
+    }
+    const CssProperty* definition = css_property_get_by_code(source);
+    for (int index = 0; definition && index < definition->longhand_count; index++) {
+        matches |= definition->longhand_props[index] == query->property;
+    }
+    if (matches) query->sources[query->count++] = source;
+    return true;
+}
+
+CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
+                                                     CssPropertyCode property) {
+    if (!element || !element->specified_style || property <= CSS_PROPERTY_UNKNOWN ||
+        property >= CSS_PROPERTY_COUNT) return nullptr;
+    CssEnum direction = layout_specified_keyword(element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+    bool rtl = direction == CSS_VALUE_RTL ||
+        (direction != CSS_VALUE_LTR && logical_inline_direction(element) == CSS_VALUE_RTL);
+    bool vertical = layout_element_inline_axis_is_vertical(element);
+    CssPropertyCode sources[CSS_PROPERTY_COUNT];
+    LayoutComponentCascade query = {property, vertical,
+        layout_logical_sides(vertical, layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl),
+        box_component_family(property), sources, 0};
+    style_tree_foreach(element->specified_style, collect_component_cascade_source, &query);
+    return style_tree_get_component_declaration(element->specified_style, sources, query.count);
+}
+
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
     if (!decl || !lycon || !lycon->view) {
         return;
@@ -9649,7 +9589,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_MAX_WIDTH:
         case CSS_PROPERTY_MIN_HEIGHT:
         case CSS_PROPERTY_MAX_HEIGHT: {
-            if (block) apply_dimension_constraint(lycon, block, prop_id, value);
+            if (block) resolve_css_dimension_constraint(lycon, block, prop_id, value);
             break;
         }
         case CSS_PROPERTY_TEXT_BOX:
@@ -9745,11 +9685,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 break;
             }
             span->ensure_transform(lycon);
-            span->transform->functions = lam::shared(resolve_css_function_list<TransformFunction>(
-                value,
-                [&](const CssValue* item) {
-                    return resolve_transform_function(lycon, prop_id, item);
-                }, append_transform_function));
+            span->transform->functions = lam::shared(resolve_transform_value(lycon, value));
             span->transform->functions_owner = TRANSFORM_FUNCTIONS_VIEW_POOL;
             break;
         }

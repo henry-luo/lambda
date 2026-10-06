@@ -656,6 +656,18 @@ struct DocumentAnimationTick {
     bool active;
 };
 
+bool radiant_tick_document_animation_scheduler(DomDocument* document, double now,
+                                               DirtyTracker* dirty_tracker) {
+    DocState* state = document ? document->state : nullptr;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    if (!scheduler || !scheduler->has_active_animations) return false;
+    bool active = animation_scheduler_tick(scheduler, now, dirty_tracker);
+    // sampled sizes must reach geometry before native or virtual frames paint.
+    if (scheduler->needs_layout) doc_state_request_reflow(state);
+    doc_state_request_repaint(state);
+    return active;
+}
+
 static void tick_document_animation_tree(DomDocument* document,
                                          DocumentAnimationTick* tick);
 
@@ -688,7 +700,8 @@ static void tick_document_animation_tree(DomDocument* document,
         // Embedded bounds are local to their own viewport; the host repaints
         // the complete frame after any child tick.
         DirtyTracker* dirty = tick->depth == 0 ? &state->dirty_tracker : nullptr;
-        tick->active = animation_scheduler_tick(scheduler, tick->now, dirty) || tick->active;
+        tick->active = radiant_tick_document_animation_scheduler(
+            document, tick->now, dirty) || tick->active;
         tick->ticked = true;
     }
     if (state && state->has_active_smooth_scroll &&
@@ -8052,11 +8065,38 @@ static Item radiant_build_svg_timing_event(void* userdata) {
     return js_create_native_svg_time_event(data->type, data->detail, data->seconds);
 }
 
+static Item radiant_dispatch_queued_css_event(Item env_item) {
+    JS_ENV_UNPACK(env, env_item);
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, env[0]);
+    Rooted<Item> event_root(roots, env[1]);
+    if (dom_unwrap_element(target_root.get())) {
+        dom_dispatch_event(target_root.get(), event_root.get());
+    }
+    return make_js_undefined();
+}
+
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value, double elapsed_time) {
-    if (!type || !*type) return;
+    if (!uicon || !target || !target->doc || !type || !*type) return;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = target->doc;
+    JsCtxScope scope = {};
+    bool entered_scope = radiant_js_ctx_enter(&scope, &evcon);
+    if (!entered_scope && (!context || dom_get_document() != target->doc)) return;
     RadiantTimingEventData data = {type, detail_name, detail_value, elapsed_time, 0};
-    radiant_dispatch_timing_event(uicon, target, radiant_build_css_timing_event, &data);
+    // CSS listeners run after sampling releases its layout/scheduler ownership.
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, dom_wrap_element(target));
+    Rooted<Item> event_root(roots, radiant_build_css_timing_event(&data));
+    Item values[2] = {target_root.get(), event_root.get()};
+    js_schedule_native_env(dom_schedule_animation_frame,
+        radiant_dispatch_queued_css_event, 0, values, 2);
+    if (entered_scope) {
+        input_context = scope.saved_input_ctx;
+        scope.active = false;
+    }
 }
 
 void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,

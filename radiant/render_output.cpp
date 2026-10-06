@@ -238,6 +238,11 @@ static bool render_export_session_begin_internal(
 
     // Every file exporter must lay out and measure the same scaled document before encoding.
     session->ui_context->document = session->document;
+    // exports sample the same initial CSS animation timeline as headless layout.
+    if (!radiant_document_ensure_state(session->document, "render_export_session")) {
+        render_export_session_end(session);
+        return false;
+    }
     session->document->viewport.output_scale = session->output_scale;
     ui_context_sync_document_raster_scale(session->ui_context,
                                           session->document);

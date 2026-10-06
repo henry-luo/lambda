@@ -3353,6 +3353,9 @@ void editing_interaction_end_composition(DocState* state,
  */
 void doc_state_mark_dirty(DocState* state);
 void doc_state_request_repaint(DocState* state);
+// Sample one document's scheduler and invalidate layout/paint for both frame owners.
+bool radiant_tick_document_animation_scheduler(DomDocument* document, double now,
+                                               DirtyTracker* dirty_tracker);
 // Advance the visible document and its embedded documents on the UI thread.
 // Returns whether any scheduler still needs another frame.
 bool radiant_tick_document_animations(DomDocument* document, double now,

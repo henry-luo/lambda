@@ -1185,6 +1185,8 @@ Item js_iterable_to_array(Item iterable);
 Item js_get_iterator(Item iterable);
 Item js_get_async_iterator(Item iterable);
 Item js_get_iterator_lazy(Item iterable);
+// IDL callers have already read @@iterator; validate its result and capture next once.
+Item js_iterator_return_checked(Item iterator, bool cache_next, const char* error_message);
 bool js_is_fixed_layout_iterator(Item object);
 Item js_iterator_step(Item iterator);
 // Async iteration keeps the protocol result intact until its promise settles,

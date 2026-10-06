@@ -1065,7 +1065,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
     }
 
     // If we have content, we have at least one argument (arg_count is the number of commas)
-    if (has_content) {
+    if (has_content || arg_count > 0) {
         arg_count++;  // commas + 1 = number of arguments
     }
 
@@ -1132,11 +1132,6 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
 
         // Now create a value for this argument
         // If single token, create simple value; if multiple tokens, create a list value
-        if (arg_token_count == 0) {
-            // Empty argument - skip
-            continue;
-        }
-
         // Count non-whitespace tokens in this argument
         int value_count = 0;
         for (int i = arg_token_start; i < arg_token_start + arg_token_count; i++) {
@@ -1159,7 +1154,11 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
             }
         }
 
-        if (value_count == 1) {
+        if (value_count == 0) {
+            // empty arguments are tokens too: var(--name,) has an empty fallback.
+            func_value->data.function->args[arg_idx++] =
+                css_value_create_list(pool, NULL, 0);
+        } else if (value_count == 1) {
             // Single value - find and parse it
             for (int i = arg_token_start; i < arg_token_start + arg_token_count; i++) {
                 if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
@@ -1206,6 +1205,11 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
         }
     }
 
+    while (arg_idx < arg_count) {
+        func_value->data.function->args[arg_idx++] =
+            css_value_create_list(pool, NULL, 0);
+    }
+
     // Skip closing paren if present
     if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
         (*pos)++;
@@ -1236,6 +1240,12 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
                 if (enum_id != CSS_VALUE__UNDEF) {
                     value->type = CSS_VALUE_TYPE_KEYWORD;
                     value->data.keyword = enum_id;
+                    const CssEnumInfo* info = css_enum_info(enum_id);
+                    if (info && strcmp(token_val, info->name) != 0) {
+                        // keywords also serve as case-sensitive animation/container names.
+                        value->data.identifier.authored = pool_strdup(pool, token_val);
+                        value->flags |= CSS_VALUE_AUTHORED_IDENTIFIER;
+                    }
                 } else {
                     value->type = CSS_VALUE_TYPE_CUSTOM;
                     value->data.custom_property.name = pool_strdup(pool, token_val);
@@ -1274,6 +1284,8 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
         case CSS_TOKEN_NUMBER:
             value->type = CSS_VALUE_TYPE_NUMBER;
             value->data.number.value = token->data.number_value;
+            // CSS <integer> depends on token spelling, not the rounded numeric value.
+            value->data.number.is_integer = css_token_is_integer(token);
             break;
 
         case CSS_TOKEN_DIMENSION:
@@ -1351,6 +1363,11 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             break;
     }
 
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && token->type != CSS_TOKEN_IDENT &&
+        token->type != CSS_TOKEN_CUSTOM_PROPERTY) {
+        // unknown dimensions and delimiters stay distinct from identifiers.
+        value->flags |= CSS_VALUE_NON_IDENTIFIER_TOKEN;
+    }
     return value;
 }
 
@@ -2370,6 +2387,7 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
     bool bracket_mismatch = false;  // unmatched ] or ) detected
     bool has_bad_token = false;  // CSS §5.4.5: bad-string/bad-url in value → drop declaration
     bool has_top_level_colon = false;
+    bool has_top_level_comma = false;
     bool has_brace_block = false;
     int value_end_before_important = -1;  // track end of value before !important
 
@@ -2381,15 +2399,20 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
             has_bad_token = true;
         }
 
-        // Check for !important (whitespace allowed between ! and important per CSS spec)
-        if (brace_depth == 0 && t == CSS_TOKEN_DELIM && tokens[*pos].data.delimiter == '!') {
+        // priority is the final top-level token pair, never nested value content.
+        if (brace_depth == 0 && bracket_depth == 0 && paren_depth_val == 0 &&
+            t == CSS_TOKEN_DELIM && tokens[*pos].data.delimiter == '!') {
             int next = css_skip_whitespace_tokens(tokens, *pos + 1, token_count);
             if (next < token_count && tokens[next].type == CSS_TOKEN_IDENT &&
-                strcmp(tokens[next].value, "important") == 0) {
-                is_important = true;
-                value_end_before_important = *pos;  // position of '!' — value ends before this
-                *pos = next + 1;
-                break;
+                str_icmp_cstr(tokens[next].value, "important") == 0) {
+                int after = css_skip_whitespace_tokens(tokens, next + 1, token_count);
+                if (after == token_count || tokens[after].type == CSS_TOKEN_SEMICOLON ||
+                    tokens[after].type == CSS_TOKEN_RIGHT_BRACE || tokens[after].type == CSS_TOKEN_EOF) {
+                    is_important = true;
+                    value_end_before_important = *pos;
+                    *pos = after;
+                    break;
+                }
             }
         }
 
@@ -2424,6 +2447,8 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
         if (t == CSS_TOKEN_COLON) {
             if (brace_depth == 0) has_top_level_colon = true;
         }
+        if (t == CSS_TOKEN_COMMA && brace_depth == 0 && paren_depth_val == 0)
+            has_top_level_comma = true;
 
         // Handle function tokens - skip entire function as one value
         if (t == CSS_TOKEN_FUNCTION) {
@@ -2461,12 +2486,11 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
         (*pos)++;
     }
 
-    if (value_count == 0) {
+    bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
+    if (value_count == 0 && !is_custom_prop) {
         log_debug("[CSS Parser] No value tokens found");
         return NULL;
     }
-
-    bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
 
     // CSS Syntax permits a single var-bearing block as a deferred value.
     // Other blocks remain invalid for standard properties after consumption.
@@ -2527,15 +2551,20 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
     decl->ref_count = 1;
 
     // Special handling for font-family: combine multi-word font names
-    if (decl->property_code == CSS_PROPERTY_FONT_FAMILY && value_count > 1) {
-        decl->value = css_parse_font_family_values(tokens, value_start, *pos, pool);
+    if (is_custom_prop && value_start == value_end) {
+        // an empty custom property is present and must suppress var() fallbacks.
+        decl->value = css_value_create_list(pool, NULL, 0);
+        decl->value_text = " ";
+        decl->value_text_len = 1;
+    } else if (decl->property_code == CSS_PROPERTY_FONT_FAMILY && value_count > 1) {
+        decl->value = css_parse_font_family_values(tokens, value_start, value_end, pool);
     }
     // Create value(s) from tokens
-    else if (value_count == 1) {
+    else if (value_count == 1 && !has_top_level_comma) {
         // Single value - create directly
         int i = value_start;
-        while (i < *pos) {
-            CssValue* value = css_parse_value_at(tokens, &i, *pos, pool);
+        while (i < value_end) {
+            CssValue* value = css_parse_value_at(tokens, &i, value_end, pool);
             if (value) {
                 decl->value = value;
             }
@@ -2547,23 +2576,12 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
         // comma-separated value groups (e.g. box-shadow, background, transition).
         // Top-level commas split values into sub-lists; commas inside functions
         // like rgba() are NOT group separators.
-        bool has_top_level_comma = false;
-        {
-            int pd = 0;
-            for (int i = value_start; i < *pos; i++) {
-                CssTokenType t = tokens[i].type;
-                if (t == CSS_TOKEN_FUNCTION || t == CSS_TOKEN_LEFT_PAREN) pd++;
-                else if (t == CSS_TOKEN_RIGHT_PAREN) { if (pd > 0) pd--; }
-                else if (t == CSS_TOKEN_COMMA && pd == 0) { has_top_level_comma = true; break; }
-            }
-        }
-
         if (has_top_level_comma) {
             // Count comma-separated groups (tracking paren depth to skip function args)
             int group_count = 1;
             {
                 int pd = 0;
-                for (int i = value_start; i < *pos; i++) {
+                for (int i = value_start; i < value_end; i++) {
                     CssTokenType t = tokens[i].type;
                     if (t == CSS_TOKEN_FUNCTION || t == CSS_TOKEN_LEFT_PAREN) pd++;
                     else if (t == CSS_TOKEN_RIGHT_PAREN) { if (pd > 0) pd--; }
@@ -2581,11 +2599,11 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
             // Parse each comma-separated group into a sub-list (or single value)
             int group_idx = 0;
             int i = value_start;
-            while (i < *pos && group_idx < group_count) {
+            while (i <= value_end && group_idx < group_count) {
                 // Find group boundaries (up to next top-level comma or end)
                 int group_start = i;
                 int pd = 0;
-                while (i < *pos) {
+                while (i < value_end) {
                     CssTokenType t = tokens[i].type;
                     if (t == CSS_TOKEN_FUNCTION || t == CSS_TOKEN_LEFT_PAREN) pd++;
                     else if (t == CSS_TOKEN_RIGHT_PAREN) { if (pd > 0) pd--; }
@@ -2593,7 +2611,7 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
                     i++;
                 }
                 int group_end = i;
-                if (i < *pos && tokens[i].type == CSS_TOKEN_COMMA) i++; // skip comma
+                if (i < value_end && tokens[i].type == CSS_TOKEN_COMMA) i++; // skip comma
 
                 // Parse values within this group
                 // First count values (functions count as 1)
@@ -2620,6 +2638,9 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
                 }
 
                 if (gval_count == 0) {
+                    // keep leading/trailing commas for deferred token substitution.
+                    list_value->data.list.values[group_idx] =
+                        css_value_create_list(pool, NULL, 0);
                     group_idx++;
                     continue;
                 } else if (gval_count == 1) {
@@ -2686,8 +2707,8 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
 
             int list_idx = 0;
             int i = value_start;
-            while (i < *pos && list_idx < value_count) {
-                CssValue* value = css_parse_value_at(tokens, &i, *pos, pool);
+            while (i < value_end && list_idx < value_count) {
+                CssValue* value = css_parse_value_at(tokens, &i, value_end, pool);
                 if (value) {
                     list_value->data.list.values[list_idx++] = value;
                 }
@@ -3519,11 +3540,12 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
                 }
                 int content_end = pos - 1; // Content ends before '}'
 
-                if (rule->type == CSS_RULE_FONT_FACE && brace_depth == 0 &&
+                if ((rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_KEYFRAMES) &&
+                    brace_depth == 0 &&
                     tokens[opening_brace].start && tokens[content_end].start) {
-                    // Descriptor values such as U+3000-30FF require the original
-                    // token spacing; the generic formatter inserts invalid spaces.
-                    const char* raw_start = tokens[opening_brace].start;
+                    // descriptor ranges and keyframe math require authored token spacing.
+                    const char* raw_start = tokens[rule->type == CSS_RULE_KEYFRAMES
+                        ? prefix_start : opening_brace].start;
                     const char* raw_end = tokens[content_end].start + tokens[content_end].length;
                     rule->data.generic_rule.content = pool_dup_n(
                         pool, raw_start, (size_t)(raw_end - raw_start));

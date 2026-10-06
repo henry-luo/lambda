@@ -562,6 +562,8 @@ bool dom_exec_insert_html(DomDocument* doc, const char* html);
 uint64_t dom_mutation_epoch(DomDocument* doc);
 #endif
 
+void dom_schedule_animation_frame(Item callback);
+
 #ifdef __cplusplus
 }
 #endif

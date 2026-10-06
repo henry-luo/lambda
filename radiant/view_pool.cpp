@@ -327,12 +327,8 @@ static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
 static void free_transform_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->transform) return;
     if (elem->transform->functions_owner == TRANSFORM_FUNCTIONS_DOCUMENT_POOL) return;
-    TransformFunction* function = elem->transform->functions;
-    while (function) {
-        TransformFunction* next = function->next;
-        view_pool_free_ptr(tree, function);
-        function = next;
-    }
+    if (tree && tree->prop_pool)
+        radiant::destroy_transform_list(tree->prop_pool, elem->transform->functions);
 }
 
 static void free_filter_chain(ViewTree* tree, FilterProp* filter) {

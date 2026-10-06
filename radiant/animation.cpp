@@ -1,6 +1,7 @@
 #include "view.hpp"
 #include "../lib/log.h"
 #include <math.h>
+#include <limits.h>
 
 // forward declaration — defined in state_store.cpp
 extern void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float height);
@@ -109,17 +110,17 @@ static float timing_eval_steps(const TimingFunction* tf, float t) {
     float step;
     switch (tf->steps.position) {
         case STEP_JUMP_START:
-            step = ceilf(t * (float)n) / (float)n;
+            step = (floorf(t * (float)n) + 1.0f) / (float)n;
             break;
         case STEP_JUMP_END:
             step = floorf(t * (float)n) / (float)n;
             break;
         case STEP_JUMP_BOTH:
-            step = ceilf(t * (float)(n + 1)) / (float)(n + 1);
+            step = (floorf(t * (float)n) + 1.0f) / ((float)n + 1.0f);
             break;
         case STEP_JUMP_NONE:
             if (n <= 1) return t;
-            step = floorf(t * (float)(n - 1)) / (float)(n - 1);
+            step = floorf(t * (float)n) / ((float)n - 1.0f);
             break;
         default:
             step = floorf(t * (float)n) / (float)n;
@@ -232,19 +233,35 @@ void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* a
     scheduler->count++;
     scheduler->has_active_animations = true;
 
-    log_debug("anim: added animation type=%d target=%p duration=%.3fs count=%d (total active: %d)",
+    log_debug("anim: added animation type=%d target=%p duration=%.3fs count=%g (total active: %d)",
               anim->type, anim->target, anim->duration, anim->iteration_count, scheduler->count);
 }
 
-void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim) {
-    if (!scheduler || !anim) return;
-
-    // unlink from doubly-linked list
+static void animation_scheduler_unlink(AnimationScheduler* scheduler, AnimationInstance* anim) {
     if (anim->prev) anim->prev->next = anim->next;
     else scheduler->first = anim->next;
 
     if (anim->next) anim->next->prev = anim->prev;
     else scheduler->last = anim->prev;
+    anim->prev = nullptr;
+    anim->next = nullptr;
+}
+
+void animation_scheduler_move_before(AnimationScheduler* scheduler, AnimationInstance* anim,
+                                     AnimationInstance* before) {
+    if (!scheduler || !anim || anim == before || anim->next == before) return;
+    animation_scheduler_unlink(scheduler, anim);
+    anim->next = before;
+    anim->prev = before ? before->prev : scheduler->last;
+    if (anim->prev) anim->prev->next = anim;
+    else scheduler->first = anim;
+    if (before) before->prev = anim;
+    else scheduler->last = anim;
+}
+
+void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim) {
+    if (!scheduler || !anim) return;
+    animation_scheduler_unlink(scheduler, anim);
 
     scheduler->count--;
     if (scheduler->count == 0) {
@@ -323,81 +340,97 @@ void animation_scheduler_prune_disconnected_css_views(AnimationScheduler* schedu
 // Compute normalized progress for an animation at the given time
 static float compute_animation_progress(AnimationInstance* anim, double now) {
     double elapsed = now - anim->start_time;
+    anim->active_time = elapsed - anim->delay;
 
     // still in delay period
     if (elapsed < anim->delay) {
         if (anim->fill_mode == ANIM_FILL_BACKWARDS || anim->fill_mode == ANIM_FILL_BOTH) {
-            return 0.0f; // apply start state during delay
+            anim->current_iteration = 0;
+            return anim->direction == ANIM_DIR_REVERSE ||
+                anim->direction == ANIM_DIR_ALTERNATE_REVERSE ? 1.0f : 0.0f;
         }
         return -1.0f; // not yet active
     }
 
     double active_time = elapsed - anim->delay;
 
-    // check for completion
-    if (anim->duration <= 0.0) {
-        // zero-duration: jump to end
+    double overall = anim->duration > 0.0 ? active_time / anim->duration
+        : (anim->iteration_count >= 0.0 ? anim->iteration_count : 1.0);
+    bool finished = anim->duration <= 0.0 ||
+        (anim->iteration_count >= 0.0 && overall >= anim->iteration_count);
+    if (finished) {
+        if (anim->iteration_count >= 0.0) overall = anim->iteration_count;
         anim->play_state = ANIM_PLAY_FINISHED;
-        return 1.0f;
     }
-
-    int iteration = (int)(active_time / anim->duration);
-    double iteration_progress = fmod(active_time, anim->duration) / anim->duration;
-
-    // check if all iterations are done
-    if (anim->iteration_count >= 0 && iteration >= anim->iteration_count) {
-        anim->current_iteration = anim->iteration_count - 1;
-        anim->play_state = ANIM_PLAY_FINISHED;
-
-        // fill-mode forwards/both: hold final value
-        if (anim->fill_mode == ANIM_FILL_FORWARDS || anim->fill_mode == ANIM_FILL_BOTH) {
-            // determine if final iteration was forward or reverse
-            bool is_reverse = false;
-            if (anim->direction == ANIM_DIR_REVERSE) is_reverse = true;
-            else if (anim->direction == ANIM_DIR_ALTERNATE) is_reverse = (anim->current_iteration % 2) != 0;
-            else if (anim->direction == ANIM_DIR_ALTERNATE_REVERSE) is_reverse = (anim->current_iteration % 2) == 0;
-            return is_reverse ? 0.0f : 1.0f;
-        }
-        return -1.0f; // finished, no fill
+    double whole = floor(overall);
+    double iteration_progress = overall - whole;
+    // integral active ends belong to the end of the previous iteration.
+    if (finished && overall > 0.0 && iteration_progress == 0.0) {
+        whole -= 1.0;
+        iteration_progress = 1.0;
     }
-
+    int iteration = (int)fmin(whole, (double)INT_MAX); // INT_CAST_OK: animation iteration counter
     anim->current_iteration = iteration;
+    if (finished && anim->fill_mode != ANIM_FILL_FORWARDS &&
+        anim->fill_mode != ANIM_FILL_BOTH) return -1.0f;
     float t = (float)iteration_progress;
 
     // apply direction
     bool is_reverse = false;
+    bool odd_iteration = fmod(whole, 2.0) != 0.0;
     switch (anim->direction) {
         case ANIM_DIR_NORMAL: break;
         case ANIM_DIR_REVERSE: is_reverse = true; break;
-        case ANIM_DIR_ALTERNATE: is_reverse = (iteration % 2) != 0; break;
-        case ANIM_DIR_ALTERNATE_REVERSE: is_reverse = (iteration % 2) == 0; break;
+        case ANIM_DIR_ALTERNATE: is_reverse = odd_iteration; break;
+        case ANIM_DIR_ALTERNATE_REVERSE: is_reverse = !odd_iteration; break;
     }
     if (is_reverse) t = 1.0f - t;
 
     return t;
 }
 
+static void animation_notify_finished(AnimationInstance* anim) {
+    if (anim->finish_notified) return;
+    anim->finish_notified = true;
+    if (anim->on_finish) anim->on_finish(anim);
+}
+
 bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
-                              DirtyTracker* dirty_tracker) {
+                              DirtyTracker* dirty_tracker, bool force_css_sample,
+                              AnimationInstance* only) {
     if (!scheduler || scheduler->count == 0) {
-        scheduler->has_active_animations = false;
+        if (scheduler) {
+            scheduler->has_active_animations = false;
+            scheduler->needs_layout = false;
+        }
         return false;
     }
 
     scheduler->current_time = now;
-    bool any_active = false;
+    bool any_active = only ? scheduler->has_active_animations : false;
+    if (!only) scheduler->needs_layout = false;
 
     AnimationInstance* anim = scheduler->first;
     while (anim) {
         AnimationInstance* next = anim->next;
-
-        if (anim->play_state == ANIM_PLAY_PAUSED) {
-            any_active = true; // paused still counts as "active" for scheduling
+        // a style pass samples its own effects without overwriting pending targets.
+        if (only && anim != only) {
             anim = next;
             continue;
         }
 
-        if (anim->play_state == ANIM_PLAY_FINISHED) {
+        bool css_animation = anim->type == ANIM_CSS_ANIMATION;
+        bool paused = anim->play_state == ANIM_PLAY_PAUSED;
+        if (paused && (!css_animation || (anim->sampled && !force_css_sample))) {
+            any_active = true;
+            anim = next;
+            continue;
+        }
+        if (css_animation && anim->play_state == ANIM_PLAY_FINISHED && !force_css_sample) {
+            anim = next;
+            continue;
+        }
+        if (anim->play_state == ANIM_PLAY_FINISHED && !css_animation) {
             // finished animations with fill mode stay in the list but don't tick
             if (anim->fill_mode == ANIM_FILL_FORWARDS || anim->fill_mode == ANIM_FILL_BOTH) {
                 anim = next;
@@ -411,20 +444,28 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
         }
 
         // compute progress
-        float raw_t = compute_animation_progress(anim, now);
+        if (css_animation && anim->play_state == ANIM_PLAY_FINISHED) {
+            anim->play_state = ANIM_PLAY_RUNNING;
+        }
+        float raw_t = compute_animation_progress(anim, paused ? anim->pause_time : now);
+        anim->sampled = true;
+        bool finished = anim->play_state == ANIM_PLAY_FINISHED;
+        if (!finished) anim->finish_notified = false;
+        if (paused) anim->play_state = ANIM_PLAY_PAUSED;
 
         if (raw_t < 0.0f) {
             // not yet active (in delay, no fill-backwards) or finished (no fill)
-            if (anim->play_state == ANIM_PLAY_FINISHED) {
-                if (anim->on_finish) anim->on_finish(anim);
+            if (finished) animation_notify_finished(anim);
+            else any_active = true;
+            if (finished && !css_animation) {
                 animation_scheduler_remove(scheduler, anim);
             }
             anim = next;
             continue;
         }
 
-        // apply easing function
-        float eased_t = timing_function_eval(&anim->timing, raw_t);
+        // CSS animation easing belongs to each property's keyframe interval.
+        float eased_t = css_animation ? raw_t : timing_function_eval(&anim->timing, raw_t);
 
         // save previous bounds before tick updates them (needed to clear
         // the old visual position when transforms move the element)
@@ -435,6 +476,9 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
         if (anim->tick) {
             anim->tick(anim, eased_t);
         }
+        // style-time samples are consumed by the current layout pass.
+        if (!only && anim->layout_changed) scheduler->needs_layout = true;
+        anim->layout_changed = false;
 
         // mark dirty region for both old and new bounds (the old position
         // must be repainted to clear the previous frame's content)
@@ -451,10 +495,10 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
             }
         }
 
-        if (anim->play_state == ANIM_PLAY_FINISHED) {
-            // just finished this tick — fire callback but keep in list for fill
-            if (anim->on_finish) anim->on_finish(anim);
-            if (anim->fill_mode != ANIM_FILL_FORWARDS && anim->fill_mode != ANIM_FILL_BOTH) {
+        // media tick callbacks may finish their own lifetime independently of duration.
+        if (finished || anim->play_state == ANIM_PLAY_FINISHED) {
+            animation_notify_finished(anim);
+            if (!css_animation && anim->fill_mode != ANIM_FILL_FORWARDS && anim->fill_mode != ANIM_FILL_BOTH) {
                 animation_scheduler_remove(scheduler, anim);
                 anim = next;
                 continue;
@@ -466,8 +510,8 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
         anim = next;
     }
 
-    scheduler->has_active_animations = any_active;
-    return any_active;
+    scheduler->has_active_animations = any_active && scheduler->count > 0;
+    return scheduler->has_active_animations;
 }
 
 // ============================================================================

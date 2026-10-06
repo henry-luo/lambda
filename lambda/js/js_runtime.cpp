@@ -29726,17 +29726,20 @@ static Item js_iterator_cache_next_method(Item iterator) {
     return item_is_error(set_result) ? set_result : ItemNull;
 }
 
-static Item js_iterator_return_checked(Item iterator, bool cache_next,
+extern "C" Item js_iterator_return_checked(Item iterator, bool cache_next,
         const char* error_message) {
-    TypeId type = get_type_id(iterator);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && !js_is_js_array(iterator)) {
+    RootFrame roots(1);
+    Rooted<Item> iterator_root(roots, iterator);
+    TypeId type = get_type_id(iterator_root.get());
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && !js_is_js_array(iterator_root.get())) {
         return js_throw_type_error(error_message);
     }
     if (cache_next) {
-        Item status = js_iterator_cache_next_method(iterator);
+        // A next getter can collect; return the rooted iterator after that callback.
+        Item status = js_iterator_cache_next_method(iterator_root.get());
         if (item_is_error(status)) return status;
     }
-    return iterator;
+    return iterator_root.get();
 }
 
 static Item js_get_iterator_impl(Item iterable, bool cache_next) {

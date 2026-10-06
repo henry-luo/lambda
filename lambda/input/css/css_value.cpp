@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 extern "C" {
 #include "../../../lib/log.h"
@@ -9,6 +10,23 @@ extern "C" {
 }
 #include "css_value.hpp"
 #include "css_style.hpp"
+#include "dom_element.hpp"
+#include "../../../lib/mem_grow.hpp"
+
+CssValue* css_value_create_list(Pool* pool, CssValue** values, size_t count) {
+    if (!pool || count > INT_MAX || count > SIZE_MAX / sizeof(CssValue*) ||
+        (count && !values)) return NULL;
+    CssValue* list = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!list) return NULL;
+    list->type = CSS_VALUE_TYPE_LIST;
+    list->data.list.count = (int)count;
+    if (count) {
+        list->data.list.values = (CssValue**)pool_alloc(pool, count * sizeof(CssValue*));
+        if (!list->data.list.values) return NULL;
+        memcpy(list->data.list.values, values, count * sizeof(CssValue*));
+    }
+    return list;
+}
 
 bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels) {
     static const double scales[] = {
@@ -51,6 +69,7 @@ const char* css_math_token_name(const CssValue* value) {
     if (value->type == CSS_VALUE_TYPE_CUSTOM)
         return value->data.custom_property.name;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->flags & CSS_VALUE_AUTHORED_IDENTIFIER) return value->data.identifier.authored;
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
         return info ? info->name : NULL;
     }
@@ -944,4 +963,202 @@ bool css_unit_is_length(CssUnit unit) {
 
 bool css_unit_is_angle(CssUnit unit) {
     return unit >= CSS_UNIT_DEG && unit <= CSS_UNIT_TURN;
+}
+
+struct CssVariableFrame {
+    const char* name;
+    DomElement* owner;
+    bool cyclic;
+};
+
+static bool css_var_stack_cycle(CssVariableFrame* var_stack, int stack_count,
+                                const char* var_name, DomElement* owner) {
+    if (!var_stack || !var_name) return false;
+    for (int i = 0; i < stack_count; i++) {
+        if (var_stack[i].owner != owner ||
+            !css_custom_property_name_matches(var_stack[i].name, var_name)) continue;
+        // fallbacks inside a dependency cycle cannot make its properties valid.
+        for (int j = i; j < stack_count; j++) var_stack[j].cyclic = true;
+        return true;
+    }
+    return false;
+}
+
+static const char* css_var_function_name(const CssFunction* func) {
+    if (!func || !func->args || func->arg_count < 1 || !func->args[0]) return nullptr;
+    CssValue* first_arg = func->args[0];
+    if (first_arg->type == CSS_VALUE_TYPE_CUSTOM) {
+        return first_arg->data.custom_property.name;
+    }
+    return first_arg->type == CSS_VALUE_TYPE_STRING ? first_arg->data.string : nullptr;
+}
+
+struct CssSubstitutedTokens {
+    CssValue** values;
+    int count;
+    int capacity;
+};
+
+static bool css_append_substituted_tokens(Pool* pool, const CssValue* value,
+                                          CssSubstitutedTokens* tokens) {
+    if (value && value->type == CSS_VALUE_TYPE_LIST) {
+        if (value->data.list.count < 0 ||
+            (value->data.list.count && !value->data.list.values)) return false;
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (i && value->data.list.comma_separated &&
+                !css_append_substituted_tokens(pool, nullptr, tokens)) return false;
+            if (!value->data.list.values[i] ||
+                !css_append_substituted_tokens(pool, value->data.list.values[i], tokens))
+                return false;
+        }
+        return true;
+    }
+    if (tokens->count == INT_MAX || !lam::pool_copy_grow_array(pool,
+            &tokens->values, &tokens->capacity, tokens->count,
+            tokens->count + 1, 4, false)) return false;
+    // null is a comma boundary here; empty lists contribute no tokens.
+    tokens->values[tokens->count++] = (CssValue*)value;
+    return true;
+}
+
+static CssValue* css_substituted_token_group(Pool* pool, CssValue** values, int count) {
+    return count == 1 ? values[0] : css_value_create_list(pool, values, (size_t)count);
+}
+
+static const CssValue* css_normalize_substituted_list(Pool* pool, const CssValue* value) {
+    CssSubstitutedTokens tokens = {};
+    if (!css_append_substituted_tokens(pool, value, &tokens)) return nullptr;
+    int groups = 1;
+    for (int i = 0; i < tokens.count; i++) {
+        if (!tokens.values[i]) groups++;
+    }
+    if (groups == 1) return css_substituted_token_group(pool, tokens.values, tokens.count);
+    CssValue** values = (CssValue**)pool_alloc(pool, (size_t)groups * sizeof(CssValue*));
+    if (!values) return nullptr;
+    int start = 0, next = 0;
+    for (int i = 0; i <= tokens.count; i++) {
+        if (i < tokens.count && tokens.values[i]) continue;
+        values[next] = css_substituted_token_group(pool, tokens.values + start, i - start);
+        if (!values[next++]) return nullptr;
+        start = i + 1;
+    }
+    CssValue* result = css_value_create_list(pool, values, (size_t)groups);
+    if (result) result->data.list.comma_separated = true;
+    return result;
+}
+
+static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* value,
+                                                  DomElement* context_element,
+                                                  CssVariableLookupFn lookup,
+                                                  void* lookup_context,
+                                                  CssVariableFrame* var_stack, int stack_count) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        CssValue** substituted = nullptr;
+        int count = value->data.list.count;
+        if (count < 0 || (count > 0 && !value->data.list.values)) return nullptr;
+        for (int i = 0; i < count; i++) {
+            const CssValue* item = value->data.list.values[i];
+            const CssValue* replacement = resolve_var_function_inner(
+                pool, item, context_element, lookup, lookup_context, var_stack, stack_count);
+            if (item && !replacement) return nullptr;
+            if (replacement != item && !substituted) {
+                if (!pool) return nullptr;
+                substituted = (CssValue**)pool_alloc(pool,
+                    (size_t)count * sizeof(CssValue*));
+                if (!substituted) return nullptr;
+                memcpy(substituted, value->data.list.values,
+                       (size_t)count * sizeof(CssValue*));
+            }
+            if (substituted) substituted[i] = (CssValue*)replacement;
+        }
+        if (!substituted) return value;
+        CssValue result = *value;
+        result.data.list.values = substituted;
+        // substitution joins adjacent tokens across comma and space boundaries.
+        return css_normalize_substituted_list(pool, &result);
+    }
+    const CssFunction* func = value->type == CSS_VALUE_TYPE_FUNCTION
+        ? value->data.function : nullptr;
+    const CSSVarRef* var_ref = value->type == CSS_VALUE_TYPE_VAR
+        ? value->data.var_ref : nullptr;
+    if (!func && !var_ref) return value;
+    if (func && !func->name) return value;
+    if (func && func->arg_count > 0 && !func->args) return nullptr;
+    if (func && strcmp(func->name, "var") != 0) {
+        CssValue arguments = {};
+        arguments.type = CSS_VALUE_TYPE_LIST;
+        arguments.data.list.values = func->args;
+        arguments.data.list.count = func->arg_count;
+        arguments.data.list.comma_separated = true;
+        const CssValue* substituted = resolve_var_function_inner(pool, &arguments,
+            context_element, lookup, lookup_context, var_stack, stack_count);
+        if (!substituted) return nullptr;
+        if (substituted == &arguments) return value;
+        CssFunction* new_func = (CssFunction*)pool_alloc(pool,
+                                                        sizeof(CssFunction));
+        CssValue* result = (CssValue*)pool_alloc(pool, sizeof(CssValue));
+        if (!new_func || !result) return nullptr;
+        *new_func = *func;
+        if (substituted->type == CSS_VALUE_TYPE_LIST &&
+            (substituted->data.list.comma_separated || substituted->data.list.count == 0)) {
+            new_func->args = substituted->data.list.values;
+            new_func->arg_count = substituted->data.list.count;
+        } else {
+            new_func->args = (CssValue**)pool_alloc(pool, sizeof(CssValue*));
+            if (!new_func->args) return nullptr;
+            new_func->args[0] = (CssValue*)substituted;
+            new_func->arg_count = 1;
+        }
+        *result = *value;
+        result->data.function = new_func;
+        return result;
+    }
+    CssValue fallback_tokens = {};
+    fallback_tokens.type = CSS_VALUE_TYPE_LIST;
+    if (func && func->arg_count >= 2) {
+        // every comma after the first belongs to the fallback token sequence.
+        fallback_tokens.data.list.values = func->args + 1;
+        fallback_tokens.data.list.count = func->arg_count - 1;
+        fallback_tokens.data.list.comma_separated = true;
+    }
+    const CssValue* fallback_value = var_ref
+        ? (var_ref->has_fallback ? var_ref->fallback : nullptr)
+        : (func->arg_count >= 2 ? (func->arg_count == 2 ? func->args[1] : &fallback_tokens)
+            : nullptr);
+    auto resolve_fallback = [&]() -> const CssValue* {
+        if (!fallback_value) return nullptr;
+        const CssValue* resolved = resolve_var_function_inner(pool, fallback_value,
+            context_element, lookup, lookup_context, var_stack, stack_count);
+        // synthetic fallback lists cannot escape their stack frame.
+        return resolved == &fallback_tokens
+            ? (pool ? css_normalize_substituted_list(pool, resolved) : nullptr) : resolved;
+    };
+    const char* var_name = var_ref ? var_ref->name : css_var_function_name(func);
+    if (!var_name) {
+        return resolve_fallback();
+    }
+    DomElement* owner = nullptr;
+    const CssValue* var_value = lookup
+        ? lookup(lookup_context, context_element, var_name, &owner)
+        : dom_element_lookup_custom_property(context_element, var_name, &owner);
+    if (var_value) {
+        if (css_var_stack_cycle(var_stack, stack_count, var_name, owner)) return nullptr;
+        if (stack_count >= 32) return resolve_fallback();
+        CssVariableFrame* frame = &var_stack[stack_count];
+        *frame = {var_name, owner, false};
+        const CssValue* resolved = resolve_var_function_inner(
+            pool, var_value, owner, lookup, lookup_context, var_stack, stack_count + 1);
+        if (frame->cyclic) resolved = nullptr;
+        if (resolved) return resolved;
+        return resolve_fallback();
+    }
+    return resolve_fallback();
+}
+
+const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
+                                     CssVariableLookupFn lookup, void* context,
+                                     DomElement* element) {
+    CssVariableFrame var_stack[32];
+    return resolve_var_function_inner(pool, value, element, lookup, context, var_stack, 0);
 }

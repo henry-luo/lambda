@@ -20,7 +20,7 @@ def check(script, directory):
         prefix = directory / (script.stem + ("_profile" if enabled else "_plain"))
         env = {key: value for key, value in os.environ.items()
                if not key.startswith(("LAMBDA_", "JS_EXECUTION_"))}
-        env.update(LAMBDA_TIER="jit", LAMBDA_DISABLE_MIR_CACHE="1",
+        env.update(LAMBDA_EXEC_BACKEND="jit", LAMBDA_DISABLE_MIR_CACHE="1",
                    LAMBDA_MIR_DUMP_PATH=str(prefix.with_suffix(".mir")),
                    LAMBDA_LOG_FILE=str(prefix.with_suffix(".log")),
                    LAMBDA_MIR_LOG_FRAME_SLOTS="1", TMPDIR=str(ROOT / "temp"))
