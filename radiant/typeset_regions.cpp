@@ -19,8 +19,44 @@ static TypesetStatus region_slice_valid(const TypesetRegionMaterial* material,
 
 void typeset_region_plan_dispose(TypesetRegionPlan* plan) {
     if (!plan) return;
-    if (plan->scratch) mem_pool_destroy(plan->scratch);
+    if (plan->scratch && (!plan->leases || --*plan->leases == 0)) mem_pool_destroy(plan->scratch);
     *plan = {};
+}
+
+TypesetStatus typeset_region_plan_retain(const TypesetRegionPlan* plan, TypesetRegionPlan* retained) {
+    if (!plan || !retained || retained->scratch) return TYPESET_INVALID;
+    if (plan->scratch) {
+        if (!plan->leases || *plan->leases == SIZE_MAX) return TYPESET_BUDGET_EXHAUSTED;
+        ++*plan->leases;
+    }
+    *retained = *plan;
+    return TYPESET_OK;
+}
+
+TypesetStatus typeset_region_checkpoint(TypesetRegionQueue* queue, Pool* scratch, TypesetRegionCheckpoint* checkpoint) {
+    if (!queue || !scratch || !checkpoint || checkpoint->queue || (queue->count && !queue->entries)) return TYPESET_INVALID;
+    if (queue->count > SIZE_MAX / sizeof(TypesetRegionPending)) return TYPESET_BUDGET_EXHAUSTED;
+    TypesetRegionPending* entries = queue->count ? (TypesetRegionPending*)pool_alloc(scratch, queue->count * sizeof(TypesetRegionPending)) : nullptr;
+    if (queue->count && !entries) return TYPESET_OUT_OF_MEMORY;
+    if (queue->count) memcpy(entries, queue->entries, queue->count * sizeof(TypesetRegionPending));
+    *checkpoint = {queue, queue->version, entries, queue->count};
+    return TYPESET_OK;
+}
+
+TypesetStatus typeset_region_restore(TypesetRegionCheckpoint* checkpoint, TypesetRegionPlan* retained) {
+    if (!checkpoint || !checkpoint->queue) return TYPESET_INVALID;
+    TypesetRegionQueue* queue = checkpoint->queue;
+    if (queue->version < checkpoint->version || (retained && retained->scratch &&
+        (retained->queue != queue || retained->version != checkpoint->version))) return TYPESET_STALE;
+    if (queue->version == UINT64_MAX) return TYPESET_BUDGET_EXHAUSTED;
+    if (!lam::pool_grow_array(queue->pool, &queue->entries, &queue->capacity, checkpoint->count, 16)) return TYPESET_OUT_OF_MEMORY;
+    if (checkpoint->count) memcpy(queue->entries, checkpoint->entries, checkpoint->count * sizeof(TypesetRegionPending));
+    queue->count = checkpoint->count;
+    // rollback changes the queue incarnation; rejected plans must stay stale.
+    queue->version++;
+    if (retained && retained->scratch) retained->version = queue->version;
+    *checkpoint = {};
+    return TYPESET_OK;
 }
 
 TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
@@ -42,6 +78,9 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
     plan.queue = queue; plan.version = queue->version;
     plan.scratch = mem_pool_create(queue->memory, MEM_ROLE_LAYOUT, "typeset.region.trial");
     if (!plan.scratch) return TYPESET_OUT_OF_MEMORY;
+    plan.leases = (size_t*)pool_alloc(plan.scratch, sizeof(size_t));
+    if (!plan.leases) { typeset_region_plan_dispose(&plan); return TYPESET_OUT_OF_MEMORY; }
+    *plan.leases = 1;
     if (total) {
         plan.placements = (TypesetRegionPlacement*)pool_calloc(plan.scratch, total * sizeof(TypesetRegionPlacement));
         plan.pending = (TypesetRegionPending*)pool_calloc(plan.scratch, total * sizeof(TypesetRegionPending));
@@ -113,6 +152,7 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
 TypesetStatus typeset_region_commit(TypesetRegionQueue* queue, const TypesetRegionPlan* plan) {
     if (!queue || !plan || !plan->scratch || plan->queue != queue) return TYPESET_INVALID;
     if (plan->version != queue->version) return TYPESET_STALE;
+    if (queue->version == UINT64_MAX) return TYPESET_BUDGET_EXHAUSTED;
     if (!lam::pool_grow_array(queue->pool, &queue->entries, &queue->capacity, plan->pending_count, 16))
         return TYPESET_OUT_OF_MEMORY;
     if (plan->pending_count) memcpy(queue->entries, plan->pending, plan->pending_count * sizeof(TypesetRegionPending));

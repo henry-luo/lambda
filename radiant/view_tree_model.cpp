@@ -2,9 +2,11 @@
 #include "view_tree_css.hpp"
 #include "layout_paged.hpp"
 #include "view.hpp"
+#include "render.hpp"
 #include "../lib/atomic.h"
 #include "../lib/generation.h"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/mem_grow.hpp"
@@ -18,6 +20,17 @@ struct SourceStateEntry {
     ViewNodeState* state;
 };
 
+struct ViewModelUndo { void* address; void* saved; size_t size; };
+HASHMAP_DEFINE_PTRKEY(view_model_undo, ViewModelUndo, address)
+struct ViewModelCheckpoint {
+    Pool* pool;
+    hashmap* records;
+    hashmap* created_states;
+    ViewModelCheckpoint* previous;
+    ArenaMark mark;
+    size_t node_count, node_id_count, page_count;
+};
+
 static atomic_int64 next_secondary_tree_id = {0};
 
 static uint64_t source_state_hash(const void* entry, uint64_t seed0, uint64_t seed1) {
@@ -28,6 +41,95 @@ static int source_state_compare(const void* left, const void* right, void*) {
     uint32_t a = ((const SourceStateEntry*)left)->id;
     uint32_t b = ((const SourceStateEntry*)right)->id;
     return a < b ? -1 : a > b ? 1 : 0;
+}
+
+static void model_checkpoint_dispose(ViewTreeModel* model) {
+    ViewModelCheckpoint* checkpoint = model->checkpoint;
+    model->checkpoint = lam::up(checkpoint->previous);
+    hashmap_free(checkpoint->records);
+    hashmap_free(checkpoint->created_states);
+    mem_pool_destroy(checkpoint->pool);
+}
+
+ViewModelCheckpoint* view_tree_model_checkpoint(ViewTree* tree) {
+    if (!view_tree_model_source_valid(tree) || tree->model->committed) return nullptr;
+    ViewTreeModel* model = tree->model;
+    Pool* pool = mem_pool_create((MemContext*)model->document->services.mem_ctx,
+        MEM_ROLE_LAYOUT, "view_tree.model.checkpoint");
+    if (!pool) return nullptr;
+    ViewModelCheckpoint* checkpoint = (ViewModelCheckpoint*)pool_calloc(pool, sizeof(ViewModelCheckpoint));
+    if (!checkpoint) { mem_pool_destroy(pool); return nullptr; }
+    checkpoint->pool = pool;
+    checkpoint->records = view_model_undo_new(0);
+    checkpoint->created_states = hashmap_new(sizeof(SourceStateEntry), 0, 0, 0,
+        source_state_hash, source_state_compare, nullptr, nullptr);
+    if (!checkpoint->records || !checkpoint->created_states) {
+        if (checkpoint->records) hashmap_free(checkpoint->records);
+        if (checkpoint->created_states) hashmap_free(checkpoint->created_states);
+        mem_pool_destroy(pool); return nullptr;
+    }
+    checkpoint->previous = model->checkpoint;
+    checkpoint->mark = arena_mark(model->arena);
+    checkpoint->node_count = model->node_count;
+    checkpoint->node_id_count = model->node_id_count;
+    checkpoint->page_count = model->page_count;
+    model->checkpoint = lam::up(checkpoint);
+    return checkpoint;
+}
+
+static bool model_record(ViewModelCheckpoint* checkpoint, void* address, size_t size) {
+    ViewModelUndo key = {address, nullptr, size};
+    const ViewModelUndo* existing = (const ViewModelUndo*)hashmap_get(checkpoint->records, &key);
+    if (existing) return existing->size == size;
+    key.saved = pool_alloc(checkpoint->pool, size);
+    if (!key.saved) return false;
+    memcpy(key.saved, address, size);
+    hashmap_set(checkpoint->records, &key);
+    return !hashmap_oom(checkpoint->records);
+}
+
+bool view_tree_model_record(ViewTree* tree, void* address, size_t size) {
+    if (!address || !size || !view_tree_model_source_valid(tree) || tree->model->committed) return false;
+    for (ViewModelCheckpoint* checkpoint = tree->model->checkpoint; checkpoint; checkpoint = checkpoint->previous)
+        if (!model_record(checkpoint, address, size)) return false;
+    return true;
+}
+
+bool view_tree_model_touch_node(ViewTree* tree, LayoutViewNode* node) {
+    if (!node || view_tree_node_resolve(tree, node->ref) != node || tree->model->committed) return false;
+    for (ViewModelCheckpoint* checkpoint = tree->model->checkpoint; checkpoint; checkpoint = checkpoint->previous) {
+        // new nodes disappear with the arena tail; only surviving records need undo bytes.
+        if (node->ref.node_id > checkpoint->node_id_count) continue;
+        if (!model_record(checkpoint, node, node->kind == LAYOUT_VIEW_PAGE ? sizeof(ViewPageBox) : sizeof(LayoutViewNode)) ||
+            (node->glyph_run && !model_record(checkpoint, node->glyph_run, sizeof(PaintGlyphRun)))) return false;
+    }
+    return true;
+}
+
+bool view_tree_model_accept(ViewTree* tree, ViewModelCheckpoint* checkpoint) {
+    if (!view_tree_model_source_valid(tree) || !checkpoint || tree->model->checkpoint.get() != checkpoint || tree->model->committed) return false;
+    model_checkpoint_dispose(tree->model);
+    return true;
+}
+
+bool view_tree_model_restore(ViewTree* tree, ViewModelCheckpoint* checkpoint) {
+    if (!view_tree_model_source_valid(tree) || !checkpoint || tree->model->checkpoint.get() != checkpoint || tree->model->committed) return false;
+    ViewTreeModel* model = tree->model;
+    size_t cursor = 0; void* item = nullptr;
+    while (hashmap_iter(checkpoint->records, &cursor, &item)) {
+        const ViewModelUndo* undo = (const ViewModelUndo*)item;
+        memcpy(undo->address, undo->saved, undo->size);
+    }
+    cursor = 0;
+    while (hashmap_iter(checkpoint->created_states, &cursor, &item)) hashmap_delete(model->source_states, item);
+    // never reuse a discarded node ID within a layout generation (D4.5.1v4).
+    for (size_t i = checkpoint->node_id_count; i < model->node_id_count; i++) model->nodes.get()[i] = nullptr;
+    for (size_t i = checkpoint->page_count; i < model->page_count; i++) model->pages.get()[i] = nullptr;
+    model->node_count = checkpoint->node_count;
+    model->page_count = checkpoint->page_count;
+    arena_rewind(model->arena, checkpoint->mark);
+    model_checkpoint_dispose(model);
+    return true;
 }
 
 static bool valid_extent(float value, bool allow_zero) {
@@ -68,18 +170,19 @@ bool view_tree_model_source_valid(const ViewTree* tree) {
 
 static LayoutViewNode* model_node_create(ViewTree* tree, LayoutViewKind kind, size_t size) {
     ViewTreeModel* model = tree->model;
-    if (model->node_count >= UINT32_MAX) return nullptr;
+    if (model->node_id_count >= UINT32_MAX) return nullptr;
     LayoutViewNode** nodes = model->nodes;
     if (!lam::pool_grow_array(tree->prop_pool, &nodes, &model->node_capacity,
-                             model->node_count + 1, 16)) return nullptr;
+                             model->node_id_count + 1, 16)) return nullptr;
     model->nodes = lam::up(nodes);
     LayoutViewNode* node = (LayoutViewNode*)arena_alloc(model->arena, size);
     if (!node) return nullptr;
     memset(node, 0, size);
     node->kind = kind;
     node->ref = {model->tree_id, tree->layout_generation,
-                 static_cast<uint32_t>(model->node_count + 1)};
-    nodes[model->node_count++] = node;
+                 static_cast<uint32_t>(model->node_id_count + 1)};
+    nodes[model->node_id_count++] = node;
+    model->node_count++;
     return node;
 }
 
@@ -170,6 +273,7 @@ void view_tree_secondary_release_all(DomDocument* document) {
 void view_tree_model_destroy(ViewTree* tree) {
     if (!tree || !tree->model) return;
     ViewTreeModel* model = tree->model;
+    while (model->checkpoint) model_checkpoint_dispose(model);
     paged_composition_destroy(tree);
     view_css_context_destroy(tree);
     if (model->source_states) hashmap_free(model->source_states);
@@ -180,11 +284,12 @@ void view_tree_model_destroy(ViewTree* tree) {
 void view_tree_model_reset(ViewTree* tree) {
     if (!tree || !tree->model) return;
     ViewTreeModel* model = tree->model;
+    while (model->checkpoint) model_checkpoint_dispose(model);
     paged_composition_destroy(tree);
     view_css_context_destroy(tree);
     hashmap_clear(model->source_states, false);
     arena_reset(model->arena);
-    model->node_count = model->page_count = model->placement_count = 0;
+    model->node_count = model->node_id_count = model->page_count = model->placement_count = 0;
     model->root = nullptr;
     model->committed = false;
     model->preview_bounds = {};
@@ -201,6 +306,10 @@ ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create
     const SourceStateEntry* existing = (const SourceStateEntry*)hashmap_get(model->source_states, &key);
     if (existing) return existing->state;
     if (!create || model->committed) return nullptr;
+    for (ViewModelCheckpoint* checkpoint = model->checkpoint; checkpoint; checkpoint = checkpoint->previous) {
+        hashmap_set(checkpoint->created_states, &key);
+        if (hashmap_oom(checkpoint->created_states)) return nullptr;
+    }
     ViewNodeState* state = (ViewNodeState*)arena_alloc(model->arena, sizeof(ViewNodeState));
     if (!state) return nullptr;
     memset(state, 0, sizeof(*state));
@@ -213,7 +322,7 @@ ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create
 LayoutViewNode* view_tree_node_resolve(ViewTree* tree, LayoutViewRef ref) {
     if (!view_tree_model_source_valid(tree) || ref.tree_id != tree->model->tree_id ||
         ref.generation != tree->layout_generation || ref.node_id == 0 ||
-        ref.node_id > tree->model->node_count) return nullptr;
+        ref.node_id > tree->model->node_id_count) return nullptr;
     return tree->model->nodes.get()[ref.node_id - 1];
 }
 
@@ -231,6 +340,14 @@ LayoutViewNode* view_tree_fragment_append(ViewTree* tree, LayoutViewNode* parent
         text_length > SIZE_MAX - text_start) return nullptr;
     ViewNodeState* state = source ? view_tree_node_state(tree, source, true) : nullptr;
     if (source && !state) return nullptr;
+    if (!view_tree_model_touch_node(tree, parent) ||
+        (parent->last_child && !view_tree_model_touch_node(tree, parent->last_child))) return nullptr;
+    if (state) {
+        SourceStateEntry key = {state->source.expected_id, nullptr};
+        for (ViewModelCheckpoint* checkpoint = tree->model->checkpoint; checkpoint; checkpoint = checkpoint->previous)
+            if (!hashmap_get(checkpoint->created_states, &key) && !model_record(checkpoint, state, sizeof(*state))) return nullptr;
+        if (state->last_occurrence && !view_tree_model_touch_node(tree, state->last_occurrence)) return nullptr;
+    }
     LayoutViewNode* node = model_node_create(tree, LAYOUT_VIEW_FRAGMENT, sizeof(LayoutViewNode));
     if (!node) return nullptr;
     node->rect = rect;
@@ -258,6 +375,8 @@ ViewPageBox* view_tree_page_append(ViewTree* tree, float width, float height,
         content_rect.y + content_rect.height > height || side > VIEW_PAGE_RIGHT ||
         tree->model->page_count >= UINT32_MAX) return nullptr;
     ViewTreeModel* model = tree->model;
+    if (!view_tree_model_touch_node(tree, model->root) ||
+        (model->root->last_child && !view_tree_model_touch_node(tree, model->root->last_child))) return nullptr;
     ViewPageBox** pages = model->pages;
     if (!lam::pool_grow_array(tree->prop_pool, &pages, &model->page_capacity,
                              model->page_count + 1, 16)) return nullptr;
@@ -275,7 +394,7 @@ ViewPageBox* view_tree_page_append(ViewTree* tree, float width, float height,
 }
 
 bool view_tree_model_commit(ViewTree* tree) {
-    if (!view_tree_model_source_valid(tree) || !tree->model->root) return false;
+    if (!view_tree_model_source_valid(tree) || !tree->model->root || tree->model->checkpoint) return false;
     tree->model->committed = true;
     return true;
 }

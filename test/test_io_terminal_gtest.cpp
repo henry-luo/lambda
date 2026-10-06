@@ -10,6 +10,7 @@
 #include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/runtime/terminal_host.h"
 #include "../lambda/runtime/template_host.h"
+#include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/jube/jube_interface.h"
 #include "../lib/memtrack.h"
 #include <string.h>
@@ -106,6 +107,34 @@ TEST(IoTerminal, RetainedTemplateCloseDefersUntilBindingUnwinds) {
         EXPECT_STREQ(item_attr(fn_apply1(model), "value").get_chars(), "ok");
         template_host_session_close(mounted);
     }
+}
+
+TEST(IoTerminal, RetainedTemplateRestoresHostJsOwner) {
+    TerminalTestRuntime owned(LAMBDA_TIER_INTERP);
+    Input* seed = run_script_mir(&owned.runtime, "1\n",
+        (char*)"<terminal-js-owner-test>", false);
+    ASSERT_NE(seed, nullptr);
+    EvalContext* owner = runtime_get_eval_context(&owned.runtime);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_TRUE(js_runtime_state_init(owner));
+
+    TemplateHostSession* mounted = template_host_session_open(
+        "view <counter> { <frame value: 1> }\n<counter>\n",
+        "<terminal-js-owner-mount>");
+    ASSERT_NE(mounted, nullptr);
+    EXPECT_TRUE(js_runtime_state_thread_matches(owner));
+    {
+        TemplateHostBinding binding(mounted);
+        ASSERT_TRUE(binding.valid());
+        // the host capsule must not remain active while the template owns TLS.
+        EXPECT_FALSE(js_runtime_state_thread_matches(owner));
+        Item model{.item = template_host_session_root_word(mounted)};
+        EXPECT_EQ(get_type_id(fn_apply1(model)), LMD_TYPE_ELEMENT);
+    }
+    EXPECT_TRUE(js_runtime_state_thread_matches(owner));
+    template_host_session_close(mounted);
+    EXPECT_TRUE(js_runtime_state_thread_matches(owner));
+    EXPECT_TRUE(js_runtime_state_shutdown(owner));
 }
 
 TEST(IoTerminal, JubeTemplateServiceDispatchesPlainValues) {

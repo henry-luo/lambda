@@ -4265,16 +4265,7 @@ static const JubeHostTemplateAPI jube_host_template_api = {
     sizeof(JubeHostTemplateAPI),
     [](const char* source, const char* reference) -> void* {
         JubeTemplateActivationBarrier barrier;
-        const TemplateHostActivationHooks hooks = {
-            [](EvalContext* owner, bool* was_active) -> bool {
-                *was_active = js_runtime_state_thread_matches(owner);
-                return !*was_active || js_runtime_state_shutdown(owner);
-            },
-            [](EvalContext* owner, bool was_active) -> bool {
-                return !was_active || js_runtime_state_init(owner);
-            },
-        };
-        return template_host_session_open_with_hooks(source, reference, &hooks);
+        return template_host_session_open(source, reference);
     },
     [](void* session) { template_host_session_close((TemplateHostSession*)session); },
     jube_template_dispatch,

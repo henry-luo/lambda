@@ -28,6 +28,8 @@ static Pool* prop_pool(ViewTree* tree) { return tree ? tree->prop_pool : nullptr
 
 Pool* layout_prop_pool(LayoutContext* lycon) {
     if (!lycon) return nullptr;
+    // secondary resolution owns its properties even when a default browsing view exists.
+    if (lycon->selected_view_tree) return lycon->selected_view_tree->prop_pool;
     if (lycon->doc && lycon->doc->view_tree) return lycon->doc->view_tree->prop_pool;
     // Focused layout tests and embedders can provide the pass pool without a ViewTree shell.
     return lycon->pool;

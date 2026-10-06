@@ -20,6 +20,7 @@ struct ViewCssContext;
 struct PagedComposition;
 struct ViewPageStyle;
 struct PaintGlyphRun;
+struct ViewModelCheckpoint;
 struct Arena;
 struct hashmap;
 
@@ -160,7 +161,7 @@ struct ViewTreeModel {
     lam::Own<PagedComposition> composition;
     lam::Up<LayoutViewNode> root;
     lam::Up<LayoutViewNode*> nodes;
-    size_t node_count, node_capacity;
+    size_t node_count, node_id_count, node_capacity; // live count; issued IDs include rollback tombstones
     lam::Up<ViewPageBox*> pages;
     size_t page_count, page_capacity;
     lam::Up<ViewPagePlacement> placements;
@@ -168,6 +169,7 @@ struct ViewTreeModel {
     RdtLogicalRect preview_bounds;
     uint32_t presentation_generation;
     bool committed;
+    lam::Up<ViewModelCheckpoint> checkpoint;
 };
 
 ViewEnvironment view_environment_default(ViewPresentation presentation);
@@ -186,6 +188,12 @@ ViewPageBox* view_tree_page_append(ViewTree* tree, float width, float height,
     RdtLogicalRect content_rect, ViewPageSide side, bool blank = false);
 LayoutViewNode* view_tree_node_resolve(ViewTree* tree, LayoutViewRef ref);
 bool view_tree_model_commit(ViewTree* tree);
+// checkpoints are LIFO and end on accept/restore; records must retain stable addresses until then.
+ViewModelCheckpoint* view_tree_model_checkpoint(ViewTree* tree);
+bool view_tree_model_record(ViewTree* tree, void* address, size_t size);
+bool view_tree_model_touch_node(ViewTree* tree, LayoutViewNode* node);
+bool view_tree_model_restore(ViewTree* tree, ViewModelCheckpoint* checkpoint);
+bool view_tree_model_accept(ViewTree* tree, ViewModelCheckpoint* checkpoint);
 ViewModelStatus view_tree_preview_arrange(ViewTree* tree,
     const ViewPageSelection* selection, const ViewPreviewOptions* options);
 typedef bool (*ViewPagePaintFn)(ViewTree* tree, const ViewPageBox* page,

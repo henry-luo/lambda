@@ -917,21 +917,25 @@ static void view_teardown_visit_node(ViewTree* tree,
     }
 }
 
-void* alloc_prop(LayoutContext* lycon, size_t size) {
-    return lycon->doc->view_tree->alloc_prop(size);
-}
-
-void* ViewTree::alloc_prop(size_t size) {
-    void* prop = pool_calloc(prop_pool, size);
+static void* alloc_property_from_pool(Pool* pool, size_t size) {
+    void* prop = pool_calloc(pool, size);
     if (prop) {
         return prop;
     }
     else {
         // layout properties have no recovery path; aborting here avoids unchecked callers dereferencing NULL later.
         log_error("alloc_prop: pool_calloc returned NULL (pool=%p, size=%zu) - pool may be corrupt",
-                  (void*)prop_pool, size);
+                  (void*)pool, size);
         abort();
     }
+}
+
+void* alloc_prop(LayoutContext* lycon, size_t size) {
+    return alloc_property_from_pool(layout_prop_pool(lycon), size);
+}
+
+void* ViewTree::alloc_prop(size_t size) {
+    return alloc_property_from_pool(prop_pool, size);
 }
 
 TextRect* ViewTree::alloc_text_rect() {

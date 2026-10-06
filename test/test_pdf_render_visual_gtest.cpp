@@ -840,6 +840,29 @@ TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndRejectsUnimplementedCont
     EXPECT_FALSE(file_exists(unsupported));
 }
 
+TEST(RenderOutputParity, PagedPdfBacktracksLateBlockClosuresWithNotesAndFloats) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_rollback.html";
+    const char* pdf_path = "temp/render_output_parity/paged_rollback.pdf";
+    const char* html = "<!doctype html><html><head><style>"
+        "@page{size:220px 100px;margin:10px;@top-center{content:string(Title);font-size:7px}}"
+        "html,body{margin:0}body,div,span{font-size:10px;line-height:12px;white-space:pre-wrap;orphans:1;widows:1}"
+        "body{counter-reset:N}.prelude{height:20px;string-set:Title 'Prelude'}"
+        ".moved{padding-bottom:16px;break-inside:avoid;counter-increment:N;string-set:Title 'Moved';background:#eee}"
+        ".call::before{content:counter(N) ': '}.note{float:footnote;footnote-policy:line;color:blue}"
+        ".float{float:top;float-reference:page;color:red}.tail{padding-bottom:16px}"
+        "</style></head><body><div class='prelude'>Prelude</div><div class='moved' id='moved'>"
+        "<div class='call'>Call <span class='note'>Note A\nNote B</span></div><div class='float'>Float</div>"
+        "<div class='tail'></div></div></body></html>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged"));
+    EXPECT_EQ(pdf_page_count(pdf_path), 2);
+    CommandResult info = pdf_info(pdf_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0;
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 165.0, 0.01); EXPECT_NEAR(height, 75.0, 0.01);
+}
+
 TEST(RenderOutputParity, NormalPngMatchesForcedTiledPng) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";

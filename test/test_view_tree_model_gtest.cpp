@@ -247,6 +247,35 @@ TEST(TypesetTest, ContinuationsHoldAnUnsplittableTailInSourceOrder) {
     mem_pool_destroy(pool);
 }
 
+TEST(TypesetTest, RegionRollbackRetainsExactPayloadsAndInvalidatesRejectedPlans) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_LAYOUT, "test.typeset.region.rollback"); ASSERT_NE(pool, nullptr);
+    NativeRegionFixture record = {{61}, UINT64_C(9007199254740993), 5, 10.0f};
+    TypesetRegionMaterial material = native_region_material(&record, 9, 1, true);
+    TypesetRegionPending pending = {&material, material.start, 1};
+    TypesetRegionQueue queue = {pool, nullptr, 0, &pending, 1, 1, 8};
+    TypesetRegionConstraints constraints = {100.0f, 40.0f, 1};
+    TypesetRegionPlan plan = {}, retained = {}, rejected = {};
+    ASSERT_EQ(typeset_region_plan(&queue, nullptr, 0, &constraints, 10.0f, 0.0f, &plan), TYPESET_OK);
+    ASSERT_EQ(typeset_region_plan_retain(&plan, &retained), TYPESET_OK);
+    const TypesetRecord* payload = retained.placements[0].slice.metrics.exact;
+    TypesetRegionCheckpoint checkpoint = {};
+    ASSERT_EQ(typeset_region_checkpoint(&queue, pool, &checkpoint), TYPESET_OK);
+    ASSERT_EQ(typeset_region_plan(&queue, nullptr, 0, &constraints, 0.0f, 0.0f, &rejected), TYPESET_OK);
+    ASSERT_EQ(typeset_region_commit(&queue, &rejected), TYPESET_OK);
+    EXPECT_EQ(queue.entries[0].cursor.state[0], 4u);
+    typeset_region_plan_dispose(&plan);
+    ASSERT_EQ(typeset_region_restore(&checkpoint, &retained), TYPESET_OK);
+    ASSERT_EQ(queue.count, 1u); EXPECT_EQ(queue.entries[0].cursor.state[0], 0u);
+    EXPECT_GT(queue.version, rejected.version);
+    EXPECT_EQ(typeset_region_commit(&queue, &rejected), TYPESET_STALE);
+    EXPECT_EQ(retained.placements[0].slice.metrics.exact.get(), payload);
+    EXPECT_EQ(record.scaled_points, UINT64_C(9007199254740993));
+    ASSERT_EQ(typeset_region_commit(&queue, &retained), TYPESET_OK);
+    EXPECT_EQ(queue.entries[0].cursor.state[0], 3u);
+    EXPECT_EQ(typeset_region_restore(&checkpoint), TYPESET_INVALID);
+    typeset_region_plan_dispose(&retained); typeset_region_plan_dispose(&rejected); mem_pool_destroy(pool);
+}
+
 TEST(TypesetTest, DeferredFloatsKeepTheirIdentityAndEarliestPageUntilTheyFit) {
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_LAYOUT, "test.typeset.deferred"); ASSERT_NE(pool, nullptr);
     NativeRegionFixture records[] = {{{71}, 111, 3, 10.0f}, {{71}, 222, 3, 10.0f}};
@@ -507,6 +536,8 @@ TEST(TypesetTest, FailedCommitAndStalePlansCannotPublishTrialState) {
     mem_pool_destroy(pool);
 }
 
+struct LateClosureFixture { DomElement* prelude; DomElement* moved; DomElement* note; DomElement* floating; };
+
 class SecondaryViewTest : public ::testing::Test {
 protected:
     Pool* input_pool = nullptr;
@@ -595,9 +626,75 @@ protected:
         }
         return element;
     }
+    bool late_closure_fixture(LateClosureFixture* fixture, bool floating = false) {
+        stylesheet("@page { size: 220px 100px; margin: 10px; @top-center { content: string(Title); font-size: 7px } } "
+            "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 } "
+            "p { counter-reset: N } .call::before { content: counter(N) ': ' }");
+        fixture->prelude = block("Prelude", "height: 20px; string-set: Title 'Prelude'");
+        fixture->moved = block(nullptr, floating ? "padding-bottom: 16px; break-inside: avoid; counter-increment: N; string-set: Title 'Moved'" :
+            "padding-bottom: 20px; break-inside: avoid; counter-increment: N; string-set: Title 'Moved'");
+        if (!fixture->prelude || !fixture->moved || !fixture->moved->set_attribute("id", "moved")) return false;
+        DomElement* call = block("Call ", nullptr, "div", fixture->moved);
+        if (!call || !call->set_attribute("class", "call")) return false;
+        fixture->note = block("Note A\nNote B", "float: footnote; footnote-policy: line; color: blue", "span", call);
+        fixture->floating = floating ? block("Float", "float: top; float-reference: page; color: red", "div", fixture->moved) : nullptr;
+        return fixture->note && (!floating || fixture->floating) &&
+            block(nullptr, floating ? "padding-bottom: 16px" : "padding-bottom: 20px", "div", fixture->moved);
+    }
     void reference_width_boundary(size_t chapters);
 };
 static LayoutViewNode* source_fragment(ViewTree* tree, DomNode* source, ViewFragmentRole role, bool box, bool last = false);
+
+TEST_F(SecondaryViewTest, SharedPropertyAllocationBelongsToTheExplicitlySelectedView) {
+    ViewTree* tree = secondary(); ViewTree* sibling = secondary();
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.pool = lam::up(doc.document_pool.get());
+    context.selected_view_tree = lam::up(tree);
+    void* property = alloc_prop(&context, 8); ASSERT_NE(property, nullptr);
+    EXPECT_TRUE(pool_owns(tree->prop_pool, property)); EXPECT_FALSE(pool_owns(doc.view_tree->prop_pool, property));
+    EXPECT_FALSE(pool_owns(sibling->prop_pool, property));
+    ViewTree* browsing = doc.view_tree; doc.view_tree = nullptr;
+    void* headless_property = alloc_prop(&context, 8);
+    doc.view_tree = lam::own(browsing);
+    ASSERT_NE(headless_property, nullptr); EXPECT_TRUE(pool_owns(tree->prop_pool, headless_property));
+    context.selected_view_tree = nullptr;
+    void* default_property = alloc_prop(&context, 8); ASSERT_NE(default_property, nullptr);
+    EXPECT_TRUE(pool_owns(doc.view_tree->prop_pool, default_property));
+}
+
+TEST_F(SecondaryViewTest, ModelRollbackRestoresNestedLinksAndNeverReusesDiscardedHandles) {
+    DomElement* other = block("other"); ASSERT_NE(other, nullptr);
+    ViewTree* tree = secondary(); ViewTree* sibling = secondary();
+    ViewPageBox* page = view_tree_page_append(tree, 100.0f, 200.0f, {0, 0, 100, 200}, VIEW_PAGE_RIGHT); ASSERT_NE(page, nullptr);
+    LayoutViewNode* first = view_tree_fragment_append(tree, &page->node, source, {0, 0, 10, 12}); ASSERT_NE(first, nullptr);
+    PaintGlyphRun* run = (PaintGlyphRun*)arena_alloc(tree->model->arena, sizeof(PaintGlyphRun)); ASSERT_NE(run, nullptr);
+    *run = {}; run->baseline_y = 9.0f; first->glyph_run = lam::up(run);
+    LayoutViewRef kept = first->ref;
+    ViewNodeState* state = view_tree_node_state(tree, source, false); ASSERT_NE(state, nullptr);
+    size_t nodes = tree->model->node_count;
+    ViewModelCheckpoint* outer = view_tree_model_checkpoint(tree); ASSERT_NE(outer, nullptr);
+    ASSERT_TRUE(view_tree_model_touch_node(tree, first)); first->rect.y = 30; run->baseline_y = 39;
+    LayoutViewNode* discarded = view_tree_fragment_append(tree, &page->node, source, {0, 30, 10, 12}); ASSERT_NE(discarded, nullptr);
+    LayoutViewRef removed = discarded->ref;
+    ViewModelCheckpoint* inner = view_tree_model_checkpoint(tree); ASSERT_NE(inner, nullptr);
+    EXPECT_FALSE(view_tree_model_accept(tree, outer)); EXPECT_FALSE(view_tree_model_commit(tree));
+    ViewPageBox* extra = view_tree_page_append(tree, 100, 200, {0, 0, 100, 200}, VIEW_PAGE_LEFT); ASSERT_NE(extra, nullptr);
+    LayoutViewRef removed_page = extra->node.ref;
+    ASSERT_NE(view_tree_fragment_append(tree, &extra->node, other, {0, 0, 10, 12}), nullptr);
+    ASSERT_TRUE(view_tree_model_accept(tree, inner));
+    ASSERT_TRUE(view_tree_model_restore(tree, outer));
+    EXPECT_EQ(tree->model->node_count, nodes); EXPECT_EQ(tree->model->page_count, 1u);
+    EXPECT_EQ(view_tree_node_resolve(tree, kept), first); EXPECT_EQ(view_tree_node_resolve(tree, removed), nullptr);
+    EXPECT_EQ(view_tree_node_resolve(tree, removed_page), nullptr);
+    EXPECT_FLOAT_EQ(first->rect.y, 0); EXPECT_FLOAT_EQ(run->baseline_y, 9);
+    EXPECT_EQ(page->node.first_child.get(), first); EXPECT_EQ(page->node.last_child.get(), first);
+    EXPECT_EQ(first->next_sibling, nullptr); EXPECT_EQ(first->next_occurrence, nullptr);
+    EXPECT_EQ(state->first_occurrence.get(), first); EXPECT_EQ(state->last_occurrence.get(), first); EXPECT_EQ(state->occurrence_count, 1u);
+    EXPECT_EQ(view_tree_node_state(tree, other, false), nullptr); EXPECT_EQ(page->node.next_sibling, nullptr);
+    EXPECT_EQ(sibling->model->node_count, 1u);
+    LayoutViewNode* replacement = view_tree_fragment_append(tree, &page->node, source, {0, 12, 10, 12}); ASSERT_NE(replacement, nullptr);
+    EXPECT_GT(replacement->ref.node_id, removed_page.node_id); EXPECT_EQ(view_tree_node_resolve(tree, removed), nullptr);
+    ASSERT_TRUE(view_tree_model_commit(tree)); EXPECT_EQ(view_tree_model_checkpoint(tree), nullptr);
+}
 
 TEST_F(SecondaryViewTest, UnimplementedContextsCannotPublishFlattenedPages) {
     stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0 }");
@@ -1310,6 +1407,40 @@ TEST_F(SecondaryViewTest, ClosingBodyDecorationsCannotOverlapPublishedFootnotes)
     EXPECT_FALSE(tree->model->committed); EXPECT_NE(diagnostic.reason, nullptr);
 }
 
+TEST_F(SecondaryViewTest, LateBlockClosuresRollbackBodyNotesMarksAndTargetsTogether) {
+    LateClosureFixture fixture = {}; ASSERT_TRUE(late_closure_fixture(&fixture));
+    DomElement* prelude = fixture.prelude; DomElement* moved = fixture.moved; DomElement* note = fixture.note;
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    EXPECT_EQ(occurrence_page(source_fragment(tree, prelude, VIEW_FRAGMENT_BODY, true)), 1u);
+    LayoutViewNode* body = source_fragment(tree, moved, VIEW_FRAGMENT_BODY, true); ASSERT_NE(body, nullptr);
+    EXPECT_EQ(occurrence_page(body), 2u); EXPECT_TRUE(body->first_fragment); EXPECT_TRUE(body->last_fragment);
+    ViewNodeState* state = view_tree_node_state(tree, note, false); ASSERT_NE(state, nullptr);
+    size_t calls = 0, notes = 0;
+    for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence) {
+        if (fragment->role == VIEW_FRAGMENT_BODY && fragment->glyph_run) {
+            calls++; EXPECT_EQ(occurrence_page(fragment), 2u); EXPECT_STREQ(fragment->glyph_run->text, "1");
+        }
+        if (fragment->role == VIEW_FRAGMENT_NOTE && fragment->paint_box) {
+            notes++; EXPECT_EQ(occurrence_page(fragment), 2u);
+            EXPECT_GE(fragment->rect.y, body->rect.y + body->rect.height);
+        }
+    }
+    EXPECT_EQ(calls, 1u); EXPECT_EQ(notes, 1u);
+    const TypesetTarget* target = layout_secondary_target(tree, "moved"); ASSERT_NE(target, nullptr);
+    EXPECT_EQ(target->page_number, 2u);
+    const char* titles[] = {"Prelude", "Moved"};
+    for (size_t i = 0; i < 2; i++) {
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        LayoutViewNode* header = tree->model->pages.get()[i]->margin_boxes[CSS_PAGE_TOP_CENTER]; ASSERT_NE(header, nullptr);
+        append_fragment_text(header, text); EXPECT_STREQ(text->str, titles[i]); strbuf_free(text);
+    }
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+    append_fragment_text(body, text); EXPECT_STREQ(text->str, "1: Call 1"); strbuf_free(text);
+    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
+}
+
 TEST_F(SecondaryViewTest, FootnoteReservationMovesCallBeforePublishingItsFragments) {
     stylesheet("@page { size: 200px 100px; margin: 10px } "
         "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 }");
@@ -1335,6 +1466,44 @@ TEST_F(SecondaryViewTest, FootnoteReservationMovesCallBeforePublishingItsFragmen
     }
     EXPECT_EQ(calls, 1u); EXPECT_EQ(notes, 1u);
     EXPECT_EQ(note->parent, paragraph); EXPECT_FLOAT_EQ(note->x, 91.25f); EXPECT_FLOAT_EQ(note->width, 7.5f);
+}
+
+TEST_F(SecondaryViewTest, LateRollbackUndoesTopFloatTranslationOfEarlierText) {
+    LateClosureFixture fixture = {}; ASSERT_TRUE(late_closure_fixture(&fixture, true));
+    DomElement* prelude = fixture.prelude; DomElement* moved = fixture.moved;
+    DomElement* note = fixture.note; DomElement* floating = fixture.floating;
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    LayoutViewNode* previous = source_fragment(tree, prelude, VIEW_FRAGMENT_BODY, true); ASSERT_NE(previous, nullptr);
+    EXPECT_FLOAT_EQ(previous->rect.y, 10); EXPECT_FLOAT_EQ(previous->rect.height, 20);
+    LayoutViewNode* text = source_fragment(tree, prelude->first_child, VIEW_FRAGMENT_BODY, false); ASSERT_NE(text, nullptr);
+    ASSERT_NE(text->glyph_run, nullptr); EXPECT_FLOAT_EQ(text->rect.y, 10);
+    EXPECT_GT(text->glyph_run->baseline_y, 10); EXPECT_LT(text->glyph_run->baseline_y, 22);
+    EXPECT_EQ(occurrence_page(previous), 1u);
+    LayoutViewNode* float_box = source_fragment(tree, floating, VIEW_FRAGMENT_FLOAT, true); ASSERT_NE(float_box, nullptr);
+    EXPECT_EQ(occurrence_page(float_box), 2u); EXPECT_FLOAT_EQ(float_box->rect.y, 10);
+    LayoutViewNode* body = source_fragment(tree, moved, VIEW_FRAGMENT_BODY, true); ASSERT_NE(body, nullptr);
+    EXPECT_EQ(occurrence_page(body), 2u); EXPECT_FLOAT_EQ(body->rect.y, 22);
+    EXPECT_FLOAT_EQ(body->rect.height, 44);
+    LayoutViewNode* note_box = source_fragment(tree, note, VIEW_FRAGMENT_NOTE, true); ASSERT_NE(note_box, nullptr);
+    EXPECT_EQ(occurrence_page(note_box), 2u); EXPECT_FLOAT_EQ(note_box->rect.y, 66);
+    ViewNodeState* state = view_tree_node_state(tree, floating, false); ASSERT_NE(state, nullptr);
+    size_t floats = 0;
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence)
+        if (node->role == VIEW_FRAGMENT_FLOAT && node->paint_box) floats++;
+    EXPECT_EQ(floats, 1u);
+}
+
+TEST_F(SecondaryViewTest, BlockTrialBudgetCannotBeReplenishedByRollback) {
+    LateClosureFixture fixture = {}; ASSERT_TRUE(late_closure_fixture(&fixture));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); options.max_block_trials = 5;
+    PagedLayoutDiagnostic diagnostic = {};
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_STREQ(diagnostic.reason, "block composition exhausted its trial budget");
+    EXPECT_EQ(diagnostic.status, TYPESET_BUDGET_EXHAUSTED); EXPECT_FALSE(tree->model->committed);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(tree->model->node_count, 1u);
+    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
 }
 
 TEST_F(SecondaryViewTest, BlockFootnotePolicyMovesTheWholeParagraphBeforePublishingText) {
