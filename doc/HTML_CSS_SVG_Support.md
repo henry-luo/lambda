@@ -223,7 +223,7 @@ Stylesheets are collected in document order, each rule is matched against every 
 | `!important` | ◐ | Beats normal declarations; an inline author `!important` wins over an author stylesheet `!important`, including layered declarations. User stylesheets remain unavailable. |
 | Origins | ◐ | Built-in UA styles and author styles only; there are no user stylesheets. |
 | Specificity and source order | ◐ | Supported selectors and matching list branches are ranked correctly; layer order precedes specificity. Some selector and CSS-wide value cases remain partial ([§3](#3-css-selectors)). |
-| Inheritance, `inherit` | ✅ | |
+| Inheritance, `inherit` | ◐ | Child-first live computed reads refresh ancestor selector and variable sources before serialization. `test/ui/cssom_inherited_live_cascade.json` covers 32 language/class/attribute, inline/rule, stylesheet-disable, reparenting, relative-font and SVG checks; a pixel regression verifies the live value reaches paint. Explicit background inheritance and initial color serialization use the shared computed path. Complete property computation, dependency depth and slot inheritance remain open. |
 | `initial`, `unset` | ◐ | `width` and `height` now resolve to `auto`. Other properties still need a complete computed-value audit. |
 | `revert` | ◐ | Falls back to the built-in UA default. |
 | `revert-layer` | ◐ | Resolves an ordinary property's or `all` shorthand's earlier layer or origin. Computed-value coverage across all property consumers still needs an audit. |

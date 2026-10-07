@@ -3,10 +3,12 @@
 #include "render.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/math_utils.h"
 #include "../lib/mem_factory.h"
+#include "../lib/arraylist.h"
 #include "../lambda/dom/dom.h"
 
 #include <assert.h>
@@ -171,6 +173,12 @@ static Color rgba_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return color;
 }
 
+static bool format_color_text(const char* text, char* out, size_t out_size) {
+    CssColor color = {};
+    return text && css_parse_color(text, &color) && color.type != CSS_COLOR_CURRENT &&
+        format_color(out, out_size, rgba_color(color.r, color.g, color.b, color.a));
+}
+
 static const void* prop_group_base(const DomElement* element, PropGroupKind group) {
     if (!element) return nullptr;
     switch (group) {
@@ -277,7 +285,13 @@ static bool format_decl_color(DomElement* element, const CssValue* value,
 static bool format_css_value(DomElement* element, CssPropertyCode id,
                              const CssValue* value, char* out, size_t out_size,
                              Pool* scratch = nullptr) {
-    if (!value) return copy_text(out, out_size, property_initial(id));
+    if (!value) {
+        // initial color names still serialize as computed colors after a rule stops matching.
+        const CssProperty* property = css_property_get_by_code(id);
+        if (property && property->type == PROP_TYPE_COLOR &&
+            format_color_text(property_initial(id), out, out_size)) return true;
+        return copy_text(out, out_size, property_initial(id));
+    }
     if (id == CSS_PROPERTY_OPACITY) {
         // numeric opacity math needs a value context, without consuming pending geometry.
         Pool* scratch = pool_create();
@@ -315,12 +329,7 @@ static bool format_legacy_font_color(DomElement* element, CssPropertyCode id,
         element->tag() != MARKUP_NAME_FONT) {
         return false;
     }
-    const char* value = element->get_attribute("color");
-    CssColor color = {};
-    if (!value || !css_parse_color(value, &color) || color.type == CSS_COLOR_CURRENT) {
-        return false;
-    }
-    return format_color(out, out_size, rgba_color(color.r, color.g, color.b, color.a));
+    return format_color_text(element->get_attribute("color"), out, out_size);
 }
 
 static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
@@ -366,7 +375,7 @@ static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
         if (!value || !css_property_validate_value(background_shorthand ? CSS_PROPERTY_BACKGROUND : id, value)) {
             DomElement* parent = css_property_is_inherited(id) ? dom_parent_element(element) : nullptr;
             return parent ? serialize_decl_recursive(parent, id, 0, depth + 1, out, out_size, scratch, preserve_color_model)
-                          : !preserve_color_model && copy_text(out, out_size, property_initial(id));
+                          : !preserve_color_model && format_css_value(element, id, nullptr, out, out_size, scratch);
         }
     }
     if (value && value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -375,11 +384,11 @@ static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
             (keyword == CSS_VALUE_UNSET && css_property_is_inherited(id))) {
             DomElement* parent = dom_parent_element(element);
             return parent ? serialize_decl_recursive(parent, id, 0, depth + 1, out, out_size, scratch, preserve_color_model)
-                          : !preserve_color_model && copy_text(out, out_size, property_initial(id));
+                          : !preserve_color_model && format_css_value(element, id, nullptr, out, out_size, scratch);
         }
         if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT ||
             keyword == CSS_VALUE_UNSET) {
-            return !preserve_color_model && copy_text(out, out_size, property_initial(id));
+            return !preserve_color_model && format_css_value(element, id, nullptr, out, out_size, scratch);
         }
     }
     if (!value && css_property_is_inherited(id)) {
@@ -398,7 +407,7 @@ static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
         return copy_text(out, out_size, "none");
     }
     return value ? format_css_value(element, id, value, out, out_size, scratch)
-                 : !preserve_color_model && copy_text(out, out_size, property_initial(id));
+                 : !preserve_color_model && format_css_value(element, id, nullptr, out, out_size, scratch);
 }
 
 static bool serialize_decl_value(DomElement* element, CssPropertyCode id,
@@ -561,17 +570,14 @@ static bool cssom_resolve_font_size_value(DomElement* element,
 static bool cssom_resolve_font_size_recursive(DomElement* element,
                                               int pseudo_type, int depth,
                                               float* root_font_size,
-                                              float* font_size, bool refresh_cascade) {
+                                              float* font_size) {
     if (!element || !root_font_size || !font_size || depth > 64) return false;
     DomElement* parent = dom_parent_element(element);
     float parent_font_size = 16.0f;
     if (parent && !cssom_resolve_font_size_recursive(
-            parent, 0, depth + 1, root_font_size, &parent_font_size, refresh_cascade)) {
+            parent, 0, depth + 1, root_font_size, &parent_font_size)) {
         return false;
     }
-    // Resolve this element before using its font as the next inherited basis;
-    // CSSOM reads run before layout creates a ViewTree or LayoutContext.
-    if (refresh_cascade) radiant_cascade_styles_for_element(element);
     const CssValue* value = cssom_font_size_decl_value(element, pseudo_type);
     if (!value) {
         *font_size = parent_font_size;
@@ -591,15 +597,17 @@ static bool cssom_resolve_font_size_recursive(DomElement* element,
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size) {
     float root_font_size = 16.0f;
     // Layout has already matched this tree; reading its font must not invalidate the cascade.
-    return cssom_resolve_font_size_recursive(element, 0, 0, &root_font_size, font_size, false);
+    return cssom_resolve_font_size_recursive(element, 0, 0, &root_font_size, font_size);
 }
 
 static bool serialize_cssom_font_size(DomElement* element, int pseudo_type,
                                       char* out, size_t out_size) {
     float root_font_size = 16.0f;
     float font_size = 0.0f;
+    // refresh inherited inputs before any declaration pointer enters font computation.
+    dom_ensure_computed(element, false);
     if (!cssom_resolve_font_size_recursive(element, pseudo_type, 0,
-                                           &root_font_size, &font_size, true)) {
+                                           &root_font_size, &font_size)) {
         return false;
     }
     return format_number(out, out_size, font_size, "px");
@@ -1025,20 +1033,8 @@ static bool serialize_background_color(const CssPropAccessor*, DomElement* eleme
         return format_color(out, out_size, boundary->background->color);
     }
 
-    CssDeclaration* longhand = computed_decl(
-        element, CSS_PROPERTY_BACKGROUND_COLOR, pseudo_type);
-    CssDeclaration* shorthand = computed_decl(
-        element, CSS_PROPERTY_BACKGROUND, pseudo_type);
-    // A shorthand and its longhand occupy separate style-tree nodes; compare
-    // them before layout so computed style cannot expose the losing longhand.
-    if (shorthand && (!longhand ||
-        css_declaration_cascade_compare(shorthand, longhand) > 0)) {
-        if (format_decl_color(element, shorthand->value, out, out_size)) return true;
-    }
-    return longhand
-        ? format_css_value(element, CSS_PROPERTY_BACKGROUND_COLOR,
-                           longhand->value, out, out_size)
-        : copy_text(out, out_size, "rgba(0, 0, 0, 0)");
+    // use the common shorthand/substitution/inheritance path before paint has caught up.
+    return serialize_decl_value(element, CSS_PROPERTY_BACKGROUND_COLOR, pseudo_type, out, out_size);
 }
 
 static bool serialize_minmax(const CssPropAccessor* accessor, DomElement* element,
@@ -1370,6 +1366,26 @@ const CssPropAccessor* css_prop_accessors(size_t* count) {
     return CSS_PROP_ROWS;
 }
 
+static void cssom_refresh_cascade_chain(DomElement* element) {
+    ArrayList* ancestors = arraylist_new(8);
+    if (!ancestors) return;
+    // inheritance and declaration-site variables need live ancestors before pointers are borrowed.
+    for (DomElement* current = element; current;
+         current = current == element->doc->root ? nullptr : dom_parent_element(current)) {
+        if (!arraylist_append(ancestors, current)) {
+            arraylist_free(ancestors);
+            return;
+        }
+    }
+    SelectorMatcher matcher;
+    selector_matcher_init(&matcher, element->doc->document_pool);
+    for (int index = ancestors->length; index > 0; index--) {
+        radiant_cascade_styles_for_element_with_matcher(
+            (DomElement*)ancestors->data[index - 1], &matcher);
+    }
+    arraylist_free(ancestors);
+}
+
 bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     if (!element || !element->doc) return false;
     // A clean committed ViewTree already owns the used values. Re-reading a
@@ -1394,15 +1410,10 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
             // CSSOM width/height resolve to used values for displayed boxes.
             return true;
         }
-        // EventSim deliberately retains its committed geometry through a
-        // handler. Re-cascade the declaration tree so a live CSSStyleDeclaration
-        // observes the write without advancing that geometry snapshot.
-        radiant_cascade_styles_for_element(element);
-        return false;
     }
 
-    // A declaration read still recascades when no usable layout snapshot exists.
-    radiant_cascade_styles_for_element(element);
+    // host-driven handlers retain committed geometry while declaration reads refresh inheritance.
+    cssom_refresh_cascade_chain(element);
     return false;
 }
 

@@ -6501,6 +6501,36 @@ TEST(RenderOutputParity, SvgDashLengthsUseEachInstanceFontBeforeInheritance) {
         "temp/render_output_parity/svg_properties_use_css.png");
 }
 
+TEST(RenderOutputParity, LiveInheritedComputedValuesReachPaintAfterAncestorSelectorMutation) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}"
+        "#parent:lang(en){color:red}#parent:lang(fr){color:blue}"
+        "#swatch{width:40px;height:20px;background:red}</style>"
+        "<div id=swatch></div><button id=update>update</button>"
+        "<div id=parent lang=en><span id=child>inherited text</span></div><script>"
+        "var child=document.getElementById('child'),live=getComputedStyle(child);"
+        "document.getElementById('update').addEventListener('click',function(){"
+        "document.getElementById('parent').lang='fr';"
+        "document.getElementById('swatch').style.backgroundColor=live.color;});</script>";
+    const char* events =
+        "{\"name\":\"inherited CSSOM value drives paint\","
+        "\"html\":\"temp/render_output_parity/cssom_inherited_paint.html\","
+        "\"viewport\":{\"width\":200,\"height\":100},\"events\":["
+        "{\"type\":\"click\",\"target\":{\"selector\":\"#update\"}},"
+        "{\"type\":\"assert_style\",\"target\":{\"selector\":\"#child\"},"
+        "\"property\":\"color\",\"equals\":\"rgb(0, 0, 255)\"},"
+        "{\"type\":\"assert_style\",\"target\":{\"selector\":\"#swatch\"},"
+        "\"property\":\"background-color\",\"equals\":\"rgb(0, 0, 255)\"},"
+        "{\"type\":\"assert_pixel\",\"x\":10,\"y\":10,\"min_b\":240,\"max_r\":20,\"max_g\":20}]}";
+    // the first inherited read in the handler determines a separately painted consumer.
+    ASSERT_TRUE(run_html_fixture_view("temp/render_output_parity/cssom_inherited_paint.html",
+        "temp/render_output_parity/cssom_inherited_paint.json", html, events));
+}
+
 TEST(RenderOutputParity, LinguisticSelectorsAndFirstStrongDirectionReachPaintAndInlineLayout) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
