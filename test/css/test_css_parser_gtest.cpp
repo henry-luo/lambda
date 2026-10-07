@@ -1771,8 +1771,8 @@ TEST_F(CssEngineParserTest, RegistrationInitialParsingChecksCompleteNestedTokens
     const Case cases[] = {
         {"red;", false, nullptr}, {"!", false, nullptr}, {"red !other", false, nullptr},
         {"nested([)]", false, nullptr}, {"nested(\"a\nb\")", false, nullptr},
-        {"nested(; !)", true, "nested(; !)"}, {" /*comment*/ ", true, ""},
-        {" /**/ red/**/ ", true, "red"}, {"foo(", true, "foo("},
+        {"nested(; !)", true, "nested(; !)"}, {" /*comment*/ ", true, "/*comment*/"},
+        {" /**/ red/**/ ", true, "/**/ red/**/"}, {"foo(", true, "foo("},
         {"\"initial\"", true, "\"initial\""}, {"{color:red;}", true, "{color:red;}"}
     };
     for (const Case& entry : cases) {
@@ -1786,8 +1786,67 @@ TEST_F(CssEngineParserTest, RegistrationInitialParsingChecksCompleteNestedTokens
     CssPropertyRegistration registration = {};
     ASSERT_TRUE(css_parse_property_syntax("*", pool, &registration));
     ASSERT_TRUE(css_parse_property_initial_value(&registration, raw, sizeof(raw) - 1, pool));
-    EXPECT_EQ(registration.initial_text_length, 3u);
-    EXPECT_EQ(memcmp(registration.initial_text, "a\0b", 3), 0);
+    const char expected[] = "/**/ a\0b/**/";
+    EXPECT_EQ(registration.initial_text_length, sizeof(expected) - 1);
+    EXPECT_EQ(memcmp(registration.initial_text, expected, sizeof(expected) - 1), 0);
+}
+
+TEST_F(CssEngineParserTest, AuthoredCustomCommentsAreNotSemanticFunctionArguments) {
+    const char* source = "/* lead */ var(/* name */ --ref /* tail */, /* empty fallback */)";
+    CssDeclaration* declaration = css_parse_property_value_declaration(
+        "--tokens", 8, source, strlen(source), pool);
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_STREQ(css_serialize_declaration_value(declaration, pool), source);
+    ASSERT_NE(declaration->value, nullptr);
+    ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_FUNCTION);
+    CssFunction* function = declaration->value->data.function;
+    ASSERT_NE(function, nullptr);
+    ASSERT_EQ(function->arg_count, 2);
+    ASSERT_EQ(function->args[0]->type, CSS_VALUE_TYPE_CUSTOM);
+    EXPECT_STREQ(function->args[0]->data.custom_property.name, "--ref");
+    ASSERT_EQ(function->args[1]->type, CSS_VALUE_TYPE_LIST);
+    EXPECT_EQ(function->args[1]->data.list.count, 0);
+
+    const char* opacity = ".5/**/";
+    declaration = css_parse_property_declaration("opacity", 7, opacity, strlen(opacity), pool);
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_EQ(declaration->value->type, CSS_VALUE_TYPE_NUMBER);
+    EXPECT_STREQ(css_serialize_declaration_value(declaration, pool), "0.5");
+
+    source = "Foo(/* no arguments */) bar";
+    declaration = css_parse_property_value_declaration("--tokens", 8, source, strlen(source), pool);
+    ASSERT_NE(declaration, nullptr);
+    ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_LIST);
+    ASSERT_EQ(declaration->value->data.list.count, 2);
+    ASSERT_NE(declaration->value->data.list.values[0], nullptr);
+    ASSERT_EQ(declaration->value->data.list.values[0]->type, CSS_VALUE_TYPE_FUNCTION);
+    ASSERT_NE(declaration->value->data.list.values[1], nullptr);
+    ASSERT_EQ(declaration->value->data.list.values[1]->type, CSS_VALUE_TYPE_KEYWORD);
+    EXPECT_EQ(declaration->value->data.list.values[0]->data.function->arg_count, 0);
+    EXPECT_EQ(declaration->value->data.list.values[1]->data.keyword, CSS_VALUE_BAR);
+}
+
+TEST_F(CssEngineParserTest, CustomTokenSourceRetainsSpellingAndRepairsPrimitiveEofRecovery) {
+    struct Case {const char* source; const char* expected;};
+    const Case cases[] = {
+        {"/* keep */ +001.2 \\66 oo\\", "/* keep */ +001.2 \\66 oo\xef\xbf\xbd"},
+        {"1foo\\", "1foo\xef\xbf\xbd"}, {"url(foo\\", "url(foo\xef\xbf\xbd)"},
+        {"'foo\\", "'foo'"}, {"'foo\\'", "'foo\\''"},
+        {"'foo\\\\", "'foo\\\\'"}, {"/* unclosed", "/* unclosed*/"},
+        {"'keep' /* comment */ \\66 oo", "'keep' /* comment */ \\66 oo"},
+        {"Foo([\"x", "Foo([\"x\"])"}
+    };
+    for (const Case& entry : cases) {
+        CssDeclaration* declaration = css_parse_property_value_declaration(
+            "--tokens", 8, entry.source, strlen(entry.source), pool);
+        ASSERT_NE(declaration, nullptr) << entry.source;
+        EXPECT_STREQ(declaration->value_text, entry.expected) << entry.source;
+        EXPECT_STREQ(css_serialize_declaration_value(declaration, pool), entry.expected) << entry.source;
+        CssDeclaration* reparsed = css_parse_property_value_declaration(
+            "--tokens", 8, entry.expected, strlen(entry.expected), pool);
+        ASSERT_NE(reparsed, nullptr) << entry.expected;
+        EXPECT_STREQ(reparsed->value_text, entry.expected) << entry.expected;
+    }
 }
 
 TEST_F(CssEngineParserTest, SharedMathComputationKeepsCanonicalUnitsAndPercentageTerms) {

@@ -641,9 +641,9 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
     // For STRING tokens, strip quotes and unescape
     if (token->type == CSS_TOKEN_STRING) {
         char quote = token->start[0];
-        bool has_closing_quote = (token->length >= 2 &&
-            (quote == '\'' || quote == '"') &&
-            token->start[token->length - 1] == quote);
+        // an escaped terminal quote remains string content at EOF.
+        bool has_closing_quote = false;
+        strn_scan_quoted(token->start, token->start + token->length, quote, true, &has_closing_quote);
         bool has_opening_quote = (token->length >= 1 &&
             (quote == '\'' || quote == '"'));
 
@@ -683,6 +683,40 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
     if (value) {
         token->value = value;
     }
+}
+
+StrView css_token_source_text(const CssToken* token, Pool* pool) {
+    if (!token || !token->start) return {};
+    StrView source = {token->start, token->length};
+    size_t slashes = 0;
+    while (slashes < source.length && source.str[source.length - slashes - 1] == '\\') slashes++;
+    bool escaped_eof = (slashes & 1) != 0;
+    const char* suffix = "";
+    size_t suffix_length = 0;
+    bool closed = true;
+    if (token->type == CSS_TOKEN_STRING) {
+        strn_scan_quoted(source.str, source.str + source.length, source.str[0], true, &closed);
+        if (!closed) {suffix = source.str; suffix_length = 1;}
+    } else if (token->type == CSS_TOKEN_URL) {
+        const char* open = (const char*)memchr(source.str, '(', source.length);
+        if (open) strn_scan_balanced(open, source.str + source.length, '(', ')', true, &closed);
+        if (!closed) {suffix = ")"; suffix_length = 1;}
+    } else if (token->type == CSS_TOKEN_COMMENT) {
+        closed = source.length >= 4 && source.str[source.length - 2] == '*' &&
+            source.str[source.length - 1] == '/';
+        if (!closed) {suffix = "*/"; suffix_length = 2;}
+        escaped_eof = false;
+    } else if (token->type == CSS_TOKEN_DELIM && token->data.delimiter == '\\') {
+        // Syntax §9 requires a newline after a reverse-solidus delimiter.
+        return {"\\\n", 2};
+    }
+    if (closed && !escaped_eof) return source;
+    // EOF strings drop their escape; identifier and URL escapes become U+FFFD.
+    const char* replacement = escaped_eof && token->type != CSS_TOKEN_STRING ? "\xef\xbf\xbd" : "";
+    size_t replacement_length = strlen(replacement);
+    size_t kept = source.length - (escaped_eof ? 1 : 0);
+    char* text = pool_join3(pool, source.str, kept, replacement, replacement_length, suffix, suffix_length);
+    return text ? StrView{text, kept + replacement_length + suffix_length} : StrView{};
 }
 
 int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
@@ -955,6 +989,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         pos++;
                     }
                     if (pos + 1 < length) pos += 2; // Skip */
+                    else pos = length; // EOF consumes the comment's final byte too.
                     token->type = CSS_TOKEN_COMMENT;
                     token->length = pos - start;
                 } else {

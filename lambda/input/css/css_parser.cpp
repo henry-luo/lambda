@@ -1184,7 +1184,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
             if (paren_depth == 0) break;
         } else if (paren_depth == 1 && t == CSS_TOKEN_COMMA) {
             arg_count++;
-        } else if (t != CSS_TOKEN_WHITESPACE) {
+        } else if (t != CSS_TOKEN_WHITESPACE && t != CSS_TOKEN_COMMENT) {
             has_content = true;
         }
         temp_pos++;
@@ -1208,9 +1208,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
 
     while (*pos < token_count && paren_depth > 0 && arg_idx < arg_count) {
         // Skip leading whitespace
-        while (*pos < token_count && tokens[*pos].type == CSS_TOKEN_WHITESPACE) {
-            (*pos)++;
-        }
+        *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
 
         if (*pos >= token_count) break;
 
@@ -1261,7 +1259,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
         int value_count = 0;
         for (int i = arg_token_start; i < arg_token_start + arg_token_count; i++) {
             CssTokenType vt = tokens[i].type;
-            if (vt != CSS_TOKEN_WHITESPACE) {
+            if (vt != CSS_TOKEN_WHITESPACE && vt != CSS_TOKEN_COMMENT) {
                 // Functions count as one value but span multiple tokens
                 if (vt == CSS_TOKEN_FUNCTION) {
                     value_count++;
@@ -1286,7 +1284,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
         } else if (value_count == 1) {
             // Single value - find and parse it
             for (int i = arg_token_start; i < arg_token_start + arg_token_count; i++) {
-                if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+                if (tokens[i].type == CSS_TOKEN_WHITESPACE || tokens[i].type == CSS_TOKEN_COMMENT) continue;
 
                 if (tokens[i].type == CSS_TOKEN_FUNCTION) {
                     int func_pos = i;
@@ -1310,7 +1308,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
 
             int list_idx = 0;
             for (int i = arg_token_start; i < arg_token_start + arg_token_count && list_idx < value_count; i++) {
-                if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+                if (tokens[i].type == CSS_TOKEN_WHITESPACE || tokens[i].type == CSS_TOKEN_COMMENT) continue;
 
                 if (tokens[i].type == CSS_TOKEN_FUNCTION) {
                     int func_pos = i;
@@ -1338,6 +1336,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
     }
 
     // Skip closing paren if present
+    *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
     if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
         (*pos)++;
     }
@@ -1500,7 +1499,7 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool, Css
 }
 
 static CssValue* css_parse_value_at(const CssToken* tokens, int* pos, int end, Pool* pool, CssIdentifierGrammar grammar) {
-    while (*pos < end && tokens[*pos].type == CSS_TOKEN_WHITESPACE) (*pos)++;
+    *pos = css_skip_whitespace_tokens(tokens, *pos, end);
     if (*pos >= end) return NULL;
     if (tokens[*pos].type == CSS_TOKEN_FUNCTION) {
         return css_parse_function_from_tokens(tokens, pos, end, pool);
@@ -2471,11 +2470,16 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
     int* pos, int token_count, Pool* pool, bool quirks_mode, StrView property) {
     char* property_name = pool_dup_n(pool, property.str, property.length);
     if (!property_name) return nullptr;
-    if (!(property.length > 2 && property_name[0] == '-' && property_name[1] == '-'))
+    bool is_custom_prop = property.length > 2 && property_name[0] == '-' && property_name[1] == '-';
+    if (!is_custom_prop)
         str_lower_inplace(property_name, property.length);
 
-    // Skip whitespace after colon
-    *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+    // custom serialization retains authored comments even though value parsing ignores them.
+    if (is_custom_prop) {
+        while (*pos < token_count && tokens[*pos].type == CSS_TOKEN_WHITESPACE) (*pos)++;
+    } else {
+        *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+    }
 
     // Parse value tokens until semicolon, right brace, or end
     int value_start = *pos;
@@ -2489,6 +2493,7 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
     bool has_top_level_colon = false;
     bool has_top_level_comma = false;
     bool has_brace_block = false;
+    bool function_eof = false;
     int value_end_before_important = -1;  // track end of value before !important
 
     while (*pos < token_count) {
@@ -2566,6 +2571,7 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
                 }
                 (*pos)++;
             }
+            function_eof = paren_depth > 0;
             continue;
         }
 
@@ -2582,13 +2588,12 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
         }
 
         // Count non-whitespace, non-comma tokens as values
-        if (t != CSS_TOKEN_WHITESPACE && t != CSS_TOKEN_COMMA) {
+        if (t != CSS_TOKEN_WHITESPACE && t != CSS_TOKEN_COMMENT && t != CSS_TOKEN_COMMA) {
             value_count++;
         }
         (*pos)++;
     }
 
-    bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
     bool accepts_empty = is_custom_prop || strcmp(property_name, "initial-value") == 0;
     if (value_count == 0 && !accepts_empty) {
         log_debug("[CSS Parser] No value tokens found");
@@ -2636,9 +2641,33 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
         while (val_end >= value_start && tokens[val_end].type == CSS_TOKEN_WHITESPACE) val_end--;
         if (val_end >= value_start && tokens[value_start].start && tokens[val_end].start) {
             const char* raw_start = tokens[value_start].start;
-            const char* raw_end = tokens[val_end].start + tokens[val_end].length;
-            size_t raw_len = raw_end - raw_start;
-            char* raw_buf = pool_dup_n(pool, raw_start, raw_len);
+            // save EOF recovery once so specified and computed custom values agree.
+            StrView tail = css_token_source_text(&tokens[val_end], pool);
+            if (!tail.str) return nullptr;
+            size_t prefix_length = tokens[val_end].start - raw_start;
+            StrView closing = {};
+            if (function_eof || brace_depth > 0 || bracket_depth > 0 || paren_depth_val > 0) {
+                // EOF closes component-value blocks in reverse nesting order.
+                size_t capacity = (size_t)(val_end - value_start + 1);
+                char* closers = (char*)pool_alloc(pool, capacity);
+                if (!closers) return nullptr;
+                for (int i = value_start; i <= val_end; i++) {
+                    CssTokenType type = css_token_block_closer(tokens[i].type);
+                    if (type != CSS_TOKEN_EOF) closers[closing.length++] =
+                        type == CSS_TOKEN_RIGHT_PAREN ? ')' : type == CSS_TOKEN_RIGHT_BRACKET ? ']' : '}';
+                    else if (css_token_is_block_end(tokens[i].type) && closing.length) closing.length--;
+                }
+                for (size_t i = 0; i < closing.length / 2; i++) {
+                    char saved = closers[i];
+                    closers[i] = closers[closing.length - i - 1];
+                    closers[closing.length - i - 1] = saved;
+                }
+                closing.str = closers;
+            }
+            size_t raw_len = prefix_length + tail.length + closing.length;
+            char* raw_buf = pool_join3(pool, raw_start, prefix_length, tail.str, tail.length,
+                closing.str ? closing.str : "", closing.length);
+            if (closing.str) pool_free(pool, (void*)closing.str);
             if (raw_buf) {
                 decl->value_text = raw_buf;
                 decl->value_text_len = raw_len;
@@ -2656,7 +2685,7 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
     if (value_count == 0 && !has_top_level_comma) {
         // An empty token sequence is a valid value, distinct from the guaranteed-invalid default.
         decl->value = css_value_create_list(pool, nullptr, 0);
-        decl->value_text = pool_strdup(pool, "");
+        if (!decl->value_text) decl->value_text = pool_strdup(pool, "");
         return decl->value && decl->value_text ? decl : nullptr;
     }
 
@@ -2731,7 +2760,7 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
                     int j = group_start, gpd = 0;
                     while (j < group_end) {
                         CssTokenType t = tokens[j].type;
-                        if (t == CSS_TOKEN_WHITESPACE) { j++; continue; }
+                        if (t == CSS_TOKEN_WHITESPACE || t == CSS_TOKEN_COMMENT) { j++; continue; }
                         if (t == CSS_TOKEN_FUNCTION) {
                             gval_count++;
                             gpd = 1;
@@ -2757,7 +2786,7 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
                 } else if (gval_count == 1) {
                     // Single value in group - store directly
                     int j = group_start;
-                    while (j < group_end && tokens[j].type == CSS_TOKEN_WHITESPACE) j++;
+                    j = css_skip_whitespace_tokens(tokens, j, group_end);
                     CssValue* value = NULL;
                     if (tokens[j].type == CSS_TOKEN_FUNCTION) {
                         int func_pos = j;
@@ -2779,7 +2808,7 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
                     int sub_idx = 0;
                     int j = group_start;
                     while (j < group_end && sub_idx < gval_count) {
-                        if (tokens[j].type == CSS_TOKEN_WHITESPACE) { j++; continue; }
+                        if (tokens[j].type == CSS_TOKEN_WHITESPACE || tokens[j].type == CSS_TOKEN_COMMENT) { j++; continue; }
                         CssValue* value = NULL;
                         if (tokens[j].type == CSS_TOKEN_FUNCTION) {
                             int func_pos = j;
@@ -4607,17 +4636,16 @@ static bool css_property_value_token_span(const CssToken* tokens, size_t count,
     for (size_t i = 0; i < count && valid; i++) {
         CssTokenType type = tokens[i].type;
         if (type == CSS_TOKEN_EOF) break;
-        if (type == CSS_TOKEN_WHITESPACE || type == CSS_TOKEN_COMMENT) continue;
+        if (type == CSS_TOKEN_WHITESPACE) continue;
         if (first == count) first = i;
         last = i;
+        if (type == CSS_TOKEN_COMMENT) continue;
         if (type == CSS_TOKEN_BAD_STRING || type == CSS_TOKEN_BAD_URL ||
             (!depth && (type == CSS_TOKEN_SEMICOLON ||
              (type == CSS_TOKEN_DELIM && tokens[i].data.delimiter == '!')))) valid = false;
-        else if (type == CSS_TOKEN_FUNCTION || type == CSS_TOKEN_LEFT_PAREN)
-            closers[depth++] = CSS_TOKEN_RIGHT_PAREN;
-        else if (type == CSS_TOKEN_LEFT_BRACKET) closers[depth++] = CSS_TOKEN_RIGHT_BRACKET;
-        else if (type == CSS_TOKEN_LEFT_BRACE) closers[depth++] = CSS_TOKEN_RIGHT_BRACE;
-        else if (type == CSS_TOKEN_RIGHT_PAREN || type == CSS_TOKEN_RIGHT_BRACKET || type == CSS_TOKEN_RIGHT_BRACE) {
+        else if (css_token_block_closer(type) != CSS_TOKEN_EOF)
+            closers[depth++] = css_token_block_closer(type);
+        else if (css_token_is_block_end(type)) {
             if (!depth || closers[--depth] != type) valid = false;
         }
     }

@@ -1,0 +1,69 @@
+<!doctype html>
+<style id="rules">
+@layer early, late;
+@layer early { #target { --rank: /* early */ 'early'; } }
+@layer late { #target { --rank: /* late */ 'late'; } }
+#rule { --source: /* rule */ 'one'; --dependent: var(--source); }
+#parent { --source: 'parent' /* kept */; --inherited: var(--source); --wide: /* parent */ 'wide'; }
+#child { --source: 'child'; --wide: /* ignored */ inherit /* ignored */; }
+</style>
+<button id="check">check</button><button id="verify">verify width</button><button id="math">verify math</button><div id="report"></div>
+<div id="target" style="font-size:20px"></div><div id="consumer" style="font-size:20px"></div><div id="rule"></div>
+<div id="parent"><span id="child"></span></div>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var element=document.getElementById('target'),s=element.style,c=getComputedStyle(element),report=document.getElementById('report');
+function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+function value(name,text){s.setProperty(name,text);return c.getPropertyValue(name);}
+check('numeric-spelling',function(){return value('--number','+001.200e+2')==='+001.200e+2';});
+check('uuid-spelling',function(){var uuid='12345678-12e3-8d9b-a456-426614174000';return value('--uuid',uuid)===uuid&&value('--uuid-ref','var(--uuid)')===uuid;});
+check('adjacent-signed-numbers',function(){return value('--signed','001.2-02.0')==='001.2-02.0';});
+check('escaped-spelling',function(){return value('--escape','\\66 oo')==='\\66 oo'&&s.getPropertyValue('--escape')==='\\66 oo';});
+check('string-quotes',function(){return value('--string',"'a \" /* literal */'")==="'a \" /* literal */'";});
+check('whitespace',function(){return value('--spaces','a  b\t\tc')==='a  b\t\tc';});
+check('leading-comment',function(){return value('--leading',"/* lead */  'x'")==="/* lead */  'x'";});
+check('trailing-comment',function(){return value('--trailing',"'x' /* tail */")==="'x' /* tail */";});
+check('comment-only',function(){return value('--comment','/* only */')==='/* only */';});
+check('comment-only-substitution',function(){return value('--with-comment','a var(--comment,wrong) b')==='a /* only */ b';});
+check('draft-comment-example',function(){s.setProperty('--y','/* baz */');return value('--x','/* foo */ var(--y) /* bar */')==='/* foo */ /* baz */ /* bar */';});
+check('ident-boundary',function(){s.setProperty('--a','a');return value('--join','var(--a)b')==='a/**/b';});
+check('number-boundary',function(){s.setProperty('--a','1');return value('--join','var(--a)px')==='1/**/px';});
+check('number-number',function(){s.setProperty('--a','1');return value('--join','var(--a)2')==='1/**/2';});
+check('function-boundary',function(){s.setProperty('--a','foo');return value('--join','var(--a)()')==='foo/**/()';});
+check('comment-boundary',function(){s.setProperty('--a','/');return value('--join','var(--a)*')==='//**/*';});
+check('preserved-separator',function(){s.setProperty('--a','a');return value('--join','var(--a)/* original */b')==='a/* original */b';});
+check('empty-substitution',function(){s.cssText+='--empty: ;';return value('--join','a var(--empty,wrong) b')==='a  b';});
+check('empty-joins-neighbors',function(){return value('--join','a var(--empty)b')==='a b';});
+check('empty-fallback',function(){return value('--join','a var(--absent,) b')==='a  b';});
+check('raw-fallback',function(){return value('--fallback','var(--absent, /* fallback */ "x"  y)')===' /* fallback */ "x"  y';});
+check('nested-fallback',function(){s.setProperty('--a',"'a'");return value('--fallback','var(--absent,var(--a))')==="'a'";});
+check('commented-var-name',function(){s.setProperty('--a',"'a'");return value('--join','var(/* name */ --a /* tail */)')==="'a'";});
+check('escaped-var-function',function(){return value('--join','v\\61 r(--a)')==="'a'";});
+check('unknown-function-spelling',function(){return value('--function','Foo( 1 , "x" )')==='Foo( 1 , "x" )';});
+check('unicode',function(){return value('--unicode',"'λ🙂' /* 中文 */")==="'λ🙂' /* 中文 */";});
+check('inherited-environment',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--inherited')==="'parent' /* kept */";});
+check('wide-keyword-comments',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--wide')==="/* parent */ 'wide'";});
+check('cascade-winner',function(){return c.getPropertyValue('--rank')==="/* late */ 'late'";});
+check('typed-consumer',function(){s.setProperty('--length','001.20em');var consumer=document.getElementById('consumer');consumer.style.setProperty('--length','001.20em');consumer.style.width='var(--length)';return c.getPropertyValue('--length')==='001.20em';});
+check('standard-comment-grammar',function(){s.width='calc(1px /* lhs */ + /* rhs */ 2px)';return s.width!=='';});
+check('typed-registration',function(){CSS.registerProperty({name:'--typed',syntax:'<length>',inherits:false,initialValue:'2px'});s.setProperty('--typed','1em');return c.getPropertyValue('--typed')==='20px'&&value('--typed-ref','var(--typed)')==='20px';});
+check('registered-color-substitution',function(){CSS.registerProperty({name:'--typed-color',syntax:'<color>',inherits:false,initialValue:'red'});return c.getPropertyValue('--typed-color')==='rgb(255, 0, 0)'&&value('--typed-color-ref','var(--typed-color)')==='rgb(255, 0, 0)';});
+check('universal-registration',function(){CSS.registerProperty({name:'--universal',syntax:'*',inherits:false,initialValue:"/* initial */ 'u'"});return c.getPropertyValue('--universal')==="/* initial */ 'u'";});
+check('universal-substitution',function(){return value('--universal-ref','var(--universal)')==="/* initial */ 'u'";});
+check('cycle-fallback',function(){s.setProperty('--cycle','var(--cycle)');return c.getPropertyValue('--cycle')===''&&value('--cycle-ref',"var(--cycle,'safe')")==="'safe'";});
+check('live-replacement',function(){s.setProperty('--a',"/* update */ 'new'");s.setProperty('--live','var(--a)');var before=c.getPropertyValue('--live');s.setProperty('--a',"'again'");return before==="/* update */ 'new'"&&c.getPropertyValue('--live')==="'again'";});
+check('clone-authored',function(){var clone=element.cloneNode(true);return clone.style.getPropertyValue('--escape')==='\\66 oo'&&clone.style.getPropertyValue('--leading')==="/* lead */  'x'";});
+check('import-authored',function(){var doc=document.implementation.createHTMLDocument('tokens'),clone=doc.importNode(element,true);return clone.style.getPropertyValue('--escape')==='\\66 oo';});
+check('rule-replacement',function(){var rule=document.getElementById('rules').sheet.cssRules[3].style,computed=getComputedStyle(document.getElementById('rule'));var before=computed.getPropertyValue('--dependent');rule.setProperty('--source',"/* changed */ 'two'");return before==="/* rule */ 'one'"&&computed.getPropertyValue('--dependent')==="/* changed */ 'two'";});
+check('recascade-retirement',function(){element.setAttribute('style',"--raw: /* reset */ 'r'; --dependent:var(--raw)");return c.getPropertyValue('--dependent')==="/* reset */ 'r'"&&c.getPropertyValue('--escape')==='';});
+});
+// used values are checked after the event simulator commits each layout snapshot.
+document.getElementById('verify').addEventListener('click',function(){
+var consumer=document.getElementById('consumer');
+document.getElementById('report').setAttribute('data-used-width',String(getComputedStyle(consumer).width==='24px'));
+consumer.style.width='calc(1px /* lhs */ + /* rhs */ 2px)';
+});
+document.getElementById('math').addEventListener('click',function(){
+document.getElementById('report').setAttribute('data-used-math',String(getComputedStyle(document.getElementById('consumer')).width==='3px'));
+});
+</script>

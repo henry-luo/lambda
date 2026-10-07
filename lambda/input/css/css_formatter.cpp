@@ -479,8 +479,8 @@ const char* css_serialize_declaration_value(CssDeclaration* declaration, Pool* p
         declaration->value_text_len > 0 &&
         memchr(declaration->value_text, '\\', declaration->value_text_len);
 
-    if ((is_custom || has_var) && declaration->value_text &&
-        declaration->value_text_len > 0 && !raw_needs_escape_resolution) {
+    // custom values serialize authored tokens, including escape spelling and empty sequences.
+    if ((is_custom || (has_var && !raw_needs_escape_resolution)) && declaration->value_text) {
         return declaration->value_text;
     }
 

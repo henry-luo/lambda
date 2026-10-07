@@ -4,6 +4,7 @@
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lib/str.h"
+#include "../lib/strbuf.h"
 #include "../lib/mem_grow.hpp"
 #include <limits.h>
 #include <math.h>
@@ -156,14 +157,22 @@ static const CssValue* css_compute_registered_atom(Pool* pool, DomElement* owner
 }
 
 static const CssValue* css_compute_custom_property(Pool* pool, DomElement* element,
-    const char* name, const CssVarStack* stack, size_t name_length = (size_t)-1) {
+    const char* name, const CssVarStack* stack, size_t name_length = (size_t)-1,
+    StrView* text = nullptr);
+
+static StrView css_substitute_custom_text(Pool* pool, DomElement* element,
+    StrView source, const CssVarStack* stack);
+
+static const CssValue* css_compute_custom_property(Pool* pool, DomElement* element,
+    const char* name, const CssVarStack* stack, size_t name_length, StrView* text) {
     if (!element) return nullptr;
     if (name_length == (size_t)-1) name_length = strlen(name);
     const CssPropertyRegistration* registration = element->doc
         ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
     const CssValue* initial = registration ? registration->initial_value : nullptr;
     if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
-    const CssValue* value = dom_element_lookup_own_custom_property(element, name, name_length);
+    const CssCustomProp* entry = dom_element_lookup_own_custom_property_entry(element, name, name_length);
+    const CssValue* value = entry ? entry->value : nullptr;
     bool inherit = registration ? registration->inherits : true;
     if (value && css_value_is_global_keyword(value)) {
         CssEnum keyword = value->data.keyword;
@@ -177,7 +186,14 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
         CssVarResolutionScope scope(&current);
         const CssValue* resolved = resolve_var_function_inner(pool, value, element, nullptr, nullptr, &current);
         if (invalid) resolved = nullptr;
-        if (resolved && (!registration || registration->universal)) return resolved;
+        if (resolved && (!registration || registration->universal)) {
+            if (text && entry && entry->value_text) {
+                *text = css_substitute_custom_text(pool, element,
+                    {entry->value_text, entry->value_text_len}, &current);
+                if (!text->str || invalid) return nullptr;
+            }
+            return resolved;
+        }
         const CssPropertySyntaxComponent* matched = registration
             ? css_match_property_syntax(registration, resolved) : nullptr;
         if (matched) {
@@ -190,11 +206,132 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
     }
     DomElement* parent = element->doc && element == element->doc->root
         ? nullptr : dom_parent_element(element);
-    if (inherit && parent) return css_compute_custom_property(pool, parent, name, stack, name_length);
+    if (inherit && parent) return css_compute_custom_property(pool, parent, name, stack, name_length, text);
     if (!initial) return nullptr;
-    if (registration->universal) return initial;
+    if (registration->universal) {
+        if (text && registration->initial_text)
+            *text = {registration->initial_text, registration->initial_text_length};
+        return initial;
+    }
     const CssPropertySyntaxComponent* matched = css_match_property_syntax(registration, initial);
     return matched ? css_compute_registered_atom(pool, element, matched, initial) : nullptr;
+}
+
+// CSS Syntax 3 §9: only newly adjacent tokens need an inserted empty comment.
+static bool css_custom_tokens_need_separator(const CssToken& left, const CssToken& right) {
+    bool ident = right.type == CSS_TOKEN_IDENT || right.type == CSS_TOKEN_CUSTOM_PROPERTY;
+    bool name = ident || right.type == CSS_TOKEN_FUNCTION || right.type == CSS_TOKEN_URL ||
+        right.type == CSS_TOKEN_BAD_URL;
+    bool number = right.type == CSS_TOKEN_NUMBER || right.type == CSS_TOKEN_PERCENTAGE ||
+        right.type == CSS_TOKEN_DIMENSION;
+    bool dash = right.type == CSS_TOKEN_DELIM && right.data.delimiter == '-';
+    bool cdc = right.type == CSS_TOKEN_CDC;
+    switch (left.type) {
+    case CSS_TOKEN_IDENT:
+    case CSS_TOKEN_CUSTOM_PROPERTY:
+        return name || number || dash || cdc || right.type == CSS_TOKEN_LEFT_PAREN;
+    case CSS_TOKEN_AT_KEYWORD:
+    case CSS_TOKEN_HASH:
+    case CSS_TOKEN_DIMENSION:
+        return name || number || dash || cdc;
+    case CSS_TOKEN_NUMBER:
+        return name || number || cdc ||
+            (right.type == CSS_TOKEN_DELIM && right.data.delimiter == '%');
+    case CSS_TOKEN_DELIM:
+        switch (left.data.delimiter) {
+        case '#': case '-': return name || number || dash || cdc;
+        case '@': return name || dash || cdc;
+        case '.': case '+': return number;
+        case '/': return right.type == CSS_TOKEN_DELIM && right.data.delimiter == '*';
+        default: return false;
+        }
+    default: return false;
+    }
+}
+
+struct CssCustomTextOutput {
+    StrBuf* buffer;
+    CssToken last;
+    bool adjacent;
+};
+
+static bool css_append_custom_token(Pool* pool, CssCustomTextOutput* output, const CssToken& token) {
+    StrView text = css_token_source_text(&token, pool);
+    if (!text.str) return false;
+    // contiguous authored spans already round-trip (for example UUID number/dimension runs).
+    bool authored_neighbors = output->last.start && output->last.start + output->last.length == token.start;
+    if (output->adjacent && !authored_neighbors && css_custom_tokens_need_separator(output->last, token))
+        strbuf_append_str(output->buffer, "/**/");
+    strbuf_append_str_n(output->buffer, text.str, text.length);
+    output->last = token;
+    output->adjacent = token.type != CSS_TOKEN_WHITESPACE && token.type != CSS_TOKEN_COMMENT;
+    return true;
+}
+
+static bool css_append_custom_text(Pool* pool, DomElement* element, StrView source,
+    const CssVarStack* stack, CssCustomTextOutput* output) {
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(source.str, source.length, pool, &count);
+    if (!tokens) return false;
+    for (size_t index = 0; index < count && tokens[index].type != CSS_TOKEN_EOF; index++) {
+        const CssToken& token = tokens[index];
+        if (token.type != CSS_TOKEN_FUNCTION || !token.value ||
+            !str_ieq_const(token.value, strlen(token.value), "var(")) {
+            if (!css_append_custom_token(pool, output, token)) return false;
+            continue;
+        }
+        size_t end = index + 1, comma = count;
+        int depth = 1;
+        for (; end < count && tokens[end].type != CSS_TOKEN_EOF; end++) {
+            CssTokenType type = tokens[end].type;
+            if (css_token_block_closer(type) != CSS_TOKEN_EOF) depth++;
+            else if (css_token_is_block_end(type)) {
+                if (--depth == 0) break;
+            } else if (type == CSS_TOKEN_COMMA && depth == 1 && comma == count) comma = end;
+        }
+        size_t name_index = index + 1;
+        while (name_index < end && (tokens[name_index].type == CSS_TOKEN_WHITESPACE ||
+            tokens[name_index].type == CSS_TOKEN_COMMENT)) name_index++;
+        if (name_index >= end || !tokens[name_index].value) return false;
+        const char* name = tokens[name_index].value;
+        StrView replacement = {};
+        const CssValue* value = css_compute_custom_property(pool, element, name, stack,
+            strlen(name), &replacement);
+        if (value) {
+            if (!replacement.str) {
+                CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+                if (!formatter) return false;
+                // registered values substitute their computed spelling, including color serialization.
+                formatter->options.computed_colors = true;
+                css_format_value(formatter, (CssValue*)value);
+                String* text = stringbuf_to_string(formatter->output);
+                if (!text) return false;
+                replacement = {text->chars, text->len};
+            }
+        } else {
+            if (comma >= end) return false;
+            const char* begin = tokens[comma].start + tokens[comma].length;
+            const char* finish = end < count ? tokens[end].start : source.str + source.length;
+            replacement = {begin, (size_t)(finish - begin)};
+        }
+        // empty replacement leaves its neighboring tokens adjacent.
+        if (!css_append_custom_text(pool, element, replacement, stack, output)) return false;
+        index = end;
+    }
+    return true;
+}
+
+static StrView css_substitute_custom_text(Pool* pool, DomElement* element,
+    StrView source, const CssVarStack* stack) {
+    StrBuf* buffer = strbuf_new();
+    if (!buffer) return {};
+    CssCustomTextOutput output = {buffer, {}, false};
+    bool valid = css_append_custom_text(pool, element, source, stack, &output);
+    // D4.5.1v4: only the caller's pool retains output; the builder dies at return.
+    StrView result = valid ? StrView{pool_dup_n(pool, buffer->str, buffer->length), buffer->length}
+        : StrView{};
+    strbuf_free(buffer);
+    return result;
 }
 
 static const char* css_var_function_name(const CssFunction* func) {
@@ -394,4 +531,10 @@ const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
 const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length) {
     return css_compute_custom_property(pool, element, name, css_active_var_stack, name_length);
+}
+
+const CssValue* css_compute_element_custom_property_text(Pool* pool, DomElement* element,
+    const char* name, size_t name_length, StrView* text) {
+    if (text) *text = {};
+    return css_compute_custom_property(pool, element, name, css_active_var_stack, name_length, text);
 }
