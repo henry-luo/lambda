@@ -149,7 +149,6 @@ static const JubeModuleDef rdb_drivers_module = {
     0,
     NULL,           // runtime_reset
     NULL,           // heap_cleanup
-    NULL,           // language
     NULL,           // requirements
     NULL,           // globals
     0,

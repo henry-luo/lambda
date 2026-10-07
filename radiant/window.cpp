@@ -276,6 +276,7 @@ typedef enum {
     DOC_FORMAT_RST,
     DOC_FORMAT_WIKI,
     DOC_FORMAT_LAMBDA_SCRIPT,
+    DOC_FORMAT_SLIDES,
     DOC_FORMAT_PDF,
     DOC_FORMAT_SVG,
     DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF
@@ -308,6 +309,8 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_WIKI;
     } else if (str_ieq_const(ext, ext_len, "ls")) {
         return DOC_FORMAT_LAMBDA_SCRIPT;
+    } else if (str_ieq_const(ext, ext_len, "slides")) {
+        return DOC_FORMAT_SLIDES;
     } else if (str_ieq_const(ext, ext_len, "pdf")) {
         return DOC_FORMAT_PDF;
     } else if (str_ieq_const(ext, ext_len, "svg")) {
@@ -349,7 +352,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         }
         if (format == DOC_FORMAT_UNKNOWN) {
             log_error("Unsupported document format for file: %s", filename);
-            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
+            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
         }
         // a source-text view takes no page host settings
@@ -372,6 +375,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_RST: return "RST";
         case DOC_FORMAT_WIKI: return "Wiki";
         case DOC_FORMAT_LAMBDA_SCRIPT: return "Lambda Script";
+        case DOC_FORMAT_SLIDES: return "Slides";
         case DOC_FORMAT_PDF: return "PDF";
         case DOC_FORMAT_SVG: return "SVG";
         case DOC_FORMAT_IMAGE: return "Image";
@@ -1613,6 +1617,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 }
                 bool running = event_sim_update(sim_ctx, &ui_context, window, current_time);
                 dom_retire_idle(2000);
+                radiant_collect_stranded_dom(&ui_context, ui_context.document);
                 if (!running) break;
                 // Tick the JS event loop between sim events so deferred callbacks
                 // (setTimeout/queueMicrotask-scheduled work, e.g. the coalesced
@@ -1797,6 +1802,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                      uv_loop);
         // Reclaim retired storage after painting, between input batches.
         // Pending work wakes again promptly without running a busy idle loop.
+        if (radiant_collect_stranded_dom(&ui_context, ui_context.document) &&
+            wait_timeout > 0.001) wait_timeout = 0.001;
         if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;
         if (wait_timeout > 0.0) {
             glfwWaitEventsTimeout(wait_timeout);
@@ -1836,7 +1843,7 @@ int view_lambda_document_transform_with_events(const char* document_file,
         enable_event_log, enable_state_dump, UI_APP_MODE_VIEW);
 }
 
-int edit_doc_in_window_with_events(const char* document_file,
+int edit_doc_in_window_with_events(const char* document_file, bool source_surface,
         const char* event_file, bool headless, const char** font_dirs,
         int font_dir_count, bool enable_event_log, bool enable_state_dump) {
     const LambdaDocumentTransformConfig* transform =
@@ -1845,7 +1852,11 @@ int edit_doc_in_window_with_events(const char* document_file,
         log_error("edit: the edit document transform is not configured");
         return -1;
     }
-    return view_doc_in_window_with_events_internal(document_file, transform, nullptr, 0,
+    // open_document(path, options) reads `options.source` (lambda.edit)
+    LambdaDocumentTransformOption options[1] = {
+        {"source", LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL, nullptr, true}};
+    return view_doc_in_window_with_events_internal(document_file, transform,
+        source_surface ? options : nullptr, source_surface ? 1 : 0,
         event_file, headless, font_dirs, font_dir_count,
         enable_event_log, enable_state_dump, UI_APP_MODE_EDIT);
 }

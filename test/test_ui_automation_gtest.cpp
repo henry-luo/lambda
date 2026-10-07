@@ -94,6 +94,12 @@ struct UiTestInfo {
     // document before each run, so a Save never writes a committed file.
     bool edit_command;
     char working_copy[256];
+    // `"source": true` opens the document in the source surface (--source).
+    bool source_surface;
+    // `"prepare"` is an argv run before launch that writes a generated
+    // document under temp/, such as the source editor's multi-MB stress file.
+    int prepare_argc;
+    char prepare_argv[8][256];
     int env_count;
     char env_keys[4][64];
     char env_values[4][256];
@@ -475,7 +481,31 @@ static bool ui_load_fixture(const std::string& json_path, const UiSuiteSpec& sui
     if (html_path.empty()) {
         html_path = json_path.substr(0, json_path.size() - 5) + ".html";
     }
-    if (!ui_safe_repo_path(html_path) || !file_exists(html_path)) {
+    info->prepare_argc = 0;
+    ItemReader prepare = root_map.get("prepare");
+    if (!prepare.isNull()) {
+        int64_t count = 0;
+        bool valid = prepare.isArray() || prepare.isList();
+        if (valid) {
+            ArrayReader prepare_args = prepare.asArray();
+            count = prepare_args.length();
+            valid = count > 0 && count <= 7;
+            for (int64_t i = 0; valid && i < count; i++) {
+                ItemReader arg = prepare_args.get(i);
+                const char* text = arg.isString() ? arg.cstring() : nullptr;
+                valid = text && strlen(text) < sizeof(info->prepare_argv[0]);
+                if (valid) snprintf(info->prepare_argv[i], sizeof(info->prepare_argv[i]), "%s", text);
+            }
+        }
+        // a prepared document is generated, so it can only live under temp/
+        if (!valid || html_path.compare(0, 5, "temp/") != 0) {
+            g_ui_discovery_error = "fixture prepare must be a short argv for a temp/ document: " + json_path;
+            ui_dispose_json_input(pool, input);
+            return false;
+        }
+        info->prepare_argc = (int)count; // INT_CAST_OK: bounded by 7 above
+    }
+    if (!ui_safe_repo_path(html_path) || (info->prepare_argc == 0 && !file_exists(html_path))) {
         g_ui_discovery_error = "fixture page does not exist: " + json_path + " -> " + html_path;
         ui_dispose_json_input(pool, input);
         return false;
@@ -502,6 +532,13 @@ static bool ui_load_fixture(const std::string& json_path, const UiSuiteSpec& sui
         return false;
     }
     info->edit_command = command_name && strcmp(command_name, "edit") == 0;
+    ItemReader source_surface = root_map.get("source");
+    if (!source_surface.isNull() && (!source_surface.isBool() || !info->edit_command)) {
+        g_ui_discovery_error = "fixture source must be a boolean on an edit fixture: " + json_path;
+        ui_dispose_json_input(pool, input);
+        return false;
+    }
+    info->source_surface = source_surface.isBool() && source_surface.asBool();
     info->working_copy[0] = '\0';
     ItemReader working_copy = root_map.get("working_copy");
     if (!working_copy.isNull()) {
@@ -883,6 +920,22 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     // The window auto-closes when simulation completes (auto_close=true in EventSimContext).
     // Exit code: 0 = all assertions passed, 1 = one or more failed.
     const char* document_path = info.html_path.c_str();
+    if (info.prepare_argc > 0) {
+        const char* prepare_args[8];
+        for (int i = 0; i < info.prepare_argc; i++) prepare_args[i] = info.prepare_argv[i];
+        prepare_args[info.prepare_argc] = NULL;
+        ShellOptions prepare_options = {0};
+        prepare_options.merge_stderr = true;
+        ShellResult prepared = shell_exec(prepare_args[0], prepare_args, &prepare_options);
+        bool prepare_ok = prepared.exit_code == 0 && file_exists(info.html_path);
+        shell_result_free(&prepared);
+        if (!prepare_ok) {
+            result.output = "prepare did not write ";
+            result.output += info.html_path;
+            result.exit_code = -1;
+            return result;
+        }
+    }
     if (info.working_copy[0]) {
         FileCopyOptions copy_options = {true, false};
         if (file_copy(info.html_path.c_str(), info.working_copy, &copy_options) != 0) {
@@ -898,6 +951,7 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     args[arg_count++] = LAMBDA_EXE;
     args[arg_count++] = info.edit_command ? "edit" : "view";
     args[arg_count++] = document_path;
+    if (info.source_surface) args[arg_count++] = "--source";
     args[arg_count++] = "--event-file";
     args[arg_count++] = info.json_path.c_str();
     args[arg_count++] = "--event-result";

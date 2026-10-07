@@ -20,6 +20,7 @@
 
 #ifndef LIB_STR_H
 #define LIB_STR_H
+#include "lambda_api.h"
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -113,7 +114,7 @@ size_t str_find_byte(const char* s, size_t len, char c);
 size_t str_rfind_byte(const char* s, size_t len, char c);
 
 /** find first occurrence of needle in haystack. returns offset or STR_NPOS. */
-size_t str_find(const char* s, size_t s_len,
+LAMBDA_LIB_API size_t str_find(const char* s, size_t s_len,
                 const char* needle, size_t needle_len);
 
 /** frequency rank of a byte in typical text and source code, measured over
@@ -193,7 +194,7 @@ size_t str_teddy_find_portable(const StrTeddy* teddy, const char* s, size_t s_le
 const char* str_teddy_kernel(void);
 
 /** find last occurrence. */
-size_t str_rfind(const char* s, size_t s_len,
+LAMBDA_LIB_API size_t str_rfind(const char* s, size_t s_len,
                  const char* needle, size_t needle_len);
 
 /** case-insensitive find (ASCII). */
@@ -310,7 +311,7 @@ void str_capitalize_ascii(char* dst, const char* src, size_t len);
 void str_swapcase_ascii(char* dst, const char* src, size_t len);
 
 /** predicate: is the whole string ASCII? (SWAR-accelerated). */
-bool str_is_ascii(const char* s, size_t len);
+LAMBDA_LIB_API bool str_is_ascii(const char* s, size_t len);
 
 /* ──────────────────────────────────────────────────────────────────────
  *  7. Copy / Fill (safe replacements for strcpy, strncpy, memset)
@@ -318,7 +319,7 @@ bool str_is_ascii(const char* s, size_t len);
 
 /** safe copy — copies up to dst_cap-1 bytes, always NUL-terminates.
  *  returns number of bytes written (excluding NUL), or 0 if dst_cap==0. */
-size_t str_copy(char* dst, size_t dst_cap,
+LAMBDA_LIB_API size_t str_copy(char* dst, size_t dst_cap,
                 const char* src, size_t src_len);
 
 /** safe concatenate — appends to dst[dst_len], NUL-terminates.
@@ -336,7 +337,7 @@ void str_fill(char* dst, size_t n, char c);
 
 /** duplicate [s, s+len) as a NUL-terminated malloc'd string.
  *  caller must free(). returns NULL on allocation failure. */
-char* str_dup(const char* s, size_t len);
+LAMBDA_LIB_API char* str_dup(const char* s, size_t len);
 
 /** duplicate with lower-case conversion. */
 char* str_dup_lower(const char* s, size_t len);

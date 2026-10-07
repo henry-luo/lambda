@@ -1,3 +1,4 @@
+#include "../../lib/utf.h"
 
 #include "transpiler.hpp"
 #include "type_contract.hpp"
@@ -179,6 +180,7 @@ static Item resolve_path_content(Path* path) {
 
 Array* array() {
     Array *arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    if (!arr) return NULL; // callers can propagate allocation failure before reserving storage
     arr->type_id = LMD_TYPE_ARRAY;
     return arr;
 }
@@ -2920,16 +2922,21 @@ static Item map_get_attr(Map* owner, const char* key, bool* is_found) {
 }
 
 Item map_get(Map* map, Item key) {
-    if (!map || !key.item) { return ItemNull;}
-    bool is_found;
-    char *key_str = NULL;
-    if (is_text_type_id(key._type_id)) {
-        key_str = (char*)key.get_chars();
-    } else {
-        log_error("map_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
-        return ItemNull;  // only string or symbol keys are supported
+    if (!map || !key.item) return ItemNull;
+    bool found;
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* name = key.get_string();
+        if (!utf8_key_is_canonical(name->chars, name->len)) {
+            name = heap_create_name(name->chars, name->len);
+            if (!name) return ItemError;
+        }
+        // string keys carry their length: embedded NUL is ordinary name data.
+        return map_get_for_owner_keyed(map, (TypeMap*)map->type, map->data,
+            name->chars, (int)name->len, typemap_name_hash(name->chars, (int)name->len), &found);
     }
-    return map_get_attr(map, key_str, &is_found);
+    if (get_type_id(key) == LMD_TYPE_SYMBOL) return map_get_attr(map, key.get_chars(), &found);
+    log_error("map_get: key must be string or symbol, got type %s", get_type_name(get_type_id(key)));
+    return ItemNull;
 }
 
 static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,

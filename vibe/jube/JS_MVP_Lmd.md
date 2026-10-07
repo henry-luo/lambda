@@ -2,675 +2,595 @@
 
 **Date:** 2026-10-07
 
-**Status:** PROPOSAL FOR REVIEW — the design goals in §1 are fixed by the
-user (2026-10-07); runtime helper APIs remain proposed and unimplemented.
+**Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
+phase implemented. Current validation and measurements are recorded in §10.8.
 
-**Implementation destination:** `lambda/js/mvp-lmd/`
+**Destination:** `lambda/js/mvp-lmd/`
 
-**Scope:** existing JS parsing and AST analysis; new MIR lowering and execution
-for basic scalars, dense arrays, variable assignment, control flow, and functions.
+**Scope:** JS execution on Lambda's values, containers, memory ownership, and
+MIR infrastructure. This document records design and the latest measurement
+round; implementation narratives and earlier measurement rounds are omitted.
 
 ## 1. Objective and fixed constraints
 
-Execute the current JS subset as efficiently as possible using untyped
-Lambda's representation and compilation machinery, with minimal emitted MIR
-and minimal new runtime code. Measure these properties independently; sharing
-code alone does not establish a performance improvement.
+Execute the admitted JS subset efficiently on untyped Lambda's substrate.
+The four governing goals remain fixed (USER, 2026-10-07):
 
-### Governing design goals — USER, 2026-10-07
+1. **Keep emitted MIR minimal.** Use retained analysis to avoid unnecessary
+   checks, conversions, roots, wrappers, and function bodies.
+2. **Keep new helpers and helper code minimal.** Reuse audited Lambda/lib
+   primitives; count internal utilities, adapters, and shared additions too.
+3. **Implement exactly the admitted scope.** Section 3 describes the shipped
+   subset; §10 records the object/Map extension. Excluded capabilities receive
+   diagnostics, without reserved machinery for later features.
+4. **Keep the MVP as efficient as possible.** Preserve native computations and
+   direct storage/calls where proven; measure release performance with fixed
+   sources and correctness oracles.
 
-1. **Keep emitted MIR minimal.** Emit only instructions, checks, conversions,
-   roots, wrappers, and function bodies needed by the admitted program. Reuse
-   existing analysis to eliminate redundant work before MIR emission.
-2. **Keep new helpers and helper code minimal.** Minimize both the number of
-   helpers and their total implementation, including internal utility functions,
-   adapters, and new shared code. Reuse audited Lambda/lib primitives. A single
-   large dispatcher is not an improvement over several small helpers merely
-   because it reduces the exported symbol count.
-3. **Implement exactly the current scope.** Section 3 is the capability
-   boundary. Do not implement, design for, reserve hooks for, or plan future
-   expansion. Unsupported features need only recognition and a diagnostic.
-4. **Keep the MVP as efficient as possible.** Keep proven scalar computations
-   native, avoid unnecessary calls and allocations, and use direct storage and
-   call paths where current-scope proofs permit. Validate choices on release
-   builds with unchanged source and output oracles.
+These goals apply together. Correct JS results, precise ownership, and the
+execution boundary take precedence over reducing a single size metric.
+Retain added machinery only when its semantic need or measured benefit
+justifies its MIR, helper-code, allocation, and execution cost.
 
-These goals apply together. Do not reduce MIR by moving every operation into
-a C dispatcher, reduce helper code by duplicating long algorithms at every MIR
-site, or gain speed by changing JS results. Correct admitted behavior, precise
-ownership, and the ban on existing JS runtime helpers remain constraints
-(**S1.11**, **D2.4.3**, **D5.3**, **D8.2.6**). If speed and size trade off,
-record the measured runtime, emitted-instruction count, and added helper code;
-retain extra machinery only when it earns its cost on an in-scope workload.
-
-The requested constraints are:
-
-1. Keep the current JS parser, AST, binding, validation, and applicable analysis.
-2. Emit **new MIR** under `lambda/js/mvp-lmd/`; do not invoke the current JS
-   lowering, JS interpreter, or the private-value MVP under `lambda/js/mvp/`.
-3. Base execution on untyped Lambda's `Item`, native scalar lanes, containers,
-   precise roots, memory ownership, and shared MIR emitter.
-4. Support JS `var` declaration and assignment, including runtime type changes.
-5. Call **no existing JS runtime helper**, directly or transitively.
-6. Present every proposed runtime helper and its dependencies for review before
-   implementing it. Section 7 is that review inventory.
-
-This is an explicit experimental selector, not a replacement for the current
-JS engine. A source outside the admitted subset is reported as unsupported;
-there is no fallback into either existing JS execution engine.
-
-### Authority and proposal status
+Keep the existing JS parser, AST, binding, validation, and applicable analysis.
+Use new MVP MIR lowering over Lambda `Item`, scalar lanes, containers, roots,
+and the shared emitter. **Call no existing JS runtime helper, directly or
+transitively**, including during collection, error handling, and teardown.
+Do not fall back into full LambdaJS or the retired private-value MVP.
+Present each new helper and its dependency closure for review before coding.
 
 The [formal semantics](../../doc/Lambda_Formal_Semantics.md) and
-[formal design](../../doc/Lambda_Formal_Design.md) govern the proposal:
+[formal design](../../doc/Lambda_Formal_Design.md) govern this design:
 
-| Concern | Authority | Application here |
-|---|---|---|
-| Hosted language semantics | **S1.11**, **D1.1** | Admitted programs retain JS meaning; unsupported capabilities are explicit. |
-| Shared substrate and values | **D1.2v2–D1.3v3** | Use host `Item`, heap, execution ownership, and MIR infrastructure. |
-| Representation versus conversion | **D2.4.1–D2.4.3** | Native representation never substitutes for JS coercion. |
-| Returned failures | **D1.4v4**, **D8.4.3v2** | Failures return through every frame and its cleanup. |
-| Scalar lifetime and rooting | **D5.2.1v3–D5.2.3**, **D5.3.1–D5.3.5** | Shared companion returns, destination ownership, and precise roots. |
-| AST and passes | **D8.2.1–D8.2.6** | Existing indexed AST and pass manager; new lowering consumes resolved facts. |
-| Specialization | **D8.3.1v2**, **D8.4.1v2** | Use proven native operations and necessary local guards; no automatic body cloning, feedback vectors, or mutable inline caches. |
+| Concern | Authority |
+|---|---|
+| Hosted JS retains ECMAScript behavior | **S1.11**, **D1.1** |
+| Host values and shared physical substrate | **D1.2v2–D1.3v3** |
+| Integer subtype and numeric FFI | **D2.2.5**, **S4.9.1** |
+| Representation is distinct from conversion | **D2.4.1–D2.4.3** |
+| Nominal objects and shared map layouts | **D2.6.6v3**, **D2.6.9v3**, **D3.4.1–D3.4.7** |
+| Name identity | **S8.2.2v5**, **D3.4.4v4**, **D4.6.1v4–D4.6.2v2** |
+| Returned failures and precise ownership | **D1.4v4**, **D1.5v2**, **D5.2–D5.3**, **D8.4.3v2** |
+| Retained analysis and immutable specialization | **D8.2.1–D8.2.6**, **D8.3.1v2**, **D8.4.1v2** |
 
-The user's new experimental lane is recorded here. It does not change Lambda
-language rulings or authorize changing the behavior of full LambdaJS. The
-specific feature boundary, helper APIs, and integration details remain review
-items. No formal-spec ruling is revised by this proposal.
-
-## 2. What “based on untyped Lambda” means
-
-The new lane uses Lambda's physical execution substrate with a JS semantic
-profile. It does not translate JavaScript into Lambda source, relabel JS nodes
-as Lambda expressions, or pass JS operations to Lambda language builtins.
+## 2. Shared substrate and semantic ownership
 
 ```mermaid
 flowchart TD
-    source[JavaScript source] --> front[Existing JS parser, binding, validation, AST analysis]
-    front --> admit[MVP admission and representation planning]
-    admit --> lower[New mvp-lmd MIR lowering]
-    shared[Shared Lambda MirEmitter and value plans] --> lower
-    lower --> mir[Host MIR library and native code]
-    mir --> core[Lambda Item, heap, roots, scalar ownership]
-    mir --> helpers[Reviewed mvp-lmd semantic helpers]
-    helpers --> core
+    source[JavaScript source] --> front[Existing parser, binding, validation, AST analysis]
+    front --> plan[MVP admission and representation planning]
+    plan --> mir[New MVP MIR lowering]
+    shared[Shared Lambda MIR emitter] --> mir
+    mir --> host[Lambda Item, containers, heap, roots]
+    mir --> leaves[Reviewed MVP semantic leaves]
+    leaves --> host
 ```
 
-Untyped source may still compile to native `MIR_T_D` and Boolean registers.
-Unknown or changing values use `Item`. Preserve JS semantics at every join,
-store, call, and return; an inferred Number is a representation opportunity,
-not a declaration restricting what a JS variable may later contain.
+Reuse physical allocation, field storage, shape transitions, scalar ownership,
+and control-flow emission. JS owns coercion, equality, reference mutation,
+property behavior, and completion semantics (**S1.11**, **D1.3v3**).
 
-### Existing assets and limits
+Unknown or changing values use `Item`; proven scalar regions use native
+registers. An inferred kind selects a representation without restricting
+later JS assignments. Lambda COW, structural equality, list spreading, and
+null-on-missing conventions do not implement the corresponding JS operations.
 
-- [`js_c_parser.cpp`](../../lambda/js/js_c_parser.cpp) exposes
-  `js_transpiler_parse_c()`, which schedules parse/build, bind, validate, and
-  index in the existing `CompilerPassManager`.
-- [`js_ast.hpp`](../../lambda/js/js_ast.hpp) already aliases many core AST
-  layouts. Use its `AstBindingId`/`FunctionId` infrastructure and shared child
-  enumeration; do not implement another spelling-based binder.
-- [`mir_emitter_shared.hpp`](../../lambda/runtime/mir_emitter_shared.hpp)
-  contains numeric opcode plans, `MirValue`/representation work, float
-  boxing/unboxing, call/return plans, and rooting infrastructure. These are
-  compiler utilities; they are not JS runtime helpers.
-- [`lambda-data-runtime.cpp`](../../lambda/runtime/lambda-data-runtime.cpp)
-  supplies ordinary `Array` allocation. Its `array_get()` returns Lambda
-  `null` out of bounds, so it cannot implement a JS indexed read unchanged.
-- [`collection_runtime.cpp`](../../lambda/runtime/collection_runtime.cpp)
-  distinguishes verbatim storage from Lambda spreading and capture. Only
-  physical storage operations with compatible ownership are reuse candidates.
-- [`lib/utf.h`](../../lib/utf.h) provides UTF codecs, WTF-8 encoding, and UTF-16
-  length utilities. They avoid copying the JS string runtime; each reused
-  operation still needs a contract check, especially for lone surrogates.
+## 3. Implemented admission boundary
 
-Later JS analysis is currently coupled to `JsMirTranspiler` in
-[`js_mir_module_batch_lowering.cpp`](../../lambda/js/js_mir_module_batch_lowering.cpp).
-Retaining analysis therefore requires separating backend-independent collection,
-capture/effect, and type facts from old environment layout, MIR declarations,
-literal recipes, and emission state. Promote useful existing analyses into a
-shared interface used by both clients; do not duplicate them or call the old
-compiler merely to obtain its facts. MVP frame layout and representation plans
-consume those facts in the existing pass schedule (**D8.2.4v2–D8.2.6**).
-Extract only facts consumed by this scope. Do not undertake a general compiler
-framework refactor or retain old lowering plans for unsupported features.
+This table summarizes the implemented subset. Section 10 defines the detailed
+object/Map boundary and its scope decisions.
 
-## 3. Current admission boundary
-
-This is the proposal's current concrete interpretation of basic scalars,
-dense arrays, control flow, and functions. The new minimization goals do not
-silently narrow this scope or weaken its semantics. The right column is an
-exclusion list, not an expansion backlog: no corresponding runtime machinery,
-adapter, reserved field, or extension interface belongs in this MVP.
-
-| Area | Current scope | Out of scope |
+| Area | Implemented | Excluded from the implemented phase |
 |---|---|---|
-| Scalars | `undefined`, `null`, Boolean, Number, String; NaN, infinities, signed zero | BigInt, Symbol, boxed primitive objects |
-| Scalar operators | Arithmetic including `%` and `**`; unary `+ - ! ~`; bitwise and shifts; relational, loose and strict equality; `typeof`, `void`; short-circuit `&&`, `||`, `??`; conditional and comma expressions | Object/array/function-to-primitive coercion; `instanceof`, `in`, `delete` |
-| Variables | `var`, `let`, `const`; simple identifiers; assignment, compound assignment, logical assignment, prefix/postfix update; changing runtime types | Destructuring; unresolved-name writes creating sloppy globals |
-| Arrays | Dense literals, empty arrays, nested arrays, mixed values, indexed reads/writes, append at current length, `.length` reads and shrinking | Holes, sparse writes, named properties other than length, descriptors, prototypes, array constructors and methods |
-| Control flow | Blocks, `if`/`else`, `while`, `do`/`while`, classic `for`, `switch` with fallthrough, `break`, `continue`, labels, `return` | `for-in`, `for-of`, generators, async/await, throw/try/catch/finally |
-| Functions | Ordinary declarations/expressions and arrows with simple parameters; recursion and mutual recursion; function values, reassignment, indirect calls; access to program bindings | Captured enclosing function locals, defaults/rest/spread, observable `this`/`arguments`/`new.target`, constructors, methods/classes |
-| Program | One JS script with execution-owned top-level bindings; existing strictness/early-error checks | Modules, imports, eval, Function constructors, `with`, DOM, Node APIs, general global object |
+| Scalars | Undefined, null, Boolean, Number, String; NaN, infinities, signed zero | BigInt, Symbol, boxed primitive objects |
+| Operators | Arithmetic, remainder/power, bitwise/shifts, comparisons, loose/strict equality, `typeof`, `void`, short-circuiting, conditional/comma; object `in`/property `delete` | Object-to-primitive coercion; `instanceof` |
+| Variables | `var`, `let`, `const`; assignments, logical/compound assignments, updates, changing kinds | Destructuring; sloppy implicit global creation |
+| Arrays | Dense mixed/nested literals, indexed reads/writes, append at length, length reads/shrink | Holes, sparse writes, other named properties, constructors/methods, descriptors/prototypes |
+| Objects/Map | Data properties, own projections, `new Map()` and fixed collection operations (§10) | `__proto__`, descriptors/accessors, proxies, custom prototypes, iterable Map construction |
+| Control flow | Blocks, conditionals, while/do/for, direct `for-of` with simple pair binding (§10.5), switch/fallthrough, labels, break/continue, return | `for-in`, general iterators, generators, async, throw/try/catch/finally |
+| Functions | Ordinary declarations/expressions, arrows, simple parameters, recursion, function values, indirect calls, program bindings | Enclosing local captures, default/rest/spread parameters, observable `this`/`arguments`/`new.target`, constructors/methods/classes |
+| Program | One script with execution-owned bindings and retained early-error/strictness rules | Modules, eval, Function constructor, with, DOM/Node APIs, general global object |
 
-String support includes literal preservation, concatenation, comparison,
-primitive conversion, UTF-16 `.length`, and indexed code-unit reads. String
-methods are out of scope. This is not an ASCII-only profile.
+Strings preserve Unicode, including lone surrogates, with UTF-16 length and
+indexed code-unit reads. String methods remain excluded.
 
-The ordinary Number globals `NaN` and `Infinity`, and `undefined`, resolve
-through the retained binding facts and an explicit minimal global record.
-Lexical shadowing remains valid. Do not recognize an intrinsic by spelling at
-an arbitrary use site. An undeclared identifier read is a ReferenceError;
-`typeof` on an unresolvable name returns `"undefined"`, while a TDZ read still
-fails. Sloppy implicit global creation remains an unsupported capability.
+Unsupported syntax is diagnosed throughout the unit, including unexecuted
+functions, before execution. Runtime-dependent unsupported operations return
+a capability failure distinct from JS semantic errors. Effects already
+performed are neither replayed nor rolled back; failed executions are not
+correctness or timing successes.
 
-Noncapturing functions can still be passed, returned, stored in arrays, and
-called through variables. Every evaluated function expression creates a fresh
-function identity. A reference to a program binding uses the execution's
-program slots; it is not a captured enclosing-function local. Mutable local
-closures are out of scope; implement neither cells nor snapshot emulation.
+## 4. Semantic contracts
 
-Unsupported syntax is diagnosed across the entire retained unit, including
-unexecuted function bodies, before execution. Runtime-dependent unsupported
-operations return a capability failure when encountered. Such a failure is
-distinct from a JS TypeError/ReferenceError/RangeError and makes that execution
-ineligible for a correctness or timing success. Already-performed effects are
-not replayed or rolled back.
+### 4.1 Values and operators
 
-## 4. JS behavior that the shared substrate must preserve
+JS observes one Number type across INT and FLOAT representations (§9).
+Primitive conversions distinguish null, undefined, Boolean, Number, and
+String. For example, `null + 1` is `1`, `undefined + 1` is NaN, and
+`"2" + 1` is `"21"`. Native entry guards test kinds without coercing them.
 
-### 4.1 Scalars and operators
+Use JS truthiness and identity equality for reference values. Logical
+operators return the selected operand. Loose equality performs only admitted
+primitive conversions; an excluded object-conversion protocol causes a
+capability failure. Preserve NaN, signed zero, per-operation binary64 rounding,
+ToInt32/ToUint32 wrapping, and JS remainder/power behavior (**S1.11**,
+**D2.4.3**).
 
-All JS Numbers use Lambda's canonical FLOAT Item encoding at boxed boundaries;
-native Number computations use binary64. Machine integers may implement
-indices and proven bitwise operations, but they never change the observable
-Number type or import Lambda int53 poison/overflow rules.
+### 4.2 Bindings and references
 
-Scalar conversion must distinguish null, undefined, Boolean, Number, and String.
-For example, `null + 1` is `1`, `undefined + 1` is NaN, and `"2" + 1` is `"21"`.
-Guarded numeric entries test for Number; they never coerce arguments to make
-a guard pass (**D2.4.3**, **D8.3.1v2**).
+- `var` is function/program scoped and instantiated before execution;
+  redeclaration without an initializer does not reset it.
+- `let`/`const` retain block scope and TDZ; const prevents rebinding without
+  freezing the referenced container.
+- Program bindings are execution-local and shared by functions in that
+  execution. Enclosing function/block captures remain excluded.
+- `undefined`, `NaN`, and `Infinity` use resolved intrinsic bindings, with
+  proper shadowing, restricted global declarations, and strict/sloppy writes.
+  An unresolved read and a TDZ read retain their distinct `typeof` behavior.
+- Assignment preserves scalar values and reference aliases. Receiver and key
+  are evaluated once before the RHS; compound assignment reads first.
+  Retain the owner/key through calls, never a potentially stale data address.
+- Preserve prefix/postfix snapshots, logical short-circuiting, switch order,
+  and the classic-for update target of `continue`.
 
-JS truthiness is emitted directly from the admitted value domain: zero, NaN,
-false, null, undefined, and the empty string are falsy; arrays and functions
-are truthy. Lambda's truthiness (**S3.1**) is not reused. Logical operators
-return their selected operand, not its Boolean conversion.
-
-Strict equality compares scalar values and array/function identity; it never
-uses Lambda structural container equality (**S5.1**, **S9.1.5v2**). Loose
-equality implements primitive conversions and null/undefined equivalence.
-An operation that would require an excluded object's primitive conversion
-reports the capability boundary, rather than guessing a numeric result.
-
-Bitwise lowering performs ECMAScript ToInt32/ToUint32 and masks the shift count.
-It must handle NaN, infinities, and out-of-range finite doubles before any
-machine conversion. `%` is numeric remainder; `**` needs its JS special cases
-around NaN, infinities, negative zero, and negative bases. A raw C cast or
-unqualified `pow()` is not a semantic implementation.
-
-These admitted conversions follow
-[ECMAScript abstract operations](https://tc39.es/ecma262/multipage/abstract-operations.html#sec-type-conversion)
-under **S1.11**; the MVP excludes object conversion protocols explicitly.
-
-### 4.2 Assignment and binding lifetime
-
-The JS binding model remains intact:
-
-- `var` is function/program scoped, instantiated as undefined before the body,
-  and is not reinitialized by a later `var x;`. Its initializer executes where
-  written. Repeated declarations refer to the binding selected by the binder.
-- `let` and `const` retain block scope and TDZ checks. A const binding prevents
-  rebinding; it does not freeze an array reached through that binding.
-- Parameters are local bindings. Missing arguments become undefined; extra
-  arguments are evaluated in order even when the body does not use them.
-- Program variables live in execution-owned slots shared by functions from
-  that execution. They are not Lambda module-level `var`s (**S9.1.7**).
-- Assignment copies a scalar value or an array/function reference. There is
-  no Lambda COW capture, snapshot, or inout-parameter rewrite (**S9.1.2–S9.1.4**).
-
-For example, both of these must work without source annotations:
-
-```js
-var x;
-x = 1;
-x = "two";
-x = [3];
-
-var a = [1];
-var b = a;
-b[0] = 7;                 // a[0] is 7
-function change(v) { v[0] = 9; }
-change(a);                // b[0] is 9
-```
-
-The compiler plans a stable carrier at joins and loop headers. If a binding
-may hold multiple kinds, its complete generic implementation stores Item.
-Proven Number regions keep native registers while their proof holds; they do
-not require a second copy of the function or loop. Reassignment never
-truncates a value to fit an earlier register choice.
-
-Computed assignments use a reference plan: evaluate receiver and key once,
-canonicalize the key in JS order, retain the reference, then evaluate the RHS
-and store. Compound assignments additionally load the old value before the
-RHS. Calls in the RHS may grow or shrink the same array; therefore retain its
-owner and index, not a backing-buffer address. `continue` in a classic `for`
-targets the update expression; switch discriminants and case tests preserve
-their specified evaluation order.
+These are JS binding/reference contracts under **S1.11**, independent of
+Lambda's mutable-value rules in **S9.1**.
 
 ### 4.3 Dense arrays
 
-Use one array representation: ordinary host `Array` with boxed Item elements.
-Do not implement ArrayNum promotion, representation transitions, or a private
-heap. Arrays may contain any
-admitted value, including other arrays and functions; aliasing and cycles are
-legal within this JS execution. The shared collector must trace them precisely.
+Use ordinary host `Array` with mixed Item elements. Every index below length
+is an own data element; stored undefined is not a hole. Aliases and cycles
+are valid. Foreign containers and mutable prototypes are outside admission.
 
-The admitted invariant is that every index below `length` has an own data
-element. A stored undefined is an element, not a hole. All arrays originate in
-this lane; foreign containers and prototype mutation cannot enter through its
-host boundary. Consequently, generated accesses need no descriptor, prototype,
-proxy, sparse-storage, or native-lane dispatch. Retain only receiver-type,
-key, bounds, and ownership checks not already discharged by analysis.
-
-| Operation | Behavior |
+| Operation | Contract |
 |---|---|
-| `[a, b]` | Evaluate left to right and store each value once; no spreading, null dropping, or COW capture. |
-| `a[i]`, `0 <= i < length` | Read its own element. |
-| `a[i]`, canonical index at/above length | Return undefined; the admitted environment has no inherited numeric properties. |
-| `a[i] = v`, `i < length` | Mutate the existing shared array and return `v`. |
-| `a[a.length] = v` | Append one element, grow storage if needed, return `v`. |
-| `a[i] = v`, `i > length` | Capability failure: this would create holes. |
-| `a.length = n`, valid `n <= length` | Shrink or keep the visible prefix; truncated values cease to be reachable through the array. Assignment evaluates to the RHS. |
-| `a.length = n`, valid `n > length` | Capability failure: length growth creates holes. |
-| Invalid array length | RangeError, distinguished from unsupported valid growth. |
+| Literal | Evaluate/store left to right, preserving every value and alias. |
+| In-bounds read/write | Read or mutate the own element; assignment returns its original RHS. |
+| Read at/above length | Undefined for an admitted canonical index. |
+| Write at length | Append one element. |
+| Write beyond length | Capability failure before creating a hole. |
+| Length assignment | Shrink/retain a valid length; invalid lengths cause RangeError; valid growth is unsupported. |
 
-Numeric `-0` is index zero; the string `"-0"` is not. Canonical index strings
-such as `"0"` are admitted; `"01"`, negative indices, and other named keys are
-outside this profile. Index `2^32 - 1` is not an array index. Both dot and
-computed `"length"` access are supported. Key evaluation/conversion runs once;
-objects requiring ToPropertyKey are unsupported. These boundaries follow the
-[ECMAScript array algorithms](https://tc39.es/ecma262/multipage/ordinary-and-exotic-objects-behaviours.html#sec-array-exotic-objects).
+Numeric `-0` denotes index zero; string `"-0"` does not. `2^32 - 1` is not an
+array index. Key conversion runs once. Length conversion, RHS evaluation,
+and truncation preserve ECMAScript order and release removed references.
+Wide scalar storage is destination-owned across overwrite and growth
+(**D5.2–D5.3**). ArrayNum promotion and a private heap are excluded.
 
-Fast stores of immediate Items or stable heap references can emit MIR directly
-after ownership/bounds proofs. An out-of-band FLOAT needs destination-owned
-scalar storage; growth must rebase that storage correctly. Never store a
-number-stack pointer into an array or retain `items` across a MAY_GC call.
-Likewise, reading a scalar home must materialize its value into a native
-register or independently owned destination before the owner can be mutated,
-resized, or collected. `var x = a[0]; a[0] = y;` must not change `x` through a
-borrowed pointer to the array's old scalar home.
+### 4.4 Functions and failures
 
-Length shrink needs no new runtime helper. For the admitted primitive RHS,
-emit conversion, finite/integral/range validation, the no-growth check, and
-the length store; preserve the original RHS as the assignment result. The
-ordinary Array collector traces only the visible prefix, so shrinking does
-not require clearing the entire removed range or reallocating the buffer.
-Preserve the shared scalar-tail metadata for retained values and overwrite
-an appended slot before publishing its new length. This is a property of the
-single admitted storage layout, not a general array-resize implementation.
+Each source function has one semantic body and chosen entry. All arguments,
+including unused extras, evaluate in order; missing arguments are undefined.
+Direct-call specialization requires complete stable-target/domain evidence.
+Observed function values and indirect calls retain a checked boxed boundary.
+Every evaluated function expression has fresh identity.
 
-### 4.4 Functions and completions
+Proven native scalar calls use the shared companion return/error convention.
+Self-tail reentry must preserve argument snapshots and fresh local
+initialization. Other recursion retains the ordinary stack checks. All normal
+and error exits restore root/number ownership once (**D5.2.1v3**, **D5.3**).
 
-Emit **one semantic body per source function**. Choose native parameters and
-results only when all admitted incoming edges prove their contracts; otherwise
-use Item where needed and keep proven local computations native. Do not emit
-a boxed/native pair of full bodies by default or clone loops speculatively.
+Semantic and capability failures return explicitly through every frame
+(**D1.4v4**, **D8.4.3v2**). Pending-error side channels and old JS dispatchers
+are excluded; catch/finally remains outside the admitted language.
 
-Known stable direct calls pass individual operands. A function used as a
-value or reached by a dynamic edge has one uniform boxed `Item* + argc` entry
-(**D8.4.2v2**). It is the body itself when that ABI fits, or a thin adapter to
-the single body when adaptation is necessary and sound for every incoming
-value. Unknown actuals require a generic semantic body; an adapter must not
-coerce or reject an otherwise admitted argument merely to reach a native body.
-Omit unused adapters and internal function-object allocations when identity
-cannot be observed.
+## 5. MIR design
 
-An indirect call checks the MVP callable ABI, loads its boxed entry, and emits
-`MIR_CALL` through that pointer using the same call emitter as direct calls.
-There is no new C call-dispatch helper. It calls no `js_call`,
-`lambda_dynamic_call`, or old MVP dispatcher. Callability failure goes to the
-shared cold error path; arbitrary host function values cannot enter this lane.
+Retain one AST and semantic-analysis authority. Separate admission, physical
+planning, and lowering through the existing pass infrastructure
+(**D8.2.4v2–D8.2.6**). Use native arithmetic, branches, direct loads/stores,
+and calls where facts suffice. Box at generic boundaries; a guard miss
+performs the pending operation once and rejoins the same body.
 
-Function declaration instantiation uses the existing binding/validation facts.
-Do not assume a declaration's target stays constant: JS can assign a different
-function to its binding. Direct call eligibility requires a stable target or
-an exact identity guard. Capture-free arrows and ordinary functions may share
-the physical call path because this scope excludes observation of their
-receiver/constructor distinctions. No missing `this` behavior is fabricated.
+Use compile-predicted layout guards and shared physical operations on misses.
+No mutable inline caches, feedback vectors, speculative body/loop clones,
+deoptimizer, interpreter tier, or generic opcode dispatcher is introduced
+(**D8.4.1v2**). Keep analysis only where admission or emission consumes it.
 
-One normal-return cleanup path restores root and number watermarks. Boxed MIR
-returns use **D5.2.1v3**'s companion lane when needed; native returns carry the
-required companion error lane. C-reachable wrappers use the existing declared
-companion-slot protocol. A pending scalar never enters an array, binding,
-argument slot, or persistent table. Resolve/own it at the relevant store.
+## 6. Ownership and execution isolation
 
-Runtime semantic errors and capability failures return ERROR-tagged Items
-through every caller (**D1.4v4**, **D8.4.3v2**). The MVP terminates on
-such a failure because catch/finally is out of scope. It still needs correct cleanup
-and a stable error category/site; it does not construct JS Error objects.
+Use the host evaluation context, heap, precise roots, scalar homes, source/code
+owner, and MIR lifecycle. Execution starts without initializing full LambdaJS.
+The execution owner outlives its values and all host inspection of them.
 
-## 5. MIR lowering strategy
+Generated and native calls follow shared rooting/effect contracts. Allocation
+may move backing data, so reload it from a rooted owner. Borrowed scalar
+payloads become owned before their source can move, mutate, or die. Mutable
+slots reuse homes; no pending scalar escapes into a persistent container.
 
-Preserve the existing AST and semantic-analysis results. Add MVP admission and
-backend plans through named passes in the existing manager; do not rewrite the
-tree into a Lambda-shaped shadow AST. A proposed pass outline is:
+The dependency boundary covers execution, GC tracing/compaction, finalization,
+and teardown as well as generated imports. Reuse of a host allocator or
+container is valid only when those lifecycle paths also avoid existing JS
+runtime callbacks (**D1.3v3**, **D1.5v2**, **D5.3**).
 
-1. Existing parse/build → bind → validate → index.
-2. Reused collection and capture/effect analysis, with MVP admission checked
-   over the shared index. Reject unsupported nodes/captures.
-3. MVP environment layout, applicable existing type analysis, and MVP
-   representation planning, in the shared manager's established order.
-4. New forward declarations and demand-driven MIR lowering.
-5. Shared root/final-store insertion, completion validation, finalize/link.
+## 7. Helper review policy
 
-The public semantic type remains on its existing AST authority; lowering plans
-carry physical choices and guards (**D2.4.1**, **D8.2.5v3**). JS Number evidence
-must not be interpreted as a Lambda integer contract. Facts coupled to old
-backend storage are converted at an explicit analysis seam, not treated as
-portable merely because their fields have similar names.
+The original MVP has ten semantic/runtime helpers, covering failure
+creation; string/Number conversion, concatenation, comparison and indexing;
+power; array-key classification; array growth/storage; and function identity.
+Integer tuning adds none. The object/Map phase adds ten audited entry points;
+their contracts and dependencies are recorded in
+[JS MVP objects implementation](../impl/JS_MVP_Lmd_Objects.md).
 
-The desired hot form is native arithmetic over native loop state, with boxing
-at real generic boundaries. Mixed-type assignment retains a complete Item
-path within the one body. Where an operation needs a runtime tag guard, its
-miss performs that operation's admitted conversion or reports the excluded
-capability; it never restarts the body or replays prior effects. Do not build
-a multi-version planner, deoptimizer, interpreter tier, or feedback system.
+For every proposed addition, review its operation contract, existing reuse
+candidates, complete dependencies, GC/scalar ownership, failure completion,
+call frequency, and total code cost. A wrapper needs a real ownership, ABI,
+or completion adaptation. Promote shared physical work and update its
+clients; do not copy a static helper or rename a forbidden JS dependency.
 
-Truthiness, primitive tag classification, immediate equality, branches,
-assignment, arithmetic on proven Numbers, existing dense-element reads, and
-direct calls are compiler emission responsibilities. Do not create one C
-runtime call per such operation. Use `MirValue` demands, including BRANCH and
-DEST_REG, to avoid unnecessary Item materialization (**D8.2.6**).
-
-### MIR and runtime-code minimization decisions
-
-| Decision | Required emitted form |
-|---|---|
-| Proven Number arithmetic | Native arithmetic; no coercion helper, Item round trip, or redundant error check. |
-| Branch-only result | Direct comparison/branch; no materialized boxed Boolean. |
-| Assignment | Write the planned destination directly; do not produce an unused temporary or result. Preserve RHS effects. |
-| Scalar conversion | Handle constant-time primitive cases locally; use a small string/formatting leaf only for variable-length work. |
-| Dense array read | Owner/type proof, necessary key/bounds check, load, scalar ownership if needed. No general property kernel. |
-| Dense array creation | Existing `array()` and, when useful, one checked `array_reserve_append_slots()` call; no new allocation wrapper. |
-| Array literal | Reserve known capacity once and evaluate/store elements in order; do not grow once per element. |
-| Dense array write | Direct store for proven immediate/reference cases; reviewed slow leaf only for growth or scalar-home ownership. |
-| Array length shrink | Required conversion/validation and a length store; no resize helper, tail-clearing loop, or buffer copy. |
-| Function calls | Direct or checked indirect MIR call; one necessary ABI adapter, no C dispatch hop. |
-| Function/loop bodies | One body; no automatic generic/specialized clones. |
-| GC roots | Existing liveness/effect-driven root stores at MAY_GC calls; no root frame for a proven zero-root body (**D5.3.1**). |
-| Failure checks | Check fallible results once; share cold failure blocks by category/site needs. No error check on an infallible raw result. |
-
-Keep existing analyses only when this table or scope validation consumes their
-results. Small compile-time emission helpers can share repeated shapes without
-adding runtime calls. Do not introduce a generic operation protocol or virtual
-dispatch layer to organize a finite set of current-scope operations.
-
-## 6. Memory ownership and the no-JS-runtime boundary
-
-### Shared host services
-
-Use a fresh ordinary host `EvalContext`, the host heap, existing root/number
-stacks, source ownership, and the host MIR lifecycle. The selector branches
-before full-JS realm/global/prototype initialization. No second Runtime, event
-loop, allocator framework, collector, or root-stack owner is introduced
-(**D1.3v3**, **D1.5v2**).
-
-Generated roots and final stores are owned by `MirEmitter`. New native helpers
-use `RootFrame` / `Rooted` and audited source/destination ownership. Unknown
-calls remain MAY_GC. Wide-capable mutable bindings reserve reusable scalar
-homes rather than allocating one per assignment (**D5.2.2v3**, **D5.3**).
-
-One existing execution owner retains the source/AST, compiled code, program
-bindings, and literal tables until execution and host result inspection finish.
-Reuse its lifetime and root facilities; add no cross-execution callable lease
-system or module loader. Program bindings are execution-local slots, never
-process globals or baked mutable pointers (**D1.8**, **D5.4**).
-
-### An existing transitive dependency that needs attention
-
-Reusing a host `Function` allocation does not currently prove runtime isolation.
-`lambda/runtime/gc/gc_heap.c` tries the registered JS trace/compact callbacks
-for function objects. `heap_gc_destroy_external_payload()` in
-`lambda/runtime/lambda-mem.cpp` also calls `js_function_gc_destroy()` for
-`LMD_TYPE_FUNC`, including objects the callback may subsequently ignore.
-
-The proposal is to discriminate callable ownership/ABI in the shared collector
-and finalization boundary **before** calling a language callback. MVP callables
-must have an explicit entry ABI and a shared, precisely traced layout; full-JS
-callables retain their existing callbacks. Use the smallest existing-layout
-ABI discrimination needed for these two cases; do not introduce a callback
-registry or a general guest-callable framework. The exact layout/ABI change
-is part of helper review. Merely invoking a JS callback that does nothing is
-not sufficient. These are Lambda-owned files, not vendored GC code.
-
-### Dependency enforcement
-
-Maintain an explicit import/helper manifest for this lane. It covers generated
-MIR imports, new helper dependencies, indirect function targets, and lifecycle
-callbacks. Permit existing `js_*` frontend analysis calls only during
-compilation; execution, collection, teardown, and error handling must never
-enter existing JS runtime helpers or `lambda/js/mvp/`.
-
-Do not call a renamed wrapper around a forbidden helper or copy its body into
-this directory. Reuse non-JS physical primitives after audit. If a useful
-physical operation exists only as a static in another owner, propose promoting
-it to the proper shared module and update both clients; review that change
-explicitly. JS-specific existing semantic helpers remain excluded.
-
-Check both the static dependency closure and execution traces in focused tests.
-The host binary may still link full LambdaJS for its other selector; absence
-of `js_*` symbols from that binary is neither required nor a meaningful test.
-
-## 7. Runtime helper inventory for joint review
-
-All names in this section beginning `mvp_lmd_` are **proposed interfaces**.
-They do not exist yet. Grouping an operation here does not authorize an
-unlisted transitive helper. Final signatures must include their shared call
-catalog's return, companion, allocation, and ownership contracts.
-
-The revised inventory has **10 candidates**, reduced from 13 by removing the
-array-creation, array-resize, and C call-dispatch wrappers. This is an inventory,
-not a requirement to implement ten helpers: omit a candidate if an audited
-existing primitive already satisfies its complete current-scope contract.
-Conversely, do not hide new helper code in another directory to lower the count.
-
-Before adding a helper, identify the in-scope operation that needs it, the
-existing primitives searched, the smallest missing semantic/ownership work,
-and its effect on emitted MIR and call frequency. A forwarding wrapper needs
-a concrete ABI, ownership, or completion adaptation; naming consistency is
-not a reason to add one. Internal helper functions and new shared utility
-code count toward the same helper-code budget. Factor genuinely shared work;
-do not collapse unrelated operations into a mode-switched dispatcher.
-
-`Item` results below are success-or-ERROR completions. Raw results are allowed
-only after an infallible, transitive NO_GC audit. All other calls are MAY_GC;
-side outputs are consumed only after checking successful completion.
-
-### 7.1 Proposed new semantic/runtime entry points
-
-| Proposed helper | Purpose / result | Why generated MIR alone is insufficient | Dependencies and admission |
-|---|---|---|---|
-| `mvp_lmd_fail(kind, site) -> Item` | Capability, TypeError, ReferenceError, RangeError, and execution diagnostics | Error allocation and source ownership | Shared `err_create_heap`/ERROR carrier; no JS Error factory. MAY_GC. |
-| `mvp_lmd_string_to_number(String*) -> double` | String arm of primitive ToNumber | Variable-length numeric grammar and whitespace handling | `lib/str` conversion behind JS grammar checks; invalid numeric text returns NaN. Other primitive arms stay in MIR. Infallible candidate NO_GC; no Item boxing in this leaf. |
-| `mvp_lmd_number_to_string(double) -> Item` | Number arm of primitive ToString | Formatting and string allocation | Shared finite-double formatter/string allocation; only JS Number spelling is new. Boolean/null/undefined use literal strings in MIR; String is already its own result. MAY_GC. |
-| `mvp_lmd_string_concat(Item, Item) -> Item` | Concatenate already-converted strings | Precise roots, immutable result, and completion adaptation | Reuse the audited `fn_strcat`/string-freeze physical path; do not copy its allocation/growth/copy algorithm or invoke Lambda coercion. MAY_GC. |
-| `mvp_lmd_string_compare(Item, Item) -> int64` | UTF-16 code-unit ordering/equality | Variable-length scan over shared WTF-8 storage | Shared codecs; equal code-unit sequences must compare equal even if byte encodings differ. Candidate NO_GC. |
-| `mvp_lmd_string_at(Item, uint32 index) -> Item` | One UTF-16 code unit or undefined | Allocating the one-unit string, including lone surrogates | Shared UTF/WTF-8 primitives and string allocation. MAY_GC. |
-| `mvp_lmd_number_pow(double, double) -> double` | JS Number exponentiation | IEEE/ECMAScript special-case policy around the math primitive | Platform `pow` behind explicit JS rules. Infallible candidate NO_GC. |
-| `mvp_lmd_string_key(String*) -> int64` | String-key classification only | Canonical decimal-index scan | Shared byte/number primitives; return index, `-1` for length, or `-2` for an excluded key. These are internal machine results, never JS values. Numeric keys are classified in MIR; the caller constructs any capability failure. Infallible candidate NO_GC. |
-| `mvp_lmd_array_store(Item owner, uint32 index, Item value) -> Item` | Overwrite or append and return the assigned value | Growth and destination-owned out-of-band scalars | Audited shared reserve/store primitives; no COW, splice, or capture. Unsupported gaps fail before mutating length. MAY_GC. |
-| `mvp_lmd_function_new(code_id, execution_owner) -> Item` | New callable with identity and compiled-entry metadata | Managed lifetime and source/code ownership | Shared heap/callable layout plus the neutral GC seam in §6; no JsFunction allocation. MAY_GC. |
-
-The current scope determines every helper's argument domain; it does not need
-cases for unsupported JS types. Emit proven primitive conversions and numeric
-keys locally, and call the string leaves only for their actual variable-length
-work. Dynamic `+` selects numeric MIR or primitive-to-string and concatenation;
-it does not call existing `js_add`, Lambda `fn_add`, or a new opcode dispatcher.
-Do not inline a complete string parser/comparison loop at each call site to
-make the helper inventory shorter.
-
-The precise `Function` layout, allocation error propagation, and array storage
-leaves are intentionally not claimed settled. Their existing C APIs include
-void-returning mutators and assumptions about ownership; a wrapper must not
-report success after a failed reserve/store. Prefer extracting a checked
-physical leaf used by both clients over duplicating that algorithm.
-
-### 7.2 Existing non-JS runtime dependencies requiring review
-
-| Candidate family | Intended reuse | Check before admitting it |
-|---|---|---|
-| `heap_calloc`, `heap_data_alloc`, `heap_strcpy` | Host-managed objects, buffers, strings | Exact root coverage, checked size/allocation outcome, callback closure |
-| `array()`, `array_reserve_append_slots()`, and audited array store leaves | Dense physical allocation/growth/storage | No COW/capture/spreading; FLOAT home ownership; explicit failure handling; no JS callback path. `array_set`/`array_push_verbatim` are candidates only where their complete preconditions hold. |
-| `fn_strcat` / `fn_string_freeze` | Existing string allocation/copy and immutable publication | Already-converted strings only; rooted arguments/results, overflow/error-sentinel handling, and no mutation visible through an alias. No Lambda `fn_string` coercion. |
-| `flt2it`, `scalar_storage_read`, and shared scalar-home/return transport | Canonical Number storage and owned reads | Preserve negative zero/NaN; keep number-home lifetime and companion ABI correct; never retain a mutable owner's scalar-home pointer |
-| Side-stack/root-frame primitives from `side_stack.h` | Exact generated/native roots and cleanup | Reuse through shared emitter/root facilities, not a private root implementation |
-| `err_create_heap` and error-site support | Explicit ERROR completion | No pending-error channel or JS Error construction; safe allocation failure |
-| `lambda_finite_double_to_shortest` | Already-classified finite Number formatting | New JS wrapper owns nonfinite and formatting policy |
-| `str_to_double`, UTF/WTF-8 codecs, `utf8_to_utf16_length` | Primitive parsing and string operations | No assumption that generic parsing or byte length already implements JS |
-| `fmod`, `pow`, `trunc` and necessary C/lib byte primitives | Infallible numeric/physical leaves | Domain behavior, defined conversion, signed zero, and transitive NO_GC |
-| Shared stack-budget and execution-owner primitives | Recursion limits, literals/program slots, source/code lifetime for this run | No new module loader, cross-execution lease system, JS realm initialization, callback dispatch, or hidden runtime helper |
-
-The generated import manifest must enumerate the concrete symbols selected
-from these families. This table does not whitelist an entire module. MIR
-construction/link APIs, AST utilities, and `lib` containers used only while
-compiling belong to a separate compile-time dependency manifest.
-
-### 7.3 Work proposed without new runtime helpers
-
-Emit constants, scalar tags, truthiness, nullish checks, `typeof` dispatch,
-TDZ/const guards, strict equality, primitive loose-equality dispatch, Boolean
-operators, numeric arithmetic/comparisons, bitwise conversion, assignments,
-control flow, direct/indirect calls, dense in-range reads, array length loads,
-and validated length shrink in MIR. Call existing array allocation/reserve
-primitives directly. Existing string length primitives serve the UTF-16 scan.
-
-At every error branch call only the reviewed error constructor. At every
-allocation/call use the shared root machinery. Do not add `mvp_lmd_add`,
-`mvp_lmd_if`, or a generic opcode interpreter merely to reduce emitter code.
+Infallible raw leaves need a transitive no-GC audit. Fallible operations return
+explicit completions; other calls are treated as potentially collecting.
+Internal utilities and shared additions count toward the helper-code budget.
+Section 10.6 records the object/Map phase's completion criteria.
 
 ## 8. Acceptance and evaluation
 
-The MVP's compatibility population is defined by §3, not by whichever tests
-happen to pass. Select matching existing JS fixtures and Test262 cases before
-timing; record pass, failure, static rejection, and runtime capability failure
-separately. Do not modify `test_js_test262_gtest` or weaken its oracles to admit
-this profile. Full Test262 conformance is outside the MVP's scope.
+Define admitted fixtures before measuring. Separate passes, semantic failures,
+static rejection, and runtime capability failures. Test bindings, numeric
+edges, Unicode, aliases/cycles, evaluation order, recursion/indirect calls,
+cleanup, and storage ownership normally and under forced GC with freed-memory
+poisoning. Exercise rejection paths and lifecycle isolation too.
 
-Required behavior checks include:
+Shared changes require the Lambda/input baseline and unchanged full-JS
+Test262 baseline. The latter checks full-JS nonregression; it does not establish
+MVP conformance. Do not alter harnesses, oracles, timeouts, or budgets to pass.
+Any new Lambda script regression also needs its expected result file.
 
-- var hoisting/redeclaration, TDZ, const assignment versus array mutation,
-  program slots, and type-changing assignment at branches and loop backedges;
-- `-0`, NaN, infinities, zero division, shift wrapping, primitive coercion,
-  string code-unit equality/indexing, embedded NULs and lone surrogates;
-- array aliases through parameters/returns, nested/cyclic arrays, mixed
-  elements, boundary keys, dense append, length shrink, and rejected holes;
-- receiver/key/RHS evaluation order, including RHS calls that resize the
-  assignment's array, prefix/postfix result differences, and short circuiting;
-- recursion, mutual recursion, missing/extra arguments, function reassignment,
-  expression identity, indirect calls, and function values held by arrays;
-- labeled loop/switch exits, `for` continue/update behavior, and single cleanup
-  on every normal/error return;
-- forced/poisoned GC during nested calls, string conversion, array growth,
-  scalar-home escape, and callable finalization, with zero existing-JS-runtime
-  entries including trace/compact/destroy callbacks.
+Compare release builds with fixed sources, inputs, and result checks. Report
+workload execution separately from startup/compilation, retain failed and
+regressed rows, and disclose Lambda-port differences. Record emitted MIR,
+branches/conversions/calls, roots/homes, body count, helper-code cost, and
+memory alongside timing. Additional tuning must earn its cost; source-line
+reductions never come from removing comments or changing formatting.
 
-Use a host test adapter to invoke a selected function and inspect its Item
-result while its execution owner remains live. It is test infrastructure, not
-a silently injected JS builtin. Node/full LambdaJS receive the same admitted
-source and argument values; preserve Number bit-sensitive checks and identity
-checks rather than comparing only printed output.
+## 9. Integer-tuning phase
 
-Benchmark release builds only (`make release`), with instrumentation disabled
-for timing. Compare this lane with full JS MIR and Node using identical JS
-source, input, loop counts, and result oracles. Report workload execution and
-end-to-end startup/compile time separately, alongside memory, MIR size, and
-new versus removed source lines. Untyped Lambda ports are secondary references
-whose algorithm/layout differences must be disclosed.
+**Accepted and implemented:** USER, 2026-10-07; **D2.2.5**.
+This phase extends the implemented scope's internal representations without
+adding JS syntax or restricting later assignments.
 
-For each changed operation, inspect the emitted MIR and record instruction,
-call, branch, conversion, and root-store counts; note body/adapter count and
-hot-loop helper calls. Count new helper implementation across this directory
-and shared owners, including internal functions and adapters. Count semantic
-code reductions, never removed comments/blank lines or compressed formatting.
-Do not use fewer exported helper names as a proxy for less helper code.
+### 9.1 Runtime subtype and observable behavior
 
-An added guard, wrapper, allocation, helper, or code copy must explain which
-current-scope obligation or measured bottleneck requires it. Remove redundant
-work shown by those checks. A speed gain must pass correctness/forced-GC gates;
-a size reduction must not hide extra runtime dispatch or an unexplained release
-regression. Keep performance instrumentation in the test/diagnostic path and
-disabled during timing, not as a new runtime feedback mechanism.
+Lambda `int` is an internal subtype of JS Number. Finite integers in
+±(2^53 - 1), excluding negative zero, may use canonical INT Items and proven
+native integer lanes. Fractions, negative zero, out-of-band Numbers, NaN,
+and infinities use the existing FLOAT representation. INT zero means `+0`.
 
-Begin with scalar arithmetic/recursion, dense array traversal and append,
-mixed-assignment controls, and small string operations. Publish all preselected
-rows, including unsupported/failed ones. No Node parity, percentage gain, or
-63-workload coverage target is asserted before a baseline exists. This lane
-initially adds code; genuine consolidation is measured only when shared
-extractions replace existing duplicated physical implementations.
+All numeric consumers accept both representations. Equal INT/FLOAT Numbers
+compare equal; NaN remains unequal to itself. A FLOAT tag does not imply a
+fraction. Narrowing requires a finite, integral, in-band value with the
+correct zero sign. No universal retagging pass is required. The host numeric
+FFI still exports JS Number as Lambda float (**S4.9.1**).
 
-Because the planned extraction and GC seams affect shared infrastructure,
-implementation acceptance includes `make test-lambda-baseline` and the
-unchanged full-JS Test262 baseline, in addition to MVP-specific tests. Add any
-new Lambda `*.ls` regression with its corresponding expected `*.txt`.
+### 9.2 Arithmetic and widening
 
-## 9. Remaining helper review
+Preserve binary64 rounding at each JS operation. Integer addition/subtraction
+may retain an in-band result; otherwise use the original operands for double
+arithmetic. Multiplication needs complete overflow/range/zero-sign proofs.
+Division remains double unless exactness and zero sign are proven; remainder
+must preserve negative zero and zero-divisor NaN. Bitwise/shift operations
+retain JS 32-bit conversion rules. Power retains its JS Number contract.
 
-The scope and four minimization/efficiency goals govern implementation. The
-requested joint review now concerns the ten candidate helpers in §7.1 and
-their concrete non-JS dependencies in §7.2: necessity, total added code,
-ownership/completion contracts, and cost at emitted call sites.
+A failed guard executes only that operation, without replaying effects.
+Lambda saturation and out-of-band exact intermediates are forbidden
+(**S1.11**, **S4.1.2**, **D2.4.3**).
 
-Review the smallest callable-GC discrimination and checked storage changes
-needed for this scope. No review item proposes adding capabilities, preparing
-an extension architecture, or introducing console/Math/Node surfaces.
+### 9.3 Representation proofs
 
-## Appendix A. Proposed integration shape
+Facts cover all writes, joins, backedges, call edges, implicit returns, and
+possible negative zero. A terminating conservative analysis falls back to
+Number/Item when it cannot prove a range. Integer regions require complete
+bounds; no workload/input-specific assumptions are allowed. In particular,
+Collatz and recursive Fibonacci do not acquire integer workers merely because
+one measured input stays in range.
 
-File names below are planning suggestions; only this proposal is created now.
+### 9.4 Storage and calls
+
+INT survives program slots, arrays, mixed locals, and generic calls. FLOAT
+ownership remains correct through overwrites and growth. Native functions
+select a carrier valid for every admitted call and return, retaining one body
+and the shared completion ABI (**D5.2–D5.3**, **D8.4.2v2**).
+
+### 9.5 Acceptance
+
+Verify actual Item kinds, widening, intermediate rounding, signed zero,
+machine overflow, proof invalidation, and alias/call boundaries. Retain
+integer guards only with correctness, ownership, MIR-size, and release
+measurement evidence. This phase introduced no new runtime helper.
+
+### 9.6 Archived integer evidence — 2026-10-07
+
+The preceding integer-tuning measurements are retained in
+[`integer_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/integer_mir_20261007.json).
+The latest round of phase results is §10.8.
+
+## 10. Map and plain-object phase
+
+**Status:** IMPLEMENTED; user constraints recorded 2026-10-07. The phase extends
+§3 while retaining §1's four goals and the execution-isolation boundary.
+Section 10.7 records scope decisions; §10.8 contains the latest results.
+
+**Fixed direction:** reuse Lambda map/object storage and shape transitions;
+align string-key identity through shared canonical UTF-8; include map
+iteration along the model of Lambda for-expressions/loops; exclude
+`__proto__`, advanced descriptors, accessors, and proxies. **Use no VMap for
+either plain objects or ES Map collections, including their backing storage.**
+Possible VMap use for exotic features belongs to a separate future phase and
+introduces no hook or dependency here.
+
+### 10.1 Admission boundary
+
+| Area | Added in this phase | Excluded |
+|---|---|---|
+| Plain objects | Empty/nested literals; named, shorthand and computed data properties; values of any admitted kind | Getters/setters, descriptor APIs, spread, classes and user constructors |
+| Properties | Dot/computed reads, assignments, compound/logical assignments, updates, addition, deletion, `in`, own-presence checks | Object-to-primitive key conversion, Symbols, private-field syntax, prototype mutation, `instanceof` |
+| Object projections | `Object.hasOwn`, `Object.keys`, `Object.values`, `Object.entries` on plain objects and ES Map's attribute face | Projections of arrays/functions/primitives; general reflection and arbitrary host/foreign objects |
+| ES Map | `new Map()`, `get`, `set`, `has`, `delete`, `clear`, `size`; admitted values as keys/values | Iterable constructors, subclassing, weak collections, callbacks/`forEach` |
+| Iteration | Direct `for-of` over Map entries/keys/values and object projections; simple pair binding as described in §10.5 | General iterator objects/protocols, custom iterables, generators, async iteration, general destructuring, `for-in` |
+
+All `__proto__` **property** forms are excluded: literal definitions, dot
+access, and computed access after key conversion. A dynamic spelling must
+reach the same capability diagnostic. This phase implements no prototype
+setter or literal special case for that name.
+
+Ordinary data properties have the default writable/enumerable/configurable
+behavior without materialized descriptor records. Missing own properties
+remain distinguishable from present properties holding undefined. Object/Map
+values are truthy, use identity equality, and preserve aliases through const
+bindings, parameters, arrays, and returns (**S1.11**).
+
+Resolve `Map` and `Object` operations through binding and receiver facts;
+shadowed identifiers or overwritten members never receive a builtin fast
+path merely because their spelling matches. Unsupported builtin escapes or
+prototype observations receive capability diagnostics under §10.7.
+
+### 10.2 Ordinary Lambda storage and shape transitions
+
+Plain objects use the ordinary Lambda `Map` carrier, `TypeMap`/`ShapeEntry`
+layout, and a nominal object-family record. ES Map uses the same ordinary
+object carrier with a distinct nominal family and internal collection state.
+Every transition preserves nominal identity (**D2.6.6v3**, **D2.6.9v3**).
+No VMap carrier, backend, or virtual property dispatch participates.
+
+Use the shared transition tree for property addition and field retyping
+(**D3.4.3v5–D3.4.6**). Shapes reached by the same ordered fields and storage
+contracts share metadata within the same semantic family:
 
 ```text
-lambda/js/mvp-lmd/
-    mvp_lmd.h                 entry API and execution ownership
-    mvp_lmd_frontend.cpp       existing frontend/analysis adapter and admission
-    mvp_lmd_mir.hpp            plans and emitter context
-    mvp_lmd_mir.cpp            new expression, statement, function MIR lowering
-    mvp_lmd_runtime.h          reviewed helper contracts/import inventory
-    mvp_lmd_runtime.cpp        reviewed semantic and ownership adapters
+empty -> {x: INT} -> {x: INT, y: STRING}
+              \-> {x: STRING}
 ```
 
-Keep common physical algorithms in their established Lambda/lib owners and
-promote existing statics when needed. Do not copy `transpile-mir.cpp`,
-`js_mir_*.cpp`, existing JS runtime helpers, or the private-value MVP into this
-directory. Treat this listing as responsibilities, not a six-file minimum;
-create only the files and interfaces the implementation actually needs.
+- Compatible overwrites retain the layout. An incompatible write selects a
+  new shape and repacks as necessary; equal byte widths alone are insufficient.
+- Shared fields remain immutable. Mutating one instance never retags a
+  sibling's fields. All shape walks respect the owning shape's field boundary.
+- Growth/repacking publishes storage and shape consistently, with explicit
+  failure and no partially committed object. Transition-budget exhaustion
+  selects the shared substrate's private-shape fallback without narrowing JS.
+- Deletion initially rebuilds the live shape; re-adding a string property
+  gives it a new creation position. Undefined cannot stand in for deletion.
+- Fixed literals may use a predicted final shape while preserving initializer
+  order, duplicate-key effects, and last-write values. Dynamic layouts use
+  transitions. Never publish uninitialized references to the collector.
 
-Proposed invocation, **not currently implemented**:
+Named accesses use proven offsets or immutable predicted-shape guards, with
+a small semantic property operation on a miss (**D8.4.1v2**). Stores recheck
+the shape after RHS calls that may mutate an alias. Retain owner/key/value
+roots and scalar ownership through conversion, growth, and repacking
+(**D5.3**).
 
-```sh
-./lambda.exe js --runtime=mvp-lmd script.js
-```
+Reuse requires separating neutral storage work from existing full-JS hooks.
+The current general map setter can enter JS shape helpers, and the generic
+transition tree declines full-JS metadata layouts. The MVP needs an explicit
+data-only nominal family and audited shared storage operations; copying the
+old JS property kernel or hiding it behind a wrapper is excluded. Preserve
+semantic-family identity when sharing a layout (**D1.3v3**, **D3.4.7**).
 
-Add the opt-in selector and its source set through `build_lambda_config.json`,
-then regenerate with `make`; never edit generated Lua. Keep the current
-`--runtime=mvp` distinct. Use existing source admission with a distinct
-MVP-Lmd profile/ABI key so old-JS artifacts cannot be executed accidentally
-(**D1.7**, **D8.5.1v7**). Add no MVP cache, serialization format, or artifact
-management subsystem.
+### 10.3 Shared canonical UTF-8 key identity
 
-Suggested implementation order after review: frontend/dependency isolation;
-scalar and assignment correctness; dense storage and ownership; function/GC
-integration; native specialization and release measurement. Each step retains
-its complete admitted behavior instead of introducing fallback into old JS.
+**User direction:** Lambda and MVP string keys share canonical UTF-8 identity.
+Reuse one common canonicalization/name mechanism for literals, computed keys,
+lookup, hashing, transitions, and enumeration. A separate JS interning scheme
+would recreate the same-spelling/different-pool problem.
 
-## Appendix B. Relevant existing evidence
+Under **S8.2.2v5**, **D3.4.4v4**, and **D4.6.1v4**, the key is the resolved
+namespace and decoded spelling. Equal NameIds may prove equality; differing
+or absent IDs still require kind/namespace/length/content comparison. Hashes
+route lookups and never prove identity. Empty and embedded-NUL names are valid.
 
-- [JS MVP Runtime](JS_MVP_Runtime.md): the existing private-value MVP is a
-  separate experiment; its representation/runtime are not reused here.
-- [Untyped Lambda reference audit](../../test/benchmark/js_mvp/untyped_reference_20260929/README.md):
-  port workload/layout differences prevent interpreting JS/Lambda ratios as
-  predicted compiler speedups.
-- [Shared-emitter and guarded-loop evidence](../../test/benchmark/js_mvp/untyped_tuning_20260929/README.md):
-  prior measured reuse successes and rejected experiments; new work should
-  account for those outcomes rather than repeat them unexamined.
-- [Earlier unification investigation](../Lambda_Proposal_JS_Unify_P7.md):
-  shared AST tags alone do not establish removable lowering duplication.
+The encoding contract is canonical UTF-8 for Unicode scalar values:
+equivalent literal escapes and computed strings produce the same bytes.
+Canonicalization preserves the character sequence; it performs no NFC/NFKC,
+case folding, or locale transformation. In particular, composed and decomposed
+spellings remain distinct JS keys, as required by **S1.11** and the
+[ECMAScript String model](https://tc39.es/ecma262/multipage/ecmascript-data-types-and-values.html#sec-ecmascript-language-types-string-type).
+
+**S8.2.2v5**, **D4.6.1v4:** JS also admits lone UTF-16
+surrogates. Use the shared lossless WTF-8 extension for those units, combining
+valid surrogate pairs into their canonical scalar encoding. Never replace a lone surrogate with U+FFFD for
+key identity. This keeps the existing MVP string domain and gives equal
+code-unit sequences one key representation. It does not change UTF-16 JS
+length, indexing, or comparison to byte-based operations.
+
+NamePool creation/lookup, shared shape additions, and dynamic Lambda map
+reads/writes now canonicalize at their boundaries. Focused coverage checks
+computed JS keys against Lambda map lookup, including embedded NUL. Ordinary Map string keys use the same
+canonical string-content relation; other Map keys retain §10.4's rules.
+
+### 10.4 ES Map entry storage
+
+Object properties and collection entries are separate domains:
+`m.x = 1` does not create the entry addressed by `m.get("x")`. Property
+shapes describe the ordinary object's fields; arbitrary collection keys
+cannot be encoded as ShapeEntry property names.
+
+Use host-owned ordered Item storage and a `lib` hash index of stable entry
+positions inside the ordinary Map's collection state. Keep all key/value
+edges visible to precise tracing and own numeric payloads across overwrite,
+growth, and deletion. The native index must not hide untraced Item references;
+its lifetime follows the collection. No VMap is involved (**D1.3v3**, **D5.3**).
+
+Keys follow SameValueZero: INT/FLOAT forms of one Number share a key, NaNs
+match, and both zeros share the canonical zero key. Reference keys use
+identity. Updating an entry retains its order; delete/reinsert moves it to
+the end. Missing `get` returns undefined, `has` distinguishes presence,
+`set` returns the receiver, and `delete` reports whether an entry existed.
+These follow the [ECMAScript Map contract](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-map-objects)
+under **S1.11**. `size` is the live entry count; supporting this fixed builtin
+observation does not admit user-defined accessor machinery.
+
+### 10.5 Iteration through the shared loop model
+
+**User direction:** map iteration should resemble Lambda for-expressions and
+loops. Reuse their traversal, key/value binding, control-flow, and rooting
+model (**S8.1.2v2**, **S8.2.1v4**, **S8.4.1v2**, **D8.2.6**), while preserving
+JS syntax and observable behavior under **S1.11**.
+
+| JS surface | Loop binding |
+|---|---|
+| `for (const [k, v] of m)` / `for (const [k, v] of m.entries())` | Key and value, analogous to Lambda `for (k, v in m)` |
+| `for (const k of m.keys())` | Key only |
+| `for (const v of m.values())` | Value only |
+| `for (const pair of m)` | A fresh ordinary `[key, value]` array when observable |
+| `for (const k of Object.keys(o))` | Own string keys |
+| `for (const v of Object.values(o))` / pair binding over `Object.entries(o)` | Own values / key-value pairs |
+
+The pair pattern is restricted to two simple bindings without defaults/rest;
+it does not admit general destructuring or captured per-iteration locals.
+Collection and projection expressions evaluate once. Proven intrinsic loop
+sources lower directly to a cursor/key/value loop; escaping iterator values
+and custom iterator protocols remain unsupported. Elide an entry array only
+when its identity and contents cannot be observed independently.
+
+Share neutral traversal primitives rather than adopting Lambda's existing
+symbol-key list or fixed-length walk unchanged. JS Map loops are live:
+skip deleted entries, observe later updates to unvisited entries, and visit
+entries appended before exhaustion, including delete/reinsert. Clear and
+nested iteration must preserve each active cursor. Do not cache initial size
+as the termination bound or compact storage in a way that invalidates cursors.
+These requirements follow [CreateMapIterator](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-createmapiterator).
+
+Object projections instead produce snapshots at expression evaluation;
+lazy lowering must not change their captured keys/values. Array-index keys
+come first in numeric order, followed by other strings in creation order.
+Retyping preserves order; deletion/re-addition changes it as above. This is
+[ordinary own-property order](https://tc39.es/ecma262/multipage/ordinary-and-exotic-objects-behaviours.html#sec-ordinaryownpropertykeys),
+not a change to Lambda iteration semantics. General `for-in` remains excluded.
+
+### 10.6 Completion criteria
+
+Acceptance covers shared-shape siblings, add/retype/delete/re-add, aliases,
+cycles, duplicate keys, undefined versus absence, exact evaluation order,
+cross-pool and computed key identity, Unicode boundaries, collection key
+identity/order, mutation during nested iteration, and rejection of excluded
+property forms. It includes scalar relocation, native-index cleanup under
+forced GC, and zero existing-JS-runtime callbacks.
+
+The implementation record and concrete helper inventory are in
+[JS MVP objects implementation](../impl/JS_MVP_Lmd_Objects.md). Apply §8's
+focused and shared baseline gates. Release measurements cover fixed fields,
+computed growth, retyping, deletion churn, lookup/update, and key/value loops.
+
+### 10.7 Scope decisions
+
+- Canonical keys use lossless UTF-8/WTF-8 with no Unicode normalization
+  (**S8.2.2v5**, **D4.6.1v4**).
+- Fixed intrinsic prototype operations beyond this phase's admitted builtins
+  produce capability diagnostics. An inherited method is never reported as
+  an absent own field. Extracted Map method values and builtin mutation are
+  diagnosed; shadowed user bindings and own methods follow ordinary calls.
+- Native ordered-entry storage is traced and finalized by the shared GC.
+  Active loops preserve slot positions; inactive storage can compact.
+  Neither VMap nor existing JS lifecycle hooks participates (**D2.6.9v3**,
+  **D5.3**).
+- `__proto__`, descriptors, accessors, proxies, user prototype mutation,
+  general iterator objects/callbacks, and general destructuring remain outside
+  this phase. No further scope decision blocks the admitted subset.
+
+### 10.8 Latest validation and release evidence — 2026-10-07
+
+The bounded tuning phase in §11 is implemented. Latest gates:
+
+- MVP: **30/30**; object/Map groups with forced GC and poisoning: **10/10**.
+- Shared Lambda/input baseline: **6,286/6,286**.
+- Full-JS Test262: **zero regressions or semantic failures**; **40,259 fully
+  passed + 2 retry-only** Unicode 10 identifier cases out of 40,261. This is
+  not an all-fully-passing result.
+
+Release comparison: 15 alternating before/after pairs per workload, with a
+second control sample and Node in each round, after one discarded process per
+lane. **All 16 workload oracles and 960 measured outputs pass.** MIR is pinned;
+the table uses self-reported execution times, excluding MVP startup and
+compilation. Node's tiering during its workload is included.
+
+| Workload | Before ms | Tuned ms | Node ms | Paired speedup |
+|---|---:|---:|---:|---:|
+| larceny\_deriv | 81.871 | 54.438 | 27.544 | 1.52× |
+| larceny\_gcbench | 450.636 | 242.265 | 36.480 | 1.89× |
+| js\_micro\_lit | 79.198 | 0.152 | 4.822 | 520.46× |
+| js\_micro\_named | 36.264 | 36.074 | 7.776 | 1.00× |
+| js\_micro\_args\_ctl | 42.334 | 16.120 | 4.360 | 2.27× |
+| js\_micro\_args\_fp | 49.888 | 17.760 | 4.249 | 2.68× |
+| object\_fields | 3.951 | 3.748 | 3.573 | 1.05× |
+| object\_growth | 5.116 | 5.942 | 11.379 | 0.96× |
+| object\_retype | 61.197 | 55.000 | 2.511 | 1.05× |
+| object\_delete | 4.563 | 4.147 | 2.473 | 1.13× |
+| map\_lookup | 45.849 | 26.845 | 10.235 | 1.70× |
+| map\_iteration | 2.834 | 2.680 | 14.548 | 1.02× |
+
+Speedup is the median of paired ratios; the time columns are independent
+medians. Host load was high (1-minute load **84.9 → 57.4**, eight logical CPUs).
+The clear gains are `deriv`, `gcbench`, `lit`, the two argument cases and Map
+lookup. Small changes in named fields, growth, retyping, deletion and iteration
+remain inconclusive. The four numeric/array/call/string controls also show no
+resolved change. Per-round control/control ratios and paired intervals are
+retained in the artifact; these measurements establish the bundle's gains,
+not each individual change's contribution.
+
+The `lit` fast path removes allocation/property calls and keeps its accumulation
+in a proven integer lane. Broader shape polymorphism and retyping performance
+remain tuning work. `gcbench` includes the final long-lived traversal in every
+lane; `named` combines its two original loops.
+
+Evidence: [`tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/tuning_mir_20261007.json).
+Exact binaries, matched sources, raw output, fresh MIR and gate logs are under
+`temp/mvp_lmd_tuning/`; the latest paired run is `confirm/`.
+Release SHA-256: `d0ac0f6188f72c48f92afe5f3757583b5fa5e3b254e36dd0a2f3376174f96d46`.
+Implementation boundaries are recorded in
+[`JS_MVP_Lmd_Objects.md`](../impl/JS_MVP_Lmd_Objects.md#5-bounded-tuning-implementation).
+
+## 11. Object and Map tuning
+
+Implemented as bounded optimizations, in this order:
+
+1. Predict complete literal shapes from existing type/range facts, canonicalize
+   static keys during compilation, and initialize known fields directly.
+2. Carry bounded shape predictions through aliases and closed calls; retain
+   typed field values and pass rooted object arguments individually.
+3. Remove redundant boxing and guards where mutation and safepoint analysis
+   proves this safe.
+4. Reuse payload storage for compatible shape transitions; preserve the shared
+   rebuild path for layouts that move fields.
+5. Specialize admitted Map method calls and immediate entry updates, retaining
+   SameValueZero, identity, insertion order and live iteration.
+6. Apply bounded inlining and scalar replacement to local objects whose identity
+   and allocation cannot be observed, sharing neutral compiler machinery where
+   available.
+
+These changes use immutable shape guards (**D3.4.3v5–D3.4.6**, **D8.4.1v2**),
+the direct-call ABI (**D8.4.2v2**), and precise ownership (**D5.3**). Canonical
+UTF8/WTF8 identity remains shared with Lambda (**S8.2.2v5**, **D4.6.1v4**);
+JS Number behavior remains governed by **D2.2.5** and **S1.11**. VMap,
+`__proto__`, descriptors, accessors and proxies remain outside the phase.
+
+The current bounds are one shape prediction per binding/return, four fields
+for scalar replacement, and 24 AST nodes for expression inlining. Escaping or
+mutated objects retain allocation; loop-body inlining and general polymorphic
+guard chains remain future work.
+
+Acceptance requires the existing MVP and forced-GC cases, shared-runtime
+regression gates, and output-verified release comparisons against the archived
+binary. Pin MIR and compare self-reported workload times; use alternating
+control/candidate samples and a control/control noise check. The six newly
+enabled workloads and existing object/Map cases form the performance set.

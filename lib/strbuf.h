@@ -1,5 +1,6 @@
 #ifndef STRING_BUFFER_H
 #define STRING_BUFFER_H
+#include "lambda_api.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -23,18 +24,18 @@ typedef struct StrBuf {
 } StrBuf;
 #pragma clang diagnostic pop
 
-StrBuf* strbuf_new();
+LAMBDA_LIB_API StrBuf* strbuf_new();
 StrBuf* strbuf_new_cap(size_t size);
 StrBuf* strbuf_create(const char *str);
 StrBuf* strbuf_dup(const StrBuf *sb);
-void strbuf_free(StrBuf *sb);
+LAMBDA_LIB_API void strbuf_free(StrBuf *sb);
 void strbuf_reset(StrBuf *sb);
 void strbuf_full_reset(StrBuf *sb);
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity);
 void strbuf_append_str(StrBuf *sb, const char *str);
 // append string of given length n
-void strbuf_append_str_n(StrBuf *sb, const char *str, size_t n);
-void strbuf_append_char(StrBuf *sb, char c);
+LAMBDA_LIB_API void strbuf_append_str_n(StrBuf *sb, const char *str, size_t n);
+LAMBDA_LIB_API void strbuf_append_char(StrBuf *sb, char c);
 // append character c n times
 void strbuf_append_char_n(StrBuf *sb, char c, size_t n);
 // append n bytes while replacing each occurrence of `from` with `to`
@@ -46,7 +47,7 @@ bool strbuf_append_collapsed_ascii_whitespace(StrBuf* sb, const char* str,
                                               bool previous_whitespace);
 bool strbuf_append_utf8(StrBuf *sb, uint32_t codepoint);
 void strbuf_append_int(StrBuf *buf, int value);
-void strbuf_append_int64(StrBuf *buf, int64_t value);
+LAMBDA_LIB_API void strbuf_append_int64(StrBuf *buf, int64_t value);
 void strbuf_append_uint64(StrBuf *buf, uint64_t value);
 void strbuf_append_all(StrBuf *sb, int num_args, ...);
 void strbuf_vappend(StrBuf *sb, int num_args, va_list args);

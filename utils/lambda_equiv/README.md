@@ -19,12 +19,9 @@ passing replacement gate.
 | `utils/generate_premake.py` | Pending native generator rewrite. |
 | `utils/generate_well_known_names.py` | `generate_well_known_names.ls` renders all eight files from the catalog data; `generate_well_known_names_check.ls` matched all eight committed outputs byte for byte. |
 | `utils/test_jube_module_loader_negative.py` | Blocked on native process execution/capture. |
-| `utils/test_jube_language_dispatch.py` | Blocked on native process execution/capture. |
-| `utils/test_hosted_python_architecture_checker.py` | Pending native checker and self-test rewrite. |
 | `utils/test_node_module_architecture_checker.py` | `test_node_module_architecture_checker.ls` covers its source and symbol predicate self-test; the separately chained binary gate remains unavailable. |
 | `utils/test_premake_generator.py` | Blocked on native process execution/capture. |
 | `utils/check_node_module_architecture.py` | `check_node_module_architecture.ls` covers the source/config gate; `check_node_module_architecture_report.ls` matched Python's current JSON report, including all 38 `node_core` sources. Binary modes lack a native object/import table reader. |
-| `utils/check_hosted_python_architecture.py` | Pending native source checker and inventory; binary modes also lack a native object/import table reader. |
 | `utils/check_static_module_architecture.py` | `check_static_module_architecture.ls` renders the default report; `_json.ls` and `_boundary_baseline.ls` cover its two JSON modes. The complete JSON inventory matched Python semantically, including all 35 weak providers. CLI argument forwarding remains unavailable. |
 | `utils/check_module_boundary.py` | Blocked on native object-file symbol inspection. |
 | `test/interp/tier_sweep.py` | Blocked on native process execution/capture and environment control. |
@@ -51,11 +48,7 @@ passing replacement gate.
 `c_function_scan.ls` and `gc_source_paths.ls` are unfinished shared helpers
 for the GC checks. They do not enforce either Python checker yet.
 
-The Python language fixtures are separate from these utilities.
-`test/py/test_py_basic.py` has a Lambda counterpart at
-`test/lambda/proc/python_equiv_basic.ls` with its `.txt` expected result.
-`test_py_closures.py` requires a mutable captured `nonlocal` variable, which
-Lambda rules out under S9.1.4. `test_py_generators.py` requires suspended
-`yield`/`send` generators; the related stream surface is still pending under
-S14.2–S14.3. Their prior value-printing substitutes were removed. Confirmed
+`test/lambda/proc/python_equiv_basic.ls` (with its `.txt` expected result) is
+the Lambda counterpart of the former `test/py/test_py_basic.py`; the Python
+fixtures were removed with the `lang-python` module on 2026-10-07. Confirmed
 runtime and CLI gaps are recorded in `vibe/impl/Lambda_Issue_Log2.md`.

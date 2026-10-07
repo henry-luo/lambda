@@ -1,0 +1,22 @@
+{
+  "name": "--source opens a Markdown file as text: markup is shown and kept byte for byte, edits land as typed",
+  "command": "edit",
+  "source": true,
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_src_markdown.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-format-source"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "title: Edit mode sample"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "**bold text** and *italic text*"},
+    {"type": "click", "target": {"text": "**bold text**"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "type", "text": "> "},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved edit_src_markdown.md"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_markdown.md", "contains": "---\ntitle: Edit mode sample\n---\n"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_markdown.md", "contains": "\n> Some **bold text** and *italic text*"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_markdown.md", "contains": "```js\nlet x = 1;\n```\n\n> A quoted line."},
+    {"type": "render", "file": "temp/edit-ui/edit_src_markdown.png"}
+  ]
+}

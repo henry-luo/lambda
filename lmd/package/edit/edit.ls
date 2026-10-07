@@ -13,11 +13,16 @@ import md: lambda.edit.markdown
 import html: lambda.edit.html
 import svg: lambda.edit.svg
 import shell: lambda.edit.shell
+import src: lambda.edit.source
 import sess: lambda.edit.session
+import files: lambda.edit.files
+import tools: lambda.edit.toolbar
 import lambda.editor.mod_editor
 
-// Every editable format, in lookup order.
-pub let formats = [md.descriptor, html.descriptor, svg.descriptor]
+// Every editable format, in lookup order. The source surface opens the text
+// formats no rich surface claims, and any file under `--source`
+// (Radiant_Design_Source_Editor CED20).
+pub let formats = [md.descriptor, html.descriptor, svg.descriptor, src.descriptor]
 
 fn supported_suffixes() => join([for (f in formats) for (s in f.suffixes) s], ", ")
 
@@ -29,7 +34,7 @@ pub fn format_for_path(path) {
 }
 
 pub pn open_document(path, options) element^ {
-  let format = format_for_path(path)
+  let format = if (options != null and options.source == true) src.descriptor else format_for_path(path)
   if (format == null) {
     raise error("'" ++ sess.basename(path) ++ "' is not a document type lambda edit supports (" ++
                 supported_suffixes() ++ ")")
@@ -41,7 +46,35 @@ pub pn open_document(path, options) element^ {
   if (mismatch != null) {
     raise error("the " ++ format.name ++ " editor cannot keep this document exactly: " ++ mismatch)
   }
-  let session = sess.new_session(path, format, source, loaded)
-  let editor = edit_open(loaded.doc, format.schema, null)
-  shell.page(session, editor, "Opened " ++ session.name ++ ".")
+  // the rich format behind the view switch, null for plain text
+  let named = format_for_path(path)
+  let rich_format = if (named != null and named.surface != 'source') named else null
+  let session = {*: sess.new_session(path, format, source, loaded), rich_format: rich_format}
+  let status = "Opened " ++ session.name ++ "."
+  page(if (format.surface == 'source') {mode: 'source', session: session, doc: loaded.doc, status: status}
+       else {mode: 'rich', session: session, doc: edit_open(loaded.doc, format.schema, null), status: status})
 }
+
+// The application root: the rich (or drawing) surface or the source surface
+// over one file (Radiant_Design_Source_Editor OQ7, CED20). Each surface keeps
+// its own state; switching hands the other the view it builds from the
+// current text, `shown` = {mode, session, doc, status}.
+edit <edit_doc> state shown: ~.shown {
+  // the surface's own <body> is this template's result as well; both handle
+  // its events, the surface first (render_map_wrapper_lookup)
+  if (shown.mode == 'source') src.app(shown.session, shown.doc, shown.status)
+  else shell.app(shown.session, shown.doc, shown.status)
+}
+on edit_switch(next) {
+  shown = next
+}
+
+fn page(shown) =>
+  <html lang: "en",
+    <head
+      <meta charset: "UTF-8">
+      <title sess.window_title(shown.session, false)>
+      <style files.css ++ tools.css ++ shell.surface_css ++ src.surface_css>
+    >
+    apply(<edit_doc shown: shown>, {mode: "edit"})
+  >

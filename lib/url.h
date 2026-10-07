@@ -1,5 +1,6 @@
 #ifndef URL_H
 #define URL_H
+#include "lambda_api.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -88,6 +89,7 @@ String* url_serialize_path(const Url* url);
 
 bool url_is_valid(const Url* url);
 bool url_equals(const Url* a, const Url* b);
+bool url_equals_without_fragment(const Url* a, const Url* b);
 Url* url_clone(const Url* url);
 bool url_has_authority(const Url* url);
 
@@ -183,7 +185,7 @@ char* url_encode_component(const char* str, size_t len);
 // Percent-decode a string: %XX → byte.
 // Returns a newly allocated string. Caller must free.
 // If out_len is non-NULL, stores the decoded length.
-char* url_decode_component(const char* str, size_t len, size_t* out_len);
+LAMBDA_LIB_API char* url_decode_component(const char* str, size_t len, size_t* out_len);
 
 // Like url_decode_component but also maps '+' → ' '
 // (application/x-www-form-urlencoded). Returns a newly allocated string.
@@ -192,7 +194,7 @@ char* url_decode_form(const char* str, size_t len, size_t* out_len);
 
 // Lenient percent-decode into caller-provided storage. Malformed escapes are
 // copied literally; when `form` is true, '+' maps to a space. Returns bytes written.
-size_t url_decode_lenient_write(const char* str, size_t len, bool form, char* out);
+LAMBDA_LIB_API size_t url_decode_lenient_write(const char* str, size_t len, bool form, char* out);
 
 // Percent-decode in place into `buf` (NUL-terminated), returning the new length.
 // Decodes %XX and, if form is true, maps '+' → ' '. Never grows the string, so

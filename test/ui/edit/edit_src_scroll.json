@@ -1,0 +1,26 @@
+{
+  "name": "the source window scrolls by wheel and by dragging the thumb; the caret keeps editing at its model position",
+  "command": "edit",
+  "html": "temp/edit-ui/scroll_source.txt",
+  "prepare": ["python3", "test/ui/edit/gen_large_source.py", "temp/edit-ui/scroll_source.txt", "300"],
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "line 000002"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -5},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "line 000026"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "line 000025"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 2, Col 1"},
+    {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": 2},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "line 000016"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "line 000015"},
+    {"type": "mouse_drag", "target": {"selector": ".src-thumb", "offset_x": 5, "offset_y": 10}, "dx": 0, "dy": 200, "button": 0},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "line 000016"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "line 000120"},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 2, Col 2"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Xline 000002"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/scroll_source.txt", "contains": "\nXline 000002:"}
+  ]
+}

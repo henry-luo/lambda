@@ -1,4 +1,5 @@
 #pragma once
+#include "../../lib/lambda_api.h"
 
 // js_runtime_state.hpp - shared JS runtime state surface.
 //
@@ -219,9 +220,9 @@ Item* js_realm_slot(JsRealmSlots* slots, JsRealmSlotId slot);
 Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot);
 bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
     Item** values, int count, bool reserve);
-Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index);
-Item* js_realm_intrinsic_slot_existing(JsRealmSlotId base, int index);
-bool js_realm_runtime_is_active(void);
+LAMBDA_RT_API Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index);
+LAMBDA_RT_API Item* js_realm_intrinsic_slot_existing(JsRealmSlotId base, int index);
+LAMBDA_RT_API bool js_realm_runtime_is_active(void);
 bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
     bool reserve);
 

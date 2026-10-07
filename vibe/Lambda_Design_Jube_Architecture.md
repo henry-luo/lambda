@@ -17,6 +17,11 @@
 > - `vibe/Lambda_Design_Native_Module.md` — module ABI, capability tables, VMap projections
 > - `vibe/Lambda_Design_Jube_Lang_Hosting.md` — hosted-language architecture (Python first)
 > - `vibe/impl/Lambda_Impl_Hosted_Python.md` — staged carve-out execution (H0–H10)
+>
+> **Update 2026-10-07 (USER):** `lang-python` and the host's hosted-language and
+> hosted-compiler services were removed (Jube ABI 8, host API 5). The hosted-language
+> kind (JA3) and JA13's opaque cursor API have no implementation now; the `node-*`
+> modules carry the DSO chain JA2 describes. Python references below are history.
 > - `vibe/Lambda_Design_Jube_Node_Hosting.md` — Node compat as Jube modules (JN1–JN14, N0–N7)
 > - `vibe/radiant/Radiant_Design_Concurrency.md` — pages as Lambda isolates (JA15 context)
 > - `vibe/radiant/Radiant_Design_State_Management.md` — Lambda-page regeneration model (JA15 context)
@@ -35,6 +40,7 @@
 | JA3 | Four module kinds: hosted languages; native IO/runtime modules; Radiant DOM API modules; data-pack extensions | adopted direction |
 | JA4 | One host executable; bundles differ only by the module set beside it; hosts are byte-identical across bundles | adopted (Python carve-out precedent) |
 | JA5 | One strict host-API tier for all modules: `jube.h` only, versioned additive-only, status codes + pending exceptions, no unwinding | adopted (landed ABI) |
+| JA5.1 | The host exports only a checked-in allowlist (hidden default visibility); any further runtime symbol a module needs is opened case by case | **adopted** (USER 2026-10-07; D7.3.6) |
 | JA6 | Value/memory boundary: `Item` is the only value currency; native structs cross as VMap projections; system resources as integer rids; precise rooting via host APIs only | adopted direction |
 | JA7 | Async boundary: modules are shielded from the async substrate — micro-kernel bridge + host-owned socket/process/signal ops; no loop escape hatch, ever | adopted direction (2026-07-26 review) |
 | JA8 | Dependency direction: core never links modules; core→module calls exist only as registered hooks with absent defaults; inter-module deps declared in manifests | adopted direction |
@@ -184,7 +190,8 @@ module architecture checkers.
      `web-streams` (exemplars); candidates: fetch, URL, encoding.
    - **2b node-compat modules** — implement Node's API surface: `node-core`
      and the dependency-keyed leaves (`node-fs`, `node-net`, `node-http`,
-     `node-tls`, `node-crypto`, `node-zlib`, `node-child-process`).
+     `node-tls`, `node-crypto`, `node-child-process`; `node-zlib` was
+     removed 2026-10-07).
 3. **Radiant DOM API module** — the bridge that surfaces the in-process
    Radiant engine to scripts: DOM/CSSOM types as VMap projections with
    `interface_decl` + binding-table dispatch (the DOM3 mechanism).
@@ -248,6 +255,66 @@ landed and exercised by Python, DOM3, and the demo modules:
 There is deliberately **no second, softer tier** for "trusted in-tree"
 modules — in-tree modules are the constant test of the same contract
 third parties get.
+
+**Follow-on ruling:** JA5.1 bounds the transitional host-symbol imports with
+an export allowlist (D7.3.6).
+
+### JA5.1 The host exports an allowlist (USER ruling 2026-10-07)
+
+**Decision.** Host code compiles with hidden default visibility, and the
+host executable's dynamic export table is exactly
+`lambda/jube/jube_host_exports.txt`: Jube modules can resolve nothing else
+from it, in any build configuration. Every entry is a host-internal import
+that JA5 forbids in the end state, so the list is the JA2 `dynamic_lookup`
+debt made explicit, bounded and reviewable. A module that needs another
+runtime symbol has it **opened case by case**: a list entry naming its
+consumers, plus the `LAMBDA_*_API` marker (`lib/lambda_api.h`, the SM4
+export macros) on the symbol's owner declaration. Vendored archives already have default
+visibility and need only the entry. An entry no module imports is dropped.
+Hosts without the Jube loader (`lambda-cli`, `lambda-wasm`) export nothing.
+
+**Why.** Measured 2026-10-07. The hosted-Python carve-out (2026-07-20) made
+release builds drop `-fvisibility=hidden` whenever a `lang-*` module exists,
+and link the host with `-Wl,-export_dynamic` so that `dynamic_lookup`
+imports resolve. ld64 keeps every exported symbol as a dead-strip and LTO
+root. All 15,971 globals of the 21.7 MB release `lambda.exe` were therefore
+kept, reachable or not, and `-dead_strip` only removed `static` code. The
+built modules imported 400 symbols. With the allowlist, release `lambda.exe`
+is 19.2 MB and exports exactly those 400. Removing `lang-python` (2026-10-07)
+dropped its 126 entries; the list now holds 274.
+
+**Mechanics.**
+- One list feeds both linkers: `generate_premake.py` emits
+  `-Wl,-exported_symbols_list` (macOS) or `-Wl,--dynamic-list` (Linux) for
+  every host configuration. Debug is included, so an unopened import fails
+  in the development loop, not only in release. The LDDEPS hook relinks the
+  host when the list changes.
+- The marker makes a symbol exportable; the list makes it exported. ld64
+  fails the link on a listed symbol that does not exist, but silently skips
+  one compiled hidden. `utils/check_host_exports.py` therefore checks host ⊇
+  list after every release link, and `make check-host-exports` also checks
+  module imports ⊆ list.
+- `JUBE_MODULE_EXPORT` now carries default visibility on Mach-O/ELF:
+  release module builds share the hidden default, and the loader looks up
+  `jube_module` by name.
+
+**Alternatives rejected.**
+- *Keep `-export_dynamic`*: the export surface grows with the codebase,
+  nothing about it is reviewed, and dead stripping stays off.
+- *Default visibility per file, or `#pragma GCC visibility` blocks*: opens
+  far more than modules import, and is not case by case.
+- *Derive the list from the markers*: the `JS_NATIVE_*` overload generators
+  mark every arity where modules import a few, and vendored symbols carry no
+  marker. The list stays the authority.
+
+**Consequences.**
+- Release `dladdr` no longer names `fn_*` native frames in Lambda stack
+  traces, because local symbols are stripped. This was the release behavior
+  before 2026-07-20.
+- On Linux, `dladdr` reads only `.dynsym`, so debug builds lose those names
+  too.
+- Windows hosts still link `--export-all-symbols` to produce the module
+  import library. A `.def`-file counterpart is open (D7.3.6 footnote).
 
 ## JA6. The value and memory boundary
 
@@ -795,7 +862,8 @@ regeneration). The `radiant-dom` module remains the sole script-side door
 4. **Data-pack design (JA12)**: full design doc gated on the first adopter;
    lands together with the Radiant host-API extraction (JA14, item 6).
 5. **Symbol-isolation closure (JA2/JA5)**: retire `dynamic_lookup` laxity —
-   shared burn-down with hosted-Python H8.
+   hosted-Python H8 lapsed with `lang-python`'s removal (2026-10-07). Until then the JA5.1 allowlist
+   bounds it, and shrinking that list measures the burn-down.
 6. **Radiant-domain host API (JA14)**: extract the Radiant service surface
    empirically from the first Radiant-domain adopters (text shaping,
    spell-check) — its own design doc.

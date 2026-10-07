@@ -557,13 +557,21 @@ gc_heap_t* gc_heap_create(void) {
 void gc_heap_destroy(gc_heap_t* gc) {
     if (!gc) return;
 
-    if (gc->external_destroy) {
+    {
         gc_header_t* current = gc->all_objects;
         while (current) {
             if (!(current->gc_flags & GC_FLAG_FREED)) {
-                gc->external_destroy((void*)(current + 1), current->type_tag);
+                if (gc->external_destroy) gc->external_destroy((void*)(current + 1), current->type_tag);
+                if (current->type_tag == LMD_TYPE_MAP_) {
+                    LambdaGcOrderedMapLayout* m = (LambdaGcOrderedMapLayout*)(current + 1);
+                    if (m->map.container.map_kind == MAP_KIND_ORDERED && m->index) {
+                        hashmap_free(m->index); m->index = NULL;
+                    }
+                }
                 if (current->type_tag == LMD_TYPE_MAP_ &&
-                        gc->js_native_destroy) {
+                        gc->js_native_destroy &&
+                        ((LambdaGcMapLayout*)(current + 1))->container.map_kind != MAP_KIND_ORDERED &&
+                        ((LambdaGcMapLayout*)(current + 1))->container.map_kind != MAP_KIND_PLAIN) {
                     gc->js_native_destroy((void*)(current + 1));
                 }
             }
@@ -1943,7 +1951,11 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         void* type_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
         void* data_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
         int data_cap = *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP);
-        if (tag == LMD_TYPE_MAP_ && gc->js_native_trace) {
+        if (map_kind == MAP_KIND_ORDERED) {
+            gc_mark_object_ptr(gc, ((LambdaGcOrderedMapLayout*)obj)->entries);
+        }
+        if (tag == LMD_TYPE_MAP_ && map_kind != MAP_KIND_ORDERED &&
+                map_kind != MAP_KIND_PLAIN && gc->js_native_trace) {
             // JS trailing carriers own their precise edges through this hook.
             gc->js_native_trace(obj, gc);
         }
@@ -1994,7 +2006,9 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_FUNC_: {
-        if (gc->js_function_trace && gc->js_function_trace(obj, gc)) break;
+        // only the JS callable ABI owns JS trace payloads
+        if (function_has_abi((Function*)obj, FN_ENTRY_ABI_JS_FUNCTION) &&
+                gc->js_function_trace && gc->js_function_trace(obj, gc)) break;
         // Function's GC-relevant fields are checked against LambdaGcFunctionLayout.
         uint8_t* p = (uint8_t*)obj;
         uint8_t field_count = *(uint8_t*)(p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT);
@@ -2416,7 +2430,8 @@ static void gc_compact_data(gc_heap_t* gc) {
             break;
         }
         case LMD_TYPE_FUNC_: {
-            if (gc->js_function_compact && gc->js_function_compact(obj, gc)) break;
+            if (function_has_abi((Function*)obj, FN_ENTRY_ABI_JS_FUNCTION) &&
+                    gc->js_function_compact && gc->js_function_compact(obj, gc)) break;
             uint8_t* p = (uint8_t*)obj;
             uint8_t field_count = *(uint8_t*)(
                 p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT);
@@ -2529,7 +2544,12 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         }
     }
     else if (tag == LMD_TYPE_MAP_) {
-        if (gc->js_native_destroy) {
+        LambdaGcOrderedMapLayout* ordered = (LambdaGcOrderedMapLayout*)obj;
+        uint8_t kind = ordered->map.container.map_kind;
+        if (kind == MAP_KIND_ORDERED && ordered->index) {
+            hashmap_free(ordered->index); ordered->index = NULL;
+        }
+        if (kind != MAP_KIND_ORDERED && kind != MAP_KIND_PLAIN && gc->js_native_destroy) {
             // D4.1.4v4: Map wrappers can own tracked raw allocations, so sweep
             // must release those payloads when the GC owner dies.
             gc->js_native_destroy(obj);

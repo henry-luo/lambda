@@ -422,6 +422,8 @@ static SimEvent* event_sim_alloc_event(EventSimContext* ctx) {
 }
 
 // Map key name string to GLFW key code
+static int sim_physical_key_for_codepoint(uint32_t codepoint, int* out_mods);
+
 static int key_name_to_glfw(const char* name) {
     if (!name) return GLFW_KEY_UNKNOWN;
 
@@ -433,6 +435,10 @@ static int key_name_to_glfw(const char* name) {
         if (c >= 'a' && c <= 'z') return GLFW_KEY_A + (c - 'a');
         if (c >= 'A' && c <= 'Z') return GLFW_KEY_A + (c - 'A');
         if (c >= '0' && c <= '9') return GLFW_KEY_0 + (c - '0');
+        // punctuation ("/" in a key_combo): the key that types it; the
+        // fixture's mods_str supplies any modifier
+        int punct = sim_physical_key_for_codepoint((uint32_t)(unsigned char)c, nullptr);
+        if (punct != GLFW_KEY_UNKNOWN) return punct;
     }
 
     // Special keys
@@ -675,19 +681,14 @@ static void sim_flush_pending_reflow(DomDocument* doc) {
     }
 }
 
-static SelectorMatcher* sim_create_dom_selector_matcher(DomDocument* doc) {
-    // Automation assertions must use the DOM resolver so option:selected sees
-    // live IDL selectedness rather than only the layout StateStore bit.
-    return doc ? (SelectorMatcher*)dom_create_selector_matcher_bridge(doc) : NULL;
-}
-
+// Each lookup parses into the caller's scratch query, so repeated automation
+// selectors do not accumulate in the document pool under test.
 static bool sim_parse_selector(DomDocument* doc, const char* selector_text,
-                               CssSelector** out_selector,
-                               SelectorMatcher** out_matcher) {
+                               SelectorQueryScratch* query,
+                               CssSelector** out_selector) {
     if (out_selector) *out_selector = nullptr;
-    if (out_matcher) *out_matcher = nullptr;
-    if (!doc || !selector_text || !out_selector || !out_matcher) return false;
-    Pool* pool = doc->document_pool;
+    if (!doc || !selector_text || !query || !out_selector) return false;
+    Pool* pool = query->ensure_pool();
     if (!pool) return false;
 
     size_t token_count = 0;
@@ -699,10 +700,11 @@ static bool sim_parse_selector(DomDocument* doc, const char* selector_text,
         tokens, &pos, (int)token_count, pool);
     css_token_array_release(pool, tokens, token_count);
     if (!selector) return false;
-    SelectorMatcher* matcher = sim_create_dom_selector_matcher(doc);
-    if (!matcher) return false;
+    // Automation assertions must use the DOM resolver so option:selected sees
+    // live IDL selectedness rather than only the layout StateStore bit.
+    query->matcher = (SelectorMatcher*)dom_create_selector_matcher_bridge(doc, pool);
+    if (!query->matcher) return false;
     *out_selector = selector;
-    *out_matcher = matcher;
     return true;
 }
 
@@ -712,16 +714,16 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
     if (flush_reflow) sim_flush_pending_reflow(doc);
 
+    SelectorQueryScratch query;
     CssSelector* selector = nullptr;
-    SelectorMatcher* matcher = nullptr;
-    if (!sim_parse_selector(doc, selector_text, &selector, &matcher)) {
+    if (!sim_parse_selector(doc, selector_text, &query, &selector)) {
         log_error("event_sim: failed to tokenize selector '%s'", selector_text);
         return NULL;
     }
 
     SimSelectorCtx ctx = {0};
     ctx.selector = selector;
-    ctx.matcher = matcher;
+    ctx.matcher = query.matcher;
     ctx.result = NULL;
     ctx.target_index = index;
     ctx.current_match = 0;
@@ -740,13 +742,13 @@ static int count_elements_by_selector(DomDocument* doc, const char* selector_tex
     // assertion has the same post-mutation visibility as selector targets.
     sim_flush_pending_reflow(doc);
 
+    SelectorQueryScratch query;
     CssSelector* selector = nullptr;
-    SelectorMatcher* matcher = nullptr;
-    if (!sim_parse_selector(doc, selector_text, &selector, &matcher)) return 0;
+    if (!sim_parse_selector(doc, selector_text, &query, &selector)) return 0;
 
     SimSelectorCtx ctx = {0};
     ctx.selector = selector;
-    ctx.matcher = matcher;
+    ctx.matcher = query.matcher;
     ctx.target_index = -1;
 
     view_geometry_walk_elements(static_cast<View*>(doc->view_tree->root),

@@ -8,6 +8,7 @@
  * type is encountered or a blank line is found.
  */
 #include "block_common.hpp"
+#include "../markup_highlight.hpp"
 #include "../../../../lib/mem.h"
 #include <cstdio>
 #include <cstring>
@@ -270,6 +271,9 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
     const char* first_line = parser->lines[parser->current_line];
     const char* text = first_line;
     skip_whitespace(&text);
+    // highlight mode: the joined text maps back to its lines (markup_highlight.hpp)
+    highlight_begin_inline(parser);
+    highlight_add_segment(parser, 0, parser->current_line, (int)(text - first_line)); // INT_CAST_OK: indent within one line
     stringbuf_append_str(sb, text);
     parser->current_line++;
 
@@ -393,6 +397,8 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
 
         const char* content = current;
         skip_whitespace(&content);
+        highlight_add_segment(parser, (int64_t)sb->length + 1, parser->current_line,
+                              (int)(content - current)); // INT_CAST_OK: indent within one line
 
         // CommonMark: Add newline between lines (soft line break), not space
         stringbuf_append_all(sb, 2, "\n", content);
@@ -418,6 +424,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
         // Parse inline content for heading with trimmed length
         String* text_content = parser->builder.createString(sb->str->chars, heading_len);
         Item content = parse_inline_spans(parser, text_content->chars);
+        highlight_end_inline(parser);
 
         if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
             list_push((List*)heading, content);
@@ -489,6 +496,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
     // Parse inline content for paragraph
     String* text_content = parser->builder.createString(sb->str->chars, sb->length);
     Item content = parse_inline_spans(parser, text_content->chars);
+    highlight_end_inline(parser);
 
     if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
         list_push((List*)para, content);

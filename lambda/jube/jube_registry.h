@@ -1,4 +1,5 @@
 #pragma once
+#include "../../lib/lambda_api.h"
 
 #include "jube.h"
 #include "../runtime/async.h"
@@ -38,14 +39,11 @@ bool jube_specifier_is_builtin(const char* name);
 // Resolves only a descriptor already resident in this process, so it never
 // loads a library. Requesting its namespace may initialize and attach it.
 JubeSpecifierResolveStatus jube_specifier_resolve_active(const char* name, Item* out_namespace);
-JubeSpecifierResolveStatus jube_specifier_resolve(const char* name, Item* out_namespace);
+LAMBDA_RT_API JubeSpecifierResolveStatus jube_specifier_resolve(const char* name, Item* out_namespace);
 bool jube_specifier_index_names(JubeSpecifierNameCallback callback, void* user);
 // Supplies argv[0] so the registry can discover a bundle next to the unified
 // host even when the current working directory is a user project.
 void jube_set_host_executable_path(const char* executable_path);
-// Resolve and load one manifest-selected hosted language on a CLI/import
-// fallback. It performs no work for already registered languages.
-bool jube_discover_hosted_language(const char* selector);
 void jube_register_builtin_modules(void);
 // Returns whether the selected bundle profile includes the optional Node
 // compatibility descriptor. The executable owns its registration because
@@ -69,23 +67,23 @@ uint32_t jube_node_resource_add_with_close(void* session, Item value, const char
 // handle (a crypto context, say). It is owned and closed identically but is
 // invisible to process._getActiveHandles / getActiveResourcesInfo, which
 // report only handles (JSCU24).
-uint32_t jube_node_resource_add_native(void* session, Item value, const char* kind,
+LAMBDA_RT_API uint32_t jube_node_resource_add_native(void* session, Item value, const char* kind,
                                        JubeNodeResourceCloseCallback close_callback,
                                        void* close_user);
 // Legacy host-ABI bridge. It maps the one published crypto prefix to a frozen
 // resource group; resource-table teardown itself never dispatches on text.
-void jube_node_resource_close_kind(void* session, const char* kind_prefix);
-void jube_node_resource_remove_for_session(void* session, uint32_t resource_id);
-void* jube_node_resource_user_data_for_session(void* session, uint32_t resource_id);
-void* jube_node_runtime_current_session(void);
-NodeTraceState* jube_node_trace_state(void* session);
-NodeTraceState* jube_node_trace_state_ensure(void* session);
+LAMBDA_RT_API void jube_node_resource_close_kind(void* session, const char* kind_prefix);
+LAMBDA_RT_API void jube_node_resource_remove_for_session(void* session, uint32_t resource_id);
+LAMBDA_RT_API void* jube_node_resource_user_data_for_session(void* session, uint32_t resource_id);
+LAMBDA_RT_API void* jube_node_runtime_current_session(void);
+LAMBDA_RT_API NodeTraceState* jube_node_trace_state(void* session);
+LAMBDA_RT_API NodeTraceState* jube_node_trace_state_ensure(void* session);
 JsCjsState* jube_node_cjs_state(void* session);
 JsCommonJsCompileCacheState* jube_node_commonjs_compile_cache_state(void* session);
 JsDiagnosticsChannelState* jube_node_diagnostics_channel_state(void* session);
 JsPermissionPolicy* jube_node_permission_policy(void* session);
 JsPermissionPolicy* jube_node_permission_policy_ensure(void* session);
-JsCryptoNativeState* jube_node_crypto_native_state(void* session);
+LAMBDA_RT_API JsCryptoNativeState* jube_node_crypto_native_state(void* session);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);
@@ -94,7 +92,6 @@ const JubeModuleDef* jube_find_static_module(const char* name);
 bool jube_activate_module(const JubeModuleDef* module);
 bool jube_resolve_global(const char* name, size_t name_length, Item* out_value);
 const JubeGlobalDef* jube_module_globals(const JubeModuleDef* module, int32_t* count);
-const JubeLanguageDef* jube_module_language(const JubeModuleDef* module);
 // Activates the module whose manifest provides `rdb:<name>` and returns its
 // driver table, or NULL when no installed module provides it (RDB4).
 const RdbDriver* jube_rdb_resolve_driver(const char* name);
@@ -105,7 +102,7 @@ const JubeTypeDef* jube_find_type_by_host_type(const void* host_type);
 void jube_modules_runtime_reset(void);
 // JS owns the lifecycle boundary and calls these only while its current heap
 // is live. The opaque session becomes invalid immediately after detach.
-void jube_modules_runtime_attach(void);
+LAMBDA_RT_API void jube_modules_runtime_attach(void);
 void jube_modules_runtime_detach(void);
 // Browser-standard URL/Event globals use these host-owned primitives without
 // requiring the optional node-core compatibility namespace.
@@ -134,16 +131,8 @@ typedef enum JubeNodeModuleStateSlot {
 // Node compatibility modules register private native records under opaque
 // slots in the current context capsule directory. Slot acquisition is a cold
 // runtime_attach operation; normal module calls only resolve the chosen slot.
-void* jube_node_session_module_state_get(void* session, uint32_t slot, size_t size);
-void* jube_node_current_module_state(uint32_t slot);
-
-// Internal host bridge for import-time language dispatch.  The returned
-// wrapper is opaque to the language module and is always released by the
-// language registry unless its activation was retained for heap cleanup.
-void* jube_create_import_execution(void* host_context);
-void jube_destroy_import_execution(void* execution_context);
-bool jube_import_execution_is_retained(void* execution_context);
-void* jube_execution_runtime_handle(void* execution_context);
+LAMBDA_RT_API void* jube_node_session_module_state_get(void* session, uint32_t slot, size_t size);
+LAMBDA_RT_API void* jube_node_current_module_state(uint32_t slot);
 
 // DOM3: shared per-type prototype object (lazy, GC-rooted) for types with a
 // compiled interface declaration; modules attach constructors to it so

@@ -9,8 +9,9 @@ on 2026-10-03 (§8) and are recorded as **D8.1.3v22** and JSI18v2.
 from `551d9cd3e` (`temp/bench_auto/lambda-fix-rel`) for timings and profiles.
 **Scope:** the LambdaJS boxed AST walker (`lambda/js/js_interp.cpp`), its P2
 promotion edge, and the parts of Lambda's T0 (`lambda/runtime/interp.cpp`,
-`interp_plan.cpp`) that the two walkers could own jointly. The JS MVP backend
-(`lambda/js/mvp/`) is out of scope.
+`interp_plan.cpp`) that the two walkers could own jointly. The private-value
+JS MVP backend was retired on 2026-10-07 (**D1.2v2**, **D1.3v3**); this plan's
+historical measurements and comparisons do not describe a current backend.
 
 **Formal authority:** [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)
 **D8.1.3v22** (LambdaJS tiers; hotness-only promotion and loop-head handoff,

@@ -1,0 +1,24 @@
+{
+  "name": "HTML source is highlighted from the tokenizer's lexical spans, and editing an attribute keeps the colors",
+  "command": "edit",
+  "source": true,
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_src_html_highlight.html",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".tok-doctype"}, "equals": "<!DOCTYPE html>"},
+    {"type": "assert_text", "target": {"selector": ".tok-tag"}, "equals": "html"},
+    {"type": "assert_text", "target": {"selector": ".tok-attr"}, "equals": "lang"},
+    {"type": "assert_text", "target": {"selector": ".tok-attr-value"}, "equals": "\"en\""},
+    {"type": "assert_text", "target": {"selector": ".tok-comment"}, "equals": "<!-- a comment -->"},
+    {"type": "assert_text", "target": {"selector": ".tok-entity"}, "equals": "&amp;"},
+    {"type": "assert_text", "target": {"selector": ".tok-raw"}, "equals": "Edit sample"},
+    {"type": "click", "target": {"text": "ight\""}},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".tok-attr-value", "index": 5}, "contains": "X"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_html_highlight.html", "contains": "data-theme=\"lXight\""},
+    {"type": "assert_count", "target": {"selector": ".tok-comment"}, "count": 1},
+    {"type": "render", "file": "temp/edit-ui/edit_src_html_highlight.png"}
+  ]
+}

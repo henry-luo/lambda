@@ -1,4 +1,5 @@
 #include "../io/mark_output_builder.hpp"
+#include "heap_api.h"  // owner header: its LAMBDA_RT_API markers must reach these definitions
 #include "transpiler.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
@@ -166,7 +167,8 @@ void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag) {
     if (type_tag == LMD_TYPE_FUNC) {
         // A function value may own optional native payloads (JSCU20); the JS
         // side knows which layout it is and what it owns.
-        js_function_gc_destroy(obj);
+        if (function_has_abi((Function*)obj, FN_ENTRY_ABI_JS_FUNCTION))
+            js_function_gc_destroy(obj);
         return;
     }
     if (type_tag == LMD_TYPE_DECIMAL) {
@@ -1372,8 +1374,11 @@ void heap_destroy() {
     if (context->heap) {
         // Runtime item cleanup may neuter owning Array objects, so it must run
         // while the runtime owner group and GC extents are still alive.
-        js_array_runtime_items_cleanup_all();
-        js_array_immortal_props_cleanup_all();
+        // a host-only heap has no JS side tables or JS-owned array storage.
+        if (context_capsule(context, CONTEXT_CAPSULE_JS_RUNTIME)) {
+            js_array_runtime_items_cleanup_all();
+            js_array_immortal_props_cleanup_all();
+        }
         if (context->heap->gc) {
             // finalize all GC-managed objects: free sub-allocations (items[], data, mpd_t, closure_env)
             // that were malloc'd/calloc'd separately from the pool
@@ -1480,12 +1485,14 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
         }
         else if (tag == LMD_TYPE_ARRAY) {
             Array *arr = (Array*)obj;
-            if (arr->items && js_array_runtime_items_release(arr)) {
+            if (arr->items && (arr->reserved_state & CONTAINER_STATE_JS_RUNTIME_ITEMS) &&
+                    js_array_runtime_items_release(arr)) {
                 arr->items = NULL;
                 arr->capacity = 0;
             }
         }
-        else if (tag == LMD_TYPE_MAP) {
+        else if (tag == LMD_TYPE_MAP && ((Map*)obj)->map_kind != MAP_KIND_PLAIN &&
+                ((Map*)obj)->map_kind != MAP_KIND_ORDERED) {
             gc_finalize_js_native_map((Map*)obj, &seen_native);
         }
         // All other types: items[], data, closure_env are zone-managed (data zone or object zone)

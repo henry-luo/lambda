@@ -499,7 +499,9 @@ inline bool layout_replaced_image_surface_contributes(const ViewBlock* block) {
         block->display.inner == RDT_DISPLAY_REPLACED;
 }
 
-void layout_replaced_image_facts(ReplacedIntrinsicFacts* facts, ImageSurface* image, bool from_image);
+void layout_replaced_image_facts(ReplacedIntrinsicFacts* facts, ImageSurface* image, bool from_image,
+    float density = 1.0f);
+float layout_replaced_image_density(const DomElement* block);
 ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
                                                       ViewBlock* block);
 bool layout_replaced_intrinsic_axis_size(LayoutContext* lycon, ViewBlock* block,
@@ -563,7 +565,11 @@ float layout_preferred_aspect_ratio(ViewBlock* block);
 float layout_used_preferred_aspect_ratio(ViewBlock* block);
 void layout_apply_preferred_ratio_to_replaced_auto_axes(LayoutContext* lycon,
                                                         ViewBlock* block);
-char* layout_resolve_replaced_image_source(DomElement* element);
+bool layout_image_type_supported(const char* type);
+// the caller owns the returned URL; density and dimension hints belong to the selected view.
+char* layout_resolve_replaced_image_source(DomElement* element, CssEngine* engine = nullptr,
+    float* density = nullptr, DomElement** dimension_source = nullptr,
+    bool (*supports_type)(const char*) = nullptr);
 bool layout_aspect_ratio_uses_content_box(ViewBlock* block);
 ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
                                                    ViewBlock* block,

@@ -72,6 +72,31 @@ static uint64_t template_event_mask_bit(const char* event_name) {
     return UINT64_C(1) << (hash & 63u);
 }
 
+// The continuous input events: the one list both the engine's dispatch gates
+// and the registry's exact author flags use.
+// `mousewheel`, the legacy alias dispatched with every wheel, is deliberately
+// absent: as a discrete event it is what first loads the dom package in a
+// static document (an iframe preview), whose wheel scrolling depends on it.
+static const char* const k_continuous_events[] = {
+    "mousemove", "pointermove", "scroll", "wheel",
+    "scrollwheel", "dragmove", "dragover",
+};
+
+int template_continuous_event_index(const char* event_name) {
+    if (!event_name) return -1;
+    for (int i = 0; i < (int)(sizeof(k_continuous_events) / sizeof(k_continuous_events[0])); i++) { // INT_CAST_OK: tiny fixed table
+        if (strcmp(event_name, k_continuous_events[i]) == 0) return i;
+    }
+    return -1;
+}
+
+bool template_registry_has_author_continuous_handler(TemplateRegistry* registry,
+                                                     const char* event_name) {
+    int index = template_continuous_event_index(event_name);
+    return registry && index >= 0 &&
+        (registry->author_continuous_mask & (UINT32_C(1) << index)) != 0;
+}
+
 static void template_registry_note_handler(TemplateEntry* entry,
                                            const char* event_name) {
     uint64_t bit = template_event_mask_bit(event_name);
@@ -81,6 +106,9 @@ static void template_registry_note_handler(TemplateEntry* entry,
     if (!registry) return;
     if (entry->is_behavior) registry->behavior_event_mask |= bit;
     else registry->author_event_mask |= bit;
+    int continuous = template_continuous_event_index(event_name);
+    if (continuous >= 0) entry->handler_continuous_mask |= UINT32_C(1) << continuous;
+    if (!entry->is_behavior) registry->author_continuous_mask |= entry->handler_continuous_mask;
 }
 
 TemplateRegistry** template_registry_current_slot(void) {
@@ -135,6 +163,7 @@ void template_registry_remove_module(TemplateRegistry* registry, Script* module)
     registry->last = NULL;
     registry->count = registry->behavior_count = 0;
     registry->author_event_mask = registry->behavior_event_mask = 0;
+    registry->author_continuous_mask = 0;
     while (*link) {
         TemplateEntry* entry = *link;
         if (entry->interp_module == module) {
@@ -149,6 +178,7 @@ void template_registry_remove_module(TemplateRegistry* registry, Script* module)
             registry->behavior_event_mask |= entry->handler_event_mask;
         } else {
             registry->author_event_mask |= entry->handler_event_mask;
+            registry->author_continuous_mask |= entry->handler_continuous_mask;
         }
         link = &entry->next;
     }

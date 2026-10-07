@@ -193,7 +193,6 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"string_decoder", "string-decoder",  true,  nullptr},
     {"url",            "url",             true,  nullptr},
     {"util",           "util",            true,  nullptr},
-    {"zlib",           "zlib",            true,  nullptr},
     {"async_wrap",     "async-wrap",      true,  nullptr},
     {"eventsource",    "eventsource",     true,  nullptr},
     {"stringbytes",    "stringbytes",     true,  nullptr},

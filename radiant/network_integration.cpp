@@ -2,6 +2,7 @@
 #include "resource_loaders.h"
 #include "radiant.hpp"
 #include "view.hpp"
+#include "layout.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
@@ -205,8 +206,10 @@ static void discover_link_callback(DomElement* link, void* user_data) {
 static void discover_img_callback(DomElement* img, void* user_data) {
     DomDocument* doc = (DomDocument*)user_data;
 
-    // Get src attribute
-    const char* src = img->get_attribute("src");
+    CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
+    if (!engine && doc->resource_manager) engine = (CssEngine*)doc->resource_manager->css_engine;
+    lam::Temp<char> selected(layout_resolve_replaced_image_source(img, engine));
+    const char* src = selected.get();
     if (!src) {
         log_debug("network: <img> without src attribute");
         return;
@@ -405,10 +408,6 @@ void radiant_discover_document_resources(DomDocument* doc) {
 
     // Find all <script src="...">
     find_elements_by_selector(doc->root, "script", discover_script_callback, doc);
-
-    // Find all <picture><source srcset="..."> and <img srcset="...">
-    // Note: srcset parsing is simplified — only uses first URL, ignores descriptors
-    // Full srcset handling would need viewport/DPR-aware selection
 
     discover_document_font_resources(doc, true);
 

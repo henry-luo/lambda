@@ -557,6 +557,73 @@ TEST(CssPropTable, VisibilityUsesRenderEnumNames) {
     }
 }
 
+TEST(DomSelectorRows, RepeatedQueriesLeaveDocumentPoolUnchanged) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    struct Cleanup {
+        Runtime* runtime;
+        Pool* pool = nullptr;
+        DomDocument* document = nullptr;
+        ~Cleanup() {
+            dom_set_document(nullptr);
+            runtime_cleanup(runtime);
+            if (document) dom_document_destroy(document);
+            if (pool) pool_destroy(pool);
+        }
+    } cleanup = {&runtime};
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "null;", 5,
+        "selector-rows.js", nullptr)));
+    cleanup.pool = pool_create();
+    ASSERT_NE(cleanup.pool, nullptr);
+    Input* input = Input::create(cleanup.pool);
+    ASSERT_NE(input, nullptr);
+    cleanup.document = dom_document_create(input);
+    ASSERT_NE(cleanup.document, nullptr);
+    DomElement* root = DomElement::create(cleanup.document, "html", nullptr);
+    ASSERT_NE(root, nullptr);
+    cleanup.document->root = lam::up(root);
+    dom_set_document(cleanup.document);
+    auto* child = (DomElement*)dom_create_backed_element_bridge(cleanup.document, "div");
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("class", "probe"));
+    ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(child));
+
+    RootFrame roots(4);
+    Rooted<Item> root_item(roots, dom_wrap_element(root));
+    Rooted<Item> child_item(roots, dom_wrap_element(child));
+    Rooted<Item> list(roots, js_name_item("html > .probe, .missing"));
+    Rooted<Item> found(roots, ItemNull);
+    auto query_all_rows = [&]() {
+        found.set(dom_core_query_selector(root_item.get(), list.get()));
+        EXPECT_EQ(dom_unwrap_element(found.get()), (void*)child);
+        found.set(dom_core_query_selector_all(root_item.get(), list.get()));
+        EXPECT_NE(get_type_id(found.get()), LMD_TYPE_NULL);
+        EXPECT_EQ(dom_core_matches(child_item.get(), list.get()).item, ITEM_TRUE);
+        found.set(dom_core_closest(child_item.get(), list.get()));
+        EXPECT_EQ(dom_unwrap_element(found.get()), (void*)child);
+    };
+    // selectors and matchers are per-call; repeated rows must not grow the document
+    query_all_rows();
+    PoolStats warm = {};
+    pool_get_detailed_stats(cleanup.document->document_pool, &warm);
+    for (int i = 0; i < 64; i++) query_all_rows();
+    PoolStats repeated = {};
+    pool_get_detailed_stats(cleanup.document->document_pool, &repeated);
+    EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+}
+
+TEST(SelectorMatcherLifetime, DestroyReturnsTheMatcherBlockToItsPool) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    PoolStats before = {};
+    pool_get_detailed_stats(pool, &before);
+    for (int i = 0; i < 32; i++) selector_matcher_destroy(selector_matcher_create(pool));
+    PoolStats after = {};
+    pool_get_detailed_stats(pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    pool_destroy(pool);
+}
+
 // Helper: set up a stylesheet with one @keyframes rule on a doc
 static void setup_keyframes_sheet(DomDocument* doc, CssStylesheet* sheet,
                                    CssRule* rule, CssRule** rule_ptr,
@@ -614,6 +681,45 @@ TEST_F(MotionCascadeTest, ExtendingExpiredDurationResumesTheRetainedTimeline) {
     EXPECT_FLOAT_EQ(in_line.opacity, 0.75f);
     animation_scheduler_destroy(state.animation_scheduler);
     doc.state = nullptr;
+}
+
+TEST_F(MotionCascadeTest, RepeatedResolveDoesNotGrowRetainedLayoutPool) {
+    CssStylesheet sheet;
+    CssRule rule;
+    CssRule* rule_ptr;
+    CssStylesheet* sheet_ptr;
+    setup_keyframes_sheet(&doc, &sheet, &rule, &rule_ptr, &sheet_ptr,
+        "fade { from { opacity: 0; } to { opacity: 1; } }");
+    InlineProp in_line = INLINE_PROP_DEFAULT;
+    element.in_line = lam::view_ref(&in_line);
+    DocState state = {};
+    state.animation_scheduler = animation_scheduler_create(pool);
+    doc.state = lam::up(&state);
+    UiContext ui = {};
+    ui.document = lam::up(&doc);
+    // the layout pool is the view tree's retained prop pool in real passes
+    Pool* view_pool = pool_create();
+    ASSERT_NE(view_pool, nullptr);
+    LayoutContext context = {};
+    context.pool = lam::up(view_pool);
+    context.ui_context = lam::up(&ui);
+
+    // unanimated elements still compute animation-name, so both shapes resolve a list
+    const char* styles[] = {"animation-name: none", "animation: fade 1s linear forwards"};
+    for (const char* style : styles) {
+        apply(style);
+        css_animation_resolve(&element, &context);
+        PoolStats warm = {};
+        pool_get_detailed_stats(view_pool, &warm);
+        for (int i = 0; i < 128; i++) css_animation_resolve(&element, &context);
+        PoolStats repeated = {};
+        pool_get_detailed_stats(view_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes) << style;
+    }
+    EXPECT_NE(state.animation_scheduler->first, nullptr);
+    animation_scheduler_destroy(state.animation_scheduler);
+    doc.state = nullptr;
+    pool_destroy(view_pool);
 }
 
 // ============================================================================

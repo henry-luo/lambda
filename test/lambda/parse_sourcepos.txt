@@ -5,4 +5,4 @@
 "nested blocks:"
 ["1:1-2:3", [null, null]]
 "option must be a bool:"
-["parse: sourcepos option must be a bool, got type: int"]
+["parse: sourcepos option must be a bool or 'spans', got type: int"]

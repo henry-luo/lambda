@@ -239,6 +239,11 @@ typedef struct Html5Parser {
     bool track_source_lines;    // whether to record source line numbers on elements
     LineCounter source_line_counter; // running source-line counter for __source_line
     size_t line_scan_pos;       // byte position up to which lines have been counted
+
+    // Lexical mode only (html5_lex_spans): told of every tokenizer state
+    // change with the input position, to locate attribute names and values.
+    void (*state_hook)(void* ctx, int old_state, int new_state, size_t pos);
+    void* state_hook_ctx;
 } Html5Parser;
 
 // Parse options for html5_parse_ex
@@ -269,6 +274,14 @@ int html5_determine_quirks_mode(const char* name, const char* public_id,
 
 // Extended parsing function with options
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
+
+// Lexical mode for source highlighting (Radiant_Design_Source_Editor CED18):
+// tokenize `text` with the tree builder bypassed and report where each token
+// lies, in source order, as byte ranges [start, end). Kinds: "tag" (a whole
+// start or end tag), "tag-name", "attr-name", "attr-value" (quotes included),
+// "comment", "doctype", "entity", "raw" (script/style/textarea/title text).
+typedef void (*Html5LexEmit)(void* ctx, const char* kind, size_t start, size_t end);
+void html5_lex_spans(Input* input, const char* text, size_t len, Html5LexEmit emit, void* ctx);
 
 // Fragment parsing (for markdown HTML blocks/inline)
 // Creates a parser in body mode for parsing HTML fragments

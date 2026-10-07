@@ -45,6 +45,8 @@ ENGINE_LABELS = {
     "c2mir_e2e": "C2MIR",
     "go_e2e": "Go",
     "julia_e2e": "Julia (startup + warmup)",
+    "java_e2e": "Java (startup + warmup)",
+    "erlang_e2e": "Erlang (startup + warmup)",
     "lambdajs_e2e": "LambdaJS (auto)",
     "quickjs_e2e": "QuickJS",
     "nodejs_e2e": "Node.js",
@@ -55,6 +57,8 @@ ENGINE_LABELS = {
     "nodejs": "Node.js",
     "python": "Python",
     "julia": "Julia",
+    "java": "Java",
+    "erlang": "Erlang",
 }
 
 
@@ -157,7 +161,7 @@ def display_ms(bench_data, engine):
     sample_key = "wall_ms" if engine.endswith("_e2e") else "exec_ms"
     observed = [sample.get(sample_key) for sample in samples
                 if isinstance(sample, dict) and isinstance(sample.get(sample_key), (int, float))]
-    if observed:
+    if len(observed) > 1:
         value += f" [{fmt_ms(min(observed))}\u2013{fmt_ms(max(observed))}]"
     if engine in ("mir_typed", "mir_typed_auto") and \
             status_of(bench_data, engine) == "untyped_fallback":
@@ -427,7 +431,7 @@ def write_historical_comparisons(w, metadata):
 # Set 2's engine list, in the order the report shows it. Built from what the
 # JSON actually carries so an older snapshot without e2e columns simply reports
 # part 1 alone.
-E2E_ENGINES = ["mir_auto_e2e", "mir_typed_auto_e2e", "c2mir_e2e", "julia_e2e",
+E2E_ENGINES = ["mir_auto_e2e", "mir_typed_auto_e2e", "c2mir_e2e", "julia_e2e", "java_e2e", "erlang_e2e",
                "lambdajs_e2e", "quickjs_e2e", "nodejs_e2e"]
 
 
@@ -576,6 +580,13 @@ def write_report(args, data):
         w(f"- **Julia:** {julia.get('version') or 'unrecorded'}; one thread; {warmup} full warmup run(s) with fresh inputs. "
           "Execution excludes startup and warmup; the process column includes startup, compilation and warmup. "
           "Node's timer uses the checked-in script's own warmup policy.")
+    for native_engine in ("java", "erlang"):
+        if native_engine in engines:
+            native = metadata.get(native_engine) or {}
+            version = (native.get("version") or "unrecorded").splitlines()[0]
+            w(f"- **{ENGINE_LABELS[native_engine]}:** {version}; {native.get('warmup_runs', 1)} optional full warmup run(s). "
+              f"Implementation: {native.get('implementation') or 'unrecorded'}. Execution excludes startup and warmup; "
+              "process time includes VM startup and warmup; native source compilation precedes both timers.")
     if "julia" in data:
         w("- **Julia microbenchmark suite:** every language uses one complete warmup, then one measured workload; "
           "formatted-output timing includes synchronous null-sink writes.")
@@ -590,8 +601,11 @@ def write_report(args, data):
         order_text = " -> ".join(order)
         timeout_text += (f"; suites run in order `{order_text}`"
                          f" with a {cooldown_s}s idle gap between suites")
-    w(f"- **Methodology:** {runs} run(s) per benchmark, median of self-reported `__TIMING__` milliseconds{timeout_text}")
-    w("- **Range notation:** per-row timing cells are `median [minimum–maximum]`; "
+    method_label = "Original measurements" if metadata.get("measurement_notes") else "Methodology"
+    w(f"- **{method_label}:** {runs} run(s) per benchmark, median of self-reported `__TIMING__` milliseconds{timeout_text}")
+    for note in metadata.get("measurement_notes", []):
+        w(f"- **Added measurements:** {note}")
+    w("- **Range notation:** repeated-run timing cells are `median [minimum–maximum]`; single-run cells show the one measured value; "
       "the complete ordered sample set is retained in the result JSON's status detail.")
     w(f"- **Engines in this report:** {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
     w(f"- **Results source:** `{args.input}`")
@@ -610,7 +624,8 @@ def write_report(args, data):
         note = f" {record['note']}" if record.get("note") else ""
         commit = record.get("source_lambda_commit")
         commit_text = f" on Lambda commit `{commit[:10]}`" if commit else ""
-        w(f"- **Separately measured:** {merged_labels} measured{when}{runs_text} "
+        record_label = "Historical import (superseded)" if record.get("superseded") else "Separately measured"
+        w(f"- **{record_label}:** {merged_labels} measured{when}{runs_text} "
           f"from `{record.get('source')}`{commit_text}.{note}")
     if "mir_typed" in engines:
         w("- **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists")
@@ -644,7 +659,8 @@ def write_report(args, data):
         w("## Part 1 — Execution time (self-reported)")
         w()
         w("Each engine's own `__TIMING__` figure: the timed workload only, with "
-          "startup and compilation outside the measured region. This is the "
+          "process startup and prior build steps excluded. Runtime compilation "
+          "performed during the workload is included. This is the "
           "historical series, comparable back through Result18, the MIR "
           "columns pin `LAMBDA_EXEC_BACKEND=jit`, and LambdaJS pins "
           "`JS_EXEC_BACKEND=mir`.")
@@ -703,8 +719,9 @@ def write_report(args, data):
         w()
         w("## Part 2 — End-to-end time (wall clock, auto tier)")
         w()
-        w("Wall clock from process invocation to exit, so **every engine pays its "
-          "own startup and compilation inside the number**. The MIR and LambdaJS "
+        w("Wall clock from process invocation to exit, including **startup and "
+          "compilation performed inside that process**. Build steps completed before "
+          "invocation are excluded. The MIR and LambdaJS "
           "columns use the shipped auto tier -- no `LAMBDA_EXEC_BACKEND` or "
           "`JS_EXEC_BACKEND` override -- which is what `lambda.exe run "
           "script.ls` and `lambda.exe js script.js` actually do.")
@@ -714,7 +731,8 @@ def write_report(args, data):
           "run the script. Timing the auto tier under part 1's rules would charge "
           "Lambda for JIT compilation performed *inside* the measured region while "
           "crediting Node.js with a post-warmup figure -- comparing two different "
-          "things. Here the accounting is the same for everyone.")
+          "things. Process timing includes each engine's recorded warmup policy, "
+          "workload and verification; separately added measurements are described above.")
         w()
         w("Same processes, where possible: the reference engines report their wall "
           "and `__TIMING__` figures from the *same* run, so parts 1 and 2 are two "

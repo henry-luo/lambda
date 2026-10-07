@@ -86,7 +86,26 @@ bool is_code_fence(const char* line) {
 /**
  * get_fence_info - Extract fence character and length from a fence line
  */
-static void get_fence_info(const char* line, char* fence_char, int* fence_len) {
+// CommonMark closing fence: indented 0-3 spaces, the opening fence's
+// character at least as many times, then only whitespace.
+bool is_code_fence_close(const char* line, char fence_char, int fence_len) {
+    const char* pos = line;
+    int close_indent = 0;
+    while (*pos == ' ' && close_indent < 4) {
+        pos++;
+        close_indent++;
+    }
+    if (close_indent >= 4 || *pos != fence_char) return false;
+    int close_len = 0;
+    while (*pos == fence_char) {
+        close_len++;
+        pos++;
+    }
+    pos = str_skip_line_space(pos);
+    return close_len >= fence_len && (*pos == '\0' || *pos == '\n' || *pos == '\r');
+}
+
+void get_fence_info(const char* line, char* fence_char, int* fence_len) {
     if (!line || !fence_char || !fence_len) return;
 
     const char* pos = line;
@@ -448,27 +467,10 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
         }
 
         // Fallback: CommonMark-style closing fence (same type, at least same length)
-        // CommonMark: closing fence can be indented 0-3 spaces (not 4+)
-        const char* pos = current;
-        int close_indent = 0;
-        while (*pos == ' ' && close_indent < 4) {
-            pos++;
-            close_indent++;
-        }
-
-        if (close_indent < 4 && *pos == fence_char) {
-            int close_len = 0;
-            while (*pos == fence_char) {
-                close_len++;
-                pos++;
-            }
-            // Check rest of line is whitespace only (CommonMark requirement)
-            pos = str_skip_line_space(pos);
-            if (close_len >= fence_len && (*pos == '\0' || *pos == '\n' || *pos == '\r')) {
-                parser->current_line++; // Skip closing fence
-                found_close = true;
-                break;
-            }
+        if (is_code_fence_close(current, fence_char, fence_len)) {
+            parser->current_line++; // Skip closing fence
+            found_close = true;
+            break;
         }
 
         // Strip fence indentation from content lines

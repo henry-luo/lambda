@@ -11,6 +11,7 @@
 
 #ifndef LIB_UTF_H
 #define LIB_UTF_H
+#include "lambda_api.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -85,6 +86,17 @@ size_t utf16_to_utf8_offset(const char* s, size_t byte_len, size_t u16_offset);
 /** Convert a UTF-8 byte offset to a UTF-16 code-unit offset, clamped to end. */
 size_t utf8_to_utf16_offset(const char* s, size_t byte_len, size_t byte_offset);
 
+/** Iterate UTF-16 units of a WTF-8 buffer, including lone surrogates. */
+typedef struct Utf16Iterator {
+    const unsigned char* data;
+    int64_t len;
+    int64_t pos;
+    int pending_low_surrogate;
+} Utf16Iterator;
+bool utf16_iterator_next(Utf16Iterator* iter, uint16_t* out_unit);
+/** Compare UTF-16 unit sequences, independent of their UTF-8/WTF-8 byte encoding. */
+int utf16_compare(const char* left, size_t left_len, const char* right, size_t right_len);
+
 /* ── UTF-16 Surrogate Pairs ───────────────────────────────────────── */
 
 /**
@@ -98,17 +110,21 @@ uint32_t utf16_decode_pair(uint16_t high, uint16_t low);
  * @return Number of uint16_t units written: 1 (BMP) or 2 (supplementary).
  *         Returns 0 on invalid codepoint (surrogate, > 0x10FFFF).
  */
-int utf16_encode(uint32_t codepoint, uint16_t utf16[2]);
+LAMBDA_LIB_API int utf16_encode(uint32_t codepoint, uint16_t utf16[2]);
 
 /**
  * Count bytes needed to encode Lambda's WTF-8 string representation as UTF-8.
  * Lone UTF-16 surrogate units are replaced with U+FFFD; valid surrogate pairs
  * are combined before encoding.
  */
-int utf8_wtf8_encoded_len(const char* chars, int byte_len);
+LAMBDA_LIB_API int utf8_wtf8_encoded_len(const char* chars, int byte_len);
 
 /** Encode a WTF-8 string as well-formed UTF-8 into an existing output buffer. */
-void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* out);
+LAMBDA_LIB_API void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* out);
+
+// canonical UTF-8/WTF-8: combine surrogate pairs, preserve lone units; no Unicode normalization.
+bool utf8_key_is_canonical(const char* chars, size_t length);
+size_t utf8_canonical_key(const char* chars, size_t length, char* out);
 
 /* ── Codepoint Classification ─────────────────────────────────────── */
 

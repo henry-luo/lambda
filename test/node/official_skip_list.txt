@@ -77,7 +77,6 @@ test-stream-pipe-needDrain.js               # [hang] requires event loop (proces
 test-stream-writable-write-cb-error.js      # [hang] requires event loop (process.nextTick)
 test-string-decoder-fuzz.js                 # [hang] Date.now() loop + StringDecoder instance methods
 test-util-inspect-long-running.js           # [hang] util.inspect depth:Infinity on circular graph
-test-zlib-brotli.js                         # [hang] requires fixtures module + brotli compression
 test-os-process-priority.js                 # [hang] requires os.constants.priority
 test-buffer-alloc.js                        # [hang] 1192-line test, JIT compilation exceeds timeout
 test-webcrypto-digest-turboshake-rfc.js     # [hang] WebCrypto SHAKE variant is unsupported/timeout-bound

@@ -1,5 +1,6 @@
 #ifndef LIB_ESCAPE_H
 #define LIB_ESCAPE_H
+#include "lambda_api.h"
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -74,7 +75,7 @@ void escape_append_stringbuf(StringBuf* out, const char* s, size_t len,
  * clean-run copy of every escaper. */
 size_t escape_append_run_stringbuf(StringBuf* out, const char* s, size_t from,
                                    size_t len, const StrByteSet* stops);
-void escape_append_json_string(StrBuf* out, const char* s, size_t len,
+LAMBDA_LIB_API void escape_append_json_string(StrBuf* out, const char* s, size_t len,
                                bool quote, bool escape_utf8_surrogates);
 void escape_append_json_stringbuf(StringBuf* out, const char* s, size_t len,
                                   bool quote, bool escape_utf8_surrogates);

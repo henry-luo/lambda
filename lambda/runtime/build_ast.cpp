@@ -11,7 +11,6 @@
 #include "../../lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
-#include "../jube/jube_language.h"
 #include "../jube/jube_registry.h"
 #endif
 #include "../../lib/hashmap_helpers.h"
@@ -2686,6 +2685,19 @@ void init_function_placeholder(Transpiler* tp, AstFuncNode* fn_node) {
         is_proc ? &TYPE_ANY : &TYPE_ANY_NO_ERROR, false);
 }
 
+// The element type an array item contributes. A spread splices its operand's
+// elements, so it contributes their type, never the operand container's: an
+// array of two spread int arrays holds ints, not arrays. An operand that is
+// not an array with a known element type leaves the array generic (NULL).
+static Type* array_item_element_type(AstNode* item) {
+    if (item->node_type != AST_NODE_SPREAD) return item->type;
+    AstNode* operand = ((AstUnaryNode*)item)->operand;
+    Type* container = operand ? operand->type : NULL;
+    if (!container || (container->type_id != LMD_TYPE_ARRAY &&
+            container->type_id != LMD_TYPE_ARRAY_NUM)) return NULL;
+    return ((TypeArray*)container)->nested;
+}
+
 // An array node holds its item list from the syntax phase.
 static void resolve_array(Transpiler* tp, AstArrayNode* ast_node) {
     AstNode* items = ast_node->item;
@@ -2701,16 +2713,17 @@ static void resolve_array(Transpiler* tp, AstArrayNode* ast_node) {
         // Let bindings are transparent: they establish a local name but do
         // not occupy a runtime array slot in either parser front end.
         if (item->node_type == AST_NODE_VARIABLE_DECLARATOR) continue;
+        Type* item_type = array_item_element_type(item);
         if (!has_value_item) {
-            nested_type = item->type;
+            nested_type = item_type;
             has_value_item = true;
         }
-        else if (nested_type && (!item->type ||
-                item->type->type_id != nested_type->type_id)) {
+        else if (nested_type && (!item_type ||
+                item_type->type_id != nested_type->type_id)) {
             nested_type = NULL;
         }
         else if (nested_type && nested_type->type_id == LMD_TYPE_NUM_SIZED &&
-                type_num_sized_kind(nested_type) != type_num_sized_kind(item->type)) {
+                type_num_sized_kind(nested_type) != type_num_sized_kind(item_type)) {
             nested_type = NULL;
         }
         // D6.1.3/S7.8.1: a possible defect keeps the array generic

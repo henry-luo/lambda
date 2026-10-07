@@ -1600,8 +1600,16 @@ static const char* css_join_font_family_parts(LayoutContext* lycon,
     }
     if (part_count == 0) return nullptr;
     total_len += (part_count - 1) * separator_length;
-    char* combined = (char*)pool_alloc(tree->prop_pool, total_len + 1);
-    if (!combined) return nullptr;
+    // Every restyle rebuilds the list; join into transient storage and let the
+    // tree's canonical store own the one retained copy borrowers point at.
+    char stack_buffer[256];
+    lam::Temp<char> heap_buffer;
+    char* combined = stack_buffer;
+    if (total_len + 1 > sizeof(stack_buffer)) {
+        heap_buffer = lam::temp_array<char>(total_len + 1, MEM_CAT_LAYOUT);
+        combined = heap_buffer.get();
+        if (!combined) return nullptr;
+    }
     combined[0] = '\0';
     size_t pos = 0;
     bool first = true;
@@ -1619,7 +1627,19 @@ static const char* css_join_font_family_parts(LayoutContext* lycon,
         pos = str_cat(combined, pos, total_len + 1, part, strlen(part));
         first = false;
     }
-    return combined;
+    return view_tree_canonical_font_family(tree, combined, pos);
+}
+
+// Restyles re-apply these resets every pass; allocating the keyword each time
+// grew retained view storage per element per layout.
+const CssValue* css_line_height_normal_value() {
+    static const CssValue normal = [] {
+        CssValue value = {};
+        value.type = CSS_VALUE_TYPE_KEYWORD;
+        value.data.keyword = CSS_VALUE_NORMAL;
+        return value;
+    }();
+    return &normal;
 }
 
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value) {
@@ -3922,9 +3942,11 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
                 // Parent has given height but content_height not yet calculated
                 result = percentage * lycon->block.parent->given_height / 100.0;
-            } else if (!lycon->block.parent && lycon && lycon->height > 0) {
+            } else if (!lycon->block.parent && (lycon->height > 0.0f ||
+                    (lycon->selected_view_tree && lycon->height == 0.0f))) {
                 // No parent context (root html element) - use viewport height
                 // Layout uses logical pixels, so use lycon->height without raster scaling.
+                // a selected view also carries definite zero-sized containing blocks.
                 result = percentage * lycon->height / 100.0;
             } else {
                 // Per CSS 2.1 §10.7: max-height percentage → 'none', min-height percentage → '0'
@@ -8803,8 +8825,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 if (parts.size && font_family_name) {
                     span->ensure_block(lycon);
                     span->blk->line_height = lam::shared(parts.line_height
-                        ? parts.line_height
-                        : css_value_create_keyword(lycon->doc->view_tree->prop_pool, "normal"));
+                        ? parts.line_height : css_line_height_normal_value());
                 }
                 if (font_family_name) {
                     radiant_retain_font_family(span->font,

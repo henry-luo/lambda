@@ -10,6 +10,10 @@
   withdraws JLS-14 (the regex pattern detectors are required for regex
   correctness and stay) and makes a full pass of test262 and `test_js_gtest`
   a hard gate for every batch (JLSR4, JLSR5).
+- **Supersession (2026-10-07):** the user's later instruction to remove the
+  private-value JS MVP supersedes JLSR1's keep-it decision. The LOC baseline,
+  estimates, and rulings below remain historical records of this proposal's
+  original scope; **D1.2v2–D1.5v2** are unchanged.
 - **Goal set by the user:** remove at least 10% of the JS runtime's LOC
   without a performance regression, preferring unification with and reuse of
   the Lambda runtime (AST builder, type inference, interpreter, MIR emission)
@@ -729,7 +733,8 @@ test262 runner must not be weakened).
 ## 8. Sequencing
 
 Each batch is one review-sized change with a non-positive delta, its own
-ledger row and its own gate run. `lambda/js/mvp/` is never edited (JLSR1).
+ledger row and its own gate run. In this proposal's original scope,
+`lambda/js/mvp/` was excluded from edits under JLSR1.
 Order by certainty, then by Tune14 conflicts:
 
 1. **Batch 1 — dead Node host code:** JLS-15. −2,000 to −2,800. First,
@@ -789,7 +794,8 @@ Resolved (USER, 2026-09-22):
 
 - Node-specific code may move to `lambda/module/` subdirectories and that
   counts for the metric (JLSR2).
-- `lambda/js/mvp/` is excluded and not touched (JLSR1).
+- At the time, `lambda/js/mvp/` was excluded and not touched (JLSR1; later
+  superseded by the 2026-10-07 user instruction recorded above).
 - The Node support floor used by `lambda js` and the benchmark corpus stays
   (JLSR3, §1.2).
 - The regex pattern detectors stay; JLS-14 is withdrawn (JLSR4).

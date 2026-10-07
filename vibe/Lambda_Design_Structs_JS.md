@@ -1,17 +1,18 @@
 # Lambda Design: LambdaJS Struct Authority
 
-> **Last census/source audit:** 2026-09-17, tree `b085bbb18` plus the completed
+> **Last source audit:** 2026-09-17, tree `b085bbb18` plus the completed
 > JSCU45–JSCU57 working-tree changes below.
+> **Last census:** 2026-10-07, after removing the private-value MVP runtime.
 > **Status.** The initial consolidation, §20 follow-up and §21 Phase 3 are
 > implemented after the completed TypedArray cleanup and callable-base follow-up.
 > **JSCU57 is complete:** LambdaJS uses the core `Symbol` carrier directly;
 > `NameId` is retained only for the temporary property-key compatibility route.
-> Appendix B distinguishes current evidence from the historical measurements.
-> The clean refreshed `js-rt` census has **457 definitions: 324 structs,
-> 5 classes, 3 unions and 125 enums**; all 547 configured translation units
-> parsed. The private MVP runtime is preserved as a debug-only POC, including
-> its tests, benchmark evidence and design records; its private ABI is not a
-> Lambda interop path.
+> Appendix B distinguishes current evidence from historical measurements.
+> The 2026-10-07 regenerated census has **432 `js-rt` definitions: 294 structs,
+> 8 classes, 2 unions and 128 enums**. It scanned 587 translation units and
+> reported one unrelated parse error in `radiant/app_icon_mac_static.cpp`.
+> The separate private-value MVP runtime was removed from the active tree on
+> 2026-10-07; its benchmark and design records remain historical.
 >
 > **Scope.** The single design record for LambdaJS data-structure ownership:
 > which concept owns which runtime structure, and which duplicate structures are
@@ -2218,21 +2219,20 @@ proxies still require their property protocol. A plain shared `Map*` does not
 authorize calling a raw Lambda field load on a JS accessor (D3.4.8), and a
 JS `Symbol()` is not Lambda's textual `Symbol` (D4.6.1v3; S2.4.3v3).
 
-There is also a second JS runtime in the census: **MVP contributes 34 structs
-and 3 enums**. `MvpValue`, `MvpHeap`, `MvpRootFrame`, `MvpString`, `MvpArray`,
-`MvpObject`, `MvpMap` and `MvpFunction` duplicate physical concepts deliberately
-behind a private ABI. D1.2v2/D1.3v3 permit that boundary; they do not make its
-values interchangeable with `Item`. The current benchmark scope excludes
-modules/DOM/async. The previous bundled Item-alignment experiment was abandoned
-after regression; its history is in
+The 2026-09-17 census/source audit also recorded the former JS MVP runtime:
+**34 structs and 3 enums**. `MvpValue`, `MvpHeap`, `MvpRootFrame`, `MvpString`,
+`MvpArray`, `MvpObject`, `MvpMap` and `MvpFunction` duplicated physical
+concepts behind a private ABI. That runtime was removed from the active tree on
+2026-10-07; D1.2v2/D1.3v3 still define the boundary for any future private
+guest ABI. The previous bundled Item-alignment experiment was abandoned after
+regression; its history is in
 [`JS_MVP_Runtime.md` §7](jube/JS_MVP_Runtime.md#7-abandoned-v2-item-alignment-experiment).
 
-For the requested runtime interoperability, make **the shared-Item LambdaJS
-runtime the consolidation target**. Keep MVP in the reported totals and reuse
-its applicable substrate/leaf algorithms. The private value ABI remains a
-separately measured POC boundary: do not claim that a cast, wrapper rename, or
-byte-copy bridge achieves shared runtime identity. This proposal does not
-supersede the private-ABI ruling or restore the abandoned experiment.
+For the requested runtime interoperability, **the shared-Item LambdaJS runtime
+is the consolidation target**. Historical MVP comparisons remain evidence for
+their recorded source snapshots, not a current backend or census contributor.
+The private-ABI boundary in D1.2v2/D1.3v3 remains available to a future guest;
+it does not make private values interchangeable with `Item`.
 
 ### 20.2 JSCU46 — Finish callable, environment and suspension ownership
 
@@ -2615,22 +2615,20 @@ temporaries; moving them to `lambda/runtime` would manufacture a false shared
 owner, violating D8.2.3. A future deletion requires an actual second client and
 recovery of every field from the canonical owner under D8.2.4–D8.2.6.
 
-### 21.5 JSCU55 — preserve the private MVP POC boundary
+### 21.5 JSCU55 — retire the private MVP POC
 
-**Revised, 2026-09-17.** The separate debug-only MVP runtime remains intact:
-10,329 source LOC across eight files, its 741-line test binary, private
-benchmark engine, manifests, reporting and isolation scripts, acceptance
-artifacts, and POC design records. The debug build exposes `--runtime=mvp` and
-`--js-runtime=mvp`; the release configuration deliberately excludes the POC.
-This preserves a useful future experiment without making it part of the
-production LambdaJS runtime.
+**Retired, 2026-10-07.** The user-directed cleanup removed the private-value
+MVP runtime, its focused runtime test, CLI selector, and active benchmark-engine
+hooks. Its benchmark artifacts and design records remain historical evidence;
+the source snapshot is available at commit `f6e11aa3342f855205a8f3135c1f2df9cc584073`.
+The independent `mvp-lmd` runtime remains active and is a separate subsystem.
 
-No bridge, cast or byte-copy translation is introduced. D1.2v2/D1.3v3 permit a
-language-private ABI when needed; they do not make it interchangeable with
-`Item`. `MvpValue` therefore remains entirely inside the POC, with no claimed
-shared struct owner or implicit interop conversion.
+No bridge, cast or byte-copy translation was introduced. D1.2v2/D1.3v3 permit
+a language-private ABI when needed; they do not make it interchangeable with
+`Item`. The historical `MvpValue` implementation did not claim a shared struct
+owner or implicit interop conversion.
 
-**Phase 3 acceptance.** With the POC restored, the Phase 3 full qualified
+**Historical Phase 3 acceptance (before the 2026-10-07 retirement).** With the POC restored, the Phase 3 full qualified
 census was **2,979→2,978** records and `js-rt` was **462→461**. JSCU56 then
 retired `FunctionHeader` and its anonymous compatibility records while making
 `JsFunction` extend `Function`; the current full census is **2,973** records
@@ -2784,7 +2782,7 @@ analysis; a large size alone is not proof of a duplicate struct.
 | JSCU49 | Callable snapshots/`JsCtor`, import/export plans, three class member payload rows and four continuation records are retired. The replacement records use direct common bases or explicit kinds and shared lifecycle operations |
 | JSCU50 | Clean full census, source-level retirement checks, shared-operation evidence and focused behavior/forced-GC gates are recorded in §20 and this appendix |
 | JSCU54 | `JsMirBindingRef`, `JsMirLiteralShapePlan` and `JsMirStaticShapeField` remain JS lowering facts: no second client can recover their pre-resolution data from core plans |
-| JSCU55 (revised) | The MVP source/runtime, tests, selector, benchmark engine and private acceptance artifacts are preserved as a debug-only private-ABI POC; no `MvpValue`–`Item` bridge or shared owner is claimed |
+| JSCU55 (retired) | The old private-value MVP source/runtime, runtime test, selector, and benchmark-engine hooks were removed 2026-10-07; benchmark artifacts remain historical, with no `MvpValue`–`Item` bridge or shared owner claimed |
 | JSCU56 | `JsFunction : Function` replaces `FunctionHeader`; `Function` marks its inherited tail Lambda-specific, and each later tail merge requires matching ownership, GC and call contracts |
 | JSCU57 | Core `Symbol` is the direct `LMD_TYPE_SYMBOL` carrier for JS values; `JsSymbolRecord`, the negative-int encoding and numeric identity are retired together, while the union's JS `NameId` preserves the existing property route pending the later Lambda-name decision |
 

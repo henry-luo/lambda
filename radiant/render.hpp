@@ -4354,6 +4354,8 @@ void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
  * @param view ViewBlock for the SVG element
  */
 void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view);
+// Starts a paint pass: inline SVGs painted in it share one host style context.
+void render_svg_begin_paint_pass(void);
 void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element,
                                 float viewport_width, float viewport_height);
 

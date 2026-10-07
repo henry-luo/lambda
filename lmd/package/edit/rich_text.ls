@@ -33,7 +33,9 @@ fn wrap_leaf(marks, i, child) =>
   if (i >= len(leaf_marks)) child
   else wrap_leaf(marks, i + 1, if (has_mark(marks, leaf_marks[i])) mark_element(leaf_marks[i], child) else child)
 
-fn render_text_leaf(leaf) => wrap_leaf(leaf.marks, 0, leaf_text(leaf))
+// A source-surface leaf carries its highlight class (source.ls, CED15).
+fn render_text_leaf(leaf) =>
+  if (leaf.cls != null) <span class: leaf.cls, leaf_text(leaf)> else wrap_leaf(leaf.marks, 0, leaf_text(leaf))
 
 fn align_style(n) {
   let align = attr_get(n, 'align')

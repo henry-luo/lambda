@@ -1,4 +1,5 @@
 #pragma once
+#include "../../lib/lambda_api.h"
 
 // Active runtime heap/root API. These entry points can collect or relocate
 // data-zone storage, so only lambda-rt provides them; pool/arena users must
@@ -6,7 +7,7 @@
 #include "../lambda.h"
 
 // Keep C++ linkage to match the active runtime API.
-void* heap_alloc(int size, TypeId type_id);
+LAMBDA_RT_API void* heap_alloc(int size, TypeId type_id);
 // Dedicated internal carrier for accessor getter/setter storage. It is not a
 // public Item type and must never be allocated as LMD_TYPE_FUNC.
 #ifdef __cplusplus
@@ -16,7 +17,7 @@ void* heap_calloc_js_accessor_cell(size_t size);
 #endif
 void heap_init();
 void heap_destroy();
-String* heap_create_name(const char* str, size_t len);
+LAMBDA_RT_API String* heap_create_name(const char* str, size_t len);
 // C++ bridge for resources owned by GC wrappers but allocated outside GC zones.
 void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag);
 

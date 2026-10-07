@@ -9,6 +9,7 @@
  * Extracted from input-markup.cpp lines 1558-1907
  */
 #include "inline_common.hpp"
+#include "../markup_highlight.hpp"
 #include "../../../../lib/strbuf.h"
 #include "../../../../lib/log.h"
 #include "../../../../lib/str.h"
@@ -27,8 +28,10 @@ static bool try_parse_inline_item(MarkupParser* parser, Element* span, StringBuf
         list_push((List*)span, text_item);
         stringbuf_reset(sb);
     }
+    const char* start = *pos;
     Item item = parse(parser, pos);
     if (item.item == ITEM_ERROR || item.item == ITEM_UNDEFINED) return false;
+    highlight_note_inline(parser, start, *pos, highlight_item_kind(item.item));
     list_push((List*)span, item);
     return true;
 }
@@ -50,6 +53,7 @@ static void parse_code_span_item(MarkupParser* parser, Element* span,
     *pos = backtick_start;
     Item code_item = parse_code_span(parser, pos);
     if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
+        highlight_note_inline(parser, backtick_start, *pos, highlight_item_kind(code_item.item));
         list_push((List*)span, code_item);
         return;
     }
@@ -74,6 +78,7 @@ static void parse_emphasis_item(MarkupParser* parser, Element* span, StringBuf* 
             Item text_item = {.item = s2it(text_content)};
             list_push((List*)span, text_item);
         }
+        highlight_note_inline(parser, *pos, try_pos, highlight_item_kind(inline_item.item));
         list_push((List*)span, inline_item);
         *pos = try_pos;
         stringbuf_reset(sb);
@@ -126,6 +131,8 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     }
 
     log_debug("parse_inline_spans: input='%s', len=%zu", text, strlen(text));
+    // highlight mode: where this call's text lies in the root inline text
+    InlineOriginScope origin(parser);
 
     // For simple text without markup, return as string
     // Check for any potential inline markup characters
@@ -162,6 +169,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         String* content = create_string(parser, text);
         return Item{.item = s2it(content)};
     }
+    origin.enter(text_copy);
 
     // Get string buffer from parser context
     StringBuf* sb = parser->sb;

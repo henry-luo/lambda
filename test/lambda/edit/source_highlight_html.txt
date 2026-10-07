@@ -1,0 +1,10 @@
+"runs:"
+[["<!DOCTYPE html>", ["0-15:tok-doctype"]], ["<html lang=\"en\">", ["0-1:tok-tag-punct", "1-5:tok-tag", "5-6:tok-tag-punct", "6-10:tok-attr", "10-11:tok-tag-punct", "11-15:tok-attr-value", "15-16:tok-tag-punct"]], ["<head>", ["0-1:tok-tag-punct", "1-5:tok-tag", "5-6:tok-tag-punct"]], ["  <title>A &amp; B</title>", ["2-3:tok-tag-punct", "3-8:tok-tag", "8-9:tok-tag-punct", "9-18:tok-raw", "18-20:tok-tag-punct", "20-25:tok-tag", "25-26:tok-tag-punct"]], ["  <style>", ["2-3:tok-tag-punct", "3-8:tok-tag", "8-9:tok-tag-punct"]], ["    p { color: red; }", ["0-21:tok-raw"]], ["  </style>", ["0-2:tok-raw", "2-4:tok-tag-punct", "4-9:tok-tag", "9-10:tok-tag-punct"]], ["</head>", ["0-2:tok-tag-punct", "2-6:tok-tag", "6-7:tok-tag-punct"]], ["<body class='main' data-x=1 hidden>", ["0-1:tok-tag-punct", "1-5:tok-tag", "5-6:tok-tag-punct", "6-11:tok-attr", "11-12:tok-tag-punct", "12-18:tok-attr-value", "18-19:tok-tag-punct", "19-25:tok-attr", "25-26:tok-tag-punct", "26-27:tok-attr-value", "27-28:tok-tag-punct", "28-34:tok-attr", "34-35:tok-tag-punct"]], ["  <!-- a", ["2-8:tok-comment"]], ["  comment -->", ["0-13:tok-comment"]], ["  <p>Hi &copy; <b>there</b></p>", ["2-3:tok-tag-punct", "3-4:tok-tag", "4-5:tok-tag-punct", "8-14:tok-entity", "15-16:tok-tag-punct", "16-17:tok-tag", "17-18:tok-tag-punct", "23-25:tok-tag-punct", "25-26:tok-tag", "26-29:tok-tag-punct", "29-30:tok-tag", "30-31:tok-tag-punct"]], ["  <script>if (a < b) x();</script>", ["2-3:tok-tag-punct", "3-9:tok-tag", "9-10:tok-tag-punct", "10-25:tok-raw", "25-27:tok-tag-punct", "27-33:tok-tag", "33-34:tok-tag-punct"]], ["</body>", ["0-2:tok-tag-punct", "2-6:tok-tag", "6-7:tok-tag-punct"]], ["</html>", ["0-2:tok-tag-punct", "2-6:tok-tag", "6-7:tok-tag-punct"]]]
+"lines, highlighted lines:"
+[600, 520]
+"windows without a cache, mismatched lines:"
+0
+"windows with the cache, mismatched lines:"
+0
+"after opening a comment above the window:"
+[0, "0-2tok-tag-punct,2-9tok-tag,9-10tok-tag-punct"]

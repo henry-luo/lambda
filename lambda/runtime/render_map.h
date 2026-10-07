@@ -26,6 +26,12 @@ typedef struct RenderMapEntry {
     int child_index;           // position within parent's children (-1 if unknown)
     int child_count;           // rendered children occupying that parent range
     bool dirty;                // needs re-transformation
+    // A template whose body is another template's application returns that
+    // template's result element unchanged; it "wraps" this entry. The
+    // reverse map keeps the innermost template of an element, and the
+    // wrappers chain outward from it (render_map_wrapper_lookup).
+    bool has_wrapper;
+    RenderMapKey wrapper;
 } RenderMapEntry;
 
 // Initialize the global render map (call once at startup)
@@ -94,7 +100,15 @@ typedef struct RenderMapLookup {
 
 // Reverse lookup: given a result_node Item, find the source_item and template_ref.
 // Returns true if found, false otherwise. Writes to *out on success.
+// An element several templates returned (one template's body being another's
+// application) reports the innermost; walk outward with
+// render_map_wrapper_lookup, so handlers are found innermost first, as on
+// nested elements.
 bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out);
+
+// The template one level out that returned the same result element as
+// `inner`, or false when `inner` is the outermost.
+bool render_map_wrapper_lookup(RenderMapLookup inner, RenderMapLookup* out);
 
 // Set the document root element so retransform can fix parent references.
 // Call this after producing the top-level element tree in load_lambda_script_doc.

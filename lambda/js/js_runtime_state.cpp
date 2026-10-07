@@ -1152,7 +1152,8 @@ extern "C" void js_set_strict_mode(int64_t strict) {
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
-extern "C" Item js_get_current_this(void) { return js_current_this; }
+// host export (lambda/jube/jube_host_exports.txt) with no header declaration
+extern "C" LAMBDA_RT_API Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
     JS_ROOTS(roots,

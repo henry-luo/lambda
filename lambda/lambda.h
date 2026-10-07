@@ -1,4 +1,5 @@
 #pragma once
+#include "../lib/lambda_api.h"
 // #include <math.h>  // MIR has problem parsing math.h
 
 // Include standard integer types from system
@@ -732,6 +733,15 @@ typedef struct LambdaGcMapLayout {
     int data_cap;
 } LambdaGcMapLayout;
 
+// ordered keyed storage keeps strong edges in an ordinary traced Array.
+typedef struct LambdaGcOrderedMapLayout {
+    LambdaGcMapLayout map;
+    void* entries;
+    struct hashmap* index;
+    int64_t size;
+    int64_t cursors;
+} LambdaGcOrderedMapLayout;
+
 typedef struct LambdaGcListLayout {
     LambdaGcMapLayout map;
     void* items;
@@ -1003,6 +1013,7 @@ enum MapKind {
     MAP_KIND_REGEXP      = 16, // RegExp carrier with typed trailing native payload
     MAP_KIND_ASYNC_FRAME = 17, // JSCU10: suspended async activation (internal, no property face)
     MAP_KIND_GENERATOR   = 18, // JSCU9: generator carrier with suspended native state
+    MAP_KIND_ORDERED     = 19, // shared ordered Item entries plus a native ordinal index
 };
 
 #define CONTAINER_FLAG_STATIC (1u << 4)
@@ -1568,6 +1579,7 @@ enum {
     // discriminated here rather than by a per-language magic word: every value
     // at or above FN_ENTRY_ABI_HOSTED_FIRST uses that language's layout, not
     // `Function`'s. Consumers read `type_id` at 0 and `entry_abi` at 3.
+    FN_ENTRY_ABI_MVP_LMD,  // common Function layout, boxed MVP MIR entry
     FN_ENTRY_ABI_HOSTED_FIRST,
     FN_ENTRY_ABI_JS_FUNCTION = FN_ENTRY_ABI_HOSTED_FIRST,
 };
@@ -1760,7 +1772,7 @@ void heap_gc_defer_collection_end(void);
 LambdaGcScopeCheckpoint lambda_gc_scope_checkpoint_capture(void);
 bool lambda_gc_scope_checkpoint_restore(const LambdaGcScopeCheckpoint* checkpoint);
 // String creation for name pooling
-String* heap_create_name(const char* name);
+LAMBDA_RT_API String* heap_create_name(const char* name);
 // String creation for runtime strings
 String* heap_strcpy(const char* src, int64_t len);
 const uint8_t* binary_data(const Binary* binary);
@@ -2684,6 +2696,9 @@ extern "C" {
     Map* map_alloc_for_type(struct TypeMap* map_type, LambdaRegion* region,
         int64_t minimum_capacity);
     bool map_field_store(void* field_ptr, Item value, TypeId value_type);
+    // neutral packed-field mutation; no descriptors, prototype dispatch, or JS hooks.
+    bool map_shape_set(Map* map, String* key, Item value);
+    bool map_shape_delete(Map* map, String* key);
     bool map_field_store_dynamic_item(void* field_ptr, Item value);
     Map* map_with_tl(int64_t type_index, void* type_list_ptr);
     Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
@@ -2793,13 +2808,13 @@ extern "C" {
     // item unboxing
     bool item_try_to_int64(Item item, int64_t* out);
     bool item_try_to_double(Item item, double* out);
-    int64_t it2l(Item item);
+    LAMBDA_CORE_API int64_t it2l(Item item);
     uint64_t it2u(Item item);
-    double it2d(Item item);
-    bool it2b(Item item);
-    int64_t it2i(Item item);
+    LAMBDA_CORE_API double it2d(Item item);
+    LAMBDA_CORE_API bool it2b(Item item);
+    LAMBDA_CORE_API int64_t it2i(Item item);
     DateTime* it2k(Item item);
-    String* it2s(Item item);
+    LAMBDA_CORE_API String* it2s(Item item);
     Binary* it2x(Item item);
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
     Item coerce_num_sized(Item value, int64_t num_type);

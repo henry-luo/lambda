@@ -36,7 +36,7 @@
     "lambda/format",
     "lambda/validator",
     "lambda/js",
-    "lambda/js/mvp",
+    "lambda/js/mvp-lmd",
     "lambda/dom",
     "lambda/dom/realm",
     "lambda/module/radiant",
@@ -70,13 +70,6 @@
     "lib/font/font_config.c",
     "lib/test_font_path_gtest.cpp",
     "lambda/runtime/http_module.cpp"
-  ],
-  "release_exclude_source_files": [
-    "lambda/js/mvp/*.cpp"
-  ],
-  "release_profile_exclude_source_files": [],
-  "release_profile_defines": [
-    "LAMBDA_JS_MVP"
   ],
   "defines": [
     "SQLITE_THREADSAFE=0",
@@ -427,13 +420,6 @@
       "dependencies": [
         "node-core"
       ]
-    },
-    {
-      "name": "node-zlib",
-      "description": "External Node zlib Jube module",
-      "source_files": [
-        "lambda/module/node_zlib/node_zlib_module.cpp"
-      ]
     }
   ],
   "targets": [
@@ -467,49 +453,6 @@
         "-Wl,--exclude-libs,ALL",
         "-Wl,-Bsymbolic",
         "-Wl,--no-undefined"
-      ]
-    },
-    {
-      "name": "lang-python",
-      "description": "External hosted Python Jube language module",
-      "lang": "c++17",
-      "link": "dynamic",
-      "target_dir": "modules/lang-python",
-      "target_name": "lang-python",
-      "target_prefix": "",
-      "pic": true,
-      "single_project": true,
-      "defines": [
-        "LAMBDA_PYTHON_DYNAMIC_MODULE"
-      ],
-      "include": "lambda/tree-sitter-python/bindings/c",
-      "source_files": [
-        "lambda/module/py/build_py_ast.cpp",
-        "lambda/module/py/py_async.cpp",
-        "lambda/module/py/py_bigint.cpp",
-        "lambda/module/py/py_builtins.cpp",
-        "lambda/module/py/py_class.cpp",
-        "lambda/module/py/py_print.cpp",
-        "lambda/module/py/py_runtime.cpp",
-        "lambda/module/py/py_scope.cpp",
-        "lambda/module/py/py_stdlib.cpp",
-        "lambda/module/py/python_jube_module.cpp",
-        "lambda/module/py/python_runtime_imports.cpp",
-        "lambda/module/py/transpile_py_mir.cpp",
-        "lambda/tree-sitter-python/src/parser.c",
-        "lambda/tree-sitter-python/src/scanner.c"
-      ],
-      "libraries": [
-        "tree-sitter"
-      ],
-      "link_options_macos": [
-        "-Wl,-undefined,dynamic_lookup"
-      ],
-      "link_options_linux": [
-        "-Wl,--allow-shlib-undefined"
-      ],
-      "link_options_windows": [
-        "-Wl,/force:unresolved"
       ]
     },
     {
@@ -741,7 +684,7 @@
       "lang": "c++17",
       "source_patterns": [
         "lambda/js/*.cpp",
-        "lambda/js/mvp/*.cpp",
+        "lambda/js/mvp-lmd/*.cpp",
         "lambda/dom/*.cpp",
         "lambda/dom/realm/*.cpp",
         "lambda/jube/*.cpp",
@@ -754,10 +697,6 @@
         "lambda/runtime/http_module_stub.cpp",
         "lambda/runtime/headless_stubs.cpp"
       ],
-      "release_exclude_patterns": [
-        "lambda/js/mvp/*.cpp"
-      ],
-      "release_profile_exclude_patterns": [],
       "source_files": [
         "lambda/module/node_core/node_events.cpp",
         "lambda/module/node_core/node_trace_events.cpp",
@@ -5306,14 +5245,14 @@
             "icon": "\ud83e\uddee"
           },
           {
-            "source": "test/test_js_mvp_gtest.cpp",
-            "name": "JS MVP Runtime Tests",
+            "source": "test/test_js_mvp_lmd_gtest.cpp",
+            "name": "JS Lambda MVP Tests",
             "dependencies": [
               "lambda-rt",
               "node-core",
               "radiant"
             ],
-            "binary": "test_js_mvp_gtest.exe",
+            "binary": "test_js_mvp_lmd_gtest.exe",
             "libraries": [
               "gtest",
               "gtest_main"
@@ -5948,18 +5887,6 @@
         "name": "\ud83c\udf10 Jube Polyglot Tests",
         "category": "baseline",
         "tests": [
-          {
-            "source": "test/test_py_gtest.cpp",
-            "name": "Python Transpiler Tests",
-            "dependencies": [],
-            "binary": "test_py_gtest.exe",
-            "libraries": [
-              "gtest"
-            ],
-            "requires_lambda_exe": true,
-            "requires_lang_python": true,
-            "icon": "\ud83d\udc0d"
-          },
           {
             "source": "test/test_rb_gtest.cpp",
             "name": "Ruby Transpiler Tests",

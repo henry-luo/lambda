@@ -15,6 +15,7 @@ import run_benchmarks as registry
 import run_c2mir_benchmarks as c2mir
 import run_go_benchmarks as go
 import run_julia_benchmarks as julia
+import native_benchmark_runner as native
 
 ROOT = Path(registry.PROJECT_ROOT).resolve()
 SUITE = ROOT / "test/benchmark/julia"
@@ -88,7 +89,7 @@ def port_command(engine, name):
         path = SUITE / f"{name}{'2' if typed else ''}.ls"
         env = {"LAMBDA_EXEC_BACKEND": "interp" if engine.startswith("interp") else "jit"}
         return [registry.LAMBDA_EXE, "run", str(path)], env
-    if engine in ("nodejs", "lambdajs", "quickjs", "mvpjs"):
+    if engine in ("nodejs", "lambdajs", "quickjs"):
         path = str(SUITE / f"{name}.js")
         if engine == "nodejs":
             return [registry.NODE_EXE, path], {}
@@ -96,13 +97,13 @@ def port_command(engine, name):
             return [registry.QJS_EXE, "--stack-size", str(registry.QJS_STACK_SIZE), "--std", "-m",
                     registry.make_qjs_wrapper(path)], {}
         path = registry.expand_benchmark_js(path)
-        if engine == "mvpjs":
-            return [registry.LAMBDA_EXE, "js", "--runtime=mvp", path], {}
         return [registry.LAMBDA_EXE, "js", path], {"JS_EXEC_BACKEND": "mir"}
     if engine == "python":
         return [sys.executable, str(SUITE / "python" / f"{name}.py")], {}
     if engine == "julia":
         return julia.build_command(julia.port_source("julia", name)), julia.julia_environment()
+    if engine in ("java", "erlang"):
+        return native.build_command(engine, "julia", name), native.environment()
     if engine == "c2mir":
         error = c2mir.ensure_c2m()
         if error:
@@ -122,12 +123,12 @@ def port_command(engine, name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--engines", default="mir,mir_typed,nodejs,lambdajs,quickjs,python,julia,c2mir,go")
+    parser.add_argument("--engines", default="mir,mir_typed,nodejs,lambdajs,quickjs,python,julia,c2mir,go,java,erlang")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--output", type=Path, default=ROOT / "temp/julia_suite_validation.json")
     args = parser.parse_args()
     engines = args.engines.split(",")
-    if set(engines) & {"mir", "mir_typed", "interp", "interp_typed", "lambdajs", "mvpjs"}:
+    if set(engines) & {"mir", "mir_typed", "interp", "interp_typed", "lambdajs"}:
         registry.check_release_build()
     registry.require_pinned_node_version(engines, "time")
     expected = contract_oracle()
@@ -158,8 +159,14 @@ def main():
     sources = [p for p in SUITE.rglob("*") if p.suffix in (".ls", ".js", ".py", ".jl", ".c", ".h", ".json")]
     sources += list((ROOT / "test/benchmark/go/cmd/julia").rglob("*.go"))
     sources.append(ROOT / "test/benchmark/go/internal/bench/julia_micro.go")
+    for engine in ("java", "erlang"):
+        if engine in engines:
+            sources += native.source_files(engine)
     payload = {"warmup_runs": 1, "expected": expected, "records": records,
                "sources_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}}
+    for engine in ("java", "erlang"):
+        if engine in engines:
+            payload[engine] = native.runtime_metadata(engine)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2) + "\n")
     passed = sum(record["status"] == "ok" for record in records)

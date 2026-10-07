@@ -31,8 +31,10 @@ typedef struct DomNodeRecord {
     bool borrows_data;
     bool borrows_items;
     uint32_t pins[DOM_NODE_PIN_REASON_COUNT];
+    size_t stranded_bytes;  // counted in stats.wrapper_stranded_bytes while a candidate
     struct DomNodeRecord* bucket_next;
     struct DomNodeRecord* all_next;
+    struct DomNodeRecord* all_prev;
     struct DomNodeRecord* retire_next;
 } DomNodeRecord;
 
@@ -48,6 +50,7 @@ typedef struct DomNodeRegistry {
     bool queued;
     bool sweep_requested;
     bool destroying;
+    size_t stranded_after_collection;  // wrapper-stranded level after the host's last collection
     DomLifecycleStats stats;
 } DomNodeRegistry;
 
@@ -119,6 +122,18 @@ static DomNodeRecord* dom_record_find(DomNodeRegistry* registry, DomNode* addres
         if (record->address == address) return record;
     }
     return nullptr;
+}
+
+// Every way a detached candidate stops being one also ends its stranded charge.
+static void dom_record_end_candidacy(DomNodeRegistry* registry, DomNodeRecord* record) {
+    record->candidate = false;
+    if (registry && record->stranded_bytes) {
+        registry->stats.wrapper_stranded_bytes -= record->stranded_bytes;
+        // a natural collection freed some; pace the next idle one from the new level
+        if (registry->stranded_after_collection > registry->stats.wrapper_stranded_bytes)
+            registry->stranded_after_collection = registry->stats.wrapper_stranded_bytes;
+    }
+    record->stranded_bytes = 0;
 }
 
 static Arena* dom_node_primary_arena(DomDocument* doc, DomNode* node) {
@@ -272,6 +287,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
     record->bucket_next = registry->buckets[bucket];
     registry->buckets[bucket] = record;
     record->all_next = registry->all_records;
+    if (record->all_next) record->all_next->all_prev = record;
     registry->all_records = record;
     registry->record_count++;
     registry->stats.registered_nodes++;
@@ -329,7 +345,7 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
     }
     // The source registry may still own wrapper/expando pins that must unpin
     // normally, but its detached candidate must never recycle adopted storage.
-    source_record->candidate = false;
+    dom_record_end_candidacy(dom_registry(source), source_record);
     source_record->state = DOM_NODE_LIVE;
     source_record->current_owner = false;
     dom_record_release_backing_root(source_record);
@@ -467,7 +483,7 @@ void dom_node_schedule_detached(DomDocument* doc, DomNode* root) {
         if (!other->candidate || other == record) continue;
         if (dom_node_is_within(root, other->address)) return;
         if (dom_node_is_within(other->address, root)) {
-            other->candidate = false;
+            dom_record_end_candidacy(registry, other);
             other->state = DOM_NODE_LIVE;
         }
     }
@@ -491,7 +507,7 @@ void dom_node_cancel_detached(DomDocument* doc, DomNode* root) {
     if (!record || !record->current_owner || record->id != root->id ||
         record->state == DOM_NODE_RETIRED) return;
     if (record && record->candidate && record->id == root->id) {
-        record->candidate = false;
+        dom_record_end_candidacy(registry, record);
         record->state = DOM_NODE_LIVE;
         registry->stats.cancelled_candidates++;
     }
@@ -500,8 +516,11 @@ void dom_node_cancel_detached(DomDocument* doc, DomNode* root) {
     dom_expando_attachment_changed(doc, root, true);
 }
 
+// `allowed_pins` is a mask of pin reasons treated as non-blocking; `bytes`
+// accumulates the primary sizes the subtree would recycle.
 static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
-                                   DomNodeRecord** blocked) {
+                                   DomNodeRecord** blocked,
+                                   uint32_t allowed_pins = 0, size_t* bytes = nullptr) {
     // Layout-only nodes need not be in the script DOM registry. Their view
     // owner releases them; they must not keep an authored subtree alive.
     if (node && node->is_element() && node->as_element()->is_synthetic()) {
@@ -517,18 +536,31 @@ static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
         return false;
     }
     for (int reason = 0; reason < DOM_NODE_PIN_REASON_COUNT; reason++) {
-        if (record->pins[reason]) {
+        if (record->pins[reason] && !(allowed_pins & (1u << reason))) {
             if (blocked) *blocked = record;
             return false;
         }
     }
+    if (bytes) *bytes += record->primary_size;
     if (node->is_element()) {
         for (DomNode* child = node->as_element()->first_child; child;
              child = child->next_sibling) {
-            if (!dom_subtree_can_retire(doc, child, blocked)) return false;
+            if (!dom_subtree_can_retire(doc, child, blocked, allowed_pins, bytes)) return false;
         }
     }
     return true;
+}
+
+// A rejected candidate held only by script wrappers waits on a collection;
+// charge it once per detachment so the host can pace idle-time collections.
+static void dom_record_note_stranded(DomDocument* doc, DomNodeRegistry* registry,
+                                     DomNodeRecord* record) {
+    if (record->stranded_bytes) return;
+    size_t bytes = 0;
+    if (!dom_subtree_can_retire(doc, record->address, nullptr,
+                                1u << DOM_NODE_PIN_WRAPPER, &bytes)) return;
+    record->stranded_bytes = bytes;
+    registry->stats.wrapper_stranded_bytes += bytes;
 }
 
 static DomNode* dom_retire_resolve_edge(DomNodeRegistry* registry, DomNode* node,
@@ -599,7 +631,7 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
     size_t primary_size = record->primary_size;
     dom_record_release_backing_root(record);
     record->backing_source = nullptr;
-    record->candidate = false;
+    dom_record_end_candidacy(registry, record);
     record->state = DOM_NODE_RETIRED;
     record->retiring = true;
     record->retire_next = *pending;
@@ -623,14 +655,14 @@ static size_t dom_retire_collect(DomDocument* doc) {
         if (record->candidate && record->state == DOM_NODE_DETACHED_CANDIDATE) {
             DomNode* root = record->address;
             if (!dom_node_ref_validate(doc, {root, record->id})) {
-                record->candidate = false;
+                dom_record_end_candidacy(registry, record);
             } else if (root->is_element() && root->as_element()->is_synthetic()) {
                 // synthetic layout nodes are released by their view owner;
                 // lifecycle retirement must not recycle their DOM addresses.
-                record->candidate = false;
+                dom_record_end_candidacy(registry, record);
                 record->state = DOM_NODE_LIVE;
             } else if (root->parent) {
-                record->candidate = false;
+                dom_record_end_candidacy(registry, record);
                 record->state = DOM_NODE_LIVE;
                 registry->stats.rejected_attached++;
             } else {
@@ -648,6 +680,7 @@ static size_t dom_retire_collect(DomDocument* doc) {
                     retired += dom_retire_subtree(doc, root, &pending);
                 } else {
                     registry->stats.rejected_pinned++;
+                    dom_record_note_stranded(doc, registry, record);
                 }
             }
         }
@@ -672,6 +705,19 @@ static size_t dom_retire_collect(DomDocument* doc) {
     return retired;
 }
 
+// Every lookup treats a missing record exactly like a retired one, so a
+// recycled slot's record only cost memory and lengthened each detach scan.
+static void dom_record_unlink_free(DomNodeRegistry* registry, DomNodeRecord* record) {
+    DomNodeRecord** edge = &registry->buckets[dom_node_bucket(registry, record->address)];
+    while (*edge && *edge != record) edge = &(*edge)->bucket_next;
+    if (*edge) *edge = record->bucket_next;
+    if (record->all_prev) record->all_prev->all_next = record->all_next;
+    else registry->all_records = record->all_next;
+    if (record->all_next) record->all_next->all_prev = record->all_prev;
+    registry->record_count--;
+    pool_free(registry->document->document_pool, record);
+}
+
 static void dom_retire_recycle_one(DomNodeRegistry* registry) {
     DomNodeRecord* record = registry->pending_free;
     registry->pending_free = record->retire_next;
@@ -683,6 +729,7 @@ static void dom_retire_recycle_one(DomNodeRegistry* registry) {
     arena_retire(record->primary_arena, record->address, record->primary_size);
     registry->stats.pending_primary_bytes -= record->primary_size;
     registry->stats.recycled_nodes++;
+    dom_record_unlink_free(registry, record);
 }
 
 size_t dom_retire_sweep(DomDocument* doc) {
@@ -723,6 +770,21 @@ bool dom_retire_idle(uint64_t budget_us) {
         if (time_now_us() - start >= budget_us) break;
     }
     return dom_retirement_queue != nullptr;
+}
+
+bool dom_retire_wrapper_collection_due(DomDocument* doc, size_t threshold) {
+    DomNodeRegistry* registry = dom_registry(doc);
+    if (!registry || registry->destroying) return false;
+    size_t stranded = registry->stats.wrapper_stranded_bytes;
+    return stranded > registry->stranded_after_collection &&
+        stranded - registry->stranded_after_collection >= threshold;
+}
+
+void dom_retire_wrapper_collection_done(DomDocument* doc) {
+    DomNodeRegistry* registry = dom_registry(doc);
+    // Wrappers that survived the collection are still owned by script; only
+    // newly stranded bytes may ask for the next one.
+    if (registry) registry->stranded_after_collection = registry->stats.wrapper_stranded_bytes;
 }
 
 void dom_retire_begin_destroy(DomDocument* doc) {

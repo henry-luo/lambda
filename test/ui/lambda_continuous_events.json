@@ -1,0 +1,22 @@
+{
+  "name": "ES5v2: mousemove, wheel and scroll reach Lambda author templates that declare them",
+  "html": "test/ui/lambda_continuous_events.ls",
+  "viewport": {"width": 800, "height": 600},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#moves"}, "equals": "0"},
+    {"type": "mouse_move", "x": 100, "y": 50},
+    {"type": "mouse_move", "x": 150, "y": 60},
+    {"type": "mouse_move", "x": 210, "y": 70},
+    {"type": "assert_text", "target": {"selector": "#moves"}, "equals": "3"},
+    {"type": "assert_text", "target": {"selector": "#last-x"}, "equals": "210"},
+    {"type": "scroll", "x": 100, "y": 100, "dx": 0, "dy": -2},
+    {"type": "assert_text", "target": {"selector": "#wheel"}, "equals": "1:200"},
+    {"type": "mouse_move", "x": 500, "y": 50},
+    {"type": "assert_text", "target": {"selector": "#moves"}, "equals": "3"},
+    {"type": "assert_text", "target": {"selector": "#clicks"}, "equals": "0"},
+    {"type": "click", "x": 100, "y": 300},
+    {"type": "scroll", "x": 100, "y": 300, "dx": 0, "dy": -3},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_text", "target": {"selector": "#scrolls"}, "equals": "1"}
+  ]
+}

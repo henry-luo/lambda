@@ -1,0 +1,28 @@
+{
+  "name": "a 5 MB file opens, pages, jumps to the end, edits there and in the middle, and saves exactly",
+  "command": "edit",
+  "html": "temp/edit-ui/large_source.txt",
+  "prepare": ["python3", "test/ui/edit/gen_large_source.py", "temp/edit-ui/large_source.txt"],
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".src-gutter"}, "contains": "1"},
+    {"type": "click", "target": {"text": "line 000003"}},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 65"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "line 000065"},
+    {"type": "assert_count", "target": {"selector": ".src-num"}, "count": 34},
+    {"type": "key_combo", "key": "ArrowDown", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 100000"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "line 100000: the quick brown fox"},
+    {"type": "type", "text": " END"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "lazy dog END"},
+    {"type": "key_combo", "key": "ArrowUp", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "line 000001: the quick"},
+    {"type": "type", "text": "TOP "},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved large_source.txt"},
+    {"type": "assert_file", "path": "temp/edit-ui/large_source.txt", "contains": "TOP line 000001: the quick"},
+    {"type": "assert_file", "path": "temp/edit-ui/large_source.txt", "contains": "line 100000: the quick brown fox jumps over the lazy dog END\n"}
+  ]
+}

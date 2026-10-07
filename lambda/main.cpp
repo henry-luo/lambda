@@ -9,7 +9,6 @@
 #include "../lib/byte_builder.h"
 #ifndef LAMBDA_NO_JUBE
 #include "jube/jube_interface.h"
-#include "jube/jube_language.h"
 #include "jube/jube_registry.h"
 #endif
 #include "../lib/strbuf.h"  // For string buffer
@@ -68,10 +67,7 @@
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
-#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
-// the profile host also links MVP so both backends can be measured with release optimization.
-#include "js/mvp/mvp.h"
-#endif
+#include "js/mvp-lmd/mvp_lmd.h"
 #endif // LAMBDA_NO_JS
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #include "../lib/time_util.h"
@@ -133,55 +129,6 @@ static char* lambda_load_hosted_source_from_cache(const char* path,
 }
 #endif
 
-#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
-static char* mvp_load_script_source_from_cache(const char* path, size_t* out_length) {
-    if (out_length) *out_length = 0;
-    if (!path || !path[0]) return NULL;
-
-    char* canonical = file_realpath(path);
-    const char* identity = canonical ? canonical : path;
-    InputScriptRequest request = {};
-    request.identity = identity;
-    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
-    request.language = "javascript";
-    request.profile = "js-mvp";
-    request.parser_abi = "js-c-ast-v1";
-    request.parse_flags = "script";
-    request.resolution_base = identity;
-    request.backend = "js-mvp-mir";
-    request.execution_mode = "script";
-    request.ast_abi = 1;
-    request.compiler_abi = 1;
-    request.optimize_level = 2;
-    request.module_mode = false;
-
-    char* source = input_script_cache_copy_file_source(
-        input_manager_global_script_cache(), &request, path, out_length);
-    if (canonical) mem_free(canonical);
-    if (!source) log_error("mvp-source-cache: failed to acquire %s", path);
-    return source;
-}
-
-static void mvp_cli_print_value(MvpValue value) {
-    if (mvp_value_is_number(value)) {
-        printf("%.17g\n", mvp_value_to_number(value));
-    } else if (mvp_value_is_string(value)) {
-        size_t length = 0;
-        const char* bytes = mvp_string_bytes(value, &length);
-        if (bytes && length) fwrite(bytes, 1, length, stdout);
-        fputc('\n', stdout);
-    } else if (mvp_value_is_undefined(value)) {
-        printf("undefined\n");
-    } else if (mvp_value_is_null(value)) {
-        printf("null\n");
-    } else if (mvp_value_is_boolean(value)) {
-        printf("%s\n", mvp_value_boolean(value) ? "true" : "false");
-    } else {
-        printf("[mvp value]\n");
-    }
-}
-#endif
-
 #ifndef LAMBDA_NO_JS
 static long js_batch_process_cpu_us(void) {
 #ifdef _WIN32
@@ -206,23 +153,6 @@ static bool js_test262_global_flag_is_true(const char* name) {
     return value.item == (ITEM_TRUE);
 }
 #endif // LAMBDA_NO_JS
-
-#ifndef LAMBDA_NO_JUBE
-static void lambda_cli_jube_write(void* user, const char* bytes, size_t length) {
-    FILE* stream = (FILE*)user;
-    if (!stream || !bytes || length == 0) return;
-    fwrite(bytes, 1, length, stream);
-}
-
-static bool lambda_cli_has_core_source_extension(const char* path) {
-    if (!path) return false;
-    const char* extension = file_path_ext(path);
-    if (!extension) return false;
-    return strcmp(extension, ".ls") == 0 || strcmp(extension, ".js") == 0 ||
-        strcmp(extension, ".mjs") == 0 || strcmp(extension, ".cjs") == 0 ||
-        strcmp(extension, ".ts") == 0 || strcmp(extension, ".tsx") == 0;
-}
-#endif // LAMBDA_NO_JUBE
 
 #ifndef LAMBDA_NO_JS
 static const int JS_DOCUMENT_VIEWPORT_WIDTH = 800;
@@ -914,13 +844,14 @@ struct DocWindowLaunchOptions {
     bool event_log;
     bool state_dump;
     const char* graph_view_key;
+    bool source_surface;
     const char* font_dirs[16];
     int font_dir_count;
 };
 
 // Parse argv[2..] for a document-window command. `--view-key` belongs to the
-// viewer only. Returns false after reporting a usage error.
-static bool parse_doc_window_launch_options(int argc, char** argv, bool allow_view_key,
+// viewer and `--source` to the editor. Returns false after reporting a usage error.
+static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
                                             DocWindowLaunchOptions* out) {
     *out = DocWindowLaunchOptions{};
     for (int i = 2; i < argc; i++) {
@@ -934,7 +865,9 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool allow_vi
             out->event_log = true;
         } else if (strcmp(argv[i], "--state-dump") == 0) {
             out->state_dump = true;
-        } else if (allow_view_key && strcmp(argv[i], "--view-key") == 0) {
+        } else if (!is_view && strcmp(argv[i], "--source") == 0) {
+            out->source_surface = true;
+        } else if (is_view && strcmp(argv[i], "--view-key") == 0) {
             if (i + 1 < argc) {
                 out->graph_view_key = argv[++i];
             } else {
@@ -2615,6 +2548,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nOptions:\n");
             printf("  -h, --help              Show this help message\n");
             printf("  -e, --eval <script>     Evaluate JavaScript source text\n");
+            fputs("  --runtime=mvp-lmd      MVP MIR with Lambda arrays, objects, and Map\n", stdout);
+            fputs("  --timing               MVP-Lmd execution time, excluding compilation\n", stdout);
             printf("  --document <file.html>  Load HTML document for DOM API access\n");
             printf("  --diagnose              Enable extra JS fast-path diagnostic logging\n");
             printf("\nExamples:\n");
@@ -2631,6 +2566,51 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 runtime_cleanup(&runtime);
                 return lambda_main_finish(9);
             }
+        }
+
+        for (int selector = 2; selector < argc; selector++) {
+            if (strcmp(argv[selector], "--runtime=mvp-lmd") != 0) continue;
+            const char* source = NULL;
+            const char* filename = NULL;
+            char* loaded = NULL;
+            size_t length = 0;
+            bool print = false;
+            bool timing = false;
+            bool invalid = false;
+            for (int arg = 2; arg < argc; arg++) {
+                if (arg == selector || strcmp(argv[arg], "--no-log") == 0) continue;
+                if (strcmp(argv[arg], "--timing") == 0) { timing = true; continue; }
+                if ((!strcmp(argv[arg], "-e") || !strcmp(argv[arg], "--eval") ||
+                     !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print")) && arg + 1 < argc) {
+                    print = !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print");
+                    source = argv[++arg]; length = strlen(source);
+                } else if (argv[arg][0] == '-' || filename) invalid = true;
+                else filename = argv[arg];
+            }
+            if (!source && filename && !invalid &&
+                    file_read_all(filename, MEM_CAT_JS_RUNTIME, &loaded, &length)) source = loaded;
+            if (invalid || !source || (filename && !loaded)) {
+                fputs("MVP-Lmd accepts a script file, -e source, or -p source\n", stderr);
+                mem_free(loaded); runtime_cleanup(&runtime); return lambda_main_finish(1);
+            }
+            double execution_ms = 0;
+            MvpLmdExecution* execution = mvp_lmd_execute(source, length, timing ? &execution_ms : NULL);
+            const char* error = mvp_lmd_diagnostic(execution);
+            if (error) { fputs(error, stderr); fputc('\n', stderr); }
+            else if (print) {
+                Pool* output_pool = pool_create();
+                String* output = format_mark(output_pool, mvp_lmd_result(execution));
+                if (output) { fwrite(output->chars, 1, output->len, stdout); fputc('\n', stdout); }
+                pool_destroy(output_pool);
+            }
+            int status = error ? 1 : 0;
+            if (!error && timing) {
+                char report[64];
+                snprintf(report, sizeof(report), "__TIMING__:%.6f\n", execution_ms);
+                fputs(report, stdout);
+            }
+            mvp_lmd_destroy(execution); mem_free(loaded);
+            runtime_cleanup(&runtime); return lambda_main_finish(status);
         }
 
         JsDocumentSession js_document_session;
@@ -2650,7 +2630,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
             bool eval_mode = false;
             bool print_eval_result = false;
             bool input_type_module = false;
-            bool mvp_runtime = false;
             bool unhandled_rejections_strict = false;
             bool tls_min_v13 = false;
             bool tls_max_v12 = false;
@@ -2665,18 +2644,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     force_interactive = true;
                 } else if (strcmp(argv[i], "--input-type=module") == 0) {
                     input_type_module = true;
-                } else if (strcmp(argv[i], "--runtime=mvp") == 0 ||
-                           strcmp(argv[i], "--js-runtime=mvp") == 0) {
-#if defined(NDEBUG) && !defined(LAMBDA_JS_MVP)
-                    fputs("MVP runtime is available only in debug and release-profile builds\n", stderr);
-                    runtime_cleanup(&runtime);
-                    return lambda_main_finish(9);
-#else
-                    mvp_runtime = true;
-#endif
                 } else if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                            strcmp(argv[i], "--js-runtime=legacy") == 0) {
-                    mvp_runtime = false;
+                    // retain the old full-LambdaJS alias for existing scripts.
                 } else if (strncmp(argv[i], "--runtime=", 10) == 0 ||
                            strncmp(argv[i], "--js-runtime=", 13) == 0) {
                     fputs("invalid value for --runtime\n", stderr);
@@ -2748,7 +2718,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             char* js_source = NULL;
             if (eval_mode) {
                 js_file = "[eval]";
-                if (print_eval_result && !mvp_runtime) {
+                if (print_eval_result) {
                     js_source_len = strlen(eval_source_arg) + 13;
                     js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
                     snprintf(js_source, js_source_len + 1, "console.log(%s)", eval_source_arg);
@@ -2767,45 +2737,15 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             } else {
                 if (!js_file) js_file = argv[2];  // fallback
-#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
-                js_source = mvp_runtime
-                    ? mvp_load_script_source_from_cache(js_file, &js_source_len)
-                    : js_load_script_source_from_cache(
-                        js_file, "js-cli", input_type_module ? "module" : "classic",
-                        input_type_module, &js_source_len);
-#else
                 js_source = js_load_script_source_from_cache(
                     js_file, "js-cli", input_type_module ? "module" : "classic",
                     input_type_module, &js_source_len);
-#endif
                 if (!js_source) {
                     printf("Error: Could not read file '%s'\n", js_file);
                     runtime_cleanup(&runtime);
                     return lambda_main_finish(1);
                 }
             }
-#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
-            if (mvp_runtime) {
-                if (input_type_module || html_file) {
-                    fputs("MVP runtime supports benchmark scripts only; modules and DOM are unavailable\n",
-                          stderr);
-                    mem_free(js_source);
-                    runtime_cleanup(&runtime);
-                    return lambda_main_finish(1);
-                }
-                MvpExecutionResult mvp_result = mvp_execute_source(js_source, js_source_len);
-                mem_free(js_source);
-                if (!mvp_result.ok) {
-                    fprintf(stderr, "MVP runtime error: %s\n", mvp_result.error);
-                    runtime_cleanup(&runtime);
-                    return lambda_main_finish(1);
-                }
-                if (print_eval_result) mvp_cli_print_value(mvp_result.value);
-                mvp_execution_result_destroy(&mvp_result);
-                runtime_cleanup(&runtime);
-                return lambda_main_finish(0);
-            }
-#endif
             js_promise_set_unhandled_rejections_mode(unhandled_rejections_strict ? 1 : 0);
             // V8's --stack_size is in KB of native stack; it sets the native
             // recursion budget before any context binds its limit (JC23).
@@ -2879,9 +2819,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0) continue;
-                    if (strcmp(argv[i], "--runtime=mvp") == 0 ||
-                        strcmp(argv[i], "--runtime=legacy") == 0 ||
-                        strcmp(argv[i], "--js-runtime=mvp") == 0 ||
+                    if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                         strcmp(argv[i], "--js-runtime=legacy") == 0) continue;
                     if (strncmp(argv[i], "--stack_size=", 13) == 0 ||
                         strncmp(argv[i], "--stack-size=", 13) == 0) {
@@ -2918,9 +2856,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0) continue;
-                    if (strcmp(argv[i], "--runtime=mvp") == 0 ||
-                        strcmp(argv[i], "--runtime=legacy") == 0 ||
-                        strcmp(argv[i], "--js-runtime=mvp") == 0 ||
+                    if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                         strcmp(argv[i], "--js-runtime=legacy") == 0) continue;
                     if (strncmp(argv[i], "--stack_size=", 13) == 0 ||
                         strncmp(argv[i], "--stack-size=", 13) == 0) {
@@ -3077,99 +3013,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(final_js_exit_code);
     }
 #endif // LAMBDA_NO_JS
-
-#ifndef LAMBDA_NO_JUBE
-    // Hosted-language aliases are module declarations, not command branches
-    // in the host. The lookup happens once at CLI dispatch and never enters
-    // Lambda or JavaScript evaluation/JIT paths.
-    if (argc >= 2) {
-        // `run --lang` is the command-form spelling of the same generic
-        // language dispatch. Keep this before Lambda's `run` handler so a
-        // hosted language never needs a special command branch in the host.
-        if (argc >= 3 && strcmp(argv[1], "run") == 0 &&
-            strcmp(argv[2], "--lang") == 0) {
-            if (argc < 5) {
-                fprintf(stderr, "Usage: %s run --lang <language> <source> [args...]\n", argv[0]);
-                return lambda_main_finish(1);
-            }
-#ifdef LAMBDA_JUBE
-            jube_register_builtin_modules();
-#endif
-            const JubeLanguageDef* run_language = jube_find_language(argv[3]);
-            bool run_discovery_attempted = false;
-            if (!run_language) {
-                run_discovery_attempted = jube_discover_hosted_language(argv[3]);
-                if (run_discovery_attempted) run_language = jube_find_language(argv[3]);
-            }
-            if (run_language) {
-                JubeLanguageRunRequest request = {
-                    JUBE_LANGUAGE_RUN_REQUEST_V1_SIZE,
-                    argv[4],
-                    argc > 5 ? argc - 5 : 0,
-                    argc > 5 ? (const char* const*)&argv[5] : NULL,
-                    false,
-                    stdout,
-                    lambda_cli_jube_write,
-                    lambda_cli_jube_write,
-                };
-                int rc = jube_run_language(run_language->name, &request);
-                return lambda_main_finish(rc == 0 ? 0 : 1);
-            }
-            if (run_discovery_attempted) {
-                fprintf(stderr, "Hosted language module for '%s' is unavailable or incompatible.\n",
-                        argv[3]); // PRINTF_OK: user-facing missing-module diagnostic.
-                return lambda_main_finish(1);
-            }
-            fprintf(stderr, "Unknown hosted language '%s'.\n", argv[3]);
-            return lambda_main_finish(1);
-        }
-#ifdef LAMBDA_JUBE
-        jube_register_builtin_modules();
-#endif
-        const JubeLanguageDef* language = jube_find_language(argv[1]);
-        bool language_from_extension = false;
-        if (!language) {
-            language = jube_find_language_for_path(argv[1]);
-            language_from_extension = language != NULL;
-        }
-        bool hosted_discovery_attempted = false;
-        if (!language && !lambda_cli_has_core_source_extension(argv[1])) {
-            hosted_discovery_attempted = jube_discover_hosted_language(argv[1]);
-        }
-        if (!language && hosted_discovery_attempted) {
-            language = jube_find_language(argv[1]);
-            if (!language) {
-                language = jube_find_language_for_path(argv[1]);
-                language_from_extension = language != NULL;
-            }
-        }
-        if (language) {
-            int language_arg_index = language_from_extension ? 1 : 2;
-            bool show_help = argc > language_arg_index &&
-                !language_from_extension &&
-                (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0);
-            JubeLanguageRunRequest request = {
-                JUBE_LANGUAGE_RUN_REQUEST_V1_SIZE,
-                show_help ? NULL : (language_from_extension ? argv[1] :
-                    (argc < 3 ? NULL : argv[2])),
-                language_from_extension ? argc - 2 : (argc > 3 ? argc - 3 : 0),
-                language_from_extension ? (argc > 2 ? (const char* const*)&argv[2] : NULL) :
-                    (argc > 3 ? (const char* const*)&argv[3] : NULL),
-                show_help,
-                stdout,
-                lambda_cli_jube_write,
-                lambda_cli_jube_write,
-            };
-            int rc = jube_run_language(language->name, &request);
-            return lambda_main_finish(rc == 0 ? 0 : 1);
-        }
-        if (hosted_discovery_attempted) {
-            fprintf(stderr, "Hosted language module for '%s' is unavailable or incompatible.\n",
-                    argv[1]); // PRINTF_OK: user-facing missing-module diagnostic.
-            return lambda_main_finish(1);
-        }
-    }
-#endif // LAMBDA_NO_JUBE
 
 #ifdef LAMBDA_RUBY
     // Handle Ruby command
@@ -3983,7 +3826,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .md/.markdown  Markdown rich text\n");
             printf("  .html/.htm     HTML rich text (head, styles and scripts are preserved)\n");
             printf("  .svg           SVG drawing\n");
+            printf("  .txt/.ls/.json/.yaml/.css/.js/...  Source text (virtualized source editor)\n");
             printf("\nOptions:\n");
+            printf("  --source                   Open the file as source text, whatever its format\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
             printf("  --headless                 Run without creating a window\n");
@@ -4014,8 +3859,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
         log_info("Opening document for editing: %s (event_file: %s)", filename,
                  launch.event_file ? launch.event_file : "none");
-        int exit_code = edit_doc_in_window_with_events(filename, launch.event_file,
-            launch.headless, launch.font_dirs, launch.font_dir_count,
+        int exit_code = edit_doc_in_window_with_events(filename, launch.source_surface,
+            launch.event_file, launch.headless, launch.font_dirs, launch.font_dir_count,
             launch.event_log, launch.state_dump);
         if (exit_code < 0) {
             const char* diagnostic = lambda_document_load_diagnostic();
@@ -4216,7 +4061,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".pgf") == 0 ||
-                    strcmp(ext, ".ls") == 0 ||
+                    strcmp(ext, ".ls") == 0 || strcmp(ext, ".slides") == 0 ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
                     strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
@@ -4233,7 +4078,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .pdf, .html, .md, .tex, .pgf, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .pdf, .html, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

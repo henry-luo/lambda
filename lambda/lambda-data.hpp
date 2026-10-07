@@ -1,4 +1,5 @@
 #pragma once
+#include "../lib/lambda_api.h"
 
 #include <string.h>  // moved outside extern "C" block to fix C++ compatibility
 #include <mpdecimal.h>
@@ -1564,10 +1565,12 @@ extern TypeMap EmptyMap;
 // SparseArrayMap with its own fields), so what moved inline is the POINTER.
 extern TypeMap ArrayPropsShape;
 extern TypeElmt EmptyElmt;
-extern const Item ItemNull;
-extern const Item ItemError;
+extern LAMBDA_CORE_API const Item ItemNull;
+extern LAMBDA_CORE_API const Item ItemError;
 extern const Item ItemEmptyString;
 extern TypeInfo type_info[];
+// Shared concatenation reports allocation/length failure with this immutable sentinel.
+extern String& STR_ERROR;
 
 typedef struct Input {
     void* url;

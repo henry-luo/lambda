@@ -1891,6 +1891,17 @@ static View* rich_keyboard_target_from_selection(DocState* state,
     return nullptr;
 }
 
+static void log_clipboard_copy(DocState* state, View* surface_target, const char* prefix,
+                               uint32_t text_len, uint32_t html_len) {
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(surface_target, &surface)) {
+        surface_ptr = &surface;
+    }
+    const char* op = (prefix && strstr(prefix, "cut")) ? "cut" : "copy";
+    event_log_editing_clipboard(state, surface_ptr, op, text_len, html_len);
+}
+
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
     if (!state) return false;
     View* surface_target = canonical_selection_focus_target(state);
@@ -1909,17 +1920,27 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
         copied = true;
     }
     if (copied) {
-        EditingSurface surface;
-        EditingSurface* surface_ptr = nullptr;
-        if (editing_surface_from_target(surface_target, &surface)) {
-            surface_ptr = &surface;
-        }
-        const char* op = (prefix && strstr(prefix, "cut")) ? "cut" : "copy";
-        event_log_editing_clipboard(state, surface_ptr, op,
-                                    text ? (uint32_t)strlen(text) : 0,
-                                    html ? (uint32_t)strlen(html) : 0);
+        log_clipboard_copy(state, surface_target, prefix,
+                           text ? (uint32_t)strlen(text) : 0,
+                           html ? (uint32_t)strlen(html) : 0);
     }
     arena_destroy(temp_arena);
+    return copied;
+}
+
+// A model-bound surface chooses what a copy or cut puts on the clipboard (its
+// selection may reach past what the DOM shows); Radiant only transports it
+// (D7.2.5). Returns false when the model supplied no text.
+static bool copy_model_text_to_clipboard(DocState* state, Item result, const char* prefix) {
+    char* text = radiant_edit_result_string_copy(result, "clipboard_text");
+    bool copied = text && text[0];
+    if (copied) {
+        clipboard_copy_text(text);
+        log_debug("%s: copied model text=%zu", prefix, strlen(text));
+        log_clipboard_copy(state, canonical_selection_focus_target(state), prefix,
+                           (uint32_t)strlen(text), 0);
+    }
+    mem_free(text);
     return copied;
 }
 
@@ -2089,10 +2110,12 @@ static Item event_source_position(DomDocument* doc, const SourcePosC* position) 
         for (int index = 0; index < position->path.depth; index++)
             array_push(path.get(), {.item = i2it(position->path.indices[index])});
     }
+    // The clone already has the seed's fields: set them, since putting would
+    // append a second `path`/`offset` that field reads never reach.
     MarkBuilder builder(doc->input);
-    map_put_heap(result.get().map, builder.createName("path"), {.array = path.get()}, doc->input);
-    map_put_heap(result.get().map, builder.createName("offset"),
-        {.item = i2it(position ? position->offset : 0)}, doc->input);
+    fn_map_set(result.get(), {.item = s2it(builder.createName("path"))}, {.array = path.get()});
+    fn_map_set(result.get(), {.item = s2it(builder.createName("offset"))},
+        {.item = i2it(position ? position->offset : 0)});
     return result.get();
 }
 
@@ -2105,9 +2128,10 @@ static Item event_source_selection(DomDocument* doc, const SourcePosC* anchor,
     Rooted<Item> anchor_value(roots, event_source_position(doc, anchor));
     Rooted<Item> head_value(roots, event_source_position(doc, head));
     if (get_type_id(result.get()) != LMD_TYPE_MAP) return ItemError;
+    // set, not put: the seed already carries `anchor` and `head`
     MarkBuilder builder(doc->input);
-    map_put_heap(result.get().map, builder.createName("anchor"), anchor_value.get(), doc->input);
-    map_put_heap(result.get().map, builder.createName("head"), head_value.get(), doc->input);
+    fn_map_set(result.get(), {.item = s2it(builder.createName("anchor"))}, anchor_value.get());
+    fn_map_set(result.get(), {.item = s2it(builder.createName("head"))}, head_value.get());
     return result.get();
 }
 
@@ -2329,8 +2353,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     // `scrollwheel` is behavior-only, after the public WheelEvent has had its
     // cancellation chance. Expose the same CSS-pixel deltas to package policy
-    // without giving it a mutable scroll offset or live layout geometry.
-    if (evcon && strcmp(event_name, "scrollwheel") == 0) {
+    // without giving it a mutable scroll offset or live layout geometry. Author
+    // templates read them from the public `wheel` / `mousewheel` (ES5v2).
+    if (evcon && (strcmp(event_name, "scrollwheel") == 0 ||
+                  (evcon->event.type == RDT_EVENT_SCROLL &&
+                   (strcmp(event_name, "wheel") == 0 || strcmp(event_name, "mousewheel") == 0)))) {
         const ScrollEvent* scroll = &evcon->event.scroll;
         mb.put("deltaX", -(double)scroll->xoffset * 100.0);
         mb.put("deltaY", -(double)scroll->yoffset * 100.0);
@@ -2558,6 +2585,21 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     return event_root.get();
 }
+
+// The templates that returned a result element, innermost first: one whose
+// body applies another template returns that template's element, and both
+// handle its events, as nested elements would (render_map_wrapper_lookup).
+struct RenderOwners {
+    RenderMapLookup lookup = {};
+    bool owned;
+    int link = 0;
+    explicit RenderOwners(Item result) { owned = render_map_reverse_lookup(result, &lookup); }
+    bool valid() const { return owned && link < 64; }
+    void next() {
+        link++;
+        owned = render_map_wrapper_lookup(lookup, &lookup);
+    }
+};
 
 // ============================================================================
 // Handler context for emit() support
@@ -2840,12 +2882,11 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
                 item.element = dom_element_render_source(dom_elem);
 
                 // skip the current handler's template (we want PARENT)
-                RenderMapLookup lookup;
-                if (render_map_reverse_lookup(item, &lookup)) {
+                for (RenderOwners owners(item); owners.valid(); owners.next()) {
+                    RenderMapLookup lookup = owners.lookup;
                     if (lookup.template_ref == g_emit_handler_ctx->template_ref &&
                         lookup.source_item.item == g_emit_handler_ctx->model_item.item) {
                         found_self = true;
-                        node = node->parent;
                         continue;
                     }
 
@@ -3384,28 +3425,32 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     return true;
 }
 
-// ES5 hot-path guard: continuous events must never enter Lambda, and must never
-// trigger a package load. Real workloads deliver these per frame, so letting one
-// bootstrap the dom package puts script compilation on the pointer path — and
-// loading a package mid-mousemove inside a JS page crashed it outright.
+// ES5v2 hot-path guard: a continuous event (pointer motion, scroll, wheel,
+// drag-over) must never trigger a package load, and reaches behavior templates
+// only in an already-loaded package. Real workloads deliver these per frame, so
+// letting one bootstrap the dom package puts script compilation on the pointer
+// path — and loading a package mid-mousemove inside a JS page crashed it
+// outright. Author templates do receive them, but only in a document whose own
+// templates declare the handler (author_template_may_handle).
 static bool event_is_hot_path(const char* event_name) {
-    if (!event_name) return false;
-    return strcmp(event_name, "mousemove") == 0 ||
-           strcmp(event_name, "pointermove") == 0 ||
-           strcmp(event_name, "scroll") == 0 ||
-           strcmp(event_name, "wheel") == 0 ||
-           strcmp(event_name, "scrollwheel") == 0 ||
-           strcmp(event_name, "dragmove") == 0 ||
-           strcmp(event_name, "dragover") == 0;
+    return template_continuous_event_index(event_name) >= 0;
+}
+
+// Whether an author template may handle `event_name`. A continuous event uses
+// the registry's exact flag, so a document that does not declare it never
+// builds an event record or walks ancestors per frame; a discrete event uses
+// the collision-tolerant prefilter.
+static bool author_template_may_handle(const char* event_name) {
+    return event_is_hot_path(event_name)
+        ? template_registry_has_author_continuous_handler(g_template_registry, event_name)
+        : template_registry_may_have_author_handler(g_template_registry, event_name);
 }
 
 extern "C" bool radiant_author_template_event_live(const char* event_name) {
-    if (!s_active_js_dispatch_event_context || !context || !event_name ||
-        event_is_hot_path(event_name)) {
+    if (!s_active_js_dispatch_event_context || !context || !event_name) {
         return false;
     }
-    return template_registry_may_have_author_handler(g_template_registry,
-                                                     event_name);
+    return author_template_may_handle(event_name);
 }
 
 static bool author_template_dispatch_begin(EventContext* evcon, Item event) {
@@ -3473,23 +3518,25 @@ static bool dispatch_author_template_participant(EventContext* evcon,
 
     Item source_item;
     source_item.element = dom_element_render_source(dom_elem);
-    RenderMapLookup lookup;
-    if (!render_map_reverse_lookup(source_item, &lookup)) return false;
-    TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
-                                                      lookup.template_ref);
-    if (!tmpl || tmpl->is_behavior ||
-        !template_entry_may_handle_event(tmpl, event_name)) {
-        return false;
+    bool delivered = false;
+    for (RenderOwners owners(source_item); owners.valid(); owners.next()) {
+        RenderMapLookup lookup = owners.lookup;
+        TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
+                                                          lookup.template_ref);
+        if (!tmpl || tmpl->is_behavior ||
+            !template_entry_may_handle_event(tmpl, event_name)) {
+            continue;
+        }
+        TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
+        if (!handler || !author_template_cascade_claim_participant(evcon, lookup)) continue;
+        bool reconciled = false;
+        (void)invoke_template_handler(evcon, evcon->target, event_name, intent,
+                                      tmpl, handler, lookup.source_item,
+                                      lookup.template_ref, &reconciled);
+        if (reconciled) evcon->need_repaint = true;
+        delivered = true;
     }
-    TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
-    if (!handler) return false;
-    if (!author_template_cascade_claim_participant(evcon, lookup)) return false;
-    bool reconciled = false;
-    (void)invoke_template_handler(evcon, evcon->target, event_name, intent,
-                                  tmpl, handler, lookup.source_item,
-                                  lookup.template_ref, &reconciled);
-    if (reconciled) evcon->need_repaint = true;
-    return true;
+    return delivered;
 }
 
 extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
@@ -4707,8 +4754,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                  (Item){.item = ITEM_TRUE}, &ignored);
 
     bool author_dispatched = false;
-    bool author_live = !event_is_hot_path(event_name) &&
-        template_registry_may_have_author_handler(g_template_registry, event_name);
+    bool author_live = author_template_may_handle(event_name);
     bool author_cascade = author_live && author_template_dispatch_begin(evcon, event);
     if (author_cascade) {
         bool bubbles = dom_event_bubbles(event);
@@ -7490,6 +7536,76 @@ static bool post_html_handler_incremental_rebuild(
     return true;
 }
 
+// A presentation-channel write of opacity, or of a transform that stays a
+// transform, changes paint and hit testing but never layout: Radiant reads
+// transforms in layout only to decide containing-block establishment and
+// computes overflow without them, and stacking order is collected at paint.
+// Presentation writes also leave attributes, and so selector matching, intact.
+static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutationRecord* record) {
+    CssPropertyCode property = record->presentation_property;
+    if (property != CSS_PROPERTY_OPACITY && property != CSS_PROPERTY_TRANSFORM) return nullptr;
+    if (!record->target || !record->target->is_element() || !record->was_connected) return nullptr;
+    DomElement* element = record->target->as_element();
+    if (element->doc != doc || element->is_synthetic() || element->view_type == RDT_VIEW_NONE ||
+        !dom_is_connected(element) || dom_element_is_svg(element) ||
+        element->specified_style_shared() || !element->specified_style) return nullptr;
+    StyleTree* style = element->specified_style;
+    CssDeclaration* declaration = style_tree_get_declaration(style, property);
+    if (!declaration || !declaration->value) return nullptr;
+    // transitions and animations start or sample during style resolution
+    static const CssPropertyCode motion[] = {
+        CSS_PROPERTY_TRANSITION, CSS_PROPERTY_TRANSITION_PROPERTY,
+        CSS_PROPERTY_TRANSITION_DURATION, CSS_PROPERTY_ANIMATION, CSS_PROPERTY_ANIMATION_NAME};
+    for (CssPropertyCode code : motion) if (style_tree_get_declaration(style, code)) return nullptr;
+    if (element->web_animation_state()) return nullptr;
+    if (property == CSS_PROPERTY_OPACITY) {
+        // opacity below one flattens preserve-3d, which changes descendants' containing blocks
+        return element->transformp()->transform_style == CSS_VALUE_PRESERVE_3D ? nullptr : element;
+    }
+    const CssValue* value = declaration->value;
+    bool becomes_none = value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE;
+    return transform_has_functions(element->transform) && !becomes_none ? element : nullptr;
+}
+
+static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument* doc,
+                                               uint64_t t0, int mutations) {
+    DocState* state = (DocState*)doc->state;
+    if (!state || !doc->view_tree || !doc->root || doc->js.mutation_record_count == 0 ||
+        doc->js.mutation_record_overflow || doc->js.inline_stylesheet_mutation_count ||
+        doc->js.reflow_pending_before_batch || state->reflow_scheduler.pending) return false;
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        if (!dom_js_paint_only_target(doc, &doc->js.mutation_records[i])) return false;
+    }
+    LayoutContext lycon = {};
+    lycon.doc = lam::up(doc);
+    lycon.ui_context = lam::up(evcon->ui_context);
+    lycon.pool = lam::up(doc->view_tree->prop_pool);
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        const DomJsMutationRecord* record = &doc->js.mutation_records[i];
+        DomElement* element = record->target->as_element();
+        lycon.view = lam::up(static_cast<View*>(element));
+        // the same resolver layout uses writes the retained view prop
+        resolve_css_property(record->presentation_property,
+            style_tree_get_declaration(element->specified_style, record->presentation_property), &lycon);
+    }
+    uint64_t t1 = time_now_ns();
+    frame_profile_cascade_finished(doc);
+    // the batch's own reflow request is satisfied without layout
+    doc_state_clear_reflow(state);
+    state->dirty_tracker.full_repaint = true;
+    doc_state_mark_dirty(state);
+    doc_state_request_repaint(state);
+    evcon->need_repaint = true;
+    to_repaint();
+    uint64_t t3 = time_now_ns();
+    frame_profile_record_commit(t0, t1, t1, t3, mutations);
+    dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "paint-only",
+                            mutations, doc->js.mutation_record_count,
+                            doc->js.mutation_record_overflow,
+                            "presentation-properties", "none", "retained", 0);
+    return true;
+}
+
 static void post_html_handler_rebuild(EventContext* evcon,
                                        uint64_t t_start, uint64_t t_handler) {
     DomDocument* doc = event_context_target_document(evcon);
@@ -7510,6 +7626,10 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // deferring text-tree changes until load completion loses dynamic keyframes.
     dom_cssom_sync_mutated_inline_stylesheets(doc);
 
+    if (post_html_handler_paint_only_commit(evcon, doc, t0, mutations)) {
+        dom_js_mutation_reset_records(doc);
+        return;
+    }
     const char* fallback_reason = "none";
     if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0,
                                               mutations, &fallback_reason)) {
@@ -7676,6 +7796,34 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
     s->active = false;
 }
 
+// Primary node bytes held only by script wrappers before an idle collection;
+// the nodes' style and payload storage is several times larger.
+static const size_t RADIANT_STRANDED_DOM_COLLECT_BYTES = 64u * 1024u;
+
+// User ruling (2026-10-07): detached DOM pinned only by wrappers is reclaimed
+// by one collection at an idle point once enough of it is stranded, instead of
+// charging the GC's allocation thresholds. GC-heap allocation alone may never
+// reach them, so replaced content would otherwise accumulate.
+bool radiant_collect_stranded_dom(UiContext* uicon, DomDocument* doc) {
+    if (!uicon || !doc ||
+        !dom_retire_wrapper_collection_due(doc, RADIANT_STRANDED_DOM_COLLECT_BYTES)) return false;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    JsCtxScope scope = {};
+    // idle: no handler frame holds unrooted values while the runtime collects
+    if (!radiant_js_ctx_enter(&scope, &evcon)) return false;
+    heap_gc_collect();
+    radiant_js_ctx_exit(&scope, &evcon, time_now_ns());
+    dom_retire_sweep(doc);
+    dom_retire_wrapper_collection_done(doc);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(doc, &stats);
+    log_debug("dom-stranded-gc: collected; %zu wrapper-held bytes remain",
+              stats.wrapper_stranded_bytes);
+    return true;
+}
+
 static thread_local uint32_t js_dispatch_batch_depth = 0;
 static thread_local DomDocument* js_dispatch_batch_document = nullptr;
 
@@ -7760,22 +7908,23 @@ static bool snapshot_template_edit_action(View* target,
         if (!element || element->is_synthetic()) continue;
         Item source;
         source.element = dom_element_render_source(element);
-        RenderMapLookup lookup = {};
-        if (!render_map_reverse_lookup(source, &lookup)) continue;
-        TemplateEntry* tmpl = template_registry_find_ref(
-            g_template_registry, lookup.template_ref);
-        if (!tmpl || tmpl->is_behavior || !tmpl->is_edit ||
-            !template_entry_may_handle_event(tmpl, "editaction")) {
-            continue;
+        for (RenderOwners owners(source); owners.valid(); owners.next()) {
+            RenderMapLookup lookup = owners.lookup;
+            TemplateEntry* tmpl = template_registry_find_ref(
+                g_template_registry, lookup.template_ref);
+            if (!tmpl || tmpl->is_behavior || !tmpl->is_edit ||
+                !template_entry_may_handle_event(tmpl, "editaction")) {
+                continue;
+            }
+            TemplateHandlerEntry* handler = template_entry_find_handler(
+                tmpl, "editaction");
+            if (!handler) continue;
+            out->tmpl = tmpl;
+            out->handler = handler;
+            out->model_item = lookup.source_item;
+            out->template_ref = lookup.template_ref;
+            return true;
         }
-        TemplateHandlerEntry* handler = template_entry_find_handler(
-            tmpl, "editaction");
-        if (!handler) continue;
-        out->tmpl = tmpl;
-        out->handler = handler;
-        out->model_item = lookup.source_item;
-        out->template_ref = lookup.template_ref;
-        return true;
     }
     return false;
 }
@@ -7934,10 +8083,14 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         InputIntent model_intent;
         if (!input_intent_clone(intent, &model_intent)) return true;
         // The source-model backend owns deletion, while clipboard transport
-        // remains native. Complete the copy half only after the public cut
-        // event and before invoking the snapshotted model action.
-        if (intent->type == INPUT_INTENT_DELETE_BY_CUT &&
-            !copy_current_selection_to_clipboard(state, "model cut")) {
+        // remains native. Copy the DOM selection after the public copy/cut
+        // event and before invoking the snapshotted model action: the
+        // handler's own render can retire the selected nodes. A cut with
+        // nothing to copy does not run.
+        if (intent->type == INPUT_INTENT_COPY) {
+            copy_current_selection_to_clipboard(state, "model copy");
+        } else if (intent->type == INPUT_INTENT_DELETE_BY_CUT &&
+                   !copy_current_selection_to_clipboard(state, "model cut")) {
             return true;
         }
         model_intent.edit_invocation_id = 0;
@@ -7951,6 +8104,10 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
             action_snapshot.model_item, action_snapshot.template_ref,
             nullptr, &raw_result);
         action_result_root.set(raw_result);
+        // a model whose selection reaches past the DOM names its own text
+        if (intent->type == INPUT_INTENT_COPY || intent->type == INPUT_INTENT_DELETE_BY_CUT) {
+            copy_model_text_to_clipboard(state, action_result_root.get(), "model clipboard");
+        }
         bool claimed = radiant_edit_result_bool(action_result_root.get(), "claimed");
         bool changed = radiant_edit_result_bool(action_result_root.get(), "changed");
         model_edit_surface_accept_result(
@@ -9497,13 +9654,13 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
         // after the StateStore pseudo bits have been updated.
         view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
                                     clear_cascaded_styles_visitor, nullptr);
-        SelectorMatcher* matcher = selector_matcher_create(pool);
-        if (matcher) {
-            state_configure_selector_matcher(state, matcher);
-            radiant_apply_css_stylesheets_to_tree(
-                doc, doc->root, doc->stylesheets, doc->stylesheet_count,
-                pool, css_engine, matcher);
-        }
+        // caller-owned matcher: a pointer-state change must not retain one per event
+        SelectorMatcher matcher_storage;
+        selector_matcher_init(&matcher_storage, pool);
+        state_configure_selector_matcher(state, &matcher_storage);
+        radiant_apply_css_stylesheets_to_tree(
+            doc, doc->root, doc->stylesheets, doc->stylesheet_count,
+            pool, css_engine, &matcher_storage);
     }
 }
 

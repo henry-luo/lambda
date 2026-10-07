@@ -164,20 +164,6 @@ static const char* try_parse_complete_tag(const char* start) {
 // ============================================================================
 
 /**
- * HtmlBlockType - The 7 types of HTML blocks defined by CommonMark
- */
-enum class HtmlBlockType {
-    NONE = 0,
-    TYPE_1,  // pre, script, style, textarea
-    TYPE_2,  // <!-- comment -->
-    TYPE_3,  // <? processing instruction ?>
-    TYPE_4,  // <!DOCTYPE or similar
-    TYPE_5,  // <![CDATA[
-    TYPE_6,  // Block-level tags
-    TYPE_7   // Complete tag on single line
-};
-
-/**
  * detect_html_block_type - Detect what type of HTML block starts at this line
  *
  * @param line The line to check

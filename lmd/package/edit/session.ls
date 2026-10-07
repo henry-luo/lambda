@@ -56,7 +56,11 @@ pub fn new_session(path, format, source, loaded) =>
 
 // Dirty compares content with the saved checkpoint, so undoing back to the
 // saved document is clean again and selection or view changes never dirty it.
-pub fn is_dirty(session, doc) => doc != session.saved_doc
+// A format whose documents are too large to compare whole supplies `same_doc`
+// (the source buffer compares versions, Radiant_Design_Source_Editor §5.1).
+pub fn is_dirty(session, doc) =>
+  if (session.format.same_doc != null) not session.format.same_doc(doc, session.saved_doc)
+  else doc != session.saved_doc
 
 pub fn window_title(session, dirty) =>
   (if (dirty) "* " else "") ++ session.name ++ " - Lambda Edit"

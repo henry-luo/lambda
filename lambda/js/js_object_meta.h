@@ -1,6 +1,7 @@
 // Tune6 object metadata and exotic-operation contract.
 #ifndef LAMBDA_JS_OBJECT_META_H
 #define LAMBDA_JS_OBJECT_META_H
+#include "../../lib/lambda_api.h"
 
 #include "js_class.h"
 
@@ -90,9 +91,9 @@ extern "C" {
 #endif
 
 const JsClassMeta* js_class_meta_for_id(JsClassId id);
-JsClassId js_class_id_from_meta(const JsClassMeta* meta);
+LAMBDA_RT_API JsClassId js_class_id_from_meta(const JsClassMeta* meta);
 void js_object_metadata_initialize(void);
-const JsClassMeta* js_object_meta(Item value);
+LAMBDA_RT_API const JsClassMeta* js_object_meta(Item value);
 bool js_object_has_class(Item value, JsClassId id);
 bool js_object_uses_ordinary_shape(Item value);
 bool js_object_uses_default_object_to_primitive(Item value);

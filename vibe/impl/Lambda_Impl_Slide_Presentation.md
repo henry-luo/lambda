@@ -1,13 +1,69 @@
 # Lambda Slide Presentation — Implementation
 
-> **Status:** in progress, 2026-10-07.
+> **Status:** milestones 13.1–13.5 met on the measured decks, 2026-10-07 (see the acceptance round); not yet merged.
 > **Authorized scope:** implement [the package design](../Lambda_Pkg_Slide_Presentation.md);
 > no PPTX import/export.
 > **Contracts:** D7.2.4/D7.5.3 package and host boundaries; S12.1.1v2/S12.1.3
 > pure transformations and procedural event handlers; S2.6.3 element splicing;
 > D4.5.1v4/D5.3.3 ownership and precise roots; D7.2.2 boxed import entries; D2.1.3 tagged string leaves.
 
-## Current progress — 2026-10-07
+## Acceptance round — 2026-10-07 (frame cost and retention)
+
+This round closes the 13.5 storage and frame-cost gates on the measured decks.
+The changes are commits `e9063e4bf`, `3bd129379`, `c985b7a27`, `2409c4488`,
+`9384097ad` and `8f6bad70d` on the `worktree-slide-acceptance` branch (not yet
+merged); the older progress notes below are history.
+
+| Gate | Change | Evidence |
+|---|---|---|
+| Computed font-family ownership | Joined family lists are canonical per view tree (`view_tree_canonical_font_family`); equal lists share one tree-lifetime string, so inherited/copied borrowers stay valid (D4.5.1v4) | 100-target opacity reproducer holds view-pool live bytes flat over 60 callbacks (was +3.4 KB/frame, +5.2 KB/frame with a family list) |
+| Other view-pool growth | Motion lists resolve in a per-call scratch pool; `line-height: normal` is one static value; selector queries/matchers use call scratch and `selector_matcher_destroy` frees; retired registry records are freed on slot recycle | Same reproducer flat; 20-round navigation holds document and view pools flat with collection |
+| Wrapper-stranded detached DOM | SLD6 idle-time collection: the lifecycle registry charges wrapper-only rejected candidates once, and an idle point collects when 64 KB is newly stranded | 20-round navigation: zero collections and +3.7 MB before; a bounded 120–560 KB document-pool band with six idle collections after |
+| Published-fragment / navigation retention | SLD1–SLD5: decks are `.slides` files presented by the `slides` transform; a slide renders once, on first view, and later navigation changes only state (D2.9.3) | 20-round two-slide navigation holds Input 92,480 B, document pool ~130 KB and view pool ~53 KB flat after warm-up (was +17.5 KB Input per round, never reclaimable) |
+| Per-frame cost | One host style context per inline-SVG paint pass; a paint-only commit for presentation `opacity`/`transform` turns; inline-SVG layers keyed on content (`style_content_epoch`, `doc_state_content_version`) and folding a uniform stage scale (RAD_14 §4.4, RAD_16 §8) | Release timing below: turn + paint p50 and p95 under 16.67 ms at both viewports on a quiet machine |
+
+Release timing: Apple M4, `temp/slide/perf_mixed.ls` (100 simultaneously
+animated text/shape/image wrappers, a one-second fly-in on a fitted stage), 60
+aligned callback/paint pairs per run, three interleaved runs per binary taken
+when the 1-minute load average had fallen to about 10 (other sessions were
+compiling earlier). *Before* is `lambda_release_batch2` (the retention commits,
+none of the frame work); *after* is the branch head. Cells are p50 / p95 ms of
+the run with the lowest turn + paint median; the last row is the median across
+the three runs.
+
+| Phase | 1280 × 720 before → after | 1920 × 1080 before → after |
+|---|---:|---:|
+| Script + synchronous host | 4.90 / 6.04 → 4.91 / 5.61 | 4.73 / 5.10 → 4.71 / 5.41 |
+| Cascade | 2.31 / 2.64 → 0.20 / 0.22 | 2.26 / 2.68 → 0.17 / 0.26 |
+| Layout | 10.04 / 10.55 → 0 / 0 | 9.56 / 10.19 → 0 / 0 |
+| Paint record | 10.10 / 10.49 → 0.98 / 1.49 | 9.74 / 10.08 → 0.97 / 1.40 |
+| Paint replay | 4.56 / 4.90 → 3.71 / 4.20 | 5.04 / 5.34 → 3.98 / 4.47 |
+| Paint total | 16.08 / 16.60 → 6.08 / 6.51 | 16.11 / 16.73 → 6.30 / 7.30 |
+| Paired turn + paint | 33.40 / 37.67 → **11.18 / 15.67** | 32.67 / 37.77 → **11.20 / 15.25** |
+| Median of three runs | 33.63 / 37.87 → **11.33 / 15.67** | 34.10 / 40.44 → **11.49 / 15.74** |
+
+Turn + paint is under 16.67 ms at p50 and p95 at both viewports. One 1920 run
+had a 22.1 ms p95 from a single paint-replay outlier, and the same binaries
+measured under load average 30–60 give p50 11.8–15.3 ms with p95 up to 40 ms:
+the budget holds on a quiet machine, not under heavy contention. The measurement
+excludes GUI presentation and event-pump latency. Remaining per-frame cost is
+Lambda sampling plus host writes (~4.8 ms) and raster replay of 100 objects
+(~4 ms). Artifacts: `temp/slide/quiet_{1280,1920}.txt`, `ab_q_*` logs and
+`final_table.py`.
+
+| Verification on the branch head | Result |
+|---|---|
+| Focused fixtures, forced GC + freed-memory poisoning | 15 slide/host/transform fixtures, 273 assertions pass (126 Northstar, 32 speed, 14 navigation-state, 6 paint-only) |
+| Package scripts | 13 scripts × JIT/interpreter = 26 runs match their expected output |
+| Navigation retention | 20 rounds / 40 assertions: Input 92,480 B, document pool 129.6 KB and view pool 53.1 KB flat after the first round |
+| SVG paint parity | `test_svg_paint.cjs` and `test_svg_smil.cjs` pass at 1× and 2× with layers off and eager; a 0.907-scaled stage cached vs direct differs only by the whole-pixel snap (ink centroid ≤0.46 px, ink totals within 0.05%) |
+| Full Lambda baseline | 6,272 / 6,275; the three REPL session failures are the locale cases recorded as environmental |
+| Full Radiant baseline | 4,042 pass, 350 partial, 8 fail. All 8 are environmental or pre-existing: `tetris_smoke`; `doc_editor_text_to_pdf` and `page_facatology` (the pre-branch binary fails identically in this worktree); four `dom_jquery_ui_*` (the tracked `test/jquery-ui` symlink resolves only from the main checkout); `bootstrap_5_kitchen_sink_` page load (15 s timeout under load; passes standalone in 10 s); CSS cascade memory (jqueryui `css_live` 378,762 B and linuxmint 668,986 B, identical with the pre-branch binary) |
+| Lint | Radiant float/int-cast rule passes; the full sweep's mem-kind, header-ratchet and editable-registry findings name no field or header this branch adds |
+
+## Progress before the acceptance round — 2026-10-07
+
+*Superseded by the acceptance round above; kept as history.*
 
 Proposal milestones **13.1–13.4 are implemented within their documented scope**.
 Milestone **13.5 remains open**: release playback exceeds the 16.67 ms frame
@@ -44,6 +100,13 @@ buffer (D4.5.1v4). The generic input fix preserves the package boundary (D7.5.3)
 The toolbar range is 0.5×–4× in quarter steps. Pixel assertions now verify actual
 thumb movement on clicks and drags, both endpoints, and persistence through
 Restart and later layout updates; value/readout assertions alone missed the bug.
+The native range thumb now uses the existing circle fill/outline helpers in
+`render_form.cpp`, preserving its size and interaction geometry (D7.5.3).
+The toolbar preview was visually checked and all 32 speed assertions still pass.
+The full Radiant baseline retains 4,031 passes / 350 partial / 4 failures; both
+HTTP setup failures pass with loopback access, leaving the existing Tetris and
+LaTeX iframe failures. Float/int-cast lint passes. Artifacts:
+`temp/slide/circle_thumb_*` and `temp/slide/northstar/circle-thumb-controls.png`.
 
 | Latest verification | Result and boundary |
 |---|---|
@@ -51,12 +114,12 @@ Restart and later layout updates; value/readout assertions alone missed the bug.
 | Focused UI | 14 slide/host fixtures, 255 assertions pass with forced collection and freed-memory poisoning, including 126 Northstar checks and 32 speed-slider checks |
 | Merged native checks | 405 cases pass, including transition-track retirement |
 | Full Lambda baseline | 6,297/6,297 pass after the range-thumb and value-storage fixes |
-| Full Radiant baseline | 4,031 pass, 350 partial, 4 fail after the speed/name-root fix; both HTTP setup failures pass with loopback access; Tetris smoke and LaTeX iframe navigation remain failed |
+| Full Radiant baseline | 4,031 pass, 350 partial, 4 fail after the range-thumb/value-storage fixes; both HTTP setup failures pass with loopback access; Tetris smoke and LaTeX iframe navigation remain failed |
 | Navigation stress | Normal and forced-GC/poison runs each pass 40 assertions over 20 rounds / 120 callbacks; forced run has no raw-pointer or inconsistent-focus-ancestry diagnostics |
 | Latest lint / diff | Radiant float/int-cast lint and whitespace checks pass |
 
 All layout, render, DOM UI and memory baseline gates pass. Full Lambda and
-Radiant baselines were rerun sequentially after the speed/name-root fix; the
+Radiant baselines were rerun sequentially after the range-thumb/value-storage fixes; the
 405-case native row is the earlier merge verification. Older rounds below are
 retained as history and do not describe the current failure set.
 
@@ -195,7 +258,11 @@ dragging to both endpoints and retaining the thumb through later layout. The
 4× completion timing. All 13 package scripts pass in both tiers (26 runs), and
 all 14 slide/host release replays pass 255 assertions with forced GC/poison.
 Existing plain-JS range and pointer replays pass 26 and 11 assertions normally.
-Float/int-cast lint passes. Artifacts: `temp/slide/thumb_*`.
+The regular UI runner also passes all 32 speed assertions. Sequential full
+baselines retain 6,297/6,297 Lambda passes and Radiant's 4,031 pass / 350 partial /
+4 fail result. Both sandbox HTTP-server setup failures pass on a loopback-enabled
+rerun; the previously recorded Tetris and LaTeX iframe failures remain. Float/int-cast
+lint and whitespace checks pass. Artifacts: `temp/slide/thumb_*`.
 
 | Milestone | Status |
 |---|---|
@@ -854,7 +921,9 @@ the ordinary run, so GC does not reclaim that native growth. Neither repeat
 establishes a retention bound. Artifacts are `merged_navigation_gc.log`, its
 result JSON and `merged_navigation_gc_summary.json` under `temp/slide/`.
 
-## Remaining implementation and acceptance plan
+## Pre-acceptance plan (completed)
+
+*Items 1–4 were completed in the acceptance round at the top of this report; item 5 is that section.*
 
 1. **Repair computed font-family ownership.** Audit `css_join_font_family_parts`,
    family selection and shorthand paths, `FontProp` copies, inherited values,
