@@ -192,6 +192,9 @@ fn span_cols(sp, line, text) =>
 // Outermost first: a container starts at or before the blocks inside it.
 fn by_start(sp) => sp.line * 1000000 + sp.col
 
+// Most lines have at most one container and one leaf: skip the sort then.
+fn outermost_first(spans) => if (len(spans) < 2) spans else sort(spans, by_start)
+
 // Runs for one line from the spans touching it: container markers and the
 // leaf blocks inside them, then inline constructs outermost first, so nested
 // constructs paint over their parents.
@@ -199,14 +202,16 @@ fn line_runs(text, line, spans, fm_end) {
   if (line <= fm_end) [run(0, len(text), "tok-meta")]
   else {
     let here = [for (sp in spans where sp.line <= line and sp.end_line >= line) sp]
-    let containers = sort([for (sp in here where sp.block and is_container(sp.kind)) sp], by_start)
-    let leaves = sort([for (sp in here where sp.block and not is_container(sp.kind)) sp], by_start)
+    let containers = outermost_first([for (sp in here where sp.block and is_container(sp.kind)) sp])
+    let leaves = outermost_first([for (sp in here where sp.block and not is_container(sp.kind)) sp])
     let inlines = sort([for (sp in here where not sp.block) sp],
                        (sp) => 0 - ((sp.end_line - sp.line) * 100000 + sp.end_col - sp.col))
     let marks = container_marks(text, containers, 0, 0, [])
     // inner leaves paint over outer ones, and the markers over both
-    let leaf = paint_all([], [for (sp in leaves) for (r in leaf_runs(text, line, sp, marks.at)) r], 0)
-    let base = paint_all(leaf, marks.runs, 0)
+    // one leaf's runs are already sorted and disjoint
+    let leaf_list = [for (sp in leaves) for (r in leaf_runs(text, line, sp, marks.at)) r]
+    let leaf = if (len(leaves) < 2) leaf_list else paint_all([], leaf_list, 0)
+    let base = if (len(marks.runs) == 0) leaf else paint_all(leaf, marks.runs, 0)
     merge(inline_runs(text, line, inlines, 0, base))
   }
 }
