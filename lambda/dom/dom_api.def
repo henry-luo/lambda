@@ -455,14 +455,13 @@ DOM_OP(DERIVED, click,           event, 1, "pn(n: any) -> bool", DOM_NO_BODY, DO
 // Each of these was a `->dom` slot with no row. The row's body is literally the
 // slot's function, so the module crossing here is a spelling change, not a
 // second implementation; the bridges answer `undefined` and the publication
-// boundary renders that as null for Lambda. None carries DOM_F_NEUTRAL: they
-// need a realm (CSSOM objects, the document wrapper), so they are catalog
-// operations the module reaches, not `dom.*` functions a script calls.
+// boundary renders that as null for Lambda. Neutral rows below use native
+// document ownership; the remaining bridges still require a JS realm.
 // ---------------------------------------------------------------------------
 DOM_OP(CORE, adopt_node, node, 1, "pn(n: any) -> any", dom_adopt_node_bridge, DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, style_has_property, style, 2, "fn(n: any, prop: string) -> any", dom_style_css_has, 0, "", none, "", "")
-DOM_OP(CORE, style_get_property, style, 2, "fn(n: any, prop: string) -> any", dom_get_style_property, 0, "", none, "", "")
-DOM_OP(CORE, style_set_property, style, 3, "pn(n: any, prop: string, value: any) -> any", dom_set_style_property, DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, style_get_property, style, 2, "fn(n: any, prop: string) -> any", dom_get_style_property, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, style_set_property, style, 3, "pn(n: any, prop: string, value: any) -> any", dom_set_style_property, DOM_F_MUTATES | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_style_has_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_decl_css_has, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_style_get_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_rule_decl_get_property, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_style_set_property, style, 3, "pn(d: any, prop: string, value: any) -> any", dom_cssom_rule_decl_set_property, DOM_F_MUTATES | DOM_F_NEUTRAL, "", none, "", "")
@@ -699,6 +698,43 @@ DOM_OP(CORE, rule_get_property_syntax, style, 1, "fn(rule: any) -> any", dom_css
 DOM_OP(CORE, rule_get_property_inherits, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_inherits, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_get_property_initial_value, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_initial_value, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, css_register_property, style, 1, "pn(definition: map) -> null", dom_core_css_register_property, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+
+// receiver-specific CSSOM interfaces stay behind the Jube host catalog (D7.3.3).
+DOM_OP(CORE, rule_get_prototype, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_prototype, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_style_get_value, style, 2, "fn(d: any, prop: string) -> string", dom_cssom_rule_decl_get_value, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_style_get_priority, style, 2, "fn(d: any, prop: string) -> string", dom_cssom_rule_decl_get_priority, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_style_set_value, style, 4, "pn(d: any, prop: string, value: any, priority: any) -> null", dom_cssom_rule_decl_set_value, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, rule_style_item, style, 2, "fn(d: any, index: int) -> string", dom_cssom_rule_decl_item, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, stylesheet_set_disabled, style, 2, "pn(sheet: any, value: any) -> any", dom_cssom_stylesheet_set_disabled_property, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, stylesheet_get_owner_node, style, 1, "fn(sheet: any) -> any", dom_cssom_stylesheet_get_owner_node, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, stylesheet_get_owner_rule, style, 1, "fn(sheet: any) -> any", dom_cssom_stylesheet_get_owner_rule, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, stylesheet_get_parent_style_sheet, style, 1, "fn(sheet: any) -> any", dom_cssom_stylesheet_get_parent_style_sheet, DOM_F_NEUTRAL, "", none, "", "")
+DOM_RAW(retain_owned_document, document, bool, (void* document), dom_retain_owned_document, DOM_F_NEUTRAL)
+DOM_RAW(cached_node_wrapper, node, Item, (void* node), dom_cached_node_wrapper, DOM_F_NEUTRAL)
+DOM_RAW(cache_node_wrapper, node, bool, (void* node, void* document, Item wrapper), dom_cache_node_wrapper, DOM_F_NEUTRAL)
+DOM_RAW(cached_node_wrapper_document, node, void*, (Item wrapper), dom_cached_node_wrapper_document, DOM_F_NEUTRAL)
+DOM_RAW(wrapper_weak_slots_processed, node, void, (void), dom_wrapper_weak_slots_processed, DOM_F_NEUTRAL)
+DOM_RAW(invalidate_document_wrappers, document, void, (void* document), dom_cssom_invalidate_document, DOM_F_NEUTRAL)
+DOM_RAW(release_document_wrappers, document, void, (void), dom_cssom_release_context, DOM_F_NEUTRAL)
+DOM_RAW(node_owner_document, node, void*, (void* node), dom_node_owner_document_bridge, DOM_F_NEUTRAL)
+DOM_RAW(visible_child, node, void*, (void* element, bool first), dom_visible_child, DOM_F_NEUTRAL)
+DOM_RAW(visible_sibling, node, void*, (void* node, bool forward), dom_visible_sibling, DOM_F_NEUTRAL)
+
+DOM_RAW(rule_type_prototype, style, Item, (const char* name), dom_cssom_rule_type_prototype, DOM_F_NEUTRAL)
+DOM_OP(CORE, rule_get_condition_text, style, 1, "fn(rule: any) -> string", dom_cssom_rule_get_condition_text, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_set_style, style, 2, "pn(rule: any, value: any) -> any", dom_cssom_rule_set_style, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, rule_set_css_text, style, 2, "pn(rule: any, value: any) -> any", dom_cssom_rule_set_css_text, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, rule_get_namespace_prefix, style, 1, "fn(rule: any) -> string", dom_cssom_rule_get_namespace_prefix, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, rule_get_namespace_uri, style, 1, "fn(rule: any) -> string", dom_cssom_rule_get_namespace_uri, DOM_F_NEUTRAL, "", none, "", "")
+
+// named frame delivery is shared host mechanism; animation policy stays in packages
+DOM_OP(CORE, request_frame, timing, 2, "pn(n: any, event_name: string) -> int", dom_engine_request_frame, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, cancel_frame, timing, 2, "pn(n: any, token: int) -> bool", dom_engine_cancel_frame, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_RAW(frame_request_native, timing, uint64_t, (void* owner, const char* event_name), dom_engine_frame_request, DOM_F_NATIVE)
+DOM_RAW(frame_cancel_native, timing, bool, (void* owner, uint64_t token), dom_engine_frame_cancel, DOM_F_NATIVE)
+DOM_OP(CORE, viewport_size, geometry, 1, "fn(n: any) -> map|null", dom_engine_viewport_size, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, presentation_style_set_property, style, 3, "pn(n: any, prop: string, value: string) -> bool", dom_presentation_style_set_property, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, presentation_style_clear, style, 1, "pn(n: any) -> bool", dom_presentation_style_clear, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP

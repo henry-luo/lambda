@@ -1,4 +1,5 @@
 #include "css_paged_media.hpp"
+#include "css_formatter.hpp"
 #include "../../../lib/mem_grow.hpp"
 #include "../../../lib/str.h"
 #include <string.h>
@@ -13,8 +14,8 @@ const char* css_page_margin_box_name(CssPageMarginBox box) {
     return box < CSS_PAGE_MARGIN_BOX_COUNT ? page_margin_names[box] : nullptr;
 }
 
-static int page_space(const CssToken* tokens, int pos, int end) {
-    while (pos < end && (tokens[pos].type == CSS_TOKEN_WHITESPACE ||
+static int page_space(const CssToken* tokens, int pos, int end, bool whitespace = true) {
+    while (pos < end && ((whitespace && tokens[pos].type == CSS_TOKEN_WHITESPACE) ||
                         tokens[pos].type == CSS_TOKEN_COMMENT)) pos++;
     return pos;
 }
@@ -37,10 +38,10 @@ static bool page_selectors_parse(CssPageRule* rule, const CssToken* tokens,
             selector.name = pool_dup_n(pool, tokens[pos].value, strlen(tokens[pos].value));
             if (!selector.name) return false;
             selector.named_specificity = 1;
-            pos++;
+            pos = page_space(tokens, pos + 1, end, false);
         }
         while (pos < end && tokens[pos].type == CSS_TOKEN_COLON) {
-            pos++;
+            pos = page_space(tokens, pos + 1, end, false);
             if (pos >= end || tokens[pos].type != CSS_TOKEN_IDENT) return false;
             uint8_t flag = 0;
             if (page_token_is(&tokens[pos], "first")) flag = CSS_PAGE_FIRST;
@@ -51,19 +52,31 @@ static bool page_selectors_parse(CssPageRule* rule, const CssToken* tokens,
             selector.pseudos |= flag;
             if (flag == CSS_PAGE_FIRST || flag == CSS_PAGE_BLANK) selector.state_specificity++;
             else selector.side_specificity++;
-            pos++;
+            pos = page_space(tokens, pos + 1, end, false);
         }
         if (!lam::pool_grow_array(pool, &rule->selectors, &capacity,
                                   rule->selector_count + 1, 4)) return false;
         rule->selectors[rule->selector_count++] = selector;
         pos = page_space(tokens, pos, end);
-        if (pos == end) return true;
+        if (pos == end) {
+            rule->selector_text = css_format_page_selector_tokens(tokens, start, end, pool);
+            return rule->selector_text != nullptr;
+        }
         if (tokens[pos].type != CSS_TOKEN_COMMA) return false;
         pos = page_space(tokens, pos + 1, end);
         if (pos == end || (tokens[pos].type != CSS_TOKEN_IDENT &&
                           tokens[pos].type != CSS_TOKEN_COLON)) return false;
     } while (pos < end);
     return false;
+}
+
+CssPageRule* css_page_selectors_parse_text(const char* text, size_t length, Pool* pool) {
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(text, length, pool, &count);
+    if (!tokens || !count) return nullptr;
+    if (tokens[count - 1].type == CSS_TOKEN_EOF) count--;
+    CssPageRule* rule = (CssPageRule*)pool_calloc(pool, sizeof(CssPageRule));
+    return rule && page_selectors_parse(rule, tokens, 0, (int)count, pool) ? rule : nullptr;
 }
 
 static bool page_declarations_parse(const CssToken* tokens, int start, int end,

@@ -1,0 +1,8 @@
+"codes:"
+["unresolved-reference"]
+"range:"
+true
+"capitalized:"
+true
+"unresolved visible:"
+true

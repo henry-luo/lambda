@@ -3,6 +3,7 @@
 #include "rdt_video.h"
 #include "event.hpp"
 #include "render.hpp"
+#include "../lambda/module/radiant/radiant_input_value.hpp"
 #include "../lib/str.h"
 #include "../lib/strview.h"
 #include "../lib/memtrack.h"
@@ -525,7 +526,7 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
             block->embed->has_controls = element->has_attribute("controls");
             const char* poster_src = element->get_attribute("poster");
             if (poster_src && *poster_src) {
-                block->embed->poster = lam::up(load_image(lycon->ui_context, poster_src));
+                block->embed->poster = lam::up(load_document_image(lycon->doc, lycon->ui_context, poster_src));
             }
         }
 
@@ -1552,6 +1553,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (min_attr) block->form->range_min = str_to_double_default(min_attr, strlen(min_attr), 0.0);
             if (max_attr) block->form->range_max = str_to_double_default(max_attr, strlen(max_attr), 0.0);
             if (step_attr) block->form->range_step = str_to_double_default(step_attr, strlen(step_attr), 0.0);
+            // reflow must retain the user's live thumb position, not restore the value attribute.
+            if (const char* live_value = radiant_input_peek_live_value(block)) {
+                block->form->value = live_value;
+            }
             if (block->form->value) {
                 float val = (float)str_to_double_default(block->form->value, strlen(block->form->value), 0.0);
                 float normalized = (val - block->form->range_min) /

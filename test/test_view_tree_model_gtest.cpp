@@ -12,9 +12,67 @@
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lib/mem_factory.h"
+#include "../lib/memtrack.h"
 #include "../lib/file.h"
 #include "../lib/font/font.h"
 #include <math.h>
+
+TEST(ViewModelOptionsTest, PageSelectionsParseStrictPhysicalRangesWithoutPartialPublication) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.page.selection"); ASSERT_NE(pool, nullptr);
+    ViewPageSelection selection = {};
+    ASSERT_EQ(view_page_selection_parse(pool, nullptr, &selection), VIEW_MODEL_OK); EXPECT_TRUE(selection.all);
+    ASSERT_EQ(view_page_selection_parse(pool, " none ", &selection), VIEW_MODEL_OK); EXPECT_FALSE(selection.all);
+    ASSERT_EQ(view_page_selection_parse(pool, " 4 - 5, 2,4 ", &selection), VIEW_MODEL_OK);
+    ASSERT_EQ(selection.range_count, 3u); EXPECT_FALSE(selection.all);
+    EXPECT_EQ(selection.ranges[0].first, 4u); EXPECT_EQ(selection.ranges[0].last, 5u);
+    EXPECT_EQ(selection.ranges[1].first, 2u); EXPECT_EQ(selection.ranges[2].first, 4u);
+    ViewPageSelection retained = selection;
+    const char* invalid[] = {"", " ", "0", "1,", "1, ", "1,,2", "-1", "2-1", "1-0", "1-all", "all,1",
+        "1x2", "1.5", "1e2", "1 2", "1;2", "4294967296", "1-4294967296", "18446744073709551616"};
+    for (const char* text : invalid) {
+        SCOPED_TRACE(text); EXPECT_FALSE(view_page_selection_text_valid(text));
+        EXPECT_EQ(view_page_selection_parse(pool, text, &selection), VIEW_MODEL_INVALID_PAGE_RANGE);
+        EXPECT_EQ(selection.ranges, retained.ranges); EXPECT_EQ(selection.range_count, retained.range_count);
+    }
+    EXPECT_TRUE(view_page_selection_text_valid("4294967295"));
+    EXPECT_FALSE(view_page_selection_text_valid(nullptr));
+    EXPECT_EQ(view_page_selection_parse(nullptr, "all", &selection), VIEW_MODEL_INVALID_ARGUMENT);
+    EXPECT_EQ(view_page_selection_parse(pool, "all", nullptr), VIEW_MODEL_INVALID_ARGUMENT);
+    mem_pool_destroy(pool);
+}
+
+TEST(ViewModelOptionsTest, PagedRenderOptionsKeepPreviewGeometrySeparateFromPhysicalSelection) {
+    RenderPagedOptions options = render_paged_options_default(); const char* error = nullptr;
+    EXPECT_EQ(options.preview.rows, 1u); EXPECT_EQ(options.preview.scale, 1.0f);
+    EXPECT_FALSE(options.block_remote_resources);
+    ASSERT_TRUE(render_paged_option_apply(&options, "--block-remote-resources", nullptr, &error));
+    EXPECT_TRUE(options.block_remote_resources);
+    EXPECT_EQ(render_paged_option_arity("--unknown"), -1); EXPECT_EQ(render_paged_option_arity("--book"), 0);
+    EXPECT_EQ(render_paged_option_arity("--pages"), 1);
+    ASSERT_TRUE(render_paged_option_apply(&options, "--pages", "1,3-5", &error));
+    ASSERT_TRUE(render_paged_option_apply(&options, "--export-pages", "2,4", &error));
+    EXPECT_STREQ(options.preview_pages, "1,3-5"); EXPECT_STREQ(options.export_pages, "2,4");
+    ASSERT_TRUE(render_paged_option_apply(&options, "--page-grid", "2x3", &error));
+    EXPECT_EQ(options.preview.rows, 2u); EXPECT_EQ(options.preview.columns, 3u);
+    ASSERT_TRUE(render_paged_option_apply(&options, "--page-scale", ".25", &error));
+    ASSERT_TRUE(render_paged_option_apply(&options, "--thumbnail-page", "5", &error));
+    EXPECT_EQ(options.preview.scale, .25f); EXPECT_EQ(options.thumbnail_page, 5u);
+    ASSERT_TRUE(render_paged_option_apply(&options, "--book-page", "2", &error));
+    EXPECT_EQ(options.preview.arrangement, VIEW_PAGES_BOOK); EXPECT_EQ(options.preview.anchor_page, 2u);
+    const struct { const char* name; const char* value; } invalid[] = {
+        {"--pages", "1,"}, {"--page-grid", "0x2"}, {"--page-grid", "2x3x4"}, {"--page-grid", "2"},
+        {"--page-fill", "diagonal"}, {"--page-groups", "row"}, {"--page-scale", "nan"},
+        {"--page-scale", "inf"}, {"--page-scale", "1px"}, {"--page-scale", "1e100"},
+        {"--page-scale", "1e-100"}, {"--page-scale", "0"}, {"--page-padding", "-1"},
+        {"--thumbnail-page", "0"}, {"--book-page", "1.5"}, {"--book-page", "4294967296"}, {"--pages", nullptr}};
+    for (const auto& argument : invalid) {
+        SCOPED_TRACE(argument.name);
+        SCOPED_TRACE(argument.value ? argument.value : "missing");
+        EXPECT_FALSE(render_paged_option_apply(&options, argument.name, argument.value, &error));
+        EXPECT_NE(error, nullptr); EXPECT_EQ(options.preview.scale, .25f); EXPECT_EQ(options.thumbnail_page, 5u);
+    }
+    ASSERT_TRUE(render_paged_option_apply(&options, "--page-padding", "0", &error)); EXPECT_EQ(error, nullptr);
+}
 
 TEST(PagedCssTest, TypedSelectorsMarginsAndOriginalStrings) {
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_VIEW, "test.paged.css");
@@ -134,6 +192,45 @@ TEST(TypesetTest, OrderedGlueAndSignedPenaltiesRemainDistinctFromLegality) {
     EXPECT_EQ(line.next, 5u);
 }
 
+TEST(TypesetTest, BeforeBoundariesExcludeUnconsumedMetricsAndKeepTheirNativePenalty) {
+    TypesetItem items[3] = {};
+    items[0].metrics = {20.0f, 8.0f, 2.0f, 8.0f, {}, nullptr};
+    items[1].metrics = {40.0f, 42.0f, 8.0f, 42.0f, {}, nullptr};
+    items[2].metrics = items[0].metrics; items[2].metrics.advance = 15.0f;
+    items[1].has_before = true; items[1].before = {TYPESET_BREAK_ALLOWED, TYPESET_BREAK_LINE, -23, 71};
+    items[2].has_before = true; items[2].before = {TYPESET_BREAK_FORCED, TYPESET_BREAK_LINE, -99, 72};
+    TypesetParagraph paragraph = {items, 3, 10.0f, nullptr, nullptr, nullptr, nullptr, 8.0f};
+    TypesetLineCandidate scratch[3] = {}, line = {};
+    ASSERT_EQ(typeset_next_line(&paragraph, 0, 30.0f, scratch, 3, &line), TYPESET_OK);
+    EXPECT_EQ(line.next, 1u); EXPECT_EQ(line.paint_end, 1u);
+    EXPECT_FLOAT_EQ(line.width, 20.0f); EXPECT_FLOAT_EQ(line.height, 10.0f); EXPECT_FLOAT_EQ(line.depth, 2.0f);
+    EXPECT_EQ(line.penalty, -23); EXPECT_FALSE(line.forced);
+    ASSERT_EQ(typeset_next_line(&paragraph, 1, 60.0f, scratch, 3, &line), TYPESET_OK);
+    EXPECT_EQ(line.next, 2u); EXPECT_EQ(line.paint_end, 2u); EXPECT_TRUE(line.forced);
+    EXPECT_FLOAT_EQ(line.height, 50.0f); EXPECT_EQ(line.penalty, -99);
+    ASSERT_EQ(typeset_next_line(&paragraph, 2, 30.0f, scratch, 3, &line), TYPESET_OK);
+    EXPECT_EQ(line.next, 3u); EXPECT_FALSE(line.forced); EXPECT_FLOAT_EQ(line.height, 10.0f);
+}
+
+TEST(TypesetTest, BeforeBoundariesPreserveGlueTrimmingAndCandidateCapacity) {
+    TypesetItem items[3] = {};
+    items[0].metrics = {20.0f, 8.0f, 2.0f, 8.0f, {}, nullptr};
+    items[1].kind = TYPESET_GLUE; items[1].glue = {5.0f, 0.0f, 0.0f, 0, 0, true, true};
+    items[2].metrics = items[0].metrics;
+    items[2].has_before = true; items[2].before = {TYPESET_BREAK_ALLOWED, TYPESET_BREAK_LINE, 0, 0};
+    TypesetParagraph paragraph = {items, 3, 10.0f, nullptr, nullptr, nullptr};
+    TypesetLineCandidate scratch[2] = {}, line = {};
+    EXPECT_EQ(typeset_line_alternatives(&paragraph, 0, 30.0f, scratch, 2, nullptr), 2u);
+    ASSERT_EQ(typeset_next_line(&paragraph, 0, 30.0f, scratch, 2, &line), TYPESET_OK);
+    EXPECT_EQ(line.next, 2u); EXPECT_EQ(line.paint_end, 1u); EXPECT_FLOAT_EQ(line.width, 20.0f);
+    items[2].before.legality = TYPESET_BREAK_FORCED;
+    EXPECT_EQ(typeset_line_alternatives(&paragraph, 0, 30.0f, scratch, 2, nullptr), 1u);
+    EXPECT_TRUE(scratch[0].forced); EXPECT_EQ(scratch[0].next, 2u);
+    items[2].before.scope = TYPESET_BREAK_PAGE;
+    ASSERT_EQ(typeset_next_line(&paragraph, 0, 30.0f, scratch, 2, &line), TYPESET_OK);
+    EXPECT_FALSE(line.forced);
+}
+
 static size_t alternate_lines(const TypesetParagraph*, size_t first, float,
         TypesetLineCandidate* candidates, size_t capacity, void*) {
     if (capacity < 2) return 2;
@@ -153,6 +250,24 @@ TEST(TypesetTest, NativeProviderSuppliesAlternativesToDifferentPolicies) {
     ASSERT_EQ(typeset_next_line(&paragraph, 0, 100.0f, scratch, 2, &line), TYPESET_OK);
     EXPECT_EQ(line.next, 2u);
     EXPECT_EQ(typeset_next_line(&paragraph, 0, 100.0f, scratch, 1, &line), TYPESET_BUDGET_EXHAUSTED);
+}
+
+static bool width_relative_native_metrics(const TypesetParagraph*, size_t, float width,
+        TypesetMetrics* metrics, void*) {
+    *metrics = {width * 0.5f, width * 0.25f, 0.0f, width * 0.25f, {}, nullptr};
+    return true;
+}
+
+TEST(TypesetTest, WidthSpecificMetricsDoNotChangeSourceItemsAndKeepTheStrutDescent) {
+    TypesetItem item = {}; item.kind = TYPESET_BOX; item.metrics.advance = 17.0f;
+    TypesetParagraph paragraph = {&item, 1, 12.0f, nullptr, nullptr, nullptr};
+    paragraph.measure = width_relative_native_metrics; paragraph.minimum_baseline = 9.0f;
+    TypesetLineCandidate scratch[1] = {}, wide = {}, narrow = {};
+    ASSERT_EQ(typeset_next_line(&paragraph, 0, 120.0f, scratch, 1, &wide), TYPESET_OK);
+    ASSERT_EQ(typeset_next_line(&paragraph, 0, 80.0f, scratch, 1, &narrow), TYPESET_OK);
+    EXPECT_FLOAT_EQ(wide.width, 60.0f); EXPECT_FLOAT_EQ(wide.height, 33.0f); EXPECT_FLOAT_EQ(wide.baseline, 30.0f);
+    EXPECT_FLOAT_EQ(narrow.width, 40.0f); EXPECT_FLOAT_EQ(narrow.height, 23.0f); EXPECT_FLOAT_EQ(narrow.baseline, 20.0f);
+    EXPECT_FLOAT_EQ(item.metrics.advance, 17.0f); EXPECT_EQ(item.paint, nullptr);
 }
 
 static TypesetStatus copy_resume(void*, const TypesetResume* cursor, TypesetResume* saved) {
@@ -220,6 +335,35 @@ TEST(TypesetTest, NoteReservationIsTransactionalAndSharesSpaceAcrossAnchors) {
     EXPECT_EQ(queue.count, 0u);
     typeset_region_plan_dispose(&chosen);
     mem_pool_destroy(pool);
+}
+
+TEST(TypesetTest, OccupiedRegionFloorsAndSignedSeparatorsPreserveMaterialMetrics) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_LAYOUT, "test.typeset.region.floor"); ASSERT_NE(pool, nullptr);
+    NativeRegionFixture record = {{61}, UINT64_C(9007199254740993), 1, 10.0f};
+    TypesetRegionMaterial material = native_region_material(&record, 2, 11);
+    TypesetRegionQueue queue = {pool, nullptr, 0, nullptr, 0, 0, 8};
+    const TypesetRegionMaterial* anchors[] = {&material};
+    TypesetRegionConstraints constraints = {100.0f, 60.0f, 1, nullptr, false};
+    constraints.minimum_height = 45.0f; constraints.defer_anchors = true;
+    TypesetRegionPlan plan = {};
+    ASSERT_EQ(typeset_region_plan(&queue, anchors, 1, &constraints, 20.0f, 5.0f, &plan), TYPESET_OK);
+    EXPECT_EQ(plan.count, 0u); EXPECT_EQ(plan.pending_count, 1u); EXPECT_FLOAT_EQ(plan.reserved_height, 0.0f);
+    ASSERT_EQ(typeset_region_commit(&queue, &plan), TYPESET_OK); typeset_region_plan_dispose(&plan);
+    constraints.page_number++;
+    ASSERT_EQ(typeset_region_plan(&queue, nullptr, 0, &constraints, 0.0f, 5.0f, &plan), TYPESET_OK);
+    ASSERT_EQ(plan.count, 1u); EXPECT_FLOAT_EQ(plan.reserved_height, 45.0f);
+    EXPECT_FLOAT_EQ(plan.placements[0].rect.y, 20.0f); EXPECT_FLOAT_EQ(plan.placements[0].rect.height, 10.0f);
+    EXPECT_EQ(plan.placements[0].slice.metrics.exact.get(), &record);
+    EXPECT_EQ(record.scaled_points, UINT64_C(9007199254740993)); typeset_region_plan_dispose(&plan);
+    constraints.minimum_height = 0.0f;
+    ASSERT_EQ(typeset_region_plan(&queue, nullptr, 0, &constraints, 54.0f, -4.0f, &plan), TYPESET_OK);
+    ASSERT_EQ(plan.count, 1u); EXPECT_FLOAT_EQ(plan.reserved_height, 6.0f);
+    EXPECT_FLOAT_EQ(plan.placements[0].rect.y, 50.0f); EXPECT_FLOAT_EQ(plan.placements[0].rect.height, 10.0f);
+    ASSERT_EQ(typeset_region_commit(&queue, &plan), TYPESET_OK); typeset_region_plan_dispose(&plan);
+    constraints.minimum_height = 45.0f;
+    ASSERT_EQ(typeset_region_plan(&queue, nullptr, 0, &constraints, 0.0f, 5.0f, &plan), TYPESET_OK);
+    EXPECT_EQ(plan.count, 0u); EXPECT_FLOAT_EQ(plan.reserved_height, 0.0f);
+    typeset_region_plan_dispose(&plan); mem_pool_destroy(pool);
 }
 
 TEST(TypesetTest, ContinuationsHoldAnUnsplittableTailInSourceOrder) {
@@ -538,6 +682,52 @@ TEST(TypesetTest, FailedCommitAndStalePlansCannotPublishTrialState) {
 
 struct LateClosureFixture { DomElement* prelude; DomElement* moved; DomElement* note; DomElement* floating; };
 
+TEST(ResourceAdmissionTest, NormalizedNetworkSchemesDoNotDenyLocalOrEmbeddedSources) {
+    const char* local[] = {"assets/image.png", "./font.woff2", "../sheet.css", "file:///local/script.js",
+        "data:text/plain,inline", "builtin:wpt-testharness.js"};
+    for (const char* source : local) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(input_resource_policy_admits(INPUT_RESOURCE_LOCAL_ONLY, source));
+    }
+    const char* remote[] = {"http://example.test/a.js", "HTTPS://example.test/a.css", "ftp://example.test/image.png",
+        "ftps://example.test/font.ttf", "ws://example.test/socket", "wss://example.test/socket"};
+    for (const char* source : remote) {
+        SCOPED_TRACE(source);
+        EXPECT_FALSE(input_resource_policy_admits(INPUT_RESOURCE_LOCAL_ONLY, source));
+        EXPECT_TRUE(input_resource_policy_admits(INPUT_RESOURCE_ALLOW_NETWORK, source));
+    }
+    EXPECT_FALSE(input_resource_policy_admits(INPUT_RESOURCE_LOCAL_ONLY, nullptr));
+}
+
+TEST(ResourceAdmissionTest, DocumentAndChildHostPoliciesAreIndependent) {
+    DomDocument parent, sibling, child;
+    EXPECT_EQ(parent.resource_policy, INPUT_RESOURCE_ALLOW_NETWORK);
+    DocumentJsHostConfig config = {}; config.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    document_apply_js_host_config(&parent, &config);
+    DocumentJsHostConfig inherited = document_js_host_config_inherit(nullptr, &parent);
+    document_apply_js_host_config(&child, &inherited);
+    EXPECT_EQ(child.resource_policy, INPUT_RESOURCE_LOCAL_ONLY);
+    EXPECT_EQ(sibling.resource_policy, INPUT_RESOURCE_ALLOW_NETWORK);
+}
+
+TEST(ResourceAdmissionTest, ASharedWarmImageCacheCannotBypassTheSelectedDocumentPolicy) {
+    UiContext ui = {}; DomDocument allowed, denied;
+    denied.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    const char* remote = "http://example.test/retained.png";
+    allowed.url = lam::own(url_parse(remote)); denied.url = lam::own(url_parse(remote));
+    ASSERT_NE(allowed.url, nullptr); ASSERT_NE(denied.url, nullptr);
+    ui.document = lam::up(&allowed);
+    ImageSurface* pixels = image_surface_create(4, 4); ASSERT_NE(pixels, nullptr);
+    ASSERT_EQ(image_cache_adopt(&ui, remote, pixels), pixels);
+    EXPECT_EQ(load_document_image(&denied, &ui, remote), nullptr);
+    EXPECT_EQ(load_document_image(&allowed, &ui, remote), pixels);
+    EXPECT_EQ(load_document_image(&denied, &ui, remote), nullptr);
+    EXPECT_EQ(load_document_image(&denied, &ui, "/retained.png"), nullptr);
+    image_cache_cleanup(&ui);
+    url_destroy(allowed.url); allowed.url = nullptr;
+    url_destroy(denied.url); denied.url = nullptr;
+}
+
 class SecondaryViewTest : public ::testing::Test {
 protected:
     Pool* input_pool = nullptr;
@@ -626,6 +816,8 @@ protected:
         }
         return element;
     }
+    DomElement* image(const char* css = nullptr, DomElement* parent = nullptr, const char* url = nullptr);
+    DomElement* svg_image(const char* attributes, const char* css = nullptr);
     bool late_closure_fixture(LateClosureFixture* fixture, bool floating = false) {
         stylesheet("@page { size: 220px 100px; margin: 10px; @top-center { content: string(Title); font-size: 7px } } "
             "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 } "
@@ -644,6 +836,540 @@ protected:
     void reference_width_boundary(size_t chapters);
 };
 static LayoutViewNode* source_fragment(ViewTree* tree, DomNode* source, ViewFragmentRole role, bool box, bool last = false);
+static uint32_t occurrence_page(LayoutViewNode* occurrence);
+static void append_fragment_text(LayoutViewNode* node, StrBuf* text);
+static uint32_t snapshot_pixel(const ImageSurface* surface, size_t x, size_t y);
+
+static const char* paged_split_png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAKCAYAAAC0VX7mAAAAKUlEQVR4Aa3BMQEAAAiAMKR/Z63gwTYLy8OwfEhMYhKTmMQkJjGJSewAawgDEgrHt2EAAAAASUVORK5CYII=";
+
+DomElement* SecondaryViewTest::image(const char* css, DomElement* parent, const char* url) {
+    DomElement* element = block(nullptr, css, "img", parent);
+    return element && element->set_attribute("src", url ? url : paged_split_png) ? element : nullptr;
+}
+
+DomElement* SecondaryViewTest::svg_image(const char* attributes, const char* css) {
+    StrBuf* url = strbuf_new();
+    if (!url) return nullptr;
+    strbuf_append_str(url, "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' ");
+    strbuf_append_str(url, attributes);
+    strbuf_append_str(url, "%3E%3Crect width='100%25' height='100%25' fill='red'/%3E%3C/svg%3E");
+    DomElement* result = image(css, nullptr, url->str);
+    strbuf_free(url); return result;
+}
+
+static LayoutViewNode* source_image_fragment(ViewTree* tree, DomNode* source) {
+    ViewNodeState* state = view_tree_node_state(tree, source, false);
+    for (LayoutViewNode* node = state ? state->first_occurrence.get() : nullptr; node; node = node->next_occurrence)
+        if (node->image_box) return node;
+    return nullptr;
+}
+
+TEST_F(SecondaryViewTest, SvgImageFactsRetainFractionalAxesAndIndependentRatioProvenance) {
+    rdt_engine_init(0); vector_engine = true;
+    const char* roots[] = {
+        "width='16.25' height='8.125'",
+        "width='25.5'",
+        "height='18.25'",
+        "width='25.5' viewBox='0 0 30.75 10.25'",
+        "height='18.25' viewBox='0 0 30.75 10.25'",
+        "viewBox='0 0 30.75 10.25'",
+        "width='16.25' height='8.125' viewBox='0 0 10 10'"
+    };
+    const float widths[] = {16.25f, 25.5f, 0.0f, 25.5f, 0.0f, 0.0f, 16.25f};
+    const float heights[] = {8.125f, 0.0f, 18.25f, 0.0f, 18.25f, 0.0f, 8.125f};
+    const float ratios[] = {2.0f, 0.0f, 0.0f, 3.0f, 3.0f, 3.0f, 2.0f};
+    const float used_widths[] = {16.25f, 25.5f, 300.0f, 25.5f, 54.75f, 300.0f, 16.25f};
+    const float used_heights[] = {8.125f, 150.0f, 18.25f, 8.5f, 18.25f, 100.0f, 8.125f};
+    const float none_widths[] = {16.25f, 25.5f, 40.0f, 25.5f, 54.75f, 40.0f, 16.25f};
+    const float none_heights[] = {8.125f, 20.0f, 18.25f, 8.5f, 18.25f, 40.0f / 3.0f, 8.125f};
+    ViewTree* tree = secondary(); ASSERT_NE(tree, nullptr);
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); i++) {
+        SCOPED_TRACE(roots[i]);
+        DomElement* element = svg_image(roots[i]); ASSERT_NE(element, nullptr);
+        ImageSurface* image = load_document_image_resource(&doc, &tree->model->image_resources, element->get_attribute("src"));
+        ASSERT_NE(image, nullptr);
+        ReplacedIntrinsicFacts facts = {}; layout_replaced_image_facts(&facts, image, true);
+        EXPECT_EQ(facts.has_natural_width, widths[i] > 0.0f);
+        EXPECT_EQ(facts.has_natural_height, heights[i] > 0.0f);
+        EXPECT_EQ(facts.has_natural_aspect_ratio, ratios[i] > 0.0f);
+        EXPECT_FLOAT_EQ(facts.natural_width, widths[i]); EXPECT_FLOAT_EQ(facts.natural_height, heights[i]);
+        EXPECT_FLOAT_EQ(facts.natural_aspect_ratio, ratios[i]);
+        EXPECT_FLOAT_EQ(facts.width, used_widths[i]); EXPECT_FLOAT_EQ(facts.height, used_heights[i]);
+        float width = 0.0f, height = 0.0f;
+        ASSERT_TRUE(layout_image_intrinsic_size(source, image, &width, &height));
+        EXPECT_FLOAT_EQ(width, used_widths[i]); EXPECT_FLOAT_EQ(height, used_heights[i]);
+        ReplacedSizeConstraints constraints = {NAN, NAN, 0.0f, 0.0f, INFINITY, INFINITY,
+            facts.natural_aspect_ratio, 0.0f, 0.0f, true};
+        ASSERT_TRUE(layout_replaced_content_size(&facts, &constraints, 340.0f, &width, &height));
+        EXPECT_FLOAT_EQ(width, used_widths[i]); EXPECT_FLOAT_EQ(height, used_heights[i]);
+        if (ratios[i] > 0.0f) {
+            EmbedProp object = {}; object.object_fit = CSS_VALUE_CONTAIN;
+            Rect rect = render_media_object_rect(&object, image, {0.0f, 0.0f, 40.0f, 20.0f}, 1.0f);
+            EXPECT_FLOAT_EQ(rect.width, 40.0f); EXPECT_FLOAT_EQ(rect.height, 40.0f / ratios[i]);
+        }
+        EmbedProp object = {};
+        Rect filled = render_media_object_rect(&object, image, {0.0f, 0.0f, 40.0f, 20.0f}, 1.0f);
+        EXPECT_FLOAT_EQ(filled.width, 40.0f); EXPECT_FLOAT_EQ(filled.height, 20.0f);
+        object.object_fit = CSS_VALUE_NONE;
+        Rect none = render_media_object_rect(&object, image, {0.0f, 0.0f, 40.0f, 20.0f}, 1.0f);
+        EXPECT_FLOAT_EQ(none.width, none_widths[i]); EXPECT_FLOAT_EQ(none.height, none_heights[i]);
+        EXPECT_FLOAT_EQ(none.x, (40.0f - none_widths[i]) * .5f);
+        object.object_fit = CSS_VALUE_SCALE_DOWN;
+        Rect down = render_media_object_rect(&object, image, {0.0f, 0.0f, 80.0f, 40.0f}, 2.0f);
+        EXPECT_FLOAT_EQ(down.width, (i == 4 ? 40.0f : none_widths[i]) * 2.0f);
+        EXPECT_FLOAT_EQ(down.height, (i == 4 ? 40.0f / 3.0f : none_heights[i]) * 2.0f);
+    }
+}
+
+TEST_F(SecondaryViewTest, SvgIntrinsicAxesFlowThroughIndependentPhysicalPages) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 360px 240px; margin: 10px } p { margin: 0 } img { display: block; break-before: page }");
+    const char* roots[] = {"width='16.25' height='8.125'", "width='25.5'", "height='18.25'",
+        "width='25.5' viewBox='0 0 30.75 10.25'", "height='18.25' viewBox='0 0 30.75 10.25'",
+        "viewBox='0 0 30.75 10.25'", "width='25.5'", "height='18.25'"};
+    const char* css[] = {nullptr, nullptr, nullptr, nullptr, nullptr, "width: 51px", "width: 51px", "height: 36.5px"};
+    const float widths[] = {16.25f, 25.5f, 300.0f, 25.5f, 54.75f, 51.0f, 51.0f, 300.0f};
+    const float heights[] = {8.125f, 150.0f, 18.25f, 8.5f, 18.25f, 17.0f, 150.0f, 36.5f};
+    DomElement* images[8] = {};
+    for (size_t i = 0; i < 8; i++) { images[i] = svg_image(roots[i], css[i]); ASSERT_NE(images[i], nullptr); }
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 8u);
+    for (size_t i = 0; i < 8; i++) {
+        SCOPED_TRACE(i);
+        LayoutViewNode* fragment = source_image_fragment(tree, images[i]); ASSERT_NE(fragment, nullptr);
+        EXPECT_EQ(occurrence_page(fragment), i + 1);
+        EXPECT_FLOAT_EQ(fragment->rect.width, widths[i]); EXPECT_FLOAT_EQ(fragment->rect.height, heights[i]);
+        EXPECT_FLOAT_EQ(fragment->image_box->image_rect.width, widths[i]);
+        EXPECT_FLOAT_EQ(fragment->image_box->image_rect.height, heights[i]);
+        EXPECT_EQ(images[i]->embed, nullptr); EXPECT_EQ(images[i]->width, 0.0f);
+    }
+    ASSERT_TRUE(create_dir("temp/paged-media-svg-intrinsics"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-svg-intrinsics/native-axis-pages.pdf"));
+    ImageSurface* snapshot = render_secondary_page_snapshot(tree, 2, 2.0f); ASSERT_NE(snapshot, nullptr);
+    Color inside = {snapshot_pixel(snapshot, 24, 24)}, outside = {snapshot_pixel(snapshot, 75, 24)};
+    EXPECT_EQ(inside.r, 255); EXPECT_EQ(inside.g, 0); EXPECT_EQ(outside.r, 255); EXPECT_EQ(outside.g, 255);
+    save_surface_to_png(snapshot, "temp/paged-media-svg-intrinsics/native-width-only.png"); image_surface_destroy(snapshot);
+}
+
+TEST_F(SecondaryViewTest, SvgImageMetadataUsesAbsoluteUnitsWithoutPromotingRelativeOrInvalidAxes) {
+    rdt_engine_init(0); vector_engine = true;
+    const char* roots[] = {"width='12pt' height='6pt'", "width='1.016q' height='0.508q'",
+        "width='25pxbad' height='18.25' viewBox='0 0 30.75 10.25'",
+        "width='25%25' height='18.25' viewBox='0 0 30.75 10.25'",
+        "width='25em' height='18.25' viewBox='0 0 30.75 10.25'",
+        "width='auto' height='18.25' viewBox='0 0 30.75 10.25'", "width=' 12pt  ' height=' 6pt  '"};
+    const float widths[] = {16.0f, .96f, 0.0f, 0.0f, 0.0f, 0.0f, 16.0f};
+    const float heights[] = {8.0f, .48f, 18.25f, 18.25f, 18.25f, 18.25f, 8.0f};
+    const float ratios[] = {2.0f, 2.0f, 3.0f, 3.0f, 3.0f, 3.0f, 2.0f};
+    ViewTree* tree = secondary(); ASSERT_NE(tree, nullptr);
+    for (size_t i = 0; i < 7; i++) {
+        SCOPED_TRACE(roots[i]); DomElement* element = svg_image(roots[i]); ASSERT_NE(element, nullptr);
+        ImageSurface* image = load_document_image_resource(&doc, &tree->model->image_resources, element->get_attribute("src"));
+        ASSERT_NE(image, nullptr); ReplacedIntrinsicFacts facts = {}; layout_replaced_image_facts(&facts, image, true);
+        EXPECT_EQ(facts.has_natural_width, widths[i] > 0.0f); EXPECT_TRUE(facts.has_natural_height);
+        EXPECT_FLOAT_EQ(facts.natural_width, widths[i]); EXPECT_FLOAT_EQ(facts.natural_height, heights[i]);
+        EXPECT_FLOAT_EQ(facts.natural_aspect_ratio, ratios[i]);
+        EXPECT_GT(image->width, 0); EXPECT_GT(image->height, 0);
+    }
+}
+
+TEST_F(SecondaryViewTest, AdjacentImagesWrapAtAtomicBoundariesAndResumeOnTheNextPage) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 100px 60px; margin: 10px } div { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
+    DomElement* body = block(nullptr); ASSERT_NE(body, nullptr);
+    DomElement* images[3] = {};
+    for (size_t i = 0; i < 3; i++) {
+        images[i] = image("width: 50px; height: 20px; white-space: nowrap", body);
+        ASSERT_NE(images[i], nullptr);
+    }
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    for (size_t i = 0; i < 3; i++) {
+        LayoutViewNode* fragment = source_image_fragment(tree, images[i]); ASSERT_NE(fragment, nullptr);
+        EXPECT_EQ(occurrence_page(fragment), i + 1);
+        EXPECT_FLOAT_EQ(fragment->rect.x, 10.0f); EXPECT_FLOAT_EQ(fragment->rect.width, 50.0f);
+        EXPECT_EQ(fragment->next_occurrence, nullptr);
+        ImageSurface* snapshot = render_secondary_page_snapshot(tree, i + 1, 2.0f); ASSERT_NE(snapshot, nullptr);
+        Color red = {snapshot_pixel(snapshot, 24, 24)}; EXPECT_GT(red.r, 200); EXPECT_LT(red.b, 30);
+        image_surface_destroy(snapshot);
+        EXPECT_EQ(images[i]->embed, nullptr);
+    }
+    ASSERT_TRUE(create_dir("temp/paged-media-image-wrap"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-image-wrap/adjacent-images.pdf"));
+}
+
+TEST_F(SecondaryViewTest, AtomicWrapUsesTheCommonAncestorAndPreservesUnicodeNoBreakControls) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 100px 160px; margin: 10px } div, p { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
+    const char* neighbors[] = {"A", "\xc2\xa0", "\xe2\x81\xa0", "\xe2\x80\x8d", "\xe2\x80\xaf", "\xe2\x80\x87", "\xe2\x80\x91"};
+    for (size_t side = 0; side < 2; side++) for (size_t i = 0; i < sizeof(neighbors) / sizeof(neighbors[0]); i++) {
+        SCOPED_TRACE(side);
+        SCOPED_TRACE(i);
+        StrBuf* label = strbuf_new(); ASSERT_NE(label, nullptr);
+        if (!side && i) strbuf_append_char(label, 'A');
+        strbuf_append_str(label, neighbors[i]);
+        if (side && i) strbuf_append_char(label, 'A');
+        DomElement* body = block(!side ? label->str : nullptr); ASSERT_NE(body, nullptr);
+        DomElement* atom = image("width: 80px; height: 10px; white-space: nowrap", body); ASSERT_NE(atom, nullptr);
+        DomElement* word = side ? block(label->str, nullptr, "span", body) : body;
+        strbuf_free(label); ASSERT_NE(word, nullptr);
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        TypesetStatus status = layout_secondary_view(tree, &options, &diagnostic);
+        if (i < 2) {
+            ASSERT_EQ(status, TYPESET_OK) << diagnostic.reason;
+            LayoutViewNode* text = source_fragment(tree, word->first_child, VIEW_FRAGMENT_BODY, false);
+            LayoutViewNode* fragment = source_image_fragment(tree, atom); ASSERT_NE(text, nullptr); ASSERT_NE(fragment, nullptr);
+            if (side) EXPECT_GT(text->rect.y, fragment->rect.y);
+            else EXPECT_GT(fragment->rect.y, text->rect.y);
+            EXPECT_FLOAT_EQ(fragment->rect.x, 10.0f);
+        } else EXPECT_EQ(status, TYPESET_UNPLACEABLE);
+        ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+        ASSERT_TRUE(source->DomNode::remove_child(body));
+    }
+    DomElement* body = block(nullptr); ASSERT_NE(body, nullptr);
+    DomElement* nowrap = block(nullptr, "white-space: nowrap", "span", body); ASSERT_NE(nowrap, nullptr);
+    ASSERT_NE(image("width: 50px; height: 10px; white-space: normal", nowrap), nullptr);
+    ASSERT_NE(image("width: 50px; height: 10px; white-space: normal", nowrap), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default();
+    EXPECT_EQ(layout_secondary_view(tree, &options, nullptr), TYPESET_UNPLACEABLE);
+}
+
+TEST_F(SecondaryViewTest, AtomicWrapCrossesSourceOnlyAnchorsAndTrimsNowrapInlineSpaces) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 100px 160px; margin: 10px } div { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
+    DomElement* body = block(nullptr); ASSERT_NE(body, nullptr);
+    DomElement* first = image("width: 50px; height: 10px", body); ASSERT_NE(first, nullptr);
+    ASSERT_NE(block(nullptr, "display: none; string-set: Title 'Hidden'", "span", body), nullptr);
+    DomElement* second = image("width: 50px; height: 30px", body); ASSERT_NE(second, nullptr);
+    DomElement* text = block("A ", "white-space: nowrap", "span", body); ASSERT_NE(text, nullptr);
+    DomElement* third = image("width: 80px; height: 10px", body); ASSERT_NE(third, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    LayoutViewNode* a = source_image_fragment(tree, first), *b = source_image_fragment(tree, second), *c = source_image_fragment(tree, third);
+    ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr); ASSERT_NE(c, nullptr);
+    EXPECT_GT(b->rect.y, a->rect.y + 10.0f); EXPECT_GT(c->rect.y, b->rect.y + 30.0f);
+    EXPECT_FLOAT_EQ(c->rect.x, 10.0f);
+    ViewNodeState* state = view_tree_node_state(tree, text->first_child, false); ASSERT_NE(state, nullptr);
+    StrBuf* content = strbuf_new(); ASSERT_NE(content, nullptr);
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) append_fragment_text(node, content);
+    EXPECT_STREQ(content->str, "A"); strbuf_free(content);
+}
+
+TEST_F(SecondaryViewTest, InlineImagesUseTheBaselineAndClipCoverAndContainInTheirContentBoxes) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 220px 150px; margin: 10px } p, div { margin: 0; font-size: 10px; line-height: 12px }");
+    DomElement* body = block("Text "); ASSERT_NE(body, nullptr);
+    DomElement* cover = image("width: 20px; height: 20px; padding: 2px; border: 1px solid green; object-fit: cover; object-position: right top", body);
+    DomElement* contain = image("display: block; width: 40px; height: 40px; object-fit: contain; background: yellow");
+    ASSERT_NE(cover, nullptr); ASSERT_NE(contain, nullptr);
+    ASSERT_TRUE(create_dir("temp/paged-media-images"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    LayoutViewNode* image = source_image_fragment(tree, cover); ASSERT_NE(image, nullptr);
+    LayoutViewNode* text = source_fragment(tree, body->first_child, VIEW_FRAGMENT_BODY, false); ASSERT_NE(text, nullptr);
+    ASSERT_NE(text->glyph_run, nullptr);
+    EXPECT_FLOAT_EQ(image->rect.width, 26.0f); EXPECT_FLOAT_EQ(image->rect.height, 26.0f);
+    EXPECT_FLOAT_EQ(image->rect.y + image->rect.height, text->glyph_run->baseline_y);
+    EXPECT_LT(image->image_box->image_rect.x, image->image_box->content_rect.x);
+    EXPECT_FLOAT_EQ(image->image_box->image_rect.width, 40.0f);
+    LayoutViewNode* contained = source_image_fragment(tree, contain); ASSERT_NE(contained, nullptr);
+    EXPECT_FLOAT_EQ(contained->image_box->image_rect.width, 40.0f); EXPECT_FLOAT_EQ(contained->image_box->image_rect.height, 20.0f);
+    ImageSurface* snapshot = render_secondary_page_snapshot(tree, 1, 2.0f); ASSERT_NE(snapshot, nullptr);
+    Color blue = {snapshot_pixel(snapshot, (size_t)((image->image_box->content_rect.x + 5.0f) * 2.0f), (size_t)((image->image_box->content_rect.y + 5.0f) * 2.0f))};
+    EXPECT_GT(blue.b, 200); EXPECT_LT(blue.r, 30);
+    Color yellow = {snapshot_pixel(snapshot, (size_t)((contained->rect.x + 5.0f) * 2.0f), (size_t)((contained->rect.y + 5.0f) * 2.0f))};
+    EXPECT_GT(yellow.r, 200); EXPECT_GT(yellow.g, 200); EXPECT_LT(yellow.b, 30);
+    save_surface_to_png(snapshot, "temp/paged-media-images/image-fit-native.png"); image_surface_destroy(snapshot);
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-images/image-fit.pdf"));
+}
+
+TEST_F(SecondaryViewTest, ImageAssetsBelongToEachEditionAndSurviveTheRetainedPageLease) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 160px 100px; margin: 10px } p { margin: 0 }");
+    DomElement* image = this->image(); ASSERT_NE(image, nullptr);
+    ViewTree* a = secondary(), *b = secondary(); ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr);
+    PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(a, &options, nullptr), TYPESET_OK);
+    ASSERT_EQ(layout_secondary_view(b, &options, nullptr), TYPESET_OK);
+    LayoutViewNode* first = source_image_fragment(a, image), *second = source_image_fragment(b, image);
+    ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
+    ImageSurface* old = first->image_box->image; auto handle = old->self;
+    EXPECT_NE(old, second->image_box->image.get()); EXPECT_EQ(image->embed, nullptr);
+    ViewPageSelection all = {true, nullptr, 0}; ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(a, &all, &preview_options); ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(a)); EXPECT_EQ(image_surface_lookup(handle), old);
+    ASSERT_EQ(layout_secondary_view(a, &options, nullptr), TYPESET_OK);
+    EXPECT_NE(source_image_fragment(a, image)->image_box->image.get(), old);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, a)); EXPECT_EQ(image_surface_lookup(handle), old);
+    ImageSurface* snapshot = render_secondary_page_snapshot(preview, 1, 2.0f); ASSERT_NE(snapshot, nullptr);
+    image_surface_destroy(snapshot);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, preview)); EXPECT_EQ(image_surface_lookup(handle), nullptr);
+    EXPECT_NE(source_image_fragment(b, image)->image_box->image, nullptr);
+}
+
+TEST_F(SecondaryViewTest, ImageSizingUsesHtmlHintsAndRatioConstraintsWithoutStretchingBothAutoAxes) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 240px 200px; margin: 10px } p, div { margin: 0 }");
+    const char* styles[] = {"display: block", "display: block; max-width: 10px", "display: block; min-width: 30px; max-height: 10px",
+        "display: block; width: 30px; aspect-ratio: 1 / 1", "display: block; width: 30px; aspect-ratio: auto 1 / 1",
+        "display: block; width: 32px; height: 22px; box-sizing: border-box; padding: 1px; border: 2px solid blue"};
+    const float widths[] = {40.0f, 10.0f, 30.0f, 30.0f, 30.0f, 26.0f};
+    const float heights[] = {20.0f, 5.0f, 10.0f, 30.0f, 15.0f, 16.0f};
+    DomElement* images[6] = {};
+    for (size_t i = 0; i < 6; i++) {
+        images[i] = image(styles[i]); ASSERT_NE(images[i], nullptr);
+    }
+    ASSERT_TRUE(images[0]->set_attribute("width", "40"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, nullptr), TYPESET_OK);
+    for (size_t i = 0; i < 6; i++) {
+        SCOPED_TRACE(i); LayoutViewNode* fragment = source_image_fragment(tree, images[i]); ASSERT_NE(fragment, nullptr);
+        EXPECT_FLOAT_EQ(fragment->image_box->content_rect.width, widths[i]);
+        EXPECT_FLOAT_EQ(fragment->image_box->content_rect.height, heights[i]);
+    }
+}
+
+TEST_F(SecondaryViewTest, ImagesMoveWithTheBodyWhenLateNotesAndTopFloatsReplayAKeepChain) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 180px 120px; margin: 10px } p, div, span { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
+    ASSERT_NE(block("Prelude", "height: 36px"), nullptr);
+    DomElement* body = block("Body ", "break-after: avoid"); ASSERT_NE(body, nullptr);
+    DomElement* image = this->image("width: 60px; height: auto", body); ASSERT_NE(image, nullptr);
+    ASSERT_TRUE(create_dir("temp/paged-media-images"));
+    DomElement* call = block("Call "); ASSERT_NE(call, nullptr);
+    // the line policy reserves the complete note before accepting the sibling keep chain.
+    ASSERT_NE(block("Note A\nNote B", "float: footnote; footnote-policy: line; white-space: pre-wrap", "span", call), nullptr);
+    ASSERT_NE(block("Float", "float: top; float-reference: page; height: 18px; color: green"), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    LayoutViewNode* fragment = source_image_fragment(tree, image); ASSERT_NE(fragment, nullptr);
+    EXPECT_EQ(occurrence_page(fragment), 2u);
+    EXPECT_GE(fragment->image_box->content_rect.y, 28.0f);
+    EXPECT_FLOAT_EQ(fragment->rect.y, fragment->image_box->content_rect.y);
+    size_t images = 0;
+    ViewNodeState* state = view_tree_node_state(tree, image, false); ASSERT_NE(state, nullptr);
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) if (node->image_box) images++;
+    EXPECT_EQ(images, 1u);
+    ImageSurface* snapshot = render_secondary_page_snapshot(tree, 2, 2.0f); ASSERT_NE(snapshot, nullptr);
+    Color blue = {snapshot_pixel(snapshot, (size_t)((fragment->rect.x + 40.0f) * 2.0f), (size_t)((fragment->rect.y + 15.0f) * 2.0f))};
+    EXPECT_GT(blue.b, 200); EXPECT_LT(blue.r, 30);
+    save_surface_to_png(snapshot, "temp/paged-media-images/image-rollback-native.png"); image_surface_destroy(snapshot);
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-images/image-rollback.pdf"));
+}
+
+TEST_F(SecondaryViewTest, OversizedAndDeniedImagesReturnSourceDiagnosticsWithoutFragmentation) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 160px 80px; margin: 10px } p { margin: 0 }");
+    DomElement* image = this->image("display: block; width: 40px; height: 90px"); ASSERT_NE(image, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    EXPECT_EQ(diagnostic.source.expected_id, dom_node_ref(image).expected_id);
+    EXPECT_LT(tree->model->page_count, 3u); EXPECT_FALSE(tree->model->committed);
+    ASSERT_TRUE(image->set_attribute("src", "https://example.test/forbidden.png"));
+    doc.resource_policy = INPUT_RESOURCE_LOCAL_ONLY; diagnostic = {};
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    EXPECT_EQ(diagnostic.source.expected_id, dom_node_ref(image).expected_id);
+    EXPECT_STREQ(diagnostic.reason, "image source is unavailable or requires a sampled media producer");
+}
+
+TEST_F(SecondaryViewTest, ImagesUseTheSameProducerInFootnotesAndRepeatedRunningFurniture) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 180px 140px; margin: 20px; @top-left { content: element(logo) } } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
+    DomElement* logo = block(nullptr, "position: running(logo)", "div"); ASSERT_NE(logo, nullptr);
+    DomElement* running_image = image("width: 20px; height: auto", logo); ASSERT_NE(running_image, nullptr);
+    ASSERT_TRUE(create_dir("temp/paged-media-images"));
+    DomElement* body = block("Statement "); ASSERT_NE(body, nullptr);
+    DomElement* note = block("Note ", "float: footnote", "span", body); ASSERT_NE(note, nullptr);
+    DomElement* note_image = image("width: 20px; height: auto", note); ASSERT_NE(note_image, nullptr);
+    ASSERT_NE(block("Next page", "break-before: page"), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    LayoutViewNode* footnote = source_image_fragment(tree, note_image); ASSERT_NE(footnote, nullptr);
+    EXPECT_EQ(footnote->role, VIEW_FRAGMENT_NOTE); EXPECT_EQ(occurrence_page(footnote), 1u);
+    ViewNodeState* state = view_tree_node_state(tree, running_image, false); ASSERT_NE(state, nullptr);
+    size_t logos = 0;
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) if (node->image_box) {
+        logos++; EXPECT_EQ(node->role, VIEW_FRAGMENT_RUNNING);
+        EXPECT_LT(node->image_box->content_rect.y, 20.0f);
+        EXPECT_EQ(node->image_box->image.get(), footnote->image_box->image.get());
+    }
+    EXPECT_EQ(logos, 2u);
+    EXPECT_EQ(note_image->embed, nullptr); EXPECT_EQ(running_image->embed, nullptr);
+    ImageSurface* snapshot = render_secondary_page_snapshot(tree, 1, 2.0f); ASSERT_NE(snapshot, nullptr);
+    Color blue = {snapshot_pixel(snapshot, (size_t)((footnote->rect.x + 15.0f) * 2.0f), (size_t)((footnote->rect.y + 5.0f) * 2.0f))};
+    EXPECT_GT(blue.b, 200); EXPECT_LT(blue.r, 30);
+    save_surface_to_png(snapshot, "temp/paged-media-images/image-regions-native.png"); image_surface_destroy(snapshot);
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-images/image-regions.pdf"));
+}
+
+TEST_F(SecondaryViewTest, PagedImagesRemainAtomicWhenTheFollowingPageChangesWidth) {
+    rdt_engine_init(0); vector_engine = true;
+    // a fresh raster export must register its SVG backend without a prior PDF or SVG export.
+    paint_ir_register_svg_subscene_lowerers(nullptr, nullptr);
+    stylesheet("@page { size: 180px 100px; margin: 10px } @page :left { size: 260px 100px } "
+        "p, div { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
+    ASSERT_NE(block("Prelude", "height: 64px"), nullptr);
+    DomElement* image = this->image("display: block; width: 50%; height: auto", nullptr,
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='20'%3E%3Crect width='80' height='20' fill='blue'/%3E%3C/svg%3E");
+    ASSERT_NE(image, nullptr);
+    image->x = 71.25f; image->width = 123.5f;
+    ViewTree* tree = secondary(); ASSERT_NE(tree, nullptr);
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    EXPECT_FLOAT_EQ(image->x, 71.25f); EXPECT_FLOAT_EQ(image->width, 123.5f);
+    EXPECT_EQ(image->embed, nullptr);
+    ViewNodeState* state = view_tree_node_state(tree, image, false); ASSERT_NE(state, nullptr);
+    size_t visible = 0;
+    for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence) {
+        if (!fragment->paint_box) continue;
+        visible++; EXPECT_EQ(occurrence_page(fragment), 2u);
+        EXPECT_FLOAT_EQ(fragment->rect.width, 120.0f); EXPECT_FLOAT_EQ(fragment->rect.height, 30.0f);
+    }
+    EXPECT_EQ(visible, 1u);
+    ASSERT_TRUE(create_dir("temp/paged-media-images"));
+
+    ImageSurface* snapshot = render_secondary_page_snapshot(tree, 2, 2.0f); ASSERT_NE(snapshot, nullptr);
+    Color blue = {snapshot_pixel(snapshot, 40, 40)};
+    EXPECT_GT(blue.b, 200); EXPECT_LT(blue.r, 30); EXPECT_LT(blue.g, 30);
+    save_surface_to_png(snapshot, "temp/paged-media-images/changed-width-image-native.png");
+    image_surface_destroy(snapshot);
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-images/changed-width-image.pdf"));
+}
+
+TEST_F(SecondaryViewTest, OutsideListMarkersFollowFirstContentAcrossPageRollback) {
+    stylesheet("@page { size: 160px 56px; margin: 8px } "
+        "div, ol, li { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap } "
+        "ol { padding-left: 24px } li { orphans: 2; widows: 1 } li::marker { color: blue }");
+    ASSERT_NE(block("Prelude", "height: 24px"), nullptr);
+    DomElement* list = block(nullptr, nullptr, "ol"); ASSERT_NE(list, nullptr);
+    ASSERT_TRUE(list->set_attribute("start", "4"));
+    DomElement* first = block("A\nB\nC\nD", nullptr, "li", list); ASSERT_NE(first, nullptr);
+    DomElement* second = block("E", nullptr, "li", list); ASSERT_NE(second, nullptr);
+    first->x = 71.0f; first->width = 83.0f;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ViewNodeState* state = view_tree_node_state(tree, first, false); ASSERT_NE(state, nullptr);
+    size_t markers = 0;
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
+        if (!node->computed_style || node->computed_style->pseudo_element != PSEUDO_ELEMENT_MARKER || !node->glyph_run) continue;
+        markers++;
+        EXPECT_STREQ(node->glyph_run->text, "4. "); EXPECT_EQ(node->computed_style->color.b, 255);
+        EXPECT_EQ(occurrence_page(node), 2u);
+        LayoutViewNode* content = source_fragment(tree, first->first_child, VIEW_FRAGMENT_BODY, false);
+        ASSERT_NE(content, nullptr); EXPECT_FLOAT_EQ(node->rect.y, content->rect.y);
+        EXPECT_LE(node->rect.x + node->rect.width, content->rect.x);
+    }
+    EXPECT_EQ(markers, 1u);
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+    append_fragment_text(tree->model->root, text);
+    EXPECT_NE(strstr(text->str, "5. "), nullptr); strbuf_free(text);
+    EXPECT_FLOAT_EQ(first->x, 71.0f); EXPECT_FLOAT_EQ(first->width, 83.0f);
+    ASSERT_TRUE(create_dir("temp/paged-media-lists"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-lists/outside.pdf"));
+}
+
+TEST_F(SecondaryViewTest, NestedListCountersAndValueHintsRemainInLogicalOrder) {
+    stylesheet("@page { size: 200px 100px; margin: 8px } "
+        "ol, li { margin: 0; font-size: 10px; line-height: 12px } ol { padding-left: 24px } "
+        "li::marker { content: '(' counters(list-item, '.') ') ' }");
+    DomElement* list = block(nullptr, nullptr, "ol"); ASSERT_NE(list, nullptr);
+    ASSERT_TRUE(list->set_attribute("start", "3"));
+    DomElement* first = block("First", nullptr, "li", list); ASSERT_NE(first, nullptr);
+    DomElement* nested = block(nullptr, nullptr, "ol", first); ASSERT_NE(nested, nullptr);
+    ASSERT_NE(block("Nested", nullptr, "li", nested), nullptr);
+    DomElement* second = block("Second", nullptr, "li", list); ASSERT_NE(second, nullptr);
+    ASSERT_TRUE(second->set_attribute("value", "8"));
+    ASSERT_NE(block("Third", nullptr, "li", list), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+    append_fragment_text(tree->model->root, text);
+    EXPECT_STREQ(text->str, "(3) First(3.1) Nested(8) Second(9) Third"); strbuf_free(text);
+}
+
+TEST_F(SecondaryViewTest, ReversedListMarkersExcludeHiddenItemsAndNestedScopes) {
+    stylesheet("@page { size: 200px 68px; margin: 8px } ol, li { margin: 0; font-size: 10px; line-height: 12px }");
+    DomElement* list = block(nullptr, nullptr, "ol"); ASSERT_NE(list, nullptr);
+    ASSERT_TRUE(list->set_attribute("reversed", ""));
+    DomElement* first = block("First", nullptr, "li", list); ASSERT_NE(first, nullptr);
+    ASSERT_NE(block("Hidden", "display: none", "li", list), nullptr);
+    DomElement* nested = block(nullptr, nullptr, "ol", first); ASSERT_NE(nested, nullptr);
+    ASSERT_NE(block("Nested", nullptr, "li", nested), nullptr);
+    ASSERT_NE(block("Second", nullptr, "li", list), nullptr);
+    ASSERT_NE(block("Third", nullptr, "li", list), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {}; PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(tree->model->root, text);
+    EXPECT_STREQ(text->str, "3. First1. Nested2. Second1. Third"); strbuf_free(text);
+    ASSERT_TRUE(list->set_attribute("start", "7"));
+    ViewTree* changed = secondary();
+    ASSERT_EQ(layout_secondary_view(changed, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(changed->model->root, text);
+    EXPECT_STREQ(text->str, "7. First1. Nested6. Second5. Third"); strbuf_free(text);
+}
+
+TEST_F(SecondaryViewTest, InsideListMarkerShorthandAndEmptyItemsUseInlineFlow) {
+    stylesheet("@page { size: 160px 80px; margin: 8px } ol, li { margin: 0; font-size: 10px; line-height: 12px } "
+        "ol { padding-left: 0; list-style: upper-roman inside } .custom::marker { content: 'Note: '; color: red }");
+    DomElement* list = block(nullptr, nullptr, "ol"); ASSERT_NE(list, nullptr);
+    DomElement* first = block("Alpha", nullptr, "li", list); ASSERT_NE(first, nullptr);
+    DomElement* empty = block(nullptr, nullptr, "li", list); ASSERT_NE(empty, nullptr);
+    DomElement* third = block("Beta", nullptr, "li", list); ASSERT_NE(third, nullptr);
+    ASSERT_TRUE(third->set_attribute("class", "custom"));
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {}; PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(tree->model->root, text);
+    EXPECT_STREQ(text->str, "I. AlphaII. Note: Beta"); strbuf_free(text);
+    LayoutViewNode* content = source_fragment(tree, first->first_child, VIEW_FRAGMENT_BODY, false); ASSERT_NE(content, nullptr);
+    EXPECT_GT(content->rect.x, tree->model->pages.get()[0]->content_rect.x);
+    LayoutViewNode* empty_box = source_fragment(tree, empty, VIEW_FRAGMENT_BODY, true); ASSERT_NE(empty_box, nullptr);
+    EXPECT_GT(empty_box->rect.height, 0.0f);
+}
+
+TEST_F(SecondaryViewTest, ListCounterCssOverridesHintsAndRunsResetIncrementSetBeforeMarker) {
+    stylesheet("@page { size: 200px 100px; margin: 8px } ol, li { margin: 0; font-size: 10px; line-height: 12px } "
+        "li::before { content: '[' counter(list-item) ']' }");
+    DomElement* list = block(nullptr, "counter-reset: list-item 9", "ol"); ASSERT_NE(list, nullptr);
+    ASSERT_TRUE(list->set_attribute("start", "3"));
+    DomElement* first = block("First", "counter-increment: list-item 2", "li", list); ASSERT_NE(first, nullptr);
+    DomElement* second = block("Second", "counter-set: list-item 20", "li", list); ASSERT_NE(second, nullptr);
+    ASSERT_TRUE(second->set_attribute("value", "8"));
+    ASSERT_NE(block("Third", "counter-increment: list-item 0; list-style-type: none", "li", list), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {}; PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(tree->model->root, text);
+    EXPECT_STREQ(text->str, "11. [11]First20. [20]Second[20]Third"); strbuf_free(text);
+}
+
+TEST_F(SecondaryViewTest, OutsideListMarkersPreserveLeadingSpaceCollapseAndNestedBlockAlignment) {
+    stylesheet("@page { size: 200px 100px; margin: 8px } ol, li, div { margin: 0; font-size: 10px; line-height: 12px }");
+    DomElement* list = block(nullptr, nullptr, "ol"); ASSERT_NE(list, nullptr);
+    DomElement* item = block(nullptr, nullptr, "li", list); ASSERT_NE(item, nullptr);
+    DomElement* child = block(" \n\tAlpha", "margin-left: 12px", "div", item); ASSERT_NE(child, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {}; PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ViewNodeState* state = view_tree_node_state(tree, child->first_child, false); ASSERT_NE(state, nullptr);
+    LayoutViewNode* ink = nullptr;
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) if (node->glyph_run) { ink = node; break; }
+    ASSERT_NE(ink, nullptr);
+    EXPECT_FLOAT_EQ(ink->rect.x, 8.0f + 40.0f + 12.0f);
+    state = view_tree_node_state(tree, item, false); ASSERT_NE(state, nullptr);
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) if (node->glyph_run) {
+        EXPECT_STREQ(node->glyph_run->text, "1. "); EXPECT_FLOAT_EQ(node->rect.y, ink->rect.y);
+        EXPECT_FLOAT_EQ(node->rect.x + node->rect.width, 8.0f + 40.0f);
+    }
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(tree->model->root, text);
+    EXPECT_STREQ(text->str, "1. Alpha"); strbuf_free(text);
+}
 
 TEST_F(SecondaryViewTest, SharedPropertyAllocationBelongsToTheExplicitlySelectedView) {
     ViewTree* tree = secondary(); ViewTree* sibling = secondary();
@@ -700,7 +1426,7 @@ TEST_F(SecondaryViewTest, UnimplementedContextsCannotPublishFlattenedPages) {
     stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0 }");
     DomElement* child = block("context content"); ASSERT_NE(child, nullptr);
     const char* declarations[] = {"display: flex", "display: grid", "display: table", "display: inline-block",
-        "display: list-item", "column-count: 2", "column-width: 60px", "position: absolute", "float: left"};
+        "display: inline flow-root list-item", "column-count: 2", "column-width: 60px", "position: absolute", "float: left"};
     PagedLayoutOptions options = paged_layout_options_default();
     for (const char* declaration : declarations) {
         ASSERT_TRUE(child->set_attribute("style", declaration));
@@ -824,19 +1550,24 @@ TEST_F(SecondaryViewTest, FileLoadedGroupedSelectorsRetainTheirFontShorthand) {
     render_export_session_end(&session);
 }
 
-TEST_F(SecondaryViewTest, ReplacedContentIsDiagnosedButHiddenSubtreesDoNotRequireAProducer) {
+TEST_F(SecondaryViewTest, MissingImagesAndUnsupportedContextsAreDiagnosedButHiddenSubtreesAreSkipped) {
     stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0 }");
     DomElement* image = block(nullptr, nullptr, "img"); ASSERT_NE(image, nullptr);
     ASSERT_TRUE(image->set_attribute("src", "missing-image.png"));
     PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ViewTree* tree = secondary();
-    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    EXPECT_STREQ(diagnostic.reason, "image source is unavailable or requires a sampled media producer");
     EXPECT_EQ(diagnostic.source.address, image);
     EXPECT_FALSE(tree->model->committed);
     ASSERT_TRUE(image->set_attribute("style", "display: none"));
     ASSERT_NE(block("hidden grid", "display: grid", "div", image), nullptr);
     tree = secondary();
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    DomElement* svg = block(nullptr, nullptr, "svg"); ASSERT_NE(svg, nullptr);
+    tree = secondary();
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(diagnostic.source.address, svg);
 }
 
 TEST(PagedCssTest, BreakKeywordsAliasesAndLineMinimaValidateBeforeCascade) {
@@ -1441,6 +2172,41 @@ TEST_F(SecondaryViewTest, LateBlockClosuresRollbackBodyNotesMarksAndTargetsToget
     EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
 }
 
+TEST_F(SecondaryViewTest, OversizedKeepGroupRelaxesOnlyAtAUsableBodyBoundary) {
+    stylesheet("@page { size: 180px 24px; margin: 0 } p, div { margin: 0; font-size: 10px; line-height: 12px; "
+        "white-space: pre-wrap; orphans: 1; widows: 1 }");
+    DomElement* paragraph = block("A\nB\nC", "break-inside: avoid"); ASSERT_NE(paragraph, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 1u);
+    EXPECT_EQ(diagnostic.relaxed_line_minima, 0u);
+    ViewNodeState* state = view_tree_node_state(tree, paragraph->first_child, false); ASSERT_NE(state, nullptr);
+    size_t coverage[5] = {}, ink[2] = {};
+    for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence) {
+        uint32_t page = occurrence_page(fragment); ASSERT_GE(page, 1u); ASSERT_LE(page, 2u);
+        if (fragment->glyph_run) ink[page - 1]++;
+        for (size_t i = fragment->text_start; i < fragment->text_start + fragment->text_length; i++) {
+            ASSERT_LT(i, 5u); coverage[i]++;
+        }
+    }
+    EXPECT_EQ(ink[0], 2u); EXPECT_EQ(ink[1], 1u);
+    for (size_t i = 0; i < 5; i++) EXPECT_EQ(coverage[i], 1u);
+}
+
+TEST_F(SecondaryViewTest, ForcedPageBoundaryOverridesSiblingAndEnclosingAvoidance) {
+    stylesheet("@page { size: 180px 80px; margin: 10px } p, div { margin: 0; font-size: 10px; line-height: 12px }");
+    DomElement* group = block(nullptr, "break-inside: avoid"); ASSERT_NE(group, nullptr);
+    DomElement* first = block("First", "break-after: avoid", "div", group); ASSERT_NE(first, nullptr);
+    DomElement* second = block("Second", "break-before: page; break-after: page", "div", group); ASSERT_NE(second, nullptr);
+    DomElement* third = block("Third", "break-before: avoid; break-after: page", "div", group); ASSERT_NE(third, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+    EXPECT_EQ(occurrence_page(source_fragment(tree, first->first_child, VIEW_FRAGMENT_BODY, false)), 1u);
+    EXPECT_EQ(occurrence_page(source_fragment(tree, second->first_child, VIEW_FRAGMENT_BODY, false)), 2u);
+    EXPECT_EQ(occurrence_page(source_fragment(tree, third->first_child, VIEW_FRAGMENT_BODY, false)), 3u);
+}
+
 TEST_F(SecondaryViewTest, FootnoteReservationMovesCallBeforePublishingItsFragments) {
     stylesheet("@page { size: 200px 100px; margin: 10px } "
         "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 }");
@@ -1562,6 +2328,56 @@ TEST_F(SecondaryViewTest, AnImpossibleBlockFootnoteStopsBeforePublishingAnEditio
     EXPECT_NE(diagnostic.reason, nullptr);
 }
 
+TEST_F(SecondaryViewTest, DefaultFootnoteCallsUseAnOverridableSuperscriptStyle) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 240px 120px; margin: 10px } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 } "
+        ".override::footnote-call { font-size: 8px; vertical-align: baseline } "
+        ".inherit::footnote-call { font-size: inherit; vertical-align: inherit } "
+        ".initial::footnote-call { font-size: initial; vertical-align: initial } "
+        ".unset::footnote-call { all: unset }");
+    DomElement* body = block("Statement "); ASSERT_NE(body, nullptr);
+    const char* classes[] = {nullptr, "override", "inherit", "initial", "unset"};
+    const float sizes[] = {6.5f, 8.0f, 10.0f, 16.0f, 10.0f};
+    DomElement* notes[5] = {};
+    for (size_t i = 0; i < 5; i++) {
+        notes[i] = block("Note", "float: footnote; color: blue", "span", body);
+        ASSERT_NE(notes[i], nullptr);
+        if (classes[i]) ASSERT_TRUE(notes[i]->set_attribute("class", classes[i]));
+    }
+    ViewTree* tree = secondary(); ASSERT_NE(tree, nullptr);
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    LayoutViewNode* body_text = source_fragment(tree, body->first_child, VIEW_FRAGMENT_BODY, false);
+    ASSERT_NE(body_text, nullptr); ASSERT_NE(body_text->glyph_run, nullptr);
+    for (size_t i = 0; i < 5; i++) {
+        LayoutViewNode* call = source_fragment(tree, notes[i], VIEW_FRAGMENT_BODY, false);
+        ASSERT_NE(call, nullptr); ASSERT_NE(call->glyph_run, nullptr); ASSERT_NE(call->computed_style, nullptr);
+        EXPECT_FLOAT_EQ(call->glyph_run->font_size, sizes[i]);
+        EXPECT_EQ(call->computed_style->pseudo_element, PSEUDO_ELEMENT_FOOTNOTE_CALL);
+        if (i == 0) EXPECT_LT(call->glyph_run->baseline_y, body_text->glyph_run->baseline_y);
+        else EXPECT_FLOAT_EQ(call->glyph_run->baseline_y, body_text->glyph_run->baseline_y);
+        EXPECT_FLOAT_EQ(view_css_resolve(tree, notes[i])->font.font_size, 10.0f);
+        EXPECT_EQ(notes[i]->first_child, notes[i]->last_child);
+    }
+    EXPECT_EQ(doc.stylesheet_count, 1);
+    EXPECT_FLOAT_EQ(source->width, 640.0f);
+    ASSERT_TRUE(create_dir("temp/paged-media-footnote-defaults"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-footnote-defaults/footnote-defaults.pdf"));
+    ImageSurface* surface = render_secondary_page_snapshot(tree, 1, 2.0f); ASSERT_NE(surface, nullptr);
+    size_t call_ink = 0;
+    LayoutViewNode* call = source_fragment(tree, notes[0], VIEW_FRAGMENT_BODY, false);
+    for (size_t y = 0; y < (size_t)(body_text->glyph_run->baseline_y * 2.0f); y++) {
+        for (size_t x = (size_t)(call->rect.x * 2.0f); x < (size_t)((call->rect.x + call->rect.width) * 2.0f); x++) {
+            Color pixel = {snapshot_pixel(surface, x, y)};
+            if (pixel.b > pixel.r + 20 && pixel.b > pixel.g + 20) call_ink++;
+        }
+    }
+    EXPECT_GT(call_ink, 2u);
+    save_surface_to_png(surface, "temp/paged-media-footnote-defaults/footnote-defaults-native.png");
+    image_surface_destroy(surface);
+}
+
 TEST_F(SecondaryViewTest, FootnoteCallAndMarkerStylesBelongToTheirViewOccurrences) {
     stylesheet("@page { size: 240px 120px; margin: 10px } "
         "p, div, span { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 } "
@@ -1646,6 +2462,209 @@ TEST_F(SecondaryViewTest, FootnoteAreaEdgesAndLimitShareThePaintedReservation) {
     EXPECT_EQ(note->parent, body); EXPECT_EQ(source->x, 11.25f); EXPECT_EQ(source->height, 91.75f);
     ASSERT_TRUE(create_dir("temp/paged-media-impl"));
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/footnote-area.pdf"));
+}
+
+TEST_F(SecondaryViewTest, FootnoteAreaMarginsAndWidthConstrainEveryContinuation) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 240px 120px; margin: 10px; @footnote { width: 50%; margin: 6px 8px 4px 12px; "
+        "padding: 2px; border: 2px solid blue; max-height: 28px; box-sizing: border-box; background: #eef2ff } } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 }");
+    DomElement* body = block("Call "); ASSERT_NE(body, nullptr);
+    DomElement* note = block("A\nB\nC\nD", "float: footnote", "span", body); ASSERT_NE(note, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    ViewNodeState* state = view_tree_node_state(tree, note, false); ASSERT_NE(state, nullptr);
+    size_t count = 0;
+    for (LayoutViewNode* box = state->first_occurrence; box; box = box->next_occurrence) {
+        if (box->role != VIEW_FRAGMENT_NOTE || !box->paint_box) continue;
+        count++; LayoutViewNode* area = box->parent; ASSERT_NE(area, nullptr);
+        EXPECT_FLOAT_EQ(area->rect.x, 22.0f); EXPECT_FLOAT_EQ(area->rect.width, 110.0f);
+        EXPECT_FLOAT_EQ(area->rect.y + area->rect.height, 106.0f);
+        EXPECT_FLOAT_EQ(area->rect.height, count == 1 ? 20.0f : 44.0f);
+        EXPECT_FLOAT_EQ(box->rect.x, 26.0f); EXPECT_FLOAT_EQ(box->rect.width, 102.0f);
+        EXPECT_FLOAT_EQ(box->rect.y, area->rect.y + 4.0f);
+        ASSERT_NE(area->computed_boundary, nullptr);
+        EXPECT_FLOAT_EQ(area->computed_boundary->margin.top, 6.0f);
+        EXPECT_FLOAT_EQ(area->computed_boundary->margin.bottom, 4.0f);
+    }
+    EXPECT_EQ(count, 2u); EXPECT_EQ(note->parent, body);
+    ASSERT_TRUE(create_dir("temp/paged-media-area-sizing"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-area-sizing/margins-width.pdf"));
+    for (uint32_t page_number = 1; page_number <= 2; page_number++) {
+        ImageSurface* surface = render_secondary_page_snapshot(tree, page_number, 1.0f); ASSERT_NE(surface, nullptr);
+        size_t top = page_number == 1 ? 86 : 62;
+        EXPECT_EQ(snapshot_pixel(surface, 23, top + 1), 0xffff0000u);
+        EXPECT_EQ(snapshot_pixel(surface, 60, 103), 0xfffff2eeu);
+        EXPECT_EQ(snapshot_pixel(surface, 21, 100), 0xffffffffu);
+        EXPECT_EQ(snapshot_pixel(surface, 133, 100), 0xffffffffu);
+        save_surface_to_png(surface, page_number == 1 ? "temp/paged-media-area-sizing/margins-native-1.png" :
+            "temp/paged-media-area-sizing/margins-native-2.png"); image_surface_destroy(surface);
+    }
+}
+
+TEST_F(SecondaryViewTest, FootnoteAreaMinimumHeightReservesSpaceAndKeepsNotesAtTheTop) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 240px 120px; margin: 10px; @footnote { min-height: 48px; max-height: 24px; "
+        "margin: 3px 5px 7px; padding: 2px; border-top: 2px solid blue; background: #eef2ff } } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 }");
+    DomElement* body = block("A\nB\nCall "); ASSERT_NE(body, nullptr);
+    DomElement* note = block("Note", "float: footnote; footnote-policy: line", "span", body); ASSERT_NE(note, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u);
+    LayoutViewNode* box = source_fragment(tree, note, VIEW_FRAGMENT_NOTE, true);
+    ASSERT_NE(box, nullptr); LayoutViewNode* area = box->parent; ASSERT_NE(area, nullptr);
+    EXPECT_FLOAT_EQ(area->rect.x, 15.0f); EXPECT_FLOAT_EQ(area->rect.width, 210.0f);
+    EXPECT_FLOAT_EQ(area->rect.y, 49.0f); EXPECT_FLOAT_EQ(area->rect.height, 54.0f);
+    EXPECT_FLOAT_EQ(box->rect.y, 53.0f); EXPECT_FLOAT_EQ(box->rect.height, 12.0f);
+    EXPECT_EQ(body->parent, source);
+    ASSERT_TRUE(create_dir("temp/paged-media-area-sizing"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-area-sizing/min-height.pdf"));
+    ImageSurface* surface = render_secondary_page_snapshot(tree, 1, 1.0f); ASSERT_NE(surface, nullptr);
+    EXPECT_EQ(snapshot_pixel(surface, 100, 50), 0xffff0000u);
+    EXPECT_EQ(snapshot_pixel(surface, 100, 80), 0xfffff2eeu);
+    EXPECT_EQ(snapshot_pixel(surface, 100, 104), 0xffffffffu);
+    save_surface_to_png(surface, "temp/paged-media-area-sizing/min-height-native.png"); image_surface_destroy(surface);
+}
+
+TEST_F(SecondaryViewTest, FootnoteAreaDeclaredDimensionsRespectSizingAndPagePercentages) {
+    const struct { const char* dimensions; float width, height; } cases[] = {
+        {"width: 50px; min-width: 120px; max-width: 60px; height: 30px; min-height: 40px; max-height: 20px", 128.0f, 48.0f},
+        {"width: 50px; min-width: 120px; max-width: 60px; height: 30px; min-height: 40px; max-height: 20px; box-sizing: border-box", 120.0f, 40.0f},
+        {"width: 50%; height: 20%", 118.0f, 28.0f},
+        {"width: 50%; height: 20%; box-sizing: border-box", 110.0f, 20.0f}
+    };
+    DomElement* body = block("Call "); ASSERT_NE(body, nullptr);
+    DomElement* note = block("Note", "float: footnote; footnote-policy: line", "span", body); ASSERT_NE(note, nullptr);
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.dimensions);
+        StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+        strbuf_append_str(css, "@page { size: 240px 120px; margin: 10px; @footnote { margin: 3px 0 7px; padding: 2px; border: 2px solid blue; ");
+        strbuf_append_str(css, test.dimensions);
+        strbuf_append_str(css, " } } p, div, span { margin: 0; font-size: 10px; line-height: 12px }");
+        stylesheet(css->str); strbuf_free(css);
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        LayoutViewNode* box = source_fragment(tree, note, VIEW_FRAGMENT_NOTE, true);
+        ASSERT_NE(box, nullptr); LayoutViewNode* area = box->parent; ASSERT_NE(area, nullptr);
+        EXPECT_FLOAT_EQ(area->rect.width, test.width); EXPECT_FLOAT_EQ(area->rect.height, test.height);
+        EXPECT_FLOAT_EQ(area->rect.y, 103.0f - test.height); EXPECT_FLOAT_EQ(box->rect.y, area->rect.y + 4.0f);
+        EXPECT_FLOAT_EQ(box->rect.width, test.width - 8.0f); EXPECT_FLOAT_EQ(box->rect.height, 12.0f);
+    }
+}
+
+TEST_F(SecondaryViewTest, FootnoteAreaSignedMarginsAndLateCallRollbackKeepThePhysicalAnchor) {
+    stylesheet("@page { size: 240px 120px; margin: 10px; @footnote { min-height: 48px; "
+        "margin: 3px 0 7px -4px; padding: 2px; border-top: 2px solid blue; background: #eef2ff } } "
+        "@page :left { @footnote { margin-top: -3px; margin-bottom: -4px } } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 }");
+    DomElement* body = block("A\nB\nC\nCall "); ASSERT_NE(body, nullptr);
+    DomElement* note = block("Note", "float: footnote; footnote-policy: line", "span", body); ASSERT_NE(note, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    LayoutViewNode* box = source_fragment(tree, note, VIEW_FRAGMENT_NOTE, true);
+    ASSERT_NE(box, nullptr); LayoutViewNode* area = box->parent; ASSERT_NE(area, nullptr);
+    EXPECT_EQ(area->parent, &tree->model->pages.get()[1]->node);
+    EXPECT_FLOAT_EQ(area->rect.x, 6.0f); EXPECT_FLOAT_EQ(area->rect.width, 224.0f);
+    EXPECT_FLOAT_EQ(area->rect.y, 60.0f); EXPECT_FLOAT_EQ(area->rect.height, 54.0f);
+    EXPECT_FLOAT_EQ(box->rect.y, 64.0f);
+    EXPECT_FLOAT_EQ(area->computed_boundary->margin.top, -3.0f);
+    EXPECT_FLOAT_EQ(area->computed_boundary->margin.bottom, -4.0f);
+    for (LayoutViewNode* child = tree->model->pages.get()[0]->node.first_child; child; child = child->next_sibling)
+        EXPECT_NE(child->role, VIEW_FRAGMENT_NOTE);
+    EXPECT_EQ(note->parent, body);
+    ASSERT_TRUE(create_dir("temp/paged-media-area-sizing"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-area-sizing/late-call.pdf"));
+}
+
+TEST_F(SecondaryViewTest, PageAndFootnoteAreaFontsKeepSemanticNoteInheritanceAcrossSheets) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page { size: 240px 150px; margin: 20px; font: 20px/1.25 Arial; color: purple; "
+        "@top-center { content: 'Header'; font: italic bold 8px/2 Arial; letter-spacing: 2px; color: blue } "
+        "@footnote { font-size: 50%; font-weight: bold; font-style: italic; line-height: 2; color: blue; "
+        "padding-top: 1em; border-top: .25em solid currentColor; margin-top: .5em; max-height: 34px; box-sizing: border-box } } "
+        "@page :left { @footnote { font-size: 100%; color: red } } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap; orphans: 1; widows: 1 }");
+    DomElement* body = block("Call "); ASSERT_NE(body, nullptr);
+    DomElement* note = block("A\nB\nC\nD", "float: footnote; color: green", "span", body); ASSERT_NE(note, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    ViewNodeState* state = view_tree_node_state(tree, note, false); ASSERT_NE(state, nullptr);
+    size_t count = 0;
+    for (LayoutViewNode* box = state->first_occurrence; box; box = box->next_occurrence) {
+        if (box->role != VIEW_FRAGMENT_NOTE || !box->paint_box) continue;
+        LayoutViewNode* area = box->parent; ASSERT_NE(area, nullptr); count++;
+        EXPECT_FLOAT_EQ(area->computed_boundary->padding.top, count == 1 ? 10.0f : 20.0f);
+        EXPECT_FLOAT_EQ(area->computed_boundary->border->width.top, count == 1 ? 2.5f : 5.0f);
+        EXPECT_FLOAT_EQ(area->computed_boundary->margin.top, count == 1 ? 5.0f : 10.0f);
+        EXPECT_NE(area->computed_style, nullptr);
+        if (area->computed_style) {
+            EXPECT_FLOAT_EQ(area->computed_style->font.font_size, count == 1 ? 10.0f : 20.0f);
+            EXPECT_FLOAT_EQ(area->computed_style->line_height, count == 1 ? 20.0f : 40.0f);
+            EXPECT_EQ(area->computed_style->font.font_weight_numeric, 700);
+            EXPECT_EQ(area->computed_style->font.font_style, CSS_VALUE_ITALIC);
+        }
+        EXPECT_FLOAT_EQ(box->computed_style->font.font_size, 10.0f);
+        EXPECT_EQ(box->computed_style->color.g, 128); EXPECT_EQ(box->computed_style->color.r, 0);
+    }
+    EXPECT_EQ(count, 2u);
+    LayoutViewNode* header = source_fragment(tree, source, VIEW_FRAGMENT_MARGIN, false); ASSERT_NE(header, nullptr);
+    ASSERT_NE(header->computed_style, nullptr);
+    EXPECT_FLOAT_EQ(header->computed_style->font.font_size, 8.0f);
+    EXPECT_FLOAT_EQ(header->computed_style->line_height, 16.0f);
+    EXPECT_FLOAT_EQ(header->computed_style->font.letter_spacing, 2.0f);
+    EXPECT_EQ(header->computed_style->font.font_weight_numeric, 700);
+    EXPECT_EQ(header->computed_style->font.font_style, CSS_VALUE_ITALIC);
+    EXPECT_STREQ(header->computed_style->font.family.get(), "Arial");
+    EXPECT_EQ(note->parent, body); EXPECT_FLOAT_EQ(source->x, 11.25f);
+    ASSERT_TRUE(create_dir("temp/paged-media-area-text"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-area-text/page-area-fonts.pdf"));
+    for (uint32_t page_number = 1; page_number <= 2; page_number++) {
+        ImageSurface* surface = render_secondary_page_snapshot(tree, page_number, 1.0f); ASSERT_NE(surface, nullptr);
+        EXPECT_EQ(snapshot_pixel(surface, 100, page_number == 1 ? 107 : 71), page_number == 1 ? 0xffff0000u : 0xff0000ffu);
+        size_t green_ink = 0;
+        for (size_t y = 118; y < 130; y++) for (size_t x = 20; x < 50; x++) {
+            Color pixel = {snapshot_pixel(surface, x, y)};
+            if (pixel.g > pixel.r + 20 && pixel.g > pixel.b + 20) green_ink++;
+        }
+        EXPECT_GT(green_ink, 5u);
+        save_surface_to_png(surface, page_number == 1 ? "temp/paged-media-area-text/page-area-fonts-native-1.png" :
+            "temp/paged-media-area-text/page-area-fonts-native-2.png"); image_surface_destroy(surface);
+    }
+}
+
+TEST_F(SecondaryViewTest, PageContextsResolveOwnVariablesQuotesAndWhitespace) {
+    stylesheet("@page { size: 240px 120px; margin: 20px; font-size: 16px; --label: 'Page'; --size: 8px; "
+        "@top-center { --label: 'Line'; --size: 10px; font-size: var(--size); line-height: 1; color: blue; "
+        "white-space: pre; quotes: '[' ']'; content: open-quote var(--label) close-quote '\\A Two' } "
+        "@footnote { --size: 6px; font-size: var(--size); padding-top: 1em; border-top: 1px solid blue } } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px }");
+    DomElement* body = block("Call "); ASSERT_NE(body, nullptr);
+    DomElement* note = block("Note", "float: footnote; color: green", "span", body); ASSERT_NE(note, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u);
+    LayoutViewNode* header = tree->model->pages.get()[0]->margin_boxes[CSS_PAGE_TOP_CENTER]; ASSERT_NE(header, nullptr);
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(header, text);
+    EXPECT_STREQ(text->str, "[Line]Two"); strbuf_free(text);
+    LayoutViewNode* first = header->first_child;
+    LayoutViewNode* last = header->last_child;
+    ASSERT_NE(first, nullptr); ASSERT_NE(last, nullptr); EXPECT_NE(first, last);
+    EXPECT_FLOAT_EQ(last->rect.y - first->rect.y, 10.0f);
+    EXPECT_EQ(header->computed_style->white_space, CSS_VALUE_PRE);
+    EXPECT_FLOAT_EQ(header->computed_style->font.font_size, 10.0f);
+    LayoutViewNode* box = source_fragment(tree, note, VIEW_FRAGMENT_NOTE, true); ASSERT_NE(box, nullptr);
+    ASSERT_NE(box->parent->computed_style, nullptr);
+    EXPECT_FLOAT_EQ(box->parent->computed_style->font.font_size, 6.0f);
+    EXPECT_FLOAT_EQ(box->parent->computed_boundary->padding.top, 6.0f);
+    EXPECT_FLOAT_EQ(box->computed_style->font.font_size, 10.0f);
+    EXPECT_EQ(note->parent, body);
+    ASSERT_TRUE(create_dir("temp/paged-media-area-text"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-area-text/page-contexts.pdf"));
 }
 
 TEST_F(SecondaryViewTest, AutomaticNotesCanFollowTheirCallWhenTheAreaHasNoBodyPageBudget) {
@@ -2007,6 +3026,45 @@ TEST_F(SecondaryViewTest, KeepInsideAndHeadingWithFollowingLinesMoveBeforeCommit
     EXPECT_EQ(occurrence_page(view_tree_node_state(tree, paragraph->first_child, false)->first_occurrence), heading_page);
 }
 
+TEST_F(SecondaryViewTest, SiblingKeepChainBacktracksBeforeLateFootnoteReservation) {
+    stylesheet("@page { size: 200px 100px; margin: 10px; @top-center { content: string(Title, last) } } "
+        "p, div, h2, span { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
+    ASSERT_NE(block("Prelude", "height: 24px; string-set: Title 'Prelude'"), nullptr);
+    DomElement* headings[3] = {};
+    const char* names[] = {"First", "Second", "Third"};
+    const char* styles[] = {"break-after: avoid; string-set: Title 'First'",
+        "break-after: avoid; string-set: Title 'Second'", "break-after: avoid; string-set: Title 'Third'"};
+    for (size_t i = 0; i < 3; i++) {
+        headings[i] = block(names[i], styles[i], "h2"); ASSERT_NE(headings[i], nullptr);
+    }
+    ASSERT_TRUE(headings[2]->set_attribute("id", "third"));
+    DomElement* paragraph = block("Call "); ASSERT_NE(paragraph, nullptr);
+    DomElement* note = block("Note A\nNote B", "float: footnote; footnote-policy: line; white-space: pre-wrap", "span", paragraph);
+    ASSERT_NE(note, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default();
+    PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+    for (size_t i = 0; i < 3; i++) {
+        ViewNodeState* state = view_tree_node_state(tree, headings[i]->first_child, false); ASSERT_NE(state, nullptr);
+        ASSERT_NE(state->first_occurrence, nullptr); EXPECT_EQ(occurrence_page(state->first_occurrence), 2u);
+        EXPECT_EQ(state->first_occurrence->next_occurrence, nullptr);
+    }
+    EXPECT_EQ(occurrence_page(source_fragment(tree, paragraph->first_child, VIEW_FRAGMENT_BODY, false)), 2u);
+    EXPECT_EQ(occurrence_page(source_fragment(tree, note, VIEW_FRAGMENT_NOTE, true)), 2u);
+    const TypesetTarget* target = layout_secondary_target(tree, "third"); ASSERT_NE(target, nullptr);
+    EXPECT_EQ(target->page_number, 2u);
+    const char* titles[] = {"Prelude", "Third"};
+    for (size_t i = 0; i < 2; i++) {
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        append_fragment_text(tree->model->pages.get()[i]->margin_boxes[CSS_PAGE_TOP_CENTER], text);
+        EXPECT_STREQ(text->str, titles[i]); strbuf_free(text);
+    }
+    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
+    ASSERT_TRUE(create_dir("temp/paged-media-whole-page"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-whole-page/keep-chain.pdf"));
+}
+
 TEST_F(SecondaryViewTest, ImpossibleLineReturnsDiagnosticWithoutPageBudgetLoop) {
     stylesheet("@page { size: 120px 20px; margin: 0 } p { margin: 0; font-size: 10px; line-height: 30px }");
     ASSERT_NE(block("A"), nullptr);
@@ -2187,6 +3245,58 @@ TEST_F(SecondaryViewTest, PageCascadeResolvesNamedSidedAndPercentageMargins) {
     ASSERT_EQ(view_css_page_style(tree, nullptr, 3, VIEW_PAGE_RIGHT, true, &style), VIEW_MODEL_OK);
     ASSERT_NE(style.margin_content[CSS_PAGE_BOTTOM_CENTER], nullptr);
     EXPECT_TRUE(css_value_is_none(style.margin_content[CSS_PAGE_BOTTOM_CENTER]->value));
+}
+
+TEST_F(SecondaryViewTest, PageGeometryUsesPageVariablesWithoutChangingSemanticInheritance) {
+    stylesheet("p { --paper: 500px 500px; --edge: 3px; --tint: red; font-size: 10px; margin: 0 } "
+        "@page { --paper: 240px 120px; --edge: 20px; --tint: blue; size: var(--paper); "
+        "margin: var(--edge); background-color: var(--tint) } "
+        "@page :left { --paper: 260px 140px; --edge: 10px; --tint: green }");
+    ViewTree* tree = secondary(); ViewPageStyle first = {}, second = {};
+    ASSERT_EQ(view_css_page_style(tree, nullptr, 1, VIEW_PAGE_RIGHT, false, &first), VIEW_MODEL_OK);
+    ASSERT_EQ(view_css_page_style(tree, nullptr, 2, VIEW_PAGE_LEFT, false, &second), VIEW_MODEL_OK);
+    EXPECT_FLOAT_EQ(first.width, 240.0f); EXPECT_FLOAT_EQ(first.height, 120.0f);
+    EXPECT_FLOAT_EQ(first.content_rect.x, 20.0f); EXPECT_FLOAT_EQ(first.content_rect.width, 200.0f);
+    EXPECT_EQ(first.background.b, 255); EXPECT_EQ(first.background.r, 0);
+    EXPECT_FLOAT_EQ(second.width, 260.0f); EXPECT_FLOAT_EQ(second.height, 140.0f);
+    EXPECT_FLOAT_EQ(second.content_rect.x, 10.0f); EXPECT_FLOAT_EQ(second.content_rect.width, 240.0f);
+    EXPECT_EQ(second.background.g, 128); EXPECT_EQ(second.background.r, 0);
+    ViewCssStyle* semantic = view_css_resolve(tree, source); ASSERT_NE(semantic, nullptr);
+    EXPECT_FLOAT_EQ(view_css_length(tree, semantic, view_css_property(tree, semantic, "--edge"),
+        CSS_PROPERTY_MARGIN_LEFT, 100.0f, 100.0f), 3.0f);
+    EXPECT_FLOAT_EQ(source->width, 640.0f); EXPECT_FLOAT_EQ(source->x, 11.25f);
+    ASSERT_NE(block("First sheet"), nullptr);
+    ASSERT_NE(block("Second sheet", "break-before: page"), nullptr);
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    ASSERT_TRUE(create_dir("temp/paged-media-area-text"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-area-text/page-geometry.pdf"));
+    rdt_engine_init(0); vector_engine = true;
+    for (uint32_t page_number = 1; page_number <= 2; page_number++) {
+        ImageSurface* surface = render_secondary_page_snapshot(tree, page_number, 1.0f); ASSERT_NE(surface, nullptr);
+        EXPECT_EQ(surface->width, page_number == 1 ? 240 : 260);
+        EXPECT_EQ(surface->height, page_number == 1 ? 120 : 140);
+        EXPECT_EQ(snapshot_pixel(surface, 1, 1), page_number == 1 ? 0xffff0000u : 0xff008000u);
+        save_surface_to_png(surface, page_number == 1 ? "temp/paged-media-area-text/page-geometry-native-1.png" :
+            "temp/paged-media-area-text/page-geometry-native-2.png"); image_surface_destroy(surface);
+    }
+}
+
+TEST_F(SecondaryViewTest, PageSizeAndEdgesUseThePageFontAcrossNamedAndSidedContexts) {
+    stylesheet("p { font-size: 10px } @page { size: 24em 12em; margin: 1em; font-size: 10px } "
+        "@page :left { font-size: 20px } @page square { size: 12em; font-size: 15px }");
+    ViewTree* tree = secondary(); ViewPageStyle first = {}, second = {}, square = {};
+    ASSERT_EQ(view_css_page_style(tree, nullptr, 1, VIEW_PAGE_RIGHT, false, &first), VIEW_MODEL_OK);
+    ASSERT_EQ(view_css_page_style(tree, nullptr, 2, VIEW_PAGE_LEFT, false, &second), VIEW_MODEL_OK);
+    ASSERT_EQ(view_css_page_style(tree, "square", 3, VIEW_PAGE_RIGHT, false, &square), VIEW_MODEL_OK);
+    EXPECT_FLOAT_EQ(first.width, 240.0f); EXPECT_FLOAT_EQ(first.height, 120.0f);
+    EXPECT_FLOAT_EQ(first.margin[0], 10.0f);
+    EXPECT_FLOAT_EQ(second.width, 480.0f); EXPECT_FLOAT_EQ(second.height, 240.0f);
+    EXPECT_FLOAT_EQ(second.margin[0], 20.0f);
+    EXPECT_FLOAT_EQ(square.width, 180.0f); EXPECT_FLOAT_EQ(square.height, 180.0f);
+    EXPECT_FLOAT_EQ(square.margin[0], 15.0f);
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, source)->font.font_size, 10.0f);
 }
 
 TEST_F(SecondaryViewTest, ForcedBreaksProducePhysicalPagesAndNoTrailingBlank) {
@@ -2374,6 +3484,211 @@ struct PageSnapshotCacheScope {
     RenderPageSnapshotCache* cache;
     ~PageSnapshotCacheScope() { render_page_snapshot_cache_destroy(cache); }
 };
+
+static void expect_same_page_pixels(ViewTree* left, ViewTree* right, uint32_t number) {
+    ImageSurface* a = render_secondary_page_snapshot(left, number, 0.5f);
+    ImageSurface* b = render_secondary_page_snapshot(right, number, 0.5f);
+    EXPECT_NE(a, nullptr); EXPECT_NE(b, nullptr);
+    if (a && b) {
+        EXPECT_EQ(a->width, b->width); EXPECT_EQ(a->height, b->height);
+        if (a->width == b->width && a->height == b->height)
+            for (size_t y = 0; y < (size_t)a->height; y++)
+                EXPECT_EQ(memcmp((uint8_t*)a->pixels + y * a->pitch,
+                    (uint8_t*)b->pixels + y * b->pitch, (size_t)a->width * 4), 0) << "row " << y;
+    }
+    image_surface_destroy(a); image_surface_destroy(b);
+}
+
+TEST_F(SecondaryViewTest, PageInstanceRootsShareFinalizedContentWithIndependentPlacements) {
+    preview_document();
+    DomElement* first = (DomElement*)source->first_child.get();
+    ASSERT_TRUE(first->set_attribute("id", "first"));
+    ViewTree* original = secondary(); ViewTree* sibling = secondary(); pages(sibling, 1);
+    PagedLayoutOptions layout = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(original, &layout, nullptr), TYPESET_OK);
+    ViewPageBox* material = original->model->pages.get()[0];
+    LayoutViewNode* parent = material->node.parent;
+    LayoutViewRef sibling_page = sibling->model->pages.get()[0]->node.ref;
+    ViewNodeState* state = view_tree_node_state(original, first->first_child, false); ASSERT_NE(state, nullptr);
+    PaintGlyphRun* run = state->first_occurrence->glyph_run;
+    ViewPreviewOptions grid = view_preview_options_default(); grid.rows = grid.columns = 2; grid.scale = 0.5f;
+    ViewModelStatus status = VIEW_MODEL_INVALID_ARGUMENT;
+    ViewTree* a = view_tree_page_instances_create(original, nullptr, &grid, &status);
+    ASSERT_NE(a, nullptr); EXPECT_EQ(status, VIEW_MODEL_OK);
+    ViewPreviewOptions book = grid; book.arrangement = VIEW_PAGES_BOOK; book.anchor_page = 2;
+    ViewTree* b = view_tree_page_instances_create(a, nullptr, &book, &status); ASSERT_NE(b, nullptr);
+    ViewPageRange range = {5, 5}; ViewPageSelection selection = {false, &range, 1};
+    ViewPreviewOptions thumbnail = view_preview_options_default(); thumbnail.scale = 0.25f;
+    ViewTree* c = view_tree_page_instances_create(b, &selection, &thumbnail, &status); ASSERT_NE(c, nullptr);
+    EXPECT_EQ(a->model->page_count, 5u); EXPECT_EQ(b->model->page_count, 5u); EXPECT_EQ(c->model->page_count, 5u);
+    EXPECT_EQ(a->model->placement_count, 5u); EXPECT_EQ(b->model->placement_count, 2u); EXPECT_EQ(c->model->placement_count, 1u);
+    EXPECT_EQ(c->model->placements.get()[0].page_number, 5u);
+    EXPECT_EQ(original->model->placement_count, 0u);
+    ViewPagePlacement retained = a->model->placements.get()[0];
+    book.right_binding = true;
+    ASSERT_EQ(view_tree_preview_arrange(b, nullptr, &book), VIEW_MODEL_OK);
+    EXPECT_FLOAT_EQ(a->model->placements.get()[0].rect.x, retained.rect.x);
+    ViewTree* instances[] = {a, b, c};
+    for (ViewTree* instance : instances) {
+        EXPECT_EQ(instance->model->pages.get()[0]->node.kind, LAYOUT_VIEW_PAGE_INSTANCE);
+        EXPECT_EQ(instance->model->pages.get()[0]->node.parent.get(), instance->model->root.get());
+        EXPECT_EQ(instance->model->pages.get()[0]->node.first_child, nullptr);
+        EXPECT_EQ(view_tree_page_material(instance, instance->model->pages.get()[0]), material);
+        EXPECT_EQ(view_tree_page_content_owner(instance), original);
+        EXPECT_EQ(view_tree_node_state(instance, first->first_child, false), state);
+        EXPECT_EQ(view_tree_node_state(instance, first->first_child, true), nullptr);
+        EXPECT_EQ(view_tree_node_resolve(instance, material->node.ref), nullptr);
+        EXPECT_EQ(layout_secondary_target(instance, "first"), layout_secondary_target(original, "first"));
+        EXPECT_FALSE(view_tree_model_touch_node(instance, &instance->model->pages.get()[0]->node));
+        expect_same_page_pixels(instance, original, 1);
+    }
+    PageSnapshotCacheScope cache = {render_page_snapshot_cache_create(4, 1024 * 1024)}; ASSERT_NE(cache.cache, nullptr);
+    const ImageSurface* pixels = render_page_snapshot_cache_get(cache.cache, original, 1, 0.5f); ASSERT_NE(pixels, nullptr);
+    EXPECT_EQ(render_page_snapshot_cache_get(cache.cache, a, 1, 0.5f), pixels);
+    EXPECT_EQ(render_page_snapshot_cache_get(cache.cache, c, 1, 0.5f), pixels);
+    EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).renders, 1u);
+    EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).hits, 2u);
+    EXPECT_EQ(material->node.parent.get(), parent); EXPECT_EQ(state->first_occurrence->glyph_run.get(), run);
+    EXPECT_EQ(view_tree_node_resolve(sibling, sibling_page), &sibling->model->pages.get()[0]->node);
+    EXPECT_FLOAT_EQ(source->width, 640.0f); EXPECT_FLOAT_EQ(source->x, 11.25f);
+}
+
+TEST_F(SecondaryViewTest, PageInstancesRetainOldArenaAndFontsAcrossSourceResetAndRelease) {
+    preview_document();
+    uint32_t baseline = mem_context_live_count((MemContext*)doc.services.mem_ctx);
+    ViewTree* original = secondary(); PagedLayoutOptions layout = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(original, &layout, nullptr), TYPESET_OK);
+    ViewPageBox* old_page = original->model->pages.get()[0]; LayoutViewRef old_ref = old_page->node.ref;
+    ViewPreviewOptions options = view_preview_options_default(); options.columns = 2; options.scale = 0.5f;
+    ViewTree* old_preview = view_tree_page_instances_create(original, nullptr, &options); ASSERT_NE(old_preview, nullptr);
+    original->reset_retained();
+    EXPECT_EQ(view_tree_node_resolve(original, old_ref), nullptr); EXPECT_FALSE(original->model->committed);
+    EXPECT_EQ(original->model->page_count, 0u); EXPECT_EQ(original->model->tree_id, old_ref.tree_id);
+    ViewTree* retired = view_tree_page_content_owner(old_preview); ASSERT_NE(retired, nullptr); EXPECT_NE(retired, original);
+    EXPECT_EQ(view_tree_node_resolve(retired, old_ref), &old_page->node);
+    EXPECT_FALSE(view_tree_model_reset(retired));
+    view_pool_destroy(retired);
+    EXPECT_EQ(view_tree_node_resolve(retired, old_ref), &old_page->node);
+    EXPECT_EQ(view_tree_page_material(old_preview, old_preview->model->pages.get()[0]), old_page);
+    original->model->environment.page_width = 200.0f;
+    ASSERT_EQ(layout_secondary_view(original, &layout, nullptr), TYPESET_OK);
+    EXPECT_NE(original->model->pages.get()[0], old_page);
+    ViewTree* new_preview = view_tree_page_instances_create(original, nullptr, &options); ASSERT_NE(new_preview, nullptr);
+    ViewTree* another_old = view_tree_page_instances_create(old_preview, nullptr, &options); ASSERT_NE(another_old, nullptr);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, original));
+    ASSERT_TRUE(view_tree_secondary_release(&doc, old_preview));
+    expect_same_page_pixels(another_old, new_preview, 1);
+    EXPECT_EQ(view_tree_node_resolve(retired, old_ref), &old_page->node);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, new_preview));
+    ImageSurface* page = render_secondary_page_snapshot(another_old, 1, 0.5f); ASSERT_NE(page, nullptr);
+    EXPECT_EQ(snapshot_pixel(page, 10, 35), 0xff0000ffu); image_surface_destroy(page);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, another_old));
+    EXPECT_EQ(mem_context_live_count((MemContext*)doc.services.mem_ctx), baseline);
+    EXPECT_EQ(doc.secondary_view_trees, nullptr); EXPECT_FLOAT_EQ(source->width, 640.0f);
+}
+
+TEST_F(SecondaryViewTest, PageInstanceResetAndRawSourceDestroyRespectGenerationLeases) {
+    preview_document();
+    uint32_t baseline = mem_context_live_count((MemContext*)doc.services.mem_ctx);
+    ViewTree* original = secondary(); PagedLayoutOptions layout = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(original, &layout, nullptr), TYPESET_OK);
+    ViewPreviewOptions options = view_preview_options_default();
+    ViewTree* a = view_tree_page_instances_create(original, nullptr, &options); ASSERT_NE(a, nullptr);
+    ViewTree* b = view_tree_page_instances_create(a, nullptr, &options); ASSERT_NE(b, nullptr);
+    LayoutViewRef old_instance = a->model->pages.get()[0]->node.ref;
+    ASSERT_TRUE(view_tree_model_reset(a));
+    EXPECT_FALSE(a->model->page_instances); EXPECT_EQ(view_tree_node_resolve(a, old_instance), nullptr);
+    ASSERT_EQ(layout_secondary_view(a, &layout, nullptr), TYPESET_OK);
+    expect_same_page_pixels(a, b, 1);
+    view_pool_destroy(original);
+    EXPECT_EQ(original->model, nullptr);
+    ASSERT_NE(view_tree_page_content_owner(b), nullptr);
+    expect_same_page_pixels(a, b, 1);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, b));
+    ASSERT_TRUE(view_tree_secondary_release(&doc, a));
+    ASSERT_TRUE(view_tree_secondary_release(&doc, original));
+    EXPECT_EQ(mem_context_live_count((MemContext*)doc.services.mem_ctx), baseline);
+}
+
+TEST_F(SecondaryViewTest, PageInstancesRejectInvalidAndStaleInputsWithoutChangingTheEdition) {
+    ViewTree* original = secondary(); ViewPreviewOptions options = view_preview_options_default();
+    ViewModelStatus status = VIEW_MODEL_OK;
+    EXPECT_EQ(view_tree_page_instances_create(original, nullptr, &options, &status), nullptr);
+    EXPECT_EQ(status, VIEW_MODEL_INVALID_ARGUMENT);
+    pages(original, 3); ViewPageBox* material = original->model->pages.get()[0];
+    ViewPageRange range = {4, 4}; ViewPageSelection selection = {false, &range, 1};
+    uint32_t baseline = mem_context_live_count((MemContext*)doc.services.mem_ctx);
+    EXPECT_EQ(view_tree_page_instances_create(original, &selection, &options, &status), nullptr);
+    EXPECT_EQ(status, VIEW_MODEL_INVALID_PAGE_RANGE);
+    options.scale = NAN;
+    EXPECT_EQ(view_tree_page_instances_create(original, nullptr, &options, &status), nullptr);
+    EXPECT_EQ(status, VIEW_MODEL_INVALID_ARGUMENT);
+    EXPECT_EQ(original->model->page_generation, nullptr); EXPECT_EQ(doc.secondary_view_trees.get(), original);
+    EXPECT_EQ(mem_context_live_count((MemContext*)doc.services.mem_ctx), baseline);
+    options = view_preview_options_default();
+    memtrack_fault_inject(0);
+    EXPECT_EQ(view_tree_page_instances_create(original, nullptr, &options, &status), nullptr);
+    memtrack_fault_clear(); EXPECT_EQ(status, VIEW_MODEL_OUT_OF_MEMORY);
+    EXPECT_EQ(original->model->page_generation, nullptr);
+    EXPECT_EQ(mem_context_live_count((MemContext*)doc.services.mem_ctx), baseline);
+    ViewTree* instance = view_tree_page_instances_create(original, nullptr, &options); ASSERT_NE(instance, nullptr);
+    baseline = mem_context_live_count((MemContext*)doc.services.mem_ctx);
+    memtrack_fault_inject(0);
+    original->reset_retained();
+    memtrack_fault_clear();
+    EXPECT_TRUE(original->model->committed); EXPECT_EQ(original->model->pages.get()[0], material);
+    EXPECT_EQ(view_tree_page_content_owner(instance), original);
+    EXPECT_EQ(mem_context_live_count((MemContext*)doc.services.mem_ctx), baseline);
+    doc.mutation_epoch++;
+    EXPECT_EQ(view_tree_page_content_owner(instance), nullptr);
+    EXPECT_EQ(view_tree_page_material(instance, instance->model->pages.get()[0]), nullptr);
+    EXPECT_EQ(view_tree_page_instances_create(instance, nullptr, &options, &status), nullptr);
+    EXPECT_EQ(status, VIEW_MODEL_STALE_SOURCE);
+    EXPECT_EQ(render_secondary_page_snapshot(instance, 1), nullptr);
+}
+
+TEST_F(SecondaryViewTest, PageInstancesRenderIndependentRootsAndExportTheCompletePhysicalEdition) {
+    ASSERT_TRUE(create_dir("temp/paged-media-instances")); preview_document();
+    ViewTree* original = secondary(); PagedLayoutOptions layout = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(original, &layout, nullptr), TYPESET_OK);
+    ViewPageRange range = {3, 3}; ViewPageSelection selection = {false, &range, 1};
+    ViewPreviewOptions options = view_preview_options_default(); options.arrangement = VIEW_PAGES_BOOK;
+    options.anchor_page = 2; options.scale = 0.5f; options.column_gap = 8.0f;
+    ViewTree* instance = view_tree_page_instances_create(original, &selection, &options); ASSERT_NE(instance, nullptr);
+    EXPECT_EQ(instance->model->page_count, 5u); EXPECT_EQ(instance->model->placement_count, 1u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, original));
+    ImageSurface* book = render_secondary_view_snapshot(instance, 1.0f, Color{0xff808080}); ASSERT_NE(book, nullptr);
+    EXPECT_EQ(book->width, 128); EXPECT_EQ(book->height, 80);
+    EXPECT_EQ(snapshot_pixel(book, 10, 35), 0xff808080u);
+    EXPECT_EQ(snapshot_pixel(book, 78, 35), 0xffff0000u);
+    save_surface_to_png(book, "temp/paged-media-instances/book.png"); image_surface_destroy(book);
+    ASSERT_TRUE(render_secondary_view_to_svg(instance, "temp/paged-media-instances/book.svg"));
+    ASSERT_TRUE(render_secondary_view_to_pdf(instance, "temp/paged-media-instances/all.pdf"));
+    ASSERT_TRUE(render_secondary_view_to_pdf(instance, "temp/paged-media-instances/selected.pdf", &selection));
+    options = view_preview_options_default(); options.rows = options.columns = 2; options.scale = 0.5f;
+    ViewTree* grid = view_tree_page_instances_create(instance, nullptr, &options); ASSERT_NE(grid, nullptr);
+    ASSERT_TRUE(render_secondary_view_to_png(grid, "temp/paged-media-instances/grid.png"));
+    EXPECT_EQ(instance->model->placement_count, 1u); EXPECT_EQ(grid->model->placement_count, 5u);
+    view_tree_secondary_release_all(&doc);
+    EXPECT_EQ(doc.secondary_view_trees, nullptr);
+}
+
+TEST_F(SecondaryViewTest, DocumentCleanupReleasesRegisteredInstancesAndRetiredGenerations) {
+    uint32_t baseline = mem_context_live_count((MemContext*)doc.services.mem_ctx);
+    DomDocument other; ASSERT_TRUE(other.init(input));
+    ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+    ViewTree* original = view_tree_secondary_create(&other, &environment); ASSERT_NE(original, nullptr);
+    pages(original, 3);
+    ViewPreviewOptions options = view_preview_options_default();
+    ViewTree* first = view_tree_page_instances_create(original, nullptr, &options); ASSERT_NE(first, nullptr);
+    original->reset_retained(); pages(original, 2);
+    ViewTree* second = view_tree_page_instances_create(original, nullptr, &options); ASSERT_NE(second, nullptr);
+    ASSERT_NE(view_tree_page_instances_create(first, nullptr, &options), nullptr);
+    // document-pool cleanup is also responsible for generations no longer in its view registry.
+    other.destroy();
+    EXPECT_EQ(other.secondary_view_trees, nullptr);
+    EXPECT_EQ(mem_context_live_count((MemContext*)doc.services.mem_ctx), baseline);
+}
 
 TEST_F(SecondaryViewTest, PhysicalPageSnapshotsIgnoreThePreviewFilterAndPreserveGlyphPlacement) {
     preview_document();
@@ -2620,12 +3935,16 @@ TEST_F(SecondaryViewTest, SnapshotsRejectInvalidDensityAndStaleOrUncommittedView
     EXPECT_EQ(render_secondary_view_snapshot(tree, INFINITY), nullptr);
     EXPECT_EQ(render_secondary_view_snapshot(tree, 1.0e30f), nullptr);
     EXPECT_FALSE(render_secondary_view_to_png(tree, nullptr));
+    EXPECT_FALSE(render_secondary_view_to_svg(tree, nullptr));
+    EXPECT_FALSE(render_secondary_view_to_svg(tree, "temp/paged-media-impl/invalid-preview.svg", 0.0f));
+    EXPECT_FALSE(render_secondary_view_to_svg(tree, "temp/paged-media-impl/invalid-preview.svg", INFINITY));
     ViewPageSelection empty = {false, nullptr, 0}; options.padding = 0.0f;
     ASSERT_EQ(view_tree_preview_arrange(tree, &empty, &options), VIEW_MODEL_OK);
     EXPECT_EQ(render_secondary_view_snapshot(tree), nullptr);
     doc.mutation_epoch++;
     EXPECT_EQ(render_secondary_view_snapshot(tree), nullptr);
     EXPECT_FALSE(render_secondary_view_to_png(tree, "temp/paged-media-impl/stale-preview.png"));
+    EXPECT_FALSE(render_secondary_view_to_svg(tree, "temp/paged-media-impl/stale-preview.svg"));
 }
 
 TEST_F(SecondaryViewTest, SelectionMergesAndPreservesPhysicalOrder) {

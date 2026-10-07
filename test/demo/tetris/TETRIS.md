@@ -44,6 +44,8 @@ diff -u test/demo/tetris/tetris_test.txt temp/tetris_test.actual.txt
 ./lambda.exe view test/demo/tetris/tetris.ls --headless --no-log \
   --event-file test/demo/tetris/tetris_smoke.json \
   --event-result temp/tetris_smoke_result.json
+./test/test_radiant_view_gtest.exe \
+  --gtest_filter=RadiantViewTest.TetrisClosesAfterSustainedReactiveRedraws
 ```
 
 Create `temp/` first if it does not exist. `tetris_test.txt` is the expected
@@ -52,3 +54,8 @@ collision, line clearing, scoring, hold, and top-out. The 17 interactive
 assertions check keyboard movement, rotation, scoring, hold, uninterrupted
 gravity, pause/resume, and restart. The replay is also registered under
 `test/ui/` for `make test-radiant-baseline`.
+
+`tetris_close.json` exercises sustained gravity, piece locking, restarts, and
+the window-close path. The regression runner bounds execution so a
+shutdown hang fails the test. Radiant releases obsolete rendering fragments
+after each frame under D4.5.1v4's arena ownership policy.

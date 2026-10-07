@@ -115,6 +115,9 @@ static bool clip_point_in_polygon(float px, float py, const float* vx, const flo
 
 bool clip_point_in_shape(ClipShape* cs, float px, float py) {
     if (!cs) return true;
+    if (cs->transformed) {
+        rdt_matrix_project_point(&cs->inverse_transform, px, py, &px, &py);
+    }
     switch (cs->type) {
         case CLIP_SHAPE_ROUNDED_RECT:
             return clip_point_in_rounded_rect(px, py,
@@ -202,6 +205,12 @@ void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
     int left = base_left, right = base_right;
     for (int i = 0; i < depth; i++) {
         ClipShape* cs = shapes[i];
+        if (cs->transformed) {
+            // A transformed scanline is oblique in author space; test its pixel centers.
+            while (left < right && !clip_point_in_shape(cs, (float)left + 0.5f, y)) left++;
+            while (right > left && !clip_point_in_shape(cs, (float)right - 0.5f, y)) right--;
+            continue;
+        }
         float sl, sr;
         switch (cs->type) {
             case CLIP_SHAPE_ROUNDED_RECT: {
@@ -226,6 +235,7 @@ void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
                 if (clip_floor_to_scanline(sr) < right) right = clip_floor_to_scanline(sr);
                 break;
             case CLIP_SHAPE_INSET:
+                if (y < cs->inset.y || y >= cs->inset.y + cs->inset.h) { right = left; break; }
                 if (clip_ceil_to_scanline(cs->inset.x) > left) left = clip_ceil_to_scanline(cs->inset.x);
                 if (clip_floor_to_scanline(cs->inset.x + cs->inset.w) < right) {
                     right = clip_floor_to_scanline(cs->inset.x + cs->inset.w);
@@ -246,6 +256,8 @@ void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
 ClipShape clip_shape_from_params(int type, const float* params) {
     ClipShape cs = {};
     cs.type = (ClipShapeType)type;
+    cs.transformed = params[8] != 0.0f;
+    if (cs.transformed) memcpy(&cs.inverse_transform, params + 9, sizeof(RdtMatrix));
     switch (cs.type) {
         case CLIP_SHAPE_CIRCLE:
             cs.circle = {params[0], params[1], params[2]};
@@ -267,8 +279,10 @@ ClipShape clip_shape_from_params(int type, const float* params) {
 
 void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params) {
     *out_type = cs ? (int)cs->type : 0; // INT_CAST_OK: enum serialization into display-list type field.
-    memset(out_params, 0, 8 * sizeof(float));
+    memset(out_params, 0, RDT_CLIP_PARAM_COUNT * sizeof(float));
     if (!cs) return;
+    out_params[8] = cs->transformed ? 1.0f : 0.0f;
+    if (cs->transformed) memcpy(out_params + 9, &cs->inverse_transform, sizeof(RdtMatrix));
     switch (cs->type) {
         case CLIP_SHAPE_CIRCLE:
             out_params[0] = cs->circle.cx; out_params[1] = cs->circle.cy;
@@ -290,5 +304,34 @@ void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params)
             out_params[6] = cs->rounded_rect.r_br; out_params[7] = cs->rounded_rect.r_bl;
             break;
         default: break;
+    }
+}
+
+void clip_shape_offset(ClipShape* shape, float offset_x, float offset_y) {
+    if (!shape || (offset_x == 0.0f && offset_y == 0.0f)) return;
+    if (shape->transformed) {
+        RdtMatrix translation = {1, 0, offset_x, 0, 1, offset_y, 0, 0, 1};
+        shape->inverse_transform = rdt_matrix_multiply(&shape->inverse_transform, &translation);
+        return;
+    }
+    switch (shape->type) {
+        case CLIP_SHAPE_CIRCLE:
+            shape->circle.cx -= offset_x;
+            shape->circle.cy -= offset_y;
+            break;
+        case CLIP_SHAPE_ELLIPSE:
+            shape->ellipse.cx -= offset_x;
+            shape->ellipse.cy -= offset_y;
+            break;
+        case CLIP_SHAPE_INSET:
+            shape->inset.x -= offset_x;
+            shape->inset.y -= offset_y;
+            break;
+        case CLIP_SHAPE_ROUNDED_RECT:
+            shape->rounded_rect.x -= offset_x;
+            shape->rounded_rect.y -= offset_y;
+            break;
+        default:
+            break;
     }
 }

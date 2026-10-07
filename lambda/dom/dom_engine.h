@@ -90,6 +90,11 @@ void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 bool dom_engine_set_image_source(DomElement* element, const char* source);
 bool dom_engine_image_natural_size(DomElement* element, int* width, int* height);
 
+// one-shot named frame events; the document owns requests, never script closures
+uint64_t dom_engine_frame_request(void* owner, const char* event_name);
+bool dom_engine_frame_cancel(void* owner, uint64_t token);
+bool dom_engine_frame_tick(DomDocument* document, double timestamp_ms);
+
 #ifdef __cplusplus
 }
 #endif

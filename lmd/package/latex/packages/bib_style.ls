@@ -28,6 +28,7 @@ pub fn settings(opts, language) {
      giveninits: opts != null and opts.giveninits == "true",
      uniquename: if (opts != null and opts.uniquename != null) opts.uniquename else "init",
      natbib: opts != null and opts.natbib == "true",
+     backref: opts != null and opts.backref == "true",
      doi: opts == null or opts.doi != "false",
      url: opts == null or opts.url != "false",
      isbn: opts == null or opts.isbn != "false",

@@ -848,10 +848,10 @@ TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndRejectsUnimplementedCont
     EXPECT_FALSE(render_html_fixture(html_path, invalid_path, invalid, "--paged"));
     EXPECT_FALSE(file_exists(invalid_path));
     EXPECT_TRUE(file_contains_text("temp/render_output_parity/paged_invalid.pdf.err", "formatting context requires"));
-    const char* unsupported = "temp/render_output_parity/paged_unsupported.png";
-    remove(unsupported);
-    EXPECT_FALSE(render_html_fixture(html_path, unsupported, html, "--paged"));
-    EXPECT_FALSE(file_exists(unsupported));
+    const char* preview = "temp/render_output_parity/paged_settled.png";
+    ASSERT_TRUE(render_html_fixture(html_path, preview, html, "--paged"));
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(preview, &image));
+    EXPECT_EQ(image.width, 320); EXPECT_EQ(image.height, 960); image_free(image.pixels);
 }
 
 TEST(RenderOutputParity, PagedPdfBacktracksLateBlockClosuresWithNotesAndFloats) {
@@ -875,6 +875,354 @@ TEST(RenderOutputParity, PagedPdfBacktracksLateBlockClosuresWithNotesAndFloats) 
     double width = 0.0, height = 0.0;
     ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
     EXPECT_NEAR(width, 165.0, 0.01); EXPECT_NEAR(height, 75.0, 0.01);
+}
+
+TEST(RenderOutputParity, PagedPdfBacktracksSiblingKeepChainsWithLateNotes) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_keep_chain.html";
+    const char* pdf_path = "temp/render_output_parity/paged_keep_chain.pdf";
+    const char* html = "<!doctype html><html><head><style>"
+        "@page{size:200px 100px;margin:10px;@top-center{content:string(Title,last);font-size:7px}}"
+        "html,body,div,h2,span{margin:0;font-size:10px;line-height:12px;orphans:1;widows:1}"
+        ".prelude{height:24px;string-set:Title 'Prelude'}h2{break-after:avoid;color:blue}"
+        "#first{string-set:Title 'First'}#second{string-set:Title 'Second'}#third{string-set:Title 'Third'}"
+        ".note{float:footnote;footnote-policy:line;white-space:pre-wrap;color:red}"
+        "</style></head><body><div class='prelude'>Prelude</div>"
+        "<h2 id='first'>First</h2><h2 id='second'>Second</h2><h2 id='third'>Third</h2>"
+        "<div>Call <span class='note'>Note A\nNote B</span></div></body></html>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged"));
+    EXPECT_EQ(pdf_page_count(pdf_path), 2);
+    CommandResult info = pdf_info(pdf_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0;
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 150.0, 0.01); EXPECT_NEAR(height, 75.0, 0.01);
+}
+
+TEST(RenderOutputParity, PagedPdfListMarkersResumeWithoutRepeatingOrdinals) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_lists.html";
+    const char* pdf_path = "temp/render_output_parity/paged_lists.pdf";
+    const char* html = "<!doctype html><html><head><style>"
+        "@page{size:160px 56px;margin:8px}html,body,div,ol,li{margin:0;font-size:10px;line-height:12px}"
+        "ol{padding-left:24px}li{white-space:pre-wrap;orphans:2;widows:1}li::marker{color:blue}"
+        ".prelude{height:24px}</style></head><body><div class='prelude'>Prelude</div>"
+        "<ol start='4'><li>A\nB\nC\nD</li><li>E</li></ol></body></html>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged"));
+    EXPECT_EQ(pdf_page_count(pdf_path), 3);
+    CommandResult info = pdf_info(pdf_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0;
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 120.0, 0.01); EXPECT_NEAR(height, 42.0, 0.01);
+    if (!command_exists("pdftoppm")) GTEST_SKIP() << "Poppler is needed to inspect paged marker placement";
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo rendered = {};
+    snprintf(rendered.path, sizeof(rendered.path), "%s", pdf_path);
+    snprintf(rendered.base, sizeof(rendered.base), "paged_lists");
+    for (int page = 1; page <= 3; page++) {
+        char png_path[PATH_MAX]; ASSERT_TRUE(render_reference_page(&rendered, page, png_path, sizeof(png_path)));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png_path, &image));
+        size_t markers = 0;
+        for (size_t i = 0; i < (size_t)image.width * image.height; i++) {
+            const unsigned char* pixel = image.pixels + i * 4;
+            if (pixel[2] > 180 && pixel[0] < 80 && pixel[1] < 80) markers++;
+        }
+        image_free(image.pixels);
+        if (page == 1) EXPECT_EQ(markers, 0u);
+        else EXPECT_GT(markers, 0u);
+    }
+}
+
+static const char* paged_preview_fixture() {
+    return "<!doctype html><html><head><style>"
+        "@page{size:120px 160px;margin:20px;@bottom-center{content:counter(page)}}"
+        "html,body{margin:0;font:12px/16px Arial}div{height:80px}div+div{break-before:page}"
+        "</style></head><body><div style='background:#ff0000'>One</div>"
+        "<div style='background:#00ff00'>Two</div><div style='background:#0000ff'>Three</div>"
+        "<div style='background:#ff8000'>Four</div><div style='background:#8000ff'>Five</div></body></html>";
+}
+
+static void expect_preview_pixel(const ImageData& image, int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+    ASSERT_GE(x, 0); ASSERT_GE(y, 0); ASSERT_LT(x, image.width); ASSERT_LT(y, image.height);
+    const uint8_t* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
+    EXPECT_EQ(pixel[0], r); EXPECT_EQ(pixel[1], g); EXPECT_EQ(pixel[2], b);
+}
+
+static void append_svg_image_fixture(StrBuf* html, const char* attributes,
+        const char* color, const char* style = nullptr) {
+    strbuf_append_str(html, "<img");
+    if (style) { strbuf_append_str(html, " style='"); strbuf_append_str(html, style); strbuf_append_char(html, '\''); }
+    strbuf_append_str(html, " src=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' ");
+    strbuf_append_str(html, attributes);
+    strbuf_append_str(html, "%3E%3Crect width='100%25' height='100%25' fill='");
+    strbuf_append_str(html, color); strbuf_append_str(html, "'/%3E%3C/svg%3E\">");
+}
+
+TEST(RenderOutputParity, PagedImagesWrapIntoPhysicalSheetsAndScaledPreviewCells) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_atomic_images.html";
+    const char* pdf_path = "temp/render_output_parity/paged_atomic_images.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_atomic_images.png";
+    const char* colors[] = {"red", "lime", "blue"};
+    const uint8_t expected[][3] = {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}};
+    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+    strbuf_append_str(html, "<!doctype html><style>@page{size:100px 60px;margin:10px}"
+        "html,body{margin:0;font-size:10px;line-height:12px;orphans:1;widows:1}"
+        "img{width:50px;height:20px;white-space:nowrap}</style><body>");
+    for (const char* color : colors) append_svg_image_fixture(html, "width='50' height='20'", color);
+    strbuf_append_str(html, "</body>");
+    bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
+    strbuf_free(html); ASSERT_TRUE(rendered);
+    ASSERT_EQ(pdf_page_count(pdf_path), 3);
+    EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
+    ASSERT_TRUE(render_document_fixture(html_path, preview_path,
+        "--paged --block-remote-resources --page-grid 1x3 --page-scale 0.5"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    EXPECT_EQ(preview.width, 150); EXPECT_EQ(preview.height, 30);
+    for (int page = 0; page < 3; page++)
+        expect_preview_pixel(preview, page * 50 + 12, 8, expected[page][0], expected[page][1], expected[page][2]);
+    image_free(preview.pixels);
+    if (!command_exists("pdftoppm")) GTEST_SKIP() << "Poppler is needed to inspect atomic image page order";
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
+    snprintf(pdf.base, sizeof(pdf.base), "paged_atomic_images");
+    for (int page = 0; page < 3; page++) {
+        char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page + 1, png, sizeof(png)));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+        expect_preview_pixel(image, 80, 80, expected[page][0], expected[page][1], expected[page][2]);
+        image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, SvgNaturalAxesProduceFractionalPagedPdfAndGridGeometry) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_svg_axes.html";
+    const char* pdf_path = "temp/render_output_parity/paged_svg_axes.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_svg_axes.png";
+    const char* roots[] = {"width='25.5'", "height='18.25'", "width='16.25' height='8.125'",
+        "width='25.5' viewBox='0 0 30.75 10.25'", "width='25.5'", "height='18.25'"};
+    const char* fills[] = {"red", "blue", "lime", "red", "red", "blue"};
+    const char* styles[] = {nullptr, nullptr, nullptr, nullptr, "width:51px", "height:36.5px"};
+    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+    strbuf_append_str(html, "<!doctype html><style>@page{size:360px 240px;margin:10px}html,body{margin:0}"
+        "img{display:block;break-before:page}</style><body>");
+    for (size_t i = 0; i < 6; i++) append_svg_image_fixture(html, roots[i], fills[i], styles[i]);
+    strbuf_append_str(html, "</body>");
+    bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
+    strbuf_free(html); ASSERT_TRUE(rendered);
+    ASSERT_EQ(pdf_page_count(pdf_path), 6); EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
+    ASSERT_TRUE(render_document_fixture(html_path, preview_path, "--paged --block-remote-resources --page-grid 2x3"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    EXPECT_EQ(preview.width, 1080); EXPECT_EQ(preview.height, 480);
+    expect_preview_pixel(preview, 34, 150, 255, 0, 0); expect_preview_pixel(preview, 37, 150, 255, 255, 255);
+    expect_preview_pixel(preview, 660, 26, 0, 0, 255); expect_preview_pixel(preview, 660, 30, 255, 255, 255);
+    expect_preview_pixel(preview, 744, 14, 0, 255, 0); expect_preview_pixel(preview, 748, 14, 255, 255, 255);
+    expect_preview_pixel(preview, 34, 255, 255, 0, 0); expect_preview_pixel(preview, 37, 255, 255, 255, 255);
+    expect_preview_pixel(preview, 418, 390, 255, 0, 0); expect_preview_pixel(preview, 424, 390, 255, 255, 255);
+    expect_preview_pixel(preview, 1000, 284, 0, 0, 255); expect_preview_pixel(preview, 1000, 290, 255, 255, 255);
+    image_free(preview.pixels);
+    const char* default_path = "temp/render_output_parity/paged_svg_axes_default.png";
+    ASSERT_TRUE(render_document_fixture(html_path, default_path, "--viewport-width 360 --viewport-height 400"));
+    ImageData browsing = {}; ASSERT_TRUE(load_png_rgba(default_path, &browsing));
+    EXPECT_EQ(browsing.width, 360); EXPECT_EQ(browsing.height, 400);
+    expect_preview_pixel(browsing, 49, 200, 255, 0, 0); expect_preview_pixel(browsing, 55, 200, 255, 255, 255);
+    expect_preview_pixel(browsing, 280, 350, 0, 0, 255); expect_preview_pixel(browsing, 280, 375, 255, 255, 255);
+    image_free(browsing.pixels);
+    if (!command_exists("pdftoppm")) GTEST_SKIP() << "Poppler is needed to inspect SVG natural-axis physical pages";
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path); snprintf(pdf.base, sizeof(pdf.base), "paged_svg_axes");
+    const int inside[][2] = {{34, 150}, {300, 26}, {24, 14}, {34, 15}, {58, 150}, {280, 44}};
+    const int outside[][2] = {{37, 150}, {300, 30}, {28, 14}, {37, 15}, {64, 150}, {280, 50}};
+    const uint8_t colors[][3] = {{255, 0, 0}, {0, 0, 255}, {0, 255, 0}, {255, 0, 0}, {255, 0, 0}, {0, 0, 255}};
+    for (int page = 0; page < 6; page++) {
+        char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page + 1, png, sizeof(png)));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+        float density = image.width / 360.0f; // the shared Poppler helper fits physical pages to RENDER_WIDTH.
+        expect_preview_pixel(image, (int)(inside[page][0] * density), (int)(inside[page][1] * density),
+            colors[page][0], colors[page][1], colors[page][2]);
+        expect_preview_pixel(image, (int)(outside[page][0] * density), (int)(outside[page][1] * density), 255, 255, 255);
+        image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, SvgImagesRetainMissingAndFractionalAxesInDefaultGridAndFlex) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/svg_intrinsic_containers.html";
+    const char* png_path = "temp/render_output_parity/svg_intrinsic_containers.png";
+    const char* roots[] = {"width='25.5'", "width='25.5' viewBox='0 0 30.75 10.25'",
+        "height='18.25'", "viewBox='0 0 30.75 10.25'"};
+    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+    strbuf_append_str(html, "<!doctype html><style>html,body{margin:0}"
+        ".grid{display:grid;grid-template-columns:51px;grid-template-rows:max-content;align-items:start;width:51px}"
+        ".flex{display:flex;flex-direction:column;align-items:start;width:51px}img{display:block;width:51px}</style><body>");
+    for (size_t i = 0; i < 4; i++) for (size_t kind = 0; kind < 2; kind++) {
+        strbuf_append_str(html, kind ? "<div class='flex'>" : "<div class='grid'>");
+        append_svg_image_fixture(html, roots[i], kind ? "blue" : "red"); strbuf_append_str(html, "</div>");
+    }
+    strbuf_append_str(html, "</body>");
+    bool rendered = render_html_fixture(html_path, png_path, html->str, "--viewport-width 80 --viewport-height 430");
+    strbuf_free(html); ASSERT_TRUE(rendered);
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(png_path, &image));
+    EXPECT_EQ(image.width, 80); EXPECT_EQ(image.height, 430);
+    const int centers[] = {100, 250, 308, 326, 342, 360, 378, 396};
+    for (size_t i = 0; i < 8; i++) {
+        SCOPED_TRACE(i);
+        expect_preview_pixel(image, 10, centers[i], i % 2 ? 0 : 255, 0, i % 2 ? 255 : 0);
+        expect_preview_pixel(image, 55, centers[i], 255, 255, 255);
+    }
+    expect_preview_pixel(image, 10, 410, 255, 255, 255); image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, PagedPreviewFilesArrangeGridsAndApplyDensityOnce) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_preview.html";
+    const char* png_path = "temp/render_output_parity/paged_preview_grid.png";
+    const char* options = "--paged --page-grid 2x2 --page-padding 8 --page-column-gap 12 --page-row-gap 10 --page-group-gap 14";
+    ASSERT_TRUE(render_html_fixture(html_path, png_path, paged_preview_fixture(), options));
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(png_path, &image));
+    EXPECT_EQ(image.width, 268); EXPECT_EQ(image.height, 520);
+    expect_preview_pixel(image, 40, 70, 255, 0, 0); expect_preview_pixel(image, 170, 70, 0, 255, 0);
+    expect_preview_pixel(image, 40, 240, 0, 0, 255); expect_preview_pixel(image, 170, 240, 255, 128, 0);
+    expect_preview_pixel(image, 40, 402, 128, 0, 255); image_free(image.pixels);
+    const char* dense = "temp/render_output_parity/paged_preview_grid_dense.png";
+    const char* device = "temp/render_output_parity/paged_preview_grid_device.png";
+    char arguments[512]; snprintf(arguments, sizeof(arguments), "%s --scale 2", options);
+    ASSERT_TRUE(render_document_fixture(html_path, dense, arguments));
+    snprintf(arguments, sizeof(arguments), "%s --pixel-ratio 2", options);
+    ASSERT_TRUE(render_document_fixture(html_path, device, arguments)); expect_pngs_exactly_equal(dense, device);
+    ASSERT_TRUE(load_png_rgba(dense, &image)); EXPECT_EQ(image.width, 536); EXPECT_EQ(image.height, 1040); image_free(image.pixels);
+    const char* svg = "temp/render_output_parity/paged_preview_grid.svg";
+    ASSERT_TRUE(render_document_fixture(html_path, svg, options));
+    EXPECT_TRUE(file_contains_text(svg, "viewBox=\"0 0 268 520\""));
+    EXPECT_TRUE(file_contains_text(svg, "<path")); EXPECT_FALSE(file_contains_text(svg, "<image"));
+    if (command_exists("rsvg-convert")) {
+        const char* independent = "temp/render_output_parity/paged_preview_grid_rsvg.png";
+        CommandResult rendered = run_command_capture("rsvg-convert temp/render_output_parity/paged_preview_grid.svg -o temp/render_output_parity/paged_preview_grid_rsvg.png");
+        ASSERT_EQ(rendered.exit_code, 0) << rendered.output;
+        ASSERT_TRUE(load_png_rgba(independent, &image)); EXPECT_EQ(image.width, 268); EXPECT_EQ(image.height, 520);
+        expect_preview_pixel(image, 40, 70, 255, 0, 0); expect_preview_pixel(image, 170, 240, 255, 128, 0);
+        expect_preview_pixel(image, 40, 402, 128, 0, 255); image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, PagedBookPreviewAndPhysicalThumbnailKeepOriginalPages) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_preview_book.html";
+    const char* book = "temp/render_output_parity/paged_preview_book.png";
+    ASSERT_TRUE(render_html_fixture(html_path, book, paged_preview_fixture(),
+        "--paged --book --book-page 2 --pages 1,3 --page-padding 8 --page-column-gap 12"));
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(book, &image));
+    EXPECT_EQ(image.width, 268); EXPECT_EQ(image.height, 176);
+    expect_preview_pixel(image, 40, 70, 232, 232, 232); expect_preview_pixel(image, 170, 70, 0, 0, 255); image_free(image.pixels);
+    const char* thumbnail = "temp/render_output_parity/paged_preview_thumbnail.png";
+    ASSERT_TRUE(render_document_fixture(html_path, thumbnail,
+        "--paged --book --book-page 1 --pages 1 --page-scale .25 --page-padding 40 --thumbnail-page 5 --scale .5"));
+    ASSERT_TRUE(load_png_rgba(thumbnail, &image)); EXPECT_EQ(image.width, 60); EXPECT_EQ(image.height, 80);
+    expect_preview_pixel(image, 15, 30, 128, 0, 255); image_free(image.pixels);
+    const char* jpeg = "temp/render_output_parity/paged_preview_thumbnail.jpg";
+    ASSERT_TRUE(render_document_fixture(html_path, jpeg, "--paged --thumbnail-page 5 --scale .5"));
+    int channels = 0; image.pixels = image_load(jpeg, &image.width, &image.height, &channels, 4);
+    ASSERT_NE(image.pixels, nullptr); EXPECT_EQ(image.width, 60); EXPECT_EQ(image.height, 80);
+    const uint8_t* pixel = image.pixels + ((size_t)30 * image.width + 15) * 4;
+    EXPECT_NEAR(pixel[0], 128, 5); EXPECT_LT(pixel[1], 5); EXPECT_GT(pixel[2], 250); image_free(image.pixels);
+    const char* svg = "temp/render_output_parity/paged_preview_thumbnail.svg";
+    ASSERT_TRUE(render_document_fixture(html_path, svg,
+        "--paged --thumbnail-page 5 --scale .5 --pages 1 --book-page 1 --page-scale .25"));
+    EXPECT_TRUE(file_contains_text(svg, "width=\"60\" height=\"80\" viewBox=\"0 0 120 160\""));
+    if (command_exists("rsvg-convert")) {
+        CommandResult rendered = run_command_capture("rsvg-convert temp/render_output_parity/paged_preview_thumbnail.svg -o temp/render_output_parity/paged_preview_thumbnail_rsvg.png");
+        ASSERT_EQ(rendered.exit_code, 0) << rendered.output;
+        ASSERT_TRUE(load_png_rgba("temp/render_output_parity/paged_preview_thumbnail_rsvg.png", &image));
+        EXPECT_EQ(image.width, 60); EXPECT_EQ(image.height, 80); expect_preview_pixel(image, 15, 30, 128, 0, 255); image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, PagedPreviewColumnFillHorizontalGroupsAndRightBinding) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html = "temp/render_output_parity/paged_preview_alternate.html";
+    const char* png = "temp/render_output_parity/paged_preview_horizontal.png";
+    ASSERT_TRUE(render_html_fixture(html, png, paged_preview_fixture(),
+        "--paged --page-grid 2x2 --page-fill column --page-groups horizontal --page-scale .5 --page-padding 8 --page-column-gap 6 --page-row-gap 5 --page-group-gap 14"));
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+    EXPECT_EQ(image.width, 216); EXPECT_EQ(image.height, 181);
+    expect_preview_pixel(image, 40, 40, 255, 0, 0); expect_preview_pixel(image, 40, 115, 0, 255, 0);
+    expect_preview_pixel(image, 100, 40, 0, 0, 255); expect_preview_pixel(image, 100, 115, 255, 128, 0);
+    expect_preview_pixel(image, 170, 40, 128, 0, 255); image_free(image.pixels);
+    const char* book = "temp/render_output_parity/paged_preview_right_binding.png";
+    ASSERT_TRUE(render_document_fixture(html, book, "--paged --book-page 1 --right-binding --page-padding 8 --page-column-gap 12"));
+    ASSERT_TRUE(load_png_rgba(book, &image)); EXPECT_EQ(image.width, 268); EXPECT_EQ(image.height, 176);
+    expect_preview_pixel(image, 40, 70, 0, 255, 0); expect_preview_pixel(image, 170, 70, 255, 0, 0); image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, PagedPdfSelectionIgnoresPreviewFilteringAndGeometry) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_preview_export.html";
+    const char* pdf = "temp/render_output_parity/paged_preview_export_all.pdf";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf, paged_preview_fixture(),
+        "--paged --pages 1 --book --book-page 1 --page-scale .25 --page-padding 99 --scale 2"));
+    EXPECT_EQ(pdf_page_count(pdf), 5);
+    const char* selected = "temp/render_output_parity/paged_preview_export_selected.pdf";
+    ASSERT_TRUE(render_document_fixture(html_path, selected,
+        "--paged --pages 1 --page-grid 2x2 --export-pages 4-5,2,4 --page-scale .25"));
+    EXPECT_EQ(pdf_page_count(selected), 3);
+    CommandResult info = pdf_info(selected); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0; ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 90.0, .01); EXPECT_NEAR(height, 120.0, .01);
+    if (command_exists("pdftoppm")) {
+        PdfFileInfo rendered = {}; snprintf(rendered.path, sizeof(rendered.path), "%s", selected);
+        snprintf(rendered.base, sizeof(rendered.base), "paged_selected");
+        ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+        const uint8_t colors[][3] = {{0, 255, 0}, {255, 128, 0}, {128, 0, 255}};
+        for (int page = 1; page <= 3; page++) {
+            char png_path[PATH_MAX]; ASSERT_TRUE(render_reference_page(&rendered, page, png_path, sizeof(png_path)));
+            ImageData image = {}; ASSERT_TRUE(load_png_rgba(png_path, &image));
+            // overlapping selections remain deduplicated in physical order; sample inside each colored body box.
+            expect_preview_pixel(image, image.width / 3, image.height * 7 / 16,
+                colors[page - 1][0], colors[page - 1][1], colors[page - 1][2]);
+            image_free(image.pixels);
+        }
+    }
+}
+
+TEST(RenderOutputParity, PagedPreviewRejectsInvalidOptionsWithoutWritingAnOutput) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html = "temp/render_output_parity/paged_invalid_options.html";
+    ASSERT_TRUE(write_file_all(html, paged_preview_fixture(), strlen(paged_preview_fixture())));
+    const struct { const char* options; const char* extension; const char* reason; } invalid[] = {
+        {"--pages 1", "png", "require --paged"}, {"--paged --pages 1,", "png", "expected all"},
+        {"--paged --page-grid 2x0", "png", "expected positive rows"}, {"--paged --page-scale nan", "png", "finite"},
+        {"--paged --scale nan", "png", "finite"}, {"--paged --pixel-ratio 1junk", "png", "finite"},
+        {"--paged --pages 6", "png", "invalid page selection"}, {"--paged --book-page 6", "svg", "invalid page selection"},
+        {"--paged --thumbnail-page 6", "png", "thumbnail page"}, {"--paged --thumbnail-page 1", "pdf", "requires PNG"},
+        {"--paged --export-pages 1", "svg", "requires PDF"}, {"--paged --export-pages 6", "pdf", "encoding failed"},
+        {"--paged --page-padding 1e30", "png", "too large"}, {"--paged --pages", "png", "expected all"}};
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        SCOPED_TRACE(invalid[i].options);
+        char output[PATH_MAX]; snprintf(output, sizeof(output), "temp/render_output_parity/paged_invalid_option_%zu.%s", i, invalid[i].extension);
+        remove(output); EXPECT_FALSE(render_document_fixture(html, output, invalid[i].options)); EXPECT_FALSE(file_exists(output));
+        char errors[PATH_MAX + 8]; snprintf(errors, sizeof(errors), "%s.err", output);
+        char messages[PATH_MAX + 8]; snprintf(messages, sizeof(messages), "%s.out", output);
+        EXPECT_TRUE(file_contains_text(errors, invalid[i].reason) || file_contains_text(messages, invalid[i].reason));
+    }
+}
+
+TEST(RenderOutputParity, PagedLambdaPreviewUsesTheSharedFileExportPath) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html = "temp/render_output_parity/paged_lambda_input.html";
+    ASSERT_TRUE(write_file_all(html, paged_preview_fixture(), strlen(paged_preview_fixture())));
+    const char* script = "temp/render_output_parity/paged_lambda_input.ls";
+    // the HTML parser returns #document with a doctype followed by the HTML element expected by the loader.
+    const char* source = "(input(\"temp/render_output_parity/paged_lambda_input.html\", 'html')^)[1]";
+    ASSERT_TRUE(write_file_all(script, source, strlen(source)));
+    const char* png = "temp/render_output_parity/paged_lambda_preview.png";
+    ASSERT_TRUE(render_document_fixture(script, png, "--paged --pages 2,5 --page-grid 1x2 --page-padding 8 --page-column-gap 12"));
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image)); EXPECT_EQ(image.width, 268); EXPECT_EQ(image.height, 176);
+    expect_preview_pixel(image, 40, 70, 0, 255, 0); expect_preview_pixel(image, 170, 70, 128, 0, 255); image_free(image.pixels);
+    const char* pdf = "temp/render_output_parity/paged_lambda_selected.pdf";
+    ASSERT_TRUE(render_document_fixture(script, pdf, "--paged --pages 2,5 --export-pages 2,5")); EXPECT_EQ(pdf_page_count(pdf), 2);
 }
 
 TEST(RenderOutputParity, NormalPngMatchesForcedTiledPng) {
@@ -6310,6 +6658,29 @@ TEST(RenderOutputParity, SvgExportCssFilterUsesRasterFallbackImage) {
         << "SVG export should mark unsupported CSS filter groups as raster fallbacks";
     EXPECT_TRUE(file_contains_text(svg_path, "href=\"data:image/png;base64,"))
         << "SVG raster fallback should embed the captured filtered paint";
+}
+
+TEST(RenderOutputParity, PdfUnicodeTextUsesFontOutlines) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/pdf_unicode.html";
+    const char* pdf_path = "temp/render_output_parity/pdf_unicode.pdf";
+    const char* html = "<!doctype html><meta charset='utf-8'>"
+        "<style>body{font:24px serif}</style><p>Café αβγ Привет</p>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    char qhtml[PATH_MAX + 8], qpdf[PATH_MAX + 8], cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(cmd, sizeof(cmd), "%s render %s%s -o %s > temp/render_output_parity/pdf_unicode.log 2>&1",
+        LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    EXPECT_TRUE(file_contains_text(pdf_path, " c\n"));
+    EXPECT_TRUE(file_contains_text(pdf_path, "f\n"));
+    EXPECT_FALSE(file_contains_text(pdf_path, " Tj\n"));
+    EXPECT_FALSE(file_contains_text(pdf_path, "Café"));
 }
 
 TEST(RenderOutputParity, PdfExportCssFilterUsesRasterFallbackImage) {

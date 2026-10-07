@@ -1,0 +1,35 @@
+<!doctype html>
+<style>
+#grid { display: table; width: 120px; }
+#row { display: table-row; }
+#grid::before { content: 'generated'; }
+button { height: 24px; }
+</style>
+<button id="check">check DOM after layout</button>
+<div id="report"></div>
+<div id="grid"><span id="a">a</span><span id="b">b</span><div id="row"><span id="c">c</span><span id="d">d</span></div></div>
+<script>
+document.getElementById('check').addEventListener('click', function () {
+    var grid = document.getElementById('grid');
+    var report = document.getElementById('report');
+    grid.offsetHeight;
+    function check(name, value) { report.setAttribute('data-' + name, String(value)); }
+    var all = document.querySelectorAll('*');
+    var authored = true;
+    for (var i = 0; i < all.length; i++) {
+        if (all[i].tagName.indexOf('::') === 0) authored = false;
+    }
+    check('authored', authored);
+    var descendants = grid.querySelectorAll('*');
+    var ids = [];
+    for (var i = 0; i < descendants.length; i++) ids.push(descendants[i].id);
+    check('descendants', ids.join(',') === 'a,b,row,c,d');
+    check('document-query', document.querySelectorAll('#grid *').length === 5);
+    check('first-query', document.querySelector('#grid *') === document.getElementById('a'));
+    check('first-child', grid.firstChild === document.getElementById('a'));
+    check('last-child', grid.lastChild === document.getElementById('row'));
+    check('children', grid.children.length === 3 && grid.childNodes.length === 3);
+    check('siblings', grid.firstChild.nextSibling === document.getElementById('b') && grid.lastChild.previousSibling === document.getElementById('b'));
+    check('parent', document.getElementById('c').parentNode === document.getElementById('row'));
+});
+</script>

@@ -85,7 +85,7 @@ const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
-String* css_prop_serialize_registered_custom_property(Pool* pool, DomElement* element,
+String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length);
 
 // Refresh one dynamic element's stylesheet declarations without constructing a
@@ -642,13 +642,15 @@ typedef enum {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct ImageSurface {
     ImageFormat format;
-    int width;             // the intrinsic width of the surface/image (used for layout/intrinsic sizing)
-    int height;            // the intrinsic height of the surface/image
+    int width;             // integer source/decoder extent; SVG natural dimensions remain fractional below
+    int height;
     int encoded_width;     // raster source dimensions before image-orientation metadata
     int encoded_height;
     int orientation;       // EXIF orientation value, 1 when absent/normal/invalid
     bool has_intrinsic_size;
     bool has_intrinsic_aspect_ratio;
+    float natural_width, natural_height, natural_aspect_ratio; // SVG metadata, independent of decoder viewport
+    bool has_natural_width, has_natural_height;
     int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
@@ -2901,6 +2903,8 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
                                   DomElement* parent);
 
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
+// Release a private transform chain before retained restyle replaces its head.
+void view_release_transform_functions(DomElement* element, ViewTree* tree);
 // Release iframe documents before lifecycle retirement checks their host nodes.
 // The embedded document otherwise keeps an external pin on a detached iframe.
 void view_tree_release_detached_embedded_documents(ViewTree* tree, DomNode* root);
@@ -3134,6 +3138,8 @@ enum ClipShapeType {
 // tier-2: view-pool, rebuilt each relayout
 struct ClipShape {
     ClipShapeType type;
+    bool transformed;
+    RdtMatrix inverse_transform; // maps raster pixels back to the clip's author coordinates
     union {
         struct { lam::OwnArr<float> vx; lam::OwnArr<float> vy; int count; } polygon;  // view-pool copies
         struct { float cx, cy, r; } circle;
@@ -3144,6 +3150,7 @@ struct ClipShape {
 };
 
 #define RDT_MAX_CLIP_SHAPES 8
+#define RDT_CLIP_PARAM_COUNT 18 // geometry (8), transform flag (1), inverse matrix (9)
 
 bool clip_point_in_shape(ClipShape* cs, float px, float py);
 bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
@@ -3152,6 +3159,7 @@ void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
     float y, int base_left, int base_right, int* out_left, int* out_right);
 ClipShape clip_shape_from_params(int type, const float* params);
 void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params);
+void clip_shape_offset(ClipShape* shape, float offset_x, float offset_y);
 
 
 // ===== form controls =====
@@ -3746,7 +3754,7 @@ typedef struct CssTransitionValue {
 
 // One tracked transitionable property: its last-applied used value (the
 // snapshot) plus the currently running transition instance (if any).
-// document-pool: snapshots survive retained view-pool resets.
+// embedded in the document-owned per-element snapshot
 typedef struct CssTransitionTrack {
     CssPropertyCode property_code;
     CssAnimValueType value_type;
@@ -3755,15 +3763,6 @@ typedef struct CssTransitionTrack {
     CssTransitionValue snapshot;     // last-applied used value
     CssTransitionValue pending_from; // before-change value for the next style resolution
 } CssTransitionTrack;
-
-// Persistent per-element transition state (stored in DomElement's extension).
-// document-pool: retained across relayout with the element.
-typedef struct CssTransitionElemState {
-    lam::OwnArr<CssTransitionTrack> tracks;
-    int track_count;
-    int track_capacity;
-    Pool* pool;
-} CssTransitionElemState;
 
 // Per-instance transition state (attached to AnimationInstance.state).
 // document-pool: released when its scheduler instance finishes or is canceled.
@@ -4221,6 +4220,7 @@ typedef struct DocumentJsHostConfig {
     double post_load_settle_ms;
     bool redirect_stdout_to_stderr;
     bool disable_css_animations;
+    InputResourcePolicy resource_policy;
 } DocumentJsHostConfig;
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const struct DomDocument* source);
@@ -4231,6 +4231,11 @@ extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp*
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
+bool document_dependency_admits(const DomDocument* document, const char* source);
+ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source);
+ImageSurface* load_document_image_resource(DomDocument* document, lam::Own<struct hashmap>* cache,
+    const char* source);
+void image_resource_cache_cleanup(lam::Own<struct hashmap>* cache, UiContext* animation_ui = nullptr);
 // The image cache takes a surface decoded elsewhere under `key` and returns the
 // surface it holds for that key: `surface`, or an earlier one (then `surface`
 // is destroyed). Returns null, with `surface` destroyed, when it cannot store it.
@@ -4265,6 +4270,10 @@ typedef struct HtmlLoadPhaseTiming {
     double finalize_ms;
 } HtmlLoadPhaseTiming;
 
+DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
+    bool track_source_lines = false, bool execute_scripts = true,
+    const DocumentJsHostConfig* host_config = nullptr);
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config = nullptr,
                            struct CookieJar* top_level_cookie_jar = nullptr,
@@ -4279,9 +4288,11 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_filename, int viewport_
                                     struct DocumentScriptPhaseTiming* script_timing,
                                     bool print_media = false);
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
-        const LambdaDocumentTransformConfig* transform,
-        const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool, bool print_media = false);
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    int viewport_width, int viewport_height, Pool* pool,
+    InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK,
+    bool print_media = false);
 // Names the window whose shared loader runtime a top-level load on this thread
 // uses, for the duration of that load. Iframe and worker loads install none,
 // so their stateless loaders keep a runtime per document.

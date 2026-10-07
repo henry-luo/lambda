@@ -13,7 +13,7 @@ struct Arena;
  * when the tree declines (D3.4.3v3). It makes no ShapeEntry itself.
  *
  * SCU10: drafts grow from the document. The builder embeds no field-count
- * limit; its draft arrays live in the caller's arena (Input lifetime, no
+ * limit; its draft arrays live in the caller's arena (no
  * per-builder free), doubling as fields are added.
  *
  * USAGE:
@@ -39,7 +39,7 @@ typedef struct ShapeBuilder {
 
 // SCU16/SCU10 size budget: no embedded document-sized tables.
 #ifdef __cplusplus
-static_assert(sizeof(ShapeBuilder) <= 64, "ShapeBuilder must stay a small handle over arena-owned drafts");
+static_assert(sizeof(ShapeBuilder) <= 64, "ShapeBuilder must stay a small handle over caller-owned drafts");
 #endif
 
 #ifdef __cplusplus

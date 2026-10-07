@@ -30,7 +30,6 @@ bool css_import_rule_is_active(CssRule* rule, CssEngine* engine) {
         css_evaluate_media_query(engine, rule->data.import_rule.media);
 }
 
-typedef bool (*CssRegistrationVisitor)(void*, const CssPropertyRegistration*);
 
 static bool css_visit_active_rules_in_sheet(CssEngine* engine, CssStylesheet* sheet,
     CssActiveRuleVisitor visitor, void* context, size_t depth);
@@ -366,6 +365,21 @@ struct CssScriptPropertyRegistration {
     size_t name_length;
     CssScriptPropertyRegistration* next;
 };
+
+bool css_visit_document_property_registrations(DomDocument* doc,
+        CssRegistrationVisitor visitor, void* context) {
+    if (!doc || !visitor) return false;
+    CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        CssStylesheet* sheet = doc->stylesheets[i];
+        if (sheet && !sheet->is_import_child &&
+            !css_visit_registrations_in_sheet(engine, sheet, visitor, context, 0)) return false;
+    }
+    for (CssScriptPropertyRegistration* entry = (CssScriptPropertyRegistration*)doc->services.registered_property_set;
+         entry; entry = entry->next)
+        if (!visitor(context, &entry->registration)) return false;
+    return true;
+}
 
 const CssPropertyRegistration* css_find_script_property_registration(DomDocument* doc,
     const char* name, size_t name_length) {

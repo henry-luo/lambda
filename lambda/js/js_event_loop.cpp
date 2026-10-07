@@ -1742,14 +1742,16 @@ extern "C" int js_event_loop_drain(void) {
     }
 
     if (auto_close_mode) {
-        if (virtual_clock_enabled && auto_close_settle_ms > 0.0) {
+        if (virtual_clock_enabled) {
             // Resource-completion tasks run at the load boundary. Settle their
-            // zero-delay work first, so the requested window starts after load.
+            // zero-delay work even when the requested window is zero.
             js_event_loop_advance_virtual_time(0.0, 0);
-            js_event_loop_advance_virtual_time(auto_close_settle_ms, 0);
-            // Browser snapshots observe the next rendering opportunity after
-            // their wait completes, including timer callbacks due this frame.
-            js_event_loop_advance_virtual_time(1000.0 / 60.0, 1);
+            if (auto_close_settle_ms > 0.0) {
+                js_event_loop_advance_virtual_time(auto_close_settle_ms, 0);
+                // Browser snapshots observe the next rendering opportunity after
+                // their wait completes, including timer callbacks due this frame.
+                js_event_loop_advance_virtual_time(1000.0 / 60.0, 1);
+            }
         }
         for (int turn = 0; turn < 4; turn++) {
             int active = uv_run(loop, UV_RUN_NOWAIT);
@@ -1759,7 +1761,9 @@ extern "C" int js_event_loop_drain(void) {
             // final DOM mutations before the one-shot document is serialized.
             int frame_callbacks = js_animation_frame_has_pending()
                 ? js_animation_frame_flush(js_performance_monotonic_now_ms()) : 0;
-            js_microtask_flush();
+            // rAF and IO delivery may queue more work at this same capture time.
+            if (virtual_clock_enabled) js_event_loop_advance_virtual_time(0.0, 0);
+            else js_microtask_flush();
             if (!active && timer_handle_count == 0 && frame_callbacks == 0 &&
                 !js_animation_frame_has_pending()) break;
         }

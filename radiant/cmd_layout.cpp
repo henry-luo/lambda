@@ -186,12 +186,29 @@ struct CssSourceBuffer {
 // CSS parsing runs on the document thread, but its immutable HTTP bytes are
 // supplied by the page's shared network scheduler.
 static thread_local NetworkResourceManager* g_css_resource_manager = nullptr;
+static thread_local InputResourcePolicy g_css_resource_policy = INPUT_RESOURCE_ALLOW_NETWORK;
+
+struct CssSourceScope {
+    NetworkResourceManager* manager;
+    InputResourcePolicy policy;
+    explicit CssSourceScope(DomDocument* document,
+            InputResourcePolicy selected_policy = INPUT_RESOURCE_ALLOW_NETWORK)
+        : manager(g_css_resource_manager), policy(g_css_resource_policy) {
+        g_css_resource_manager = document ? document->resource_manager : nullptr;
+        g_css_resource_policy = document ? document->resource_policy : selected_policy;
+    }
+    ~CssSourceScope() { g_css_resource_manager = manager; g_css_resource_policy = policy; }
+};
 
 static bool css_load_source(const char* path, bool is_http, bool binary,
                             CssSourceBuffer* source) {
     if (!path || !*path || !source) return false;
     source->data = nullptr;
     source->length = 0;
+    if (!input_resource_policy_admits(g_css_resource_policy, path)) {
+        log_info("resource-admission: denied stylesheet dependency %s", path);
+        return false;
+    }
     if (is_http) {
         if (g_css_resource_manager) {
             source->data = resource_manager_copy_resource_content(
@@ -883,6 +900,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
             // importing rule's source position.
             imported->is_import_child = true;
             imported->parent_stylesheet = stylesheet;
+            imported->owner_rule = rule;
             rule->data.import_rule.stylesheet = imported;
         }
         if (!imported || imported->rule_count == 0) {
@@ -1559,8 +1577,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
     int stylesheet_capacity = 0;
 
     DomDocument* document = dom_root ? dom_root->doc : nullptr;
-    NetworkResourceManager* previous_manager = g_css_resource_manager;
-    g_css_resource_manager = document ? document->resource_manager : nullptr;
+    CssSourceScope source_scope(document);
 
     // Start script transfer only after stylesheet bytes are ready. This lets
     // CSS parsing overlap script I/O without delaying the first cascade.
@@ -1575,7 +1592,6 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
     collect_stylesheets_in_document_order(html_root, dom_root, engine, base_path, pool,
                                           &stylesheets, stylesheet_count,
                                           &stylesheet_capacity, &linked_count, 0);
-    g_css_resource_manager = previous_manager;
     if (linked_count_out) *linked_count_out = linked_count;
 
     return stylesheets;
@@ -2097,6 +2113,7 @@ DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
     config.post_load_settle_ms = source->js.post_load_settle_ms;
     config.redirect_stdout_to_stderr = source->js.redirect_stdout_to_stderr;
     config.disable_css_animations = source->disable_css_animations;
+    config.resource_policy = source->resource_policy;
     return config;
 }
 
@@ -2111,6 +2128,7 @@ void document_apply_js_host_config(DomDocument* doc,
     doc->js.post_load_settle_ms = config->post_load_settle_ms;
     doc->js.redirect_stdout_to_stderr = config->redirect_stdout_to_stderr;
     doc->disable_css_animations = config->disable_css_animations;
+    doc->resource_policy = config->resource_policy;
 }
 
 // Script realms stay on the host thread; async loaders transfer only the parsed DOM.
@@ -2384,6 +2402,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     // parsed HTML: the only page kind that may host a JS DOM script realm.
     dom_doc->page_kind = DOM_PAGE_KIND_HTML;
+    dom_doc->resource_policy = g_css_resource_policy;
     // Scripts may call getClientRects() during load. Preserve the parsed mode
     // before that first layout so transient measurements use the same initial
     // values as the eventual post-script layout.
@@ -2470,6 +2489,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
 
     // Load external CSS if provided
+    CssSourceScope source_scope(dom_doc);
     CssStylesheet* external_stylesheet = nullptr;
     if (css_filename) {
         external_stylesheet = load_pool_backed_stylesheet(
@@ -2621,12 +2641,12 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 }
 
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
-    bool track_source_lines = false, bool execute_scripts = true) {
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
+    bool track_source_lines, bool execute_scripts, const DocumentJsHostConfig* host_config) {
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, html_source, track_source_lines, execute_scripts,
-                                         nullptr, nullptr, nullptr, nullptr, false);
+                                         nullptr, nullptr, host_config, nullptr, false);
 }
 
 static DomDocument* load_lambda_html_doc_with_host_config(
@@ -2644,7 +2664,8 @@ static DomDocument* load_lambda_html_doc_with_host_config(
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
-    int viewport_width, int viewport_height, Pool* pool, bool print_media);
+    int viewport_width, int viewport_height, Pool* pool,
+    InputResourcePolicy resource_policy, bool print_media);
 
 // The document of the transform configured for `input_type`.
 static DomDocument* load_input_type_transform_doc(const char* input_type, Url* url,
@@ -2657,7 +2678,7 @@ static DomDocument* load_input_type_transform_doc(const char* input_type, Url* u
         return nullptr;
     }
     return load_lambda_document_transform_doc(url, transform, options, option_count,
-                                              viewport_width, viewport_height, pool);
+        viewport_width, viewport_height, pool, g_css_resource_policy);
 }
 
 static DomDocument* load_pdf_transform_doc(Url* pdf_url, int viewport_width,
@@ -2742,9 +2763,12 @@ static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool
 static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               int width, int height, Pool* pool,
                                               bool include_text,
-                                              bool* handled) {
+                                              bool* handled,
+                                              const DocumentJsHostConfig* host_config = nullptr) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
+    // legacy format loaders inherit one request-scoped admission context.
+    CssSourceScope source_scope(nullptr, host_config ? host_config->resource_policy : g_css_resource_policy);
 
     if (graph_path_is_graph(path)) {
         if (handled) *handled = true;
@@ -2810,7 +2834,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     bool handled = false;
     // Use the parsed pathname so a query does not hide the file extension.
     doc = load_layout_special_file(full_url, url_get_pathname(full_url),
-                                   viewport_width, viewport_height, pool, true, &handled);
+                                   viewport_width, viewport_height, pool, true, &handled, js_host_config);
     // non-HTML documents still dispatch callbacks through their owning viewer.
     if (handled) document_apply_js_host_config(doc, js_host_config);
     if (!handled) {
@@ -3331,6 +3355,7 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
     // record provenance at construction; routing must never re-derive it from
     // which runtime pointer a document happens to hold.
     document->page_kind = page_kind;
+    document->resource_policy = g_css_resource_policy;
     log_debug("[page-kind] %s document -> %s", document_kind,
               dom_page_kind_name(page_kind));
     if (page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
@@ -3840,7 +3865,10 @@ const char* lambda_document_load_diagnostic(void) {
 static DomDocument* load_lambda_document_doc(Url* script_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool, bool print_media) {
+        int viewport_width, int viewport_height, Pool* pool,
+        InputResourcePolicy resource_policy = g_css_resource_policy,
+        bool print_media = false) {
+    CssSourceScope request_scope(nullptr, resource_policy);
     auto total_start = time_now_ns();
 
     if (!script_url || !pool) {
@@ -3876,6 +3904,8 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
         runtime_init(runtime);
     }
+    // shared loaders must use the resource policy of the current document.
+    runtime->resource_policy = resource_policy;
     Runtime* owned_runtime = shared_runtime ? nullptr : runtime;
     // A load that builds no document here releases a document-owned runtime;
     // the shared one stays with its window.
@@ -4077,6 +4107,8 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     css_engine->context.print_media = print_media;
 
     auto step5_end = time_now_ns();
+    dom_doc->resource_policy = resource_policy;
+    CssSourceScope source_scope(dom_doc);
     log_info("[TIMING] Step 5 - Build DOM tree: %.1fms",
         time_elapsed_ms_f(step5_start, step5_end));
 
@@ -4146,14 +4178,15 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool, bool print_media) {
+        int viewport_width, int viewport_height, Pool* pool,
+        InputResourcePolicy resource_policy, bool print_media) {
     return load_lambda_document_doc(document_url, transform, options, option_count,
-        viewport_width, viewport_height, pool, print_media);
+        viewport_width, viewport_height, pool, resource_policy, print_media);
 }
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
     return load_lambda_document_doc(script_url, nullptr, nullptr, 0,
-        viewport_width, viewport_height, pool, false);
+        viewport_width, viewport_height, pool, g_css_resource_policy, false);
 }
 
 static View* find_matching_input(View* root, const char* match_tag, const char* match_class) {
@@ -4759,7 +4792,9 @@ struct LayoutOptions {
     const char* memory_profile_output_file;      // post-layout six-domain snapshot
     bool auto_close;                            // cancel async JS timers after load/onload
     int post_load_settle_ms;                    // deterministic timer window before auto-close
+    bool post_load_settle_given;
     bool disable_animations;                    // freeze CSS animation/transition effects for snapshots
+    bool block_remote_resources;
     bool stream_layout_results;                 // write compact framed results to stdout
 };
 
@@ -4814,6 +4849,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         {nullptr, "--post-load-settle-ms", "--post-load-settle-ms",
          &opts->post_load_settle_ms, LAYOUT_OPTION_INTEGER},
         {nullptr, "--disable-animations", nullptr, &opts->disable_animations, LAYOUT_OPTION_FLAG},
+        {nullptr, "--block-remote-resources", nullptr, &opts->block_remote_resources, LAYOUT_OPTION_FLAG},
         {nullptr, "--stream-layout-results", nullptr,
          &opts->stream_layout_results, LAYOUT_OPTION_FLAG}
     };
@@ -4834,6 +4870,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
                     } else {
                         *(int*)spec->target = (int)str_to_int64_default(
                             value, strlen(value), 0); // INT_CAST_OK: CLI viewport option
+                        if (spec->target == &opts->post_load_settle_ms) opts->post_load_settle_given = true;
                     }
                 }
                 matched = true;
@@ -5191,6 +5228,7 @@ static bool layout_single_file(
     bool auto_close = false,
     int post_load_settle_ms = 0,
     bool disable_animations = false,
+    bool block_remote_resources = false,
     FILE* result_stream = nullptr
 ) {
     auto total_start = time_now_ns();
@@ -5217,11 +5255,13 @@ static bool layout_single_file(
         ui_context,
         false,
         auto_close,
-        post_load_settle_ms > 0,
+        // static captures keep startup time fixed even when their post-load window is zero.
+        auto_close,
         0.0,
         (double)post_load_settle_ms,
         result_stream != nullptr,
-        disable_animations
+        disable_animations,
+        block_remote_resources ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK
     };
 
     Url* input_url = url_parse_path_or_url(input_file, cwd);
@@ -5284,7 +5324,7 @@ static bool layout_single_file(
         // the batch's documents share one loader runtime, as a window's do
         LayoutLoaderHostScope loader_host(ui_context);
         doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
-                                       pool, false, &special_handled);
+                                       pool, false, &special_handled, &js_host_config);
     }
     if (!special_handled) {
         const int max_redirects = 8;
@@ -5808,7 +5848,8 @@ int cmd_layout(int argc, char** argv) {
         opts.stream_layout_results;
     bool auto_close = opts.auto_close || shell_getenv("LAMBDA_AUTO_CLOSE") != nullptr;
     int post_load_settle_ms = opts.post_load_settle_ms;
-    if (post_load_settle_ms == 0) {
+    // an explicit zero freezes delayed capture tasks even when a host supplies a default window.
+    if (!opts.post_load_settle_given) {
         const char* settle_env = shell_getenv("LAMBDA_POST_LOAD_SETTLE_MS");
         if (settle_env) {
             post_load_settle_ms = (int)str_to_int64_default(
@@ -5896,6 +5937,7 @@ int cmd_layout(int argc, char** argv) {
                 auto_close,
                 post_load_settle_ms,
                 opts.disable_animations,
+                opts.block_remote_resources,
                 opts.stream_layout_results ? stdout : nullptr
                 );
             } catch (...) {

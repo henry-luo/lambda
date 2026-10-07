@@ -1,0 +1,15 @@
+{
+  accents: true,
+  unresolved: true,
+  invalid_flags: true,
+  conflicting_packages: true,
+  thai_limit: true,
+  page_limit: true,
+  table_number: true,
+  raw_stylesheet: true,
+  table_header: true,
+  proof_definition: true,
+  coil_geometry: true,
+  nested_alignment: true,
+  resource_resolution: true
+}

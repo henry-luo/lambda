@@ -1808,6 +1808,25 @@ TEST(SvgLengthTest, UsesViewportAxesFontMetricsAndRejectsUnknownUnits) {
     EXPECT_FLOAT_EQ(svg_resolve_length("12%bad", &lengths, SVG_LENGTH_X, -1.0f), -1.0f);
 }
 
+TEST(SvgLengthTest, ResolvesFontMetricsOnlyWhenExUnitsAreConsumed) {
+    FontContextConfig config = {}; config.pixel_ratio = 1.0f;
+    FontContext* fonts = font_context_create(&config);
+    ASSERT_NE(fonts, nullptr);
+    FontStyleDesc descriptor = {};
+    descriptor.family = "Arial"; descriptor.size_px = 30.0f;
+    descriptor.weight = FONT_WEIGHT_NORMAL;
+    SvgLengthContext lengths = {200.0f, 100.0f, 30.0f, 15.0f, fonts, descriptor};
+    EXPECT_FLOAT_EQ(svg_resolve_length("2em", &lengths, SVG_LENGTH_X, -1.0f), 60.0f);
+    EXPECT_FLOAT_EQ(svg_resolve_length("calc(50% + 10px)", &lengths, SVG_LENGTH_X, -1.0f), 110.0f);
+    EXPECT_EQ(font_get_cache_stats(fonts).face_count, 0);
+    EXPECT_EQ(font_get_cache_stats(fonts).database_font_count, 0);
+    float measured = svg_resolve_length("2ex", &lengths, SVG_LENGTH_X, -1.0f);
+    EXPECT_FLOAT_EQ(measured, 2.0f * svg_font_x_height(fonts, &descriptor));
+    EXPECT_FLOAT_EQ(svg_resolve_length("calc(50% + 2ex)", &lengths, SVG_LENGTH_X, -1.0f), 100.0f + measured);
+    EXPECT_GT(font_get_cache_stats(fonts).face_count, 0);
+    font_context_destroy(fonts);
+}
+
 TEST(SvgLengthTest, AnglesShareCssUnitConversionAndRejectInvalidSuffixes) {
     EXPECT_NEAR(svg_resolve_angle("0.25turn", -1), 90, 0.0001f);
     EXPECT_NEAR(svg_resolve_angle("100grad", -1), 90, 0.0001f);
@@ -2064,6 +2083,35 @@ TEST(RdtVectorTest, ComposesOneClipMaskPerStableBatch) {
     rdt_path_free(inner);
     rdt_path_free(outer);
     rdt_vector_destroy(&vector);
+    rdt_engine_term();
+}
+
+TEST(RdtVectorTest, NestedTransformedCurvesClipImmediateAndBatchedPaints) {
+    rdt_engine_init(0);
+    for (int batch = 0; batch < 2; batch++) {
+        uint32_t pixels[20 * 20] = {};
+        RdtVector vector = {};
+        rdt_vector_init(&vector, pixels, 20, 20, 20);
+        RdtPath* outer = rdt_path_new();
+        RdtPath* inner = rdt_path_new();
+        rdt_path_add_rect(outer, 0.0f, 0.0f, 12.0f, 20.0f, 0.0f, 0.0f);
+        rdt_path_add_circle(inner, 5.0f, 5.0f, 4.0f, 4.0f);
+        RdtMatrix transform = rdt_matrix_translate(5.0f, 5.0f);
+        Color red = {}; red.r = 255; red.a = 255;
+        if (batch) rdt_vector_begin_batch(&vector);
+        rdt_push_clip(&vector, outer, nullptr);
+        rdt_push_clip(&vector, inner, &transform);
+        rdt_fill_rect(&vector, 0.0f, 0.0f, 20.0f, 20.0f, red);
+        rdt_pop_clip(&vector);
+        rdt_pop_clip(&vector);
+        if (batch) rdt_vector_end_batch(&vector);
+        EXPECT_NE(pixels[10 * 20 + 10], 0u);
+        EXPECT_EQ(pixels[10 * 20 + 13], 0u); // inside the circle, outside the outer clip.
+        EXPECT_EQ(pixels[6 * 20 + 6], 0u); // inside the outer clip, outside the circle.
+        EXPECT_EQ(pixels[4 * 20 + 4], 0u); // the untranslated circle must not paint here.
+        rdt_path_free(inner); rdt_path_free(outer);
+        rdt_vector_destroy(&vector);
+    }
     rdt_engine_term();
 }
 

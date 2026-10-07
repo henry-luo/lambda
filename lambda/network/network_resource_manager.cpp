@@ -544,14 +544,23 @@ void resource_manager_set_wake_callback(NetworkResourceManager* mgr,
     log_debug("network: wake callback set for resource manager");
 }
 
+static bool resource_manager_admits(NetworkResourceManager* mgr, const char* url) {
+    if (!mgr || !url) return false;
+    // admission precedes both source acquisition and retained content reuse.
+    if (mgr->document && !input_resource_policy_admits(mgr->document->resource_policy, url)) {
+        log_info("resource-admission: denied network dependency %s", url);
+        return false;
+    }
+    return true;
+}
+
 // load resource (with deduplication and actual download integration)
 NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
                                       const char* url,
                                       ResourceType type,
                                       ResourcePriority priority,
                                       struct DomElement* owner) {
-    if (!mgr || !url) return NULL;
-    
+    if (!resource_manager_admits(mgr, url)) return NULL;
     pthread_mutex_lock(&mgr->mutex);
     
     // enforce maximum resources per page (500) to prevent runaway loading
@@ -721,7 +730,7 @@ char* resource_manager_copy_ready_resource_content(NetworkResourceManager* mgr,
                                                    const char* url,
                                                    size_t* out_size) {
     if (out_size) *out_size = 0;
-    if (!mgr || !url) return NULL;
+    if (!resource_manager_admits(mgr, url)) return NULL;
 
     char* local_path = NULL;
     pthread_mutex_lock(&mgr->mutex);

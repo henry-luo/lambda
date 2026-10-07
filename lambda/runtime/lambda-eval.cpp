@@ -95,7 +95,6 @@ extern "C" Item vmap_set(Item vmap_item, Item key, Item value);
 extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index);
 
 // forward declaration of static error string (defined later in this file)
-extern String& STR_ERROR;
 
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
@@ -6174,6 +6173,7 @@ Item fn_parse_html_fragment1(Item str_item) {
     }
 
     Html5Parser* parser = html5_fragment_parser_create(input->pool, input->arena, input);
+    Html5ParserScope parser_scope(parser);
     if (!parser) {
         set_runtime_error(ERR_OUT_OF_MEMORY,
             "parse_html_fragment: failed to allocate HTML fragment parser");

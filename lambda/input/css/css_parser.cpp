@@ -4587,7 +4587,7 @@ CssDeclaration* css_parse_property_declaration(const char* property, size_t prop
     return css_parse_declaration_text(text, length, pool);
 }
 
-static bool css_initial_value_token_span(const CssToken* tokens, size_t count,
+static bool css_property_value_token_span(const CssToken* tokens, size_t count,
     const char* text, size_t length, Pool* pool, const char** start, size_t* span_length) {
     CssTokenType* closers = (CssTokenType*)pool_alloc(pool, count * sizeof(CssTokenType));
     if (!closers) return false;
@@ -4634,6 +4634,22 @@ static bool css_initial_value_token_span(const CssToken* tokens, size_t count,
     return true;
 }
 
+CssDeclaration* css_parse_property_value_declaration(const char* property, size_t property_length,
+    const char* value, size_t value_length, Pool* pool) {
+    if (!property || !value || !pool) return nullptr;
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(value, value_length, pool, &count);
+    if (!tokens || !count) return nullptr;
+    const char* raw = nullptr;
+    size_t raw_length = 0;
+    // reject top-level punctuation before parsing the value as a declaration fragment.
+    bool valid = css_property_value_token_span(tokens, count, value, value_length,
+        pool, &raw, &raw_length);
+    css_token_array_release(pool, tokens, count);
+    return valid ? css_parse_property_declaration(property, property_length,
+        raw, raw_length, pool) : nullptr;
+}
+
 bool css_parse_property_initial_value(CssPropertyRegistration* registration,
     const char* text, size_t length, Pool* pool) {
     if (!registration || !text || !pool) return false;
@@ -4643,7 +4659,7 @@ bool css_parse_property_initial_value(CssPropertyRegistration* registration,
     const char* raw = nullptr;
     size_t raw_length = 0;
     // Parse a value, not a declaration: a trailing semicolon or top-level ! cannot be consumed as punctuation.
-    bool valid = css_initial_value_token_span(tokens, count, text, length, pool, &raw, &raw_length);
+    bool valid = css_property_value_token_span(tokens, count, text, length, pool, &raw, &raw_length);
     css_token_array_release(pool, tokens, count);
     if (!valid) return false;
     CssDeclaration* declaration = css_parse_property_declaration("--initial", 9, raw, raw_length, pool);

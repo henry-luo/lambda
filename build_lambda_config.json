@@ -37,6 +37,7 @@
     "lambda/validator",
     "lambda/js",
     "lambda/js/mvp",
+    "lambda/js/mvp-lmd",
     "lambda/dom",
     "lambda/dom/realm",
     "lambda/module/radiant",
@@ -742,6 +743,7 @@
       "source_patterns": [
         "lambda/js/*.cpp",
         "lambda/js/mvp/*.cpp",
+        "lambda/js/mvp-lmd/*.cpp",
         "lambda/dom/*.cpp",
         "lambda/dom/realm/*.cpp",
         "lambda/jube/*.cpp",
@@ -5315,6 +5317,42 @@
               "radiant"
             ],
             "binary": "test_js_mvp_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "Security",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "icon": "\ud83e\uddee"
+          },
+          {
+            "source": "test/test_js_mvp_lmd_gtest.cpp",
+            "name": "JS Lambda MVP Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "binary": "test_js_mvp_lmd_gtest.exe",
             "libraries": [
               "gtest",
               "gtest_main"

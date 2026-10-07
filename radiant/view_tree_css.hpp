@@ -7,6 +7,7 @@
 struct SelectorMatcher;
 struct ViewCssVariable;
 struct CounterSnapshot;
+struct ViewCssPageContext;
 
 enum ViewBreak : uint8_t {
     VIEW_BREAK_AUTO, VIEW_BREAK_AVOID, VIEW_BREAK_PAGE,
@@ -21,6 +22,7 @@ struct ViewCssStyle {
     lam::Up<CssDeclaration*> inline_declarations;
     size_t inline_count;
     lam::Up<ViewCssVariable> variables;
+    lam::Up<ViewCssPageContext> page_context;
     DisplayValue display;
     FontProp font;
     FontBox font_box;
@@ -31,6 +33,11 @@ struct ViewCssStyle {
     float line_height;
     lam::Up<const CssValue> line_height_value;
     CssEnum text_align, white_space, float_value, clear_value, position, box_sizing;
+    CssEnum list_style_type;
+    bool list_marker_inside;
+    bool list_reversed;
+    lam::Up<const char> list_style_string;
+    lam::Up<const CssValue> list_style_image;
     ViewBreak break_before, break_after, break_inside;
     uint32_t orphans, widows;
     bool decoration_clone;
@@ -50,11 +57,20 @@ struct ViewCssContext {
     lam::Up<SelectorMatcher> matcher;
     lam::Counted<FontContext> fonts;
     lam::Up<ViewCssStyle> styles;
+    lam::Up<CssStylesheet*> stylesheets;
+    size_t stylesheet_count;
     float root_font_size;
 };
 
 struct ViewPageAreaStyle {
+    lam::Up<ViewCssStyle> computed_style;
+    const CssDeclaration* width;
+    const CssDeclaration* min_width;
+    const CssDeclaration* max_width;
+    const CssDeclaration* height;
+    const CssDeclaration* min_height;
     const CssDeclaration* max_height;
+    const CssDeclaration* margin[4];
     const CssDeclaration* padding[4];
     const CssDeclaration* border_width[4];
     const CssDeclaration* border_style[4];
@@ -65,6 +81,8 @@ struct ViewPageAreaStyle {
     const CssDeclaration* float_value;
 };
 struct ViewPageStyle {
+    lam::Up<ViewCssStyle> computed_style;
+    lam::Up<ViewCssStyle> margin_style[CSS_PAGE_MARGIN_BOX_COUNT];
     float width, height;
     float margin[4], padding[4], border_width[4];
     Color background;
@@ -83,6 +101,7 @@ bool view_css_context_begin(ViewTree* tree);
 void view_css_context_destroy(ViewTree* tree);
 ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element);
 ViewCssStyle* view_css_resolve_pseudo(ViewTree* tree, DomElement* element, uint8_t pseudo_element);
+const ViewCssStyle* view_css_common_ancestor(const ViewCssStyle* left, const ViewCssStyle* right);
 const CssValue* view_css_property(ViewTree* tree, ViewCssStyle* style, const char* name,
                                  CssDeclaration* winning = nullptr);
 const CssValue* view_css_resolve_value(ViewTree* tree, ViewCssStyle* style, const CssValue* value);

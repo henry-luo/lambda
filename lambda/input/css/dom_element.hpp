@@ -15,6 +15,7 @@
 #include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
 #include "../../lambda.hpp"  // Full Element definition (needed for embedded Element field)
 #include "../../core/name_identity.h"
+#include "../../io/resource_policy.h"
 
 /**
  * DOM Element Extension for CSS Styling
@@ -48,7 +49,14 @@ int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir, bool first)
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct MarkerProp MarkerProp;  // From radiant/view.hpp
-typedef struct CssTransitionElemState CssTransitionElemState;  // From radiant/view.hpp
+typedef struct CssTransitionTrack CssTransitionTrack;  // From radiant/view.hpp
+// D4.5.1v4: DOM retirement owns the snapshot and its track allocation.
+typedef struct CssTransitionElemState {
+    lam::OwnArr<CssTransitionTrack> tracks;
+    int track_count;
+    int track_capacity;
+    Pool* pool;
+} CssTransitionElemState;
 typedef struct CssWebAnimationState CssWebAnimationState;  // From radiant/view.hpp
 typedef struct CustomLayoutPaintState CustomLayoutPaintState;  // From radiant/layout.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
@@ -97,12 +105,25 @@ typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_INLINE_STYLE = 9
 } DomJsMutationKind;
 
+// authored and presentation writes share repaint versus recascade classification.
+inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id) {
+    switch (prop_id) {
+        case CSS_PROPERTY_BACKGROUND_COLOR:
+        case CSS_PROPERTY_COLOR:
+        case CSS_PROPERTY_OPACITY:
+        case CSS_PROPERTY_VISIBILITY:
+            return DOM_JS_MUTATION_STYLE_REPAINT;
+        default:
+            return DOM_JS_MUTATION_INLINE_STYLE;
+    }
+}
+
 typedef enum DomJsMutationAttribute {
     DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN,
     DOM_JS_MUTATION_ATTRIBUTE_CLASS,
 } DomJsMutationAttribute;
 
-// tier-1: doc-pool, survives relayout
+// tier-1: document-owned journal, survives relayout
 typedef struct DomJsMutationRecord {
     uint32_t sequence;
     DomJsMutationKind kind;
@@ -141,9 +162,11 @@ struct DomJsRuntime {
     uint32_t mutation_kind_mask;
     int mutation_record_count;
     int mutation_record_overflow;
-    DomJsMutationRecord mutation_records[DOM_JS_MUTATION_RECORD_CAP];
+    DomJsMutationRecord* mutation_records;
+    int mutation_record_capacity;
+    DomJsMutationRecord inline_mutation_records[DOM_JS_MUTATION_RECORD_CAP];
     // DOM text-tree edits to <style> need exact owners even when the generic
-    // layout-mutation ledger reaches its bounded record capacity.
+    // layout-mutation ledger cannot grow after an allocation failure.
     DomElement** inline_stylesheet_mutations;
     int inline_stylesheet_mutation_count;
     int inline_stylesheet_mutation_capacity;
@@ -164,7 +187,9 @@ struct DomJsRuntime {
 
     DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime(nullptr),
         doc_node(nullptr), implicit_doctype(true), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
-        mutation_record_count(0), mutation_record_overflow(0), mutation_records{},
+        mutation_record_count(0), mutation_record_overflow(0),
+        mutation_records(inline_mutation_records), mutation_record_capacity(DOM_JS_MUTATION_RECORD_CAP),
+        inline_mutation_records{},
         inline_stylesheet_mutations(nullptr), inline_stylesheet_mutation_count(0),
         inline_stylesheet_mutation_capacity(0),
         ready_state("complete"), host_ui_context(nullptr), host_driven_loop(false),
@@ -319,6 +344,7 @@ struct DomDocument : DomDocumentResourceData {
 
     // Network support (Phase 4 integration)
     lam::Own<struct NetworkResourceManager> resource_manager;  // Network resource coordinator (nullptr for local-only docs)
+    InputResourcePolicy resource_policy;              // immutable dependency admission for this document
     double load_start_time;                           // Document load start timestamp (for total timeout)
     bool fully_loaded;                                // True when all network resources complete
 
@@ -452,7 +478,7 @@ struct DomDocument : DomDocumentResourceData {
                     font_faces_processed(false),
                     view_tree(nullptr), secondary_view_trees(nullptr),
                     secondary_views_cleanup_registered(false), state_store(nullptr), state(nullptr),
-                    resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
+                    resource_manager(nullptr), resource_policy(INPUT_RESOURCE_ALLOW_NETWORK), load_start_time(0.0), fully_loaded(true),
                     lambda_runtime(nullptr), embedding_document(nullptr),
                     embedding_element_ref({nullptr, 0}), resources(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
@@ -1311,8 +1337,15 @@ void dom_option_text_normalized(DomElement* option, StrBuf* out);
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 
 // DomElement* → Element*: returns pointer to the embedded Element within DomElement
-inline Element* dom_element_to_element(DomElement* de) { return &de->elmt; }
-inline const Element* dom_element_to_element(const DomElement* de) { return &de->elmt; }
+inline Element* dom_element_to_element(DomElement* de) {
+    if (de->node_flags & DOM_NODE_FLAG_GC_BACKING) {
+        dom_node_registry_refresh_backing(de->doc, de);
+    }
+    return &de->elmt;
+}
+inline const Element* dom_element_to_element(const DomElement* de) {
+    return dom_element_to_element(const_cast<DomElement*>(de));
+}
 
 // Synthetic layout-only nodes deliberately have no Lambda-tree identity even
 // though they carry the same embedded storage for a uniform object layout.
@@ -1498,6 +1531,10 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style);
  * @return Number of declarations applied
  */
 int dom_element_apply_inline_style(DomElement* element, const char* style_text);
+// Node-owned transient CSS values, independent of the authored Mark attributes.
+bool dom_element_set_presentation_style(DomElement* element, const char* property,
+                                        const char* value, bool* changed);
+bool dom_element_clear_presentation_style(DomElement* element);
 const char* dom_inline_style_declaration_end(const char* text);
 
 /**

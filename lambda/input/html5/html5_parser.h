@@ -6,6 +6,7 @@
 #include <string.h>
 #include "html5_token.h"
 #include "../../../lib/stringbuf.h"
+#include "../../../lib/mem_kind.hpp"
 #include "../line_counter.hpp"
 
 // ============================================================================
@@ -166,10 +167,12 @@ typedef struct Html5Parser {
     // Memory management
     Pool* pool;
     Arena* arena;
+    // parser-only stacks and buffers; published Mark data stays in arena/input.
+    lam::Own<Arena> work_arena;
     // Token strings (tag and attribute names, text runs, comment and doctype
     // text), which the tree builder copies: a private scratch arena during
-    // html5_parse/html5_parse_ex, reset between tokens; the Input arena for
-    // a fragment parser, which has no end of parse to release it.
+    // full and fragment parse calls, reset between tokens; the parser's arena
+    // between calls so a fragment parser can continue parsing later input.
     Arena* token_arena;
     Input* input;
 
@@ -251,6 +254,15 @@ typedef struct Html5ParseOptions {
 // Parser lifecycle
 Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input);
 void html5_parser_destroy(Html5Parser* parser);
+
+class Html5ParserScope {
+    lam::Own<Html5Parser> parser_;
+public:
+    explicit Html5ParserScope(Html5Parser* parser) : parser_(lam::own(parser)) {}
+    ~Html5ParserScope() { html5_parser_destroy(parser_.get()); }
+    Html5ParserScope(const Html5ParserScope&) = delete;
+    Html5ParserScope& operator=(const Html5ParserScope&) = delete;
+};
 
 // Main parsing function
 Element* html5_parse(Input* input, const char* html);

@@ -5,6 +5,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/arena.h"
+#include "../lib/arraylist.h"
 
 #include <math.h>
 #include <string.h>
@@ -378,6 +379,28 @@ void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayLis
         }
         retained_dl_cache_store_marker(cache, source, i);
     }
+
+    // replaced view IDs cannot be reused; release their arenas each frame
+    // instead of retaining every reactive redraw until document teardown.
+    ArrayList* stale = nullptr;
+    size_t iter = 0;
+    RetainedDisplayListEntry* entry = nullptr;
+    while (cache->map.next(&iter, &entry)) {
+        if (!entry->fragment || entry->fragment->last_stored_epoch == cache->epoch) continue;
+        if (!stale) stale = arraylist_new(16);
+        if (!stale || !arraylist_append(stale, entry->fragment)) {
+            log_error("retained_dl_prune: could not collect expired fragments");
+            break;
+        }
+    }
+    if (!stale) return;
+    // hash-map erasure rearranges buckets, so collect before mutating the map.
+    for (int i = 0; i < stale->length; i++) {
+        RetainedDisplayListFragment* fragment = (RetainedDisplayListFragment*)stale->data[i];
+        cache->map.erase({fragment->view_id, nullptr});
+        retained_dl_fragment_free(cache->pool, fragment);
+    }
+    arraylist_free(stale);
 }
 
 const RetainedDisplayListFragment* retained_dl_cache_get(RetainedDisplayListCache* cache,

@@ -3,7 +3,8 @@ import util: ~~.util
 import math: lambda.doc.math.math
 
 let ENVIRONMENTS = ["equation*", "align", "align*", "alignat", "alignat*",
-    "aligned", "gather", "gather*", "multline", "multline*", "split"]
+    "aligned", "gather", "gather*", "multline", "multline*", "split",
+    "IEEEeqnarray", "IEEEeqnarray*"]
 
 pub fn is_environment(tag) => any([for (name in ENVIRONMENTS) tag == name])
 
@@ -200,7 +201,16 @@ pub fn rows_for(el) {
 }
 
 fn alignat_body(source, tag) {
-    if (not starts_with(tag, "alignat")) {source: source, error: null}
+    if (starts_with(tag, "IEEEeqnarray")) {
+        let trimmed = trim(source)
+        let close = index_of(trimmed, "}")
+        let columns = if (close == null) "" else slice(trimmed, 1, close)
+        if (not starts_with(trimmed, "{") or close == null or
+            not valid_ieee_columns(columns, 0))
+            {source: source, error: "Unsupported IEEEeqnarray column specification"}
+        else {source: slice(trimmed, close + 1, len(trimmed)), error: null}
+    }
+    else if (not starts_with(tag, "alignat")) {source: source, error: null}
     else {
         let trimmed = trim(source)
         let close = index_of(trimmed, "}")
@@ -212,6 +222,16 @@ fn alignat_body(source, tag) {
                 {source: source, error: "Invalid alignat column-pair count"}
             else {source: slice(trimmed, close + 1, len(trimmed)), error: null}
         }
+    }
+}
+
+fn valid_ieee_columns(columns, index) {
+    if (index >= len(columns)) index > 0
+    else {
+        let ch = slice(columns, index, index + 1)
+        if (ch == "l" or ch == "c" or ch == "r")
+            valid_ieee_columns(columns, index + 1)
+        else false
     }
 }
 

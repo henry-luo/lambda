@@ -27,7 +27,7 @@ ShapeBuilder shape_builder_init_element(Arena* arena, const char* element_name) 
 // ========== Field Management ==========
 
 // SCU10: grow the draft array from the caller's arena, which owns the
-// abandoned smaller block for the Input's lifetime; there is no per-builder
+// abandoned smaller block for that arena's lifetime; there is no per-builder
 // free.
 static bool shape_builder_reserve(ShapeBuilder* builder, size_t needed) {
     if (needed <= builder->capacity) return true;

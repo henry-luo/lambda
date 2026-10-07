@@ -11,6 +11,7 @@ struct TypesetRegionConstraints {
     bool defer_anchors, from_start;
     float reference_height; // containing region height remains stable as the reservation budget shrinks
     bool occupied; // body material outside this region may leave it with a zero budget
+    float minimum_height; // reserve this extent only when material actually occupies the region
 };
 struct TypesetRegionSlice {
     TypesetResume end;
@@ -67,6 +68,7 @@ struct TypesetRegionCheckpoint {
 };
 
 // Required anchors receive a first slice; deferrable insertions preserve their cursor in the queue.
+// A signed separator permits producer-owned margins without changing content metrics.
 TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
     const TypesetRegionMaterial* const* anchors, size_t anchor_count,
     const TypesetRegionConstraints* constraints, float body_height, float separator_height,

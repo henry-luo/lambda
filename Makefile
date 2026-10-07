@@ -79,6 +79,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_mir_emission_gtest \
 	test_js_mir_emission_gtest \
 	test_js_mvp_gtest \
+	test_js_mvp_lmd_gtest \
 	test_item_repr_gtest \
 	test_lambda_typed \
 	test_scalar_compare_gtest \
@@ -2286,7 +2287,7 @@ run-layout-baseline-suites:
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-radiant-baseline: build-radiant-baseline
-	@./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:FontPathTest.*'
+	@./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:ResourceAdmissionTest.*'
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
 # Requires test/render Node dependencies, Chromium and Poppler's pdftocairo/pdfimages.

@@ -29,7 +29,11 @@ let NAMED_COLORS = {
     'teal':      "#009688",
     'violet':    "#9c27b0",
     'darkgray':  "#616161",
-    'lightgray': "#bdbdbd"
+    'lightgray': "#bdbdbd",
+    'LightGrey': "#d3d3d3",
+    'RoyalBlue': "#4169e1",
+    'VioletRed': "#d02090",
+    'Gainsboro': "#dcdcdc"
 }
 
 // ============================================================

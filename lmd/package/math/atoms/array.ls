@@ -18,7 +18,9 @@ import util: lambda.doc.math.util
 // ============================================================
 
 pub fn render_env(node, context, render_fn) {
-    let env_name = if (node.name != null) string(node.name) else "matrix"
+    // split has the same cell/row presentation as an aligned block.
+    let declared_name = if (node.name != null) string(node.name) else "matrix"
+    let env_name = if (declared_name == "split") "aligned" else declared_name
     let columns = if (node.columns != null) string(node.columns) else null
     let body = node.body
     if (body == null) box.text_box("", null, "mord")

@@ -27,8 +27,13 @@ extern "C" {
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/runtime/interp.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_events.h"
+#include "../lambda/dom/dom_cssom.h"
+#include "../lambda/dom/dom_core.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
 
 static struct {
@@ -45,6 +50,234 @@ static Item record_animation_event(Item event) {
     if (js_string_equals(type, "animationcancel")) animation_events.cancels++;
     animation_events.elapsed = js_get_name_key(event, "elapsedTime").get_double();
     return ItemNull;
+}
+
+struct CssomDocumentLifetimeProbe : DomDocumentResourceData {
+    unsigned* destroyed;
+};
+
+static void cssom_document_lifetime_destroyed(DomDocumentResourceData* data) {
+    CssomDocumentLifetimeProbe* probe = (CssomDocumentLifetimeProbe*)data;
+    ++*probe->destroyed;
+    mem_free(probe);
+}
+
+static DomDocument* cssom_create_owned_document(unsigned* destroyed) {
+    Pool* pool = pool_create();
+    Input* input = pool ? Input::create(pool) : nullptr;
+    DomDocument* document = input ? dom_document_create(input) : nullptr;
+    if (!document) {
+        if (pool) pool_destroy(pool);
+        return nullptr;
+    }
+    dom_document_finalize_loader_pool(document, pool);
+    document->root = lam::up(DomElement::create(document, "html", nullptr));
+    CssomDocumentLifetimeProbe* probe = (CssomDocumentLifetimeProbe*)mem_calloc(
+        1, sizeof(*probe), MEM_CAT_LAYOUT);
+    if (!probe || !document->root) {
+        if (probe) mem_free(probe);
+        free_document(document);
+        return nullptr;
+    }
+    probe->destroyed = destroyed;
+    if (!dom_document_add_resource(document, probe, cssom_document_lifetime_destroyed)) {
+        mem_free(probe);
+        free_document(document);
+        return nullptr;
+    }
+    return document;
+}
+
+TEST(DomDocumentOwnership, LambdaOnlyEvaluatorClosesDocumentsAtResetAndTeardown) {
+    unsigned destroyed = 0;
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    struct Cleanup {
+        Runtime* runtime;
+        Pool* pool;
+        ~Cleanup() {
+            if (runtime) runtime_cleanup(runtime);
+            if (pool) pool_destroy(pool);
+        }
+    } cleanup = {&runtime, pool_create()};
+    ASSERT_NE(cleanup.pool, nullptr);
+    EvalContext* owner = runtime_get_eval_context(&runtime);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_TRUE(eval_context_init(owner));
+    heap_init();
+    ASSERT_NE(owner->heap, nullptr);
+    owner->pool = owner->heap->pool;
+    owner->name_pool = name_pool_create_runtime(cleanup.pool);
+    ASSERT_NE(owner->name_pool, nullptr);
+    ASSERT_EQ(js_runtime_state_for(runtime.eval_context), nullptr);
+    DomDocument* document = cssom_create_owned_document(&destroyed);
+    ASSERT_NE(document, nullptr);
+    ASSERT_TRUE(dom_retain_owned_document(document));
+    RuntimeResourceTable* table = runtime_resource_table_context(runtime.eval_context);
+    ASSERT_NE(table, nullptr);
+    EXPECT_EQ(runtime_resource_table_active_count(table), 1);
+    EXPECT_TRUE(dom_retain_owned_document(document));
+    EXPECT_EQ(runtime_resource_table_active_count(table), 1);
+    static const char node_brand = 0;
+    DomElement* native_root = document->root;
+    Item node_wrapper = vmap_new();
+    virtual_host_set(node_wrapper, &node_brand, native_root);
+    heap_register_gc_root(&node_wrapper.item);
+    ASSERT_TRUE(dom_cache_node_wrapper(native_root, document, node_wrapper));
+    EXPECT_EQ(dom_cached_node_wrapper(native_root).item, node_wrapper.item);
+    EXPECT_EQ(dom_cached_node_wrapper_document(node_wrapper), document);
+    DomText* detached = DomText::create_detached_copy(document, "detached", 8);
+    ASSERT_NE(detached, nullptr);
+    EXPECT_EQ(dom_node_owner_document_bridge(detached), document);
+    // weak script carriers cannot collect a document still owned by the evaluator.
+    heap_gc_collect();
+    EXPECT_EQ(destroyed, 0u);
+    EXPECT_STREQ(document->root->tag_name, "html");
+    free_document(document);
+    EXPECT_EQ(virtual_host_data(node_wrapper), nullptr);
+    heap_unregister_gc_root(&node_wrapper.item);
+    EXPECT_EQ(destroyed, 1u);
+    EXPECT_EQ(runtime_resource_table_active_count(table), 0);
+
+    document = cssom_create_owned_document(&destroyed);
+    ASSERT_NE(document, nullptr);
+    ASSERT_TRUE(dom_retain_owned_document(document));
+    runtime_reset_heap(&runtime);
+    EXPECT_EQ(destroyed, 2u);
+    EXPECT_EQ(runtime_resource_table_active_count(table), 0);
+    heap_init();
+    ASSERT_NE(owner->heap, nullptr);
+    owner->pool = owner->heap->pool;
+    owner->name_pool = name_pool_create_runtime(cleanup.pool);
+    ASSERT_NE(owner->name_pool, nullptr);
+    document = cssom_create_owned_document(&destroyed);
+    ASSERT_NE(document, nullptr);
+    ASSERT_TRUE(dom_retain_owned_document(document));
+    runtime_cleanup(&runtime);
+    cleanup.runtime = nullptr;
+    EXPECT_EQ(destroyed, 3u);
+}
+
+TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    struct Cleanup {
+        Runtime* runtime;
+        Pool* pool = nullptr;
+        DomDocument* document = nullptr;
+        ~Cleanup() {
+            if (document) dom_cssom_invalidate_document(document);
+            dom_set_document(nullptr);
+            runtime_cleanup(runtime);
+            if (document) dom_document_destroy(document);
+            if (pool) pool_destroy(pool);
+        }
+    } cleanup = {&runtime};
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "null;", 5,
+        "cssom-identity.js", nullptr)));
+    cleanup.pool = pool_create();
+    ASSERT_NE(cleanup.pool, nullptr);
+    Input* input = Input::create(cleanup.pool);
+    ASSERT_NE(input, nullptr);
+    cleanup.document = dom_document_create(input);
+    ASSERT_NE(cleanup.document, nullptr);
+    DomElement* root = DomElement::create(cleanup.document, "html", nullptr);
+    ASSERT_NE(root, nullptr);
+    cleanup.document->root = lam::up(root);
+    dom_set_document(cleanup.document);
+    CssEngine* engine = css_engine_create(cleanup.pool);
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        ".a { color: red; & .b { color: blue; } color: green; }", nullptr);
+    CssStylesheet* imported = css_parse_stylesheet(engine, ".child { width: 10px; }", "child.css");
+    const char* import_text = "@import 'child.css';";
+    CssRule* import_rule = css_parse_rule_text(import_text, strlen(import_text), cleanup.pool);
+    css_engine_destroy(engine);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_NE(imported, nullptr);
+    ASSERT_NE(import_rule, nullptr);
+    sheet->owner_document = cleanup.document;
+    css_rule_attach(import_rule, nullptr, sheet);
+    imported->parent_stylesheet = sheet;
+    imported->owner_rule = import_rule;
+    import_rule->data.import_rule.stylesheet = imported;
+    struct WorkerCall { EvalContext* eval; CssStylesheet* sheet; } call = {
+        runtime.eval_context, sheet};
+    // create the weak index on a worker, then destroy the document after the legal handoff.
+    ASSERT_TRUE(js_runtime_state_shutdown(call.eval));
+    Item wrapper = interp_run_on_large_stack(call.eval, [](void* opaque) -> Item {
+        WorkerCall* call = (WorkerCall*)opaque;
+        if (!js_runtime_state_init(call->eval)) return ItemError;
+        Item result = dom_cssom_wrap_stylesheet(call->sheet);
+        return js_runtime_state_shutdown(call->eval) ? result : ItemError;
+    }, &call);
+    RootFrame roots(13);
+    Rooted<Item> sheet_root(roots, wrapper);
+    ASSERT_TRUE(js_runtime_state_init(call.eval));
+    ASSERT_EQ(get_type_id(sheet_root.get()), LMD_TYPE_VMAP);
+    Rooted<Item> document_root(roots, dom_cached_node_wrapper(cleanup.document->js.doc_node));
+    ASSERT_EQ(get_type_id(document_root.get()), LMD_TYPE_VELMT);
+    EXPECT_EQ(dom_cached_node_wrapper_document(document_root.get()), cleanup.document);
+    Rooted<Item> element_root(roots, dom_wrap_element(root));
+    Rooted<Item> style_key_root(roots, js_name_item("style"));
+    Rooted<Item> inline_root(roots, dom_core_get_property(element_root.get(), style_key_root.get()));
+    Rooted<Item> computed_root(roots, dom_get_computed_style(element_root.get(), ItemNull));
+    ASSERT_TRUE(dom_is_inline_style_item(inline_root.get()));
+    ASSERT_TRUE(dom_is_computed_style_item(computed_root.get()));
+    Rooted<Item> rule_root(roots, dom_cssom_stylesheet_rule_at(
+        sheet_root.get(), (Item){.item = i2it(0)}));
+    Rooted<Item> declaration_root(roots, dom_cssom_rule_get_style(rule_root.get()));
+    Rooted<Item> rules_root(roots, dom_cssom_stylesheet_get_css_rules(sheet_root.get()));
+    Rooted<Item> nested_root(roots, dom_cssom_rule_get_css_rules(rule_root.get()));
+    Rooted<Item> key_root(roots, js_name_item("parentRule"));
+    ASSERT_EQ(get_type_id(declaration_root.get()), LMD_TYPE_VMAP);
+    EXPECT_EQ(sheet_root.get().item, dom_cssom_wrap_stylesheet(sheet).item);
+    EXPECT_EQ(rule_root.get().item, dom_cssom_stylesheet_rule_at(
+        sheet_root.get(), (Item){.item = i2it(0)}).item);
+    EXPECT_EQ(declaration_root.get().item, dom_cssom_rule_get_style(rule_root.get()).item);
+    EXPECT_EQ(inline_root.get().item,
+        dom_core_get_property(element_root.get(), style_key_root.get()).item);
+    EXPECT_EQ(rules_root.get().item, dom_cssom_stylesheet_get_css_rules(sheet_root.get()).item);
+    EXPECT_EQ(nested_root.get().item, dom_cssom_rule_get_css_rules(rule_root.get()).item);
+    EXPECT_FALSE(it2b(js_strict_equal(rule_root.get(), declaration_root.get())));
+    Rooted<Item> imported_root(roots, dom_cssom_wrap_stylesheet(imported));
+    Rooted<Item> import_root(roots, dom_cssom_stylesheet_get_owner_rule(imported_root.get()));
+    EXPECT_EQ(dom_cssom_stylesheet_get_owner_node(imported_root.get()).item, ItemNull.item);
+    EXPECT_EQ(dom_cssom_stylesheet_get_parent_style_sheet(imported_root.get()).item, sheet_root.get().item);
+    EXPECT_EQ(dom_cssom_stylesheet_get_owner_rule(imported_root.get()).item, import_root.get().item);
+    css_rule_attach(import_rule, nullptr, nullptr);
+    EXPECT_EQ(dom_cssom_stylesheet_get_parent_style_sheet(imported_root.get()).item, ItemNull.item);
+    EXPECT_EQ(dom_cssom_stylesheet_get_owner_rule(imported_root.get()).item, import_root.get().item);
+    uint64_t parent_identity = rule_root.get().item;
+    // the declaration's hidden traced edge must retain its parent without native-stack scanning.
+    sheet_root.set(ItemNull);
+    rule_root.set(ItemNull);
+    rules_root.set(ItemNull);
+    nested_root.set(ItemNull);
+    heap_gc_collect();
+    rule_root.set(dom_cssom_rule_decl_get_property(declaration_root.get(), key_root.get()));
+    EXPECT_EQ(rule_root.get().item, parent_identity);
+    EXPECT_EQ(declaration_root.get().item, dom_cssom_rule_get_style(rule_root.get()).item);
+    rules_root.set(dom_cssom_rule_get_css_rules(rule_root.get()));
+    nested_root.set(dom_cssom_get_document_stylesheets());
+    // direct native destruction uses the document resource hook, not a UI-only path.
+    dom_document_destroy(cleanup.document);
+    cleanup.document = nullptr;
+    dom_set_document(nullptr);
+    EXPECT_EQ(virtual_host_data(document_root.get()), nullptr);
+    // retained declarations must detach before their document-owned payload is freed.
+    EXPECT_EQ(virtual_host_data(inline_root.get()), nullptr);
+    EXPECT_EQ(virtual_host_data(computed_root.get()), nullptr);
+    ASSERT_FALSE(dom_is_css_rule(rule_root.get()));
+    ASSERT_FALSE(dom_is_rule_style_decl(declaration_root.get()));
+    ASSERT_FALSE(dom_is_stylesheet(imported_root.get()));
+    ASSERT_FALSE(dom_is_css_rule(import_root.get()));
+    EXPECT_EQ(dom_cssom_rule_get_style(rule_root.get()).item, ItemNull.item);
+    EXPECT_EQ(rules_root.get().varray->vtable->items.count(rules_root.get().varray->data), 0);
+    EXPECT_EQ(nested_root.get().varray->vtable->items.count(nested_root.get().varray->data), 0);
+    declaration_root.set(ItemNull);
+    rule_root.set(ItemNull);
+    heap_gc_collect();
 }
 
 TEST(CssCascade, SelectorListUsesStrongestMatchingBranch) {

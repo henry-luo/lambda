@@ -1568,6 +1568,8 @@ extern const Item ItemNull;
 extern const Item ItemError;
 extern const Item ItemEmptyString;
 extern TypeInfo type_info[];
+// Shared concatenation reports allocation/length failure with this immutable sentinel.
+extern String& STR_ERROR;
 
 typedef struct Input {
     void* url;

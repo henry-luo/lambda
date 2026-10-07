@@ -1,0 +1,3252 @@
+{
+  "captured": "2026-10-07",
+  "command": "python3 test/latex/samples/audit.py --target all --export",
+  "binary_sha256": "fcb22bb57174ea32530e49424411ba68eaa64f1a6e807d1a9c2eea680b3ab168",
+  "targets": "continuous/fixed-page native export; paged profile checked separately",
+  "counts": {
+    "samples": 31,
+    "non_lua_samples": 30,
+    "records": 93,
+    "parsed": 93,
+    "serialized": 93,
+    "unsupported_elements": 0,
+    "exports": 62
+  },
+  "records": [
+    {
+      "file": "algebra",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "amsthm",
+        "amssymb",
+        "multirow",
+        "booktabs",
+        "xcolor",
+        "fullpage",
+        "lastpage",
+        "enumitem",
+        "fancyhdr",
+        "mathrsfs",
+        "multicol",
+        "IEEEtrantools",
+        "geometry"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "amscd",
+          "item": null,
+          "message": "Unknown LaTeX package: amscd",
+          "offset": 177
+        },
+        {
+          "code": "unknown-package",
+          "package": "wrapfig",
+          "item": null,
+          "message": "Unknown LaTeX package: wrapfig",
+          "offset": 396
+        },
+        {
+          "code": "unknown-package",
+          "package": "setspace",
+          "item": null,
+          "message": "Unknown LaTeX package: setspace",
+          "offset": 417
+        },
+        {
+          "code": "unknown-package",
+          "package": "calc",
+          "item": null,
+          "message": "Unknown LaTeX package: calc",
+          "offset": 439
+        },
+        {
+          "code": "unknown-package",
+          "package": "cancel",
+          "item": null,
+          "message": "Unknown LaTeX package: cancel",
+          "offset": 479
+        },
+        {
+          "code": "unknown-package",
+          "package": "floatrow",
+          "item": null,
+          "message": "Unknown LaTeX package: floatrow",
+          "offset": 575
+        },
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 374
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1427
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "pageref",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1452
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "MATE IV Serie Álgebra2015/01/26 NOMENCLATURA ALGEBRAICADefinición 1. [Término] Es una expresión algebraica que consta de",
+      "output_chars": 906875,
+      "serialization_error": null,
+      "source_sha256": "b9cff8a70fce362140d67e1a974e3a2b09600a1185d83988a73a348e1237cc87"
+    },
+    {
+      "file": "algebra",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "amsthm",
+        "amssymb",
+        "multirow",
+        "booktabs",
+        "xcolor",
+        "fullpage",
+        "lastpage",
+        "enumitem",
+        "fancyhdr",
+        "mathrsfs",
+        "multicol",
+        "IEEEtrantools",
+        "geometry"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "amscd",
+          "item": null,
+          "message": "Unknown LaTeX package: amscd",
+          "offset": 177
+        },
+        {
+          "code": "unknown-package",
+          "package": "wrapfig",
+          "item": null,
+          "message": "Unknown LaTeX package: wrapfig",
+          "offset": 396
+        },
+        {
+          "code": "unknown-package",
+          "package": "setspace",
+          "item": null,
+          "message": "Unknown LaTeX package: setspace",
+          "offset": 417
+        },
+        {
+          "code": "unknown-package",
+          "package": "calc",
+          "item": null,
+          "message": "Unknown LaTeX package: calc",
+          "offset": 439
+        },
+        {
+          "code": "unknown-package",
+          "package": "cancel",
+          "item": null,
+          "message": "Unknown LaTeX package: cancel",
+          "offset": 479
+        },
+        {
+          "code": "unknown-package",
+          "package": "floatrow",
+          "item": null,
+          "message": "Unknown LaTeX package: floatrow",
+          "offset": 575
+        },
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 374
+        },
+        {
+          "code": "running-format-approximation",
+          "package": "fancyhdr",
+          "item": null,
+          "message": "PDF margin content preserves text, marks and counters; mixed inline font formatting is flattened",
+          "offset": 1268
+        },
+        {
+          "code": "unsupported-running-header",
+          "package": "fancyhdr",
+          "item": null,
+          "message": "Running headers require the shared paged PDF export",
+          "offset": 1268
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1427
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "pageref",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1452
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "MATE IV Serie Álgebra2015/01/26 NOMENCLATURA ALGEBRAICADefinición 1. [Término] Es una expresión algebraica que consta de",
+      "output_chars": 906875,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 23841425,
+      "source_sha256": "b9cff8a70fce362140d67e1a974e3a2b09600a1185d83988a73a348e1237cc87"
+    },
+    {
+      "file": "algebra",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "amsthm",
+        "amssymb",
+        "multirow",
+        "booktabs",
+        "xcolor",
+        "fullpage",
+        "lastpage",
+        "enumitem",
+        "fancyhdr",
+        "mathrsfs",
+        "multicol",
+        "IEEEtrantools",
+        "geometry"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "amscd",
+          "item": null,
+          "message": "Unknown LaTeX package: amscd",
+          "offset": 177
+        },
+        {
+          "code": "unknown-package",
+          "package": "wrapfig",
+          "item": null,
+          "message": "Unknown LaTeX package: wrapfig",
+          "offset": 396
+        },
+        {
+          "code": "unknown-package",
+          "package": "setspace",
+          "item": null,
+          "message": "Unknown LaTeX package: setspace",
+          "offset": 417
+        },
+        {
+          "code": "unknown-package",
+          "package": "calc",
+          "item": null,
+          "message": "Unknown LaTeX package: calc",
+          "offset": 439
+        },
+        {
+          "code": "unknown-package",
+          "package": "cancel",
+          "item": null,
+          "message": "Unknown LaTeX package: cancel",
+          "offset": 479
+        },
+        {
+          "code": "unknown-package",
+          "package": "floatrow",
+          "item": null,
+          "message": "Unknown LaTeX package: floatrow",
+          "offset": 575
+        },
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 374
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1427
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "pageref",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1452
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "MATE IV Serie Álgebra2015/01/26 NOMENCLATURA ALGEBRAICADefinición 1. [Término] Es una expresión algebraica que consta de",
+      "output_chars": 906875,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 2384174,
+      "source_sha256": "b9cff8a70fce362140d67e1a974e3a2b09600a1185d83988a73a348e1237cc87"
+    },
+    {
+      "file": "arithmetic_lualatex",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "polyglossia",
+        "amsmath",
+        "multicol"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "unicode-math",
+          "item": null,
+          "message": "Unknown LaTeX package: unicode-math",
+          "offset": 192
+        },
+        {
+          "code": "unknown-package",
+          "package": "luacode",
+          "item": null,
+          "message": "Unknown LaTeX package: luacode",
+          "offset": 243
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 464
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "luacode*",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 538
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1645
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1702
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1762
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1817
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 1543
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "GrundrechenartenWerner Pronkow4 Addition \\directluaaddaufgabe(30) Subtraktion \\directluasubaufgabe(30) Multiplikation \\d",
+      "output_chars": 20288,
+      "serialization_error": null,
+      "source_sha256": "efbec7324a79a6da17775a938e45059d8f4708faf006bbe6fefd4fb49aadc7f1"
+    },
+    {
+      "file": "arithmetic_lualatex",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "polyglossia",
+        "amsmath",
+        "multicol"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "unicode-math",
+          "item": null,
+          "message": "Unknown LaTeX package: unicode-math",
+          "offset": 192
+        },
+        {
+          "code": "unknown-package",
+          "package": "luacode",
+          "item": null,
+          "message": "Unknown LaTeX package: luacode",
+          "offset": 243
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 464
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "luacode*",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 538
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1645
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1702
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1762
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1817
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 1543
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "GrundrechenartenWerner Pronkow4 Addition \\directluaaddaufgabe(30) Subtraktion \\directluasubaufgabe(30) Multiplikation \\d",
+      "output_chars": 20288,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 207657,
+      "source_sha256": "efbec7324a79a6da17775a938e45059d8f4708faf006bbe6fefd4fb49aadc7f1"
+    },
+    {
+      "file": "arithmetic_lualatex",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "polyglossia",
+        "amsmath",
+        "multicol"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "unicode-math",
+          "item": null,
+          "message": "Unknown LaTeX package: unicode-math",
+          "offset": 192
+        },
+        {
+          "code": "unknown-package",
+          "package": "luacode",
+          "item": null,
+          "message": "Unknown LaTeX package: luacode",
+          "offset": 243
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 464
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "luacode*",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 538
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1645
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1702
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1762
+        },
+        {
+          "code": "unsupported-lua",
+          "package": "lua",
+          "item": "directlua",
+          "message": "Embedded Lua is outside the LaTeX package",
+          "offset": 1817
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 1543
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "GrundrechenartenWerner Pronkow4 Addition \\directluaaddaufgabe(30) Subtraktion \\directluasubaufgabe(30) Multiplikation \\d",
+      "output_chars": 20288,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 8498,
+      "source_sha256": "efbec7324a79a6da17775a938e45059d8f4708faf006bbe6fefd4fb49aadc7f1"
+    },
+    {
+      "file": "biblatex_biber",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "inputenc",
+        "lmodern",
+        "babel",
+        "csquotes",
+        "fullpage",
+        "hyperref",
+        "doi",
+        "filecontents",
+        "biblatex"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [
+        {
+          "kind": "bibliography",
+          "source": "filecontents:bib",
+          "origin": "inline",
+          "available": true,
+          "offset": 983
+        }
+      ],
+      "visible": "Bibliographies with biber and biblatexFrank the Giant BunnyAugust 27, 2014Nunc auctor nunc in nisi suscipit tempus [BS73",
+      "output_chars": 18929,
+      "serialization_error": null,
+      "source_sha256": "042e91db0672576f96358fe35945de31f6df16057b201a699a7d1a4c70d72426"
+    },
+    {
+      "file": "biblatex_biber",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "inputenc",
+        "lmodern",
+        "babel",
+        "csquotes",
+        "fullpage",
+        "hyperref",
+        "doi",
+        "filecontents",
+        "biblatex"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [
+        {
+          "kind": "bibliography",
+          "source": "filecontents:bib",
+          "origin": "inline",
+          "available": true,
+          "offset": 983
+        }
+      ],
+      "visible": "Bibliographies with biber and biblatexFrank the Giant BunnyAugust 27, 2014Nunc auctor nunc in nisi suscipit tempus [BS73",
+      "output_chars": 18929,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 385335,
+      "source_sha256": "042e91db0672576f96358fe35945de31f6df16057b201a699a7d1a4c70d72426"
+    },
+    {
+      "file": "biblatex_biber",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "inputenc",
+        "lmodern",
+        "babel",
+        "csquotes",
+        "fullpage",
+        "hyperref",
+        "doi",
+        "filecontents",
+        "biblatex"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [
+        {
+          "kind": "bibliography",
+          "source": "filecontents:bib",
+          "origin": "inline",
+          "available": true,
+          "offset": 983
+        }
+      ],
+      "visible": "Bibliographies with biber and biblatexFrank the Giant BunnyAugust 27, 2014Nunc auctor nunc in nisi suscipit tempus [BS73",
+      "output_chars": 18929,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 3993,
+      "source_sha256": "042e91db0672576f96358fe35945de31f6df16057b201a699a7d1a4c70d72426"
+    },
+    {
+      "file": "booktabs",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "booktabs"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "ABC12E34F56ABC12E34F56ABC12E34F56",
+      "output_chars": 18777,
+      "serialization_error": null,
+      "source_sha256": "d69444de556c6b9da15a325d441b78b237fb586f4be5f0f39d9c52feb37a9781"
+    },
+    {
+      "file": "booktabs",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "booktabs"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "ABC12E34F56ABC12E34F56ABC12E34F56",
+      "output_chars": 18777,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 53531,
+      "source_sha256": "d69444de556c6b9da15a325d441b78b237fb586f4be5f0f39d9c52feb37a9781"
+    },
+    {
+      "file": "booktabs",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "booktabs"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "ABC12E34F56ABC12E34F56ABC12E34F56",
+      "output_chars": 18777,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 8590,
+      "source_sha256": "d69444de556c6b9da15a325d441b78b237fb586f4be5f0f39d9c52feb37a9781"
+    },
+    {
+      "file": "bungee_model",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "tikz",
+        "cmbright"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "cmbright",
+          "item": "Computer Modern Bright",
+          "message": "CM Bright is not bundled; using bundled Computer Modern Sans",
+          "offset": 138
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "(1)lhfx(2)l",
+      "output_chars": 28957,
+      "serialization_error": null,
+      "source_sha256": "f83d0bc8b0c9afe24ff8dd31eefb8caab993c6d900e88ffa7819e35f703b3a4a"
+    },
+    {
+      "file": "bungee_model",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "tikz",
+        "cmbright"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "cmbright",
+          "item": "Computer Modern Bright",
+          "message": "CM Bright is not bundled; using bundled Computer Modern Sans",
+          "offset": 138
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "(1)lhfx(2)l",
+      "output_chars": 28957,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 827503,
+      "source_sha256": "f83d0bc8b0c9afe24ff8dd31eefb8caab993c6d900e88ffa7819e35f703b3a4a"
+    },
+    {
+      "file": "bungee_model",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "tikz",
+        "cmbright"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "cmbright",
+          "item": "Computer Modern Bright",
+          "message": "CM Bright is not bundled; using bundled Computer Modern Sans",
+          "offset": 138
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "(1)lhfx(2)l",
+      "output_chars": 28957,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 18432,
+      "source_sha256": "f83d0bc8b0c9afe24ff8dd31eefb8caab993c6d900e88ffa7819e35f703b3a4a"
+    },
+    {
+      "file": "complex_numbers",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "graphicx",
+        "todonotes"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Complex NumbersJunha Park1 Warm-Up Set Let z4 = 1. \t(a) What are the four complex roots of z?     (b) Draw the roots of ",
+      "output_chars": 44817,
+      "serialization_error": null,
+      "source_sha256": "193d51d513b0c6b66fed4b6359c7eec6d4888f1885338f222d69cb8b57db6130"
+    },
+    {
+      "file": "complex_numbers",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "graphicx",
+        "todonotes"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Complex NumbersJunha Park1 Warm-Up Set Let z4 = 1. \t(a) What are the four complex roots of z?     (b) Draw the roots of ",
+      "output_chars": 44817,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1518195,
+      "source_sha256": "193d51d513b0c6b66fed4b6359c7eec6d4888f1885338f222d69cb8b57db6130"
+    },
+    {
+      "file": "complex_numbers",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "graphicx",
+        "todonotes"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Complex NumbersJunha Park1 Warm-Up Set Let z4 = 1. \t(a) What are the four complex roots of z?     (b) Draw the roots of ",
+      "output_chars": 44817,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 69976,
+      "source_sha256": "193d51d513b0c6b66fed4b6359c7eec6d4888f1885338f222d69cb8b57db6130"
+    },
+    {
+      "file": "diagonal_table_cells",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "slashbox"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "The usage is pretty straightforward, such as  DateRoom5/316/16/26/36/4Meeting RoomAuditoriumSeminar Room You may include",
+      "output_chars": 23902,
+      "serialization_error": null,
+      "source_sha256": "4b70723728031b645d47e4c5e4d0ce7a5f8bc54a4545784130117c87fa66ab87"
+    },
+    {
+      "file": "diagonal_table_cells",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "slashbox"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "The usage is pretty straightforward, such as  DateRoom5/316/16/26/36/4Meeting RoomAuditoriumSeminar Room You may include",
+      "output_chars": 23902,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1325211,
+      "source_sha256": "4b70723728031b645d47e4c5e4d0ce7a5f8bc54a4545784130117c87fa66ab87"
+    },
+    {
+      "file": "diagonal_table_cells",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "slashbox"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "The usage is pretty straightforward, such as  DateRoom5/316/16/26/36/4Meeting RoomAuditoriumSeminar Room You may include",
+      "output_chars": 23902,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 20787,
+      "source_sha256": "4b70723728031b645d47e4c5e4d0ce7a5f8bc54a4545784130117c87fa66ab87"
+    },
+    {
+      "file": "dragon_curve",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "tikz"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "5.313415.313415.313415.31341",
+      "output_chars": 155977,
+      "serialization_error": null,
+      "source_sha256": "d0fd29396ca38050ce55eb312aae4ae0b7f77aadb5207632d2426ddffbd71791"
+    },
+    {
+      "file": "dragon_curve",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "tikz"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "5.313415.313415.313415.31341",
+      "output_chars": 155977,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 5420771,
+      "source_sha256": "d0fd29396ca38050ce55eb312aae4ae0b7f77aadb5207632d2426ddffbd71791"
+    },
+    {
+      "file": "dragon_curve",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "tikz"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "5.313415.313415.313415.31341",
+      "output_chars": 155977,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 124984,
+      "source_sha256": "d0fd29396ca38050ce55eb312aae4ae0b7f77aadb5207632d2426ddffbd71791"
+    },
+    {
+      "file": "filter_overview",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "graphicx",
+        "todonotes",
+        "geometry",
+        "upquote"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "NotesT−sampling timeωc​−cutoff frequencyωr​−resonance frequencyωl​−lower band width limitωh​−higher band width limit  Di",
+      "output_chars": 134090,
+      "serialization_error": null,
+      "source_sha256": "f526062904a17344052cfca1f4f2f54083576840821ca5b26390de17fc450bd5"
+    },
+    {
+      "file": "filter_overview",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "graphicx",
+        "todonotes",
+        "geometry",
+        "upquote"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "NotesT−sampling timeωc​−cutoff frequencyωr​−resonance frequencyωl​−lower band width limitωh​−higher band width limit  Di",
+      "output_chars": 134090,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1165595,
+      "source_sha256": "f526062904a17344052cfca1f4f2f54083576840821ca5b26390de17fc450bd5"
+    },
+    {
+      "file": "filter_overview",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "amsmath",
+        "graphicx",
+        "todonotes",
+        "geometry",
+        "upquote"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "NotesT−sampling timeωc​−cutoff frequencyωr​−resonance frequencyωl​−lower band width limitωh​−higher band width limit  Di",
+      "output_chars": 134090,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 311635,
+      "source_sha256": "f526062904a17344052cfca1f4f2f54083576840821ca5b26390de17fc450bd5"
+    },
+    {
+      "file": "foray_into_latex",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "xcolor"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Atlas KinzelForay into LATEXMy first project in a string of projects for Math 590 is an  investigation of the following ",
+      "output_chars": 22381,
+      "serialization_error": null,
+      "source_sha256": "dc68f9cf0b73f029262ec96cf81262ad1510e8f5ec53a7aed18c805256936b4c"
+    },
+    {
+      "file": "foray_into_latex",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "xcolor"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Atlas KinzelForay into LATEXMy first project in a string of projects for Math 590 is an  investigation of the following ",
+      "output_chars": 22381,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 326526,
+      "source_sha256": "dc68f9cf0b73f029262ec96cf81262ad1510e8f5ec53a7aed18c805256936b4c"
+    },
+    {
+      "file": "foray_into_latex",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "xcolor"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Atlas KinzelForay into LATEXMy first project in a string of projects for Math 590 is an  investigation of the following ",
+      "output_chars": 22381,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 13312,
+      "source_sha256": "dc68f9cf0b73f029262ec96cf81262ad1510e8f5ec53a7aed18c805256936b4c"
+    },
+    {
+      "file": "greek_russian",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "inputenc",
+        "babel",
+        "gfsporson"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "gfsporson",
+          "item": "GFS Porson",
+          "message": "GFS Porson is not bundled; using a Greek-capable serif fallback",
+          "offset": 179
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 231
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "κτῆμά τε  ἐς αἰεὶ  μᾶλλον ἢ  ἀγώνισμα ἐς τὸ παραχρῆμα ἀκούειν ξύγκειται. This work was written not for the author to pro",
+      "output_chars": 18430,
+      "serialization_error": null,
+      "source_sha256": "950f076bacfdd18e108870cf1bd4ed2e4d716468e7d89a7f20f4c5a4d2276ae8"
+    },
+    {
+      "file": "greek_russian",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "inputenc",
+        "babel",
+        "gfsporson"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "gfsporson",
+          "item": "GFS Porson",
+          "message": "GFS Porson is not bundled; using a Greek-capable serif fallback",
+          "offset": 179
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 231
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "κτῆμά τε  ἐς αἰεὶ  μᾶλλον ἢ  ἀγώνισμα ἐς τὸ παραχρῆμα ἀκούειν ξύγκειται. This work was written not for the author to pro",
+      "output_chars": 18430,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 382559,
+      "source_sha256": "950f076bacfdd18e108870cf1bd4ed2e4d716468e7d89a7f20f4c5a4d2276ae8"
+    },
+    {
+      "file": "greek_russian",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "inputenc",
+        "babel",
+        "gfsporson"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "gfsporson",
+          "item": "GFS Porson",
+          "message": "GFS Porson is not bundled; using a Greek-capable serif fallback",
+          "offset": 179
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 231
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "κτῆμά τε  ἐς αἰεὶ  μᾶλλον ἢ  ἀγώνισμα ἐς τὸ παραχρῆμα ἀκούειν ξύγκειται. This work was written not for the author to pro",
+      "output_chars": 18430,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 3407,
+      "source_sha256": "950f076bacfdd18e108870cf1bd4ed2e4d716468e7d89a7f20f4c5a4d2276ae8"
+    },
+    {
+      "file": "longtable",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "longtable"
+      ],
+      "diagnostics": [
+        {
+          "code": "continuous-table-approximation",
+          "package": "longtable",
+          "item": "longtable",
+          "message": "Continuous output uses the first header and last footer; continued page bands require pagination",
+          "offset": 111
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Table 1: A sample long table.First columnSecond columnThird columnOneabcdef ghjijklmn123.456778Oneabcdef ghjijklmn123.45",
+      "output_chars": 23643,
+      "serialization_error": null,
+      "source_sha256": "fcee2e59f821b68b80190828fd0c04fb0c52ac20744b2e6231ffd66e2ef6443b"
+    },
+    {
+      "file": "longtable",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "longtable"
+      ],
+      "diagnostics": [
+        {
+          "code": "unsupported-pagination",
+          "package": "longtable",
+          "item": "longtable",
+          "message": "PDF page-spanning tables need repeated-header pagination",
+          "offset": 111
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Table 1: A sample long table.First columnSecond columnThird columnOneabcdef ghjijklmn123.456778Oneabcdef ghjijklmn123.45",
+      "output_chars": 23643,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 3560494,
+      "source_sha256": "fcee2e59f821b68b80190828fd0c04fb0c52ac20744b2e6231ffd66e2ef6443b"
+    },
+    {
+      "file": "longtable",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "longtable"
+      ],
+      "diagnostics": [
+        {
+          "code": "continuous-table-approximation",
+          "package": "longtable",
+          "item": "longtable",
+          "message": "Continuous output uses the first header and last footer; continued page bands require pagination",
+          "offset": 111
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Table 1: A sample long table.First columnSecond columnThird columnOneabcdef ghjijklmn123.456778Oneabcdef ghjijklmn123.45",
+      "output_chars": 23643,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 55908,
+      "source_sha256": "fcee2e59f821b68b80190828fd0c04fb0c52ac20744b2e6231ffd66e2ef6443b"
+    },
+    {
+      "file": "math_proof",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "amsthm",
+        "enumerate",
+        "eucal",
+        "graphicx",
+        "psfrag",
+        "ifthen"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "eucal",
+          "item": "Euler calligraphic",
+          "message": "Euler calligraphic is not bundled; using the math calligraphic font",
+          "offset": 148
+        },
+        {
+          "code": "math-bold-approximation",
+          "package": "latex",
+          "item": "boldmath",
+          "message": "Bold math uses CSS font weight until bold math fonts are available",
+          "offset": 2231
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Let K be a compact set in a metric space (X,d). Suppose F={Uα​}α∈A​ is an open cover of K, then there exists a positive ",
+      "output_chars": 26103,
+      "serialization_error": null,
+      "source_sha256": "a147d57bcfdce8e210f0b77e422c35fcdb384177d0b206b99a311255f08445a3"
+    },
+    {
+      "file": "math_proof",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "amsthm",
+        "enumerate",
+        "eucal",
+        "graphicx",
+        "psfrag",
+        "ifthen"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "eucal",
+          "item": "Euler calligraphic",
+          "message": "Euler calligraphic is not bundled; using the math calligraphic font",
+          "offset": 148
+        },
+        {
+          "code": "math-bold-approximation",
+          "package": "latex",
+          "item": "boldmath",
+          "message": "Bold math uses CSS font weight until bold math fonts are available",
+          "offset": 2231
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Let K be a compact set in a metric space (X,d). Suppose F={Uα​}α∈A​ is an open cover of K, then there exists a positive ",
+      "output_chars": 26103,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 559337,
+      "source_sha256": "a147d57bcfdce8e210f0b77e422c35fcdb384177d0b206b99a311255f08445a3"
+    },
+    {
+      "file": "math_proof",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "amsthm",
+        "enumerate",
+        "eucal",
+        "graphicx",
+        "psfrag",
+        "ifthen"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "eucal",
+          "item": "Euler calligraphic",
+          "message": "Euler calligraphic is not bundled; using the math calligraphic font",
+          "offset": 148
+        },
+        {
+          "code": "math-bold-approximation",
+          "package": "latex",
+          "item": "boldmath",
+          "message": "Bold math uses CSS font weight until bold math fonts are available",
+          "offset": 2231
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Let K be a compact set in a metric space (X,d). Suppose F={Uα​}α∈A​ is an open cover of K, then there exists a positive ",
+      "output_chars": 26103,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 23978,
+      "source_sha256": "a147d57bcfdce8e210f0b77e422c35fcdb384177d0b206b99a311255f08445a3"
+    },
+    {
+      "file": "math_test_flight",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "fontenc",
+        "enumitem",
+        "fancyhdr",
+        "amsmath",
+        "graphicx"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Test Flight1 Problem Say whether the following is true or false and support your answer by a proof.(∃m∈\\calN)(∃n∈\\calN)(",
+      "output_chars": 22990,
+      "serialization_error": null,
+      "source_sha256": "0c6a61e5c3080a0e16b02102c9284f321ba4fe27c3bd707c88985ff7493e65cc"
+    },
+    {
+      "file": "math_test_flight",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "fontenc",
+        "enumitem",
+        "fancyhdr",
+        "amsmath",
+        "graphicx"
+      ],
+      "diagnostics": [
+        {
+          "code": "running-format-approximation",
+          "package": "fancyhdr",
+          "item": null,
+          "message": "PDF margin content preserves text, marks and counters; mixed inline font formatting is flattened",
+          "offset": 190
+        },
+        {
+          "code": "unsupported-running-header",
+          "package": "fancyhdr",
+          "item": null,
+          "message": "Running headers require the shared paged PDF export",
+          "offset": 190
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Test Flight1 Problem Say whether the following is true or false and support your answer by a proof.(∃m∈\\calN)(∃n∈\\calN)(",
+      "output_chars": 22990,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 553073,
+      "source_sha256": "0c6a61e5c3080a0e16b02102c9284f321ba4fe27c3bd707c88985ff7493e65cc"
+    },
+    {
+      "file": "math_test_flight",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "fontenc",
+        "enumitem",
+        "fancyhdr",
+        "amsmath",
+        "graphicx"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Test Flight1 Problem Say whether the following is true or false and support your answer by a proof.(∃m∈\\calN)(∃n∈\\calN)(",
+      "output_chars": 22990,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 12324,
+      "source_sha256": "0c6a61e5c3080a0e16b02102c9284f321ba4fe27c3bd707c88985ff7493e65cc"
+    },
+    {
+      "file": "nursing_care_plan",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "xcolor",
+        "longtable",
+        "geometry",
+        "makecell",
+        "cellspace",
+        "caption",
+        "array"
+      ],
+      "diagnostics": [
+        {
+          "code": "continuous-table-approximation",
+          "package": "longtable",
+          "item": "longtable",
+          "message": "Continuous output uses the first header and last footer; continued page bands require pagination",
+          "offset": 584
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Consumers  PriorityIdentified  Goals/IssuesThe consumer’s strengths  to address these issues.Consumer and Nursing  Inter",
+      "output_chars": 25914,
+      "serialization_error": null,
+      "source_sha256": "c68cb2204781e4e99a48f2abab35425b07372df1877d664e84640ad279d577c4"
+    },
+    {
+      "file": "nursing_care_plan",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "xcolor",
+        "longtable",
+        "geometry",
+        "makecell",
+        "cellspace",
+        "caption",
+        "array"
+      ],
+      "diagnostics": [
+        {
+          "code": "unsupported-pagination",
+          "package": "longtable",
+          "item": "longtable",
+          "message": "PDF page-spanning tables need repeated-header pagination",
+          "offset": 584
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Consumers  PriorityIdentified  Goals/IssuesThe consumer’s strengths  to address these issues.Consumer and Nursing  Inter",
+      "output_chars": 25914,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 4691847,
+      "source_sha256": "c68cb2204781e4e99a48f2abab35425b07372df1877d664e84640ad279d577c4"
+    },
+    {
+      "file": "nursing_care_plan",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "xcolor",
+        "longtable",
+        "geometry",
+        "makecell",
+        "cellspace",
+        "caption",
+        "array"
+      ],
+      "diagnostics": [
+        {
+          "code": "continuous-table-approximation",
+          "package": "longtable",
+          "item": "longtable",
+          "message": "Continuous output uses the first header and last footer; continued page bands require pagination",
+          "offset": 584
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Consumers  PriorityIdentified  Goals/IssuesThe consumer’s strengths  to address these issues.Consumer and Nursing  Inter",
+      "output_chars": 25914,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 42777,
+      "source_sha256": "c68cb2204781e4e99a48f2abab35425b07372df1877d664e84640ad279d577c4"
+    },
+    {
+      "file": "ofdm_spectrum",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "fontenc",
+        "pgfplots",
+        "helvet",
+        "verbatim"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "helvet",
+          "item": "Helvetica",
+          "message": "Helvetica is not bundled; using a system sans-serif fallback",
+          "offset": 184
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "00.511.52-50-40-30-20-100Espectro de Banda Base OFDM Multiportadora LogarítmicaN∗Rsf​S(f)N=4N=16N=64",
+      "output_chars": 73389,
+      "serialization_error": null,
+      "source_sha256": "4e92864b711d1e89cfade9581e737f0b67d088479dbf89f06a71c96ed6a34c33"
+    },
+    {
+      "file": "ofdm_spectrum",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "fontenc",
+        "pgfplots",
+        "helvet",
+        "verbatim"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "helvet",
+          "item": "Helvetica",
+          "message": "Helvetica is not bundled; using a system sans-serif fallback",
+          "offset": 184
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "00.511.52-50-40-30-20-100Espectro de Banda Base OFDM Multiportadora LogarítmicaN∗Rsf​S(f)N=4N=16N=64",
+      "output_chars": 73389,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 325745,
+      "source_sha256": "4e92864b711d1e89cfade9581e737f0b67d088479dbf89f06a71c96ed6a34c33"
+    },
+    {
+      "file": "ofdm_spectrum",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "babel",
+        "inputenc",
+        "fontenc",
+        "pgfplots",
+        "helvet",
+        "verbatim"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "helvet",
+          "item": "Helvetica",
+          "message": "Helvetica is not bundled; using a system sans-serif fallback",
+          "offset": 184
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "00.511.52-50-40-30-20-100Espectro de Banda Base OFDM Multiportadora LogarítmicaN∗Rsf​S(f)N=4N=16N=64",
+      "output_chars": 73389,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 84919,
+      "source_sha256": "4e92864b711d1e89cfade9581e737f0b67d088479dbf89f06a71c96ed6a34c33"
+    },
+    {
+      "file": "plotting_lesson",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "tikz",
+        "pgfplots"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "RETAABABTRIÂNGULOQUADRADORETÂNGULOCÍRCULOARCOPLOTANDO GRÁFICOSFUNÇÃO-4-2024-4-202412345-0.500.511.5",
+      "output_chars": 32007,
+      "serialization_error": null,
+      "source_sha256": "9279a2131f909cd76c7a2fcca1260c58d3441322b5e790e81da2a282e4763f4a"
+    },
+    {
+      "file": "plotting_lesson",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "tikz",
+        "pgfplots"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "RETAABABTRIÂNGULOQUADRADORETÂNGULOCÍRCULOARCOPLOTANDO GRÁFICOSFUNÇÃO-4-2024-4-202412345-0.500.511.5",
+      "output_chars": 32007,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 6600895,
+      "source_sha256": "9279a2131f909cd76c7a2fcca1260c58d3441322b5e790e81da2a282e4763f4a"
+    },
+    {
+      "file": "plotting_lesson",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "tikz",
+        "pgfplots"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "RETAABABTRIÂNGULOQUADRADORETÂNGULOCÍRCULOARCOPLOTANDO GRÁFICOSFUNÇÃO-4-2024-4-202412345-0.500.511.5",
+      "output_chars": 32007,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 46651,
+      "source_sha256": "9279a2131f909cd76c7a2fcca1260c58d3441322b5e790e81da2a282e4763f4a"
+    },
+    {
+      "file": "pulley_systems",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "tikz",
+        "cmbright"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "cmbright",
+          "item": "Computer Modern Bright",
+          "message": "CM Bright is not bundled; using bundled Computer Modern Sans",
+          "offset": 222
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "mmmmm",
+      "output_chars": 68230,
+      "serialization_error": null,
+      "source_sha256": "bbd3e47d56a57608537f22c7741c9f8a9fd10f41ea9b5cfa799b00ecd8a353b3"
+    },
+    {
+      "file": "pulley_systems",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "tikz",
+        "cmbright"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "cmbright",
+          "item": "Computer Modern Bright",
+          "message": "CM Bright is not bundled; using bundled Computer Modern Sans",
+          "offset": 222
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "mmmmm",
+      "output_chars": 68230,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1986476,
+      "source_sha256": "bbd3e47d56a57608537f22c7741c9f8a9fd10f41ea9b5cfa799b00ecd8a353b3"
+    },
+    {
+      "file": "pulley_systems",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "tikz",
+        "cmbright"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "cmbright",
+          "item": "Computer Modern Bright",
+          "message": "CM Bright is not bundled; using bundled Computer Modern Sans",
+          "offset": 222
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "mmmmm",
+      "output_chars": 68230,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 40906,
+      "source_sha256": "bbd3e47d56a57608537f22c7741c9f8a9fd10f41ea9b5cfa799b00ecd8a353b3"
+    },
+    {
+      "file": "russian_article",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "cmap",
+        "fontenc",
+        "inputenc",
+        "babel"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "1.1 Наш первый документАнтон СамсоновПривет, мир!Вторая строка.1 Первый разделТекст первого раздела.1.1 ПодразделВ разде",
+      "output_chars": 19294,
+      "serialization_error": null,
+      "source_sha256": "dfe88183bf5abeb7b92cf7876db94fb3007ea13aa4b004f676f516a1020826d9"
+    },
+    {
+      "file": "russian_article",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "cmap",
+        "fontenc",
+        "inputenc",
+        "babel"
+      ],
+      "diagnostics": [
+        {
+          "code": "unsupported-text-extraction",
+          "package": "cmap",
+          "item": "ToUnicode",
+          "message": "PDF text extraction needs an embedded ToUnicode map",
+          "offset": 911
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "1.1 Наш первый документАнтон СамсоновПривет, мир!Вторая строка.1 Первый разделТекст первого раздела.1.1 ПодразделВ разде",
+      "output_chars": 19294,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1628373,
+      "source_sha256": "dfe88183bf5abeb7b92cf7876db94fb3007ea13aa4b004f676f516a1020826d9"
+    },
+    {
+      "file": "russian_article",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "cmap",
+        "fontenc",
+        "inputenc",
+        "babel"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "1.1 Наш первый документАнтон СамсоновПривет, мир!Вторая строка.1 Первый разделТекст первого раздела.1.1 ПодразделВ разде",
+      "output_chars": 19294,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 5637,
+      "source_sha256": "dfe88183bf5abeb7b92cf7876db94fb3007ea13aa4b004f676f516a1020826d9"
+    },
+    {
+      "file": "scientific_writing",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "cite",
+        "amsthm",
+        "amsmath"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Fundamental Theorem of CalculusMohammadreza OsouliAbstract     The fundamental theorem of calculus is a theorem that lin",
+      "output_chars": 64126,
+      "serialization_error": null,
+      "source_sha256": "d18a75f4b15b7e69fa5a8d2258edcfef46ffce709a1ab089fc6e4d39463da6ce"
+    },
+    {
+      "file": "scientific_writing",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "cite",
+        "amsthm",
+        "amsmath"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Fundamental Theorem of CalculusMohammadreza OsouliAbstract     The fundamental theorem of calculus is a theorem that lin",
+      "output_chars": 64126,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 2198416,
+      "source_sha256": "d18a75f4b15b7e69fa5a8d2258edcfef46ffce709a1ab089fc6e4d39463da6ce"
+    },
+    {
+      "file": "scientific_writing",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "cite",
+        "amsthm",
+        "amsmath"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Fundamental Theorem of CalculusMohammadreza OsouliAbstract     The fundamental theorem of calculus is a theorem that lin",
+      "output_chars": 64126,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 138710,
+      "source_sha256": "d18a75f4b15b7e69fa5a8d2258edcfef46ffce709a1ab089fc6e4d39463da6ce"
+    },
+    {
+      "file": "semantic_inference_rules",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "semantic",
+        "url"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Some examples from http://scholar.princeton.edu/scuellar/blog/2014/03/deduction-trees-latexABCdOne of Demorgan's Law:¬ϕ∨",
+      "output_chars": 32926,
+      "serialization_error": null,
+      "source_sha256": "8a6ef45f76a8d3e7dbbcd349b25221fae64a3d16e26f3951d953d6d13b3d5ad9"
+    },
+    {
+      "file": "semantic_inference_rules",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "semantic",
+        "url"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Some examples from http://scholar.princeton.edu/scuellar/blog/2014/03/deduction-trees-latexABCdOne of Demorgan's Law:¬ϕ∨",
+      "output_chars": 32926,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1550696,
+      "source_sha256": "8a6ef45f76a8d3e7dbbcd349b25221fae64a3d16e26f3951d953d6d13b3d5ad9"
+    },
+    {
+      "file": "semantic_inference_rules",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "fontenc",
+        "semantic",
+        "url"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Some examples from http://scholar.princeton.edu/scuellar/blog/2014/03/deduction-trees-latexABCdOne of Demorgan's Law:¬ϕ∨",
+      "output_chars": 32926,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 53681,
+      "source_sha256": "8a6ef45f76a8d3e7dbbcd349b25221fae64a3d16e26f3951d953d6d13b3d5ad9"
+    },
+    {
+      "file": "sequent_calculus",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "bussproofs",
+        "comment"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "1 Here's what an example tree would look like:Γ⇒Δ,DD,Γ′⇒Δ′Γ,Γ′⇒Δ,Δ′RIf an inference is made from one premiss to a conclu",
+      "output_chars": 33354,
+      "serialization_error": null,
+      "source_sha256": "b4ab5f0d841fbec06effde3243ec53cf03a80c4768f1b2c0c8744e00da2d29b5"
+    },
+    {
+      "file": "sequent_calculus",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "bussproofs",
+        "comment"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "1 Here's what an example tree would look like:Γ⇒Δ,DD,Γ′⇒Δ′Γ,Γ′⇒Δ,Δ′RIf an inference is made from one premiss to a conclu",
+      "output_chars": 33354,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 401364,
+      "source_sha256": "b4ab5f0d841fbec06effde3243ec53cf03a80c4768f1b2c0c8744e00da2d29b5"
+    },
+    {
+      "file": "sequent_calculus",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "bussproofs",
+        "comment"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "1 Here's what an example tree would look like:Γ⇒Δ,DD,Γ′⇒Δ′Γ,Γ′⇒Δ,Δ′RIf an inference is made from one premiss to a conclu",
+      "output_chars": 33354,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 47784,
+      "source_sha256": "b4ab5f0d841fbec06effde3243ec53cf03a80c4768f1b2c0c8744e00da2d29b5"
+    },
+    {
+      "file": "slashbox",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "slashbox"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "DEFABC12E34F56",
+      "output_chars": 18165,
+      "serialization_error": null,
+      "source_sha256": "9d744d5ff8de1218e396906118ba3757966f6142cffb60240d4e326506135377"
+    },
+    {
+      "file": "slashbox",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "slashbox"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "DEFABC12E34F56",
+      "output_chars": 18165,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 57301,
+      "source_sha256": "9d744d5ff8de1218e396906118ba3757966f6142cffb60240d4e326506135377"
+    },
+    {
+      "file": "slashbox",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "slashbox"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "DEFABC12E34F56",
+      "output_chars": 18165,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 4075,
+      "source_sha256": "9d744d5ff8de1218e396906118ba3757966f6142cffb60240d4e326506135377"
+    },
+    {
+      "file": "spacetime_diagrams",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "mathrsfs",
+        "tikz"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 490
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "xt",
+      "output_chars": 32711,
+      "serialization_error": null,
+      "source_sha256": "2f687df773d4bf59d5f6d5b9f40ff0445fc34baeeec0fec3b1cafc284e5676e8"
+    },
+    {
+      "file": "spacetime_diagrams",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "mathrsfs",
+        "tikz"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 490
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "xt",
+      "output_chars": 32711,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 579715,
+      "source_sha256": "2f687df773d4bf59d5f6d5b9f40ff0445fc34baeeec0fec3b1cafc284e5676e8"
+    },
+    {
+      "file": "spacetime_diagrams",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "mathrsfs",
+        "tikz"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 490
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "xt",
+      "output_chars": 32711,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 44284,
+      "source_sha256": "2f687df773d4bf59d5f6d5b9f40ff0445fc34baeeec0fec3b1cafc284e5676e8"
+    },
+    {
+      "file": "thai_polyglossia",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "polyglossia",
+        "hyperref"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Norasi",
+          "message": "Requested font is not bundled; using system font or fallback: Norasi",
+          "offset": 97
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Garuda",
+          "message": "Requested font is not bundled; using system font or fallback: Garuda",
+          "offset": 144
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Noto Sans Thai",
+          "message": "Requested font is not bundled; using system font or fallback: Noto Sans Thai",
+          "offset": 193
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeSerif",
+          "message": "Requested font is not bundled; using system font or fallback: FreeSerif",
+          "offset": 292
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeSans",
+          "message": "Requested font is not bundled; using system font or fallback: FreeSans",
+          "offset": 345
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeMono",
+          "message": "Requested font is not bundled; using system font or fallback: FreeMono",
+          "offset": 401
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "ตัวอย่างเช่นไทยLim Lian TzeContents๑บทนำ๑ บทนำ คอรัปชันจุ๊ยโปรดิวเซอร์ สถาปัตย์จ๊าบ แจ็กพ็อต ม้าหินอ่อน ซากุระคันถธุระ ฟ",
+      "output_chars": 20603,
+      "serialization_error": null,
+      "source_sha256": "b7ce0e532be5941e312e08bda0faa68460ce9a5df9137b0571cda36ad0fdc3b8"
+    },
+    {
+      "file": "thai_polyglossia",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "polyglossia",
+        "hyperref"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Norasi",
+          "message": "Requested font is not bundled; using system font or fallback: Norasi",
+          "offset": 97
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Garuda",
+          "message": "Requested font is not bundled; using system font or fallback: Garuda",
+          "offset": 144
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Noto Sans Thai",
+          "message": "Requested font is not bundled; using system font or fallback: Noto Sans Thai",
+          "offset": 193
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeSerif",
+          "message": "Requested font is not bundled; using system font or fallback: FreeSerif",
+          "offset": 292
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeSans",
+          "message": "Requested font is not bundled; using system font or fallback: FreeSans",
+          "offset": 345
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeMono",
+          "message": "Requested font is not bundled; using system font or fallback: FreeMono",
+          "offset": 401
+        },
+        {
+          "code": "complex-script-layout-approximation",
+          "package": "polyglossia",
+          "item": "thai",
+          "message": "Native layout places glyphs per character; Thai mark shaping and dictionary line breaking need a shared text shaper",
+          "offset": 56
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "ตัวอย่างเช่นไทยLim Lian TzeContents๑บทนำ๑ บทนำ คอรัปชันจุ๊ยโปรดิวเซอร์ สถาปัตย์จ๊าบ แจ็กพ็อต ม้าหินอ่อน ซากุระคันถธุระ ฟ",
+      "output_chars": 20603,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1067733,
+      "source_sha256": "b7ce0e532be5941e312e08bda0faa68460ce9a5df9137b0571cda36ad0fdc3b8"
+    },
+    {
+      "file": "thai_polyglossia",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "polyglossia",
+        "hyperref"
+      ],
+      "diagnostics": [
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Norasi",
+          "message": "Requested font is not bundled; using system font or fallback: Norasi",
+          "offset": 97
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Garuda",
+          "message": "Requested font is not bundled; using system font or fallback: Garuda",
+          "offset": 144
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "Noto Sans Thai",
+          "message": "Requested font is not bundled; using system font or fallback: Noto Sans Thai",
+          "offset": 193
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeSerif",
+          "message": "Requested font is not bundled; using system font or fallback: FreeSerif",
+          "offset": 292
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeSans",
+          "message": "Requested font is not bundled; using system font or fallback: FreeSans",
+          "offset": 345
+        },
+        {
+          "code": "font-substitution",
+          "package": "polyglossia",
+          "item": "FreeMono",
+          "message": "Requested font is not bundled; using system font or fallback: FreeMono",
+          "offset": 401
+        },
+        {
+          "code": "complex-script-layout-approximation",
+          "package": "polyglossia",
+          "item": "thai",
+          "message": "Native layout places glyphs per character; Thai mark shaping and dictionary line breaking need a shared text shaper",
+          "offset": 56
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "ตัวอย่างเช่นไทยLim Lian TzeContents๑บทนำ๑ บทนำ คอรัปชันจุ๊ยโปรดิวเซอร์ สถาปัตย์จ๊าบ แจ็กพ็อต ม้าหินอ่อน ซากุระคันถธุระ ฟ",
+      "output_chars": 20603,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 8420,
+      "source_sha256": "b7ce0e532be5941e312e08bda0faa68460ce9a5df9137b0571cda36ad0fdc3b8"
+    },
+    {
+      "file": "tikzpeople",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "fontenc",
+        "url",
+        "tikzpeople"
+      ],
+      "diagnostics": [
+        {
+          "code": "tikzpeople-shape-approximation",
+          "package": "tikzpeople",
+          "item": null,
+          "message": "Named people use reusable vector silhouettes; CTAN artwork detail differs",
+          "offset": 95
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Fairy GodmotherThe BrideAll clear; you're good to go.Moving in.Ho ho ho!We've been good!See the tikzpeople package docum",
+      "output_chars": 61184,
+      "serialization_error": null,
+      "source_sha256": "6ab91f6bc1d42430d88d96a3b110f6e786dee22fa192736e9a66d92298b29c2c"
+    },
+    {
+      "file": "tikzpeople",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "fontenc",
+        "url",
+        "tikzpeople"
+      ],
+      "diagnostics": [
+        {
+          "code": "tikzpeople-shape-approximation",
+          "package": "tikzpeople",
+          "item": null,
+          "message": "Named people use reusable vector silhouettes; CTAN artwork detail differs",
+          "offset": 95
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Fairy GodmotherThe BrideAll clear; you're good to go.Moving in.Ho ho ho!We've been good!See the tikzpeople package docum",
+      "output_chars": 61184,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 2174712,
+      "source_sha256": "6ab91f6bc1d42430d88d96a3b110f6e786dee22fa192736e9a66d92298b29c2c"
+    },
+    {
+      "file": "tikzpeople",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "fontenc",
+        "url",
+        "tikzpeople"
+      ],
+      "diagnostics": [
+        {
+          "code": "tikzpeople-shape-approximation",
+          "package": "tikzpeople",
+          "item": null,
+          "message": "Named people use reusable vector silhouettes; CTAN artwork detail differs",
+          "offset": 95
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Fairy GodmotherThe BrideAll clear; you're good to go.Moving in.Ho ho ho!We've been good!See the tikzpeople package docum",
+      "output_chars": 61184,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 143230,
+      "source_sha256": "6ab91f6bc1d42430d88d96a3b110f6e786dee22fa192736e9a66d92298b29c2c"
+    },
+    {
+      "file": "timeline",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "xcolor",
+        "tikz",
+        "preview"
+      ],
+      "diagnostics": [
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 142
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 402
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Inclinometer19921993199419951996199719981999200020012002200320042005200620072008200920102011Reconstruction of the railwa",
+      "output_chars": 45538,
+      "serialization_error": null,
+      "source_sha256": "78c1b86ff0531495210603dc591f9c523bd4241e090d614d0e616e890789349a"
+    },
+    {
+      "file": "timeline",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "xcolor",
+        "tikz",
+        "preview"
+      ],
+      "diagnostics": [
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 142
+        },
+        {
+          "code": "unsupported-preview-crop",
+          "package": "preview",
+          "item": "PreviewEnvironment",
+          "message": "PDF preview cropping needs a neutral tight-page export",
+          "offset": 212
+        },
+        {
+          "code": "unsupported-preview-crop",
+          "package": "preview",
+          "item": "PreviewEnvironment",
+          "message": "PDF preview cropping needs a neutral tight-page export",
+          "offset": 245
+        },
+        {
+          "code": "unsupported-preview-crop",
+          "package": "preview",
+          "item": "PreviewEnvironment",
+          "message": "PDF preview cropping needs a neutral tight-page export",
+          "offset": 305
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 402
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Inclinometer19921993199419951996199719981999200020012002200320042005200620072008200920102011Reconstruction of the railwa",
+      "output_chars": 45538,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1179150,
+      "source_sha256": "78c1b86ff0531495210603dc591f9c523bd4241e090d614d0e616e890789349a"
+    },
+    {
+      "file": "timeline",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "xcolor",
+        "tikz",
+        "preview"
+      ],
+      "diagnostics": [
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 142
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 402
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Inclinometer19921993199419951996199719981999200020012002200320042005200620072008200920102011Reconstruction of the railwa",
+      "output_chars": 45538,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 68062,
+      "source_sha256": "78c1b86ff0531495210603dc591f9c523bd4241e090d614d0e616e890789349a"
+    },
+    {
+      "file": "ubc_math_220",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "The symbols ∈ and ⊆.  I received several questions whether the symbols ∈ and ⊆ mean the same thing.  The answer is,  NO ",
+      "output_chars": 36240,
+      "serialization_error": null,
+      "source_sha256": "836c4f370a758e81216a1508973056167280c0df47725e6eaae9abd567eb909a"
+    },
+    {
+      "file": "ubc_math_220",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "The symbols ∈ and ⊆.  I received several questions whether the symbols ∈ and ⊆ mean the same thing.  The answer is,  NO ",
+      "output_chars": 36240,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 2907377,
+      "source_sha256": "836c4f370a758e81216a1508973056167280c0df47725e6eaae9abd567eb909a"
+    },
+    {
+      "file": "ubc_math_220",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "The symbols ∈ and ⊆.  I received several questions whether the symbols ∈ and ⊆ mean the same thing.  The answer is,  NO ",
+      "output_chars": 36240,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 46916,
+      "source_sha256": "836c4f370a758e81216a1508973056167280c0df47725e6eaae9abd567eb909a"
+    },
+    {
+      "file": "unit_circle",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "tikz",
+        "geometry"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "xy−11−11−1.4−1.3−1.2−1.1−0.9−0.8−0.7−0.6−0.5−0.4−0.3−0.2−0.100.10.20.30.40.50.60.70.80.911.11.21.31.40102030405060708090",
+      "output_chars": 92042,
+      "serialization_error": null,
+      "source_sha256": "272ef8f3caf2fee786b26daaaf12ef2478b8df7aabd96ff3d369243b7d4929db"
+    },
+    {
+      "file": "unit_circle",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "tikz",
+        "geometry"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "xy−11−11−1.4−1.3−1.2−1.1−0.9−0.8−0.7−0.6−0.5−0.4−0.3−0.2−0.100.10.20.30.40.50.60.70.80.911.11.21.31.40102030405060708090",
+      "output_chars": 92042,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 1643934,
+      "source_sha256": "272ef8f3caf2fee786b26daaaf12ef2478b8df7aabd96ff3d369243b7d4929db"
+    },
+    {
+      "file": "unit_circle",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "inputenc",
+        "tikz",
+        "geometry"
+      ],
+      "diagnostics": [],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "xy−11−11−1.4−1.3−1.2−1.1−0.9−0.8−0.7−0.6−0.5−0.4−0.3−0.2−0.100.10.20.30.40.50.60.70.80.911.11.21.31.40102030405060708090",
+      "output_chars": 92042,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 143832,
+      "source_sha256": "272ef8f3caf2fee786b26daaaf12ef2478b8df7aabd96ff3d369243b7d4929db"
+    },
+    {
+      "file": "vietnamese_document",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "amsthm",
+        "fancyhdr",
+        "eucal",
+        "mathrsfs",
+        "tcolorbox",
+        "hyperref",
+        "tikz",
+        "geometry",
+        "multirow",
+        "longtable",
+        "vietnam",
+        "xcolor",
+        "graphicx",
+        "multicol"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "amsxtra",
+          "item": null,
+          "message": "Unknown LaTeX package: amsxtra",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "latexsym",
+          "item": null,
+          "message": "Unknown LaTeX package: latexsym",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "amscd",
+          "item": null,
+          "message": "Unknown LaTeX package: amscd",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "indentfirst",
+          "item": null,
+          "message": "Unknown LaTeX package: indentfirst",
+          "offset": 197
+        },
+        {
+          "code": "unknown-package",
+          "package": "extsizes",
+          "item": null,
+          "message": "Unknown LaTeX package: extsizes",
+          "offset": 222
+        },
+        {
+          "code": "unknown-package",
+          "package": "makeidx",
+          "item": null,
+          "message": "Unknown LaTeX package: makeidx",
+          "offset": 357
+        },
+        {
+          "code": "unknown-package",
+          "package": "mathabx",
+          "item": null,
+          "message": "Unknown LaTeX package: mathabx",
+          "offset": 378
+        },
+        {
+          "code": "unknown-package",
+          "package": "boxedminipage",
+          "item": null,
+          "message": "Unknown LaTeX package: boxedminipage",
+          "offset": 420
+        },
+        {
+          "code": "unknown-package",
+          "package": "tkz-tab",
+          "item": null,
+          "message": "Unknown LaTeX package: tkz-tab",
+          "offset": 447
+        },
+        {
+          "code": "unknown-package",
+          "package": "fancybox",
+          "item": null,
+          "message": "Unknown LaTeX package: fancybox",
+          "offset": 468
+        },
+        {
+          "code": "unknown-package",
+          "package": "maybemath",
+          "item": null,
+          "message": "Unknown LaTeX package: maybemath",
+          "offset": 934
+        },
+        {
+          "code": "unknown-package",
+          "package": "arcs",
+          "item": null,
+          "message": "Unknown LaTeX package: arcs",
+          "offset": 957
+        },
+        {
+          "code": "unknown-package",
+          "package": "wrapfig",
+          "item": null,
+          "message": "Unknown LaTeX package: wrapfig",
+          "offset": 997
+        },
+        {
+          "code": "unknown-package",
+          "package": "minitoc",
+          "item": null,
+          "message": "Unknown LaTeX package: minitoc",
+          "offset": 2030
+        },
+        {
+          "code": "unknown-package",
+          "package": "answers",
+          "item": null,
+          "message": "Unknown LaTeX package: answers",
+          "offset": 2533
+        },
+        {
+          "code": "unsupported-tikz-library",
+          "package": "tikz",
+          "item": "arrows",
+          "message": "Unsupported TikZ library: arrows",
+          "offset": 625
+        },
+        {
+          "code": "font-substitution",
+          "package": "eucal",
+          "item": "Euler calligraphic",
+          "message": "Euler calligraphic is not bundled; using the math calligraphic font",
+          "offset": 307
+        },
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 335
+        },
+        {
+          "code": "math-bold-approximation",
+          "package": "latex",
+          "item": "boldmath",
+          "message": "Bold math uses CSS font weight until bold math fonts are available",
+          "offset": 3922
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1261
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1357
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 3637
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "I Nhân đa thức với đa thức 1 Nhân đơn thức với đơn thức  Để nhân hai đơn thức, ta nhân các hệ số với nhau và nhân các ph",
+      "output_chars": 79335,
+      "serialization_error": null,
+      "source_sha256": "29abdf6568a894d4366b9caeb9fb3814f102fa8b104cdf8b6e6e656694849f27"
+    },
+    {
+      "file": "vietnamese_document",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "amsthm",
+        "fancyhdr",
+        "eucal",
+        "mathrsfs",
+        "tcolorbox",
+        "hyperref",
+        "tikz",
+        "geometry",
+        "multirow",
+        "longtable",
+        "vietnam",
+        "xcolor",
+        "graphicx",
+        "multicol"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "amsxtra",
+          "item": null,
+          "message": "Unknown LaTeX package: amsxtra",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "latexsym",
+          "item": null,
+          "message": "Unknown LaTeX package: latexsym",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "amscd",
+          "item": null,
+          "message": "Unknown LaTeX package: amscd",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "indentfirst",
+          "item": null,
+          "message": "Unknown LaTeX package: indentfirst",
+          "offset": 197
+        },
+        {
+          "code": "unknown-package",
+          "package": "extsizes",
+          "item": null,
+          "message": "Unknown LaTeX package: extsizes",
+          "offset": 222
+        },
+        {
+          "code": "unknown-package",
+          "package": "makeidx",
+          "item": null,
+          "message": "Unknown LaTeX package: makeidx",
+          "offset": 357
+        },
+        {
+          "code": "unknown-package",
+          "package": "mathabx",
+          "item": null,
+          "message": "Unknown LaTeX package: mathabx",
+          "offset": 378
+        },
+        {
+          "code": "unknown-package",
+          "package": "boxedminipage",
+          "item": null,
+          "message": "Unknown LaTeX package: boxedminipage",
+          "offset": 420
+        },
+        {
+          "code": "unknown-package",
+          "package": "tkz-tab",
+          "item": null,
+          "message": "Unknown LaTeX package: tkz-tab",
+          "offset": 447
+        },
+        {
+          "code": "unknown-package",
+          "package": "fancybox",
+          "item": null,
+          "message": "Unknown LaTeX package: fancybox",
+          "offset": 468
+        },
+        {
+          "code": "unknown-package",
+          "package": "maybemath",
+          "item": null,
+          "message": "Unknown LaTeX package: maybemath",
+          "offset": 934
+        },
+        {
+          "code": "unknown-package",
+          "package": "arcs",
+          "item": null,
+          "message": "Unknown LaTeX package: arcs",
+          "offset": 957
+        },
+        {
+          "code": "unknown-package",
+          "package": "wrapfig",
+          "item": null,
+          "message": "Unknown LaTeX package: wrapfig",
+          "offset": 997
+        },
+        {
+          "code": "unknown-package",
+          "package": "minitoc",
+          "item": null,
+          "message": "Unknown LaTeX package: minitoc",
+          "offset": 2030
+        },
+        {
+          "code": "unknown-package",
+          "package": "answers",
+          "item": null,
+          "message": "Unknown LaTeX package: answers",
+          "offset": 2533
+        },
+        {
+          "code": "unsupported-tikz-library",
+          "package": "tikz",
+          "item": "arrows",
+          "message": "Unsupported TikZ library: arrows",
+          "offset": 625
+        },
+        {
+          "code": "font-substitution",
+          "package": "eucal",
+          "item": "Euler calligraphic",
+          "message": "Euler calligraphic is not bundled; using the math calligraphic font",
+          "offset": 307
+        },
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 335
+        },
+        {
+          "code": "math-bold-approximation",
+          "package": "latex",
+          "item": "boldmath",
+          "message": "Bold math uses CSS font weight until bold math fonts are available",
+          "offset": 3922
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1261
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1357
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 3637
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "I Nhân đa thức với đa thức 1 Nhân đơn thức với đơn thức  Để nhân hai đơn thức, ta nhân các hệ số với nhau và nhân các ph",
+      "output_chars": 79335,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 2867630,
+      "source_sha256": "29abdf6568a894d4366b9caeb9fb3814f102fa8b104cdf8b6e6e656694849f27"
+    },
+    {
+      "file": "vietnamese_document",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "amsmath",
+        "amssymb",
+        "amsthm",
+        "fancyhdr",
+        "eucal",
+        "mathrsfs",
+        "tcolorbox",
+        "hyperref",
+        "tikz",
+        "geometry",
+        "multirow",
+        "longtable",
+        "vietnam",
+        "xcolor",
+        "graphicx",
+        "multicol"
+      ],
+      "diagnostics": [
+        {
+          "code": "unknown-package",
+          "package": "amsxtra",
+          "item": null,
+          "message": "Unknown LaTeX package: amsxtra",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "latexsym",
+          "item": null,
+          "message": "Unknown LaTeX package: latexsym",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "amscd",
+          "item": null,
+          "message": "Unknown LaTeX package: amscd",
+          "offset": 137
+        },
+        {
+          "code": "unknown-package",
+          "package": "indentfirst",
+          "item": null,
+          "message": "Unknown LaTeX package: indentfirst",
+          "offset": 197
+        },
+        {
+          "code": "unknown-package",
+          "package": "extsizes",
+          "item": null,
+          "message": "Unknown LaTeX package: extsizes",
+          "offset": 222
+        },
+        {
+          "code": "unknown-package",
+          "package": "makeidx",
+          "item": null,
+          "message": "Unknown LaTeX package: makeidx",
+          "offset": 357
+        },
+        {
+          "code": "unknown-package",
+          "package": "mathabx",
+          "item": null,
+          "message": "Unknown LaTeX package: mathabx",
+          "offset": 378
+        },
+        {
+          "code": "unknown-package",
+          "package": "boxedminipage",
+          "item": null,
+          "message": "Unknown LaTeX package: boxedminipage",
+          "offset": 420
+        },
+        {
+          "code": "unknown-package",
+          "package": "tkz-tab",
+          "item": null,
+          "message": "Unknown LaTeX package: tkz-tab",
+          "offset": 447
+        },
+        {
+          "code": "unknown-package",
+          "package": "fancybox",
+          "item": null,
+          "message": "Unknown LaTeX package: fancybox",
+          "offset": 468
+        },
+        {
+          "code": "unknown-package",
+          "package": "maybemath",
+          "item": null,
+          "message": "Unknown LaTeX package: maybemath",
+          "offset": 934
+        },
+        {
+          "code": "unknown-package",
+          "package": "arcs",
+          "item": null,
+          "message": "Unknown LaTeX package: arcs",
+          "offset": 957
+        },
+        {
+          "code": "unknown-package",
+          "package": "wrapfig",
+          "item": null,
+          "message": "Unknown LaTeX package: wrapfig",
+          "offset": 997
+        },
+        {
+          "code": "unknown-package",
+          "package": "minitoc",
+          "item": null,
+          "message": "Unknown LaTeX package: minitoc",
+          "offset": 2030
+        },
+        {
+          "code": "unknown-package",
+          "package": "answers",
+          "item": null,
+          "message": "Unknown LaTeX package: answers",
+          "offset": 2533
+        },
+        {
+          "code": "unsupported-tikz-library",
+          "package": "tikz",
+          "item": "arrows",
+          "message": "Unsupported TikZ library: arrows",
+          "offset": 625
+        },
+        {
+          "code": "font-substitution",
+          "package": "eucal",
+          "item": "Euler calligraphic",
+          "message": "Euler calligraphic is not bundled; using the math calligraphic font",
+          "offset": 307
+        },
+        {
+          "code": "font-substitution",
+          "package": "mathrsfs",
+          "item": "Ralph Smith Formal Script",
+          "message": "RSFS is not bundled; using the available math script font",
+          "offset": 335
+        },
+        {
+          "code": "math-bold-approximation",
+          "package": "latex",
+          "item": "boldmath",
+          "message": "Bold math uses CSS font weight until bold math fonts are available",
+          "offset": 3922
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1261
+        },
+        {
+          "code": "unresolved-page-counter",
+          "package": "latex",
+          "item": "thepage",
+          "message": "Page references require paged output; continuous output displays a question mark",
+          "offset": 1357
+        },
+        {
+          "code": "page-style-approximation",
+          "package": "fancyhdr",
+          "item": "thispagestyle",
+          "message": "Per-page style overrides are not represented by the document-wide margin profile",
+          "offset": 3637
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "I Nhân đa thức với đa thức 1 Nhân đơn thức với đơn thức  Để nhân hai đơn thức, ta nhân các hệ số với nhau và nhân các ph",
+      "output_chars": 79335,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 220512,
+      "source_sha256": "29abdf6568a894d4366b9caeb9fb3814f102fa8b104cdf8b6e6e656694849f27"
+    },
+    {
+      "file": "xltabular",
+      "target": "html",
+      "parsed": true,
+      "packages": [
+        "xltabular"
+      ],
+      "diagnostics": [
+        {
+          "code": "continuous-table-approximation",
+          "package": "xltabular",
+          "item": "xltabular",
+          "message": "Continuous output uses the first header and last footer; continued page bands require pagination",
+          "offset": 124
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Table 1: A sample long table.First columnSecond columnThird columnOneabcdef ghjijklmn123.456778Oneabcdef ghjijklmn123.45",
+      "output_chars": 27647,
+      "serialization_error": null,
+      "source_sha256": "fba0f4a270bb2aafd6c99096c82eeb959fff65ba73c1a080a9c178764203fdad"
+    },
+    {
+      "file": "xltabular",
+      "target": "pdf",
+      "parsed": true,
+      "packages": [
+        "xltabular"
+      ],
+      "diagnostics": [
+        {
+          "code": "unsupported-pagination",
+          "package": "xltabular",
+          "item": "xltabular",
+          "message": "PDF page-spanning tables need repeated-header pagination",
+          "offset": 124
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Table 1: A sample long table.First columnSecond columnThird columnOneabcdef ghjijklmn123.456778Oneabcdef ghjijklmn123.45",
+      "output_chars": 27647,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 3568996,
+      "source_sha256": "fba0f4a270bb2aafd6c99096c82eeb959fff65ba73c1a080a9c178764203fdad"
+    },
+    {
+      "file": "xltabular",
+      "target": "svg",
+      "parsed": true,
+      "packages": [
+        "xltabular"
+      ],
+      "diagnostics": [
+        {
+          "code": "continuous-table-approximation",
+          "package": "xltabular",
+          "item": "xltabular",
+          "message": "Continuous output uses the first header and last footer; continued page bands require pagination",
+          "offset": 124
+        }
+      ],
+      "unsupported": 0,
+      "resources": [],
+      "visible": "Table 1: A sample long table.First columnSecond columnThird columnOneabcdef ghjijklmn123.456778Oneabcdef ghjijklmn123.45",
+      "output_chars": 27647,
+      "serialization_error": null,
+      "export_status": 0,
+      "artifact_bytes": 54003,
+      "source_sha256": "fba0f4a270bb2aafd6c99096c82eeb959fff65ba73c1a080a9c178764203fdad"
+    }
+  ]
+}

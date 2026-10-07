@@ -1,0 +1,10 @@
+\documentclass{article}
+\usepackage{cleveref}
+\begin{document}
+\section{First}\label{sec:first}
+\section{Second}\label{sec:second}
+\section{Third}\label{sec:third}
+\cref{sec:first,sec:second,sec:third}
+\Cref{sec:first,sec:third}
+\cref{sec:missing}
+\end{document}

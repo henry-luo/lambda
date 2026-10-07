@@ -13,8 +13,8 @@ import run_julia_benchmarks as julia
 class JuliaRunnerTests(unittest.TestCase):
     def test_registered_port_coverage(self):
         entries = julia.benchmark_entries(True)
-        self.assertEqual(73, len(entries))
-        self.assertEqual(67, len(julia.benchmark_entries()))
+        self.assertEqual(77, len(entries))
+        self.assertEqual(71, len(julia.benchmark_entries()))
         self.assertFalse([f"{b['suite']}/{b['name']}" for b in entries
                           if julia.port_source(b['suite'], b['name']) is None])
 
@@ -28,6 +28,15 @@ class JuliaRunnerTests(unittest.TestCase):
                 _, count = registry._detect_jetstream_run_function(registry.JETSTREAM_NODE[name])
                 command = julia.build_command(julia.port_source("jetstream", name))
                 self.assertEqual(str(count), command[-1])
+
+    @unittest.skipUnless(julia.julia_executable(), "Julia is not installed")
+    def test_jq_vm_semantics(self):
+        env = os.environ.copy()
+        env.update(julia.julia_environment())
+        source = julia.JULIA_ROOT / "test_jq_vm.jl"
+        proc = subprocess.run(julia.build_command(source), cwd=julia.PROJECT_ROOT,
+                              env=env, capture_output=True, text=True, timeout=180)
+        self.assertEqual(0, proc.returncode, proc.stdout + proc.stderr)
 
     def test_failures_are_not_timings(self):
         for returncode, output, status in [
@@ -44,6 +53,14 @@ class JuliaRunnerTests(unittest.TestCase):
     def test_missing_toolchain_is_explicit(self):
         with patch.object(julia, "julia_executable", return_value=None):
             self.assertEqual((None, "toolchain_missing"), julia.shell_command("r7rs", "fib"))
+
+    def test_jq_filters_and_inputs_are_hashed(self):
+        with patch.object(julia, "julia_executable", return_value=None):
+            metadata = julia.runtime_metadata()
+        for name in ("mix.jq", "records.jq", "bf.jq", "tree.jq", "orders.json", "fib.bf"):
+            path = Path("test/benchmark/text/jq") / name
+            self.assertEqual(julia.sha256(julia.PROJECT_ROOT / path),
+                             metadata["fixtures_sha256"][str(path)])
 
     def test_unified_runner_rejects_missing_execution_timer(self):
         results, row = {"r7rs": {"fib": {}}}, {}

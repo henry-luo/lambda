@@ -352,6 +352,8 @@ Element* html5_parse(Input* input, const char* html) {
     Arena* arena = input->arena;
 
     Html5Parser* parser = html5_parser_create(pool, arena, input);
+    Html5ParserScope parser_scope(parser);
+    if (!parser) return nullptr;
     parser->html = html;
     parser->length = strlen(html);
     parser->pos = 0;
@@ -406,6 +408,8 @@ Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts)
     Arena* arena = input->arena;
 
     Html5Parser* parser = html5_parser_create(pool, arena, input);
+    Html5ParserScope parser_scope(parser);
+    if (!parser) return nullptr;
     parser->html = html;
     parser->length = strlen(html);
     parser->pos = 0;
@@ -546,6 +550,8 @@ bool html5_fragment_parse(Html5Parser* parser, const char* html) {
 
     log_debug("html5_fragment: parsing %zu bytes of HTML", html_len);
 
+    // fragment tokens have the same transient lifetime as full-document tokens.
+    html5_begin_token_scratch(parser);
     // Tokenize and process
     while (true) {
         Html5Token* token = html5_tokenize_next(parser);
@@ -557,10 +563,12 @@ bool html5_fragment_parse(Html5Parser* parser, const char* html) {
         }
 
         html5_process_token(parser, token);
+        html5_recycle_token_scratch(parser);
     }
 
     // Flush any pending text
     html5_flush_pending_text(parser);
+    html5_end_token_scratch(parser);
 
     // Restore for potential continuation
     // (Note: for fragments we typically create fresh each time,

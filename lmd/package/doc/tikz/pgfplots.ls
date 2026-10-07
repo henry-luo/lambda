@@ -2,6 +2,8 @@
 import opts: .options
 import labels: .labels
 import expression: .expression
+import pgfmath: .pgfmath
+import util: lambda.latex.util
 import scale: lambda.chart.scale
 import chart_axis: lambda.chart.axis
 import svg: lambda.chart.svg
@@ -11,19 +13,25 @@ fn children_named(node, tag) => [for (child in node
 
 fn plotted_points(plot) => children_named(plot, "point")
 
-fn sample_domain(plot, axis_node) any^ {
-    let raw = opts.value(plot, "domain", opts.value(axis_node, "domain", "-5:5"))
+fn sample_domain(plot, axis_node, program_data) any^ {
+    let axis_domain = if (axis_node == null) "-5:5"
+        else opts.value(axis_node, "domain", "-5:5")
+    let raw = opts.value(plot, "domain", axis_domain)
     let parts = split(raw, ":")
     let valid_parts = if (len(parts) == 2) true
         else raise error("PGFPlots function domain must be min:max")
-    let low = opts.numeric_value(parts[0])^
-    let high = opts.numeric_value(parts[1])^
+    let low = if (program_data == null) opts.numeric_value(parts[0])^
+        else pgfmath.evaluate_source(parts[0], program_data)^
+    let high = if (program_data == null) opts.numeric_value(parts[1])^
+        else pgfmath.evaluate_source(parts[1], program_data)^
     if (low < high) [low, high]
     else raise error("PGFPlots function domain must increase")
 }
 
 fn sample_count(plot, axis_node) int^ {
-    let raw = opts.value(plot, "samples", opts.value(axis_node, "samples", "25"))
+    let axis_samples = if (axis_node == null) "25"
+        else opts.value(axis_node, "samples", "25")
+    let raw = opts.value(plot, "samples", axis_samples)
     let count_number = opts.numeric_value(raw)^
     if (count_number < 2.0 or count_number > 1001.0 or
         float(int(count_number)) != count_number)
@@ -31,47 +39,83 @@ fn sample_count(plot, axis_node) int^ {
     else int(count_number)
 }
 
-fn sample_curve(y_tree, x_tree, low, high, count, index, acc) any^ {
+fn sample_curve(y_tree, x_tree, low, high, count, index, acc,
+                program_data, sample_variable) any^ {
     if (index >= count) acc
     else {
         let x = low + (high - low) * float(index) / float(count - 1)
-        let x_value = if (x_tree == null) x else expression.evaluate(x_tree, x)^
-        let y = expression.evaluate(y_tree, x)^
-        if (not (x_value == x_value) or abs(x_value) > 1e100 or
+        let point = sample_point(y_tree, x_tree, x, program_data, sample_variable)^
+        let x_value = if (point == null) null else point.x
+        let y = if (point == null) null else point.y
+        if (x_value == null or y == null)
+            sample_curve(y_tree, x_tree, low, high, count, index + 1,
+                acc, program_data, sample_variable)^
+        else if (not (x_value == x_value) or abs(x_value) > 1e100 or
             not (y == y) or abs(y) > 1e100)
             raise error("PGFPlots expression produced a non-finite sample")
         else sample_curve(y_tree, x_tree, low, high, count, index + 1,
-            [*acc, {x: x_value, y: y}])^
+            [*acc, {x: x_value, y: y}], program_data, sample_variable)^
     }
 }
 
-fn resolve_plots(plots, axis_node, index, acc) any^ {
-    if (index >= len(plots)) acc
-    else {
-        let plot = plots[index]
-        let points = if (plot.input_kind == "expression" or
+fn sample_point(y_tree, x_tree, x, program_data, sample_variable) any^ {
+    evaluate_point(y_tree, x_tree, x, program_data, sample_variable) ^ {
+        if (expression.undefined_sample(^.message)) null else raise ^
+    }
+}
+
+fn evaluate_point(y_tree, x_tree, x, program_data, sample_variable) any^ {
+    // Definitions are part of a sample; undefined accumulators discard that sample too.
+    let context = pgfmath.context_at(program_data, x, sample_variable)^;
+    {x: if (x_tree == null) x else expression.evaluate_sample(x_tree, x, context)^,
+     y: expression.evaluate_sample(y_tree, x, context)^}
+}
+
+pub fn plot_points(plot, axis_node = null, program_data = null) any^ {
+    let points = if (plot.input_kind == "expression" or
                           plot.input_kind == "parametric") {
-            let domain = sample_domain(plot, axis_node)^
+            let domain = sample_domain(plot, axis_node, program_data)^
             let count = sample_count(plot, axis_node)^
+            let raw_variable = opts.value(plot, "variable", null)
+            let sample_variable = if (raw_variable == null) null
+                else if (starts_with(trim(raw_variable), "\\"))
+                    slice(trim(raw_variable), 1, len(trim(raw_variable)))
+                else trim(raw_variable)
             if (plot.input_kind == "parametric") {
                 let x_wrappers = children_named(plot, "x_expression")
                 let y_wrappers = children_named(plot, "y_expression")
                 if (len(x_wrappers) != 1 or len(y_wrappers) != 1)
                     raise error("PGFPlots parametric expression pair is missing")
-                else sample_curve(y_wrappers[0][0], x_wrappers[0][0],
-                    domain[0], domain[1], count, 0, [])^
+                else {
+                    let selected = pgfmath.for_expression(program_data,
+                        [x_wrappers[0][0], y_wrappers[0][0]])
+                    sample_curve(y_wrappers[0][0], x_wrappers[0][0],
+                        domain[0], domain[1], count, 0, [], selected,
+                        sample_variable)^
+                }
             } else {
                 let trees = [for (child in plot
                     where child is element and string(name(child)) != "option" and
                         string(name(child)) != "point" and
                         string(name(child)) != "node") child]
                 if (len(trees) == 1)
-                    sample_curve(trees[0], null, domain[0], domain[1], count, 0, [])^
+                    sample_curve(trees[0], null, domain[0], domain[1],
+                        count, 0, [], pgfmath.for_expression(program_data, trees[0]),
+                        sample_variable)^
                 else raise error("PGFPlots function tree is missing")
             }
         } else plotted_points(plot)
+    if (len(points) == 0) raise error("PGFPlots plot has no finite coordinates")
+    else points
+}
+
+fn resolve_plots(plots, axis_node, index, acc, program_data) any^ {
+    if (index >= len(plots)) acc
+    else {
+        let plot = plots[index]
+        let points = plot_points(plot, axis_node, program_data)^
         resolve_plots(plots, axis_node, index + 1,
-            [*acc, {source: plot, points: points}])^
+            [*acc, {source: plot, points: points}], program_data)^
     }
 }
 
@@ -87,7 +131,7 @@ fn series_color(plot, index) string^ {
     let cycle = ["blue", "red", "green", "purple", "orange"]
     let checked = opts.check(plot, ["blue", "red", "green", "orange", "purple", "gray",
         "black", "darkgreen", "color", "only marks", "domain", "samples", "mark",
-        "thick"])^
+        "thick", "smooth"])^
     let fallback = cycle[index % len(cycle)]
     opts.color(plot, fallback)^
 }
@@ -134,16 +178,49 @@ fn clipped_segment(a, b, width, height) {
           [a[0] + bottom[1] * dx, a[1] + bottom[1] * dy]]
 }
 
-fn clipped_path(points, width, height, index, acc) {
+fn clipped_path(points, width, height, index, acc) any^ {
     if (index >= len(points)) acc
     else {
         let segment = clipped_segment(points[index - 1], points[index], width, height)
         let next = if (segment == null) acc else acc ++ " " ++
             svg.M(segment[0][0], segment[0][1]) ++ " " ++
             svg.L(segment[1][0], segment[1][1])
-        clipped_path(points, width, height, index + 1, next)
+        clipped_path(points, width, height, index + 1, next)^
     }
 }
+
+fn catmull_component(a, b, c, d, t) {
+    let square = t * t
+    let cube = square * t
+    0.5 * (2.0 * b + (c - a) * t +
+        (2.0 * a - 5.0 * b + 4.0 * c - d) * square +
+        (3.0 * b - a - 3.0 * c + d) * cube)
+}
+
+fn smooth_interpolated(first, left, right, following, step) {
+    let t = float(step) / 4.0;
+    [catmull_component(first[0], left[0], right[0], following[0], t),
+     catmull_component(first[1], left[1], right[1], following[1], t)]
+}
+
+fn smooth_segment(points, index) any^ {
+    let first = points[max([0, index - 1])]
+    let left = points[index]
+    let right = points[index + 1]
+    let following = points[min([len(points) - 1, index + 2])];
+    [for (step in 1 to 4)
+        smooth_interpolated(first, left, right, following, step)]
+}
+
+fn smooth_segments(points, index) any^ =>
+    [for (at in index to (len(points) - 2)) smooth_segment(points, at)^]
+
+fn flattened_points(segments) =>
+    [for (segment in segments, point in segment) point]
+
+fn smooth_points(points, index, acc) any^ =>
+    if (index >= len(points) - 1) acc
+    else acc ++ flattened_points(smooth_segments(points, index)^)
 
 fn render_series(series_list, axis_node, index, xs, ys, width, height, acc) any^ {
     if (index >= len(series_list)) acc
@@ -154,10 +231,14 @@ fn render_series(series_list, axis_node, index, xs, ys, width, height, acc) any^
         let transformed = [for (point in points)
             [float(scale.scale_apply(xs, point.x)),
              float(scale.scale_apply(ys, point.y))]]
+        // Sample a Catmull-Rom curve before clipping so smooth plots remain vector paths.
+        let drawing_points = if (opts.has(plot, "smooth") and len(transformed) >= 3)
+            smooth_points(transformed, 0, [transformed[0]])^
+            else transformed
         let marks_only = opts.has(plot, "only marks")
         let mark = checked_mark(plot, axis_node)^
         let path_data = if (marks_only) ""
-            else clipped_path(transformed, width, height, 1, "")
+            else clipped_path(drawing_points, width, height, 1, "")^
         let path = if (path_data == "") null
             else <path d: path_data, fill: "none",
                 stroke: color, 'stroke-width': if (opts.has(plot, "thick")) 2.1 else 1.5>
@@ -180,27 +261,100 @@ fn label_at(raw, x, y, extra = "") any^ {
     else labels.positioned(labels.prepare(raw)^, x, y, extra)
 }
 
-fn legend_nodes(axis_node) => [for (child in axis_node
-    where child is element and string(name(child)) == "legend_entry") child]
+fn legend_nodes(axis_node) {
+    let explicit = [for (child in axis_node
+        where child is element and string(name(child)) == "legend_entry") child]
+    let raw = opts.value(axis_node, "legend entries", null)
+    if (raw == null) explicit
+    else [*explicit, *[for (entry in util.split_top_level(raw, ",")
+        where trim(entry) != "") {source: trim(entry), from_list: true}]]
+}
 
-fn render_legend(entries, plots, index, left, acc) any^ {
+fn render_legend(entries, plots, index, acc) any^ {
     if (index >= len(entries)) acc
     else {
         let prepared = labels.prepare(entries[index])^
         let color = series_color(plots[index], index)^
-        let y = 7.0 + float(index) * 22.0
         let sample = if (opts.has(plots[index], "only marks"))
             <span style: "display:inline-block;width:18px;margin-right:4px;" ++
                 "color:" ++ color ++ ";text-align:center;", "●">
             else <span style: "display:inline-block;width:18px;border-top:2px solid " ++
                 color ++ ";vertical-align:middle;margin-right:4px;">
-        let el = <span class: "tikz-legend-entry",
-            style: "position:absolute;left:" ++ string(left) ++
-                "px;top:" ++ string(y) ++ "px;white-space:nowrap;",
+        let el = <div class: "tikz-legend-entry",
+            style: "white-space:nowrap;line-height:20px;",
             sample
             prepared.element
         >
-        render_legend(entries, plots, index + 1, left, [*acc, el])^
+        render_legend(entries, plots, index + 1, [*acc, el])^
+    }
+}
+
+fn style_keys(style, allowed, label) any^ {
+    let invalid = [for (key, value at style
+        where len([for (candidate in allowed
+            where string(key) == candidate) candidate]) == 0) string(key)]
+    if (len(invalid) > 0)
+        raise error("unsupported PGFPlots " ++ label ++ ": " ++ invalid[0])
+    else style
+}
+
+fn legend_style(axis_node) any^ {
+    let raw = opts.value(axis_node, "legend style", null)
+    if (raw == null) {overlay: false, fill: null, font: null}
+    else {
+        let style = style_keys(util.parse_kv_options(raw),
+            ["fill", "font", "anchor"], "legend style")^
+        let anchor = if (style.anchor == null) "default" else trim(style.anchor)
+        let valid_anchor = if (anchor != "default" and anchor != "north east")
+            raise error("unsupported PGFPlots legend anchor: " ++ anchor) else true
+        let font = if (style.font == null) null else trim(style.font)
+        let valid_font = if (font != null and font != "\\scriptsize")
+            raise error("unsupported PGFPlots legend font: " ++ font) else true
+        {overlay: anchor == "north east",
+         fill: if (style.fill == null) null else opts.color_value(style.fill)^,
+         font: font}
+    }
+}
+
+fn axis_background(axis_node) string^ {
+    let raw = opts.value(axis_node, "axis background/.style", null)
+    if (raw == null) "white"
+    else {
+        let style = style_keys(util.parse_kv_options(raw),
+            ["fill"], "axis background")^
+        if (style.fill == null) raise error("PGFPlots axis background needs fill")
+        else opts.color_value(style.fill)^
+    }
+}
+
+fn minor_tick_count(axis_node) int^ {
+    let raw = opts.value(axis_node, "minor tick num", null)
+    if (raw == null) 0
+    else {
+        let value = opts.numeric_value(raw)^
+        if (value < 0.0 or value > 20.0 or float(int(value)) != value)
+            raise error("PGFPlots minor tick num must be an integer from 0 to 20")
+        else int(value)
+    }
+}
+
+fn minor_ticks(axis_scale, count, horizontal, limit) {
+    if (count == 0) null
+    else {
+        let major = scale.scale_ticks(axis_scale, 5);
+        <g class: "minor-ticks",
+            for (at in 0 to (len(major) - 2), between in 1 to count,
+                 let value = major[at] +
+                     (major[at + 1] - major[at]) * float(between) /
+                     float(count + 1),
+                 let position = float(scale.scale_apply(axis_scale, value))
+                 where position >= 0.0 and position <= limit)
+                if (horizontal)
+                    <line x1: position, y1: 0, x2: position, y2: 3,
+                        stroke: "#888", 'stroke-width': 0.8>
+                else <line x1: 0, y1: position, x2: -3, y2: position,
+                    stroke: "#888", 'stroke-width': 0.8>
+        >
     }
 }
 
@@ -225,11 +379,12 @@ fn render_polar_series(series_list, index, center_x, center_y,
     }
 }
 
-fn render_polar_axis(axis_node) any^ {
+fn render_polar_axis(axis_node, picture) any^ {
     let checked = opts.check(axis_node, ["width", "height", "title", "domain", "samples"])^
     let plots = children_named(axis_node, "plot")
     if (len(plots) == 0) raise error("PGFPlots polar axis has no plots")
-    let series_list = resolve_plots(plots, axis_node, 0, [])^
+    let program_data = pgfmath.program(picture, axis_node)^
+    let series_list = resolve_plots(plots, axis_node, 0, [], program_data)^
     let all_points = [for (series in series_list, point in series.points) point]
     let max_radius = max([for (point in all_points) abs(float(point.y))])
     if (max_radius <= 0.0) raise error("PGFPlots polar radius must be nonzero")
@@ -412,14 +567,19 @@ fn plot_annotations(series_list, index, xs, ys, left, top, acc) any^ {
     }
 }
 
-fn render_cartesian_axis(axis_node, options) any^ {
+fn render_cartesian_axis(axis_node, options, picture) any^ {
     let checked = opts.check(axis_node, ["xmin", "xmax", "ymin", "ymax", "width", "height",
         "xlabel", "ylabel", "grid", "domain", "samples", "mark", "axis x line",
         "axis y line", "axis line style", "xlabel near ticks", "ylabel near ticks",
-        "xticklabel style"])^
+        "xticklabel style", "tick align", "legend style", "legend entries",
+        "axis background/.style", "title", "minor tick num"])^
+    let tick_align = opts.value(axis_node, "tick align", "outside")
+    if (tick_align != "outside")
+        raise error("unsupported PGFPlots tick alignment: " ++ tick_align)
     let plots = children_named(axis_node, "plot")
     if (len(plots) == 0) raise error("PGFPlots axis has no coordinate plots")
-    let series_list = resolve_plots(plots, axis_node, 0, [])^
+    let program_data = pgfmath.program(picture, axis_node)^
+    let series_list = resolve_plots(plots, axis_node, 0, [], program_data)^
     let points = [for (series in series_list, point in series.points) point]
     let kind = string(name(axis_node))
     let xlog = kind == "semilogxaxis" or kind == "loglogaxis"
@@ -438,8 +598,11 @@ fn render_cartesian_axis(axis_node, options) any^ {
     let text_width_px = if (options == null) null else options.text_width_px
     let width = opts.dimension_px(opts.value(axis_node, "width", "8cm"), text_width_px)^
     let height = opts.dimension_px(opts.value(axis_node, "height", "5cm"), text_width_px)^
-    let x_line = opts.value(axis_node, "axis x line", "bottom")
-    let y_line = opts.value(axis_node, "axis y line", "left")
+    // PGFPlots treats center as an alias for middle on both axes.
+    let x_line_option = opts.value(axis_node, "axis x line", "bottom")
+    let y_line_option = opts.value(axis_node, "axis y line", "left")
+    let x_line = if (x_line_option == "center") "middle" else x_line_option
+    let y_line = if (y_line_option == "center") "middle" else y_line_option
     let tick_label_style = opts.value(axis_node, "xticklabel style", null)
     if ((x_line != "bottom" and x_line != "middle") or
         (y_line != "left" and y_line != "middle"))
@@ -454,12 +617,22 @@ fn render_cartesian_axis(axis_node, options) any^ {
         raise error("PGFPlots has more legend entries than plots")
     let entries = [for (index, entry in legend_entries
         where index < len(plots)) entry.source]
-    // keep legends in a separate band so rising curves and scatter points stay visible.
-    let legend_band = if (len(entries) > 0) 6.0 + float(len(entries)) * 22.0 else 0.0
-    let total_height = height + legend_band
+    let legend_config = legend_style(axis_node)^
+    let background = axis_background(axis_node)^
+    let minor_count = minor_tick_count(axis_node)^
+    let valid_minor = if (minor_count > 0 and (xlog or ylog))
+        raise error("PGFPlots logarithmic minor ticks need logarithmic spacing") else true
+    let title_source = opts.value(axis_node, "title", null)
+    let title_prepared = if (title_source == null) null
+        else labels.prepare(title_source)^
+    let title_band = if (title_prepared == null) 0.0 else 30.0
+    // A north-east legend sits inside the axes; default legends use a header band.
+    let legend_band = if (len(entries) > 0 and not legend_config.overlay)
+        6.0 + float(len(entries)) * 22.0 else 0.0
+    let total_height = height + title_band + legend_band
     // logarithmic ticks need room for values such as 1e-05 beside the y title.
     let left = if (ylog) 80.0 else 64.0
-    let top = 20.0 + legend_band
+    let top = 20.0 + title_band + legend_band
     let pw = width - left - 18.0
     let ph = height - 20.0 - 43.0
     if (pw <= 0.0 or ph <= 0.0) raise error("PGFPlots axis dimensions are too small")
@@ -468,13 +641,12 @@ fn render_cartesian_axis(axis_node, options) any^ {
     let ys = if (ylog) scale.log_scale(ydomain[0], ydomain[1], ph, 0.0, 10.0)
         else scale.linear_scale(ydomain[0], ydomain[1], ph, 0.0)
     let x_origin = if (y_line == "middle") {
-        if (xlog or xdomain[0] > 0.0 or xdomain[1] < 0.0)
-            raise error("PGFPlots middle y axis requires zero in the x domain")
+        // PGFPlots places a middle axis at the lower limit when zero is outside.
+        if (xlog or xdomain[0] > 0.0 or xdomain[1] < 0.0) 0.0
         else float(scale.scale_apply(xs, 0.0))
     } else 0.0
     let y_origin = if (x_line == "middle") {
-        if (ylog or ydomain[0] > 0.0 or ydomain[1] < 0.0)
-            raise error("PGFPlots middle x axis requires zero in the y domain")
+        if (ylog or ydomain[0] > 0.0 or ydomain[1] < 0.0) ph
         else float(scale.scale_apply(ys, 0.0))
     } else ph
     let raw_axis_style = opts.value(axis_node, "axis line style", null)
@@ -513,14 +685,17 @@ fn render_cartesian_axis(axis_node, options) any^ {
         width: width, height: total_height,
         viewBox: "0 0 " ++ string(width) ++ " " ++ string(total_height),
         <g transform: svg.translate(left, top),
+            <rect x: 0, y: 0, width: pw, height: ph, fill: background>;
             if (grid_x != null) grid_x
             if (grid_y != null) grid_y
             plot_view;
             for (item in annotation_paths) item.shape;
             <g transform: svg.translate(0.0, y_origin - ph),
-                chart_axis.x_axis(xs, pw, ph, config, null)>;
+                chart_axis.x_axis(xs, pw, ph, config, null)
+                minor_ticks(xs, minor_count, true, pw)>;
             <g transform: svg.translate(x_origin, 0.0),
-                chart_axis.y_axis(ys, pw, ph, config, null)>;
+                chart_axis.y_axis(ys, pw, ph, config, null)
+                minor_ticks(ys, minor_count, false, ph)>;
             if (axis_arrows)
                 <g
                     svg.arrow_head(8.0, y_origin, 0.0, y_origin, axis_color)
@@ -542,18 +717,35 @@ fn render_cartesian_axis(axis_node, options) any^ {
         y_label_x, if (y_line == "middle") top + 8.0 else top + ph / 2.0,
         if (y_line == "middle") "" else
             "transform:translate(-50%,-50%) rotate(-90deg);")^
-    let legend = render_legend(entries, plots, 0, left, [])^
+    let legend_rows = render_legend(entries, plots, 0, [])^
+    let legend_style_text = "position:absolute;" ++
+        (if (legend_config.overlay)
+            "right:24px;top:" ++ string(top + 8.0) ++ "px;"
+         else "left:" ++ string(left) ++ "px;top:" ++
+            string(title_band + 3.0) ++ "px;") ++
+        (if (legend_config.fill == null) ""
+         else "background:" ++ legend_config.fill ++ ";padding:3px 6px;") ++
+        (if (legend_config.font == "\\scriptsize") "font-size:0.72em;" else "")
+    let legend = if (len(entries) == 0) null
+        else <div class: "tikz-legend", style: legend_style_text,
+            for (row in legend_rows) row>
+    let title = if (title_prepared == null) null
+        else <div class: "tikz-axis-title",
+            style: "position:absolute;left:0;top:0;width:100%;" ++
+                "height:30px;text-align:center;white-space:nowrap;",
+            title_prepared.element>
     let style = "position:relative;display:inline-block;width:" ++ string(width) ++
         "px;height:" ++ string(total_height) ++ "px;vertical-align:bottom;";
     <div class: "tikz-axis", style: style,
         graphic
+        if (title != null) title
         if (x_label != null) x_label
         if (y_label != null) y_label
-        for (entry in legend) entry
+        if (legend != null) legend
         for (label in [*series_labels, *direct_labels, *path_labels]) label
     >
 }
 
-pub fn render_axis(axis_node, options = null) any^ =>
-    if (string(name(axis_node)) == "polaraxis") render_polar_axis(axis_node)^
-    else render_cartesian_axis(axis_node, options)^
+pub fn render_axis(axis_node, options = null, picture = null) any^ =>
+    if (string(name(axis_node)) == "polaraxis") render_polar_axis(axis_node, picture)^
+    else render_cartesian_axis(axis_node, options, picture)^

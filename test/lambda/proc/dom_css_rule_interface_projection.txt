@@ -1,0 +1,4 @@
+["p", true, true, true]
+["p", "p { color: green; width: 12px; }", true]
+[true, true, true]
+[true, true]

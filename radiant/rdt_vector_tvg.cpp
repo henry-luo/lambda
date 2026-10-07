@@ -1117,7 +1117,7 @@ static void apply_transform(Tvg_Paint shape, const RdtMatrix* transform) {
     tvg_paint_set_transform(shape, &m);
 }
 
-// Create a clip mask shape from a path (solid black fill for alpha masking)
+// create a filled shape for geometric clipping.
 static Tvg_Paint create_clip_mask(RdtPath* clip_path, const RdtMatrix* transform) {
     Tvg_Paint clip = tvg_shape_new();
     if (matrix_is_projective(transform)) {
@@ -1878,9 +1878,8 @@ void rdt_clip_restore_depth(int saved_depth) {
 
 }
 
-// Apply active clip masks to an immediate paint or a completed batch scene.
-// Multiple clips are composed as intersection by nesting masks: the innermost
-// mask is masked by the next outer one, and finally applied to the paint.
+// geometric clips intersect paths without allocating full-surface alpha masks
+// for every image batch; nested clippers preserve the clip stack's intersection.
 static void apply_clip_masks(RdtVectorImpl* impl, Tvg_Paint shape) {
     if (s_clip_depth <= 0) return;
     impl->clip_mask_count++;
@@ -1895,12 +1894,11 @@ static void apply_clip_masks(RdtVectorImpl* impl, Tvg_Paint shape) {
         if (!entry->path) continue;
         Tvg_Paint inner = create_clip_mask(entry->path,
             entry->has_transform ? &entry->transform : nullptr);
-        // mask the inner clip by the composed (outer) clip → intersection
-        tvg_paint_set_mask_method(inner, composed, TVG_MASK_METHOD_ALPHA);
+        tvg_paint_set_clip(inner, composed);
         composed = inner;
     }
 
-    tvg_paint_set_mask_method(shape, composed, TVG_MASK_METHOD_ALPHA);
+    tvg_paint_set_clip(shape, composed);
 }
 
 // Clip-aware version of tvg_push_draw_remove

@@ -2,6 +2,7 @@
 
 #include "../../lib/log.h"
 #include "../io/input-allocation-context.h"
+#include "../io/resource_policy.h"
 
 #include "../lambda-data.hpp"
 
@@ -121,6 +122,7 @@ struct Runtime {
     unsigned int optimize_level;  // MIR optimization level (0-3, default: 2)
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
+    InputResourcePolicy resource_policy; // copied from the document before executing or linking its scripts
     void* dom_ui_context; // UiContext* borrowed by the document execution realm (NULL outside DOM sessions)
     // Borrowed canonical document URL. Synthetic inline script labels resolve
     // browser module specifiers against this URL while the document is alive.

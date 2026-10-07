@@ -2,7 +2,7 @@
 
 These are standalone text-library benchmarks. The JavaScript files embed the
 library cores or load their checked-in fixture data; `*.ls`, `*2.ls`,
-`c2mir/*.c`, `python/*.py`, and `../go/cmd/text/*` implement the same bounded
+`c2mir/*.c`, `python/*.py`, `../julia/text/*.jl`, and `../go/cmd/text/*` implement the same bounded
 workloads for the Lambda and native reference columns.
 
 - fast_diff.js: multiline source-text diffs with semantic cleanup, 256 rounds
@@ -61,6 +61,10 @@ workloads for the Lambda and native reference columns.
   `jq_*2.ls`). The C2MIR cell holds two values: the C jq VM, and a typed
   Lambda port of the same VM (`../jq_vm.ls`, run by `jq_*_vm.ls`) shown as
   `/ λ-VM` (the proposal's §1.5 has its times).
+  Julia evaluates the shared filters with a native port of that VM
+  (`../julia/text/jq_vm.jl`), including its parser/compiler, backtracking,
+  lexical closures, and path updates. Its default full warmup uses fresh VM
+  state; filter compilation and fixture loading are outside execution timing.
   `generate_jq_fixture.js` regenerates `jq/orders.json` and
   `jq/jq_helper.js` (vendored jqjs without its ES exports, plus
   `jq/jq_driver.js`).

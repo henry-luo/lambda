@@ -1096,15 +1096,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     }
                     lycon->ui_context->iframe_depth++;
 
-                    DomDocument* doc = nullptr;
-                    {
-                        // an iframe's stateless loaders keep a runtime per document (EO5v2)
-                        LayoutLoaderHostScope no_loader_host(nullptr);
-                        doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
-                            // The embedded viewport excludes the flex item's border and padding.
-                            (int)iframe_content.width, // INT_CAST_OK: viewport API expects int
-                            (int)iframe_content.height); // INT_CAST_OK: viewport API expects int
-                    }
+                    DomDocument* doc = layout_load_iframe_src_doc(lycon, src_value,
+                        // The embedded viewport excludes the flex item's border and padding.
+                        (int)iframe_content.width, // INT_CAST_OK: viewport API expects int
+                        (int)iframe_content.height); // INT_CAST_OK: viewport API expects int
                     if (doc) {
                         radiant_document_ensure_state(doc, "layout_flex_iframe");
                         if (!flex_item->embed) {

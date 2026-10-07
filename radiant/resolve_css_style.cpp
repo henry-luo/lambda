@@ -2353,6 +2353,62 @@ static bool parse_object_position_component(LayoutContext* lycon, const CssValue
     return false;
 }
 
+void resolve_object_position_value(LayoutContext* lycon, const CssValue* value, EmbedProp* embed) {
+    if (!value || !embed) return;
+    float x = 50.0f, y = 50.0f;
+    bool x_is_percent = true, y_is_percent = true;
+    bool parsed = false;
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        float values[2] = {50.0f, 50.0f};
+        bool is_percent[2] = {true, true};
+        int axes[2] = {0, 0};
+        int count = 0;
+        for (int i = 0; i < value->data.list.count && count < 2; i++) {
+            CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
+            if (parse_object_position_component(lycon, item,
+                    &values[count], &is_percent[count], &axes[count])) {
+                count++;
+            }
+        }
+        if (count == 1) {
+            if (axes[0] == 2) {
+                y = values[0]; y_is_percent = is_percent[0];
+            } else {
+                x = values[0]; x_is_percent = is_percent[0];
+            }
+            parsed = true;
+        } else if (count >= 2) {
+            if (axes[0] == 2 && axes[1] != 2) {
+                y = values[0]; y_is_percent = is_percent[0];
+                x = values[1]; x_is_percent = is_percent[1];
+            } else {
+                x = values[0]; x_is_percent = is_percent[0];
+                y = values[1]; y_is_percent = is_percent[1];
+            }
+            parsed = true;
+        }
+    } else {
+        int axis = 0;
+        float component = 50.0f;
+        bool is_percent = true;
+        if (parse_object_position_component(lycon, value, &component, &is_percent, &axis)) {
+            if (axis == 2) {
+                y = component; y_is_percent = is_percent;
+            } else {
+                x = component; x_is_percent = is_percent;
+            }
+            parsed = true;
+        }
+    }
+    if (parsed) {
+        embed->object_position_x = x;
+        embed->object_position_y = y;
+        embed->object_position_x_is_percent = x_is_percent;
+        embed->object_position_y_is_percent = y_is_percent;
+        embed->object_position_set = true;
+    }
+}
+
 static bool css_text_has_top_level_comma(const char* text, size_t len) {
     return text && strn_scan_top_level(text, text + len, ",", '(', ')', "\"'", true) < text + len;
 }
@@ -5542,7 +5598,6 @@ static void resolve_scroll_snap(DomElement* element, LayoutContext* lycon) {
     }
 }
 
-static CssEnum logical_inline_direction(DomElement* element);
 
 // each family lists its shorthand, physical sides and logical block/inline members.
 static const CssPropertyCode box_component_families[][11] = {
@@ -6522,6 +6577,23 @@ static const char* css_list_style_image_url(const CssValue* value) {
     CssValue* argument = value->data.function->args[0];
     return argument->type == CSS_VALUE_TYPE_STRING ? argument->data.string
         : argument->type == CSS_VALUE_TYPE_URL ? argument->data.url : nullptr;
+}
+
+const CssValue* layout_list_style_longhand(const CssValue* value, CssPropertyCode property, Pool* pool) {
+    const CssValue* type = nullptr; const CssValue* position = nullptr; const CssValue* image = nullptr;
+    bool none = false;
+    for (int i = 0; i < css_value_count(value, 0); i++) {
+        const CssValue* item = css_value_at(value, i); if (!item) continue;
+        const char* name = css_value_identifier_name(item); CssEnum ignored;
+        if (css_value_is_none(item)) none = true;
+        else if (name && css_list_style_custom_position(name, &ignored)) position = item;
+        else if (css_list_style_image_url(item) || css_background_gradient_type(item) != GRADIENT_NONE) image = item;
+        else type = item;
+    }
+    // omitted longhands reset to their initial value; none suppresses both unspecified marker sources.
+    if (property == CSS_PROPERTY_LIST_STYLE_TYPE) return type ? type : css_value_create_keyword(pool, none ? "none" : "disc");
+    if (property == CSS_PROPERTY_LIST_STYLE_POSITION) return position ? position : css_value_create_keyword(pool, "outside");
+    return image ? image : css_value_create_keyword(pool, "none");
 }
 
 static bool css_store_list_style_image(LayoutContext* lycon, ViewSpan* span,
@@ -8422,7 +8494,7 @@ static CssEnum css_parse_webkit_text_align(const CssValue* value) {
     return CSS_VALUE__UNDEF;
 }
 
-static CssEnum logical_inline_direction(DomElement* element) {
+CssEnum logical_inline_direction(DomElement* element) {
     for (DomElement* parent = dom_parent_element(element); parent;
          parent = dom_parent_element(parent)) {
         CssEnum specified = layout_specified_keyword(
@@ -9199,6 +9271,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
         case CSS_PROPERTY_TRANSFORM: {
+            // retained resolution replaces the previous private chain without resetting its prop block
+            view_release_transform_functions(current_element, lycon->selected_view_tree
+                ? lycon->selected_view_tree : (lycon->doc ? lycon->doc->view_tree : nullptr));
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 // transform:none clears only its list; independent transforms and origin still apply.
                 if (span->transform) span->transform->functions = nullptr;
@@ -10364,58 +10439,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_OBJECT_POSITION: {
             EmbedProp* embed = resolve_embed_prop(lycon, block);
             if (!embed) break;
-            float x = 50.0f, y = 50.0f;
-            bool x_is_percent = true, y_is_percent = true;
-            bool parsed = false;
-            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                float values[2] = {50.0f, 50.0f};
-                bool is_percent[2] = {true, true};
-                int axes[2] = {0, 0};
-                int count = 0;
-                for (int i = 0; i < value->data.list.count && count < 2; i++) {
-                    CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
-                    if (parse_object_position_component(lycon, item,
-                            &values[count], &is_percent[count], &axes[count])) {
-                        count++;
-                    }
-                }
-                if (count == 1) {
-                    if (axes[0] == 2) {
-                        y = values[0]; y_is_percent = is_percent[0];
-                    } else {
-                        x = values[0]; x_is_percent = is_percent[0];
-                    }
-                    parsed = true;
-                } else if (count >= 2) {
-                    if (axes[0] == 2 && axes[1] != 2) {
-                        y = values[0]; y_is_percent = is_percent[0];
-                        x = values[1]; x_is_percent = is_percent[1];
-                    } else {
-                        x = values[0]; x_is_percent = is_percent[0];
-                        y = values[1]; y_is_percent = is_percent[1];
-                    }
-                    parsed = true;
-                }
-            } else {
-                int axis = 0;
-                float component = 50.0f;
-                bool is_percent = true;
-                if (parse_object_position_component(lycon, value, &component, &is_percent, &axis)) {
-                    if (axis == 2) {
-                        y = component; y_is_percent = is_percent;
-                    } else {
-                        x = component; x_is_percent = is_percent;
-                    }
-                    parsed = true;
-                }
-            }
-            if (parsed) {
-                embed->object_position_x = x;
-                embed->object_position_y = y;
-                embed->object_position_x_is_percent = x_is_percent;
-                embed->object_position_y_is_percent = y_is_percent;
-                embed->object_position_set = true;
-            }
+            resolve_object_position_value(lycon, value, embed);
             break;
         }
         case CSS_PROPERTY_OUTLINE_STYLE:

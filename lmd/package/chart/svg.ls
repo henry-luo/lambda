@@ -92,17 +92,18 @@ pub fn line_path(points) string {
     }
 }
 
-pub fn arrow_head(x1, y1, x2, y2, color) {
+pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false) {
     let dx = x2 - x1
     let dy = y2 - y1
     let distance = math.sqrt(dx * dx + dy * dy)
     let ux = dx / distance
     let uy = dy / distance
-    let base_x = x2 - ux * 8.0
-    let base_y = y2 - uy * 8.0
-    let wing_x = uy * 3.0
-    let wing_y = 0.0 - ux * 3.0;
+    let base_x = x2 - ux * length
+    let base_y = y2 - uy * length
+    let wing_x = uy * length * 0.375
+    let wing_y = 0.0 - ux * length * 0.375;
     <path d: M(x2, y2) ++ " " ++ L(base_x + wing_x, base_y + wing_y) ++
+        (if (notched) " " ++ L(x2 - ux * length * 0.7, y2 - uy * length * 0.7) else "") ++
         " " ++ L(base_x - wing_x, base_y - wing_y) ++ " Z", fill: color>
 }
 

@@ -1,0 +1,10 @@
+{
+  unsupported: 0,
+  shape_approximation: 1,
+  pictures: 3,
+  gallery_shapes: 29,
+  pin_text: true,
+  mirrored: true,
+  custom_color: true,
+  labels: true
+}

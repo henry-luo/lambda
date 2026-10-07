@@ -1,5 +1,7 @@
 // Text and math labels share one positioned HTML representation.
 import math: lambda.doc.math.math
+import opts: .options
+import util: lambda.latex.util
 
 fn plain_text(source) {
     // Common TeX accent commands in figure labels have plain Unicode equivalents.
@@ -29,6 +31,37 @@ fn mixed_parts(source, offset, acc) any^ {
 
 pub fn prepare(source) map^ {
     let value = trim(source)
+    let font_command = if (starts_with(value, "\\footnotesize")) "\\footnotesize"
+        else if (starts_with(value, "\\scriptsize")) "\\scriptsize"
+        else if (starts_with(value, "\\small")) "\\small"
+        else if (starts_with(value, "\\large")) "\\large" else null
+    if (starts_with(value, "\\textbf{")) {
+        let group = util.read_balanced(value, len("\\textbf"), "{", "}")^
+        let valid_tail = if (trim(slice(value, group.next, len(value))) != "")
+            raise error("unsupported text after PGFPlots bold label") else true
+        let prepared = prepare(group.raw)^;
+        {element: <span style: "font-weight:bold", prepared.element>,
+         width_em: prepared.width_em, height_em: prepared.height_em,
+         depth_em: prepared.depth_em}
+    } else if (starts_with(value, "\\color{")) {
+        let group = util.read_balanced(value, len("\\color"), "{", "}")^
+        let color = opts.color_value(group.raw)^
+        let prepared = prepare(slice(value, group.next, len(value)))^;
+        {element: <span style: "color:" ++ color, prepared.element>,
+         width_em: prepared.width_em, height_em: prepared.height_em,
+         depth_em: prepared.depth_em}
+    } else if (font_command != null) {
+        let remaining = trim(slice(value, len(font_command), len(value)))
+        let body = if (starts_with(remaining, "{") and ends_with(remaining, "}"))
+            slice(remaining, 1, len(remaining) - 1) else remaining
+        let prepared = prepare(body)^
+        let size = if (font_command == "\\scriptsize") "0.72em"
+            else if (font_command == "\\footnotesize") "0.8em"
+            else if (font_command == "\\small") "0.9em" else "1.2em";
+        {element: <span style: "font-size:" ++ size ++ ";", prepared.element>,
+         width_em: prepared.width_em, height_em: prepared.height_em,
+         depth_em: prepared.depth_em}
+    } else {
     let textcolor_prefix = "\\textcolor{"
     if (starts_with(value, textcolor_prefix)) {
         let color_start = len(textcolor_prefix)
@@ -65,6 +98,7 @@ pub fn prepare(source) map^ {
         // reserve space independently before it admits long labels.
         {element: <span plain_text(value)>,
             width_em: null, height_em: null, depth_em: null}
+    }
     }
 }
 

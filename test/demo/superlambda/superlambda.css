@@ -1,0 +1,67 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #f3efdf; color: #20322f; font-family: Arial, sans-serif; }
+.page { width: 928px; margin: 30px auto 20px; }
+.masthead { display: flex; justify-content: space-between; align-items: center; margin: 0 0 22px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-mark { display: block; width: 58px; height: 58px; border: 2px solid #20322f; border-radius: 16px; background: #ef6248; color: #fff6df; font-size: 42px; font-weight: bold; text-align: center; line-height: 52px; box-shadow: 3px 3px 0 #20322f; }
+.eyebrow { margin: 0; font-size: 10px; letter-spacing: 2px; font-weight: bold; }
+h1 { margin: 4px 0 0; font-size: 29px; letter-spacing: -1px; line-height: 1; }
+h1 span { color: #e85940; }
+.edition { border: 1px solid #c5caba; border-radius: 20px; padding: 10px 14px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
+.edition-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: #4c9163; }
+main { padding: 22px; border: 2px solid #20322f; border-radius: 20px; background: #fffcf0; box-shadow: 5px 6px 0 #d0d5be; outline: none; }
+.stage { position: relative; width: 880px; height: 480px; overflow: hidden; border: 2px solid #20322f; border-radius: 12px; background: #56b6dd; }
+.scenery { position: absolute; left: 0; top: 0; width: 880px; height: 480px; pointer-events: none; }
+.world { position: absolute; left: 0; top: 0; width: 880px; height: 480px; pointer-events: none; }
+.object, .hero, .checkpoint, .goal { position: absolute; }
+.object img { display: block; width: 100%; height: 100%; }
+.hero img { display: block; position: absolute; top: 0; width: 120px; height: 54px; max-width: none; }
+.ground { background: #b97640 url('assets/ground.svg') repeat; border-top: 0; }
+.ledge { background: #b97640 url('assets/ground.svg') repeat; border-radius: 5px; border: 2px solid #34532e; }
+.hero { z-index: 5; overflow: hidden; }
+.facing-left { transform: scaleX(-1); }
+.invincible { opacity: 0.4; }
+.hud { position: absolute; left: 20px; top: 18px; width: 836px; display: flex; gap: 10px; align-items: center; z-index: 8; }
+.hud-world { width: 340px; padding: 10px 14px; background: #fff9e8; border: 2px solid #20322f; border-radius: 9px; box-shadow: 2px 3px 0 #20322f; }
+.hud-stat { width: 108px; padding: 10px 12px; background: #fff9e8; border: 2px solid #20322f; border-radius: 9px; box-shadow: 2px 3px 0 #20322f; }
+.hud-label { display: block; font-size: 8px; letter-spacing: 1.7px; margin-bottom: 5px; color: #617366; font-weight: bold; }
+.hud strong { display: block; font-size: 15px; letter-spacing: 0.5px; }
+#coins { color: #bb801c; }
+#lives { color: #dc553b; }
+.stage-caption { position: absolute; left: 20px; bottom: 17px; font-size: 9px; font-weight: bold; letter-spacing: 1.8px; color: #fff3d4; z-index: 9; }
+.checkpoint-flag { position: absolute; left: 10px; top: 4px; width: 36px; height: 26px; background: #eee4bb; border: 2px solid #20322f; border-radius: 2px 9px 9px 2px; color: #857b4e; text-align: center; font-size: 22px; font-weight: bold; }
+.activated .checkpoint-flag { background: #ffd35f; color: #20322f; }
+.flag-pole, .goal-pole { position: absolute; left: 8px; top: 0; width: 6px; height: 100%; background: #fff9e8; border: 2px solid #20322f; border-radius: 3px; }
+.goal-pole { left: 18px; width: 8px; }
+.goal-ball { position: absolute; left: 13px; top: -6px; width: 18px; height: 18px; background: #ffd35f; border: 2px solid #20322f; border-radius: 50%; }
+.goal-flag { position: absolute; left: 25px; top: 18px; width: 74px; height: 48px; border: 2px solid #20322f; border-radius: 2px 12px 12px 2px; background: #ef6248; color: #fff9e8; text-align: center; font-weight: bold; font-size: 35px; }
+.goal-base { position: absolute; left: 0; bottom: 0; width: 45px; height: 18px; border: 2px solid #20322f; border-radius: 5px 5px 0 0; background: #b97640; }
+.goal-label { position: absolute; left: 43px; bottom: 6px; color: #20322f; font-size: 11px; font-weight: bold; }
+.veil { position: absolute; left: 0; top: 84px; width: 880px; height: 316px; z-index: 10; }
+.overlay { width: 410px; margin: 12px auto; padding: 20px 28px 16px; background: #fff9e8; border: 2px solid #20322f; border-radius: 16px; box-shadow: 5px 6px 0 #20322f; text-align: center; }
+.overlay-mark { width: 39px; height: 39px; margin: 0 auto 10px; background: #ef6248; border: 2px solid #20322f; border-radius: 11px; color: #fff9e8; font-size: 29px; font-weight: bold; line-height: 33px; }
+.overlay .eyebrow { color: #648164; font-size: 9px; letter-spacing: 1.6px; }
+h2 { margin: 10px 0; font-size: 28px; line-height: 1.07; letter-spacing: -0.5px; }
+.overlay-description { font-size: 12px; line-height: 1.6; margin: 12px 0 16px; color: #637061; }
+button { background: #fff9e8; color: #20322f; border: 2px solid #20322f; border-radius: 9px; padding: 12px 16px; font-weight: bold; font-size: 11px; letter-spacing: 0.5px; cursor: pointer; box-shadow: 2px 3px 0 #20322f; }
+button:hover { background: #f6df9b; }
+button:active { box-shadow: 0 1px 0 #20322f; background: #ffd35f; }
+button:focus { outline: 2px solid #e85940; outline-offset: 3px; }
+#overlay-action { background: #ef6248; color: #fff9e8; width: 220px; }
+#overlay-action:hover { background: #d44c35; }
+.overlay-keys { font-size: 10px; color: #7b8773; margin: 15px 0 0; }
+.dashboard { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
+.movement, .game-menu { display: flex; gap: 10px; }
+.control-left, .control-right { width: 54px; font-size: 21px; padding: 8px; }
+.control-jump { background: #ffd35f; width: 108px; }
+.control-run { background: #dce8c6; }
+.game-menu button { font-size: 10px; }
+.progress { height: 6px; margin-top: 21px; border-radius: 3px; background: #e3e6d4; overflow: hidden; }
+.progress-fill { height: 6px; background: #4c9163; }
+footer { display: flex; justify-content: space-between; margin-top: 12px; color: #75826e; font-size: 9px; }
+.colophon { margin: 20px 0 0; text-align: center; font-size: 9px; letter-spacing: 2px; color: #7a8772; }
+@keyframes frame { from { opacity: 0.9; } to { opacity: 1; } }
+#frame-clock { position: absolute; left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; animation-name: frame; animation-duration: 40ms; animation-timing-function: linear; animation-iteration-count: infinite; }
+@media (max-width: 960px) {
+  .page { margin: 20px 14px; }
+}

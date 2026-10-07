@@ -29,9 +29,6 @@
 
 String* heap_create_name(const char* name, size_t len);
 
-extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
-    bool track_source_lines, bool execute_scripts);
 extern void free_document(DomDocument* doc);
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item);
@@ -1266,6 +1263,12 @@ static DomDocument* radiant_load_html_document(const char* path, const char* fun
     }
     if (!doc->root) {
         log_error("JUBE_RADIANT_%s: document '%s' has no root element", func_name, path);
+        free_document(doc);
+        return nullptr;
+    }
+    // loaded documents outlive weak wrappers and belong to the calling evaluator.
+    if (!radiant_host_api || !radiant_host_api->dom_catalog->retain_owned_document(doc)) {
+        log_error("JUBE_RADIANT_%s: failed to retain document '%s'", func_name, path);
         free_document(doc);
         return nullptr;
     }
@@ -2960,6 +2963,36 @@ RADIANT_C_API Item fn_radiant_request_change(Item node_item) {
     return (Item){.item = b2it(1)};
 }
 
+RADIANT_C_API Item fn_radiant_request_frame(Item owner, Item event_name) {
+    DomElement* elem = radiant_dom_element_from_item(owner, "REQUEST_FRAME");
+    const char* name = get_type_id(event_name) == LMD_TYPE_STRING ? fn_to_cstr(event_name) : nullptr;
+    uint64_t token = elem && name && *name && radiant_host_api && radiant_host_api->dom_catalog
+        ? radiant_host_api->dom_catalog->frame_request_native(elem, name) : 0;
+    return (Item){.item = i2it((int64_t)token)};
+}
+
+RADIANT_C_API Item fn_radiant_cancel_frame(Item owner, Item token) {
+    DomElement* elem = radiant_dom_element_from_item(owner, "CANCEL_FRAME");
+    int64_t id = get_type_id(token) == LMD_TYPE_INT ? it2i(token) : 0;
+    bool cancelled = elem && id > 0 && radiant_host_api && radiant_host_api->dom_catalog &&
+        radiant_host_api->dom_catalog->frame_cancel_native(elem, (uint64_t)id);
+    return (Item){.item = b2it(cancelled)};
+}
+
+RADIANT_C_API Item fn_radiant_viewport_size(Item owner) {
+    DomElement* elem = radiant_dom_element_from_item(owner, "VIEWPORT_SIZE");
+    DomDocument* doc = elem ? elem->doc : nullptr;
+    UiContext* uicon = doc ? static_cast<UiContext*>(doc->js.host_ui_context) : nullptr;
+    if (!doc || !doc->view_tree || !uicon || doc->embedding_document) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "width", radiant_float_item(
+        doc->viewport.width > 0 ? doc->viewport.width : uicon->viewport_width));
+    radiant_rooted_obj_set(result, "height", radiant_float_item(
+        doc->viewport.height > 0 ? doc->viewport.height : uicon->viewport_height));
+    return result.get();
+}
+
 // Range geometry for the ARIA value mirrors (F7). `value` is the *computed*
 // value, not the normalized 0..1 the engine stores, because that is what
 // aria-valuenow reports. All three return null on a control that is not a
@@ -3040,7 +3073,8 @@ static bool radiant_input_commit_value(DomElement* elem, DocState* state,
     if (tc_is_text_control(elem)) {
         tc_set_value(elem, committed, strlen(committed));
     } else if (elem->form) {
-        elem->form->value = committed;
+        // the view borrows document-owned storage, never the commit's stack buffer.
+        elem->form->value = radiant_input_live_value(elem);
     }
     radiant_input_sync_range_position(elem, state, committed);
     dom_notify_mutation(DOM_JS_MUTATION_CONTROL_VALUE, (void*)elem, (void*)elem->parent);
@@ -3493,17 +3527,18 @@ static void radiant_custom_layout_heap_cleanup(void* heap_ptr) {
     }
 }
 
+#define RADIANT_READONLY_INDEXED (JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_INDEXED_READONLY)
 static const JubeTypeDef radiant_types[] = {
     {"dom_node", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
     {"range", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"selection", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     // DOM3: style hosts are record-driven; no hand-written host ops remain
-    {"inline_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"computed_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"stylesheet", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"inline_style", RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
+    {"computed_style", RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
+    {"stylesheet", JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_NATIVE_INDEXED, NULL, NULL},
     {"css_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"rule_style_decl", RADIANT_READONLY_INDEXED, NULL, NULL},
     {"document", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
     {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
@@ -3525,27 +3560,40 @@ static const JubeTypeDef radiant_types[] = {
     {"html_element", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
     {"event", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_dom_event_destroy},
-    {"node_list", JUBE_TYPE_NON_OWNING_HOST, &dom_child_collection_varray_vtable, NULL,
+    {"node_list", RADIANT_READONLY_INDEXED, &dom_child_collection_varray_vtable, NULL,
      JUBE_CARRIER_VARRAY},
-    {"html_collection", JUBE_TYPE_NON_OWNING_HOST, &dom_child_collection_varray_vtable, NULL,
+    {"html_collection", RADIANT_READONLY_INDEXED, &dom_child_collection_varray_vtable, NULL,
      JUBE_CARRIER_VARRAY},
     {"html_options_collection", JUBE_TYPE_NON_OWNING_HOST,
      &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"html_form_controls_collection", JUBE_TYPE_NON_OWNING_HOST,
+    {"html_form_controls_collection", RADIANT_READONLY_INDEXED,
      &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"named_node_map", JUBE_TYPE_NON_OWNING_HOST,
+    {"named_node_map", RADIANT_READONLY_INDEXED,
      &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"dom_token_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"dom_token_list", RADIANT_READONLY_INDEXED,
      &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"radio_node_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"radio_node_list", RADIANT_READONLY_INDEXED,
      &dom_static_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"dom_rect_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"dom_rect_list", RADIANT_READONLY_INDEXED,
      &dom_static_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"style_sheet_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"style_sheet_list", RADIANT_READONLY_INDEXED,
      &dom_cssom_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"css_rule_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"css_rule_list", RADIANT_READONLY_INDEXED,
      &dom_cssom_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"css_grouping_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"css_condition_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+#define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
+    {#host, JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+#define CSS_RULE_INTERFACE_ALIAS(...)
+#include "../../input/css/css_rule_interfaces.def"
+#undef CSS_RULE_INTERFACE_ALIAS
+#undef CSS_RULE_INTERFACE
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    {#host, RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
+#include "../../input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
 };
+#undef RADIANT_READONLY_INDEXED
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
     return &radiant_types[0];
@@ -3767,6 +3815,9 @@ RADIANT_C_API void radiant_jube_register_static(void) {
 RADIANT_PROVIDE_ENGINE_2(get_state, fn_radiant_get_state)
 RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
 RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
+RADIANT_PROVIDE_ENGINE_2(request_frame, fn_radiant_request_frame)
+RADIANT_PROVIDE_ENGINE_1(viewport_size, fn_radiant_viewport_size)
+RADIANT_PROVIDE_ENGINE_2(cancel_frame, fn_radiant_cancel_frame)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
 RADIANT_PROVIDE_ENGINE_1(clear_editing_focus, fn_radiant_clear_editing_focus)
@@ -3838,8 +3889,12 @@ extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
 
 extern "C" Item dom_engine_dispatch_event(Item node_item, Item type_item,
                                           Item bubbles_item, Item cancelable_item) {
-    DomElement* elem = radiant_dom_element_from_item(node_item, "DISPATCH_EVENT");
-    const char* type = fn_to_cstr(type_item);
+    // nested dispatch allocates before copying its name; retain the GC string (D5.3.3).
+    RootFrame roots(2);
+    Rooted<Item> node_root(roots, node_item);
+    Rooted<Item> type_root(roots, type_item);
+    DomElement* elem = radiant_dom_element_from_item(node_root.get(), "DISPATCH_EVENT");
+    const char* type = fn_to_cstr(type_root.get());
     if (!elem || !type || !type[0]) return radiant_bool_item(false);
     return radiant_bool_item(radiant_dispatch_event_with_flags_from_script(
         (void*)elem, type, is_truthy(bubbles_item), is_truthy(cancelable_item)));

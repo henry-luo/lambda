@@ -6551,6 +6551,8 @@ static bool js_interp_is_lambda_module_path(const char* filename) {
 }
 
 static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
+    if (runtime && !input_resource_policy_admits(runtime->resource_policy, filename))
+        return js_throw_reference_error(js_make_string("Module blocked by document resource policy"));
     if (!runtime || !filename) return ItemError;
     // Prebuild workers publish file-backed ASTs under canonical paths. Resolve
     // the runtime lookup the same way so one import spelling cannot bypass it.
@@ -6589,7 +6591,7 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
     }
     size_t source_length = 0;
     char* source = js_load_script_source_from_cache(
-        module_filename, "js-interpreter-module", "module", true, &source_length);
+        module_filename, "js-interpreter-module", "module", true, &source_length, runtime->resource_policy);
     if (!source) {
         mem_free(canonical_filename);
         return js_throw_reference_error(js_make_string("Cannot find module"));

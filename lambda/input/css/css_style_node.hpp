@@ -165,6 +165,11 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
  * @return Winning declaration or NULL if not set
  */
 CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCode property_code);
+CssDeclaration* style_tree_get_authored_declaration(StyleTree* style_tree, CssPropertyCode property_code);
+CssDeclaration* style_tree_get_inline_declaration(StyleTree* style_tree, CssPropertyCode property_code);
+CssDeclaration* style_tree_get_presentation_declaration(StyleTree* style_tree, CssPropertyCode property_code);
+bool style_tree_has_local_declarations(StyleTree* style_tree);
+bool style_tree_remove_presentation_declarations(StyleTree* style_tree, CssPropertyCode property_code);
 
 // declarations sharing a computed component compete in one rollback-aware cascade.
 CssDeclaration* style_tree_get_component_declaration(StyleTree* style_tree,

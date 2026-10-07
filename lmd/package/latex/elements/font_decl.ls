@@ -10,6 +10,10 @@
 let FONT_DECL_STYLES = {
     'itshape':   "font-style:italic",
     'bfseries':  "font-weight:bold",
+    'bf':        "font-weight:bold",
+    'it':        "font-style:italic",
+    'rm':        "font-family:serif",
+    'tt':        "font-family:monospace",
     'ttfamily':  "font-family:monospace",
     'rmfamily':  "font-family:serif",
     'sffamily':  "font-family:sans-serif",

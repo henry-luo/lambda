@@ -207,6 +207,7 @@ void* dom_document_swap_current_script(void* document, void* script_element);
 // `import dom` alone must work, and the module's host API is only bound when
 // `radiant` is imported (ESO80).
 void* dom_engine_load_document_native(const char* path);
+bool dom_retain_owned_document(void* document);
 
 // Bind the engine module's host API if it is not bound already. `import dom`
 // must stand on its own, but every engine-side wrapper call goes through that

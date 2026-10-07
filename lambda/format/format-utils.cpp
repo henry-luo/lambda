@@ -195,7 +195,8 @@ void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
                                   bool escape_non_ascii_bytes) {
     if (!sb || !str) return;
 
-    if (((uintptr_t)str & 0x7) != 0) {
+    // String's ABI requires four-byte alignment; static MIR strings need not be pointer-aligned.
+    if ((uintptr_t)str % alignof(String) != 0) {
         log_error("%s_string_guard: skipping misaligned string ptr=%p",
             log_prefix ? log_prefix : "markup", (void*)str);
         return;

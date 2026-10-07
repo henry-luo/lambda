@@ -11,6 +11,8 @@
 #include "../lib/mem_factory.h"
 #include "../lib/mem_grow.hpp"
 #include "../lib/memtrack.h"
+#include "../lib/ref_count.h"
+#include "../lib/str.h"
 #include <float.h>
 #include <math.h>
 #include <string.h>
@@ -19,6 +21,40 @@ struct SourceStateEntry {
     uint32_t id;
     ViewNodeState* state;
 };
+
+struct ViewPageGeneration {
+    RefCount references;
+    lam::Up<DomDocument> document;
+    lam::Up<ViewTree> owner;
+    lam::Own<ViewTree> retired; // reserved shell makes detachment allocation-free
+};
+
+static void page_generation_release(ViewTreeModel* model) {
+    ViewPageGeneration* generation = model->page_generation;
+    if (!generation) return;
+    model->page_generation = nullptr;
+    if (ref_count_release(&generation->references) == REF_COUNT_LAST) {
+        DomDocument* document = generation->document;
+        view_tree_shell_destroy(document, generation->retired);
+        pool_free(document->document_pool, generation);
+    }
+}
+
+static void page_generation_detach(ViewTree* tree) {
+    ViewTreeModel* model = tree->model;
+    ViewPageGeneration* generation = model ? model->page_generation.get() : nullptr;
+    if (!generation || model->page_instances || ref_count_get(&generation->references) == 1) return;
+    // transfer the complete arena/font ownership bundle; fragment addresses and parents stay stable.
+    *generation->retired = *tree;
+    generation->retired->next_secondary = nullptr;
+    generation->retired->model->page_generation = nullptr;
+    generation->retired->model->retained_generation = lam::up(generation);
+    generation->owner = generation->retired.borrow();
+    lam::Own<ViewTree> next = tree->next_secondary;
+    *tree = {};
+    tree->next_secondary = next;
+    ref_count_release(&generation->references);
+}
 
 struct ViewModelUndo { void* address; void* saved; size_t size; };
 HASHMAP_DEFINE_PTRKEY(view_model_undo, ViewModelUndo, address)
@@ -100,8 +136,9 @@ bool view_tree_model_touch_node(ViewTree* tree, LayoutViewNode* node) {
     for (ViewModelCheckpoint* checkpoint = tree->model->checkpoint; checkpoint; checkpoint = checkpoint->previous) {
         // new nodes disappear with the arena tail; only surviving records need undo bytes.
         if (node->ref.node_id > checkpoint->node_id_count) continue;
-        if (!model_record(checkpoint, node, node->kind == LAYOUT_VIEW_PAGE ? sizeof(ViewPageBox) : sizeof(LayoutViewNode)) ||
-            (node->glyph_run && !model_record(checkpoint, node->glyph_run, sizeof(PaintGlyphRun)))) return false;
+        if (!model_record(checkpoint, node, node->kind == LAYOUT_VIEW_PAGE || node->kind == LAYOUT_VIEW_PAGE_INSTANCE ? sizeof(ViewPageBox) : sizeof(LayoutViewNode)) ||
+            (node->glyph_run && !model_record(checkpoint, node->glyph_run, sizeof(PaintGlyphRun))) ||
+            (node->image_box && !model_record(checkpoint, node->image_box, sizeof(PaintImageBox)))) return false;
     }
     return true;
 }
@@ -163,6 +200,53 @@ ViewPreviewOptions view_preview_options_default() {
     return options;
 }
 
+static ViewModelStatus page_selection_parse(Pool* pool, const char* text, ViewPageSelection* result) {
+    ViewPageSelection parsed = {}; ViewPageRange* ranges = nullptr; size_t capacity = 0;
+    if (result && !pool) return VIEW_MODEL_INVALID_ARGUMENT;
+    size_t length = text ? strlen(text) : 0;
+    if (text) str_trim(&text, &length);
+    if (!text || (length == 3 && memcmp(text, "all", 3) == 0)) parsed.all = true;
+    else if (length == 4 && memcmp(text, "none", 4) == 0) parsed.all = false;
+    else {
+        const char* end = text + length; const char* cursor = text;
+        auto invalid = [&]() { if (ranges) pool_free(pool, ranges); return VIEW_MODEL_INVALID_PAGE_RANGE; };
+        if (!length) return invalid();
+        while (cursor < end) {
+            cursor = strn_skip_ascii_space(cursor, end);
+            uint64_t first = 0, last = 0;
+            if (cursor == end || *cursor < '0' || *cursor > '9' ||
+                !str_to_uint64(cursor, (size_t)(end - cursor), &first, &cursor) || !first || first > UINT32_MAX) return invalid();
+            cursor = strn_skip_ascii_space(cursor, end); last = first;
+            if (cursor < end && *cursor == '-') {
+                cursor = strn_skip_ascii_space(cursor + 1, end);
+                if (cursor == end || *cursor < '0' || *cursor > '9' ||
+                    !str_to_uint64(cursor, (size_t)(end - cursor), &last, &cursor) || last < first || last > UINT32_MAX) return invalid();
+                cursor = strn_skip_ascii_space(cursor, end);
+            }
+            if (result) {
+                if (!lam::pool_grow_array(pool, &ranges, &capacity, parsed.range_count + 1, 8)) {
+                    if (ranges) pool_free(pool, ranges); return VIEW_MODEL_OUT_OF_MEMORY;
+                }
+                ranges[parsed.range_count] = {static_cast<uint32_t>(first), static_cast<uint32_t>(last)};
+            }
+            parsed.range_count++;
+            if (cursor == end) break;
+            if (*cursor++ != ',' || cursor == end) return invalid();
+        }
+        parsed.ranges = ranges;
+    }
+    if (result) *result = parsed;
+    return VIEW_MODEL_OK;
+}
+
+ViewModelStatus view_page_selection_parse(Pool* pool, const char* text, ViewPageSelection* result) {
+    return result ? page_selection_parse(pool, text, result) : VIEW_MODEL_INVALID_ARGUMENT;
+}
+
+bool view_page_selection_text_valid(const char* text) {
+    return text && page_selection_parse(nullptr, text, nullptr) == VIEW_MODEL_OK;
+}
+
 bool view_tree_model_source_valid(const ViewTree* tree) {
     return tree && tree->model && tree->model->document &&
         tree->model->source_epoch == tree->model->document->mutation_epoch;
@@ -197,8 +281,8 @@ static void secondary_views_cleanup(void* data) {
     view_tree_secondary_release_all((DomDocument*)data);
 }
 
-ViewTree* view_tree_secondary_create(DomDocument* document,
-                                    const ViewEnvironment* environment) {
+static ViewTree* secondary_shell_create(DomDocument* document,
+                                       const ViewEnvironment* environment) {
     if (!document || !document->document_pool || !environment ||
         environment->presentation > VIEW_PRESENTATION_PAGED ||
         !valid_extent(environment->viewport_width, false) ||
@@ -239,16 +323,57 @@ ViewTree* view_tree_secondary_create(DomDocument* document,
         view_tree_shell_destroy(document, shell);
         return nullptr;
     }
+    return shell;
+}
+
+static bool secondary_shell_register(DomDocument* document, ViewTree* shell) {
     if (!document->secondary_views_cleanup_registered) {
         if (!pool_add_cleanup(document->document_pool, secondary_views_cleanup, document)) {
-            view_tree_shell_destroy(document, shell);
-            return nullptr;
+            return false;
         }
         document->secondary_views_cleanup_registered = true;
     }
     shell->next_secondary = document->secondary_view_trees;
-    document->secondary_view_trees = shell;
+    document->secondary_view_trees = lam::own(shell);
+    return true;
+}
+
+ViewTree* view_tree_secondary_create(DomDocument* document,
+                                    const ViewEnvironment* environment) {
+    lam::Own<ViewTree> shell = lam::own(secondary_shell_create(document, environment));
+    if (!shell) return nullptr;
+    if (!secondary_shell_register(document, shell)) {
+        view_tree_shell_destroy(document, shell);
+        return nullptr;
+    }
     return shell;
+}
+
+static bool model_prepare_reset(ViewTree* tree) {
+    if (!tree || !tree->model) return true;
+    ViewTreeModel* model = tree->model;
+    if (model->retained_generation) return false;
+    ViewPageGeneration* generation = model->page_generation;
+    if (!generation || model->page_instances || ref_count_get(&generation->references) == 1) return true;
+    lam::Own<ViewTree> fresh = lam::own(secondary_shell_create(model->document, &model->environment));
+    if (!fresh) {
+        log_error("VIEW_MODEL retain: reset allocation failed; committed generation preserved");
+        return false;
+    }
+    // the active shell retains its identity; old handles resolve only in the leased generation.
+    fresh->model->tree_id = model->tree_id;
+    fresh->layout_generation = tree->layout_generation;
+    fresh->model->presentation_generation = model->presentation_generation;
+    fresh->html_version = tree->html_version;
+    fresh->canonical_prop_cap_bytes = tree->canonical_prop_cap_bytes;
+    DomDocument* document = model->document;
+    page_generation_detach(tree);
+    lam::Own<ViewTree> next = tree->next_secondary;
+    *tree = *fresh;
+    tree->next_secondary = next;
+    *fresh = {};
+    view_tree_shell_destroy(document, fresh);
+    return true;
 }
 
 bool view_tree_secondary_release(DomDocument* document, ViewTree* tree) {
@@ -270,36 +395,53 @@ void view_tree_secondary_release_all(DomDocument* document) {
     }
 }
 
-void view_tree_model_destroy(ViewTree* tree) {
-    if (!tree || !tree->model) return;
+bool view_tree_model_destroy(ViewTree* tree) {
+    if (!tree || !tree->model) return true;
+    if (tree->model->retained_generation &&
+        ref_count_get(&tree->model->retained_generation->references) > 0) return false;
+    page_generation_detach(tree);
+    if (!tree->model) return true;
     ViewTreeModel* model = tree->model;
     while (model->checkpoint) model_checkpoint_dispose(model);
     paged_composition_destroy(tree);
+    image_resource_cache_cleanup(&model->image_resources);
     view_css_context_destroy(tree);
+    page_generation_release(model);
     if (model->source_states) hashmap_free(model->source_states);
     if (model->arena) mem_arena_destroy(model->arena);
     tree->model = nullptr;
+    return true;
 }
 
-void view_tree_model_reset(ViewTree* tree) {
-    if (!tree || !tree->model) return;
+bool view_tree_model_reset(ViewTree* tree) {
+    if (!tree || !tree->model || !model_prepare_reset(tree)) return false;
+    tree->layout_generation = generation_next32(tree->layout_generation);
     ViewTreeModel* model = tree->model;
     while (model->checkpoint) model_checkpoint_dispose(model);
     paged_composition_destroy(tree);
+    image_resource_cache_cleanup(&model->image_resources);
     view_css_context_destroy(tree);
+    page_generation_release(model);
     hashmap_clear(model->source_states, false);
     arena_reset(model->arena);
     model->node_count = model->node_id_count = model->page_count = model->placement_count = 0;
     model->root = nullptr;
     model->committed = false;
+    model->page_instances = false;
     model->preview_bounds = {};
     model->presentation_generation = generation_next32(model->presentation_generation);
-    if (!model_initialize(tree)) log_error("VIEW_MODEL reset: root allocation failed");
+    bool initialized = model_initialize(tree);
+    if (!initialized) log_error("VIEW_MODEL reset: root allocation failed");
+    return initialized;
 }
 
 ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create) {
     if (!source || !view_tree_model_source_valid(tree)) return nullptr;
     ViewTreeModel* model = tree->model;
+    if (model->page_instances) {
+        ViewTree* owner = view_tree_page_content_owner(tree);
+        return !create && owner ? view_tree_node_state(owner, source, false) : nullptr;
+    }
     DomNodeRef ref = dom_node_ref(source);
     if (dom_node_ref_validate(model->document, ref) != source) return nullptr;
     SourceStateEntry key = {ref.expected_id, nullptr};
@@ -397,6 +539,79 @@ bool view_tree_model_commit(ViewTree* tree) {
     if (!view_tree_model_source_valid(tree) || !tree->model->root || tree->model->checkpoint) return false;
     tree->model->committed = true;
     return true;
+}
+
+ViewTree* view_tree_page_content_owner(ViewTree* tree) {
+    if (!view_tree_model_source_valid(tree) || !tree->model->committed ||
+        tree->model->environment.presentation != VIEW_PRESENTATION_PAGED) return nullptr;
+    if (!tree->model->page_instances) return tree;
+    ViewPageGeneration* generation = tree->model->page_generation;
+    ViewTree* owner = generation ? generation->owner.get() : nullptr;
+    return view_tree_model_source_valid(owner) && owner->model->committed &&
+        !owner->model->page_instances ? owner : nullptr;
+}
+
+const ViewPageBox* view_tree_page_material(ViewTree* tree, const ViewPageBox* page) {
+    ViewTree* owner = view_tree_page_content_owner(tree);
+    if (!owner || !page || view_tree_node_resolve(tree, page->node.ref) != &page->node) return nullptr;
+    if (!tree->model->page_instances) return page->node.kind == LAYOUT_VIEW_PAGE ? page : nullptr;
+    LayoutViewNode* node = view_tree_node_resolve(owner, page->referenced_page);
+    return page->node.kind == LAYOUT_VIEW_PAGE_INSTANCE && node && node->kind == LAYOUT_VIEW_PAGE
+        ? (const ViewPageBox*)node : nullptr;
+}
+
+static ViewPageGeneration* page_generation_acquire(ViewTree* source) {
+    ViewTreeModel* model = source->model;
+    ViewPageGeneration* generation = model->page_generation;
+    if (!generation) {
+        DomDocument* document = model->document;
+        generation = (ViewPageGeneration*)pool_calloc(document->document_pool, sizeof(ViewPageGeneration));
+        if (!generation) return nullptr;
+        generation->retired = view_tree_shell_create(document);
+        if (!generation->retired) { pool_free(document->document_pool, generation); return nullptr; }
+        generation->document = lam::up(document);
+        generation->owner = lam::up(source);
+        ref_count_init(&generation->references);
+        model->page_generation = lam::counted(generation);
+    }
+    return ref_count_retain(&generation->references) ? generation : nullptr;
+}
+
+ViewTree* view_tree_page_instances_create(ViewTree* source,
+        const ViewPageSelection* selection, const ViewPreviewOptions* options,
+        ViewModelStatus* result) {
+    ViewModelStatus status = VIEW_MODEL_INVALID_ARGUMENT;
+    if (result) *result = status;
+    if (!source || !source->model || !source->model->committed ||
+        source->model->environment.presentation != VIEW_PRESENTATION_PAGED) return nullptr;
+    ViewTree* owner = view_tree_page_content_owner(source);
+    if (!owner) { if (result) *result = VIEW_MODEL_STALE_SOURCE; return nullptr; }
+    DomDocument* document = source->model->document;
+    lam::Own<ViewTree> shell = lam::own(secondary_shell_create(document, &source->model->environment));
+    if (!shell) { if (result) *result = VIEW_MODEL_OUT_OF_MEMORY; return nullptr; }
+    for (size_t i = 0; i < owner->model->page_count; i++) {
+        const ViewPageBox* material = owner->model->pages.get()[i];
+        ViewPageBox* instance = view_tree_page_append(shell, material->node.rect.width,
+            material->node.rect.height, material->content_rect, material->side, material->blank);
+        if (!instance) { status = VIEW_MODEL_OUT_OF_MEMORY; break; }
+        instance->node.kind = LAYOUT_VIEW_PAGE_INSTANCE;
+        instance->referenced_page = material->node.ref;
+        instance->style = material->style;
+        instance->name = material->name;
+    }
+    if (shell->model->page_count == owner->model->page_count && view_tree_model_commit(shell))
+        status = view_tree_preview_arrange(shell, selection, options);
+    if (status == VIEW_MODEL_OK) {
+        ViewPageGeneration* generation = page_generation_acquire(source);
+        if (generation) {
+            shell->model->page_generation = lam::counted(generation);
+            shell->model->page_instances = true;
+            if (!secondary_shell_register(document, shell)) status = VIEW_MODEL_OUT_OF_MEMORY;
+        } else status = VIEW_MODEL_OUT_OF_MEMORY;
+    }
+    if (result) *result = status;
+    if (status != VIEW_MODEL_OK) { view_tree_shell_destroy(document, shell); return nullptr; }
+    return shell;
 }
 
 static ViewModelStatus page_selection_resolve(const ViewTreeModel* model,

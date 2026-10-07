@@ -1,0 +1,19 @@
+{
+  "name": "Key release reaches body with no focus and after focused node retirement",
+  "html": "test/ui/keyboard_keyup_body_fallback.html",
+  "events": [
+    {"type":"key_down","key":"ArrowRight"},
+    {"type":"assert_text","target":{"selector":"#status"},"equals":"down"},
+    {"type":"key_up","key":"ArrowRight"},
+    {"type":"assert_text","target":{"selector":"#status"},"equals":"up"},
+    {"type":"key_press","key":"ArrowLeft"},
+    {"type":"assert_text","target":{"selector":"#status"},"equals":"up"},
+    {"type":"navigate","url":"keyboard_keyup_body_fallback.html"},
+    {"type":"click","target":{"selector":"#focused"}},
+    {"type":"assert_focus","target":{"selector":"#focused"}},
+    {"type":"key_down","key":"ArrowRight"},
+    {"type":"assert_text","target":{"selector":"#status"},"equals":"down"},
+    {"type":"key_up","key":"ArrowRight"},
+    {"type":"assert_text","target":{"selector":"#status"},"equals":"up"}
+  ]
+}

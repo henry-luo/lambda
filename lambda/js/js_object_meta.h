@@ -55,6 +55,7 @@ typedef JsPropertyOpResult (*JsPropertyOpFn)(Item target, uint64_t lane,
 
 typedef struct JsPropertyOps {
     JsPropertyOpFn get;
+    // completed Set callbacks return the [[Set]] boolean or an abrupt completion.
     JsPropertyOpFn set;
     JsPropertyOpFn define_own;
     JsPropertyOpFn delete_property;

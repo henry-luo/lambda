@@ -157,6 +157,19 @@ protected:
     }
 };
 
+TEST_F(FormatMarkupTest, HtmlEscapingAcceptsStringAbiAlignment) {
+    if (alignof(String) >= alignof(void*)) GTEST_SKIP();
+    alignas(void*) unsigned char storage[32] = {};
+    String* str = reinterpret_cast<String*>(storage + alignof(String));
+    str->len = 5;
+    memcpy(str->chars, "<tag>", 6);
+    ASSERT_EQ(reinterpret_cast<uintptr_t>(str) % alignof(String), 0u);
+    ASSERT_NE(reinterpret_cast<uintptr_t>(str) % alignof(void*), 0u);
+    StringBuf* output = stringbuf_new(pool_);
+    format_html_string_safe(output, str, false);
+    EXPECT_STREQ(output->str->chars, "&lt;tag&gt;");
+}
+
 // ==============================================================================
 // Markdown Tests
 // ==============================================================================

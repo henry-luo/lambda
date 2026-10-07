@@ -1186,6 +1186,17 @@ static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
     mir_append_emit_label(em->ctx, em->func_item, label);
 }
 
+// Argument spans occupy the suffix after semantic-root coloring (D5.3.1).
+static inline MIR_reg_t em_deferred_root_span_base(MirEmitter* em,
+        MIR_reg_t* base, MIR_insn_t* fixup) {
+    if (*base) return *base;
+    *base = em_new_reg(em, "argument_span", MIR_T_I64);
+    *fixup = MIR_new_insn(em->ctx, MIR_ADD, MIR_new_reg_op(em->ctx, *base),
+        MIR_new_reg_op(em->ctx, em->frame.root_base), MIR_new_int_op(em->ctx, 0));
+    MIR_insert_insn_after(em->ctx, em->func_item, em->frame.anchor, *fixup);
+    return *base;
+}
+
 static inline MIR_reg_t em_load_at(MirEmitter* em, MIR_reg_t base,
         MIR_disp_t offset, MIR_type_t type, const char* name) {
     MIR_reg_t value = em_new_reg(em, name,
@@ -1214,8 +1225,32 @@ static inline MIR_type_t em_numeric_storage_type(ArrayNumElemType type) {
     }
 }
 
-// Frontends own the proof that admits a scalar operation, but a proven numeric
-// operation must select the same physical MIR opcode in every frontend.  This
+// finite INT primitives require a proven tag/band; guest operators own overflow policy.
+static inline MIR_reg_t em_unbox_finite_int_item(MirEmitter* em, MIR_reg_t item, MIR_reg_t value = 0) {
+    if (!value) value = em_new_reg(em, "finite_int", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_LSH, MIR_new_reg_op(em->ctx, value),
+        MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 8)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_RSH, MIR_new_reg_op(em->ctx, value),
+        MIR_new_reg_op(em->ctx, value), MIR_new_int_op(em->ctx, 8)));
+    return value;
+}
+static inline MIR_reg_t em_box_finite_int_item(MirEmitter* em, MIR_reg_t value, MIR_reg_t item = 0) {
+    if (!item) item = em_new_reg(em, "finite_int_item", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, item),
+        MIR_new_reg_op(em->ctx, value), MIR_new_uint_op(em->ctx, ITEM_INT_PAYLOAD_MASK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR, MIR_new_reg_op(em->ctx, item),
+        MIR_new_reg_op(em->ctx, item), MIR_new_uint_op(em->ctx, ITEM_INT)));
+    return item;
+}
+static inline void em_branch_int53_outside(MirEmitter* em, MIR_reg_t value, MIR_label_t miss) {
+    MIR_reg_t shifted = em_new_reg(em, "band_shift", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD, MIR_new_reg_op(em->ctx, shifted),
+        MIR_new_reg_op(em->ctx, value), MIR_new_int_op(em->ctx, INT53_MAX)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBGT, MIR_new_label_op(em->ctx, miss),
+        MIR_new_reg_op(em->ctx, shifted), MIR_new_int_op(em->ctx, 2 * INT53_MAX)));
+}
+
+// Frontends own the proof that admits a scalar operation. The numeric
 // table deliberately carries no coercion or nullability policy: Lambda's
 // nullable lanes and JavaScript's Number semantics remain frontend-local.
 typedef struct MirNumericOpPlan {
@@ -1759,10 +1794,11 @@ static inline void em_build_pending_pair(MirEmitter* em, MIR_reg_t item,
 // ordinary Item. The 2-instruction test costs nothing on the resolved path;
 // the rare pending arm calls the runtime to allocate destination-owned storage.
 static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
-                                                MIR_reg_t companion) {
+                                                MIR_reg_t companion,
+                                                MIR_reg_t destination_home = 0) {
     // The patch allocates in this frame's number extent, so the epilogue must
     // restore the watermark even with no scalar homes present.
-    em->frame.number_extent_dirty = true;
+    if (!destination_home) em->frame.number_extent_dirty = true;
     MIR_reg_t result = em_new_reg(em, "resolved", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, item)));
@@ -1774,11 +1810,27 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
         MIR_new_label_op(em->ctx, l_done), MIR_new_reg_op(em->ctx, high),
         MIR_new_uint_op(em->ctx, ITEM_PENDING)));
-    MIR_type_t types[2] = {MIR_T_I64, MIR_T_I64};
-    MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
-        MIR_new_reg_op(em->ctx, companion)};
-    MIR_reg_t boxed = em_call_with_args(em, "lambda_item_resolve_pending",
-        MIR_T_I64, 2, types, args, true);
+    MIR_reg_t boxed;
+    if (destination_home) {
+        // Transported scalar bits can land directly in a reusable caller home (D5.2.1v3).
+        em_store_at(em, destination_home, 0, MIR_T_I64, companion);
+        MIR_reg_t kind = em_new_reg(em, "pending_kind", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, kind),
+            MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 3)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD, MIR_new_reg_op(em->ctx, kind),
+            MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, LMD_TYPE_INT64)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_LSH, MIR_new_reg_op(em->ctx, kind),
+            MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, 56)));
+        boxed = em_new_reg(em, "owned_scalar", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR, MIR_new_reg_op(em->ctx, boxed),
+            MIR_new_reg_op(em->ctx, destination_home), MIR_new_reg_op(em->ctx, kind)));
+    } else {
+        MIR_type_t types[2] = {MIR_T_I64, MIR_T_I64};
+        MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
+            MIR_new_reg_op(em->ctx, companion)};
+        boxed = em_call_with_args(em, "lambda_item_resolve_pending",
+            MIR_T_I64, 2, types, args, true);
+    }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, boxed)));
     em_emit_label(em, l_done);
@@ -1977,8 +2029,9 @@ static inline MIR_insn_t mir_new_call_with_target(MIR_context_t ctx,
                                                   MIR_op_t target,
                                                   MIR_reg_t result,
                                                   int nargs,
-                                                  MIR_op_t* arg_ops) {
-    int op_count = (result ? 3 : 2) + nargs;
+                                                  MIR_op_t* arg_ops,
+                                                  MIR_reg_t companion = 0) {
+    int op_count = (result ? 3 : 2) + (companion ? 1 : 0) + nargs;
     // Dynamic sizing prevents many-parameter generated wrappers from overflow.
     MIR_op_t* ops = (MIR_op_t*)mem_alloc(
         (size_t)op_count * sizeof(MIR_op_t), MEM_CAT_TEMP);
@@ -1993,6 +2046,8 @@ static inline MIR_insn_t mir_new_call_with_target(MIR_context_t ctx,
     if (result) {
         ops[oi++] = MIR_new_reg_op(ctx, result);
     }
+    // internal shape-2 entries return their companion before the operands (D5.2.1v3).
+    if (companion) ops[oi++] = MIR_new_reg_op(ctx, companion);
     for (int i = 0; i < nargs; i++) {
         ops[oi++] = arg_ops[i];
     }
@@ -4950,29 +5005,9 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     em_before_resolved_call(em, call_name, &metadata, nargs,
         physical_types, physical_ops);
     MIR_reg_t result = em_new_reg(em, "direct_result", result_type);
-    MIR_insn_t call;
-    MIR_reg_t companion = 0;
-    if (callee_returns_pair) {
-        companion = em_new_reg(em, "direct_companion", MIR_T_I64);
-        int op_count = 4 + nargs;
-        MIR_op_t* ops = (MIR_op_t*)mem_alloc(
-            (size_t)op_count * sizeof(MIR_op_t), MEM_CAT_TEMP);
-        if (!ops) {
-            log_error("mir-direct-call: pair operand allocation failed for %s",
-                call_name);
-            abort();
-        }
-        ops[0] = MIR_new_ref_op(em->ctx, proto);
-        ops[1] = MIR_new_ref_op(em->ctx, target);
-        ops[2] = MIR_new_reg_op(em->ctx, result);
-        ops[3] = MIR_new_reg_op(em->ctx, companion);
-        for (int i = 0; i < nargs; i++) ops[4 + i] = physical_ops[i];
-        call = MIR_new_insn_arr(em->ctx, MIR_CALL, (size_t)op_count, ops);
-        mem_free(ops);
-    } else {
-        call = mir_new_call_with_args(em->ctx, proto, target,
-            result, nargs, physical_ops);
-    }
+    MIR_reg_t companion = callee_returns_pair ? em_new_reg(em, "direct_companion", MIR_T_I64) : 0;
+    MIR_insn_t call = mir_new_call_with_target(em->ctx, proto, MIR_new_ref_op(em->ctx, target),
+        result, nargs, physical_ops, companion);
     mir_append_emit_insn(em->ctx, em->func_item, call);
     em_profile_before_call(em, call, call_name,
         variant && variant->entry.kind == FN_ENTRY_NATIVE_BODY

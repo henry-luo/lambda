@@ -6,6 +6,7 @@
 #include "lambda-error.h"
 #include "recovery_frame.h"
 #include "transpiler.hpp"
+#include "../js/js_runtime_state.hpp"
 #include "lambda/runtime/gc/gc_heap.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -589,8 +590,19 @@ extern "C" LambdaScheduler* lambda_scheduler_create(int mailbox_capacity) {
     return scheduler;
 }
 
+static bool scheduler_poll_teardown(EvalContext* owner, uv_run_mode mode) {
+    uv_run(lambda_uv_loop(), mode);
+    // shared-loop callbacks can bind another document; teardown must return to its precise root owner.
+    if (owner && context != owner && !js_runtime_context_enter_turn(owner->runtime, owner)) {
+        log_error("scheduler-teardown: could not restore the retiring evaluator");
+        return false;
+    }
+    return true;
+}
+
 extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
     if (!scheduler) return;
+    EvalContext* teardown_owner = context;
     if (attached_scheduler == scheduler) {
         attached_scheduler = NULL;
         lambda_uv_set_task_drain(NULL);
@@ -619,7 +631,7 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
                 break;
             }
         }
-        if (pending_file_read) uv_run(lambda_uv_loop(), UV_RUN_ONCE);
+        if (pending_file_read && !scheduler_poll_teardown(teardown_owner, UV_RUN_ONCE)) return;
     }
     LambdaTask* task = scheduler->all_tasks;
     while (task) {
@@ -655,7 +667,8 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
             LambdaScheduler* owner = handle ? (LambdaScheduler*)handle->data : NULL;
             if (owner) owner->wake_closed = true;
         });
-        while (!scheduler->wake_closed) uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+        while (!scheduler->wake_closed)
+            if (!scheduler_poll_teardown(teardown_owner, UV_RUN_NOWAIT)) return;
     }
     // Every task's activation is gone; keep no pooled stacks past the scheduler.
     activation_release_pool();

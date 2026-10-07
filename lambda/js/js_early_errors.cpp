@@ -952,9 +952,13 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 }
                 // Track whether this label is on an iteration statement
                 // (for continue target validation per ContainsUndefinedContinueTarget)
-                bool is_iteration = ls->body->node_type == AST_NODE_LOOP ||
-                                    ls->body->node_type == AST_NODE_FOR_IN_STAM ||
-                                    ls->body->node_type == AST_NODE_FOR_OF_STAM;
+                // chained labels share the underlying iteration's continue target.
+                AstNode* target = ls->body;
+                while (target->node_type == JS_AST_NODE_LABELED_STATEMENT)
+                    target = ((JsLabeledStatementNode*)target)->body;
+                bool is_iteration = target->node_type == AST_NODE_LOOP ||
+                                    target->node_type == AST_NODE_FOR_IN_STAM ||
+                                    target->node_type == AST_NODE_FOR_OF_STAM;
                 int label_mark = ee_name_ledger_mark(&ctx->names);
                 if (ls->label) {
                     uint8_t kind = EARLY_ERROR_NAME_LABEL;

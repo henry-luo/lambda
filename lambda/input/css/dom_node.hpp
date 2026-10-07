@@ -50,6 +50,7 @@ enum DomNodeFlag : uint8_t {
     DOM_NODE_FLAG_TEXT_SYMBOL = 1u << 0,
     DOM_NODE_FLAG_TEXT_OWNS_STRING = 1u << 1,
     DOM_NODE_FLAG_TEXT_REINSERTABLE = 1u << 2,
+    DOM_NODE_FLAG_GC_BACKING = 1u << 3,
 };
 
 typedef enum {

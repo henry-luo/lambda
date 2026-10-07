@@ -9,6 +9,7 @@
 
 extern "C" {
 #include "../lib/shell.h"
+#include "../lib/file.h"
 }
 
 #ifdef _WIN32
@@ -18,6 +19,7 @@ extern "C" {
 #else
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -115,7 +117,11 @@ static bool test_radiant_view_send_all(int client, const char* data, size_t size
     return true;
 }
 
-static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageServer* server) {
+struct RadiantViewHttpResource { const char* request; const char* type; const char* body; size_t size; };
+
+static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageServer* server,
+        const RadiantViewHttpResource* resources = nullptr, size_t resource_count = 0,
+        const char* audit_path = nullptr) {
     if (!server) return false;
     memset(server, 0, sizeof(*server));
 
@@ -181,11 +187,22 @@ static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageSer
                 (is_prime_request ? prime_document : page_document);
             size_t body_size = is_image_request ? sizeof(avif) :
                 (is_prime_request ? sizeof(prime_document) - 1 : sizeof(page_document) - 1);
+            const char* type = is_image_request ? "image/avif" : "text/html";
+            if (resources) {
+                body = "missing fixture resource"; body_size = strlen(body); type = "text/plain";
+                for (size_t i = 0; i < resource_count; i++) if (strstr(request, resources[i].request)) {
+                    body = resources[i].body; body_size = resources[i].size; type = resources[i].type; break;
+                }
+            }
+            if (audit_path) {
+                FILE* audit = fopen(audit_path, "ab");
+                if (audit) { fwrite(request, 1, request_size > 0 ? (size_t)request_size : 0, audit); fclose(audit); }
+            }
             char header[256];
             int header_size = snprintf(header, sizeof(header),
                 "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
                 "Connection: close\r\n\r\n",
-                is_image_request ? "image/avif" : "text/html", body_size);
+                type, body_size);
             bool sent = header_size > 0 && header_size < (int)sizeof(header) &&
                 test_radiant_view_send_all(client, header, (size_t)header_size);
             if (sent) {
@@ -194,7 +211,7 @@ static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageSer
             close(client);
             if (!sent) break;
             if (is_prime_request) served_prime = true;
-            if (!is_image_request && !is_prime_request && served_prime) served_document = true;
+            if (!resources && !is_image_request && !is_prime_request && served_prime) served_document = true;
         }
         close(listener);
         _exit(served_document ? 0 : 1);
@@ -1102,6 +1119,184 @@ TEST(RadiantViewTest, ExposesBinaryFetchWithoutUnsupportedWorker) {
     remove(view_log);
 }
 
+#ifndef _WIN32
+static void test_radiant_view_expect_cli_success(const char** arguments) {
+    ShellOptions options = {}; options.merge_stderr = true; options.timeout_ms = 15000;
+    ShellResult result = shell_exec("./lambda.exe", arguments, &options);
+    EXPECT_FALSE(result.timed_out); EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+}
+#endif
+
+TEST(RadiantViewTest, CaptureAdmissionKeepsLocalSourcesAndDeniesColdAndWarmRemoteDependencies) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "temp/test_capture_admission.html";
+    const char* local_script = "temp/test_capture_local.js";
+    const char* module_script = "temp/test_capture_import.mjs";
+    const char* audit = "temp/test_capture_admission_requests.txt";
+    remove(audit);
+    const char* script = "document.getElementById('script-status').textContent='remote-script-ran';";
+    const char* css = "@import url('/remote-import.css'); #style-status { width:137px }";
+    const char* imported_css = "#import-status { width:149px }";
+    const char* module = "export const label='remote-module-ran';";
+    const char* child_script = "document.body.setAttribute('data-admission','child-script-ran');";
+    const char* svg = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='blue'/></svg>";
+    size_t font_length = 0;
+    char* font = read_binary_file("test/layout/data/font/Ahem.ttf", &font_length); ASSERT_NE(font, nullptr);
+    const RadiantViewHttpResource resources[] = {
+        {"GET /remote-script.js ", "text/javascript", script, strlen(script)},
+        {"GET /remote.css ", "text/css", css, strlen(css)},
+        {"GET /remote-import.css ", "text/css", imported_css, strlen(imported_css)},
+        {"GET /remote-module.mjs ", "text/javascript", module, strlen(module)},
+        {"GET /remote-image.svg ", "image/svg+xml", svg, strlen(svg)},
+        {"GET /remote-font.ttf ", "font/ttf", font, font_length},
+        {"GET /remote-fetch.txt ", "text/plain", "remote-fetch-ran", 16},
+        {"GET /remote-child.js ", "text/javascript", child_script, strlen(child_script)},
+        {"GET /remote-wrapper.css ", "text/css", css, strlen(css)},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0]), audit));
+    // the child owns a forked resource snapshot; cleanup also runs after fatal assertions.
+    struct ServerScope {
+        pid_t pid; char* font;
+        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); free(font); }
+    } server_scope = {server.pid, font};
+    char document[4096], importing[512];
+    ASSERT_GT(snprintf(document, sizeof(document), "<!doctype html><head>"
+        "<link rel='stylesheet' href='http://127.0.0.1:%d/remote.css'>"
+        "<style>@page {size:200px 140px; margin:10px} p{margin:0;font-size:10px;line-height:12px} "
+        "p{width:123px} "
+        "@font-face{font-family:CaptureFont;src:url('http://127.0.0.1:%d/remote-font.ttf')} "
+        "#font-status{font-family:CaptureFont,serif} #image-status{width:20px;height:20px;background:red "
+        "url('http://127.0.0.1:%d/remote-image.svg')} </style></head><body>"
+        "<p id='script-status'>pending-script</p><p id='style-status'>style</p><p id='import-status'>import</p>"
+        "<p id='module-status'>module-pending</p><p id='inline-status'>inline-pending</p>"
+        "<p id='fetch-status'>fetch-pending</p><p id='font-status'>AAA</p><div id='image-status'></div>"
+        "<img width='20' height='20' src='http://127.0.0.1:%d/remote-image.svg'>"
+        "<script src='test_capture_local.js'></script><script src='http://127.0.0.1:%d/remote-script.js'></script>"
+        "<script type='module' src='test_capture_import.mjs'></script><script>"
+        "document.getElementById('inline-status').textContent='inline-script-ran';"
+        "var style=document.getElementById('style-status'), imported=document.getElementById('import-status');"
+        "style.textContent='style-width-'+getComputedStyle(style).width;"
+        "imported.textContent='import-width-'+getComputedStyle(imported).width;"
+        "fetch('http://127.0.0.1:%d/remote-fetch.txt').then(function(r){return r.text();})"
+        ".then(function(t){document.getElementById('fetch-status').textContent=t;})"
+        ".catch(function(){document.getElementById('fetch-status').textContent='fetch-denied';});"
+        "</script><iframe srcdoc='&lt;p>child-local&lt;/p>&lt;script src=&quot;http://127.0.0.1:%d/remote-child.js&quot;>&lt;/script>'></iframe></body>",
+        server.port, server.port, server.port, server.port, server.port, server.port, server.port), 0);
+    ASSERT_GT(snprintf(importing, sizeof(importing), "import {label} from 'http://127.0.0.1:%d/remote-module.mjs';"
+        "document.getElementById('module-status').textContent=label;", server.port), 0);
+    const char* local = "document.getElementById('script-status').textContent='local-script-ran';";
+    ASSERT_EQ(write_binary_file(page, document, strlen(document)), 0);
+    ASSERT_EQ(write_binary_file(local_script, local, strlen(local)), 0);
+    ASSERT_EQ(write_binary_file(module_script, importing, strlen(importing)), 0);
+    const bool policies[] = {true, false, true, false};
+    for (size_t job = 0; job < sizeof(policies) / sizeof(policies[0]); job++) {
+        bool blocked = policies[job];
+        char output[128]; snprintf(output, sizeof(output), "temp/test_capture_admission_%zu.json", job);
+        SCOPED_TRACE(blocked ? "deny cold/warm dependencies" : "ordinary document admission");
+        if (blocked) remove(audit);
+        const char* arguments[] = {"./lambda.exe", "layout", page, "--auto-close", "--post-load-settle-ms", "200",
+            "--view-output", output, "--no-log", blocked ? "--block-remote-resources" : nullptr, nullptr};
+        test_radiant_view_expect_cli_success(arguments);
+        EXPECT_TRUE(test_radiant_view_file_contains(output, "inline-script-ran"));
+        EXPECT_TRUE(test_radiant_view_file_contains(output, blocked ? "local-script-ran" : "remote-script-ran"));
+        EXPECT_TRUE(test_radiant_view_file_contains(output, blocked ? "style-width-123px" : "style-width-137px"));
+        EXPECT_TRUE(test_radiant_view_file_contains(output, blocked ? "import-width-123px" : "import-width-149px"));
+        EXPECT_EQ(test_radiant_view_file_contains(output, "remote-module-ran"), !blocked);
+        if (blocked) {
+            EXPECT_TRUE(test_radiant_view_file_contains(output, "fetch-denied"));
+            EXPECT_EQ(access(audit, F_OK), -1) << "denied dependencies reached the HTTP fixture";
+        } else {
+            EXPECT_TRUE(test_radiant_view_file_contains(output, "remote-fetch-ran"));
+            if (job == 1) {
+                // the final admitted run may reuse already acquired source bytes.
+                for (const RadiantViewHttpResource& resource : resources) {
+                    if (strstr(resource.request, "/remote-wrapper.css")) continue;
+                    EXPECT_TRUE(test_radiant_view_file_contains(audit, resource.request)) << resource.request;
+                }
+            }
+        }
+    }
+    // exercise paint-time backgrounds separately from the pending paged replaced producer.
+    const char* paged_page = "temp/test_capture_paged_admission.html";
+    char* replaced = strstr(document, "<img "); ASSERT_NE(replaced, nullptr);
+    char* replaced_end = strchr(replaced, '>'); ASSERT_NE(replaced_end, nullptr);
+    memmove(replaced, replaced_end + 1, strlen(replaced_end + 1) + 1);
+    char* frame = strstr(document, "<iframe "); ASSERT_NE(frame, nullptr);
+    char* frame_end = strstr(frame, "</iframe>"); ASSERT_NE(frame_end, nullptr);
+    memmove(frame, frame_end + strlen("</iframe>"), strlen(frame_end + strlen("</iframe>")) + 1);
+    ASSERT_EQ(write_binary_file(paged_page, document, strlen(document)), 0);
+    const char* wrapped = "temp/test_capture_admission.svg";
+    char svg_document[512];
+    snprintf(svg_document, sizeof(svg_document), "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>"
+        "<style>@import url('http://127.0.0.1:%d/remote-wrapper.css');</style><rect width='20' height='20' fill='red'/></svg>", server.port);
+    ASSERT_EQ(write_binary_file(wrapped, svg_document, strlen(svg_document)), 0);
+    const bool wrapper_policies[] = {true, false, true};
+    for (bool blocked : wrapper_policies) {
+        remove(audit);
+        const char* arguments[] = {"./lambda.exe", "layout", wrapped, "--auto-close", "--no-log",
+            blocked ? "--block-remote-resources" : nullptr, nullptr};
+        test_radiant_view_expect_cli_success(arguments);
+        if (blocked) EXPECT_EQ(access(audit, F_OK), -1);
+        else EXPECT_TRUE(test_radiant_view_file_contains(audit, "GET /remote-wrapper.css "));
+    }
+    const char* formats[] = {"pdf", "png"};
+    const bool export_policies[] = {true, false};
+    for (bool blocked : export_policies) {
+        SCOPED_TRACE(blocked ? "paged local dependencies" : "paged admitted dependencies");
+        if (blocked) remove(audit);
+        for (const char* format : formats) {
+            char exported[160]; snprintf(exported, sizeof(exported),
+                "temp/test_capture_admission_%s.%s", blocked ? "blocked" : "allowed", format);
+            const char* arguments[16] = {"./lambda.exe", "render", paged_page, "--paged",
+                "--page-padding", "0", "-o", exported, "--no-log"};
+            size_t argument_count = 9;
+            if (strcmp(format, "png") == 0) {
+                arguments[argument_count++] = "--thumbnail-page"; arguments[argument_count++] = "1";
+            }
+            if (blocked) arguments[argument_count++] = "--block-remote-resources";
+            arguments[argument_count] = nullptr;
+            test_radiant_view_expect_cli_success(arguments); EXPECT_TRUE(test_radiant_view_file_readable(exported));
+        }
+        if (blocked) EXPECT_EQ(access(audit, F_OK), -1) << "paged denied dependencies reached the HTTP fixture";
+    }
+#endif
+}
+
+TEST(RadiantViewTest, ExplicitLayoutTimerWindowOverridesTheEnvironmentIncludingZero) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "temp/test_layout_timer_window.html";
+    const char* output = "temp/test_layout_timer_window.json";
+    const char* document = "<!doctype html><body><p id='status'>capture-now-ready</p><p id='clock'></p><p id='zero'>zero-pending</p><script>"
+        "document.getElementById('clock').textContent='capture-clock-'+performance.now();"
+        "setTimeout(function(){setTimeout(function(){document.getElementById('zero').textContent='zero-nested-'+performance.now();},0);},0);"
+        "setTimeout(function(){document.getElementById('status').textContent='timer-fired';},100);</script></body>";
+    FILE* file = fopen(page, "wb"); ASSERT_NE(file, nullptr);
+    ASSERT_EQ(fwrite(document, 1, strlen(document), file), strlen(document)); ASSERT_EQ(fclose(file), 0);
+    const ShellEnvEntry environment[] = {{"LAMBDA_POST_LOAD_SETTLE_MS", "200"}, {nullptr, nullptr}};
+    const char* windows[] = {"0", "50", nullptr};
+    for (const char* window : windows) {
+        SCOPED_TRACE(window ? window : "environment fallback"); remove(output);
+        const char* arguments[] = {"./lambda.exe", "layout", page, "--auto-close", "--view-output", output,
+            "--no-log", window ? "--post-load-settle-ms" : nullptr, window, nullptr};
+        ShellOptions options = {}; options.env = environment; options.merge_stderr = true; options.timeout_ms = 10000;
+        ShellResult result = shell_exec("./lambda.exe", arguments, &options);
+        EXPECT_FALSE(result.timed_out); EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+        EXPECT_TRUE(test_radiant_view_file_contains(output, window ? "capture-now-ready" : "timer-fired"));
+        EXPECT_FALSE(test_radiant_view_file_contains(output, window ? "timer-fired" : "capture-now-ready"));
+        EXPECT_TRUE(test_radiant_view_file_contains(output, "capture-clock-0"));
+        EXPECT_TRUE(test_radiant_view_file_contains(output, "zero-nested-0"));
+        EXPECT_FALSE(test_radiant_view_file_contains(output, "zero-pending"));
+    }
+    remove(page); remove(output);
+}
+
 TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
     const char* page = "./temp/test_radiant_view_recursive_timer.html";
     const char* view_log = "./temp/test_radiant_view_recursive_timer.log";
@@ -1136,6 +1331,27 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
 
     remove(page);
     remove(view_log);
+}
+
+TEST(RadiantViewTest, TetrisClosesAfterSustainedReactiveRedraws) {
+    test_radiant_view_ensure_temp_dir();
+    const char* result_path = "./temp/test_radiant_view_tetris_close.json";
+    remove(result_path);
+    const char* args[] = {
+        "./lambda.exe", "view", "test/demo/tetris/tetris.ls", "--headless", "--no-log",
+        "--event-file", "test/demo/tetris/tetris_close.json",
+        "--event-result", result_path, nullptr,
+    };
+    ShellOptions options = {};
+    // bound a shutdown hang; the replay advances gameplay on the virtual clock.
+    options.timeout_ms = 30000;
+    options.merge_stderr = true;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    EXPECT_TRUE(test_radiant_view_file_contains(result_path, "\"result\":\"PASS\""));
+    remove(result_path);
 }
 
 TEST(RadiantViewTest, RendersObjectBoundingBoxPatternWithoutUserUnitTiling) {
@@ -1639,6 +1855,42 @@ TEST(RadiantViewTest, RapidLocalIframeNavigationCommitsLatestScriptPage) {
     shell_result_free(&result);
 }
 
+TEST(RadiantViewTest, LambdaLoadedDocumentsReleaseNativeStorageAtExit) {
+    const char* cases[] = {
+        "test/lambda/dom_stylesheet.ls",
+        "test/lambda/proc/dom_stylesheet_declaration.ls",
+        "test/lambda/proc/dom_document_ownership.ls",
+        "test/lambda/proc/dom_css_rule_interface_projection.ls",
+        "test/lambda/proc/dom_css_rule_mixed_projection.ls",
+    };
+    const ShellEnvEntry env[] = {
+        {"VIEW_MEM_STAGES", "1"},
+        {"MEMTRACK_MODE", "DEBUG"},
+        {"LAMBDA_GC_FORCE_EVERY", "1"},
+        {"LAMBDA_GC_POISON_FREED", "1"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {0};
+    options.env = env;
+    options.merge_stderr = true;
+    for (const char* path : cases) {
+        SCOPED_TRACE(path);
+        ASSERT_TRUE(test_radiant_view_file_readable(path));
+        const char* args[5] = {"./lambda.exe", "run", path, "--no-log", NULL};
+        // the existing functional fixture has no procedural entry point.
+        if (strcmp(path, cases[0]) == 0) {
+            args[1] = path;
+            args[2] = "--no-log";
+            args[3] = NULL;
+        }
+        ShellResult result = shell_exec("./lambda.exe", args, &options);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+    }
+}
+
 TEST(RadiantViewTest, LatexIframeNavigationAcceptsParentClickWithoutScroll) {
     const char* page = "test/html/index.html";
     const char* events = "test/html/latex_navigation_events.json";
@@ -1854,6 +2106,25 @@ TEST(RadiantViewTest, BatchLoaderRuntimeMatchesFreshRuntimes) {
         EXPECT_TRUE(test_radiant_view_same_view_tree(batch_path, single_path))
             << loader_case.path << " lays out differently on the shared loader runtime";
     }
+}
+
+TEST(RadiantViewTest, RenderBatchReleasesImageCacheAfterDocumentOwner) {
+    const char* jobs = "test/html/render_batch_image_cleanup.tsv";
+    ASSERT_TRUE(test_radiant_view_file_readable(jobs));
+    test_radiant_view_ensure_temp_dir();
+    const char* args[] = {"./lambda.exe", "render-batch", "--no-log", nullptr};
+    ShellOptions options = {};
+    options.stdin_path = jobs;
+    options.merge_stderr = true;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    // image-cache cleanup must finish after each document, including reuse of the same UI context.
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "OK\ttest/render/page/bg_image_01.html"), nullptr) << output;
+    EXPECT_NE(strstr(output, "OK\ttest/render/page/enhance5_svg_data_uri_image_stack_01.html"), nullptr) << output;
+    EXPECT_TRUE(test_radiant_view_file_readable("temp/render_batch_image_cleanup_raster.png"));
+    EXPECT_TRUE(test_radiant_view_file_readable("temp/render_batch_image_cleanup_svg.png"));
+    shell_result_free(&result);
 }
 
 TEST(RadiantViewTest, BatchDocumentFontFaceOverridesSystemCache) {

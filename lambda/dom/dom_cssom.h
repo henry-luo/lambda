@@ -32,6 +32,14 @@ bool dom_is_css_rule(Item item);
 /** Check if an Item is a wrapped CSSStyleDeclaration (rule declarations) */
 bool dom_is_rule_style_decl(Item item);
 
+/** Retain the owner node and detach inline/computed payloads at document teardown. */
+Item dom_cssom_wrap_element_style(void* elem, void* payload, bool computed);
+
+typedef struct DomComputedStyleHost {
+    void* elem;
+    int pseudo_type;
+} DomComputedStyleHost;
+
 // =============================================================================
 // CSSStyleSheet Wrapper
 // =============================================================================
@@ -100,7 +108,7 @@ Item dom_cssom_rule_get_style(Item rule_item);
 
 /**
  * Get property of a CSSStyleDeclaration wrapper (rule declarations).
- * Supports camelCase CSS property access and getPropertyValue().
+ * Supports CSS property attributes, length, cssText and parentRule.
  * @param decl_item  Wrapped declaration Item
  * @param prop_name  String Item with property name
  * @return Property value as string Item
@@ -155,6 +163,11 @@ bool dom_cssom_sync_inline_style_element(void* elem);
 
 /** Synchronize mutation-tracked inline sheets in current document source order. */
 void dom_cssom_sync_mutated_inline_stylesheets(void* doc);
+
+/** Neuter CSSOM native payloads before their document pool is destroyed. */
+void dom_cssom_invalidate_document(void* doc);
+/** Remove this realm's weak slots before its heap is released. */
+void dom_cssom_release_context(void);
 
 /** Update a stylesheet's disabled state and request a document recascade. */
 bool dom_cssom_stylesheet_set_disabled(Item sheet, bool disabled);

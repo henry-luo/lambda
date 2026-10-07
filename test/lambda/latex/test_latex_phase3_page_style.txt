@@ -1,0 +1,9 @@
+{
+  unsupported: 0,
+  header: true,
+  margin_content: true,
+  page_number: true,
+  page_count: true,
+  reference: true,
+  print_band: true
+}

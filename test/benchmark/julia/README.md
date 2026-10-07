@@ -1,6 +1,6 @@
 # Julia benchmark ports
 
-Native Julia implementations of all **73 registered entries**, or **67 canonical
+Native Julia implementations of all **77 registered entries**, or **71 canonical
 rows** after the shared runner removes duplicate workloads. Tested with Julia
 1.13.1 on macOS arm64 and the runner's pinned Node v22.13.0. No Julia packages
 are required; the ports use Base and the Printf standard library.
@@ -12,7 +12,7 @@ are required; the ports use Base and the Printf standard library.
 | BENG | 10 |
 | Kostya | 7 |
 | Larceny | 12 |
-| Text | 7 |
+| Text | 11 |
 | JetStream | 9 |
 | Julia microbenchmarks | 4 |
 
@@ -81,8 +81,8 @@ Both policies use one Julia thread. The runner keeps Julia's depot and temporary
 files under `temp/`, records runtime version, executable hash, source hashes and
 fixture hashes, and fails on crashes, failed result checks, timeouts, or missing
 timing markers. `--verify-node` additionally requires matching result output
-after timing lines are removed. It checks all 73 entries with `--all`; without
-that flag it uses the authoritative manifest's 67 canonical rows.
+after timing lines are removed. It checks all 77 entries with `--all`; without
+that flag it uses the authoritative manifest's 71 canonical rows.
 
 AWFY inner/outer counts come from `awfy_node_iterations()`. JetStream repeat
 counts come from each Node source's `runIteration()` body:
@@ -110,6 +110,23 @@ Text ports load the existing checked-in fixtures before timing. The shared SOM
 JSON parser is used for those bounded fixtures; it is not a general JSON library.
 The formatted AST is compared in full, and hyphenation checks every fixture in
 addition to its aggregate checksum. Source notices are in [LICENSE.md](LICENSE.md).
+
+The four `jq_*` text ports use a native Julia jq interpreter adapted from
+`../jq_vm.ls` and `../text/c2mir/jq_*.h`: recursive-descent parsing, lexical
+bytecode compilation, a forkable data stack, path tracking, and a compacted
+frame arena. They evaluate the same checked-in `../text/jq/*.jq` filters as
+the other reference columns, at their full sizes. No C jq library or external
+interpreter runs inside the Julia column. Updates copy containers along their
+paths, preserving input snapshots as in Lambda's S9.1.4 value semantics.
+The interpreter covers the benchmark subset; it does not claim full jq
+conformance. Parsing/compilation and input loading precede the timer; one full
+warmup uses separate VM state before measurement. Filter and input hashes are
+included in Julia runtime metadata.
+
+```sh
+python3 test/benchmark/run_julia_benchmarks.py --suite text --bench jq_mix --bench jq_records --bench jq_bf --bench jq_tree --verify-node --timeout 600 --output temp/julia_jq_validation.json
+julia --startup-file=no --history-file=no --threads=1 test/benchmark/julia/test_jq_vm.jl
+```
 
 Passing output checks establishes correct benchmark results, rather than
 identical instructions, allocations, or a Julia-versus-Node speed claim. Record

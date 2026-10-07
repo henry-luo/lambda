@@ -1,0 +1,10 @@
+<!doctype html>
+<html><head><style>
+body { margin: 0; background: white; }
+.move { position: absolute; left: 20px; top: 20px; width: 40px; height: 40px; transform: translate(100px, 0); }
+.scale { position: absolute; left: 20px; top: 100px; width: 40px; height: 40px; transform: scale(2); transform-origin: 0 0; }
+.clip { width: 40px; height: 40px; clip-path: inset(0 50% 0 0); }
+</style></head><body>
+<div class="move"><div class="clip"><svg width="40" height="40"><rect width="40" height="40" fill="blue"/></svg></div></div>
+<div class="scale"><div class="clip"><svg width="40" height="40"><rect width="40" height="40" fill="red"/></svg></div></div>
+</body></html>

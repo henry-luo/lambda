@@ -44,7 +44,7 @@ void dl_replay_shadow_clip_restore_at_offset(DisplayReplayShadowClip* clip,
                                              float origin_x, float origin_y) {
     if (!clip) return;
     if (clip->saved && surface && surface->pixels && restore && restore->exclude_type) {
-        float params[8];
+        float params[RDT_CLIP_PARAM_COUNT];
         dl_replay_offset_clip_params(restore->exclude_type, restore->exclude_params,
                                      params, origin_x, origin_y);
         ClipShape ex = clip_shape_from_params(restore->exclude_type, params);

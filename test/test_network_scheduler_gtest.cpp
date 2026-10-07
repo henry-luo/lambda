@@ -176,6 +176,33 @@ TEST(NetworkResourceManager, PreservesParserBlockingPriorityAcrossConsumers) {
     enhanced_cache_destroy(cache);
 }
 
+TEST(NetworkResourceManager, AdmissionPrecedesSharedCacheAndReadyContentReuse) {
+    const char* cache_dir = "./temp/test_cache_manager_admission";
+    const char* url = "https://example.test/admission.js";
+    const char* content = "retained remote bytes";
+    ASSERT_TRUE(create_dir(cache_dir));
+    EnhancedFileCache* cache = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
+    ASSERT_NE(cache, nullptr);
+    char* path = enhanced_cache_store(cache, url, content, strlen(content), nullptr);
+    ASSERT_NE(path, nullptr); mem_free(path);
+    DomDocument allowed, denied; denied.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    NetworkResourceManager* admitted = resource_manager_create(&allowed, nullptr, cache);
+    NetworkResourceManager* blocked = resource_manager_create(&denied, nullptr, cache);
+    ASSERT_NE(admitted, nullptr); ASSERT_NE(blocked, nullptr);
+    ASSERT_NE(resource_manager_prefetch(admitted, url, PRIORITY_HIGH), nullptr);
+    size_t size = 0;
+    char* ready = resource_manager_copy_ready_resource_content(admitted, url, &size);
+    ASSERT_NE(ready, nullptr); EXPECT_EQ(size, strlen(content)); EXPECT_STREQ(ready, content); mem_free(ready);
+    EXPECT_EQ(resource_manager_prefetch(blocked, url, PRIORITY_HIGH), nullptr);
+    EXPECT_EQ(resource_manager_copy_ready_resource_content(blocked, url, &size), nullptr);
+    EXPECT_EQ(size, 0u);
+    // even a retained manager entry cannot override a subsequently selected policy.
+    allowed.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    EXPECT_EQ(resource_manager_copy_ready_resource_content(admitted, url, &size), nullptr);
+    EXPECT_EQ(size, 0u);
+    resource_manager_destroy(blocked); resource_manager_destroy(admitted); enhanced_cache_destroy(cache);
+}
+
 TEST(NetworkSchedulerCurlMulti, FileUrlCompletesAndWritesLocalResource) {
     mkdir("./temp", 0755);
 
