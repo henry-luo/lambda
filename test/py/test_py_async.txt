@@ -1,6 +1,0 @@
-hello world
-42
-4
-[2, 4, 6]
-None
-51

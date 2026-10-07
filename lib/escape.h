@@ -37,7 +37,7 @@ typedef enum {
 } EscapeQuotedOptions;
 
 /* Decode the shared single-byte C/Python/Ruby escape set. */
-LAMBDA_LIB_API char escape_decode_c_char(char c);
+char escape_decode_c_char(char c);
 
 /* Decode a JavaScript SingleEscapeCharacter (ES2024 12.9.4): the C set without
  * `\a`. Any other character is a NonEscapeCharacter and decodes to itself. */

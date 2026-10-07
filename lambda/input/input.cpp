@@ -1,3 +1,4 @@
+#include "../../lib/utf.h"
 #include "input.hpp"
 #include "input-parsers.h"
 #include "../core/lambda-decimal.hpp"
@@ -812,6 +813,7 @@ static bool copy_external_identity(TypeAlloc tree, TypeMap* child, const TypeMap
 typedef struct ExternalParentEdges {
     uint64_t fingerprint;
     TypeMapTransition** edges;
+    TypeMap* empty_root;
 } ExternalParentEdges;
 
 static uint64_t fingerprint_mix(uint64_t h, const void* data, size_t len) {
@@ -1155,6 +1157,11 @@ TypeMap* type_tree_add_map_field(Input* input, TypeMap* parent, String* key,
         TypeId type_id, ShapeEntry** out_entry) {
     if (out_entry) *out_entry = NULL;
     if (!input || !key) return NULL;
+    if ((!string_is_pooled(key) || property_key_kind(key) == NAME_KEY_STRING) &&
+            !utf8_key_is_canonical(key->chars, key->len)) {
+        key = name_pool_create_len(input->name_pool, key->chars, key->len);
+        if (!key) return NULL;
+    }
     TransitionKey k = transition_key_of_string(key);
     return type_tree_step(input, parent, &k, type_id, out_entry);
 }
@@ -1165,6 +1172,10 @@ TypeMap* type_tree_add_map_field_chars(Input* input, TypeMap* parent,
         const char* chars, uint32_t len, TypeId type_id, ShapeEntry** out_entry) {
     if (out_entry) *out_entry = NULL;
     if (!input || !chars) return NULL;
+    if (!utf8_key_is_canonical(chars, len)) {
+        String* key = name_pool_create_len(input->name_pool, chars, len);
+        return key ? type_tree_add_map_field(input, parent, key, type_id, out_entry) : NULL;
+    }
     TransitionKey k = transition_key_of_chars(chars, len);
     return type_tree_step(input, parent, &k, type_id, out_entry);
 }
@@ -1674,8 +1685,24 @@ TypeMap* type_tree_root_like(Input* input, Map* container) {
         return (TypeMap*)elmt_tree_root_find(input, ((TypeElmt*)type)->name.str,
             ((TypeElmt*)type)->ns);
     }
-    if (container->type_id == LMD_TYPE_MAP && container->map_kind == MAP_KIND_PLAIN) {
-        return map_shape_transition_root(input, type->js_meta);
+    if (container->type_id == LMD_TYPE_MAP && (container->map_kind == MAP_KIND_PLAIN || container->map_kind == MAP_KIND_ORDERED)) {
+        if (!type->nominal) return map_shape_transition_root(input, type->js_meta);
+        // deletion/replay must retain the nominal family even when its last field is removed.
+        TypeMap empty = {};
+        empty.type_id = LMD_TYPE_MAP; empty.nominal = type->nominal; empty.is_nominal = type->is_nominal;
+        uint64_t fingerprint = external_parent_fingerprint(&empty);
+        if (!external_edges_for(input, fingerprint)) return NULL;
+        ExternalParentEdges query = {fingerprint, NULL, NULL};
+        const ExternalParentEdges* found = (const ExternalParentEdges*)hashmap_get(input->external_edges, &query);
+        if (found->empty_root) return found->empty_root->nominal == type->nominal &&
+            found->empty_root->is_nominal == type->is_nominal ? found->empty_root : NULL;
+        query = *found;
+        TypeMap* root = (TypeMap*)alloc_type_in(input_tree_alloc(input), LMD_TYPE_MAP, sizeof(TypeMap));
+        if (!root) return NULL;
+        root->nominal = type->nominal; root->is_nominal = type->is_nominal;
+        root->type_index = -1; query.empty_root = root;
+        hashmap_set(input->external_edges, &query);
+        return hashmap_oom(input->external_edges) ? NULL : root;
     }
     return NULL;
 }

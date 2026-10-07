@@ -429,6 +429,14 @@ struct Map : Container {
     bool has_field(const char* field_name) const;
 };
 
+// native hash buckets contain only ordinals; all strong keys/values live in entries.
+struct OrderedMap : Map {
+    Array* entries;
+    struct hashmap* index;
+    int64_t size;
+    int64_t cursors;
+};
+
 // `Array` is a typedef of List (lambda.h). Extending Map costs every array a
 // 24-byte attribute prefix — the accepted price of the reconciliation — and
 // buys arrays their own property face, which is what retires the reserved-tail
@@ -788,6 +796,10 @@ static_assert(offsetof(Map, type) == LAMBDA_GC_OFF_MAP_TYPE &&
               offsetof(Map, data) == LAMBDA_GC_OFF_MAP_DATA &&
               offsetof(Map, data_cap) == LAMBDA_GC_OFF_MAP_DATA_CAP,
               "Map must match the GC ABI");
+static_assert(sizeof(OrderedMap) == sizeof(LambdaGcOrderedMapLayout) &&
+              offsetof(OrderedMap, entries) == offsetof(LambdaGcOrderedMapLayout, entries) &&
+              offsetof(OrderedMap, index) == offsetof(LambdaGcOrderedMapLayout, index),
+              "OrderedMap must match the GC ABI");
 static_assert(offsetof(List, type) == LAMBDA_GC_OFF_MAP_TYPE &&
               offsetof(List, data) == LAMBDA_GC_OFF_MAP_DATA &&
               offsetof(List, data_cap) == LAMBDA_GC_OFF_MAP_DATA_CAP,

@@ -1,0 +1,6689 @@
+{
+  "metadata": {
+    "started": "2026-10-07T16:26:09.859738+08:00",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "runner_sha256": "4c1e26513f1739d48330be277e586ee2dc860feeadda95e25658636185562afc",
+    "node_version": "v22.13.0",
+    "flags": {
+      "JS_EXEC_BACKEND": "mir",
+      "JS_MIR_INTERP": "0",
+      "LAMBDA_JS_LARGE_INTERP": "0"
+    },
+    "runs": 15,
+    "timing": "self reported workload execution only; 15 fresh-process samples per lane after one discarded process; alternating control/candidate; control peer and Node positions alternate; Node tiering included",
+    "binaries": {
+      "control": {
+        "path": "temp/mvp_lmd_tuning/control.exe",
+        "sha256": "3e2cc7f7d392493c4874a182b987d0147b2f52657b7603579c895053d58678af"
+      },
+      "candidate": {
+        "path": "temp/mvp_lmd_tuning/candidate.exe",
+        "sha256": "d0ac0f6188f72c48f92afe5f3757583b5fa5e3b254e36dd0a2f3376174f96d46"
+      }
+    },
+    "load_start": [
+      84.93115234375,
+      53.80078125,
+      41.75439453125
+    ],
+    "production_hashes": {
+      "lambda/js/mvp-lmd/mvp_lmd_runtime.h": "2bc4c277dd6c00815fb0ae4fd246c02e76b375e3acac3172a781344c46b47a2c",
+      "lambda/js/mvp-lmd/mvp_lmd_runtime.cpp": "9d1f68cb7729bb1bd3821010b4321389a85c8b8161d2a1d49cc40db7ed7c32ad",
+      "lambda/js/mvp-lmd/mvp_lmd.h": "56b545a81cd492dbf4e98884e2bb200756a4719e296548cf57bd217b1438336a",
+      "lambda/js/mvp-lmd/mvp_lmd_mir.cpp": "4e40c71474ef2acd0828187f1b4003983b673b8ea89c749d7027049d876acc97",
+      "lambda/js/mvp-lmd/mvp_lmd_objects.cpp": "756cea4c0d8fbb1f91606c5511fc79f6cd7f27adc7c1c0128e36a9d79bc5e1c7",
+      "lambda/runtime/lambda-eval.cpp": "e1f06fbd240cda4884ed68e5e4a9ef7a9b20feb6cd01acbdb7a2144964b434c2"
+    },
+    "load_finish": [
+      57.3779296875,
+      53.42578125,
+      43.044921875
+    ],
+    "finished": "2026-10-07T16:27:55.841654+08:00",
+    "binaries_unchanged": true,
+    "production_unchanged": true,
+    "sources_unchanged": true,
+    "runner_archive": "temp/mvp_lmd_tuning/confirm/paired.py",
+    "boundary_notes": [
+      "gcbench includes the final long-lived traversal in every lane; original timer excluded it",
+      "named combines both original 4M loops; both original results are checked",
+      "MVP times program entry; Node uses the matched internal workload timer; startup, parsing, compilation, output and teardown excluded from MVP timing"
+    ],
+    "scope": "12 object/Map workloads plus four numeric, array, call and string controls; original sources and oracles retained",
+    "validation": {
+      "mvp": "30/30",
+      "mvp_forced_gc_poison": "10/10",
+      "lambda_input_baseline": "6286/6286",
+      "test262": {
+        "fully_passed": 40259,
+        "retry_only": 2,
+        "semantic_failures": 0,
+        "regressions": 0,
+        "retry_cases": [
+          "language_identifiers_start_unicode_10_0_0_js",
+          "language_identifiers_start_unicode_10_0_0_escaped_js"
+        ]
+      },
+      "logs": {
+        "temp/mvp_lmd_tuning/mvp.log": "ff233813cddfa3be0029b84413828cae157f371ff3c3f6376ffba9aaa682c44e",
+        "temp/mvp_lmd_tuning/mvp-gc.log": "2d971dcd9a3606cc6146ba18b43e1333235ad66a8e1b92dca2a0a724e3680647",
+        "temp/mvp_lmd_tuning/lambda-baseline.log": "3292edea3c3b03f58fe9f50e01692cd88997aac17206bdffbfd965e627b55707",
+        "temp/mvp_lmd_tuning/test262.log": "799f979116414589bec0ce67da446b828a87b1943960c82c283fe98f4b714569"
+      }
+    },
+    "analysis": "Bundled optimization comparison. High host load limits small-effect conclusions. Bootstrap intervals resample 15 paired ratios, not process wall times; they do not eliminate scheduling bias."
+  },
+  "rows": [
+    {
+      "id": "larceny_deriv",
+      "source": "temp/mvp_lmd_new_objects/larceny_deriv_mvp.js",
+      "source_sha256": "0b2c780470fcd32c267e9e2715c29fa7b0e9688492c8c6f925f1b2fca05c11ca",
+      "expected": 45,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 147.668,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 27.544332999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 72.83,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 46.625,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 67.92,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 79.565,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 20.996,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 87.863,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 26.431417000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 73.003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 67.191,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 70.112,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 58.321,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 34.327917,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 88.751,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 89.681,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 74.643,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 115.361,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 19.137124999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 62.789,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 42.84737500000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 54.438,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 72.185,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 77.558,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 66.974,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 21.447917,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 82.813,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 51.397,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 64.884,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 98.567,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 26.618833999999996,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 130.219,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 30.854374999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 61.749,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 88.193,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 62.704,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 59.95,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 22.259042,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 94.77,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 100.854,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 93.259,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 86.113,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 30.640208,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 51.577,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 51.220083,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 48.403,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 78.565,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 68.32,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 77.883,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 30.947542,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 81.871,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 48.633,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 51.382,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 77.713,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 33.37,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 90.768,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 18.45675,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 69.349,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 75.658,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 53.182,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/larceny_deriv_candidate.mir",
+          "sha256": "6f07989f9a6e137dc2405dc21cd79177fa295da82fca17866474200acc5e295f"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/larceny_deriv_control.mir",
+          "sha256": "b24f2d66f18647513617e41753794f7e364ed42b72c8df93e89b5fe25541c1a3"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/larceny_deriv_noise_peer.mir",
+          "sha256": "dbcedbaa9ae0cb9b6954af5563d607b7fca169f09ee3aa06776d3cf00a357523"
+        }
+      },
+      "median_ms": {
+        "control": 81.871,
+        "candidate": 54.438,
+        "noise_peer": 77.883,
+        "node": 27.544332999999998
+      },
+      "paired_speedup": 1.5217674594057031,
+      "control_noise_ratio": 0.9396751740139211,
+      "paired_speedup_bootstrap95": [
+        1.4226241961565944,
+        1.6112419012782848
+      ],
+      "range_ms": {
+        "control": [
+          67.191,
+          115.361
+        ],
+        "candidate": [
+          46.625,
+          70.112
+        ],
+        "noise_peer": [
+          61.749,
+          147.668
+        ],
+        "node": [
+          18.45675,
+          51.220083
+        ]
+      },
+      "interpretation": "clear gain"
+    },
+    {
+      "id": "larceny_gcbench",
+      "source": "temp/mvp_lmd_new_objects/larceny_gcbench_mvp.js",
+      "source_sha256": "540a18ccabe3764874f6e8f2e57f448286f828ccbaf07b505047d798d33ec02a",
+      "expected": "stretch tree of depth 15 check: 65535\n16384 trees of depth 4 check: 507904\n4096 trees of depth 6 check: 520192\n1024 trees of depth 8 check: 523264\n256 trees of depth 10 check: 524032\n64 trees of depth 12 check: 524224\n16 trees of depth 14 check: 524272\nlong lived tree of depth 14 check: 32767\n",
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 817.869,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 145.613958,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 690.05,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 417.809,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 359.151,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 670.587,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 112.74979200000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 720.473,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 127.16287499999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 756.043,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 699.093,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 340.402,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 361.56,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 154.856834,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 698.774,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 792.148,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 657.984,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 708.098,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 88.41666699999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 374.778,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 137.499791,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 400.738,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 619.535,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 530.225,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 458.363,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 38.464875,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 450.636,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 229.67,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 234.038,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 447.495,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 36.480375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 440.393,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 36.382583000000004,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 440.073,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 437.395,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 242.265,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 230.121,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 36.348167,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 434.548,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 446.237,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 437.858,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 488.717,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 34.328333,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 220.141,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 34.005375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 260.031,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 429.307,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 436.961,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 433.908,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 33.363541999999995,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 421.157,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 218.181,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 238.447,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 424.605,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 27.693624999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 394.359,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 31.984291999999996,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 374.397,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 363.656,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 186.308,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/larceny_gcbench_candidate.mir",
+          "sha256": "ed47fe5bebeae812fade218b378e7374843823fec44e2d55670e97448bb1254d"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/larceny_gcbench_control.mir",
+          "sha256": "acfb3e15efc405d2743b564870a893ab7d088d94a1bef584ead894cd084be831"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/larceny_gcbench_noise_peer.mir",
+          "sha256": "bd63ebce690f994cb809d44c0a9e44564befab0f15cd6a7b0915697f86417670"
+        }
+      },
+      "median_ms": {
+        "control": 450.636,
+        "candidate": 242.265,
+        "noise_peer": 446.237,
+        "node": 36.480375
+      },
+      "paired_speedup": 1.8893798462022848,
+      "control_noise_ratio": 0.9824835626062738,
+      "paired_speedup_bootstrap95": [
+        1.7807101787818678,
+        1.9326640115056974
+      ],
+      "range_ms": {
+        "control": [
+          363.656,
+          708.098
+        ],
+        "candidate": [
+          186.308,
+          417.809
+        ],
+        "noise_peer": [
+          374.397,
+          817.869
+        ],
+        "node": [
+          27.693624999999997,
+          154.856834
+        ]
+      },
+      "interpretation": "clear gain"
+    },
+    {
+      "id": "js_micro_lit",
+      "source": "temp/mvp_lmd_new_objects/js_micro_lit_mvp.js",
+      "source_sha256": "85d2f672873a92069020372582be8f401c37d1389e506414c7b392de90e001f4",
+      "expected": 125000250000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 80.068,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 5.5624579999999995,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 79.18,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 81.282,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 4.822208,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 82.208,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 4.224041,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 79.631,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 79.936,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 4.5472920000000006,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 77.927,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 81.563,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 79.79,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 80.022,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 5.422082999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 0.153,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 4.083375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 78.396,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 81.778,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 79.437,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 5.856167000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 79.11,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 78.901,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 37.523624999999996,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 81.1,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 4.75925,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 79.91,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 83.526,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 0.198,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 0.153,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 4.38475,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 77.143,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 82.548,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 80.677,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 81.753,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 4.928000000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 4.002541000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 0.152,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 80.768,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 81.503,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 81.447,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 5.375374999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 79.198,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 0.159,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 0.16,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 78.314,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 5.294500000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 83.795,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 4.239374999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 78.147,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 80.191,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 0.152,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_lit_candidate.mir",
+          "sha256": "33fd602687376c027fdb841da7fe3282b95fc2853e6c6f5a4eade756bfb56a73"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_lit_control.mir",
+          "sha256": "2bf8551ce0974a7ed32c5d2834429cedd2f0d2f56f11daf5bf0e1e565ccd659c"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_lit_noise_peer.mir",
+          "sha256": "5b362328cea9fa0413217c0ce2585dca95b65a791e3336591646a011aab1d82e"
+        }
+      },
+      "median_ms": {
+        "control": 79.198,
+        "candidate": 0.152,
+        "noise_peer": 81.1,
+        "node": 4.822208
+      },
+      "paired_speedup": 520.4605263157895,
+      "control_noise_ratio": 0.9889094269870611,
+      "paired_speedup_bootstrap95": [
+        512.6776315789474,
+        525.8947368421053
+      ],
+      "range_ms": {
+        "control": [
+          77.143,
+          83.526
+        ],
+        "candidate": [
+          0.152,
+          0.198
+        ],
+        "noise_peer": [
+          78.147,
+          83.795
+        ],
+        "node": [
+          4.002541000000001,
+          37.523624999999996
+        ]
+      },
+      "interpretation": "clear gain"
+    },
+    {
+      "id": "js_micro_named",
+      "source": "temp/mvp_lmd_new_objects/js_micro_named_mvp.js",
+      "source_sha256": "17b8d270bec21ccc65a49c367af3d762624e36a3d9ab1dcdd47e46f44b795443",
+      "expected": [
+        12000000,
+        3999999
+      ],
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 37.086,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 7.114125,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 36.381,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 36.911,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 38.077,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 36.441,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 7.8671669999999985,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 35.83,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 7.775500000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 36.381,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 34.962,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 35.471,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 36.074,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 8.185374999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 36.264,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 35.826,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 35.687,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 35.91,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 7.253291000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 35.441,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 7.259708000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 35.837,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 37.085,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 36.624,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 35.446,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 7.692875000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 35.611,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 35.165,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 35.991,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 38.341,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 8.281583,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 41.434,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 8.415208,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 43.374,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 38.205,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 37.848,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 36.228,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 8.079749999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 36.326,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 37.009,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 35.641,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 35.08,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 7.768708,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 35.78,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 7.9683340000000005,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 37.456,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 34.976,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 35.84,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 36.362,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 8.277125,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 35.474,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 35.958,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 36.248,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 39.105,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 6.903791999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 35.607,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 6.918583,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 63.905,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 36.028,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 37.191,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_named_candidate.mir",
+          "sha256": "8e48ad56b37829905e0620bb7049358be45289783597a8dc4d7704384a596211"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_named_control.mir",
+          "sha256": "a4d71bfc029f563eb51bb7719fcbe7a1199199aa581f759b941d86d5ffedef07"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_named_noise_peer.mir",
+          "sha256": "96c1a5815e610ff494caa2c2589fd0632daa0deeb4f72ff407471a0ae33190e9"
+        }
+      },
+      "median_ms": {
+        "control": 36.264,
+        "candidate": 36.074,
+        "noise_peer": 36.362,
+        "node": 7.775500000000001
+      },
+      "paired_speedup": 1.0027050899856464,
+      "control_noise_ratio": 0.9815450295873976,
+      "paired_speedup_bootstrap95": [
+        0.9804359977641139,
+        1.0132332609125023
+      ],
+      "range_ms": {
+        "control": [
+          34.962,
+          39.105
+        ],
+        "candidate": [
+          35.165,
+          38.077
+        ],
+        "noise_peer": [
+          35.446,
+          63.905
+        ],
+        "node": [
+          6.903791999999999,
+          8.415208
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "js_micro_args_ctl",
+      "source": "temp/mvp_lmd_new_objects/js_micro_args_ctl_mvp.js",
+      "source_sha256": "c4d98936dfcd337882ca4ee416a4f88a2f1ddfc7a41bac6b447a079931bf9d23",
+      "expected": 1500000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 29.972,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 2.5135000000000005,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 28.96,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 12.758,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 14.144,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 30.445,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 3.0640420000000006,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 31.225,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 2.644208000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 31.218,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 30.608,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 13.05,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 13.356,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 2.5143749999999994,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 29.735,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 29.955,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 30.97,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 31.811,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 29.429624999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 13.996,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 5.543958000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 32.364,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 95.358,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 45.518,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 44.23,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 6.140792000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 54.931,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 15.51,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 20.256,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 41.286,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 4.208874999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 38.008,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 3.938958000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 38.307,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 48.28,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 25.251,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 18.133,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 7.843917000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 38.388,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 41.849,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 40.143,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 42.334,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 4.600666999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 16.12,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 3.1497910000000005,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 27.372,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 48.974,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 66.209,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 48.479,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 18.180999999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 87.563,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 21.339,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 15.735,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 65.923,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 4.359917000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 51.589,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 4.572292000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 39.303,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 45.724,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 17.938,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_args_ctl_candidate.mir",
+          "sha256": "dbfac79fc3c442e588aaaaeea5f7f319d6392e81e6d12327327350ef0538f4f9"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_args_ctl_control.mir",
+          "sha256": "42705d24699265a747fb6cdc3e4da861e341c6194c6929925715af44fe6c092e"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_args_ctl_noise_peer.mir",
+          "sha256": "9c91baa51d537a231bffa64a8f7aa55b4bc46e011abeef56eb0ad555717758bc"
+        }
+      },
+      "median_ms": {
+        "control": 42.334,
+        "candidate": 16.12,
+        "noise_peer": 39.303,
+        "node": 4.359917000000003
+      },
+      "paired_speedup": 2.27286367533581,
+      "control_noise_ratio": 1.0545798769399397,
+      "paired_speedup_bootstrap95": [
+        2.1525028280542986,
+        2.6261786600496277
+      ],
+      "range_ms": {
+        "control": [
+          28.96,
+          95.358
+        ],
+        "candidate": [
+          12.758,
+          32.364
+        ],
+        "noise_peer": [
+          29.955,
+          66.209
+        ],
+        "node": [
+          2.5135000000000005,
+          29.429624999999998
+        ]
+      },
+      "interpretation": "clear gain"
+    },
+    {
+      "id": "js_micro_args_fp",
+      "source": "temp/mvp_lmd_new_objects/js_micro_args_fp_mvp.js",
+      "source_sha256": "f29aa9161693fae9b9279aaf7772ab3e694768d047097fde9cf396cc384e3ded",
+      "expected": 1500000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 51.497,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 3.3646660000000015,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 56.131,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 17.76,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 21.643,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 43.203,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 5.494667,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 43.126,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 4.918042,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 41.767,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 51.23,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 14.613,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 54.312,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 4.377583000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 50.838,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 48.855,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 45.015,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 62.205,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 4.249499999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 17.932,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 3.8686659999999993,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 16.892,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 55.421,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 46.495,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 44.736,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 4.811875000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 57.71,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 15.06,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 15.616,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 44.56,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 3.160292000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 41.919,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 4.687041999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 51.199,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 46.859,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 17.511,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 18.815,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 4.800916000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 48.113,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 95.589,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 42.148,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 45.408,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 3.5200829999999996,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 18.082,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 3.38025,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 15.224,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 49.888,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 44.944,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 66.227,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 5.773584,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 43.338,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 16.523,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 36.692,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 53.553,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 4.164458,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 49.459,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 4.240917000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 55.8,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 44.001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 18.425,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_args_fp_candidate.mir",
+          "sha256": "e2e8914eb9f4fd8819b11583158014e75a7c513bdd2325b6c4dae7a08871e635"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_args_fp_control.mir",
+          "sha256": "bb8c17f459532486143087ef040b7f10fca02fb926384b4af823e31418df5fa1"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/js_micro_args_fp_noise_peer.mir",
+          "sha256": "36085939f0e895784b57d93e883945b7606f11a8b5439dd94352049afde817f8"
+        }
+      },
+      "median_ms": {
+        "control": 49.888,
+        "candidate": 17.76,
+        "noise_peer": 46.495,
+        "node": 4.249499999999999
+      },
+      "paired_speedup": 2.6759751013648567,
+      "control_noise_ratio": 1.077346493309291,
+      "paired_speedup_bootstrap95": [
+        2.511226634221878,
+        3.280902202225906
+      ],
+      "range_ms": {
+        "control": [
+          43.203,
+          62.205
+        ],
+        "candidate": [
+          14.613,
+          54.312
+        ],
+        "noise_peer": [
+          41.767,
+          95.589
+        ],
+        "node": [
+          3.160292000000002,
+          5.773584
+        ]
+      },
+      "interpretation": "clear gain"
+    },
+    {
+      "id": "object_fields",
+      "source": "test/benchmark/js_mvp_lmd/object_fields.js",
+      "source_sha256": "3bea6d71692b8f4fcc6d59937022f41a7765b572b7c9162b0858133c6f0186bc",
+      "expected": 125000750000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 3.928,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 4.248290999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 4.426,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 4.386,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 3.748,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 3.931,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 4.183292000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 11.084,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 3.071833999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 3.93,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 3.96,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 3.745,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 3.741,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 3.0758339999999986,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 3.934,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 3.934,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 3.933,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 3.929,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 3.181749999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 3.743,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 3.442958000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 3.745,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 3.933,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 3.93,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 5.609,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 9.136334000000005,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 4.618,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 4.318,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 3.845,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 4.003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 3.743291000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 4.149,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 3.015708,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 5.386,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 4.011,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 3.742,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 4.233,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 4.611291,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 4.223,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 4.033,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 5.861,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 3.951,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 4.097417,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 5.979,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 3.573291000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 5.645,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 4.593,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 3.93,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 4.63,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 3.109290999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 3.929,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 17.473,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 3.744,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 3.937,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 3.732166000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 4.22,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 3.217708000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 3.929,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 3.929,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 3.742,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_fields_candidate.mir",
+          "sha256": "5a24ea7337834d0b93062f75d5ab9895843a21988564bb9c521a39918ac6b771"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_fields_control.mir",
+          "sha256": "afc14ef04b1536d0b55a7c7c9cca5100e633efea637e54433da983b78e506820"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_fields_noise_peer.mir",
+          "sha256": "16f61cd8b512d101657989846bd0e2641ea5fb07c517c061beafbfa8df86b227"
+        }
+      },
+      "median_ms": {
+        "control": 3.951,
+        "candidate": 3.748,
+        "noise_peer": 4.033,
+        "node": 3.573291000000001
+      },
+      "paired_speedup": 1.0496927598183274,
+      "control_noise_ratio": 0.9989829646580218,
+      "paired_speedup_bootstrap95": [
+        0.9976376092605718,
+        1.0515904838278536
+      ],
+      "range_ms": {
+        "control": [
+          3.929,
+          4.618
+        ],
+        "candidate": [
+          3.741,
+          17.473
+        ],
+        "noise_peer": [
+          3.928,
+          11.084
+        ],
+        "node": [
+          3.015708,
+          9.136334000000005
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "object_growth",
+      "source": "test/benchmark/js_mvp_lmd/object_growth.js",
+      "source_sha256": "a6f448ae936a6eda1cf52ab5b7c068c2a8ea95af77380e98f4af960efa6f72ce",
+      "expected": 1990000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 5.249,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 12.228084000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 4.967,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 5.724,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 5.717,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 7.745,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 11.379000000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 4.961,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 8.586041000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 4.865,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 4.802,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 8.124,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 4.713,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 11.922208,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 4.927,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 9.656,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 4.873,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 7.6,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 11.226500000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 7.939,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 11.285834,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 5.04,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 5.526,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 8.395,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 5.729,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 13.461624999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 8.814,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 5.942,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 4.919,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 4.91,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 14.097125000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 5.047,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 8.189708,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 5.679,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 5.116,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 5.269,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 7.439,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 10.135625000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 4.93,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 6.755,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 4.881,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 4.878,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 12.691291999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 6.461,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 11.733708000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 6.986,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 5.946,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 4.965,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 4.922,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 8.952791000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 4.909,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 6.905,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 4.747,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 8.128,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 10.819542000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 11.873,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 14.734459000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 8.45,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 8.23,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 9.294,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_growth_candidate.mir",
+          "sha256": "ac4a4372e5589932666e7a96eebe0f5451c6ab6cd20af5a2324a2fc70bad10e2"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_growth_control.mir",
+          "sha256": "93d193d3c13a8b9d3329e53389e370d48307c2ab51f3c1b0e1f6e9db7ff7da9b"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_growth_noise_peer.mir",
+          "sha256": "e090abd1e8be18325d835aded09394743886d4bb68ea86280f72320b7fa04f31"
+        }
+      },
+      "median_ms": {
+        "control": 5.116,
+        "candidate": 5.942,
+        "noise_peer": 5.249,
+        "node": 11.379000000000001
+      },
+      "paired_speedup": 0.9572994079858924,
+      "control_noise_ratio": 0.9739644970414203,
+      "paired_speedup_bootstrap95": [
+        0.7549914873858535,
+        1.0964285714285713
+      ],
+      "range_ms": {
+        "control": [
+          4.802,
+          8.814
+        ],
+        "candidate": [
+          4.713,
+          9.294
+        ],
+        "noise_peer": [
+          4.865,
+          11.873
+        ],
+        "node": [
+          8.189708,
+          14.734459000000001
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "object_retype",
+      "source": "test/benchmark/js_mvp_lmd/object_retype.js",
+      "source_sha256": "559e74bbef91e0fe9a93d127243d6d0a568ee37f17d5785d6f43ae5d4ad881e1",
+      "expected": 4999950000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 79.151,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 2.174332999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 52.115,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 53.908,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 54.119,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 53.238,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 4.171790999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 57.038,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 3.122084000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 58.102,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 55.576,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 54.298,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 51.872,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 2.173375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 64.674,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 70.129,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 58.14,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 68.096,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 2.168499999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 56.689,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 2.504624999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 71.34,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 64.906,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 65.136,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 58.98,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 2.5106670000000015,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 60.415,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 58.176,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 53.527,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 72.98,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 3.8320000000000007,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 60.678,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 3.1778750000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 64.542,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 56.365,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 53.889,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 54.168,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 2.4384169999999976,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 70.729,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 69.402,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 56.911,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 64.069,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 2.9553749999999965,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 56.615,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 3.0401670000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 55.0,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 59.209,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 65.19,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 55.552,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 2.9844170000000023,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 61.197,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 59.293,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 56.606,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 68.189,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 2.24625,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 58.475,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 2.190792,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 53.732,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 57.337,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 68.441,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_retype_candidate.mir",
+          "sha256": "4a0da2fc987bd1c1ca77a462cdd43ff67b7a74f0713ed054cf63deb94b127338"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_retype_control.mir",
+          "sha256": "f9379d97272e71f7f95ada789245dcf2b296f949ad08fbd1004b189a8c3084db"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_retype_noise_peer.mir",
+          "sha256": "bf2a23b0188b34139d3c14ebbf712424efb6783782cf27c6958c4009428bbd93"
+        }
+      },
+      "median_ms": {
+        "control": 61.197,
+        "candidate": 55.0,
+        "noise_peer": 58.98,
+        "node": 2.5106670000000015
+      },
+      "paired_speedup": 1.0459462970179443,
+      "control_noise_ratio": 1.0191204864413128,
+      "paired_speedup_bootstrap95": [
+        0.9837210591474344,
+        1.2046249514185774
+      ],
+      "range_ms": {
+        "control": [
+          52.115,
+          72.98
+        ],
+        "candidate": [
+          51.872,
+          71.34
+        ],
+        "noise_peer": [
+          53.732,
+          79.151
+        ],
+        "node": [
+          2.168499999999998,
+          4.171790999999999
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "object_delete",
+      "source": "test/benchmark/js_mvp_lmd/object_delete.js",
+      "source_sha256": "d68167eb5365af042823836a44952a05bd2e08983ca56c3a9bbe574b2e96b2c2",
+      "expected": 200030000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 5.023,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 11.249375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 4.255,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 12.041,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 5.096,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 4.854,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 6.2123750000000015,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 4.868,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 2.8135830000000013,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 5.25,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 4.5,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 3.832,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 5.452,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 1.8981250000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 4.322,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 6.3,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 5.209,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 5.89,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 2.272791,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 3.498,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 2.986459,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 3.643,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 4.278,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 4.694,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 4.606,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 2.329333,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 5.187,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 3.83,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 5.296,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 4.307,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 5.2570830000000015,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 4.263,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 2.9246250000000025,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 6.763,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 4.563,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 3.598,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 3.537,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 2.0357909999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 5.148,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 13.099,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 6.123,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 6.079,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 2.4233340000000005,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 4.48,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 2.472875000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 4.93,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 5.25,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 4.423,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 4.283,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 2.846957999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 4.287,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 4.532,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 3.709,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 4.204,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 2.0743750000000016,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 4.259,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 2.4596669999999996,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 4.751,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 4.706,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 4.147,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_delete_candidate.mir",
+          "sha256": "385b5168d293a5ec6ceb744fa4f514d2204e46791bae5c43c0cc76b70efcda38"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_delete_control.mir",
+          "sha256": "9ba9701f077e5e51032623fcb4583593cce797af013edc20d2686809f51466a8"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/object_delete_noise_peer.mir",
+          "sha256": "6341cdd1729d3e21e79bb73e64ddd49ef5d656a2ed55ec5a30308c4f16c3f300"
+        }
+      },
+      "median_ms": {
+        "control": 4.563,
+        "candidate": 4.147,
+        "noise_peer": 4.868,
+        "node": 2.472875000000002
+      },
+      "paired_speedup": 1.134796238244514,
+      "control_noise_ratio": 0.9905283098295096,
+      "paired_speedup_bootstrap95": [
+        0.9525117739403454,
+        1.354308093994778
+      ],
+      "range_ms": {
+        "control": [
+          4.204,
+          6.079
+        ],
+        "candidate": [
+          3.498,
+          12.041
+        ],
+        "noise_peer": [
+          4.259,
+          13.099
+        ],
+        "node": [
+          1.8981250000000003,
+          11.249375
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "map_lookup",
+      "source": "test/benchmark/js_mvp_lmd/map_lookup.js",
+      "source_sha256": "ebc6b0980dfdfef06a3a0abbb9f2d3bd24c9a233dad32b51b2da88d69934500d",
+      "expected": 120000000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 42.779,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 7.155791000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 47.811,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 25.562,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 29.281,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 93.864,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 10.237665999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 41.779,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 9.683459,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 41.77,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 49.113,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 24.067,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 30.885,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 9.877084,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 47.157,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 53.182,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 45.248,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 43.956,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 10.246708000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 25.719,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 10.747999999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 35.577,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 48.869,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 41.664,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 48.426,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 6.273707999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 43.552,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 25.544,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 26.326,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 91.364,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 10.2345,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 46.167,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 15.533041000000004,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 47.509,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 44.302,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 26.845,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 25.35,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 10.700500000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 45.849,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 47.186,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 43.876,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 46.979,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 7.077208000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 32.294,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 6.462083,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 24.754,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 44.196,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 48.238,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 47.379,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 10.377208,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 41.997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 34.704,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 27.114,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 44.922,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 6.849875000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 47.48,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 10.381166,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 46.26,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 44.315,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 32.133,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/map_lookup_candidate.mir",
+          "sha256": "12ef2c3a31a82d52a01acb8f413f88ec721584bd55b34877f426eb521e1ede1e"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/map_lookup_control.mir",
+          "sha256": "424db56176abd557ce649f4ede17878eaff998f81adf6e1208a85d4253b0d372"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/map_lookup_noise_peer.mir",
+          "sha256": "358c8d062ed279da43dd8b041679416f09844212b63cafe35e1494b7d73a9150"
+        }
+      },
+      "median_ms": {
+        "control": 45.849,
+        "candidate": 26.845,
+        "noise_peer": 46.26,
+        "node": 10.2345
+      },
+      "paired_speedup": 1.7049796429689947,
+      "control_noise_ratio": 0.9714462517680341,
+      "paired_speedup_bootstrap95": [
+        1.5268576979116073,
+        1.8086390532544376
+      ],
+      "range_ms": {
+        "control": [
+          41.997,
+          93.864
+        ],
+        "candidate": [
+          24.067,
+          35.577
+        ],
+        "noise_peer": [
+          41.664,
+          53.182
+        ],
+        "node": [
+          6.273707999999999,
+          15.533041000000004
+        ]
+      },
+      "interpretation": "clear gain"
+    },
+    {
+      "id": "map_iteration",
+      "source": "test/benchmark/js_mvp_lmd/map_iteration.js",
+      "source_sha256": "5b067c327782b86cc08b938484a52c0672d3a72ce05dcb92c3f5f650953cbfb1",
+      "expected": 200000000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 21.566,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 22.498375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 2.978,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 3.261,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 2.511,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 2.834,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 13.890792000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 2.567,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 13.76125,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 4.763,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 2.551,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 2.68,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 2.506,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 13.859666999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 2.556,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 2.712,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 2.562,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 2.564,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 13.084792,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 4.339,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 14.185457999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 2.694,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 3.757,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 2.562,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 2.591,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 17.612333,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 3.601,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 2.542,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 2.525,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 2.554,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 14.547833,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 2.567,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 19.600167,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 2.54,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 3.668,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 2.689,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 2.955,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 17.8185,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 2.979,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 2.552,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 2.416,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 3.203,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 16.879125000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 2.506,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 8.371667000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 2.638,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 4.901,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 2.57,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 2.738,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 12.184542,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 2.566,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 4.465,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 3.179,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 2.557,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 14.916916999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 3.561,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 16.603792,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 2.545,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 2.555,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 2.502,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/map_iteration_candidate.mir",
+          "sha256": "f7ef8ec9ef025a6c02cc783781d9f2a4304b9f7a29f81bdd3222599d9a9f3c3e"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/map_iteration_control.mir",
+          "sha256": "63802cdf987945f48854227a98513db5710fcbdb81c690acd7d9a7304fdea8d8"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/map_iteration_noise_peer.mir",
+          "sha256": "7d37295665da38372a30138fce5df24a9c79620accdbdee5512c5fb66a1748e0"
+        }
+      },
+      "median_ms": {
+        "control": 2.834,
+        "candidate": 2.68,
+        "noise_peer": 2.567,
+        "node": 14.547833
+      },
+      "paired_speedup": 1.0199521149241821,
+      "control_noise_ratio": 1.0039292730844795,
+      "paired_speedup_bootstrap95": [
+        0.913216804661147,
+        1.3640758646336928
+      ],
+      "range_ms": {
+        "control": [
+          2.551,
+          4.901
+        ],
+        "candidate": [
+          2.502,
+          4.465
+        ],
+        "noise_peer": [
+          2.416,
+          21.566
+        ],
+        "node": [
+          8.371667000000002,
+          22.498375
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "numeric",
+      "source": "test/benchmark/js_mvp_lmd/numeric.js",
+      "source_sha256": "02ee5e5c13212d506d4c7b35700bfcd0a8a321b1190f32ec17d6898925b11948",
+      "expected": 1249999987500000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 143.025,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 144.71808299999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 113.868,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 128.262,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 115.248,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 110.563,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 108.983792,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 117.602,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 128.253458,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 103.613,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 111.356,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 143.538,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 105.3,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 114.639083,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 106.381,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 181.732,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 145.93,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 133.474,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 112.43266700000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 125.125,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 128.315834,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 118.459,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 112.988,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 106.112,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 155.118,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 136.760541,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 135.096,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 135.034,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 130.753,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 118.006,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 103.7255,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 124.229,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 111.28833300000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 131.032,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 116.929,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 123.717,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 112.97,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 106.49445800000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 115.55,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 106.319,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 152.164,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 166.105,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 161.3675,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 115.223,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 116.63133400000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 111.921,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 121.868,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 124.53,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 125.089,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 134.694625,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 130.291,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 120.089,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 113.497,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 111.456,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 99.456083,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 111.319,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 116.541167,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 137.473,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 141.745,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 116.948,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/numeric_candidate.mir",
+          "sha256": "2faa9f82d40ac7be8cc862fe21688b886bebe58b00124af1d43b2df06b648d47"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/numeric_control.mir",
+          "sha256": "2faa9f82d40ac7be8cc862fe21688b886bebe58b00124af1d43b2df06b648d47"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/numeric_noise_peer.mir",
+          "sha256": "2faa9f82d40ac7be8cc862fe21688b886bebe58b00124af1d43b2df06b648d47"
+        }
+      },
+      "median_ms": {
+        "control": 116.929,
+        "candidate": 118.459,
+        "noise_peer": 125.089,
+        "node": 116.541167
+      },
+      "paired_speedup": 1.0004591436230876,
+      "control_noise_ratio": 0.9786236248293584,
+      "paired_speedup_bootstrap95": [
+        0.945132843505743,
+        1.0667252747252747
+      ],
+      "range_ms": {
+        "control": [
+          106.381,
+          166.105
+        ],
+        "candidate": [
+          105.3,
+          143.538
+        ],
+        "noise_peer": [
+          103.613,
+          181.732
+        ],
+        "node": [
+          99.456083,
+          161.3675
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "dense_array",
+      "source": "test/benchmark/js_mvp_lmd/dense_array.js",
+      "source_sha256": "2f7fd982853243a60d2f584cbfaf908e8271a0404774ae6f97c77bfcc3eb2b45",
+      "expected": 781246875000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 115.688,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 20.851541999999995,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 125.135,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 111.7,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 113.851,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 112.133,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 23.177958,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 123.081,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 24.178,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 112.076,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 107.036,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 113.58,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 114.338,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 22.505875,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 116.323,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 119.224,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 157.014,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 108.497,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 24.406333000000004,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 122.924,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 25.203458,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 116.376,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 115.889,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 112.146,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 113.086,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 21.483375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 108.33,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 111.23,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 108.518,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 107.395,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 76.18829199999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 169.669,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 19.237459,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 108.483,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 112.714,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 114.214,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 116.158,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 21.572875000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 109.875,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 113.414,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 107.809,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 109.597,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 21.927375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 111.889,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 22.636667,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 110.807,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 110.366,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 107.281,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 107.862,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 20.721124999999997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 115.774,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 109.372,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 108.175,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 108.461,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 23.5365,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 107.314,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 23.771167,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 109.387,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 111.632,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 131.644,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/dense_array_candidate.mir",
+          "sha256": "881ef166ce1b13704553b2c556fcc627e3abd09bc5e094cd3d14fbac9a039fcd"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/dense_array_control.mir",
+          "sha256": "74d4556d2b989f2ef87bf06a85219aa67541dd2ac0c3956c6eeefe4fe9320148"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/dense_array_noise_peer.mir",
+          "sha256": "a121b58dd4d944b685031fe5cb0a49291164033c5ff605af65c6eaba95fc68e0"
+        }
+      },
+      "median_ms": {
+        "control": 110.366,
+        "candidate": 113.58,
+        "noise_peer": 112.146,
+        "node": 22.636667
+      },
+      "paired_speedup": 0.9868667588912042,
+      "control_noise_ratio": 1.0106882606183722,
+      "paired_speedup_bootstrap95": [
+        0.9459098813684809,
+        1.0026438641090825
+      ],
+      "range_ms": {
+        "control": [
+          107.036,
+          125.135
+        ],
+        "candidate": [
+          108.175,
+          131.644
+        ],
+        "noise_peer": [
+          107.281,
+          169.669
+        ],
+        "node": [
+          19.237459,
+          76.18829199999999
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "calls",
+      "source": "test/benchmark/js_mvp_lmd/calls.js",
+      "source_sha256": "35db2112d6f80b6b037eba4fdbad6606469d692c05645fde1180eb8d8bab5423",
+      "expected": 676500,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 6.882,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 11.914375,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 8.901,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 9.227,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 16.781,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 8.741,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 11.683083,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 7.844,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 10.391000000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 9.177,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 37.163,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 7.104,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 7.435,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 6.415749999999999,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 6.755,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 13.455,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 9.142,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 7.175,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 7.336125000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 8.02,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 6.86525,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 9.0,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 6.948,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 7.064,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 7.202,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 7.174709,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 7.617,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 11.209,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 6.745,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 7.239,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 8.246042,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 8.387,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 8.922083,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 7.894,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 8.585,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 6.698,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 7.869,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 6.801917000000001,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 7.286,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 10.148,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 7.172,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 7.156,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 7.622583000000002,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 6.997,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 6.751417,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 9.007,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 8.482,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 7.76,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 6.831,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 6.504791999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 7.55,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 7.269,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 7.694,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 7.242,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 8.07425,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 7.243,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 6.800874999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 7.59,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 9.129,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 6.717,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/calls_candidate.mir",
+          "sha256": "d82187b4234abdd7a3945f5b6eca885c7a60421629e9db91e6fd34a5f40380b2"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/calls_control.mir",
+          "sha256": "d82187b4234abdd7a3945f5b6eca885c7a60421629e9db91e6fd34a5f40380b2"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/calls_noise_peer.mir",
+          "sha256": "d82187b4234abdd7a3945f5b6eca885c7a60421629e9db91e6fd34a5f40380b2"
+        }
+      },
+      "median_ms": {
+        "control": 7.55,
+        "candidate": 7.694,
+        "noise_peer": 7.76,
+        "node": 7.336125000000003
+      },
+      "paired_speedup": 0.9417120017763961,
+      "control_noise_ratio": 1.05762288253263,
+      "paired_speedup_bootstrap95": [
+        0.8946384039900249,
+        1.0386573118723346
+      ],
+      "range_ms": {
+        "control": [
+          6.755,
+          37.163
+        ],
+        "candidate": [
+          6.698,
+          16.781
+        ],
+        "noise_peer": [
+          6.831,
+          13.455
+        ],
+        "node": [
+          6.415749999999999,
+          11.914375
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    },
+    {
+      "id": "strings",
+      "source": "test/benchmark/js_mvp_lmd/strings.js",
+      "source_sha256": "7b92571aba0d869ddb2e7cc2c3f5c4e4b534d72c76510ca5dfba929f4e090416",
+      "expected": 10000000,
+      "samples": [
+        {
+          "lane": "noise_peer",
+          "round": 1,
+          "ms": 3.412,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 1,
+          "ms": 0.3780840000000012,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 1,
+          "ms": 3.216,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 1,
+          "ms": 3.438,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 2,
+          "ms": 5.671,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 2,
+          "ms": 6.849,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 2,
+          "ms": 0.3724999999999987,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 2,
+          "ms": 5.75,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 3,
+          "ms": 0.4239999999999995,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 3,
+          "ms": 3.223,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 3,
+          "ms": 3.448,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 3,
+          "ms": 4.496,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 4,
+          "ms": 3.412,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 4,
+          "ms": 0.3949170000000013,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 4,
+          "ms": 3.219,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 4,
+          "ms": 7.77,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 5,
+          "ms": 3.237,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 5,
+          "ms": 3.211,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 5,
+          "ms": 1.256999999999998,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 5,
+          "ms": 3.33,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 6,
+          "ms": 0.40275000000000105,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 6,
+          "ms": 3.348,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 6,
+          "ms": 7.62,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 6,
+          "ms": 3.469,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 7,
+          "ms": 3.226,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 7,
+          "ms": 0.4298750000000009,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 7,
+          "ms": 3.383,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 7,
+          "ms": 3.232,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 8,
+          "ms": 3.343,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 8,
+          "ms": 5.218,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 8,
+          "ms": 0.38954100000000125,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 8,
+          "ms": 3.282,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 9,
+          "ms": 0.39420900000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 9,
+          "ms": 4.425,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 9,
+          "ms": 3.966,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 9,
+          "ms": 3.467,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 10,
+          "ms": 3.215,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 10,
+          "ms": 0.3810830000000003,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 10,
+          "ms": 6.876,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 10,
+          "ms": 3.216,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 11,
+          "ms": 8.272,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 11,
+          "ms": 6.093,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 11,
+          "ms": 0.3730829999999994,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 11,
+          "ms": 5.107,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 12,
+          "ms": 0.47724999999999795,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 12,
+          "ms": 3.483,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 12,
+          "ms": 3.688,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 12,
+          "ms": 3.731,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 13,
+          "ms": 5.131,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 13,
+          "ms": 0.3751250000000006,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 13,
+          "ms": 3.472,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 13,
+          "ms": 5.855,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 14,
+          "ms": 5.759,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 14,
+          "ms": 7.052,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 14,
+          "ms": 0.3759580000000007,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 14,
+          "ms": 3.221,
+          "oracle_equal": true
+        },
+        {
+          "lane": "node",
+          "round": 15,
+          "ms": 0.4498330000000017,
+          "oracle_equal": true
+        },
+        {
+          "lane": "noise_peer",
+          "round": 15,
+          "ms": 3.53,
+          "oracle_equal": true
+        },
+        {
+          "lane": "control",
+          "round": 15,
+          "ms": 3.323,
+          "oracle_equal": true
+        },
+        {
+          "lane": "candidate",
+          "round": 15,
+          "ms": 6.3,
+          "oracle_equal": true
+        }
+      ],
+      "backend": {
+        "candidate": {
+          "path": "temp/mvp_lmd_tuning/confirm/strings_candidate.mir",
+          "sha256": "9a941f93ec10f0e683770105db2cf7ba74799fa473f9e2e846138806b032e035"
+        },
+        "control": {
+          "path": "temp/mvp_lmd_tuning/confirm/strings_control.mir",
+          "sha256": "1cd41960202ecb9125b3aa9aa73255b9d05dfd1122917813c82f8b3f34784299"
+        },
+        "noise_peer": {
+          "path": "temp/mvp_lmd_tuning/confirm/strings_noise_peer.mir",
+          "sha256": "5c4121d5b76c223a12763c47ebc963ec1b0b02a4935e6b1d6187277197e22c95"
+        }
+      },
+      "median_ms": {
+        "control": 3.688,
+        "candidate": 3.467,
+        "noise_peer": 3.469,
+        "node": 0.39420900000000003
+      },
+      "paired_speedup": 1.0588573069193223,
+      "control_noise_ratio": 0.9919678714859437,
+      "paired_speedup_bootstrap95": [
+        0.9434349355216881,
+        1.2077235055545759
+      ],
+      "range_ms": {
+        "control": [
+          3.211,
+          7.62
+        ],
+        "candidate": [
+          3.215,
+          6.3
+        ],
+        "noise_peer": [
+          3.216,
+          8.272
+        ],
+        "node": [
+          0.3724999999999987,
+          1.256999999999998
+        ]
+      },
+      "interpretation": "small change inconclusive under host load"
+    }
+  ]
+}

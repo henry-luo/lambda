@@ -1,13 +1,15 @@
 # Benchmark source notices
 
 The Java and Erlang ports adapt the checked-in benchmark sources identified below.
+Java also compiles `ref/are-we-fast-yet/benchmarks/Java/src` unchanged, retaining its source notices.
 The applicable upstream notices remain attached to each source or are reproduced
 here. AWFY's Richards and DeltaBlue retain their historical license notes;
 this file does not replace those terms with a new license.
 
 ## jq interpreter and prelude
 
-`text/jq_{values,native,parse,compile,vm}.jl` adapts Lambda's
+The native Java/Erlang jq implementations adapt the algorithms in
+`text/jq_{values,native,parse,compile,vm}.jl`, which adapt Lambda's
 `test/benchmark/jq_vm.ls` and `test/benchmark/text/c2mir/jq_*.h`.
 The prelude definitions come from jq 1.7.1's `src/builtin.jq`, under
 [jq's MIT license](https://github.com/jqlang/jq/blob/jq-1.7.1/COPYING):

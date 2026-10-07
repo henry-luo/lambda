@@ -1,0 +1,25 @@
+-module(nbody).
+-export([new/0,advance/1,energy/1,steps/2]).
+new()->Days=365.24,Mass=4.0*math:pi()*math:pi(),
+    Bodies=[{0.0,0.0,0.0,0.0,0.0,0.0,Mass},
+        {4.84143144246472090,-1.16032004402742839,-0.103622044471123109,0.00166007664274403694*Days,0.00769901118419740425*Days,-0.0000690460016972063023*Days,0.000954791938424326609*Mass},
+        {8.34336671824457987,4.12479856412430479,-0.403523417114321381,-0.00276742510726862411*Days,0.00499852801234917238*Days,2.30417297573763929e-5*Days,0.000285885980666130812*Mass},
+        {12.8943695621391310,-15.1111514016986312,-0.223307578892655734,0.00296460137564761618*Days,0.00237847173959480950*Days,-2.96589568540237556e-5*Days,0.0000436624404335156298*Mass},
+        {15.3796971148509165,-25.9193146099879641,0.179258772950371181,0.00268067772490389322*Days,0.00162824170038242295*Days,-0.0000951592254519715870*Days,0.0000515138902046611451*Mass}],
+    {Px,Py,Pz}=lists:foldl(fun({_,_,_,Vx,Vy,Vz,M},{X,Y,Z})->{X+Vx*M,Y+Vy*M,Z+Vz*M}end,{0.0,0.0,0.0},Bodies),
+    [_|Rest]=Bodies,[{0.0,0.0,0.0,-Px/Mass,-Py/Mass,-Pz/Mass,Mass}|Rest].
+advance(Bodies)->[move(B)||B<-pairs(Bodies)].
+move({X,Y,Z,Vx,Vy,Vz,M})->{X+0.01*Vx,Y+0.01*Vy,Z+0.01*Vz,Vx,Vy,Vz,M}.
+pairs([])->[];
+pairs([B|Bs])->{Next,Rest}=adjust(B,Bs,[]),[Next|pairs(Rest)].
+adjust(B,[],Acc)->{B,lists:reverse(Acc)};
+adjust({X,Y,Z,Vx,Vy,Vz,M},[{Rx,Ry,Rz,Rvx,Rvy,Rvz,Rm}|Bs],Acc)->
+    Dx=X-Rx,Dy=Y-Ry,Dz=Z-Rz,D2=Dx*Dx+Dy*Dy+Dz*Dz,Mag=0.01/(D2*math:sqrt(D2)),
+    Left={X,Y,Z,Vx-Dx*Rm*Mag,Vy-Dy*Rm*Mag,Vz-Dz*Rm*Mag,M},
+    Right={Rx,Ry,Rz,Rvx+Dx*M*Mag,Rvy+Dy*M*Mag,Rvz+Dz*M*Mag,Rm},adjust(Left,Bs,[Right|Acc]).
+energy(Bodies)->energy(Bodies,0.0).
+energy([],E)->E;
+energy([{X,Y,Z,Vx,Vy,Vz,M}|Bs],E0)->E=E0+0.5*M*(Vx*Vx+Vy*Vy+Vz*Vz),
+    Next=lists:foldl(fun({Rx,Ry,Rz,_,_,_,Rm},Acc)->Dx=X-Rx,Dy=Y-Ry,Dz=Z-Rz,Acc-M*Rm/math:sqrt(Dx*Dx+Dy*Dy+Dz*Dz)end,E,Bs),energy(Bs,Next).
+steps(0,Bodies)->Bodies;
+steps(N,Bodies)->steps(N-1,advance(Bodies)).

@@ -2004,6 +2004,22 @@ TEST(JsInterpreter, NativeHarnessSourceEntryInstallsTest262Helpers) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, CanonicalAndConcatenatedStringsShareUtf16Equality) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "var p='\\uD834'+'\\uDF06';var iterator=('a'+p+'b')[Symbol.iterator]();"
+        "iterator.next();var q=iterator.next().value;"
+        "q===p && q==p && Object.is(q,p) && q.length===2 && p.length===2 && "
+        "(p+'𝌆')===('𝌆'+p) && p!=='\\uD834' && p!=='\\uFFFD' && "
+        "new Map([[p,7]]).get(q)===7 && new Set([q]).has(p);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "canonical-string-equality.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, NativeHarnessMatchesCanonicalPropertyAndThrowChecks) {
     struct Probe { const char* source; const char* expected; };
     const Probe probes[] = {

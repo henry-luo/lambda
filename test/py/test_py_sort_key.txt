@@ -1,3 +1,0 @@
-['a', 'pie', 'banana', 'Washington']
-[3, 2, 1]
-[8, 5, 2, 1]

@@ -1,197 +1,551 @@
 {
+  "implementation": "direct-native-v1",
+  "registered_entries": 77,
+  "canonical_workloads": 71,
   "entries": {
-    "r7rs/fib": "julia/r7rs/fib.jl",
-    "r7rs/fibfp": "julia/r7rs/fibfp.jl",
-    "r7rs/tak": "julia/r7rs/tak.jl",
-    "r7rs/cpstak": "julia/r7rs/cpstak.jl",
-    "r7rs/sum": "julia/r7rs/sum.jl",
-    "r7rs/sumfp": "julia/r7rs/sumfp.jl",
-    "r7rs/nqueens": "julia/r7rs/nqueens.jl",
-    "r7rs/fft": "julia/r7rs/fft.jl",
-    "r7rs/mbrot": "julia/r7rs/mbrot.jl",
-    "r7rs/ack": "julia/r7rs/ack.jl",
-    "awfy/sieve": "julia/awfy/sieve.jl",
-    "awfy/permute": "julia/awfy/permute.jl",
-    "awfy/queens": "julia/awfy/queens.jl",
-    "awfy/towers": "julia/awfy/towers.jl",
-    "awfy/bounce": "julia/awfy/bounce.jl",
-    "awfy/list": "julia/awfy/list.jl",
-    "awfy/storage": "julia/awfy/storage.jl",
-    "awfy/mandelbrot": "julia/awfy/mandelbrot.jl",
-    "awfy/nbody": "julia/awfy/nbody.jl",
-    "awfy/richards": "julia/awfy/richards.jl",
-    "awfy/json": "julia/awfy/json.jl",
-    "awfy/deltablue": "julia/awfy/deltablue.jl",
-    "awfy/havlak": "julia/awfy/havlak.jl",
-    "awfy/cd": "julia/awfy/cd.jl",
-    "beng/binarytrees": "julia/beng/binarytrees.jl",
-    "beng/fannkuch": "julia/beng/fannkuch.jl",
-    "beng/fasta": "julia/beng/fasta.jl",
-    "beng/knucleotide": "julia/beng/knucleotide.jl",
-    "beng/mandelbrot": "julia/beng/mandelbrot.jl",
-    "beng/nbody": "julia/beng/nbody.jl",
-    "beng/pidigits": "julia/beng/pidigits.jl",
-    "beng/regexredux": "julia/beng/regexredux.jl",
-    "beng/revcomp": "julia/beng/revcomp.jl",
-    "beng/spectralnorm": "julia/beng/spectralnorm.jl",
-    "kostya/brainfuck": "julia/kostya/brainfuck.jl",
-    "kostya/matmul": "julia/kostya/matmul.jl",
-    "kostya/primes": "julia/kostya/primes.jl",
-    "kostya/base64": "julia/kostya/base64.jl",
-    "kostya/levenshtein": "julia/kostya/levenshtein.jl",
-    "kostya/json_gen": "julia/kostya/json_gen.jl",
-    "kostya/collatz": "julia/kostya/collatz.jl",
-    "larceny/triangl": "julia/larceny/triangl.jl",
-    "larceny/array1": "julia/larceny/array1.jl",
-    "larceny/deriv": "julia/larceny/deriv.jl",
-    "larceny/diviter": "julia/larceny/diviter.jl",
-    "larceny/divrec": "julia/larceny/divrec.jl",
-    "larceny/gcbench": "julia/larceny/gcbench.jl",
-    "larceny/paraffins": "julia/larceny/paraffins.jl",
-    "larceny/pnpoly": "julia/larceny/pnpoly.jl",
-    "larceny/primes": "julia/larceny/primes.jl",
-    "larceny/puzzle": "julia/larceny/puzzle.jl",
-    "larceny/quicksort": "julia/larceny/quicksort.jl",
-    "larceny/ray": "julia/larceny/ray.jl",
-    "julia/parse_integers": "julia/julia/parse_integers.jl",
-    "julia/matrix_statistics": "julia/julia/matrix_statistics.jl",
-    "julia/iteration_pi_sum": "julia/julia/iteration_pi_sum.jl",
-    "julia/formatted_output": "julia/julia/formatted_output.jl",
-    "text/fast_diff": "julia/text/fast_diff.jl",
-    "text/microdiff": "julia/text/microdiff.jl",
-    "text/hyphen": "julia/text/hyphen.jl",
-    "text/prettier_ast": "julia/text/prettier_ast.jl",
-    "text/text_search": "julia/text/text_search.jl",
-    "text/three_way_merge": "julia/text/three_way_merge.jl",
-    "text/log_pipeline": "julia/text/log_pipeline.jl",
-    "text/jq_mix": "julia/text/jq_mix.jl",
-    "text/jq_records": "julia/text/jq_records.jl",
-    "text/jq_bf": "julia/text/jq_bf.jl",
-    "text/jq_tree": "julia/text/jq_tree.jl",
-    "jetstream/nbody": "julia/jetstream/nbody.jl",
-    "jetstream/cube3d": "julia/jetstream/cube3d.jl",
-    "jetstream/navier_stokes": "julia/jetstream/navier_stokes.jl",
-    "jetstream/richards": "julia/jetstream/richards.jl",
-    "jetstream/splay": "julia/jetstream/splay.jl",
-    "jetstream/deltablue": "julia/jetstream/deltablue.jl",
-    "jetstream/hashmap": "julia/jetstream/hashmap.jl",
-    "jetstream/crypto_sha1": "julia/jetstream/crypto_sha1.jl",
-    "jetstream/raytrace3d": "julia/jetstream/raytrace3d.jl"
+    "r7rs/fib": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/fib2.js"
+    },
+    "r7rs/fibfp": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/fibfp2.js"
+    },
+    "r7rs/tak": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/tak2.js"
+    },
+    "r7rs/cpstak": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/cpstak2.js"
+    },
+    "r7rs/sum": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/sum2.js"
+    },
+    "r7rs/sumfp": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/sumfp2.js"
+    },
+    "r7rs/nqueens": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/nqueens2.js"
+    },
+    "r7rs/fft": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/fft2.js"
+    },
+    "r7rs/mbrot": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/mbrot2.js"
+    },
+    "r7rs/ack": {
+      "java": "java/native/R7RS.java",
+      "erlang": "erlang/native/r7rs.erl",
+      "node_reference": "test/benchmark/r7rs/ack2.js"
+    },
+    "awfy/sieve": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/sieve2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/permute": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/permute2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/queens": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/queens2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/towers": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/towers2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/bounce": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/bounce2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/list": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/list2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/storage": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/storage2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/mandelbrot": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/mandelbrot2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 500
+    },
+    "awfy/nbody": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/nbody2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 36000
+    },
+    "awfy/richards": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/richards2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 50
+    },
+    "awfy/json": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/json2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/deltablue": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/deltablue2.js",
+      "outer_iterations": 20,
+      "inner_iterations": 100
+    },
+    "awfy/havlak": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/havlak2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 1
+    },
+    "awfy/cd": {
+      "java": "java/native/NativeBench.java",
+      "erlang": "erlang/native/awfy.erl",
+      "node_reference": "test/benchmark/awfy/cd2.js",
+      "outer_iterations": 1,
+      "inner_iterations": 100
+    },
+    "beng/binarytrees": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/binarytrees.js"
+    },
+    "beng/fannkuch": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/fannkuch.js"
+    },
+    "beng/fasta": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/fasta.js"
+    },
+    "beng/knucleotide": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/knucleotide.js"
+    },
+    "beng/mandelbrot": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/mandelbrot.js"
+    },
+    "beng/nbody": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/nbody.js"
+    },
+    "beng/pidigits": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/pidigits.js"
+    },
+    "beng/regexredux": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/regexredux.js"
+    },
+    "beng/revcomp": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/revcomp.js"
+    },
+    "beng/spectralnorm": {
+      "java": "java/native/Beng.java",
+      "erlang": "erlang/native/beng.erl",
+      "node_reference": "test/benchmark/beng/js/spectralnorm.js"
+    },
+    "kostya/brainfuck": {
+      "java": "java/native/Kostya.java",
+      "erlang": "erlang/native/kostya.erl",
+      "node_reference": "test/benchmark/kostya/brainfuck.js"
+    },
+    "kostya/matmul": {
+      "java": "java/native/Kostya.java",
+      "erlang": "erlang/native/kostya.erl",
+      "node_reference": "test/benchmark/kostya/matmul.js"
+    },
+    "kostya/primes": {
+      "java": "java/native/Kostya.java",
+      "erlang": "erlang/native/kostya.erl",
+      "node_reference": "test/benchmark/kostya/primes.js"
+    },
+    "kostya/base64": {
+      "java": "java/native/Kostya.java",
+      "erlang": "erlang/native/kostya.erl",
+      "node_reference": "test/benchmark/kostya/base64.js"
+    },
+    "kostya/levenshtein": {
+      "java": "java/native/Kostya.java",
+      "erlang": "erlang/native/kostya.erl",
+      "node_reference": "test/benchmark/kostya/levenshtein.js"
+    },
+    "kostya/json_gen": {
+      "java": "java/native/Kostya.java",
+      "erlang": "erlang/native/kostya.erl",
+      "node_reference": "test/benchmark/kostya/json_gen.js"
+    },
+    "kostya/collatz": {
+      "java": "java/native/Kostya.java",
+      "erlang": "erlang/native/kostya.erl",
+      "node_reference": "test/benchmark/kostya/collatz.js"
+    },
+    "larceny/triangl": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/triangl.js"
+    },
+    "larceny/array1": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/array1.js"
+    },
+    "larceny/deriv": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/deriv.js"
+    },
+    "larceny/diviter": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/diviter.js"
+    },
+    "larceny/divrec": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/divrec.js"
+    },
+    "larceny/gcbench": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/gcbench.js"
+    },
+    "larceny/paraffins": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/paraffins.js"
+    },
+    "larceny/pnpoly": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/pnpoly.js"
+    },
+    "larceny/primes": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/primes.js"
+    },
+    "larceny/puzzle": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/puzzle.js"
+    },
+    "larceny/quicksort": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/quicksort.js"
+    },
+    "larceny/ray": {
+      "java": "java/native/Larceny.java",
+      "erlang": "erlang/native/larceny.erl",
+      "node_reference": "test/benchmark/larceny/ray.js"
+    },
+    "julia/parse_integers": {
+      "java": "java/native/Micro.java",
+      "erlang": "erlang/native/micro.erl",
+      "node_reference": "test/benchmark/julia/parse_integers.js",
+      "workload_contract": "julia/SUITE.md"
+    },
+    "julia/matrix_statistics": {
+      "java": "java/native/Micro.java",
+      "erlang": "erlang/native/micro.erl",
+      "node_reference": "test/benchmark/julia/matrix_statistics.js",
+      "workload_contract": "julia/SUITE.md"
+    },
+    "julia/iteration_pi_sum": {
+      "java": "java/native/Micro.java",
+      "erlang": "erlang/native/micro.erl",
+      "node_reference": "test/benchmark/julia/iteration_pi_sum.js",
+      "workload_contract": "julia/SUITE.md"
+    },
+    "julia/formatted_output": {
+      "java": "java/native/Micro.java",
+      "erlang": "erlang/native/micro.erl",
+      "node_reference": "test/benchmark/julia/formatted_output.js",
+      "workload_contract": "julia/SUITE.md"
+    },
+    "text/fast_diff": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/fast_diff.js"
+    },
+    "text/microdiff": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/microdiff.js"
+    },
+    "text/hyphen": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/hyphen.js"
+    },
+    "text/prettier_ast": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/prettier_ast.js"
+    },
+    "text/text_search": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/text_search.js"
+    },
+    "text/three_way_merge": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/three_way_merge.js"
+    },
+    "text/log_pipeline": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/log_pipeline.js"
+    },
+    "text/jq_mix": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/jq_mix.js"
+    },
+    "text/jq_records": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/jq_records.js"
+    },
+    "text/jq_bf": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/jq_bf.js"
+    },
+    "text/jq_tree": {
+      "java": "java/native/TextBench.java",
+      "erlang": "erlang/native/text_bench.erl",
+      "node_reference": "test/benchmark/text/jq_tree.js"
+    },
+    "jetstream/nbody": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/n-body.js",
+      "repeats": 8
+    },
+    "jetstream/cube3d": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/3d-cube.js",
+      "repeats": 8
+    },
+    "jetstream/navier_stokes": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/navier-stokes.js",
+      "repeats": 1
+    },
+    "jetstream/richards": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/richards.js",
+      "repeats": 50
+    },
+    "jetstream/splay": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/splay.js",
+      "repeats": 50
+    },
+    "jetstream/deltablue": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/deltablue.js",
+      "repeats": 20
+    },
+    "jetstream/hashmap": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/hash-map.js",
+      "repeats": 1
+    },
+    "jetstream/crypto_sha1": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/crypto-sha1.js",
+      "repeats": 25
+    },
+    "jetstream/raytrace3d": {
+      "java": "java/native/JetStream.java",
+      "erlang": "erlang/native/jetstream.erl",
+      "node_reference": "test/benchmark/jetstream/3d-raytrace.js",
+      "repeats": 8
+    }
   },
-  "algorithm_sources_sha256": {
-    "julia/awfy/bounce.jl": "40fc9c8e87ad9f5dcd82457675871922b7471fb9c450e583276820f8019f4df3",
-    "julia/awfy/cd.jl": "e30525b7f76c648037bce7309480ca9d7895883557a1ce26cc9b91dd7b000744",
-    "julia/awfy/cd_core.jl": "bb96a0afc5a39faa4e673dec4140f7715d08e3d457e57449e4c37b2354cefa95",
-    "julia/awfy/core.jl": "95cceb62d361560e6447ad82474ae8f97caa6da7726257dcaa1a0d8c02c654e2",
-    "julia/awfy/deltablue.jl": "28d5851c2f8abe28c70a80ed0a48b4cbbaf6acd0b63f85e48f8a6077e2c7d43b",
-    "julia/awfy/deltablue_core.jl": "8240de2a4a631ea9e91f75dbcd91142f7e04ec8ef2b9950dbb3a60810bcaa7ae",
-    "julia/awfy/havlak.jl": "5482bf98d228a4798e8f25dae4418e109b97d3777a8f13c81267d987a559be52",
-    "julia/awfy/havlak_core.jl": "2bc60c2af783b377db1cd61582190dad69d72115580042f49ed7c10d7c06418b",
-    "julia/awfy/json.jl": "b79569badf368958ecc537c83da41e257ce1fb0ed02121062379db0b84bfd181",
-    "julia/awfy/json_core.jl": "03932cf7f43d534944562bdc148e7225a0cdb11aba4d903e7b3c4b2c47dbfaf0",
-    "julia/awfy/list.jl": "a73de964773afc46b9925ddfdcd640c5ed5f8cdaa80452f304a59ea629278a9e",
-    "julia/awfy/mandelbrot.jl": "4be572161fbb9ca34923c155679b0e7e169bf52448ded3d5868e234830d56a6f",
-    "julia/awfy/nbody.jl": "13497d6ef299dad327e4663dd90c73d0d59b5ea81a4f82277df752d7bc077e9b",
-    "julia/awfy/permute.jl": "7844fb1fe37a04b1be8a18f6f1e7eef642a1c2dccdbb9c28544ad542a08b52e0",
-    "julia/awfy/queens.jl": "77b265902cff57c395e131f5e929a43c02b18d6db8fef3f80fa4de42e2752bfe",
-    "julia/awfy/richards.jl": "f789fcd9f000ca72fe93eac9fcb3cacd41ac50cfe7583dab646ba3af34b21248",
-    "julia/awfy/richards_core.jl": "116a05942eff3fbd8fbf5e4e0638f5ee5b2e7674f0dc61d21ab484c05dcc8c79",
-    "julia/awfy/sieve.jl": "36b379d27bcbe4f442cd675b6fbb85c7732f36baa3044d6b3ef253c88cb89846",
-    "julia/awfy/som.jl": "29adc1e0e30054384445978b0b3ed611f66527e157142f15b46257afe759dff2",
-    "julia/awfy/storage.jl": "67d65ee39d276769641309c36f90a9f975ac81d0eff2f5b6548a55ccb273e6cf",
-    "julia/awfy/towers.jl": "b2a1120e89217ca02c58063edec02b26cd12e2c0986b2c4950a3778f02cc5a8a",
-    "julia/beng/binarytrees.jl": "78fd07794052653f6e6b4f2013004b90bb8e543f5cab919e0a5a55f47af9a866",
-    "julia/beng/core.jl": "00da1b2f949f8876a6b4e1454ddfa3eb7daeeabe1c96dff42209d3b965bde941",
-    "julia/beng/fannkuch.jl": "248ba60e066b8ee9bc65c131bde3d5c13dd1ba4d55f9be5a40d629466ac55f95",
-    "julia/beng/fasta.jl": "4bdf5a23364f2500d97ff5d012f64ecd5ff1220490bdf307eddc81de7cad5df9",
-    "julia/beng/knucleotide.jl": "5a5f51e45574c3773b8795b2d1126248f19e56ba6d8726fc78c02e074f9e48a4",
-    "julia/beng/mandelbrot.jl": "a8ba0cf5334405b8e97d86ff4d3bbd1ab995c0074fa2ef65f769479a31e0223e",
-    "julia/beng/nbody.jl": "4bc812ab79baaa61602efeaccf03d55399f68b3fe94a5c9a4363f374f7b2e331",
-    "julia/beng/pidigits.jl": "18fbf14bf9eaeeded63d5e62840b456b7c4d170b8a503d11afbf3453c043f7b3",
-    "julia/beng/regexredux.jl": "7e9d472c79763a325a43da1fbfd7f57226012e44159e6713f7e8c410e3e48d84",
-    "julia/beng/revcomp.jl": "f859f823b179758a41e39b39c38187954c34df96a2d5878382b4c8d889b09f9e",
-    "julia/beng/spectralnorm.jl": "4cf06b28c2e246a0babcc9f5e592341878af980c7d89612a71749a3031874ec6",
-    "julia/class_support.jl": "e2f23a7da2a71ea9af12312400d0a0dbee4c7b605fd88a1e478115261e2ebbb4",
-    "julia/common.jl": "2ee55457195de4e41447305454fb39f99cdbc6266286916d8739478f85dc81e6",
-    "julia/fixtures.jl": "e3aad537fa940f93c575d68590b558659dc193db4170caa50790ad330635ddcf",
-    "julia/jetstream/crypto_sha1.jl": "e5caeed41d810fda6fd49d030201387693cff32ead66d9215d83cf0dc9336489",
-    "julia/jetstream/crypto_sha1_core.jl": "7e254f270138b4432be44bb1d0c8f1c987531c8fc68c811324055cb49c6e3874",
-    "julia/jetstream/cube3d.jl": "07f6c40bf281e06c9bd9fe13b9e70b37cb4cc8a5ed99922e21b1a42372909e77",
-    "julia/jetstream/cube3d_core.jl": "384d62a0bffd446a0b47f9cfcb355cf6043c62c205248e7124a58bfefbdff631",
-    "julia/jetstream/deltablue.jl": "c948e82ad6346f99d0e89022201ecc6bfeb12463012bb79d775bd24753cdd037",
-    "julia/jetstream/hashmap.jl": "83ca1705b2fbe864b6d2545d8ed1883d50f1c82f45b316450c4b66537adea8f8",
-    "julia/jetstream/navier_stokes.jl": "a9c718149815323a9da4203a922ec45cda7b88846427589d957ff339b642988c",
-    "julia/jetstream/navier_stokes_core.jl": "c4159e5509a56cae8f6832b40bf6cd60d43dff819cb493011d95f917ff78b603",
-    "julia/jetstream/nbody.jl": "e0eb4fd7bdfad9c9939c1080c71e2bd01f1cb0bb631276bc6fbbb4265919a508",
-    "julia/jetstream/raytrace3d.jl": "e4a5383902e0f17d86c65ed10dbf28a03d6319274f5a834381b3ad44380a3bf1",
-    "julia/jetstream/raytrace3d_core.jl": "6236711c9a54efd13859481aad1ac8ded922fd6dc68a1fed6b5ce94b11b8da90",
-    "julia/jetstream/richards.jl": "75dac4d29b97dcd82471effb3157808081849462e40d99d59b8f41f8509bbb4c",
-    "julia/jetstream/richards_core.jl": "1a886830fe22c75f51e4c756550186f38fbc856678e8d470451579b934f9b2d3",
-    "julia/jetstream/splay.jl": "3de3e97891f2402b6495d0ed655269e24c7926231b3988131a2b427f37be8cb3",
-    "julia/jetstream/splay_core.jl": "a43badcd7da562493f8f994a0a1475b5cc1859c3fad618a0c1b563d05247b6c6",
-    "julia/jetstream/support.jl": "81a63869cfd77f375fec485bdf163bf73f72c53d55411d1399db519d23c46f8e",
-    "julia/julia/formatted_output.jl": "9310a0fafa6d0fdb8afc90d59a2a58612ec2167eebd85abc792b514d6624bac8",
-    "julia/julia/iteration_pi_sum.jl": "d5aa512d9c9cf50b2f6dedea6c0a7b517d59822b2bfcce046bab21433f8c862f",
-    "julia/julia/matrix_statistics.jl": "90a336f9eda3ac40486f14d76b78d958ed79f70e2daf6ab810871eb218afae76",
-    "julia/julia/micro_common.jl": "3d9a23a3fc4341a592caa13d8c5828c2f4300d1c559621f10a06a06d0580735c",
-    "julia/julia/parse_integers.jl": "c399c5a77182f3ba2542e49f20a66bf170420ec9a049b68edabb7c9197eff850",
-    "julia/kostya/base64.jl": "39ad07b134f3f9ee271c3b297decb87eb2bda00639baea7ffbb6b6cbadf52dbe",
-    "julia/kostya/brainfuck.jl": "677b1bbf0335e05fc2ad585fa45df2c9c9fd1e31b8e2b8c0069d5326e35aaf17",
-    "julia/kostya/collatz.jl": "13b34f12029fec3e947cfb97af0a8e885782542a821284cb357b89d988b77e6a",
-    "julia/kostya/core.jl": "92c507fcb755322c5ce8f097a5c9c0ae4bd0926cd07a78dded5768f3860c3152",
-    "julia/kostya/json_gen.jl": "8bf4b3e771115f224076e25dbb04c39d0578b28402c9ac24196170b4afbf6251",
-    "julia/kostya/levenshtein.jl": "f0c3e3a3fae3ec934c27698af8dcb50d1e975b6c474ed0c8ced2bf54e253c01c",
-    "julia/kostya/matmul.jl": "2a5929e2d94cf74b9960d880ecd3d1941a4f4edc46df4e799ddd128972c8563a",
-    "julia/kostya/primes.jl": "9c910245aba284677c275da800edb97e043232fb649ed70bd798c60fc2cb603c",
-    "julia/larceny/array1.jl": "63279d74c1160b99f39928b74d851b644842f3963c108d4db9e523a05205e891",
-    "julia/larceny/core.jl": "749a8fcca0b1474327306b1e404d2162aeaaccff6ab6d19978b5b52931d6d04b",
-    "julia/larceny/deriv.jl": "3598b33d98ecc18af4a454da568f1722260d6d894f4b3a1802190b82b6d5482a",
-    "julia/larceny/diviter.jl": "62abda5da9b296bbb3c4c902c4a6e8d2d0f53a28225b9e6b5c739d3108fbe340",
-    "julia/larceny/divrec.jl": "5bb7b3fb2cb6a92bca5ba9ca19fda61e1b030255422d41df8ef1ee2555dc592a",
-    "julia/larceny/gcbench.jl": "cc45f3d3b86380184075d37903c6ecc0821487aca7407e5789c885836c3f69dc",
-    "julia/larceny/paraffins.jl": "ee647e2f98e88d6ad664aeabd66b5dd83fbf4902045f21ebb1c3d4ed89c17783",
-    "julia/larceny/pnpoly.jl": "8017bdbcaf35950786401bdee4bc0ad1e04985faae4aa77ca5faf24a95ca1ad0",
-    "julia/larceny/primes.jl": "9c910245aba284677c275da800edb97e043232fb649ed70bd798c60fc2cb603c",
-    "julia/larceny/puzzle.jl": "e34df114ce508833e3086b7c3f1191b30296628436f11fe07004cf378acc7e02",
-    "julia/larceny/quicksort.jl": "20ec72b37ae1adf15177f90abb9718030b388b67f0f7246bdd5a23cefa100ab2",
-    "julia/larceny/ray.jl": "d7af4034cf9caf285543de16a63b9653ed02b55dbb7b154bd99559c8f079be40",
-    "julia/larceny/triangl.jl": "ff933be63b24bae14c1cb231436f30516ffc4439068b3141fe2151240419c29e",
-    "julia/nbody.jl": "f2448c0945cee76b78339d2cd1c6b88c2a10f0b00175cd2c707b3007a66cc3ad",
-    "julia/r7rs/ack.jl": "5bd2ee77e021631a7dfefb241409cdf06f24656c3268795bb87dd773521493e1",
-    "julia/r7rs/core.jl": "b0bc20352c82522586ff4a399a9e6a59fd82467f8a9f037dbf48e9accc53da50",
-    "julia/r7rs/cpstak.jl": "67d570bf31a592fc63debcfccb0b76c6fb5ce075fc0106978e5e75e7ee7ccfa9",
-    "julia/r7rs/fft.jl": "91d646240350d688292d7100158acf9281888eac4bf86e36d15e16ca6d8dcc4c",
-    "julia/r7rs/fib.jl": "01b244213bc511037820fa90d49bf9811bebc8ef91e6ec7b714f233c72bdecd1",
-    "julia/r7rs/fibfp.jl": "c5738e75ec8327decef31e7c01138ee67cdabe20cab423823391ff30fc31c320",
-    "julia/r7rs/mbrot.jl": "1008ab3fbbbaaf4ba4c050dc9fe61946af4a23dba5ae2f5d2b09d0ad6adfb859",
-    "julia/r7rs/nqueens.jl": "207fd3d7e60c7cecf9008111b2a3ab105bf7376a470b963956b6b75bca737e6c",
-    "julia/r7rs/sum.jl": "63b0d7746b5bcc1bbfb44ca931c836494ca135510184326b99e001129d07b3bc",
-    "julia/r7rs/sumfp.jl": "49416ad5d7b853a9701c836b7076d96e5105a3b03f55124ff99ee00dd875a2c0",
-    "julia/r7rs/tak.jl": "9141b2ac7ec00268963d49a95c6584048ec7ebb7f6cea287993b81b4b1ef67ed",
-    "julia/text/fast_diff.jl": "8c85dd4336332518ba068d48a2b0bd06719403c4ef7a5404bca7b9f5be8df67b",
-    "julia/text/fast_diff_core.jl": "2dcf2528ba6e54d7ffc7d467ade4c82614a53b94c65ef3faf06f6357b7899800",
-    "julia/text/hyphen.jl": "b0831b6666b4b3bd1e13853fb063b778cd4de1ce0448866ff75efdbdb60a749a",
-    "julia/text/hyphen_core.jl": "f1c6fd242b9403dc0c5b62c239cc3742377e098e9d5b6dbc5ec57918a2a76914",
-    "julia/text/jq_bf.jl": "81a9caaf626efe2d128e2291b4e7d6a0da3674d127eb48b9a3a5313d55cc7cb1",
-    "julia/text/jq_common.jl": "8a0087fecbe90036da60bb82250d2ff037fc5cf74cbb58a81994224e041a4116",
-    "julia/text/jq_compile.jl": "c596cab26c246f4f85ef3347962c1356a1ef8411f26cac75d772aed003eea5d9",
-    "julia/text/jq_mix.jl": "a678f5a8e01f6b26a4e739465df851dfef4a146e50e68afd063d2fbe0139fb87",
-    "julia/text/jq_native.jl": "9449d22927d3dc01a5f4fd6fffb9a9d008b7e8fcddec3734a25e160c36e867bb",
-    "julia/text/jq_parse.jl": "1d9f44b20dbb02843b9eeedde6075fc2dfd4697d64da58aa932b548ef8e341b7",
-    "julia/text/jq_records.jl": "e13fdc52d054550204da750a6c7ff5b3a62cdd362dc3ae1eaceaf114168645bd",
-    "julia/text/jq_tree.jl": "2dc825b8486ce697aa252d79ce1bffd5ed3c0f50096e58e654f9bfddf9c45b2c",
-    "julia/text/jq_values.jl": "4bc5140863534220a6fe91e27c77145e70340f53cc425edc461ab571b316748e",
-    "julia/text/jq_vm.jl": "31d16c32b92e81d14610aa52441ce5e6ebbcbedd382c412a496aea120672f948",
-    "julia/text/log_pipeline.jl": "423e1d86788edab2ec2ff78e983536e95dc892c12dbe3fdeea6ae38c40a96754",
-    "julia/text/log_pipeline_core.jl": "c521d0588a20a4b559c868f0064d1924c2d63b78bc314dddf5ce72aed3cd3bad",
-    "julia/text/microdiff.jl": "248edfa1d2320e746f6690f857551fba27f4df3d3ee1f25ccfacf54f7423c08e",
-    "julia/text/microdiff_core.jl": "ba6262db8e675072ee53db430aca0a22095e6438ce2db92935b1d811afbc131a",
-    "julia/text/prettier_ast.jl": "85d5771914dee1a67cd204db18e6ccda90f47b0f207fc3a5177f0f15680d9af1",
-    "julia/text/prettier_ast_core.jl": "a4b7037a98281a04d31b359e8c289719c4038e3ce889b67c02de8e157133a476",
-    "julia/text/support.jl": "cf919a58d3e33fc04ddd2d95b525dc3523149560872cf52c9431c8877c818d28",
-    "julia/text/text_search.jl": "aff16c8a6cfbf448b2f7df6bed7528ff75775b525f25de2ae411aeb612a77f41",
-    "julia/text/text_search_core.jl": "adea278111647beb06f74ed6bc147f62ef20568238ddb02fbbbf1b85fd3904f9",
-    "julia/text/three_way_merge.jl": "64d095c877ad7f8969b78d4fcd23245b5bd9fe769bc7ffe909e232075042d3f5",
-    "julia/text/three_way_merge_core.jl": "86e74b4e9858f4d837f2a703b1fc03cb99da28d6e95a74ad9556eeb7336fbe67"
+  "reference_sources_sha256": {
+    "awfy/bounce2.js": "6cacae10352156db578b69c919e30e1e2a42fb4aeba55773bdaa00d95af70885",
+    "awfy/cd2.js": "7b501e19a8e50876d7dcaacb1cb2f48ab8fc00d07c78f13acc7559a9ffb24ce3",
+    "awfy/deltablue2.js": "ff5134efca8fd84f793c0f991d7bfd94bf05c034d55d8bd499460453f1f44543",
+    "awfy/havlak2.js": "b9d01c692c24c0728106b68dd0137482f766ce86b72eaa49c272c003a1f18b39",
+    "awfy/json2.js": "1f6bde372efd2125c5291355fc1b5535d6bbb80f4acd3f4f43b037d9948c0ca5",
+    "awfy/list2.js": "31937ef17f9815bd10c0ac5c0b57b77c7cb450a9b1951adf8fb4d734b9ab78b6",
+    "awfy/mandelbrot2.js": "088bd0c2e58f642c49debc4816e086dd188099d76270dbd2a3f0bac3bf533db3",
+    "awfy/nbody2.js": "edb4538649145a6dcf97cd45a63f99c6cd6979056791837de93d12926e526b6a",
+    "awfy/permute2.js": "71f0415801236e22c7c6fb1899ff93647983a1877efa213617d78b72860228c8",
+    "awfy/queens2.js": "b46bf5c587ebb0f6f0508932b4dfb5617f290a49c361f66ec1ca8ad1847f32f4",
+    "awfy/richards2.js": "4724c0accf46bae6297c543025f7a066503e67668e6e8c64fb7dac74075e884d",
+    "awfy/sieve2.js": "a04facb05ebf5b42dfd4c99634dc9bdebfcc69c9b6d3e77a8e014b3e0abe5a74",
+    "awfy/storage2.js": "a81cfbf4c537004ef21059db2d3f69e3f372ed7b6c43daac4306e4becbfc39a6",
+    "awfy/towers2.js": "89d49364e0533cf0fce0a76d2e7664473c3c5c769227d5f1b3328e59ab06a58f",
+    "beng/js/binarytrees.js": "d3c9ab48525f99aa03da84e3fa8e61095ed45d0670892653fc47bed3cf120cbe",
+    "beng/js/fannkuch.js": "f090bc1ae21ad43bf0318fc70af04010e0dff1f3598b9fe94692f07138eec757",
+    "beng/js/fasta.js": "d2e03674e3cc0cc022c36524df696777973c824afe84e062ecd58c7063c29477",
+    "beng/js/knucleotide.js": "59d8c8d53609d3a97e21ea0c2d93e01d717b78a4417bfb28727c1150262560bb",
+    "beng/js/mandelbrot.js": "58b15992a97f0d7b6eabc7465352b2e3cf4c1a54d578b7a64d3aa0f35930b428",
+    "beng/js/nbody.js": "0ca0a1c81ea36aee9f0f0596fa692e53535d008fadb2e1f8cfc2c5de0ca98e61",
+    "beng/js/pidigits.js": "8d971aa758c6f1c958da10ef7a2219de7c77b2911211cc819e78d1b23eb4dacc",
+    "beng/js/regexredux.js": "8dd0b79ac2655798d4f8eb42718f9c50996f0fabec52e03de1bd1ec64ba6bd19",
+    "beng/js/revcomp.js": "8e16e9b3b1631cc53fe9f938e4072f939b3397eaeccdc1c031b20e7173e352ef",
+    "beng/js/spectralnorm.js": "8a48f6b6a0c468050f86a919797d0d8665a3fcbbdf34ecf10013fae532779077",
+    "jetstream/3d-cube.js": "b3e46da521d5a04dafe7676cbec38fbfe24178c03de41b20ee835a5c727c4ca1",
+    "jetstream/3d-raytrace.js": "b11273b2e298b2ce04c3a443f18c9195addf40950f9aec86e8a640fa253871b9",
+    "jetstream/base64.js": "1bb7177f1e3b68f3fbe3cf8f95bd8f10c3782d21c030c30d9b047bd9062f8708",
+    "jetstream/crypto-aes.js": "9b6d5500c7041e8da0a9aea2773e7661b83d80b0bf74f251c82cbf4311b31e96",
+    "jetstream/crypto-md5.js": "211d392be7f575397b5dfec55d7ee9fc32bbf3daa4c58e061656482fbe915e89",
+    "jetstream/crypto-sha1.js": "40373456ed4f3ad965df265b6b671d36f42a91d0b6e14d1a534dd76e5ec0a60e",
+    "jetstream/deltablue.js": "eab88dd7294bbc775ff1354bc6f1be1f196ff1401b5b21aba2123eb28f296f92",
+    "jetstream/hash-map.js": "2a8807fb02f4f35fd741994ccec18c72fd211ef2cff94278317cf4c07c63d8a0",
+    "jetstream/n-body.js": "ae2f4fc4cf3a0b126f6c4246e7ab040aac7e6e4584b7e2c21dc7a5bcc1426082",
+    "jetstream/navier-stokes.js": "24ff01d4efb18f994786659b04bdf79d74821461c99e9d8c29c2ea0081ff161c",
+    "jetstream/regex-dna.js": "80d2cadb48c715f0724a42edc6ad87c180a99579b5aea79af0a536d437aa0c1e",
+    "jetstream/richards.js": "fdbc6b3f4e7c305247074d8a5e54d4b4ff8550a94053431149fbd4149aa05e4e",
+    "jetstream/run_jetstream_node.js": "cfcb39de7a466877bb74044dc9c2a61e6bfff333dc0bbe26403b480a093847f4",
+    "jetstream/splay.js": "3ac49277a4ebf21a2d352acf019ed6536c15b53300d3b884784b8dcd58273b37",
+    "julia/SUITE.md": "f1c80a69aeeb38666630ceaa0d8a15215e0d1577311d28082285d24669aeca67",
+    "julia/expected.json": "d1cbc591bfeb4481b1ec3f69f622684ed067ec11000c2d47463fa5ad6b0a32ac",
+    "julia/formatted_output.js": "2da4197fb1090fd8f21171e8b927f7eb487d14ed6b9a7f30d387371786ba92a8",
+    "julia/iteration_pi_sum.js": "7709c7e241a3dfdadfe4136991973e057982953980a19d661df586437d13dab6",
+    "julia/matrix_statistics.js": "0f7b83b6059b14c589f7f3909654e4f23a2e2388355b194b30db74d7f2987acd",
+    "julia/micro_common.js": "8a42c48a8df86ce87c0dba469418bf82141286f786ced6e18e43e63960661da0",
+    "julia/parse_integers.js": "981c75b0033f9648ae627a2c4602a24e14a6b4751707b1c6c4512a6d8a24f049",
+    "kostya/base64.js": "5a88cafed700d281940634e82caab6dbc8d9dfe399b525317f8d6d1586dba1d7",
+    "kostya/brainfuck.js": "aff69c49f3b071b1289bd10e03926e31f8698bb531b97973af59ba5ea9735827",
+    "kostya/collatz.js": "2fe151d0458aeca7d6f9a06a1d718dadf8606173e280dc92c1f2c1fdff6fa19e",
+    "kostya/json_gen.js": "bae5d919c6971d319248dd53be32030b81953b18c06e4d0e5c754b191ec6e987",
+    "kostya/levenshtein.js": "de0be10e431a30dede2faea645edb3927ed2d88d38b6f831d91662fbc8c78759",
+    "kostya/matmul.js": "2e0b91da3cb9516477a9ef0fc87045c93caf2cea50107d8ed0668008342c7bd6",
+    "kostya/primes.js": "0df2aed8a87fa0d266f24ccd85f5cd2e6e1bd1787ab05f30b71ef832a0330450",
+    "larceny/array1.js": "9f2d835d2bda29f8084bc2407f661d3c00a7a6d92ee51c782998cb7f48c25fab",
+    "larceny/deriv.js": "572ad4d53c3f35f204c1b8a53f226746fc1f14430c011e14031657c9bbc61d7e",
+    "larceny/diviter.js": "d3445de07b40f4ca9e453a3035218e1a90108d64db34dc12740e8f208e7f1d01",
+    "larceny/divrec.js": "0ee5bcdb4738d22e4f9fa9efd719d70d0ca206725ff5e74555b5c37474a6ae90",
+    "larceny/gcbench.js": "a4ce81ae58b27d4be34281f236227038d0a2f412f67e69fb7713a7b813015e28",
+    "larceny/paraffins.js": "b20b3b843c6891b8fae195ac06e35e2fe0e5e679b965c2a90a1b4a26564ccc28",
+    "larceny/pnpoly.js": "2b5482fb81257154bc62c4271d6ec8753408e518e3b8e332dc6c8b85669903d6",
+    "larceny/primes.js": "9799400e3f195a0634b72c70cb4a45a1cee1af30b8b15dea753fa2b0aaaf1596",
+    "larceny/puzzle.js": "07e1a4172c2867862e487275f94b3c1465ab56d6e4ce2232debd79156908b3ec",
+    "larceny/quicksort.js": "02fc9074f65071e7dc81951402e597f7d27949d5f84b4d042e8efc5fb8030a98",
+    "larceny/ray.js": "e19331e46ad88d2caaffc6e432c7ac9b863a4cd7a17f940b53595a811112552f",
+    "larceny/triangl.js": "7f28f785f625f6fc9f5363b38834e143315baebb6b1946bf944517f824ffe748",
+    "r7rs/ack2.js": "61088542b483aa31c34bf57efba08c16bec5682788489c839eb99c0f52c5ed53",
+    "r7rs/cpstak2.js": "369a27186b1cf86e268fc870749994e9b1791252c630868f54864cec7022e837",
+    "r7rs/fft2.js": "a886ca3a6c204efc32a779acc30b27abebccc6682e9922897eb0757ef86cc896",
+    "r7rs/fib2.js": "6e681b5f5db08d124b8b4503375b0b880e1f557c27c031d383e73a18db315380",
+    "r7rs/fibfp2.js": "2e10fe27110881ef0fe9d5f875a39ba415c5534d422b913810a903e98aeb660c",
+    "r7rs/mbrot2.js": "2d0f087451321e56b00dbfe4d2a4bc24ef66df6fede703dd261d89b92d53bdcd",
+    "r7rs/nqueens2.js": "c6b433248cb7ad718502080c5c9512caec312225b2d10fbaac808b98f3021e0b",
+    "r7rs/sum2.js": "eababc2f0ff053df9c232ff1af8a16f05bcec46c928ef8bb2709538087f862a3",
+    "r7rs/sumfp2.js": "30b0437e0a551841468b51abf8ceb1c8b920812103b2f1dd083868b6fc70ec14",
+    "r7rs/tak2.js": "0ac38fc0eb3df05ccb7c57269fcadbfa5f0e0e37d0b419971e59d8539c1d07a9",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/benchmark.js": "78f9885e38de580aac46dbdb65e78be4ac0974d7e2d2807dca8f77faae43eca7",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/bounce.js": "0aeeb84313960f6403943c470858cc27d64b1d629975d3bfdc62c68019d3a7e0",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/cd.js": "a262564b91b040ddeb1b7643bb2d15921ca913b758b2fa7a3d5f4119f2ee88a4",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/deltablue.js": "dd7401169151bb9f2dc54638334ae5f5ee0255061bb33fa8c505a92c7a3d37c5",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/harness.js": "368a9b986de3f5d3b28a5e8d6e6a31cec05288fc14d407a35da6adae52d6ebef",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/havlak.js": "e58c62bed6a454ab70ebb76e232c122a6282be2a9f296ca51f0493087521ffcd",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/json.js": "47b68fa926fc56f7eb5bd133e3258827b54ddf6ea70a8c366326208c96e82f9d",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/list.js": "86b98e220e626cc36a9781d581b3f24e82ff9e3dc7155639f47d237bc4586576",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/mandelbrot.js": "ede7cde7d7f35663230edf856724e740547073475352be6384610bc211c6ff22",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/nbody.js": "5c05d5bbb738b5b837b77b3877825ff88747a1fe60f0958514d48c9964bad540",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/permute.js": "663464b098850cb1ee98f20401b8a0edee181870d21c7aaaa35b16034591c86b",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/queens.js": "fcbfd55b6f90fa9db403a7982db415fa09fb0263d47a6b0c65a3b8d9b6cc1b77",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/richards.js": "abdd85fcae5f29071fea709ddf3460eaf892e6f5547599ea3c0ed4dd83f64dad",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/run.js": "03732bbf9b5ab07ca8392afaba818e584ae77a9c479ee7366eaf5983ca64f6a5",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/sieve.js": "6f80ce83cecc9b33c2eeb8ec8b83b59d605039fce45c1c55f906c156ddaaa844",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/som.js": "0bafab9b216476b3ea13735b96ca8302015c35c04ad2119cd48d8a4b4c47212c",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/storage.js": "02aad7895005f6af7f9ad251c5d63aca4c4db805e2154e513bfb021dcf5aa846",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/towers.js": "2903897475e554bebb06a1d56ec7b829a74227944097728ee640a0edb5564c1c",
+    "ref/are-we-fast-yet/benchmarks/JavaScript/webpack.config.js": "2e26767d30050b471452d34da4bc44a10f2694e3e1ce3bfa4c45534662db8f79",
+    "text/c2mir/jq_core.h": "002ea2e44651a63ac7eecd4f7d61fd34f217fcbaa7f628439e19496dd01ca231",
+    "text/c2mir/jq_parse.h": "5db4b10c6376cd4fd8ea35791453fa136ed18e95b1ec854c7097820e6f86c230",
+    "text/c2mir/jq_value.h": "9b437b1526a95b13ab71336202eb0e580eead6c1806c22d85de9bbe1b9d674db",
+    "text/c2mir/jq_vm.h": "c662ce93d01ee0ab17b8ad5525ef5b44b1cfac7efee8c3dd108bd15dbfb2f940",
+    "text/fast_diff.js": "aaa9ba17140a375aafa94ee1cb655a4cd81b934c538cb27814f58ca331a6902a",
+    "text/generate_fast_diff_fixture.js": "d9edc54dac298b9fe5e6365db457beae07a4e76d22a47b20415d36b5d1dc39e7",
+    "text/generate_hyphen_fixture.js": "69bc1020cf823026f2e67f4e27ae7e777249a307dd5c127c882f9354fe992a94",
+    "text/generate_jq_fixture.js": "b3a288355f4974e77ee512c2f60a3f661a56b51cedb51eacbb8d3081c6593be5",
+    "text/hyphen.js": "cbe9668ee61cb04f1505fb5d7d80fa8c103a0f435da1d63cc3bee6dbdbe48c9a",
+    "text/jq/jq_driver.js": "98e09c2e42199cab86f758a97b3e9925a0d2312affd0f8f3175922a5680675c6",
+    "text/jq/jq_helper.js": "a6f89559feb738d715b30400c8e981edddb9583b298fcfea0afe04138d1c5d3c",
+    "text/jq/vendor/jqjs.js": "39051fde8be69e6c87cf97162dbf2097fb9d3aeec3fa88db3720b7ada2b9b36c",
+    "text/jq_bf.js": "f8fc121aae0f84567082f7738acaf71ef956c62f2d84c573047b0a699b291b3e",
+    "text/jq_mix.js": "0858450cd6b2feabd138a13fb301e92a03d137f68544b3f40f2d5980f21a1cf2",
+    "text/jq_records.js": "518d940cbc856f0034106f995d4b38828797ee6ee7c2a5b1af10c4e52f847e14",
+    "text/jq_tree.js": "1f32a5de04a18d027879cc0593b084c3f57c7e3d66653a81c5f04dd8834167c7",
+    "text/log_pipeline.js": "798df1c71411f12080859b8789392b9be759b211f01ea8e2106ae9e76d392a41",
+    "text/microdiff.js": "010083ba2b26117e656015605ff95f21ec0117e5a69746fb693df00b46713656",
+    "text/prettier_ast.js": "911df9164354f6c97e7bc5ad56c8afac64aec502bafdd951c95f3aea7268a309",
+    "text/prettier_ast_preprocess.js": "3dd19f8805472a33d4a660c0f41be808a325c66f5a4b18bd987ae673cdb05029",
+    "text/prettier_source.js": "b7552a1bc51a9c2dbe20293e21b8a3a1582a048a306d5cf62ff56e74f8746312",
+    "text/text_search.js": "3778d1fc127bb2ea6105d78affd906f15f957bd5c31ff933b427fe3cd2b0a4af",
+    "text/three_way_merge.js": "68d15f68c376a722e50ad598990d33ad4cb0376625fb98480d441d3b333960c8"
   }
 }

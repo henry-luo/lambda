@@ -1,5 +1,7 @@
 #include "../../lib/log.h"
 #include "../../lib/string.h"
+#include "../../lib/utf.h"
+#include "../../lib/mem.h"
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/ref_counted_pool.hpp"
 #include "../lambda-data.hpp"
@@ -483,6 +485,26 @@ NameId name_pool_name_id(NamePool* pool, StrView name) {
     return existing ? name_ref_id(existing) : NAME_ID_NONE;
 }
 
+// only adjacent surrogate encodings need rewriting; ordinary UTF-8 stays allocation-free.
+static bool canonical_name_view(StrView* name, char** bytes) {
+    *bytes = NULL;
+    if (utf8_key_is_canonical(name->str, name->length)) return true;
+    *bytes = (char*)mem_alloc(name->length, MEM_CAT_TEMP);
+    if (!*bytes) return false;
+    name->length = utf8_canonical_key(name->str, name->length, *bytes);
+    name->str = *bytes;
+    return true;
+}
+
+static String* name_pool_create_canonical_view(NamePool* pool, StrView name);
+String* name_pool_create_strview(NamePool* pool, StrView name) {
+    char* bytes;
+    if (!canonical_name_view(&name, &bytes)) return NULL;
+    String* result = name_pool_create_canonical_view(pool, name);
+    mem_free(bytes);
+    return result;
+}
+
 String* name_pool_create_name(NamePool* pool, const char* name) {
     if (!pool || !name) return nullptr;
     size_t len = strlen(name);
@@ -499,7 +521,7 @@ String* name_pool_create_string(NamePool* pool, String* str) {
     return name_pool_create_strview(pool, {.str = str->chars, .length = str->len});
 }
 
-String* name_pool_create_strview(NamePool* pool, StrView name) {
+static String* name_pool_create_canonical_view(NamePool* pool, StrView name) {
     if (!pool) {
         log_error("ERROR: pool is NULL");
         return nullptr;
@@ -575,11 +597,12 @@ String* name_pool_lookup_len(NamePool* pool, const char* name, size_t len) {
 
 String* name_pool_lookup_strview(NamePool* pool, StrView name) {
     if (!pool) return nullptr;
+    char* bytes;
+    if (!canonical_name_view(&name, &bytes)) return NULL;
     String* result = name_pool_lookup_strview_without_catalog(pool, name);
-    if (result) return result;
-    // The catalog is an internal fallback, not a visible parent: Input keeps
-    // parent == NULL while predefined names still resolve process-globally.
-    return find_well_known_name(name);
+    if (!result) result = find_well_known_name(name);
+    mem_free(bytes);
+    return result;
 }
 
 String* name_pool_lookup_string(NamePool* pool, String* str) {

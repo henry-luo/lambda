@@ -1,0 +1,2588 @@
+{
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "runs": 20,
+    "aggregation": "median",
+    "platform": "Darwin arm64",
+    "measurement_dates": [
+      "2026-10-07"
+    ],
+    "evidence_saved_at": "2026-10-07T13:26:27+08:00",
+    "engines": [
+      "go",
+      "c2mir"
+    ],
+    "lambda_commit": "fb464641d541523241816a6e7ba368bdcbb4c65a",
+    "dirty_sources": true,
+    "selection": "Only the four Julia microbenchmarks: Go, C2MIR, and paired C2MIR process timings.",
+    "methodology": "Twenty alternating original/tuned A/B pairs per port, each in a fresh process with one complete untimed warmup. Only tuned comparison samples contribute to this patch. Five original/original pairs per port screen timing noise. Workload and process medians are computed separately from the same launches. Builds precede all final measurements. Workload counts, scalar arithmetic order and 391 synchronous output batches are unchanged.",
+    "go_version": "go version go1.26.5 darwin/arm64",
+    "go_build_flags": "default optimized build",
+    "c2mir_driver_sha256": "3d5adac0325974dbc2a14711dd1d5f865ea7d2be6ddb0494487eb51c82b06596",
+    "raw_measurements": {
+      "path": "temp/micro-native-opt-20261007/comparison-final.json",
+      "archive_entry": "comparison-final.json",
+      "sha256": "568229b37fc58d5aa2aa2121662db9aaa2c3f84c850931ffd201a0a3d602cec8",
+      "metadata": {
+        "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+        "c2m_sha256": "3d5adac0325974dbc2a14711dd1d5f865ea7d2be6ddb0494487eb51c82b06596",
+        "control_pairs": 5,
+        "comparison_pairs": 20,
+        "timing": "self-reported workload; one full warmup per process"
+      }
+    },
+    "expected_sha256": "d1cbc591bfeb4481b1ec3f69f622684ed067ec11000c2d47463fa5ad6b0a32ac",
+    "measured_artifacts_sha256": {
+      "after-final/go-source/internal/bench/julia_micro.go": "79b4495d0c33c15b73bd08d795c4b44827ac35dfb0752653e9db99b719403759",
+      "after-final/c-source/micro_common.h": "199b6a76b2cfc42065e7f6bfee05e56b63f14409b56862cb17154803df1a2308",
+      "after-final/go-bin/formatted_output": "cd916f0b8c283409ee7b439d2526ad7457e5c6d2ad885f301e511577a6816b82",
+      "after-final/go-bin/iteration_pi_sum": "2cb1aa8beba7f4b013739d8df19e31036e147dc2e5c1a08c5092fcc3c8896fcb",
+      "after-final/go-bin/parse_integers": "4f42e8b1a4fce6cfaf00b0cd10f618e850d81c90289002517a16c889c145b115",
+      "after-final/go-bin/matrix_statistics": "2c40239ac2603642324f55de828b6cb8cdbc55d2a64c78b1a6a3e5ea074855fc"
+    },
+    "source_snapshot": {
+      "path": "test/benchmark/exe/result51-go-c2mir-micro-tuned-evidence.zip",
+      "sha256": "739fc8ea711866f9bb3c9bb00e435ca2e170dc039183128f031846d3eb36d5e3",
+      "size_bytes": 51681840,
+      "files": 227
+    },
+    "original_result51_sha256": "cdc0f524fb2a2fd8201ef04c660ff2a1e1b951461e962c70de51d97072a820ed",
+    "replaced_cells": {
+      "parse_integers:go": {
+        "value": 22.068875,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 492.215208,
+              "exec_ms": 26.389083,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 49.75025,
+              "exec_ms": 20.989917,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 50.480042,
+              "exec_ms": 22.068875,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "iteration_pi_sum:go": {
+        "value": 4.433959,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 541.307292,
+              "exec_ms": 6.870583,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 19.912333,
+              "exec_ms": 4.433959,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 15.015,
+              "exec_ms": 3.642042,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "formatted_output:go": {
+        "value": 40.533375,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 528.7035,
+              "exec_ms": 41.980375,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 88.238375,
+              "exec_ms": 40.26525,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 88.12925,
+              "exec_ms": 40.533375,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "matrix_statistics:go": {
+        "value": 13.845042,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 471.7725,
+              "exec_ms": 19.074959,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 36.778458,
+              "exec_ms": 13.845042,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 31.5415,
+              "exec_ms": 12.3425,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "parse_integers:c2mir": {
+        "value": 4.528809,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 106.996041,
+              "exec_ms": 4.515137,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 105.722125,
+              "exec_ms": 4.528809,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 105.12675,
+              "exec_ms": 4.538086,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "parse_integers:c2mir_e2e": {
+        "value": 105.722125,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 106.996041,
+              "exec_ms": 4.515137,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 105.722125,
+              "exec_ms": 4.528809,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 105.12675,
+              "exec_ms": 4.538086,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "iteration_pi_sum:c2mir": {
+        "value": 2.994141,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 103.008166,
+              "exec_ms": 3.016113,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 101.83825,
+              "exec_ms": 2.98999,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 101.738375,
+              "exec_ms": 2.994141,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "iteration_pi_sum:c2mir_e2e": {
+        "value": 101.83825,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 103.008166,
+              "exec_ms": 3.016113,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 101.83825,
+              "exec_ms": 2.98999,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 101.738375,
+              "exec_ms": 2.994141,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "formatted_output:c2mir": {
+        "value": 29.134033,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 156.574542,
+              "exec_ms": 29.195068,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 154.722958,
+              "exec_ms": 29.134033,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 153.964792,
+              "exec_ms": 28.984131,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "formatted_output:c2mir_e2e": {
+        "value": 154.722958,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 156.574542,
+              "exec_ms": 29.195068,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 154.722958,
+              "exec_ms": 29.134033,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 153.964792,
+              "exec_ms": 28.984131,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "matrix_statistics:c2mir": {
+        "value": 10.612061,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 119.701208,
+              "exec_ms": 10.718994,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 117.16175,
+              "exec_ms": 10.589111,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 117.281875,
+              "exec_ms": 10.612061,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "matrix_statistics:c2mir_e2e": {
+        "value": 117.281875,
+        "status": "ok",
+        "status_detail": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 119.701208,
+              "exec_ms": 10.718994,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 117.16175,
+              "exec_ms": 10.589111,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 117.281875,
+              "exec_ms": 10.612061,
+              "status": "ok"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "julia": {
+    "parse_integers": {
+      "category": "conversion",
+      "_status": {
+        "go": "ok",
+        "c2mir": "ok",
+        "c2mir_e2e": "ok"
+      },
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 2.296292,
+              "wall_ms": 475.66237501450814,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 2.344625,
+              "wall_ms": 7.951000006869435,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 2.289334,
+              "wall_ms": 7.8906670096330345,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 2.397875,
+              "wall_ms": 7.519917009631172,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 2.340875,
+              "wall_ms": 8.120208018226549,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 2.259542,
+              "wall_ms": 7.664709002710879,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 2.28675,
+              "wall_ms": 8.272499981103465,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 2.2855,
+              "wall_ms": 7.786250003846362,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 2.3415,
+              "wall_ms": 8.139500016113743,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 2.282167,
+              "wall_ms": 7.941582996863872,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 2.313625,
+              "wall_ms": 8.39137501316145,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 2.295875,
+              "wall_ms": 7.688834011787549,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 2.30575,
+              "wall_ms": 8.051917015109211,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 2.333625,
+              "wall_ms": 7.733333011856303,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 2.309333,
+              "wall_ms": 8.194291003746912,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 2.302834,
+              "wall_ms": 7.721165980910882,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 2.345875,
+              "wall_ms": 8.259583992185071,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 2.328166,
+              "wall_ms": 7.8429169952869415,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 2.291917,
+              "wall_ms": 8.011708996491507,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 2.336625,
+              "wall_ms": 7.644792000064626,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json",
+          "paired_comparison": {
+            "median_ms": {
+              "before": 22.4046875,
+              "after": 2.3075415
+            },
+            "speedup": 9.709332421540415,
+            "paired_after_before_geo": 0.10327453730633794,
+            "paired_after_before_bootstrap95": [
+              0.1026609921447403,
+              0.10393999204006446
+            ],
+            "control_second_first_ratio": 1.0071666839832332
+          }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 2.327881,
+              "wall_ms": 109.29162500542589,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 2.273926,
+              "wall_ms": 93.60900000319816,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 2.280029,
+              "wall_ms": 93.18862500367686,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 2.329834,
+              "wall_ms": 92.37825000309385,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 2.272949,
+              "wall_ms": 94.27375000086613,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 2.291016,
+              "wall_ms": 93.52470899466425,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 2.314941,
+              "wall_ms": 93.1052080122754,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 2.260986,
+              "wall_ms": 92.77441698941402,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 2.25,
+              "wall_ms": 92.58991599199362,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 2.263184,
+              "wall_ms": 93.05025002686307,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 2.25708,
+              "wall_ms": 92.29833300923929,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 2.293945,
+              "wall_ms": 92.27566700428724,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 2.256836,
+              "wall_ms": 92.015292000724,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 2.266113,
+              "wall_ms": 92.14554200298153,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 2.251953,
+              "wall_ms": 92.12795898201875,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 2.263916,
+              "wall_ms": 92.47199998935685,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 2.259033,
+              "wall_ms": 92.24191700923257,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 2.291992,
+              "wall_ms": 92.5950419914443,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 2.300049,
+              "wall_ms": 92.7694579877425,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 2.267822,
+              "wall_ms": 91.97883299202658,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json",
+          "paired_comparison": {
+            "median_ms": {
+              "before": 4.551513999999999,
+              "after": 2.2703854999999997
+            },
+            "speedup": 2.004731795547496,
+            "paired_after_before_geo": 0.49389751516809827,
+            "paired_after_before_bootstrap95": [
+              0.4839289055904279,
+              0.5015941484484621
+            ],
+            "control_second_first_ratio": 0.9977414290934505
+          }
+        },
+        "c2mir_e2e": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 2.327881,
+              "wall_ms": 109.29162500542589,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 2.273926,
+              "wall_ms": 93.60900000319816,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 2.280029,
+              "wall_ms": 93.18862500367686,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 2.329834,
+              "wall_ms": 92.37825000309385,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 2.272949,
+              "wall_ms": 94.27375000086613,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 2.291016,
+              "wall_ms": 93.52470899466425,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 2.314941,
+              "wall_ms": 93.1052080122754,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 2.260986,
+              "wall_ms": 92.77441698941402,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 2.25,
+              "wall_ms": 92.58991599199362,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 2.263184,
+              "wall_ms": 93.05025002686307,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 2.25708,
+              "wall_ms": 92.29833300923929,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 2.293945,
+              "wall_ms": 92.27566700428724,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 2.256836,
+              "wall_ms": 92.015292000724,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 2.266113,
+              "wall_ms": 92.14554200298153,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 2.251953,
+              "wall_ms": 92.12795898201875,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 2.263916,
+              "wall_ms": 92.47199998935685,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 2.259033,
+              "wall_ms": 92.24191700923257,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 2.291992,
+              "wall_ms": 92.5950419914443,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 2.300049,
+              "wall_ms": 92.7694579877425,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 2.267822,
+              "wall_ms": 91.97883299202658,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json"
+        }
+      },
+      "go": 2.3075415,
+      "c2mir": 2.2703854999999997,
+      "c2mir_e2e": 92.59247899171896
+    },
+    "iteration_pi_sum": {
+      "category": "numeric",
+      "_status": {
+        "go": "ok",
+        "c2mir": "ok",
+        "c2mir_e2e": "ok"
+      },
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 5.286041,
+              "wall_ms": 487.27733301348053,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 3.782333,
+              "wall_ms": 14.462416002061218,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 2.952667,
+              "wall_ms": 11.120166018372402,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 2.949667,
+              "wall_ms": 10.854083026060835,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 3.007458,
+              "wall_ms": 9.77608299581334,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 2.889333,
+              "wall_ms": 9.626249986467883,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 2.894542,
+              "wall_ms": 9.390416002133861,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 2.964208,
+              "wall_ms": 9.2878750001546,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 2.913458,
+              "wall_ms": 9.292749979067594,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 2.890417,
+              "wall_ms": 9.124709002207965,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 3.025708,
+              "wall_ms": 9.527916001388803,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 2.913292,
+              "wall_ms": 9.370666986797005,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 2.891,
+              "wall_ms": 9.221624990459532,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 2.895834,
+              "wall_ms": 9.067375009180978,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 2.893209,
+              "wall_ms": 9.170415985863656,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 2.916083,
+              "wall_ms": 9.129334008321166,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 2.886416,
+              "wall_ms": 9.080291987629607,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 2.890708,
+              "wall_ms": 9.063417004654184,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 2.890625,
+              "wall_ms": 9.16787501773797,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 2.902083,
+              "wall_ms": 9.04112498392351,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json",
+          "paired_comparison": {
+            "median_ms": {
+              "before": 2.891292,
+              "after": 2.9076875
+            },
+            "speedup": 0.9943613266556326,
+            "paired_after_before_geo": 1.02157799082251,
+            "paired_after_before_bootstrap95": [
+              0.9645467528755614,
+              1.1006963737835151
+            ],
+            "control_second_first_ratio": 1.0035499464110218
+          }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 2.984863,
+              "wall_ms": 93.72104200883768,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 2.991943,
+              "wall_ms": 94.43395902053453,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 3.042969,
+              "wall_ms": 94.08183299819939,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 2.988037,
+              "wall_ms": 94.43241698318161,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 2.988037,
+              "wall_ms": 93.9535419747699,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 3.019043,
+              "wall_ms": 93.9646249753423,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 4.7229,
+              "wall_ms": 153.4945410094224,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 3.000977,
+              "wall_ms": 98.96008399664424,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 2.991211,
+              "wall_ms": 94.36654101591557,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 3.004883,
+              "wall_ms": 93.802291987231,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 2.99585,
+              "wall_ms": 93.77083400613628,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 2.99585,
+              "wall_ms": 93.42691701021977,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 3.005127,
+              "wall_ms": 94.137584004784,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 2.998047,
+              "wall_ms": 94.40545798861422,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 2.991943,
+              "wall_ms": 93.72683300171047,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 3.040039,
+              "wall_ms": 94.1092910070438,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 3.077881,
+              "wall_ms": 98.65220802021213,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 22.974121,
+              "wall_ms": 121.296291006729,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 3.048096,
+              "wall_ms": 115.35587499383837,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 2.983887,
+              "wall_ms": 99.45166599936783,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json",
+          "paired_comparison": {
+            "median_ms": {
+              "before": 3.007446,
+              "after": 2.999512
+            },
+            "speedup": 1.002645096935768,
+            "paired_after_before_geo": 1.0760908186105684,
+            "paired_after_before_bootstrap95": [
+              0.9200490447423205,
+              1.3565053944858296
+            ],
+            "control_second_first_ratio": 0.9995938264278281
+          }
+        },
+        "c2mir_e2e": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 2.984863,
+              "wall_ms": 93.72104200883768,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 2.991943,
+              "wall_ms": 94.43395902053453,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 3.042969,
+              "wall_ms": 94.08183299819939,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 2.988037,
+              "wall_ms": 94.43241698318161,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 2.988037,
+              "wall_ms": 93.9535419747699,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 3.019043,
+              "wall_ms": 93.9646249753423,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 4.7229,
+              "wall_ms": 153.4945410094224,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 3.000977,
+              "wall_ms": 98.96008399664424,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 2.991211,
+              "wall_ms": 94.36654101591557,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 3.004883,
+              "wall_ms": 93.802291987231,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 2.99585,
+              "wall_ms": 93.77083400613628,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 2.99585,
+              "wall_ms": 93.42691701021977,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 3.005127,
+              "wall_ms": 94.137584004784,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 2.998047,
+              "wall_ms": 94.40545798861422,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 2.991943,
+              "wall_ms": 93.72683300171047,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 3.040039,
+              "wall_ms": 94.1092910070438,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 3.077881,
+              "wall_ms": 98.65220802021213,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 22.974121,
+              "wall_ms": 121.296291006729,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 3.048096,
+              "wall_ms": 115.35587499383837,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 2.983887,
+              "wall_ms": 99.45166599936783,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json"
+        }
+      },
+      "go": 2.9076875,
+      "c2mir": 2.999512,
+      "c2mir_e2e": 94.25206251034979
+    },
+    "formatted_output": {
+      "category": "io",
+      "_status": {
+        "go": "ok",
+        "c2mir": "ok",
+        "c2mir_e2e": "ok"
+      },
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 7.830875,
+              "wall_ms": 413.98941600346006,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 7.93425,
+              "wall_ms": 19.289915973786265,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 7.812417,
+              "wall_ms": 19.427416991675273,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 7.855125,
+              "wall_ms": 19.296167010907084,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 7.842708,
+              "wall_ms": 19.34324999456294,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 7.873583,
+              "wall_ms": 19.283250003354624,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 7.92475,
+              "wall_ms": 19.344833999639377,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 7.828542,
+              "wall_ms": 19.161459000315517,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 8.319833,
+              "wall_ms": 20.498833007877693,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 8.555167,
+              "wall_ms": 20.127041003433987,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 7.808208,
+              "wall_ms": 19.328958995174617,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 7.806833,
+              "wall_ms": 19.3284590204712,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 8.002292,
+              "wall_ms": 20.41183298570104,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 8.374167,
+              "wall_ms": 20.414750004420057,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 8.162208,
+              "wall_ms": 20.420917018782347,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 8.169417,
+              "wall_ms": 19.997124996734783,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 8.818375,
+              "wall_ms": 53.302999993320554,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 8.279334,
+              "wall_ms": 20.898125017993152,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 8.365334,
+              "wall_ms": 20.747499977005646,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 8.376417,
+              "wall_ms": 20.628166996175423,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json",
+          "paired_comparison": {
+            "median_ms": {
+              "before": 44.910104000000004,
+              "after": 7.968271
+            },
+            "speedup": 5.636116542723008,
+            "paired_after_before_geo": 0.17787750619987683,
+            "paired_after_before_bootstrap95": [
+              0.17339037377123803,
+              0.18158159090549505
+            ],
+            "control_second_first_ratio": 1.0576983409393306
+          }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 8.289795,
+              "wall_ms": 104.60099999909289,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 8.214844,
+              "wall_ms": 104.68875002698041,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 8.388916,
+              "wall_ms": 104.38712500035763,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 8.282959,
+              "wall_ms": 104.69308399478905,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 8.281006,
+              "wall_ms": 103.62670800532214,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 8.269043,
+              "wall_ms": 104.59158301819116,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 8.264893,
+              "wall_ms": 103.95737498765811,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 8.291016,
+              "wall_ms": 104.69420798472129,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 8.209961,
+              "wall_ms": 104.56775000784546,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 8.304199,
+              "wall_ms": 104.52337499009445,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 8.230957,
+              "wall_ms": 104.37508299946785,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 8.213867,
+              "wall_ms": 104.68274998129345,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 8.243896,
+              "wall_ms": 104.14391700760461,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 8.261963,
+              "wall_ms": 106.72179202083498,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 8.203125,
+              "wall_ms": 104.39800002495758,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 8.240967,
+              "wall_ms": 103.51583300507627,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 8.240967,
+              "wall_ms": 104.38475001137704,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 8.23584,
+              "wall_ms": 104.32233300525695,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 8.201172,
+              "wall_ms": 104.46212501847185,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 8.239014,
+              "wall_ms": 104.5861249731388,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json",
+          "paired_comparison": {
+            "median_ms": {
+              "before": 29.230469,
+              "after": 8.242431499999999
+            },
+            "speedup": 3.546340542836177,
+            "paired_after_before_geo": 0.2819791701893154,
+            "paired_after_before_bootstrap95": [
+              0.2807487347848429,
+              0.28324171541514603
+            ],
+            "control_second_first_ratio": 1.0069543870146658
+          }
+        },
+        "c2mir_e2e": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 8.289795,
+              "wall_ms": 104.60099999909289,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 8.214844,
+              "wall_ms": 104.68875002698041,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 8.388916,
+              "wall_ms": 104.38712500035763,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 8.282959,
+              "wall_ms": 104.69308399478905,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 8.281006,
+              "wall_ms": 103.62670800532214,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 8.269043,
+              "wall_ms": 104.59158301819116,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 8.264893,
+              "wall_ms": 103.95737498765811,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 8.291016,
+              "wall_ms": 104.69420798472129,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 8.209961,
+              "wall_ms": 104.56775000784546,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 8.304199,
+              "wall_ms": 104.52337499009445,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 8.230957,
+              "wall_ms": 104.37508299946785,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 8.213867,
+              "wall_ms": 104.68274998129345,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 8.243896,
+              "wall_ms": 104.14391700760461,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 8.261963,
+              "wall_ms": 106.72179202083498,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 8.203125,
+              "wall_ms": 104.39800002495758,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 8.240967,
+              "wall_ms": 103.51583300507627,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 8.240967,
+              "wall_ms": 104.38475001137704,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 8.23584,
+              "wall_ms": 104.32233300525695,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 8.201172,
+              "wall_ms": 104.46212501847185,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 8.239014,
+              "wall_ms": 104.5861249731388,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json"
+        }
+      },
+      "go": 7.968271,
+      "c2mir": 8.242431499999999,
+      "c2mir_e2e": 104.49275000428315
+    },
+    "matrix_statistics": {
+      "category": "numeric",
+      "_status": {
+        "go": "ok",
+        "c2mir": "ok",
+        "c2mir_e2e": "ok"
+      },
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 9.845625,
+              "wall_ms": 419.50916597852483,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 9.877416,
+              "wall_ms": 23.446167004294693,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 9.882583,
+              "wall_ms": 23.461040982510895,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 9.787166,
+              "wall_ms": 22.98849998624064,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 9.831875,
+              "wall_ms": 23.33724999334663,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 9.829083,
+              "wall_ms": 23.187666985904798,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 9.916875,
+              "wall_ms": 23.466791986720636,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 9.79275,
+              "wall_ms": 23.52737501496449,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 10.699833,
+              "wall_ms": 26.78824999020435,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 11.599958,
+              "wall_ms": 27.265707991318777,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 10.952208,
+              "wall_ms": 25.73866699822247,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 10.984084,
+              "wall_ms": 25.32962500117719,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 10.386542,
+              "wall_ms": 24.816874996758997,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 10.3055,
+              "wall_ms": 24.66541700414382,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 10.365917,
+              "wall_ms": 24.609874992165715,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 10.579959,
+              "wall_ms": 24.75675000459887,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 10.627625,
+              "wall_ms": 24.596875009592623,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 10.36025,
+              "wall_ms": 24.38074999372475,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 10.411292,
+              "wall_ms": 24.359875009395182,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 10.480583,
+              "wall_ms": 24.649791012052447,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json",
+          "paired_comparison": {
+            "median_ms": {
+              "before": 14.406625,
+              "after": 10.3630835
+            },
+            "speedup": 1.3901871002004373,
+            "paired_after_before_geo": 0.7185257057996125,
+            "paired_after_before_bootstrap95": [
+              0.7084149935973045,
+              0.7289098920976222
+            ],
+            "control_second_first_ratio": 0.9837952030174781
+          }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 9.75708,
+              "wall_ms": 108.96120799588971,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 9.749023,
+              "wall_ms": 107.28366699186154,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 9.86499,
+              "wall_ms": 107.27237499668263,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 9.783936,
+              "wall_ms": 107.35566698713228,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 9.751953,
+              "wall_ms": 107.19425001298077,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 9.748047,
+              "wall_ms": 108.15337498206645,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 9.784912,
+              "wall_ms": 107.01529201469384,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 9.77002,
+              "wall_ms": 107.37245899508707,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 10.968994,
+              "wall_ms": 109.60308299399912,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 10.124023,
+              "wall_ms": 179.9759170098696,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 9.790039,
+              "wall_ms": 108.00737497629598,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 9.853027,
+              "wall_ms": 107.90320800151676,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 9.742188,
+              "wall_ms": 107.41333398618735,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 9.765869,
+              "wall_ms": 107.5270000146702,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 9.758057,
+              "wall_ms": 110.14174998854287,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 10.112061,
+              "wall_ms": 107.97254100907594,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 9.745117,
+              "wall_ms": 108.06108399992809,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 9.802979,
+              "wall_ms": 107.91820898884907,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 9.801025,
+              "wall_ms": 107.62724999221973,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 9.781006,
+              "wall_ms": 109.23229099716991,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json",
+          "paired_comparison": {
+            "median_ms": {
+              "before": 10.642456,
+              "after": 9.782471000000001
+            },
+            "speedup": 1.0879108151713404,
+            "paired_after_before_geo": 0.9169362270613142,
+            "paired_after_before_bootstrap95": [
+              0.8944311376823297,
+              0.9361353141160764
+            ],
+            "control_second_first_ratio": 0.9975695788926112
+          }
+        },
+        "c2mir_e2e": {
+          "status_counts": {
+            "ok": 20
+          },
+          "samples": [
+            {
+              "run": 1,
+              "exec_ms": 9.75708,
+              "wall_ms": 108.96120799588971,
+              "status": "ok",
+              "comparison_pair": 1,
+              "position": 2
+            },
+            {
+              "run": 2,
+              "exec_ms": 9.749023,
+              "wall_ms": 107.28366699186154,
+              "status": "ok",
+              "comparison_pair": 2,
+              "position": 1
+            },
+            {
+              "run": 3,
+              "exec_ms": 9.86499,
+              "wall_ms": 107.27237499668263,
+              "status": "ok",
+              "comparison_pair": 3,
+              "position": 2
+            },
+            {
+              "run": 4,
+              "exec_ms": 9.783936,
+              "wall_ms": 107.35566698713228,
+              "status": "ok",
+              "comparison_pair": 4,
+              "position": 1
+            },
+            {
+              "run": 5,
+              "exec_ms": 9.751953,
+              "wall_ms": 107.19425001298077,
+              "status": "ok",
+              "comparison_pair": 5,
+              "position": 2
+            },
+            {
+              "run": 6,
+              "exec_ms": 9.748047,
+              "wall_ms": 108.15337498206645,
+              "status": "ok",
+              "comparison_pair": 6,
+              "position": 1
+            },
+            {
+              "run": 7,
+              "exec_ms": 9.784912,
+              "wall_ms": 107.01529201469384,
+              "status": "ok",
+              "comparison_pair": 7,
+              "position": 2
+            },
+            {
+              "run": 8,
+              "exec_ms": 9.77002,
+              "wall_ms": 107.37245899508707,
+              "status": "ok",
+              "comparison_pair": 8,
+              "position": 1
+            },
+            {
+              "run": 9,
+              "exec_ms": 10.968994,
+              "wall_ms": 109.60308299399912,
+              "status": "ok",
+              "comparison_pair": 9,
+              "position": 2
+            },
+            {
+              "run": 10,
+              "exec_ms": 10.124023,
+              "wall_ms": 179.9759170098696,
+              "status": "ok",
+              "comparison_pair": 10,
+              "position": 1
+            },
+            {
+              "run": 11,
+              "exec_ms": 9.790039,
+              "wall_ms": 108.00737497629598,
+              "status": "ok",
+              "comparison_pair": 11,
+              "position": 2
+            },
+            {
+              "run": 12,
+              "exec_ms": 9.853027,
+              "wall_ms": 107.90320800151676,
+              "status": "ok",
+              "comparison_pair": 12,
+              "position": 1
+            },
+            {
+              "run": 13,
+              "exec_ms": 9.742188,
+              "wall_ms": 107.41333398618735,
+              "status": "ok",
+              "comparison_pair": 13,
+              "position": 2
+            },
+            {
+              "run": 14,
+              "exec_ms": 9.765869,
+              "wall_ms": 107.5270000146702,
+              "status": "ok",
+              "comparison_pair": 14,
+              "position": 1
+            },
+            {
+              "run": 15,
+              "exec_ms": 9.758057,
+              "wall_ms": 110.14174998854287,
+              "status": "ok",
+              "comparison_pair": 15,
+              "position": 2
+            },
+            {
+              "run": 16,
+              "exec_ms": 10.112061,
+              "wall_ms": 107.97254100907594,
+              "status": "ok",
+              "comparison_pair": 16,
+              "position": 1
+            },
+            {
+              "run": 17,
+              "exec_ms": 9.745117,
+              "wall_ms": 108.06108399992809,
+              "status": "ok",
+              "comparison_pair": 17,
+              "position": 2
+            },
+            {
+              "run": 18,
+              "exec_ms": 9.802979,
+              "wall_ms": 107.91820898884907,
+              "status": "ok",
+              "comparison_pair": 18,
+              "position": 1
+            },
+            {
+              "run": 19,
+              "exec_ms": 9.801025,
+              "wall_ms": 107.62724999221973,
+              "status": "ok",
+              "comparison_pair": 19,
+              "position": 2
+            },
+            {
+              "run": 20,
+              "exec_ms": 9.781006,
+              "wall_ms": 109.23229099716991,
+              "status": "ok",
+              "comparison_pair": 20,
+              "position": 1
+            }
+          ],
+          "aggregation": "median",
+          "source_artifact": "test/benchmark/benchmark_results_v51_go_c2mir_tuned.json"
+        }
+      },
+      "go": 10.3630835,
+      "c2mir": 9.782471000000001,
+      "c2mir_e2e": 107.91070849518292
+    }
+  }
+}

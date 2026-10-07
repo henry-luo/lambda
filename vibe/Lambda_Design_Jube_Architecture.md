@@ -17,6 +17,11 @@
 > - `vibe/Lambda_Design_Native_Module.md` — module ABI, capability tables, VMap projections
 > - `vibe/Lambda_Design_Jube_Lang_Hosting.md` — hosted-language architecture (Python first)
 > - `vibe/impl/Lambda_Impl_Hosted_Python.md` — staged carve-out execution (H0–H10)
+>
+> **Update 2026-10-07 (USER):** `lang-python` and the host's hosted-language and
+> hosted-compiler services were removed (Jube ABI 8, host API 5). The hosted-language
+> kind (JA3) and JA13's opaque cursor API have no implementation now; the `node-*`
+> modules carry the DSO chain JA2 describes. Python references below are history.
 > - `vibe/Lambda_Design_Jube_Node_Hosting.md` — Node compat as Jube modules (JN1–JN14, N0–N7)
 > - `vibe/radiant/Radiant_Design_Concurrency.md` — pages as Lambda isolates (JA15 context)
 > - `vibe/radiant/Radiant_Design_State_Management.md` — Lambda-page regeneration model (JA15 context)
@@ -274,8 +279,9 @@ and link the host with `-Wl,-export_dynamic` so that `dynamic_lookup`
 imports resolve. ld64 keeps every exported symbol as a dead-strip and LTO
 root. All 15,971 globals of the 21.7 MB release `lambda.exe` were therefore
 kept, reachable or not, and `-dead_strip` only removed `static` code. The
-built modules import 400 symbols. With the allowlist, release `lambda.exe`
-is 19.2 MB and exports exactly those 400.
+built modules imported 400 symbols. With the allowlist, release `lambda.exe`
+is 19.2 MB and exports exactly those 400. Removing `lang-python` (2026-10-07)
+dropped its 126 entries; the list now holds 274.
 
 **Mechanics.**
 - One list feeds both linkers: `generate_premake.py` emits
@@ -856,7 +862,7 @@ regeneration). The `radiant-dom` module remains the sole script-side door
 4. **Data-pack design (JA12)**: full design doc gated on the first adopter;
    lands together with the Radiant host-API extraction (JA14, item 6).
 5. **Symbol-isolation closure (JA2/JA5)**: retire `dynamic_lookup` laxity —
-   shared burn-down with hosted-Python H8. Until then the JA5.1 allowlist
+   hosted-Python H8 lapsed with `lang-python`'s removal (2026-10-07). Until then the JA5.1 allowlist
    bounds it, and shrinking that list measures the burn-down.
 6. **Radiant-domain host API (JA14)**: extract the Radiant service surface
    empirically from the first Radiant-domain adopters (text shaping,

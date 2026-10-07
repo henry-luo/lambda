@@ -1,3 +1,4 @@
+#include "../../lib/utf.h"
 #include "../io/mark_output_builder.hpp"
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
@@ -4638,6 +4639,14 @@ Bool fn_in(Item a_item, Item b_item) {
     if (get_type_id(a_item) == LMD_TYPE_ERROR ||
             get_type_id(b_item) == LMD_TYPE_ERROR) {
         return BOOL_ERROR;
+    }
+    if (get_type_id(b_item) == LMD_TYPE_MAP && get_type_id(a_item) == LMD_TYPE_STRING) {
+        String* name = a_item.get_string();
+        if (!utf8_key_is_canonical(name->chars, name->len)) {
+            name = heap_create_name(name->chars, name->len);
+            if (!name) return BOOL_ERROR;
+            a_item.item = s2it(name);
+        }
     }
     if (b_item._type_id) { // b is scalar
         if (is_text_type_id((TypeId)b_item._type_id)) {
@@ -11431,7 +11440,8 @@ static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     // D2.6.6v2: an element shares Map's attribute face (type, data, data_cap)
     Map* map = map_item.map;
     if (!map || value_type == LMD_TYPE_ERROR) return false;
-    if (!is_element && map->map_kind != MAP_KIND_PLAIN) return false;
+    if (!is_element && map->map_kind != MAP_KIND_PLAIN &&
+            map->map_kind != MAP_KIND_ORDERED) return false;
     // UI-mode elements keep their attribute buffers in the context arena, which
     // only the private path allocates from
     if (is_element && context && context->ui_mode && context->arena) return false;
@@ -11581,7 +11591,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     added->name_hash = typemap_name_hash(name->str, (int)name->length);
     added->name_id = NAME_ID_NONE;
     added->key_kind = NAME_KEY_STRING;
-    added->type = type_info[value_type].type;
+    shape_entry_set_type(added, type_info[value_type].type);
     added->byte_offset = offset;
     map_field_store((char*)new_data + offset, rooted_value.get(), value_type);
     if (last) last->chain_next = added;
@@ -13100,9 +13110,46 @@ static void container_rebuild_data_install(Container* container, void** data_slo
 // `new_value` -- and install the pair. This is the shared half of a
 // type-changing write, whether `new_type` is a private rebuild or a shared
 // tree target (Impl_Map_Transition_Coverage P2).
-static void container_move_to_type(void** type_slot, void** data_slot, int* cap_slot,
+static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_slot,
         Container* container, TypeMap* old_map_type, TypeMap* new_type,
-        ShapeEntry* changed_entry, Item new_value, int fixed_slot_count) {
+        ShapeEntry* changed_entry, Item new_value, int fixed_slot_count, ShapeEntry* removed_entry = NULL) {
+    // a heap-owned payload can stay in place when every surviving field keeps its lane.
+    // validate the entire layout before the no-GC value/type commit (D3.4.5, D5.3).
+    if (container->is_heap && *data_slot && !fixed_slot_count &&
+            new_type->byte_size <= *cap_slot) {
+        ShapeEntry* replacement = NULL;
+        ShapeEntry* old_field = old_map_type->shape;
+        ShapeEntry* new_field = new_type->shape;
+        bool compatible = true;
+        while (old_field || new_field) {
+            if (old_field && old_field == removed_entry) {
+                old_field = typemap_next_field(old_map_type, old_field); continue;
+            }
+            if (!old_field || !new_field || old_field->byte_offset < 0 ||
+                    old_field->byte_offset != new_field->byte_offset ||
+                    shape_entry_storage_size(old_field) != shape_entry_storage_size(new_field) ||
+                    (old_field != changed_entry && old_field->type != new_field->type)) {
+                compatible = false; break;
+            }
+            if (old_field == changed_entry) replacement = new_field;
+            old_field = typemap_next_field(old_map_type, old_field);
+            new_field = typemap_next_field(new_type, new_field);
+        }
+        TypeId storage = replacement ? shape_entry_storage_type_id(replacement) : LMD_TYPE_NULL;
+        // these simple stores neither allocate nor retain a borrowed numeric home.
+        bool immediate_store = !replacement || (replacement->type == type_info[storage].type &&
+            (storage == LMD_TYPE_INT || storage == LMD_TYPE_FLOAT || storage == LMD_TYPE_NULL ||
+             storage == LMD_TYPE_BOOL || storage == LMD_TYPE_UNDEFINED || storage == LMD_TYPE_STRING ||
+             storage == LMD_TYPE_ARRAY || storage == LMD_TYPE_MAP));
+        if (compatible && immediate_store && (!changed_entry || replacement)) {
+            uint64_t value_home = 0;
+            Item held = lambda_item_adopt_scalar_home(new_value, &value_home);
+            if (replacement && !map_field_store((char*)*data_slot + replacement->byte_offset, held, storage))
+                return false;
+            *type_slot = new_type;
+            return true;
+        }
+    }
     void* old_data = NULL;
     int64_t new_byte_size = new_type->byte_size;
     int field_index = 0;
@@ -13111,6 +13158,7 @@ static void container_move_to_type(void** type_slot, void** data_slot, int* cap_
     // registered native addresses behind on a non-local recovery edge while
     // keeping both unpublished owners exact through the data allocation.
     RootFrame roots(2);
+    if (!roots.valid()) return false;
     Rooted<Container*> rooted_container(roots, container);
     // a borrowed scalar may point inside the old data buffer that GC moves.
     uint64_t value_home = 0;
@@ -13119,7 +13167,7 @@ static void container_move_to_type(void** type_slot, void** data_slot, int* cap_
     void* new_data = container_rebuild_data_alloc(container, new_byte_size);
     if (!new_data) {
         log_error("map_rebuild: data allocation failed");
-        return;
+        return false;
     }
     container = rooted_container.get();
     new_value = rooted_value.get();
@@ -13134,6 +13182,7 @@ static void container_move_to_type(void** type_slot, void** data_slot, int* cap_
     ShapeEntry* new_e = new_type->shape;
     field_index = 0;
     while (old_e && new_e) {
+        if (old_e == removed_entry) { old_e = typemap_next_field(old_map_type, old_e); continue; }
         if (old_e->byte_offset < 0 || new_e->byte_offset < 0) {
             old_e = typemap_next_field(old_map_type, old_e);
             new_e = typemap_next_field(new_type, new_e);
@@ -13175,10 +13224,10 @@ static void container_move_to_type(void** type_slot, void** data_slot, int* cap_
 
     log_debug("map_rebuild: type change complete, fields=%lld, byte_size=%ld, migrated=%d",
               (long long)new_type->length, new_byte_size, container->is_data_migrated);
+    return true;
 }
 
-
-static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int* cap_slot,
+static bool map_rebuild_for_type_change(void** type_slot, void** data_slot, int* cap_slot,
                                         TypeId container_type_id,
                                         Container* container,
                                         ShapeEntry* changed_entry,
@@ -13186,7 +13235,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     TypeMap* old_map_type = (TypeMap*)*type_slot;
     if (!new_field_contract) {
         log_error("map_rebuild: missing replacement field contract");
-        return;
+        return false;
     }
 
     // count existing fields
@@ -13197,7 +13246,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // no stack arrays or fixed-size buffers. globalThis legitimately has 100+ fields.
     if (field_count <= 0) {
         log_error("map_rebuild: invalid field count %d", field_count);
-        return;
+        return false;
     }
 
     // Constructor fields form a fixed-width prefix; properties appended later
@@ -13220,7 +13269,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
             sizeof(ShapeEntry) + sizeof(StrView));
         if (!ne) {
             log_error("map_rebuild: ShapeEntry allocation failed");
-            return;
+            return false;
         }
         StrView* nv = (StrView*)((char*)ne + sizeof(ShapeEntry));
         nv->str = e->name->str;
@@ -13328,8 +13377,64 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_type = new_mt;
     }
 
-    container_move_to_type(type_slot, data_slot, cap_slot, container, old_map_type,
+    return container_move_to_type(type_slot, data_slot, cap_slot, container, old_map_type,
         new_type, changed_entry, new_value, fixed_slot_count);
+}
+
+// D3.4.3/D3.4.5: immutable transitions for packed plain maps, without JS policy hooks.
+bool map_shape_set(Map* map, String* key, Item value) {
+    TypeMap* type = (TypeMap*)map->type;
+    if (!type || type->js_meta || !key || get_type_id(value) == LMD_TYPE_ERROR) return false;
+    ShapeEntry* field = typemap_hash_lookup(type, key->chars, (int)key->len);
+    if (!field) return map_extend_open_shape(Item{.map = map}, Item{.item = s2it(key)}, value);
+    TypeId tid = get_type_id(value);
+    if (field->type->type_id == tid)
+        return map_field_store((char*)map->data + field->byte_offset, value, tid);
+    Input* tree = runtime_shape_tree();
+    TypeMap* target = tree ? type_tree_retype_field(tree, type, field, tid) : NULL;
+    if (target) return container_move_to_type(&map->type, &map->data, &map->data_cap,
+        map, type, target, field, value, 0);
+    return map_rebuild_for_type_change(&map->type, &map->data, &map->data_cap,
+        LMD_TYPE_MAP, map, field, type_info[tid].type, value);
+}
+
+bool map_shape_delete(Map* map, String* key) {
+    TypeMap* old = (TypeMap*)map->type;
+    if (!old || old->js_meta || !key) return false;
+    ShapeEntry* removed = typemap_hash_lookup(old, key->chars, (int)key->len);
+    if (!removed) return true;
+    Input* tree = runtime_shape_tree();
+    TypeMap* target = tree ? type_tree_root_like(tree, map) : NULL;
+    FOR_EACH_MAP_FIELD(old, field) {
+        if (field != removed && target) target = type_tree_add_map_field_chars(tree, target,
+            field->name->str, field->name->length, field->type->type_id, NULL);
+    }
+    if (!target) {
+        // the bounded tree declined: retain family identity in a private filtered chain.
+        target = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        if (!target) return false;
+        target->nominal = old->nominal; target->is_nominal = old->is_nominal;
+        target->type_index = -1; target->is_private_clone = true;
+        FOR_EACH_MAP_FIELD(old, field) {
+            if (field == removed) continue;
+            ShapeEntry* copy = (ShapeEntry*)pool_calloc(context->pool, sizeof(ShapeEntry));
+            if (!copy) return false;
+            *copy = *field; copy->chain_next = NULL; copy->chain_index = 0;
+            copy->byte_offset = target->byte_size;
+            target->byte_size += shape_entry_storage_size(copy);
+            if (target->last) target->last->chain_next = copy;
+            else target->shape = copy;
+            target->last = copy; target->length++;
+        }
+        typemap_hash_build(target, context->pool);
+    }
+    if (!target->length) {
+        // empty shapes have no traced data buffer; leave the old storage for GC.
+        map->type = target; map->data = NULL; map->data_cap = 0;
+        return true;
+    }
+    return container_move_to_type(&map->type, &map->data, &map->data_cap,
+        map, old, target, NULL, ItemNull, 0, removed);
 }
 
 // map/element field assignment: obj.field = val
@@ -14242,6 +14347,14 @@ Item fn_map_set(Item map_item, Item key, Item value) {
         Rooted<Item> rooted_key(roots, key);
         Item image = slot_image(value);
         return fn_map_set(rooted_map.get(), rooted_key.get(), image);
+    }
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* name = key.get_string();
+        if (!utf8_key_is_canonical(name->chars, name->len)) {
+            name = heap_create_name(name->chars, name->len);
+            if (!name) return ItemError;
+            key.item = s2it(name);
+        }
     }
     TypeId map_type_id = get_type_id(map_item);
 
