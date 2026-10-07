@@ -1,3 +1,8 @@
+# Agent Instructions for Lambda Script
+
+> This file is the single source of agent instructions. `CLAUDE.md` imports it
+> and `.github/copilot-instructions.md` points to it — edit only this file.
+
 ## CRITICAL Rules for AI Agents
 
 These rules MUST be followed. Violations are considered errors.
@@ -17,7 +22,7 @@ These rules MUST be followed. Violations are considered errors.
 13. **NEVER duplicate code.** Grep for an existing helper before writing one. At the 3rd near-identical variant (type/kind/case), extract the shared shape first. To reuse another file's `static`, promote it to the module header — never copy it.
 14. **The legacy C2MIR path is REMOVED.** MIR Direct (`transpile-mir.cpp`) is the only back end. 
 15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
-16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), the Tree-sitter runtime (`lambda/tree-sitter/`) and its vendored language grammars (`lambda/tree-sitter-{bash,javascript,latex,latex-math,python,ruby,typescript}/`), ThorVG, re2, curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern. **`lambda/tree-sitter-lambda/` is NOT vendored** — it is Lambda's own grammar.
+16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), the Tree-sitter runtime (`lambda/tree-sitter/`) and its vendored language grammars (`lambda/tree-sitter-{bash,javascript,latex,python,ruby}/`), ThorVG, RE2 (`lib/re2/`), curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern. **`lambda/tree-sitter-lambda/` and `lambda/tree-sitter-latex-math/` are NOT vendored** — they are Lambda's own grammars. **`lambda/tree-sitter-typescript/` is a Lambda-maintained fork** of the upstream grammar (copied 2026-04-01, tuned since): edit it like Lambda's own grammars.
 17. **Cite rulings by formal-spec ID.** `doc/Lambda_Formal_Semantics.md` (`S#`) and `doc/Lambda_Formal_Design.md` (`D#`) are the single sources of truth. In chat/discussion and in every new or updated design/impl doc, quote the `S#`/`D#` point when one covers the topic; only when none exists, quote the vibe design-doc ledger ID (e.g. TE-16, K13, CW9). When a semantics or design ruling changes, update BOTH the `./doc` formal spec (revise the ruling in place: `v2` suffix + doc semver bump) and the relevant `./vibe` working design doc. Documentation tiers, authority order, and style conventions: `doc/Doc_Convention.md`.
 18. **When js262/Test262 tests fail, crash, or time out, NEVER modify `test_js_test262_gtest` to mask the issue.** Investigate and fix the root cause or instability in the JS runtime.
 19. When asked to reduce LOC, **NEVER ever remove blank/comment lines, or reformat the code to reduce LOC**. Simplify the code itself.
@@ -35,8 +40,8 @@ These rules MUST be followed. Violations are considered errors.
 | Add a 3rd/4th copy of a per-type/kind/case block | Extract a parameterized helper or table first |
 | Cite only a vibe ledger ID when an `S#`/`D#` ruling exists | Quote `S#`/`D#` first; vibe IDs only for uncovered points |
 | Reintroduce a C-text back end (`transpile.cpp`) | Evolve only MIR Direct (`transpile-mir.cpp`) |
-| Edit `lambda/mir/`, `lambda/tree-sitter/`, a vendored `tree-sitter-<lang>/`, ThorVG, or any vendored dep | Fix it on the Lambda side; if it must be upstream, ask first, then record it under `patches/` |
-| Treat `lambda/tree-sitter-lambda/` as vendored | It is Lambda's own grammar: edit `grammar.js` / `src/scanner.c`, then `make generate-grammar` |
+| Edit `lambda/mir/`, `lib/re2/`, `lambda/tree-sitter/`, a vendored `tree-sitter-<lang>/`, ThorVG, or any vendored dep | Fix it on the Lambda side; if it must be upstream, ask first, then record it under `patches/` |
+| Treat `lambda/tree-sitter-{lambda,latex-math,typescript}/` as vendored | They are Lambda-owned: edit `grammar.js` / the scanner, never the generated `src/parser.c` — the Makefile regenerates it (`make generate-grammar`, `make generate-grammar-typescript`) |
 
 ## Project Overview
 
@@ -70,10 +75,11 @@ Lambda uses **tagged pointers/values** in 64-bit `Item` type:
 Access type with `get_type_id(Item)` - handles all variants uniformly.
 
 ### Core System Architecture
-- **Parser**: Direct C lexer/parser (`lambda/runtime/parser/` and `lambda/runtime/parse.c`); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
+- **Parser**: Direct C lexer/parser (`lambda/runtime/parser/lambda_lexer.c`, `lambda_parser.c`; `lambda/runtime/parse.c` is only an include shim); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
 - **AST Builder**: `lambda/runtime/build_ast.cpp` - constructs typed AST from parser reductions
 - **Transpiler**: `lambda/runtime/transpile-mir.cpp` - MIR Direct JIT, the only back end (the C-text transpiler is removed, see rule 14)
-- **Runtime**: `lambda/runtime/lambda-eval.cpp` - interpreter execution + `lambda/runtime/mir.c` - JIT compilation
+- **Execution**: tiered per D8.1.1 — `lambda/runtime/interp.cpp` is the T0 AST-walking interpreter; hot definitions promote to MIR JIT (`lambda/runtime/mir.c`)
+- **Runtime builtins**: `lambda/runtime/lambda-eval.cpp` - the C-ABI `fn_*` library that interpreted and JIT'd code call into (not an evaluator)
 - **Type System**: `lambda/lambda-data.hpp` - 20+ built-in types with inference
 
 ### Document Processing Pipeline
@@ -123,6 +129,10 @@ make test                     # Run ALL tests (baseline + extended)
 make test-lambda-baseline     # Lambda core functionalities (must pass 100%, when changes maked to Lambda engine)
 make test-radiant-baseline    # Radiant core functionalities (must pass 100%, when changes maked to Radiant engine)
 ```
+**Test data**: run `./setup-test.sh` once per checkout — it links `test/<corpus>` to the sibling `../lambda-test` repo and fetches the pinned WPT into `ref/wpt`; suites using those corpora fail without it. All make targets: `make help` and [`doc/dev/Make_Guide.md`](doc/dev/Make_Guide.md).
+
+**Before building or testing in a worktree, or when a failure looks environmental** (stale objects, flaky baseline, debug vs release exe, renamed env knobs): read [`doc/dev/Developer_Guide.md` §7](doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas). Never run `make release` in a worktree.
+
 **Running single test**: `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`
 
 ### Grammar & Parser
@@ -134,7 +144,7 @@ parser is used only by the isolated `lambda-cst` verifier.
 
 ## Coding Conventions
 
-Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible. See [`doc/dev/C_Plus_Convention.md`](../doc/dev/C_Plus_Convention.md) for details.
+Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible. See [`doc/dev/C_Plus_Convention.md`](doc/dev/C_Plus_Convention.md) for details.
 
 - **Memory**: Use `pool_calloc()`, `arena_alloc()` for Lambda objects. Use `MarkBuilder`/`MarkReader` for constructing/reading Lambda data structures.
 - **Logging**: Use `log_debug()`/`log_info()`/`log_error()` from `lib/log.h` → outputs to `./log.txt`
@@ -146,9 +156,9 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 | Area | Start here |
 |------|-----------|
 | Core data types | `lambda/lambda-data.hpp`, `lambda/lambda.h` (C API for MIR) |
-| Runtime evaluation | `lambda/runtime/lambda-eval.cpp` |
+| Execution & builtins | `lambda/runtime/interp.cpp` (T0 interpreter), `lambda/runtime/lambda-eval.cpp` (builtins) |
 | Memory management | `lambda/runtime/lambda-mem.cpp` |
-| AST & parsing | `lambda/runtime/build_ast.cpp`, `lambda/runtime/parse.c`, `lambda/runtime/parser/` |
+| AST & parsing | `lambda/runtime/build_ast.cpp`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/parser/lambda_lexer.c` |
 | JIT compilation | `lambda/runtime/transpile-mir.cpp`, `lambda/runtime/mir.c` |
 | Data construction | `lambda/io/mark_builder.hpp`, `lambda/core/mark_reader.hpp`, `lambda/io/mark_editor.hpp` |
 | Input parsers | `lambda/input/input.cpp` (dispatcher), `lambda/input/input-*.cpp` |
@@ -170,6 +180,7 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 ## Lambda Language Documentation
 - `doc/Lambda_Formal_Semantics.md` — **Normative semantics specification (ADR)** — core principles, value domain, truthiness, numerics, equality, total order, absence/errors, mutability, operators, metaprogramming; the semantic authority when docs or implementation disagree (decision records in `vibe/Lambda_Semantics_Formal*.md`)
 - `doc/Lambda_Formal_Design.md` — **Normative design/implementation specification** — D-numbered rulings D1–D8 (architecture, data representation, type & shape, memory, stacks/rooting, functions, modules/Jube, compilation) with impl footnotes and open issues `DO#`; the design authority when design docs or implementation disagree
+- `doc/Lambda_Formal_Index.md` — **Generated ruling index** for both formal specs (ID → spec line → title); `python3 utils/formal_index.py D7.3.6` prints one ruling in full. Regenerate with `make formal-index` whenever a spec changes
 - `doc/Doc_Convention.md` — **Documentation convention** — the document tiers, authority order (Formal specs → vibe → grammar.js; ask the user on missing rulings or conflicts), formal-spec structure and distillation discipline, vibe/impl/ledger conventions, doc/dev verified-against headers
 - `doc/Lambda_Reference.md` — Language overview and quick reference
 - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)

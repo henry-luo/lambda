@@ -38,6 +38,7 @@ STRUCTURAL_CHECKS=(
   "no-new-per-file-header:python3 $ROOT/utils/lint/rules/structural/no_new_per_file_header.py"
   "mem-kind-nodes:python3 $ROOT/utils/check_mem_kind_nodes.py"
   "static-module-architecture:python3 $ROOT/utils/check_static_module_architecture.py"
+  "formal-index:python3 $ROOT/utils/formal_index.py --check"
   "module-boundary-link:make -C $ROOT check-module-boundary"
   # ls-test-has-golden moved from Python to alint (see .alint.yml).
   # `check_state_machine.py` stays — it parses C++ enum tables and correlates,
