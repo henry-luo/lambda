@@ -868,6 +868,30 @@ CssMathType css_math_value_type(const CssValue* value, int depth) {
     return css_math_evaluate(value, nullptr, depth).type;
 }
 
+bool css_compute_line_height_value(const CssValue* value,
+    const CssMathEvaluationContext* context, CssValue* computed) {
+    if (!value || !computed) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) {
+        *computed = *value;
+        return true;
+    }
+    CssMathResult math = css_math_evaluate(value, context);
+    bool number = math.type == CSS_MATH_NUMBER;
+    if (!math.resolved || (!number && math.type != CSS_MATH_LENGTH &&
+        math.type != CSS_MATH_PERCENT && math.type != CSS_MATH_LENGTH_PERCENT)) return false;
+    // range checking happens after math; an inherited number keeps its receiver-independent factor.
+    double result = isnan(math.value) ? 0.0 : fmax(0.0, math.value);
+    *computed = {};
+    if (number) {
+        computed->type = CSS_VALUE_TYPE_NUMBER;
+        computed->data.number.value = result;
+    } else {
+        computed->type = CSS_VALUE_TYPE_LENGTH;
+        computed->data.length = {result, CSS_UNIT_PX};
+    }
+    return true;
+}
+
 static const CssTransformFunctionInfo CSS_TRANSFORM_FUNCTIONS[] = {
     {"translate", TRANSFORM_TRANSLATE, 1, 2},
     {"translateX", TRANSFORM_TRANSLATEX, 1, 1},
@@ -969,7 +993,8 @@ static bool css_transform_value_valid(const CssValue* value) {
 
 static bool css_value_is_length_expression(const CssValue* value,
                                             bool allow_percentage,
-                                            bool allow_fit_content) {
+                                            bool allow_fit_content,
+                                            bool allow_number = false) {
     if (!value) return false;
     if (value->type == CSS_VALUE_TYPE_CALC) return true;
     if (value->type == CSS_VALUE_TYPE_VAR || value->type == CSS_VALUE_TYPE_ENV ||
@@ -981,6 +1006,7 @@ static bool css_value_is_length_expression(const CssValue* value,
         strcmp(value->data.function->name, "fit-content") == 0) return true;
     CssMathType type = css_math_value_type(value, 0);
     return type == CSS_MATH_LENGTH || type == CSS_MATH_DEFERRED ||
+        (allow_number && type == CSS_MATH_NUMBER) ||
         (allow_percentage && (type == CSS_MATH_PERCENT ||
                               type == CSS_MATH_LENGTH_PERCENT));
 }
@@ -2619,18 +2645,8 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                     keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET ||
                     keyword == CSS_VALUE_REVERT;
             }
-            if (value->type == CSS_VALUE_TYPE_FUNCTION) {
-                const CssFunction* function = value->data.function;
-                if (!function || !function->name) return false;
-                return strcmp(function->name, "var") == 0 ||
-                    strcmp(function->name, "env") == 0 ||
-                    strcmp(function->name, "attr") == 0 ||
-                    strcmp(function->name, "calc") == 0 ||
-                    strcmp(function->name, "min") == 0 ||
-                    strcmp(function->name, "max") == 0 ||
-                    strcmp(function->name, "clamp") == 0;
-            }
-            return false;
+            // function names alone cannot distinguish a multiplier from invalid dimensions.
+            return css_value_is_length_expression(value, true, false, true);
         }
 
         case CSS_PROPERTY_WIDTH:

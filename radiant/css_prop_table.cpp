@@ -254,6 +254,12 @@ static DomElement* cssom_inheritance_parent(DomElement* element) {
     return element->doc && element == element->doc->root ? nullptr : dom_parent_element(element);
 }
 
+static DomElement* cssom_inherited_source(DomElement* element, int* pseudo_type) {
+    // a generated pseudo inherits from its originating element before walking further ancestors.
+    if (*pseudo_type != 0) { *pseudo_type = 0; return element; }
+    return cssom_inheritance_parent(element);
+}
+
 static ArrayList* cssom_collect_style_ancestors(DomElement* element) {
     ArrayList* ancestors = arraylist_new(8);
     if (!ancestors) return nullptr;
@@ -407,7 +413,7 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
                 value = nullptr;
         }
         if (cssom_value_inherits(value, id)) {
-            DomElement* parent = cssom_inheritance_parent(element);
+            DomElement* parent = cssom_inherited_source(element, &pseudo_type);
             if (parent) {
                 element = parent;
                 pseudo_type = 0;
@@ -449,18 +455,34 @@ static bool serialize_decl(const CssPropAccessor* accessor, DomElement* element,
     return accessor && serialize_decl_value(element, accessor->id, pseudo_type, out, out_size);
 }
 
-static const CssValue* inherited_decl_value(DomElement* element, CssPropertyCode id,
-                                            int pseudo_type, DomElement** declaring_element) {
+static const CssValue* cssom_declared_font_value(Pool* scratch, DomElement* element,
+                                                CssPropertyCode id, int pseudo_type) {
+    CssDeclaration* longhand = computed_decl(element, id, pseudo_type);
+    CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_FONT, pseudo_type);
+    bool use_shorthand = shorthand && shorthand->value &&
+        (!longhand || css_declaration_cascade_compare(shorthand, longhand) > 0);
+    const CssValue* value = use_shorthand ? shorthand->value : longhand ? longhand->value : nullptr;
+    if (!value) return nullptr;
+    const CssValue* resolved = css_resolve_element_var_value(scratch, element, value, id);
+    CssPropertyCode source = use_shorthand ? CSS_PROPERTY_FONT : id;
+    if (!resolved || !css_property_validate_value(source, resolved)) return nullptr;
+    // font's omitted line-height resets to normal; its components share validation and projection.
+    const CssProperty* property = css_property_get_by_code(id);
+    return use_shorthand && property
+        ? css_font_shorthand_longhand(resolved, property->name, scratch) : resolved;
+}
+
+static const CssValue* inherited_decl_value(Pool* scratch, DomElement* element,
+    CssPropertyCode id, int pseudo_type, DomElement** declaring_element, int* declaring_pseudo) {
     while (element) {
-        CssDeclaration* declaration = computed_decl(element, id, pseudo_type);
-        const CssValue* value = declaration ? declaration->value : nullptr;
+        const CssValue* value = cssom_declared_font_value(scratch, element, id, pseudo_type);
         if (cssom_value_inherits(value, id)) {
-            element = cssom_inheritance_parent(element);
-            pseudo_type = 0;
+            element = cssom_inherited_source(element, &pseudo_type);
             continue;
         }
         if (cssom_value_uses_initial(value)) return nullptr;
         if (value && declaring_element) *declaring_element = element;
+        if (value && declaring_pseudo) *declaring_pseudo = pseudo_type;
         return value;
     }
     return nullptr;
@@ -468,27 +490,6 @@ static const CssValue* inherited_decl_value(DomElement* element, CssPropertyCode
 
 static bool cssom_resolve_font_size(DomElement* element, int pseudo_type,
                                      float* root_font_size, float* font_size);
-
-static bool cssom_font_size_px(DomElement* element, int pseudo_type, float* font_size) {
-    float root_font_size = 16.0f;
-    // line-height borrows a declaration; compute fonts without rematching its owner.
-    return cssom_resolve_font_size(element, pseudo_type, &root_font_size, font_size);
-}
-
-static const CssValue* cssom_font_size_decl_value(DomElement* element,
-                                                   int pseudo_type) {
-    if (!element) return nullptr;
-    CssDeclaration* longhand = computed_decl(
-        element, CSS_PROPERTY_FONT_SIZE, pseudo_type);
-    CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_FONT,
-                                               pseudo_type);
-    if (shorthand && shorthand->value && pseudo_type == 0 &&
-        (!longhand || css_declaration_cascade_compare(shorthand, longhand) > 0)) {
-        CssFontShorthandParts parts = {};
-        if (css_parse_font_shorthand(shorthand->value, &parts)) return parts.size;
-    }
-    return longhand ? longhand->value : nullptr;
-}
 
 static bool cssom_resolve_font_size_value(DomElement* element,
     const CssValue* value, float parent_font_size, float root_font_size, float* font_size,
@@ -527,8 +528,16 @@ static bool cssom_resolve_font_size_value(DomElement* element,
                                       value->data.length.value, &absolute_pixels)) {
             resolved = (float)absolute_pixels;
         } else {
-            float viewport_width = element->doc ? element->doc->viewport.width : 0.0f;
-            float viewport_height = element->doc ? element->doc->viewport.height : 0.0f;
+            DomDocument* document = element->doc;
+            UiContext* host = document ? (UiContext*)document->js.host_ui_context : nullptr;
+            CssEngine* engine = document ? (CssEngine*)document->services.cached_css_engine : nullptr;
+            // viewport metadata is an override; the host/cascade owns the actual viewport dimensions.
+            float viewport_width = host ? host->viewport_width
+                : engine ? (float)engine->context.viewport_width : 0.0f;
+            float viewport_height = host ? host->viewport_height
+                : engine ? (float)engine->context.viewport_height : 0.0f;
+            if (document && document->viewport.width > 0) viewport_width = document->viewport.width;
+            if (document && document->viewport.height > 0) viewport_height = document->viewport.height;
             double viewport_pixels = 0.0;
             WritingMode mode = element->blk ? element->block()->writing_mode
                 : WM_HORIZONTAL_TB;
@@ -579,15 +588,21 @@ static bool cssom_resolve_font_size(DomElement* element, int pseudo_type,
     // compute each inherited basis once from the CSS root toward the queried element.
     for (int index = ancestors->length; index > 0; index--) {
         DomElement* current = (DomElement*)ancestors->data[index - 1];
-        const CssValue* value = cssom_font_size_decl_value(current, index == 1 ? pseudo_type : 0);
+        const CssValue* value = cssom_declared_font_value(scratch, current, CSS_PROPERTY_FONT_SIZE, 0);
         float resolved = parent_font_size;
         if (value) {
-            value = css_resolve_element_var_value(scratch, current, value, CSS_PROPERTY_FONT_SIZE);
             if (!cssom_resolve_font_size_value(current, value, parent_font_size,
                                                *root_font_size, &resolved)) resolved = parent_font_size;
         }
         parent_font_size = resolved;
         if (index == ancestors->length) *root_font_size = resolved;
+    }
+    if (pseudo_type != 0) {
+        const CssValue* value = cssom_declared_font_value(scratch, element,
+            CSS_PROPERTY_FONT_SIZE, pseudo_type);
+        float resolved = parent_font_size;
+        if (value && cssom_resolve_font_size_value(element, value, parent_font_size,
+                *root_font_size, &resolved)) parent_font_size = resolved;
     }
     *font_size = parent_font_size;
     pool_destroy(scratch);
@@ -617,25 +632,39 @@ static bool serialize_cssom_font_size(DomElement* element, int pseudo_type,
 static bool serialize_line_height(const CssPropAccessor* accessor, DomElement* element,
                                   int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element) return false;
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
     DomElement* declaring_element = nullptr;
-    const CssValue* value = inherited_decl_value(
-        element, CSS_PROPERTY_LINE_HEIGHT, pseudo_type, &declaring_element);
-    if (value && value->type == CSS_VALUE_TYPE_NUMBER) {
-        float font_size = 0.0f;
-        // CSS Inline: inherited unitless values retain their multiplier and use
-        // the target element's font size, unlike inherited percentages.
-        if (cssom_font_size_px(element, pseudo_type, &font_size)) {
-            return format_number(out, out_size, value->data.number.value * font_size, "px");
-        }
-    } else if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE && declaring_element) {
-        float font_size = 0.0f;
-        // Percentages compute to a length on the declaring element before inheritance.
-        if (cssom_font_size_px(declaring_element, 0, &font_size)) {
-            return format_number(out, out_size,
-                                 value->data.percentage.value * font_size / 100.0f, "px");
+    int declaring_pseudo = 0;
+    const CssValue* value = inherited_decl_value(scratch, element,
+        CSS_PROPERTY_LINE_HEIGHT, pseudo_type, &declaring_element, &declaring_pseudo);
+    bool success = false;
+    if (!value || (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL)) {
+        success = copy_text(out, out_size, "normal");
+    } else {
+        float root_font_size = 16.0f, owner_font_size = 0.0f;
+        if (cssom_resolve_font_size(declaring_element, declaring_pseudo,
+                &root_font_size, &owner_font_size)) {
+            CssomFontMathContext lengths = {declaring_element, owner_font_size, root_font_size};
+            CssMathEvaluationContext context = {cssom_font_math_leaf, &lengths, 1.0, false};
+            CssValue computed = {};
+            if (css_compute_line_height_value(value, &context, &computed)) {
+                double pixels = computed.type == CSS_VALUE_TYPE_NUMBER
+                    ? computed.data.number.value : computed.data.length.value;
+                if (computed.type == CSS_VALUE_TYPE_NUMBER) {
+                    float target_font_size = 0.0f;
+                    if (cssom_resolve_font_size(element, pseudo_type,
+                            &root_font_size, &target_font_size))
+                        pixels = computed.data.number.value * target_font_size;
+                    else pixels = NAN;
+                }
+                if (!isnan(pixels)) success = format_number(out, out_size,
+                    layout_clamp_dimension((float)pixels), "px");
+            }
         }
     }
-    return serialize_decl(accessor, element, pseudo_type, out, out_size);
+    pool_destroy(scratch);
+    return success || serialize_decl(accessor, element, pseudo_type, out, out_size);
 }
 
 struct CssomSvgLengthContext {SvgLengthContext svg; CssomFontMathContext font;};
@@ -762,7 +791,8 @@ static String* serialize_svg_paint_value(Pool* pool, DomElement* element, CssPro
 
 static bool serialize_svg_paint(const CssPropAccessor* accessor, DomElement* element,
     int pseudo_type, char* out, size_t out_size) {
-    if (pseudo_type != 0) return serialize_decl(accessor, element, pseudo_type, out, out_size);
+    if (pseudo_type != 0 && !(accessor->flags & CSS_PROP_ACCESSOR_CASCADE_RESOLVED))
+        return serialize_decl(accessor, element, pseudo_type, out, out_size);
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.svg.computed_value");
     if (!pool) return false;
     String* value = css_prop_serialize_computed_value(pool, element, accessor->id, pseudo_type);

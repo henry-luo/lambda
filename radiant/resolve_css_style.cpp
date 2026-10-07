@@ -3681,7 +3681,10 @@ static void resolve_current_font_size(LayoutContext* lycon) {
         ? font_prop_used_size(lycon->font.style) : 16.0f;
 }
 
-struct CssLayoutMathContext {LayoutContext* layout; uintptr_t property;};
+static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
+    const CssValue* value, bool computed_units);
+
+struct CssLayoutMathContext {LayoutContext* layout; uintptr_t property; bool computed_units;};
 
 static bool css_layout_math_leaf(void* data, const CssValue* value, double* result) {
     CssLayoutMathContext* context = (CssLayoutMathContext*)data;
@@ -3689,7 +3692,8 @@ static bool css_layout_math_leaf(void* data, const CssValue* value, double* resu
         CssUnit canonical;
         return css_dimension_to_canonical(value->data.length.unit, value->data.length.value, &canonical, result);
     }
-    *result = resolve_length_value(context->layout, context->property, value);
+    *result = resolve_length_value_mode(context->layout, context->property, value,
+        context->computed_units);
     return !isnan(*result);
 }
 
@@ -3761,6 +3765,11 @@ static float css_font_relative_glyph_advance(LayoutContext* lycon,
 
 // resolve a CSS length, percentage, or number to pixels.
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
+    return resolve_length_value_mode(lycon, property, value, false);
+}
+
+static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
+    const CssValue* value, bool computed_units) {
     if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
     static thread_local int length_resolve_depth = 0;
     if (length_resolve_depth > 64) {
@@ -3921,7 +3930,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = percentage * lycon->scroll_percentage_base / 100.0;
         } else if (effective_property == CSS_PROPERTY_FONT_SIZE || effective_property == CSS_PROPERTY_LINE_HEIGHT || effective_property == CSS_PROPERTY_VERTICAL_ALIGN) {
             result = percentage * lycon->font.style->font_size / 100.0;
-            if (effective_property == CSS_PROPERTY_LINE_HEIGHT) {
+            if (effective_property == CSS_PROPERTY_LINE_HEIGHT && !computed_units) {
                 result *= layout_effective_zoom(lycon->view);
             }
         } else if (effective_property == CSS_PROPERTY_LETTER_SPACING) {
@@ -4004,7 +4013,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             break;
         }
         uintptr_t raw_property = (intptr_t)property < 0 ? property : (uintptr_t)(-(intptr_t)property);
-        CssLayoutMathContext leaf_context = {lycon, raw_property};
+        CssLayoutMathContext leaf_context = {lycon, raw_property, computed_units};
         CssMathEvaluationContext math_context = {css_layout_math_leaf, &leaf_context,
             1.0 / ui_context_raster_scale(lycon->ui_context), false};
         CssMathResult math = css_math_evaluate(value, &math_context);
@@ -4016,7 +4025,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             // as non-length properties; missing substitutions compute invalid.
             const CssValue* substituted = resolve_var_function(lycon, value);
             result = substituted && substituted != value
-                ? resolve_length_value(lycon, property, substituted) : NAN;
+                ? resolve_length_value_mode(lycon, property, substituted, computed_units) : NAN;
         } else {
             log_warn("unknown CSS function: %s()", func->name);
             result = NAN;
@@ -4025,7 +4034,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     }
     case CSS_VALUE_TYPE_LIST:
         if (value->data.list.count > 0 && value->data.list.values[0]) {
-            result = resolve_length_value(lycon, property, value->data.list.values[0]);
+            result = resolve_length_value_mode(lycon, property, value->data.list.values[0], computed_units);
         } else {
             result = 0.0f;
         }
@@ -4050,7 +4059,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     case CSS_VALUE_TYPE_VAR: {
         const CssValue* substituted = resolve_var_function(lycon, value);
         result = substituted && substituted != value
-            ? resolve_length_value(lycon, property, substituted) : NAN;
+            ? resolve_length_value_mode(lycon, property, substituted, computed_units) : NAN;
         break;
     }
     default:
@@ -4058,7 +4067,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         result = NAN;  // Use NAN instead of 0 to indicate unresolvable value
         break;
     }
-    if (value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result) &&
+    if (!computed_units && value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result) &&
         effective_property != CSS_PROPERTY_FONT_SIZE &&
         !(lycon->transform_angle_math && effective_property == CSS_PROPERTY_TRANSFORM)) {
         // CSS Viewport 1 applies effective zoom to every resolved CSS length,
@@ -4072,6 +4081,29 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     }
     length_resolve_depth--;
     return result;
+}
+
+static void compute_stored_line_height(LayoutContext* lycon, ViewSpan* span) {
+    const CssValue* value = span && span->blk ? span->block()->line_height : nullptr;
+    if (!value || value->type == CSS_VALUE_TYPE_NUMBER ||
+        value->type == CSS_VALUE_TYPE_KEYWORD ||
+        (value->type == CSS_VALUE_TYPE_LENGTH && value->data.length.unit == CSS_UNIT_PX)) return;
+    FontBox saved_font = lycon->font;
+    if (span->font && span->font->font_size >= 0.0f) {
+        lycon->font.style = lam::up(span->font);
+        lycon->font.current_font_size = span->font->font_size;
+    }
+    CssLayoutMathContext leaves = {lycon, (uintptr_t)(-(intptr_t)CSS_PROPERTY_LINE_HEIGHT), true};
+    CssMathEvaluationContext context = {css_layout_math_leaf, &leaves, 1.0, false};
+    CssValue computed = {};
+    bool resolved = css_compute_line_height_value(value, &context, &computed);
+    lycon->font = saved_font;
+    if (!resolved) return;
+    // computed lengths inherit before zoom; numbers keep their multiplier for each descendant font.
+    CssValue* retained = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
+    if (!retained) return;
+    *retained = computed;
+    span->blk->line_height = lam::shared(retained);
 }
 
 static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
@@ -6215,6 +6247,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
         }
     }
+    compute_stored_line_height(lycon, lam::view_require_element(lycon->view));
     resolve_text_align_longhands(dom_elem, lycon);
     resolve_overflow_axes(dom_elem, lycon);
     resolve_overscroll_axes(dom_elem, lycon);

@@ -204,6 +204,29 @@ TEST_F(CssEngineParserTest, PhysicalSideLengthsValidateWholeValues) {
         EXPECT_EQ(css_parse_declaration_text(value, strlen(value), pool), nullptr) << value;
 }
 
+TEST_F(CssEngineParserTest, LineHeightValidatesNumericTypesBeforeCascade) {
+    const char* valid[] = {
+        "line-height:2", "line-height:150%", "line-height:1.5em", "line-height:0",
+        "line-height:normal", "line-height:inherit", "line-height:initial", "line-height:unset",
+        "line-height:calc(2)", "line-height:calc(2 * 1em)", "line-height:calc(50% + 5px)",
+        "line-height:calc(-2)", "line-height:calc(-1em)", "line-height:calc(0 / 0)",
+        "line-height:sin(90deg)", "line-height:sqrt(4)", "line-height:round(up, 1.2, 1)",
+        "line-height:mod(5, 2)", "line-height:var(--leading)",
+        "line-height:calc(1px + var(--leading))"
+    };
+    const char* invalid[] = {
+        "line-height:-1", "line-height:-10%", "line-height:-1px", "line-height:1s",
+        "line-height:1foo", "line-height:none", "line-height:calc(1px + 1)",
+        "line-height:calc(1s)", "line-height:calc(1deg)", "line-height:min(2, 3px)",
+        "line-height:calc(1em * 1em)", "line-height:asin(1)",
+        "line-height:clamp(1, 2)", "line-height:sin(1px)", "line-height:wobble(2)"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
 TEST_F(CssEngineParserTest, SvgPaintAndStrokeWidthUseCompleteGrammar) {
     const char* valid[] = {"fill:red", "fill:CURRENTCOLOR", "fill:none", "stroke:context-fill",
         "fill:context-stroke", "fill:url(#paint)", "fill:url(#paint) blue",
@@ -1998,6 +2021,39 @@ static bool css_test_math_leaf(void* data, const CssValue* value, double* result
     if (value->type != CSS_VALUE_TYPE_PERCENTAGE) return false;
     *result = value->data.percentage.value * *(double*)data / 100.0;
     return true;
+}
+
+TEST_F(CssEngineParserTest, ComputedLineHeightKeepsNumbersAndResolvesLengthBases) {
+    struct Case {const char* value; CssValueType type; double result;};
+    const Case cases[] = {
+        {"2", CSS_VALUE_TYPE_NUMBER, 2}, {"150%", CSS_VALUE_TYPE_LENGTH, 30},
+        {"calc(50% + 5px)", CSS_VALUE_TYPE_LENGTH, 15},
+        {"calc(-2)", CSS_VALUE_TYPE_NUMBER, 0}, {"calc(-5px)", CSS_VALUE_TYPE_LENGTH, 0},
+        {"calc(0 / 0)", CSS_VALUE_TYPE_NUMBER, 0}, {"sqrt(4)", CSS_VALUE_TYPE_NUMBER, 2}
+    };
+    double basis = 20;
+    CssMathEvaluationContext context = {css_test_math_leaf, &basis, 1.0, false};
+    for (const Case& entry : cases) {
+        CssDeclaration* declaration = css_parse_property_declaration(
+            "line-height", 11, entry.value, strlen(entry.value), pool);
+        ASSERT_NE(declaration, nullptr) << entry.value;
+        CssValue computed = {};
+        ASSERT_TRUE(css_compute_line_height_value(declaration->value, &context, &computed)) << entry.value;
+        EXPECT_EQ(computed.type, entry.type) << entry.value;
+        double actual = computed.type == CSS_VALUE_TYPE_NUMBER
+            ? computed.data.number.value : computed.data.length.value;
+        EXPECT_DOUBLE_EQ(actual, entry.result) << entry.value;
+        if (computed.type == CSS_VALUE_TYPE_LENGTH) EXPECT_EQ(computed.data.length.unit, CSS_UNIT_PX);
+    }
+    const char* text = "--test:calc(1s)";
+    CssDeclaration* invalid = css_parse_declaration_text(text, strlen(text), pool);
+    ASSERT_NE(invalid, nullptr);
+    CssValue unchanged = {};
+    unchanged.type = CSS_VALUE_TYPE_NUMBER;
+    unchanged.data.number.value = 7;
+    EXPECT_FALSE(css_compute_line_height_value(invalid->value, &context, &unchanged));
+    EXPECT_EQ(unchanged.type, CSS_VALUE_TYPE_NUMBER);
+    EXPECT_DOUBLE_EQ(unchanged.data.number.value, 7);
 }
 
 TEST_F(CssEngineParserTest, SharedMathDefersMixedComparisonsUntilTheConsumerSuppliesABasis) {

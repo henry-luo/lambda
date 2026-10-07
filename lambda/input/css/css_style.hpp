@@ -159,6 +159,10 @@ CssMathResult css_math_evaluate(const CssValue* value,
     const CssMathEvaluationContext* context, int depth = 0);
 CssMathType css_math_value_type(const CssValue* value, int depth = 0);
 
+// line-height numbers retain their multiplier; other numeric forms compute to inherited px.
+bool css_compute_line_height_value(const CssValue* value,
+    const CssMathEvaluationContext* context, CssValue* computed);
+
 // CSS Fonts §2.5 maps absolute font-size keywords before layout applies
 // inherited relative sizes such as larger and smaller.
 float css_font_size_keyword_px(CssEnum keyword);

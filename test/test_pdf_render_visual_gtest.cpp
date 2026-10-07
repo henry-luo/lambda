@@ -6535,6 +6535,73 @@ TEST(RenderOutputParity, DeepInheritedComputedValuesDriveTextAndBoxPaint) {
         "temp/render_output_parity/cssom_deep_paint.json", html, events));
 }
 
+TEST(RenderOutputParity, LineHeightMathKeepsInheritedTypesAndAppliesZoomOnce) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>body{margin:0;background:white}"
+        ".frame{position:absolute;top:0;width:40px;font-size:10px}"
+        "#numbers{left:0;line-height:calc(2)}#lengths{left:60px;line-height:calc(2 * 1em)}"
+        "#zoom_frame{position:absolute;left:120px;top:0}"
+        "#zoom_owner{font-size:10px;line-height:calc(2 * 1em);zoom:2}"
+        ".leaf{width:40px;font-size:20px;background:blue;text-indent:9999px;overflow:hidden}"
+        "#length_leaf{background:green}#update{position:absolute;left:0;top:110px}</style>"
+        "<div id=numbers class=frame><div id=number_leaf class=leaf>X</div></div>"
+        "<div id=lengths class=frame><div id=length_leaf class=leaf>X</div></div>"
+        "<div id=zoom_frame><div id=zoom_owner><div id=zoom_leaf class=leaf>X</div></div></div>"
+        "<button id=update>update</button><script>"
+        "document.getElementById('update').addEventListener('click',function(){"
+        "document.getElementById('lengths').style.fontSize='20px';});</script>";
+    const char* events =
+        "{\"name\":\"line-height numeric types reach layout and paint\","
+        "\"html\":\"temp/render_output_parity/cssom_leading_paint.html\","
+        "\"viewport\":{\"width\":240,\"height\":150},\"events\":["
+        "{\"type\":\"assert_style\",\"target\":{\"selector\":\"#number_leaf\"},\"property\":\"height\",\"equals\":\"40px\"},"
+        "{\"type\":\"assert_style\",\"target\":{\"selector\":\"#length_leaf\"},\"property\":\"height\",\"equals\":\"20px\"},"
+        "{\"type\":\"assert_style\",\"target\":{\"selector\":\"#zoom_leaf\"},\"property\":\"line-height\",\"equals\":\"20px\"},"
+        "{\"type\":\"assert_pixel\",\"x\":5,\"y\":35,\"min_b\":240,\"max_r\":20,\"max_g\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":65,\"y\":15,\"min_g\":110,\"max_r\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":65,\"y\":25,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"assert_pixel\",\"x\":125,\"y\":35,\"min_b\":240,\"max_r\":20,\"max_g\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":125,\"y\":45,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"click\",\"target\":{\"selector\":\"#update\"}},"
+        "{\"type\":\"assert_style\",\"target\":{\"selector\":\"#length_leaf\"},\"property\":\"height\",\"equals\":\"40px\"},"
+        "{\"type\":\"assert_pixel\",\"x\":65,\"y\":35,\"min_g\":110,\"max_r\":20,\"max_b\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":65,\"y\":45,\"min_r\":240,\"min_g\":240,\"min_b\":240}]}";
+    // inherited math numbers scale with the child font; computed lengths retain their owner's basis.
+    ASSERT_TRUE(run_html_fixture_view("temp/render_output_parity/cssom_leading_paint.html",
+        "temp/render_output_parity/cssom_leading_paint.json", html, events));
+}
+
+TEST(RenderOutputParity, InheritedLineHeightMathMatchesComputedLengthsAcrossOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    const char* rules[] = {
+        "#numbers{line-height:calc(2)}#lengths{line-height:calc(2 * 1em)}"
+        "#percentages{line-height:calc(150% + 5px)}#zoom_owner{line-height:calc(2 * 1em)}",
+        "#numbers{line-height:2}#lengths,#percentages,#zoom_owner{line-height:20px}",
+    };
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    for (size_t index = 0; index < 2; index++) {
+        strbuf_append_str(html[index], "<!doctype html><style>body{margin:0;background:white}"
+            ".owner{position:absolute;top:0;width:40px;font:10px Arial}"
+            "#numbers{left:0}#lengths{left:50px}#percentages{left:100px}#zoom{left:150px}"
+            "#zoom_owner{font-size:10px;zoom:2}.leaf{font-size:20px;background:blue}</style><style>");
+        strbuf_append_str(html[index], rules[index]);
+        strbuf_append_str(html[index], "</style><div id=numbers class=owner><div class=leaf>A<br>B</div></div>"
+            "<div id=lengths class=owner><div class=leaf>C<br>D</div></div>"
+            "<div id=percentages class=owner><div class=leaf>E<br>F</div></div>"
+            "<div id=zoom class=owner><div id=zoom_owner><div class=leaf>G<br>H</div></div></div>");
+    }
+    // line boxes position real glyphs and backgrounds in every export, including inherited zoom.
+    expect_html_pair_output_parity("inherited_line_height_math", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
 TEST(RenderOutputParity, LiveInheritedComputedValuesReachPaintAfterAncestorSelectorMutation) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
