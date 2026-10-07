@@ -44,6 +44,9 @@ buffer (D4.5.1v4). The generic input fix preserves the package boundary (D7.5.3)
 The toolbar range is 0.5×–4× in quarter steps. Pixel assertions now verify actual
 thumb movement on clicks and drags, both endpoints, and persistence through
 Restart and later layout updates; value/readout assertions alone missed the bug.
+The native range thumb now uses the existing circle fill/outline helpers in
+`render_form.cpp`, preserving its size and interaction geometry (D7.5.3).
+The toolbar preview was visually checked and all 32 speed assertions still pass.
 
 | Latest verification | Result and boundary |
 |---|---|
@@ -51,12 +54,12 @@ Restart and later layout updates; value/readout assertions alone missed the bug.
 | Focused UI | 14 slide/host fixtures, 255 assertions pass with forced collection and freed-memory poisoning, including 126 Northstar checks and 32 speed-slider checks |
 | Merged native checks | 405 cases pass, including transition-track retirement |
 | Full Lambda baseline | 6,297/6,297 pass after the range-thumb and value-storage fixes |
-| Full Radiant baseline | 4,031 pass, 350 partial, 4 fail after the speed/name-root fix; both HTTP setup failures pass with loopback access; Tetris smoke and LaTeX iframe navigation remain failed |
+| Full Radiant baseline | 4,031 pass, 350 partial, 4 fail after the range-thumb/value-storage fixes; both HTTP setup failures pass with loopback access; Tetris smoke and LaTeX iframe navigation remain failed |
 | Navigation stress | Normal and forced-GC/poison runs each pass 40 assertions over 20 rounds / 120 callbacks; forced run has no raw-pointer or inconsistent-focus-ancestry diagnostics |
 | Latest lint / diff | Radiant float/int-cast lint and whitespace checks pass |
 
 All layout, render, DOM UI and memory baseline gates pass. Full Lambda and
-Radiant baselines were rerun sequentially after the speed/name-root fix; the
+Radiant baselines were rerun sequentially after the range-thumb/value-storage fixes; the
 405-case native row is the earlier merge verification. Older rounds below are
 retained as history and do not describe the current failure set.
 
@@ -195,7 +198,11 @@ dragging to both endpoints and retaining the thumb through later layout. The
 4× completion timing. All 13 package scripts pass in both tiers (26 runs), and
 all 14 slide/host release replays pass 255 assertions with forced GC/poison.
 Existing plain-JS range and pointer replays pass 26 and 11 assertions normally.
-Float/int-cast lint passes. Artifacts: `temp/slide/thumb_*`.
+The regular UI runner also passes all 32 speed assertions. Sequential full
+baselines retain 6,297/6,297 Lambda passes and Radiant's 4,031 pass / 350 partial /
+4 fail result. Both sandbox HTTP-server setup failures pass on a loopback-enabled
+rerun; the previously recorded Tetris and LaTeX iframe failures remain. Float/int-cast
+lint and whitespace checks pass. Artifacts: `temp/slide/thumb_*`.
 
 | Milestone | Status |
 |---|---|
