@@ -367,6 +367,18 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
     return true;
 }
 
+static const char* view_css_counter_names[] = {"counter-reset", "counter-increment", "counter-set"};
+static void view_css_counter_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyle* parent) {
+    lam::Up<const CssValue>* values[] = {&style->counter_reset, &style->counter_increment, &style->counter_set};
+    const CssValue* inherited[] = {parent ? parent->counter_reset.get() : nullptr,
+        parent ? parent->counter_increment.get() : nullptr, parent ? parent->counter_set.get() : nullptr};
+    for (size_t i = 0; i < 3; i++) {
+        const CssValue* value = view_css_property(tree, style, view_css_counter_names[i]);
+        *values[i] = css_value_is_inherit(value) ? lam::up(inherited[i]) :
+            css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
+    }
+}
+
 static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         ViewCssStyle* parent, uint8_t pseudo_element) {
     ViewCssContext* css = tree->model->css;
@@ -477,15 +489,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     value = view_css_property(tree, style, "string-set");
     style->string_set = css_value_is_inherit(value) ? (parent ? parent->string_set : nullptr) :
         css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
-    const char* counter_names[] = {"counter-reset", "counter-increment", "counter-set"};
-    lam::Up<const CssValue>* counter_values[] = {&style->counter_reset, &style->counter_increment, &style->counter_set};
-    const CssValue* inherited_counters[] = {parent ? parent->counter_reset.get() : nullptr,
-        parent ? parent->counter_increment.get() : nullptr, parent ? parent->counter_set.get() : nullptr};
-    for (size_t i = 0; i < 3; i++) {
-        value = view_css_property(tree, style, counter_names[i]);
-        *counter_values[i] = css_value_is_inherit(value) ? lam::up(inherited_counters[i]) :
-            css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
-    }
+    view_css_counter_style(tree, style, parent);
     style->list_reversed = parent && parent->list_reversed;
     if (!pseudo_element && layout_is_html_list_container_tag(element->tag_id))
         style->list_reversed = element->tag_id == MARKUP_NAME_OL && element->has_attribute("reversed") && !style->counter_reset;
@@ -679,7 +683,6 @@ static ViewCssStyle* view_css_page_context_style(ViewTree* tree, ViewCssStyle* p
     if (query.name && !(context->name = pool_dup_n(css->pool, query.name, strlen(query.name)))) return nullptr;
     style->page_context = lam::up(context); style->parent = lam::up(parent);
     style->source = parent ? parent->source : nullptr;
-    style->counters = parent ? parent->counters : nullptr;
     style->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW}; style->orphans = style->widows = 1;
     style->next = css->styles; css->styles = lam::up(style);
     // Page contexts inherit from their CSS parent, while relocated notes retain their DOM cascade.
@@ -691,6 +694,7 @@ static ViewCssStyle* view_css_page_context_style(ViewTree* tree, ViewCssStyle* p
     const CssValue* quotes = view_css_property(tree, style, "quotes");
     style->quotes = !quotes || css_value_is_inherit(quotes) || css_value_is_unset(quotes)
         ? (parent ? parent->quotes : nullptr) : lam::up(quotes);
+    view_css_counter_style(tree, style, parent);
     return style;
 }
 
@@ -809,7 +813,11 @@ ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t p
         style.margin_color[i] = page_query_declaration(&query, "color", i);
         style.margin_align[i] = page_query_declaration(&query, "text-align", i);
         style.margin_overflow[i] = page_query_declaration(&query, "overflow", i);
-        if (style.margin_content[i]) {
+        bool counter_context = false;
+        if (!style.margin_content[i]) for (const char* name : view_css_counter_names)
+            counter_context |= page_query_declaration(&query, name, i) != nullptr;
+        // Margin counter state advances with page generation even before this box acquires content.
+        if (style.margin_content[i] || counter_context) {
             style.margin_style[i] = lam::up(view_css_page_context_style(tree, style.computed_style, query,
                 page_number, CSS_PAGE_AREA_MARGIN, i));
             if (!style.margin_style[i]) return VIEW_MODEL_OUT_OF_MEMORY;

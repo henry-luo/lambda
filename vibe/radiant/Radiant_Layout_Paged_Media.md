@@ -514,6 +514,8 @@ Collect running-content changes as source-linked events, then snapshot the state
 
 Maintain separate source counters, page-label counters and physical page indexes. A header may repeat a chapter title across many pages without re-entering that chapter's counter scope. Blank inserted pages, float-only pages and note-only continuations participate in page numbering and running-state selection according to the active policy. Labels such as `iv` or `A-3` are formatted values, not replacements for page identity.
 
+The CSS adapter now evaluates page and margin counter declarations over the finalized physical sequence, following [CSS Paged Media 3 §6.1](https://www.w3.org/TR/css-page-3/#page-based-counters). Target-page references retain the corresponding logical counter snapshot across reference passes; physical indexes continue to identify pages for selection, sidedness and preview placement. Ownership follows D4.5.1v4 / D4.1.4v5. The [implementation record](../impl/Radiant_Impl_Paged_Media.md#logical-page-counters-and-retained-target-labels-2026-10-07) describes the admitted forms and remaining counter boundaries.
+
 Margin content uses fixed region constraints and the chosen running snapshot. Running content that appears first in a discarded trial must not become the next page's starting state. Commit or restore mark/counter state together with the body and queues.
 
 ### 5.9 References, generated lists and convergence
