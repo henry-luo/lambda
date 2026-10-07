@@ -60,7 +60,7 @@ by 1e12 and the weighted sum scaled by 1e6 are floored and checked. The first
 sum is the usual truncated π²/6 series.
 
 Formatted output reuses the same decimal formatter. Every line contributes to
-the byte count and ASCII digest, then is appended to the current string buffer.
+the byte count and ASCII digest, then is appended to the current byte or string buffer.
 At 256 lines, or the final line, each port opens the OS null device, writes the
 entire buffer synchronously, closes it, and resets the buffer. There are 391
 open/write/close batches, 1,177,795 bytes and 100,000 lines per workload. Opening,
@@ -69,7 +69,10 @@ Node uses `fs.writeFileSync`, and the QuickJS adapter implements its synchronous
 open/write/close behavior. The null device avoids persistent output fixtures or
 asynchronous Node writes. Lambda runs the effects and mutable loops in `pn`
 procedures under **S12.1.1v2** and **S12.1.2**; inputs to matrix helpers are read
-only, while each helper owns its result array.
+only, while each matrix product writes into a separate result array. Go and C
+reuse storage allocated inside each workload: decimal and batch buffers, and
+two disjoint matrix scratch arrays. Every scalar product is still computed in
+full and in the prescribed order; storage reuse never skips an iteration.
 
 ## Implementations and verification
 

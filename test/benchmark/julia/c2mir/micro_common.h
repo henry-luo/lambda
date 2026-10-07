@@ -1,28 +1,30 @@
 /* Scalar C reference ports; all workloads and timing policies match SUITE.md. */
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/time.h>
 /* Apple's math.h uses compiler intrinsics unsupported by the pinned C frontend. */
 extern double sqrt(double);
 extern double floor(double);
 
 typedef struct MicroResult { long long value[4]; } MicroResult;
+enum { MICRO_DECIMAL_BYTES = 20, MICRO_OUTPUT_BATCH_LINES = 256 };
 
-static char *decimal_text(long long value) {
+/* caller provides space for a signed 64-bit decimal plus its terminator. */
+static int decimal_text(char *text, long long value) {
     int negative = value < 0, length = 0;
-    long long divisor = 1;
-    char *text = malloc(16);
-    if (!text) exit(1);
+    long long divisor = 1, limit;
     if (negative) { text[length++] = '-'; value = -value; }
-    while (value / divisor >= 10) divisor *= 10;
+    /* find the leading divisor with one constant divide; share quotient/remainder. */
+    limit = value / 10;
+    while (divisor <= limit) divisor *= 10;
     while (divisor > 0) {
-        text[length++] = (char)(48 + value / divisor);
-        value %= divisor;
+        long long digit = value / divisor;
+        text[length++] = (char)(48 + digit);
+        value -= digit * divisor;
         divisor /= 10;
     }
     text[length] = 0;
-    return text;
+    return length;
 }
 static long long decimal_value(const char *text) {
     int negative = text[0] == '-', index = negative ? 1 : 0;
@@ -32,52 +34,46 @@ static long long decimal_value(const char *text) {
 }
 static MicroResult parse_integers(void) {
     long long seed = 42, checksum = 0, size = 0, errors = 0;
+    char text[MICRO_DECIMAL_BYTES + 1];
     int index;
     for (index = 0; index < 100000; index++) {
         long long value, parsed;
-        char *text;
+        int length;
         seed = seed * 16807 % 2147483647;
         value = index % 8 == 0 ? 0 : (index % 8 == 1 ? -seed : seed);
-        text = decimal_text(value);
+        length = decimal_text(text, value);
         parsed = decimal_value(text);
         errors += parsed != value;
-        size += strlen(text);
+        size += length;
         checksum = (checksum * 31 + parsed + 2147483647) % 1000000007;
-        free(text);
     }
     { MicroResult result = {{checksum, size, seed, errors}}; return result; }
 }
-static double *zeros(int count) {
-    double *result = calloc(count, sizeof(double));
-    if (!result) exit(1);
-    return result;
-}
-static double *gram(const double *matrix, int rows, int columns) {
-    double *result = zeros(columns * columns);
+static void gram(const double *matrix, int rows, int columns, double *result) {
     int i, j, k;
     for (i = 0; i < columns; i++) for (j = 0; j < columns; j++) {
         double total = 0.0;
         for (k = 0; k < rows; k++) total += matrix[k * columns + i] * matrix[k * columns + j];
         result[i * columns + j] = total;
     }
-    return result;
 }
-static double *square(const double *matrix, int n) {
-    double *result = zeros(n * n);
+static void square(const double *matrix, int n, double *result) {
     int i, j, k;
     for (i = 0; i < n; i++) for (j = 0; j < n; j++) {
         double total = 0.0;
-        for (k = 0; k < n; k++) total += matrix[i * n + k] * matrix[k * n + j];
+        const double *row = matrix + i * n;
+        for (k = 0; k < n; k++) total += row[k] * matrix[k * n + j];
         result[i * n + j] = total;
     }
-    return result;
 }
-static double trace_fourth(const double *matrix, int rows, int columns) {
-    double *g = gram(matrix, rows, columns), *second = square(g, columns);
-    double *fourth = square(second, columns), total = 0.0;
+static double trace_fourth(const double *matrix, int rows, int columns, double *scratch) {
+    double *first = scratch, *second = scratch + columns * columns, total = 0.0;
     int i;
-    for (i = 0; i < columns; i++) total += fourth[i * columns + i];
-    free(g); free(second); free(fourth);
+    /* each product overwrites a separate destination; reuse Gram storage for G^4. */
+    gram(matrix, rows, columns, first);
+    square(first, columns, second);
+    square(second, columns, first);
+    for (i = 0; i < columns; i++) total += first[i * columns + i];
     return total;
 }
 static double variation(const double *values, int count) {
@@ -90,11 +86,11 @@ static double variation(const double *values, int count) {
 }
 static MicroResult matrix_statistics(void) {
     long long seed = 42, digest = 0;
-    double *v = zeros(1000), *w = zeros(1000);
+    /* all cells are overwritten; stack storage avoids allocation and zeroing. */
+    double v[1000], w[1000], blocks[100], p[100], q[100], scratch[2 * 20 * 20];
     MicroResult result;
     int iteration, i, block, row, column;
     for (iteration = 0; iteration < 1000; iteration++) {
-        double *blocks = zeros(100), *p = zeros(100), *q = zeros(100);
         for (i = 0; i < 100; i++) {
             seed = seed * 16807 % 2147483647;
             blocks[i] = (double)seed / 2147483647.0 * 2.0 - 1.0;
@@ -104,19 +100,17 @@ static MicroResult matrix_statistics(void) {
             p[row * 20 + block * 5 + column] = value;
             q[(block / 2 * 5 + row) * 10 + block % 2 * 5 + column] = value;
         }
-        v[iteration] = trace_fourth(p, 5, 20); w[iteration] = trace_fourth(q, 10, 10);
+        v[iteration] = trace_fourth(p, 5, 20, scratch); w[iteration] = trace_fourth(q, 10, 10, scratch);
         digest = (digest * 31 + (long long)floor(v[iteration] * 1000)) % 1000000007;
         digest = (digest * 31 + (long long)floor(w[iteration] * 1000)) % 1000000007;
-        free(blocks); free(p); free(q);
     }
     result.value[0] = (long long)floor(variation(v, 1000) * 1e9);
     result.value[1] = (long long)floor(variation(w, 1000) * 1e9);
     result.value[2] = digest; result.value[3] = seed;
-    free(v); free(w);
     return result;
 }
 static MicroResult iteration_pi_sum(void) {
-    double *values = zeros(500), digest = 0.0;
+    double values[500], digest = 0.0;
     MicroResult result;
     int iteration, k, i;
     for (iteration = 0; iteration < 500; iteration++) {
@@ -128,35 +122,33 @@ static MicroResult iteration_pi_sum(void) {
     result.value[0] = (long long)floor(values[0] * 1e12);
     result.value[1] = (long long)floor(values[499] * 1e12);
     result.value[2] = (long long)floor(digest * 1e6); result.value[3] = 5124750;
-    free(values);
     return result;
 }
 static MicroResult formatted_output(void) {
     long long size = 0, digest = 0, writes = 0;
-    char *buffer = calloc(1, 1);
+    /* append directly into one batch; explicit lengths avoid repeated scans/copies. */
+    char buffer[MICRO_OUTPUT_BATCH_LINES * (2 * MICRO_DECIMAL_BYTES + 2) + 1];
+    int length = 0;
     int i, j;
     for (i = 1; i <= 100000; i++) {
-        char *a = decimal_text(i), *b = decimal_text(i + 1);
-        size_t length = strlen(a) + strlen(b) + 2, old_length = strlen(buffer);
-        char *line = malloc(length + 1), *next = malloc(old_length + length + 1);
-        if (!line || !next) exit(1);
-        strcpy(line, a); strcat(line, " "); strcat(line, b); strcat(line, "\n");
-        for (j = 0; j < (int)length; j++) digest = (digest * 31 + line[j]) % 1000000007;
-        size += length;
-        strcpy(next, buffer); strcat(next, line);
-        free(a); free(b); free(line); free(buffer); buffer = next;
-        if (i % 256 == 0 || i == 100000) {
+        int start = length;
+        length += decimal_text(buffer + length, i);
+        buffer[length++] = ' ';
+        length += decimal_text(buffer + length, i + 1);
+        buffer[length++] = '\n';
+        for (j = start; j < length; j++) digest = (digest * 31 + buffer[j]) % 1000000007;
+        size += length - start;
+        if (i % MICRO_OUTPUT_BATCH_LINES == 0 || i == 100000) {
 #ifdef _WIN32
             FILE *sink = fopen("NUL", "w");
 #else
             FILE *sink = fopen("/dev/null", "w");
 #endif
-            if (!sink || fwrite(buffer, 1, strlen(buffer), sink) != strlen(buffer)) exit(1);
+            if (!sink || fwrite(buffer, 1, length, sink) != (size_t)length) exit(1);
             if (fclose(sink) != 0) exit(1);
-            writes++; free(buffer); buffer = calloc(1, 1);
+            writes++; length = 0;
         }
     }
-    free(buffer);
     { MicroResult result = {{size, digest, writes, 100000}}; return result; }
 }
 static int verify_micro(MicroResult result, const long long *expected) {
