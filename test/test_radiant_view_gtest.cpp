@@ -2039,6 +2039,92 @@ TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
     }
 }
 
+TEST(RadiantViewTest, BatchHtmlMeasurementsReleaseLoaderPools) {
+    test_radiant_view_ensure_temp_dir();
+    const char* snapshot_path = "./temp/wordcloud_metrics_memory.json";
+    remove(snapshot_path);
+    const char* args[] = {
+        "./lambda.exe", "--mem-dump=./temp/wordcloud_metrics_memory.json",
+        "test/lambda/chart/test_wordcloud_metrics.ls", "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    ASSERT_TRUE(test_radiant_view_file_contains(snapshot_path, "physical_total"));
+    EXPECT_FALSE(test_radiant_view_file_contains(snapshot_path, "radiant.render.document"));
+}
+
+TEST(RadiantViewTest, EmbeddedSvgNumericTextPositionsMatchStringAttributes) {
+    test_radiant_view_ensure_temp_dir();
+    const char* script_path = "./temp/ui_svg_numeric_text.ls";
+    const char* output_paths[] = {"./temp/ui_svg_numeric_text.svg", "./temp/ui_svg_string_text.svg"};
+    const char* sources[] = {
+        "<html <body <svg width: 300, height: 120, "
+        "<text x: 35.5, y: 40.25, dx: -2.5, dy: 1.5, rotate: 25, 'font-size': 24, \"Position\"> "
+        "<text x: 40, y: 80, \"A\" <tspan dx: 5.5, dy: -2.5, rotate: -15, \"B\">>>>>\n",
+        "<html <body <svg width: 300, height: 120, "
+        "<text x: \"35.5\", y: \"40.25\", dx: \"-2.5\", dy: \"1.5\", rotate: \"25\", 'font-size': 24, \"Position\"> "
+        "<text x: \"40\", y: \"80\", \"A\" <tspan dx: \"5.5\", dy: \"-2.5\", rotate: \"-15\", \"B\">>>>>\n",
+    };
+    for (size_t i = 0; i < 2; i++) {
+        write_text_file(script_path, sources[i]);
+        remove(output_paths[i]);
+        const char* args[] = {"./lambda.exe", "render", script_path, "-o", output_paths[i], "--no-log", NULL};
+        ShellOptions options = {0};
+        options.merge_stderr = true;
+        ShellResult result = shell_exec("./lambda.exe", args, &options);
+        EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+    char* numeric = test_radiant_view_read_file(output_paths[0]);
+    char* strings = test_radiant_view_read_file(output_paths[1]);
+    ASSERT_NE(numeric, nullptr);
+    ASSERT_NE(strings, nullptr);
+    EXPECT_NE(strstr(numeric, "<path"), nullptr);
+    EXPECT_STREQ(numeric, strings);
+    free(numeric);
+    free(strings);
+}
+
+TEST(RadiantViewTest, SerializedScriptDocumentsPreserveUtf8AndCallerUrl) {
+    test_radiant_view_ensure_temp_dir();
+    const char* script_path = "./temp/ui_serialized_script_utf8.ls";
+    const char* view_path = "./temp/ui_serialized_script_utf8.json";
+    const char* svg_path = "./temp/ui_serialized_script_utf8.svg";
+    const char* sources[] = {
+        "<svg width: 300, height: 80, <text x: 10, y: 30, \"café 中文\">>\n",
+        "format(<svg width: 300, height: 80, <text x: 10, y: 30, \"café 中文\">>, 'xml')\n",
+        "\"<html><head><meta charset='utf-8'></head><body>café 中文</body></html>\"\n",
+    };
+    for (const char* source : sources) {
+        write_text_file(script_path, source);
+        const char* layout_args[] = {
+            "./lambda.exe", "layout", script_path,
+            "--view-output", view_path, "--no-log", NULL,
+        };
+        ShellOptions options = {0};
+        options.merge_stderr = true;
+        ShellResult layout_result = shell_exec("./lambda.exe", layout_args, &options);
+        // The serialized branch must leave the CLI's borrowed input URL intact.
+        EXPECT_EQ(0, layout_result.exit_code)
+            << (layout_result.stdout_buf ? layout_result.stdout_buf : "");
+        shell_result_free(&layout_result);
+
+        remove(svg_path);
+        const char* render_args[] = {
+            "./lambda.exe", "render", script_path, "-o", svg_path, "--no-log", NULL,
+        };
+        ShellResult render_result = shell_exec("./lambda.exe", render_args, &options);
+        EXPECT_EQ(0, render_result.exit_code)
+            << (render_result.stdout_buf ? render_result.stdout_buf : "");
+        shell_result_free(&render_result);
+        EXPECT_TRUE(test_radiant_view_file_contains(svg_path, "café"));
+        EXPECT_TRUE(test_radiant_view_file_contains(svg_path, "中文"));
+    }
+}
+
 // Two view-tree dumps match apart from their capture timestamp line.
 static bool test_radiant_view_same_view_tree(const char* left_path, const char* right_path) {
     char* left = test_radiant_view_read_file(left_path);

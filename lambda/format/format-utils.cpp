@@ -152,21 +152,13 @@ bool is_html_entity(const char* str, size_t len, size_t pos, size_t* entity_end)
     return false;
 }
 
-void format_markup_string_safe(StringBuf* sb, String* str, bool is_attribute,
-                               bool escape_apostrophe_in_text,
-                               bool escape_apostrophe_in_attr,
-                               const char* log_prefix) {
-    format_markup_string_safe_ex(sb, str, is_attribute, escape_apostrophe_in_text,
-        escape_apostrophe_in_attr, log_prefix, false);
-}
-
-// The bytes format_markup_string_safe_ex rewrites, per flag combination:
-// bit 0 escapes '"', bit 1 escapes '\'', bit 2 escapes non-ASCII bytes.
+// The bytes format_markup_string_safe rewrites, per flag combination:
+// bit 0 escapes '"', bit 1 escapes '\''.
 // Every other byte is copied in runs.
 struct MarkupStopSets {
-    StrByteSet sets[8];
+    StrByteSet sets[4];
     MarkupStopSets() {
-        for (int k = 0; k < 8; k++) {
+        for (int k = 0; k < 4; k++) {
             StrByteSet* set = &sets[k];
             str_byteset_clear(set);
             str_byteset_add(set, '&');
@@ -178,21 +170,19 @@ struct MarkupStopSets {
             str_byteset_add_range(set, 0x0E, 0x1F);
             if (k & 1) str_byteset_add(set, '"');
             if (k & 2) str_byteset_add(set, '\'');
-            if (k & 4) str_byteset_add_range(set, 0x80, 0xFF);
         }
     }
 };
 
-static const StrByteSet* markup_stop_set(bool quote, bool apos, bool non_ascii) {
+static const StrByteSet* markup_stop_set(bool quote, bool apos) {
     static const MarkupStopSets stops;
-    return &stops.sets[(quote ? 1 : 0) | (apos ? 2 : 0) | (non_ascii ? 4 : 0)];
+    return &stops.sets[(quote ? 1 : 0) | (apos ? 2 : 0)];
 }
 
-void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
-                                  bool escape_apostrophe_in_text,
-                                  bool escape_apostrophe_in_attr,
-                                  const char* log_prefix,
-                                  bool escape_non_ascii_bytes) {
+void format_markup_string_safe(StringBuf* sb, String* str, bool is_attribute,
+                               bool escape_apostrophe_in_text,
+                               bool escape_apostrophe_in_attr,
+                               const char* log_prefix) {
     if (!sb || !str) return;
 
     // String's ABI requires four-byte alignment; static MIR strings need not be pointer-aligned.
@@ -219,8 +209,7 @@ void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
     // (27-30% of HTML/XML output time).
     const StrByteSet* stops = markup_stop_set(is_attribute,
         (is_attribute && escape_apostrophe_in_attr) ||
-            (!is_attribute && escape_apostrophe_in_text),
-        escape_non_ascii_bytes);
+            (!is_attribute && escape_apostrophe_in_text));
     for (size_t i = 0; i < len; i++) {
         i = escape_append_run_stringbuf(sb, s, i, len, stops);
         if (i >= len) break;
@@ -265,12 +254,9 @@ void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
                 }
                 break;
             default:
-                // use unsigned char for comparison to handle UTF-8 multibyte sequences correctly
-                // XML tests assert the legacy byte-wise numeric form for decoded PDF text;
-                // control characters get the same numeric character reference.
-                if ((escape_non_ascii_bytes && (unsigned char)c >= 0x80) ||
-                        ((unsigned char)c < 0x20 && c != '\n' && c != '\r' && c != '\t')) {
-                    // "&#xHH;" without an snprintf per byte (three per CJK character)
+                // Numeric references encode control codepoints; UTF-8 is copied intact.
+                if ((unsigned char)c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
+                    // "&#xHH;" without an snprintf per control character
                     char ref[8] = "&#x";
                     str_hex_encode(ref + 3, &c, 1);
                     ref[5] = ';';

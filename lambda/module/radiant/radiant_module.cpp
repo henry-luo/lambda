@@ -1227,6 +1227,12 @@ static DomDocument* radiant_load_html_source(const char* html_source, int viewpo
         return nullptr;
     }
 
+    // Transient measurement/render documents must release their loader pool too.
+    if (!dom_document_finalize_loader_pool(doc, doc_pool)) {
+        log_error("JUBE_RADIANT_%s: failed to transfer in-memory document pool", func_name);
+        free_document(doc);
+        return nullptr;
+    }
     if (!doc->root) {
         log_error("JUBE_RADIANT_%s: in-memory document has no root element", func_name);
         free_document(doc);
@@ -3328,6 +3334,51 @@ RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item h
     return result;
 }
 
+// Batch intrinsic measurements use the same CSS/font/fallback path as rendering.
+RADIANT_C_API Item fn_radiant_measure_html(Item html_item, Item width_item, Item height_item) {
+    int viewport_width = 0;
+    int viewport_height = 0;
+    if (!radiant_item_to_int(width_item, &viewport_width) ||
+        !radiant_item_to_int(height_item, &viewport_height) ||
+        viewport_width <= 0 || viewport_height <= 0) {
+        log_error("JUBE_RADIANT_MEASURE_HTML: expected positive viewport dimensions");
+        return ItemNull;
+    }
+    DomDocument* doc = radiant_load_html_source(fn_to_cstr(html_item),
+        viewport_width, viewport_height, "MEASURE_HTML");
+    if (!doc) return ItemNull;
+    RadiantLayoutResource* resource = radiant_layout_resource_for_document(doc, "MEASURE_HTML");
+    if (!resource || !radiant_layout_document(doc, &resource->ui_context,
+        viewport_width, viewport_height, "MEASURE_HTML")) {
+        free_document(doc);
+        return ItemNull;
+    }
+
+    DomElement* body = dom_document_body_element(doc);
+    int count = 0;
+    for (DomElement* child = body ? body->first_child_element() : nullptr;
+         child; child = child->next_sibling_element()) count++;
+    RootFrame roots(2);
+    Rooted<Item> result(roots, radiant_array_new_item(count));
+    Rooted<Item> box(roots, ItemNull);
+    for (DomElement* child = body ? body->first_child_element() : nullptr;
+         child; child = child->next_sibling_element()) {
+        if (child->view_type == RDT_VIEW_NONE) {
+            radiant_array_push_item(result.get(), ItemNull);
+            continue;
+        }
+        box.set(radiant_obj_new());
+        radiant_rooted_obj_set(box, "width", radiant_float_item(child->width));
+        radiant_rooted_obj_set(box, "height", radiant_float_item(child->height));
+        float baseline = child->blk ? child->block()->first_line_baseline : child->height;
+        radiant_rooted_obj_set(box, "baseline", radiant_float_item(baseline));
+        radiant_array_push_item(result.get(), box.get());
+    }
+    // Only copied scalar metrics escape; the document owns all layout/font resources.
+    free_document(doc);
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_box(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "BOX");
     if (!node || node->view_type == RDT_VIEW_NONE) return ItemNull;
@@ -3721,6 +3772,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_layout(Item node)", (fn_ptr)fn_radiant_layout},
     {"render_svg", "fn(html: string, width: int, height: int) -> string|null", (fn_ptr)fn_radiant_render_svg, JUBE_FN_NONE,
      "Item fn_radiant_render_svg(Item html, Item width, Item height)", (fn_ptr)fn_radiant_render_svg},
+    {"measure_html", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_html, JUBE_FN_NONE,
+     "Item fn_radiant_measure_html(Item html, Item width, Item height)", (fn_ptr)fn_radiant_measure_html},
     {"box", "fn(node: dom_node) -> map|null", (fn_ptr)fn_radiant_box, JUBE_FN_NONE,
      "Item fn_radiant_box(Item node)", (fn_ptr)fn_radiant_box},
     {"poc_attr", "fn(path: string) -> string", (fn_ptr)fn_radiant_poc_attr, JUBE_FN_NONE,

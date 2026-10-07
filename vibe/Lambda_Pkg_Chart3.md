@@ -1520,3 +1520,68 @@ All **659 baseline tests pass** (649 Phase A + 10 new Phase B across MIR-direct 
 ---
 
 *This proposal extends the Lambda Chart Library from its current Vega-Lite–inspired core toward full Vega-level capability, adapted for Lambda Script's pure functional model and SVG output pipeline.*
+
+## Appendix — Word clouds (2026-10-07)
+
+Implemented as `lambda.chart.wordcloud` under the source-package contract
+**D7.2.1–D7.2.4**. Weighted category text belongs to the chart family; no graph
+edges or ranking model is involved. Public `layout` and `render` functions
+share deterministic, descending-weight spiral placement, stable ties
+(**S6.2.3**), square-root size scaling, orthogonal rotations, explicit overflow
+records and raised validation failures (**S7.4.2**). The full contract and
+options are in [Lambda Packages §4.4](../doc/Lambda_Packages.md#44-word-and-tag-clouds).
+
+The implementation reuses chart scales, palettes and SVG helpers. The native
+`radiant.measure_html` primitive supplies one batch of actual CSS text-box and
+baseline measurements, with all placement policy in Lambda source. Temporary
+documents own their loader pools and layout/font resources (**D4.2.3**);
+only copied scalar metrics escape (**D4.5.2**).
+Regression coverage checks collision gaps, viewport bounds, exact integer
+ordering, tie order, rotations, proportional font widths, validation, Unicode
+output and overflow.
+
+End-to-end checking exposed two existing serialized-document defects: the
+loader destroyed a borrowed script URL, and XML text formatting emitted a
+numeric reference for each UTF-8 byte. The loader now leaves the URL with its
+caller, and the shared markup writer keeps UTF-8 sequences intact. The XML
+round-trip and serialized SVG/HTML CLI tests pin these fixes; decoded PDF
+text expectations now check its actual Unicode content.
+
+### Advanced placement and styling
+
+The source package (**D7.2.1–D7.2.4**) now supports finite rotations from
+−180 to 180 degrees, ellipse/circle/diamond boundaries, a rectangular spiral,
+seeded spiral phases, linear/logarithmic sizing and per-record font overrides.
+Weight ordering remains exact and stable (**S6.2.2v3**, **S6.2.3**); invalid
+options and overrides continue to raise through `T^` (**S7.4.2**).
+
+Measured rectangles retain their local axes and corner offsets. A broad
+axis-aligned rejection precedes the four separating axes of two padded,
+oriented rectangles. Padding inflates each local rectangle by half the gap
+on every side. Shape containment checks the four rotated corners, avoiding
+both protruding text and unnecessary rejection by enclosing bounds. All
+supported boundaries are convex and centrally symmetric, so a rectangle
+that cannot fit at the center cannot fit at any translation; such overflow
+is reported as `too_large`.
+
+The rectangular spiral traverses successive square rings. Termination uses
+the ring's minimum radius, since its corners can leave the viewport before
+the rest of that ring does. A local 31-bit recurrence chooses a per-word
+spiral phase from the seed; no process-global RNG state is read or modified.
+Seed zero and orthogonal rotations preserve the original defaults. Font
+overrides are measured in the same native batch and emitted on the SVG text.
+The native measurement contract is unchanged.
+
+Regression tests independently project padded rectangle corners onto
+separating axes, verify every corner against each shape, check overlapping
+enclosing bounds for separated angled words, and cover seeds, sizing modes,
+metadata, font overrides and validation. `test/demo/wordcloud.ls` is a
+permanent four-panel gallery for `lambda view` and `lambda render`.
+
+The gallery exposed an existing SVG painter mismatch at the Mark/DOM seam
+(**S1.6**): scalar numeric text-position attributes survived as Items, while
+the text-position-list parser only read string attributes. Embedded clouds
+therefore lost their local `x`/`y` offsets; serialized SVGs rendered correctly.
+The list parser now reuses the existing numeric attribute reader for a
+one-entry list. A native regression compares complete exported glyph paths
+for numeric and string `x`, `y`, `dx`, `dy` and `rotate`, including a `tspan`.

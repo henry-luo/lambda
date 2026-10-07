@@ -2,15 +2,16 @@ import c: .common
 import ease: .easing
 import color: .color
 import samples: .sample
+import palette: .theme
 
 fn compatible(a, b) => a.tag == b.tag and a.source.style == b.source.style and
     (if (a.tag == 'shape') c.value(a.source.kind, 'rect') == c.value(b.source.kind, 'rect') and
         a.source.stroke == b.source.stroke and a.source.stroke_width == b.source.stroke_width and a.source.radius == b.source.radius
-     else if (a.tag == 'text') content(a.source) == content(b.source) and a.source.font_size == b.source.font_size and a.source.role == b.source.role
+     else if (a.tag == 'text') content(a.source) == content(b.source) and a.font_size == b.font_size and
+        a.font_family == b.font_family and a.source.role == b.source.role
      else if (a.tag == 'image') a.source.src == b.source.src and a.source.fit == b.source.fit
      else if (a.tag == 'content') content(a.source) == content(b.source) else false)
 
-fn background(scene, theme) => c.value(scene.source.background, if (theme == 'dark') "#111827" else "#ffffff")
 fn endpoint_color(visual, path) array^ => if (visual.paint_rgba != null) visual.paint_rgba else color.parse(visual.paint, path)^
 
 pub fn compile(previous, destination, theme) map^ {
@@ -32,8 +33,8 @@ pub fn compile(previous, destination, theme) map^ {
             let bc = endpoint_color([for (v in new_visuals where v.id == b.id) v][0], path)^;
             {a: a, b: b, compatible: compatible(a, b), ac: ac, bc: bc}
         }]
-    let old_background = color.parse(background(previous, theme), path)^;
-    let new_background = color.parse(background(destination, theme), path)^;
+    let old_background = color.parse(palette.background(previous), path)^;
+    let new_background = color.parse(palette.background(destination), path)^;
     {pairs: pairs, old_background: old_background, new_background: new_background}
 }
 

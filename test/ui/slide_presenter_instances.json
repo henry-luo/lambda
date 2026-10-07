@@ -1,0 +1,176 @@
+{
+  "name": "Presenter tools and cached previews belong to one embedded player",
+  "html": "test/ui/slide_features.ls",
+  "viewport": {
+    "width": 1000,
+    "height": 1500
+  },
+  "env": [
+    {
+      "key": "LAMBDA_GC_FORCE_EVERY",
+      "value": "1"
+    },
+    {
+      "key": "LAMBDA_GC_POISON_FREED",
+      "value": "1"
+    }
+  ],
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player .slide-controls [data-slide-tool=console]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#first-player"
+      },
+      "attribute": "data-slide-console",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#second-player .slide-console"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#first-player .slide-preview-canvas > .slide-layer"
+      },
+      "equals": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#second-player .slide-preview-canvas > .slide-layer"
+      },
+      "equals": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player .slide-controls [data-slide-tool=blackout]"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#first-player .slide-blackout"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#second-player .slide-blackout"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#first-player .slide-canvas"
+      },
+      "attribute": "inert",
+      "exists": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#first-player .slide-preview-stage"
+      },
+      "attribute": "inert",
+      "exists": true
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player .slide-controls [data-slide-tool=overview]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-destination='2']"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 400,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#first-player"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#second-player .slide-canvas > .slide-layer"
+      },
+      "equals": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player .slide-controls [data-slide-tool=overview]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-destination='1']"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#first-player .slide-preview-canvas > .slide-layer"
+      },
+      "equals": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player .slide-controls [data-slide-tool=console]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#first-player"
+      },
+      "attribute": "data-slide-console",
+      "equals": "false"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#second-player .slide-controls"
+      },
+      "property": "display",
+      "equals": "flex"
+    }
+  ]
+}
