@@ -6,6 +6,8 @@
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/hashmap.h"
+#include "../lib/mem.h"
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
@@ -23,6 +25,166 @@ struct CssVarStack {
 };
 
 static thread_local const CssVarStack* css_active_var_stack = nullptr;
+
+struct CssVarSize {size_t bytes; size_t tokens;};
+struct CssVarCacheEntry {
+    DomElement* owner;
+    const CssValue* source;
+    const char* name;
+    size_t name_length;
+    const CssValue* value;
+    StrView text;
+    CssVarSize size;
+    bool leaf;
+    bool valid;
+};
+
+static uint64_t css_var_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const CssVarCacheEntry* entry = (const CssVarCacheEntry*)item;
+    return hashmap_sip(&entry->owner, sizeof(entry->owner), seed0, seed1) ^
+        hashmap_sip(&entry->source, sizeof(entry->source), seed1, seed0) ^
+        (entry->name ? hashmap_sip(entry->name, entry->name_length, seed0, seed1) : 0) ^ entry->leaf;
+}
+
+static int css_var_cache_compare(const void* a, const void* b, void*) {
+    const CssVarCacheEntry* left = (const CssVarCacheEntry*)a;
+    const CssVarCacheEntry* right = (const CssVarCacheEntry*)b;
+    if (left->owner != right->owner || left->source != right->source || left->leaf != right->leaf ||
+        left->name_length != right->name_length) return 1;
+    return left->name_length ? memcmp(left->name, right->name, left->name_length) : 0;
+}
+
+struct CssVarContext {
+    Pool* pool;
+    CssVariableLookupFn lookup;
+    void* lookup_context;
+    size_t max_bytes = CSS_SUBSTITUTION_DEFAULT_MAX_BYTES;
+    size_t max_tokens = CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS;
+    HashMap* cache = nullptr;
+    Pool* measure_pool = nullptr;
+    CssFormatter* scalar_formatter = nullptr;
+    bool allocation_failed = false;
+
+    static void* allocate(size_t size) {return mem_alloc(size, MEM_CAT_STYLE);}
+    static void* reallocate(void* pointer, size_t size) {return mem_realloc(pointer, size, MEM_CAT_STYLE);}
+
+    CssVarContext(Pool* pool, DomElement* element, CssVariableLookupFn lookup, void* context)
+        : pool(pool), lookup(lookup), lookup_context(context) {
+        CssEngine* engine = element && element->doc
+            ? (CssEngine*)element->doc->services.cached_css_engine : nullptr;
+        if (engine && engine->limits.max_substitution_bytes) max_bytes = engine->limits.max_substitution_bytes;
+        if (engine && engine->limits.max_substitution_tokens) max_tokens = engine->limits.max_substitution_tokens;
+    }
+    ~CssVarContext() {
+        // cache borrows end at return; output stays in the caller's pool (D4.5.1v4).
+        if (cache) hashmap_free(cache);
+        if (measure_pool) pool_destroy(measure_pool);
+    }
+    const CssVarCacheEntry* get(const CssVarCacheEntry& key) {
+        return cache ? (const CssVarCacheEntry*)hashmap_get(cache, &key) : nullptr;
+    }
+    void put(const CssVarCacheEntry& entry) {
+        if (allocation_failed) return;
+        if (!cache) cache = hashmap_new_with_allocator(allocate, reallocate, mem_free,
+            sizeof(CssVarCacheEntry), 16, 0, 0,
+            css_var_cache_hash, css_var_cache_compare, nullptr, nullptr);
+        if (cache) hashmap_set(cache, &entry);
+        // continuing without memoization would make repeated empty dependencies exponential again.
+        allocation_failed = !cache || hashmap_oom(cache);
+    }
+};
+
+static thread_local CssVarContext* css_active_var_context = nullptr;
+
+struct CssVarContextScope {
+    CssVarContext local;
+    CssVarContext* previous;
+    CssVarContextScope(Pool* pool, DomElement* element, CssVariableLookupFn lookup = nullptr,
+        void* context = nullptr) : local(pool, element, lookup, context), previous(css_active_var_context) {
+        // nested font computation may destroy a different scratch pool before this call returns.
+        css_active_var_context = previous && previous->pool == pool && previous->lookup == lookup &&
+            previous->lookup_context == context ? previous : &local;
+    }
+    ~CssVarContextScope() {css_active_var_context = previous;}
+};
+
+static bool css_var_size_add(CssVarSize* total, CssVarSize addition) {
+    CssVarContext* context = css_active_var_context;
+    if (!context || total->bytes > context->max_bytes || addition.bytes > context->max_bytes - total->bytes ||
+        total->tokens > context->max_tokens || addition.tokens > context->max_tokens - total->tokens)
+        return false;
+    total->bytes += addition.bytes;
+    total->tokens += addition.tokens;
+    return true;
+}
+
+static bool css_var_measure_value(const CssValue* value, CssVarSize* size) {
+    if (!value) return false;
+    CssVarContext* context = css_active_var_context;
+    if (!context || context->allocation_failed) return false;
+    CssValue** children = nullptr;
+    int count = 0;
+    bool comma = false;
+    *size = {};
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        children = value->data.list.values;
+        count = value->data.list.count;
+        comma = value->data.list.comma_separated;
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
+        const CssFunction* function = value->data.function;
+        if (!function->name || !css_var_size_add(size, {strlen(function->name), 0}) ||
+            !css_var_size_add(size, {2, 2})) return false;
+        children = function->args;
+        count = function->arg_count;
+        comma = true;
+    } else {
+        CssVarCacheEntry key = {};
+        key.source = value;
+        key.leaf = true;
+        const CssVarCacheEntry* cached = context->get(key);
+        if (cached) {*size = cached->size; return cached->valid;}
+        const char* text = nullptr;
+        size_t punctuation = 0;
+        if (value->type == CSS_VALUE_TYPE_CUSTOM) text = value->data.custom_property.name;
+        else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(value->data.keyword);
+            text = info ? info->name : nullptr;
+        } else if (value->type == CSS_VALUE_TYPE_STRING) {text = value->data.string; punctuation = 2;}
+        else if (value->type == CSS_VALUE_TYPE_URL) {text = value->data.url; punctuation = 7;}
+        else if (value->type == CSS_VALUE_TYPE_COLOR && value->data.color.type == CSS_COLOR_KEYWORD)
+            text = value->data.color.data.keyword;
+        bool valid = false;
+        if (text) valid = css_var_size_add(size, {strlen(text), 1}) &&
+            css_var_size_add(size, {punctuation, 0});
+        else if (value->type != CSS_VALUE_TYPE_VAR) {
+            if (!context->scalar_formatter) {
+                context->measure_pool = pool_create();
+                context->scalar_formatter = css_formatter_create(context->measure_pool, CSS_FORMAT_COMPACT);
+            }
+            if (context->scalar_formatter) {
+                stringbuf_reset(context->scalar_formatter->output);
+                css_format_value(context->scalar_formatter, (CssValue*)value);
+                valid = css_var_size_add(size, {context->scalar_formatter->output->length, 1});
+            }
+        }
+        key.size = *size;
+        key.valid = valid;
+        context->put(key);
+        return valid && !context->allocation_failed;
+    }
+    if (count < 0 || (count && !children)) return false;
+    for (int index = 0; index < count; index++) {
+        CssVarSize child = {};
+        if ((index && !css_var_size_add(size, {comma ? 2u : 1u, comma ? 1u : 0u})) ||
+            !css_var_measure_value(children[index], &child) || !css_var_size_add(size, child)) return false;
+    }
+    return true;
+}
+
+static bool css_var_value_fits(const CssValue* value) {
+    CssVarSize size = {};
+    return css_var_measure_value(value, &size);
+}
 
 struct CssVarResolutionScope {
     const CssVarStack* previous;
@@ -163,14 +325,13 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
 static StrView css_substitute_custom_text(Pool* pool, DomElement* element,
     StrView source, const CssVarStack* stack);
 
-static const CssValue* css_compute_custom_property(Pool* pool, DomElement* element,
+static const CssValue* css_compute_custom_property_uncached(Pool* pool, DomElement* element,
     const char* name, const CssVarStack* stack, size_t name_length, StrView* text) {
     if (!element) return nullptr;
     if (name_length == (size_t)-1) name_length = strlen(name);
     const CssPropertyRegistration* registration = element->doc
         ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
     const CssValue* initial = registration ? registration->initial_value : nullptr;
-    if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
     const CssCustomProp* entry = dom_element_lookup_own_custom_property_entry(element, name, name_length);
     const CssValue* value = entry ? entry->value : nullptr;
     bool inherit = registration ? registration->inherits : true;
@@ -184,21 +345,29 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
         bool invalid = false;
         CssVarStack current = {name, element, stack, &invalid, CSS_PROPERTY_UNKNOWN, name_length};
         CssVarResolutionScope scope(&current);
-        const CssValue* resolved = resolve_var_function_inner(pool, value, element, nullptr, nullptr, &current);
-        if (invalid) resolved = nullptr;
-        if (resolved && (!registration || registration->universal)) {
-            if (text && entry && entry->value_text) {
-                *text = css_substitute_custom_text(pool, element,
+        StrView computed_text = {};
+        bool valid_text = true;
+        if (entry && entry->value_text) {
+            if (css_value_contains_var_reference(value)) {
+                // bound authored expansion before the typed resolver allocates flattened value arrays.
+                computed_text = css_substitute_custom_text(pool, element,
                     {entry->value_text, entry->value_text_len}, &current);
-                if (!text->str || invalid) return nullptr;
-            }
+                valid_text = computed_text.str != nullptr;
+            } else computed_text = {entry->value_text, entry->value_text_len};
+            valid_text = valid_text && computed_text.length <= css_active_var_context->max_bytes;
+        }
+        const CssValue* resolved = valid_text && !invalid
+            ? resolve_var_function_inner(pool, value, element, nullptr, nullptr, &current) : nullptr;
+        if (invalid || !css_var_value_fits(resolved)) resolved = nullptr;
+        if (resolved && (!registration || registration->universal)) {
+            if (text) *text = computed_text;
             return resolved;
         }
         const CssPropertySyntaxComponent* matched = registration
             ? css_match_property_syntax(registration, resolved) : nullptr;
         if (matched) {
             const CssValue* computed = css_compute_registered_atom(pool, element, matched, resolved);
-            if (computed && !invalid) return computed;
+            if (computed && !invalid && css_var_value_fits(computed)) return computed;
         }
         // an invalid unregistered declaration stays invalid instead of inheriting a parent value.
         if (!registration) return nullptr;
@@ -209,12 +378,35 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
     if (inherit && parent) return css_compute_custom_property(pool, parent, name, stack, name_length, text);
     if (!initial) return nullptr;
     if (registration->universal) {
+        if (!css_var_value_fits(initial) ||
+            registration->initial_text_length > css_active_var_context->max_bytes) return nullptr;
         if (text && registration->initial_text)
             *text = {registration->initial_text, registration->initial_text_length};
         return initial;
     }
     const CssPropertySyntaxComponent* matched = css_match_property_syntax(registration, initial);
-    return matched ? css_compute_registered_atom(pool, element, matched, initial) : nullptr;
+    const CssValue* computed = matched ? css_compute_registered_atom(pool, element, matched, initial) : nullptr;
+    return css_var_value_fits(computed) ? computed : nullptr;
+}
+
+static const CssValue* css_compute_custom_property(Pool* pool, DomElement* element,
+    const char* name, const CssVarStack* stack, size_t name_length, StrView* text) {
+    if (!element || !name || !css_active_var_context || css_active_var_context->allocation_failed) return nullptr;
+    if (name_length == (size_t)-1) name_length = strlen(name);
+    if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
+    CssVarCacheEntry key = {};
+    key.owner = element;
+    key.name = name;
+    key.name_length = name_length;
+    const CssVarCacheEntry* cached = css_active_var_context->get(key);
+    if (cached) {
+        if (text) *text = cached->text;
+        return cached->value;
+    }
+    key.value = css_compute_custom_property_uncached(pool, element, name, stack, name_length, &key.text);
+    css_active_var_context->put(key);
+    if (text) *text = key.text;
+    return css_active_var_context->allocation_failed ? nullptr : key.value;
 }
 
 // CSS Syntax 3 §9: only newly adjacent tokens need an inserted empty comment.
@@ -253,6 +445,7 @@ struct CssCustomTextOutput {
     StrBuf* buffer;
     CssToken last;
     bool adjacent;
+    size_t tokens;
 };
 
 static bool css_append_custom_token(Pool* pool, CssCustomTextOutput* output, const CssToken& token) {
@@ -260,11 +453,18 @@ static bool css_append_custom_token(Pool* pool, CssCustomTextOutput* output, con
     if (!text.str) return false;
     // contiguous authored spans already round-trip (for example UUID number/dimension runs).
     bool authored_neighbors = output->last.start && output->last.start + output->last.length == token.start;
-    if (output->adjacent && !authored_neighbors && css_custom_tokens_need_separator(output->last, token))
+    bool separator = output->adjacent && !authored_neighbors && css_custom_tokens_need_separator(output->last, token);
+    CssVarContext* context = css_active_var_context;
+    size_t available = context->max_bytes - output->buffer->length;
+    bool component = token.type != CSS_TOKEN_WHITESPACE && token.type != CSS_TOKEN_COMMENT;
+    if (text.length > available || (separator && available - text.length < 4) ||
+        (component && output->tokens == context->max_tokens)) return false;
+    if (separator)
         strbuf_append_str(output->buffer, "/**/");
     strbuf_append_str_n(output->buffer, text.str, text.length);
     output->last = token;
     output->adjacent = token.type != CSS_TOKEN_WHITESPACE && token.type != CSS_TOKEN_COMMENT;
+    if (component) output->tokens++;
     return true;
 }
 
@@ -342,9 +542,10 @@ static bool css_append_custom_text(Pool* pool, DomElement* element, StrView sour
 
 static StrView css_substitute_custom_text(Pool* pool, DomElement* element,
     StrView source, const CssVarStack* stack) {
+    if (!pool || !css_active_var_context) return {};
     StrBuf* buffer = strbuf_new();
     if (!buffer) return {};
-    CssCustomTextOutput output = {buffer, {}, false};
+    CssCustomTextOutput output = {buffer, {}, false, 0};
     bool valid = css_append_custom_text(pool, element, source, stack, &output);
     // D4.5.1v4: only the caller's pool retains output; the builder dies at return.
     StrView result = valid ? StrView{pool_dup_n(pool, buffer->str, buffer->length), buffer->length}
@@ -367,6 +568,7 @@ struct CssSubstitutedTokens {
     CssValue** values;
     int count;
     int capacity;
+    CssVarSize size;
 };
 
 static bool css_append_substituted_tokens(Pool* pool, const CssValue* value,
@@ -383,6 +585,11 @@ static bool css_append_substituted_tokens(Pool* pool, const CssValue* value,
         }
         return true;
     }
+    CssVarSize size = {2, 1};
+    if (value && !css_var_measure_value(value, &size)) return false;
+    if (value && tokens->count && tokens->values[tokens->count - 1] &&
+        !css_var_size_add(&size, {1, 0})) return false;
+    if (!css_var_size_add(&tokens->size, size)) return false;
     if (tokens->count == INT_MAX || !lam::pool_copy_grow_array(pool,
             &tokens->values, &tokens->capacity, tokens->count,
             tokens->count + 1, 4, false)) return false;
@@ -422,7 +629,7 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
                                                   CssVariableLookupFn lookup,
                                                   void* lookup_context,
                                                   const CssVarStack* stack) {
-    if (!value) return nullptr;
+    if (!value || (css_active_var_context && css_active_var_context->allocation_failed)) return nullptr;
     if (value->type == CSS_VALUE_TYPE_LIST) {
         CssValue** substituted = nullptr;
         int count = value->data.list.count;
@@ -482,7 +689,7 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
         }
         *result = *value;
         result->data.function = new_func;
-        return result;
+        return css_var_value_fits(result) ? result : nullptr;
     }
     CssValue fallback_tokens = {};
     fallback_tokens.type = CSS_VALUE_TYPE_LIST;
@@ -500,6 +707,7 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
         if (!fallback_value) return nullptr;
         const CssValue* resolved = resolve_var_function_inner(pool, fallback_value,
             context_element, lookup, lookup_context, stack);
+        if (!css_var_value_fits(resolved)) return nullptr;
         // synthetic fallback lists cannot escape their stack frame.
         return resolved == &fallback_tokens
             ? (pool ? css_normalize_substituted_list(pool, resolved) : nullptr) : resolved;
@@ -519,23 +727,35 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
     const CssValue* var_value = lookup(lookup_context, context_element, var_name, &owner);
     if (css_var_stack_contains(stack, owner, var_name)) return nullptr;
     if (var_value) {
+        CssVarCacheEntry key = {};
+        key.owner = owner;
+        key.source = var_value;
+        key.name = var_name;
+        key.name_length = strlen(var_name);
+        const CssVarCacheEntry* cached = css_active_var_context->get(key);
+        if (cached) return cached->value ? cached->value : resolve_fallback();
         bool invalid = false;
         CssVarStack current = {var_name, owner, stack, &invalid, CSS_PROPERTY_UNKNOWN};
+        CssVarResolutionScope scope(&current);
         const CssValue* resolved = resolve_var_function_inner(
             pool, var_value, owner, lookup, lookup_context, &current);
-        if (resolved && !invalid) return resolved;
+        key.value = !invalid && css_var_value_fits(resolved) ? resolved : nullptr;
+        css_active_var_context->put(key);
+        if (key.value) return key.value;
     }
     return resolve_fallback();
 }
 
 const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
                                      CssVariableLookupFn lookup, void* context, DomElement* element) {
+    CssVarContextScope scope(pool, element, lookup, context);
     return resolve_var_function_inner(pool, value, element, lookup, context, css_active_var_stack);
 }
 
 // Resolve in the declaration owner's environment for inherited custom properties.
 const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
     const CssValue* value, CssPropertyCode property) {
+    CssVarContextScope context(pool, element);
     if (property != CSS_PROPERTY_FONT_SIZE && property != CSS_PROPERTY_LINE_HEIGHT)
         return resolve_var_function_inner(pool, value, element, nullptr, nullptr, css_active_var_stack);
     for (const CssVarStack* current = css_active_var_stack; current; current = current->parent) {
@@ -553,11 +773,13 @@ const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
 
 const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length) {
+    CssVarContextScope context(pool, element);
     return css_compute_custom_property(pool, element, name, css_active_var_stack, name_length);
 }
 
 const CssValue* css_compute_element_custom_property_text(Pool* pool, DomElement* element,
     const char* name, size_t name_length, StrView* text) {
+    CssVarContextScope context(pool, element);
     if (text) *text = {};
     return css_compute_custom_property(pool, element, name, css_active_var_stack, name_length, text);
 }

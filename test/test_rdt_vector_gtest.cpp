@@ -1732,6 +1732,103 @@ TEST(CssVariableSubstitutionTest, ComputedNamesUseWholeFirstArgumentAndKeepFallb
     pool_destroy(pool);
 }
 
+TEST(CssVariableSubstitutionTest, DocumentLimitsBoundBytesTokensAndAuthoredText) {
+    Input input = {};
+    DomDocument doc = {};
+    ASSERT_TRUE(doc.init(&input));
+    struct Cleanup {
+        DomDocument* doc;
+        CssEngine* engine = nullptr;
+        ~Cleanup() {
+            if (engine) css_engine_destroy(engine);
+            doc->services.cached_css_engine = nullptr;
+            css_property_system_cleanup();
+            doc->destroy();
+        }
+    } cleanup = {&doc};
+    DomElement* node = DomElement::create(&doc, "div", nullptr);
+    ASSERT_NE(node, nullptr);
+    doc.root = lam::up(node);
+    CssEngine* engine = css_engine_create(doc.document_pool);
+    ASSERT_NE(engine, nullptr);
+    cleanup.engine = engine;
+    doc.services.cached_css_engine = engine;
+    EXPECT_EQ(engine->limits.max_substitution_bytes, CSS_SUBSTITUTION_DEFAULT_MAX_BYTES);
+    EXPECT_EQ(engine->limits.max_substitution_tokens, CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS);
+    struct Sample {const char* text; size_t bytes, tokens; bool valid;} samples[] = {
+        {"abcdefghijklmnop", 16, 4, true}, {"abcdefghijklmnopq", 16, 4, false},
+        {"éééééééé", 16, 4, true}, {"ééééééééé", 16, 4, false},
+        {"a b c d", 16, 4, true}, {"a b c d e", 16, 4, false},
+        {"f(a,b)", 16, 5, true}, {"f(a,b)", 16, 4, false},
+        {"/*123456789*/ x", 16, 4, true}, {"/*123456789012*/ x", 16, 4, false},
+        {"var(--missing,abcdefghijklmnop)", 16, 4, true},
+        {"var(--missing,abcdefghijklmnopq)", 16, 4, false}
+    };
+    for (const Sample& sample : samples) {
+        css_engine_set_substitution_limits(engine, sample.bytes, sample.tokens);
+        CssDeclaration* declaration = css_parse_property_declaration("--value", 7,
+            sample.text, strlen(sample.text), doc.document_pool);
+        ASSERT_NE(declaration, nullptr) << sample.text;
+        CssCustomProp entry = {};
+        entry.name = lam::up(declaration->property_name);
+        entry.value = lam::up(declaration->value);
+        entry.value_text = lam::up(declaration->value_text);
+        entry.value_text_len = declaration->value_text_len;
+        // the entry borrows stack storage only for this resolver call (D4.5.1v4).
+        node->css_variables = lam::own(&entry);
+        StrView text = {};
+        const CssValue* value = css_compute_element_custom_property_text(doc.document_pool,
+            node, "--value", 7, &text);
+        EXPECT_EQ(value != nullptr, sample.valid) << sample.text;
+        node->css_variables = nullptr;
+        if (css_value_contains_var_reference(declaration->value)) {
+            const CssValue* substituted = css_resolve_var_value(doc.document_pool,
+                declaration->value, nullptr, nullptr, node);
+            EXPECT_EQ(substituted != nullptr, sample.valid) << sample.text;
+        }
+    }
+    css_engine_set_substitution_limits(engine, 0, 0);
+    EXPECT_EQ(engine->limits.max_substitution_bytes, CSS_SUBSTITUTION_DEFAULT_MAX_BYTES);
+    EXPECT_EQ(engine->limits.max_substitution_tokens, CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS);
+}
+
+TEST(CssVariableSubstitutionTest, RepeatedEmptyDependenciesAreMemoizedWithinEachCall) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    struct Cleanup {Pool* pool; ~Cleanup() {pool_destroy(pool);}} cleanup = {pool};
+    struct Lookup {CssDeclaration* nodes[32]; unsigned calls;} lookup = {};
+    for (int index = 0; index < 32; index++) {
+        char name[24], value[80];
+        snprintf(name, sizeof(name), "--empty%d", index);
+        if (index) snprintf(value, sizeof(value), "var(--empty%d)var(--empty%d)", index - 1, index - 1);
+        else snprintf(value, sizeof(value), "var(--missing,)");
+        lookup.nodes[index] = css_parse_property_declaration(name, strlen(name), value, strlen(value), pool);
+        ASSERT_NE(lookup.nodes[index], nullptr);
+    }
+    auto lookup_value = [](void* context, DomElement*, const char* name,
+        DomElement** owner) -> const CssValue* {
+        *owner = nullptr;
+        Lookup* lookup = (Lookup*)context;
+        lookup->calls++;
+        for (CssDeclaration* node : lookup->nodes)
+            if (strcmp(node->property_name, name) == 0) return node->value;
+        return nullptr;
+    };
+    CssDeclaration* declaration = css_parse_property_declaration("--result", 8,
+        "var(--empty31)", 14, pool);
+    ASSERT_NE(declaration, nullptr);
+    for (int call = 0; call < 2; call++) {
+        lookup.calls = 0;
+        const CssValue* value = css_resolve_var_value(pool, declaration->value, lookup_value, &lookup);
+        ASSERT_NE(value, nullptr);
+        ASSERT_EQ(value->type, CSS_VALUE_TYPE_LIST);
+        EXPECT_EQ(value->data.list.count, 0);
+        // repeated paths collapse to the 32 distinct dependencies; the next call recomputes.
+        EXPECT_GT(lookup.calls, 32u);
+        EXPECT_LE(lookup.calls, 64u);
+    }
+}
+
 TEST(SvgConditionalTest, LanguageMatchingUsesPreferencePrefixesAndRefreshesDocumentEpoch) {
     EXPECT_TRUE(dom_svg_conditions_match(nullptr, nullptr, ""));
     EXPECT_FALSE(dom_svg_conditions_match("", nullptr, "en"));

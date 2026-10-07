@@ -6397,6 +6397,34 @@ TEST(RenderOutputParity, ComputedCustomPropertyNamesReachHtmlAndSvgPaint) {
     expect_pngs_exactly_equal(literal_png, variable_png);
 }
 
+TEST(RenderOutputParity, OversizedCustomPropertiesUseConsumerFallbacksAcrossHtmlAndSvg) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* literal_png = "temp/render_output_parity/var_limit_literal.png";
+    const char* expanded_png = "temp/render_output_parity/var_limit_expanded.png";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/var_limit_literal.html", literal_png,
+        "<!doctype html><style>body{margin:0}div{width:40px;height:20px;"
+        "border:3px solid blue;background:red}svg{display:block}</style><div></div>"
+        "<svg width='32' height='18' xmlns='http://www.w3.org/2000/svg'>"
+        "<rect width='32' height='18' fill='lime'/></svg>"));
+    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+    strbuf_append_str(html, "<!doctype html><style>:root{--expand0:x;");
+    for (int index = 1; index <= 31; index++)
+        strbuf_append_format(html, "--expand%d:var(--expand%d)var(--expand%d);", index, index - 1, index - 1);
+    strbuf_append_str(html,
+        "}body{margin:0}div{width:var(--expand31,40px);height:20px;"
+        "padding:5px;padding:var(--expand31);border:var(--expand31,3px solid blue);"
+        "background:var(--expand31,red)}svg{display:block}rect{fill:var(--expand31,lime)}"
+        "</style><div></div><svg width='32' height='18' xmlns='http://www.w3.org/2000/svg'>"
+        "<rect width='32' height='18'/></svg>");
+    bool rendered = render_html_fixture("temp/render_output_parity/var_limit_expanded.html", expanded_png, html->str);
+    strbuf_free(html); ASSERT_TRUE(rendered);
+    // an overflowing winner resets padding rather than exposing the discarded 5px declaration.
+    expect_pngs_exactly_equal(literal_png, expanded_png);
+}
+
 TEST(RenderOutputParity, CustomPropertyDefaultingAndCyclesReachPaint) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

@@ -19,6 +19,9 @@ struct SelectorMatcher;
 enum {
     CSS_CONDITION_CACHE_CAPACITY = 128,
     CSS_CONDITION_CACHE_MAX_TEXT_BYTES = 1024,
+    // expansion bounds are UA-defined by CSS Values 5, applied per computed value.
+    CSS_SUBSTITUTION_DEFAULT_MAX_BYTES = 1024 * 1024,
+    CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS = 64 * 1024,
 };
 
 typedef enum CssConditionKind {
@@ -88,6 +91,11 @@ typedef struct CssEngine {
         bool parallel_parsing;
         size_t max_cache_size;
     } performance;
+
+    struct {
+        size_t max_substitution_bytes;
+        size_t max_substitution_tokens;
+    } limits;
 
     // Context settings
     struct {
@@ -195,6 +203,8 @@ void css_style_engine_destroy(struct CssStyleEngine* engine);
 
 // Configuration
 void css_engine_set_options(CssEngine* engine, const CssProcessingOptions* options);
+// zero selects the default per-value bound; each document may override the UA policy.
+void css_engine_set_substitution_limits(CssEngine* engine, size_t max_bytes, size_t max_tokens);
 void css_engine_set_viewport(CssEngine* engine, double width, double height);
 void css_engine_set_color_scheme(CssEngine* engine, const char* scheme);
 void css_engine_set_root_font_size(CssEngine* engine, double size);

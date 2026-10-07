@@ -525,6 +525,8 @@ CssEngine* css_engine_create(Pool* pool) {
     engine->performance.optimize_specificity = true;
     engine->performance.parallel_parsing = false; // Not implemented yet
     engine->performance.max_cache_size = 1000;
+    engine->limits.max_substitution_bytes = CSS_SUBSTITUTION_DEFAULT_MAX_BYTES;
+    engine->limits.max_substitution_tokens = CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS;
 
     // Set default document context
     engine->context.base_url = "";
@@ -574,6 +576,12 @@ void css_engine_destroy(CssEngine* engine) {
 }
 
 // Configuration functions
+void css_engine_set_substitution_limits(CssEngine* engine, size_t max_bytes, size_t max_tokens) {
+    if (!engine) return;
+    engine->limits.max_substitution_bytes = max_bytes ? max_bytes : CSS_SUBSTITUTION_DEFAULT_MAX_BYTES;
+    engine->limits.max_substitution_tokens = max_tokens ? max_tokens : CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS;
+}
+
 void css_engine_enable_feature(CssEngine* engine, const char* feature_name, bool enabled) {
     if (!engine || !feature_name) return;
 
