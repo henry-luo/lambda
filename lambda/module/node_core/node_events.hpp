@@ -1,4 +1,5 @@
 #pragma once
+#include "../../../lib/lambda_api.h"
 
 #include "../../jube/jube.h"
 
@@ -7,4 +8,4 @@ void node_events_shutdown(void);
 void node_events_runtime_attach(void* session);
 void node_events_runtime_reset(void* session);
 void node_events_runtime_detach(void* session);
-Item node_events_namespace(void);
+LAMBDA_RT_API Item node_events_namespace(void);

@@ -428,13 +428,6 @@
       "dependencies": [
         "node-core"
       ]
-    },
-    {
-      "name": "node-zlib",
-      "description": "External Node zlib Jube module",
-      "source_files": [
-        "lambda/module/node_zlib/node_zlib_module.cpp"
-      ]
     }
   ],
   "targets": [

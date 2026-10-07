@@ -4,6 +4,8 @@
 # NOTE: the node:vm module was removed; its 92 test-vm-* rows and 3 vm-dependent
 # rows in other prefixes were deleted by hand. The counter lines below still
 # describe the pre-removal run -- regenerate on the reference host to refresh them.
+# NOTE: the node-zlib module was removed; its 63 test-zlib-* rows, the zlib prefix
+# and 7 zlib-dependent rows in other prefixes were deleted by hand as well.
 # Commit: 5145bb7407
 # ref/node commit: 92b72d4f601
 # Lambda runtime build: release
@@ -214,7 +216,6 @@
 #   worker
 #   wrap
 #   x509
-#   zlib
 #
 test-abort-controller-any-timeout.js
 test-abortcontroller-internal.js
@@ -283,7 +284,6 @@ test-async-local-storage-http-parser-leak.js
 test-async-local-storage-isolation.js
 test-async-local-storage-run-scope.js
 test-async-local-storage-snapshot.js
-test-async-local-storage-weak-asyncwrap-leak.js
 test-async-wrap-constructor.js
 test-async-wrap-destroyid.js
 test-async-wrap-pop-id-during-load.js
@@ -2495,7 +2495,6 @@ test-repl-tab-complete-on-editor-mode.js
 test-repl-tab-complete-require.js
 test-repl-tab-complete-unary-expressions.js
 test-repl-tab-complete.js
-test-repl-tab.js
 test-repl-throw-null-or-undefined.js
 test-repl-top-level-await.js
 test-repl-uncaught-exception-after-input-ended.js
@@ -2756,13 +2755,9 @@ test-stream-iter-share-from.js
 test-stream-iter-share-sync.js
 test-stream-iter-sharedarraybuffer.js
 test-stream-iter-to-readable.js
-test-stream-iter-transform-compat.js
-test-stream-iter-transform-coverage.js
 test-stream-iter-transform-errors.js
 test-stream-iter-transform-output.js
 test-stream-iter-transform-roundtrip.js
-test-stream-iter-transform-sync.js
-test-stream-iter-validation.js
 test-stream-iter-writable-from.js
 test-stream-iter-writable-interop.js
 test-stream-map.js
@@ -3231,7 +3226,6 @@ test-trace-events-net.js
 test-trace-events-none.js
 test-trace-events-process-exit.js
 test-trace-events-promises.js
-test-trace-events-threadpool.js
 test-trace-events-v8.js
 test-trace-events-vm.js
 test-trace-events-worker-metadata-with-name.js
@@ -3603,66 +3597,3 @@ test-wrap-js-stream-duplex.js
 test-wrap-js-stream-exceptions.js
 test-wrap-js-stream-read-stop.js
 test-x509-escaping.js
-test-zlib-brotli-16GB.js
-test-zlib-brotli-dictionary.js
-test-zlib-brotli-flush.js
-test-zlib-brotli-from-brotli.js
-test-zlib-brotli-from-string.js
-test-zlib-brotli-kmaxlength-rangeerror.js
-test-zlib-close-after-error.js
-test-zlib-close-after-write.js
-test-zlib-close-in-ondata.js
-test-zlib-const.js
-test-zlib-convenience-methods.js
-test-zlib-crc32.js
-test-zlib-create-raw.js
-test-zlib-deflate-constructors.js
-test-zlib-deflate-raw-inherits.js
-test-zlib-destroy-pipe.js
-test-zlib-destroy.js
-test-zlib-dictionary-fail.js
-test-zlib-dictionary.js
-test-zlib-empty-buffer.js
-test-zlib-failed-init.js
-test-zlib-flush-drain-longblock.js
-test-zlib-flush-drain.js
-test-zlib-flush-flags.js
-test-zlib-flush-write-sync-interleaved.js
-test-zlib-flush.js
-test-zlib-from-concatenated-gzip.js
-test-zlib-from-gzip-with-trailing-garbage.js
-test-zlib-from-gzip.js
-test-zlib-from-string.js
-test-zlib-invalid-arg-value-brotli-compress.js
-test-zlib-invalid-input-memory.js
-test-zlib-invalid-input.js
-test-zlib-kmaxlength-rangeerror.js
-test-zlib-maxOutputLength.js
-test-zlib-negative-zero.js
-test-zlib-no-stream.js
-test-zlib-not-string-or-buffer.js
-test-zlib-object-write.js
-test-zlib-params.js
-test-zlib-premature-end.js
-test-zlib-random-byte-pipes.js
-test-zlib-reject-garbage-after-end.js
-test-zlib-reset-before-write.js
-test-zlib-reset-during-write.js
-test-zlib-sync-no-event.js
-test-zlib-truncated.js
-test-zlib-type-error.js
-test-zlib-unused-weak.js
-test-zlib-unzip-one-byte-chunks.js
-test-zlib-write-after-close.js
-test-zlib-write-after-end.js
-test-zlib-write-after-flush.js
-test-zlib-zero-byte.js
-test-zlib-zero-windowBits.js
-test-zlib-zstd-dictionary.js
-test-zlib-zstd-flush.js
-test-zlib-zstd-from-string.js
-test-zlib-zstd-from-zstd.js
-test-zlib-zstd-kmaxlength-rangeerror.js
-test-zlib-zstd-pledged-src-size.js
-test-zlib-zstd.js
-test-zlib.js

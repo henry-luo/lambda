@@ -116,7 +116,6 @@ The table records each module's **actual** backing and the notable gaps verified
 | `child_process` | `js_child_process.cpp` / `js_get_child_process_namespace` | libuv `uv_spawn` + `popen` | `exec` (async, `uv_spawn`, `:287`), `execSync` (`popen`, `:329`), `spawn`/`spawnSync`. **`fork()` is absent.** |
 | `url` | `js_url_module.cpp` / `js_get_url_namespace` | native, immutable `TypeMap::js_meta` brand | WHATWG `URL` constructor plus legacy `parse`/`format`/`resolve`. `searchParams` is a basic key/value object, **not** a full `URLSearchParams` (`:80`). |
 | `querystring` | `js_querystring.cpp` / `js_get_querystring_namespace` | native | `parse`/`stringify`/`escape`/`unescape` with Node percent-encoding semantics (`:33`). |
-| `zlib` | `lambda/module/node_zlib/node_zlib_module.cpp` | host Jube zlib provider (system `<zlib.h>` remains host-linked) | `gzipSync`/`gunzipSync`/`deflateSync`/`inflateSync` and streaming `createGzip`/`createGunzip`. |
 | `readline` | `js_readline.cpp` / `js_get_readline_namespace` | native, blocking stdin | `createInterface` with `question`/`on`/`close`; reads stdin synchronously (`:31`). |
 | `string_decoder` | `js_string_decoder.cpp` / `js_get_string_decoder_namespace` | native | `StringDecoder` with `write`/`end`; buffers incomplete multi-byte sequences in `__pending__` (`:56`). utf8 primary. |
 | `assert` | `js_assert.cpp` / `js_get_assert_namespace` | native | `ok`/`equal`/`strictEqual`/`deepStrictEqual`/`throws`/`rejects`/`match`/`ifError` and friends; throws `AssertionError` with Node-shaped properties (`:36`). `assert/strict` aliases the same namespace (always strict). |
@@ -169,6 +168,10 @@ Top-level `let`/`var`/`const`, function declarations, and class declarations in 
 9. **External package support.** Installed external packages and `node_modules`
    resolution are outside the `lambda.exe` host build. The historical npm
    client details remain in §5 for migration reference.
+10. **No `zlib` module.** `zlib` is not provided: `require('zlib')` and
+   `require('node:zlib')` raise `MODULE_NOT_FOUND`. The `node-zlib` Jube module
+   was removed on 2026-10-07; it could no longer initialize because the Node
+   `stream` Transform services it was built on were gone from the host.
 
 ---
 

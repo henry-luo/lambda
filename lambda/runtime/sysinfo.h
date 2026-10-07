@@ -9,6 +9,7 @@
 
 #ifndef LAMBDA_SYSINFO_H
 #define LAMBDA_SYSINFO_H
+#include "../../lib/lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,12 +38,12 @@ void sysinfo_set_argv(int argc, char** argv);
 /**
  * Get the stored command line argument count.
  */
-int sysinfo_get_argc(void);
+LAMBDA_RT_API int sysinfo_get_argc(void);
 
 /**
  * Get the stored command line argument vector.
  */
-char** sysinfo_get_argv(void);
+LAMBDA_RT_API char** sysinfo_get_argv(void);
 
 /**
  * Release the current EvalContext's sysinfo Input before its heap pool ends.

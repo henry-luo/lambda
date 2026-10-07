@@ -1,5 +1,6 @@
 #ifndef FILE_H
 #define FILE_H
+#include "lambda_api.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -118,9 +119,9 @@ int file_rename(const char* old_path, const char* new_path);
 // Queries & metadata
 // ---------------------------------------------------------------------------
 
-bool     file_exists(const char* path);
-bool     file_is_file(const char* path);
-bool     file_is_dir(const char* path);
+LAMBDA_LIB_API bool     file_exists(const char* path);
+LAMBDA_LIB_API bool     file_is_file(const char* path);
+LAMBDA_LIB_API bool     file_is_dir(const char* path);
 bool     file_is_symlink(const char* path);
 bool     file_is_readable(const char* path);
 bool     file_is_writable(const char* path);
@@ -129,10 +130,10 @@ FileStat file_stat(const char* path);
 int64_t  file_size(const char* path);
 
 // Resolve to absolute canonical path. Caller must free(). NULL on error.
-char* file_realpath(const char* path);
+LAMBDA_LIB_API char* file_realpath(const char* path);
 
 // Return current working directory as malloc'd string. Caller must free().
-char* file_getcwd(void);
+LAMBDA_LIB_API char* file_getcwd(void);
 
 // Write current working directory into caller storage. Returns false on error.
 bool file_getcwd_into(char* buffer, size_t capacity);

@@ -1,5 +1,6 @@
 #ifndef BASE64_H
 #define BASE64_H
+#include "lambda_api.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -23,7 +24,7 @@ typedef enum {
  * Encoded length (excluding the NUL terminator) for `in_len` input bytes.
  * STD is padded to a multiple of 4; URL is unpadded.
  */
-size_t base64_encoded_len(size_t in_len, Base64Variant variant);
+LAMBDA_LIB_API size_t base64_encoded_len(size_t in_len, Base64Variant variant);
 
 /**
  * Encode `len` bytes into caller-provided `out`.
@@ -31,7 +32,7 @@ size_t base64_encoded_len(size_t in_len, Base64Variant variant);
  * NUL-terminates the result.
  * @return Number of bytes written (excluding the NUL terminator).
  */
-size_t base64_encode(const void* data, size_t len, char* out, Base64Variant variant);
+LAMBDA_LIB_API size_t base64_encode(const void* data, size_t len, char* out, Base64Variant variant);
 
 /**
  * Convenience: malloc + encode. Caller must free() the returned buffer.
@@ -55,7 +56,7 @@ uint8_t* base64_decode(const char* input, size_t input_len, size_t* output_len);
  * The URL variant also tolerates missing '=' padding. Whitespace is ignored.
  * Same contract/ownership as base64_decode().
  */
-uint8_t* base64_decode_variant(const char* input, size_t input_len, size_t* output_len,
+LAMBDA_LIB_API uint8_t* base64_decode_variant(const char* input, size_t input_len, size_t* output_len,
                                Base64Variant variant);
 
 /**

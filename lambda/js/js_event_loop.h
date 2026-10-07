@@ -9,6 +9,7 @@
  * - Main drain via uv_run() for post-script execution
  */
 #pragma once
+#include "../../lib/lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,7 +53,7 @@ void js_event_loop_set_auto_close_settle_ms(double settle_ms);
 // =============================================================================
 
 void js_microtask_enqueue(Item callback);
-void js_next_tick_enqueue(Item callback);
+LAMBDA_RT_API void js_next_tick_enqueue(Item callback);
 void js_microtask_flush(void);
 Item js_microtask_flush_result(void);
 // Run one nextTick or microtask callback, preserving FIFO page-turn order.

@@ -1006,6 +1006,15 @@ builtin name knowledge is deleted; core→builtin edges become hooks.
 
 ## 10. Stage N4 — `node-zlib`: first dynamic module
 
+> **Removed 2026-10-07 (USER).** `lambda/module/node_zlib/`, its manifests,
+> `build-node-zlib` / `release-node-zlib`, the `test-jube-node-zlib-*` targets,
+> the `test/node` zlib fixtures and the official-baseline zlib rows were
+> deleted. The module could no longer initialize: `jube_host_node_stream_api`
+> had kept only its two file-stream slots since `js_stream.cpp` left the host
+> in the 2026-09-16 Node source clean-up. The host codec provider
+> (`jube_node_zlib_codec.cpp`, `JubeHostNodeZlibAPI`) remains. The tasks below
+> are the historical record.
+
 ### Goal
 
 Prove the full delivery chain (build target → manifest → lazy dlopen → absent

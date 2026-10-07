@@ -38,6 +38,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #ifndef ALGORITHM_ARRAYLIST_H
 #define ALGORITHM_ARRAYLIST_H
+#include "lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -113,7 +114,7 @@ typedef int (*ArrayListCompareFunc)(ArrayListValue value1,
  * @see arraylist_free
  */
 
-ArrayList *arraylist_new(int length);
+LAMBDA_LIB_API ArrayList *arraylist_new(int length);
 
 /**
  * Destroy an ArrayList and free back the memory it uses.
@@ -121,7 +122,7 @@ ArrayList *arraylist_new(int length);
  * @param arraylist      The ArrayList to free.
  */
 
-void arraylist_free(ArrayList *arraylist);
+LAMBDA_LIB_API void arraylist_free(ArrayList *arraylist);
 
 /**
  * Append a value to the end of an ArrayList.
@@ -133,7 +134,7 @@ void arraylist_free(ArrayList *arraylist);
  *                       for the new entry.
  */
 
-int arraylist_append(ArrayList *arraylist, ArrayListValue data);
+LAMBDA_LIB_API int arraylist_append(ArrayList *arraylist, ArrayListValue data);
 
 /** 
  * Prepend a value to the beginning of an ArrayList.
@@ -154,7 +155,7 @@ int arraylist_prepend(ArrayList *arraylist, ArrayListValue data);
  * @param index          The index of the entry to remove.
  */
 
-void arraylist_remove(ArrayList *arraylist, int index);
+LAMBDA_LIB_API void arraylist_remove(ArrayList *arraylist, int index);
 
 /**
  * Remove a range of entries at the specified location in an ArrayList.

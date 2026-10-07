@@ -6,6 +6,7 @@
 
 #ifndef SHELL_H
 #define SHELL_H
+#include "lambda_api.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -93,7 +94,7 @@ void shell_process_free(ShellProcess* proc);
 // Environment variables
 // ---------------------------------------------------------------------------
 
-const char* shell_getenv(const char* name);
+LAMBDA_LIB_API const char* shell_getenv(const char* name);
 bool        shell_setenv(const char* name, const char* value);
 bool        shell_unsetenv(const char* name);
 
