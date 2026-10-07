@@ -105,8 +105,10 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         input_context = saved_input_ctx;
         return false;
     }
-    dom_set_host_driven_loop(doc->js.host_driven_loop);
-    dom_set_document(doc);
+    if (!radiant_bind_document_script_host(uicon, doc)) {
+        input_context = saved_input_ctx;
+        return false;
+    }
     DocState* state = (DocState*)doc->state;
     // A host-loop turn is one browser task.  Defer debug state validation until
     // its DOM mutations commit, otherwise a timer building a large subtree
@@ -1705,7 +1707,6 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
             frame_driven = js_animation_frame_has_pending() != 0;
         }
-
         // Drain network completions on the UI thread before deciding whether
         // this tick needs a reflow/repaint.
         if (ui_context.document && ui_context.document->resource_manager) {

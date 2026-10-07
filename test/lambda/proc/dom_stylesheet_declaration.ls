@@ -20,4 +20,13 @@ pn main() {
     print([dom.rule_style_get_value(declaration, "width") == "",
         dom.rule_style_get_priority(declaration, "width")])
     print("\n")
+    // D7.3.3: native inline access shares CSSOM without a JavaScript realm.
+    let intro = dom.query_selector(document, "#intro")
+    let width_result = dom.style_set_property(intro, "width", "18px")
+    let opacity_result = dom.style_set_property(intro, "opacity", 0.5)
+    print([dom.style_get_property(intro, "color") == "",
+        width_result == "18px", opacity_result == 0.5,
+        dom.style_get_property(intro, "width") == "18px",
+        dom.style_get_property(intro, "opacity") == "0.5"])
+    print("\n")
 }

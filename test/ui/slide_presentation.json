@@ -1,0 +1,19 @@
+{
+  "name": "Lambda slide player uses named frame delivery without page JavaScript",
+  "html": "examples/slide_presentation.ls",
+  "viewport": {"width": 1100, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": "[data-slide-command=play]"}},
+    {"type": "advance_time", "ms": 700, "steps": 14},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-phase", "equals": "waiting"},
+    {"type": "assert_style", "target": {"selector": "#demo-s0-o0"}, "property": "opacity", "equals": "1"},
+    {"type": "click", "target": {"selector": "[data-slide-command=next]"}},
+    {"type": "advance_time", "ms": 700, "steps": 14},
+    {"type": "assert_attribute", "target": {"selector": "#demo-s0-o1"}, "attribute": "aria-hidden", "equals": "false"},
+    {"type": "click", "target": {"selector": "[data-slide-command=next]"}},
+    {"type": "advance_time", "ms": 700, "steps": 14},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-index", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-phase", "equals": "waiting"},
+    {"type": "assert_text", "target": {"selector": ".slide-status"}, "equals": "2 / 2"}
+  ]
+}

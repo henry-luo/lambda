@@ -1,0 +1,12 @@
+{
+  "name": "Behavior model survives event construction under forced GC",
+  "html": "test/ui/dom_pkg_mouse_gc_root.html",
+  "viewport": {"width": 240, "height": 160},
+  "env": [{"key": "LAMBDA_GC_FORCE_EVERY", "value": "1"}],
+  "events": [
+    {"type": "dblclick", "target": {"selector": "#text"}},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "click", "target": {"selector": "#text"}},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

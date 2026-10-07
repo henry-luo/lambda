@@ -594,7 +594,7 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
     }
     doc->js.mutation_kind_mask |= dom_mutation_bit(kind);
 
-    if (doc->js.mutation_record_count < DOM_JS_MUTATION_RECORD_CAP) {
+    if (dom_js_mutation_records_reserve(doc, doc->js.mutation_record_count + 1)) {
         DomNodeRef target_ref = dom_node_ref(target);
         DomNodeRef parent_ref = dom_node_ref(parent);
         if (target && !dom_node_pin(doc, target_ref, DOM_NODE_PIN_RECONCILE)) return;
@@ -955,9 +955,12 @@ static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
     dom_commit_headless_layout();
     DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
         ? _js_current_ui_context->document : _js_current_document;
+    double timestamp_ms = js_event_loop_virtual_clock_enabled()
+        ? js_event_loop_virtual_clock_now_ms() : js_performance_monotonic_now_ms();
+    bool frame_delivered = dom_engine_frame_tick(doc, timestamp_ms);
     DocState* state = doc && doc->state ? (DocState*)doc->state : nullptr;
     AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
-    if (!state) return false;
+    if (!state) return frame_delivered;
     // Batch documents have no native frame clock; advance the same scheduler
     // deterministically so transition events cannot remain queued forever.
     bool active = false;
@@ -973,7 +976,7 @@ static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
             : js_performance_monotonic_now_ms() / 1000.0;
         active = scroll_smooth_tick_document(doc, now) || active;
     }
-    return active;
+    return active || frame_delivered;
 }
 
 extern "C" bool dom_tick_headless_animation_frame(void) {
@@ -3758,6 +3761,7 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     if (!body || !doc->node_arena) return;
 
     Html5Parser* parser = dom_create_fragment_parser(doc);
+    Html5ParserScope parser_scope(parser);
     if (!parser) return;
     html5_fragment_parse(parser, srcdoc);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -5738,6 +5742,7 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
     DomDocument* doc = target ? target->doc : nullptr;
     if (!doc || !doc->input) return false;
     Html5Parser* parser = dom_create_fragment_parser(doc, context ? context : target);
+    Html5ParserScope parser_scope(parser);
     if (!parser) return false;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -5846,6 +5851,7 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     if (!doc || !doc->input || !html_str) return nullptr;
 
     Html5Parser* parser = dom_create_fragment_parser(doc);
+    Html5ParserScope parser_scope(parser);
     if (!parser) return nullptr;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -11663,20 +11669,49 @@ static Item dom_style_object(Item receiver) {
         dom_is_computed_style_item(receiver)) return receiver;
     if (dom_is_css_rule(receiver)) return dom_cssom_rule_get_style(receiver);
     DomElement* elem = (DomElement*)dom_unwrap_element(receiver);
-    return elem ? dom_get_inline_style_wrapper(elem) : dom_realm_get_name(receiver, "style");
+    if (elem) return dom_get_inline_style_wrapper(elem);
+    return dom_realm_active() ? dom_realm_get_name(receiver, "style") : ItemNull;
 }
 
 extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item value) {
     RootFrame roots(4);
     Rooted<Item> receiver_root(roots, elem_item), property_root(roots, prop_name),
         value_root(roots, value), style_root(roots, dom_style_object(receiver_root.get()));
+    // Lambda-only callers use the same declaration core without entering a JS realm.
+    if (!dom_realm_active())
+        return dom_cssom_rule_decl_set_property(style_root.get(), property_root.get(), value_root.get());
     return dom_realm_set(style_root.get(), property_root.get(), value_root.get());
+}
+
+extern "C" Item dom_presentation_style_set_property(Item node_item, Item property, Item value) {
+    RootFrame roots(3);
+    Rooted<Item> node_root(roots, node_item);
+    Rooted<Item> property_root(roots, property);
+    Rooted<Item> value_root(roots, value);
+    DomElement* element = (DomElement*)dom_unwrap_element(node_root.get());
+    const char* name = fn_to_cstr(property_root.get());
+    const char* text = fn_to_cstr(value_root.get());
+    bool changed = false;
+    bool accepted = element && dom_element_set_presentation_style(element, name, text, &changed);
+    if (changed) dom_notify_mutation(dom_style_mutation_kind(css_property_code_from_name(name)),
+                                     element, element->parent);
+    return (Item){.item = b2it(accepted)};
+}
+
+extern "C" Item dom_presentation_style_clear(Item node_item) {
+    DomElement* element = (DomElement*)dom_unwrap_element(node_item);
+    if (!element) return (Item){.item = b2it(false)};
+    if (dom_element_clear_presentation_style(element))
+        dom_notify_mutation(DOM_JS_MUTATION_INLINE_STYLE, element, element->parent);
+    return (Item){.item = b2it(true)};
 }
 
 extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
     RootFrame roots(3);
     Rooted<Item> receiver_root(roots, elem_item), property_root(roots, prop_name),
         style_root(roots, dom_style_object(receiver_root.get()));
+    if (!dom_realm_active())
+        return dom_cssom_rule_decl_get_property(style_root.get(), property_root.get());
     return dom_realm_get(style_root.get(), property_root.get());
 }
 
@@ -14304,6 +14339,8 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
         text->length = inserted_string->len;
         text->set_owns_native_string(false);
     }
+    dom_node_registry_set_backing_value(parent->doc, text,
+        Item{.item = s2it(inserted_string)});
     if (relinked && relinked != text) {
         if (!((DomNode*)parent)->insert_before(text, relinked) ||
             !((DomNode*)parent)->remove_child(relinked)) {

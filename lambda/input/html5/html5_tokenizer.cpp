@@ -392,7 +392,7 @@ static String* html5_create_lowercase_string_from_temp_buffer(Html5Parser* parse
 
 // helper: append character to temp buffer
 static void html5_append_to_temp_buffer(Html5Parser* parser, char c) {
-    if (!lam::arena_grow_array(parser->arena, &parser->temp_buffer,
+    if (!lam::arena_grow_array(parser->work_arena, &parser->temp_buffer,
             &parser->temp_buffer_capacity, parser->temp_buffer_len,
             parser->temp_buffer_len + 1, 4096)) return;
     parser->temp_buffer[parser->temp_buffer_len++] = c;
@@ -419,7 +419,7 @@ static void html5_clear_temp_buffer(Html5Parser* parser) {
 
 // helper: append to attribute name buffer
 static void html5_append_to_attr_name(Html5Parser* parser, char c) {
-    if (!lam::arena_grow_array(parser->arena, &parser->current_attr_name,
+    if (!lam::arena_grow_array(parser->work_arena, &parser->current_attr_name,
             &parser->current_attr_name_capacity, parser->current_attr_name_len,
             parser->current_attr_name_len + 2, 32)) return;
     parser->current_attr_name[parser->current_attr_name_len++] = c;
@@ -526,7 +526,7 @@ static Html5Token* html5_emit_end_tag_as_text(Html5Parser* parser,
     }
     html5_switch_tokenizer_state(parser, state);
     size_t len = 2 + parser->temp_buffer_len;
-    char* text = (char*)arena_alloc(parser->arena, len + 1);
+    char* text = (char*)arena_alloc(parser->token_arena, len + 1);
     text[0] = '<';
     text[1] = '/';
     memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
@@ -538,7 +538,7 @@ static Html5Token* html5_emit_end_tag_as_text(Html5Parser* parser,
 static void html5_save_last_start_tag(Html5Parser* parser, const char* name, size_t len) {
     // Allocate or reuse buffer
     if (parser->last_start_tag_name == nullptr || len > parser->last_start_tag_name_len) {
-        parser->last_start_tag_name = (char*)arena_alloc(parser->arena, len + 1);
+        parser->last_start_tag_name = (char*)arena_alloc(parser->work_arena, len + 1);
     }
     str_copy(parser->last_start_tag_name, len + 1, name, len);
     parser->last_start_tag_name_len = len;

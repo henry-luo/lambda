@@ -93,6 +93,8 @@ The retained cache lets clean subtrees survive a re-record entirely. `RetainedDi
 
 **Capture** runs after recording. `retained_dl_cache_capture` (`retained_display_list.cpp:360`) scans the recorded list for `DL_BEGIN_ELEMENT` markers and calls `retained_dl_cache_store_marker` (`:319`) for each; if the range is retainable (`dl_item_is_retainable_for_fragment`, `render.hpp`, per-item at `retained_display_list.cpp:312`) it deep-copies the item range into the per-view fragment via `retained_dl_copy_range` (`:186`), which re-deep-copies clip-shape polygons into the fragment's own arena (`retained_dl_copy_clip_shape_stack`, `:39`) so the fragment is independently immutable.
 
+**Lifetime** follows the arena ownership policy in **D4.5.1v4**. After capture, fragments whose `last_stored_epoch` does not match the completed frame are removed, releasing their display lists and arenas. Replaced view IDs therefore do not accumulate across reactive redraws. Current fragments, including markers copied by retained replay, remain available for the next frame.
+
 **Reuse** happens on a later frame for clean subtrees. `retained_dl_append_fragment_for_dirty` (`retained_display_list.cpp:478`) re-injects a cached fragment into the new list, but only after two gates pass: `retained_dl_fragment_resources_valid` (`:424`) checks the stored video/glyph resource generations still match (a re-decoded image or re-shaped glyph invalidates the fragment), and the fragment must not intersect the `DirtyTracker`'s dirty rects (`:485-498`, consulting the caller-supplied `contains_view` predicate). The `RetainedDisplayListStats` counters (`render.hpp`) record capture/reuse hits and each rejection reason for diagnostics.
 
 ---

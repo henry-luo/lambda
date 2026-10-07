@@ -1992,17 +1992,15 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         case CSS_PROPERTY_TRANSFORM:
             return css_transform_value_valid(value);
         case CSS_PROPERTY_OPACITY: {
-            if (css_value_contains_var_reference(value)) return true;
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                const CssEnumInfo* info = css_enum_info(value->data.keyword);
-                return info && info->group == CSS_VALUE_GROUP_GLOBAL;
-            }
+            if (css_value_is_global_keyword(value) || css_value_contains_var_reference(value)) return true;
             // a bare list is never a numeric expression outside a math function.
             if (value->type != CSS_VALUE_TYPE_NUMBER &&
                 value->type != CSS_VALUE_TYPE_PERCENTAGE &&
-                value->type != CSS_VALUE_TYPE_FUNCTION) return false;
+                value->type != CSS_VALUE_TYPE_FUNCTION &&
+                value->type != CSS_VALUE_TYPE_ENV &&
+                value->type != CSS_VALUE_TYPE_ATTR) return false;
             CssMathType type = css_math_value_type(value, 0);
-            return type == CSS_MATH_NUMBER || type == CSS_MATH_PERCENT;
+            return type == CSS_MATH_NUMBER || type == CSS_MATH_PERCENT || type == CSS_MATH_DEFERRED;
         }
         case CSS_PROPERTY_BREAK_BEFORE:
         case CSS_PROPERTY_BREAK_AFTER:

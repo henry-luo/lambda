@@ -37,7 +37,8 @@ typedef enum {
     PDF_OBJ_CONTENT,
     PDF_OBJ_RESOURCES,
     PDF_OBJ_INFO,
-    PDF_OBJ_ANNOTATION
+    PDF_OBJ_ANNOTATION,
+    PDF_OBJ_OUTLINE
 } PdfObjType;
 
 // Base14 fonts mapping
@@ -120,6 +121,20 @@ typedef struct PdfNamedDestination {
     struct PdfNamedDestination* next;
 } PdfNamedDestination;
 
+typedef struct PdfOutline {
+    int obj_id;
+    unsigned int level;
+    unsigned int descendants;
+    char* title;
+    char* destination;
+    struct PdfOutline* parent;
+    struct PdfOutline* previous;
+    struct PdfOutline* next;
+    struct PdfOutline* first_child;
+    struct PdfOutline* last_child;
+    struct PdfOutline* next_record;
+} PdfOutline;
+
 // Page structure
 struct HPDF_Page_Rec {
     struct HPDF_Doc_Rec* doc;
@@ -189,6 +204,9 @@ struct HPDF_Doc_Rec {
     char* subject;
     char* keywords;
     PdfNamedDestination* destinations;
+    PdfOutline* outline_root;
+    PdfOutline* first_outline;
+    PdfOutline* last_outline;
     
     // Error handling
     HPDF_ErrorHandler error_fn;
@@ -579,6 +597,40 @@ HPDF_STATUS HPDF_Doc_AddNamedDestination(HPDF_Doc doc, const char* name,
     dest->x = x; dest->y = y;
     dest->next = doc->destinations;
     doc->destinations = dest;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Doc_AddOutline(HPDF_Doc doc, const char* title,
+                                const char* destination, unsigned int level) {
+    if (!doc || !title || !*title || !destination || !*destination || level > 32)
+        return HPDF_ERROR_INVALID_PARAM;
+    if (!doc->outline_root) {
+        doc->outline_root = (PdfOutline*)arena_calloc(doc->arena, sizeof(PdfOutline));
+        if (!doc->outline_root) return HPDF_ERROR_OUT_OF_MEMORY;
+        doc->outline_root->obj_id = alloc_obj_id(doc);
+    }
+    PdfOutline* entry = (PdfOutline*)arena_calloc(doc->arena, sizeof(PdfOutline));
+    if (!entry) return HPDF_ERROR_OUT_OF_MEMORY;
+    entry->title = arena_strdup(doc->arena, title);
+    entry->destination = arena_strdup(doc->arena, destination);
+    if (!entry->title || !entry->destination) return HPDF_ERROR_OUT_OF_MEMORY;
+    entry->obj_id = alloc_obj_id(doc);
+    entry->level = level;
+    // A skipped level attaches to the nearest preceding lower level.
+    PdfOutline* parent = doc->last_outline;
+    while (parent && parent != doc->outline_root && parent->level >= level)
+        parent = parent->parent;
+    if (!parent) parent = doc->outline_root;
+    entry->parent = parent;
+    entry->previous = parent->last_child;
+    if (entry->previous) entry->previous->next = entry;
+    else parent->first_child = entry;
+    parent->last_child = entry;
+    for (PdfOutline* ancestor = parent; ancestor; ancestor = ancestor->parent)
+        ancestor->descendants++;
+    if (doc->last_outline) doc->last_outline->next_record = entry;
+    else doc->first_outline = entry;
+    doc->last_outline = entry;
     return HPDF_OK;
 }
 
@@ -1098,6 +1150,14 @@ static bool pdf_link_is_resolved(HPDF_Doc doc, const PdfLinkAnnotation* link) {
 
 HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     if (!doc || !filename) return HPDF_ERROR_INVALID_PARAM;
+
+    // Reject unresolved destinations before opening an output file.
+    for (PdfOutline* entry = doc->first_outline; entry; entry = entry->next_record) {
+        if (!pdf_find_destination(doc, entry->destination)) {
+            log_error("[PDF_OUTLINE] unresolved destination: %s", entry->destination);
+            return HPDF_ERROR_INVALID_STATE;
+        }
+    }
     
     FILE* file = fopen(filename, "wb");
     if (!file) {
@@ -1312,6 +1372,30 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     fprintf(file, "/Count %d\n", doc->pages->length);
     fprintf(file, ">>\nendobj\n\n");
     
+    // Outline titles use the same UTF-16 document-string path as Info metadata.
+    if (doc->first_outline) {
+        PdfOutline* root = doc->outline_root;
+        record_obj_offset(doc, root->obj_id, ftell(file), PDF_OBJ_OUTLINE);
+        fprintf(file, "%d 0 obj\n<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %u >>\nendobj\n\n",
+            root->obj_id, root->first_child->obj_id, root->last_child->obj_id, root->descendants);
+        for (PdfOutline* entry = doc->first_outline; entry; entry = entry->next_record) {
+            PdfNamedDestination* destination = pdf_find_destination(doc, entry->destination);
+            record_obj_offset(doc, entry->obj_id, ftell(file), PDF_OBJ_OUTLINE);
+            fprintf(file, "%d 0 obj\n<<\n", entry->obj_id);
+            if (!pdf_write_info_entry(file, "Title", entry->title)) {
+                fclose(file);
+                return HPDF_ERROR_FILE_IO;
+            }
+            fprintf(file, "/Parent %d 0 R\n", entry->parent->obj_id);
+            if (entry->previous) fprintf(file, "/Prev %d 0 R\n", entry->previous->obj_id);
+            if (entry->next) fprintf(file, "/Next %d 0 R\n", entry->next->obj_id);
+            if (entry->first_child) fprintf(file, "/First %d 0 R /Last %d 0 R /Count %u\n",
+                entry->first_child->obj_id, entry->last_child->obj_id, entry->descendants);
+            fprintf(file, "/Dest [%d 0 R /XYZ %.3f %.3f null]\n>>\nendobj\n\n",
+                destination->page->obj_id, destination->x, destination->y);
+        }
+    }
+
     // --- Catalog ---
     offset = ftell(file);
     record_obj_offset(doc, doc->catalog_id, offset, PDF_OBJ_CATALOG);
@@ -1319,6 +1403,7 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     fprintf(file, "%d 0 obj\n<<\n", doc->catalog_id);
     fprintf(file, "/Type /Catalog\n");
     fprintf(file, "/Pages %d 0 R\n", doc->pages_id);
+    if (doc->first_outline) fprintf(file, "/Outlines %d 0 R\n", doc->outline_root->obj_id);
     fprintf(file, ">>\nendobj\n\n");
     
     // --- Cross-Reference Table ---

@@ -76,6 +76,50 @@ static bool retained_test_contains_view_id(void* userdata, uint32_t source_view_
     return contained_id && *contained_id == source_view_id;
 }
 
+TEST_F(RetainedDisplayListTest, ReleasesReplacedViewsWhileKeepingCurrentFragments) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    const RetainedDisplayListFragment* stable = nullptr;
+
+    // reactive redraws preserve the shell while replacing the board's node IDs.
+    for (uint32_t frame = 0; frame < 32; frame++) {
+        dl_clear(&source);
+        int root = dl_begin_element(&source, 42, 0.0f, 0.0f, 100.0f, 10.0f);
+        for (uint32_t child = 0; child < 24; child++) {
+            float x = child * 4.0f;
+            int begin = dl_begin_element(&source, 1000 + frame * 24 + child,
+                x, 0.0f, 2.0f, 2.0f);
+            ASSERT_NE(retained_test_add_rect(&source, x, 0.0f, 2.0f, 2.0f), nullptr);
+            dl_end_element(&source, begin);
+        }
+        dl_end_element(&source, root);
+        retained_dl_cache_begin_frame(cache);
+        if (stable) EXPECT_EQ(retained_dl_cache_get(cache, 42), stable);
+        retained_dl_cache_capture(cache, &source);
+        if (!stable) stable = retained_dl_cache_get(cache, 42);
+        ASSERT_NE(stable, nullptr);
+        EXPECT_EQ(retained_dl_cache_get(cache, 42), stable);
+        for (uint32_t child = 0; child < 24; child++) {
+            EXPECT_NE(retained_dl_cache_get(cache, 1000 + frame * 24 + child), nullptr);
+            if (frame > 0) {
+                EXPECT_EQ(retained_dl_cache_get(cache, 1000 + (frame - 1) * 24 + child), nullptr);
+            }
+        }
+    }
+
+    dl_clear(&source);
+    retained_dl_cache_begin_frame(cache);
+    retained_dl_cache_capture(cache, &source);
+    EXPECT_EQ(retained_dl_cache_get(cache, 42), nullptr);
+    for (uint32_t child = 0; child < 24; child++) {
+        EXPECT_EQ(retained_dl_cache_get(cache, 1000 + 31 * 24 + child), nullptr);
+    }
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
 TEST_F(RetainedDisplayListTest, CapturesAndAppendsMatchedElementFragment) {
     DisplayList source = {};
     dl_init(&source, arena);

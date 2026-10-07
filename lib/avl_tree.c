@@ -401,81 +401,38 @@ static int foreach_inorder_iterative(AvlTree* tree, avl_callback_t callback, voi
     
     int count = 0;
     AvlNode* node = tree->root;
-    AvlNode* root = tree->root;
-    bool from_right = false;
     
     // Start from leftmost node
     while (node->left != NULL) {
         node = node->left;
     }
     
-    do {
-        AvlNode* parent = node->parent;
-        AvlNode* original_root = tree->root;
-        
-        if (!from_right) {
-            // Process current node
-            count++;
-            bool should_continue = callback(node, context);
-            if (!should_continue) {
-                return count;
-            }
-            
-            // Check if tree was modified during callback
-            if (tree->root != original_root) {
-                // Tree structure changed, need to restart or handle specially
-                root = tree->root;
-                if (root == NULL) {
-                    return count;
-                } else if (tree->last_removed == root) {
-                    node = root;
-                } else {
-                    // Find where to continue from
-                    node = root;
-                    while (node->left != NULL) {
-                        node = node->left;
-                    }
-                    continue;
-                }
-            }
-            
-            // Check if current node was removed
-            if (parent && parent->left != node && parent->right != node) {
-                // Node was removed, adjust traversal
-                if (parent->left != NULL) {
-                    node = parent->left;
-                    while (node->right != NULL) {
-                        node = node->right;
-                    }
-                } else {
-                    node = parent;
-                    from_right = true;
-                    continue;
-                }
+    while (node) {
+        uintptr_t key = node->property_id;
+        uint64_t generation = tree->mutation_generation;
+        AvlNode* next = node->right ? subtree_min(node->right) : node->parent;
+        if (!node->right) {
+            AvlNode* child = node;
+            while (next && child == next->right) {
+                child = next;
+                next = next->parent;
             }
         }
-        
-        // Move to next node in inorder sequence
-        if (node->right != NULL && !from_right) {
-            node = node->right;
-            while (node->left != NULL) {
-                node = node->left;
+        count++;
+        if (!callback(node, context)) return count;
+        // A callback may free either the current node or its successor. Re-find
+        // the next key after edits; stable traversals keep their linear walk.
+        if (tree->mutation_generation != generation) {
+            next = NULL;
+            for (AvlNode* candidate = tree->root; candidate;) {
+                if (candidate->property_id > key) {
+                    next = candidate;
+                    candidate = candidate->left;
+                } else candidate = candidate->right;
             }
-            from_right = false;
-            continue;
         }
-        
-        // Move up to parent
-        if (parent == NULL || parent == root->parent) {
-            break;
-        } else if (node == parent->left) {
-            from_right = false;
-        } else {
-            from_right = true;
-        }
-        
-        node = parent;
-    } while (true);
+        node = next;
+    }
     
     return count;
 }
@@ -615,6 +572,7 @@ AvlTree* avl_tree_create(Pool* pool) {
     tree->node_count = 0;
     tree->max_depth = 0;
     tree->last_removed = NULL;
+    tree->mutation_generation = 0;
     
     return tree;
 }
@@ -627,6 +585,7 @@ bool avl_tree_init(AvlTree* tree, Pool* pool) {
     tree->node_count = 0;
     tree->max_depth = 0;
     tree->last_removed = NULL;
+    tree->mutation_generation = 0;
     
     return true;
 }
@@ -640,11 +599,17 @@ void avl_tree_destroy(AvlTree* tree) {
 
 void avl_tree_clear(AvlTree* tree) {
     if (!tree) return;
+
+    // All wrapper nodes belong exclusively to the tree; declarations are borrowed.
+    while (tree->root) {
+        avl_tree_remove(tree, tree->root->property_id);
+    }
     
     tree->root = NULL;
     tree->node_count = 0;
     tree->max_depth = 0;
     tree->last_removed = NULL;
+    tree->mutation_generation++;
 }
 
 AvlNode* avl_tree_insert(AvlTree* tree, uintptr_t property_id, void* declaration) {
@@ -664,6 +629,7 @@ AvlNode* avl_tree_insert(AvlTree* tree, uintptr_t property_id, void* declaration
     // Insert into tree
     tree->root = insert_iterative(tree->root, new_node);
     tree->node_count++;
+    tree->mutation_generation++;
     
     // Update max depth
     int height = avl_tree_height(tree);
@@ -681,6 +647,9 @@ AvlNode* avl_tree_search(AvlTree* tree, uintptr_t property_id) {
 
 void* avl_tree_remove(AvlTree* tree, uintptr_t property_id) {
     if (!tree) return NULL;
+    AvlNode* original = avl_tree_search(tree, property_id);
+    if (!original) return NULL;
+    void* declaration = original->declaration;
     
     AvlNode* removed_node;
     tree->last_removed = subtree_min(tree->root ? tree->root->left : NULL);
@@ -688,7 +657,10 @@ void* avl_tree_remove(AvlTree* tree, uintptr_t property_id) {
     
     if (removed_node) {
         tree->node_count--;
-        void* declaration = removed_node->declaration;
+        tree->mutation_generation++;
+        // Two-child removal detaches the successor wrapper, whose declaration
+        // now belongs to the replacement node. Return the originally requested value.
+        pool_free(tree->pool, removed_node);
         return declaration;
     }
     

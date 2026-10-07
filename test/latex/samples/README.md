@@ -6,6 +6,10 @@ The TeX content is unchanged; HTML entities were decoded and the local files
 were given descriptive names. Each source page lists its work under
 [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+The [Phase III compatibility report](COMPATIBILITY.md) records the checked
+HTML/SVG/PDF profiles and remaining limits. Reproduce the corpus records and
+exports with `python3 test/latex/samples/audit.py --target all --export`.
+
 | Local file | Original example | Author | Main features |
 | --- | --- | --- | --- |
 | [booktabs.tex](booktabs.tex) | [booktabs](https://www.overleaf.com/latex/examples/booktabs-pakietomat-dot-wordpress-dot-com/ymjrtqrgpbnp) | pakietomat.wordpress.com | `booktabs` tables |

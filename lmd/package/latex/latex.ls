@@ -16,11 +16,18 @@ import registry: .packages.registry
 import geometry: .packages.geometry
 import microtype: .packages.microtype
 import biblatex: .packages.biblatex
+import natbib: .packages.natbib
 import bib_style: .packages.bib_style
+import bib_data: .packages.bib_data
 import hyperref: .packages.hyperref
 import amsmath: .packages.amsmath
 import paths: lambda.edit.session
 import util: .util
+import language_profile: .packages.language
+import tikz: .packages.tikz
+import page_style: .packages.page_style
+import listings: .packages.listings
+import caption: .packages.caption
 
 // ============================================================
 // Public API — HTML string output
@@ -60,25 +67,72 @@ pub fn render_result(ast, options) {
     // extract macro definitions from AST (does not modify tree)
     let macro_defs = macros.get_defs(ast)
     let loaded = registry.collect(ast)
+    let polyglossia = if (registry.active(loaded.packages, "polyglossia"))
+        language_profile.polyglossia_profile(ast) else null
     let math_operators = if (registry.active(loaded.packages, "amsmath"))
         amsmath.operators(ast) else {definitions: [], diagnostics: []}
     // package activation precedes counter and label analysis.
-    let language = document_language(options, loaded.packages)
+    let language = document_language(options, loaded.packages, polyglossia)
     let base_info = analyzer.analyze_with_language(ast, loaded.packages, language)
-    let bibliography = biblatex.prepare(ast, base_uri,
-        registry.options_for(loaded.packages, "biblatex"), language)
+    let bibliography = if (registry.active(loaded.packages, "biblatex"))
+        biblatex.prepare(ast, base_uri,
+            registry.options_for(loaded.packages, "biblatex"), language)
+        else natbib.prepare(ast, base_uri,
+            registry.options_for(loaded.packages, "natbib"), language)
     let language_issues = if (registry.active(loaded.packages, "biblatex") and
         not (bib_style.supported_language(language) ^ { false }))
         [util.diagnostic("unsupported-bib-language", "biblatex", language,
             "Unsupported bibliography language " ++ language,
             registry.offset_for(loaded.packages, "biblatex"))] else []
+    let cleveref_issues = if (registry.active(loaded.packages, "cleveref") and
+        language != "english" and language != "en")
+        [util.diagnostic("unsupported-cref-language", "cleveref", language,
+            "Cleveref names currently support English", registry.offset_for(
+                loaded.packages, "cleveref"))] else []
+    let font_issues = if (registry.active(loaded.packages, "cmbright"))
+        [util.diagnostic("font-substitution", "cmbright", "Computer Modern Bright",
+            "CM Bright is not bundled; using bundled Computer Modern Sans",
+            registry.offset_for(loaded.packages, "cmbright"))] else []
+    let math_font_issues = if (registry.active(loaded.packages, "eucal"))
+        [util.diagnostic("font-substitution", "eucal", "Euler calligraphic",
+            "Euler calligraphic is not bundled; using the math calligraphic font",
+            registry.offset_for(loaded.packages, "eucal"))] else []
+    let script_font_issues = if (registry.active(loaded.packages, "mathrsfs"))
+        [util.diagnostic("font-substitution", "mathrsfs", "Ralph Smith Formal Script",
+            "RSFS is not bundled; using the available math script font",
+            registry.offset_for(loaded.packages, "mathrsfs"))] else []
+    let greek_font_issues = if (registry.active(loaded.packages, "gfsporson"))
+        [util.diagnostic("font-substitution", "gfsporson", "GFS Porson",
+            "GFS Porson is not bundled; using a Greek-capable serif fallback",
+            registry.offset_for(loaded.packages, "gfsporson"))] else []
+    let helvet_issues = if (registry.active(loaded.packages, "helvet"))
+        [util.diagnostic("font-substitution", "helvet", "Helvetica",
+            "Helvetica is not bundled; using a system sans-serif fallback",
+            registry.offset_for(loaded.packages, "helvet"))] else []
     let link_settings = hyperref.settings(ast, registry.options_for(loaded.packages, "hyperref"))
+    let running_style = page_style.prepare(ast,
+        registry.active(loaded.packages, "fancyhdr"))
     // add macro definitions to info for render-time expansion
     let info = {macros: macro_defs, *:base_info, packages: loaded.packages,
+                tikz_declarations: tikz.preamble_declarations(ast),
+                tikz_math_declarations: tikz.math_declarations(ast),
+                running_style: running_style,
+                language: language, text_language: language,
+                polyglossia: polyglossia,
+                listing_options: listings.preamble_options(ast),
+                listing_nums: base_info.listing_nums,
+                caption_options: caption.initial(registry.options_for(loaded.packages, "caption"),
+                    registry.options_for(loaded.packages, "subcaption")),
+                caption_type: null, caption_number: null,
+                macro_depth: 0,
+                math_bold: false,
+                greek_polytonic: language_profile.greek_polytonic(ast),
+                font_size: null, line_height: null, font_groups: [],
                 base_uri: base_uri,
                 bibitems: base_info.bibitems,
                 biblatex_context: bibliography.context, hyperref_settings: link_settings,
-                math_operators: math_operators.definitions}
+                math_operators: math_operators.definitions,
+                cellspace_css: cellspace_stylesheet(ast, loaded.packages)}
     // pass 2: render AST using pre-computed info
     let html = dispatcher.render_node(ast, info)
     let completed = postprocess(html, info)
@@ -88,28 +142,48 @@ pub fn render_result(ast, options) {
         completed
     }
     let diagnostics = loaded.diagnostics ++ math_operators.diagnostics ++
-        bibliography.diagnostics ++ language_issues ++
+        bibliography.diagnostics ++ language_issues ++ cleveref_issues ++ font_issues ++
+        math_font_issues ++ script_font_issues ++ greek_font_issues ++ helvet_issues ++
+        hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
+        (if (registry.active(loaded.packages, "tikzpeople"))
+            [util.diagnostic("tikzpeople-shape-approximation", "tikzpeople", null,
+                "Named people use reusable vector silhouettes; CTAN artwork detail differs",
+                registry.offset_for(loaded.packages, "tikzpeople"))] else []) ++
+        (if (util.find_descendant(ast, "boldmath") == null) [] else
+            [util.diagnostic("math-bold-approximation", "latex", "boldmath",
+                "Bold math uses CSS font weight until bold math fonts are available",
+                util.find_descendant(ast, "boldmath").source_offset)]) ++
+        (if (polyglossia == null) [] else language_profile.polyglossia_issues(
+            polyglossia, registry.offset_for(loaded.packages, "polyglossia"))) ++
+        language_profile.target_issues(polyglossia, if (options == null) null else options.target,
+            registry.offset_for(loaded.packages, "polyglossia")) ++
+        running_style.diagnostics ++
+        dispatcher.running_diagnostics(info, if (options == null) null else options.target) ++
+        (if (options != null and options.target == "pdf" and options.paged != true and
+             (running_style.style == "fancy" or
+              running_style.style == "fancyplain"))
+            [util.diagnostic("unsupported-running-header", "fancyhdr", null,
+                "Running headers require the shared paged PDF export",
+                running_style.offset)] else []) ++
         microtype.unsupported(registry.options_for(loaded.packages, "microtype"),
             registry.offset_for(loaded.packages, "microtype")) ++
-        registry.reference_diagnostics(ast, info.labels, info.bibitems, info.packages) ++
+        registry.reference_diagnostics(ast, info.labels, info.bibitems, info.packages,
+            bibliography.context != null) ++
+        registry.target_diagnostics(ast, if (options == null) null else options.target,
+            options != null and options.paged == true) ++
         output_diagnostics(elements)
     {body: html, elements: elements,
      stylesheet: css.get_stylesheet() ++ math_css.get_stylesheet(options) ++ package_stylesheet(info),
      metadata: hyperref.metadata(link_settings, info.title, info.author),
      packages: loaded.packages, diagnostics: diagnostics,
-     assets: registry.assets(ast, info.base_uri)}
+     assets: registry.assets(ast, info.base_uri) ++ bib_data.resource_assets(ast, info.base_uri)}
 }
 
-fn document_language(options, packages) {
+fn document_language(options, packages, polyglossia) {
     if (options != null and options.language != null) options.language
-    else {
-        let babel = registry.options_for(packages, "babel")
-        if (babel == null) "english"
-        else if (babel.french != null) "french"
-        else if (babel.ngerman != null) "ngerman"
-        else if (babel.german != null) "german"
-        else "english"
-    }
+    else if (polyglossia != null) polyglossia.default
+    else if (registry.active(packages, "vietnam")) "vietnamese"
+    else language_profile.babel_default(registry.options_for(packages, "babel"))
 }
 
 fn resource_base(options) {
@@ -134,8 +208,40 @@ fn output_diagnostics(node) {
 
 fn package_stylesheet(info) {
     geometry.stylesheet(registry.options_for(info.packages, "geometry")) ++
+    (if (registry.active(info.packages, "fullpage") and
+        not registry.active(info.packages, "geometry"))
+        geometry.stylesheet({margin: "1in"}) else "") ++
     microtype.stylesheet(registry.options_for(info.packages, "microtype")) ++
-    hyperref.stylesheet(info.hyperref_settings)
+    hyperref.stylesheet(info.hyperref_settings) ++ dispatcher.running_stylesheet(info) ++
+    info.cellspace_css
+}
+
+// The parser preserves both braced and control-sequence forms of \setlength.
+fn declared_length(node, key) {
+    if (not (node is element)) null
+    else if (string(name(node)) == "setlength" and node.length_name == key)
+        util.css_dimension(node.length_value)
+    else declared_length_child(node, key, 0)
+}
+
+fn declared_length_child(node, key, index) {
+    if (index >= len(node)) null
+    else {
+        let value = declared_length(node[index], key)
+        if (value != null) value else declared_length_child(node, key, index + 1)
+    }
+}
+
+fn cellspace_stylesheet(ast, packages) {
+    if (not registry.active(packages, "cellspace")) ""
+    else {
+        let top = declared_length(ast, "cellspacetoplimit")
+        let bottom = declared_length(ast, "cellspacebottomlimit")
+        if (top == null and bottom == null) ""
+        else ".latex-tabular td{" ++
+            (if (top == null) "" else "padding-top:" ++ top ++ ";") ++
+            (if (bottom == null) "" else "padding-bottom:" ++ bottom ++ ";") ++ "}\n"
+    }
 }
 
 // Native document-loader entry point keeps standalone output as the view default.
@@ -222,7 +328,7 @@ fn wrap_standalone(html, info, options) {
     let meta = hyperref.metadata(info.hyperref_settings, info.title, info.author)
     let title_text = get_title_or_default(meta.title);
 
-    <html lang: "en",
+    <html lang: language_profile.code(info.language),
         <head
             <meta charset: "utf-8">
             <meta name: "viewport", content: "width=device-width, initial-scale=1">

@@ -1,0 +1,25 @@
+{
+  "name": "GC handler markup survives model publication and UI retransform",
+  "html": "test/ui/lambda_handler_allocation.ls",
+  "viewport": {"width": 400, "height": 240},
+  "env": [
+    {"key": "LAMBDA_GC_FORCE_EVERY", "value": "1"},
+    {"key": "LAMBDA_GC_POISON_FREED", "value": "1"}
+  ],
+  "events": [
+    {"type": "click", "target": {"selector": "#allocate"}},
+    {"type": "assert_text", "target": {"selector": "#allocation-result"}, "equals": "1:150890"},
+    {"type": "assert_text", "target": {"selector": "#saved-markup"}, "equals": "retained 1"},
+    {"type": "click", "target": {"selector": "#allocate"}},
+    {"type": "assert_text", "target": {"selector": "#allocation-result"}, "equals": "2:150890"},
+    {"type": "assert_text", "target": {"selector": "#saved-markup"}, "equals": "retained 2"},
+    {"type": "click", "target": {"selector": "#allocate"}},
+    {"type": "assert_text", "target": {"selector": "#allocation-result"}, "equals": "3:150890"},
+    {"type": "assert_text", "target": {"selector": "#saved-markup"}, "equals": "retained 3"},
+    {"type": "click", "target": {"selector": "#allocate"}},
+    {"type": "assert_text", "target": {"selector": "#allocation-result"}, "equals": "4:150890"},
+    {"type": "assert_text", "target": {"selector": "#saved-markup"}, "equals": "retained 4"},
+    {"type": "assert_text", "target": {"selector": "#held-value"}, "equals": "value 1"},
+    {"type": "assert_text", "target": {"selector": "#held-extra"}, "equals": "edited"}
+  ]
+}

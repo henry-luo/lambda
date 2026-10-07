@@ -1,4 +1,7 @@
 #include "render.hpp"
+#include "layout.hpp"
+#include "../lib/utf.h"
+#include "../lib/str.h"
 
 typedef struct RenderGlyphPathWriter {
     RdtPath* path;
@@ -55,3 +58,45 @@ RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run) {
     return path;
 }
 
+RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font_context) {
+    FontBox* box = run ? (FontBox*)run->font : nullptr;
+    FontHandle* primary = font_box_handle(box);
+    if (!run || !run->text || !primary || !box->style) return nullptr;
+    FontStyleDesc descriptor = font_style_desc_from_prop(box->style);
+    RdtPath* path = rdt_path_new();
+    Arena* scratch = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.text_run.outline");
+    bool ok = path && scratch;
+    float pen = run->x;
+    const char* cursor = run->text;
+    const char* end = cursor + (run->text_len >= 0 ? (size_t)run->text_len : strlen(cursor));
+    uint32_t previous = 0;
+    while (ok && cursor < end) {
+        uint32_t codepoint = 0;
+        int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
+        if (bytes <= 0) { ok = false; break; }
+        cursor += bytes;
+        if (codepoint == 0xFE0F) continue;
+        if (text_justify_cjk_gap(previous, codepoint)) pen += run->cjk_spacing;
+        previous = codepoint;
+        if (codepoint == ' ') {
+            pen += max(0.0f, box->style->space_width + run->word_spacing) + box->style->letter_spacing;
+            continue;
+        }
+        uint32_t next = 0;
+        bool emoji = utf_is_emoji_presentation_default(codepoint) ||
+            (cursor < end && str_utf8_decode(cursor, (size_t)(end - cursor), &next) > 0 && next == 0xFE0F);
+        FontHandle* fallback = emoji ? font_resolve_for_emoji(font_context, &descriptor, codepoint)
+            : !font_has_codepoint(primary, codepoint)
+                ? font_resolve_for_codepoint(font_context, &descriptor, codepoint) : nullptr;
+        FontHandle* face = fallback ? fallback : primary;
+        // PDF text must use the selected Unicode face, never interpret UTF-8 as WinAnsi bytes.
+        ok = font_has_codepoint(face, codepoint) && render_path_append_font_glyph(path, face,
+            codepoint, pen, run->baseline_y, 1.0f, scratch, nullptr);
+        pen += font_get_glyph(face, codepoint).advance_x + box->style->letter_spacing;
+        if (fallback) font_handle_release(fallback);
+        arena_reset(scratch);
+    }
+    if (scratch) mem_arena_destroy(scratch);
+    if (!ok) { if (path) rdt_path_free(path); return nullptr; }
+    return path;
+}

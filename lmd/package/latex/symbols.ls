@@ -66,7 +66,7 @@ pub fn resolve_diacritic(cmd, base_char) {
     else {
         // fallback: base char + combining diacritic
         let combining = DIACRITICS[cmd]
-        if (combining != null) base_char ++ combining
+        if (combining != null) normalize(base_char ++ combining, 'nfc')
         else base_char
     }
 }

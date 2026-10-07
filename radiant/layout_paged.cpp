@@ -741,7 +741,14 @@ static TypesetStatus paged_context_admit(ViewTree* tree, PagedComposition* compo
         if (value && !css_value_is_auto(value) && !css_value_is_initial(value) && !css_value_is_unset(value))
             reason = "columns require nested paged fragmentainers";
     }
-    return reason ? paged_failure(composition, TYPESET_INVALID, style->source, 0, reason) : TYPESET_OK;
+    if (reason) {
+        const char* class_name = style->source->get_attribute("class");
+        log_debug("[PAGED_ADMISSION] class=%s outer=%d inner=%d source=%u reason=%s",
+            class_name ? class_name : "", style->display.outer, style->display.inner,
+            dom_node_ref(style->source).expected_id, reason);
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, reason);
+    }
+    return TYPESET_OK;
 }
 
 static TypesetStatus paged_image_append(ViewTree* tree, PagedComposition* composition,

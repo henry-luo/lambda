@@ -4,13 +4,21 @@ pub fn options(el) => util.parse_kv_options(el.options_raw)
 
 fn label_type(label) {
     if (label == null) null
-    else if (not ends_with(trim(label), "*.")) null
+    else if (not ends_with(trim(label), "*.") and
+             not (ends_with(trim(label), "*)") and
+                  index_of(label, "\\alph") != null)) null
     else if (index_of(label, "\\alph") != null) "lower-alpha"
     else if (index_of(label, "\\Alph") != null) "upper-alpha"
     else if (index_of(label, "\\roman") != null) "lower-roman"
     else if (index_of(label, "\\Roman") != null) "upper-roman"
     else if (index_of(label, "\\arabic") != null) "decimal"
     else null
+}
+
+pub fn parenthesized_alpha(opts) {
+    if (opts.label == null) false
+    else ends_with(trim(opts.label), "*)") and
+        index_of(opts.label, "\\alph") != null
 }
 
 pub fn list_style(opts, kind) {

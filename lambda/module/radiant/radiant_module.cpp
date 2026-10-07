@@ -2963,6 +2963,36 @@ RADIANT_C_API Item fn_radiant_request_change(Item node_item) {
     return (Item){.item = b2it(1)};
 }
 
+RADIANT_C_API Item fn_radiant_request_frame(Item owner, Item event_name) {
+    DomElement* elem = radiant_dom_element_from_item(owner, "REQUEST_FRAME");
+    const char* name = get_type_id(event_name) == LMD_TYPE_STRING ? fn_to_cstr(event_name) : nullptr;
+    uint64_t token = elem && name && *name && radiant_host_api && radiant_host_api->dom_catalog
+        ? radiant_host_api->dom_catalog->frame_request_native(elem, name) : 0;
+    return (Item){.item = i2it((int64_t)token)};
+}
+
+RADIANT_C_API Item fn_radiant_cancel_frame(Item owner, Item token) {
+    DomElement* elem = radiant_dom_element_from_item(owner, "CANCEL_FRAME");
+    int64_t id = get_type_id(token) == LMD_TYPE_INT ? it2i(token) : 0;
+    bool cancelled = elem && id > 0 && radiant_host_api && radiant_host_api->dom_catalog &&
+        radiant_host_api->dom_catalog->frame_cancel_native(elem, (uint64_t)id);
+    return (Item){.item = b2it(cancelled)};
+}
+
+RADIANT_C_API Item fn_radiant_viewport_size(Item owner) {
+    DomElement* elem = radiant_dom_element_from_item(owner, "VIEWPORT_SIZE");
+    DomDocument* doc = elem ? elem->doc : nullptr;
+    UiContext* uicon = doc ? static_cast<UiContext*>(doc->js.host_ui_context) : nullptr;
+    if (!doc || !doc->view_tree || !uicon || doc->embedding_document) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "width", radiant_float_item(
+        doc->viewport.width > 0 ? doc->viewport.width : uicon->viewport_width));
+    radiant_rooted_obj_set(result, "height", radiant_float_item(
+        doc->viewport.height > 0 ? doc->viewport.height : uicon->viewport_height));
+    return result.get();
+}
+
 // Range geometry for the ARIA value mirrors (F7). `value` is the *computed*
 // value, not the normalized 0..1 the engine stores, because that is what
 // aria-valuenow reports. All three return null on a control that is not a
@@ -3784,6 +3814,9 @@ RADIANT_C_API void radiant_jube_register_static(void) {
 RADIANT_PROVIDE_ENGINE_2(get_state, fn_radiant_get_state)
 RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
 RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
+RADIANT_PROVIDE_ENGINE_2(request_frame, fn_radiant_request_frame)
+RADIANT_PROVIDE_ENGINE_1(viewport_size, fn_radiant_viewport_size)
+RADIANT_PROVIDE_ENGINE_2(cancel_frame, fn_radiant_cancel_frame)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
 RADIANT_PROVIDE_ENGINE_1(clear_editing_focus, fn_radiant_clear_editing_focus)

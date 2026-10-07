@@ -32381,7 +32381,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         AstIdentNode* ident = (AstIdentNode*)fn_expr;
         AstNode* entry_node = ident->entry ? ident->entry->node : nullptr;
 
-        // Handle imported function calls (from another module compiled via C transpiler)
+        // Handle imported function calls through their MIR boxed entry.
         if (ident->entry && ident->entry->import &&
             !(mt->interp_module_owner &&
               interp_satellite_import_supported(mt->interp_module_owner,
@@ -32437,11 +32437,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     arg_root_slots[i] = create_gc_root_slot(mt, val);
                     arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
                 } else {
-                    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                    // Omission must reach the wrapper distinctly from explicit null.
+                    uint64_t absent = use_wrapper ? ITEM_MISSING_ARGUMENT : ITEM_NULL;
                     MIR_reg_t null_reg = new_reg(mt, "pad", MIR_T_I64);
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, null_reg),
-                        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+                        MIR_new_uint_op(mt->ctx, absent)));
                     arg_ops[i] = MIR_new_reg_op(mt->ctx, null_reg);
                 }
                 arg_vars[i] = {MIR_T_I64, "p", 0};

@@ -318,16 +318,20 @@ bool html5_is_in_svg_namespace(Html5Parser* parser) {
 
 // parser lifecycle
 Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
+    if (!pool || !arena || !input) return nullptr;
     Html5Parser* parser = (Html5Parser*)pool_calloc(pool, sizeof(Html5Parser));
+    if (!parser) return nullptr;
     parser->pool = pool;
     parser->arena = arena;
     parser->token_arena = arena;
     parser->input = input;
+    parser->work_arena = lam::own(arena_create_default());
+    if (!parser->work_arena) { html5_parser_destroy(parser); return nullptr; }
 
     // initialize stacks
-    parser->open_elements = list_arena(arena);
-    parser->active_formatting = list_arena(arena);
-    parser->template_modes = list_arena(arena);
+    parser->open_elements = list_arena(parser->work_arena);
+    parser->active_formatting = list_arena(parser->work_arena);
+    parser->template_modes = list_arena(parser->work_arena);
 
     // initial mode
     parser->mode = HTML5_MODE_INITIAL;
@@ -343,7 +347,7 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
 
     // temporary buffer (4KB initial capacity)
     parser->temp_buffer_capacity = 4096;
-    parser->temp_buffer = (char*)arena_alloc(arena, parser->temp_buffer_capacity);
+    parser->temp_buffer = (char*)arena_alloc(parser->work_arena, parser->temp_buffer_capacity);
     parser->temp_buffer_len = 0;
 
     // text content buffering
@@ -360,19 +364,30 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     parser->last_start_tag_name_len = 0;
 
     // error collection
-    html5_error_list_init(&parser->errors, arena);
+    html5_error_list_init(&parser->errors, parser->work_arena);
 
     // source line tracking (disabled by default)
     parser->track_source_lines = false;
     line_counter_init(&parser->source_line_counter);
     parser->line_scan_pos = 0;
 
+    if (!parser->open_elements || !parser->active_formatting || !parser->template_modes ||
+        !parser->temp_buffer || !parser->text_buffer || !parser->foster_text_buffer) {
+        html5_parser_destroy(parser);
+        return nullptr;
+    }
     return parser;
 }
 
 void html5_parser_destroy(Html5Parser* parser) {
-    // memory is pool/arena-managed, nothing to free explicitly
-    (void)parser;
+    if (!parser) return;
+    // published strings transferred out of these builders remain in the result owner.
+    stringbuf_free(parser->text_buffer);
+    stringbuf_free(parser->foster_text_buffer);
+    if (parser->token_arena && parser->token_arena != parser->arena)
+        arena_destroy(parser->token_arena);
+    arena_destroy(parser->work_arena);
+    pool_free(parser->pool, parser);
 }
 
 // stack operations - these implement the "stack of open elements" from WHATWG spec
@@ -386,7 +401,7 @@ Element* html5_current_node(Html5Parser* parser) {
 void html5_push_element(Html5Parser* parser, Element* elem) {
     Item item;
     item.element = elem;
-    array_append(parser->open_elements, item, parser->pool, parser->arena);
+    array_append(parser->open_elements, item, parser->pool, parser->work_arena);
     log_debug("html5: pushed element <%s>, stack depth now %zu", ((TypeElmt*)elem->type)->name.str, parser->open_elements->length);
 }
 
@@ -903,6 +918,7 @@ void html5_flush_foster_text(Html5Parser* parser) {
             } else {
                 new_str = stringbuf_to_string(combined);
             }
+            stringbuf_free(combined);
             foster_parent->items[table_pos - 1] = {.item = s2it(new_str)};
             log_debug("html5_flush_foster_text: merged foster text with existing text before table");
             stringbuf_reset(parser->foster_text_buffer);
@@ -1098,7 +1114,7 @@ void html5_push_active_formatting_element(Html5Parser* parser, Element* elem, Ht
 
     // Add to active formatting elements list
     Item item = {.element = elem};
-    array_append(parser->active_formatting, item, parser->pool, parser->arena);
+    array_append(parser->active_formatting, item, parser->pool, parser->work_arena);
     log_debug("html5: added <%s> to active formatting list, size=%zu",
               ((TypeElmt*)elem->type)->name.str, parser->active_formatting->length);
 }
@@ -1106,7 +1122,7 @@ void html5_push_active_formatting_element(Html5Parser* parser, Element* elem, Ht
 // Push a marker onto active formatting list
 void html5_push_active_formatting_marker(Html5Parser* parser) {
     Item marker = {.element = nullptr};
-    array_append(parser->active_formatting, marker, parser->pool, parser->arena);
+    array_append(parser->active_formatting, marker, parser->pool, parser->work_arena);
     log_debug("html5: pushed marker to active formatting list");
 }
 
@@ -1433,7 +1449,7 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
         // Insert at bookmark position using our helper
         Item new_fe_item = {.element = new_formatting_element};
         array_insert_at((Array*)parser->active_formatting, bookmark, new_fe_item,
-                        parser->pool, parser->arena);
+                        parser->pool, parser->work_arena);
 
         // Step 16: Remove formatting element from stack, insert new after furthest block
         html5_remove_from_stack(parser, fe_stack_idx);
@@ -1444,7 +1460,7 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
             // Insert new formatting element after furthest block
             Item new_fe_item2 = {.element = new_formatting_element};
             array_insert_at((Array*)parser->open_elements, fb_new_idx + 1, new_fe_item2,
-                            parser->pool, parser->arena);
+                            parser->pool, parser->work_arena);
         }
 
         log_debug("html5: AAA iteration complete for </%s>", subject);

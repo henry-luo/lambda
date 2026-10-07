@@ -1,0 +1,20 @@
+\documentclass{article}
+\usepackage[labelfont=bf,labelsep=period]{caption}
+\usepackage{subcaption,hyperref}
+\begin{document}
+\captionsetup{font=small}
+\begin{figure}
+\begin{subfigure}[b]{0.45\textwidth}
+First panel.
+\caption{Left \emph{panel}}\label{fig:left}
+\end{subfigure}
+\begin{subfigure}[b]{0.45\textwidth}
+Second panel.
+\caption{Right panel}\label{fig:right}
+\end{subfigure}
+\caption{Two panels}\label{fig:both}
+\end{figure}
+\captionof{table}{Outside float}\label{tab:outside}
+Figure~\ref{fig:both}, panel~\ref{fig:left}, subpanel~\subref{fig:right}, table~\ref{tab:outside}.
+\begin{figure}\captionsetup{labelsep=colon}\caption*{Unnumbered}\end{figure}
+\end{document}

@@ -234,22 +234,59 @@ fn resources(node) {
     if (not (node is element)) []
     else if (string(name(node)) == "addbibresource")
         [{source: trim(util.text_of_skip_brack(node)), offset: node.source_offset}]
+    else if (string(name(node)) == "bibliography")
+        [for (raw in util.split_top_level(util.text_of(node), ","))
+            {source: if (ends_with(trim(raw), ".bib")) trim(raw)
+                else trim(raw) ++ ".bib", offset: node.source_offset}]
     else [for (child in node, resource in resources(child)) resource]
 }
 
-fn load_resources(names, index, base_uri, macros, entries, issues) {
+// filecontents is a document-local resource; its raw body never reaches the filesystem.
+fn inline_resources(node) {
+    if (not (node is element)) []
+    else if (string(name(node)) == "filecontents" or
+        string(name(node)) == "filecontents*")
+        [{key: node.filename, source: node.source,
+            offset: node.body_offset}]
+    else [for (child in node, resource in inline_resources(child)) resource]
+}
+
+fn inline_source(inline, name) {
+    let matches = [for (resource in inline where resource.key == name) resource]
+    if (len(matches) == 0) null else matches[0]
+}
+
+fn resource_path(source, base_uri) =>
+    if (base_uri == null or starts_with(source, "/")) source
+    else paths.resolve_path(base_uri, source)
+
+pub fn resource_assets(ast, base_uri) {
+    let inline = inline_resources(ast);
+    [for (resource in resources(ast)) resource_asset(resource, base_uri, inline)]
+}
+
+fn resource_asset(resource, base_uri, inline) {
+    let local = inline_source(inline, resource.source)
+    let path = resource_path(resource.source, base_uri)
+    {kind: "bibliography", source: if (local != null) "filecontents:" ++ resource.source else path,
+     origin: if (local != null) "inline" else "local-file",
+     available: local != null or exists(path), offset: resource.offset}
+}
+
+fn load_resources(names, index, base_uri, inline, macros, entries, issues) {
     if (index >= len(names)) {entries: entries, diagnostics: issues}
     else {
         let resource = names[index]
-        let path = if (base_uri == null or starts_with(resource.source, "/"))
-            resource.source else paths.resolve_path(base_uri, resource.source)
-        let source = input(path, "text") ^ { null }
-        if (source == null) load_resources(names, index + 1, base_uri, macros, entries,
+        let local = inline_source(inline, resource.source)
+        let path = resource_path(resource.source, base_uri)
+        let source = if (local != null) local.source else input(path, "text") ^ { null }
+        let provenance = if (local != null) "filecontents:" ++ resource.source else path
+        if (source == null) load_resources(names, index + 1, base_uri, inline, macros, entries,
             issues ++ [util.diagnostic("missing-bib-resource", "biblatex",
                 resource.source, "Cannot read bibliography resource " ++ path, resource.offset)])
         else {
-            let parsed = parse_records(source, path, 0, macros, [], [])
-            load_resources(names, index + 1, base_uri, parsed.macros,
+            let parsed = parse_records(source, provenance, 0, macros, [], [])
+            load_resources(names, index + 1, base_uri, inline, parsed.macros,
                 entries ++ parsed.entries, issues ++ parsed.diagnostics)
         }
     }
@@ -335,7 +372,8 @@ fn unique_issues(issues, index, seen, unique) {
 }
 
 pub fn load(ast, base_uri) {
-    let loaded = load_resources(resources(ast), 0, base_uri, [], [], [])
+    let loaded = load_resources(resources(ast), 0, base_uri,
+        inline_resources(ast), [], [], [])
     let unique = dedupe(loaded.entries, 0, [], [], [])
     let inherited = inherited_entries(unique.entries, 0, [], [])
     {entries: inherited.entries,

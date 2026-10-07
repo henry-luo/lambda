@@ -7,6 +7,7 @@
 struct DomDocument;
 struct DomNode;
 struct Element;
+struct Item;
 
 typedef enum DomNodePinReason : uint8_t {
     DOM_NODE_PIN_WRAPPER = 0,
@@ -48,13 +49,17 @@ typedef struct DomLifecycleStats {
 
 bool dom_lifecycle_init(DomDocument* doc);
 void dom_lifecycle_destroy(DomDocument* doc);
+void dom_lifecycle_release_backing_roots(DomDocument* doc);
 bool dom_node_registry_register(DomDocument* doc, DomNode* node,
                                 size_t primary_size, bool recyclable);
 bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
                                 DomNode* node, uint32_t* destination_id);
 void dom_node_registry_set_backing_source(DomDocument* doc, DomNode* node,
                                           Element* backing_source);
+void dom_node_registry_set_backing_value(DomDocument* doc, DomNode* node,
+                                         Item backing_value);
 Element* dom_node_registry_backing_source(DomDocument* doc, DomNode* node);
+void dom_node_registry_refresh_backing(DomDocument* doc, DomNode* node);
 DomNodeRef dom_node_ref(DomNode* node);
 DomNode* dom_node_ref_validate(DomDocument* doc, DomNodeRef ref);
 bool dom_node_registry_owns(DomDocument* doc, DomNode* node);
@@ -66,6 +71,8 @@ void dom_node_clear_reason_pins(DomDocument* doc, DomNodePinReason reason);
 void dom_node_schedule_detached(DomDocument* doc, DomNode* root);
 void dom_node_cancel_detached(DomDocument* doc, DomNode* root);
 void dom_js_mutation_records_reset(DomDocument* doc);
+bool dom_js_mutation_records_reserve(DomDocument* doc, int count);
+void dom_js_mutation_records_destroy(DomDocument* doc);
 size_t dom_retire_sweep(DomDocument* doc);
 // Hosted windows defer sweeps until the event loop reaches a quiescent point.
 bool dom_retire_set_deferred(bool enabled);

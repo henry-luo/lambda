@@ -1683,7 +1683,8 @@ static Item cssom_decl_method_get(Item receiver, Item property, bool priority) {
     const char* name = cssom_decl_name(fn_to_cstr(property_root.get()), false, name_buffer, sizeof(name_buffer));
     if (view.computed) {
         if (priority || !cssom_decl_supports(nullptr, name)) return make_string_item("");
-        property_root.set(make_string_item(name));
+        // custom names are full DOMStrings; rebuilding from C text truncates embedded NUL.
+        if (!(name[0] == '-' && name[1] == '-')) property_root.set(make_string_item(name));
         return dom_computed_style_get_property(receiver_root.get(), property_root.get());
     }
     if (!rule) return make_string_item("");
@@ -1719,17 +1720,6 @@ static void cssom_decl_notify_mutation(CssRule* rule) {
     js_cssom_notify_stylesheet_mutation(owner->stylesheet);
 }
 
-static inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id) {
-    switch (prop_id) {
-        case CSS_PROPERTY_BACKGROUND_COLOR:
-        case CSS_PROPERTY_COLOR:
-        case CSS_PROPERTY_OPACITY:
-        case CSS_PROPERTY_VISIBILITY:
-            return DOM_JS_MUTATION_STYLE_REPAINT;
-        default:
-            return DOM_JS_MUTATION_INLINE_STYLE;
-    }
-}
 
 static void cssom_decl_commit(CssomDeclarationView* view, const char* name) {
     if (!view->element) {

@@ -1,0 +1,8 @@
+\documentclass{article}
+\usepackage{tcolorbox}
+\newcommand{\emphasize}[1]{\textbf{#1}}
+\newcommand{\framed}[1]{\begin{tcolorbox}[colback=cyan!15,colframe=orange!75!white]\emphasize{#1}\end{tcolorbox}}
+\begin{document}
+Plain \emphasize{strong} text.
+\framed{Framed words}
+\end{document}

@@ -37,6 +37,7 @@ recalibrates them on a quiet machine.
 | Node.js | **jqjs** (Michael Homer, MIT), vendored from git master `f2894f6`. The npm 1.6.0 release is too old (§4.1) | runs all 4 rows; needs the portable subset (§3) |
 | Go | **gojq** 0.12.19 (itchyny, MIT) as a library | runs all 4 rows unchanged |
 | Python | **purejq** 0.3.1 (MIT, zero dependencies, pure Python: it compiles to closures and does not wrap C) | runs all 4 rows; `jq_bf` needs a higher recursion limit (§4.2) |
+| Julia | **native Julia jq VM**, adapted from the C/Lambda VM below | all 4 rows, shared filters and full sizes (§1.6) |
 | C2MIR | **new**: a reduced jq VM in C, modelled on jq's own `src/execute.c`/`compile.c`/`jv.c` | DONE (§1.2) |
 | Lambda VM (V1), **shown in the C2MIR cell** | **new**: typed Lambda port of the C2MIR VM, the like-for-like comparison with C2MIR | DONE (§1.5): all four rows at full size, about 35–60× C2MIR |
 | Lambda **MIR-T** (V2) | **new**: each filter translated by hand into typed Lambda that works on the JSON directly (no VM) | DONE (§1.4) |
@@ -215,6 +216,36 @@ V1 is about 35–60× slower than the same design in C. The remaining cost is sp
   copy-on-write copy where it used to rebuild the object key by key.
 
 Before these fixes, the rows passed 4–11 GB of RSS and were killed.
+
+### 1.6 Native Julia jq VM (2026-10-07)
+
+`test/benchmark/julia/text/jq_{values,native,parse,compile,vm}.jl` adapts V1
+to Julia. Four thin `jq_{mix,records,bf,tree}.jl` drivers use the same filter
+files and JSON/Brainfuck inputs. The parser, lexical bytecode compiler,
+forkable stack, path tracker, closure environments and compacted frame arena
+all execute in Julia. It uses Base and the existing SOM JSON decoder; there
+is no C jq library or external interpreter in the measured work.
+
+jq container updates copy their path, preserving input snapshots, as V1 does
+under Lambda's **S9.1.4** value semantics. Julia's mutable structs own VM
+state; fixed AST/result structs keep dynamic jq values out of recursive Julia
+type specialization. Booleans retain their jq type despite Julia's `Bool`
+being an integer subtype, and `0` remains truthy.
+
+Filter compilation and input loading occur before timing. The standard Julia
+harness verifies one complete warmup with fresh VM state, then measures a
+second run. Julia metadata hashes all `.jq`, JSON and Brainfuck inputs.
+The supported language remains the benchmark subset in §5.2.
+
+Validation: all four full-size checksums match Node; 45 focused assertions
+cover generators, lexical recursion, error/backtracking boundaries, path
+updates, unchanged inputs, Unicode slices, JSON and frame compaction.
+Reproduce with:
+
+```sh
+python3 test/benchmark/run_julia_benchmarks.py --suite text --bench jq_mix --bench jq_records --bench jq_bf --bench jq_tree --verify-node --timeout 600 --output temp/julia_jq_validation.json
+python3 -m unittest discover -s test/benchmark -p 'test_julia_*.py'
+```
 
 ## 2. Workloads
 

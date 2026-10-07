@@ -20,6 +20,7 @@ static bool merge_tree_callback(StyleNode* node, void* context);
 static bool clone_tree_callback(StyleNode* node, void* context);
 static bool wrapper_callback(AvlNode* avl_node, void* ctx);
 static int css_get_cascade_level(const CssDeclaration* decl);
+static void css_declaration_destroy_tree_copy(CssDeclaration* declaration, Pool* pool);
 
 static bool css_value_is_revert(const CssValue* value) {
     return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
@@ -415,9 +416,13 @@ CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
 
     switch (source->type) {
         case CSS_VALUE_TYPE_KEYWORD:
+            // Keyword identities can retain their parsed spelling as well as
+            // the enum; an owned value must not borrow parser scratch.
             if (source->has_keyword_spelling) {
-                clone->data.keyword_token.spelling = pool_strdup(pool, source->data.keyword_token.spelling);
-                if (source->data.keyword_token.spelling && !clone->data.keyword_token.spelling) goto clone_failed;
+                clone->data.keyword_token.spelling = pool_strdup(pool,
+                    source->data.keyword_token.spelling);
+                if (source->data.keyword_token.spelling &&
+                    !clone->data.keyword_token.spelling) goto clone_failed;
             }
             break;
         case CSS_VALUE_TYPE_STRING:
@@ -834,6 +839,8 @@ static bool style_node_apply_declaration(StyleNode* node, CssDeclaration* declar
         } else {
             // Equal specificity - replace existing
             css_declaration_unref(node->winning_decl);
+            if (node->winning_decl != declaration)
+                css_declaration_destroy_tree_copy(node->winning_decl, pool);
             node->winning_decl = declaration;
             css_declaration_ref(declaration);
         }
@@ -933,7 +940,8 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
 
 static CssDeclaration* style_tree_best_property_candidate(
     StyleTree* style_tree, const CssPropertyCode* sources, size_t source_count,
-    const CssDeclaration* ceiling, const CssRollbackFilter* filters) {
+    const CssDeclaration* ceiling, const CssRollbackFilter* filters,
+    bool authored = false) {
     CssDeclaration* best = NULL;
     for (size_t source = 0; source < source_count; source++) {
         AvlNode* entry = avl_tree_search(style_tree->tree, sources[source]);
@@ -942,7 +950,8 @@ static CssDeclaration* style_tree_best_property_candidate(
         CssDeclaration* candidate = node->winning_decl;
         WeakDeclaration* weak = node->weak_list;
         while (candidate) {
-            bool eligible = css_declaration_cascade_eligible(candidate, ceiling, filters);
+            bool eligible = css_declaration_cascade_eligible(candidate, ceiling, filters) &&
+                (!authored || !candidate->presentation_value);
             if (eligible && (!best ||
                 css_declaration_cascade_compare(candidate, best) > 0)) {
                 best = candidate;
@@ -955,7 +964,7 @@ static CssDeclaration* style_tree_best_property_candidate(
         // rollback removes its layer/origin across every source of the component.
         CssRollbackFilter filter = {best, filters};
         return style_tree_best_property_candidate(
-            style_tree, sources, source_count, best, &filter);
+            style_tree, sources, source_count, best, &filter, authored);
     }
     return best;
 }
@@ -966,25 +975,36 @@ CssDeclaration* style_tree_get_component_declaration(StyleTree* style_tree,
     return style_tree_best_property_candidate(style_tree, sources, source_count, NULL, NULL);
 }
 
-CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCode property_code) {
-    if (!style_tree) return NULL;
+static CssDeclaration* style_tree_lookup_declaration(StyleTree* style_tree,
+        CssPropertyCode property_code, bool authored) {
+    if (!style_tree || !style_tree->tree) return NULL;
 
     AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
     StyleNode* node = avl_node ? (StyleNode*)avl_node->declaration : NULL;
     if (property_code == CSS_PROPERTY_ALL || property_code == CSS_PROPERTY_DIRECTION ||
         property_code == CSS_PROPERTY_UNICODE_BIDI || property_code == CSS_PROPERTY_CUSTOM ||
         property_code <= 0 || property_code >= CSS_PROPERTY_COUNT) {
-        return style_node_resolve_cascade(node);
+        const CssPropertyCode sources[] = {property_code};
+        return authored ? style_tree_best_property_candidate(style_tree, sources, 1,
+            NULL, NULL, true) : style_node_resolve_cascade(node);
     }
 
     CssPropertyCode shorthand = css_property_cascade_shorthand(property_code);
     AvlNode* shorthand_node = shorthand
         ? avl_tree_search(style_tree->tree, shorthand) : NULL;
     AvlNode* all_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_ALL);
-    if (!all_node && !shorthand_node) return style_node_resolve_cascade(node);
+    if (!authored && !all_node && !shorthand_node) return style_node_resolve_cascade(node);
     const CssPropertyCode sources[] = {property_code, CSS_PROPERTY_ALL, shorthand};
-    return style_tree_get_component_declaration(style_tree, sources,
-        sizeof(sources) / sizeof(sources[0]));
+    return style_tree_best_property_candidate(style_tree, sources,
+        sizeof(sources) / sizeof(sources[0]), NULL, NULL, authored);
+}
+
+CssDeclaration* style_tree_get_declaration(StyleTree* tree, CssPropertyCode property) {
+    return style_tree_lookup_declaration(tree, property, false);
+}
+
+CssDeclaration* style_tree_get_authored_declaration(StyleTree* tree, CssPropertyCode property) {
+    return style_tree_lookup_declaration(tree, property, true);
 }
 
 void* style_tree_get_computed_value(StyleTree* style_tree,
@@ -1032,6 +1052,8 @@ bool style_tree_remove_declaration(StyleTree* style_tree, CssDeclaration* declar
     if (node->winning_decl == declaration) {
         css_declaration_unref(node->winning_decl);
         node->winning_decl = NULL;
+        // detached cascade records no longer participate in the tree's teardown
+        css_declaration_destroy_tree_copy(declaration, style_tree->pool);
 
         // Promote the highest weak declaration
         if (node->weak_list) {
@@ -1044,6 +1066,7 @@ bool style_tree_remove_declaration(StyleTree* style_tree, CssDeclaration* declar
             // Free the weak declaration struct
             promoted->next = NULL;
             promoted->declaration = NULL; // Don't unref
+            pool_free(style_tree->pool, promoted);
         }
 
         node->needs_recompute = true;
@@ -1054,18 +1077,57 @@ bool style_tree_remove_declaration(StyleTree* style_tree, CssDeclaration* declar
     WeakDeclaration* removed = weak_list_remove(&node->weak_list, declaration);
     if (removed) {
         weak_declaration_destroy(removed);
+        css_declaration_destroy_tree_copy(declaration, style_tree->pool);
+        pool_free(style_tree->pool, removed);
         return true;
     }
 
     return false;
 }
 
-static bool style_tree_remove_declarations_by_inline(StyleTree* style_tree, bool remove_inline) {
+enum CssDeclarationSelection { CSS_SELECT_INLINE, CSS_SELECT_NON_INLINE,
+    CSS_SELECT_PRESENTATION, CSS_SELECT_LOCAL };
+
+static bool css_declaration_matches(const CssDeclaration* declaration,
+                                    CssDeclarationSelection selection) {
+    if (!declaration) return false;
+    if (declaration->presentation_value)
+        return selection == CSS_SELECT_PRESENTATION || selection == CSS_SELECT_LOCAL;
+    if (selection == CSS_SELECT_PRESENTATION) return false;
+    return selection == CSS_SELECT_NON_INLINE
+        ? !declaration->specificity.inline_style : declaration->specificity.inline_style;
+}
+
+static CssDeclaration* style_node_find_declaration(StyleNode* node,
+                                                  CssDeclarationSelection selection) {
+    if (!node) return NULL;
+    if (css_declaration_matches(node->winning_decl, selection)) return node->winning_decl;
+    for (WeakDeclaration* weak = node->weak_list; weak; weak = weak->next)
+        if (css_declaration_matches(weak->declaration, selection)) return weak->declaration;
+    return NULL;
+}
+
+CssDeclaration* style_tree_get_presentation_declaration(StyleTree* tree, CssPropertyCode property) {
+    AvlNode* node = tree ? avl_tree_search(tree->tree, property) : NULL;
+    return style_node_find_declaration(node ? (StyleNode*)node->declaration : NULL,
+                                       CSS_SELECT_PRESENTATION);
+}
+
+CssDeclaration* style_tree_get_inline_declaration(StyleTree* tree, CssPropertyCode property) {
+    AvlNode* node = tree ? avl_tree_search(tree->tree, property) : NULL;
+    return style_node_find_declaration(node ? (StyleNode*)node->declaration : NULL,
+                                       CSS_SELECT_INLINE);
+}
+
+static bool style_tree_remove_selected_declarations(StyleTree* style_tree,
+        CssDeclarationSelection selection, CssPropertyCode selected_property = CSS_PROPERTY_UNKNOWN) {
     if (!style_tree) return false;
 
     bool removed_any = false;
 
-    for (int property_code = CSS_PROPERTY_DISPLAY; property_code < CSS_PROPERTY_COUNT; property_code++) {
+    int first = selected_property == CSS_PROPERTY_UNKNOWN ? CSS_PROPERTY_DISPLAY : selected_property;
+    int limit = selected_property == CSS_PROPERTY_UNKNOWN ? CSS_PROPERTY_COUNT : selected_property + 1;
+    for (int property_code = first; property_code < limit; property_code++) {
         bool property_changed = true;
 
         while (property_changed) {
@@ -1077,19 +1139,7 @@ static bool style_tree_remove_declarations_by_inline(StyleTree* style_tree, bool
             StyleNode* node = (StyleNode*)avl_node->declaration;
             if (!node) break;
 
-            CssDeclaration* matching_decl = NULL;
-            if (node->winning_decl && node->winning_decl->specificity.inline_style == remove_inline) {
-                matching_decl = node->winning_decl;
-            } else {
-                WeakDeclaration* weak = node->weak_list;
-                while (weak) {
-                    if (weak->declaration && weak->declaration->specificity.inline_style == remove_inline) {
-                        matching_decl = weak->declaration;
-                        break;
-                    }
-                    weak = weak->next;
-                }
-            }
+            CssDeclaration* matching_decl = style_node_find_declaration(node, selection);
 
             if (!matching_decl) break;
 
@@ -1108,6 +1158,7 @@ static bool style_tree_remove_declarations_by_inline(StyleTree* style_tree, bool
             if (node && !node->winning_decl && !node->weak_list) {
                 style_node_destroy(node);
                 avl_tree_remove(style_tree->tree, property_code);
+                pool_free(style_tree->pool, node);
             }
         }
     }
@@ -1120,11 +1171,15 @@ static bool style_tree_remove_declarations_by_inline(StyleTree* style_tree, bool
 }
 
 bool style_tree_remove_inline_declarations(StyleTree* style_tree) {
-    return style_tree_remove_declarations_by_inline(style_tree, true);
+    return style_tree_remove_selected_declarations(style_tree, CSS_SELECT_INLINE);
 }
 
 bool style_tree_remove_non_inline_declarations(StyleTree* style_tree) {
-    return style_tree_remove_declarations_by_inline(style_tree, false);
+    return style_tree_remove_selected_declarations(style_tree, CSS_SELECT_NON_INLINE);
+}
+
+bool style_tree_remove_presentation_declarations(StyleTree* tree, CssPropertyCode property) {
+    return style_tree_remove_selected_declarations(tree, CSS_SELECT_PRESENTATION, property);
 }
 
 // ============================================================================
@@ -1554,25 +1609,26 @@ void style_tree_retire_borrow_source(StyleTree* style_tree) {
     }
 }
 
-static bool style_tree_find_inline(StyleNode* node, void* context) {
-    bool* found = (bool*)context;
-    if (node->winning_decl && node->winning_decl->specificity.inline_style) {
-        *found = true;
-        return false;
-    }
-    for (WeakDeclaration* weak = node->weak_list; weak; weak = weak->next) {
-        if (weak->declaration && weak->declaration->specificity.inline_style) {
-            *found = true;
-            return false;
-        }
-    }
-    return true;
+struct CssDeclarationPresence { CssDeclarationSelection selection; bool found; };
+
+static bool style_tree_find_selected(StyleNode* node, void* context) {
+    CssDeclarationPresence* presence = (CssDeclarationPresence*)context;
+    // style_tree_foreach counts callback results but does not stop on false.
+    presence->found = presence->found ||
+        style_node_find_declaration(node, presence->selection) != NULL;
+    return !presence->found;
 }
 
 bool style_tree_has_inline_declarations(StyleTree* style_tree) {
-    bool found = false;
-    if (style_tree) style_tree_foreach(style_tree, style_tree_find_inline, &found);
-    return found;
+    CssDeclarationPresence presence = {CSS_SELECT_INLINE, false};
+    if (style_tree) style_tree_foreach(style_tree, style_tree_find_selected, &presence);
+    return presence.found;
+}
+
+bool style_tree_has_local_declarations(StyleTree* tree) {
+    CssDeclarationPresence presence = {CSS_SELECT_LOCAL, false};
+    if (tree) style_tree_foreach(tree, style_tree_find_selected, &presence);
+    return presence.found;
 }
 
 bool style_tree_is_empty(StyleTree* style_tree) {

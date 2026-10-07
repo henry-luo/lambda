@@ -36,6 +36,7 @@ typedef struct AvlTree {
     int node_count;              // Number of nodes in the tree
     int max_depth;               // Maximum depth reached (for debugging)
     AvlNode* last_removed;       // Last node removed (for safe traversal)
+    uint64_t mutation_generation; // invalidates traversal links across callback edits
 } AvlTree;
 
 /**

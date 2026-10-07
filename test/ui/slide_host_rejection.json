@@ -1,0 +1,44 @@
+{
+  "html": "test/ui/slide_host_rejection.ls",
+  "viewport": {
+    "width": 500,
+    "height": 400
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide-command=play]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rejection"
+      },
+      "attribute": "data-slide-paused",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-status"
+      },
+      "equals": "slide: player.style: host rejected color"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rejection"
+      },
+      "attribute": "data-slide-paused",
+      "equals": "true"
+    }
+  ],
+  "name": "Host style rejection pauses a Lambda player through its procedure handler"
+}

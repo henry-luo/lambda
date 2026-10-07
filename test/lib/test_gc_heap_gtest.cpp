@@ -25,6 +25,7 @@
 #include "../../lambda/runtime/heap_api.h"
 #include "../../lambda/runtime/transpiler.hpp"
 #include "../../lambda/runtime/root_vector.h"
+#include "../../lambda/runtime/runtime-state.h"
 
 extern "C" {
 #include "../../lambda/lambda.h"
@@ -111,6 +112,58 @@ protected:
         return ((uint64_t)LMD_TYPE_INT << 56) | (uint64_t)(uint32_t)val;
     }
 };
+
+class UICollectionStorageTest : public GCHeapTest {
+protected:
+    EvalContext runtime{};
+    Heap heap{};
+    Arena* document_arena = nullptr;
+    bool bound = false;
+
+    void SetUp() override {
+        GCHeapTest::SetUp();
+        heap.gc = gc;
+        heap.generation = 1;
+        runtime.heap = &heap;
+        document_arena = arena_create_default();
+        ASSERT_NE(document_arena, nullptr);
+        runtime.ui_mode = true;
+        runtime.arena = document_arena;
+        bound = eval_context_init(&runtime);
+        ASSERT_TRUE(bound);
+    }
+
+    void TearDown() override {
+        if (bound) eval_context_shutdown(&runtime);
+        arena_destroy(document_arena);
+        GCHeapTest::TearDown();
+    }
+};
+
+TEST_F(UICollectionStorageTest, RuntimeArrayBufferDoesNotUseDocumentArena) {
+    Array* array = (Array*)gc_heap_calloc(gc, sizeof(Array), LMD_TYPE_ARRAY);
+    ASSERT_NE(array, nullptr);
+    array->type_id = LMD_TYPE_ARRAY;
+    size_t before = arena_total_used(document_arena);
+    expand_list((List*)array, nullptr);
+    ASSERT_NE(array->items, nullptr);
+    EXPECT_FALSE(arena_owns(document_arena, array->items));
+    EXPECT_EQ(arena_total_used(document_arena), before);
+    array->items[0] = {.item = i2it(42)};
+    array->length = 1;
+    uint64_t root = (uint64_t)array;
+    gc_collect_with_root_region(gc, &root, 1, nullptr, 0);
+    EXPECT_EQ(it2i(array->items[0]), 42);
+}
+
+TEST_F(UICollectionStorageTest, ArenaElementBufferKeepsDocumentOwnership) {
+    Element* element = (Element*)arena_calloc(document_arena, sizeof(Element));
+    ASSERT_NE(element, nullptr);
+    element->type_id = LMD_TYPE_ELEMENT;
+    expand_list((List*)element, nullptr);
+    ASSERT_NE(element->items, nullptr);
+    EXPECT_TRUE(arena_owns(document_arena, element->items));
+}
 
 static int external_destroy_calls = 0;
 static uint16_t external_destroy_last_tag = 0;

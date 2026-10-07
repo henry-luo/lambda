@@ -1,0 +1,13 @@
+{
+  "name": "A player command failure pauses and reports the error, then allows recovery",
+  "html": "test/ui/slide_failure.ls",
+  "viewport": {"width": 500, "height": 400},
+  "events": [
+    {"type": "click", "target": {"selector": "[data-slide-command=invalid]"}},
+    {"type": "assert_attribute", "target": {"selector": "#failure"}, "attribute": "data-slide-paused", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": ".slide-status"}, "equals": "slide: player: unknown command invalid"},
+    {"type": "click", "target": {"selector": "[data-slide-command=restart]"}},
+    {"type": "assert_attribute", "target": {"selector": "#failure"}, "attribute": "data-slide-paused", "equals": "false"},
+    {"type": "assert_text", "target": {"selector": ".slide-status"}, "equals": "1 / 1"}
+  ]
+}

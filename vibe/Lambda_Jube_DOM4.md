@@ -185,6 +185,12 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   traced Item slots. Compaction copies the declared slots exactly; native pointer
   tails cannot carry method records. Invocation resolves the ordinal through the
   receiver's inherited record prefix under **D7.4.4** and D4a.
+  Inline and computed declaration carriers inherit the common property record,
+  while the existing object-prototype callback selects their public prototype;
+  a shared prototype must not be its own inheritance seed. Record inheritance
+  does not make distinct native payload layouts interchangeable under **D7.4.1v2**.
+  The document-aware weak cache traces each carrier's node owner and clears its
+  payload before document-pool retirement (**D4.5.1v4**, **D5.3.3**).
   Arguments and lookup objects retain precise roots under **D5.3.3**. No Lambda semantic
   ruling changes. The CSSOM implementation tracker records regression and baseline
   evidence; complete WebIDL reflection and cross-realm behavior remain open.

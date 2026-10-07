@@ -1,12 +1,16 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/view.hpp"
+#include "../radiant/event.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/io/mark_builder.hpp"
+#include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/gc/gc_heap.h"
+#include "../lib/mem_grow.hpp"
 
 DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
 
@@ -140,7 +144,350 @@ protected:
         // lifecycle tests link the DOM chain without editing Lambda content.
         return static_cast<DomNode*>(parent)->append_child(child);
     }
+
+    CssTransitionElemState* transition_snapshot(DomElement* child) {
+        auto* snapshot = static_cast<CssTransitionElemState*>(pool_calloc(
+            doc.document_pool, sizeof(CssTransitionElemState)));
+        if (!snapshot) return nullptr;
+        snapshot->pool = doc.document_pool;
+        if (!lam::pool_grow_array(snapshot->pool, &snapshot->tracks,
+                &snapshot->track_capacity, 1, 4)) {
+            pool_free(doc.document_pool, snapshot);
+            return nullptr;
+        }
+        snapshot->track_count = 1;
+        child->set_transition_state_prop(snapshot);
+        return snapshot;
+    }
 };
+
+TEST_F(DomRetirementTest, FocusValidationUsesOwnedRootAfterReflow) {
+    DomElement* owned_root = root();
+    DomElement* parser_document = element("#document");
+    DomElement* button = element("button");
+    ASSERT_TRUE(attach(parser_document, owned_root));
+    ASSERT_TRUE(attach(owned_root, button));
+    owned_root->view_type = parser_document->view_type = button->view_type = RDT_VIEW_BLOCK;
+    ASSERT_NE(state_store_create(&doc), nullptr);
+    DocState* state = doc.state;
+
+    // defer mutation assertions so the test can inspect the post-prune invariant.
+    state->transition_depth++;
+    focus_set_programmatic(state, button);
+    state_store_prune_after_reflow(state);
+    EXPECT_EQ(focus_get(state), button);
+    EXPECT_TRUE(state_get_bool(state, owned_root, STATE_FOCUS_WITHIN));
+    EXPECT_FALSE(state_get_bool(state, parser_document, STATE_FOCUS_WITHIN));
+    StateValidationReport report{};
+    EXPECT_TRUE(radiant_state_validate_interaction(state, &report)) << report.message;
+    state_set_bool(state, owned_root, STATE_FOCUS_WITHIN, false);
+    EXPECT_FALSE(radiant_state_validate_interaction(state, &report));
+    EXPECT_STREQ(report.message, ":focus-within ancestry is inconsistent");
+    state_set_bool(state, owned_root, STATE_FOCUS_WITHIN, true);
+    EXPECT_TRUE(parser_document->remove_child(owned_root));
+    state->transition_depth--;
+}
+
+class DomGcBackingTest : public DomRetirementTest {
+protected:
+    Runtime runtime = {};
+    EvalContext evaluator = {};
+    Heap heap = {};
+    TypeElmt data_type = EmptyElmt;
+    DomDocument target_doc;
+    Runtime target_runtime = {};
+    EvalContext target_evaluator = {};
+    Heap target_heap = {};
+    bool target_initialized = false;
+
+    void SetUp() override {
+        DomRetirementTest::SetUp();
+        heap.gc = gc_heap_create();
+        ASSERT_NE(heap.gc, nullptr);
+        evaluator.heap = &heap;
+        runtime.eval_context = &evaluator;
+        doc.lambda_runtime = &runtime;
+    }
+
+    void TearDown() override {
+        // the test owns its evaluator; release native roots before its heap.
+        if (target_initialized) {
+            dom_lifecycle_release_backing_roots(&target_doc);
+            target_doc.lambda_runtime = nullptr;
+            target_doc.destroy();
+            gc_heap_destroy(target_heap.gc);
+        }
+        dom_lifecycle_release_backing_roots(&doc);
+        doc.lambda_runtime = nullptr;
+        DomRetirementTest::TearDown();
+        gc_heap_destroy(heap.gc);
+    }
+
+    DomElement* runtime_element(int64_t children = 0, bool attributes = false) {
+        Element* source = static_cast<Element*>(gc_heap_calloc(
+            heap.gc, sizeof(Element), LMD_TYPE_ELEMENT));
+        if (!source) return nullptr;
+        source->type_id = LMD_TYPE_ELEMENT;
+        source->type = &EmptyElmt;
+        if (attributes) {
+            data_type.byte_size = sizeof(uint64_t);
+            source->type = &data_type;
+            source->data = gc_data_alloc(heap.gc, data_type.byte_size);
+            source->data_cap = data_type.byte_size;
+        }
+        if (children) {
+            source->items = static_cast<Item*>(gc_data_alloc(heap.gc, sizeof(Item) * children));
+            source->length = source->capacity = children;
+        }
+        return DomElement::create(&doc, "span", source);
+    }
+
+    String* runtime_string() {
+        const char* content = "retained text";
+        size_t length = strlen(content);
+        String* string = static_cast<String*>(gc_heap_calloc(
+            heap.gc, sizeof(String) + length + 1, LMD_TYPE_STRING));
+        if (!string) return nullptr;
+        string->len = length;
+        memcpy(string->chars, content, length + 1);
+        return string;
+    }
+
+    void init_adoption_target(bool separate_heap) {
+        ASSERT_TRUE(target_doc.init(&input));
+        target_initialized = true;
+        target_heap.gc = gc_heap_create();
+        ASSERT_NE(target_heap.gc, nullptr);
+        target_evaluator.heap = separate_heap ? &target_heap : &heap;
+        target_runtime.eval_context = &target_evaluator;
+        target_doc.lambda_runtime = &target_runtime;
+    }
+
+    void check_adoption(bool separate_heap) {
+        init_adoption_target(separate_heap);
+        ASSERT_TRUE(target_initialized);
+        DomElement* child = runtime_element(1);
+        ASSERT_NE(child, nullptr);
+        Element* source = dom_element_render_source(child);
+        Item* original_items = source->items;
+        // adoption must refresh a borrow even when nobody read it after collection.
+        gc_collect(heap.gc, nullptr, 0);
+        ASSERT_NE(source->items, original_items);
+        uint32_t id = dom_document_alloc_node_id(&target_doc);
+        ASSERT_TRUE(dom_node_registry_transfer(&doc, &target_doc, child, &id));
+        static_cast<DomNode*>(child)->id = id;
+        child->doc = lam::up(&target_doc);
+        ASSERT_EQ(heap.gc->root_slot_count, 1);
+        EXPECT_EQ(target_heap.gc->root_slot_count, 0);
+        dom_lifecycle_release_backing_roots(&doc);
+        gc_collect(heap.gc, nullptr, 0);
+        EXPECT_EQ(heap.gc->object_count, 1u);
+        EXPECT_EQ(dom_element_to_element(child)->items, source->items);
+        id = dom_document_alloc_node_id(&doc);
+        ASSERT_TRUE(dom_node_registry_transfer(&target_doc, &doc, child, &id));
+        static_cast<DomNode*>(child)->id = id;
+        child->doc = lam::up(&doc);
+        EXPECT_EQ(heap.gc->root_slot_count, 1);
+        dom_lifecycle_release_backing_roots(&target_doc);
+        EXPECT_EQ(heap.gc->root_slot_count, 1);
+        dom_node_schedule_detached(&doc, child);
+        EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+        EXPECT_EQ(heap.gc->root_slot_count, 0);
+        gc_collect(heap.gc, nullptr, 0);
+        EXPECT_EQ(heap.gc->object_count, 0u);
+    }
+};
+
+TEST_F(DomGcBackingTest, DetachedWrapperRetainsBackingUntilUnpinnedRetirement) {
+    DomElement* parent = root();
+    DomElement* child = runtime_element();
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(heap.gc->root_slot_count, 1);
+    ASSERT_TRUE(attach(parent, child));
+    DomNodeRef ref = dom_node_ref(child);
+    ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_WRAPPER));
+    ASSERT_TRUE(parent->remove_child(child));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 1u);
+    ASSERT_TRUE(dom_node_unpin(&doc, ref, DOM_NODE_PIN_WRAPPER));
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_EQ(heap.gc->root_slot_count, 0);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 0u);
+}
+
+TEST_F(DomGcBackingTest, RecycledNodesDoNotAccumulateBackingRoots) {
+    DomElement* parent = root();
+    for (int i = 0; i < 1024; i++) {
+        DomElement* child = runtime_element();
+        ASSERT_NE(child, nullptr);
+        ASSERT_EQ(heap.gc->root_slot_count, 1);
+        ASSERT_TRUE(attach(parent, child));
+        ASSERT_TRUE(parent->remove_child(child));
+        ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+        ASSERT_EQ(heap.gc->root_slot_count, 0);
+        gc_collect(heap.gc, nullptr, 0);
+        ASSERT_EQ(heap.gc->object_count, 0u);
+    }
+}
+
+TEST_F(DomGcBackingTest, RuntimeTeardownDropsAttachedRootsIdempotently) {
+    ASSERT_NE(runtime_element(), nullptr);
+    ASSERT_EQ(heap.gc->root_slot_count, 1);
+    dom_lifecycle_release_backing_roots(&doc);
+    EXPECT_EQ(heap.gc->root_slot_count, 0);
+    dom_lifecycle_release_backing_roots(&doc);
+    EXPECT_EQ(heap.gc->root_slot_count, 0);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 0u);
+}
+
+TEST_F(DomGcBackingTest, BorrowedContentBufferFollowsCompaction) {
+    DomElement* child = runtime_element(1);
+    ASSERT_NE(child, nullptr);
+    Element* source = dom_element_render_source(child);
+    Item* original = source->items;
+    ASSERT_EQ(dom_element_to_element(child)->items, original);
+    gc_collect(heap.gc, nullptr, 0);
+    ASSERT_NE(source->items, original);
+    EXPECT_EQ(dom_element_to_element(child)->items, source->items);
+}
+
+TEST_F(DomGcBackingTest, BorrowedAttributeBufferFollowsCompaction) {
+    DomElement* child = runtime_element(0, true);
+    ASSERT_NE(child, nullptr);
+    Element* source = dom_element_render_source(child);
+    void* original = source->data;
+    gc_collect(heap.gc, nullptr, 0);
+    ASSERT_NE(source->data, original);
+    EXPECT_EQ(dom_element_to_element(child)->data, source->data);
+}
+
+TEST_F(DomGcBackingTest, IndependentDomBuffersSurviveLaterOwnerCompaction) {
+    DomElement* child = runtime_element(1, true);
+    ASSERT_NE(child, nullptr);
+    Element* backing = dom_element_to_element(child);
+    void* owned_data = arena_calloc(doc.node_arena, sizeof(uint64_t));
+    Item* owned_items = static_cast<Item*>(arena_calloc(doc.node_arena, sizeof(Item)));
+    backing->data = owned_data;
+    backing->items = owned_items;
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(dom_element_to_element(child)->data, owned_data);
+    EXPECT_EQ(dom_element_to_element(child)->items, owned_items);
+}
+
+TEST_F(DomGcBackingTest, AdoptionAndReturnKeepPhysicalHeapRoot) {
+    check_adoption(true);
+}
+
+TEST_F(DomGcBackingTest, SameHeapAdoptionRefreshesBorrowedPointers) {
+    check_adoption(false);
+}
+
+struct BackingRootTeardownProbe : DomDocumentResourceData {
+    gc_heap_t* gc;
+    bool called;
+};
+
+static void backing_root_teardown_probe(DomDocumentResourceData* resource) {
+    auto* probe = static_cast<BackingRootTeardownProbe*>(resource);
+    // adopted-document resources may destroy the physical source heap here.
+    EXPECT_EQ(probe->gc->root_slot_count, 0);
+    probe->called = true;
+}
+
+TEST_F(DomGcBackingTest, BackingRootsWithdrawBeforeDocumentResourceTeardown) {
+    ASSERT_NE(runtime_element(), nullptr);
+    BackingRootTeardownProbe probe = {};
+    probe.gc = heap.gc;
+    ASSERT_TRUE(dom_document_add_resource(&doc, &probe, backing_root_teardown_probe));
+    doc.lambda_runtime = nullptr;
+    doc.destroy();
+    EXPECT_TRUE(probe.called);
+    EXPECT_EQ(heap.gc->root_slot_count, 0);
+}
+
+TEST_F(DomGcBackingTest, DetachedTextRetainsItsRuntimeStringUntilRetirement) {
+    String* source = runtime_string();
+    ASSERT_NE(source, nullptr);
+    DomText* text = DomText::create_detached(source, &doc);
+    ASSERT_NE(text, nullptr);
+    ASSERT_EQ(heap.gc->root_slot_count, 1);
+    DomNodeRef ref = dom_node_ref(text);
+    ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_WRAPPER));
+    dom_node_schedule_detached(&doc, text);
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 1u);
+    EXPECT_STREQ(text->text, "retained text");
+    ASSERT_TRUE(dom_node_unpin(&doc, ref, DOM_NODE_PIN_WRAPPER));
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_EQ(heap.gc->root_slot_count, 0);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 0u);
+}
+
+TEST_F(DomGcBackingTest, ReplacingTextBackingReleasesOldRuntimeString) {
+    DomText* text = DomText::create_detached(runtime_string(), &doc);
+    ASSERT_NE(text, nullptr);
+    ASSERT_EQ(heap.gc->root_slot_count, 1);
+    String* replacement = dom_document_create_string(&doc, "edited", 6);
+    ASSERT_NE(replacement, nullptr);
+    ASSERT_TRUE(dom_text_adopt_document_string(text, &doc, replacement));
+    EXPECT_EQ(heap.gc->root_slot_count, 0);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 0u);
+    EXPECT_STREQ(text->text, "edited");
+    dom_node_schedule_detached(&doc, text);
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+}
+
+TEST_F(DomGcBackingTest, TextAdoptionKeepsPhysicalStringHeapRoot) {
+    init_adoption_target(true);
+    ASSERT_TRUE(target_initialized);
+    DomText* text = DomText::create_detached(runtime_string(), &doc);
+    ASSERT_NE(text, nullptr);
+    uint32_t id = dom_document_alloc_node_id(&target_doc);
+    ASSERT_TRUE(dom_node_registry_transfer(&doc, &target_doc, text, &id));
+    text->id = id;
+    EXPECT_EQ(heap.gc->root_slot_count, 1);
+    EXPECT_EQ(target_heap.gc->root_slot_count, 0);
+    dom_lifecycle_release_backing_roots(&doc);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 1u);
+    EXPECT_STREQ(text->text, "retained text");
+    dom_node_schedule_detached(&target_doc, text);
+    EXPECT_EQ(dom_retire_sweep(&target_doc), 1u);
+    EXPECT_EQ(heap.gc->root_slot_count, 0);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 0u);
+}
+
+TEST_F(DomGcBackingTest, DetachedCommentRetainsRuntimeContentUntilRetirement) {
+    DomElement* element = runtime_element(1);
+    ASSERT_NE(element, nullptr);
+    Element* source = dom_element_render_source(element);
+    TypeElmt comment_type = EmptyElmt;
+    comment_type.name.str = "!--";
+    comment_type.name.length = 3;
+    source->type = &comment_type;
+    source->items[0] = Item{.item = s2it(runtime_string())};
+    DomComment* comment = DomComment::create_detached(source, &doc);
+    ASSERT_NE(comment, nullptr);
+    ASSERT_EQ(heap.gc->root_slot_count, 2);
+    dom_node_schedule_detached(&doc, element);
+    ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_EQ(heap.gc->root_slot_count, 1);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 2u);
+    EXPECT_STREQ(comment->content, "retained text");
+    dom_node_schedule_detached(&doc, comment);
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_EQ(heap.gc->root_slot_count, 0);
+    gc_collect(heap.gc, nullptr, 0);
+    EXPECT_EQ(heap.gc->object_count, 0u);
+}
 
 TEST_F(DomRetirementTest, UnpinnedDetachedNodeRetiresAndRejectsStaleRef) {
     DomElement* parent = root();
@@ -279,6 +626,50 @@ TEST_F(DomRetirementTest, GeneratedTextPayloadIsFreedWithItsNode) {
     PoolStats after = {};
     pool_get_detailed_stats(doc.document_pool, &after);
     EXPECT_GT(after.free_count, before.free_count);
+}
+
+TEST_F(DomRetirementTest, TransitionSnapshotLivesUntilUnpinnedRetirement) {
+    DomElement* parent = root();
+    DomElement* child = element("child");
+    ASSERT_TRUE(attach(parent, child));
+    auto* snapshot = transition_snapshot(child);
+    ASSERT_NE(snapshot, nullptr);
+    CssTransitionTrack* tracks = snapshot->tracks;
+    snapshot->tracks[0].has_snapshot = true;
+    snapshot->tracks[0].snapshot.value.f = 0.25f;
+    DomNodeRef ref = dom_node_ref(child);
+    ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_WRAPPER));
+
+    ASSERT_TRUE(parent->remove_child(child));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    EXPECT_TRUE(pool_owns(doc.document_pool, snapshot));
+    EXPECT_TRUE(pool_owns(doc.document_pool, tracks));
+    EXPECT_EQ(child->transition_state_prop(), snapshot);
+    EXPECT_FLOAT_EQ(snapshot->tracks[0].snapshot.value.f, 0.25f);
+
+    dom_node_unpin(&doc, ref, DOM_NODE_PIN_WRAPPER);
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
+    EXPECT_FALSE(pool_owns(doc.document_pool, snapshot));
+    EXPECT_FALSE(pool_owns(doc.document_pool, tracks));
+}
+
+TEST_F(DomRetirementTest, TransitionSnapshotStoragePlateausAcrossRetirements) {
+    DomElement* parent = root();
+    PoolStats warm = {};
+    for (int i = 0; i < 1056; i++) {
+        DomElement* child = element("child");
+        auto* snapshot = transition_snapshot(child);
+        ASSERT_NE(snapshot, nullptr);
+        ASSERT_TRUE(attach(parent, child));
+        ASSERT_TRUE(parent->remove_child(child));
+        ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+        if (i == 31) pool_get_detailed_stats(doc.document_pool, &warm);
+    }
+    PoolStats after = {};
+    pool_get_detailed_stats(doc.document_pool, &after);
+    EXPECT_EQ(after.live_bytes, warm.live_bytes);
+    EXPECT_GE(after.free_count - warm.free_count, 1024u);
 }
 
 struct DeferredDomRetirementScope {
@@ -422,6 +813,42 @@ TEST_F(DomRetirementTest, MoreThanMutationRecordCapRetiresAfterPinsRelease) {
     EXPECT_EQ(dom_retire_sweep(&doc), DOM_JS_MUTATION_RECORD_CAP * 4u);
 }
 
+TEST_F(DomRetirementTest, MutationJournalGrowsPreservingOrderAndReusesStorage) {
+    DomElement* parent = root();
+    const int count = DOM_JS_MUTATION_RECORD_CAP * 4;
+    for (int i = 0; i < count; i++) {
+        DomElement* child = element("journal");
+        ASSERT_TRUE(attach(parent, child));
+        DomNodeRef ref = dom_node_ref(child);
+        ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_RECONCILE));
+        ASSERT_TRUE(dom_js_mutation_records_reserve(&doc, i + 1));
+        DomJsMutationRecord* record = &doc.js.mutation_records[i];
+        *record = {};
+        record->sequence = i + 1;
+        record->target = child;
+        record->target_id = ref.expected_id;
+        doc.js.mutation_record_count++;
+        ASSERT_TRUE(parent->remove_child(child));
+    }
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    for (int i = 0; i < count; i++) {
+        EXPECT_EQ(doc.js.mutation_records[i].sequence, i + 1);
+        EXPECT_NE(dom_node_ref_validate(&doc, {doc.js.mutation_records[i].target,
+                  doc.js.mutation_records[i].target_id}), nullptr);
+    }
+    DomJsMutationRecord* retained = doc.js.mutation_records;
+    int capacity = doc.js.mutation_record_capacity;
+    dom_js_mutation_records_reset(&doc);
+    EXPECT_EQ(doc.js.mutation_record_count, 0);
+    EXPECT_EQ(doc.js.mutation_record_overflow, 0);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.retired_nodes, count);
+    ASSERT_TRUE(dom_js_mutation_records_reserve(&doc, count));
+    EXPECT_EQ(doc.js.mutation_records, retained);
+    EXPECT_EQ(doc.js.mutation_record_capacity, capacity);
+}
+
 TEST_F(DomRetirementTest, VariableTextSizesReuseArenaBlocksAfterWarmup) {
     DomElement* parent = root();
     char text[513];
@@ -516,6 +943,38 @@ TEST(DomRetirementOwnerArenaTest, FlattenedArrayTextIsRegisteredAndRetired) {
     EXPECT_EQ(dom_retire_sweep(&doc), 3u);
     EXPECT_EQ(dom_node_ref_validate(&doc, first_ref), nullptr);
     EXPECT_EQ(dom_node_ref_validate(&doc, second_ref), nullptr);
+    doc.destroy();
+    pool_destroy(pool);
+}
+
+TEST(DomAttributeValueTest, RepeatedValuesReuseInputStorageAndPreserveSnapshots) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    MarkBuilder builder(input);
+    Item source = builder.element("div").attr("id", "kept").final();
+    auto* element = build_dom_tree_from_element(source.element, &doc, nullptr);
+    ASSERT_NE(element, nullptr);
+    doc.root = lam::up(element);
+    ASSERT_TRUE(element->set_attribute("aria-hidden", "true"));
+    const char* saved = element->get_attribute("aria-hidden");
+    ASSERT_TRUE(element->set_attribute("aria-hidden", "false"));
+    ASSERT_TRUE(element->set_attribute("inert", ""));
+    ASSERT_TRUE(element->remove_attribute("inert"));
+    size_t warm = arena_total_used(input->arena);
+    for (size_t i = 0; i < 256; i++) {
+        ASSERT_TRUE(element->set_attribute("aria-hidden", i % 2 ? "true" : "false"));
+        ASSERT_TRUE(element->set_attribute("inert", ""));
+        ASSERT_TRUE(element->remove_attribute("inert"));
+    }
+    EXPECT_EQ(arena_total_used(input->arena), warm);
+    EXPECT_STREQ(saved, "true");
+    EXPECT_STREQ(element->get_attribute("aria-hidden"), "true");
+    EXPECT_STREQ(element->get_attribute("id"), "kept");
     doc.destroy();
     pool_destroy(pool);
 }
@@ -890,6 +1349,198 @@ TEST_F(StyleEpochTest, RecascadeReclaimsExclusiveOwnedStyleTrees) {
     PoolStats repeated = {};
     pool_get_detailed_stats(doc.document_pool, &repeated);
     EXPECT_LE(repeated.live_bytes, first.live_bytes + 4096u);
+}
+
+TEST_F(StyleEpochTest, RecascadeWithInlineStateReclaimsRemovedCascadeRecords) {
+    DomElement* child = append("child");
+    CssRule* width = rule(CSS_PROPERTY_WIDTH,
+        css_value_create_length(doc.document_pool, 20.0, CSS_UNIT_PX));
+    CssSpecificity specificity = {};
+    specificity.inline_style = 1;
+    CssDeclaration* height = css_declaration_create(CSS_PROPERTY_HEIGHT,
+        css_value_create_length(doc.document_pool, 25.0, CSS_UNIT_PX),
+        specificity, CSS_ORIGIN_AUTHOR, doc.document_pool);
+    ASSERT_TRUE(dom_element_apply_declaration(child, height));
+    ASSERT_EQ(dom_element_apply_rule(child, width, {}), 1);
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.document_pool, &warm);
+    for (size_t i = 0; i < 128; i++) {
+        dom_element_clear_cascaded_styles(child);
+        ASSERT_EQ(dom_element_apply_rule(child, width, {}), 1);
+        ASSERT_EQ(dom_element_get_specified_value(child, CSS_PROPERTY_HEIGHT), height);
+    }
+    PoolStats stable = {};
+    pool_get_detailed_stats(doc.document_pool, &stable);
+    EXPECT_LE(stable.live_bytes, warm.live_bytes + 4096u);
+}
+
+TEST_F(StyleEpochTest, MotionInitialValuesDoNotGrowRetainedCallerStorage) {
+    DomElement* child = append("child");
+    Pool* view_pool = pool_create();
+    ASSERT_NE(view_pool, nullptr);
+    CssTransitionList first = {};
+    css_transition_resolve_config(child, view_pool, &first);
+    PoolStats warm = {};
+    pool_get_detailed_stats(view_pool, &warm);
+    for (size_t i = 0; i < 128; i++) {
+        CssTransitionList sampled = {};
+        css_transition_resolve_config(child, view_pool, &sampled);
+        for (size_t property = 0; property < 4; property++)
+            EXPECT_EQ(sampled.values[property], first.values[property]);
+    }
+    PoolStats stable = {};
+    pool_get_detailed_stats(view_pool, &stable);
+    EXPECT_EQ(stable.live_bytes, warm.live_bytes);
+    pool_destroy(view_pool);
+}
+
+TEST_F(StyleEpochTest, ReplacingInlineValuesReclaimsParserPayloads) {
+    DomElement* child = append("child");
+    const char* styles[] = {
+        "transform:translate(1px,2px);opacity:0.5;color:blue;line-height:1.4;--accent:red",
+        "transform:translate(3px,4px);opacity:0.8;color:green;line-height:1.6;--accent:blue",
+        "transform:none;opacity:1;color:red;line-height:normal;--accent:green"
+    };
+    for (const char* style : styles) ASSERT_TRUE(child->set_attribute("style", style));
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.document_pool, &warm);
+    // Replacement must retire both ordinary declarations and custom values.
+    for (size_t i = 0; i < 192; i++) {
+        ASSERT_TRUE(child->set_attribute("style", styles[i % 3]));
+        CssDeclaration* transform = dom_element_get_specified_value(child,
+            CSS_PROPERTY_TRANSFORM);
+        ASSERT_NE(transform, nullptr);
+        EXPECT_TRUE(transform->owns_payload);
+        ASSERT_NE(child->css_variables, nullptr);
+        ASSERT_NE(child->css_variables->declaration, nullptr);
+    }
+    PoolStats repeated = {};
+    pool_get_detailed_stats(doc.document_pool, &repeated);
+    EXPECT_LE(repeated.live_bytes, warm.live_bytes + 4096u);
+    ASSERT_TRUE(child->remove_attribute("style"));
+    EXPECT_EQ(dom_element_get_specified_value(child, CSS_PROPERTY_TRANSFORM), nullptr);
+    EXPECT_EQ(child->css_variables, nullptr);
+}
+
+TEST_F(StyleEpochTest, RejectedRuleDoesNotRetainCascadeCopies) {
+    DomElement* child = append("child");
+    CssRule* invalid = rule(CSS_PROPERTY_WIDTH,
+        css_value_create_string(doc.document_pool, "invalid-width"));
+    ASSERT_EQ(dom_element_apply_rule(child, invalid, {}), 0);
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.document_pool, &warm);
+    for (size_t i = 0; i < 128; i++)
+        ASSERT_EQ(dom_element_apply_rule(child, invalid, {}), 0);
+    PoolStats repeated = {};
+    pool_get_detailed_stats(doc.document_pool, &repeated);
+    EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+}
+
+TEST_F(StyleEpochTest, OwnedDeclarationRetainsKeywordSpelling) {
+    CssValue* value = css_value_create_keyword(doc.document_pool, "auto");
+    ASSERT_NE(value, nullptr);
+    char* spelling = pool_strdup(doc.document_pool, "auto");
+    ASSERT_NE(spelling, nullptr);
+    value->has_keyword_spelling = true;
+    value->data.keyword_token.spelling = spelling;
+    CssDeclaration* source = css_declaration_create(CSS_PROPERTY_WIDTH, value,
+        {}, CSS_ORIGIN_AUTHOR, doc.document_pool);
+    ASSERT_NE(source, nullptr);
+    CssDeclaration* copy = css_declaration_clone_owned(source, {},
+        CSS_ORIGIN_AUTHOR, doc.document_pool);
+    ASSERT_NE(copy, nullptr);
+    EXPECT_NE(copy->value->data.keyword_token.spelling, spelling);
+    // Retiring or reusing parser bytes cannot change a published owned value.
+    spelling[0] = 'x';
+    EXPECT_STREQ(copy->value->data.keyword_token.spelling, "auto");
+    css_declaration_destroy_owned(copy, doc.document_pool);
+}
+
+TEST_F(StyleEpochTest, PresentationLayerPreservesAuthoredStateAndCascade) {
+    DomElement* child = append("child");
+    const char* authored = "opacity:0.3;color:red !important";
+    ASSERT_TRUE(child->set_attribute("style", authored));
+    bool changed = false;
+    ASSERT_TRUE(dom_element_set_presentation_style(child, "opacity", "0.8", &changed));
+    EXPECT_TRUE(changed);
+    ASSERT_TRUE(dom_element_set_presentation_style(child, "color", "green", &changed));
+    EXPECT_STREQ(child->get_attribute("style"), authored);
+    EXPECT_DOUBLE_EQ(style_tree_get_authored_declaration(child->specified_style,
+        CSS_PROPERTY_OPACITY)->value->data.number.value, 0.3);
+    EXPECT_DOUBLE_EQ(dom_element_get_specified_value(child,
+        CSS_PROPERTY_OPACITY)->value->data.number.value, 0.8);
+    EXPECT_TRUE(dom_element_get_specified_value(child, CSS_PROPERTY_COLOR)->important);
+
+    dom_element_clear_cascaded_styles(child);
+    CssRule* width = rule(CSS_PROPERTY_WIDTH,
+        css_value_create_length(doc.document_pool, 20.0, CSS_UNIT_PX));
+    apply(document_root, width, child);
+    EXPECT_TRUE(dom_element_get_specified_value(child, CSS_PROPERTY_OPACITY)->presentation_value);
+    ASSERT_TRUE(child->set_attribute("style", "opacity:0.4;color:blue"));
+    EXPECT_TRUE(dom_element_get_specified_value(child, CSS_PROPERTY_COLOR)->presentation_value);
+    EXPECT_DOUBLE_EQ(style_tree_get_authored_declaration(child->specified_style,
+        CSS_PROPERTY_OPACITY)->value->data.number.value, 0.4);
+
+    EXPECT_FALSE(dom_element_set_presentation_style(child, "opacity", "invalid", &changed));
+    EXPECT_FALSE(dom_element_set_presentation_style(child, "opacity", "0.2 !important", &changed));
+    EXPECT_FALSE(dom_element_set_presentation_style(child, "not-a-css-property", "1", &changed));
+    EXPECT_DOUBLE_EQ(dom_element_get_specified_value(child,
+        CSS_PROPERTY_OPACITY)->value->data.number.value, 0.8);
+    EXPECT_TRUE(dom_element_clear_presentation_style(child));
+    EXPECT_FALSE(dom_element_clear_presentation_style(child));
+    EXPECT_DOUBLE_EQ(dom_element_get_specified_value(child,
+        CSS_PROPERTY_OPACITY)->value->data.number.value, 0.4);
+    EXPECT_STREQ(child->get_attribute("style"), "opacity:0.4;color:blue");
+}
+
+TEST_F(StyleEpochTest, MixedAuthoredTreeRetainsInlineInsetsDuringRecascade) {
+    DomElement* child = append("child");
+    ASSERT_TRUE(child->set_attribute("style", "left:200px;top:40px;width:80px"));
+    CssRule* position = rule(CSS_PROPERTY_POSITION,
+        css_value_create_keyword(doc.document_pool, "absolute"));
+    CssRule* opacity = rule(CSS_PROPERTY_OPACITY,
+        css_value_create_number(doc.document_pool, 0.8));
+    apply(document_root, position, child);
+    apply(document_root, opacity, child);
+    EXPECT_TRUE(style_tree_has_inline_declarations(child->specified_style));
+    EXPECT_TRUE(style_tree_has_local_declarations(child->specified_style));
+    dom_element_clear_cascaded_styles(child);
+    apply(document_root, position, child);
+    apply(document_root, opacity, child);
+    EXPECT_FALSE(child->specified_style_shared());
+    CssDeclaration* left = dom_element_get_specified_value(child, CSS_PROPERTY_LEFT);
+    ASSERT_NE(left, nullptr);
+    EXPECT_DOUBLE_EQ(left->value->data.length.value, 200.0);
+    EXPECT_TRUE(left->specificity.inline_style);
+}
+
+TEST_F(StyleEpochTest, PresentationSamplesDoNotGrowRetainedPoolsOrArenas) {
+    DomElement* child = append("child");
+    const char* transforms[] = {
+        "translate(1px,2px) rotate(10deg) scale(1,1)",
+        "translate(3px,4px) rotate(20deg) scale(1.2,0.8)", "none"
+    };
+    bool changed = false;
+    for (const char* transform : transforms)
+        ASSERT_TRUE(dom_element_set_presentation_style(child, "transform", transform, &changed));
+    ASSERT_TRUE(dom_element_set_presentation_style(child, "clip-path", "inset(0 10% 0 0)", &changed));
+    ASSERT_TRUE(dom_element_set_presentation_style(child, "fill", "#336699", &changed));
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.document_pool, &warm);
+    size_t input_used = arena_total_used(input.arena);
+    size_t nodes_used = arena_total_used(doc.node_arena);
+    for (size_t i = 0; i < 256; i++) {
+        ASSERT_TRUE(dom_element_set_presentation_style(child, "transform", transforms[i % 3], &changed));
+        ASSERT_TRUE(dom_element_set_presentation_style(child, "opacity", i % 2 ? "0.5" : "1", &changed));
+    }
+    PoolStats repeated = {};
+    pool_get_detailed_stats(doc.document_pool, &repeated);
+    EXPECT_LE(repeated.live_bytes, warm.live_bytes + 4096u);
+    EXPECT_EQ(arena_total_used(input.arena), input_used);
+    EXPECT_EQ(arena_total_used(doc.node_arena), nodes_used);
+    EXPECT_EQ(child->get_attribute("style"), nullptr);
+    EXPECT_TRUE(dom_element_clear_presentation_style(child));
+    EXPECT_TRUE(style_tree_is_empty(child->specified_style));
 }
 
 TEST_F(StyleEpochTest, ColdCanonicalEntriesRespectCacheBudgetAfterCascade) {

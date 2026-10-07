@@ -1,0 +1,11 @@
+\documentclass{article}
+\usepackage{listings}
+\lstset{numbers=left,frame=single,basicstyle=\ttfamily\small}
+\begin{document}
+\begin{lstlisting}[caption=Example,label=lst:example]
+if (x < 2) {
+  x = x + 1;
+}
+\end{lstlisting}
+See \ref{lst:example}. \lstinline[breaklines=true]|a<b&c|.
+\end{document}

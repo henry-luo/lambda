@@ -72,8 +72,9 @@ pn get_old_or_new(old: any, newp: Vec3) Vec3 {
 // =====================================================
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
-pn arr_new() Arr {
-    let init: array = fill(16, null)
+pn arr_new() Arr^ {
+    // propagate fill's allocation/argument error before the typed boundary (S7.6.3v2).
+    let init: array = fill(16, null)^
     var a = { l0: init, sz: 0 }
     return a
 }

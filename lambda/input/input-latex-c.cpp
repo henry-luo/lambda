@@ -94,7 +94,10 @@ static bool is_supported_math_environment(const char* name) {
         strcmp(name, "Vmatrix") == 0 || strcmp(name, "cases") == 0 ||
         strcmp(name, "rcases") == 0 || strcmp(name, "dcases") == 0 ||
         strcmp(name, "aligned") == 0 || strcmp(name, "align") == 0 ||
-        strcmp(name, "equation") == 0 || strcmp(name, "smallmatrix") == 0;
+        // split must retain its row/column separators inside a structured environment.
+        strcmp(name, "split") == 0 ||
+        strcmp(name, "equation") == 0 || strcmp(name, "smallmatrix") == 0 ||
+        strcmp(name, "IEEEeqnarray") == 0;
 }
 
 static bool is_math_document_environment(const char* name) {
@@ -1087,6 +1090,7 @@ private:
 
     Item make_math_element(const char* math_source, size_t math_length, bool display) {
         ElementBuilder elem = builder_.element(display ? "display_math" : "inline_math");
+        elem.attr("source_offset", (int64_t)source_offset(math_source));
         elem.attr("source", builder_.createStringItem(math_source, math_length));
         DirectMathParser math(ctx_, math_source, math_length, source_offset(math_source), false);
         Item ast = math.parse();
@@ -1094,8 +1098,45 @@ private:
         return elem.final();
     }
 
+    size_t find_raw_environment_end(const char* name, size_t from, size_t* body_end,
+                                    bool* found) {
+        if (found) *found = false;
+        size_t name_len = strlen(name);
+        for (size_t i = from; i < length_;) {
+            if (source_[i] != '\\') {
+                i++;
+                continue;
+            }
+            char command[96];
+            char full[104];
+            size_t after_command = latex_scan_command(source_, length_, i, command,
+                sizeof(command), full, sizeof(full));
+            if (after_command == 0) {
+                i++;
+                continue;
+            }
+            if (strcmp(command, "end") == 0 && after_command < length_ &&
+                    source_[after_command] == '{') {
+                size_t env_begin = 0;
+                size_t env_end = 0;
+                size_t after_group = latex_scan_group_end(source_, length_, after_command,
+                    '{', '}', &env_begin, &env_end);
+                if (after_group != 0 && env_end - env_begin == name_len &&
+                        memcmp(source_ + env_begin, name, name_len) == 0) {
+                    if (body_end) *body_end = i;
+                    if (found) *found = true;
+                    return after_group;
+                }
+            }
+            i = after_command;
+        }
+        return length_;
+    }
+
     size_t find_environment_end(const char* name, size_t from, size_t* body_end,
                                 bool* found) {
+        if (is_raw_text_environment(name))
+            return find_raw_environment_end(name, from, body_end, found);
         if (found) *found = false;
         size_t name_len = strlen(name);
         size_t nested_depth = 0;
@@ -1131,6 +1172,22 @@ private:
                 i = after_command;
                 continue;
             }
+            if (strcmp(command, "begin") == 0 &&
+                    env_end - env_begin < sizeof(command)) {
+                char inner_name[96];
+                str_copy(inner_name, sizeof(inner_name), source_ + env_begin,
+                    env_end - env_begin);
+                if (is_raw_text_environment(inner_name)) {
+                    // Raw bodies may contain TeX-looking begin/end tokens that
+                    // cannot close their containing environment.
+                    size_t raw_body_end = length_;
+                    bool raw_found = false;
+                    size_t after_raw = find_raw_environment_end(inner_name,
+                        after_group, &raw_body_end, &raw_found);
+                    i = raw_found ? after_raw : length_;
+                    continue;
+                }
+            }
             bool matching_name = env_end - env_begin == name_len &&
                 memcmp(source_ + env_begin, name, name_len) == 0;
             if (matching_name && strcmp(command, "begin") == 0) {
@@ -1163,7 +1220,29 @@ private:
                     options_end - options_begin));
             }
         }
-        if ((strcmp(name, "tabular") == 0 || strcmp(name, "array") == 0) && position_ < length_ && source_[position_] == '{') {
+        if (strcmp(name, "filecontents") == 0 || strcmp(name, "filecontents*") == 0) {
+            skip_space_before_group('{', '{');
+            size_t filename_begin = 0;
+            size_t filename_end = 0;
+            if (consume_group_span(&filename_begin, &filename_end)) {
+                elem.attr("filename", builder_.createStringItem(source_ + filename_begin,
+                    filename_end - filename_begin));
+            } else {
+                error("filecontents requires a filename");
+            }
+        }
+        bool table_columns = strcmp(name, "tabular") == 0 ||
+            strcmp(name, "array") == 0 || strcmp(name, "longtable") == 0 ||
+            strcmp(name, "tabularx") == 0 || strcmp(name, "xltabular") == 0;
+        if ((strcmp(name, "tabularx") == 0 || strcmp(name, "xltabular") == 0) &&
+                position_ < length_ && source_[position_] == '{') {
+            size_t width_begin = 0;
+            size_t width_end = 0;
+            if (consume_group_span(&width_begin, &width_end))
+                elem.attr("width", builder_.createStringItem(source_ + width_begin,
+                    width_end - width_begin));
+        }
+        if (table_columns && position_ < length_ && source_[position_] == '{') {
             size_t columns_begin = 0, columns_end = 0;
             if (consume_group_span(&columns_begin, &columns_end)) {
                 elem.attr("columns", builder_.createStringItem(source_ + columns_begin, columns_end - columns_begin));
@@ -1174,10 +1253,32 @@ private:
             Item placement = parse_brack_group();
             if (item_present(placement)) elem.attr("placement", placement);
         }
+        if (strcmp(name, "subfigure") == 0 || strcmp(name, "subtable") == 0) {
+            // Preserve the environment header separately from its paragraph content.
+            ArrayBuilder groups = builder_.array();
+            skip_space_before_group('[', '{');
+            if (position_ < length_ && source_[position_] == '[') {
+                size_t group_start = position_;
+                size_t begin = 0, end = 0;
+                if (consume_brack_group_span(&begin, &end))
+                    append_argument_group(groups, "optional", group_start);
+            }
+            skip_space_before_group('{', '{');
+            if (position_ < length_ && source_[position_] == '{') {
+                size_t group_start = position_;
+                size_t begin = 0, end = 0;
+                if (consume_group_span(&begin, &end))
+                    append_argument_group(groups, "required", group_start);
+            }
+            elem.attr("argument_groups", groups.final());
+        }
         bool list_environment = strcmp(name, "itemize") == 0 ||
             strcmp(name, "enumerate") == 0 || strcmp(name, "description") == 0;
-        if (list_environment) skip_space_before_group('[', '[');
-        if (list_environment && position_ < length_ && source_[position_] == '[') {
+        bool options_environment = strcmp(name, "lstlisting") == 0 ||
+            strcmp(name, "tcolorbox") == 0;
+        if (list_environment || options_environment) skip_space_before_group('[', '[');
+        if ((list_environment || options_environment) && position_ < length_ &&
+                source_[position_] == '[') {
             size_t options_begin = 0, options_end = 0;
             if (consume_brack_group_span(&options_begin, &options_end)) {
                 elem.attr("options_raw", builder_.createStringItem(source_ + options_begin,
@@ -1197,6 +1298,8 @@ private:
                 after_end - command_start));
             elem.attr("body_offset", (int64_t)source_offset(source_ + body_begin));
         } else if (is_raw_text_environment(name)) {
+            elem.attr("source", builder_.createStringItem(body_source, body_len));
+            elem.attr("body_offset", (int64_t)source_offset(body_source));
             elem.text(body_source, body_len);
         } else if (is_math_document_environment(name)) {
             while (body_len > 0 && isspace((unsigned char)*body_source)) {
@@ -1213,7 +1316,7 @@ private:
             nested.source_ = body_source;
             nested.length_ = body_len;
             nested.position_ = 0;
-            nested.tabular_mode_ = strcmp(name, "tabular") == 0;
+            nested.tabular_mode_ = table_columns;
             nested.parse_children(elem, 0, true);
         }
         position_ = after_end;
@@ -1252,6 +1355,65 @@ private:
         if (name[0] == ' ' || name[0] == '\t' || name[0] == '\n') return builder_.createStringItem(" ");
         bool starred = position_ < length_ && source_[position_] == '*';
         if (starred) position_++;
+        if (strcmp(name, "verb") == 0 || strcmp(name, "lstinline") == 0) {
+            ElementBuilder elem = builder_.element(name);
+            elem.attr("source_offset", (int64_t)source_offset(source_ + command_start));
+            if (starred) elem.attr("starred", true);
+            if (strcmp(name, "lstinline") == 0 && position_ < length_ &&
+                    source_[position_] == '[') {
+                size_t options_begin = 0, options_end = 0;
+                if (consume_brack_group_span(&options_begin, &options_end))
+                    elem.attr("options_raw", builder_.createStringItem(
+                        source_ + options_begin, options_end - options_begin));
+            }
+            if (position_ >= length_ || source_[position_] == '\n' ||
+                    source_[position_] == '\r') {
+                error("missing verbatim delimiter");
+                return elem.final();
+            }
+            char delimiter = source_[position_++];
+            size_t body_begin = position_;
+            while (position_ < length_ && source_[position_] != delimiter &&
+                    source_[position_] != '\n' && source_[position_] != '\r') position_++;
+            elem.text(source_ + body_begin, position_ - body_begin);
+            if (position_ < length_ && source_[position_] == delimiter) position_++;
+            else error("missing closing verbatim delimiter");
+            elem.attr("raw_source", builder_.createStringItem(source_ + command_start,
+                position_ - command_start));
+            return elem.final();
+        }
+        if (strcmp(name, "directlua") == 0) {
+            ElementBuilder elem = builder_.element("directlua");
+            elem.attr("source_offset", (int64_t)source_offset(source_ + command_start));
+            skip_space_before_group('{', '{');
+            size_t begin = 0;
+            size_t end = 0;
+            if (consume_group_span(&begin, &end))
+                elem.attr("source", builder_.createStringItem(source_ + begin, end - begin));
+            return elem.final();
+        }
+        if (strcmp(name, "setlength") == 0) {
+            ElementBuilder elem = builder_.element("setlength");
+            elem.attr("source_offset", (int64_t)source_offset(source_ + command_start));
+            while (position_ < length_ && isspace((unsigned char)source_[position_])) position_++;
+            size_t length_begin = 0, length_end = 0;
+            if (position_ < length_ && source_[position_] == '\\') {
+                char length_name[96];
+                char length_full[104];
+                if (read_command(length_name, sizeof(length_name), length_full, sizeof(length_full)))
+                    elem.attr("length_name", length_name);
+            } else if (consume_group_span(&length_begin, &length_end)) {
+                size_t prefix = source_[length_begin] == '\\' ? 1 : 0;
+                elem.attr("length_name", builder_.createStringItem(source_ + length_begin + prefix,
+                    length_end - length_begin - prefix));
+            }
+            skip_space_before_group('{', '{');
+            if (consume_group_span(&length_begin, &length_end))
+                elem.attr("length_value", builder_.createStringItem(source_ + length_begin,
+                    length_end - length_begin));
+            else error("missing setlength value");
+            return elem.final();
+        }
         if (strcmp(name, "begin") == 0) {
             size_t begin = 0, end = 0;
             if (!consume_group_span(&begin, &end)) return ItemNull;
@@ -1293,6 +1455,24 @@ private:
         }
         if (strcmp(name, "\\") == 0) return builder_.createSymbolItem("row_sep");
         if (strlen(name) == 1 && strchr("$%#&_{}", name[0])) return builder_.createStringItem(name, 1);
+        if (strlen(name) == 1 && strchr("'`^\"~=.uvHcdbtk", name[0])) {
+            // A text accent takes one token or one balanced group, never the following word.
+            ElementBuilder accent = builder_.element("accent");
+            accent.attr("command", name);
+            accent.attr("source_offset", (int64_t)source_offset(source_ + command_start));
+            while (position_ < length_ && isspace((unsigned char)source_[position_])) position_++;
+            if (position_ < length_ && source_[position_] == '{') {
+                accent.child(parse_group());
+            } else if (position_ < length_ && source_[position_] == '\\') {
+                accent.child(parse_command());
+            } else if (position_ < length_) {
+                size_t begin = position_++;
+                while (position_ < length_ && ((unsigned char)source_[position_] & 0xc0) == 0x80)
+                    position_++;
+                accent.text(source_ + begin, position_ - begin);
+            } else error("missing text accent argument");
+            return accent.final();
+        }
         if (strcmp(name, ",") == 0 || strcmp(name, ";") == 0 || strcmp(name, ":") == 0 || strcmp(name, "!") == 0 ||
             strcmp(name, "quad") == 0 || strcmp(name, "qquad") == 0) return builder_.createSymbolItem(name);
         char tag[sizeof(name) + 2];
@@ -1312,7 +1492,34 @@ private:
         bool environment_definition = strcmp(name, "newenvironment") == 0 ||
             strcmp(name, "renewenvironment") == 0;
         int curly_index = 0;
+        if (macro_definition) {
+            while (position_ < length_ && isspace((unsigned char)source_[position_])) position_++;
+        }
+        if (macro_definition && position_ < length_ && source_[position_] == '\\') {
+            size_t begin = position_;
+            char target_name[96], target_full[104];
+            if (read_command(target_name, sizeof(target_name), target_full, sizeof(target_full))) {
+                arguments.append(builder_.createStringItem(source_ + begin, position_ - begin));
+                append_argument_span(argument_groups, "required", begin, position_, begin, position_ - begin);
+                curly_index++;
+                skip_space_before_group('[', '{');
+            }
+        }
         while (position_ < length_) {
+            // TeX comments between argument groups erase the line break.
+            size_t probe = position_;
+            while (probe < length_ && isspace((unsigned char)source_[probe])) probe++;
+            if (probe < length_ && source_[probe] == '%') {
+                do {
+                    while (probe < length_ && source_[probe] != '\n' &&
+                            source_[probe] != '\r') probe++;
+                    while (probe < length_ && isspace((unsigned char)source_[probe]))
+                        probe++;
+                } while (probe < length_ && source_[probe] == '%');
+                if (probe < length_ && (source_[probe] == '{' ||
+                        source_[probe] == '[' || source_[probe] == '('))
+                    position_ = probe;
+            }
             if (source_[position_] == '{') {
                 size_t group_start = position_;
                 if ((macro_definition || environment_definition) && curly_index == 0) {
@@ -1356,11 +1563,16 @@ private:
         char close = strcmp(kind, "optional") == 0 ? ']' :
             (strcmp(kind, "parenthesized") == 0 ? ')' : '}');
         if (position_ < start + 2 || source_[position_ - 1] != close) return;
+        append_argument_span(groups, kind, start, position_, start + 1, position_ - start - 2);
+    }
+
+    void append_argument_span(ArrayBuilder& groups, const char* kind, size_t start,
+                              size_t end, size_t content_start, size_t content_length) {
         MapBuilder group = builder_.map();
         group.put("kind", kind);
-        group.put("raw", builder_.createStringItem(source_ + start + 1, position_ - start - 2));
+        group.put("raw", builder_.createStringItem(source_ + content_start, content_length));
         group.put("start", (int64_t)source_offset(source_ + start));
-        group.put("end", (int64_t)source_offset(source_ + position_));
+        group.put("end", (int64_t)source_offset(source_ + end));
         groups.append(group.final());
     }
 

@@ -5964,6 +5964,7 @@ Item fn_parse_html_fragment1(Item str_item) {
     }
 
     Html5Parser* parser = html5_fragment_parser_create(input->pool, input->arena, input);
+    Html5ParserScope parser_scope(parser);
     if (!parser) {
         set_runtime_error(ERR_OUT_OF_MEMORY,
             "parse_html_fragment: failed to allocate HTML fragment parser");

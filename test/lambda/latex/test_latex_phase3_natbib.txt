@@ -1,0 +1,8 @@
+{
+  author: true,
+  notes: true,
+  numeric: true,
+  bibliography: true,
+  approximation: true,
+  invalid: true
+}

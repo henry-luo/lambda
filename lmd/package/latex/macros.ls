@@ -72,19 +72,23 @@ fn extract_newcommand(nc_el, nc_n) {
     let cmd_name = strip_backslash(raw_name)
     // find param count, optional default, and body
     let pb = find_param_and_body(nc_el, 1, nc_n)
+    let raw_body = util.raw_argument(nc_el, "required", 1)
     if (pb.body != null and pb.default_arg != null) {
-        make_def_with_default(cmd_name, pb.params, pb.body, pb.default_arg)
+        make_def_with_default(cmd_name, pb.params, pb.body, pb.default_arg,
+            raw_body)
     }
-    else if (pb.body != null) { make_def(cmd_name, pb.params, pb.body) }
+    else if (pb.body != null) { make_def(cmd_name, pb.params, pb.body, raw_body) }
     else { null }
 }
 
-fn make_def(cmd_name, params, body) {
-    {name: cmd_name, params: params, body: body, default_arg: null}
+fn make_def(cmd_name, params, body, raw_body) {
+    {name: cmd_name, params: params, body: body,
+     default_arg: null, source: raw_body}
 }
 
-fn make_def_with_default(cmd_name, params, body, default_arg) {
-    {name: cmd_name, params: params, body: body, default_arg: default_arg}
+fn make_def_with_default(cmd_name, params, body, default_arg, raw_body) {
+    {name: cmd_name, params: params, body: body,
+     default_arg: default_arg, source: raw_body}
 }
 
 fn get_cmd_name(node) {
@@ -177,6 +181,18 @@ fn check_macro(defs, cmd_name, i) {
 // ============================================================
 // Parameter substitution (used by render pass)
 // ============================================================
+
+// Reparse substituted TeX source so nested commands and environments keep structure.
+pub fn substitute_source(source, invocation, macro_def) {
+    let groups = invocation.argument_groups
+    let raw = if (groups == null) []
+        else [for (group in groups where group.kind == "optional" or
+            group.kind == "required") group.raw]
+    let args = if (macro_def.default_arg != null and
+        (groups == null or len(groups) == 0 or groups[0].kind != "optional"))
+        [macro_def.default_arg, *raw] else raw
+    substitute_text(source, args)
+}
 
 // substitute #1, #2 in body with arguments from invocation element
 // returns array of string/element items

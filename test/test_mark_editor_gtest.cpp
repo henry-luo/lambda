@@ -1641,6 +1641,29 @@ TEST_F(MarkEditorTest, ElementUpdateAttrKeepsSharedTypeAndTagId) {
     EXPECT_EQ(shared->length, 1);
 }
 
+TEST_F(MarkEditorTest, RepeatedInlineShapeEditsReleaseDraftStorage) {
+    MarkBuilder builder(input);
+    Item element = builder.element("div").attr("id", "kept").final();
+    Item empty = builder.createStringItem("");
+    String* key = builder.createName("inert");
+    auto toggle = [&]() {
+        MarkEditor editor(input, EDIT_MODE_INLINE);
+        EXPECT_EQ(get_type_id(editor.elmt_update_attr(element, key, empty)), LMD_TYPE_ELEMENT);
+        EXPECT_EQ(get_type_id(editor.elmt_delete_attr(element, key)), LMD_TYPE_ELEMENT);
+    };
+    for (int i = 0; i < 16; i++) toggle();
+    size_t arena_warm = arena_total_used(input->arena);
+    size_t pool_warm = 0;
+    pool_get_mem_stats(input->pool, nullptr, &pool_warm, nullptr);
+    for (int i = 0; i < 256; i++) toggle();
+    size_t pool_after = 0;
+    pool_get_mem_stats(input->pool, nullptr, &pool_after, nullptr);
+    EXPECT_EQ(arena_total_used(input->arena), arena_warm);
+    EXPECT_EQ(pool_after, pool_warm);
+    EXPECT_TRUE(ElementReader(element).has_attr("id"));
+    EXPECT_FALSE(ElementReader(element).has_attr("inert"));
+}
+
 // A rebuild lays its fields out by storage size and carries every value across,
 // however many fields there are: past the retired 64-slot builder cap.
 TEST_F(MarkEditorTest, RebuildLaysOutManyFields) {
