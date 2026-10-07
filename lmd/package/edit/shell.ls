@@ -254,6 +254,12 @@ on beforeinput(evt) {
   return 'pass'
 }
 on editaction(evt) {
+  // A copy changes nothing in the model; Radiant has already copied the DOM
+  // selection. Claim it as a no-op without writing state: a render would
+  // replace the selected nodes, and the editor has no copy command to run.
+  if (evt.input_type == "copy") {
+    return edit_result.applied(true, true, false, false, false, 0, "", false, "", null)
+  }
   editor = mounted(editor, evt.target, session.format)
   // A command the format cannot write is declined, not applied and lost later.
   if (member(session.format.unsupported_input_types, evt.input_type)) {

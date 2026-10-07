@@ -1,0 +1,21 @@
+{
+  "name": "Cmd+C and Cmd+X in the rich Markdown surface put the selection on the clipboard, cut removes it, and Cmd+V puts it back",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_clipboard.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "dblclick", "target": {"text": "paragraph"}},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "key_combo", "key": "c", "mods_str": "super"},
+    {"type": "assert_clipboard", "contains": "paragraph"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "short paragraph for testing"},
+    {"type": "key_combo", "key": "x", "mods_str": "super"},
+    {"type": "assert_clipboard", "contains": "paragraph"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "short  for testing"},
+    {"type": "key_combo", "key": "v", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "short paragraph for testing"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_clipboard.md", "contains": "This is a short paragraph for testing the editor."}
+  ]
+}

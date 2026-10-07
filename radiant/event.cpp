@@ -7825,10 +7825,14 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         InputIntent model_intent;
         if (!input_intent_clone(intent, &model_intent)) return true;
         // The source-model backend owns deletion, while clipboard transport
-        // remains native. Complete the copy half only after the public cut
-        // event and before invoking the snapshotted model action.
-        if (intent->type == INPUT_INTENT_DELETE_BY_CUT &&
-            !copy_current_selection_to_clipboard(state, "model cut")) {
+        // remains native. Copy the DOM selection after the public copy/cut
+        // event and before invoking the snapshotted model action: the
+        // handler's own render can retire the selected nodes. A cut with
+        // nothing to copy does not run.
+        if (intent->type == INPUT_INTENT_COPY) {
+            copy_current_selection_to_clipboard(state, "model copy");
+        } else if (intent->type == INPUT_INTENT_DELETE_BY_CUT &&
+                   !copy_current_selection_to_clipboard(state, "model cut")) {
             return true;
         }
         model_intent.edit_invocation_id = 0;
@@ -7842,13 +7846,9 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
             action_snapshot.model_item, action_snapshot.template_ref,
             nullptr, &raw_result);
         action_result_root.set(raw_result);
-        // Copy is the model's to fill as well; without its text the DOM
-        // selection is copied, as cut did before the action.
+        // a model whose selection reaches past the DOM names its own text
         if (intent->type == INPUT_INTENT_COPY || intent->type == INPUT_INTENT_DELETE_BY_CUT) {
-            if (!copy_model_text_to_clipboard(state, action_result_root.get(), "model clipboard") &&
-                intent->type == INPUT_INTENT_COPY) {
-                copy_current_selection_to_clipboard(state, "model copy");
-            }
+            copy_model_text_to_clipboard(state, action_result_root.get(), "model clipboard");
         }
         bool claimed = radiant_edit_result_bool(action_result_root.get(), "claimed");
         bool changed = radiant_edit_result_bool(action_result_root.get(), "changed");

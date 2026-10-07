@@ -451,9 +451,11 @@ EditResult = {
 model backend name what a copy or cut puts on the clipboard. A model's
 selection can reach past what the DOM shows (the source editor renders only
 a window of lines), so the DOM selection is not always the text to copy. The
-transport stays native (D7.2.5): Radiant writes the text after the handler
-returns. When the field is null, a copy falls back to the DOM selection, as a
-cut already did before its model action.
+transport stays native (D7.2.5). Radiant copies the DOM selection before it
+invokes the model handler for a copy or cut, because the handler's own render
+can retire the selected nodes; a non-null `clipboard_text` then replaces that
+copy after the handler returns. A model with nothing to add (the rich editor)
+claims a copy as a no-op and writes no state.
 
 For the DOM backend, the invocation owns the live post-edit selection and
 `selection_after` may be null with `selection_space: live-dom`. For the model
