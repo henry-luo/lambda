@@ -2110,10 +2110,12 @@ static Item event_source_position(DomDocument* doc, const SourcePosC* position) 
         for (int index = 0; index < position->path.depth; index++)
             array_push(path.get(), {.item = i2it(position->path.indices[index])});
     }
+    // The clone already has the seed's fields: set them, since putting would
+    // append a second `path`/`offset` that field reads never reach.
     MarkBuilder builder(doc->input);
-    map_put_heap(result.get().map, builder.createName("path"), {.array = path.get()}, doc->input);
-    map_put_heap(result.get().map, builder.createName("offset"),
-        {.item = i2it(position ? position->offset : 0)}, doc->input);
+    fn_map_set(result.get(), {.item = s2it(builder.createName("path"))}, {.array = path.get()});
+    fn_map_set(result.get(), {.item = s2it(builder.createName("offset"))},
+        {.item = i2it(position ? position->offset : 0)});
     return result.get();
 }
 
@@ -2126,9 +2128,10 @@ static Item event_source_selection(DomDocument* doc, const SourcePosC* anchor,
     Rooted<Item> anchor_value(roots, event_source_position(doc, anchor));
     Rooted<Item> head_value(roots, event_source_position(doc, head));
     if (get_type_id(result.get()) != LMD_TYPE_MAP) return ItemError;
+    // set, not put: the seed already carries `anchor` and `head`
     MarkBuilder builder(doc->input);
-    map_put_heap(result.get().map, builder.createName("anchor"), anchor_value.get(), doc->input);
-    map_put_heap(result.get().map, builder.createName("head"), head_value.get(), doc->input);
+    fn_map_set(result.get(), {.item = s2it(builder.createName("anchor"))}, anchor_value.get());
+    fn_map_set(result.get(), {.item = s2it(builder.createName("head"))}, head_value.get());
     return result.get();
 }
 
