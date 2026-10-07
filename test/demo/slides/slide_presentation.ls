@@ -1,4 +1,4 @@
-// ./lambda.exe view examples/slide_presentation.ls
+// ./lambda.exe view test/demo/slides/slide_presentation.ls
 import slide: lambda.slide
 
 let deck = <presentation title: "Lambda Slides", width: 960.0, height: 540.0,

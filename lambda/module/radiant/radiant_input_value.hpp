@@ -51,6 +51,7 @@ bool radiant_input_value_step(const char* type, const char* value,
                               char* output, size_t output_size);
 
 const char* radiant_input_live_value(DomElement* element);
+const char* radiant_input_peek_live_value(DomElement* element);
 bool radiant_input_set_live_value(DomElement* element, const char* value);
 void radiant_input_reset_live_value(DomElement* element);
 void radiant_input_type_changed(DomElement* element);

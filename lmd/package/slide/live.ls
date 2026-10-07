@@ -21,6 +21,12 @@ fn tree(plan, options) {
             <button type: "button", ["data-slide-command"]: "resume", "Resume">
             <button type: "button", ["data-slide-command"]: "next", "Next">
             <button type: "button", ["data-slide-command"]: "restart", "Restart">
+            <label class: "slide-speed", ["for"]: key ++ "-speed",
+                <span "Speed">
+                <input id: key ++ "-speed", class: "slide-speed-input", type: "range",
+                    min: "0.5", max: "4", step: "0.25", value: "1", ["aria-label"]: "Playback speed">
+                <span class: "slide-speed-value", "1×">
+            >
             <span class: "slide-status", ["aria-live"]: "polite", "1 / " ++ string(len(plan.slides))>
         >]
     >
@@ -116,8 +122,8 @@ pn present(owner, plan, before, ps, options, painted) {
             if (dom.has_attribute(layer, "aria-hidden")) dom.remove_attribute(layer, "aria-hidden")
         }
     }
-    let diagnostics = {index: ps.slide, cue: ps.cue, phase: c.as_text(ps.phase), paused: ps.paused}
-    let old_diagnostics = {index: before.slide, cue: before.cue, phase: c.as_text(before.phase), paused: before.paused}
+    let diagnostics = {index: ps.slide, cue: ps.cue, phase: c.as_text(ps.phase), paused: ps.paused, autoplay: ps.autoplay, rate: ps.playback_rate}
+    let old_diagnostics = {index: before.slide, cue: before.cue, phase: c.as_text(before.phase), paused: before.paused, autoplay: before.autoplay, rate: before.playback_rate}
     for (property, value in diagnostics where value != old_diagnostics[property] or not dom.has_attribute(owner, "data-slide-" ++ string(property)))
         dom.set_attribute(owner, "data-slide-" ++ string(property), string(value))
     // Publish parked/command time without invalidating attribute selectors every frame.
@@ -125,6 +131,8 @@ pn present(owner, plan, before, ps, options, painted) {
         dom.set_attribute(owner, "data-slide-time", c.fmt(ps.time_ms))
     if (before.slide != ps.slide)
         dom.set_text_content(dom.query_selector(owner, ".slide-status"), string(ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
+    if (before.playback_rate != ps.playback_rate)
+        dom.set_text_content(dom.query_selector(owner, ".slide-speed-value"), c.fmt(ps.playback_rate) ++ "×")
     // retain only the last successful ordinary sample; Morph has separate placement writes.
     return if (is_morph) null else visuals
 }
@@ -166,7 +174,18 @@ on slide_frame(evt) {
 }
 on slide_activate(evt) {
     if (ps.generation != 0 or evt.event_phase != 2) { return 'pass' }
-    let next = commit_event(evt.target, ~.plan, ps, {command: 'play', time_ms: evt.time_stamp}, ~.options, frame_token, painted)
+    let next = commit_event(evt.target, ~.plan, ps, {command: 'activate', time_ms: evt.time_stamp}, ~.options, frame_token, painted)
+    ps = next.ps
+    frame_token = next.token
+    painted = next.painted
+    return 'handled'
+}
+on input(evt) {
+    let owner = dom.closest(evt.target, ".slide-player")
+    if (owner == null or dom.get_attribute(owner, "id") != instance(~.options) or
+        not dom.matches(evt.target, ".slide-speed-input")) { return 'pass' }
+    let next = commit_event(owner, ~.plan, ps,
+        {command: 'speed', rate: dom.range_value(evt.target), time_ms: evt.time_stamp}, ~.options, frame_token, painted)
     ps = next.ps
     frame_token = next.token
     painted = next.painted

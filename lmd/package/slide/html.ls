@@ -12,8 +12,29 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-text { width: 100%; height: 100%; white-space: pre-wrap; }
 .slide-text p { margin: 0 0 0.6em; }
 .slide-image { width: 100%; height: 100%; }
-.slide-controls { display: flex; gap: 8px; justify-content: center; padding: 12px; color: white; }
-.slide-controls button { font: inherit; padding: 6px 14px; }
+.slide-controls { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+    gap: 8px; padding: 14px 24px; background: #102333; border-top: 1px solid #2b4353; color: #dce8ee; }
+.slide-controls button { appearance: none; box-sizing: border-box; font-family: inherit;
+    font-size: 13px; font-weight: 600; line-height: 20px; padding: 8px 16px;
+    border: 1px solid #365263; border-radius: 8px; background: #1b3445; color: #e5eef2;
+    cursor: pointer; box-shadow: 0 1px 2px #081724; }
+.slide-controls button:hover { background: #28495c; border-color: #5c8495; }
+.slide-controls button:active { background: #122b3c; }
+.slide-controls button:focus-visible { outline: 2px solid #8be2c6; outline-offset: 3px; }
+.slide-controls button[data-slide-command=next] { background: #8be2c6; border-color: #8be2c6;
+    color: #102b35; font-weight: 700; padding-left: 24px; padding-right: 24px; }
+.slide-controls button[data-slide-command=next]:hover { background: #b0efdb; border-color: #b0efdb; }
+.slide-controls button[data-slide-command=next]:active { background: #69c8ab; }
+.slide-controls button[data-slide-command=restart] { margin-left: 8px; background: transparent; }
+.slide-controls button[data-slide-command=restart]:hover { background: #28495c; }
+.slide-speed { display: flex; align-items: center; gap: 10px; margin-left: 8px;
+    padding: 8px 12px; border: 1px solid #2b4353; border-radius: 8px;
+    font-size: 12px; font-weight: 600; line-height: 20px; color: #afc5d0; }
+.slide-speed-input { width: 104px; height: 20px; margin: 0; padding: 0; cursor: pointer; accent-color: #8be2c6; }
+.slide-speed-input:focus-visible { outline: 2px solid #8be2c6; outline-offset: 3px; }
+.slide-speed-value { min-width: 36px; color: #8be2c6; text-align: right; }
+.slide-status { margin-left: 8px; padding: 8px 14px; border: 1px solid #2b4353; border-radius: 8px;
+    font-size: 13px; font-weight: 600; line-height: 20px; letter-spacing: 0.5px; color: #afc5d0; }
 "
 
 // compare sampled channels before formatting; steady channels need no CSS patch.
@@ -81,11 +102,14 @@ fn render_object(obj, visuals, instance, theme) {
     let matches = [for (v in visuals where v.id == obj.id) v]
     let v = matches[0]
     let hidden = v.visible < 0.5 or v.opacity <= 0.0
-    let position = placement_style(obj);
+    let position = placement_style(obj)
+    // percentage-sized SVG/images need definite bounds; groups also anchor local children.
+    let content_style = "width:100%;height:100%;" ++ (if (obj.tag == 'group') "position:relative;" else "") ++
+        c.as_text(c.value(obj.source.style, ""));
     <div id: instance ++ "-place-" ++ obj.dom_key, class: "slide-object", style: position,
         <div id: instance ++ "-" ++ obj.dom_key, class: "slide-effect", style: effect_style(v),
             ["data-slide-object"]: obj.id, ["aria-hidden"]: if (hidden) "true" else "false", *: (if (hidden) {inert: ""} else {}),
-            <div class: c.as_text(c.value(obj.source.class, "")), style: c.as_text(c.value(obj.source.style, "")),
+            <div class: c.as_text(c.value(obj.source.class, "")), style: content_style,
                 object_content(obj, v, visuals, instance, theme)
             >
         >

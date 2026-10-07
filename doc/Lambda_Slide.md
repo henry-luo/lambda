@@ -24,9 +24,15 @@ slide.page(deck, {instance: "demo", autostart: true})^
 ```
 
 Save it as a `.ls` script and open it with `./lambda.exe view deck.ls`.
-Runnable examples are [slide_presentation.ls](../examples/slide_presentation.ls)
-and [slide_package_content.ls](../examples/slide_package_content.ls). The latter
+Runnable examples are [slide_presentation.ls](../test/demo/slides/slide_presentation.ls)
+and [slide_package_content.ls](../test/demo/slides/slide_package_content.ls). The latter
 embeds a chart produced once by `lambda.chart.chart` and builds paragraphs.
+For a larger presentation, open
+[slide_northstar.ls](../test/demo/slides/slide_northstar.ls): an 18-slide fictional
+strategy briefing with charts, diagrams, a roadmap, tables and staged reveals.
+Its charts use separate slide targets for clockwise donut segments, line-series
+reveals and staggered bar fills; axes stay steady and labels appear afterward.
+See the [demo guide](../test/demo/slides/README.md) for its contents and controls.
 
 The standalone page fits the logical canvas into the viewer, with letterboxing,
 and refits on window resize. Explicit `width`/`height` options override those
@@ -46,11 +52,12 @@ dimensions. Authored object coordinates stay in logical slide units.
 | `initial_state(plan, options = {})` | Initial playback state. |
 | `reduce(plan, playback, event)^` | Updated playback state for a command or frame. |
 | `sample(plan, playback)^` | Deterministic object visuals for the selected slide/build. |
-| `needs_frame(playback)` | Whether an unpaused cue/transition needs another frame. |
+| `needs_frame(playback)` | Whether an unpaused cue, transition or autoplay dwell needs another frame. |
 | `diagnostic(plan, playback, frame_token = 0)` | IDs, time, phase, generation, active cue tracks and frame token. |
 
 `options` accepts `instance`, `width`, `height`, `base_uri`, `reduced_motion` and
-`autostart`. Dimensions are positive finite numbers; flags are booleans. Instance
+`autostart`, plus `autoplay_dwell_ms` (default 3000). Dimensions and the dwell
+interval are positive finite numbers; flags are booleans. Instance
 IDs are nonempty ASCII letters/digits/underscore/hyphen. Embedded players use
 their configured dimensions; automatic viewport fitting belongs to `page`.
 
@@ -143,10 +150,25 @@ rejected; arbitrary SVG path deformation and text reshaping are unsupported.
 
 ## Navigation, sampling and output
 
-Play starts entry cues; Next finishes a running build or starts the next build,
-then advances slides. Previous rewinds a build and crosses a slide boundary at
-its final state. Pause/Resume, Restart, Home/End, jump and seek are also available
-through the reducer. On a focused player root, arrows, Space, Page Up/Down and
+Play runs the deck automatically, waiting `autoplay_dwell_ms` before each click
+build or slide advance. It resumes paused playback and replays from slide 1
+when pressed at the end. Pause/Resume freezes/continues animations and dwell
+time. Restart returns to slide 1 and replays its entry cues; `restart-slide`
+replays the current slide through the reducer. `autostart: true` runs only the
+opening entry cues; the `activate` command exposes that same manual activation.
+
+The toolbar's **Speed** slider selects 0.5×–4× in 0.25× steps, with a live rate
+readout. It scales animations, transitions and autoplay dwell time; the default
+three-second dwell therefore takes 1.5 seconds at 2×. Changes preserve current
+progress and pause state, and the selected speed survives Restart and manual
+navigation. Focus the slider and use arrows or Home/End for keyboard control.
+The reducer also accepts `{command: 'speed', rate: 1.5, time_ms: ...}` with any
+positive finite rate.
+
+Next finishes a running build or starts the next build, then advances slides.
+Previous rewinds a build and crosses a slide boundary at its final state.
+Manual navigation, Restart, Home/End, jump and seek stop automatic playback.
+On a focused player root, arrows, Space, Page Up/Down and
 Home/End navigate. Modified keys and embedded controls retain normal behavior.
 `reduced_motion: true` snaps each build to its final state and uses cut transitions.
 
@@ -161,12 +183,14 @@ Use `snapshot` or `handout` with existing HTML/SVG/PDF/PNG paths where supported
 handout page-break hints are not a promise of new PDF pagination behavior.
 Resolve assets relative to the source document or provide `base_uri` explicitly.
 
-Each live player parks when waiting or paused. DOM handles and frame requests
+Each live player parks when waiting for manual input, paused, or finished.
+Autoplay dwell requests frames but keeps the completed cue's visual time fixed.
+DOM handles and frame requests
 use generation-checked document ownership (D4.5.1v4), and host values use precise
 roots (D5.3.3). A failed command, rejected live style value or refused frame request pauses the
 affected player and reports a message in its status. Restart retries playback;
 an invalid authored value must be corrected before that retry can succeed.
-`data-slide-index/cue/phase/paused` describe discrete live state; `data-slide-time`
+`data-slide-index/cue/phase/paused/autoplay/rate` describe discrete live state; `data-slide-time`
 is updated at command/park boundaries. Use the pure diagnostic function for an
 exact supplied playback state.
 

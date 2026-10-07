@@ -16,26 +16,39 @@ success and clean forced-GC diagnostics do not close those acceptance gates.
 PPTX import/export remains outside the authorized phase.
 
 Merge `971779a27` is complete with no unresolved index entries. Integration
-included dynamic transition-track ownership and retirement. The latest package
+included dynamic transition-track ownership and retirement. The CSS-delta package
 change compares sampled channels before CSS formatting in `html.ls`; `live.ls`
 applies those deltas directly. The static projection still emits a full map.
-These package changes and their new regression fixture remain uncommitted at
-this update; the merge is committed. No native font-family ownership fix has
-been implemented yet.
+Those changes and their regression fixture are committed in `2a3c41a6d`.
+The subsequent sample relocation, Northstar deck, styled controls, animated chart
+marks, object containing-box fixes, playback-control corrections and speed slider
+remain uncommitted at this update. No native font-family ownership fix has been
+implemented yet.
+
+The toolbar now includes a 0.5×–4× speed slider with a multiplier readout.
+Lambda owns rate changes and clock reanchoring for cues, transitions and dwell,
+including paused playback. Restart and navigation retain the rate. The native
+input behavior supplies pointer/keyboard stepping through the existing DOM
+package; no slide-specific host operation is added (S12.1.1v2/S12.1.3, D7.5.3).
+Forced collection exposed a borrowed synthetic event-name string in
+`dom_engine_dispatch_event`: creating the nested input event could reclaim its
+name before dispatch copied it, suppressing author input delivery. The bridge
+now roots both target and name throughout dispatch under D5.3.3. The same
+forced-GC reproduction passes after that ownership fix.
 
 | Latest verification | Result and boundary |
 |---|---|
-| Package scripts | 11 fixtures × JIT/interpreter = 22 matching expected-output runs |
-| Focused UI | 11 fixtures, 74 assertions pass with forced collection and freed-memory poisoning |
+| Package scripts | 13 fixtures × JIT/interpreter = 26 matching expected-output runs, including chart samples, autoplay clocks, pause/resume, restart and reduced motion |
+| Focused UI | 14 slide/host fixtures, 245 assertions pass with forced collection and freed-memory poisoning, including 126 Northstar checks and 22 speed-slider checks |
 | Merged native checks | 405 cases pass, including transition-track retirement |
-| Full Lambda baseline | 6,294/6,294 pass on the merged tree, before the subsequent Lambda CSS-delta change |
-| Full Radiant baseline | 4,028 pass, 350 partial, 4 fail; two HTTP setup failures pass on an escalated rerun; Tetris smoke and LaTeX iframe navigation remain failed |
+| Full Lambda baseline | 6,297/6,297 pass after the speed-slider and synthetic event-name ownership fix |
+| Full Radiant baseline | 4,031 pass, 350 partial, 4 fail after the speed/name-root fix; both HTTP setup failures pass with loopback access; Tetris smoke and LaTeX iframe navigation remain failed |
 | Navigation stress | Normal and forced-GC/poison runs each pass 40 assertions over 20 rounds / 120 callbacks; forced run has no raw-pointer or inconsistent-focus-ancestry diagnostics |
 | Latest lint / diff | Radiant float/int-cast lint and whitespace checks pass |
 
-All layout, render, DOM UI and memory baseline gates pass. Full baseline counts
-above describe the merged verification round; the subsequent package change has
-focused coverage, not a newly repeated full baseline. Older rounds below are
+All layout, render, DOM UI and memory baseline gates pass. Full Lambda and
+Radiant baselines were rerun sequentially after the speed/name-root fix; the
+405-case native row is the earlier merge verification. Older rounds below are
 retained as history and do not describe the current failure set.
 
 Latest release measurements use `temp/slide/lambda_release_merged`, an Apple M4,
@@ -71,9 +84,98 @@ transitions, color interpolation, paths, Morph, paragraph builds, controls and
 live frame orchestration. There is no dedicated native slide object or parser.
 
 [The public reference](../../doc/Lambda_Slide.md) describes the implemented API.
-[The introductory deck](../../examples/slide_presentation.ls) covers entry/click
-builds and slide transitions. [The package-content deck](../../examples/slide_package_content.ls)
+[The introductory deck](../../test/demo/slides/slide_presentation.ls) covers entry/click
+builds and slide transitions. [The package-content deck](../../test/demo/slides/slide_package_content.ls)
 embeds a chart and uses the paragraph helper.
+
+[The Northstar deck](../../test/demo/slides/slide_northstar.ls) adds an 18-slide
+fictional leadership briefing. Its reusable source module supplies consistent
+layouts, cards, SVG charts/diagrams, roadmap and scorecard tables, five click
+reveals and speaker notes, using ordinary element composition (S2.6.3) and the
+existing package/host boundary (D7.2.4, D7.5.3). It needs no external assets.
+Visual inspection exposed a missing containing box in the group's inner HTML
+wrapper: absolute children were present but Radiant omitted their zero-height
+ancestor. The package renderer now supplies relative positioning and full group
+bounds before authored styles, making local coordinates explicit. No native
+engine change is required. The new `slide_northstar.json` replay covers all
+18 slides, five reveals, Previous/Restart and group geometry/pixels. Normal and
+forced-GC/poison release runs each pass 92 assertions with no raw-pointer or
+focus-ancestry diagnostics. All 18 final-state snapshots render to PNG and were
+visually inspected; their HTML matches byte-for-byte in JIT and interpreter.
+Existing package fixtures still match in both tiers (22 runs), and the previous
+11 focused UI fixtures pass 74 assertions under forced GC and poisoning after
+the group fix. Artifacts are `temp/slide/northstar/`, `northstar_ui*_result.json`
+and `northstar_regression_*` under `temp/slide/`. These checks do not close the
+separate timing/retention gates.
+
+The subsequent controls/chart update replaces native-looking button defaults with
+an explicitly styled dark toolbar, rounded buttons, a mint Next action, hover and
+focus states, and a slide-count badge. Northstar's five data charts now separate
+static axes/legends from animated marks: a clockwise donut composed of 24 arc
+sectors, a left-to-right line/area reveal, staggered vertical bars revealed from
+the baseline, and sequential horizontal bar fills. Labels fade in after the
+data. Geometry, sequencing and easing remain Lambda authoring over existing
+clip/opacity tracks (S12.1.1v2/S12.1.3, D7.5.3); no native animation extension is
+needed. Percentage-sized SVGs and images also receive definite inner-wrapper
+dimensions, preserving the authored object bounds during clipping.
+
+Normal and forced-GC/poison release replays each pass 121 assertions, including
+paused intermediate chart pixels, completion pixels, staged labels and existing
+navigation. The previous eleven UI fixtures still pass 74 assertions under
+forced GC and poisoning, with no raw-pointer or inconsistent-focus-ancestry
+diagnostics. Twelve Lambda fixtures match in both tiers (24 runs); the new fixture
+checks initial/intermediate/completed samples and reduced-motion snapping for
+all five charts. All 18 final HTML snapshots match byte-for-byte between tiers
+and render successfully. Chart/control renders were visually checked. Artifacts:
+`temp/slide/northstar_chart_reveals*`, `chart_regression_*` and
+`northstar/controls.png`. Earlier timing measurements precede these changes;
+performance and retention acceptance remain open.
+
+The playback-control correction fixes two reducer limitations: Play previously
+ran only entry cues, becoming a no-op at ordinary click boundaries and leaving
+paused cues paused; Restart reset only the current slide. Play now runs the deck
+with a configurable positive `autoplay_dwell_ms` (default 3000), resumes paused
+cue/transition/dwell clocks, and replays from the beginning after completion.
+Restart resets the deck; `restart-slide` retains explicit current-slide replay.
+Manual navigation cancels autoplay. Readiness activation still runs only entry
+cues through `activate`. Dwell uses a separate elapsed value so completed chart
+visuals do not rewind while waiting. The reducer carries missed-frame time
+through automatic advances and parks at the final build. These changes stay
+in Lambda under S12.1.1v2/S12.1.3 and D7.5.3; no host extension is required.
+
+`test_slide_playback_controls` initially checked 23 boundaries, including repeated Play,
+paused cues/transitions/dwells, manual cancellation, late frames, reduced motion,
+restart scope and invalid dwell values. All 13 package scripts match their
+expected output in JIT and interpreter (26 runs). The new UI replay passes 23
+assertions under release forced GC/poison and also with the workspace debug
+executable; this is functional validation, not a performance measurement.
+Existing focused UI checks pass with forced GC/poison. The extended Northstar
+replay passes 126 assertions, including Restart to slide 1 and automatic
+playback through all 18 slides; all 13 focused fixtures total 223 assertions,
+with no raw-pointer or inconsistent-focus-ancestry diagnostics.
+Artifacts: `temp/slide/controls_*`, `controls_regression_*` and
+`playback_controls_*`. Timing and retention acceptance remain open.
+
+The subsequent speed update expands that reducer fixture to 36 checks, adding
+mid-cue, transition and dwell rate changes, paused-rate updates, missed-frame
+carry, restart persistence and invalid-rate diagnostics. All 26 JIT/interpreter
+runs pass. The new `slide_speed.json` checks default/readout values, pointer
+selection, keyboard stepping, preserved pause, completion at 2× and restart
+persistence. It passes 22 assertions under release forced GC/poison after the
+native name-root fix; all 14 slide/host fixtures pass 245 assertions, with no
+raw-pointer or inconsistent-focus-ancestry diagnostics. The toolbar was rendered
+and visually checked at 1280 × 800 (`temp/slide/northstar/speed-controls.png`).
+Artifacts: `temp/slide/speed_*`. The full Lambda baseline passes 6,297/6,297.
+The full Radiant baseline reports 4,031 pass / 350 partial / 4 fail, with all
+layout, render, DOM UI and memory gates passing. Two HTTP fixtures cannot start
+their local servers in the sandbox and both pass with loopback access; the
+previously recorded Tetris smoke and LaTeX iframe failures remain. The speed
+fixture records forced-GC/poison environment settings for regular UI-runner
+coverage. Float/int-cast lint and whitespace checks pass.
+An additional existing plain-JS range replay passes 26 assertions normally;
+under forced GC/poison its JS preamble fails before input dispatch, leaving five
+assertions failed. That separate bootstrap failure is outside the slider's
+Lambda handler path and remains unresolved.
 
 | Milestone | Status |
 |---|---|
@@ -97,8 +199,9 @@ Each player owns its playback state, frame token, generation and last successful
 ordinary visual sample. Frames compare against that retained GC value instead of
 resampling the previous time. Scene replacement, Morph and failed commits invalidate
 the comparison; the cache retains one sample rather than a frame history.
-Each player retains its own sample independently. Waiting/paused
-players stop requesting frames; stale deliveries are ignored. Failed commands or
+Each player retains its own sample independently. Players waiting for manual
+input, paused players and completed decks stop requesting frames; stale deliveries
+are ignored. Failed commands or
 refused requests pause and report an error, with Restart available for recovery.
 
 Standalone pages fit logical coordinates into the current viewport and refit on

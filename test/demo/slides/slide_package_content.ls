@@ -1,4 +1,4 @@
-// ./lambda.exe view examples/slide_package_content.ls
+// ./lambda.exe view test/demo/slides/slide_package_content.ls
 import slide: lambda.slide
 import chart: lambda.chart.chart
 
