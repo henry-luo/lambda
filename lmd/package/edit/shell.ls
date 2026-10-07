@@ -285,6 +285,9 @@ on editaction(evt) {
   return run.result
 }
 on selectionchange(evt) {
+  // A selection inside a dialog's text field is the field's own: adopting it
+  // would re-render the dialog and reset the field's typed value.
+  if (dom.node_type(evt.target) == 1 and dom.matches(evt.target, "input, textarea")) { return }
   if (evt.source_selection != null or evt.source_pos != null) {
     editor = mounted(editor, evt.target, session.format)
     let accepted = edit_accept_dom_selection(editor, evt)

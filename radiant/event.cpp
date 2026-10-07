@@ -10417,6 +10417,50 @@ extern "C" bool dom_engine_frame_cancel(void* owner, uint64_t token) {
     return false;
 }
 
+// The nesting a frame owner may have below a rebuilt template result.
+static const int FRAME_OWNER_MAX_DEPTH = 256;
+
+// A reactive rebuild replaces a template's result subtree
+// (rebuild_lambda_doc_incremental), so an owner inside it would be skipped as
+// detached and a template could never keep a frame it requested from its own
+// result: storing the token in its state causes that very rebuild. Like
+// retained view state (view_state_preserve_subtree_identity), a pending
+// request follows its owner to the structurally corresponding replacement; an
+// owner without one stays behind and is dropped as detached.
+void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
+                                           DomNode* new_root) {
+    RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
+    if (!queue || !old_root || !new_root || old_root == new_root) return;
+    for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
+        if (!request->pending || !dom_node_ref_validate(doc, request->owner)) continue;
+        // the owner's child indexes below old_root, innermost first
+        int path[FRAME_OWNER_MAX_DEPTH];
+        int depth = 0;
+        DomNode* node = request->owner.address;
+        while (node && node != old_root && depth < FRAME_OWNER_MAX_DEPTH) {
+            int index = 0;
+            for (DomNode* sibling = node->prev_sibling; sibling; sibling = sibling->prev_sibling) index++;
+            path[depth++] = index;
+            node = node->parent;
+        }
+        if (node != old_root) continue;
+        DomNode* old_node = old_root;
+        DomNode* new_node = new_root;
+        while (view_state_nodes_correspond(old_node, new_node) && depth > 0) {
+            int index = path[--depth];
+            old_node = old_node->is_element() ? old_node->as_element()->first_child : nullptr;
+            new_node = new_node->is_element() ? new_node->as_element()->first_child : nullptr;
+            for (int i = 0; i < index && old_node && new_node; i++) {
+                old_node = old_node->next_sibling;
+                new_node = new_node->next_sibling;
+            }
+        }
+        if (depth == 0 && view_state_nodes_correspond(old_node, new_node) && new_node->is_element()) {
+            request->owner = dom_node_ref(new_node);
+        }
+    }
+}
+
 bool radiant_document_has_pending_frames(DomDocument* doc) {
     RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
     if (!queue) return false;

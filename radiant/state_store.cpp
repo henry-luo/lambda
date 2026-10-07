@@ -2522,8 +2522,8 @@ ViewState* view_state_get(DocState* state, View* view) {
     return NULL;
 }
 
-static bool view_state_nodes_correspond(const DomNode* old_node,
-                                        const DomNode* new_node) {
+bool view_state_nodes_correspond(const DomNode* old_node,
+                                 const DomNode* new_node) {
     if (!old_node || !new_node || old_node->node_type != new_node->node_type) {
         return false;
     }

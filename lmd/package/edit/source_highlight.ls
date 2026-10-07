@@ -221,6 +221,12 @@ pub fn overlay(runs, marks, cls) {
   }
 }
 
+// Lines longer than this render plain (design §5.3): the parse still reads
+// them, but painting their runs would cost more than the frame allows.
+let LONG_LINE = 10000
+
+fn guarded_runs(text, line, spans, fm_end) => if (len(text) > LONG_LINE) [] else line_runs(text, line, spans, fm_end)
+
 // Parse the window [first, last] of a buffer in `lang` and build its runs.
 // `scan` is the restart cache {states, valid} the previous call returned.
 pub fn highlight(b, first, final, scan, lang) {
@@ -232,7 +238,7 @@ pub fn highlight(b, first, final, scan, lang) {
     let spans = [for (i in 0 to len(r[1]) div FIELDS - 1) span_at(r, i)]
     let fm_end = if (lang == 'markdown') front_matter_end(b) else -1;
     {hl: {version: b.version, first: lo, last: hi, exact: true,
-          runs: [for (l in lo to hi) line_runs(buf.line(b, l), l, spans, fm_end)]},
+          runs: [for (l in lo to hi) guarded_runs(buf.line(b, l), l, spans, fm_end)]},
      scan: {states: r[2], valid: len(r[2]) div 3}}
   }
 }
