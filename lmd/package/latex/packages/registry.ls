@@ -282,7 +282,8 @@ fn tikz_library_issues(node) {
             trim(raw) != "decorations.pathmorphing" and
             trim(raw) != "lindenmayersystems" and
             trim(raw) != "backgrounds" and
-            trim(raw) != "positioning" and
+            trim(raw) != "positioning" and trim(raw) != "calc" and
+            trim(raw) != "shapes.geometric" and
             trim(raw) != "arrows.meta" and trim(raw) != "math")
         diagnostic("unsupported-tikz-library", "tikz", trim(raw),
             "Unsupported TikZ library: " ++ trim(raw), node)]
