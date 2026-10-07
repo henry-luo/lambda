@@ -584,7 +584,8 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
                                                  DomNode* target,
                                                  DomNode* parent,
                                                  uint32_t sequence,
-                                                 const char* attribute_name = nullptr) {
+                                                 const char* attribute_name = nullptr,
+                                                 CssPropertyCode presentation_property = CSS_PROPERTY_UNKNOWN) {
     parent = dom_mutation_source_parent(parent);
     DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
@@ -592,6 +593,9 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
     if (sequence == 0) {
         sequence = doc->js.mutation_sequence + 1;
     }
+    // the reconciler may skip layout only for reflow requests this batch made
+    if (doc->js.mutation_record_count == 0 && doc->js.mutation_record_overflow == 0)
+        doc->js.reflow_pending_before_batch = doc->state && doc->state->needs_reflow;
     doc->js.mutation_kind_mask |= dom_mutation_bit(kind);
 
     if (dom_js_mutation_records_reserve(doc, doc->js.mutation_record_count + 1)) {
@@ -613,6 +617,7 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
         record->attribute = kind == DOM_JS_MUTATION_ATTRIBUTE
             ? dom_mutation_attribute_from_name(attribute_name)
             : DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
+        record->presentation_property = presentation_property;
         record->was_connected =
             dom_mutation_node_was_connected(doc, target) ||
             dom_mutation_node_was_connected(doc, parent);
@@ -733,7 +738,8 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
                                           DomNode* target = nullptr,
                                           DomNode* parent = nullptr,
                                           const char* attribute_name = nullptr,
-                                          const char* old_value = nullptr) {
+                                          const char* old_value = nullptr,
+                                          CssPropertyCode presentation_property = CSS_PROPERTY_UNKNOWN) {
     parent = dom_mutation_source_parent(parent);
     DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
@@ -746,6 +752,9 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     doc->js.mutation_count++;
     doc->js.mutation_sequence++;
     doc->mutation_epoch++;
+    // a non-inherited presentation value stays on its element (style_content_epoch)
+    if (presentation_property == CSS_PROPERTY_UNKNOWN ||
+        css_property_runtime_inherited(presentation_property)) doc->style_content_epoch++;
     dom_svg_layer_note_mutation(target);
     if (parent && (!target || parent != target->parent)) dom_svg_layer_note_mutation(parent);
     dom_record_inline_stylesheet_mutation(doc, kind, target, parent);
@@ -765,7 +774,7 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
 
     if (!has_pending_structural_record) {
         dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence,
-                                   attribute_name);
+                                   attribute_name, presentation_property);
     }
     dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
 
@@ -2327,7 +2336,7 @@ extern "C" bool dom_document_set_preferred_languages(void* document, const char*
     mem_free(doc->services.preferred_languages); doc->services.preferred_languages = replacement;
     // preference changes invalidate the same paint/resource generations as authored SVG mutations.
     if (doc->root) dom_notify_mutation(DOM_JS_MUTATION_STYLE, doc->root, nullptr);
-    else doc->mutation_epoch++;
+    else { doc->mutation_epoch++; doc->style_content_epoch++; }
     if (doc->state) doc_state_request_repaint(doc->state);
     return true;
 }
@@ -11688,8 +11697,11 @@ extern "C" Item dom_presentation_style_set_property(Item node_item, Item propert
     const char* text = fn_to_cstr(value_root.get());
     bool changed = false;
     bool accepted = element && dom_element_set_presentation_style(element, name, text, &changed);
-    if (changed) dom_notify_mutation(dom_style_mutation_kind(css_property_code_from_name(name)),
-                                     element, element->parent);
+    if (changed) {
+        CssPropertyCode code = css_property_code_from_name(name);
+        dom_mutation_notify(dom_style_mutation_kind(code), element, element->parent,
+                            nullptr, nullptr, code);
+    }
     return (Item){.item = b2it(accepted)};
 }
 

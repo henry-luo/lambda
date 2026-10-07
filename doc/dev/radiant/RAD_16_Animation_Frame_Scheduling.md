@@ -1,6 +1,6 @@
 # Radiant — Animation & Frame Scheduling
 
-> **Last verified against tree:** 2026-09-29
+> **Last verified against tree:** 2026-10-07 (§8 presentation-style paint-only commit); 2026-09-29
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *timing half* of Radiant: the cross-platform `RadiantFrameClock` vsync wake source, the `window.cpp` render loop it paces, the generic `AnimationScheduler`/`TimingFunction`/`AnimationInstance` engine, the CSS `@keyframes` runtime (`KeyframeRegistry`, per-frame keyframe sampling into in-place view mutations and dirty rects), and the video-frame wake path. The threading contract is the load-bearing idea: the native clock only *wakes* the loop; every animation sample and every mutation runs on the UI thread.
 >
@@ -205,6 +205,23 @@ the node. Invalid properties/values, `!important` input and values unsupported b
 the ownership copier are rejected without replacing the previous sample.
 SVG fill/stroke paint consults this layer through the existing CSS comparison.
 These operations supply mechanism; Lambda packages supply timeline policy.
+
+Each journal record carries the property a presentation write changed. When every
+record of a turn is an `opacity` write, or a `transform` write that keeps a
+transform, `post_html_handler_paint_only_commit` (`event.cpp`) commits without
+cascade or layout: it re-resolves just that property into the retained view with
+the layout resolver, clears the turn's own reflow request and repaints. Radiant
+reads transforms in layout only to decide containing-block establishment and
+computes overflow without them, and stacking order is collected at paint, so
+neither write changes layout; hit testing reads the retained transform. The path
+declines a target that is disconnected, unlaid-out, synthetic, SVG, shares its
+specified style, has transitions, animations or web animations, a write that
+removes or introduces a transform, an opacity write under `preserve-3d`, an
+overflowed journal, inline stylesheet mutations, or a reflow that was already
+pending before the turn; those turns take the incremental path
+(`test/ui/presentation_paint_only.json`). A non-inherited presentation write also
+leaves `DomDocument::style_content_epoch` unchanged, so inline SVG layers outside
+the written subtree stay cached ([RAD_14 §4.4](RAD_14_SVG_Vector_Graph.md)).
 
 ## 9. Known Issues & Future Improvements
 

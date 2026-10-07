@@ -7779,18 +7779,21 @@ static bool svg_layer_capture(RasterRenderContext* rdcon, SvgLayerRegistry* regi
     return true;
 }
 
-// A layer is blitted by the CPU painter, which has no transform: a pure
-// translation (the common CSS drift on a decorative layer) folds into the
-// destination, anything else disqualifies the layer.
-static bool svg_layer_transform_offset(const RasterRenderContext* rdcon, float* dx, float* dy) {
+// A layer is blitted by the CPU painter, which has no transform. An
+// axis-aligned uniform scale plus translation (a CSS drift on a decorative
+// layer, a fitted presentation stage) folds into the capture resolution and
+// the destination; rotation, skew, flips and non-uniform scale disqualify it.
+static bool svg_layer_device_transform(const RasterRenderContext* rdcon, float* sx, float* dx, float* dy) {
+    *sx = 1.0f;
     *dx = 0.0f;
     *dy = 0.0f;
     if (!rdcon->has_transform) return true;
     const RdtMatrix* m = &rdcon->transform;
-    if (fabsf(m->e11 - 1.0f) > 0.0005f || fabsf(m->e22 - 1.0f) > 0.0005f ||
+    if (m->e11 <= 0.0f || fabsf(m->e11 - m->e22) > 0.0005f ||
         fabsf(m->e12) > 0.0005f || fabsf(m->e21) > 0.0005f) {
         return false;
     }
+    *sx = m->e11;
     *dx = m->e13;
     *dy = m->e23;
     return true;
@@ -7807,10 +7810,12 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     if (mode == SVG_LAYER_MODE_OFF || !rdcon->ui_context || !rdcon->ui_context->document) {
         return false;
     }
-    float offset_x, offset_y;
-    if (!svg_layer_transform_offset(rdcon, &offset_x, &offset_y)) return false;
-    int width = (int)lroundf(content_rect->width);   // INT_CAST_OK: layer pixel size
-    int height = (int)lroundf(content_rect->height); // INT_CAST_OK: layer pixel size
+    float device_scale, offset_x, offset_y;
+    if (!svg_layer_device_transform(rdcon, &device_scale, &offset_x, &offset_y)) return false;
+    // the layer is rasterised at the scale it lands on the surface
+    float layer_scale = scale * device_scale;
+    int width = (int)lroundf(content_rect->width * device_scale);   // INT_CAST_OK: layer pixel size
+    int height = (int)lroundf(content_rect->height * device_scale); // INT_CAST_OK: layer pixel size
     if (width <= 0 || height <= 0 || (size_t)width * (size_t)height * 4u > SVG_LAYER_MAX_BYTES) {
         return false;
     }
@@ -7819,9 +7824,11 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     if (!entry) return false;
 
     uint32_t generation = dom_elem->svg_layer_generation;
-    uint64_t document_epoch = rdcon->ui_context->document->mutation_epoch;
+    // presentation writes of non-inherited values elsewhere cannot change this raster
+    uint64_t document_epoch = rdcon->ui_context->document->style_content_epoch;
     DocState* state = rdcon->ui_context->document->state;
-    uint64_t interaction_generation = state ? state->version : 0;
+    // repaint/reflow bookkeeping is not an interaction change
+    uint64_t interaction_generation = doc_state_content_version(state);
     uint64_t animation_generation = svg_animation_generation(rdcon->ui_context->document);
     uint64_t font_generation = font_context_glyph_cache_generation(rdcon->ui_context->font_ctx);
     uint64_t font_resource_generation = font_context_resource_generation(rdcon->ui_context->font_ctx);
@@ -7832,7 +7839,7 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
                      entry->font_generation == font_generation &&
                      entry->font_resource_generation == font_resource_generation &&
                      entry->pixel_width == width && entry->pixel_height == height &&
-                     entry->scale == scale && svg_layer_paint_equal(&entry->paint, paint);
+                     entry->scale == layer_scale && svg_layer_paint_equal(&entry->paint, paint);
     if (!unchanged) {
         svg_layer_entry_release_surface(registry, entry);
         entry->element = dom_node_ref(dom_elem);
@@ -7845,23 +7852,24 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
         entry->image_resource_generation = image_generation;
         entry->pixel_width = width;
         entry->pixel_height = height;
-        entry->scale = scale;
+        entry->scale = layer_scale;
         entry->paint = *paint;
         if (mode != SVG_LAYER_MODE_EAGER) return false;
     }
     if (!entry->surface &&
         !svg_layer_capture(rdcon, registry, entry, svg_elem, dom_elem,
-                           viewport_width, viewport_height, scale, paint)) {
+                           viewport_width, viewport_height, layer_scale, paint)) {
         return false;
     }
     // capture can resolve a font source; key the resulting paint by that resource.
-    entry->interaction_generation = state ? state->version : 0;
+    entry->interaction_generation = doc_state_content_version(state);
     entry->font_generation = font_context_glyph_cache_generation(rdcon->ui_context->font_ctx);
     entry->font_resource_generation = font_context_resource_generation(rdcon->ui_context->font_ctx);
     entry->image_resource_generation = image_cache_resource_generation(rdcon->ui_context);
     ImageSurface* surface = entry->surface;
     // whole device pixels, so the blit copies samples instead of resampling
-    Rect dst = { roundf(content_rect->x + offset_x), roundf(content_rect->y + offset_y),
+    Rect dst = { roundf(content_rect->x * device_scale + offset_x),
+                 roundf(content_rect->y * device_scale + offset_y),
                  (float)surface->width, (float)surface->height };
     Bound clip = view_geometry_intersect_bound_rect(rdcon->block.clip, dst);
     render_painter_blit_surface_scaled(rdcon, surface, nullptr, rdcon->ui_context->surface,
