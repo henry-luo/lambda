@@ -1348,6 +1348,7 @@
         "lambda/input/input-adoc.cpp",
         "lib/font/font_config.c",
         "lib/clock_compat.c",
+        "lib/test_font_path_gtest.cpp",
         "lambda/network/network_resource_manager.cpp"
       ],
       "includes": [
@@ -1357,9 +1358,7 @@
       ],
       "exclude_libraries": [
         "glfw",
-        "ThorVG",
-        "brotlidec",
-        "brotlicommon"
+        "ThorVG"
       ],
       "exclude_macos_libraries": [
         "Cocoa",
