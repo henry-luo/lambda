@@ -208,6 +208,11 @@ Markdown fidelity over the corpus (window versus full parse, 60,255 lines): 166 
 | Soft wrap motion and resize (§6.4) | Up, Down, PageUp and PageDown step by rows while wrapping, keeping an x within the row; `on resize` measures rows and columns again; `on load` measures at once. | `source.ls` |
 | Column units (CED21) | `bytes_before` and `col_at_byte` in one module, each one native UTF-8 encoding instead of per-character prefix sums (the old `col_at_byte` was quadratic in the line length). | `source_units.ls` |
 | GTest ring (§11) | (a) span text, (b) window vs full parse by per-line coverage over the corpus, (c) span recording leaves the tree identical, (d) HTML lexer vs tree parser, (e) 300 random edits with the carried cache vs a cold parse. | `test/test_input_sourcepos_gtest.cpp`, input suite |
+| Horizontal scrolling (§6.2) | `left` columns in the view; the surface takes a negative `margin-left` and slides under the gutter, which paints above it; `follow` keeps the caret in view with a few columns of context; horizontal wheel deltas scroll by whole columns, carrying the remainder; the measured width subtracts the hidden columns. | `source.ls` |
+| Gutter clicks (§6.3) | A press on a line number (`data-line`) selects the line; Shift extends the selection to it. A click past a line's end needed nothing: native hit-testing puts the caret at the end. | `source.ls` |
+| Undo groups (§5.2) | A typing step also ends after a 500 ms pause (the events' `time_stamp`) or a caret move (keys, clicks, gutter, Shift+click). | `source.ls` |
+| Event `timeStamp` | Native event records built for Lambda handlers had no `timeStamp`, so every handler read 0; they now carry their creation time on the document's clock, as constructed events do. | `radiant/event.cpp` `build_dom_event_record` |
+| Caret `selectionchange` | The Lambda `selectionchange` on mouse-up required a non-collapsed range, so a click that only placed the caret reached the model on the next key (the old "adopt it first" comment in `keydown`); the guard now accepts a caret. The surface projects the selection again after adopting it. | `radiant/event.cpp` `dispatch_selectionchange`, `source.ls` |
 
 ### 8.2 Measurements
 
@@ -245,8 +250,12 @@ Corpus fidelity (GTest (b), `test/markdown`, 40-line windows every 17 lines): 1,
 | `test/ui/edit/edit_src_md_nested.json` | nested blocks, references 600 lines below, a 10,800-character plain line, typing keeps the links | 14/14 |
 | `test/ui/edit/edit_src_status.json` | selection size, language, line ends, unsaved state | 7/7 |
 | `test/ui/edit/edit_src_wrap_rows.json` | Up and Down by rows, resize re-measures (gutter height equals text height) | 10/10 |
-| all `test/ui/edit/edit_src_*.json` | P0–P3 behavior with pass 2 on a frame | 19/19 |
-| all `test/ui/edit/*.json` | the edit application | 39/41; `edit_md_scroll_chrome` (6/7) and `edit_md_view_only_keys` (a CHECK-FAIL crash) fail identically with a base binary built at `796581033`; `edit_md_save_as` now passes |
+| `test/ui/edit/edit_src_hscroll.json` | sideways scroll to the caret, the gutter stays, a click on scrolled text, Home, the sideways wheel, wrap resets it | 11/11 |
+| `test/ui/edit/edit_src_gutter.json` | a click past a line's end, a line-number click and Shift+click, typing over the selected line | 4/4 |
+| `test/ui/edit/edit_src_undo_groups.json` | undo steps split by a 600 ms wait and by a caret move | 3/3 |
+| all `test/ui/edit/edit_src_*.json` | P0–P3 behavior with pass 2 on a frame | 22/22 (`edit_src_wrap` now expects the column scrolled to the caret after unwrapping) |
+| all `test/ui/edit/*.json` | the edit application | 42/44; `edit_md_scroll_chrome` (6/7) and `edit_md_view_only_keys` (a CHECK-FAIL crash) fail identically with a base binary built at `796581033`; `edit_md_save_as` now passes |
+| `test_ui_automation_gtest --suite baseline` | after the caret `selectionchange` and `timeStamp` changes | 363/365; `doc_editor_text_to_pdf` and `tetris_smoke` fail identically with the base binary |
 | `make test-lambda-baseline` | parser, `parse()` | 6282/6286; the four failures fail identically with a base binary: three `LambdaReplSessionTests` expect the `λ>` prompt, which needs a UTF-8 locale the sandboxed shell lacks, and `pdf_svg_page_resources` needs the main checkout's ignored `test/pdf` data |
 | `make test-radiant-baseline` | frame rebind, host config, shell | layout, page, vector, page-load, fuzzy, WPT suites pass. Failing, all identical with a base binary built at `796581033`: `doc_editor_text_to_pdf` (1/10), `tetris_smoke` (16/17), CSS cascade memory (jqueryui 378,762 > 373,940, linuxmint 668,986 > 667,901). Failing only for missing worktree data, passing once `test/render` and `test/pdf` are linked: the PDF fixtures, the view suite and `RenderBatchReleasesImageCacheAfterDocumentOwner`; the four `dom_jquery_ui_*` fixtures need the main checkout's `test/jquery-ui` link |
 
