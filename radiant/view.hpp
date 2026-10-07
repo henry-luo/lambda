@@ -2345,7 +2345,8 @@ typedef struct GridProp {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct EmbedProp {
     lam::Up<ImageSurface> img;  // borrowed: the image cache or a network resource owns it (O2)
-    float content_image_resolution; // CSS image-set() density for intrinsic sizing, 0 means 1x
+    float content_image_resolution; // selected srcset/image-set density; 0 means 1x
+    lam::Own<char> selected_image_source; // view-property pool owns the selected URL
     lam::Own<DomDocument> doc;   // iframe document
     struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
     lam::Own<FlexProp> flex;

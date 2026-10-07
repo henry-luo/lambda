@@ -2746,7 +2746,8 @@ static float intrinsic_image_height(DomElement* element, ImageSurface* image, fl
     float width, height;
     if (!layout_image_intrinsic_size(element, image, &width, &height)) return 0.0f;
     ReplacedIntrinsicFacts facts = {};
-    layout_replaced_image_facts(&facts, image, layout_image_orientation_uses_from_image(element));
+    layout_replaced_image_facts(&facts, image, layout_image_orientation_uses_from_image(element),
+        layout_replaced_image_density(element));
     float ratio = image->format == IMAGE_FORMAT_SVG
         ? facts.has_natural_aspect_ratio ? facts.natural_aspect_ratio : 0.0f : width / height;
     // grid/flex height queries must not synthesize a ratio from an SVG's decoder fallback.
@@ -2757,58 +2758,6 @@ static float intrinsic_image_height(DomElement* element, ImageSurface* image, fl
     return height;
 }
 
-static char* layout_first_srcset_candidate(const char* srcset) {
-    if (!srcset) return nullptr;
-    const char* cursor = srcset;
-    while (*cursor) {
-        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
-               *cursor == '\n' || *cursor == ',') {
-            cursor++;
-        }
-        if (!*cursor) return nullptr;
-        const char* end = cursor;
-        while (*end && *end != ' ' && *end != '\t' && *end != '\r' &&
-               *end != '\n' && *end != ',') {
-            end++;
-        }
-        if (end > cursor) {
-            size_t length = (size_t)(end - cursor);
-            return mem_dup_n(cursor, length, MEM_CAT_LAYOUT);
-        }
-        cursor = end;
-    }
-    return nullptr;
-}
-
-char* layout_resolve_replaced_image_source(DomElement* element) {
-    if (!element || element->tag() != MARKUP_NAME_IMG) return nullptr;
-
-    const char* src = element->get_attribute("src");
-    if (src && src[0] != '\0') return mem_strdup(src, MEM_CAT_LAYOUT);
-
-    DomNode* parent = element->parent;
-    if (!parent || !parent->is_element() ||
-        parent->as_element()->tag() != MARKUP_NAME_PICTURE) {
-        return nullptr;
-    }
-
-    DomElement* picture = parent->as_element();
-    for (DomNode* child = picture->first_child; child; child = child->next_sibling) {
-        if (!child->is_element() || child->as_element()->tag() != MARKUP_NAME_SOURCE) continue;
-        DomElement* source = child->as_element();
-        const char* media = source->get_attribute("media");
-        const char* type = source->get_attribute("type");
-        // Media/type matching is not available in the layout resource loader;
-        // leave conditional sources for a future media-capability pass.
-        if ((media && media[0] != '\0') || (type && type[0] != '\0')) continue;
-        char* candidate = layout_first_srcset_candidate(source->get_attribute("srcset"));
-        if (candidate) {
-            return candidate;
-        }
-    }
-    return nullptr;
-}
-
 ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
                                                     ViewBlock* block,
                                                     DomElement* element) {
@@ -2817,20 +2766,28 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
     bool loadable = tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_EMBED ||
         (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA));
     if (!loadable) return nullptr;
-    if (block->embed && block->embedp()->img) return block->embedp()->img;
-    const char* src_value = tag == MARKUP_NAME_IMG
-        ? element->get_attribute("src") : element->get_attribute(MARKUP_NAME_DATA);
+    if (!lycon || !lycon->ui_context || !lycon->doc) return nullptr;
+    if (tag != MARKUP_NAME_IMG && block->embed && block->embedp()->img) return block->embedp()->img;
+    CssEngine* engine = (CssEngine*)lycon->doc->services.cached_css_engine;
+    float density = 1.0f; DomElement* dimensions = element;
     lam::Temp<char> selected_source(tag == MARKUP_NAME_IMG
-        ? layout_resolve_replaced_image_source(element) : nullptr);
-    if (selected_source) src_value = selected_source.get();
-    if (!src_value || !lycon || !lycon->ui_context) return nullptr;
-
+        ? layout_resolve_replaced_image_source(element, engine, &density, &dimensions) : nullptr);
+    const char* source = tag == MARKUP_NAME_IMG ? selected_source.get() : element->get_attribute(MARKUP_NAME_DATA);
     if (!block->embed) block->ensure_embed(lycon);
-    size_t src_len = strlen(src_value);
-    StrBuf* src_buf = strbuf_new_cap(src_len);
-    strbuf_append_str_n(src_buf, src_value, src_len);
-    block->embed->img = lam::up(load_document_image(lycon->doc, lycon->ui_context, src_buf->str));
-    strbuf_free(src_buf);
+    if (!block->embed) return nullptr;
+    // revalidate admission before any warm-cache reuse, including a retained embed slot.
+    ImageSurface* image = source && isfinite(density) && density > 0.0f
+        ? load_document_image(lycon->doc, lycon->ui_context, source) : nullptr;
+    block->embed->img = lam::up(image);
+    block->embed->content_image_resolution = density;
+    Pool* pool = layout_prop_pool(lycon);
+    const char* old = block->embedp()->selected_image_source;
+    if ((!source && old) || (source && (!old || strcmp(old, source) != 0))) {
+        char* copy = source ? pool_dup_n(pool, source, strlen(source)) : nullptr;
+        if (source && !copy) { block->embed->img = nullptr; return nullptr; }
+        pool_free(pool, block->embed->selected_image_source);
+        block->embed->selected_image_source = lam::own(copy);
+    }
     return block->embedp()->img;
 }
 

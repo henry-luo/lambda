@@ -944,6 +944,7 @@ static const char* paged_preview_fixture() {
 }
 
 static void expect_preview_pixel(const ImageData& image, int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+    SCOPED_TRACE(::testing::Message() << "pixel " << x << "," << y << " in " << image.width << "x" << image.height);
     ASSERT_GE(x, 0); ASSERT_GE(y, 0); ASSERT_LT(x, image.width); ASSERT_LT(y, image.height);
     const uint8_t* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
     EXPECT_EQ(pixel[0], r); EXPECT_EQ(pixel[1], g); EXPECT_EQ(pixel[2], b);
@@ -993,6 +994,74 @@ TEST(RenderOutputParity, PagedImagesWrapIntoPhysicalSheetsAndScaledPreviewCells)
         ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
         expect_preview_pixel(image, 80, 80, expected[page][0], expected[page][1], expected[page][2]);
         image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, PagedPercentageHeightsPreserveAutoAndDefiniteContainingBlocks) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_height_percentages.html";
+    const char* pdf_path = "temp/render_output_parity/paged_height_percentages.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_height_percentages.png";
+    const char* html = "<!doctype html><style>@page{size:120px 100px;margin:10px}"
+        "html,body,div{margin:0;padding:0} .auto .child,.fixed .child{height:50%;background:blue}"
+        ".ink{height:10px;width:10px;background:green}.after{height:5px;background:red}"
+        ".fixed{height:40px;break-before:page}</style>"
+        "<div class='auto'><div class='child'><div class='ink'></div></div><div class='after'></div></div>"
+        "<div class='fixed'><div class='child'><div class='ink'></div></div></div>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged --block-remote-resources"));
+    ASSERT_EQ(pdf_page_count(pdf_path), 2);
+    ASSERT_TRUE(render_document_fixture(html_path, preview_path, "--paged --block-remote-resources --page-grid 1x2"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    EXPECT_EQ(preview.width, 240); EXPECT_EQ(preview.height, 100);
+    expect_preview_pixel(preview, 30, 15, 0, 0, 255);
+    expect_preview_pixel(preview, 30, 22, 255, 0, 0);
+    expect_preview_pixel(preview, 30, 28, 255, 255, 255);
+    expect_preview_pixel(preview, 150, 25, 0, 0, 255);
+    expect_preview_pixel(preview, 150, 35, 255, 255, 255); image_free(preview.pixels);
+    ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
+    snprintf(pdf.base, sizeof(pdf.base), "paged_height_percentages");
+    for (int page = 1; page <= 2; page++) {
+        char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page, png, sizeof(png)));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+        expect_preview_pixel(image, image.width / 4, image.width * (page == 1 ? 15 : 25) / 120, 0, 0, 255);
+        if (page == 1) expect_preview_pixel(image, image.width / 4, image.width * 22 / 120, 255, 0, 0);
+        expect_preview_pixel(image, image.width / 4, image.width * 35 / 120, 255, 255, 255); image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, ResponsivePicturePrintSelectionRetainsDensityAndPhysicalPageGeometry) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_responsive.html";
+    const char* pdf_path = "temp/render_output_parity/paged_responsive.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_responsive.png";
+    const char* red = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='40'%20height='20'%3E%3Crect%20width='40'%20height='20'%20fill='red'/%3E%3C/svg%3E";
+    const char* blue = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='40'%20height='20'%3E%3Crect%20width='40'%20height='20'%20fill='blue'/%3E%3C/svg%3E";
+    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+    strbuf_append_str(html, "<!doctype html><style>@page{size:100px 60px;margin:10px}"
+        "html,body{margin:0} picture{display:block} picture+picture{break-before:page} img{display:block}</style>");
+    for (const char* url : {red, blue}) {
+        strbuf_append_str(html, "<picture><source type='image/avif' srcset='missing.avif'>"
+            "<source media='print' type='image/svg+xml' srcset=\"");
+        strbuf_append_str(html, url); strbuf_append_str(html, " 2x\"><img src='missing-fallback.png'></picture>");
+    }
+    bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
+    strbuf_free(html); ASSERT_TRUE(rendered); ASSERT_EQ(pdf_page_count(pdf_path), 2);
+    EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
+    ASSERT_TRUE(render_document_fixture(html_path, preview_path, "--paged --block-remote-resources --page-grid 1x2"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    EXPECT_EQ(preview.width, 200); EXPECT_EQ(preview.height, 60);
+    expect_preview_pixel(preview, 15, 15, 255, 0, 0); expect_preview_pixel(preview, 115, 15, 0, 0, 255);
+    expect_preview_pixel(preview, 35, 15, 255, 255, 255); // natural width is 40 / 2 CSS pixels.
+    image_free(preview.pixels);
+    ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
+    snprintf(pdf.base, sizeof(pdf.base), "paged_responsive");
+    for (int page = 1; page <= 2; page++) {
+        char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page, png, sizeof(png)));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+        expect_preview_pixel(image, image.width * 15 / 100, image.width * 15 / 100, page == 1 ? 255 : 0, 0, page == 2 ? 255 : 0);
+        expect_preview_pixel(image, image.width * 35 / 100, image.width * 15 / 100, 255, 255, 255); image_free(image.pixels);
     }
 }
 

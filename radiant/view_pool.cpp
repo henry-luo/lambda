@@ -424,6 +424,8 @@ static void release_embed_prop_for_reset(DomElement* elem, ViewTree* tree) {
 
 static void free_embed_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
+    view_pool_free(tree, elem->embed->selected_image_source);
+    elem->embed->selected_image_source = nullptr;
     view_pool_free(tree, elem->embed->flex);
     view_pool_free(tree, elem->embed->grid);
 }

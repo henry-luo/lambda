@@ -3879,9 +3879,11 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
                 // Parent has given height but content_height not yet calculated
                 result = percentage * lycon->block.parent->given_height / 100.0;
-            } else if (!lycon->block.parent && lycon && lycon->height > 0) {
+            } else if (!lycon->block.parent && (lycon->height > 0.0f ||
+                    (lycon->selected_view_tree && lycon->height == 0.0f))) {
                 // No parent context (root html element) - use viewport height
                 // Layout uses logical pixels, so use lycon->height without raster scaling.
+                // a selected view also carries definite zero-sized containing blocks.
                 result = percentage * lycon->height / 100.0;
             } else {
                 // Per CSS 2.1 §10.7: max-height percentage → 'none', min-height percentage → '0'
