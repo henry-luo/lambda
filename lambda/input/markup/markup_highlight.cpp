@@ -92,8 +92,55 @@ static void restart_step(RestartState* st, const char* line, int64_t index) {
     *st = RestartState{RESTART_HTML, (int32_t)html, 0};
 }
 
-static bool restart_equal(const RestartState& a, const RestartState& b) {
-    return a.kind == b.kind && a.a == b.a && a.b == b.b;
+static bool boundary_equal(const BoundaryState& a, const BoundaryState& b) {
+    return a.restart.kind == b.restart.kind && a.restart.a == b.restart.a && a.restart.b == b.restart.b &&
+           a.link == b.link && a.skip == b.skip;
+}
+
+// ----------------------------------------------------------------------------
+// Link labels per chunk: the parser's own pre-scan (prescanLinkDefinitions)
+// over one chunk at a time, resumed from the state at the chunk's boundary.
+// ----------------------------------------------------------------------------
+
+void HighlightLabels::add(const char* label, size_t len) {
+    offsets.push_back((int64_t)bytes.length());
+    for (size_t i = 0; i < len; i++) bytes.push_back(label[i]);
+    bytes.push_back('\0');
+}
+
+void HighlightLabels::copy_chunk(const HighlightLabels& from, int64_t k) {
+    for (int64_t i = from.first[(size_t)k]; i < from.first[(size_t)k + 1]; i++) {
+        const char* label = from.label(i);
+        add(label, strlen(label));
+    }
+    close_chunk();
+}
+
+static int32_t pack_link_state(const LinkPrescanState& st) {
+    int32_t length = st.fence_length > 0x7FFF ? 0x7FFF : st.fence_length;
+    return (st.in_fenced_code ? 1 : 0) | (st.in_paragraph ? 2 : 0) |
+           ((int32_t)(unsigned char)st.fence_char << 8) | (length << 16);
+}
+
+static LinkPrescanState unpack_link_state(int32_t link, int32_t skip) {
+    LinkPrescanState st;
+    st.in_fenced_code = (link & 1) != 0;
+    st.in_paragraph = (link & 2) != 0;
+    st.fence_char = (char)((link >> 8) & 0xFF);
+    st.fence_length = (link >> 16) & 0x7FFF;
+    st.skip = skip;
+    return st;
+}
+
+// A parser that only pre-scans, and the lines of the chunk it reads: the
+// chunk and the next one, since a definition may run past the chunk's end.
+struct LinkLabelScan {
+    MarkupParser* parser = nullptr;
+    lam::ArrayList<char*> lines;
+};
+
+static void collect_label(void* ctx, const char* label) {
+    ((HighlightLabels*)ctx)->add(label, strlen(label));
 }
 
 // ----------------------------------------------------------------------------
@@ -184,11 +231,13 @@ static void html_restart_step(RestartState* st, const char* line, int64_t index)
     }
 }
 
-// Per-format restart rules: how a line moves the state, and whether a window
-// parse may begin at a line given the state before it.
+// Per-format restart rules: how a line moves the state, whether a window
+// parse may begin at a line given the state before it, and whether each
+// chunk's link labels are collected (Markdown only).
 struct RestartRules {
     void (*step)(RestartState* st, const char* line, int64_t index);
     bool (*safe)(const RestartState& before, const char* line, bool prev_blank);
+    bool labels;
 };
 
 // Markdown: the first line of a block that follows a blank line, at column 0,
@@ -203,8 +252,8 @@ static bool html_restart_safe(const RestartState& before, const char* line, bool
     return before.kind == RESTART_NONE;
 }
 
-static const RestartRules k_markdown_rules = {restart_step, markdown_restart_safe};
-static const RestartRules k_html_rules = {html_restart_step, html_restart_safe};
+static const RestartRules k_markdown_rules = {restart_step, markdown_restart_safe, true};
+static const RestartRules k_html_rules = {html_restart_step, html_restart_safe, false};
 
 static const char* src_line(const HighlightLines* src, int64_t index) {
     size_t len = 0;
@@ -226,23 +275,56 @@ static int64_t chunk_index(const HighlightLines* src, int64_t line) {
     return lo > 0 ? lo - 1 : 0;
 }
 
-// Extend `states` (a valid prefix) through boundary `target`. A recomputed
-// suspect boundary equal to its cached state revalidates every later cached
-// entry, since nothing before it changed the scan (CED16v3).
+// Chunk k's link labels, pre-scanned from the state at its boundary; the
+// state after it goes back into `st`. The parser reads the buffer's lines in
+// place and hands them back before anything could free them.
+static void scan_chunk_labels(LinkLabelScan* scan, const HighlightLines* src, int64_t k,
+                              BoundaryState* st, HighlightLabels* labels) {
+    int64_t start = src->chunk_starts[k];
+    int64_t end = chunk_end(src, k);
+    int64_t stop = k + 1 < src->chunk_count ? chunk_end(src, k + 1) : end;
+    scan->lines.clear();
+    for (int64_t i = start; i < stop; i++) scan->lines.push_back((char*)src_line(src, i));
+    MarkupParser* parser = scan->parser;
+    parser->lines = scan->lines.data();
+    parser->line_count = (int)(stop - start);   // a chunk pair is a few hundred lines
+    parser->current_line = 0;
+    parser->clearLinkDefinitions();
+    LinkPrescanState prescan = unpack_link_state(st->link, st->skip);
+    parser->prescanLinkDefinitions(0, (int)(end - start), &prescan);
+    st->link = pack_link_state(prescan);
+    st->skip = prescan.skip;
+    parser->forEachLinkLabel(collect_label, labels);
+    labels->close_chunk();
+    parser->lines = nullptr;
+    parser->line_count = 0;
+}
+
+// Extend `states` (a valid prefix) through boundary `target`, and with a
+// label scan the labels of every chunk before it. A recomputed suspect
+// boundary equal to its cached state revalidates every later cached entry,
+// and the labels of the chunks between them, since nothing before it changed
+// the scan (CED16v3).
 static void extend_states(const RestartRules& rules, const HighlightLines* src,
-                          const RestartState* cache, int64_t cache_count,
-                          lam::ArrayList<RestartState>* states, int64_t target) {
+                          const HighlightCache& cache, LinkLabelScan* scan,
+                          lam::ArrayList<BoundaryState>* states, HighlightLabels* labels,
+                          int64_t target) {
+    int64_t cached_label_chunks = cache.labels ? cache.labels->chunks() : 0;
     while ((int64_t)states->length() <= target) {
         int64_t k = (int64_t)states->length() - 1;
-        RestartState st = (*states)[(size_t)k];
+        BoundaryState st = (*states)[(size_t)k];
         for (int64_t i = src->chunk_starts[k]; i < chunk_end(src, k); i++) {
-            rules.step(&st, src_line(src, i), i);
+            rules.step(&st.restart, src_line(src, i), i);
         }
+        if (scan) scan_chunk_labels(scan, src, k, &st, labels);
         states->push_back(st);
         int64_t boundary = k + 1;
-        if (boundary < cache_count && restart_equal(st, cache[boundary])) {
-            for (int64_t j = boundary + 1; j < cache_count && j < src->chunk_count; j++) {
-                states->push_back(cache[j]);
+        if (boundary < cache.count && boundary_equal(st, cache.states[boundary])) {
+            for (int64_t j = boundary + 1; j < cache.count && j <= src->chunk_count; j++) {
+                // the labels of the chunk that ends at boundary j come along
+                if (scan && j - 1 >= cached_label_chunks) break;
+                states->push_back(cache.states[j]);
+                if (scan) labels->copy_chunk(*cache.labels, j - 1);
             }
         }
     }
@@ -251,9 +333,9 @@ static void extend_states(const RestartRules& rules, const HighlightLines* src,
 // The last line at or before `first` where a window parse may start, by the
 // format's rule. Line 0 always qualifies.
 static int64_t restart_line(const RestartRules& rules, const HighlightLines* src,
-                            const lam::ArrayList<RestartState>& states, int64_t first) {
+                            const lam::ArrayList<BoundaryState>& states, int64_t first) {
     for (int64_t k = chunk_index(src, first); k >= 0; k--) {
-        RestartState st = states[(size_t)k];
+        RestartState st = states[(size_t)k].restart;
         bool prev_blank = false;
         int64_t found = -1;
         for (int64_t i = src->chunk_starts[k]; i <= first; i++) {
@@ -348,6 +430,11 @@ void highlight_note_block(MarkupParser* parser, const char* kind, int first, int
     MarkupSpan span = {sink_kind(sink, kind), 1, (int32_t)line, (int32_t)col, // INT_CAST_OK: window line, byte column
                        (int32_t)end_line, (int32_t)end_col}; // INT_CAST_OK: window line, byte column
     sink->spans.push_back(span);
+}
+
+void highlight_note_item(MarkupParser* parser, uint64_t item, int first) {
+    if (!parser || !parser->span_sink) return;
+    highlight_note_block(parser, highlight_item_kind(item), first, parser->current_line);
 }
 
 void highlight_begin_inline(MarkupParser* parser) {
@@ -466,6 +553,14 @@ static void markdown_window_parse(Input* input, const char* text, size_t len, Ma
     MarkupParser* parser = markup_parser_create(input, cfg);
     if (!parser) return;
     parser->span_sink = sink;
+    // a reference link resolves against definitions anywhere in the document,
+    // as in the full parse; the window's own pre-scan adds the rest
+    if (sink->labels) {
+        for (int64_t i = 0; i < sink->labels->count(); i++) {
+            const char* label = sink->labels->label(i);
+            parser->addLinkDefinition(label, strlen(label), "", 0, nullptr, 0);
+        }
+    }
     parser->parseContent(text);
     // every container pops its map; one left by an early return is freed here
     while (sink->line_maps.length() > 0) highlight_pop_lines(parser, sink->line_maps[sink->line_maps.length() - 1].lines);
@@ -511,42 +606,68 @@ static void html_window_parse(Input* input, const char* text, size_t len, Markup
 
 static bool highlight_window(const RestartRules& rules, WindowParse parse,
                              const HighlightLines* src, int64_t first, int64_t last,
-                             const RestartState* cache, int64_t cache_count, int64_t valid,
-                             HighlightResult* out) {
+                             const HighlightCache* given, HighlightResult* out) {
     if (!src || !out || src->count <= 0 || src->chunk_count <= 0) return false;
     first = first < 0 ? 0 : (first >= src->count ? src->count - 1 : first);
     last = last < first ? first : (last >= src->count ? src->count - 1 : last);
+    HighlightCache cache = given ? *given : HighlightCache{};
 
-    // the valid prefix of the cache, never less than boundary 0 (no state)
-    if (valid > cache_count) valid = cache_count;
+    // the label scan and the window parse share one private pool
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "markup.highlight");
+    Input* input = pool ? Input::create(pool, nullptr, nullptr) : nullptr;
+    if (!input) {
+        if (pool) mem_pool_destroy(pool);
+        return false;
+    }
+    InputAllocationContext allocation = {pool, input->arena, false, input};
+    InputAllocationContext* saved_allocation = input_allocation_context;
+    input_allocation_context = &allocation;
+
+    LinkLabelScan scan;
+    if (rules.labels) {
+        ParseConfig cfg;
+        cfg.format = Format::MARKDOWN;
+        cfg.collect_metadata = false;
+        scan.parser = markup_parser_create(input, cfg);
+    }
+
+    // the valid prefix of the cache, never less than boundary 0 (no state);
+    // with labels, only as far as the cached labels reach
+    int64_t valid = cache.valid > cache.count ? cache.count : cache.valid;
+    if (scan.parser) {
+        int64_t label_chunks = cache.labels ? cache.labels->chunks() : 0;
+        if (valid > label_chunks + 1) valid = label_chunks + 1;
+    }
     out->states.clear();
-    for (int64_t k = 0; k < valid; k++) out->states.push_back(cache[k]);
-    if (out->states.length() == 0) out->states.push_back(RestartState{});
-    extend_states(rules, src, cache, cache_count, &out->states, chunk_index(src, first));
+    out->labels.reset();
+    for (int64_t k = 0; k < valid; k++) out->states.push_back(cache.states[k]);
+    if (out->states.length() == 0) out->states.push_back(BoundaryState{});
+    for (int64_t k = 0; scan.parser && k + 1 < (int64_t)out->states.length(); k++) {
+        out->labels.copy_chunk(*cache.labels, k);
+    }
+    // labels must cover the whole document; restart states only reach the window
+    extend_states(rules, src, cache, scan.parser ? &scan : nullptr, &out->states, &out->labels,
+                  scan.parser ? src->chunk_count : chunk_index(src, first));
+    if (scan.parser) markup_parser_destroy(scan.parser);
     int64_t start = restart_line(rules, src, out->states, first);
     out->restart_line = start;
 
     int64_t stop = last + 1 + HIGHLIGHT_LOOKAHEAD;
     if (stop > src->count) stop = src->count;
     StrBuf* text = strbuf_new_cap(4096);
-    if (!text) return false;
+    if (!text) {
+        input_allocation_context = saved_allocation;
+        mem_pool_destroy(pool);
+        return false;
+    }
     for (int64_t i = start; i < stop; i++) {
         if (i > start) strbuf_append_char(text, '\n');
         strbuf_append_str(text, src_line(src, i));
     }
 
-    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "markup.highlight");
-    Input* input = pool ? Input::create(pool, nullptr, nullptr) : nullptr;
-    if (!input) {
-        if (pool) mem_pool_destroy(pool);
-        strbuf_free(text);
-        return false;
-    }
-    InputAllocationContext allocation = {pool, input->arena, false, input};
-    InputAllocationContext* saved_allocation = input_allocation_context;
-    input_allocation_context = &allocation;
     MarkupSpanSink sink;
     sink.line_base = start;
+    sink.labels = rules.labels ? &out->labels : nullptr;
     parse(input, text->str ? text->str : "", text->length, &sink);
     input_allocation_context = saved_allocation;
 
@@ -573,17 +694,13 @@ static bool highlight_window(const RestartRules& rules, WindowParse parse,
 }
 
 bool markdown_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
-                               const RestartState* cache, int64_t cache_count, int64_t valid,
-                               HighlightResult* out) {
-    return highlight_window(k_markdown_rules, markdown_window_parse, src, first, last,
-                            cache, cache_count, valid, out);
+                               const HighlightCache* cache, HighlightResult* out) {
+    return highlight_window(k_markdown_rules, markdown_window_parse, src, first, last, cache, out);
 }
 
 bool html_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
-                           const RestartState* cache, int64_t cache_count, int64_t valid,
-                           HighlightResult* out) {
-    return highlight_window(k_html_rules, html_window_parse, src, first, last,
-                            cache, cache_count, valid, out);
+                           const HighlightCache* cache, HighlightResult* out) {
+    return highlight_window(k_html_rules, html_window_parse, src, first, last, cache, out);
 }
 
 } // namespace markup

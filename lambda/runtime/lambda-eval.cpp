@@ -5828,13 +5828,15 @@ extern "C" Input* input_from_source_with_positions(const char* source, Url* url,
 
 // ---------------------------------------------------------------------------
 // parse(src, {type: 'markdown' | 'html', sourcepos: 'spans', window: [first, last],
-// prescan: {states, valid}}) — the source editor's highlight parse
+// prescan: {states, valid, labels}}) — the source editor's highlight parse
 // (vibe/radiant/Radiant_Design_Source_Editor.md CED16v3, CED18v2). `src` is a string,
 // an array of lines, or the editor buffer's array of line chunks, read in
-// place. The result is [kinds, spans, states, restart]: span kinds as symbols,
-// spans as flat ints (kind index, block flag, line, col, end line, end col; 0-based
-// lines, code-point columns), and the restart state per chunk boundary as
-// flat ints (3 per boundary) for the next call's `prescan`.
+// place. The result is [kinds, spans, states, restart, labels]: span kinds as
+// symbols, spans as flat ints (kind index, block flag, line, col, end line, end
+// col; 0-based lines, code-point columns), the state per chunk boundary as flat
+// ints (BOUNDARY_STATE_FIELDS per boundary), and for Markdown each chunk's link
+// reference labels (an array of strings per chunk); the last three go back in
+// the next call's `prescan`.
 // ---------------------------------------------------------------------------
 
 struct HighlightLineSource {
@@ -5958,25 +5960,46 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
         first = highlight_list_int(window_item, 0);
         last = highlight_list_int(window_item, 1);
     }
-    lam::ArrayList<RestartState> cache;
+    lam::ArrayList<BoundaryState> cache;
+    HighlightLabels cached_labels;
+    cached_labels.reset();
     int64_t valid = 0;
     Item states_item = highlight_map_field(prescan_item, "states");
     if (highlight_is_list(states_item)) {
         int64_t n = fn_len(states_item);
-        for (int64_t i = 0; i + 2 < n; i += 3) {
-            cache.push_back(RestartState{(int32_t)highlight_list_int(states_item, i),      // INT_CAST_OK: state codes
-                                         (int32_t)highlight_list_int(states_item, i + 1),  // INT_CAST_OK: fence char
-                                         (int32_t)highlight_list_int(states_item, i + 2)}); // INT_CAST_OK: fence length
+        int64_t f = BOUNDARY_STATE_FIELDS;
+        for (int64_t i = 0; i + f - 1 < n; i += f) {
+            BoundaryState st;
+            st.restart = RestartState{(int32_t)highlight_list_int(states_item, i),      // INT_CAST_OK: state codes
+                                      (int32_t)highlight_list_int(states_item, i + 1),  // INT_CAST_OK: fence char
+                                      (int32_t)highlight_list_int(states_item, i + 2)}; // INT_CAST_OK: fence length
+            st.link = (int32_t)highlight_list_int(states_item, i + 3);  // INT_CAST_OK: packed pre-scan state
+            st.skip = (int32_t)highlight_list_int(states_item, i + 4);  // INT_CAST_OK: line count
+            cache.push_back(st);
         }
         valid = highlight_int(highlight_map_field(prescan_item, "valid"), (int64_t)cache.length());
+    }
+    Item labels_item = highlight_map_field(prescan_item, "labels");
+    if (get_type_id(labels_item) == LMD_TYPE_ARRAY) {
+        for (int64_t k = 0; k < labels_item.array->length; k++) {
+            Item chunk = array_get(labels_item.array, k);
+            if (get_type_id(chunk) != LMD_TYPE_ARRAY) break;
+            for (int64_t i = 0; i < chunk.array->length; i++) {
+                size_t len = 0;
+                const char* label = highlight_string_chars(array_get(chunk.array, i), &len);
+                cached_labels.add(label, len);
+            }
+            cached_labels.close_chunk();
+        }
     }
 
     HighlightLines lines = {&source, highlight_line_at, source.count,
                             source.starts.data(), (int64_t)source.starts.length()};
+    HighlightCache given = {cache.data(), (int64_t)cache.length(), valid, &cached_labels};
     HighlightResult hl;
     bool ok = html
-        ? html_highlight_window(&lines, first, last, cache.data(), (int64_t)cache.length(), valid, &hl)
-        : markdown_highlight_window(&lines, first, last, cache.data(), (int64_t)cache.length(), valid, &hl);
+        ? html_highlight_window(&lines, first, last, &given, &hl)
+        : markdown_highlight_window(&lines, first, last, &given, &hl);
     if (source.owned) mem_free(source.owned);
     if (!ok) {
         set_runtime_error(ERR_OUT_OF_MEMORY, "parse: the highlight parse could not allocate");
@@ -5985,11 +6008,14 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
 
     // Every allocation below may collect: each array is rooted, and slots are
     // reserved before a fresh symbol is pushed so the push cannot allocate.
-    RootFrame roots(4);
+    RootFrame roots(7);
     Rooted<Array*> result(roots, array_plain());
     Rooted<Array*> kinds(roots, array_plain());
     Rooted<Array*> spans(roots, array_plain());
     Rooted<Array*> states(roots, array_plain());
+    Rooted<Array*> labels(roots, array_plain());
+    Rooted<Array*> chunk_labels(roots, nullptr);
+    Rooted<Item> label_item(roots, ItemNull);
     for (size_t i = 0; i < hl.kinds.length(); i++) {
         if (!array_reserve_append_slots(kinds.get(), 1)) return ItemError;
         Symbol* sym = heap_create_symbol(hl.kinds[i].name, strlen(hl.kinds[i].name));
@@ -6005,14 +6031,26 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
         array_push(spans.get(), {.item = i2it(span.end_col)});
     }
     for (size_t i = 0; i < hl.states.length(); i++) {
-        array_push(states.get(), {.item = i2it(hl.states[i].kind)});
-        array_push(states.get(), {.item = i2it(hl.states[i].a)});
-        array_push(states.get(), {.item = i2it(hl.states[i].b)});
+        array_push(states.get(), {.item = i2it(hl.states[i].restart.kind)});
+        array_push(states.get(), {.item = i2it(hl.states[i].restart.a)});
+        array_push(states.get(), {.item = i2it(hl.states[i].restart.b)});
+        array_push(states.get(), {.item = i2it(hl.states[i].link)});
+        array_push(states.get(), {.item = i2it(hl.states[i].skip)});
+    }
+    for (int64_t k = 0; k < hl.labels.chunks(); k++) {
+        chunk_labels.set(array_plain());
+        for (int64_t i = hl.labels.first[(size_t)k]; i < hl.labels.first[(size_t)k + 1]; i++) {
+            const char* label = hl.labels.label(i);
+            label_item.set({.item = s2it(heap_strcpy(label, (int64_t)strlen(label)))});
+            array_push(chunk_labels.get(), label_item.get());
+        }
+        array_push(labels.get(), {.array = chunk_labels.get()});
     }
     array_push(result.get(), {.array = kinds.get()});
     array_push(result.get(), {.array = spans.get()});
     array_push(result.get(), {.array = states.get()});
     array_push(result.get(), {.item = i2it(hl.restart_line)});
+    array_push(result.get(), {.array = labels.get()});
     return {.array = result.get()};
 }
 

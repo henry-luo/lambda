@@ -6,3 +6,5 @@
 0
 "after opening a fence above the window:"
 [0, "0-10tok-code"]
+"reference links defined outside the window:"
+[0, "4-17tok-link,22-27tok-link", "22-27tok-link", 0, "4-17tok-link,22-27tok-link"]

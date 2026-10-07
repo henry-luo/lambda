@@ -82,7 +82,8 @@ fn is_digit(ch) => ch >= "0" and ch <= "9"
 // The width of a list marker at column i ("- ", "12. ", "3) "), or 0.
 fn bullet_width(t, i) {
   let ch = slice(t, i, i + 1)
-  if ((ch == "-" or ch == "*" or ch == "+") and (slice(t, i + 1, i + 2) == " " or i + 1 == len(t))) 1
+  let gap = slice(t, i + 1, i + 2)
+  if ((ch == "-" or ch == "*" or ch == "+") and (gap == " " or gap == "\t" or i + 1 == len(t))) 1
   else {
     let digits = len([for (j in i to min(len(t), i + 9) - 1 where is_digit(slice(t, j, j + 1))) j])
     let after = slice(t, i + digits, i + digits + 1)
@@ -91,23 +92,40 @@ fn bullet_width(t, i) {
   }
 }
 
-fn list_marks(t) {
-  let i = indent_len(t)
+// The list marker a line has at or after column `at` (with its task box), or
+// null on a continuation line.
+fn list_mark(t, at) {
+  let i = at + indent_len(slice(t, at, len(t)))
   let w = bullet_width(t, i)
   let task = slice(t, i + w + 1, i + w + 4)
   let box = if (w > 0 and (task == "[ ]" or task == "[x]" or task == "[X]")) 4 else 0;
-  if (w == 0) [] else [run(i, i + w + box, "tok-list-marker")]
+  if (w == 0) null else {s: i, e: i + w + box}
 }
 
-// Leading `>` markers, each with the space after it.
+// Leading `>` markers from column i, each with the space after it.
 fn quote_end(t, i) {
   let j = i + indent_len(slice(t, i, len(t)))
   if (slice(t, j, j + 1) == ">") quote_end(t, j + 1) else i
 }
 
-fn quote_marks(t) {
-  let e = quote_end(t, 0);
-  if (e == 0) [] else [run(indent_len(t), e, "tok-quote")]
+fn is_container(kind) => kind == 'blockquote' or kind == 'ul' or kind == 'ol'
+
+// The markers of the containers around a line, outermost first (design
+// §7.2): each container's marker starts where the enclosing one's ended, so
+// a list in a quote colors both. Returns the runs and the column the
+// innermost container's content starts at.
+fn container_marks(t, containers, i, at, runs) {
+  if (i >= len(containers)) {runs: runs, at: at}
+  else if (containers[i].kind == 'blockquote') {
+    let e = quote_end(t, at)
+    let mark = if (e > at) [run(at + indent_len(slice(t, at, len(t))), e, "tok-quote")] else [];
+    container_marks(t, containers, i + 1, e, [*runs, *mark])
+  }
+  else {
+    let m = list_mark(t, at)
+    container_marks(t, containers, i + 1, if (m == null) at else m.e,
+                    if (m == null) runs else [*runs, run(m.s, m.e, "tok-list-marker")])
+  }
 }
 
 fn is_fence_line(t) {
@@ -115,11 +133,13 @@ fn is_fence_line(t) {
   starts_with(s, "```") or starts_with(s, "~~~")
 }
 
-fn table_marks(t) {
-  let delimiter_row = len(trim(t)) > 0 and
-                      len([for (ch in t where ch != "|" and ch != "-" and ch != ":" and ch != " ") ch]) == 0;
-  if (delimiter_row) [run(0, len(t), "tok-table-delim")]
-  else [for (i in 0 to len(t) - 1 where slice(t, i, i + 1) == "|") run(i, i + 1, "tok-table-delim")]
+// Table pipes and the delimiter row, from column `at`.
+fn table_marks(t, at) {
+  let rest = slice(t, at, len(t))
+  let delimiter_row = len(trim(rest)) > 0 and
+                      len([for (ch in rest where ch != "|" and ch != "-" and ch != ":" and ch != " ") ch]) == 0;
+  if (delimiter_row) [run(at, len(t), "tok-table-delim")]
+  else [for (i in at to len(t) - 1 where slice(t, i, i + 1) == "|") run(i, i + 1, "tok-table-delim")]
 }
 
 // A link's destination: from "](" to its end, or the whole of an autolink.
@@ -130,9 +150,9 @@ fn link_url_start(t, s, e) {
   else s + at + 1
 }
 
-fn link_def_marks(t) {
-  let colon = index_of(t, "]:");
-  if (colon == null) [] else [run(0, colon + 2, "tok-ref"), run(colon + 2, len(t), "tok-url")]
+fn link_def_marks(t, at) {
+  let colon = index_of(slice(t, at, len(t)), "]:");
+  if (colon == null) [] else [run(at, at + colon + 2, "tok-ref"), run(at + colon + 2, len(t), "tok-url")]
 }
 
 // YAML front matter: the lines from a first-line `---` to its closing line.
@@ -151,6 +171,14 @@ pub fn front_matter_end(b) {
 
 let FIELDS = 6
 
+// Ints per chunk boundary in the cache: the restart state and the link
+// pre-scan's (BOUNDARY_STATE_FIELDS in lambda/input/markup/markup_highlight.hpp).
+let STATE_FIELDS = 5
+
+// A boundary inside a rebuilt range is unknown: its negative kind never
+// matches a recomputed state, so the parser cannot trust what follows it.
+let UNKNOWN_BOUNDARY = [-1, 0, 0, 0, 0]
+
 fn span_at(r, i) {
   let f = r[1];
   {kind: r[0][f[i * FIELDS]], block: f[i * FIELDS + 1] == 1, line: f[i * FIELDS + 2], col: f[i * FIELDS + 3],
@@ -161,33 +189,45 @@ fn span_at(r, i) {
 fn span_cols(sp, line, text) =>
   {s: if (line == sp.line) sp.col else 0, e: if (line == sp.end_line) min(sp.end_col, len(text)) else len(text)}
 
-// Runs for one line from the spans touching it: blocks first, then inline
-// constructs outermost first, so nested constructs paint over their parents.
+// Outermost first: a container starts at or before the blocks inside it.
+fn by_start(sp) => sp.line * 1000000 + sp.col
+
+// Runs for one line from the spans touching it: container markers and the
+// leaf blocks inside them, then inline constructs outermost first, so nested
+// constructs paint over their parents.
 fn line_runs(text, line, spans, fm_end) {
   if (line <= fm_end) [run(0, len(text), "tok-meta")]
   else {
     let here = [for (sp in spans where sp.line <= line and sp.end_line >= line) sp]
-    let blocks = [for (sp in here where sp.block) sp]
+    let containers = sort([for (sp in here where sp.block and is_container(sp.kind)) sp], by_start)
+    let leaves = sort([for (sp in here where sp.block and not is_container(sp.kind)) sp], by_start)
     let inlines = sort([for (sp in here where not sp.block) sp],
                        (sp) => 0 - ((sp.end_line - sp.line) * 100000 + sp.end_col - sp.col))
-    let base = block_runs(text, line, blocks)
+    let marks = container_marks(text, containers, 0, 0, [])
+    // inner leaves paint over outer ones, and the markers over both
+    let leaf = paint_all([], [for (sp in leaves) for (r in leaf_runs(text, line, sp, marks.at)) r], 0)
+    let base = paint_all(leaf, marks.runs, 0)
     merge(inline_runs(text, line, inlines, 0, base))
   }
 }
 
-fn block_runs(text, line, blocks) =>
-  if (len(blocks) == 0) []
-  else {
-    let sp = blocks[0]
-    let k = sp.kind;
-    if (k == 'ul' or k == 'ol') list_marks(text)
-    else if (k == 'blockquote') quote_marks(text)
-    else if (k == 'table') table_marks(text)
-    else if (k == 'link_def') link_def_marks(text)
-    else if (k == 'code' and is_fence_line(text) and (line == sp.line or line == sp.end_line)) [run(0, len(text), "tok-fence")]
-    else if (block_class(k) == null or len(text) == 0) []
-    else [run(0, len(text), block_class(k))]
-  }
+fn paint_all(runs, over, i) =>
+  if (i >= len(over)) runs else paint_all(paint(runs, over[i].s, over[i].e, over[i].c), over, i + 1)
+
+// A leaf block's runs on `line`. It starts at its own column on its first
+// line; on later lines, after the containers' markers (`at`) and the
+// indentation up to that column, so a list item's indent is not code.
+fn leaf_runs(text, line, sp, at) {
+  let cols = span_cols(sp, line, text)
+  let s = if (line == sp.line) cols.s else min(at + indent_len(slice(text, at, len(text))), max(at, sp.col))
+  let k = sp.kind;
+  if (k == 'table') table_marks(text, s)
+  else if (k == 'link_def') link_def_marks(text, s)
+  else if (k == 'code' and is_fence_line(slice(text, s, len(text))) and (line == sp.line or line == sp.end_line))
+    [run(s, len(text), "tok-fence")]
+  else if (block_class(k) == null or cols.e <= s) []
+  else [run(s, cols.e, block_class(k))]
+}
 
 fn inline_runs(text, line, spans, i, runs) {
   if (i >= len(spans)) runs
@@ -239,7 +279,7 @@ pub fn highlight(b, first, final, scan, lang) {
     let fm_end = if (lang == 'markdown') front_matter_end(b) else -1;
     {hl: {version: b.version, first: lo, last: hi, exact: true,
           runs: [for (l in lo to hi) guarded_runs(buf.line(b, l), l, spans, fm_end)]},
-     scan: {states: r[2], valid: len(r[2]) div 3}}
+     scan: {states: r[2], valid: len(r[2]) div STATE_FIELDS, labels: r[4]}}
   }
 }
 
@@ -303,18 +343,23 @@ pub fn map_runs(hl, d, version) {
   }
 }
 
-// The restart cache after an edit that rebuilt chunks [chunk, chunk + removed)
-// as `added` chunks: boundaries up to the edited chunk stay valid; later ones
-// are suspect but kept, realigned, for the next parse to revalidate.
+// The cache after an edit that rebuilt chunks [chunk, chunk + removed) as
+// `added` chunks: boundaries up to the edited chunk stay valid; later ones are
+// suspect but kept, realigned, for the next parse to revalidate. Each chunk's
+// link labels move with it; the rebuilt chunks' are rescanned.
 pub fn scan_after(scan, applied) {
   let states = scan.states
-  let keep = min(len(states), (applied.chunk + 1) * 3)
-  let after = min(len(states), (applied.chunk + applied.removed) * 3)
-  let fresh = [for (i in 1 to (applied.added - 1) * 3) 0];
-  {states: [*take(states, keep), *fresh, *drop(states, after)], valid: min(scan.valid, applied.chunk + 1)}
+  let keep = min(len(states), (applied.chunk + 1) * STATE_FIELDS)
+  let after = min(len(states), (applied.chunk + applied.removed) * STATE_FIELDS)
+  let fresh = [for (i in 1 to applied.added - 1) for (x in UNKNOWN_BOUNDARY) x]
+  let labels = scan.labels
+  let lkeep = min(len(labels), applied.chunk)
+  let lafter = min(len(labels), applied.chunk + applied.removed);
+  {states: [*take(states, keep), *fresh, *drop(states, after)], valid: min(scan.valid, applied.chunk + 1),
+   labels: [*take(labels, lkeep), *[for (i in 1 to applied.added) []], *drop(labels, lafter)]}
 }
 
-pub fn empty_scan() => {states: [], valid: 0}
+pub fn empty_scan() => {states: [], valid: 0, labels: []}
 
 // Apply the CED14v2 mapping for a sequence of applied edits: each step is
 // {delta, applied}, where applied is source_buffer.apply_delta's result.

@@ -4154,6 +4154,19 @@
             "icon": "\ud83e\udde9"
           },
           {
+            "source": "test_input_sourcepos_gtest.cpp",
+            "name": "Source Editor Highlight Parse Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_input_sourcepos_gtest.exe",
+            "icon": "\ud83d\udd8d\ufe0f"
+          },
+          {
             "source": "test_entity_emoji_gtest.cpp",
             "name": "Entity/Emoji Symbol Tests",
             "dependencies": [
