@@ -1546,3 +1546,42 @@ numeric reference for each UTF-8 byte. The loader now leaves the URL with its
 caller, and the shared markup writer keeps UTF-8 sequences intact. The XML
 round-trip and serialized SVG/HTML CLI tests pin these fixes; decoded PDF
 text expectations now check its actual Unicode content.
+
+### Advanced placement and styling
+
+The source package (**D7.2.1–D7.2.4**) now supports finite rotations from
+−180 to 180 degrees, ellipse/circle/diamond boundaries, a rectangular spiral,
+seeded spiral phases, linear/logarithmic sizing and per-record font overrides.
+Weight ordering remains exact and stable (**S6.2.2v3**, **S6.2.3**); invalid
+options and overrides continue to raise through `T^` (**S7.4.2**).
+
+Measured rectangles retain their local axes and corner offsets. A broad
+axis-aligned rejection precedes the four separating axes of two padded,
+oriented rectangles. Padding inflates each local rectangle by half the gap
+on every side. Shape containment checks the four rotated corners, avoiding
+both protruding text and unnecessary rejection by enclosing bounds. All
+supported boundaries are convex and centrally symmetric, so a rectangle
+that cannot fit at the center cannot fit at any translation; such overflow
+is reported as `too_large`.
+
+The rectangular spiral traverses successive square rings. Termination uses
+the ring's minimum radius, since its corners can leave the viewport before
+the rest of that ring does. A local 31-bit recurrence chooses a per-word
+spiral phase from the seed; no process-global RNG state is read or modified.
+Seed zero and orthogonal rotations preserve the original defaults. Font
+overrides are measured in the same native batch and emitted on the SVG text.
+The native measurement contract is unchanged.
+
+Regression tests independently project padded rectangle corners onto
+separating axes, verify every corner against each shape, check overlapping
+enclosing bounds for separated angled words, and cover seeds, sizing modes,
+metadata, font overrides and validation. `test/demo/wordcloud.ls` is a
+permanent four-panel gallery for `lambda view` and `lambda render`.
+
+The gallery exposed an existing SVG painter mismatch at the Mark/DOM seam
+(**S1.6**): scalar numeric text-position attributes survived as Items, while
+the text-position-list parser only read string attributes. Embedded clouds
+therefore lost their local `x`/`y` offsets; serialized SVGs rendered correctly.
+The list parser now reuses the existing numeric attribute reader for a
+one-entry list. A native regression compares complete exported glyph paths
+for numeric and string `x`, `y`, `dx`, `dy` and `rotate`, including a `tspan`.

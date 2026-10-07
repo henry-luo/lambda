@@ -2056,6 +2056,38 @@ TEST(RadiantViewTest, BatchHtmlMeasurementsReleaseLoaderPools) {
     EXPECT_FALSE(test_radiant_view_file_contains(snapshot_path, "radiant.render.document"));
 }
 
+TEST(RadiantViewTest, EmbeddedSvgNumericTextPositionsMatchStringAttributes) {
+    test_radiant_view_ensure_temp_dir();
+    const char* script_path = "./temp/ui_svg_numeric_text.ls";
+    const char* output_paths[] = {"./temp/ui_svg_numeric_text.svg", "./temp/ui_svg_string_text.svg"};
+    const char* sources[] = {
+        "<html <body <svg width: 300, height: 120, "
+        "<text x: 35.5, y: 40.25, dx: -2.5, dy: 1.5, rotate: 25, 'font-size': 24, \"Position\"> "
+        "<text x: 40, y: 80, \"A\" <tspan dx: 5.5, dy: -2.5, rotate: -15, \"B\">>>>>\n",
+        "<html <body <svg width: 300, height: 120, "
+        "<text x: \"35.5\", y: \"40.25\", dx: \"-2.5\", dy: \"1.5\", rotate: \"25\", 'font-size': 24, \"Position\"> "
+        "<text x: \"40\", y: \"80\", \"A\" <tspan dx: \"5.5\", dy: \"-2.5\", rotate: \"-15\", \"B\">>>>>\n",
+    };
+    for (size_t i = 0; i < 2; i++) {
+        write_text_file(script_path, sources[i]);
+        remove(output_paths[i]);
+        const char* args[] = {"./lambda.exe", "render", script_path, "-o", output_paths[i], "--no-log", NULL};
+        ShellOptions options = {0};
+        options.merge_stderr = true;
+        ShellResult result = shell_exec("./lambda.exe", args, &options);
+        EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+    char* numeric = test_radiant_view_read_file(output_paths[0]);
+    char* strings = test_radiant_view_read_file(output_paths[1]);
+    ASSERT_NE(numeric, nullptr);
+    ASSERT_NE(strings, nullptr);
+    EXPECT_NE(strstr(numeric, "<path"), nullptr);
+    EXPECT_STREQ(numeric, strings);
+    free(numeric);
+    free(strings);
+}
+
 TEST(RadiantViewTest, SerializedScriptDocumentsPreserveUtf8AndCallerUrl) {
     test_radiant_view_ensure_temp_dir();
     const char* script_path = "./temp/ui_serialized_script_utf8.ls";

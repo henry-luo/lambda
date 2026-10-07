@@ -237,7 +237,10 @@ A pie or donut chart is an `arc` mark with a `theta` channel, plus `inner_radius
 It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4).
 Each input record has a nonempty, single-line `text`, a finite positive
 `weight` (`int`, `i64` or `float`), and an optional `color` string. Phrases and
-Unicode text are supported.
+Unicode text are supported. Records can also override `font_size`,
+`font_family`, `font_weight` and `rotation`; other record fields are retained
+as metadata. An explicit positive `font_size` overrides weight-based sizing,
+including the global font-size range.
 
 ```lambda
 import cloud: lambda.chart.wordcloud
@@ -259,18 +262,22 @@ Save the example as `words.ls`; `lambda render words.ls -o words.png` or
 | `cloud.render(words, opts = null)` | An SVG element; `data-unplaced` records the number of words that could not fit |
 
 The layout sorts by descending weight, retaining source order among ties
-(S6.2.3), and maps square roots of weights onto the font-size range. Equal
-weights use `max_font_size`. Word colours and rotations follow source indices.
-Placement follows a deterministic spiral and checks measured rectangular boxes.
-Results repeat for the same inputs, options and available fonts; fonts can
-differ across machines.
+(S6.2.3), and defaults to square-root size scaling. Linear and logarithmic
+scales are also available. Equal weights use `max_font_size`. Word colours
+and default rotations follow source indices. Placement follows a deterministic
+spiral and checks measured, oriented text rectangles with padding. Angled
+words can have overlapping axis-aligned bounds while their text rectangles
+remain separate. Results repeat for the same inputs, options and available
+fonts; fonts can differ across machines.
 
 Placed records retain `text`, `weight`, `color` and source `index`, and add
-`font_size`, `rotation`, center coordinates `x`/`y`, rotated box `width`/`height`,
+`font_size`, `font_family`, `font_weight`, `rotation`, center coordinates
+`x`/`y`, axis-aligned bounds `width`/`height` of the rotated rectangle,
 unrotated `text_width`/`text_height` and a text `baseline`. Unplaced records
-carry a `reason`: `"too_large"` for a box larger than the available area, or
+carry a `reason`: `"too_large"` for a rectangle that cannot fit the selected shape, or
 `"no_space"` when the bounded search finds no placement. Empty input is valid.
-Invalid data or options raise an error (S7.4.2).
+Invalid data or options raise an error (S7.4.2). Fields starting with `_` are
+internal geometry data and should not be used by callers.
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -278,20 +285,40 @@ Invalid data or options raise an error (S7.4.2).
 | `margin` | `8` | Empty space inside the viewport edges |
 | `padding` | `2` | Minimum gap between word boxes |
 | `min_font_size`, `max_font_size` | `12`, `64` | Font-size range in CSS pixels |
+| `size_scale` | `"sqrt"` | `"sqrt"`, `"linear"` or `"log"` weight-to-size mapping |
 | `font_family` | `"sans-serif"` | CSS font family or family list |
 | `font_weight` | `400` | Integer CSS weight from 100 to 900 |
 | `colors` | Tableau 10 | Nonempty array of colour strings; a record's `color` overrides it |
-| `rotations` | `[0]` | Nonempty array drawn from `0`, `90`, `-90`; cycles by source index |
-| `step` | `4` | Distance between spiral turns in CSS pixels |
+| `rotations` | `[0]` | Nonempty array of finite angles from −180 to 180 degrees; cycles by source index |
+| `shape` | `"rectangle"` | `"rectangle"`, `"ellipse"`, `"circle"` or `"diamond"` boundary |
+| `spiral` | `"archimedean"` | `"archimedean"` or `"rectangular"` candidate path |
+| `seed` | `0` | Integer from 0 to 2147483646; changes each word's spiral phase without global randomness; zero retains the original path |
+| `step` | `4` | Distance between Archimedean turns or rectangular grid points in CSS pixels |
 | `max_steps` | `4000` | Positive integer candidate limit per word |
 
 Text is measured in one headless Radiant pass through the reusable
 `radiant.measure_html(html, width, height)` function. It returns copied
 `width`, `height` and `baseline` metrics for each direct body element, in order
 (`null` for an element without a layout box), then releases the temporary
-document. The package uses the same font family, weight and size in its SVG.
-Collision detection uses text boxes; arbitrary angles and glyph-mask packing
-are outside this initial API.
+document. The package uses each word's actual font family, weight and size in
+its SVG. Shape containment checks all four corners of each rotated rectangle;
+circle diameter uses the smaller available viewport dimension. Collision
+detection uses padded text rectangles, rather than glyph masks.
+
+```lambda
+import cloud: lambda.chart.wordcloud
+
+cloud.render([
+    {text: "Lambda", weight: 40, font_weight: 700, rotation: -15},
+    {text: "Documents", weight: 25},
+    {text: "Charts", weight: 15}
+], {width: 600, height: 400, shape: "ellipse", rotations: [-30, 0, 30],
+    size_scale: "log", seed: 17})^
+```
+
+The viewable gallery at `test/demo/wordcloud.ls` compares four configurations:
+`./lambda.exe view test/demo/wordcloud.ls`. Export it with
+`./lambda.exe render test/demo/wordcloud.ls -o temp/wordcloud_gallery.png`.
 
 ---
 

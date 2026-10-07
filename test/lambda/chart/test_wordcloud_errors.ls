@@ -18,7 +18,7 @@ let good = [{text: "Word", weight: 1}];
     rejected(good, {width: 0}), rejected(good, {height: -1}),
     rejected(good, {width: nan}), rejected(good, {padding: -1}),
     rejected(good, {margin: 200}), rejected(good, {min_font_size: 80, max_font_size: 20}),
-    rejected(good, {rotations: []}), rejected(good, {rotations: [45]}),
+    rejected(good, {rotations: []}), rejected(good, {rotations: [nan]}),
     rejected(good, {colors: []}), rejected(good, {colors: [12]}),
     rejected(good, {step: 0}), rejected(good, {max_steps: 0}),
     rejected(good, {font_weight: "bold"}), rejected(good, {font_family: "serif;display:none"})
