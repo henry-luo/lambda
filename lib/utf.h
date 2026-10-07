@@ -85,6 +85,17 @@ size_t utf16_to_utf8_offset(const char* s, size_t byte_len, size_t u16_offset);
 /** Convert a UTF-8 byte offset to a UTF-16 code-unit offset, clamped to end. */
 size_t utf8_to_utf16_offset(const char* s, size_t byte_len, size_t byte_offset);
 
+/** Iterate UTF-16 units of a WTF-8 buffer, including lone surrogates. */
+typedef struct Utf16Iterator {
+    const unsigned char* data;
+    int64_t len;
+    int64_t pos;
+    int pending_low_surrogate;
+} Utf16Iterator;
+bool utf16_iterator_next(Utf16Iterator* iter, uint16_t* out_unit);
+/** Compare UTF-16 unit sequences, independent of their UTF-8/WTF-8 byte encoding. */
+int utf16_compare(const char* left, size_t left_len, const char* right, size_t right_len);
+
 /* ── UTF-16 Surrogate Pairs ───────────────────────────────────────── */
 
 /**

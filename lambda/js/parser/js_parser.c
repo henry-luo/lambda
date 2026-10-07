@@ -3415,9 +3415,15 @@ static bool js_parser_parse_statement(JsParser* parser) {
             statement_secondary = label;
             ok = js_parser_parse_name(parser, &label) &&
                 js_parser_parser_expect(parser, JS_TOK_COLON, "expected ':' after label");
-            bool iteration = parser->current.kind == JS_TOK_FOR ||
-                parser->current.kind == JS_TOK_WHILE ||
-                parser->current.kind == JS_TOK_DO;
+            // immediate label chains share the final statement's continue target.
+            JsLexer lookahead = parser->lexer;
+            JsToken target = parser->current, separator = parser->next;
+            while (js_parser_token_is_name(target.kind) && separator.kind == JS_TOK_COLON) {
+                target = js_lexer_next(&lookahead);
+                separator = js_lexer_next(&lookahead);
+            }
+            bool iteration = target.kind == JS_TOK_FOR ||
+                target.kind == JS_TOK_WHILE || target.kind == JS_TOK_DO;
             if (ok && js_parser_parser_label_find(parser, label, NULL)) {
                 ok = js_parser_parser_fail(parser, JS_PARSE_ERROR_CONTEXT,
                     "duplicate label", JS_TOK_IDENTIFIER);
