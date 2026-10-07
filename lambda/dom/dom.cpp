@@ -4576,6 +4576,9 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
         return computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
     }
 
+    if (get_type_id(prop_name) == LMD_TYPE_STRING &&
+        memchr(js_prop, '\0', it2s(prop_name)->len)) return js_name_item("");
+
     // handle getPropertyValue method separately
     if (strcmp(js_prop, "getPropertyValue") == 0) {
         // return a function-like marker — handled by method dispatch
@@ -14984,6 +14987,9 @@ static DomElement* dom_clone_element_into_document(DomElement* elem,
     DomElement* clone = dom_element_create(destination, elem->tag_name, _clean_elem.element);
     if (!clone) return nullptr;
     dom_clone_content_attributes(elem, clone);
+    // CSSOM cloning preserves the declaration block, including names changed by serialization.
+    if (CssRule* authored = dom_element_inline_declaration_block(elem))
+        dom_element_commit_inline_declarations(clone, authored, elem->get_attribute("style"));
     // DOM cloning must not copy source-bound wrapper caches; their host_data would
     // make clone.classList/style writes mutate the original element.
     clone->tag_id = elem->tag_id;

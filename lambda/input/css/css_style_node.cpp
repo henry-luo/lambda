@@ -577,7 +577,11 @@ CssDeclaration* css_declaration_clone_owned(
     clone->value = css_value_clone_owned(source->value, target_pool);
     if (source->value && !clone->value) goto declaration_clone_failed;
     clone->source_file = pool_strdup(target_pool, source->source_file);
-    clone->property_name = pool_strdup(target_pool, source->property_name);
+    if (source->property_name) {
+        StrView name = css_declaration_name(source);
+        clone->property_name = pool_dup_n(target_pool, name.str, name.length);
+        clone->property_name_length = name.length;
+    }
     if (source->value_text) {
         clone->value_text = pool_dup_n(target_pool, source->value_text,
                                        source->value_text_len);

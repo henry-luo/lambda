@@ -1967,3 +1967,35 @@ TEST_F(CssEngineParserTest, IdentifierSerializationPreservesFullInputAndRoundTri
     css_append_identifier(buffer, long_name, 2048);
     EXPECT_EQ(stringbuf_to_string(buffer)->len, 2048u);
 }
+
+TEST_F(CssEngineParserTest, CssomPropertyNamesAreDecodedLengthDelimitedStrings) {
+    const char* names[] = {"--name\0tail", "--name:tail", "--name;tail", "--name tail", "--1"};
+    const size_t lengths[] = {11, 11, 11, 11, 3};
+    const char* serialized[] = {"--name\xef\xbf\xbd" "tail: 12px", "--name\\:tail: 12px",
+        "--name\\;tail: 12px", "--name\\ tail: 12px", "--1: 12px"};
+    Pool* source = pool_create();
+    ASSERT_NE(source, nullptr);
+    CssDeclaration* snapshots[sizeof(names) / sizeof(names[0])] = {};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        CssDeclaration* declaration = css_parse_property_value_declaration(
+            names[i], lengths[i], "12px", 4, source);
+        ASSERT_NE(declaration, nullptr);
+        CssDeclaration* snapshot = css_declaration_snapshot(declaration, pool);
+        ASSERT_NE(snapshot, nullptr);
+        snapshots[i] = snapshot;
+        StrView name = css_declaration_name(snapshot);
+        EXPECT_EQ(name.length, lengths[i]);
+        EXPECT_EQ(memcmp(name.str, names[i], lengths[i]), 0);
+        EXPECT_STREQ(snapshot->value_text, "12px");
+    }
+    EXPECT_EQ(css_parse_property_value_declaration("color\0tail", 10, "red", 3, source), nullptr);
+    pool_destroy(source);
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        StrView name = css_declaration_name(snapshots[i]);
+        EXPECT_EQ(memcmp(name.str, names[i], lengths[i]), 0);
+        EXPECT_STREQ(snapshots[i]->value_text, "12px");
+        CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        ASSERT_NE(formatter, nullptr);
+        EXPECT_STREQ(css_format_declaration_full(formatter, snapshots[i]), serialized[i]);
+    }
+}

@@ -668,7 +668,9 @@ static void append_rule_declaration_text(StringBuf* buf, CssDeclaration* decl, P
     const char* name = decl->property_name ? decl->property_name : css_property_spelling_from_code(decl->property_code);
     if (!name) return;
 
-    stringbuf_append_all(buf, 2, name, ": ");
+    StrView authored_name = decl->property_name ? css_declaration_name(decl) : strview_from_cstr(name);
+    css_append_identifier(buf, authored_name.str, authored_name.length);
+    stringbuf_append_str(buf, ": ");
     stringbuf_append_str(buf, css_serialize_declaration_value(decl, pool));
     if (decl->important) {
         stringbuf_append_str(buf, " !important");
@@ -1451,15 +1453,17 @@ extern "C" Item dom_cssom_rule_set_selector_text(Item rule_item, Item value) {
 
 // CSSOM exposes one effective declaration per property; source duplicates remain
 // intact until mutation so layout keeps the authored logical-property order.
-static bool cssom_decl_matches(const CssDeclaration* declaration, const char* name) {
-    if (!declaration || !name) return false;
-    CssPropertyCode code = css_property_code_from_name(name);
-    return code > 0 ? declaration->property_code == code
-        : declaration->property_name && strcmp(declaration->property_name, name) == 0;
+static bool cssom_decl_matches(const CssDeclaration* declaration, StrView name) {
+    if (!declaration || !name.str) return false;
+    // native custom IDs still require full name identity; their C-string prefix can coincide.
+    bool custom = name.length > 2 && name.str[0] == '-' && name.str[1] == '-';
+    CssPropertyCode code = custom ? CSS_PROPERTY_UNKNOWN : css_property_code_from_name(name.str);
+    StrView stored = css_declaration_name(declaration);
+    return code > 0 ? declaration->property_code == code : strview_eq(&stored, &name);
 }
 
-static CssDeclaration* cssom_decl_find(CssRule* rule, const char* name) {
-    if (!rule || !name) return nullptr;
+static CssDeclaration* cssom_decl_find(CssRule* rule, StrView name) {
+    if (!rule || !name.str) return nullptr;
     CssDeclaration* selected = nullptr;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* declaration = rule->data.style_rule.declarations[i];
@@ -1469,10 +1473,10 @@ static CssDeclaration* cssom_decl_find(CssRule* rule, const char* name) {
     return selected;
 }
 
-static bool cssom_decl_supports(CssRule* rule, const char* name) {
-    if (!name || !name[0]) return false;
-    if (name[0] == '-' && name[1] == '-')
-        return css_parse_custom_property_name(name, strlen(name));
+static bool cssom_decl_supports(CssRule* rule, StrView name) {
+    if (!name.str || !name.length) return false;
+    // CSSOM receives a decoded DOMString, not the lexical <dashed-ident> production.
+    if (name.length >= 2 && name.str[0] == '-' && name.str[1] == '-') return name.length > 2;
     // descriptor members exist independently of whether a declaration is present.
     CssRule* owner = cssom_declaration_owner(rule);
     if (owner && (owner->type == CSS_RULE_FONT_FACE || owner->type == CSS_RULE_PAGE)) {
@@ -1489,37 +1493,44 @@ static bool cssom_decl_supports(CssRule* rule, const char* name) {
         size_t count = owner->type == CSS_RULE_FONT_FACE
             ? sizeof(font_descriptors) / sizeof(font_descriptors[0])
             : sizeof(page_descriptors) / sizeof(page_descriptors[0]);
-        for (size_t i = 0; i < count; i++) if (strcmp(names[i], name) == 0) return true;
+        for (size_t i = 0; i < count; i++) if (strview_equal(&name, names[i])) return true;
         // page IDL attributes do not enumerate its ordinary CSS properties.
         if (owner->type == CSS_RULE_FONT_FACE) return false;
     }
-    CssPropertyCode code = css_property_code_from_name(name);
+    CssPropertyCode code = css_property_code_from_name(name.str);
     return code > 0 && css_property_exists(code);
 }
 
 static bool cssom_decl_first(CssRule* rule, size_t index) {
     CssDeclaration* declaration = rule->data.style_rule.declarations[index];
     if (!declaration || !declaration->property_name ||
-        !cssom_decl_supports(rule, declaration->property_name)) return false;
+        !cssom_decl_supports(rule, css_declaration_name(declaration))) return false;
     for (size_t i = 0; i < index; i++) {
         if (cssom_decl_matches(rule->data.style_rule.declarations[i],
-                declaration->property_name)) return false;
+                css_declaration_name(declaration))) return false;
     }
     return true;
 }
 
-static const char* cssom_decl_name(const char* property, bool named, char* buffer, size_t size) {
-    if (!property) return nullptr;
-    if (property[0] == '-' && property[1] == '-') return property;
-    // Reject an overflowing standard name instead of looking up a truncated key.
-    if (named) return dom_style_camel_to_css_prop(property, buffer, size) ? buffer : nullptr;
-    if (strlen(property) >= size) return nullptr;
-    str_copy(buffer, size, property, strlen(property));
-    str_lower_inplace(buffer, strlen(buffer));
-    return buffer;
+static StrView cssom_property_name(Item property) {
+    return get_type_id(property) == LMD_TYPE_STRING
+        ? strview_init(it2s(property)->chars, it2s(property)->len)
+        : strview_from_cstr(fn_to_cstr(property));
 }
 
-static bool cssom_decl_store(CssRule* rule, const char* name, CssDeclaration* replacement) {
+static StrView cssom_decl_name(StrView property, bool named, char* buffer, size_t size) {
+    if (!property.str) return strview_init(nullptr, 0);
+    if (property.length > 2 && property.str[0] == '-' && property.str[1] == '-') return property;
+    // Standard names and priorities compare the whole DOMString, including any NUL.
+    if (property.length >= size || memchr(property.str, '\0', property.length)) return strview_init(nullptr, 0);
+    if (named) return dom_style_camel_to_css_prop(property.str, buffer, size)
+        ? strview_from_cstr(buffer) : strview_init(nullptr, 0);
+    str_copy(buffer, size, property.str, property.length);
+    str_lower_inplace(buffer, property.length);
+    return strview_init(buffer, property.length);
+}
+
+static bool cssom_decl_store(CssRule* rule, StrView name, CssDeclaration* replacement) {
     size_t count = rule->data.style_rule.declaration_count;
     CssDeclaration** declarations = rule->data.style_rule.declarations;
     bool found = false;
@@ -1560,13 +1571,21 @@ struct CssomDeclarationView {
         element = (DomElement*)virtual_host_data(receiver);
         scratch = pool_create();
         if (!scratch) return;
-        // authored inline declarations remain observable even when a stylesheet wins.
-        const char* text = dom_element_get_inline_style(element);
         inline_rule.pool = scratch;
         inline_rule.type = CSS_RULE_STYLE;
-        inline_rule.data.style_rule.declarations = css_parse_declaration_list_text(
-            text ? text : "", text ? strlen(text) : 0, scratch,
-            &inline_rule.data.style_rule.declaration_count);
+        if (CssRule* authored = dom_element_inline_declaration_block(element)) {
+            size_t count = authored->data.style_rule.declaration_count;
+            inline_rule.data.style_rule.declarations = (CssDeclaration**)pool_calloc(scratch, count * sizeof(CssDeclaration*));
+            if (count && !inline_rule.data.style_rule.declarations) return;
+            if (count) memcpy(inline_rule.data.style_rule.declarations,
+                authored->data.style_rule.declarations, count * sizeof(CssDeclaration*));
+            inline_rule.data.style_rule.declaration_count = count;
+        } else {
+            const char* text = dom_element_get_inline_style(element);
+            inline_rule.data.style_rule.declarations = css_parse_declaration_list_text(
+                text ? text : "", text ? strlen(text) : 0, scratch,
+                &inline_rule.data.style_rule.declaration_count);
+        }
         rule = &inline_rule;
     }
     ~CssomDeclarationView() { if (scratch) pool_destroy(scratch); }
@@ -1580,7 +1599,7 @@ static String* cssom_decl_text(CssRule* rule) {
         if (!cssom_decl_first(rule, i)) continue;
         if (count++) stringbuf_append_str(buffer, " ");
         append_rule_declaration_text(buffer, cssom_decl_find(rule,
-            rule->data.style_rule.declarations[i]->property_name), rule->pool);
+            css_declaration_name(rule->data.style_rule.declarations[i])), rule->pool);
         stringbuf_append_str(buffer, ";");
     }
     return stringbuf_to_string(buffer);
@@ -1628,7 +1647,8 @@ static void cssom_computed_names(Item receiver, lam::ArrayList<StrView>* names) 
     dom_ensure_computed(element, false);
     for (DomElement* ancestor = element; ancestor; ancestor = dom_parent_element(ancestor))
         for (CssCustomProp* variable = ancestor->css_variables; variable; variable = variable->next)
-            cssom_computed_custom_name(&data, strview_from_cstr(variable->name));
+            cssom_computed_custom_name(&data, variable->declaration
+                ? css_declaration_name(variable->declaration) : strview_from_cstr(variable->name));
     css_visit_document_property_registrations(element->doc, cssom_computed_registration, &data);
     pool_destroy(scratch);
 }
@@ -1637,6 +1657,10 @@ extern "C" Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name)
     CssomDeclarationView view(decl_item);
     CssRule* rule = view.rule;
     const char* property = fn_to_cstr(prop_name);
+    StrView requested = cssom_property_name(prop_name);
+    if (requested.str && memchr(requested.str, '\0', requested.length) &&
+        !(requested.length > 2 && requested.str[0] == '-' && requested.str[1] == '-'))
+        property = nullptr;
     if (property && (view.computed || view.element)) {
         if (strcmp(property, "parentRule") == 0) return ItemNull;
         if (view.computed) {
@@ -1670,7 +1694,7 @@ extern "C" Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name)
         return (Item){.item = i2it((int64_t)count)};
     }
     char name_buffer[128];
-    const char* name = cssom_decl_name(property, true, name_buffer, sizeof(name_buffer));
+    StrView name = cssom_decl_name(cssom_property_name(prop_name), true, name_buffer, sizeof(name_buffer));
     CssDeclaration* declaration = cssom_decl_find(rule, name);
     return make_string_item(declaration ? css_serialize_declaration_value(declaration, pool) : "");
 }
@@ -1683,11 +1707,11 @@ static Item cssom_decl_method_get(Item receiver, Item property, bool priority) {
     CssomDeclarationView view(receiver_root.get());
     CssRule* rule = view.rule;
     char name_buffer[128];
-    const char* name = cssom_decl_name(fn_to_cstr(property_root.get()), false, name_buffer, sizeof(name_buffer));
+    StrView name = cssom_decl_name(cssom_property_name(property_root.get()), false, name_buffer, sizeof(name_buffer));
     if (view.computed) {
         if (priority || !cssom_decl_supports(nullptr, name)) return make_string_item("");
         // custom names are full DOMStrings; rebuilding from C text truncates embedded NUL.
-        if (!(name[0] == '-' && name[1] == '-')) property_root.set(make_string_item(name));
+        if (!(name.length > 2 && name.str[0] == '-' && name.str[1] == '-')) property_root.set(make_string_item(name.str));
         return dom_computed_style_get_property(receiver_root.get(), property_root.get());
     }
     if (!rule) return make_string_item("");
@@ -1724,16 +1748,16 @@ static void cssom_decl_notify_mutation(CssRule* rule) {
 }
 
 
-static void cssom_decl_commit(CssomDeclarationView* view, const char* name) {
+static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
     if (!view->element) {
         cssom_decl_notify_mutation(view->rule);
         return;
     }
     String* text = cssom_decl_text(view->rule);
     if (!text) return;
-    CssPropertyCode property = name ? css_property_code_from_name(name) : CSS_PROPERTY_UNKNOWN;
+    CssPropertyCode property = name.str ? css_property_code_from_name(name.str) : CSS_PROPERTY_UNKNOWN;
     css_transition_capture_before_change(view->element, property);
-    if (view->element->set_attribute("style", text->chars))
+    if (dom_element_commit_inline_declarations(view->element, view->rule, text->chars))
         dom_notify_mutation(dom_style_mutation_kind(property), view->element, view->element->parent);
 }
 
@@ -1756,31 +1780,31 @@ static Item cssom_decl_set(Item receiver, Item property, Item value, Item priori
     CssRule* rule = view.rule;
     if (!rule || !rule->pool) return make_js_undefined();
     String* source = it2s(value_root.get());
-    const char* property_text = fn_to_cstr(property_root.get());
-    if (named && strcmp(property_text, "cssText") == 0) {
+    StrView requested_name = cssom_property_name(property_root.get());
+    if (named && strview_equal(&requested_name, "cssText")) {
         size_t count = 0;
         CssDeclaration** parsed = css_parse_declaration_list_text(source->chars,
             source->len, rule->pool, &count);
         rule->data.style_rule.declarations = parsed;
         rule->data.style_rule.declaration_count = count;
-        cssom_decl_commit(&view, nullptr);
+        cssom_decl_commit(&view, strview_init(nullptr, 0));
         return make_js_undefined();
     }
     char name_buffer[128];
-    const char* name = cssom_decl_name(property_text, named, name_buffer, sizeof(name_buffer));
+    StrView name = cssom_decl_name(cssom_property_name(property_root.get()), named, name_buffer, sizeof(name_buffer));
     if (!cssom_decl_supports(rule, name)) return make_js_undefined();
     // CSSOM checks empty values before priority, including an invalid priority string.
     if (!source->len) {
         if (cssom_decl_store(rule, name, nullptr)) cssom_decl_commit(&view, name);
         return make_js_undefined();
     }
-    const char* requested_priority = fn_to_cstr(priority_root.get());
-    bool important = requested_priority[0] && str_icmp_cstr(requested_priority, "important") == 0;
-    if (requested_priority[0] && !important) return make_js_undefined();
-    CssDeclaration* declaration = css_parse_property_value_declaration(name, strlen(name),
+    String* requested_priority = it2s(priority_root.get());
+    bool important = requested_priority->len == 9 && str_icmp_cstr(requested_priority->chars, "important") == 0;
+    if (requested_priority->len && !important) return make_js_undefined();
+    CssDeclaration* declaration = css_parse_property_value_declaration(name.str, name.length,
         source->chars, source->len, rule->pool);
     if (!declaration) return make_js_undefined();
-    if (strcmp(name, "unicode-range") == 0) {
+    if (strview_equal(&name, "unicode-range")) {
         const char* canonical = css_parse_unicode_range_canonical(source->chars, source->len, rule->pool);
         if (!canonical) return make_js_undefined();
         declaration->value = nullptr;
@@ -1804,8 +1828,8 @@ extern "C" Item dom_cssom_rule_decl_set_property(Item receiver, Item property, I
 }
 
 extern "C" Item dom_cssom_rule_decl_remove_property(Item receiver, Item property) {
-    RootFrame roots(2);
-    Rooted<Item> receiver_root(roots, receiver), property_root(roots, property);
+    RootFrame roots(3);
+    Rooted<Item> receiver_root(roots, receiver), property_root(roots, property), previous_root(roots, ItemNull);
     JS_ASSIGN_OR_RETURN(string, js_to_string(property_root.get()));
     property_root.set(string);
     CssomDeclarationView view(receiver_root.get());
@@ -1814,11 +1838,12 @@ extern "C" Item dom_cssom_rule_decl_remove_property(Item receiver, Item property
     CssRule* rule = view.rule;
     if (!rule) return make_string_item("");
     char name_buffer[128];
-    const char* name = cssom_decl_name(fn_to_cstr(property_root.get()), false, name_buffer, sizeof(name_buffer));
+    StrView name = cssom_decl_name(cssom_property_name(property_root.get()), false, name_buffer, sizeof(name_buffer));
     CssDeclaration* declaration = cssom_decl_supports(rule, name) ? cssom_decl_find(rule, name) : nullptr;
     const char* old_value = declaration ? css_serialize_declaration_value(declaration, rule->pool) : "";
+    previous_root.set(make_string_item(old_value));
     if (declaration && cssom_decl_store(rule, name, nullptr)) cssom_decl_commit(&view, name);
-    return make_string_item(old_value);
+    return previous_root.get();
 }
 
 extern "C" Item dom_cssom_rule_decl_item(Item receiver, Item index_item) {
@@ -1838,8 +1863,10 @@ extern "C" Item dom_cssom_rule_decl_item(Item receiver, Item index_item) {
     CssRule* rule = view.rule;
     if (!rule) return make_string_item("");
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
-        if (cssom_decl_first(rule, i) && index-- == 0)
-            return make_string_item(rule->data.style_rule.declarations[i]->property_name);
+        if (cssom_decl_first(rule, i) && index-- == 0) {
+            StrView name = css_declaration_name(rule->data.style_rule.declarations[i]);
+            return (Item){.item = s2it(heap_strcpy(name.str, name.length))};
+        }
     }
     return make_string_item("");
 }
@@ -1847,7 +1874,7 @@ extern "C" Item dom_cssom_rule_decl_item(Item receiver, Item index_item) {
 extern "C" Item dom_cssom_decl_css_has(Item receiver, Item property) {
     CssomDeclarationView view(receiver);
     char name_buffer[128];
-    const char* name = cssom_decl_name(fn_to_cstr(property), true, name_buffer, sizeof(name_buffer));
+    StrView name = cssom_decl_name(cssom_property_name(property), true, name_buffer, sizeof(name_buffer));
     // native named adapters share the same context-specific supported-name list.
     return (Item){.item = b2it((view.rule || view.computed) && cssom_decl_supports(view.rule, name))};
 }

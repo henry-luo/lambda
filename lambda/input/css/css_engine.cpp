@@ -144,8 +144,9 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
         css_font_shorthand_contains_property(query->property);
     bool custom_property = strncmp(declaration->property_name, "--", 2) == 0;
+    StrView declaration_name = css_declaration_name(declaration);
     bool same_property = custom_property
-        ? strcmp(declaration->property_name, query->property) == 0
+        ? strview_equal(&declaration_name, query->property)
         : str_icmp_cstr(declaration->property_name, query->property) == 0;
     CssPropertyCode requested = css_property_code_from_name(query->property);
     bool shorthand = requested > 0 && css_property_shorthand_contains(declaration->property_code, requested);
