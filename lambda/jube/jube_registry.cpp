@@ -130,6 +130,7 @@ static bool jube_specifier_catalog_ensure(void);
 static int jube_load_manifest_path_internal(const char* manifest_path, const char* selector,
                                             const char* expected_name);
 static bool jube_activate_module_descriptor(const JubeModuleDef* module);
+static const JubeModuleDef* jube_module_for_host_type(const void* host_type);
 
 struct JubeMirCursorSlot {
     MirEmitter* emitter;
@@ -3172,6 +3173,9 @@ static bool jube_host_value_number_to_int64_exact(Item value, int64_t* out_value
 
 static Item jube_host_value_native_object_new(const JubeTypeDef* type, void* payload) {
     if (!type) return ItemNull;
+    // direct engine seams can produce module types before an explicit import.
+    const JubeModuleDef* module = jube_module_for_host_type(type);
+    if (module && !jube_activate_module_descriptor(module)) return ItemNull;
     Item object = ItemNull;
     switch (type->carrier) {
     case JUBE_CARRIER_VARRAY:
@@ -6515,7 +6519,7 @@ void jube_notify_heap_cleanup(void* heap) {
     }
 }
 
-const JubeTypeDef* jube_find_type_by_host_type(const void* host_type) {
+static const JubeModuleDef* jube_module_for_host_type(const void* host_type) {
     if (!host_type) return NULL;
     for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
@@ -6523,9 +6527,15 @@ const JubeTypeDef* jube_find_type_by_host_type(const void* host_type) {
         for (int j = 0; j < module->type_count; j++) {
             const JubeTypeDef* type = &module->types[j];
             if ((const void*)type == host_type) {
-                return jube_activate_module_descriptor(module) ? type : NULL;
+                return module;
             }
         }
     }
     return NULL;
+}
+
+const JubeTypeDef* jube_find_type_by_host_type(const void* host_type) {
+    const JubeModuleDef* module = jube_module_for_host_type(host_type);
+    return module && jube_activate_module_descriptor(module)
+        ? (const JubeTypeDef*)host_type : NULL;
 }

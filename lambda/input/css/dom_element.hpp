@@ -105,6 +105,19 @@ typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_INLINE_STYLE = 9
 } DomJsMutationKind;
 
+// authored and presentation writes share repaint versus recascade classification.
+inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id) {
+    switch (prop_id) {
+        case CSS_PROPERTY_BACKGROUND_COLOR:
+        case CSS_PROPERTY_COLOR:
+        case CSS_PROPERTY_OPACITY:
+        case CSS_PROPERTY_VISIBILITY:
+            return DOM_JS_MUTATION_STYLE_REPAINT;
+        default:
+            return DOM_JS_MUTATION_INLINE_STYLE;
+    }
+}
+
 typedef enum DomJsMutationAttribute {
     DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN,
     DOM_JS_MUTATION_ATTRIBUTE_CLASS,

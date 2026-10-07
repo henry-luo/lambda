@@ -10,6 +10,7 @@
 #include "../jube/jube_registry.h"
 #include "../dom/dom.h"
 #include "../dom/dom_events.h"
+#include "../dom/dom_cssom.h"
 #include "../dom/dom_observers.h"
 #include "../dom/dom_platform.h"
 #include "../../lib/mem_grow.hpp"
@@ -735,6 +736,7 @@ void js_runtime_state_release_heap_resources(void) {
     js_history_reset();
     dom_window_dialog_reset();
     dom_collections_release_context();
+    dom_cssom_release_context();
     dom_foreign_documents_release_context();
     js_fetch_reset();
     js_reset_template_registry();

@@ -57,6 +57,8 @@ The design reverses K2-R (state machines over fibers). §4.1 explains why the tw
 
 What is shared already: the libuv loop (`lib/uv_loop.c`), the 32-byte `DurableActivation` base (`durable_activation.hpp`), the promise/handle bridge (`concurrency_js.cpp`), and the phase order "microtask drain, then Lambda `run_ready`" (`uv_loop.c:40`).
 
+**Verification finding, 2026-10-07:** The native chart/PDF concurrency suite reproduces `SIGBUS`/`SIGSEGV` when independent evaluation threads retire schedulers through the same process-global libuv queues. **D5.4.4** requires context-owned event-loop custody and **D5.4.1** permits only quiescent handoff. A thread-local substitution is insufficient: large-stack execution and retained iframe runtimes also need their native handles and checkpoint clients to follow the canonical owner. That broader repair remains open; the trial was removed after it stalled document-editor navigation. The separate AUTO MIR-cache admission assertion also remains open. No test expectation was removed. The CSSOM delivery retains only the verified teardown correction that returns to its retiring evaluator after a foreign document callback under **D5.4.1** and **D5.3.3**.
+
 ### 2.2 Colour in the tiering logic
 
 Tier selection reads function colour in both languages, in opposite directions:

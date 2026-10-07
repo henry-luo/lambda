@@ -1,0 +1,47 @@
+<!doctype html>
+<style id="rules">.item { color: red; width: 10px; } .other { color: blue; }</style>
+<button id="check">check declaration reflection</button><div id="report" class="item"></div>
+<script>
+function check(name, callback) {
+    var report = document.getElementById('report');
+    try { report.setAttribute('data-' + name, String(callback())); }
+    catch (error) { report.setAttribute('data-' + name, error.name); }
+}
+document.getElementById('check').addEventListener('click', function () {
+    var sheet = document.getElementById('rules').sheet;
+    var rule = sheet.cssRules[0], style = rule.style, other = sheet.cssRules[1].style;
+    var proto = CSSStyleDeclaration.prototype;
+    check('instance', function () { return style instanceof CSSStyleDeclaration; });
+    check('length-readonly', function () { return Reflect.set(style, 'length', 0) === false && style.length === 2; });
+    check('strict-length', function () { try { (function () { 'use strict'; style.length = 0; })(); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('parent-readonly', function () { return Reflect.set(style, 'parentRule', null) === false && style.parentRule === rule; });
+    check('css-text-inherited', function () { return Object.prototype.hasOwnProperty.call(style, 'cssText') === false; });
+    check('css-text-descriptor', function () { var desc = Object.getOwnPropertyDescriptor(proto, 'cssText'); return !!desc && typeof desc.get === 'function' && typeof desc.set === 'function' && desc.enumerable && desc.configurable; });
+    check('method-identity', function () { return style.item === other.item && style.getPropertyValue === other.getPropertyValue && style.setProperty === other.setProperty; });
+    check('method-prototype', function () { var desc = Object.getOwnPropertyDescriptor(proto, 'item'); return !!desc && desc.value === style.item && desc.writable && desc.enumerable && desc.configurable; });
+    check('item-arity', function () { return style.item.length === 1; });
+    check('set-property-arity', function () { return style.setProperty.length === 2; });
+    check('get-property-arity', function () { return style.getPropertyValue.length === 1; });
+    check('item-brand', function () { try { style.item.call({}, 0); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('get-brand', function () { try { style.getPropertyValue.call({}, 'color'); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('get-receiver', function () { try { Reflect.get(style, 'cssText', {}); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('valid-receiver', function () { return Reflect.get(style, 'length', other) === 1; });
+    check('item-required', function () { try { style.item(); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('set-required', function () { try { style.setProperty('color'); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('indexed-descriptor', function () { var desc = Object.getOwnPropertyDescriptor(style, '0'); return !!desc && desc.value === 'color' && desc.enumerable && desc.configurable && !desc.writable; });
+    check('indexed-readonly', function () { return Reflect.set(style, '0', 'width') === false && style[0] === 'color'; });
+    check('expando-false', function () { return Reflect.set(style, 'extra', false) === true && style.extra === false; });
+    check('indexed-read', function () { return style[0] === 'color' && style[1] === 'width' && style[2] === undefined; });
+    check('indexed-has', function () { return '0' in style && '1' in style && !('2' in style); });
+    check('indexed-delete', function () { return Reflect.deleteProperty(style, '0') === false && style[0] === 'color'; });
+    check('indexed-own-keys', function () { var keys = Object.keys(style); return keys[0] === '0' && keys[1] === '1' && keys.indexOf('extra') >= 0 && keys.indexOf('cssText') < 0 && keys.indexOf('length') < 0; });
+    check('noncanonical-index', function () { return Reflect.set(style, '00', 'alias') === true && style['00'] === 'alias' && style[0] === 'color' && sheet.cssRules['00'] === undefined; });
+    check('large-key-expando', function () { return Reflect.set(style, '4294967295', false) === true && style['4294967295'] === false; });
+    check('own-css-text-shadow', function () { Object.defineProperty(style, 'cssText', { value: 'own', writable: false, configurable: true }); var result = style.cssText === 'own' && Reflect.set(style, 'cssText', 'color:green') === false && style.getPropertyValue('color') === 'red'; delete style.cssText; return result; });
+    check('own-method-shadow', function () { var replacement = function () { return this === style; }; Object.defineProperty(style, 'item', { value: replacement, writable: true, configurable: true }); var result = style.item === replacement && style.item() === true; delete style.item; return result && style.item === other.item; });
+    check('own-getter-receiver', function () { Object.defineProperty(style, 'customGet', { get: function () { return this === other; }, configurable: true }); return Reflect.get(style, 'customGet', other) === true; });
+    check('brand-before-conversion', function () { var count = 0, index = { valueOf: function () { count++; return 0; } }; try { style.item.call({}, index); } catch (error) { return error.name === 'TypeError' && count === 0; } return false; });
+    check('borrowed-method', function () { return style.getPropertyValue.call(other, 'color') === 'blue'; });
+    check('live-index-mutation', function () { style.removeProperty('color'); return style.length === 1 && style[0] === 'width' && style[1] === undefined && Object.getOwnPropertyDescriptor(style, '1') === undefined && !('1' in style); });
+});
+</script>

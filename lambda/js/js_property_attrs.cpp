@@ -699,8 +699,8 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         log_error("js-accessor: native cell root registration failed");
         return;
     }
-    Item result = js_store_virtual_accessor_pair(obj_root.get(), name_root.get(), pair,
-        (uint8_t)(attrs | JSPD_NON_ENUMERABLE));
+    // descriptor flags belong to the caller; WebIDL accessors are enumerable.
+    Item result = js_store_virtual_accessor_pair(obj_root.get(), name_root.get(), pair, attrs);
     if (item_is_error(result)) {
         log_error("js-accessor: native descriptor installation failed");
     }

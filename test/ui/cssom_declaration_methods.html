@@ -1,0 +1,72 @@
+<!doctype html>
+<style>button{height:24px}#report{height:30px}</style>
+<style id="rules">
+#report { width: 20px !important; width: 30px; height: 24px; background-color: lime; --Case: upper; --case: lower; }
+</style>
+<button id="check">check declaration methods</button><div id="report" style="width:99px">text</div>
+<script>
+var report = document.getElementById('report');
+function check(name, callback) {
+    try { report.setAttribute('data-' + name, String(callback())); }
+    catch (error) { report.setAttribute('data-' + name, error.name); }
+}
+document.getElementById('check').addEventListener('click', function () {
+    var sheet = document.getElementById('rules').sheet;
+    var rule = sheet.cssRules[0];
+    var style = rule.style;
+    check('value-length', function () { return style.getPropertyValue('length') === ''; });
+    check('value-parent', function () { return style.getPropertyValue('parentRule') === ''; });
+    check('value-text', function () { return style.getPropertyValue('cssText') === ''; });
+    check('value-case', function () { return style.getPropertyValue('HEIGHT') === '24px'; });
+    check('value-camel', function () { return style.getPropertyValue('backgroundColor') === ''; });
+    check('named-camel', function () { return style.backgroundColor === style.getPropertyValue('background-color'); });
+    check('value-important', function () { return style.getPropertyValue('width') === '20px'; });
+    check('priority-initial', function () { return style.getPropertyPriority('WIDTH') === 'important'; });
+    check('custom-case', function () { return style.getPropertyValue('--Case') === 'upper' && style.getPropertyValue('--case') === 'lower'; });
+    check('priority-unknown', function () { return style.getPropertyPriority('length') === ''; });
+    check('set-return', function () { return style.setProperty('width', '40px', 'IMPORTANT') === undefined; });
+    check('set-priority', function () { return style.getPropertyValue('width') === '40px' && style.getPropertyPriority('width') === 'important'; });
+    check('priority-cascade', function () { return getComputedStyle(report).width === '40px'; });
+    check('set-duplicate', function () { return style.length === 5; });
+    check('invalid-priority', function () { style.setProperty('width', '50px', 'urgent'); return style.width === '40px'; });
+    check('priority-space', function () { style.setProperty('width', '60px', ' important '); return style.width === '40px'; });
+    check('embedded-priority', function () { style.setProperty('width', '70px !important'); return style.width === '40px'; });
+    check('value-semicolon', function () { style.setProperty('width', '75px;'); return style.width === '40px'; });
+    check('invalid-value', function () { style.setProperty('width', 'invalid'); return style.width === '40px'; });
+    check('method-camel', function () { style.setProperty('backgroundColor', 'red'); return style.getPropertyValue('background-color') !== 'red'; });
+    check('set-case', function () { style.setProperty('HEIGHT', '28px'); return style.height === '28px'; });
+    check('priority-reset', function () { style.setProperty('width', '80px'); return style.width === '80px' && style.getPropertyPriority('width') === ''; });
+    check('empty-removal', function () { style.setProperty('width', '', 'urgent'); return style.getPropertyValue('width') === ''; });
+    check('numeric-value', function () { style.setProperty('z-index', 7); return style.zIndex === '7'; });
+    check('null-value', function () { style.setProperty('z-index', null); return style.zIndex === ''; });
+    check('remove-case', function () { return style.removeProperty('HEIGHT') === '28px' && style.height === ''; });
+    check('remove-custom', function () { return style.removeProperty('--Case') === 'upper' && style.getPropertyValue('--Case') === '' && style.getPropertyValue('--case') === 'lower'; });
+    check('named-priority', function () { style.setProperty('height', '30px', 'important'); style.height = '32px'; return style.height === '32px' && style.getPropertyPriority('height') === ''; });
+    check('declaration-expando', function () { style.note = 17; return rule.style.note === 17 && 'note' in style; });
+    check('text-set', function () { style.cssText = 'height:35px; width:36px !important; height:37px'; return style.height === '37px' && style.width === '36px' && style.getPropertyPriority('width') === 'important'; });
+    check('text-count', function () { return style.length === 2; });
+    check('item-order', function () { return style.item(0) === 'height' && style.item(1) === 'width' && style.item(2) === ''; });
+    check('text-read', function () { return style.cssText === 'height: 37px; width: 36px !important;'; });
+    check('text-parent', function () { return style.parentRule === rule && rule.style === style; });
+    check('unknown-property', function () { style.setProperty('unsupported-property', 'value'); return style.length === 2 && style.getPropertyValue('unsupported-property') === ''; });
+    check('text-unknown', function () { style.cssText = 'unsupported-property:value; height:38px'; return style.length === 1 && style.item(0) === 'height'; });
+    check('coercion-order', function () {
+        var order = '';
+        style.setProperty({toString:function () { order += 'n'; return '--coerced'; }},
+            {toString:function () { order += 'v'; return 'kept'; }},
+            {toString:function () { order += 'p'; return 'important'; }});
+        return order === 'nvp' && style.getPropertyValue('--coerced') === 'kept' && style.getPropertyPriority('--coerced') === 'important';
+    });
+    check('coercion-throw', function () {
+        var priorityCalled = false;
+        try { style.setProperty('height', {toString:function () { throw new Error('conversion'); }},
+            {toString:function () { priorityCalled = true; return ''; }}); }
+        catch (error) { return !priorityCalled && style.height === '38px'; }
+        return false;
+    });
+    check('custom-quoted', function () { style.setProperty('--quoted', '"!important"'); return style.getPropertyValue('--quoted') === '"!important"'; });
+    check('custom-block', function () { style.setProperty('--block', '{ a: b; }'); return style.getPropertyValue('--block') === '{ a: b; }'; });
+    check('custom-long-name', function () { var name = '--' + 'x'.repeat(180); style.setProperty(name, 'long'); return style.getPropertyValue(name) === 'long'; });
+    check('item-coercion', function () { return style.item('0') === 'height' && style.item(-1) === '' && style.item(4294967296) === 'height'; });
+});
+</script>

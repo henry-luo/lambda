@@ -28,6 +28,8 @@ struct CssPageAreaRule {
 };
 
 struct CssPageRule {
+    const char* selector_text; // canonical prelude retains repeated pseudo classes
+
     CssPageSelector* selectors;
     size_t selector_count;
     CssDeclaration** declarations;
@@ -43,3 +45,5 @@ bool css_page_selector_matches(const CssPageSelector* selector, const char* page
                               uint8_t page_pseudos);
 int css_page_specificity_compare(const CssPageSelector* a, const CssPageSelector* b);
 const char* css_page_margin_box_name(CssPageMarginBox box);
+
+CssPageRule* css_page_selectors_parse_text(const char* text, size_t length, Pool* pool);

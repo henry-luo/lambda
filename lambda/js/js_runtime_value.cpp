@@ -1699,8 +1699,10 @@ extern "C" Item js_strict_equal(Item left, Item right) {
             // wrapper allocation once DOM nodes are record-driven.
             void* left_host = jube_host_identity(left);
             void* right_host = jube_host_identity(right);
+            // distinct interfaces can project the same native payload (a rule and its declaration).
             if (left_host || right_host)
-                return (Item){.item = b2it(left_host && left_host == right_host)};
+                return (Item){.item = b2it(left_host && left_host == right_host &&
+                    virtual_host_type(left) == virtual_host_type(right))};
         }
         // Object/function equality is identity equality in JavaScript.
         return (Item){.item = b2it(left.item == right.item)};

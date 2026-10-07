@@ -70,6 +70,7 @@ struct HashMapEntry {
 
 // backing data for the HashMap-backed VMap
 struct HashMapData {
+    Item owner;                 // traced native-host lifetime edge, outside the property domain
     HashMap* table;              // lib/hashmap.h instance
     ArrayList* key_order;        // insertion-order list of Item keys
     ArrayList* num_values;       // heap-owned numeric key/value storage
@@ -298,7 +299,9 @@ static void hashmap_vmap_destroy(void* data) {
 
 static void hashmap_vmap_trace(void* data, gc_heap_t* gc) {
     HashMapData* hd = (HashMapData*)data;
-    if (!hd || !hd->table || !gc) return;
+    if (!hd || !gc) return;
+    gc_mark_item(gc, hd->owner.item);
+    if (!hd->table) return;
 
     size_t iter = 0;
     void* entry;
@@ -336,9 +339,16 @@ static VMap* vmap_alloc() {
 static bool vmap_ensure_hashmap_data(VMap* vm, bool lambda_key_domain) {
     if (!vm) return false;
     if (vm->data) return true;
-    // Host-branded VMaps are projection shells; only real map mutation needs backing storage.
+    // host projection shells allocate backing storage only for properties or a traced owner edge.
     vm->data = hashmap_data_new(lambda_key_domain);
     return vm->data != nullptr;
+}
+
+extern "C" bool vmap_set_owner(VMap* vm, Item owner) {
+    if (!vm || vm->vtable != &hashmap_vtable ||
+        !vmap_ensure_hashmap_data(vm, false)) return false;
+    ((HashMapData*)vm->data)->owner = owner;
+    return true;
 }
 
 // DOM3 raw backing-store access: bypasses host-object routing so the generic

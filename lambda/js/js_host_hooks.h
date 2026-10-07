@@ -19,8 +19,8 @@ bool js_host_hooks_redirect_stdout_to_stderr(void);
 // Shared JS runtime predicates and Unicode helpers live in js_runtime.cpp so
 // global builtins and runtime dispatch use one implementation of each rule.
 const JubeTypeDef* js_host_object_type(Item object);
-bool js_host_object_get_property(Item object, Item key, Item* out);
-bool js_host_object_set_property(Item object, Item key, Item value, Item* out);
+bool js_host_object_get_property(Item object, Item key, Item receiver, Item* out);
+bool js_host_object_set_property(Item object, Item key, Item value, Item receiver, Item* out);
 bool js_host_object_has_property(Item object, Item key, Item* out);
 bool js_host_object_delete_property(Item object, Item key, Item* out);
 bool js_host_object_own_property_names(Item object, Item* out);

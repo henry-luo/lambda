@@ -1282,21 +1282,21 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                                       out, out_size);
 }
 
-String* css_prop_serialize_registered_custom_property(Pool* pool, DomElement* element,
+String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length) {
     if (!pool || !element || !element->doc) return nullptr;
     DomDocument* doc = element->doc;
     const CssPropertyRegistration* registration = css_find_document_property_registration(doc, name, name_length);
-    if (!registration) return nullptr;
     dom_ensure_computed(element, false);
     Pool* scratch = pool_create();
     if (!scratch) return nullptr;
     const CssValue* value = css_compute_element_custom_property(scratch, element, name, name_length);
-    const CssPropertySyntaxComponent* matched = css_match_property_syntax(registration, value);
+    const CssPropertySyntaxComponent* matched = registration
+        ? css_match_property_syntax(registration, value) : nullptr;
     CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
     if (!formatter) {pool_destroy(scratch); return nullptr;}
     formatter->options.computed_colors = matched && matched->type == CSS_SYNTAX_COLOR;
-    if (registration->universal && value == registration->initial_value && registration->initial_text) {
+    if (registration && registration->universal && value == registration->initial_value && registration->initial_text) {
         // Universal defaults retain their original token spelling and length, including embedded NUL.
         stringbuf_append_str_n(formatter->output, registration->initial_text, registration->initial_text_length);
     } else if (value) css_format_value(formatter, (CssValue*)value);

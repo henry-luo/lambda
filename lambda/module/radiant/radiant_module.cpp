@@ -1266,6 +1266,12 @@ static DomDocument* radiant_load_html_document(const char* path, const char* fun
         free_document(doc);
         return nullptr;
     }
+    // loaded documents outlive weak wrappers and belong to the calling evaluator.
+    if (!radiant_host_api || !radiant_host_api->dom_catalog->retain_owned_document(doc)) {
+        log_error("JUBE_RADIANT_%s: failed to retain document '%s'", func_name, path);
+        free_document(doc);
+        return nullptr;
+    }
     return doc;
 }
 
@@ -3521,17 +3527,18 @@ static void radiant_custom_layout_heap_cleanup(void* heap_ptr) {
     }
 }
 
+#define RADIANT_READONLY_INDEXED (JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_INDEXED_READONLY)
 static const JubeTypeDef radiant_types[] = {
     {"dom_node", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
     {"range", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"selection", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     // DOM3: style hosts are record-driven; no hand-written host ops remain
-    {"inline_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"computed_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"stylesheet", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"inline_style", RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
+    {"computed_style", RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
+    {"stylesheet", JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_NATIVE_INDEXED, NULL, NULL},
     {"css_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"rule_style_decl", RADIANT_READONLY_INDEXED, NULL, NULL},
     {"document", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
     {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
@@ -3553,27 +3560,40 @@ static const JubeTypeDef radiant_types[] = {
     {"html_element", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
     {"event", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_dom_event_destroy},
-    {"node_list", JUBE_TYPE_NON_OWNING_HOST, &dom_child_collection_varray_vtable, NULL,
+    {"node_list", RADIANT_READONLY_INDEXED, &dom_child_collection_varray_vtable, NULL,
      JUBE_CARRIER_VARRAY},
-    {"html_collection", JUBE_TYPE_NON_OWNING_HOST, &dom_child_collection_varray_vtable, NULL,
+    {"html_collection", RADIANT_READONLY_INDEXED, &dom_child_collection_varray_vtable, NULL,
      JUBE_CARRIER_VARRAY},
     {"html_options_collection", JUBE_TYPE_NON_OWNING_HOST,
      &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"html_form_controls_collection", JUBE_TYPE_NON_OWNING_HOST,
+    {"html_form_controls_collection", RADIANT_READONLY_INDEXED,
      &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"named_node_map", JUBE_TYPE_NON_OWNING_HOST,
+    {"named_node_map", RADIANT_READONLY_INDEXED,
      &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"dom_token_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"dom_token_list", RADIANT_READONLY_INDEXED,
      &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"radio_node_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"radio_node_list", RADIANT_READONLY_INDEXED,
      &dom_static_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"dom_rect_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"dom_rect_list", RADIANT_READONLY_INDEXED,
      &dom_static_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"style_sheet_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"style_sheet_list", RADIANT_READONLY_INDEXED,
      &dom_cssom_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
-    {"css_rule_list", JUBE_TYPE_NON_OWNING_HOST,
+    {"css_rule_list", RADIANT_READONLY_INDEXED,
      &dom_cssom_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"css_grouping_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"css_condition_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+#define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
+    {#host, JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+#define CSS_RULE_INTERFACE_ALIAS(...)
+#include "../../input/css/css_rule_interfaces.def"
+#undef CSS_RULE_INTERFACE_ALIAS
+#undef CSS_RULE_INTERFACE
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    {#host, RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
+#include "../../input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
 };
+#undef RADIANT_READONLY_INDEXED
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
     return &radiant_types[0];
