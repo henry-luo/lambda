@@ -1,0 +1,27 @@
+// Presenter controls and reusable brand/layout definitions.
+<presentation id: "presenter-demo", title: "Presenter tools", theme: 'midnight', master: "brand",
+    <layout id: "briefing",
+        <placeholder role: 'title', x: 80, y: 70, width: 1120, height: 110>
+        <placeholder role: 'body', x: 80, y: 230, width: 1120, height: 350>
+    >
+    <master id: "brand", layout: "briefing",
+        <shape id: "accent", x: 80, y: 660, width: 1120, height: 3>
+        <text id: "footer", role: 'footer', x: 80, y: 676, width: 1120, height: 30, font_size: 18, "Lambda · Presenter tools">
+    >
+    <slide id: "intro", title: "Ready to present",
+        <text id: "title", role: 'title', "Ready to present">
+        <text id: "body", role: 'body', "P: presenter console\nO: overview · H: toolbar\nB: blackout · L: laser pointer">
+        <notes <p "Welcome the audience and introduce the presentation.">
+            <p "The next-slide preview shows the completed build. The timer measures speaking time.">>
+    >
+    <slide id: "details", title: "One shared design", theme: 'paper',
+        <text id: "title", role: 'title', "One shared design">
+        <text id: "body", role: 'body', "Named themes provide colors and typography.\nLayouts supply reusable object bounds.\nMasters share logos, rules, footers and placeholders.">
+        <cue <effect target: "body", kind: 'fade-in', duration: 500>>
+        <notes <p "Explain that a local object with the same ID replaces its inherited master object.">>
+    >
+    <slide id: "finish", title: "Questions?", theme: 'corporate',
+        <text id: "title", role: 'title', "Questions?">
+        <text id: "body", role: 'body', "Use the overview or slide picker to revisit any topic.">
+    >
+>

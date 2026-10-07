@@ -1,11 +1,55 @@
 # Lambda Slide Presentation — Implementation
 
 > **Status:** milestones 13.1–13.5 met on the measured decks, 2026-10-07 (see the acceptance round); not yet merged.
-> **Authorized scope:** implement [the package design](../Lambda_Pkg_Slide_Presentation.md);
+> **Authorized scope:** implement [the package design](../Lambda_Pkg_Slides.md);
 > no PPTX import/export.
 > **Contracts:** D7.2.4/D7.5.3 package and host boundaries; S12.1.1v2/S12.1.3
 > pure transformations and procedural event handlers; S2.6.3 element splicing;
 > D4.5.1v4/D5.3.3 ownership and precise roots; D7.2.2 boxed import entries; D2.1.3 tagged string leaves.
+
+## Presenter tools, themes and composition — 2026-10-07
+
+SLD7 adds a docked presenter console with rich notes, a cached final-build preview
+of the next slide, and a wall-clock timer with pause/resume/reset. Overview title
+cards, number/ID navigation, toolbar hiding, blackout and a laser pointer share
+one per-instance session with playback. Shortcuts preserve text editing, jumps
+restore root focus, and pointer exit clears the marker. Narrow embedded players
+stack the console below the canvas. This delivery uses the same viewer; an
+independent second-display speaker window is not implemented.
+
+`presenter.ls` owns tool state and markup, `compose.ls` resolves named layouts
+and inherited masters, and `theme.ls` resolves palettes/typography. Composition
+validates unused masters, cycles and duplicate local IDs before scene compilation.
+Local IDs replace inherited top-level objects; cues can target those objects.
+Theme-resolved font size/family participate in Morph compatibility. Audience
+layers and inert preview layers have separate lazy caches with instance-specific
+IDs, preserving SLD3/SLD4. All orchestration remains in the source package under
+D7.2.4/D7.5.3 and S12.1.3; no native host or formal-spec changes were needed.
+
+Toolbar restore follow-up: reading the toolbar bounds immediately after changing
+`display: none` to `flex` returned the previous committed, zero-height box. The
+player therefore filled the viewport with the stage and put its restored controls
+below the window. Visibility changes now request a `slide_fit` frame; resize
+also measures after the new toolbar wrapping commits. This respects the
+post-layout geometry contract (ES30) through the existing D7.5.3 host boundary.
+`slide_toolbar_restore.json` checks button/H toggles, rapid toggles, resize while
+hidden, wrapping changes, painted toolbar pixels and a working Next button.
+
+| Verification | Result |
+|---|---|
+| Package scripts, interpreter/JIT/auto | 15 scripts pass in each tier, including 16 presenter-state checks and 32 theme/master checks |
+| All slide UI replays | 12 fixtures, 293 assertions pass, including the 18-slide Northstar deck and toolbar restoration |
+| Presenter/toolbar replays with forced GC and freed-memory poisoning | 3 fixtures, 64 assertions pass; notes/preview reuse and independent players covered |
+| Lambda baseline | 6,294 checks pass (4,190 runtime/script checks plus 2,104 input checks) |
+| Visual review | Docked notes/timer/next preview inspected at 1280 × 800; blackout and pointer pixels asserted |
+
+Artifacts are `temp/slide_baseline_repeat.log`, `temp/toolbar_fix_*`,
+`temp/toolbar_restore_{before,after}.png`, and `temp/slide_console_review.png`.
+The Northstar fixture now uses a 900px-tall
+viewport so the expanded two-row toolbar leaves room for its 1280 × 720 logical
+canvas; its original geometry and pixel assertions remain unchanged.
+This round makes no new frame-time or retention-byte claim. The earlier
+acceptance measurements below remain specific to their measured decks.
 
 ## Acceptance round — 2026-10-07 (frame cost and retention)
 

@@ -69,6 +69,19 @@ The first introduces basic builds and slide transitions. The second carries a
 was converted. See the
 [slide package reference](../../../doc/Lambda_Slide.md) for the authoring API.
 
+The presenter and authoring example demonstrates a shared master, a named layout
+and per-slide themes:
+
+```bash
+./lambda.exe view test/demo/slides/presenter_tools.slides
+```
+
+Press **P** for notes, the next-slide preview and an independent timer in a docked
+console. **O** opens the title overview; the slide picker accepts a number or ID.
+**H** hides/shows the toolbar, **B** blacks out the canvas, and **L** enables the
+laser pointer. **Escape** clears blackout, pointer and overview. These tools also
+work on the other decks. The console shares the viewer with the audience canvas.
+
 The Northstar UI replay visits every slide, checks five staged reveals, pauses
 charts to inspect intermediate pixels, and verifies nested group bounds:
 

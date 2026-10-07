@@ -84,22 +84,69 @@ to the same target/channel. Diagnostics name the slide/cue/source path.
 
 | Element | Attributes and behavior |
 |---|---|
-| `presentation` | `id`, `title`, `width`, `height`, `theme: 'light'/'dark'`, `base_uri`; presenter defaults `autostart`, `reduced_motion`, `autoplay_dwell_ms`. Defaults to 1280 × 720. |
-| `slide` | `id`, `title`, `background`, `layout`, `transition`, `transition_duration`, `direction`. |
+| `presentation` | `id`, `title`, `width`, `height`, `theme`, default `master`, `base_uri`; presenter defaults `autostart`, `reduced_motion`, `autoplay_dwell_ms`. Defaults to 1280 × 720. |
+| `slide` | `id`, `title`, `background`, `layout`, `theme`, `master`, `transition`, `transition_duration`, `direction`. |
+| `master` | Reusable slide attributes and objects; requires `id`; optional `extends` selects a parent master. |
+| `layout` | Named object bounds; requires `id` and one or more `placeholder` children. |
+| `placeholder` | Layout slot with `role`, `x`, `y`, `width`, `height`, in logical slide units. |
 | `text` | Rich content, `font_size`, `color`, and common object attributes. |
 | `shape` | `kind: 'rect'/'circle'/'ellipse'/'line'`, `fill`, `stroke`, `stroke_width`, `radius`; lowered to SVG. |
 | `image` | `src`, `fit: 'contain'/'cover'/'fill'`. |
 | `content` | Ordinary HTML/SVG or another package's element output, inside an authored box. |
 | `group` | Nested slide objects with local coordinates. |
-| `notes` | Speaker content excluded from the audience canvas; included in `handout`. |
+| `notes` | Rich speaker content excluded from the audience canvas; shown in the presenter console and included in `handout`. |
 | `cue` | `id`, `start: 'entry'/'click'`; contains effects, `parallel`, or `sequence`. |
 
 Common object attributes are `id`, `x`, `y`, `width`, `height`, `rotation`, `scale`,
 `opacity`, `role`, `class`, `style`, and `morph_id`. Width/height/scale are positive;
-opacity is in [0,1]. Layouts are `'blank'`, `'title'`, `'title-body'`, and
-`'two-column'`; roles are `'title'`, `'body'`, `'left'`, and `'right'`. Explicit
+opacity is in [0,1]. Built-in layouts are `'blank'`, `'title'`, `'title-body'`,
+`'two-column'`, `'three-column'`, `'section'`, `'quote'`, `'image-left'`, and
+`'image-right'`; roles are `'title'`, `'body'`, `'left'`, `'center'`, `'right'`,
+and `'footer'`. In image layouts, unassigned images occupy the image side and
+`'body'` uses the opposite side. Named layouts can define additional roles. Explicit
 bounds override layout defaults. Flow content uses normal Radiant layout inside
 its box. CSS/SVG feature support remains Radiant's support matrix.
+
+### Themes, layouts and masters
+
+Themes are `'light'`, `'dark'`, `'corporate'`, `'midnight'`, and `'paper'`.
+A theme may also be a map: `{base: 'midnight', accent: "#ffaa00",
+font_family: "Arial, sans-serif", title_size: 48, body_size: 28}`.
+Optional `background` and `foreground` override the palette. Sizes are positive
+finite numbers; colors and font families are nonempty CSS strings. The deck
+theme supplies defaults; a slide or master can select its own theme. Explicit
+object paint and font sizes, and slide backgrounds, override theme defaults.
+
+Define named layouts and masters directly inside `<presentation>`:
+
+```mark
+<presentation theme: 'midnight', master: "brand",
+    <layout id: "briefing",
+        <placeholder role: 'title', x: 80, y: 70, width: 1120, height: 110>
+        <placeholder role: 'body', x: 80, y: 230, width: 1120, height: 350>
+    >
+    <master id: "brand", layout: "briefing",
+        <text id: "title", role: 'title', "Default title">
+        <text id: "footer", role: 'footer', font_size: 18, "Example Corp">
+    >
+    <slide id: "opening",
+        <text id: "title", role: 'title', "Welcome">
+        <text id: "body", role: 'body', "Shared layout and footer">
+    >
+    <slide master: false, <text "A slide without the master">>
+>
+```
+
+A master contains slide objects, including groups and boxed content. It can
+inherit another master with `extends: "base"`. A slide chooses `master: "brand"`,
+uses the deck default, or opts out with `master: false`. A local top-level object
+with the same explicit ID replaces the inherited object in place; other objects
+append. Local slide attributes override inherited attributes. Cues on the slide
+can target inherited objects. Master cycles, duplicate definitions, invalid
+objects and unknown references fail compilation, including unused definitions.
+Unspecified built-in roles retain their title/body/footer bounds. Named layouts
+cannot shadow built-in names. Composition runs before scene/cue
+compilation within the source package (D7.2.4).
 
 Effect targets are author IDs, distinct from generated DOM IDs. Generated keys
 include player instance, slide index and object position, so independent players
@@ -186,6 +233,38 @@ Manual navigation, Restart, Home/End, jump and seek stop automatic playback.
 On a focused player root, arrows, Space, Page Up/Down and
 Home/End navigate. Modified keys and embedded controls retain normal behavior.
 `reduced_motion: true` snaps each build to its final state and uses cut transitions.
+
+The **Presenter** button opens a docked console in the same viewer, containing
+the current slide's rich notes, a next-slide preview at its final build, and an
+elapsed timer. Narrow players stack the console below the audience canvas.
+The timer starts on first opening; Pause/Start and Reset control it separately
+from animation playback and speed. Closing the console keeps elapsed time
+running but parks its frame requests until reopened. At the last slide the
+preview reads “End of presentation”. The console is visible in the viewer;
+this is not a separate speaker window for a second display.
+
+**Overview** shows numbered slide titles; selecting one jumps to that slide and
+closes the overview. **Slide / Go** accepts a one-based slide number or an exact
+slide ID; Enter submits. Invalid input reports an error without navigation.
+**Blackout** covers the audience canvas in black. **Pointer** enables a red laser
+that follows the mouse over the canvas. The floating **Toolbar** button restores
+hidden controls. Tool shortcuts work within the player; text inputs retain
+ordinary typing.
+
+| Key | Tool |
+|---|---|
+| P | Toggle presenter console |
+| O | Toggle overview |
+| H | Hide/show toolbar |
+| B or . | Toggle blackout |
+| L | Toggle laser pointer |
+| Escape | Close overview and clear blackout/pointer |
+
+Overview uses titles without rendering every slide. Next-slide previews are
+rendered lazily into a separate cache with instance-specific IDs; revisiting a
+preview reuses its markup, and audience layers retain their existing cache
+(SLD3/SLD4). Preview content is inert. Presenter state and event handling stay
+in Lambda under D7.5.3 and S12.1.3.
 
 Reducer events use `{command: 'next', time_ms: ...}`, `{command: 'jump', slide: ...}`,
 or `{command: 'seek', address: ...}`. Frame times are monotonic milliseconds.
