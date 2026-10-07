@@ -6029,6 +6029,37 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
     return {.array = result.get()};
 }
 
+// latex/tex options for the TeX expansion engine (Lambda_Pkg_Latex3 §9): the
+// names stay owned by the caller's map for the duration of the parse
+static void collect_names(Map* options_map, const char* key, ArrayList* names) {
+    bool is_found = false;
+    Item list = _map_get((TypeMap*)options_map->type, options_map->data, key, &is_found);
+    if (!is_found || get_type_id(list) != LMD_TYPE_ARRAY) return;
+    Array* arr = list.array;
+    for (int64_t i = 0; i < arr->length; i++) {
+        Item name = array_get(arr, i);
+        if (is_text_type_id(get_type_id(name))) arraylist_append(names, (void*)fn_string(name)->chars);
+    }
+}
+
+static bool parse_tex_options(Map* options_map, InputParseOptions* options,
+                              ArrayList* adapter_names, ArrayList* raw_names) {
+    bool is_found = false;
+    Item expand = _map_get((TypeMap*)options_map->type, options_map->data, "expand", &is_found);
+    if (is_found && get_type_id(expand) == LMD_TYPE_BOOL) options->tex_expand = it2b(expand);
+    Item ini = _map_get((TypeMap*)options_map->type, options_map->data, "ini", &is_found);
+    if (is_found && get_type_id(ini) == LMD_TYPE_BOOL) options->tex_ini = it2b(ini);
+    Item base = _map_get((TypeMap*)options_map->type, options_map->data, "base", &is_found);
+    if (is_found && is_text_type_id(get_type_id(base))) options->tex_base = fn_string(base)->chars;
+    collect_names(options_map, "packages", adapter_names);
+    options->tex_adapters = (const char* const*)adapter_names->data;
+    options->tex_adapter_count = adapter_names->length;
+    collect_names(options_map, "raw", raw_names);
+    options->tex_raw_commands = (const char* const*)raw_names->data;
+    options->tex_raw_command_count = raw_names->length;
+    return options->tex_expand || options->tex_ini || options->tex_base || options->tex_adapter_count;
+}
+
 Item fn_parse2(Item str_item, Item type) {
     GUARD_ERROR2(str_item, type);
 
@@ -6036,6 +6067,10 @@ Item fn_parse2(Item str_item, Item type) {
     String* type_str = NULL;
     String* flavor_str = NULL;
     bool source_positions = false;
+    InputParseOptions parse_options = {};
+    ArrayList* adapter_names = arraylist_new(8);
+    ArrayList* raw_names = arraylist_new(8);
+    bool has_tex_options = false;
     bool highlight_spans = false;   // sourcepos: 'spans'
     Item window_item = ItemNull;
     Item prescan_item = ItemNull;
@@ -6098,6 +6133,7 @@ Item fn_parse2(Item str_item, Item type) {
                 source_positions = it2b(input_sourcepos);
             }
         }
+        has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names);
     }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH,
@@ -6139,9 +6175,12 @@ Item fn_parse2(Item str_item, Item type) {
 
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
-    Input* input = source_positions
-        ? input_from_source_with_positions(str->chars, dummy_url, type_str, flavor_str)
+    parse_options.source_positions = source_positions;
+    Input* input = (source_positions || has_tex_options)
+        ? input_from_source_with_options(str->chars, dummy_url, type_str, flavor_str, &parse_options)
         : input_from_source(str->chars, dummy_url, type_str, flavor_str);
+    arraylist_free(adapter_names);
+    arraylist_free(raw_names);
     if (!input) {
         set_runtime_error(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",

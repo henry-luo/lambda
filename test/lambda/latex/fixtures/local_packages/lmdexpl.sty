@@ -1,0 +1,17 @@
+\ProvidesExplPackage{lmdexpl}{2026-10-07}{1.0}{Phase IV expl3 fixture}
+\cs_new:Npn \__lmdexpl_twice:n #1 { #1#1 }
+\NewDocumentCommand \greet { O{World} } { Hello,~#1! }
+\NewDocumentCommand \twice { m } { \__lmdexpl_twice:n {#1} }
+\NewDocumentCommand \sumof { m m } { \int_eval:n { #1 + #2 } }
+\NewDocumentCommand \roottwo { } { \fp_eval:n { round(sqrt(2), 4) } }
+\NewDocumentCommand \shout { m } { \text_uppercase:n {#1} }
+\seq_new:N \l__lmdexpl_items_seq
+\NewDocumentCommand \sorted { m }
+  {
+    \seq_set_from_clist:Nn \l__lmdexpl_items_seq {#1}
+    \seq_sort:Nn \l__lmdexpl_items_seq
+      { \str_compare:nNnTF {##1} > {##2} { \sort_return_swapped: } { \sort_return_same: } }
+    \seq_use:Nn \l__lmdexpl_items_seq { ,~ }
+  }
+\tl_const:Nn \c__lmdexpl_mark_tl { expl3~ready }
+\NewDocumentCommand \ready { } { \tl_use:N \c__lmdexpl_mark_tl }

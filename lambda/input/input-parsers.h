@@ -67,6 +67,8 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 
 // Direct parsers used by the input dispatcher. They have no Tree-sitter dependency.
 void parse_latex_direct(Input* input, const char* latex_string);
+// TeX engine report for tests and tools: {text, messages, diagnostics, packages}
+void parse_tex_expansion(Input* input, const char* source);
 void parse_tikz_direct(Input* input, const char* source);
 #ifdef __cplusplus
 extern "C" {

@@ -82,6 +82,18 @@ pub let CATALOG = {
     pgfplots: {options: []}
 }
 
+// classes with a script profile; a beside-document .cls of another name runs on the engine
+pub let CLASSES = ["article", "report", "book", "amsart", "standalone"]
+
+// names the TeX engine leaves to the script adapters (Lambda_Pkg_Latex3 §9.4)
+pub fn adapter_names() => [for (k, v in CATALOG) string(k)] ++ CLASSES ++ ["pgf", "amsfonts", "color"]
+
+// adapter commands that read their arguments as tokens, as the CTAN packages
+// do: bussproofs splits sequents at \fCenter, semantic parses its rule syntax
+pub let RAW_ARGUMENT_COMMANDS = ["AxiomC", "UnaryInfC", "BinaryInfC", "TrinaryInfC",
+    "QuaternaryInfC", "QuinaryInfC", "Axiom", "UnaryInf", "BinaryInf", "TrinaryInf",
+    "RightLabel", "LeftLabel", "inference"]
+
 fn canonical(name) {
     if (name == "pgf") "tikz"
     else if (name == "amsfonts") "amssymb"

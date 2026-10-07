@@ -1785,6 +1785,10 @@ static void parse_html_input(Input* input, const char* source) {
 static void parse_latex_input(Input* input, const char* source) {
     parse_latex_direct(input, source);
 }
+
+static void parse_tex_input(Input* input, const char* source) {
+    parse_tex_expansion(input, source);
+}
 #endif
 
 #ifndef LAMBDA_NO_LATEX
@@ -1861,6 +1865,7 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
 #ifndef LAMBDA_NO_LATEX
     {"latex", parse_latex_input},
     {"latex-ts", parse_latex_input},
+    {"tex", parse_tex_input},
 #endif
 #ifndef LAMBDA_NO_LATEX
     {"tikz", parse_tikz_input},
@@ -2068,6 +2073,7 @@ static Input* input_from_source_n_with_name_parent(const char* source,
         }
         input->source_positions = options && options->source_positions;
         input->parse_embedded_math = options && options->embedded_math;
+        input->parse_options = options;
         allocation_context.pool = input->pool;
         allocation_context.arena = input->arena;
         allocation_context.ui_mode = input->ui_mode;
@@ -2125,6 +2131,7 @@ static Input* input_from_source_n_with_name_parent(const char* source,
             log_error("input_from_source: unsupported input type '%s'", effective_type);
         }
         if (get_type_id(input->root) == LMD_TYPE_ERROR) input->parse_failed = true;
+        input->parse_options = NULL;
         input_allocation_context = saved_allocation_context;
     }
     // Note: don't mem_free(source) here - it's the caller's responsibility
@@ -2511,6 +2518,7 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     input->parse_error_message = nullptr;
     input->parse_embedded_math = false;
     input->embedded_math = nullptr;
+    input->parse_options = nullptr;
     input->xml_stylesheet_href = nullptr;
     // D4.2.6: the Input lives in `pool`, so the pool releases it at the latest.
     // Without this, a URL-less Input's arena outlived every owner.

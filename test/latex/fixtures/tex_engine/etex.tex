@@ -1,0 +1,23 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\T#1{\immediate\write16{LT:#1}}
+\def\x{X}\def\y{Y}
+\T{\detokenize{\x a#b {c}}}
+\T{\unexpanded{\x\y}}
+\edef\z{\unexpanded{\x}\y}\T{\meaning\z}
+\protected\def\p{P}\edef\z{\p\x}\T{\meaning\z}
+\T{\meaning\p}
+\T{\expanded{\x\noexpand\y}}
+\edef\z{\expanded{\x}\y}\T{\meaning\z}
+\T{\pdfstrcmp{abc}{abd}\pdfstrcmp{b}{a}\pdfstrcmp{\x}{X}}
+\T{\eTeXrevision\the\eTeXversion}
+\edef\z{\scantokens{\x}}\T{\meaning\z}
+\everyeof{\noexpand}\edef\z{\scantokens{\x}}\T{\meaning\z}\everyeof{}
+\T{\ifdefined\p yes\fi}
+\T{\the\currentgrouplevel{\the\currentgrouplevel}}
+\T{\number\numexpr\ifnum1=1 2\else 3\fi*5\relax}
+\def\w#1{(#1)}\T{\expandafter\w\expandafter{\detokenize{\x}}}
+\T{\expandafter\meaning\detokenize{x}}
+\toks0=\expandafter{\x\y}\T{\the\toks0}
+\edef\z{\the\toks0 \noexpand\x}\T{\meaning\z}
+\showtokens{ignored}
+\end

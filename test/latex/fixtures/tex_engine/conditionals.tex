@@ -1,0 +1,23 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\T#1{\immediate\write16{LT:#1}}
+\T{\ifnum 3<5 a\else b\fi \ifnum 5<3 a\else b\fi \ifnum 4=4 c\fi}
+\T{\ifdim 1pt<2pt d\fi \ifdim 1in=72.27pt e\fi \ifodd 3 f\fi \ifodd 4 g\else h\fi}
+\T{\ifcase 2 zero\or one\or two\or three\else other\fi}
+\T{\ifcase 7 zero\or one\else other\fi \ifcase -1 a\else neg\fi}
+\def\x{a}\def\y{a}\def\z{b}
+\T{\ifx\x\y same\else diff\fi \ifx\x\z same\else diff\fi \ifx aa A\fi \ifx ab B\else nB\fi}
+\T{\if aa 1\fi \if ab 2\else 3\fi \if\x a 4\fi \ifcat a b 5\fi \ifcat a 1 6\else 7\fi}
+\T{\iftrue T\else F\fi \iffalse T\else F\fi}
+\T{\ifdefined\x D\else U\fi \ifdefined\nothing D\else U\fi}
+\T{\ifcsname x\endcsname C\else N\fi \ifcsname nothingatall\endcsname C\else N\fi}
+\T{\unless\ifnum 1=2 u\fi \unless\iftrue v\else w\fi}
+\T{\ifnum 1=1 \ifnum 2=3 a\else b\fi c\else d\fi}
+\T{\ifnum 1=2 \ifnum 2=2 x\fi \else y\fi}
+\T{\ifcase 1 \ifnum 1=1 a\or b\fi \or c\or d\fi}
+\T{\ifnum\ifnum 1<2 3\else 4\fi>2 big\fi}
+\T{\ifx\undefineda\undefinedb same\fi \ifx\relax\undefineda R\else nR\fi}
+\T{\number\ifnum1=1 7\fi 8}
+\count1=5 \T{\ifnum\count1>4 gt\fi \ifnum\count1=\count1 eq\fi}
+\T{\ifvoid0 void\fi}
+\T{\currentiflevel \ifnum1=1 \the\currentiflevel\fi}
+\end
