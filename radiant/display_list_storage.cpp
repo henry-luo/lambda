@@ -99,6 +99,7 @@ void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
     dst->depth = clip_depth;
     for (int i = 0; i < clip_depth; i++) {
         ClipShape* shape = clip_shapes[i];
+        clip_shape_to_params(shape, &dst->type[i], dst->params[i]);
         if (shape && shape->type == CLIP_SHAPE_POLYGON &&
             shape->polygon.count > 0 && shape->polygon.vx && shape->polygon.vy) {
             int count = shape->polygon.count;
@@ -117,33 +118,9 @@ void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
             dst->polygon_vy[i] = lam::own_arr(vy);
             continue;
         }
-        clip_shape_to_params(shape, &dst->type[i], dst->params[i]);
     }
 }
 
-static void dl_offset_clip_shape(ClipShape* shape, float offset_x, float offset_y) {
-    if (!shape || (offset_x == 0.0f && offset_y == 0.0f)) return;
-    switch (shape->type) {
-        case CLIP_SHAPE_CIRCLE:
-            shape->circle.cx -= offset_x;
-            shape->circle.cy -= offset_y;
-            break;
-        case CLIP_SHAPE_ELLIPSE:
-            shape->ellipse.cx -= offset_x;
-            shape->ellipse.cy -= offset_y;
-            break;
-        case CLIP_SHAPE_INSET:
-            shape->inset.x -= offset_x;
-            shape->inset.y -= offset_y;
-            break;
-        case CLIP_SHAPE_ROUNDED_RECT:
-            shape->rounded_rect.x -= offset_x;
-            shape->rounded_rect.y -= offset_y;
-            break;
-        default:
-            break;
-    }
-}
 
 int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                            ClipShape** shape_ptrs, ScratchArena* scratch,
@@ -158,6 +135,7 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
     int out_depth = 0;
     for (int i = 0; i < depth; i++) {
         if (src->type[i] == CLIP_SHAPE_NONE) continue;
+        shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
         if (src->type[i] == CLIP_SHAPE_POLYGON) {
             int count = src->polygon_count[i];
             if (count < 3 || !src->polygon_vx[i] || !src->polygon_vy[i]) continue;
@@ -169,16 +147,14 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                 vy = (float*)scratch_alloc(scratch, count * sizeof(float));
                 if (!vx || !vy) continue;
                 for (int pi = 0; pi < count; pi++) {
-                    vx[pi] = src->polygon_vx[i][pi] - offset_x;
-                    vy[pi] = src->polygon_vy[i][pi] - offset_y;
+                    vx[pi] = src->polygon_vx[i][pi] - (shapes[out_depth].transformed ? 0.0f : offset_x);
+                    vy[pi] = src->polygon_vy[i][pi] - (shapes[out_depth].transformed ? 0.0f : offset_y);
                 }
             }
             shapes[out_depth].type = CLIP_SHAPE_POLYGON;
             shapes[out_depth].polygon = {lam::own_arr(vx), lam::own_arr(vy), count};
-        } else {
-            shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
-            dl_offset_clip_shape(&shapes[out_depth], offset_x, offset_y);
         }
+        clip_shape_offset(&shapes[out_depth], offset_x, offset_y);
         shape_ptrs[out_depth] = &shapes[out_depth];
         out_depth++;
     }

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 extern "C" {
 #include "../../../lib/log.h"
@@ -9,6 +10,7 @@ extern "C" {
 }
 #include "css_value.hpp"
 #include "css_style.hpp"
+
 #include "../../../lib/color.h"
 #include "../../../lib/strbuf.h"
 #include <math.h>
@@ -200,6 +202,23 @@ CssValue* css_value_create_function(Pool* pool, const char* name, CssValue** arg
     return value;
 }
 
+const CssRuleInterface* css_rule_interface(const CssRule* rule) {
+    static const CssRuleInterface interfaces[] = {
+#define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
+        {#name, #base, legacy, #host},
+#define CSS_RULE_INTERFACE_ALIAS CSS_RULE_INTERFACE
+#include "css_rule_interfaces.def"
+#undef CSS_RULE_INTERFACE_ALIAS
+#undef CSS_RULE_INTERFACE
+    };
+    static_assert(sizeof(interfaces) / sizeof(interfaces[0]) == CSS_RULE_PROPERTY + 2,
+        "CSSOM interface metadata must follow the rule catalog");
+    if (!rule || (unsigned)rule->type > CSS_RULE_PROPERTY) return nullptr;
+    if (rule->type == CSS_RULE_LAYER && rule->data.conditional_rule.layer_statement)
+        return &interfaces[CSS_RULE_PROPERTY + 1];
+    return &interfaces[rule->type];
+}
+
 CssRuleChildList css_rule_child_list(CssRule* rule) {
     if (!rule) return {};
     if (rule->type == CSS_RULE_STYLE)
@@ -213,11 +232,16 @@ CssRuleChildList css_rule_child_list(CssRule* rule) {
 
 void css_rule_attach(CssRule* rule, CssRule* parent, CssStylesheet* stylesheet) {
     if (!rule) return;
+    // retain the lifetime owner when detachment clears CSSOM's parent associations.
+    if (rule->stylesheet && rule->stylesheet->owner_document)
+        rule->owner_document = rule->stylesheet->owner_document;
+    if (stylesheet && stylesheet->owner_document)
+        rule->owner_document = stylesheet->owner_document;
     rule->parent = parent;
     rule->stylesheet = stylesheet;
     // descriptor declaration wrappers retain the existing lazy style-rule cache.
     if ((rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_PAGE) &&
-        rule->property_count && rule->property_names && rule->property_values)
+        rule->property_names && rule->property_values)
         css_rule_attach((CssRule*)rule->property_values, rule, stylesheet);
     CssRuleChildList children = css_rule_child_list(rule);
     if (children.count) for (size_t i = 0; i < *children.count; i++)
@@ -403,6 +427,7 @@ const char* css_math_token_name(const CssValue* value) {
     if (value->type == CSS_VALUE_TYPE_CUSTOM)
         return value->data.custom_property.name;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->has_keyword_spelling) return value->data.keyword_token.spelling;
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
         return info ? info->name : NULL;
     }

@@ -93,7 +93,8 @@ def benchmark_entries(all_entries=False):
         return registry.build_benchmark_list(None, None)
     entries = []
     for suite, rows in registry.STANDARD_SUITES + [("text", registry.TEXT)]:
-        for name, category, ls, js, py in rows:
+        # text rows may carry a sixth field (a per-row timeout floor)
+        for name, category, ls, js, py, *_ in rows:
             entries.append({"suite": suite, "name": name, "category": category,
                             "js_path": js, "is_jetstream": False})
     for name, category, ls in registry.JETSTREAM_LS:
@@ -123,6 +124,11 @@ def runtime_metadata():
                for path in sorted(JULIA_ROOT.rglob("*.jl"))}
     fixtures = {str(path.relative_to(PROJECT_ROOT)): sha256(path)
                 for path in sorted((PROJECT_ROOT / "test/benchmark/text").glob("*.json"))}
+    # jq sizes and inputs live beside the filters; retain their exact provenance.
+    jq_dir = PROJECT_ROOT / "test/benchmark/text/jq"
+    fixtures.update({str(path.relative_to(PROJECT_ROOT)): sha256(path)
+                     for path in sorted(jq_dir.iterdir())
+                     if path.suffix in (".jq", ".json", ".bf")})
     fasta = PROJECT_ROOT / "test/benchmark/beng/input/fasta_1000.txt"
     fixtures[str(fasta.relative_to(PROJECT_ROOT))] = sha256(fasta)
     contract = JULIA_ROOT / "expected.json"

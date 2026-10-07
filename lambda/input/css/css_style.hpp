@@ -222,6 +222,41 @@ typedef struct CssFunction {
     int arg_count;               // Number of arguments
 } CssFunction;
 
+typedef enum TransformFunctionType {
+    TRANSFORM_NONE = 0,
+    // 2D Transforms
+    TRANSFORM_TRANSLATE,        // translate(x, y) or translate(x)
+    TRANSFORM_TRANSLATEX,       // translateX(x)
+    TRANSFORM_TRANSLATEY,       // translateY(y)
+    TRANSFORM_SCALE,            // scale(x, y) or scale(s)
+    TRANSFORM_SCALEX,           // scaleX(x)
+    TRANSFORM_SCALEY,           // scaleY(y)
+    TRANSFORM_ROTATE,           // rotate(angle)
+    TRANSFORM_SKEW,             // skew(x-angle, y-angle)
+    TRANSFORM_SKEWX,            // skewX(angle)
+    TRANSFORM_SKEWY,            // skewY(angle)
+    TRANSFORM_MATRIX,           // matrix(a, b, c, d, e, f)
+    // 3D Transforms
+    TRANSFORM_TRANSLATE3D,      // translate3d(x, y, z)
+    TRANSFORM_TRANSLATEZ,       // translateZ(z)
+    TRANSFORM_SCALE3D,          // scale3d(x, y, z)
+    TRANSFORM_SCALEZ,           // scaleZ(z)
+    TRANSFORM_ROTATEX,          // rotateX(angle)
+    TRANSFORM_ROTATEY,          // rotateY(angle)
+    TRANSFORM_ROTATEZ,          // rotateZ(angle) - same as rotate()
+    TRANSFORM_ROTATE3D,         // rotate3d(x, y, z, angle)
+    TRANSFORM_PERSPECTIVE,      // perspective(d)
+    TRANSFORM_MATRIX3D,         // matrix3d(16 values)
+} TransformFunctionType;
+
+// function metadata is shared by declaration validation and typed decoding.
+typedef struct CssTransformFunctionInfo {
+    const char* name;
+    TransformFunctionType type;
+    int min_args, max_args;
+} CssTransformFunctionInfo;
+const CssTransformFunctionInfo* css_transform_function_info(const char* name);
+
 // CSS Value Types for final computed values
 typedef enum CssValueType : uint8_t {
     CSS_VALUE_TYPE_KEYWORD,        // keywords (auto, inherit, etc.)
@@ -813,10 +848,16 @@ typedef struct {
 } CssColorComponents;
 
 // Generic CSS value structure
+enum CssValueFlag : uint8_t {
+    CSS_VALUE_AUTHORED_IDENTIFIER = 1u << 0,
+    CSS_VALUE_NON_IDENTIFIER_TOKEN = 1u << 1
+};
+
 typedef struct CssValue {
     CssValueType type;
+    uint8_t flags;
     bool has_keyword_spelling;
-    uint8_t reserved[2];  // padding for alignment
+    uint8_t reserved;
     union {
         // Numeric values
         struct {
@@ -998,6 +1039,7 @@ typedef struct CssDeclaration {
     // Memory management and validation
     bool owns_payload;        // declaration owns a deep CssValue/string snapshot
     bool tree_owned_record;   // containing StyleTree may reclaim this declaration record
+    bool presentation_value; // transient host layer; survives authored-style recascade
     bool valid;               // Validation flag
     int ref_count;            // Reference counting for memory management
     void* payload_owner;      // immutable epoch payload shared by cascade records
@@ -1099,6 +1141,7 @@ typedef struct CssLayerName {
 typedef struct CssRule {
     CssRuleType type;
     Pool* pool;
+    struct DomDocument* owner_document; // pool lifetime survives removal from CSSOM parents
     CssPageRule* page; // typed page selectors/descriptors; generic text remains available to CSSOM
 
     // Rule content varies by type
@@ -1180,6 +1223,13 @@ struct CssRuleChildList {
     size_t* count;
 };
 CssRuleChildList css_rule_child_list(CssRule* rule);
+struct CssRuleInterface {
+    const char* name;
+    const char* base;
+    uint16_t legacy_type;
+    const char* host_name;
+};
+const CssRuleInterface* css_rule_interface(const CssRule* rule);
 void css_rule_attach(CssRule* rule, CssRule* parent, CssStylesheet* stylesheet);
 
 // CSS Stylesheet structure
@@ -1203,6 +1253,7 @@ typedef struct CssStylesheet {
     bool constructed;           // constructed sheets reject @import through CSSOM.
     // Document sheets retain their owning <link> or <style> for source order.
     struct DomElement* owner_element;
+    struct DomDocument* owner_document; // native lifetime remains known after rule detachment
 
     // Source information
     const char* source_text;
@@ -1213,6 +1264,7 @@ typedef struct CssStylesheet {
 
     // Import information
     struct CssStylesheet* parent_stylesheet;
+    struct CssRule* owner_rule;  // retained import association, including after rule detachment
     struct CssStylesheet** imported_stylesheets;
     size_t imported_count;
 
@@ -1290,6 +1342,12 @@ bool css_value_is_initial(const CssValue* value);
 bool css_value_is_unset(const CssValue* value);
 bool css_value_is_auto(const CssValue* value);
 bool css_value_is_none(const CssValue* value);
+
+typedef const CssValue* (*CssVariableLookupFn)(void* context, DomElement* element,
+                                               const char* name, DomElement** owner);
+const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
+                                      CssVariableLookupFn lookup, void* context,
+                                      DomElement* element = nullptr);
 
 // Value conversion and computation
 double css_value_to_pixels(const CssValue* value, double font_size, double viewport_width, double viewport_height);
@@ -1636,6 +1694,10 @@ bool css_property_validate_value_mode(CssPropertyCode id,
 bool css_text_emphasis_parse_style(const CssValue* value, bool vertical,
                                    uint32_t* mark, const CssValue** color);
 bool css_display_legacy_keyword_supported(const char* name);
+bool css_value_as_seconds(const CssValue* value, double* seconds);
+bool css_value_is_timing_function(const CssValue* value);
+bool css_animation_property_is_longhand(CssPropertyCode property);
+CssPropertyCode css_timeline_shorthand_for(CssPropertyCode property);
 bool css_property_validate_value_from_string(CssPropertyCode property_code,
     const char* value_str, void** parsed_value, Pool* pool);
 

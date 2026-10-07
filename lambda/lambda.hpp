@@ -959,6 +959,8 @@ Item vmap_get_by_str(VMap* vm, const char* key);
 Item vmap_get_by_item(VMap* vm, Item key);
 SymbolKeyList* vmap_keys_for_item(Item vmap_item);
 }
+// retain a host's lifetime owner without exposing an author-visible property.
+extern "C" bool vmap_set_owner(VMap* vm, Item owner);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"

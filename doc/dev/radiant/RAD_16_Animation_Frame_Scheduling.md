@@ -120,9 +120,101 @@ The contract is simple and strict: **the native frame clock only wakes the loop;
 
 ---
 
-## 8. Known Issues & Future Improvements
+## 8. Lambda document frame events
 
-1. **CSS transitions are declared but unwired.** `CssTransitionProp` (`view.hpp`) and the `ANIM_CSS_TRANSITION` enum (`view.hpp`) exist, and `animation_scheduler_remove_views` (`animation.cpp:252`) even accounts for the type, but a repository grep finds **no creation site**: there is no `css_transition_create`, and the *only* callers of `animation_instance_create` are `css_animation_create` (`@keyframes`), `gif_player.cpp:101`, and `lottie_player.cpp:94`. `css_animation_resolve` reads `animation-*` longhands but never any `transition-*` property. So `transition:` declarations parse but never animate today. *Improvement:* add a transition detector at the style-resolution seam that diffs old vs. new computed values and spawns `ANIM_CSS_TRANSITION` instances, reusing the existing interpolation/tick machinery.
+> **This section verified:** 2026-10-07. D7.5.3 shared host boundary;
+> D4.5.1v4 document ownership; D5.3.3 precise script roots.
+
+The realm-neutral DOM catalog includes `request_frame(owner, event_name)` and
+`cancel_frame(owner, token)`. A request delivers one custom event to its connected
+owner on a later frame. Detail is the positive request token; `time_stamp` is the
+document-relative monotonic time in milliseconds. Zero means the host refused a
+request. Cancellation is scoped to the owner and token.
+
+`dom_engine_frame_request/cancel/tick` in `event.cpp` implement a document resource
+with generation-checked native references, copied names and reusable request
+slots. Delivery uses a token watermark so requests created in a callback wait
+until the following frame. Requests are delivered in registration order; an
+owner callback may cancel a later request in the same batch. Detached/stale
+owners are skipped. Document teardown releases every queue resource, without
+retaining a Lambda closure or `Item` in native storage.
+
+`radiant_document_has_pending_frames` contributes to the existing window wake
+gate. `tick_document_animation_tree` services Lambda frame events alongside the
+existing scheduler, including embedded documents. The headless animation-time
+operation calls the same frame tick with virtual time. Waiting and paused slide
+players park by ceasing requests; that policy is Lambda package code.
+
+Lambda-only document load and resize also bind the shared script host through
+`radiant_bind_document_script_host`. These operations require no authored
+JavaScript, but they reuse the existing event/value and reconcile machinery.
+`viewport_size(owner)` returns the active top-level viewport map or null when
+that host measurement is unavailable.
+
+`RADIANT_FRAME_PROFILE=1` enables opt-in turn profiling. Nested synthetic-event
+commits contribute cascade/layout/repaint-request times and counts. The remaining
+`script_host_ms` includes Lambda execution and synchronous host writes. Paint
+execution is outside this trace; it is not an end-to-end displayed-frame budget.
+For paint measurements, `view --event-log` emits separate `render.stats` JSONL
+records with CPU record/replay/total times and operation counters. Automated
+`advance_time` events with several steps run several callbacks before one paint;
+use separate one-step events when pairing every callback with a paint. Exclude
+initial/input-drain callbacks explicitly rather than aligning by record count.
+Input and DOM-node arena byte counts accompany pool counts so retained arena
+allocations cannot be mistaken for bounded document storage (D4.1.4v5).
+The trace also separates DOM-pool growth during cascade from total commit growth.
+Journal capacity and canonical style counts/live/cold bytes accompany the trace
+so cache growth can be distinguished from allocations outside the style epoch.
+Source-position/selection event snapshots use rooted GC maps/arrays, cloned from
+private immutable per-document schemas (D4.1.1v2, D5.3.3). Retaining an event
+snapshot does not force new Input-arena allocations on every frame.
+Native FocusEvent creation also retains its `relatedTarget` before allocating
+the init record. The trusted native-event factory roots init/type/result, and
+the FocusEvent constructor roots its inputs and result while adding fields
+(`lambda/dom/dom_events.cpp:1492`, `js_ctor_focus_event_fn`,
+`js_create_trusted_native_event`, `js_create_native_focus_event`; D5.3.3).
+Handler-created temporary elements use runtime GC ownership. Only template body
+retransform temporarily enables the retained UI output arena; nested scopes
+restore the prior allocation owner (D4.1.1v2, D4.5.1v4). GC values retained in
+model state remain rooted through subsequent rendering (D5.3.3).
+Native DOM nodes also retain managed backing Elements and text Strings in precise
+registry slots, including detached nodes pinned by retained wrappers. Comments
+retain their source Element. Retirement and runtime teardown release those roots;
+Input-backed values need none
+(D4.1.1v2, D4.1.3). A copied DOM header reloads borrowed data/content pointers
+through `dom_element_to_element()` after its GC owner compacts. Independent
+DOM edits end the corresponding borrow. The collector still fixes only its
+surviving owners, as required by D4.3.1; native headers are never traced.
+Adoption transfers the root against its physical GC heap, including between
+documents with different runtimes. Document destruction withdraws roots before
+resource callbacks can destroy an adopted source document and its heap.
+Replacing a text backing String updates its registry root (D5.3.3).
+
+The reconcile journal grows reusable document-owned storage for larger turns;
+reset releases generation-checked node pins and retains capacity. Document
+teardown frees the grown buffer. Allocation failure uses the established broad
+fallback. Reconcile selector matchers use caller-owned storage through the
+shared initializer. Neither mechanism depends on a slide scene model (D7.5.3).
+
+The shared DOM catalog also publishes `presentation_style_set_property(node,
+property, value)` and `presentation_style_clear(node)` (D7.5.3). Transient samples
+are owned CSS declarations at animation origin, preserved across recascade and
+released through normal node/document teardown. Author attributes remain intact;
+author `!important` values retain precedence. Same-value writes do not invalidate
+the node. Invalid properties/values, `!important` input and values unsupported by
+the ownership copier are rejected without replacing the previous sample.
+SVG fill/stroke paint consults this layer through the existing CSS comparison.
+These operations supply mechanism; Lambda packages supply timeline policy.
+
+## 9. Known Issues & Future Improvements
+
+1. **Transition support requires checking the supported property subset.** Rechecked
+   2026-10-06: `css_transition_capture_before_change`,
+   `css_transition_resolve_config` and `css_transition_resolve` now capture changes,
+   read transition longhands and create scheduler instances. The earlier claim
+   that transitions were unwired is obsolete. This does not establish support
+   for every CSS property or PowerPoint effect; consult the animation value
+   parser and the used-value consumer for the requested property.
 2. **Hard parser caps silently truncate.** `parse_keyframes_content` caps at 64 stops and 32 declarations per stop (`css_animation.cpp:343`/`347`), with 64-byte name and 256-byte value buffers (`css_animation.cpp:413`/`434`). Overflow is dropped without a warning. *Improvement:* at least `log_warn` on overflow, or grow dynamically.
 3. **`property_name_to_id` is a fixed strcmp table.** Only ~28 properties are animatable (`css_animation.cpp:122`); anything else in a keyframe is silently ignored. New animatable properties require editing three coupled tables (`property_name_to_id`, `property_value_type`, `apply_animated_value`).
 4. **Heavy platform `#ifdef` in `frame_clock.cpp`.** Every function branches on `__APPLE__`/`_WIN32`/`__linux__` (`frame_clock.cpp:27`, `226`, `316`, `384`) rather than dispatching through a small vtable; each new clock operation must re-branch in several places. *Improvement:* a `RadiantFrameClockOps` function-pointer table per platform.

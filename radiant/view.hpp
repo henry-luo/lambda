@@ -85,7 +85,7 @@ const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
-String* css_prop_serialize_registered_custom_property(Pool* pool, DomElement* element,
+String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length);
 
 // Refresh one dynamic element's stylesheet declarations without constructing a
@@ -186,6 +186,7 @@ typedef struct TimingFunction {
 
 void timing_cubic_bezier_init(TimingFunction* tf, float x1, float y1, float x2, float y2);
 float timing_function_eval(const TimingFunction* tf, float t, bool before = false);
+bool animation_easing_before(const struct AnimationInstance* anim);
 
 extern TimingFunction TIMING_EASE;
 extern TimingFunction TIMING_EASE_IN;
@@ -225,13 +226,17 @@ struct AnimationInstance {
     AnimFinishFn on_finish;
     AnimCancelFn on_cancel;
     bool suppress_cancel_event;
+    bool finish_notified;
+    bool sampled;
+    bool layout_changed;
     bool retain_after_finish;   // CSS name reconciliation keeps an inactive timeline until removal
 
     float bounds[4];
     double pause_time;
+    double active_time;
 };
 
-// tier-2: view-pool, rebuilt each relayout
+// document-pool: retained across relayout.
 typedef struct AnimationScheduler {
     AnimationInstance* first;
     AnimationInstance* last;
@@ -240,6 +245,7 @@ typedef struct AnimationScheduler {
     double current_time;
     bool has_active_animations;
     bool host_time_anchored;
+    bool needs_layout;
 
     Pool* pool;
 } AnimationScheduler;
@@ -247,12 +253,15 @@ typedef struct AnimationScheduler {
 AnimationScheduler* animation_scheduler_create(Pool* pool);
 void animation_scheduler_destroy(AnimationScheduler* scheduler);
 bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
-                              DirtyTracker* dirty_tracker);
+                              DirtyTracker* dirty_tracker, bool force_css_sample = false,
+                              AnimationInstance* only = nullptr);
 void animation_scheduler_anchor_host_time(AnimationScheduler* scheduler, double now);
 void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_move_before(AnimationScheduler* scheduler,
     AnimationInstance* anim, AnimationInstance* before);
 void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim);
+void animation_scheduler_move_before(AnimationScheduler* scheduler, AnimationInstance* anim,
+                                     AnimationInstance* before);
 void animation_scheduler_cancel(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* target);
 void animation_scheduler_remove_views(AnimationScheduler* scheduler);
@@ -282,6 +291,13 @@ static inline RdtMatrix4 rdt_matrix4_identity(void) {
     RdtMatrix4 m = {};
     m.values[0] = m.values[5] = m.values[10] = m.values[15] = 1.0f;
     return m;
+}
+
+static inline bool rdt_matrix4_is_2d(const RdtMatrix4* matrix) {
+    const float* values = matrix->values;
+    return values[2] == 0.0f && values[6] == 0.0f && values[8] == 0.0f &&
+        values[9] == 0.0f && values[11] == 0.0f && values[12] == 0.0f &&
+        values[13] == 0.0f && values[14] == 0.0f && values[10] == 1.0f && values[15] == 1.0f;
 }
 
 static inline RdtMatrix4 rdt_matrix4_multiply(const RdtMatrix4* a,
@@ -626,13 +642,15 @@ typedef enum {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct ImageSurface {
     ImageFormat format;
-    int width;             // the intrinsic width of the surface/image (used for layout/intrinsic sizing)
-    int height;            // the intrinsic height of the surface/image
+    int width;             // integer source/decoder extent; SVG natural dimensions remain fractional below
+    int height;
     int encoded_width;     // raster source dimensions before image-orientation metadata
     int encoded_height;
     int orientation;       // EXIF orientation value, 1 when absent/normal/invalid
     bool has_intrinsic_size;
     bool has_intrinsic_aspect_ratio;
+    float natural_width, natural_height, natural_aspect_ratio; // SVG metadata, independent of decoder viewport
+    bool has_natural_width, has_natural_height;
     int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
@@ -1458,32 +1476,15 @@ typedef struct TextShadow {
  * TransformFunction - Individual CSS transform function
  * Forms a linked list for transform: translate() rotate() scale() etc.
  */
-typedef enum TransformFunctionType {
-    TRANSFORM_NONE = 0,
-    // 2D Transforms
-    TRANSFORM_TRANSLATE,        // translate(x, y) or translate(x)
-    TRANSFORM_TRANSLATEX,       // translateX(x)
-    TRANSFORM_TRANSLATEY,       // translateY(y)
-    TRANSFORM_SCALE,            // scale(x, y) or scale(s)
-    TRANSFORM_SCALEX,           // scaleX(x)
-    TRANSFORM_SCALEY,           // scaleY(y)
-    TRANSFORM_ROTATE,           // rotate(angle)
-    TRANSFORM_SKEW,             // skew(x-angle, y-angle)
-    TRANSFORM_SKEWX,            // skewX(angle)
-    TRANSFORM_SKEWY,            // skewY(angle)
-    TRANSFORM_MATRIX,           // matrix(a, b, c, d, e, f)
-    // 3D Transforms
-    TRANSFORM_TRANSLATE3D,      // translate3d(x, y, z)
-    TRANSFORM_TRANSLATEZ,       // translateZ(z)
-    TRANSFORM_SCALE3D,          // scale3d(x, y, z)
-    TRANSFORM_SCALEZ,           // scaleZ(z)
-    TRANSFORM_ROTATEX,          // rotateX(angle)
-    TRANSFORM_ROTATEY,          // rotateY(angle)
-    TRANSFORM_ROTATEZ,          // rotateZ(angle) - same as rotate()
-    TRANSFORM_ROTATE3D,         // rotate3d(x, y, z, angle)
-    TRANSFORM_PERSPECTIVE,      // perspective(d)
-    TRANSFORM_MATRIX3D,         // matrix3d(16 values)
-} TransformFunctionType;
+
+
+// the containing transform's pool owns every normalized calculation and weighted term.
+struct TransformLengthTerm {
+    lam::Own<CssValue> expression;
+    float coefficient;
+    lam::Own<TransformLengthTerm> next;
+};
+struct TransformMatrixInterpolation;
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TransformFunction {
@@ -1502,10 +1503,17 @@ typedef struct TransformFunction {
     } params;
     // Percentage values for translate (to be resolved against element's own dimensions)
     // CSS transform translate percentages are relative to element's own width/height
-    float translate_x_percent;  // NaN if not percentage, otherwise percentage value (e.g. -50 for -50%)
-    float translate_y_percent;  // NaN if not percentage, otherwise percentage value
+    float translate_x_percent;  // NaN without a percentage; otherwise adds to the pixel component
+    float translate_y_percent;  // percentage component added to the pixel component
+    lam::Own<TransformLengthTerm> translate_math[2]; // x/y calculations retain their reference-box dependency
+    lam::Own<TransformMatrixInterpolation> matrix_interpolation;
     lam::Own<struct TransformFunction> next;                  // Next transform in chain
 } TransformFunction;
+
+struct TransformMatrixInterpolation {
+    lam::Own<TransformFunction> from, to;
+    float progress;
+};
 
 typedef enum TransformFunctionOwner {
     TRANSFORM_FUNCTIONS_VIEW_POOL,
@@ -1673,6 +1681,9 @@ typedef struct BoundaryProp {
     float margin_chain_positive;  // max positive margin in the pending collapse chain
     float margin_chain_negative;  // most negative margin in the pending collapse chain
 } BoundaryProp;
+
+// shared lazy border allocation for style resolution and animation sampling.
+BorderProp* radiant_ensure_border_prop(BoundaryProp* boundary, Pool* pool);
 
 // Vector path segment for PDF/SVG path rendering
 // Stores pre-transformed coordinates ready for ThorVG rendering
@@ -2892,6 +2903,8 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
                                   DomElement* parent);
 
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
+// Release a private transform chain before retained restyle replaces its head.
+void view_release_transform_functions(DomElement* element, ViewTree* tree);
 // Release iframe documents before lifecycle retirement checks their host nodes.
 // The embedded document otherwise keeps an external pin on a detached iframe.
 void view_tree_release_detached_embedded_documents(ViewTree* tree, DomNode* root);
@@ -3125,6 +3138,8 @@ enum ClipShapeType {
 // tier-2: view-pool, rebuilt each relayout
 struct ClipShape {
     ClipShapeType type;
+    bool transformed;
+    RdtMatrix inverse_transform; // maps raster pixels back to the clip's author coordinates
     union {
         struct { lam::OwnArr<float> vx; lam::OwnArr<float> vy; int count; } polygon;  // view-pool copies
         struct { float cx, cy, r; } circle;
@@ -3135,6 +3150,7 @@ struct ClipShape {
 };
 
 #define RDT_MAX_CLIP_SHAPES 8
+#define RDT_CLIP_PARAM_COUNT 18 // geometry (8), transform flag (1), inverse matrix (9)
 
 bool clip_point_in_shape(ClipShape* cs, float px, float py);
 bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
@@ -3143,6 +3159,7 @@ void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
     float y, int base_left, int base_right, int* out_left, int* out_right);
 ClipShape clip_shape_from_params(int type, const float* params);
 void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params);
+void clip_shape_offset(ClipShape* shape, float offset_x, float offset_y);
 
 
 // ===== form controls =====
@@ -3556,17 +3573,19 @@ typedef enum CssAnimComposite {
 } CssAnimComposite;
 
 
-// tier-2: view-pool, rebuilt each relayout
+// keyframe-owner pool; sampled copies hold computed values.
 typedef struct CssAnimatedProp {
     CssPropertyCode property_code;
     CssAnimValueType value_type;
     CssAnimComposite composite;
+    const CssValue* expression; // borrowed from the keyframe-owner pool until computed
     union {
         float f;                // ANIM_VAL_FLOAT
         Color color;            // ANIM_VAL_COLOR
         struct {
             float value;
             bool is_percent;
+            CssEnum keyword; // computed nonnumeric endpoint, or CSS_VALUE__UNDEF
         } length;               // ANIM_VAL_LENGTH
         struct {
             float value;
@@ -3585,8 +3604,7 @@ typedef struct CssAnimatedProp {
 // Keyframe Data Structures
 // ============================================================================
 
-// A single keyframe stop (e.g., "50% { opacity: 0.5; transform: scale(1.2); }")
-// tier-2: view-pool, rebuilt each relayout
+// a single keyframe stop; keyframe-owner pool, retained while effects reference it.
 typedef struct CssKeyframeStop {
     float offset;               // 0.0 (from) to 1.0 (to)
     lam::OwnArr<CssAnimatedProp> properties;
@@ -3594,8 +3612,7 @@ typedef struct CssKeyframeStop {
     TimingFunction* timing;     // per-keyframe easing (NULL = use animation easing)
 } CssKeyframeStop;
 
-// A parsed @keyframes rule
-// tier-2: view-pool, rebuilt each relayout
+// a parsed @keyframes rule; document-pool for CSS, effect-owner pool for Web Animations.
 typedef struct CssKeyframes {
     lam::Up<const char> name;           // animation name (e.g., "fadeIn")
     lam::OwnArr<CssKeyframeStop> stops;     // sorted by offset ascending
@@ -3606,7 +3623,7 @@ typedef struct CssKeyframes {
 // Keyframe Registry (per document)
 // ============================================================================
 
-// tier-2: view-pool, rebuilt each relayout
+// document-pool: canonical parsed rules survive retained relayout.
 typedef struct KeyframeRegistry {
     lam::OwnArr<CssKeyframes*> entries;
     int count;
@@ -3627,9 +3644,9 @@ CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* nam
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssAnimProp {
     lam::Up<const char> name;           // animation-name (keyframes reference)
-    float duration;             // animation-duration in seconds
-    float delay;                // animation-delay in seconds
-    double iteration_count;     // -1 = infinite; fractional counts end within a cycle
+    double duration;            // animation-duration in seconds
+    double delay;               // animation-delay in seconds
+    double iteration_count;     // -1 = infinite; finite counts may be fractional
     AnimationDirection direction;
     AnimationFillMode fill_mode;
     AnimationPlayState play_state;
@@ -3640,10 +3657,10 @@ typedef struct CssAnimProp {
 // CSS Transition Configuration (per element)
 // ============================================================================
 
-// tier-2: view-pool, rebuilt each relayout
+// scratch configuration: values borrow the computed-value pool supplied by the caller.
 typedef struct CssTransitionProp {
-    float duration;             // transition-duration in seconds
-    float delay;                // transition-delay in seconds
+    double duration;            // transition-duration in seconds
+    double delay;               // transition-delay in seconds
     TimingFunction timing;      // transition-timing-function
 } CssTransitionProp;
 
@@ -3668,17 +3685,33 @@ bool css_animation_parse_timing_function_text(const char* value,
 // CSS Animation Runtime State (attached to AnimationInstance.state)
 // ============================================================================
 
-// tier-2: view-pool, rebuilt each relayout
+// document-pool: retained across relayout with its animation instance.
+typedef struct CssAnimValueSample {
+    const CssAnimatedProp* source;
+    CssAnimatedProp computed;
+    bool valid;
+} CssAnimValueSample;
+
 typedef struct CssAnimState {
     CssKeyframes* keyframes;
     DomElement* element;
     UiContext* ui_context;
     bool event_started;
     bool suppress_events;
+    bool matched;
     double event_iteration;
-    bool css_matched;            // retained instances are matched once during list reconciliation
-    CssAnimatedProp underlying[32];
+    lam::OwnArr<CssAnimatedProp> underlying;
     int underlying_count;
+    int underlying_capacity;
+    lam::Own<TransformFunction> underlying_transform;
+    lam::Own<TransformFunction> sampled_transform;
+    lam::OwnArr<CssAnimValueSample> value_samples;
+    int value_sample_count;
+    int value_sample_capacity;
+    lam::OwnArr<CssPropertyCode> important_properties;
+    int important_property_count;
+    int important_property_capacity;
+    Pool* pool;
 } CssAnimState;
 
 // Web Animations keep their timeline/effect state on the DOM element. The
@@ -3708,10 +3741,6 @@ void css_web_animation_resolve(DomElement* element, LayoutContext* lycon);
 // CSS Transition Runtime State
 // ============================================================================
 
-// The supported set shares the animation value application path, including
-// the six sizing longhands handled there.
-#define CSS_TRANSITION_MAX_TRACKED 10
-
 typedef struct CssTransitionValue {
     union {
         float f;
@@ -3725,7 +3754,7 @@ typedef struct CssTransitionValue {
 
 // One tracked transitionable property: its last-applied used value (the
 // snapshot) plus the currently running transition instance (if any).
-// tier-2: view-pool, rebuilt each relayout
+// embedded in the document-owned per-element snapshot
 typedef struct CssTransitionTrack {
     CssPropertyCode property_code;
     CssAnimValueType value_type;
@@ -3735,18 +3764,12 @@ typedef struct CssTransitionTrack {
     CssTransitionValue pending_from; // before-change value for the next style resolution
 } CssTransitionTrack;
 
-// Persistent per-element transition state (stored in DomElement's extension).
-// tier-2: view-pool, rebuilt each relayout
-typedef struct CssTransitionElemState {
-    CssTransitionTrack tracks[CSS_TRANSITION_MAX_TRACKED];
-    int track_count;
-} CssTransitionElemState;
-
 // Per-instance transition state (attached to AnimationInstance.state).
-// tier-2: view-pool, rebuilt each relayout
+// document-pool: released when its scheduler instance finishes or is canceled.
 typedef struct CssTransitionState {
     DomElement* element;
     UiContext* ui_context;
+    Pool* pool;
     CssPropertyCode property_code;
     CssAnimValueType value_type;
     CssTransitionValue from;
@@ -3760,7 +3783,7 @@ typedef struct CssTransitionState {
 // Interpolate a float value: a + (b - a) * t
 float css_interpolate_float(float a, float b, float t);
 
-// Interpolate a color (per-channel linear in sRGB)
+// interpolate legacy sRGB colors with premultiplied alpha.
 Color css_interpolate_color(Color a, Color b, float t);
 
 // ============================================================================
@@ -3778,6 +3801,7 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
 
 // Animation tick callback (applied by AnimationScheduler)
 void css_animation_tick(AnimationInstance* anim, float t);
+bool css_animation_needs_computed_sample(DomElement* element, CssPropertyCode property);
 
 // Animation finish callback
 void css_animation_finish(AnimationInstance* anim);
@@ -3822,7 +3846,7 @@ void css_transition_capture_before_change(DomElement* element, CssPropertyCode p
 // synthetic list built on the stack, the list must stay alive for the whole
 // resolve call. Manually assigning decl.value = &local_list is fragile: a
 // narrower lexical scope for the list leads to stack-use-after-scope (see
-// vibe/Memory_Safety_Template4.md §1).
+// vibe/Memory_Safety_Template.md §8.2).
 //
 // These helpers tie the scratch list storage to the resolve() call so the
 // stack value cannot outlive — or under-live — the call. The copied
@@ -3844,9 +3868,12 @@ struct LayoutContext;
 float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
                                    CssPropertyCode prop_id);
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
+Color resolve_text_color_value(LayoutContext* lycon, const CssValue* value);
+float resolve_css_opacity_value(LayoutContext* lycon, const CssValue* value);
 bool resolve_pseudo_color(LayoutContext* lycon, StyleTree* pseudo_style,
                           Color* out_color);
 Color radiant_caret_color_for_view(ViewSpan* span);
+Color get_current_color_for_view(ViewSpan* span);
 Color color_name_to_rgb(CssEnum color_name);
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 int64_t get_cascade_priority(const CssDeclaration* decl);
@@ -3857,9 +3884,6 @@ float resolve_css_angle_value(const CssValue* value);
 float layout_effective_zoom(View* view);
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
                                const char* url);
-typedef const CssValue* (*CssVariableLookupFn)(void* context, const char* name);
-const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
-                                      CssVariableLookupFn lookup, void* context);
 const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
     const CssValue* value, CssPropertyCode property = CSS_PROPERTY_UNKNOWN);
 const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
@@ -3991,6 +4015,20 @@ extern RdtMatrix4 compute_transform_matrix_3d(TransformFunction* functions,
                                               float width, float height,
                                               float origin_x, float origin_y,
                                               float origin_z = 0.0f);
+bool interpolate_transform_matrix_2d(const RdtMatrix4* from, const RdtMatrix4* to,
+    float progress, RdtMatrix4* result);
+bool interpolate_transform_matrix(const RdtMatrix4* from, const RdtMatrix4* to,
+    float progress, RdtMatrix4* result);
+float normalize_transform_vector3(float vector[3]);
+TransformFunction* clone_transform_function(Pool* pool, const TransformFunction* source);
+TransformFunction* clone_transform_list(Pool* pool, const TransformFunction* source);
+void destroy_transform_list(Pool* pool, TransformFunction* functions);
+void destroy_transform_function_payload(Pool* pool, TransformFunction* function);
+TransformLengthTerm* clone_transform_length_terms(Pool* pool, const TransformLengthTerm* source,
+    float coefficient = 1.0f);
+TransformLengthTerm* interpolate_transform_length_terms(Pool* pool, const TransformLengthTerm* from,
+    const TransformLengthTerm* to, float progress);
+float resolve_computed_transform_length(const CssValue* value, float reference_size);
 extern RdtMatrix compute_transform_matrix(const TransformProp* transform,
                                           float width, float height,
                                           float origin_x, float origin_y,
@@ -4020,12 +4058,20 @@ extern void transform_point(float& x, float& y, const RdtMatrix& m);
 
 } // namespace radiant
 
+inline float transform_translate_component(float pixels, float percentage, float extent) {
+    return pixels + (isnan(percentage) ? 0.0f : percentage * extent / 100.0f);
+}
+
 // typed CSS transform decoding shared by box and SVG coordinate resolution.
 typedef float (*TransformLengthResolver)(void* context, const CssValue* value);
+typedef float (*TransformNumericResolver)(void* context, const CssValue* value, bool angle);
 int css_value_count(const CssValue* value, int limit);
 const CssValue* css_value_at(const CssValue* value, int index);
 bool resolve_transform_function_value(const CssValue* value, TransformFunction* function,
-    TransformLengthResolver resolve_length, void* context);
+    TransformLengthResolver resolve_length, void* context,
+    TransformNumericResolver resolve_numeric = nullptr);
+TransformFunction* resolve_transform_value(LayoutContext* context, const CssValue* value,
+    Pool* document_pool = nullptr);
 void resolve_transform_origin_value(const CssValue* value, TransformProp* transform,
     TransformLengthResolver resolve_length, void* context);
 
@@ -4079,6 +4125,10 @@ typedef struct UiContext {
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
     lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
+    // One Lambda runtime for the window's stateless document loaders (LaTeX,
+    // PDF, TikZ, graph, math). Created by the first such load; released after
+    // the documents built on it.
+    lam::Own<Runtime> loader_runtime;
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
     int iframe_depth;
@@ -4170,6 +4220,7 @@ typedef struct DocumentJsHostConfig {
     double post_load_settle_ms;
     bool redirect_stdout_to_stderr;
     bool disable_css_animations;
+    InputResourcePolicy resource_policy;
 } DocumentJsHostConfig;
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const struct DomDocument* source);
@@ -4180,6 +4231,11 @@ extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp*
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
+bool document_dependency_admits(const DomDocument* document, const char* source);
+ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source);
+ImageSurface* load_document_image_resource(DomDocument* document, lam::Own<struct hashmap>* cache,
+    const char* source);
+void image_resource_cache_cleanup(lam::Own<struct hashmap>* cache, UiContext* animation_ui = nullptr);
 // The image cache takes a surface decoded elsewhere under `key` and returns the
 // surface it holds for that key: `surface`, or an earlier one (then `surface`
 // is destroyed). Returns null, with `surface` destroyed, when it cannot store it.
@@ -4214,6 +4270,10 @@ typedef struct HtmlLoadPhaseTiming {
     double finalize_ms;
 } HtmlLoadPhaseTiming;
 
+DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
+    bool track_source_lines = false, bool execute_scripts = true,
+    const DocumentJsHostConfig* host_config = nullptr);
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config = nullptr,
                            struct CookieJar* top_level_cookie_jar = nullptr,
@@ -4228,14 +4288,31 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_filename, int viewport_
                                     struct DocumentScriptPhaseTiming* script_timing,
                                     bool print_media = false);
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
-        const LambdaDocumentTransformConfig* transform,
-        const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool, bool print_media = false);
-DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool);
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    int viewport_width, int viewport_height, Pool* pool,
+    InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK,
+    bool print_media = false);
+// Names the window whose shared loader runtime a top-level load on this thread
+// uses, for the duration of that load. Iframe and worker loads install none,
+// so their stateless loaders keep a runtime per document.
+struct LayoutLoaderHostScope {
+    lam::Up<struct UiContext> saved;  // the enclosing scope's window
+    explicit LayoutLoaderHostScope(struct UiContext* uicon);
+    ~LayoutLoaderHostScope();
+};
+// Whether a local document's loader can run on the window's loader runtime,
+// which lives on the host thread: the stateless transforms, and markdown for
+// its math.
+bool layout_path_uses_loader_runtime(const char* path);
+// Releases the window's loader runtime; its documents must already be gone.
+void ui_context_release_loader_runtime(struct UiContext* uicon);
+// Ends the loader runtime's work on one document: the document takes the UI
+// attribute roots that work published (with no document they are dropped),
+// and the runtime lets go of the document's Input.
+void loader_runtime_finish_document(DomDocument* doc, Runtime* loader);
 // The message of the error value a Lambda document or transform returned on
 // its most recent failed load, or null. The CLI reports it as the actionable
 // load diagnostic; a successful load clears it.
 const char* lambda_document_load_diagnostic(void);
-DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool);
 void free_document(DomDocument* doc);

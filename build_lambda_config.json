@@ -224,6 +224,7 @@
     },
     {
       "name": "rdb-pq",
+      "module_only": true,
       "version": "18.6",
       "description": "libpq, static and TLS-free (utils/build-rdb-deps.sh); rdb-drivers module only",
       "include": "mac-deps/rdb/include",
@@ -232,6 +233,7 @@
     },
     {
       "name": "rdb-pgcommon",
+      "module_only": true,
       "version": "18.6",
       "description": "PostgreSQL common code for libpq (PIC variant)",
       "lib": "mac-deps/rdb/lib/libpgcommon_shlib.a",
@@ -239,6 +241,7 @@
     },
     {
       "name": "rdb-pgport",
+      "module_only": true,
       "version": "18.6",
       "description": "PostgreSQL portability code for libpq (PIC variant)",
       "lib": "mac-deps/rdb/lib/libpgport_shlib.a",
@@ -246,6 +249,7 @@
     },
     {
       "name": "rdb-mariadbclient",
+      "module_only": true,
       "version": "3.3.21",
       "description": "MariaDB Connector/C, static and TLS-free (utils/build-rdb-deps.sh); rdb-drivers module only",
       "include": "mac-deps/rdb/include/mariadb",
@@ -3665,29 +3669,37 @@
             "source": "test_css_animation_gtest.cpp",
             "name": "CSS Animation Tests",
             "dependencies": [
-              "lambda-data"
+              "lambda-rt",
+              "node-core",
+              "radiant"
             ],
             "libraries": [
               "gtest",
               "gtest_main"
             ],
-            "additional_sources": [
-              "radiant/animation.cpp",
-              "radiant/css_animation.cpp",
-              "radiant/css_variable.cpp",
-              "radiant/view_transform.cpp",
-              "radiant/view_geometry.cpp",
-              "radiant/css_display.cpp",
-              "radiant/layout_tags.cpp",
-              "radiant/css_cascade.cpp",
-              "radiant/css_prop_table.cpp",
-              "lambda/input/css/css_engine.cpp",
-              "lambda/input/css/selector_matcher.cpp",
-              "lambda/input/css/css_value.cpp",
-              "lib/avl_tree.c"
-            ],
             "binary": "test_css_animation_gtest.exe",
-            "icon": "\ud83c\udfa8"
+            "icon": "\ud83c\udfa8",
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "Security",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            }
           },
           {
             "source": "test_gif_player_gtest.cpp",
@@ -4690,33 +4702,12 @@
           {
             "source": "test/css/test_css_style_node.cpp",
             "name": "CSS Style Node & Cascade Tests",
-            "dependencies": [],
+            "dependencies": [
+              "lambda-data"
+            ],
             "libraries": [
               "gtest",
               "gtest_main"
-            ],
-            "additional_sources": [
-              "lib/avl_tree.c",
-              "lib/hashmap.c",
-              "lib/hashmap.c",
-              "lambda/core/name_pool.cpp",
-              "lambda/core/well_known_markup_names.c",
-              "lambda/core/well_known_lambda_names.c",
-              "lambda/js/js_well_known_names.c",
-              "lambda/input/css/css_style_node.cpp",
-              "lambda/input/css/css_properties.cpp",
-              "lambda/input/css/css_value_parser.cpp",
-              "lambda/input/css/css_value.cpp",
-              "lib/strbuf.c",
-              "lib/mempool.c",
-              "lib/mem_context.c",
-              "lib/memtrack.c",
-              "lib/mem_alloc.c",
-              "lib/arena.c",
-              "lib/str.c",
-              "lib/str_simd.c",
-              "lib/utf.c",
-              "lib/log.c"
             ],
             "binary": "test_css_style_node.exe",
             "icon": "\ud83c\udfa8"
@@ -4724,34 +4715,12 @@
           {
             "source": "test/css/test_css_system.cpp",
             "name": "CSS Property System & Style Node Tests",
-            "dependencies": [],
+            "dependencies": [
+              "lambda-data"
+            ],
             "libraries": [
               "gtest",
               "gtest_main"
-            ],
-            "additional_sources": [
-              "lib/avl_tree.c",
-              "lib/hashmap.c",
-              "lambda/core/name_pool.cpp",
-              "lambda/core/well_known_markup_names.c",
-              "lambda/core/well_known_lambda_names.c",
-              "lambda/js/js_well_known_names.c",
-              "lambda/input/css/css_style_node.cpp",
-              "lambda/input/css/css_properties.cpp",
-              "lambda/input/css/css_value_parser.cpp",
-              "lambda/input/css/css_value.cpp",
-              "lib/strbuf.c",
-              "lib/mempool.c",
-              "lib/mem_context.c",
-              "lib/memtrack.c",
-              "lib/mem_alloc.c",
-              "lib/arena.c",
-              "lib/string.c",
-              "lib/str.c",
-              "lib/str_simd.c",
-              "lib/utf.c",
-              "lib/hashmap.c",
-              "lib/log.c"
             ],
             "binary": "test_css_system.exe",
             "icon": "\ud83c\udfa8"

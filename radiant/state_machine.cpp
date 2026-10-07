@@ -388,6 +388,15 @@ static bool view_has_document_root(View* view) {
     return root != NULL;
 }
 
+static View* interaction_validation_root(DocState* state, View* target) {
+    // pruning owns only the document subtree, excluding parser/layout ancestors.
+    if (state && state->owner_store && state->owner_store->document) {
+        DomDocument* doc = state->owner_store->document;
+        if (doc->root) return static_cast<View*>(doc->root);
+    }
+    return view_geometry_tree_root(target);
+}
+
 static uint32_t projection_view_offset_limit(View* view) {
     if (!view) return 0;
     DomNode* node = static_cast<DomNode*>(view);
@@ -487,7 +496,7 @@ static void validate_focus_invariants(DocState* state,
     if (focused && !view_has_document_root(focused)) {
         report_fail(report, "focused target is detached");
     }
-    View* root = view_geometry_tree_root(
+    View* root = interaction_validation_root(state,
         focused ? focused : state->focus->previous);
     if (!root) return;
 
@@ -534,12 +543,7 @@ static void validate_hover_invariants(DocState* state,
         report_fail(report, "hover target is detached");
     }
 
-    View* root = NULL;
-    if (state->owner_store && state->owner_store->document) {
-        DomDocument* doc = state->owner_store->document;
-        root = doc->root ? static_cast<View*>(doc->root) : NULL;
-    }
-    if (!root) root = view_geometry_tree_root(hovered);
+    View* root = interaction_validation_root(state, hovered);
     if (!root) return;
 
     uint32_t hover_count = 0;
@@ -560,12 +564,7 @@ static void validate_active_invariants(DocState* state,
         report_fail(report, "active target is detached");
     }
 
-    View* root = NULL;
-    if (state->owner_store && state->owner_store->document) {
-        DomDocument* doc = state->owner_store->document;
-        root = doc->root ? static_cast<View*>(doc->root) : NULL;
-    }
-    if (!root) root = view_geometry_tree_root(active);
+    View* root = interaction_validation_root(state, active);
     if (!root) return;
 
     uint32_t active_count = 0;

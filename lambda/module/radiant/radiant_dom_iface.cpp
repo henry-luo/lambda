@@ -10,6 +10,7 @@
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "../../jube/jube.h"
+#include "../../input/css/css_declaration_attributes.h"
 #include "../../../lib/log.h"
 
 extern const JubeHostAPI* radiant_host_api;
@@ -85,20 +86,6 @@ const char radiant_dom_interface_decl[] =
     "    modify: fn(alter: string, direction: string, granularity: string) null,\n"
     "    __force_direction: fn(direction: string) null\n"
     "}\n"
-    "type inline_style {\n"
-    "    css_text: string,\n"
-    "    length: string,\n"
-    "    get_property_value: fn(prop: string) string,\n"
-    "    set_property: fn(prop: string, value: string, priority: string) null,\n"
-    "    remove_property: fn(prop: string) string\n"
-    "}\n"
-    "type computed_style {\n"
-    "    css_text: string,\n"
-    "    length: string,\n"
-    "    get_property_value: fn(prop: string) string,\n"
-    "    set_property: fn(prop: string, value: string, priority: string) null,\n"
-    "    remove_property: fn(prop: string) string\n"
-    "}\n"
     "type stylesheet {\n"
     "    css_rules: any,\n"
     "    rules: any,\n"
@@ -108,27 +95,32 @@ const char radiant_dom_interface_decl[] =
     "    href: string,\n"
     "    title: string,\n"
     "    owner_node: any,\n"
-    "    insert_rule: fn(text: string, index: int) int,\n"
-    "    delete_rule: fn(index: int) null\n"
-    "}\n"
-    "type css_rule {\n"
-    "    selector_text: string,\n"
-    "    style: any,\n"
-    "    css_rules: any,\n"
-    "    rules: any,\n"
-    "    css_text: string,\n"
-    "    'type': int,\n"
-    "    parent_rule: any,\n"
+    "    owner_rule: any,\n"
     "    parent_style_sheet: any,\n"
-    "    start: any,\n"
-    "    end: any,\n"
-    "    name: any,\n"
-    "    syntax: any,\n"
-    "    inherits: any,\n"
-    "    initial_value: any,\n"
     "    insert_rule: fn(text: string, index: int) int,\n"
     "    delete_rule: fn(index: int) null\n"
     "}\n"
+    "type css_rule { css_text: string, 'type': int, parent_rule: any, parent_style_sheet: any }\n"
+    "type css_grouping_rule : css_rule { css_rules: any, insert_rule: fn(text: string, index: int) int, delete_rule: fn(index: int) null }\n"
+    "type css_condition_rule : css_grouping_rule { condition_text: string }\n"
+#define CSS_RULE_SHAPE_empty ""
+#define CSS_RULE_SHAPE_style "selector_text: string, style: any"
+#define CSS_RULE_SHAPE_declaration "style: any"
+#define CSS_RULE_SHAPE_scope "start: any, end: any"
+#define CSS_RULE_SHAPE_property "name: any, syntax: any, inherits: any, initial_value: any"
+#define CSS_RULE_SHAPE_namespace "prefix: string, namespace_uri: string"
+#define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
+    "type " #host " : " #host_base " { " CSS_RULE_SHAPE_##shape " }\n"
+#define CSS_RULE_INTERFACE_ALIAS(...)
+#include "../../input/css/css_rule_interfaces.def"
+#undef CSS_RULE_INTERFACE_ALIAS
+#undef CSS_RULE_INTERFACE
+#undef CSS_RULE_SHAPE_empty
+#undef CSS_RULE_SHAPE_style
+#undef CSS_RULE_SHAPE_declaration
+#undef CSS_RULE_SHAPE_scope
+#undef CSS_RULE_SHAPE_property
+#undef CSS_RULE_SHAPE_namespace
     "type dom_node {\n"
     "    node_name: string, node_type: int,\n"
     "    parent_node: dom_node, parent_element: dom_node, is_connected: bool,\n"
@@ -247,10 +239,21 @@ const char radiant_dom_interface_decl[] =
     "type rule_style_decl {\n"
     "    length: int,\n"
     "    css_text: string,\n"
+    "    parent_rule: any,\n"
     "    get_property_value: fn(prop: string) string,\n"
+    "    get_property_priority: fn(prop: string) string,\n"
+    "    item: fn(index: int) string,\n"
     "    set_property: fn(prop: string, value: string, priority: string) null,\n"
     "    remove_property: fn(prop: string) string\n"
     "}\n"
+#define CSS_DECLARATION_FIELD(field) "    '" #field "': string,\n"
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    "type " #host " : rule_style_decl {\n" metadata##_FIELDS(CSS_DECLARATION_FIELD) "}\n"
+#include "../../input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
+#undef CSS_DECLARATION_FIELD
+    "type inline_style : css_style_properties {}\n"
+    "type computed_style : css_style_properties {}\n"
     "type document {\n"
     "    document_element: dom_node,\n"
     "    body: dom_node,\n"
@@ -659,136 +662,13 @@ static const JubeMemberBind radiant_selection_members[] = {
 };
 
 
-// ---- style hosts (inline_style / computed_style) ----
-// Pinned legacy behaviors preserved by construction: Object.keys = [] (all
-// members non-enumerable, expandos impossible), `length` reads as "" (a CSS
-// property-table miss, not a count), no prototype object, and non-CSS writes
-// are swallowed by the CSS parser rather than stored.
-
-extern "C" Item radiant_dom_wrap_node(void* dom_elem);
-
 static Item radiant_style_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name))};
 }
 
-// inline-style wrappers carry the owner DomElement* as host_data; the engine
-// style entries take the owner ELEMENT item
-static Item radiant_style_owner_item(Item receiver) {
-    return radiant_dom_wrap_node(receiver.vmap->host_data);
-}
-
-static int st_css_text_get(Item r, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_get_property(radiant_style_owner_item(r),
-                                                     radiant_style_key("cssText"));
-    return 1;
-}
-
-static int st_css_text_set(Item r, Item v, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_set_property(radiant_style_owner_item(r),
-                                                     radiant_style_key("cssText"), v);
-    return 1;
-}
-
-static int st_length_get(Item r, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_get_property(radiant_style_owner_item(r),
-                                                     radiant_style_key("length"));
-    return 1;
-}
-
-static int st_named_get(Item r, Item key, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_get_property(radiant_style_owner_item(r), key);
-    return 1;
-}
-
-static int st_named_set(Item r, Item key, Item v, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_set_property(radiant_style_owner_item(r), key, v);
-    return 1;
-}
-
-static int st_named_has(Item r, Item key, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_has_property(r, key);
-    return 1;
-}
-
-static int st_get_property_value(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_get_property(radiant_style_owner_item(r),
-        radiant_iface_arg(args, argc, 0));
-    return 1;
-}
-
-static int st_set_property(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_set_property_bridge(r.vmap->host_data,
-        radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1),
-        radiant_iface_arg(args, argc, 2), argc >= 3);
-    return 1;
-}
-
-static int st_remove_property(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom_catalog->style_remove_property_bridge(r.vmap->host_data,
-        radiant_iface_arg(args, argc, 0));
-    return 1;
-}
-
-// computed style: read-only; the resolver entry takes the style item itself
-static int cs_get(Item r, Item key, Item* out) {
-    *out = radiant_host_api->dom_catalog->computed_style_get_property(r, key);
-    return 1;
-}
-
-static int cs_css_text_get(Item r, Item* out) {
-    return cs_get(r, radiant_style_key("cssText"), out);
-}
-
-static int cs_length_get(Item r, Item* out) {
-    return cs_get(r, radiant_style_key("length"), out);
-}
-
-static int cs_get_property_value(Item r, Item* args, int argc, Item* out) {
-    return cs_get(r, radiant_iface_arg(args, argc, 0), out);
-}
-
-static int cs_noop_method(Item r, Item* args, int argc, Item* out) {
-    (void)r; (void)args; (void)argc;
-    *out = ItemNull;
-    return 1;
-}
-
-static int cs_named_set(Item r, Item key, Item v, Item* out) {
-    (void)r; (void)key;
-    *out = v;
-    return 1;
-}
-
-// style objects have no prototype (a non-map seed records "none")
-static Item radiant_style_no_prototype(void) {
-    return ItemNull;
-}
-
-static const JubeMemberBind radiant_inline_style_members[] = {
-    {"css_text", NULL, st_css_text_get, st_css_text_set, NULL, NULL,
-     JUBE_MEMBER_NON_ENUMERABLE},
-    BIND_GET_HIDDEN("length", st_length_get),
-    BIND_CALL("get_property_value", st_get_property_value),
-    BIND_CALL("set_property", st_set_property),
-    BIND_CALL("remove_property", st_remove_property),
-};
-
-static const JubeMemberBind radiant_computed_style_members[] = {
-    BIND_GET_HIDDEN("css_text", cs_css_text_get),
-    BIND_GET_HIDDEN("length", cs_length_get),
-    BIND_CALL("get_property_value", cs_get_property_value),
-    BIND_CALL("set_property", cs_noop_method),
-    BIND_CALL("remove_property", cs_noop_method),
-};
-
-
 // ---- CSSOM (stylesheet / css_rule / rule_style_decl) ----
-// Pinned behaviors preserved: keys = [], descriptors undefined for open names,
-// unknown-name writes swallowed (stylesheet/rule) or parsed as CSS declarations
-// (rule_style_decl). Stylesheet instances expose their CSSOM interface
-// prototype; the drifted has-chain is gone: `in` now derives from the same
-// declarations `get` serves, plus null-valued members (owner_node,
-// parent_style_sheet) that the legacy chain reported present.
+// stylesheet and rule open names use the shared host expando store; native
+// members and receiver-specific rule prototypes remain host-API projections.
 
 #define RADIANT_GETTER_D(name, entry)                                        \
     static int name(Item receiver, Item* out) {                              \
@@ -799,24 +679,12 @@ static const JubeMemberBind radiant_computed_style_members[] = {
 RADIANT_GETTER_D(sh_css_rules, stylesheet_rules)
 RADIANT_GETTER_D(sh_length, stylesheet_get_length)
 RADIANT_GETTER_D(sh_disabled, stylesheet_get_disabled)
+RADIANT_GETTER_D(sh_owner_node, stylesheet_get_owner_node)
+RADIANT_GETTER_D(sh_owner_rule, stylesheet_get_owner_rule)
+RADIANT_GETTER_D(sh_parent_style_sheet, stylesheet_get_parent_style_sheet)
 RADIANT_GETTER_D(sh_type, stylesheet_get_type)
 RADIANT_GETTER_D(sh_href, stylesheet_get_href)
 RADIANT_GETTER_D(sh_title, stylesheet_get_title)
-
-static int cssom_null_get(Item receiver, Item* out) {
-    // has-only legacy members (ownerNode, parentStyleSheet): the old chain
-    // reported them present while reads returned null — declaring them with a
-    // null getter preserves both halves
-    (void)receiver;
-    *out = ItemNull;
-    return 1;
-}
-
-static int cssom_swallow_set(Item receiver, Item key, Item value, Item* out) {
-    (void)receiver; (void)key;
-    *out = value;
-    return 1;
-}
 
 static int sh_indexed_get(Item receiver, int64_t index, Item* out) {
     *out = radiant_host_api->dom_catalog->stylesheet_index(receiver, index);
@@ -849,91 +717,155 @@ RADIANT_GETTER_D(cr_property_syntax, rule_get_property_syntax)
 RADIANT_GETTER_D(cr_property_inherits, rule_get_property_inherits)
 RADIANT_GETTER_D(cr_property_initial_value, rule_get_property_initial_value)
 
+RADIANT_GETTER_D(cr_condition_text, rule_get_condition_text)
+RADIANT_GETTER_D(cr_namespace_prefix, rule_get_namespace_prefix)
+RADIANT_GETTER_D(cr_namespace_uri, rule_get_namespace_uri)
+
+#define CSS_RULE_SETTER(name, entry) \
+    static int name(Item receiver, Item value, Item* out) { \
+        *out = radiant_host_api->dom_catalog->entry(receiver, value); \
+        return 1; \
+    }
+CSS_RULE_SETTER(cr_style_set, rule_set_style)
+CSS_RULE_SETTER(cr_css_text_set, rule_set_css_text)
+#undef CSS_RULE_SETTER
+
 static int cr_selector_text_set(Item receiver, Item value, Item* out) {
     *out = radiant_host_api->dom_catalog->set_selector_text(receiver, value);
     return 1;
 }
 
+static int sh_disabled_set(Item receiver, Item value, Item* out) {
+    *out = radiant_host_api->dom_catalog->stylesheet_set_disabled(receiver, value);
+    return 1;
+}
+
 // rule declarations: CSS property names are the open-name surface
 static int rd_named_get(Item receiver, Item key, Item* out) {
+    if (!it2b(radiant_host_api->dom_catalog->rule_style_has_property(receiver, key))) return 0;
     *out = radiant_host_api->dom_catalog->rule_style_get_property(receiver, key);
     return 1;
 }
 
 static int rd_named_set(Item receiver, Item key, Item value, Item* out) {
+    if (!it2b(radiant_host_api->dom_catalog->rule_style_has_property(receiver, key))) return 0;
     *out = radiant_host_api->dom_catalog->rule_style_set_property(receiver, key, value);
     return 1;
 }
 
 static int rd_named_has(Item receiver, Item key, Item* out) {
     *out = radiant_host_api->dom_catalog->rule_style_has_property(receiver, key);
+    return it2b(*out) ? 1 : 0;
+}
+
+static int rd_member_get(Item receiver, const char* name, Item* out) {
+    *out = radiant_host_api->dom_catalog->rule_style_get_property(receiver, radiant_style_key(name));
     return 1;
 }
 
-static int rd_length_get(Item receiver, Item* out) {
-    return rd_named_get(receiver, radiant_style_key("length"), out);
+static int rd_length_get(Item receiver, Item* out) { return rd_member_get(receiver, "length", out); }
+static int rd_css_text_get(Item receiver, Item* out) { return rd_member_get(receiver, "cssText", out); }
+static int rd_parent_rule_get(Item receiver, Item* out) { return rd_member_get(receiver, "parentRule", out); }
+
+static int64_t rd_indexed_length(Item receiver) {
+    Item length = ItemNull;
+    rd_length_get(receiver, &length);
+    return fn_int64_index(length);
 }
 
-static int rd_css_text_get(Item receiver, Item* out) {
-    return rd_named_get(receiver, radiant_style_key("cssText"), out);
-}
-
-static int rd_get_property_value(Item receiver, Item* args, int argc, Item* out) {
-    return rd_named_get(receiver, radiant_iface_arg(args, argc, 0), out);
-}
-
-static int rd_set_property(Item receiver, Item* args, int argc, Item* out) {
-    // the legacy method dispatcher dropped the priority argument; preserved
-    return rd_named_set(receiver, radiant_iface_arg(args, argc, 0),
-                        radiant_iface_arg(args, argc, 1), out);
-}
-
-static int rd_remove_property(Item receiver, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom_catalog->rule_style_remove_property(receiver,
-        radiant_iface_arg(args, argc, 0));
+static int rd_indexed_get(Item receiver, int64_t index, Item* out) {
+    *out = radiant_host_api->dom_catalog->rule_style_item(receiver, (Item){.item = i2it(index)});
     return 1;
 }
+
+static int rd_css_text_set(Item receiver, Item value, Item* out) {
+    *out = radiant_host_api->dom_catalog->rule_style_set_property(receiver, radiant_style_key("cssText"), value);
+    return 1;
+}
+
+RADIANT_METHOD_1(rd_get_property_value, rule_style_get_value)
+RADIANT_METHOD_1(rd_get_property_priority, rule_style_get_priority)
+RADIANT_METHOD_1(rd_item, rule_style_item)
+RADIANT_METHOD_3(rd_set_property, rule_style_set_value)
+RADIANT_METHOD_1(rd_remove_property, rule_style_remove_property)
 
 static const JubeMemberBind radiant_stylesheet_members[] = {
     BIND_GET_HIDDEN("css_rules", sh_css_rules),
     BIND_GET_HIDDEN("rules", sh_css_rules),
     BIND_GET_HIDDEN("length", sh_length),
-    BIND_GET_HIDDEN("disabled", sh_disabled),
+    {"disabled", NULL, sh_disabled, sh_disabled_set, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE},
     BIND_GET_HIDDEN("type", sh_type),
     BIND_GET_HIDDEN("href", sh_href),
     BIND_GET_HIDDEN("title", sh_title),
-    BIND_GET_HIDDEN("owner_node", cssom_null_get),
+    BIND_GET_HIDDEN("owner_node", sh_owner_node),
+    BIND_GET_HIDDEN("owner_rule", sh_owner_rule),
+    BIND_GET_HIDDEN("parent_style_sheet", sh_parent_style_sheet),
     BIND_CALL("insert_rule", cssom_insert_rule),
     BIND_CALL("delete_rule", cssom_delete_rule),
 };
 
+#define CSS_RULE_FIELD(name, get, set) {name, NULL, get, set, NULL, NULL, JUBE_MEMBER_PROTOTYPE}
+#define CSSOM_METHOD(name, call, required) \
+    {name, NULL, NULL, NULL, call, NULL, JUBE_MEMBER_PROTOTYPE | JUBE_MEMBER_REQUIRED_ARGS(required)}
 static const JubeMemberBind radiant_css_rule_members[] = {
-    {"selector_text", NULL, cr_selector_text, cr_selector_text_set,
-     NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE},
-    BIND_GET_HIDDEN("style", cr_style),
-    BIND_GET_HIDDEN("css_rules", cr_css_rules),
-    BIND_GET_HIDDEN("rules", cr_css_rules),
-    BIND_GET_HIDDEN("css_text", cr_css_text),
-    BIND_GET_HIDDEN("type", cr_type),
-    BIND_GET_HIDDEN("parent_rule", cr_parent_rule),
-    BIND_GET_HIDDEN("parent_style_sheet", cr_parent_style_sheet),
-    BIND_GET_HIDDEN("start", cr_scope_start),
-    BIND_GET_HIDDEN("end", cr_scope_end),
-    BIND_GET_HIDDEN("name", cr_property_name),
-    BIND_GET_HIDDEN("syntax", cr_property_syntax),
-    BIND_GET_HIDDEN("inherits", cr_property_inherits),
-    BIND_GET_HIDDEN("initial_value", cr_property_initial_value),
-    BIND_CALL("insert_rule", cssom_insert_rule),
-    BIND_CALL("delete_rule", cssom_delete_rule),
+    CSS_RULE_FIELD("css_text", cr_css_text, cr_css_text_set),
+    CSS_RULE_FIELD("type", cr_type, NULL),
+    CSS_RULE_FIELD("parent_rule", cr_parent_rule, NULL),
+    CSS_RULE_FIELD("parent_style_sheet", cr_parent_style_sheet, NULL),
 };
-
+static const JubeMemberBind css_grouping_members[] = {
+    CSS_RULE_FIELD("css_rules", cr_css_rules, NULL),
+    CSSOM_METHOD("insert_rule", cssom_insert_rule, 1),
+    CSSOM_METHOD("delete_rule", cssom_delete_rule, 1),
+};
+static const JubeMemberBind css_condition_members[] = {
+    CSS_RULE_FIELD("condition_text", cr_condition_text, NULL),
+};
+static const JubeMemberBind css_style_members[] = {
+    CSS_RULE_FIELD("selector_text", cr_selector_text, cr_selector_text_set),
+    CSS_RULE_FIELD("style", cr_style, cr_style_set),
+};
+static const JubeMemberBind css_declaration_members[] = {
+    CSS_RULE_FIELD("style", cr_style, cr_style_set),
+};
+static const JubeMemberBind css_scope_members[] = {
+    CSS_RULE_FIELD("start", cr_scope_start, NULL),
+    CSS_RULE_FIELD("end", cr_scope_end, NULL),
+};
+static const JubeMemberBind css_property_members[] = {
+    CSS_RULE_FIELD("name", cr_property_name, NULL),
+    CSS_RULE_FIELD("syntax", cr_property_syntax, NULL),
+    CSS_RULE_FIELD("inherits", cr_property_inherits, NULL),
+    CSS_RULE_FIELD("initial_value", cr_property_initial_value, NULL),
+};
+static const JubeMemberBind css_namespace_members[] = {
+    CSS_RULE_FIELD("prefix", cr_namespace_prefix, NULL),
+    {"namespace_uri", "namespaceURI", cr_namespace_uri, NULL, NULL, NULL, JUBE_MEMBER_PROTOTYPE},
+};
 static const JubeMemberBind radiant_rule_decl_members[] = {
-    BIND_GET_HIDDEN("length", rd_length_get),
-    BIND_GET_HIDDEN("css_text", rd_css_text_get),
-    BIND_CALL("get_property_value", rd_get_property_value),
-    BIND_CALL("set_property", rd_set_property),
-    BIND_CALL("remove_property", rd_remove_property),
+    // declaration attributes and methods use the same observable WebIDL path as rules.
+    CSS_RULE_FIELD("length", rd_length_get, NULL),
+    CSS_RULE_FIELD("css_text", rd_css_text_get, rd_css_text_set),
+    CSS_RULE_FIELD("parent_rule", rd_parent_rule_get, NULL),
+    CSSOM_METHOD("get_property_value", rd_get_property_value, 1),
+    CSSOM_METHOD("get_property_priority", rd_get_property_priority, 1),
+    CSSOM_METHOD("item", rd_item, 1),
+    CSSOM_METHOD("set_property", rd_set_property, 2),
+    CSSOM_METHOD("remove_property", rd_remove_property, 1),
 };
+// fixed property keys share branded named adapters instead of per-property handlers.
+#define CSS_DECLARATION_ATTRIBUTE(field, js_name, css_name) \
+    {#field, js_name, NULL, NULL, NULL, css_name, \
+        JUBE_MEMBER_PROTOTYPE | JUBE_MEMBER_KEYED_ACCESSOR},
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    static const JubeMemberBind host##_members[] = { \
+        metadata##_ATTRIBUTES(CSS_DECLARATION_ATTRIBUTE) \
+    };
+#include "../../input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
+#undef CSS_DECLARATION_ATTRIBUTE
+#undef CSSOM_METHOD
+#undef CSS_RULE_FIELD
 
 
 // ---- dom_node Phase 4a-4e: identity/navigation + named hooks ----
@@ -1741,6 +1673,23 @@ static Item radiant_css_stylesheet_prototype(void) {
     return dom_realm_constructor_prototype("CSSStyleSheet");
 }
 
+static Item radiant_rule_declaration_prototype(void) {
+    return dom_realm_constructor_prototype("CSSStyleDeclaration");
+}
+
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    static Item host##_prototype(void) { \
+        return dom_realm_constructor_prototype(#name); \
+    }
+#include "../../input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
+
+static int radiant_element_style_prototype(Item, Item* out) {
+    // native payload subtypes expose their common Web IDL interface prototype.
+    *out = css_style_properties_prototype();
+    return 1;
+}
+
 static Item radiant_css_rule_list_prototype(void) {
     return dom_realm_constructor_prototype("CSSRuleList");
 }
@@ -1835,6 +1784,24 @@ static const JubeMemberBind radiant_dom_token_list_members[] = {
      JUBE_MEMBER_NON_ENUMERABLE},
 };
 
+static Item css_base_prototype(void) {
+    return radiant_host_api->dom_catalog->rule_type_prototype("CSSRule");
+}
+static Item css_grouping_prototype(void) {
+    return radiant_host_api->dom_catalog->rule_type_prototype("CSSGroupingRule");
+}
+static Item css_condition_prototype(void) {
+    return radiant_host_api->dom_catalog->rule_type_prototype("CSSConditionRule");
+}
+#define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
+    static Item host##_prototype(void) { \
+        return radiant_host_api->dom_catalog->rule_type_prototype(#name); \
+    }
+#define CSS_RULE_INTERFACE_ALIAS(...)
+#include "../../input/css/css_rule_interfaces.def"
+#undef CSS_RULE_INTERFACE_ALIAS
+#undef CSS_RULE_INTERFACE
+
 extern const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"range", NULL, radiant_range_members,
      (int32_t)(sizeof(radiant_range_members) / sizeof(radiant_range_members[0])),
@@ -1844,26 +1811,31 @@ extern const JubeTypeBinding radiant_dom_type_bindings[] = {
      (int32_t)(sizeof(radiant_selection_members) / sizeof(radiant_selection_members[0])),
      NULL, NULL, NULL, NULL, radiant_selection_prototype_seed, NULL,
      NULL, NULL, NULL, NULL, NULL, NULL},
-    {"inline_style", NULL, radiant_inline_style_members,
-     (int32_t)(sizeof(radiant_inline_style_members) / sizeof(radiant_inline_style_members[0])),
-     st_named_get, st_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has,
-     NULL, NULL, NULL, NULL, NULL, NULL},
-    {"computed_style", NULL, radiant_computed_style_members,
-     (int32_t)(sizeof(radiant_computed_style_members) / sizeof(radiant_computed_style_members[0])),
-     cs_get, cs_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has,
-     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"inline_style", NULL, NULL, 0,
+     rd_named_get, rd_named_set, rd_indexed_get, NULL, NULL, rd_named_has,
+     rd_indexed_length, NULL, NULL, NULL, NULL, radiant_element_style_prototype},
+    {"computed_style", NULL, NULL, 0,
+     rd_named_get, rd_named_set, rd_indexed_get, NULL, NULL, rd_named_has,
+     rd_indexed_length, NULL, NULL, NULL, NULL, radiant_element_style_prototype},
     {"stylesheet", NULL, radiant_stylesheet_members,
      (int32_t)(sizeof(radiant_stylesheet_members) / sizeof(radiant_stylesheet_members[0])),
-     NULL, cssom_swallow_set, sh_indexed_get, NULL, radiant_css_stylesheet_prototype, NULL,
+     NULL, NULL, sh_indexed_get, NULL, radiant_css_stylesheet_prototype, NULL,
      NULL, NULL, NULL, NULL, NULL, NULL},
     {"css_rule", NULL, radiant_css_rule_members,
      (int32_t)(sizeof(radiant_css_rule_members) / sizeof(radiant_css_rule_members[0])),
-     NULL, cssom_swallow_set, NULL, NULL, radiant_style_no_prototype, NULL,
+     NULL, NULL, NULL, NULL, css_base_prototype, NULL,
      NULL, NULL, NULL, NULL, NULL, NULL},
     {"rule_style_decl", NULL, radiant_rule_decl_members,
      (int32_t)(sizeof(radiant_rule_decl_members) / sizeof(radiant_rule_decl_members[0])),
-     rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has,
-     NULL, NULL, NULL, NULL, NULL, NULL},
+     rd_named_get, rd_named_set, rd_indexed_get, NULL, radiant_rule_declaration_prototype, rd_named_has,
+     rd_indexed_length, NULL, NULL, NULL, NULL, NULL},
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    {#host, NULL, host##_members, \
+     (int32_t)(sizeof(host##_members) / sizeof(host##_members[0])), \
+     rd_named_get, rd_named_set, rd_indexed_get, NULL, host##_prototype, rd_named_has, \
+     rd_indexed_length, NULL, NULL, NULL, NULL, NULL},
+#include "../../input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
     {"event", NULL, radiant_event_members,
      (int32_t)(sizeof(radiant_event_members) / sizeof(radiant_event_members[0])),
      radiant_dom_event_named_get, radiant_dom_event_named_set, NULL, NULL, NULL,
@@ -1993,6 +1965,34 @@ extern const JubeTypeBinding radiant_dom_type_bindings[] = {
      NULL, NULL, radiant_collection_indexed_get, NULL,
      radiant_dom_token_list_prototype, NULL,
      NULL, NULL, NULL, NULL, NULL, NULL},
+#define CSS_RULE_MEMBERS_empty NULL, 0
+#define CSS_RULE_MEMBERS(shape) css_##shape##_members, \
+    (int32_t)(sizeof(css_##shape##_members) / sizeof(css_##shape##_members[0]))
+#define CSS_RULE_MEMBERS_style CSS_RULE_MEMBERS(style)
+#define CSS_RULE_MEMBERS_declaration CSS_RULE_MEMBERS(declaration)
+#define CSS_RULE_MEMBERS_scope CSS_RULE_MEMBERS(scope)
+#define CSS_RULE_MEMBERS_property CSS_RULE_MEMBERS(property)
+#define CSS_RULE_MEMBERS_namespace CSS_RULE_MEMBERS(namespace)
+#define CSS_RULE_BIND(host, members, prototype) \
+    {host, NULL, members, NULL, NULL, NULL, NULL, prototype, NULL, \
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    CSS_RULE_BIND("css_grouping_rule", CSS_RULE_MEMBERS(grouping), css_grouping_prototype)
+    CSS_RULE_BIND("css_condition_rule", CSS_RULE_MEMBERS(condition), css_condition_prototype)
+#define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
+    CSS_RULE_BIND(#host, CSS_RULE_MEMBERS_##shape, host##_prototype)
+#define CSS_RULE_INTERFACE_ALIAS(...)
+#include "../../input/css/css_rule_interfaces.def"
+#undef CSS_RULE_INTERFACE_ALIAS
+#undef CSS_RULE_INTERFACE
+#undef CSS_RULE_BIND
+#undef CSS_RULE_MEMBERS_namespace
+#undef CSS_RULE_MEMBERS_property
+#undef CSS_RULE_MEMBERS_scope
+#undef CSS_RULE_MEMBERS_declaration
+#undef CSS_RULE_MEMBERS_style
+#undef CSS_RULE_MEMBERS_empty
+#undef CSS_RULE_MEMBERS
+
 };
 
 extern const int32_t radiant_dom_type_binding_count =

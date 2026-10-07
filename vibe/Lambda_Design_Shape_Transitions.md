@@ -1,9 +1,9 @@
 # Lambda Shape Transitions — Design
 
 **Date:** 2026-09-25
-**Status:** RATIFIED 2026-09-25 as **D3.4.3v2** (Formal Design 13.0.0). Maps: implemented. Elements: design settled 2026-09-25 (§7); E1–E7 landed the same day (plan phases P0–P3): elements and the editor's rebuilds share through the tree, and the shape pool is retired. Plan: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Sharing.md). Revised the same day as **D3.4.3v3** (Formal Design 14.0.0): a path shares its field entries, not only its types (§3, *Sharing the prefix*); implemented.
+**Status:** RATIFIED 2026-09-25 as **D3.4.3v2** (Formal Design 13.0.0). Maps: implemented. Elements: design settled 2026-09-25 (§7); E1–E7 landed the same day (plan phases P0–P3): elements and the editor's rebuilds share through the tree, and the shape pool is retired. Plan: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Sharing.md). Revised the same day as **D3.4.3v3** (Formal Design 14.0.0): a path shares its field entries, not only its types (§3, *Sharing the prefix*); implemented. Revised 2026-10-05 as **D3.4.3v4** (Formal Design 24.0.0, user ruling on LR03-38): plain maps grown at runtime share through a per-context runtime tree (§3, *The runtime tree*); implemented. Revised 2026-10-06 as **D3.4.3v5** (Formal Design 27.0.0, from [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md)): the runtime tree grows from types it does not own -- external parents -- and takes retype edges (§3, *External parents*; §4); implemented.
 **Scope:** how a map or element obtains its `TypeMap`, when that type is shared, and what may change a shared type. Out of scope: the shape pool's internals ([Lambda_Shape_Pool.md](Lambda_Shape_Pool.md)) and JavaScript property semantics ([JS_06](../doc/dev/js/JS_06_Objects_Properties_Prototypes.md)).
-**Spec linkage:** §2–§6 → D3.4.3v3. Within them, type identity (§3) → D3.4.2, D3.4.4v2, D3.4.7; "metadata, not a cache" (§3) → D8.4.1v2; layout-changing writes (§4) → D3.4.5. §7 → D3.4.3v3's element clause, D2.6.6v3 (the declared content pattern; a nominal name is not a tag), S11.1.6v3 (element content is a sequence-pattern slot), SO46 and DO31 (open).
+**Spec linkage:** §2–§6 → D3.4.3v5. Within them, type identity (§3) → D3.4.2, D3.4.4v4, D3.4.7; "metadata, not a cache" (§3) → D8.4.1v2; layout-changing writes (§4) → D3.4.5. §7 → D3.4.3v3's element clause, D2.6.6v3 (the declared content pattern; a nominal name is not a tag), S11.1.6v3 (element content is a sequence-pattern slot), SO46 and DO31 (open).
 **Relation to prior docs:** distils the transition-tree decisions recorded in [JS Tune10](<jube/JS_Tune10_Fast_Paths (done).md>) §9.3–§9.9 (the add-transition choice, the reverted and re-enabled root, the bounds) and [Transpile_Js_Tune11](jube/Transpile_Js_Tune11_Callsite_Cache.md) (the edge table). Name identity on edges follows [Lambda_Design_Name_Identity.md](Lambda_Design_Name_Identity.md). Supersedes [Lambda_Shape_Pool.md](Lambda_Shape_Pool.md) as the sharing mechanism for maps (Appendix S).
 
 ---
@@ -17,11 +17,11 @@ The case is memory, not speed (Tune10 §9.9). The clearest measurement is indire
 ## 2. Where a map's type comes from
 
 - **Literal.** A literal such as `{a: 1, b: 2}` is compiled into one `TypeMap`, and `map(type_index)` attaches it to every map that literal creates. It is shared by construction. Element literals share their `TypeElmt` the same way (`elmt_with_type`).
-- **Transition tree.** A map built one field at a time — by a parser through `MarkBuilder`, or a JavaScript object through `map_put_heap` — takes its type from its `Input`'s tree (§3).
+- **Transition tree.** A map built one field at a time — by a parser through `MarkBuilder`, or a JavaScript object through `map_put_heap` — takes its type from its `Input`'s tree (§3). A plain Lambda map grown at runtime (`r[k] = v`, `r.k = v`, a computed-key literal) takes it from the context's runtime tree (§3, *The runtime tree*).
 - **Published family shape.** A JavaScript runtime family may publish one sealed shape for its instances (the RegExp instance shape), flagged `is_shared_constructor_shape`. The per-call-site constructor shapes that once used this flag were retired with the inline caches ([JS_06](../doc/dev/js/JS_06_Objects_Properties_Prototypes.md) §10); constructor-built objects now share through the tree.
-- **Private.** A type owned by one map: a fresh type where the tree declined, or a detached clone (`is_private_clone`). Only a private type may grow in place.
+- **Private.** A type owned by one map: a fresh type where the tree declined, or a detached clone (`is_private_clone`). Only a private type may grow in place, and only `map_put` and `elmt_put` do so. At runtime a private type is an external parent like any other (§3, *External parents*), and only a declined add still copies it (Appendix B.2).
 
-`typemap_is_shared_shape` is true for tree and published shapes. A literal's type carries no flag, but runtime layout changes never edit it in place: they build new types (§4).
+`typemap_is_shared_shape` is true for tree and published shapes, and for map literal types too. `resolve_map` flags a map literal's `TypeMap` `is_transition_shared_shape` as an immutable recipe, so a field write cannot retag a sibling's layout. The type is not a tree node and takes no edges of its own; since D3.4.3v5 the runtime tree grows from it as an external parent, so an add moves the map onto a shared child (§3). An element literal's `TypeElmt` carries no flag. Runtime layout changes edit neither literal's type in place: they move the map to another type (§4).
 
 ## 3. The transition tree
 
@@ -78,11 +78,23 @@ Measured before the move on a release build, over two 13 MiB corpora: creating t
 - A `ShapeEntry` copied by struct assignment into a private chain must drop its `chain_index` (`map_extend_open_shape`), or a later field removal could make an own entry look foreign.
 - Dead tail searches (`while (e->next) e = e->next`, the TOML table header path) would have found a descendant's last field; they had no reader and are gone.
 
+### The runtime tree (2026-10-05, D3.4.3v4)
+
+Until D3.4.3v4 a plain map grown at runtime kept a type of its own, and each add copied the whole shape into the context pool, which is never reclaimed. Building an *n*-key map cost *n*(*n*+1)/2 entries, and every rebuilt object minted its shapes again: in the jq benchmark VM a 2,048-key object update passed 11 GB, and even a five-key state object rebuilt per step leaked shapes without bound (LR03-38).
+
+The context now owns one runtime tree, held by an `Input` stored as a context capsule extension (so `EvalContext`'s layout, which separately built modules read, does not change). The `Input` lives in a pool of its own, not the heap's, so its teardown belongs to the capsule alone; in the heap's pool it was freed by `runtime_reset_heap` and released again at context destruction (LR03-39). The tree lives exactly as long as one heap generation. `runtime_reset_heap` between a batch's scripts replaces the heap and the runtime name pool while the `EvalContext` stays, and it drops the tree between the two (`runtime_shape_tree_release`). Its edges and entries carry that name pool's NameIds, and the next pool recycles them. A tree kept past it let the next script follow a stale edge whose recycled id equalled a different name's (LR03-43). Every map on a tree node lives on that heap anyway. An add follows the tree when the map is an empty plain map (it starts at the root) or its type is a node of this tree; membership is checked against the tree `Input`'s own type list, because an edge lives as long as its parent and a parsed document's tree may outlive or predate the context's. The map's data grows by doubling, and `fn_map_set` finds a plain string key through the type's hash table, hit or miss, rather than walking every field. Maps built by the same sequence of adds share one type, and rebuilding an object allocates no shapes once its path exists.
+
+### External parents (2026-10-06, D3.4.3v5)
+
+Until v5 the runtime tree grew only from an empty map or one of its own nodes, so a map that started on a literal's, a contract's, a nominal type's, a parsed document's or a private type copied its whole shape on every add: 16 builds of a 1,024-key map peaked at 1.43 GB from a literal, a parsed object or a spread, against 34 MB from `{}` (debug). Such a type is now an **external parent**. Its edges live in the tree's own table, keyed by a structural fingerprint of everything a child copies from it -- the record identity, and each entry's spelling, identity, contract, offset, flags, namespace and default -- and the parent itself is never written: no edge, no chain link, no table entry. The child copies the parent's field list with its names in the tree's arena (the parent's owner may go first), keeps its record identity (a nominal instance stays an instance of its type, S2.1.4), and is never extended in place. A child is reused only when every value it copied equals the live parent's, so neither a collision nor a freed parent whose address was reused can hand back a stale pointer; equal shapes from different documents share one path. The match costs O(fields) once per map, at its first add.
+
+A **retype edge** serves a type-changing write the same way (§4): the target is the parent's fields with one field's lane replaced and every other contract kept, keyed by the parent's fingerprint plus (field position, new type). Results built at runtime with one field list -- regex match records, `io.grep` records, group-by groups, join tuples -- start on the tree. A Lambda `Symbol` key and a JavaScript identity key take edges like any name (D3.4.4v4). Measured (debug, 16 builds of a 1,024-key map): from a literal, a parsed object or a spread, 1.43 GB → 33–34 MB.
+
 ## 4. A shared type's field list is immutable
 
 Nothing edits a shared type's fields in place:
 - An add with no usable edge — a bound reached (§5), or a key that may not enter the tree — first detaches the map onto a private clone (`map_clone_typemap_for_mutation`), then appends to the clone.
-- At runtime, adding a field (`map_extend_open_shape`, the miss path of `fn_map_set`) and a write that changes a field's type (`map_rebuild_for_type_change`, D3.4.5) build a new private type.
+- At runtime, adding a field (`map_extend_open_shape`, the miss path of `fn_map_set`) moves the map onto a child of its type in the runtime tree, and a write that changes a field's type (D3.4.5) onto a retype target (§3, *External parents*); either is a shared node, and only a declined step builds a private type (`map_rebuild_for_type_change` keeps the private rebuild and contract reification).
 - A type-compatible write (D3.4.5) touches only the map's data buffer.
 - The one write a shared type's records ever see is its tail's link, set once by the first child that extends the chain (§3, *Sharing the prefix*). It lies past the type's `last`, so no walk or lookup of that type reaches it.
 
@@ -90,7 +102,8 @@ Nothing edits a shared type's fields in place:
 
 The tree is bounded four ways. Past any bound a map or element keeps a private type, which is exactly the behaviour before the tree existed.
 - **Root fan-out: 256 edges.** The root's out-degree is the number of distinct first fields in everything the `Input` builds. Capped at 16 like other nodes, it saturated after about 835 adds, and every later map fell back to a private type (Tune10 §9.9).
-- **Interior fan-out: 16 edges.** A node with more outgoing edges is a dictionary-shaped site (per-record keys), where a linear walk of the edge list on every add would not pay.
+- **Interior fan-out: 16 edges.** A node with more outgoing edges is a dictionary-shaped site (per-record keys), where a linear walk of the edge list on every add would not pay. The same caps bind the runtime tree's external-table edges, whose lists are walked the same way. Measured 2026-10-06 over 268 benchmarks and the Lambda corpus ([Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P1.5): no add declined below the root. Lifting the root cap to share `jq_mix`'s 2,048 one-key objects cost 9-10% CPU in edge walks for no measurable memory, so both caps stay.
+- **Runtime tree budget: 65,536 map types (D3.4.3v4).** Every runtime-grown map in a context shares the one runtime tree, and a single dictionary-shaped object (the jq benchmark's 2,048-key objects) is a path of that many nodes, so the per-`Input` budget below would end sharing after one such object. Sharing caps the cost: a node is a `TypeMap` plus one entry and one edge, about 300 bytes, so the budget bounds the tree near 20 MB.
 - **Graph budget: 1,024 shapes per `Input`.** The fan-out caps bound one node, not the graph. A long-lived `Input` running thousands of unrelated scripts (the test262 batch runner) kept minting shapes and reached 5.4 GB; with the budget its peak went from 5,662 to 891 MB.
 - **Element budget: 16,384 element types per `Input`, counted apart (P1, 2026-09-25).** One document's attribute variety runs to thousands of distinct sequences: a 13 MiB corpus of 77 real sites needs 5,093 element types (179 tag roots), a 13 MiB layout-test corpus 1,775. On the map budget either would saturate early and leave most elements private; the map budget stays at 1,024 because it guards the long-lived JS `Input`s it was sized for. An `Input` that reaches the element budget logs `element_tree_budget` once.
 
@@ -102,7 +115,7 @@ The shape pool (D3.4.3 v1, Appendix S) interned a map's chain at `final()`: the 
 
 On 2026-08-08 `map_finalize_shape` became a no-op, and since the shared root landed (2026-09-09) the tree carries map sharing. In between, parsed maps shared nothing. The edge table had existed since 2026-06-25, but `map_put` followed edges only from a type that was already shared, and a new map's first put minted an ordinary private type, so a parsed map never reached the tree. The tree shares from the first field, allocates each shape once, and never edits a shared record.
 
-Since P2 the editor no longer uses the pool either: a rebuilt type comes from the tree, or is a type the container owns with a chain of its own (§8). P3 deleted the pool on 2026-09-25: a container built without an `Input` — a map or element grown at runtime — keeps a type of its own, and nothing deduplicates `ShapeEntry` chains any more.
+Since P2 the editor no longer uses the pool either: a rebuilt type comes from the tree, or is a type the container owns with a chain of its own (§8). P3 deleted the pool on 2026-09-25: a container built without an `Input` — a map or element grown at runtime — kept a type of its own, and nothing deduplicated `ShapeEntry` chains any more. D3.4.3v4 (2026-10-05) gives plain runtime maps the context's runtime tree (§3).
 
 ## 7. Elements — design settled and implemented 2026-09-25
 
@@ -131,6 +144,7 @@ Phases and gates: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Shar
 - **Done 2026-09-25 (D3.4.3v3): chain copies per node.** Each node copied its parent's whole chain, so a path of n fields cost n(n+1)/2 entries per `Input`. A path now keeps one chain and one growing table, and a branch copies its prefix once (§3, *Sharing the prefix*).
 - **Budget exhaustion is permanent.** A long-lived `Input` that reaches 1,024 shapes stops sharing for the rest of its life. Per-document roots, or eviction?
 - **Literal and tree types never meet.** A map literal and a parsed map with the same fields have different types. Harmless, since type identity is not observable.
+- **Closed 2026-10-06 (D3.4.3v5): runtime growth from a non-tree type stays private.** An add to a map whose type is a literal's, a contract's, a nominal type's, a parsed `Input`'s or a detached private type copies the whole shape, so a map grown key by key from such a start is still O(*n*²) in pool entries. Replaying the existing fields onto the runtime tree on the first add would close it, at one relayout per map. `Symbol` keys and runtime elements also keep the private path.
 
 ---
 
@@ -140,14 +154,100 @@ Phases and gates: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Shar
 - `lambda/input/input.cpp`: `transition_target_for_key` (`MAX_SHAPE_TRANSITIONS`, `MAX_SHAPE_GRAPH`, `MAX_ELEMENT_SHAPE_GRAPH`), `map_transition_prefix_matches_parent`, `map_transition_target_for_add`, `map_shape_transition_root`, `map_put_via_shape_transition`, `map_put_with_data_growth`, `map_clone_typemap_for_mutation`, `elmt_tree_root`, `elmt_put_tree`, `type_tree_root_like`, `type_tree_follow`, `input_tree_alloc`.
 - `lambda/core/lambda-data.cpp`: `alloc_type_in`.
 - `lambda/runtime/lambda-data-runtime.cpp`: `map`, `map_alloc_for_type` (literal types), `elmt_with_type`, `map_put_heap`.
-- `lambda/runtime/lambda-eval.cpp`: `map_extend_open_shape`, `map_rebuild_for_type_change`.
+- `lambda/runtime/lambda-eval.cpp`: `map_extend_open_shape`, `map_rebuild_for_type_change`; the runtime tree (D3.4.3v4): `runtime_shape_tree` (capsule extension `RUNTIME_SHAPE_TREE_OWNER`), `map_extend_via_runtime_tree`, and `fn_map_set`'s hash-table lookup.
+- `lambda/input/input.cpp`: `type_tree_add_map_field`, `type_tree_owns`, `Input::shape_graph_budget` (D3.4.3v4); `type_tree_add_map_field_chars`, `transition_names_key` (D3.4.4v4); external parents -- `Input::keeps_external_edges` / `external_edges`, `external_parent_fingerprint`, `external_parent_edges`, `external_parent_admissible`, `external_child_matches_parent`, `clone_shape_entries_owned`, `copy_external_identity`, `transition_target_via` -- and `type_tree_retype_field` (D3.4.3v5); the P1.5 counters (`LAMBDA_SHAPE_TREE_STATS`).
+- `lambda/runtime/lambda-eval.cpp`: `container_move_to_type` (the data move shared by retype edges and the private rebuild), `runtime_shape_tree_element_root`; `lambda/runtime/re2_wrapper.cpp`: `runtime_result_shape` (D3.4.3v5).
 - `lambda/io/mark_builder.cpp`: `ElementBuilder` (starts on `elmt_tree_root`), `putToElement`.
 - `lambda/io/mark_editor.cpp`: `container_rebuild_with_new_shape`, `rebuild_steps`, `rebuild_private_chain`.
 - `lambda/core/shape_builder.cpp` (the editor's field list; the shape pool is deleted).
 - `lambda/runtime/gc/gc_heap.c`: `gc_trace_shape_fields` stops at `last`; `lambda/lambda.h`: `LambdaGcTypeMapLayout::last`.
 - `utils/lint/rules/c-cpp/no-raw-shape-chain-walk.yml`; tests `TransitionTreePrefixSharingTest.*` in `test/test_mark_builder_gtest.cpp`.
 
+## Appendix B — Paths outside the transition tree (survey 2026-10-06)
+
+A code survey of what still builds a map or element without the tree, taken while scoping the D3.4.3v4 residue (§8).
+
+**Status after D3.4.3v5 (2026-10-06, [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0–P3).** Now through the tree: the growth copy path from a literal's, a parsed document's, a contract's, a nominal type's, a private type or an element's type (external parents); unqualified Lambda `Symbol` keys and therefore spread literals; JavaScript identity keys in `map_put`, `elmt_put_tree` and editor rebuilds; type-changing writes on plain Lambda maps and elements (retype edges); regex and `io.grep` result records; group-by groups and join tuples. Unpooled spellings share edges with pooled ones (D3.4.4v4). Still outside, as surveyed below: declined adds (fan-out, budget), JavaScript shapes and their descriptor clones, array-index and non-plain map kinds, spread link-slot types, qualified keys (LR03-40), contract reification, the empty `TypeElmt` an element edit transaction mints per edit, VMap/Velmt/VArray, and the parser-side fallbacks of B.1. The survey is kept as taken. "Private" means a type owned by one container: a fresh pool type, whether or not it carries `is_private_clone`. Peak RSS figures are debug builds, 16 builds of a 1,024-key map: 34 MB when the map starts from `{}`.
+
+### B.1 Input parsing paths that do not build through the tree
+
+Every parser that produces Lambda maps builds them through `MarkBuilder`: `MapBuilder::put` and `putToMap` reach `map_put`, whose `map_put_with_data_growth` starts each map on `EmptyMap` at the parser `Input`'s root. That covers JSON, YAML, TOML, XML, CSV, KV/INI, Mark, Markdown and the markup family, MDX, JSX, LaTeX and math, RTF, PDF, EML, VCF, ICS, the graph formats and sysinfo. Parsers that create a map with `map_pooled` (VCF, KV, ICS) still start on `EmptyMap` and fill it through the builder. Elements start on their tag's root (`elmt_tree_root`) and add attributes through `elmt_put_tree`. Database rows (`input-rdb.cpp`, one `MapBuilder` per row), JavaScript's `JSON.parse`, npm metadata and Jube Python dicts (`map_put_heap`) take the same route. What follows does not.
+- **Produce no Lambda maps.**
+  - CSS (`input-css.cpp`) returns a native `CssStylesheet` behind a `0xCC`-tagged root pointer.
+  - Directory input (`input-dir.cpp`) returns a list of `Path` items.
+  - Plain text and `pn_fetch` return a string.
+  - HTTP input downloads the body and dispatches to the parser for its type.
+- **The element tree declines.** `ElementBuilder` gives an element a private `TypeElmt` when `elmt_tree_root` returns NULL:
+  - the tag name is not pooled;
+  - the element budget (16,384 per `Input`) is spent;
+  - an allocation fails.
+
+  `elmt_put_tree` falls back to `elmt_put`, which clones through `elmt_clone_type_for_mutation`, when:
+  - the type is already private;
+  - the key needs identity;
+  - no edge is available (caps or budget).
+- **The map tree declines** (`map_put_with_data_growth`, `transition_target_for_key`):
+  - **Key and kind:** a NULL key, a key that needs identity (Symbol or private), an array-index key on an array-property map, or a map kind other than `MAP_KIND_PLAIN`.
+  - **A `js_meta` mismatch at the root.** An `Input` has one root, and it serves one class metadata. `EmptyMap.js_meta` is set lazily, when JavaScript first initializes, so an `Input` whose root predates that sends every later map private.
+  - **Bounds.** 256 edges from the root, 16 from any other node, and 1,024 map types per `Input` (`shape_graph_budget`). Every edge counts against the fan-out, including variants of one key by value type and by pooled or unpooled spelling.
+  - **No rejoining.** A map whose first add was declined keeps the private type it got. A map on a node with no usable edge detaches through `map_clone_typemap_for_mutation`, and every later add copies again.
+- **Editor rebuilds during parsing.** The HTML5 tree builder merges attributes onto `<html>` and `<body>` with `MarkEditor::elmt_update_attr`, so they follow the editor's rules in B.2.
+- **A split, not a bypass.** CSV header keys and markup and graph attribute keys are unpooled strings. They share through the tree by their bytes, but never share an edge with a pooled spelling of the same name.
+
+### B.2 Runtime paths that end on a private type, or have no `TypeMap`
+
+At runtime only two routes give a container a shared type:
+- a map literal's compile-time type, shared by construction. It is flagged `is_transition_shared_shape` as an immutable recipe (`resolve_map`), though it is not a tree node.
+- the context's runtime tree (§3). `map_extend_via_runtime_tree` enters it only for an add with a `String` key to a `MAP_KIND_PLAIN` map whose type is empty and plain, or is a node of that tree.
+
+Everything below goes another way.
+- **The growth copy path** (`map_extend_open_shape` past the tree; callers `fn_map_set`, `lambda_map_set_checked_impl`, `cow_path_set_raw`). Each add copies the whole field list into a new pool type and never rejoins the tree, so growing *n* keys costs O(*n*²) entries. It is reached by:
+  - **A non-empty literal type.** `{seed: 0}` followed by adds: 1.43 GB.
+  - **A node of another `Input`'s tree.** A parsed document followed by adds (`parse("{\"seed\": 0}", 'json')^`): 1.43 GB.
+  - **A trusted contract type, a nominal instance or a `has_spread` type.** A nominal instance keeps its `TypeNominal` record (S2.1.4).
+  - **A private type of any origin,** including the copy the previous add made.
+  - **Symbol keys and map kinds other than `MAP_KIND_PLAIN`.**
+  - **Every element.** The tree path accepts maps only. UI-mode elements keep their data in `context->arena`.
+  - **The runtime tree declining:** an identity key, the fan-out caps, or the 65,536-type budget.
+- **Literals built at runtime.**
+  - **Spread map literals.** `map_literal_spread` adds the source's fields with the `Symbol` keys `item_keys` returns, so the first spread field goes private and every later field stays private. 16 builds of `{*:base}` over a 1,024-key map: 1.43 GB.
+  - **Computed keys.** A computed `Symbol` key goes private; computed `String` keys start on `EmptyMap` and use the runtime tree.
+  - **Spread and computed element literals** (`elmt_literal_begin`) start on the literal's `TypeElmt`, and every attribute goes private.
+- **Writes that change a layout.**
+  - **Type-changing writes** (`map_rebuild_for_type_change`, D3.4.5) build a fresh pool type that copies `is_private_clone` from the old one, so the rebuild of a tree or literal type is private but unflagged. The in-place cases avoid it: the `any` lane, a null placeholder on a shared type, native lanes, the same type, `FLOAT`←`INT`, and same-width NULL→T and pointer-class retags.
+  - **Contract admission** (`runtime_type_admit_map_env`). A field that needs reification is rebuilt privately. A map with extra open fields keeps its own, possibly private, type; otherwise it adopts the contract's `TypeMap`.
+  - **Edit transactions** (`write_set.cpp`, upsert and `del`). Maps are rebuilt with `new_empty_map` plus `fn_map_set` and reach the runtime tree; elements get a fresh `TypeElmt` and go private on every attribute.
+  - **MarkEditor rebuilds** (`container_rebuild_with_new_shape`) replay through the tree with `type_tree_root_like` and `type_tree_follow`. They fall back to a private chain when:
+    - an element's tag has no root yet (roots are looked up, never created);
+    - a map is not plain, or its `js_meta` differs from the root's;
+    - a replayed field carries flags or a non-string key;
+    - a key needs identity;
+    - a cap or the budget is hit.
+
+    The fallback rewrites in place a type the container already owns during an inline edit, and otherwise mints a fresh flagged type.
+- **Constructors that never use a tree.**
+  - Regex match maps (`create_match_map`, via `runtime_result_shape`) get a fresh unflagged `TypeMap` per match.
+  - `io.grep` results share one `TypeMap` per run, which is not a tree node.
+  - Group-by and join tuples (`fn_group_by_keys`, `join_tuple_extend`) get a fresh `group` `TypeElmt`, and attributes go through `elmt_put`, which clones privately.
+  - `vmap_from_array` on an element returns a `Map` that borrows the element's `TypeElmt`.
+- **Copies share a type pointer.** COW and mutable clones (`clone_mutable_map` and its kin) reuse the source's type. They mint nothing, but they are why a private type can be referenced by two containers and so cannot simply grow in place (LR03-38).
+- **JavaScript objects.**
+  - Descriptor changes (flags, accessor flips, delete tombstones) clone privately (`js_typemap_clone_for_mutation_ex`). So do type-change transitions that are not equal-width or fixed-slot, and virtual accessors.
+  - Property adds use `map_put_heap` with the B.1 fallbacks: `Symbol` and private keys, array-index keys on array-property maps, other map kinds, and the bounds.
+  - `js_object_type_for_class` mints a fresh `TypeMap` per call for Proxy, typed arrays, DataView, collections, generators and uncached RegExp.
+  - `map_put_undefined_unique_absent_bulk*` (`input.cpp`, called from the JS globals) is always private.
+  - `fn_map_set` clones privately when it writes a reserved constructor slot out of order, and detaches through `map_detach_shared_ctor_shape_for_type` when `js_input` is live.
+- **No `TypeMap` at all.**
+  - **VMap, Velmt and VArray** carry data, a vtable and a host type, with no `type` or `ShapeEntry` chain. They never reach the growth paths, because the attribute face is limited to maps and elements; they are written through `vmap_set` and `velmt_attr_set` and copied through `vmap_clone_for_cow`. Their keys come from the vtable or from Jube field declarations (`vmap_keys_for_item`), and `deep_copy` turns them into null. They are created by:
+    - Lambda's `map()` and `map([k, v, …])` (`vmap_new`, `vmap_from_array`);
+    - Jube host objects: a Velmt for `JUBE_CARRIER_VELMT` types (Radiant's `dom_node`, `document`, SVG elements), a VArray for `JUBE_CARRIER_VARRAY` types, a VMap otherwise;
+    - the DOM, CSSOM, selection and Radiant event wrappers;
+    - task handles and JavaScript promises.
+  - **Range and Path** have no `TypeMap`; `item_keys` resolves a Path to its target first.
+
 ## Appendix S — Superseded rulings
 
 - ~~**D3.4.3*** Shapes intern in a **per-Input shape pool** — hierarchical lookup with parent inheritance (a parent hit is returned, not copied down), interning **at finalization, not incrementally** (builders construct a throwaway chain; `final()` swaps in the pooled one), and null-safe opt-in (no pool ⇒ per-map chains, no semantic change). Runtime-constructed maps do not intern today — they rebuild per transition. [Shape_Pool §3–§8]~~ — superseded 2026-09-25 by **D3.4.3v2**: maps share incrementally through the per-`Input` transition tree (§3–§6); the pool remains for element attribute chains and editor rebuilds until elements adopt the tree (§7).
+- ~~**D3.4.3v4**~~'s runtime clause, as ratified in Formal Design 24.0.0: *an add to an empty plain map starts at the runtime tree's root and an add to a node of that tree follows its edge; any other runtime-grown type -- a literal's, a contract's or nominal type's, a detached private type, an element's -- keeps a type of its own* -- superseded 2026-10-06 by **D3.4.3v5** (Formal Design 27.0.0): every such type is an external parent of the runtime tree, and type-changing writes take retype edges (§3, *External parents*).
+- ~~**D3.4.3v3**~~'s runtime clause, as ratified in Formal Design 14.0.0: *a container built without an `Input` — a map or element grown at runtime — keeps a type of its own* — superseded 2026-10-05 by **D3.4.3v4** (Formal Design 24.0.0): plain runtime-grown maps share through the context's runtime tree (§3, *The runtime tree*); elements and other runtime-grown types keep their own.
 - ~~**D3.4.3v2**~~ as ratified in Formal Design 13.0.0, where **a shared type is immutable** and every tree node copied its parent's chain — superseded the same day by **D3.4.3v3** (Formal Design 14.0.0): a shared type's *field list* is immutable, a path shares one entry chain and one growing lookup table, and every walk stops at `last` (§3, *Sharing the prefix*; §4).

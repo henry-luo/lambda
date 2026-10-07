@@ -1,0 +1,4 @@
+// kind, exposed interface, native host type, generated attribute metadata
+CSS_DECLARATION_INTERFACE(CSS_RULE_STYLE, CSSStyleProperties, css_style_properties, CSS_STYLE_PROPERTIES)
+CSS_DECLARATION_INTERFACE(CSS_RULE_FONT_FACE, CSSFontFaceDescriptors, css_font_face_descriptors, CSS_FONT_FACE_DESCRIPTORS)
+CSS_DECLARATION_INTERFACE(CSS_RULE_PAGE, CSSPageDescriptors, css_page_descriptors, CSS_PAGE_DESCRIPTORS)

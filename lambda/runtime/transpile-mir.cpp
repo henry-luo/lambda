@@ -2004,13 +2004,17 @@ static bool mir_expr_produces_cow_owner(MirTranspiler* mt, AstNode* expr) {
     return ast_expr_produces_owned_container(root_expr);
 }
 
-static bool mir_expr_is_owned_binding_alias(MirTranspiler* mt, AstNode* expr) {
+static bool mir_expr_is_owned_binding_alias(MirTranspiler* mt, AstNode* expr,
+        NameEntry* alias) {
     AstNode* root_expr = ast_unwrap_primary(expr);
     if (!root_expr || root_expr->node_type != AST_NODE_IDENT) return false;
     MirVarEntry* source = mir_direct_root_binding(mt, root_expr);
     // LR12-10 (S9.1.2): a `var` parameter is not an owned binding, but writes
-    // through it land in its root object, so an alias of it must mark too
-    return source && (source->cow_owned || source->is_var_param);
+    // through it land in its root object, so an alias of it must mark too.
+    // So must a written alias of a plain parameter (LR12-38): its value is
+    // the caller's, and an unmarked `var r = o; r.x = v` changed it.
+    return source && (source->cow_owned || source->is_var_param ||
+        ast_parameter_alias_marks(((AstIdentNode*)root_expr)->entry, alias));
 }
 
 // Thin wrappers over the shared emitter primitives (P0.1). These delegate to
@@ -22577,7 +22581,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 bool cow_owned = mir_expr_produces_cow_owner(mt, asn->init) &&
                     ast_expr_may_return_container(asn->init, expr_tid, var_tid);
                 bool cow_binding = ast_expr_may_return_container(asn->init, expr_tid, var_tid) &&
-                    mir_expr_is_owned_binding_alias(mt, asn->init);
+                    mir_expr_is_owned_binding_alias(mt, asn->init, asn->entry);
                 if (cow_binding && mir_alias_is_readonly_borrow(mt, asn)) {
                     cow_binding = false;
                     cow_owned = false;
@@ -32356,7 +32360,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         AstIdentNode* ident = (AstIdentNode*)fn_expr;
         AstNode* entry_node = ident->entry ? ident->entry->node : nullptr;
 
-        // Handle imported function calls (from another module compiled via C transpiler)
+        // Handle imported function calls through their MIR boxed entry.
         if (ident->entry && ident->entry->import &&
             !(mt->interp_module_owner &&
               interp_satellite_import_supported(mt->interp_module_owner,
@@ -32412,11 +32416,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     arg_root_slots[i] = create_gc_root_slot(mt, val);
                     arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
                 } else {
-                    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                    // Omission must reach the wrapper distinctly from explicit null.
+                    uint64_t absent = use_wrapper ? ITEM_MISSING_ARGUMENT : ITEM_NULL;
                     MIR_reg_t null_reg = new_reg(mt, "pad", MIR_T_I64);
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, null_reg),
-                        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+                        MIR_new_uint_op(mt->ctx, absent)));
                     arg_ops[i] = MIR_new_reg_op(mt->ctx, null_reg);
                 }
                 arg_vars[i] = {MIR_T_I64, "p", 0};
@@ -35145,7 +35150,7 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
             (mir_expr_produces_cow_owner(mt, assign->value) &&
              ast_expr_may_return_container(assign->value, val_tid, var_tid));
         bool cow_binding = ast_expr_may_return_container(assign->value, val_tid, var_tid) &&
-            mir_expr_is_owned_binding_alias(mt, assign->value);
+            mir_expr_is_owned_binding_alias(mt, assign->value, assign->target_entry);
         MirVarEntry* cow_source = cow_binding
             ? mir_direct_root_binding(mt, assign->value) : NULL;
         if (cow_binding) {
@@ -37828,6 +37833,31 @@ static MirVarEntry* mir_live_local_int_lane(MirTranspiler* mt, AstNode* node) {
 // With no home transported (0 at run time) a replacement could not reach the
 // caller, so that call keeps the in-place write. T0 twin:
 // interp_read_store_owner.
+// S9.1.2: a write through a marked bare binding detaches its owner in the
+// member setter and republishes the private copy into the binding.
+static MIR_reg_t mir_emit_marked_root_member_set(MirTranspiler* mt,
+        MirVarEntry* cow_root, AstCompoundAssignNode* ca) {
+    // Evaluate the value before borrowing the root: a RHS call may
+    // observe the pre-write owner, and COW replacement must not move it first.
+    MIR_reg_t value = transpile_box_item(mt, ca->value);
+    MIR_reg_t key = transpile_box_item(mt, ca->key);
+    MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
+    MIR_reg_t replacement = emit_call_3(mt, mir_cow_site_import("member_set_cow", "member_set_cow_profiled"), MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+    emit_return_if_item_error(mt, replacement);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, cow_root->reg),
+        MIR_new_reg_op(mt->ctx, replacement)));
+    cow_root->type_id = LMD_TYPE_ANY;
+    cow_root->mir_type = MIR_T_I64;
+    cow_root->cow_marked = false;
+    cow_root->cow_children_may_be_shared = true;
+    update_gc_root_slot(mt, cow_root);
+    return replacement;
+}
+
 static void mir_emit_var_root_unshare(MirTranspiler* mt, AstNode* place) {
     AstCowPath path = {};
     if (!ast_collect_cow_path(&path, place) || !path.root ||
@@ -38228,7 +38258,28 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             // Computed map/element access must use the map-or-child setter even
             // when the key is valid; the positional fast path only addresses
             // sequence storage and would otherwise reinterpret the map pointer.
-            bool route_member = object_is_named || object_is_element;
+            // A name key on an `any` object goes there too: the positional
+            // path unboxed it to index 0 and wrote a map through fn_array_set
+            // (`var r = o; r[k] = v` with `o` untyped, or a pn result).
+            bool route_member = object_is_named || object_is_element ||
+                (object_tid == LMD_TYPE_ANY && key_is_name);
+            if (route_member && !invalid_static) {
+                // S9.1.2: as on the positional path below, a member write
+                // relinks a nested place through its COW spine and republishes
+                // a marked bare binding. Returning only the setter's detached
+                // copy lost the write (`var h = g; g["k"] = 1` left g as it was).
+                AstCowPath member_path = {};
+                MirVarEntry* member_root = ast_collect_cow_path(&member_path, ca->object)
+                    ? mir_direct_root_binding(mt, member_path.root) : NULL;
+                if (mir_cow_path_needs_rebuild(member_root, &member_path)) {
+                    MIR_reg_t value = transpile_box_item(mt, ca->value);
+                    return mir_emit_cow_path_set(mt, member_root, &member_path,
+                        ca->key, false, value);
+                }
+                if (member_root && member_root->cow_marked) {
+                    return mir_emit_marked_root_member_set(mt, member_root, ca);
+                }
+            }
             if (invalid_static || route_member) {
                 MIR_reg_t owner = transpile_box_item(mt, ca->object);
                 MIR_reg_t key = transpile_box_item(mt, ca->key);
@@ -38339,25 +38390,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             return mir_emit_cow_path_set(mt, cow_root, &cow_path, ca->key, false, value);
         }
         if (cow_root && cow_root->cow_marked && cow_root->type_id != LMD_TYPE_ARRAY_NUM) {
-            // Evaluate the value before borrowing the root: a RHS call may
-            // observe the pre-write owner, and COW replacement must not move it first.
-            MIR_reg_t value = transpile_box_item(mt, ca->value);
-            MIR_reg_t key = transpile_box_item(mt, ca->key);
-            MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
-            MIR_reg_t replacement = emit_call_3(mt, mir_cow_site_import("member_set_cow", "member_set_cow_profiled"), MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-            emit_return_if_item_error(mt, replacement);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, cow_root->reg),
-                MIR_new_reg_op(mt->ctx, replacement)));
-            cow_root->type_id = LMD_TYPE_ANY;
-            cow_root->mir_type = MIR_T_I64;
-            cow_root->cow_marked = false;
-            cow_root->cow_children_may_be_shared = true;
-            update_gc_root_slot(mt, cow_root);
-            return replacement;
+            return mir_emit_marked_root_member_set(mt, cow_root, ca);
         }
 
         MIR_reg_t obj = transpile_box_item(mt, ca->object);
@@ -48714,14 +48747,14 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
-    {"pdf", "lambda.pdf.pdf", "pdf_to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
-    {"latex", "lambda.latex.latex", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
-    {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
-    {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
-    {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
+    {"pdf", "lambda.pdf.pdf", "pdf_to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"latex", "lambda.latex.latex", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     // edit mode selects the application; lambda.edit's registry selects the
     // format adapter and reads the source itself (Radiant_Design_Edit_Mode §4).
-    {"edit", "lambda.edit.edit", "open_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH},
+    {"edit", "lambda.edit.edit", "open_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
 };
 
 const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
@@ -48735,12 +48768,6 @@ const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
         if (strcmp(transform->input_type, input_type) == 0) return transform;
     }
     return NULL;
-}
-
-Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
-        const LambdaDocumentTransformConfig* transform) {
-    return run_lambda_document_transform_with_options(runtime, input_target, transform,
-        NULL, 0);
 }
 
 Input* run_lambda_package_module(Runtime* runtime, const char* package_module,

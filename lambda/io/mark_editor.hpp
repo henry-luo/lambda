@@ -49,12 +49,14 @@ private:
     Input* input_;              // Input context
     Pool* pool_;                // Memory pool
     Arena* arena_;              // Arena allocator
+    Arena* draft_arena_;        // unpublished shape drafts; released with editor
     NamePool* name_pool_;       // String interning
     ArrayList* type_list_;      // Type registry
     MarkBuilder* builder_;      // For creating new structures
     
     EditMode mode_;             // Current edit mode
     bool ui_mode_;              // true = auto-sync DOM linked list after child mutations
+    Arena* ui_node_arena_;      // arena holding the UI tree's nodes when it is not arena_
     EditVersion* current_version_; // Current version (immutable mode)
     EditVersion* version_head_;    // Head of version list
     int next_version_num_;         // Next version number
@@ -65,12 +67,23 @@ private:
     // Room for `dense_length` children beside the list's owned scalar tail,
     // grown into this editor's arena (inline mode; LR11-3)
     bool reserve_children(List* list, int64_t dense_length);
+    Arena* shape_draft_arena();
+
+    // whether a UI node at `storage` is one this editor may keep by identity
+    bool owns_ui_node_storage(const void* storage) const;
 
 public:
     /**
      * Construct editor from Input
      */
     explicit MarkEditor(Input* input, EditMode mode = EDIT_MODE_INLINE);
+
+    /**
+     * Register the arena that holds the UI tree this editor edits when it is not
+     * the editor's own (an edit session over a UI result tree): its existing
+     * nodes are then imported by identity instead of deep-copied.
+     */
+    void set_ui_node_arena(Arena* arena) { ui_node_arena_ = arena; }
     
     /**
      * Destructor

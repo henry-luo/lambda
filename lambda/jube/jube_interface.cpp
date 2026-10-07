@@ -14,14 +14,18 @@
 #include "jube_registry.h"
 #include "../lambda.hpp"
 #include "../js/js_runtime_internal.hpp"
+#include "../js/js_property_attrs.h"
+#include "../js/js_props.h"
 #include "../runtime/heap_api.h"
 #include "../runtime/lambda-number-runtime.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
+#include "../../lib/strbuf.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/hash.h"
+#include "../../lib/arraylist.hpp"
 #include "../runtime/parser/lambda_rd_parser.h"
 #include <errno.h>
 #include <stdio.h>
@@ -42,6 +46,8 @@ typedef enum JubeMemberKind {
 
 typedef struct JubeMemberRecord JubeMemberRecord;
 struct JubeMemberRecord {
+    struct JubeTypeRecord* declaring_type;
+    JubeMemberRecord* canonical_record; // inherited methods share their declaring interface
     const JubeMemberBind* bind;   // NULL for constants
     char* snake_name;             // declared spelling (owned copy)
     char* camel_name;             // derived or js_name override (owned copy)
@@ -145,6 +151,9 @@ static bool jube_cached_root_register(Item* item, bool* rooted, Context** owner,
 static bool jube_item_key_chars(Item key, const char** chars, uint32_t* len) {
     TypeId type_id = get_type_id(key);
     if (!is_text_type_id(type_id)) return false;
+    // JS Symbol descriptions never select a string-named member or numeric index.
+    if (js_key_is_symbol(key) || (type_id == LMD_TYPE_STRING &&
+            property_key_requires_identity(it2s(key)))) return false;
     const char* key_chars = key.get_chars();
     if (!key_chars) return false;
     *chars = key_chars;
@@ -161,7 +170,8 @@ static bool jube_index_from_key(Item key, int64_t* out) {
     if (!lambda_item_to_int64_exact(key, &index)) {
         const char* digits = NULL;
         uint32_t length = 0;
-        if (!jube_item_key_chars(key, &digits, &length) || length == 0) {
+        if (!jube_item_key_chars(key, &digits, &length) || length == 0 ||
+                (length > 1 && digits[0] == '0')) {
             return false;
         }
         index = 0;
@@ -173,7 +183,8 @@ static bool jube_index_from_key(Item key, int64_t* out) {
             index = index * 10 + (digits[i] - '0');
         }
     }
-    if (index < 0) return false;
+    // WebIDL property indices use canonical array-index keys, not numeric aliases.
+    if (index < 0 || index >= UINT32_MAX) return false;
     *out = index;
     return true;
 }
@@ -220,8 +231,23 @@ static bool jube_native_alive(Item receiver) {
     return virtual_host_data(receiver) != NULL;
 }
 
+static bool jube_js_indexed(JubeTypeRecord* trec) {
+    return trec && trec->binding && trec->binding->indexed_get &&
+        !(trec->type->flags & JUBE_TYPE_NATIVE_INDEXED);
+}
+
+static int64_t jube_indexed_length(Item receiver, JubeTypeRecord* trec) {
+    if (!trec || !trec->binding || !trec->binding->indexed_get ||
+            !jube_native_alive(receiver)) return -1;
+    if (get_type_id(receiver) == LMD_TYPE_VARRAY) return varray_count(receiver.varray);
+    RootFrame roots(1);
+    Rooted<Item> receiver_root(roots, receiver);
+    return trec->binding->indexed_length ? trec->binding->indexed_length(receiver_root.get()) : -1;
+}
+
 // resolve a key against the type's compiled ordinal index.
-static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver, Item key) {
+static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver, Item key,
+        bool js_surface = true) {
     (void)receiver;
     const char* chars = NULL;
     uint32_t len = 0;
@@ -229,7 +255,11 @@ static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver
     JubeMemberIndexEntry probe = {chars, len, NULL};
     const JubeMemberIndexEntry* found = JubeMemberIndex::get(trec->index, probe);
     if (!found) return NULL;
-    return found->rec;
+    JubeMemberRecord* rec = found->rec;
+    if (js_surface && (trec->type->flags & JUBE_TYPE_JS_EXACT_NAMES) &&
+            (strlen(rec->camel_name) != len || memcmp(rec->camel_name, chars, len) != 0))
+        return NULL;
+    return rec;
 }
 
 // ============================================================================
@@ -257,8 +287,48 @@ static Item jube_expando_object(Item receiver, bool create) {
     return object_root.get();
 }
 
-static bool jube_expando_value_present(Item value) {
-    return value.item != ITEM_JS_UNDEFINED && value.item != ITEM_NULL && value.item != 0;
+static bool jube_prototype_member(const JubeMemberRecord* rec) {
+    return rec && rec->bind && (rec->bind->flags & JUBE_MEMBER_PROTOTYPE);
+}
+
+static bool jube_keyed_accessor(const JubeMemberRecord* rec) {
+    return rec && rec->bind && (rec->bind->flags & JUBE_MEMBER_KEYED_ACCESSOR);
+}
+
+static bool jube_js_named(const JubeTypeRecord* trec) {
+    return trec && !(trec->type->flags & JUBE_TYPE_NATIVE_NAMED);
+}
+
+static int jube_dispatch_keyed_accessor(Item receiver, JubeMemberRecord* rec,
+        Item value, Item* out, bool setter) {
+    const JubeTypeBinding* binding = rec->declaring_type->binding;
+    RootFrame roots(3);
+    Rooted<Item> receiver_root(roots, receiver), value_root(roots, value);
+    Rooted<Item> key_root(roots, jube_name_item(rec->bind->reflect_attr));
+    return setter ? binding->named_set(receiver_root.get(), key_root.get(), value_root.get(), out)
+        : binding->named_get(receiver_root.get(), key_root.get(), out);
+}
+
+static bool jube_expando_has(Item expando, Item key) {
+    return get_type_id(expando) == LMD_TYPE_MAP && it2b(js_has_own_property(expando, key));
+}
+
+static Item jube_member_lookup_object(Item target, Item key) {
+    Item expando = jube_expando_object(target, false);
+    if (jube_expando_has(expando, key)) return expando;
+    Item proto = ItemNull;
+    // optional Lambda reads can miss without a JS arena; do not build a prototype there.
+    if (js_active_runtime_state && js_input && js_input->pool)
+        jube_member_prototype(target, &proto);
+    return proto;
+}
+
+static bool jube_member_accepts_receiver(const JubeMemberRecord* rec, Item receiver) {
+    if (!jube_prototype_member(rec)) return true;
+    for (JubeTypeRecord* type = jube_record_for(receiver); type; type = type->base_record) {
+        if (type == rec->declaring_type) return jube_native_alive(receiver);
+    }
+    return false;
 }
 
 // ============================================================================
@@ -307,6 +377,11 @@ static Item jube_tramp_invoke(Item fn_item, Item this_value, Item* args,
     JubeMemberRecord* rec = fn
         ? (JubeMemberRecord*)(uintptr_t)js_fn_native(fn)->target.bits : NULL;
     Item out = jube_undefined_item();
+    if (rec && !jube_member_accepts_receiver(rec, this_value))
+        return js_throw_type_error("Illegal invocation of a host interface method");
+    if (rec && rec->bind && (rec->bind->flags & JUBE_MEMBER_HAS_REQUIRED_ARGS) &&
+            argc < (int)(rec->bind->flags >> 8))
+        return js_throw_type_error("Not enough arguments for a host interface method");
     if (rec && rec->bind) {
         if (rec->bind->row_index) {
             out = jube_invoke_row(rec->bind, this_value, args, argc);
@@ -328,13 +403,15 @@ static Item jube_member_js_method_item(JubeMemberRecord* rec) {
     jube_cached_root_drop(&rec->method_fn, &rec->method_fn_rooted,
                           &rec->method_root_owner, &rec->method_root_generation);
     const JubeHostAPI* host = jube_internal_host_api();
-    int arity = rec->arity;
+    int arity = rec->bind && (rec->bind->flags & JUBE_MEMBER_HAS_REQUIRED_ARGS)
+        ? (int)(rec->bind->flags >> 8) : rec->arity;
     if (arity < 0) arity = 0;
     if (arity > 8) arity = 8;
-    Item fn_item = js_new_native_payload_function(jube_tramp_invoke,
-        (uint64_t)(uintptr_t)rec, arity);
-    host->script->set_function_name(fn_item, jube_name_item(rec->camel_name));
-    rec->method_fn = fn_item;
+    RootFrame roots(1);
+    Rooted<Item> function_root(roots, js_new_native_payload_function(jube_tramp_invoke,
+        (uint64_t)(uintptr_t)rec, arity));
+    host->script->set_function_name(function_root.get(), jube_name_item(rec->camel_name));
+    rec->method_fn = function_root.get();
     if (!jube_cached_root_register(&rec->method_fn, &rec->method_fn_rooted,
                                    &rec->method_root_owner,
                                    &rec->method_root_generation)) {
@@ -347,8 +424,10 @@ static Item jube_member_js_method_item(JubeMemberRecord* rec) {
 static Item jube_lambda_method_invoke(Item env_item, Item* args, int argc) {
     Item* env = (Item*)env_item.item;
     Item out = jube_undefined_item();
-    JubeMemberRecord* rec = env
-        ? (JubeMemberRecord*)(uintptr_t)env[1].item : NULL;
+    JubeTypeRecord* trec = env ? jube_record_for(env[0]) : NULL;
+    int64_t ordinal = env ? fn_int64_index(env[1]) : -1;
+    JubeMemberRecord* rec = trec && ordinal >= 0 && ordinal < trec->member_count
+        ? &trec->members[ordinal] : NULL;
     if (rec && rec->bind) {
         // both doors resolve a row the same way, or the Lambda face would keep
         // the adapter the JS face just lost (D6.2.2v2)
@@ -413,8 +492,7 @@ static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec)
     Rooted<Item> rooted_receiver(roots, receiver);
     Rooted<Function*> rooted_fn(roots, (Function*)NULL);
     // Lambda projection reads run outside js_input, so Jube methods cannot use
-    // JS function allocation there. The stable record pointer is executable
-    // payload, not an Item edge; closure_field_count traces only the receiver.
+    // JS function allocation there. Inherited records retain their base ordinal.
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     if (!fn) return jube_undefined_item();
     rooted_fn.set(fn);
@@ -425,21 +503,23 @@ static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec)
     if (!env) return jube_undefined_item();
     fn = rooted_fn.get();
     env[0] = rooted_receiver.get();
-    env[1] = (Item){.item = (uint64_t)(uintptr_t)rec};
+    env[1] = (Item){.item = i2it(rec - rec->declaring_type->members)};
     function_init_abi(fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_HOST_ADAPTER);
     fn->arity = (uint8_t)arity;
     fn->fn_type = NULL;
     fn->ptr = (fn_ptr)s_jube_lambda_method_tramps[arity];
     fn->closure_env = env;
     fn->name = rec->snake_name;
-    fn->closure_field_count = 1;
+    // compaction copies exactly the declared Item slots; no native pointer tail.
+    fn->closure_field_count = 2;
     return (Item){.function = fn};
 }
 
-static Item jube_member_method_item(Item receiver, JubeMemberRecord* rec) {
+static Item jube_member_method_item(Item receiver, JubeMemberRecord* rec, bool js_surface) {
+    if (rec->canonical_record) rec = rec->canonical_record;
     // Pure Lambda evaluators have no JS capsule; do not dereference derived JS
     // TLS merely to choose the host-language method wrapper.
-    if (js_active_runtime_state && js_input && js_input->pool) {
+    if (js_surface && js_active_runtime_state && js_input && js_input->pool) {
         return jube_member_js_method_item(rec);
     }
     return jube_member_lambda_method_item(receiver, rec);
@@ -575,7 +655,8 @@ static JubeMemberRecord* jube_record_at_guarded(Item receiver, int slot,
     return &trec->members[ordinal];
 }
 
-static int jube_dispatch_get_record(Item receiver, JubeMemberRecord* rec, Item* out) {
+static int jube_dispatch_get_record(Item receiver, JubeMemberRecord* rec, Item* out,
+        bool js_surface = false) {
     if (!rec || !out) return 0;
     switch (rec->kind) {
     case JUBE_MEMBER_CONST:
@@ -585,26 +666,87 @@ static int jube_dispatch_get_record(Item receiver, JubeMemberRecord* rec, Item* 
         // A method may have an availability handler for a feature-gated
         // surface; the handler owns the semantic predicate, not the kernel.
         if (rec->bind && rec->bind->get && !rec->bind->get(receiver, out)) return 0;
-        *out = jube_member_method_item(receiver, rec);
+        *out = jube_member_method_item(receiver, rec, js_surface);
         return 1;
     default:
+        if (jube_keyed_accessor(rec))
+            return jube_dispatch_keyed_accessor(receiver, rec, ItemNull, out, false);
         if (rec->bind && rec->bind->get && rec->bind->get(receiver, out)) return 1;
         return 0;
     }
 }
 
 static int jube_dispatch_set_record(Item receiver, JubeTypeRecord* trec,
-                                    JubeMemberRecord* rec, Item value, Item* out) {
+                                    JubeMemberRecord* rec, Item value, Item* out,
+                                    bool js_surface = false) {
     if (!trec || !rec || !out) return 0;
+    if (jube_keyed_accessor(rec)) {
+        int handled = jube_dispatch_keyed_accessor(receiver, rec, value, out, true);
+        if (handled && js_surface && !item_is_error(*out)) *out = (Item){.item = ITEM_TRUE};
+        return handled;
+    }
     if (rec->readonly || rec->kind != JUBE_MEMBER_FIELD) {
         if (trec->binding && trec->binding->named_set && jube_native_alive(receiver) &&
                 trec->binding->named_set(receiver, jube_name_item(rec->camel_name),
-                                          value, out)) return 1;
-        *out = value;
+                                          value, out)) {
+            if (js_surface && !item_is_error(*out)) *out = (Item){.item = ITEM_TRUE};
+            return 1;
+        }
+        *out = js_surface ? (Item){.item = ITEM_FALSE} : value;
         return 1;
     }
-    if (rec->bind && rec->bind->set && rec->bind->set(receiver, value, out)) return 1;
+    if (rec->bind && rec->bind->set && rec->bind->set(receiver, value, out)) {
+        if (js_surface && !item_is_error(*out)) *out = (Item){.item = ITEM_TRUE};
+        return 1;
+    }
     return 0;
+}
+
+static Item jube_accessor_invoke(Item function, Item receiver, Item* args,
+        int argc, uint64_t* result_home) {
+    (void)result_home;
+    JsFunction* fn = (JsFunction*)function.function;
+    uintptr_t payload = (uintptr_t)js_fn_native(fn)->target.bits;
+    bool setter = (payload & 1u) != 0;
+    JubeMemberRecord* rec = (JubeMemberRecord*)(payload & ~(uintptr_t)1u);
+    if (!jube_member_accepts_receiver(rec, receiver))
+        return js_throw_type_error("Illegal invocation of a host interface accessor");
+    RootFrame roots(2);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> value_root(roots, argc ? args[0] : jube_undefined_item());
+    Item out = jube_undefined_item();
+    if (setter) {
+        jube_dispatch_set_record(receiver_root.get(), jube_record_for(receiver_root.get()),
+            rec, value_root.get(), &out, true);
+        return item_is_error(out) ? out : jube_undefined_item();
+    }
+    jube_dispatch_get_record(receiver_root.get(), rec, &out, true);
+    return out;
+}
+
+static Item jube_accessor_function(JubeMemberRecord* rec, bool setter) {
+    RootFrame roots(2);
+    Rooted<Item> function_root(roots, js_new_native_payload_function(jube_accessor_invoke,
+        (uint64_t)((uintptr_t)rec | (setter ? 1u : 0u)), setter ? 1 : 0));
+    Rooted<Item> name_root(roots, ItemNull);
+    StrBuf* name = strbuf_new();
+    strbuf_append_all(name, 2, setter ? "set " : "get ", rec->camel_name);
+    name_root.set(jube_name_item(name->str));
+    strbuf_free(name);
+    jube_internal_host_api()->script->set_function_name(function_root.get(), name_root.get());
+    return function_root.get();
+}
+
+static void jube_install_member_accessor(Item prototype, JubeMemberRecord* rec) {
+    RootFrame roots(4);
+    Rooted<Item> prototype_root(roots, prototype);
+    Rooted<Item> key_root(roots, jube_name_item(rec->camel_name));
+    Rooted<Item> getter_root(roots, jube_accessor_function(rec, false));
+    Rooted<Item> setter_root(roots, ItemNull);
+    if (rec->bind->set || jube_keyed_accessor(rec))
+        setter_root.set(jube_accessor_function(rec, true));
+    js_install_native_accessor(prototype_root.get(), key_root.get(), getter_root.get(),
+        setter_root.get(), 0);
 }
 
 static Item jube_type_prototype_for(JubeTypeRecord* trec) {
@@ -639,20 +781,15 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
     } else {
         trec->prototype = host->value->new_object();
     }
-    if (trec->base_record) {
-        // DOM4 subtypes expose the declared interface hierarchy through the
-        // ordinary prototype chain while their compiled member rows retain
-        // the inherited prefix used by ordinal dispatch.
-        Item parent = jube_type_prototype_for(trec->base_record);
-        if (get_type_id(parent) == LMD_TYPE_MAP) {
-            js_set_prototype(trec->prototype, parent);
-        }
-    }
     if (!jube_cached_root_register(&trec->prototype, &trec->prototype_rooted,
                                    &trec->prototype_root_owner,
                                    &trec->prototype_root_generation)) {
         trec->prototype = ItemNull;
         return (Item){.item = ITEM_ERROR};
+    }
+    if (trec->base_record) {
+        Item parent = jube_type_prototype_for(trec->base_record);
+        if (get_type_id(parent) == LMD_TYPE_MAP) js_set_prototype(trec->prototype, parent);
     }
     // publish method function objects onto the prototype: scripts read them as
     // Range.prototype.setStart (IDL shape / .length probes), and instance reads
@@ -660,6 +797,12 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
     if (get_type_id(trec->prototype) == LMD_TYPE_MAP) {
         for (int i = 0; i < trec->member_count; i++) {
             JubeMemberRecord* rec = &trec->members[i];
+            // inherited members live on the declaring prototype, including overrides.
+            if (rec->declaring_type != trec) continue;
+            if (jube_prototype_member(rec) && rec->kind == JUBE_MEMBER_FIELD) {
+                jube_install_member_accessor(trec->prototype, rec);
+                continue;
+            }
             if (rec->kind != JUBE_MEMBER_METHOD) continue;
             host->value->property_set(trec->prototype, jube_name_item(rec->camel_name),
                                       jube_member_js_method_item(rec));
@@ -700,12 +843,13 @@ extern "C" int jube_member_get_by_ordinal(Item receiver, int slot,
     JubeTypeRecord* trec = NULL;
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out) return 0;
+    if (jube_prototype_member(rec)) return 0;
     if (!jube_native_alive(receiver)) {
         // the native payload is gone, but the wrapper identity remains a valid husk.
         *out = jube_undefined_item();
         return 1;
     }
-    return jube_dispatch_get_record(receiver, rec, out);
+    return jube_dispatch_get_record(receiver, rec, out, true);
 }
 
 extern "C" int jube_member_set_by_ordinal(Item receiver, int slot,
@@ -713,11 +857,12 @@ extern "C" int jube_member_set_by_ordinal(Item receiver, int slot,
     JubeTypeRecord* trec = NULL;
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out) return 0;
+    if (jube_prototype_member(rec)) return 0;
     if (!jube_native_alive(receiver)) {
-        *out = jube_undefined_item();
+        *out = (Item){.item = ITEM_FALSE};
         return 1;
     }
-    return jube_dispatch_set_record(receiver, trec, rec, value, out);
+    return jube_dispatch_set_record(receiver, trec, rec, value, out, true);
 }
 
 extern "C" int jube_member_call_by_ordinal(Item receiver, int slot,
@@ -727,6 +872,7 @@ extern "C" int jube_member_call_by_ordinal(Item receiver, int slot,
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out || rec->kind != JUBE_MEMBER_METHOD ||
             !rec->bind || (!rec->bind->call && !rec->bind->row_index)) return 0;
+    if (jube_prototype_member(rec)) return 0;
     if (!jube_native_alive(receiver)) return 0;
     if (rec->bind->row_index) {
         *out = jube_invoke_row(rec->bind, receiver, args, argc);
@@ -735,62 +881,66 @@ extern "C" int jube_member_call_by_ordinal(Item receiver, int slot,
     return rec->bind->call(receiver, args, argc, out) ? 1 : 0;
 }
 
-int jube_member_get(Item receiver, Item key, Item* out) {
-    JubeTypeRecord* trec = jube_record_for(receiver);
+static int jube_member_get_impl(Item target, Item key, Item receiver, Item* out, bool js_surface) {
+    JubeTypeRecord* trec = jube_record_for(target);
     if (!trec || !out) return 0;
-    if (!jube_native_alive(receiver)) {
+    RootFrame roots(4);
+    Rooted<Item> target_root(roots, target), key_root(roots, key), receiver_root(roots, receiver);
+    Rooted<Item> lookup_root(roots, ItemNull);
+    if (!jube_native_alive(target)) {
         // neutered husk (post-release / document teardown): every read degrades
         // to undefined instead of touching the freed native payload
         *out = jube_undefined_item();
         return 1;
     }
-    JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
-    if (rec && jube_dispatch_get_record(receiver, rec, out)) {
+    JubeMemberRecord* rec = jube_resolve_member(trec, target, key, js_surface);
+    if (js_surface && jube_prototype_member(rec) && js_active_runtime_state && js_input && js_input->pool) {
+        lookup_root.set(jube_member_lookup_object(target_root.get(), key_root.get()));
+        *out = js_get_key_core(lookup_root.get(), key_root.get(), receiver_root.get());
+        return 1;
+    }
+    if (rec && jube_dispatch_get_record(target_root.get(), rec, out, js_surface)) {
         return 1;
     }
     // array-index reads (sheet[0]) resolve through the indexed hook; JS index
     // keys arrive as ints or all-digit strings depending on the access path
-    if (trec->binding && trec->binding->indexed_get) {
+    if (trec->binding && trec->binding->indexed_get &&
+            (!js_surface || jube_js_indexed(trec))) {
         int64_t index = -1;
-        if (jube_index_from_key(key, &index) &&
-                trec->binding->indexed_get(receiver, index, out)) return 1;
+        if (jube_index_from_key(key_root.get(), &index)) {
+            int64_t count = jube_indexed_length(target_root.get(), trec);
+            if ((count < 0 || index < count) &&
+                    trec->binding->indexed_get(target_root.get(), index, out)) return 1;
+        }
     }
-    if (trec->binding && trec->binding->named_get &&
-            trec->binding->named_get(receiver, key, out)) {
+    if ((!js_surface || jube_js_named(trec)) && trec->binding && trec->binding->named_get &&
+            trec->binding->named_get(target_root.get(), key_root.get(), out)) {
         return 1;
     }
     const char* key_chars = NULL;
     uint32_t key_len = 0;
-    if (jube_item_key_chars(key, &key_chars, &key_len) && key_len == 9 &&
+    if (jube_item_key_chars(key_root.get(), &key_chars, &key_len) && key_len == 9 &&
             memcmp(key_chars, "__proto__", 9) == 0) {
         *out = jube_type_prototype_for(trec);
         return 1;
     }
-    Item expando = jube_expando_object(receiver, false);
-    if (get_type_id(expando) == LMD_TYPE_MAP) {
-        Item value = jube_internal_host_api()->value->property_get(expando, key);
-        if (jube_expando_value_present(value)) {
-            *out = value;
-            return 1;
-        }
-    }
-    if (!js_active_runtime_state || !js_input || !js_input->pool) {
-        // Lambda event handlers can probe optional DOM fields. They have no JS
-        // input arena, so a miss must stay undefined instead of building a JS
-        // prototype and native method wrappers in an absent JS realm.
-        *out = jube_undefined_item();
-        return 1;
-    }
-    // Use the receiver-aware hook: DOM event subclasses carry their exact
-    // realm prototype on the wrapper, while the type-wide fallback loses it.
-    Item proto = ItemNull;
-    jube_member_prototype(receiver, &proto);
-    if (get_type_id(proto) == LMD_TYPE_MAP) {
-        *out = jube_internal_host_api()->value->property_get(proto, key);
+    // expando accessors need the original receiver, not the backing storage Map.
+    lookup_root.set(jube_member_lookup_object(target_root.get(), key_root.get()));
+    if (get_type_id(lookup_root.get()) == LMD_TYPE_MAP) {
+        *out = js_get_key_core(lookup_root.get(), key_root.get(), receiver_root.get());
         return 1;
     }
     *out = jube_undefined_item();
     return 1;
+}
+
+// a derived JS capsule can exist during Lambda evaluation; the caller owns the surface choice.
+int jube_member_get(Item receiver, Item key, Item* out) {
+    return jube_member_get_impl(receiver, key, receiver, out, false);
+}
+
+int jube_member_get_js(Item target, Item key, Item receiver, Item* out) {
+    return jube_member_get_impl(target, key, receiver, out, true);
 }
 
 int jube_member_projected_get(Item receiver, Item key, Item* out) {
@@ -803,28 +953,51 @@ int jube_member_projected_get(Item receiver, Item key, Item* out) {
     return jube_dispatch_get_record(receiver, rec, out);
 }
 
-int jube_member_set(Item receiver, Item key, Item value, Item* out) {
-    JubeTypeRecord* trec = jube_record_for(receiver);
+static int jube_member_set_impl(Item target, Item key, Item value, Item receiver,
+        Item* out, bool js_surface) {
+    JubeTypeRecord* trec = jube_record_for(target);
     if (!trec || !out) return 0;
-    if (!jube_native_alive(receiver)) {
-        *out = jube_undefined_item();
+    RootFrame roots(5);
+    Rooted<Item> target_root(roots, target), key_root(roots, key), value_root(roots, value);
+    Rooted<Item> receiver_root(roots, receiver), lookup_root(roots, ItemNull);
+    if (!jube_native_alive(target)) {
+        *out = js_surface ? (Item){.item = ITEM_FALSE} : jube_undefined_item();
         return 1;
     }
-    JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
-    if (rec && jube_dispatch_set_record(receiver, trec, rec, value, out)) {
+    JubeMemberRecord* rec = jube_resolve_member(trec, target, key, js_surface);
+    if (!js_surface || !jube_prototype_member(rec)) {
+        if (rec && jube_dispatch_set_record(target_root.get(), trec, rec, value_root.get(), out, js_surface))
+            return 1;
+        if ((!js_surface || jube_js_named(trec)) && trec->binding && trec->binding->named_set &&
+                trec->binding->named_set(target_root.get(), key_root.get(), value_root.get(), out)) {
+            if (js_surface && !item_is_error(*out)) *out = (Item){.item = ITEM_TRUE};
+            return 1;
+        }
+    }
+    if (js_surface) {
+        lookup_root.set(jube_member_lookup_object(target_root.get(), key_root.get()));
+        if (get_type_id(lookup_root.get()) != LMD_TYPE_MAP)
+            lookup_root.set(jube_expando_object(target_root.get(), true));
+        // [[Set]] completion is independent of the assigned value, including false/undefined.
+        *out = js_set_completion_with_key(lookup_root.get(), key_root.get(),
+            value_root.get(), receiver_root.get());
         return 1;
     }
-    if (trec->binding && trec->binding->named_set &&
-            trec->binding->named_set(receiver, key, value, out)) {
+    lookup_root.set(jube_expando_object(target_root.get(), true));
+    if (get_type_id(lookup_root.get()) == LMD_TYPE_MAP) {
+        *out = jube_internal_host_api()->value->property_set(lookup_root.get(), key_root.get(), value_root.get());
         return 1;
     }
-    Item expando = jube_expando_object(receiver, true);
-    if (get_type_id(expando) == LMD_TYPE_MAP) {
-        *out = jube_internal_host_api()->value->property_set(expando, key, value);
-        return 1;
-    }
-    *out = value;
+    *out = value_root.get();
     return 1;
+}
+
+int jube_member_set(Item receiver, Item key, Item value, Item* out) {
+    return jube_member_set_impl(receiver, key, value, receiver, out, false);
+}
+
+int jube_member_set_js(Item target, Item key, Item value, Item receiver, Item* out) {
+    return jube_member_set_impl(target, key, value, receiver, out, true);
 }
 
 int jube_member_define_own(Item receiver, Item key, Item descriptor, Item* out) {
@@ -839,6 +1012,17 @@ int jube_member_define_own(Item receiver, Item key, Item descriptor, Item* out) 
     Rooted<Item> key_root(roots, key);
     Rooted<Item> descriptor_root(roots, descriptor);
     Rooted<Item> expando_root(roots, ItemNull);
+    int64_t index = -1;
+    if ((trec->type->flags & JUBE_TYPE_INDEXED_READONLY) &&
+            jube_js_indexed(trec) &&
+            !trec->binding->indexed_set && jube_index_from_key(key_root.get(), &index)) {
+        // getter-only WebIDL indices reject definitions even outside current bounds.
+        // descriptor conversion still precedes that rejection (D6.2.2v2, D5.3.3).
+        JsPropertyDescriptor converted = {};
+        Item status = js_descriptor_from_object(descriptor_root.get(), &converted);
+        *out = item_is_error(status) ? status : (Item){.item = ITEM_FALSE};
+        return 1;
+    }
     expando_root.set(jube_expando_object(receiver_root.get(), true));
     if (get_type_id(expando_root.get()) != LMD_TYPE_MAP) return 0;
     // DOM and other virtual hosts keep arbitrary own fields in this map; use
@@ -856,30 +1040,40 @@ int jube_member_define_own(Item receiver, Item key, Item descriptor, Item* out) 
 int jube_member_has(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    bool present = jube_resolve_member(trec, receiver, key) != NULL;
-    if (!present && get_type_id(receiver) == LMD_TYPE_VARRAY &&
-            trec->binding && trec->binding->indexed_get) {
+    RootFrame roots(3);
+    Rooted<Item> receiver_root(roots, receiver), key_root(roots, key), prototype_root(roots, ItemNull);
+    JubeMemberRecord* rec = jube_resolve_member(trec, receiver_root.get(), key_root.get());
+    bool present = rec && !jube_prototype_member(rec);
+    if (!present && jube_js_indexed(trec)) {
         int64_t index = -1;
-        present = jube_index_from_key(key, &index) &&
-            index < varray_count(receiver.varray);
+        present = jube_index_from_key(key_root.get(), &index) &&
+            index < jube_indexed_length(receiver_root.get(), trec);
     }
     if (!present && trec->binding && trec->binding->object_has &&
-            jube_native_alive(receiver) &&
-            trec->binding->object_has(receiver, key, out)) {
+            jube_native_alive(receiver_root.get()) &&
+            trec->binding->object_has(receiver_root.get(), key_root.get(), out)) {
         return 1;
     }
-    if (!present && trec->binding && trec->binding->named_has &&
-            jube_native_alive(receiver) &&
-            trec->binding->named_has(receiver, key, out)) {
+    if (!present && jube_js_named(trec) && trec->binding && trec->binding->named_has &&
+            jube_native_alive(receiver_root.get()) &&
+            trec->binding->named_has(receiver_root.get(), key_root.get(), out)) {
         return 1;
     }
-    if (!present && jube_native_alive(receiver)) {
-        Item expando = jube_expando_object(receiver, false);
+    if (!present && jube_native_alive(receiver_root.get())) {
+        Item expando = jube_expando_object(receiver_root.get(), false);
         if (get_type_id(expando) == LMD_TYPE_MAP) {
-            Item value = jube_internal_host_api()->value->property_get(expando, key);
-            present = jube_expando_value_present(value);
+            present = jube_expando_has(expando, key_root.get());
         }
     }
+    if (!present && js_active_runtime_state && js_input && js_input->pool) {
+        Item prototype = ItemNull;
+        jube_member_prototype(receiver_root.get(), &prototype);
+        prototype_root.set(prototype);
+        if (get_type_id(prototype_root.get()) == LMD_TYPE_MAP) {
+            *out = js_in(key_root.get(), prototype_root.get());
+            return 1;
+        }
+    } else if (rec && jube_prototype_member(rec)) present = true;
     *out = (Item){.item = b2it(present)};
     return 1;
 }
@@ -887,28 +1081,38 @@ int jube_member_has(Item receiver, Item key, Item* out) {
 int jube_member_delete(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    if (jube_resolve_member(trec, receiver, key)) {
+    RootFrame roots(2);
+    Rooted<Item> receiver_root(roots, receiver), key_root(roots, key);
+    int64_t index = -1;
+    if (jube_js_indexed(trec) && jube_index_from_key(key_root.get(), &index) &&
+            index < jube_indexed_length(receiver_root.get(), trec)) {
+        *out = (Item){.item = ITEM_FALSE};
+        return 1;
+    }
+    if (JubeMemberRecord* rec = jube_resolve_member(trec, receiver_root.get(), key_root.get());
+            rec && !jube_prototype_member(rec)) {
         *out = (Item){.item = b2it(false)};
         return 1;
     }
-    if (trec->binding && trec->binding->object_delete && jube_native_alive(receiver) &&
-            trec->binding->object_delete(receiver, key, out)) {
+    if (trec->binding && trec->binding->object_delete && jube_native_alive(receiver_root.get()) &&
+            trec->binding->object_delete(receiver_root.get(), key_root.get(), out)) {
         return 1;
     }
     // open-name members (CSS properties on style objects) refuse deletion,
     // matching the projected-property non-configurable contract
-    if (trec->binding && trec->binding->named_has && jube_native_alive(receiver)) {
+    if (jube_js_named(trec) && trec->binding && trec->binding->named_has &&
+            jube_native_alive(receiver_root.get())) {
         Item present = ItemNull;
-        if (trec->binding->named_has(receiver, key, &present) &&
+        if (trec->binding->named_has(receiver_root.get(), key_root.get(), &present) &&
                 present.item == b2it(true)) {
             *out = (Item){.item = b2it(false)};
             return 1;
         }
     }
-    if (jube_native_alive(receiver)) {
-        Item expando = jube_expando_object(receiver, false);
+    if (jube_native_alive(receiver_root.get())) {
+        Item expando = jube_expando_object(receiver_root.get(), false);
         if (get_type_id(expando) == LMD_TYPE_MAP) {
-            *out = jube_internal_host_api()->script->reflect_delete_property(expando, key);
+            *out = jube_internal_host_api()->script->reflect_delete_property(expando, key_root.get());
             return 1;
         }
     }
@@ -947,12 +1151,11 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
             trec->binding->object_descriptor(receiver_root.get(), key_root.get(), out)) {
         return 1;
     }
-    if (get_type_id(receiver_root.get()) == LMD_TYPE_VARRAY &&
-            trec->binding && trec->binding->indexed_get &&
+    if (jube_js_indexed(trec) &&
             jube_native_alive(receiver_root.get())) {
         int64_t index = -1;
         if (jube_index_from_key(key_root.get(), &index) &&
-                index < varray_count(receiver_root.get().varray)) {
+                index < jube_indexed_length(receiver_root.get(), trec)) {
             Item indexed_value = ItemNull;
             if (!trec->binding->indexed_get(receiver_root.get(), index,
                     &indexed_value)) {
@@ -965,7 +1168,8 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
         }
     }
     JubeMemberRecord* rec = jube_resolve_member(trec, receiver_root.get(), key_root.get());
-    if (rec && rec->kind != JUBE_MEMBER_METHOD && jube_native_alive(receiver_root.get())) {
+    if (rec && !jube_prototype_member(rec) && rec->kind != JUBE_MEMBER_METHOD &&
+            jube_native_alive(receiver_root.get())) {
         Item member_value = jube_undefined_item();
         jube_member_get(receiver_root.get(), key_root.get(), &member_value);
         value_root.set(member_value);
@@ -975,12 +1179,8 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
     if (jube_native_alive(receiver_root.get())) {
         expando_root.set(jube_expando_object(receiver_root.get(), false));
         if (get_type_id(expando_root.get()) == LMD_TYPE_MAP) {
-            value_root.set(jube_internal_host_api()->value->property_get(
-                expando_root.get(), key_root.get()));
-            if (jube_expando_value_present(value_root.get())) {
-                *out = jube_make_data_descriptor(value_root.get(), true, true);
-                return 1;
-            }
+            *out = js_object_get_own_property_descriptor(expando_root.get(), key_root.get());
+            return 1;
         }
     }
     *out = jube_undefined_item();
@@ -1005,10 +1205,9 @@ int jube_member_own_keys(Item receiver, Item* out) {
     }
     const JubeHostAPI* host = jube_internal_host_api();
     rooted_keys.set(host->value->array_new(0));
-    if (get_type_id(rooted_receiver.get()) == LMD_TYPE_VARRAY &&
-            trec->binding && trec->binding->indexed_get &&
+    if (jube_js_indexed(trec) &&
             jube_native_alive(rooted_receiver.get())) {
-        int64_t count = varray_count(rooted_receiver.get().varray);
+        int64_t count = jube_indexed_length(rooted_receiver.get(), trec);
         for (int64_t i = 0; i < count; i++) {
             char index_name[32];
             snprintf(index_name, sizeof(index_name), "%lld", (long long)i);
@@ -1114,12 +1313,10 @@ typedef struct JubeParsedMember {
     char* default_str;
 } JubeParsedMember;
 
-#define JUBE_PARSE_MEMBER_CAPACITY 256
-
 typedef struct JubeParsedType {
     char* name;
     char* base_name;
-    JubeParsedMember members[JUBE_PARSE_MEMBER_CAPACITY];
+    lam::ArrayList<JubeParsedMember>* members;
     int member_count;
 } JubeParsedType;
 
@@ -1168,7 +1365,7 @@ static void jube_member_record_init(JubeMemberRecord* record,
             ? jube_module_type_by_name(module, parsed->result_type_name) : NULL;
     }
     record->enumerable = record->kind == JUBE_MEMBER_FIELD &&
-        !(bind && (bind->flags & JUBE_MEMBER_NON_ENUMERABLE));
+        !(bind && (bind->flags & (JUBE_MEMBER_NON_ENUMERABLE | JUBE_MEMBER_PROTOTYPE)));
 }
 
 // count fn_param children and detect '^' in the return type of a fn_type node
@@ -1234,7 +1431,11 @@ static void jube_free_parsed_members(JubeParsedMember* members, int count) {
 
 static void jube_release_parsed_type(JubeParsedType* type) {
     if (!type) return;
-    jube_free_parsed_members(type->members, type->member_count);
+    if (type->members) {
+        jube_free_parsed_members(type->members->data(), type->member_count);
+        delete type->members;
+        type->members = NULL;
+    }
     type->member_count = 0;
     if (type->name) free(type->name);
     if (type->base_name) free(type->base_name);
@@ -1338,7 +1539,7 @@ static int jube_compile_type(const JubeModuleDef* module,
         }
     }
 
-    JubeParsedMember* parsed = parsed_type->members;
+    JubeParsedMember* parsed = parsed_type->members ? parsed_type->members->data() : NULL;
     int parsed_count = parsed_type->member_count;
 
     // cross-check declared members against bindings before compiling records
@@ -1357,6 +1558,13 @@ static int jube_compile_type(const JubeModuleDef* module,
         for (int32_t j = 0; j < binding->member_count; j++) {
             const JubeMemberBind* bind = &binding->members[j];
             if (!bind->name || strcmp(bind->name, parsed[i].name) != 0) continue;
+            if ((bind->flags & JUBE_MEMBER_KEYED_ACCESSOR) &&
+                    (!bind->reflect_attr || !binding->named_get || !binding->named_set)) {
+                log_error("JUBE_IFACE: keyed accessor '%s.%s' lacks its key or named adapters",
+                    type_name, parsed[i].name);
+                jube_free_parsed_members(parsed, parsed_count);
+                return -1;
+            }
             // DS13: a method is implemented either by a call handler or by a
             // catalog row slot; requiring `call` would reject every BIND_ROW.
             if (parsed[i].is_method && !bind->call && !bind->row_index) {
@@ -1441,6 +1649,8 @@ static int jube_compile_type(const JubeModuleDef* module,
         // caches like method_fn, so they cannot be shared across brands)
         JubeMemberRecord* src = &base_rec->members[i];
         JubeMemberRecord* dst = &records[out_count++];
+        dst->declaring_type = src->declaring_type;
+        dst->canonical_record = src->canonical_record;
         dst->bind = src->bind;
         dst->snake_name = str_dup(src->snake_name, strlen(src->snake_name));
         dst->camel_name = str_dup(src->camel_name, strlen(src->camel_name));
@@ -1493,6 +1703,8 @@ static int jube_compile_type(const JubeModuleDef* module,
             }
             jube_member_record_init(&records[base_ordinal], &parsed[i],
                                     override_bind, module);
+            records[base_ordinal].declaring_type = trec;
+            records[base_ordinal].canonical_record = &records[base_ordinal];
             continue;
         }
         int variants = matching_binds > 0 ? matching_binds : 1;
@@ -1506,6 +1718,8 @@ static int jube_compile_type(const JubeModuleDef* module,
             }
             JubeMemberRecord* rec = &records[out_count++];
             jube_member_record_init(rec, &parsed[i], bind, module);
+            rec->declaring_type = trec;
+            rec->canonical_record = rec;
             if (rec->kind == JUBE_MEMBER_METHOD) {
 #ifndef NDEBUG
                 method_count++;
@@ -1721,8 +1935,7 @@ static LambdaParseValue jube_direct_reduce(void* context,
     }
 
     if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD) {
-        if (!sink->current_type.name || sink->current_type.member_count >=
-                JUBE_PARSE_MEMBER_CAPACITY || reduction->child_count < 1) {
+        if (!sink->current_type.name || reduction->child_count < 1) {
             jube_direct_fail(sink, "invalid object field reduction in interface declaration");
             return (LambdaParseValue)(uintptr_t)value;
         }
@@ -1732,8 +1945,14 @@ static LambdaParseValue jube_direct_reduce(void* context,
             jube_direct_fail(sink, "object field is missing its type slot");
             return (LambdaParseValue)(uintptr_t)value;
         }
-        JubeParsedMember* member = &sink->current_type.members[
-            sink->current_type.member_count];
+        // interface size follows declared metadata, including large property catalogs.
+        if (!sink->current_type.members)
+            sink->current_type.members = new lam::ArrayList<JubeParsedMember>();
+        if (!sink->current_type.members->append(JubeParsedMember{})) {
+            jube_direct_fail(sink, "cannot grow object fields in interface declaration");
+            return (LambdaParseValue)(uintptr_t)value;
+        }
+        JubeParsedMember* member = &sink->current_type.members->back();
         sink->current_type.member_count++;
         memset(member, 0, sizeof(*member));
         if (!jube_direct_copy_name(sink, reduction->detail_token, &member->name)) {

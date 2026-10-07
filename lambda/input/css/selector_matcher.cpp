@@ -54,6 +54,12 @@ SelectorMatcher* selector_matcher_create(Pool* pool) {
         return NULL;
     }
 
+    selector_matcher_init(matcher, pool);
+    return matcher;
+}
+
+void selector_matcher_init(SelectorMatcher* matcher, Pool* pool) {
+    *matcher = {};
     matcher->pool = pool;
     matcher->cache_enabled = false; // Disabled for now - can add HashMap caching later
     matcher->strict_mode = false;
@@ -76,7 +82,6 @@ SelectorMatcher* selector_matcher_create(Pool* pool) {
     matcher->bloom_filter_size = 0;
     matcher->bloom_filter = NULL;
 
-    return matcher;
 }
 
 void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* scope_element) {

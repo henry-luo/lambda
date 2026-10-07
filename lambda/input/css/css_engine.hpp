@@ -259,6 +259,9 @@ const CssPropertyRegistration* css_find_script_property_registration(DomDocument
     const char* name, size_t name_length);
 const CssPropertyRegistration* css_find_document_property_registration(DomDocument* doc,
     const char* name, size_t name_length = (size_t)-1);
+typedef bool (*CssRegistrationVisitor)(void*, const CssPropertyRegistration*);
+bool css_visit_document_property_registrations(DomDocument* doc,
+    CssRegistrationVisitor visitor, void* context);
 bool css_register_document_property(DomDocument* doc,
     const CssPropertyRegistration* registration, size_t name_length);
 void css_stylesheet_mark_changed(CssStylesheet* stylesheet);

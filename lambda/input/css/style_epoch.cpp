@@ -412,7 +412,7 @@ static void style_builder_add(StyleEpochManager* manager,
         // Replacement requires the caller to clear the old contribution.
         // Refusing to chain onto it preserves the explicit API contract.
         builder->eligible = false;
-    } else if (style_tree_has_inline_declarations(element->specified_style)) {
+    } else if (style_tree_has_local_declarations(element->specified_style)) {
         builder->eligible = false;
     }
     size_t bucket = style_builder_bucket(manager, element);

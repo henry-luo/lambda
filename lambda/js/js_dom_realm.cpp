@@ -30,8 +30,10 @@
 #include "js_function.hpp"
 #include "js_props.h"
 #include "../dom/dom_ops.h"
+#include "../input/css/css_style.hpp"
 #include "js_runtime_state.hpp"
 #include "../jube/jube_registry.h"
+#include "../jube/jube_interface.h"
 
 // Range/Selection wrappers are Jube host types; the realm publishes their
 // prototypes, the module owns their identity.
@@ -519,7 +521,54 @@ extern "C" void dom_install_collection_globals(void) {
     // CSSStyleSheet is constructible unlike the other CSSOM collection interfaces.
     dom_install_value_constructor(global, "CSSStyleSheet",
         dom_cssom_stylesheet_constructor, true);
-    _install_iface(global, "CSSNestedDeclarations");
+    _install_iface(global, "StyleSheet");
+    _link_iface_proto(global, "CSSStyleSheet", "StyleSheet");
+    _install_iface(global, "CSSRule");
+    _install_iface(global, "CSSGroupingRule");
+    _link_iface_proto(global, "CSSGroupingRule", "CSSRule");
+    _install_iface(global, "CSSConditionRule");
+    _link_iface_proto(global, "CSSConditionRule", "CSSGroupingRule");
+    // native rule dispatch and exposed interface chains share one type catalog.
+    for (unsigned type = CSS_RULE_STYLE; type <= CSS_RULE_PROPERTY; type++) {
+        CssRule rule = {};
+        rule.type = (CssRuleType)type;
+        const CssRuleInterface* interface = css_rule_interface(&rule);
+        _install_iface(global, interface->name);
+        _link_iface_proto(global, interface->name, interface->base);
+    }
+    _install_iface(global, "CSSLayerStatementRule");
+    _link_iface_proto(global, "CSSLayerStatementRule", "CSSRule");
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    _install_iface(global, #name); \
+    _link_iface_proto(global, #name, "CSSStyleDeclaration");
+#include "../input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
+    static const struct { const char* name; int value; } css_rule_constants[] = {
+        {"STYLE_RULE", 1}, {"CHARSET_RULE", 2}, {"IMPORT_RULE", 3}, {"MEDIA_RULE", 4},
+        {"FONT_FACE_RULE", 5}, {"PAGE_RULE", 6}, {"KEYFRAMES_RULE", 7},
+        {"KEYFRAME_RULE", 8}, {"MARGIN_RULE", 9}, {"NAMESPACE_RULE", 10},
+        {"COUNTER_STYLE_RULE", 11}, {"SUPPORTS_RULE", 12},
+    };
+    RootFrame css_rule_roots(2);
+    Rooted<Item> css_rule_ctor(css_rule_roots,
+        js_get_key_cstr(global, "CSSRule"));
+    Rooted<Item> css_rule_proto(css_rule_roots,
+        _iface_proto(global, "CSSRule"));
+    for (const auto& constant : css_rule_constants) {
+        _set_ctor_int_constant(css_rule_ctor.get(), constant.name, constant.value);
+        _set_ctor_int_constant(css_rule_proto.get(), constant.name, constant.value);
+    }
+    // publish declared CSSOM members before scripts can inspect bare prototypes.
+#define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
+    jube_type_prototype(jube_iface_type_by_name(#host, sizeof(#host) - 1));
+#define CSS_RULE_INTERFACE_ALIAS(...)
+#include "../input/css/css_rule_interfaces.def"
+#undef CSS_RULE_INTERFACE_ALIAS
+#undef CSS_RULE_INTERFACE
+#define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
+    jube_type_prototype(jube_iface_type_by_name(#host, sizeof(#host) - 1));
+#include "../input/css/css_declaration_interfaces.def"
+#undef CSS_DECLARATION_INTERFACE
     _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
     _install_collection_iterator(global, "RadioNodeList");

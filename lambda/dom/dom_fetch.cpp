@@ -683,6 +683,11 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         url = resolved_url;
     }
 
+    if (document && !input_resource_policy_admits(document->resource_policy, url)) {
+        return dom_realm_promise_reject(dom_realm_new_error_named(
+            make_string_item("TypeError"), make_string_item("fetch: resource blocked by document policy")));
+    }
+
     // ---- Local-file fast path -------------------------------------------------
     // For relative URLs (no scheme) or explicit `file://` URLs, resolve against
     // the document base directory and read directly. This makes WPT tests that

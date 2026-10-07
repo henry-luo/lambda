@@ -162,7 +162,7 @@ float layout_aspect_ratio_height(float width, float aspect_ratio) {
     return isfinite(height) && height <= MAX_LAYOUT_DIMENSION ? height : -1.0f;
 }
 
-static bool layout_aspect_ratio_value_has_auto(const CssValue* value) {
+bool layout_aspect_ratio_value_has_auto(const CssValue* value) {
     return layout_css_value_any(value, [](const CssValue* item) {
         return item->type == CSS_VALUE_TYPE_KEYWORD &&
                item->data.keyword == CSS_VALUE_AUTO;
@@ -607,7 +607,7 @@ static bool intrinsic_apply_ua_font_defaults(DomElement* element, FontProp* font
     } else if ((tag == MARKUP_NAME_CODE || tag == MARKUP_NAME_KBD || tag == MARKUP_NAME_SAMP ||
                 tag == MARKUP_NAME_TT || tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING ||
                 tag == MARKUP_NAME_XMP) && !specified_family) {
-        radiant_retain_font_family(font, lam::GcPtr<char>((char*)"monospace"));
+        radiant_retain_font_family(font, lam::static_borrow("monospace"));
         changed = true;
     }
     return changed;
@@ -2741,12 +2741,18 @@ static float intrinsic_replaced_width_with_max_height(LayoutContext* lycon,
     return ratio_limited_width < width ? ratio_limited_width : width;
 }
 
-static float intrinsic_image_height(ImageSurface* image, float constrained_width,
+static float intrinsic_image_height(DomElement* element, ImageSurface* image, float constrained_width,
                                     bool allow_upscale) {
-    float height = (float)image->height;
-    if (constrained_width > 0.0f && image->width > 0 &&
-        (allow_upscale || image->format == IMAGE_FORMAT_SVG || constrained_width < image->width)) {
-        height = constrained_width * (float)image->height / (float)image->width;
+    float width, height;
+    if (!layout_image_intrinsic_size(element, image, &width, &height)) return 0.0f;
+    ReplacedIntrinsicFacts facts = {};
+    layout_replaced_image_facts(&facts, image, layout_image_orientation_uses_from_image(element));
+    float ratio = image->format == IMAGE_FORMAT_SVG
+        ? facts.has_natural_aspect_ratio ? facts.natural_aspect_ratio : 0.0f : width / height;
+    // grid/flex height queries must not synthesize a ratio from an SVG's decoder fallback.
+    if (constrained_width > 0.0f && ratio > 0.0f &&
+        (allow_upscale || image->format == IMAGE_FORMAT_SVG || constrained_width < width)) {
+        height = constrained_width / ratio;
     }
     return height;
 }
@@ -2823,7 +2829,7 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
     size_t src_len = strlen(src_value);
     StrBuf* src_buf = strbuf_new_cap(src_len);
     strbuf_append_str_n(src_buf, src_value, src_len);
-    block->embed->img = lam::up(load_image(lycon->ui_context, src_buf->str));
+    block->embed->img = lam::up(load_document_image(lycon->doc, lycon->ui_context, src_buf->str));
     strbuf_free(src_buf);
     return block->embedp()->img;
 }
@@ -3814,7 +3820,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             ImageSurface* image = layout_ensure_replaced_image_surface(
                 lycon, view_block_replaced, element);
             if (image) {
-                replaced_width = (float)image->width;
+                float natural_height;
+                layout_image_intrinsic_size(element, image, &replaced_width, &natural_height);
             }
             // CSS 2.1 §10.3.2: HTML width attribute is a presentational hint that
             // overrides intrinsic dimensions. When <img width="128"> has a natural
@@ -3848,10 +3855,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     replaced_width = specified_width;
                 }
             }
-            if (image && (image->has_intrinsic_size || image->has_intrinsic_aspect_ratio)) {
+            if (image && replaced_facts.has_natural_aspect_ratio) {
+                float natural_width, natural_height;
+                layout_image_intrinsic_size(element, image, &natural_width, &natural_height);
                 replaced_width = intrinsic_replaced_width_with_max_height(
                     lycon, element, view_block_replaced, replaced_width,
-                    (float)image->width, (float)image->height);
+                    natural_width, natural_height);
             }
             // Broken images with alt text expose the rendered fallback's width
             // to shrink-to-fit parents, matching the later replaced layout path.
@@ -6458,7 +6467,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                         ? layout_content_size_from_border_box(view, view->block()->given_width, true)
                         : view->block()->given_width;
                 }
-                float img_height = intrinsic_image_height(img, image_query_width,
+                float img_height = intrinsic_image_height(element, img, image_query_width,
                                                           width_is_definite);
                 return img_height;
             }

@@ -2793,6 +2793,12 @@ static uint32_t state_map_set_bool_no_assert(DocState* state, void* node,
     return old_value ? 0 : 1;
 }
 
+static View* view_state_parent_in_document(DocState* state, View* view) {
+    DomDocument* doc = state && state->owner_store ? state->owner_store->document : nullptr;
+    // hover/active flags cannot be attached above the connected layout root.
+    return view && (!doc || view != doc->root) ? static_cast<View*>(view->parent) : nullptr;
+}
+
 static uint32_t state_map_sync_focus_path(DocState* state, View* focused,
                                           bool focus_visible) {
     if (!state || !focused) return 0;
@@ -2843,7 +2849,7 @@ static uint32_t view_state_sync_interaction_flag_path(DocState* state, DomNode* 
             }
         }
     }
-    for (View* node = target; node; node = static_cast<View*>(node->parent)) {
+    for (View* node = target; node; node = view_state_parent_in_document(state, node)) {
         if (strcmp(name, "hover") == 0) {
             if (!state_get_bool(state, node, STATE_HOVER)) changed++;
             view_state_set_hovered_internal(state, node, true, false);
@@ -3884,13 +3890,13 @@ static void doc_state_set_interaction_target(DocState* state, View* target,
     View* node = old_target;
     while (node) {
         set_state(state, node, false, false);
-        node = static_cast<View*>(node->parent);
+        node = view_state_parent_in_document(state, node);
     }
 
     node = target;
     while (node) {
         set_state(state, node, true, false);
-        node = static_cast<View*>(node->parent);
+        node = view_state_parent_in_document(state, node);
     }
 
     *target_slot = target;

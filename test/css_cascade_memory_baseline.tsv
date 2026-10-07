@@ -10,7 +10,7 @@
 # regress into one deep declaration snapshot per canonical entry, while the
 # cold-cache totals ensure this steady-state workload retains no optional
 # history. This follows D4.1.4v4, D4.2.1v3-D4.2.5v3, and
-# D4.5.1v3: pool lifetime and allocator attribution remain explicit.
+# D4.5.1v4: pool lifetime and allocator attribution remain explicit.
 #
 # The fixture set covers library-selector breadth (jqueryui), large external
 # stylesheet input (linuxmint), repeated content cards (netflix), a high-DOM
@@ -26,9 +26,12 @@
 # Only the affected structural ceilings change; byte budgets retain the prior capture.
 # D4.2.2v2-D4.2.4 and D4.5.1v3 continue to govern snapshot ownership.
 #
+# Priority-token removal restores the valid important heading font-family rule:
+# one immutable payload binds to six heading recipes in both cascade phases.
+# Byte budgets, recipe counts and cold-cache limits are unchanged.
 # fixture phase document_live document_live_delta work_live_delta css_live canonical_live canonical_live_delta entries bound_refs payloads payload_refs bound_entries cold_entries cold_bytes
-jqueryui initial 176242 67082 415 321604 321604 317508 78 327 411 763 78 0 0
-jqueryui recascade 176242 37770 104 321604 321604 0 78 327 411 763 78 0 0
+jqueryui initial 176242 67082 415 321604 321604 317508 78 327 412 769 78 0 0
+jqueryui recascade 176242 37770 104 321604 321604 0 78 327 412 769 78 0 0
 linuxmint initial 715354 502944 754 577222 577222 573126 154 506 594 1768 154 0 0
 linuxmint recascade 715354 243360 104 577222 577222 0 154 506 594 1768 154 0 0
 netflix initial 464141 355136 592 224337 224337 220241 57 245 283 628 57 0 0

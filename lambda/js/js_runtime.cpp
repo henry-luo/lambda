@@ -294,13 +294,13 @@ const JubeTypeDef* js_host_object_type(Item object) {
     return host_type ? jube_find_type_by_host_type(host_type) : NULL;
 }
 
-bool js_host_object_get_property(Item object, Item key, Item* out) {
-    if (jube_member_get(object, key, out)) return true;
+bool js_host_object_get_property(Item object, Item key, Item receiver, Item* out) {
+    if (jube_member_get_js(object, key, receiver, out)) return true;
     return false;
 }
 
-bool js_host_object_set_property(Item object, Item key, Item value, Item* out) {
-    if (jube_member_set(object, key, value, out)) return true;
+bool js_host_object_set_property(Item object, Item key, Item value, Item receiver, Item* out) {
+    if (jube_member_set_js(object, key, value, receiver, out)) return true;
     return false;
 }
 
@@ -4377,7 +4377,7 @@ static bool js_property_ops_property_set(Item object, Item key, Item* value,
     if (bypass_accessor_dispatch) return false;
     JsClass object_class = js_class_id(object);
     if (js_is_fixed_layout_iterator(object)) {
-        *out_result = *value;
+        *out_result = (Item){.item = ITEM_TRUE};
         return true;
     }
     if (object_class == JS_CLASS_PROCESS_ENV) {
@@ -4420,11 +4420,11 @@ static bool js_property_ops_property_set(Item object, Item key, Item* value,
         }
         // process.env performs its host side effect here; completing the same
         // Set avoids replaying the write through ordinary storage.
-        *out_result = *value;
+        *out_result = (Item){.item = ITEM_TRUE};
         return true;
     }
     if (object_class == JS_CLASS_PROXY) {
-        *out_result = js_proxy_trap_set(object, key, *value, receiver);
+        *out_result = js_proxy_trap_set_with_receiver(object, key, *value, receiver);
         return true;
     }
     return false;
@@ -4453,14 +4453,20 @@ static JsPropertyOpResult name(Item target, uint64_t lane, Item key, \
     return js_property_op_result((expression), completion); \
 }
 
-JS_HOST_META_KEY_OP(js_host_meta_get,
-    js_host_object_get_property(target, key, &completion))
+static JsPropertyOpResult js_host_meta_get(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)value; (void)descriptor;
+    Item completion = ItemNull;
+    bool handled = js_host_object_get_property(target, key, receiver, &completion);
+    return js_property_op_result(handled, completion);
+}
 
 static JsPropertyOpResult js_host_meta_set(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)descriptor;
     Item completion = ItemNull;
-    return js_property_op_result(js_host_object_set_property(target, key,
-        value, &completion), completion);
+    bool handled = js_host_object_set_property(target, key, value, receiver, &completion);
+    return js_property_op_result(handled, completion);
 }
 
 static JsPropertyOpResult js_host_meta_define_own(Item target, uint64_t lane,
@@ -7313,7 +7319,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         Item exotic_result = ItemNull;
         if (js_dispatch_property_op(JS_EXOTIC_SET, object, 0, key, receiver,
                 ItemNull, value, bypass_accessor_dispatch, &exotic_result)) {
-            return exotic_result;
+            return js_assignment_set_result(value, key, exotic_result, strict, object);
         }
     }
     // Setter property dispatch. Skip when writing the deleted sentinel
@@ -7843,7 +7849,7 @@ static Item js_set_storage_mode(Item object, Item key,
         if (js_dispatch_property_op(JS_EXOTIC_SET, object, 0, key, receiver,
                 ItemNull, value, bypass_accessor_dispatch, &out)) {
             js_note_event_handler_property_set(object, key, value);
-            return out;
+            return js_assignment_set_result(value, key, out, strict, object);
         }
     }
 
@@ -13505,7 +13511,8 @@ JS_RUNTIME_ARGS_BODY(js_intrinsic_css_supports_body,
     jube_internal_host_api()->dom_catalog->css_supports(
         argc > 0 ? args[0] : ItemNull, argc > 1 ? args[1] : ItemNull))
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_escape_body,
-    jube_internal_host_api()->dom_catalog->css_escape(argc > 0 ? args[0] : ItemNull))
+    argc < 1 ? js_throw_type_error("CSS.escape requires an argument") :
+        jube_internal_host_api()->dom_catalog->css_escape(args[0]))
 
 Item js_intrinsic_css_register_property_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
@@ -29543,17 +29550,20 @@ static Item js_iterator_cache_next_method(Item iterator) {
     return item_is_error(set_result) ? set_result : ItemNull;
 }
 
-static Item js_iterator_return_checked(Item iterator, bool cache_next,
+extern "C" Item js_iterator_return_checked(Item iterator, bool cache_next,
         const char* error_message) {
-    TypeId type = get_type_id(iterator);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && !js_is_js_array(iterator)) {
+    RootFrame roots(1);
+    Rooted<Item> iterator_root(roots, iterator);
+    TypeId type = get_type_id(iterator_root.get());
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && !js_is_js_array(iterator_root.get())) {
         return js_throw_type_error(error_message);
     }
     if (cache_next) {
-        Item status = js_iterator_cache_next_method(iterator);
+        // A next getter can collect; return the rooted iterator after that callback.
+        Item status = js_iterator_cache_next_method(iterator_root.get());
         if (item_is_error(status)) return status;
     }
-    return iterator;
+    return iterator_root.get();
 }
 
 static Item js_get_iterator_impl(Item iterable, bool cache_next) {
@@ -30212,14 +30222,13 @@ static JsPropertyOpResult js_promise_property_set(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
     JsPromisePropertyContext ctx;
     if (!js_promise_property_prepare(target, key, receiver, true, &ctx)) {
-        return {JS_PROPERTY_OP_COMPLETE, value};
+        return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
     }
     if (get_type_id(ctx.expando) != LMD_TYPE_MAP) {
         return {JS_PROPERTY_OP_COMPLETE, js_throw_type_error(
             "Cannot create Promise property storage")};
     }
-    Item stored = js_set_storage_mode(ctx.expando, ctx.key, value,
-        ctx.expando, true, false);
+    Item stored = js_set_completion_with_key(ctx.expando, ctx.key, value, ctx.receiver);
     return {JS_PROPERTY_OP_COMPLETE, stored};
 }
 

@@ -430,6 +430,8 @@ bool DomDocument::init(Input* source_input) {
     root = nullptr;
     // Factory allocation uses mem_calloc, so DomJsRuntime's constructor is bypassed.
     js.implicit_doctype = true;
+    js.mutation_records = js.inline_mutation_records;
+    js.mutation_record_capacity = DOM_JS_MUTATION_RECORD_CAP;
     return true;
 }
 
@@ -507,6 +509,8 @@ void DomDocument::destroy() {
         behavior_init_controls = nullptr;
     }
 
+    // adopted-document resources can destroy the physical backing heap.
+    dom_lifecycle_release_backing_roots(this);
     // Runtime-backed extension values must release their GC roots while the
     // document's retained Lambda runtime is still alive.
     DomDocumentResource* resource = resources;
@@ -524,9 +528,7 @@ void DomDocument::destroy() {
         lambda_runtime = nullptr;
     }
 
-    if (js.mutation_record_count > 0 || js.mutation_count > 0) {
-        dom_js_mutation_records_reset(this);
-    }
+    dom_js_mutation_records_destroy(this);
 
     // Canonical styles use independent pools and must disappear while the
     // document pool that owns their manager/list is still valid.
@@ -842,12 +844,9 @@ static bool dom_element_clear_custom_properties(DomElement* element,
             continue;
         }
         *slot = prop->next;
-        // Stylesheet cascade clones own only their record. Their source payload
-        // remains in the stylesheet pool, so retiring the record is safe here.
-        if (prop->declaration && prop->declaration->tree_owned_record &&
-            !prop->declaration->owns_payload) {
-            pool_free(element->doc->document_pool, prop->declaration);
-        }
+        if (prop->declaration && prop->declaration->tree_owned_record)
+            css_declaration_destroy_owned(prop->declaration,
+                                           element->doc->document_pool);
         pool_free(element->doc->document_pool, prop);
         removed = true;
     }
@@ -876,7 +875,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         // detaching here leaves reused boxes with an empty tree after recascade.
         return;
     } else if (element->specified_style) {
-        if (style_tree_has_inline_declarations(element->specified_style)) {
+        if (style_tree_has_local_declarations(element->specified_style)) {
             // Inline declarations are live DOM state. Reparse-on-recascade both
             // lost CSSOM writes and grew the document pool on every hover event.
             changed = style_tree_remove_non_inline_declarations(
@@ -990,6 +989,13 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_clear_custom_properties(element, false);
     style_epoch_selection_clear_element(element);
     if (element->ext) {
+        // the snapshot and its dynamic tracks survive relayout, then retire together.
+        CssTransitionElemState* transition = element->transition_state_prop();
+        if (transition) {
+            pool_free(transition->pool, transition->tracks);
+            pool_free(element->doc->document_pool, transition);
+        }
+        element->set_transition_state_prop(nullptr);
         for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
             if (element->ext->pseudo_styles[kind]) {
                 style_tree_retire_borrow_source(element->ext->pseudo_styles[kind]);
@@ -1178,6 +1184,53 @@ static bool dom_attribute_name_present(const char* name) {
     return name && name[0] != '\0';
 }
 
+struct DomAttributeValueEntry {
+    const char* chars;
+    String* value;
+};
+
+using DomAttributeValues = TypedHashMap<DomAttributeValueEntry,
+    HashMapCStrMemberKeyOps<DomAttributeValueEntry, &DomAttributeValueEntry::chars>>;
+
+struct DomAttributeValueCache : DomDocumentResourceData {
+    Input* input;
+    DomAttributeValues values;
+};
+
+static void dom_attribute_values_destroy(DomDocumentResourceData* resource) {
+    auto* cache = static_cast<DomAttributeValueCache*>(resource);
+    cache->values.destroy();
+    mem_free(cache);
+}
+
+static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder,
+                                   const char* value) {
+    DomAttributeValueCache* cache = nullptr;
+    for (DomDocumentResource* resource = doc->resources; resource; resource = resource->next) {
+        if (resource->destroy != dom_attribute_values_destroy) continue;
+        auto* candidate = static_cast<DomAttributeValueCache*>(resource->data);
+        if (candidate->input == doc->input) { cache = candidate; break; }
+    }
+    if (!cache) {
+        cache = static_cast<DomAttributeValueCache*>(
+            mem_calloc(1, sizeof(DomAttributeValueCache), MEM_CAT_LAYOUT));
+        if (!cache) return nullptr;
+        cache->input = doc->input;
+        if (!cache->values.init(0) ||
+            !dom_document_add_resource(doc, cache, dom_attribute_values_destroy)) {
+            dom_attribute_values_destroy(cache);
+            return nullptr;
+        }
+    }
+    DomAttributeValueEntry key = {value, nullptr};
+    if (const auto* found = cache->values.get(key)) return found->value;
+    // published attribute strings keep Input ownership; equal writes reuse immutable bytes.
+    String* string = builder->createString(value);
+    if (!string) return nullptr;
+    cache->values.set({string->chars, string});
+    return cache->values.oom() ? nullptr : string;
+}
+
 bool DomElement::set_attribute(const char* name, const char* value) {
     DomElement* element = this;
     if (!dom_attribute_name_present(name) || !value) {
@@ -1194,8 +1247,9 @@ bool DomElement::set_attribute(const char* name, const char* value) {
         Element* backing = dom_element_to_element(element);
         MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
 
-        // Create string value item
-        Item value_item = editor.builder()->createStringItem(value);
+        String* stored_value = dom_attribute_value(element->doc, editor.builder(), value);
+        if (!stored_value) return false;
+        Item value_item = {.item = s2it(stored_value)};
 
         // Update attribute via MarkEditor
         Item result = editor.elmt_update_attr(
@@ -1595,6 +1649,77 @@ static bool dom_element_uses_quirks_css(const DomElement* element) {
         is_quirks_mode((HtmlVersion)element->doc->html_version);
 }
 
+#ifndef LAMBDA_NO_CSS_INPUT
+static CssDeclaration* dom_parse_inline_declaration(const char* text,
+                                                    Pool* pool, bool quirks) {
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(text, strlen(text), pool, &token_count);
+    CssDeclaration* declaration = nullptr;
+    if (tokens && token_count > 0) {
+        int pos = 0;
+        declaration = css_parse_declaration_from_tokens_mode(tokens, &pos,
+            token_count, pool, quirks);
+    }
+    if (tokens) css_token_array_release(pool, tokens, token_count);
+    return declaration;
+}
+#endif
+
+bool dom_element_set_presentation_style(DomElement* element, const char* property,
+                                        const char* value, bool* changed) {
+    if (changed) *changed = false;
+#ifdef LAMBDA_NO_CSS_INPUT
+    return false;
+#else
+    if (!element || !element->doc || !property || !value) return false;
+    CssPropertyCode code = css_property_code_from_name(property);
+    if (code <= 0 || code >= CSS_PROPERTY_CUSTOM) return false;
+    CssDeclaration* old = style_tree_get_presentation_declaration(element->specified_style, code);
+    if (old && old->value_text && old->value_text_len == strlen(value) &&
+        memcmp(old->value_text, value, old->value_text_len) == 0) return true;
+    Pool* scratch = mem_pool_create((MemContext*)element->doc->services.mem_ctx,
+        MEM_ROLE_CSS, "css.presentation.parse");
+    if (!scratch) return false;
+    CssDeclaration* parsed = css_parse_property_declaration(property, strlen(property),
+        value, strlen(value), scratch);
+    bool accepted = parsed && parsed->property_code == code && !parsed->important &&
+        css_property_validate_value(code, parsed->value) &&
+        css_declaration_can_clone_owned(parsed);
+    CssDeclaration* owned = accepted ? css_declaration_clone_owned(parsed, {},
+        CSS_ORIGIN_ANIMATION, element->doc->document_pool) : nullptr;
+    mem_pool_destroy(scratch);
+    if (!owned) return false;
+    if (!style_epoch_ensure_owned(element)) {
+        css_declaration_destroy_owned(owned, element->doc->document_pool);
+        return false;
+    }
+    owned->presentation_value = true;
+    // A sample replaces its own layer without discarding authored fallbacks.
+    style_tree_remove_presentation_declarations(element->specified_style, code);
+    if (!style_tree_apply_declaration(element->specified_style, owned)) {
+        css_declaration_destroy_owned(owned, element->doc->document_pool);
+        return false;
+    }
+    element->style_version++;
+    element->set_needs_style_recompute(true);
+    element->set_styles_resolved(false);
+    if (changed) *changed = true;
+    return true;
+#endif
+}
+
+bool dom_element_clear_presentation_style(DomElement* element) {
+    if (!element || !element->specified_style || element->specified_style_shared()) return false;
+    bool changed = style_tree_remove_presentation_declarations(element->specified_style,
+        CSS_PROPERTY_UNKNOWN);
+    if (changed) {
+        element->style_version++;
+        element->set_needs_style_recompute(true);
+        element->set_styles_resolved(false);
+    }
+    return changed;
+}
+
 int dom_element_apply_inline_style(DomElement* element, const char* style_text) {
 #ifdef LAMBDA_NO_CSS_INPUT
     // reduced profiles retain the raw HTML style attribute without CSS parsing.
@@ -1607,12 +1732,16 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
     }
 
     int applied_count = 0;
+    Pool* parse_pool = mem_pool_create((MemContext*)element->doc->services.mem_ctx,
+        MEM_ROLE_CSS, "css.inline.parse");
+    if (!parse_pool) return 0;
 
     // Parse the style text - split by semicolons
     // Example: "color: red; font-size: 14px; background: blue"
     size_t style_len = strlen(style_text);
-    char* text_copy = pool_dup_n(element->doc->document_pool, style_text, style_len);
+    char* text_copy = pool_dup_n(parse_pool, style_text, style_len);
     if (!text_copy) {
+        mem_pool_destroy(parse_pool);
         return 0;
     }
 
@@ -1674,19 +1803,21 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
         // Parse the property using the proper CSS tokenizer and parser
         // Format the declaration string for parsing
         size_t decl_str_len = strlen(prop_name) + strlen(prop_value) + 3; // "name: value"
-        char* decl_str = (char*)pool_alloc(element->doc->document_pool, decl_str_len);
+        char* decl_str = (char*)pool_alloc(parse_pool, decl_str_len);
         if (decl_str) {
             snprintf(decl_str, decl_str_len, "%s:%s", prop_name, prop_value);
 
-            // Tokenize the declaration
-            size_t token_count = 0;
-            CssToken* tokens = css_tokenize(decl_str, strlen(decl_str), element->doc->document_pool, &token_count);
-
-            if (tokens && token_count > 0) {
-                int pos = 0;
-                CssDeclaration* decl = css_parse_declaration_from_tokens_mode(tokens,
-                    &pos, token_count, element->doc->document_pool,
-                    dom_element_uses_quirks_css(element));
+            CssDeclaration* parsed = dom_parse_inline_declaration(decl_str,
+                parse_pool, dom_element_uses_quirks_css(element));
+            if (parsed) {
+                // Mutable inline values need an owned payload; parser scratch
+                // otherwise accumulates for every CSSOM write (D4.5.1v4).
+                CssDeclaration* decl = css_declaration_can_clone_owned(parsed)
+                    ? css_declaration_clone_owned(parsed, parsed->specificity,
+                        CSS_ORIGIN_AUTHOR, element->doc->document_pool)
+                    : dom_parse_inline_declaration(decl_str,
+                        element->doc->document_pool,
+                        dom_element_uses_quirks_css(element));
 
                 if (decl) {
                     // Set origin to author (inline styles are author origin)
@@ -1703,19 +1834,17 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
                     bool applied = dom_element_apply_declaration(element, decl);
                     if (applied) {
                         applied_count++;
+                    } else if (decl->tree_owned_record) {
+                        css_declaration_destroy_owned(decl,
+                            element->doc->document_pool);
                     }
                 }
             }
-            if (tokens) {
-                css_token_array_release(element->doc->document_pool, tokens, token_count);
-            }
-            // The tokenizer copies retained declaration data into document
-            // storage; its mutable source buffer is only parse-call scratch.
-            pool_free(element->doc->document_pool, decl_str);
+            pool_free(parse_pool, decl_str);
         }
     }
 
-    pool_free(element->doc->document_pool, text_copy);
+    mem_pool_destroy(parse_pool);
     return applied_count;
 #endif
 }
@@ -1751,6 +1880,59 @@ bool dom_element_remove_inline_styles(DomElement* element) {
     }
 
     return removed_attr || removed_decl;
+}
+
+static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
+    const char* name, const CssDeclaration* ceiling = nullptr,
+    const CssRollbackFilter* filters = nullptr) {
+    CssCustomProp* winner = nullptr;
+    for (CssCustomProp* variable = variables; variable; variable = variable->next) {
+        if (!css_custom_property_name_matches(variable->name, name)) continue;
+        if (variable->declaration &&
+            !css_declaration_cascade_eligible(variable->declaration, ceiling, filters)) continue;
+        if (!winner || !winner->declaration || !variable->declaration ||
+            css_declaration_cascade_compare(variable->declaration, winner->declaration) > 0) {
+            winner = variable;
+        }
+    }
+    if (winner && css_declaration_is_rollback(winner->declaration)) {
+        CssRollbackFilter filter = {winner->declaration, filters};
+        return css_custom_property_winner(variables, name, winner->declaration, &filter);
+    }
+    return winner;
+}
+
+// registered-property computation needs the same rollback winner without inherited lookup.
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name) {
+    CssCustomProp* winner = element ? css_custom_property_winner(element->css_variables, name) : nullptr;
+    return winner ? winner->value : nullptr;
+}
+
+// return the declaration owner so inherited references use its computed environment.
+const CssValue* dom_element_lookup_custom_property(DomElement* element,
+                                                  const char* var_name,
+                                                  DomElement** owner) {
+    if (owner) *owner = nullptr;
+    if (!element || !var_name) return nullptr;
+    while (element) {
+        // Check if this element has CSS variables
+        if (element->css_variables) {
+            CssCustomProp* winner = css_custom_property_winner(element->css_variables, var_name);
+            if (winner) {
+                CssEnum keyword = winner->value && winner->value->type == CSS_VALUE_TYPE_KEYWORD
+                    ? winner->value->data.keyword : CSS_VALUE_NONE;
+                if (keyword == CSS_VALUE_INITIAL) return nullptr;
+                if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
+                    element = dom_parent_element(element);
+                    continue;
+                }
+                if (owner) *owner = element;
+                return winner->value;
+            }
+        }
+        element = dom_parent_element(element);
+    }
+    return nullptr;
 }
 
 bool css_custom_property_name_matches(const char* stored_name,
@@ -1849,6 +2031,10 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
                 if (element_decl) element_decl->scope_proximity = scope_proximity;
                 if (element_decl && dom_element_apply_declaration(element, element_decl)) {
                     applied_count++;
+                } else if (element_decl) {
+                    // rejected cascade copies never enter an owned style tree
+                    css_declaration_destroy_owned(element_decl,
+                        element->doc->document_pool);
                 }
             }
         }
@@ -2484,6 +2670,17 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
     if (!parent || !old_child || !new_child) return false;
     if (old_child->parent != parent) return false;
 
+    // the documentElement omits its reverse doctype link; retain that forward sibling.
+    DomNode* previous = old_child->prev_sibling;
+    if (!previous && parent->first_child != old_child) {
+        for (DomNode* sibling = parent->first_child; sibling; sibling = sibling->next_sibling) {
+            if (sibling->next_sibling == old_child) {
+                previous = sibling;
+                break;
+            }
+        }
+    }
+
     // Reinsertion before the retirement checkpoint cancels deferred recycling.
     dom_node_cancel_detached(parent->doc, new_child);
 
@@ -2492,8 +2689,8 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
     new_child->prev_sibling = old_child->prev_sibling;
     new_child->next_sibling = old_child->next_sibling;
 
-    if (old_child->prev_sibling) {
-        old_child->prev_sibling->next_sibling = lam::own(new_child);
+    if (previous) {
+        previous->next_sibling = lam::own(new_child);
     } else {
         parent->first_child = lam::own(new_child);
     }
@@ -2792,6 +2989,7 @@ DomText* DomText::create_detached(String* native_string, DomDocument* doc) {
     if (!dom_node_registry_register(doc, text_node, sizeof(DomText), true)) {
         return nullptr;
     }
+    dom_node_registry_set_backing_value(doc, text_node, Item{.item = s2it(native_string)});
 
     return text_node;
 }
@@ -2813,6 +3011,7 @@ bool dom_text_adopt_document_string(DomText* text_node, DomDocument* doc,
     text_node->text = lam::up(string->chars);
     text_node->length = string->len;
     text_node->set_owns_native_string(true);
+    dom_node_registry_set_backing_value(doc, text_node, Item{.item = s2it(string)});
     return true;
 }
 
@@ -2995,6 +3194,7 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     }
     text_node->text = lam::up(text_node->native_string->chars);
     text_node->length = text_node->native_string->len;
+    dom_node_registry_set_backing_value(parent->doc, text_node, new_string_item);
 
     if (result.element != dom_element_to_element(parent)) {
         log_error("dom_text_set_content: inline editor changed backing identity");
@@ -3294,6 +3494,7 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
     if (!dom_node_registry_register(doc, comment_node, sizeof(DomComment), true)) {
         return nullptr;
     }
+    dom_node_registry_set_backing_source(doc, comment_node, native_element);
 
     return comment_node;
 }
@@ -3393,6 +3594,7 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
 
     // Update DomComment to point to new String
     comment_node->native_element = lam::up(result.element);
+    dom_node_registry_set_backing_source(parent->doc, comment_node, result.element);
     String* new_string = new_string_item.get_string();
     if (!new_string) {
         log_error("dom_comment_set_content: replacement string disappeared");

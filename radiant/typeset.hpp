@@ -43,6 +43,8 @@ struct TypesetItem {
     TypesetGlue glue;
     TypesetBreak boundary;
     lam::Up<const TypesetRecord> paint;
+    TypesetBreak before;
+    bool has_before; // optional boundary before this item; zero-initialized producers retain existing behavior
 };
 
 struct TypesetResume {
@@ -59,6 +61,7 @@ struct TypesetPacking {
 struct TypesetLineCandidate {
     size_t first, next, paint_first, paint_end;
     float width, height, depth;
+    float baseline; // optional producer strut; zero preserves legacy line-height packing
     double cost;
     int32_t penalty;
     TypesetPacking packing;
@@ -70,6 +73,8 @@ struct TypesetParagraph;
 typedef size_t (*TypesetLineAlternativesFn)(const TypesetParagraph* paragraph, size_t first,
     float width, TypesetLineCandidate* candidates, size_t capacity, void* context);
 typedef size_t (*TypesetLineChooseFn)(const TypesetLineCandidate* candidates, size_t count, void* context);
+typedef bool (*TypesetItemMeasureFn)(const TypesetParagraph* paragraph, size_t index,
+    float width, TypesetMetrics* metrics, void* context);
 struct TypesetParagraph {
     const TypesetItem* items;
     size_t count;
@@ -77,6 +82,8 @@ struct TypesetParagraph {
     TypesetLineAlternativesFn alternatives;
     TypesetLineChooseFn choose;
     void* context;
+    TypesetItemMeasureFn measure; // pure width-specific metrics; source items stay immutable through retries
+    float minimum_baseline;
 };
 
 enum TypesetStatus : uint8_t {

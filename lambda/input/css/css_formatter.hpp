@@ -75,6 +75,8 @@ const char* css_format_stylesheet(CssFormatter* formatter, CssStylesheet* styles
  * Format a single rule to string
  */
 const char* css_format_rule(CssFormatter* formatter, CssRule* rule);
+void css_append_identifier(StringBuf* output, const char* text, size_t length);
+const char* css_format_page_selector_tokens(const CssToken* tokens, int start, int end, Pool* pool);
 
 /**
  * Format a selector group to string

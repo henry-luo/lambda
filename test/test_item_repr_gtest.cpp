@@ -16,6 +16,7 @@
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/runtime/type_contract.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/input/input.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/memtrack.h"
 
@@ -471,7 +472,9 @@ TEST_F(RuntimeShapeTransition, PackedAssignmentsRebuildWithoutMovingFixedSlots) 
     // runtime rebuilds must not publish execution-pool shapes into a cached
     // compiler registry that outlives this execution (D8.5.1v7).
     EXPECT_EQ(input.type_list->length, source_type_count);
-    EXPECT_EQ(((TypeMap*)map->type)->type_index, -1);
+    // D8.5.1v7: a runtime shape never joins the source's type list; a runtime
+    // tree node's type_index indexes the tree's own list (D3.4.3v5)
+    EXPECT_FALSE(type_tree_owns(&input, (TypeMap*)map->type));
 }
 
 TEST_F(RuntimeShapeTransition, ArrayNumIntLaneRoundTripsAndWidensSafely) {
@@ -722,7 +725,9 @@ TEST_F(RuntimeShapeTransition, ElementContentAndAttributesKeepSeparateStorage) {
     EXPECT_EQ(element->items[0].get_int64(), content_int64);
     EXPECT_EQ(element->items[1].get_double(), content_float);
     EXPECT_EQ(input.type_list->length, source_type_count);
-    EXPECT_EQ(map_type->type_index, -1);
+    // D8.5.1v7: a runtime shape never joins the source's type list; a retype
+    // target's type_index indexes the runtime tree's own list (D3.4.3v5)
+    EXPECT_FALSE(type_tree_owns(&input, map_type));
 }
 
 TEST_F(RuntimeShapeTransition, OpenFieldGrowthDoesNotExtendCompilerTypeList) {
@@ -735,7 +740,9 @@ TEST_F(RuntimeShapeTransition, OpenFieldGrowthDoesNotExtendCompilerTypeList) {
         {.item = i2it(99)}).item, ItemNull.item);
     EXPECT_EQ(lambda_int_item_value(shape_transition_read_field(map, key)), 99);
     EXPECT_EQ(input.type_list->length, source_type_count);
-    EXPECT_EQ(((TypeMap*)map->type)->type_index, -1);
+    // D8.5.1v7: a runtime shape never joins the source's type list; a runtime
+    // tree node's type_index indexes the tree's own list (D3.4.3v5)
+    EXPECT_FALSE(type_tree_owns(&input, (TypeMap*)map->type));
 }
 
 TEST_F(RuntimeShapeTransition, MatchResultsDoNotExtendCompilerTypeList) {
@@ -750,9 +757,18 @@ TEST_F(RuntimeShapeTransition, MatchResultsDoNotExtendCompilerTypeList) {
     for (int index = 0; index < 2; index++) {
         Item match = matches.array->items[index];
         ASSERT_EQ(get_type_id(match), LMD_TYPE_MAP);
-        EXPECT_EQ(((TypeMap*)match.map->type)->type_index, -1);
+        EXPECT_FALSE(type_tree_owns(&input, (TypeMap*)match.map->type));
     }
     EXPECT_EQ(input.type_list->length, source_type_count);
+    // Impl_Map_Transition_Coverage P3: every match map of one field list shares
+    // the runtime tree's node, rather than minting a TypeMap per match
+    EXPECT_EQ(matches.array->items[0].map->type, matches.array->items[1].map->type);
+    Item again = fn_find2({.item = s2it(source)}, {.item = s2it(needle)});
+    ASSERT_EQ(get_type_id(again), LMD_TYPE_ARRAY);
+    EXPECT_EQ(again.array->items[0].map->type, matches.array->items[0].map->type);
+    if (Input* tree = runtime_shape_tree()) {
+        EXPECT_TRUE(type_tree_owns(tree, (TypeMap*)matches.array->items[0].map->type));
+    }
 }
 
 TEST_F(RuntimeShapeTransition, ObjectShapeMutationRebuildsPackedFields) {

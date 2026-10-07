@@ -60,6 +60,7 @@
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
 #ifndef LAMBDA_NO_JS
+#include "../radiant/view.hpp"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // JS result and exception-lane helpers
 #include "dom/dom.h"               // JS DOM document/session bridge
@@ -95,7 +96,8 @@ char* js_load_script_source_from_cache(const char* path,
                                        const char* profile,
                                        const char* execution_mode,
                                        bool module_mode,
-                                       size_t* out_length);
+                                       size_t* out_length,
+                                       InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK);
 extern unsigned int g_js_mir_optimize_level;
 
 #if !defined(LAMBDA_NO_JS) || defined(LAMBDA_RUBY) || defined(LAMBDA_BASH)
@@ -227,11 +229,6 @@ static bool lambda_cli_has_core_source_extension(const char* path) {
 static const int JS_DOCUMENT_VIEWPORT_WIDTH = 800;
 static const int JS_DOCUMENT_VIEWPORT_HEIGHT = 600;
 
-// This is placed before the batch helper so it can share the normal CLI
-// document loader without duplicating document construction.
-extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
-    bool track_source_lines, bool execute_scripts);
 extern "C" bool radiant_eval_context_switch(EvalContext* target);
 #endif // LAMBDA_NO_JS
 
@@ -3689,7 +3686,21 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  -vh, --viewport-height   Viewport height in CSS pixels (default: auto-size to content)\n");
             printf("  -s, --scale              Raster export density (default: 1.0; does not change layout)\n");
             printf("  --pixel-ratio            Device scale for HiDPI/Retina (default: 1.0; legacy option spelling)\n");
-            printf("  --paged                  Experimental HTML/Lambda paged PDF; CSS @page size or A4 fallback\n");
+            printf("  --paged                  Experimental HTML/Lambda pages; CSS @page size or A4 fallback\n");
+            fputs("  --block-remote-resources  Use local document dependencies for paged export\n", stdout);
+            printf("  --pages <selection>      Preview physical pages: all, none, or 1,3-5 (default: all)\n");
+            printf("  --export-pages <sel>     Explicit PDF page selection; preview filtering does not filter PDF\n");
+            printf("  --thumbnail-page <N>     PNG/JPEG/SVG of physical page N, independent of preview placement\n");
+            printf("  --page-grid <RxC>        Preview rows x columns per group (default: 1x1)\n");
+            printf("  --page-fill <order>      row or column (default: row)\n");
+            printf("  --page-groups <axis>     vertical or horizontal (default: vertical)\n");
+            printf("  --page-scale <scale>     Preview page scale (default: 1; separate from export density)\n");
+            printf("  --page-padding <px>     Preview root padding (default: 0)\n");
+            printf("  --page-column-gap <px>  Gap between preview columns (default: 0)\n");
+            printf("  --page-row-gap <px>     Gap between preview rows (default: 0)\n");
+            printf("  --page-group-gap <px>   Gap between preview groups (default: 0)\n");
+            printf("  --book [--book-page N]   Preview the original facing pair containing N, or first selected pair\n");
+            printf("  --right-binding         Use right binding for book preview (all preview options need --paged)\n");
             printf("  --theme <name>           Color theme for graph diagrams (default: zinc-dark)\n");
             printf("                           Dark: tokyo-night, nord, dracula, catppuccin-mocha, one-dark, github-dark\n");
             printf("                           Light: github-light, solarized-light, catppuccin-latte, zinc-light\n");
@@ -3701,6 +3712,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  %s render script.ls -o output.pdf         # Render Lambda script result\n", argv[0]);
             printf("  %s render index.html -o output.pdf        # Auto-size to content\n", argv[0]);
             printf("  %s render book.html --paged -o book.pdf   # Physical pages from print CSS\n", argv[0]);
+            printf("  %s render book.html --paged --page-grid 2x2 --page-padding 8 -o preview.png\n", argv[0]);
+            printf("  %s render book.html --paged --book-page 6 -o spread.svg\n", argv[0]);
+            printf("  %s render book.html --paged --thumbnail-page 3 --scale .25 -o thumb.jpg\n", argv[0]);
             printf("  %s render index.html -o output.png        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.jpg        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport size\n", argv[0]);
@@ -3721,6 +3735,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         const char* theme_name = NULL;  // Graph theme name
         const char* graph_view_key = NULL;
         bool paged = false;
+        bool paged_options_given = false;
+        RenderPagedOptions paged_options = render_paged_options_default();
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -3757,9 +3773,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--scale") == 0) {
                 if (i + 1 < argc) {
                     i++;
-                    output_scale = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
-                    if (output_scale <= 0.0f) {
-                        printf("Error: Invalid scale '%s'. Must be a positive number.\n", argv[i]);
+                    if (!render_output_parse_extent(argv[i], &output_scale)) {
+                        printf("Error: Invalid scale '%s'. Must be a finite positive number.\n", argv[i]);
                         return lambda_main_finish(1);
                     }
                 } else {
@@ -3769,9 +3784,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             } else if (strcmp(argv[i], "--pixel-ratio") == 0) {
                 if (i + 1 < argc) {
                     i++;
-                    device_scale = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
-                    if (device_scale <= 0.0f) {
-                        printf("Error: Invalid pixel-ratio '%s'. Must be a positive number.\n", argv[i]);
+                    if (!render_output_parse_extent(argv[i], &device_scale)) {
+                        printf("Error: Invalid pixel-ratio '%s'. Must be a finite positive number.\n", argv[i]);
                         return lambda_main_finish(1);
                     }
                 } else {
@@ -3780,6 +3794,16 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             } else if (strcmp(argv[i], "--paged") == 0) {
                 paged = true;
+            } else if (render_paged_option_arity(argv[i]) >= 0) {
+                const char* name = argv[i];
+                int arity = render_paged_option_arity(name);
+                const char* value = arity && i + 1 < argc ? argv[++i] : nullptr;
+                const char* error = nullptr;
+                if (!render_paged_option_apply(&paged_options, name, value, &error)) {
+                    printf("Error: %s: %s\n", name, error);
+                    return lambda_main_finish(1);
+                }
+                paged_options_given = true;
             } else if (strcmp(argv[i], "--theme") == 0 || strcmp(argv[i], "-t") == 0) {
                 if (i + 1 < argc) {
                     theme_name = argv[++i];
@@ -3866,11 +3890,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
 
         const char* output_ext = file_path_ext(output_file);
-        if (paged && (!output_ext || strcmp(output_ext, ".pdf") != 0 ||
-                !input_ext || (strcmp(input_ext, ".html") != 0 && strcmp(input_ext, ".htm") != 0 &&
+        if (paged_options_given && !paged) {
+            fputs("Error: paged preview/export options require --paged\n", stderr);
+            return lambda_main_finish(1);
+        }
+        if (paged && (!input_ext || (strcmp(input_ext, ".html") != 0 && strcmp(input_ext, ".htm") != 0 &&
                                strcmp(input_ext, ".ls") != 0))) {
-            log_error("[EXPORT_PAGED] --paged currently requires HTML or Lambda input and PDF output");
-            fputs("Error: --paged currently requires HTML or Lambda input and PDF output\n", stderr);
+            log_error("[EXPORT_PAGED] --paged currently requires HTML or Lambda input");
+            fputs("Error: --paged currently requires HTML or Lambda input\n", stderr);
             return lambda_main_finish(1);
         }
         if (input_ext && strcmp(input_ext, ".pdf") == 0) {
@@ -3903,9 +3930,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             exit_code = render_transform
                 ? render_document_transform_to_output_target(html_file, render_transform,
                     render_options, render_option_count, output_file, viewport_width,
-                    viewport_height, output_scale, device_scale, 85, paged)
+                    viewport_height, output_scale, device_scale, 85, paged, &paged_options)
                 : render_html_to_output_target(html_file, output_file,
-                    viewport_width, viewport_height, output_scale, device_scale, 85, paged);
+                    viewport_width, viewport_height, output_scale, device_scale, 85, paged, &paged_options);
         }
         else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");

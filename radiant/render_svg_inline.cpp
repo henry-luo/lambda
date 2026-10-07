@@ -478,6 +478,7 @@ struct SvgStyleEntry {
     DomElement* node;
     CssDeclaration** inline_declarations;
     size_t inline_count;
+    bool inline_parsed;
     SvgStyleProperty* properties;
 };
 
@@ -525,9 +526,6 @@ static void svg_style_index_tree(SvgStyleContext* style, DomElement* node) {
     SvgStyleEntry entry = {};
     entry.element = dom_element_to_element(node);
     entry.node = node;
-    const char* inline_text = node->get_attribute("style");
-    if (inline_text) entry.inline_declarations = css_parse_declaration_list_text(
-        inline_text, strlen(inline_text), style->pool, &entry.inline_count);
     SvgStyleMap::set(style->entries, entry);
     // parsed images retain source Elements; inline UI inputs may use the embedded one.
     Element* source = dom_element_render_source(node);
@@ -619,6 +617,7 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
         style->isolated_document = input ? dom_document_create(input) : nullptr;
         style->document = style->isolated_document;
         if (!style->document) { svg_style_destroy(style); return false; }
+        style->document->resource_policy = host ? host->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
         dom_document_borrow_input_resources(style->document);
         style->document->services.svg_image_document = image_document;
         if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
@@ -674,7 +673,15 @@ static FontContext* svg_style_font_context(SvgStyleContext* style, const char* s
 static SvgStyleEntry* svg_style_entry(SvgStyleContext* style, Element* element) {
     SvgStyleEntry query = {};
     query.element = element;
-    return style && style->entries ? SvgStyleMap::get(style->entries, query) : nullptr;
+    SvgStyleEntry* entry = style && style->entries ? SvgStyleMap::get(style->entries, query) : nullptr;
+    if (entry && !entry->inline_parsed) {
+        // each SVG indexes the host for references; unrelated inline CSS is never queried.
+        const char* text = entry->node->get_attribute("style");
+        if (text) entry->inline_declarations = css_parse_declaration_list_text(
+            text, strlen(text), style->pool, &entry->inline_count);
+        entry->inline_parsed = true;
+    }
+    return entry;
 }
 
 static CssValue* svg_parse_property_value(Pool* pool, const char* text, const char* name) {
@@ -694,15 +701,25 @@ static CssValue* svg_parse_property_value(Pool* pool, const char* text, const ch
 
 typedef struct {
     SvgStyleContext* style;
-    DomElement* element;
     const SvgDomStyleScope* scope = nullptr;
 } SvgVariableContext;
 
-static const CssValue* svg_lookup_variable(void* context, const char* name) {
+static const CssValue* svg_lookup_variable(void* context, DomElement* element,
+                                           const char* name, DomElement** owner) {
+    if (owner) *owner = nullptr;
     SvgVariableContext* variables = (SvgVariableContext*)context;
     SvgStyleContext* style = variables->style;
     DomDocument* doc = style->document;
-    for (DomNode* node = variables->element; node && node->is_element();
+    if (strncmp(name, "--", 2) != 0) {
+        // the dedicated var parser omits dashes; declaration queries require the full name.
+        size_t length = strlen(name);
+        char* qualified = (char*)pool_alloc(style->pool, length + 3);
+        if (!qualified) return nullptr;
+        qualified[0] = qualified[1] = '-';
+        memcpy(qualified + 2, name, length + 1);
+        name = qualified;
+    }
+    for (DomNode* node = element; node && node->is_element();
         node = svg_dom_style_parent(node, variables->scope)) {
         SvgStyleEntry* entry = svg_style_entry(style, dom_element_to_element(node->as_element()));
         DomElement* current = node->as_element();
@@ -714,17 +731,24 @@ static const CssValue* svg_lookup_variable(void* context, const char* name) {
         CssDeclaration declaration = {};
         if (css_select_element_declaration(style->engine, style->matcher, current,
             doc->stylesheets, (size_t)doc->stylesheet_count, inline_declarations,
-            inline_count, name, &declaration)) return declaration.value;
+            inline_count, name, &declaration)) {
+            CssEnum keyword = declaration.value && declaration.value->type == CSS_VALUE_TYPE_KEYWORD
+                ? declaration.value->data.keyword : CSS_VALUE_NONE;
+            if (keyword == CSS_VALUE_INITIAL) return nullptr;
+            if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) continue;
+            if (owner) *owner = current;
+            return declaration.value;
+        }
     }
     return nullptr;
 }
 
 static const char* svg_resolve_property_declaration(SvgStyleContext* style, DomElement* element,
     const char* name, CssDeclaration* declaration, const SvgDomStyleScope* scope = nullptr) {
-    SvgVariableContext variables = {style, element, scope};
+    SvgVariableContext variables = {style, scope};
     const CssValue* authored = declaration->value;
     declaration->value = (CssValue*)css_resolve_var_value(
-        style->pool, authored, svg_lookup_variable, &variables);
+        style->pool, authored, svg_lookup_variable, &variables, element);
     // layout, DOM geometry and painting must all project the same resolved CSS tokens.
     if (declaration->value != authored) {
         declaration->value_text = nullptr; declaration->value_text_len = 0;
@@ -785,9 +809,18 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
     prop->animation_generation = generation;
     CssDeclaration declaration = {};
     DomDocument* doc = style->document;
-    if (css_select_element_declaration(style->engine, style->matcher, entry->node,
+    bool selected = css_select_element_declaration(style->engine, style->matcher, entry->node,
         doc->stylesheets, (size_t)doc->stylesheet_count, entry->inline_declarations,
-        entry->inline_count, name, &declaration)) {
+        entry->inline_count, name, &declaration);
+    CssDeclaration* presentation = style_tree_get_presentation_declaration(
+        entry->node->specified_style, css_property_code_from_name(name));
+    // The paint walk has its own CSS query, but consumes the same host layer.
+    if (presentation && (!selected ||
+        css_declaration_cascade_compare(presentation, &declaration) > 0)) {
+        declaration = *presentation;
+        selected = true;
+    }
+    if (selected) {
         prop->value = svg_resolve_property_declaration(style, entry->node, name, &declaration);
         prop->from_css = true;
     } else {
@@ -1750,6 +1783,7 @@ static SvgResourceReference svg_resolve_reference(SvgInlineRenderContext* ctx, c
         (ctx->image_document && strncmp(file.get(), "data:", 5) != 0)) return result;
     lam::Temp<char> path(svg_resolve_resource_path(ctx, file.get())); file.reset();
     if (!path) return result;
+    if (style->document && !input_resource_policy_admits(style->document->resource_policy, path.get())) return result;
     SvgStyleContext* owner = style->resource_owner ? style->resource_owner : style;
     SvgResourceDocument* document = nullptr;
     int count = 0;
@@ -1759,7 +1793,7 @@ static SvgResourceReference svg_resolve_reference(SvgInlineRenderContext* ctx, c
     }
     if (!document && !svg_resource_stack_contains(path.get()) && count < SVG_MAX_ELEM_DEFS) {
         UiContext* ui = g_svg_active_rdcon ? g_svg_active_rdcon->ui_context : nullptr;
-        ImageSurface* image = ui ? load_image(ui, path.get()) : nullptr;
+        ImageSurface* image = ui ? load_document_image(style->document, ui, path.get()) : nullptr;
         RdtPicture* picture = image && image->format == IMAGE_FORMAT_SVG
             ? rdt_picture_dup(image->pic) : ui ? nullptr : rdt_picture_load(path.get());
         document = svg_resource_document_create(ctx, picture, path.get());
@@ -5585,12 +5619,15 @@ static void render_svg_image_resource(SvgInlineRenderContext* ctx, Element* elem
     lam::Temp<char> resolved(svg_resolve_resource_path(ctx, file ? file.get() : href));
     file.reset();
     if (!resolved) return;
+    SvgStyleContext* style = (SvgStyleContext*)ctx->style_context;
+    if (style && style->document &&
+        !input_resource_policy_admits(style->document->resource_policy, resolved.get())) return;
     ImageSurface* image = nullptr;
     RdtPicture* standalone_picture = nullptr;
     bool owns_image = false;
     UiContext* ui = g_svg_active_rdcon ? g_svg_active_rdcon->ui_context : nullptr;
     if (ui) {
-        image = load_image(ui, resolved.get());
+        image = load_document_image(style ? style->document : nullptr, ui, resolved.get());
     } else if (strncmp(resolved.get(), "data:", 5) == 0) {
         size_t length = 0;
         lam::Temp<unsigned char> data(parse_data_uri(resolved.get(), nullptr, 0, &length));
@@ -7820,7 +7857,8 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
         RdtPath* clip_path = rdt_path_new();
         rdt_path_add_rect(clip_path, content_rect.x, content_rect.y,
                           content_rect.width, content_rect.height, 0, 0);
-        rc_push_clip(rdcon, clip_path, nullptr);
+        // the SVG viewport moves with its CSS ancestors, like its painted content
+        rc_push_clip(rdcon, clip_path, render_state_current_transform(rdcon));
         rdt_path_free(clip_path);
     }
 

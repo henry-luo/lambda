@@ -30,7 +30,6 @@ bool css_import_rule_is_active(CssRule* rule, CssEngine* engine) {
         css_evaluate_media_query(engine, rule->data.import_rule.media);
 }
 
-typedef bool (*CssRegistrationVisitor)(void*, const CssPropertyRegistration*);
 
 static bool css_visit_active_rules_in_sheet(CssEngine* engine, CssStylesheet* sheet,
     CssActiveRuleVisitor visitor, void* context, size_t depth);
@@ -128,6 +127,8 @@ struct CssElementDeclarationQuery {
     const char* property;
     uint8_t pseudo_element;
     CssDeclaration best;
+    const CssDeclaration* ceiling;
+    const CssRollbackFilter* filters;
     uint32_t order;
     uint32_t scope_proximity;
     bool found;
@@ -142,6 +143,10 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
          strcmp(query->property, "marker-end") == 0);
     bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
         css_font_shorthand_contains_property(query->property);
+    bool custom_property = strncmp(declaration->property_name, "--", 2) == 0;
+    bool same_property = custom_property
+        ? strcmp(declaration->property_name, query->property) == 0
+        : str_icmp_cstr(declaration->property_name, query->property) == 0;
     CssPropertyCode requested = css_property_code_from_name(query->property);
     bool shorthand = requested > 0 && css_property_shorthand_contains(declaration->property_code, requested);
     bool break_alias = strncmp(query->property, "break-", 6) == 0 &&
@@ -150,14 +155,14 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool all_reset = strcmp(declaration->property_name, "all") == 0 &&
         strncmp(query->property, "--", 2) != 0 && strcmp(query->property, "direction") != 0 &&
         strcmp(query->property, "unicode-bidi") != 0;
-    if (!marker_shorthand && !font_shorthand && !shorthand && !break_alias && !all_reset &&
-        str_icmp_cstr(declaration->property_name, query->property) != 0) return;
+    if (!marker_shorthand && !font_shorthand && !shorthand && !break_alias && !all_reset && !same_property) return;
     CssDeclaration candidate = *declaration;
     candidate.specificity = specificity;
     candidate.specificity.important = declaration->important;
     candidate.origin = origin;
     candidate.source_order = query->order++;
     candidate.scope_proximity = query->scope_proximity;
+    if (!css_declaration_cascade_eligible(&candidate, query->ceiling, query->filters)) return;
     if (!query->found || css_declaration_cascade_compare(&candidate, &query->best) >= 0) {
         query->best = candidate;
         query->found = true;
@@ -238,16 +243,19 @@ static void css_query_element_sheet(CssElementDeclarationQuery* query, CssStyles
     }
 }
 
-bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
+static bool css_select_element_declaration_inner(CssEngine* engine, SelectorMatcher* matcher,
     DomElement* element, CssStylesheet** sheets, size_t sheet_count,
     CssDeclaration** inline_declarations, size_t inline_count,
-    const char* property_name, CssDeclaration* result, uint8_t pseudo_element) {
+    const char* property_name, CssDeclaration* result,
+    const CssDeclaration* ceiling, const CssRollbackFilter* filters, uint8_t pseudo_element) {
     if (!matcher || !element || !property_name || !result) return false;
     CssElementDeclarationQuery query = {};
     query.engine = engine;
     query.matcher = matcher;
     query.element = element;
     query.property = property_name;
+    query.ceiling = ceiling;
+    query.filters = filters;
     query.pseudo_element = pseudo_element;
     for (size_t i = 0; sheets && i < sheet_count; i++) {
         css_query_element_sheet(&query, sheets[i], 0);
@@ -257,8 +265,22 @@ bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
         css_query_consider_declaration(&query, inline_declarations[i],
                                        inline_specificity, CSS_ORIGIN_AUTHOR);
     }
+    if (query.found && css_declaration_is_rollback(&query.best)) {
+        // SVG queries share the style tree's origin and layer rollback rules.
+        CssRollbackFilter filter = {&query.best, filters};
+        return css_select_element_declaration_inner(engine, matcher, element, sheets, sheet_count,
+            inline_declarations, inline_count, property_name, result, &query.best, &filter, pseudo_element);
+    }
     if (query.found) *result = query.best;
     return query.found;
+}
+
+bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
+    DomElement* element, CssStylesheet** sheets, size_t sheet_count,
+    CssDeclaration** inline_declarations, size_t inline_count,
+    const char* property_name, CssDeclaration* result, uint8_t pseudo_element) {
+    return css_select_element_declaration_inner(engine, matcher, element, sheets, sheet_count,
+        inline_declarations, inline_count, property_name, result, nullptr, nullptr, pseudo_element);
 }
 
 static uint64_t css_condition_environment_key(const CssEngine* engine,
@@ -343,6 +365,21 @@ struct CssScriptPropertyRegistration {
     size_t name_length;
     CssScriptPropertyRegistration* next;
 };
+
+bool css_visit_document_property_registrations(DomDocument* doc,
+        CssRegistrationVisitor visitor, void* context) {
+    if (!doc || !visitor) return false;
+    CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        CssStylesheet* sheet = doc->stylesheets[i];
+        if (sheet && !sheet->is_import_child &&
+            !css_visit_registrations_in_sheet(engine, sheet, visitor, context, 0)) return false;
+    }
+    for (CssScriptPropertyRegistration* entry = (CssScriptPropertyRegistration*)doc->services.registered_property_set;
+         entry; entry = entry->next)
+        if (!visitor(context, &entry->registration)) return false;
+    return true;
+}
 
 const CssPropertyRegistration* css_find_script_property_registration(DomDocument* doc,
     const char* name, size_t name_length) {

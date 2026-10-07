@@ -66,11 +66,12 @@ void save_surface_to_png(ImageSurface* surface, const char* filename) {
 }
 
 // Save surface to JPEG using TurboJPEG
-void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality) {
+bool save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality) {
+    if (!surface || !surface->pixels || surface->width <= 0 || surface->height <= 0 || !filename) return false;
     tjhandle tj_instance = tjInitCompress();
     if (!tj_instance) {
         log_error("Failed to initialize TurboJPEG compressor: %s", tjGetErrorStr());
-        return;
+        return false;
     }
 
     // Convert RGBA to RGB (JPEG doesn't support alpha channel)
@@ -81,15 +82,16 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     if (!rgb_buffer) {
         log_error("Failed to allocate memory for RGB buffer");
         tjDestroy(tj_instance);
-        return;
+        return false;
     }
 
     // Convert RGBA pixels to RGB
     uint8_t* src_pixels = (uint8_t*)surface->pixels;
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
-            int src_idx = (y * surface->pitch) + (x * 4); // RGBA = 4 bytes per pixel
-            int dst_idx = (y * width * 3) + (x * 3);      // RGB = 3 bytes per pixel
+            // preview grids can exceed signed pixel-offset arithmetic even though each extent fits int.
+            size_t src_idx = (size_t)y * surface->pitch + (size_t)x * 4;
+            size_t dst_idx = ((size_t)y * width + x) * 3;
 
             rgb_buffer[dst_idx + 0] = src_pixels[src_idx + 0]; // R
             rgb_buffer[dst_idx + 1] = src_pixels[src_idx + 1]; // G
@@ -107,8 +109,9 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 
     if (result != 0) {
         log_error("TurboJPEG compression failed: %s", tjGetErrorStr());
+        if (jpeg_buffer) tjFree(jpeg_buffer);
         tjDestroy(tj_instance);
-        return;
+        return false;
     }
 
     // Write JPEG data to file
@@ -117,7 +120,7 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
         log_error("Failed to open file for writing: %s", filename);
         tjFree(jpeg_buffer);
         tjDestroy(tj_instance);
-        return;
+        return false;
     }
 
     size_t written = fwrite(jpeg_buffer, 1, jpeg_size, fp);
@@ -128,9 +131,10 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     }
 
     // Clean up
-    fclose(fp);
+    bool closed = fclose(fp) == 0;
     tjFree(jpeg_buffer);
     tjDestroy(tj_instance);
+    return written == jpeg_size && closed;
 }
 
 // Main function to layout HTML and render to PNG
@@ -386,12 +390,9 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 //   OK\t<html_file>
 //   FAIL\t<html_file>\t<reason>
 
-static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
-    if (doc) {
-        script_runner_cleanup_js_state(doc);
-        view_tree_shell_destroy(doc, doc->view_tree);
-        dom_document_destroy(doc);
-    }
+static void render_batch_cleanup_doc(UiContext* ui_context) {
+    // cache teardown consults the document scheduler; clear the binding through shared ownership cleanup first.
+    ui_context->destroy_document();
 
     js_batch_reset();
     dom_batch_reset();
@@ -404,7 +405,6 @@ static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
 
     image_cache_cleanup(ui_context);
     InputManager::reset_global_inputs();
-    ui_context->document = nullptr;
 }
 
 static bool render_batch_single(
@@ -432,10 +432,15 @@ static bool render_batch_single(
     ui_context->viewport_width = layout_width;
     ui_context->viewport_height = layout_height;
 
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
+    DomDocument* doc = nullptr;
+    {
+        // the batch's documents share one loader runtime, as a window's do
+        LayoutLoaderHostScope loader_host(ui_context);
+        doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
+    }
     if (!doc) {
         log_error("render-batch: failed to load %s", html_file);
-        render_batch_cleanup_doc(ui_context, nullptr);
+        render_batch_cleanup_doc(ui_context);
         return false;
     }
 
@@ -474,12 +479,12 @@ static bool render_batch_single(
             render_html_doc(ui_context, doc->view_tree, png_file);
         } else {
             log_error("render-batch: no view tree for %s", html_file);
-            render_batch_cleanup_doc(ui_context, doc);
+            render_batch_cleanup_doc(ui_context);
             return false;
         }
     }
 
-    render_batch_cleanup_doc(ui_context, doc);
+    render_batch_cleanup_doc(ui_context);
     return true;
 }
 
@@ -629,5 +634,7 @@ int cmd_render_batch(int argc, char** argv) {
     }
 
     ui_context_cleanup(&ui_context);
+    // the batch owns the working-directory URL borrowed by each document loader.
+    url_destroy(cwd);
     return failure_count > 0 ? 1 : 0;
 }

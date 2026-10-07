@@ -323,6 +323,8 @@ CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
                                                                    bool horizontal,
                                                                    bool minimum);
+CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
+                                                     CssPropertyCode property);
 bool layout_axis_size_is_percentage(ViewBlock* block, bool horizontal);
 bool layout_axis_size_is_percentage(DomElement* element, bool horizontal);
 CssEnum layout_intrinsic_preferred_size_keyword(ViewBlock* block, bool horizontal);
@@ -470,6 +472,17 @@ typedef struct ReplacedIntrinsicFacts {
     bool has_default_size;
 } ReplacedIntrinsicFacts;
 
+struct ReplacedSizeConstraints {
+    float width, height; // NAN denotes an automatic axis; all inputs are content-box sizes
+    float min_width, min_height, max_width, max_height;
+    float preferred_ratio, horizontal_edges, vertical_edges;
+    bool ratio_content_box;
+};
+bool layout_replaced_content_size(const ReplacedIntrinsicFacts* facts,
+    const ReplacedSizeConstraints* constraints, float available_width, float* width, float* height);
+void layout_replaced_default_object_size(const ReplacedIntrinsicFacts* facts,
+    float default_width, float default_height, float* width, float* height);
+
 struct FlexContainerLayout;
 
 typedef struct ReplacedSvgIntrinsicSize {
@@ -486,6 +499,7 @@ inline bool layout_replaced_image_surface_contributes(const ViewBlock* block) {
         block->display.inner == RDT_DISPLAY_REPLACED;
 }
 
+void layout_replaced_image_facts(ReplacedIntrinsicFacts* facts, ImageSurface* image, bool from_image);
 ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
                                                       ViewBlock* block);
 bool layout_replaced_intrinsic_axis_size(LayoutContext* lycon, ViewBlock* block,
@@ -542,6 +556,8 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     CssEnum word_break = CSS_VALUE_NORMAL);
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
+bool layout_aspect_ratio_value_has_auto(const CssValue* value);
+void resolve_object_position_value(LayoutContext* lycon, const CssValue* value, EmbedProp* embed);
 float layout_aspect_ratio_height(float width, float aspect_ratio);
 float layout_preferred_aspect_ratio(ViewBlock* block);
 float layout_used_preferred_aspect_ratio(ViewBlock* block);
@@ -1733,6 +1749,19 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
 typedef struct StyleTree StyleTree;
 
 void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomElement* dom_elem);
+bool layout_is_html_list_container_tag(NameId tag);
+const CssValue* layout_list_style_longhand(const CssValue* value, CssPropertyCode property, Pool* pool);
+bool layout_counter_named_value(const CssValue* value, const char* name,
+    int implicit_value, int* result);
+struct LayoutListCounterQuery {
+    void* context;
+    const CssValue* (*property)(void*, DomElement*, CssPropertyCode);
+    bool (*list_item)(void*, DomElement*);
+    bool (*visible)(void*, DomElement*);
+};
+bool layout_sum_reversed_counter_incs(DomElement* parent, const char* name,
+    int* total, int* last_nonzero, int* set_value, bool implicit_list_item,
+    const LayoutListCounterQuery* query = nullptr);
 void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem);
 void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                        DomElement* dom_elem, DisplayValue display);
@@ -2287,6 +2316,7 @@ LayoutFlexStyleInfo layout_flex_declared_style_info(LayoutContext* lycon,
                                                     DomElement* element);
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback = (CssEnum)0);
+CssEnum logical_inline_direction(DomElement* element);
 
 inline FlexProp* layout_embedded_flex(ViewElement* element) {
     if (!element || (element->view_type != RDT_VIEW_BLOCK &&
@@ -3316,6 +3346,9 @@ typedef struct LayoutContext {
     // Additional fields for test compatibility
     float width, height;  // context dimensions
     float scroll_percentage_base;  // set only while resolving deferred scroll-padding math
+    bool transform_angle_math;  // scoped transform argument evaluation in degrees
+    bool transform_length_math;  // used-value evaluation of absolute/percentage transform math
+    float transform_percentage_base;
     float dpi;           // dots per inch
     lam::Up<Pool> pool;  // memory pool for view allocation
     // Available space constraints for current layout
@@ -3823,6 +3856,11 @@ void* alloc_prop(LayoutContext* lycon, size_t size);
 // The pool element props of this pass come from: the view tree's prop pool,
 // or the pass pool where a focused test has no view tree.
 Pool* layout_prop_pool(LayoutContext* lycon);
+// shared sizing consumers also accept discrete animation endpoints.
+void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
+                            const CssValue* value, LayoutAxis axis);
+void resolve_css_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
+                                       CssPropertyCode property, const CssValue* value);
 FontProp* alloc_font_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
@@ -3846,11 +3884,7 @@ inline BackgroundProp* layout_ensure_background(LayoutContext* lycon, ViewSpan* 
 inline BorderProp* layout_ensure_border(LayoutContext* lycon, ViewSpan* view) {
     if (!view) return nullptr;
     BoundaryProp* bound = view->ensure_boundary(lycon);
-    if (!bound) return nullptr;
-    if (!bound->border) {
-        bound->border = lam::own((BorderProp*)alloc_prop(lycon, sizeof(BorderProp)));
-    }
-    return bound->border;
+    return radiant_ensure_border_prop(bound, layout_prop_pool(lycon));
 }
 
 inline OutlineProp* layout_ensure_outline(LayoutContext* lycon, ViewSpan* view) {
@@ -3873,6 +3907,8 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
                                                 DomElement* pseudo_element);
 // Cross-origin document navigation needs its own host turn.  The synchronous
 // layout paths use this guard to retain the iframe's replaced-element box.
+DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
+    int viewport_width, int viewport_height);
 bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
                                               const char* src);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
@@ -4755,6 +4791,44 @@ static inline bool has_id_line_break_class(uint32_t cp) {
     if (cp == 0x3299) return true;                     // Circled Ideograph Secret
 
     return false;
+}
+
+// CSS Text 3 section 5.1: atomic boundaries admit NBSP but preserve GL/WJ/ZWJ controls.
+// ranges come from Unicode 17.0 LineBreak.txt: https://www.unicode.org/Public/17.0.0/ucd/LineBreak.txt
+static inline bool layout_atomic_wrap_neighbor_allows(uint32_t cp) {
+    static const uint32_t blocked[][2] = {
+        {0x35C, 0x362},
+        {0xF08, 0xF08},
+        {0xF0C, 0xF0C},
+        {0xF12, 0xF12},
+        {0xFD9, 0xFDA},
+        {0x180E, 0x180E},
+        {0x1AEB, 0x1AEB},
+        {0x1DCD, 0x1DCD},
+        {0x1DFC, 0x1DFC},
+        {0x2007, 0x2007},
+        {0x200D, 0x200D},
+        {0x2011, 0x2011},
+        {0x202F, 0x202F},
+        {0x2060, 0x2060},
+        {0xFE20, 0xFE20},
+        {0xFE22, 0xFE22},
+        {0xFE24, 0xFE24},
+        {0xFE26, 0xFE27},
+        {0xFE29, 0xFE29},
+        {0xFE2B, 0xFE2B},
+        {0xFE2D, 0xFE2E},
+        {0xFEFF, 0xFEFF},
+        {0x1107F, 0x1107F},
+        {0x13430, 0x13436},
+        {0x13439, 0x1343B},
+        {0x16FE4, 0x16FE4},
+    };
+    for (const auto& range : blocked) {
+        if (cp < range[0]) return true;
+        if (cp <= range[1]) return false;
+    }
+    return true;
 }
 
 static inline bool text_justify_cjk_gap(uint32_t previous, uint32_t current) {

@@ -19,7 +19,24 @@ extern TypeInfo type_info[];
 DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
 
-static bool mark_editor_should_preserve_ui_dom_child(Item child) {
+// The fat DOM node a UI child would be embedded in. Pointer arithmetic only:
+// the node header in front of the child may be read only once the storage is
+// known to hold a node.
+static const void* mark_editor_ui_node_storage(Item child) {
+    TypeId type_id = get_type_id(child);
+    if (type_id == LMD_TYPE_ELEMENT && child.element) {
+        return element_to_dom_element(child.element);
+    }
+    if (type_id == LMD_TYPE_STRING) {
+        String* s = child.get_safe_string();
+        return s ? string_to_dom_text(s) : nullptr;
+    }
+    return nullptr;
+}
+
+// Reads the node header in front of `child`; the caller must know the child is
+// node-backed (see mark_editor_ui_node_storage).
+static bool mark_editor_is_ui_dom_node(Item child) {
     TypeId type_id = get_type_id(child);
     if (type_id == LMD_TYPE_ELEMENT && child.element) {
         DomElement* elem = element_to_dom_element(child.element);
@@ -194,10 +211,12 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     : input_(input)
     , pool_(input->pool)
     , arena_(input->arena)
+    , draft_arena_(nullptr)
     , name_pool_(input->name_pool)
     , type_list_(input->type_list)
     , mode_(mode)
     , ui_mode_(input->ui_mode)
+    , ui_node_arena_(nullptr)
     , current_version_(nullptr)
     , version_head_(nullptr)
     , next_version_num_(0)
@@ -210,6 +229,7 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
 }
 
 MarkEditor::~MarkEditor() {
+    if (draft_arena_) arena_destroy(draft_arena_);
     // Clean up version history
     if (version_head_) {
         free_version_chain(version_head_);
@@ -643,14 +663,18 @@ static size_t container_header_size(const Map* container) {
     return container->type_id == LMD_TYPE_ELEMENT ? sizeof(Element) : sizeof(Map);
 }
 
-// Element shapes are interned per tag name, map shapes by their fields alone,
-// so the builder has to be seeded from the right side of the shape pool.
+Arena* MarkEditor::shape_draft_arena() {
+    if (!draft_arena_) draft_arena_ = arena_create_default();
+    return draft_arena_;
+}
+
+// element shapes start on their tag's transition root; map shapes start unnamed.
 ShapeBuilder MarkEditor::container_shape_builder(const Map* container) {
     if (container->type_id == LMD_TYPE_ELEMENT) {
-        return shape_builder_init_element(arena_,
+        return shape_builder_init_element(shape_draft_arena(),
             ((TypeElmt*)container->type)->name.str);
     }
-    return shape_builder_init_map(arena_);
+    return shape_builder_init_map(shape_draft_arena());
 }
 
 Map* MarkEditor::container_clone_header(const Map* container) {
@@ -667,11 +691,13 @@ Map* MarkEditor::container_clone_header(const Map* container) {
 // The field list a rebuild lays out, as tree steps: a field the old type has
 // keeps that field's identity (D3.4.4v2); a new one joins under a pooled key,
 // as ElementBuilder::attr pools its keys.
-static TypeTreeStep* rebuild_steps(Pool* pool, MarkBuilder* builder_,
+static TypeTreeStep* rebuild_steps(MarkBuilder* builder_,
         TypeMap* old_type, ShapeBuilder* builder) {
     int count = (int)builder->field_count;
     if (count == 0) return NULL;
-    TypeTreeStep* steps = (TypeTreeStep*)pool_calloc(pool, sizeof(TypeTreeStep) * (size_t)count);
+    // steps are copied into persistent types; only their pooled keys escape.
+    TypeTreeStep* steps = (TypeTreeStep*)arena_calloc(builder->arena,
+        sizeof(TypeTreeStep) * (size_t)count);
     if (!steps) return NULL;
     for (int i = 0; i < count; i++) {
         const char* name = builder->fields[i].name;
@@ -720,7 +746,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
 
     TypeMap* old_type = (TypeMap*)old_container->type;
     int count = (int)builder->field_count;
-    TypeTreeStep* steps = rebuild_steps(pool_, builder_, old_type, builder);
+    TypeTreeStep* steps = rebuild_steps(builder_, old_type, builder);
     if (count > 0 && !steps) {
         log_error("container_rebuild_with_new_shape: failed to describe the new fields");
         return ItemError;
@@ -1207,9 +1233,18 @@ bool MarkEditor::reserve_children(List* list, int64_t dense_length) {
     return list_grow_io(list, needed, pool_, arena_);
 }
 
+bool MarkEditor::owns_ui_node_storage(const void* storage) const {
+    return storage && (arena_owns(arena_, storage) ||
+        (ui_node_arena_ && arena_owns(ui_node_arena_, storage)));
+}
+
 Item MarkEditor::import_child(Item child) {
-    if (builder_->is_in_arena(child) ||
-        (ui_mode_ && mark_editor_should_preserve_ui_dom_child(child))) return child;
+    if (builder_->is_in_arena(child)) return child;
+    // keep a live UI node by identity only when its storage is one this editor
+    // vouches for; reading a node header in front of a GC object would read
+    // garbage and could leave a GC pointer in the document (D4.5.2)
+    if (ui_mode_ && owns_ui_node_storage(mark_editor_ui_node_storage(child)) &&
+        mark_editor_is_ui_dom_node(child)) return child;
     return builder_->deep_copy(child);
 }
 
@@ -1287,7 +1322,8 @@ Item MarkEditor::elmt_edit_children(Item element, int64_t index, int64_t delete_
     List normalized = {};
     normalized.type_id = LMD_TYPE_ELEMENT;
     for (int64_t i = 0; i < edited.length; i++) {
-        list_push_with_owner(&normalized, edited.items[i], pool_, arena_, ui_mode_);
+        list_push_with_owner(&normalized, edited.items[i], pool_, arena_,
+            ui_mode_ ? input_ : nullptr);
     }
     return publish_child_edit(element.element, &normalized);
 }
@@ -1318,7 +1354,9 @@ Item MarkEditor::dom_edit_child(Item element, int64_t index, int64_t delete_coun
     Item imported;
     if (child) {
         // detached documents still own live wrappers even when their Input is non-UI.
-        imported = builder_->is_in_arena(*child) || mark_editor_should_preserve_ui_dom_child(*child)
+        // DOM callers pass a DomElement's backing element or a DomText's string,
+        // so the node header in front of the child is genuine.
+        imported = builder_->is_in_arena(*child) || mark_editor_is_ui_dom_node(*child)
             ? *child : import_child(*child);
     }
     Array edited = {};
@@ -1350,7 +1388,7 @@ Item MarkEditor::elmt_rename(Item element, const char* new_tag_name) {
 
     // Build new shape with new element name. Note the rebuilt TypeElmt keeps
     // the OLD name — as it always has; only the shape's pool bucket moves.
-    ShapeBuilder builder = shape_builder_init_element(arena_, new_tag_name);
+    ShapeBuilder builder = shape_builder_init_element(shape_draft_arena(), new_tag_name);
     if (!shape_builder_import_shape(&builder, old_type)) return ItemError;
 
     bool is_inline = mode_ == EDIT_MODE_INLINE;

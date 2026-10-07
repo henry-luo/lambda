@@ -20,7 +20,9 @@ struct ViewCssContext;
 struct PagedComposition;
 struct ViewPageStyle;
 struct PaintGlyphRun;
+struct PaintImageBox;
 struct ViewModelCheckpoint;
+struct ViewPageGeneration;
 struct Arena;
 struct hashmap;
 
@@ -43,6 +45,7 @@ enum LayoutViewKind : uint8_t {
     LAYOUT_VIEW_ROOT,
     LAYOUT_VIEW_PAGE,
     LAYOUT_VIEW_FRAGMENT,
+    LAYOUT_VIEW_PAGE_INSTANCE,
 };
 
 struct LayoutViewRef {
@@ -69,6 +72,7 @@ struct LayoutViewNode {
     lam::Up<LayoutViewNode> next_occurrence;
     size_t text_start, text_length;
     lam::Up<PaintGlyphRun> glyph_run;
+    lam::Up<PaintImageBox> image_box;
     lam::Up<ViewCssStyle> computed_style;
     lam::Up<BoundaryProp> computed_boundary;
     ViewFragmentRole role;
@@ -98,6 +102,7 @@ enum ViewPageSide : uint8_t {
 
 struct ViewPageBox {
     LayoutViewNode node;
+    LayoutViewRef referenced_page; // instances borrow immutable content through their generation lease
     RdtLogicalRect content_rect;
     uint32_t page_number;
     ViewPageSide side;
@@ -149,6 +154,9 @@ enum ViewModelStatus : uint8_t {
     VIEW_MODEL_INVALID_PAGE_RANGE,
     VIEW_MODEL_INVALID_PAGE_SIDE,
 };
+// parsed ranges borrow the caller's pool; parsing preserves physical numbering and range order.
+ViewModelStatus view_page_selection_parse(Pool* pool, const char* text, ViewPageSelection* result);
+bool view_page_selection_text_valid(const char* text);
 
 struct ViewTreeModel {
     lam::Up<DomDocument> document;
@@ -159,6 +167,7 @@ struct ViewTreeModel {
     lam::Own<hashmap> source_states;
     lam::Own<ViewCssContext> css;
     lam::Own<PagedComposition> composition;
+    lam::Own<hashmap> image_resources; // generation owns assets independently of browsing and other editions
     lam::Up<LayoutViewNode> root;
     lam::Up<LayoutViewNode*> nodes;
     size_t node_count, node_id_count, node_capacity; // live count; issued IDs include rollback tombstones
@@ -169,6 +178,9 @@ struct ViewTreeModel {
     RdtLogicalRect preview_bounds;
     uint32_t presentation_generation;
     bool committed;
+    bool page_instances;
+    lam::Counted<ViewPageGeneration> page_generation;
+    lam::Up<ViewPageGeneration> retained_generation; // retired owner is read-only until the last lease ends
     lam::Up<ViewModelCheckpoint> checkpoint;
 };
 
@@ -176,10 +188,16 @@ ViewEnvironment view_environment_default(ViewPresentation presentation);
 ViewPreviewOptions view_preview_options_default();
 ViewTree* view_tree_secondary_create(DomDocument* document,
                                     const ViewEnvironment* environment);
+// independent presentation over every physical page; selection affects placement only.
+ViewTree* view_tree_page_instances_create(ViewTree* source,
+    const ViewPageSelection* selection, const ViewPreviewOptions* options,
+    ViewModelStatus* status = nullptr);
+ViewTree* view_tree_page_content_owner(ViewTree* tree);
+const ViewPageBox* view_tree_page_material(ViewTree* tree, const ViewPageBox* page);
 bool view_tree_secondary_release(DomDocument* document, ViewTree* tree);
 void view_tree_secondary_release_all(DomDocument* document);
-void view_tree_model_destroy(ViewTree* tree);
-void view_tree_model_reset(ViewTree* tree);
+bool view_tree_model_destroy(ViewTree* tree);
+bool view_tree_model_reset(ViewTree* tree);
 bool view_tree_model_source_valid(const ViewTree* tree);
 ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create);
 LayoutViewNode* view_tree_fragment_append(ViewTree* tree, LayoutViewNode* parent,

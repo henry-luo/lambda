@@ -301,6 +301,10 @@ typedef enum JubeTypeFlags {
     JUBE_TYPE_NONE = 0,
     JUBE_TYPE_NON_OWNING_HOST = 1u << 0,
     JUBE_TYPE_OWNING_NATIVE = 1u << 1,
+    JUBE_TYPE_NATIVE_INDEXED = 1u << 2,   // index adapter belongs only to Lambda
+    JUBE_TYPE_INDEXED_READONLY = 1u << 3, // getter-only WebIDL index definitions
+    JUBE_TYPE_NATIVE_NAMED = 1u << 4,     // named adapter belongs only to Lambda
+    JUBE_TYPE_JS_EXACT_NAMES = 1u << 5,   // JS uses js_name; Lambda keeps declared aliases
 } JubeTypeFlags;
 
 // Executable DOM host capabilities are selected when a member function is
@@ -395,7 +399,13 @@ typedef enum JubeMemberFlags {
     JUBE_MEMBER_NONE = 0,
     JUBE_MEMBER_NON_ENUMERABLE = 1u << 0,  // excluded from own-key enumeration
                                            //   (aliases like baseNode/extentNode)
+    JUBE_MEMBER_PROTOTYPE = 1u << 1,      // inherited WebIDL accessor/method
+    JUBE_MEMBER_HAS_REQUIRED_ARGS = 1u << 2,
+    JUBE_MEMBER_KEYED_ACCESSOR = 1u << 3, // reflect_attr is the fixed named-adapter key
 } JubeMemberFlags;
+
+// JS length and missing-argument validation can differ from the Lambda arity.
+#define JUBE_MEMBER_REQUIRED_ARGS(count) (JUBE_MEMBER_HAS_REQUIRED_ARGS | ((uint32_t)(count) << 8))
 
 typedef struct JubeMemberBind {
     const char* name;         // snake_case; must match a declared interface member
@@ -404,7 +414,7 @@ typedef struct JubeMemberBind {
     int (*get)(Item receiver, Item* out);
     int (*set)(Item receiver, Item value, Item* out);            // absent = readonly
     int (*call)(Item receiver, Item* args, int argc, Item* out); // methods
-    const char* reflect_attr; // attribute-reflected member: generic reflect routine
+    const char* reflect_attr; // reflected attribute, or fixed KEYED_ACCESSOR key
                               //   handles get/set; no handler functions needed
     uint32_t flags;           // JubeMemberFlags
     // DS13: the catalog row itself, so a member call lands on the operation
@@ -436,14 +446,19 @@ typedef struct JubeTypeBinding {
     int (*named_has)(Item receiver, Item key, Item* out);
     // object-operation hooks for large WebIDL surfaces whose descriptor,
     // own-key, delete, and prototype semantics are receiver-specific.
-    // ABI-preserving hole for the retired receiver/name object-call hook.
-    void* reserved_callable_slot;
+    // reuse the retired object-call slot for explicit VMap indexed bounds.
+    int64_t (*indexed_length)(Item receiver);
     int (*object_has)(Item receiver, Item key, Item* out);
     int (*object_delete)(Item receiver, Item key, Item* out);
     int (*object_descriptor)(Item receiver, Item key, Item* out);
     int (*object_own_keys)(Item receiver, Item* out);
     int (*object_prototype)(Item receiver, Item* out);
 } JubeTypeBinding;
+
+#ifdef __cplusplus
+static_assert(sizeof(((JubeTypeBinding*)0)->indexed_length) == sizeof(void*),
+    "indexed bounds must preserve the retired binding slot ABI");
+#endif
 
 typedef void (*JubeGcWeakClearFn)(uint64_t* slot, void* context);
 
@@ -694,6 +709,7 @@ struct JubeHostValueAPI {
     // Creates and unwraps a branded native object without publishing the
     // carrier layout. The type must be a module-declared JubeTypeDef; its
     // destroy hook owns the payload only when JUBE_TYPE_OWNING_NATIVE is set.
+    // Creating a registered type activates its owning module before publication.
     Item (*native_object_new)(const JubeTypeDef* type, void* payload);
     void* (*native_object_data)(Item object, const JubeTypeDef* type);
 };

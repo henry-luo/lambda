@@ -14,6 +14,8 @@
 #include "../lambda/js/js_mir_internal.hpp"
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/input/input-script-cache.h"
+#include "../lambda/dom/dom_events.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/mir/mir.h"
 #include "../lib/mem.h"
 
@@ -41,6 +43,45 @@ struct JsExecutionBackendScope {
         else unsetenv("JS_EXEC_BACKEND");
     }
 };
+
+TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "0;";
+    Item warmup = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "native-focus-roots.js", NULL);
+    EXPECT_FALSE(item_is_error(warmup));
+    if (!item_is_error(warmup)) {
+        gc_heap_t* gc = runtime.eval_context->heap->gc;
+        gc_set_force_collect_interval(gc, 1);
+        {
+            RootFrame roots(2);
+            Rooted<Item> event(roots, ItemNull);
+            Item related = ItemNull;
+            TypeId related_type = LMD_TYPE_NULL;
+            {
+                RootFrame setup_roots(1);
+                Rooted<Item> target(setup_roots, js_new_object());
+                js_set_key_default(target.get(), js_name_item("marker"), Item{.item = i2it(73)});
+                related = target.get();
+                related_type = get_type_id(related);
+            }
+            // only the factory can retain this argument during init allocation.
+            event.set(js_create_native_focus_event("focusin", related));
+            Rooted<Item> observed(roots, js_get_name_key(event.get(), "relatedTarget"));
+            EXPECT_EQ(get_type_id(observed.get()), related_type);
+            if (get_type_id(observed.get()) == related_type) {
+                EXPECT_EQ(observed.get().item, related.item);
+                EXPECT_EQ(js_get_name_key(observed.get(), "marker").item, i2it(73));
+                heap_gc_collect();
+                EXPECT_EQ(js_get_name_key(observed.get(), "marker").item, i2it(73));
+            }
+            EXPECT_EQ(js_get_name_key(event.get(), "isTrusted").item, b2it(true));
+        }
+        gc_set_force_collect_interval(gc, 0);
+    }
+    runtime_cleanup(&runtime);
+}
 
 TEST(JsModuleResolution, ResolvesHttpModuleSpecifiersAsUrls) {
     char resolved[256];
@@ -71,6 +112,29 @@ TEST(JsModuleResolution, ClassifiesHttpModuleSourcesForUrlCacheEntries) {
     EXPECT_TRUE(js_path_is_http_url("http://docs.example.test/vite/main.js"));
     EXPECT_FALSE(js_path_is_http_url("/vite/main.js"));
     EXPECT_FALSE(js_path_is_http_url("main.js"));
+}
+
+TEST(JsModuleResolution, AdmissionPrecedesWarmNamespacesInBothExecutionBackends) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        SCOPED_TRACE(backend); JsExecutionBackendScope selected(backend);
+        Runtime runtime = {}; runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2, "admission-setup.js", nullptr)));
+        const char remote[] = "https://example.test/admission.mjs";
+        const char module[] = "export const answer=42;";
+        ASSERT_FALSE(item_is_error(transpile_js_module_to_mir(&runtime, module, remote)));
+        runtime.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+        {
+            RootFrame roots(1);
+            Rooted<Item> promise(roots, js_dynamic_import(js_make_string(remote)));
+            EXPECT_STREQ(js_promise_state_name(promise.get()), "rejected");
+            EXPECT_TRUE(item_is_error(js_require(js_make_string(remote))));
+        }
+        const char importer[] = "import {answer} from 'https://example.test/admission.mjs'; export const observed=answer;";
+        Item result = transpile_js_module_to_mir(&runtime, importer, "admission-local.mjs");
+        EXPECT_TRUE(item_is_error(result));
+        runtime_cleanup(&runtime);
+    }
 }
 
 TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {

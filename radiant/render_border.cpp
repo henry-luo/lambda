@@ -582,7 +582,7 @@ static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, 
     LinearGradient* gradient = border->border_image_type == GRADIENT_LINEAR
         ? border->border_image_linear_gradient : nullptr;
     ImageSurface* image = border->border_image_url
-        ? load_image(rdcon->ui_context, border->border_image_url) : nullptr;
+        ? load_document_image(rdcon->ui_context->document, rdcon->ui_context, border->border_image_url) : nullptr;
     if (gradient && gradient->stop_count < 2) return false;
     if (image) {
         image_surface_ensure_decoded(image, image->width, image->height);

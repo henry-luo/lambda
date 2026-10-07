@@ -185,12 +185,29 @@ struct CssSourceBuffer {
 // CSS parsing runs on the document thread, but its immutable HTTP bytes are
 // supplied by the page's shared network scheduler.
 static thread_local NetworkResourceManager* g_css_resource_manager = nullptr;
+static thread_local InputResourcePolicy g_css_resource_policy = INPUT_RESOURCE_ALLOW_NETWORK;
+
+struct CssSourceScope {
+    NetworkResourceManager* manager;
+    InputResourcePolicy policy;
+    explicit CssSourceScope(DomDocument* document,
+            InputResourcePolicy selected_policy = INPUT_RESOURCE_ALLOW_NETWORK)
+        : manager(g_css_resource_manager), policy(g_css_resource_policy) {
+        g_css_resource_manager = document ? document->resource_manager : nullptr;
+        g_css_resource_policy = document ? document->resource_policy : selected_policy;
+    }
+    ~CssSourceScope() { g_css_resource_manager = manager; g_css_resource_policy = policy; }
+};
 
 static bool css_load_source(const char* path, bool is_http, bool binary,
                             CssSourceBuffer* source) {
     if (!path || !*path || !source) return false;
     source->data = nullptr;
     source->length = 0;
+    if (!input_resource_policy_admits(g_css_resource_policy, path)) {
+        log_info("resource-admission: denied stylesheet dependency %s", path);
+        return false;
+    }
     if (is_http) {
         if (g_css_resource_manager) {
             source->data = resource_manager_copy_resource_content(
@@ -211,8 +228,10 @@ static bool css_load_source(const char* path, bool is_http, bool binary,
 char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Pool* pool, int depth = 0);
 void log_root_item(Item item, const char* indent="  ");
-DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool);
+static DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height,
+                                   Pool* pool);
+static DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height,
+                                  Pool* pool);
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
@@ -880,6 +899,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
             // importing rule's source position.
             imported->is_import_child = true;
             imported->parent_stylesheet = stylesheet;
+            imported->owner_rule = rule;
             rule->data.import_rule.stylesheet = imported;
         }
         if (!imported || imported->rule_count == 0) {
@@ -1556,8 +1576,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
     int stylesheet_capacity = 0;
 
     DomDocument* document = dom_root ? dom_root->doc : nullptr;
-    NetworkResourceManager* previous_manager = g_css_resource_manager;
-    g_css_resource_manager = document ? document->resource_manager : nullptr;
+    CssSourceScope source_scope(document);
 
     // Start script transfer only after stylesheet bytes are ready. This lets
     // CSS parsing overlap script I/O without delaying the first cascade.
@@ -1572,7 +1591,6 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
     collect_stylesheets_in_document_order(html_root, dom_root, engine, base_path, pool,
                                           &stylesheets, stylesheet_count,
                                           &stylesheet_capacity, &linked_count, 0);
-    g_css_resource_manager = previous_manager;
     if (linked_count_out) *linked_count_out = linked_count;
 
     return stylesheets;
@@ -2094,6 +2112,7 @@ DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
     config.post_load_settle_ms = source->js.post_load_settle_ms;
     config.redirect_stdout_to_stderr = source->js.redirect_stdout_to_stderr;
     config.disable_css_animations = source->disable_css_animations;
+    config.resource_policy = source->resource_policy;
     return config;
 }
 
@@ -2108,6 +2127,7 @@ void document_apply_js_host_config(DomDocument* doc,
     doc->js.post_load_settle_ms = config->post_load_settle_ms;
     doc->js.redirect_stdout_to_stderr = config->redirect_stdout_to_stderr;
     doc->disable_css_animations = config->disable_css_animations;
+    doc->resource_policy = config->resource_policy;
 }
 
 // Script realms stay on the host thread; async loaders transfer only the parsed DOM.
@@ -2381,6 +2401,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     // parsed HTML: the only page kind that may host a JS DOM script realm.
     dom_doc->page_kind = DOM_PAGE_KIND_HTML;
+    dom_doc->resource_policy = g_css_resource_policy;
     // Scripts may call getClientRects() during load. Preserve the parsed mode
     // before that first layout so transient measurements use the same initial
     // values as the eventual post-script layout.
@@ -2467,6 +2488,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
 
     // Load external CSS if provided
+    CssSourceScope source_scope(dom_doc);
     CssStylesheet* external_stylesheet = nullptr;
     if (css_filename) {
         external_stylesheet = load_pool_backed_stylesheet(
@@ -2618,12 +2640,12 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 }
 
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
-    bool track_source_lines = false, bool execute_scripts = true) {
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
+    bool track_source_lines, bool execute_scripts, const DocumentJsHostConfig* host_config) {
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, html_source, track_source_lines, execute_scripts,
-                                         nullptr, nullptr, nullptr, nullptr, false);
+                                         nullptr, nullptr, host_config, nullptr, false);
 }
 
 static DomDocument* load_lambda_html_doc_with_host_config(
@@ -2641,38 +2663,41 @@ static DomDocument* load_lambda_html_doc_with_host_config(
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
-    int viewport_width, int viewport_height, Pool* pool, bool print_media);
+    int viewport_width, int viewport_height, Pool* pool,
+    InputResourcePolicy resource_policy, bool print_media);
+
+// The document of the transform configured for `input_type`.
+static DomDocument* load_input_type_transform_doc(const char* input_type, Url* url,
+        const LambdaDocumentTransformOption* options, int option_count,
+        int viewport_width, int viewport_height, Pool* pool) {
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type(input_type);
+    if (!transform) {
+        log_error("document-transform: %s runtime configuration is missing", input_type);
+        return nullptr;
+    }
+    return load_lambda_document_transform_doc(url, transform, options, option_count,
+        viewport_width, viewport_height, pool, g_css_resource_policy);
+}
 
 static DomDocument* load_pdf_transform_doc(Url* pdf_url, int viewport_width,
                                             int viewport_height, Pool* pool) {
-    const LambdaDocumentTransformConfig* transform =
-        lambda_document_transform_for_input_type("pdf");
-    if (!transform) {
-        log_error("document-transform: PDF runtime configuration is missing");
-        return nullptr;
-    }
-    return load_lambda_document_transform_doc(pdf_url, transform, nullptr, 0,
-                                              viewport_width, viewport_height, pool);
+    return load_input_type_transform_doc("pdf", pdf_url, nullptr, 0,
+                                         viewport_width, viewport_height, pool);
 }
 
 static DomDocument* load_graph_transform_doc(Url* graph_url, int viewport_width,
                                               int viewport_height, Pool* pool) {
-    const LambdaDocumentTransformConfig* transform =
-        lambda_document_transform_for_input_type("graph");
-    if (!transform) {
-        log_error("document-transform: graph runtime configuration is missing");
-        return nullptr;
-    }
-    return load_lambda_document_transform_doc(graph_url, transform, nullptr, 0,
-                                              viewport_width, viewport_height, pool);
+    return load_input_type_transform_doc("graph", graph_url, nullptr, 0,
+                                         viewport_width, viewport_height, pool);
 }
 
 typedef DomDocument* (*LayoutFormatLoader)(Url*, int, int, Pool*);
 
-DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
-                               int viewport_height, Pool* pool);
-DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width,
-                           int viewport_height, Pool* pool);
+static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
+                                      int viewport_height, Pool* pool);
+static DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width,
+                                  int viewport_height, Pool* pool);
 static DomDocument* load_svg_layout_file(Url* url, int width, int height, Pool* pool);
 static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool* pool);
 
@@ -2715,6 +2740,17 @@ static bool layout_path_has_known_extension(const char* path) {
                          layout_find_format_route(extension));
 }
 
+bool layout_path_uses_loader_runtime(const char* path) {
+    if (!path) return false;
+    if (graph_path_is_graph(path)) return true;
+    const char* extension = file_path_ext(path);
+    if (!extension) return false;
+    if (strcmp(extension, ".pdf") == 0) return true;
+    const LayoutFormatRoute* route = layout_find_format_route(extension);
+    return route && (route->loader == load_latex_doc || route->loader == load_tikz_doc ||
+                     route->loader == load_markdown_doc);
+}
+
 static DomDocument* load_svg_layout_file(Url* url, int width, int height, Pool* pool) {
     return load_svg_doc(url, width, height, pool, 1.0f);
 }
@@ -2726,9 +2762,12 @@ static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool
 static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               int width, int height, Pool* pool,
                                               bool include_text,
-                                              bool* handled) {
+                                              bool* handled,
+                                              const DocumentJsHostConfig* host_config = nullptr) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
+    // legacy format loaders inherit one request-scoped admission context.
+    CssSourceScope source_scope(nullptr, host_config ? host_config->resource_policy : g_css_resource_policy);
 
     if (graph_path_is_graph(path)) {
         if (handled) *handled = true;
@@ -2794,7 +2833,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     bool handled = false;
     // Use the parsed pathname so a query does not hide the file extension.
     doc = load_layout_special_file(full_url, url_get_pathname(full_url),
-                                   viewport_width, viewport_height, pool, true, &handled);
+                                   viewport_width, viewport_height, pool, true, &handled, js_host_config);
     // non-HTML documents still dispatch callbacks through their owning viewer.
     if (handled) document_apply_js_host_config(doc, js_host_config);
     if (!handled) {
@@ -3001,7 +3040,8 @@ struct LayoutTempPathGuard {
 };
 
 static Input* parse_layout_source_as(char* content, Url* source_url,
-                                     const char* type_name, const char* log_prefix) {
+                                     const char* type_name, const char* log_prefix,
+                                     const InputParseOptions* options = nullptr) {
     size_t type_len = strlen(type_name);
     String* type_str = string_from_strview_mem(
         strview_init(type_name, type_len), MEM_CAT_LAYOUT);
@@ -3009,7 +3049,9 @@ static Input* parse_layout_source_as(char* content, Url* source_url,
         log_error("%s: failed to allocate type string", log_prefix);
         return nullptr;
     }
-    Input* input = input_from_source(content, source_url, type_str, nullptr);
+    Input* input = options
+        ? input_from_source_with_options(content, source_url, type_str, nullptr, options)
+        : input_from_source(content, source_url, type_str, nullptr);
     mem_free(type_str);
     return input;
 }
@@ -3037,14 +3079,15 @@ static Element* input_first_element_root(Input* input) {
 
 static Input* read_layout_input_file(Url* url, const char* filepath,
                                      const char* type_name, const char* log_prefix,
-                                     const char* file_label) {
+                                     const char* file_label,
+                                     const InputParseOptions* options = nullptr) {
     char* content = read_text_file(filepath);
     if (!content) {
         log_error("Failed to read %s file: %s", file_label, filepath);
         return nullptr;
     }
 
-    Input* input = parse_layout_source_as(content, url, type_name, log_prefix);
+    Input* input = parse_layout_source_as(content, url, type_name, log_prefix, options);
     mem_free(content);
     if (!input) {
         log_error("Failed to parse %s file: %s", file_label, filepath);
@@ -3231,6 +3274,71 @@ static void release_layout_runtime(Runtime* runtime) {
     mem_free(runtime);
 }
 
+static thread_local UiContext* s_layout_loader_host = nullptr;
+
+LayoutLoaderHostScope::LayoutLoaderHostScope(UiContext* uicon)
+    : saved(lam::up(s_layout_loader_host)) {
+    s_layout_loader_host = uicon;
+}
+
+LayoutLoaderHostScope::~LayoutLoaderHostScope() {
+    s_layout_loader_host = saved.get();
+}
+
+// The loader runtime of the window named by the innermost host scope, created
+// on first use; null outside a scope, where a stateless loader owns its own.
+static Runtime* layout_loader_runtime(void) {
+    UiContext* host = s_layout_loader_host;
+    if (!host) return nullptr;
+    if (!host->loader_runtime) {
+        Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+        if (!runtime) return nullptr;
+        runtime_init(runtime);
+        host->loader_runtime = lam::own(runtime);
+        log_info("loader-runtime: created the window loader runtime");
+    }
+    return host->loader_runtime.get();
+}
+
+// The UI attribute roots one document's build published on the loader runtime.
+struct LoaderAttributeRoots : DomDocumentResourceData {
+    void* roots;
+};
+
+static void loader_attribute_roots_destroy(DomDocumentResourceData* data) {
+    LoaderAttributeRoots* held = (LoaderAttributeRoots*)data;
+    if (!held) return;
+    ui_attribute_roots_release(held->roots);
+    mem_free(held);
+}
+
+void loader_runtime_finish_document(DomDocument* doc, Runtime* loader) {
+    if (!loader) return;
+    void* roots = runtime_take_ui_attribute_roots(loader);
+    runtime_bind_ui_result_input(loader, nullptr);
+    if (!roots) return;
+    if (!doc) {
+        ui_attribute_roots_release(roots);
+        return;
+    }
+    LoaderAttributeRoots* held = (LoaderAttributeRoots*)mem_calloc(
+        1, sizeof(LoaderAttributeRoots), MEM_CAT_LAYOUT);
+    if (held) held->roots = roots;
+    if (!held || !dom_document_add_resource(doc, held, loader_attribute_roots_destroy)) {
+        // the document still reads these values: keep them rooted for the
+        // runtime's life rather than free them under it
+        log_error("loader-runtime: could not hand attribute roots to the document");
+        if (held) mem_free(held);
+    }
+}
+
+// A document built on the window loader runtime borrows that runtime for its
+// package types and custom layouts.
+static void layout_adopt_loader_runtime(DomDocument* doc, Runtime* loader) {
+    loader_runtime_finish_document(doc, loader);
+    doc->loader_runtime = lam::up(loader);
+}
+
 static DomDocument* create_layout_dom(Input* input, Element* root,
                                       const char* document_kind,
                                       DomPageKind page_kind,
@@ -3246,6 +3354,7 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
     // record provenance at construction; routing must never re-derive it from
     // which runtime pointer a document happens to hold.
     document->page_kind = page_kind;
+    document->resource_policy = g_css_resource_policy;
     log_debug("[page-kind] %s document -> %s", document_kind,
               dom_page_kind_name(page_kind));
     if (page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
@@ -3333,7 +3442,8 @@ static DomDocument* load_home_styled_source_doc(
     return document;
 }
 
-DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool) {
+static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
+                                      int viewport_height, Pool* pool) {
     auto total_start = time_now_ns();
 
     if (!markdown_url || !pool) {
@@ -3346,8 +3456,13 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     log_info("[TIMING] Loading markdown document: %s", markdown_filepath);
 
     auto step1_start = time_now_ns();
+    // the parser attaches each formula's math AST and lists the <math> elements,
+    // so rendering below needs neither a tree walk nor a second parse
+    InputParseOptions parse_options = {};
+    parse_options.embedded_math = true;
     Input* input = read_layout_input_file(markdown_url, markdown_filepath,
-                                          "markdown", "load_markdown_doc", "markdown");
+                                          "markdown", "load_markdown_doc", "markdown",
+                                          &parse_options);
     if (!input) {
         return nullptr;
     }
@@ -3363,150 +3478,94 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     log_info("[TIMING] Step 1 - Parse markdown: %.1fms",
         time_elapsed_ms_f(step1_start, step1_end));
 
-    Runtime* markdown_math_runtime = nullptr;
+    Runtime* markdown_math_runtime = nullptr;  // document-owned, outside a window
+    Runtime* shared_math_runtime = nullptr;
 
-    {
+    // A document without math keeps the plain path: no runtime, no package.
+    Array* embedded_math = input->embedded_math;
+    if (embedded_math && embedded_math->length > 0) {
         auto math_start = time_now_ns();
+        log_info("[Lambda Markdown] Rendering %lld math elements via math package",
+                 (long long)embedded_math->length);
 
-        struct MathInfo {
-            Element* parent;
-            int64_t index;
-            const char* source;
-            size_t source_len;
-            bool is_display;
-        };
-        ArrayList* math_list = arraylist_new(16);
-
-        struct WalkFrame { Element* elem; };
-        ArrayList* stack = arraylist_new(64);
-        arraylist_append(stack, (ArrayListValue)markdown_root);
-
-        while (stack->length > 0) {
-            Element* elem = (Element*)stack->data[stack->length - 1];
-            stack->length--;
-
-            for (int64_t i = 0; i < elem->length; i++) {
-                Item child = elem->items[i];
-                if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-
-                Element* child_elem = child.element;
-                TypeElmt* child_type = (TypeElmt*)child_elem->type;
-                if (!child_type) continue;
-
-                const char* tag = child_type->name.str;
-                if (tag && strcmp(tag, "math") == 0) {
-                    ConstItem type_attr = child_elem->get_attr("type");
-                    String* type_str_val = type_attr.string();
-                    bool is_display = type_str_val && strcmp(type_str_val->chars, "block") == 0;
-
-                    const char* math_src = nullptr;
-                    size_t math_src_len = 0;
-                    for (int64_t j = 0; j < child_elem->length; j++) {
-                        if (get_type_id(child_elem->items[j]) == LMD_TYPE_STRING) {
-                            String* s = child_elem->items[j].get_string();
-                            if (s && s->len > 0) {
-                                math_src = s->chars;
-                                math_src_len = s->len;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (math_src && math_src_len > 0) {
-                        MathInfo* mi = (MathInfo*)mem_alloc(sizeof(MathInfo), MEM_CAT_LAYOUT);
-                        mi->parent = elem;
-                        mi->index = i;
-                        mi->source = math_src;
-                        mi->source_len = math_src_len;
-                        mi->is_display = is_display;
-                        arraylist_append(math_list, (ArrayListValue)mi);
-                    }
-                } else {
-                    arraylist_append(stack, (ArrayListValue)child_elem);
-                }
-            }
-        }
-        arraylist_free(stack);
-
-        if (math_list->length > 0) {
-            log_info("[Lambda Markdown] Found %d math elements, rendering via math package",
-                     math_list->length);
-
-            // Invoke the math package directly so math source never becomes a Lambda script.
-            Runtime* math_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+        // In a window the math renders on the window's shared loader runtime.
+        // Elsewhere a math runtime starts only when the document has math, and
+        // one runtime renders all of its formulas.
+        shared_math_runtime = layout_loader_runtime();
+        Runtime* math_runtime = shared_math_runtime;
+        if (!math_runtime) {
+            math_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
             if (!math_runtime) {
                 log_error("[Lambda Markdown] Failed to allocate math runtime");
-                for (int i = 0; i < math_list->length; i++) {
-                    mem_free(math_list->data[i]);
-                }
-                arraylist_free(math_list);
                 return nullptr;
             }
             runtime_init(math_runtime);
-            runtime_set_ui_result_arena(math_runtime, input->arena);
-            const LambdaDocumentTransformConfig* transform =
-                lambda_document_transform_for_input_type("math");
-            Script* math_package = nullptr;
-            Input* package_result = transform
-                ? run_lambda_package_module(math_runtime, transform->package_module, &math_package)
-                : nullptr;
-            EvalContext* math_context = runtime_get_eval_context(math_runtime);
-            int replace_count = 0;
-            if (package_result && math_package && math_context) {
-                RuntimeExecutionScope execution_scope(math_context);
-                RootFrame roots(6);
-                Rooted<Item> source(roots, ItemNull);
-                Rooted<Item> type(roots, (Item){.item = s2it(heap_strcpy("math", 4))});
-                Rooted<Item> parsed(roots, ItemNull);
-                Rooted<Item> options(roots, ItemNull);
-                Rooted<Item> option_name(roots, (Item){.item = s2it(heap_strcpy("display", 7))});
-                Rooted<Item> rendered(roots, ItemNull);
-                for (int i = 0; i < math_list->length; i++) {
-                    MathInfo* mi = (MathInfo*)math_list->data[i];
-                    source.set((Item){.item = s2it(heap_strcpy(mi->source,
-                        (int64_t)mi->source_len))});
-                    parsed.set(fn_parse2(source.get(), type.get()));
-                    if (item_is_error(parsed.get())) continue;
-                    options.set(vmap_new());
-                    if (get_type_id(options.get()) != LMD_TYPE_VMAP ||
-                            item_is_error(vmap_set(options.get(), option_name.get(),
-                                (Item){.item = b2it(mi->is_display ? 1 : 0)}))) {
-                        log_error("[Lambda Markdown] Failed to construct math render options");
-                        break;
-                    }
-                    Item args[2] = {parsed.get(), options.get()};
-                    rendered.set(interp_call_module_export(math_runtime, math_package,
-                        transform->function_name, args, 2));
-                    if (get_type_id(rendered.get()) != LMD_TYPE_ELEMENT) continue;
-                    Item rendered_item = rendered.get();
-                    if (mi->is_display) {
-                        MarkBuilder builder(input);
-                        ElementBuilder display = builder.element("div");
-                        display.attr("class", "math-display-container");
-                        display.child(rendered_item);
-                        rendered_item = display.final();
-                    }
-                    mi->parent->items[mi->index] = rendered_item;
-                    replace_count++;
+        }
+        EvalContext* math_context = runtime_get_eval_context(math_runtime);
+        // Like any document loader, take the thread only from a quiescent
+        // evaluator (D5.4.1).
+        bool math_bound = math_context && !(context && context->execution_depth != 0) &&
+            radiant_eval_context_switch(math_context);
+        runtime_bind_ui_result_input(math_runtime, input);
+        const LambdaDocumentTransformConfig* transform =
+            lambda_document_transform_for_input_type("math");
+        Script* math_package = nullptr;
+        Input* package_result = transform && math_bound
+            ? run_lambda_package_module(math_runtime, transform->package_module, &math_package)
+            : nullptr;
+        int replace_count = 0;
+        if (package_result && math_package) {
+            RuntimeExecutionScope execution_scope(math_context);
+            RootFrame roots(3);
+            Rooted<Item> options(roots, ItemNull);
+            Rooted<Item> option_name(roots, (Item){.item = s2it(heap_strcpy("display", 7))});
+            Rooted<Item> rendered(roots, ItemNull);
+            for (int64_t i = 0; i < embedded_math->length; i++) {
+                Element* math_elem = embedded_math->items[i].element;
+                ConstItem ast_attr = math_elem->get_attr("ast");
+                Item ast = *(Item*)&ast_attr;
+                if (get_type_id(ast) == LMD_TYPE_NULL) continue;  // unparsed: keep the source
+                ConstItem type_attr = math_elem->get_attr("type");
+                String* type_str_val = type_attr.string();
+                bool is_display = type_str_val && strcmp(type_str_val->chars, "block") == 0;
+                options.set(vmap_new());
+                if (get_type_id(options.get()) != LMD_TYPE_VMAP ||
+                        item_is_error(vmap_set(options.get(), option_name.get(),
+                            (Item){.item = b2it(is_display ? 1 : 0)}))) {
+                    log_error("[Lambda Markdown] Failed to construct math render options");
+                    break;
                 }
-                log_info("[Lambda Markdown] Replaced %d/%d math elements with rendered HTML",
-                    replace_count, math_list->length);
-            } else {
-                log_error("[Lambda Markdown] Math package initialization failed");
+                Item args[2] = {ast, options.get()};
+                rendered.set(interp_call_module_export(math_runtime, math_package,
+                    transform->function_name, args, 2));
+                if (get_type_id(rendered.get()) != LMD_TYPE_ELEMENT) continue;
+                Item rendered_item = rendered.get();
+                if (is_display) {
+                    MarkBuilder builder(input);
+                    ElementBuilder display = builder.element("div");
+                    display.attr("class", "math-display-container");
+                    display.child(rendered_item);
+                    rendered_item = display.final();
+                }
+                // Replace the <math> element in place: its storage takes the
+                // rendered element's content, so its parent needs no update and
+                // no parent has to be found. The DOM build initializes the node
+                // from this content as for any element.
+                *math_elem = *rendered_item.element;
+                replace_count++;
             }
-            input_context = nullptr;
-            if (replace_count > 0) {
-                markdown_math_runtime = math_runtime;
-                math_runtime = nullptr;
-            }
-            release_layout_runtime(math_runtime);
+            log_info("[Lambda Markdown] Replaced %d/%lld math elements with rendered HTML",
+                replace_count, (long long)embedded_math->length);
+        } else {
+            log_error("[Lambda Markdown] Math package initialization failed");
         }
-
-        // Free math_list entries
-        for (int i = 0; i < math_list->length; i++) {
-            mem_free(math_list->data[i]);
+        input_context = nullptr;
+        // the rendered elements' types belong to the math package's Script
+        if (!shared_math_runtime && replace_count > 0) {
+            markdown_math_runtime = math_runtime;
+            math_runtime = nullptr;
         }
-        arraylist_free(math_list);
+        if (!shared_math_runtime) release_layout_runtime(math_runtime);
 
         auto math_end = time_now_ns();
         log_info("[TIMING] Step 1.5 - Math rendering: %.1fms",
@@ -3521,7 +3580,11 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         input, markdown_root, "markdown", DOM_PAGE_KIND_GENERATED,
         markdown_math_runtime,
         viewport_width, viewport_height, pool, &dom_root, &css_engine);
-    if (!dom_doc) return nullptr;
+    if (!dom_doc) {
+        if (shared_math_runtime) loader_runtime_finish_document(nullptr, shared_math_runtime);
+        return nullptr;
+    }
+    if (shared_math_runtime) layout_adopt_loader_runtime(dom_doc, shared_math_runtime);
 
     auto step2_end = time_now_ns();
     log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
@@ -3575,37 +3638,28 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 }
 
 // load MediaWiki markup and its bundled stylesheet.
-DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool) {
+static DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height,
+                                  Pool* pool) {
     return load_home_styled_source_doc(
         wiki_url, viewport_width, viewport_height, pool,
         "wiki", "Lambda Wiki", "package/doc/wiki.css", "wiki stylesheet");
 }
 
-DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool) {
-    const LambdaDocumentTransformConfig* transform =
-        lambda_document_transform_for_input_type("latex");
-    if (!transform) {
-        log_error("document-transform: LaTeX runtime configuration is missing");
-        return nullptr;
-    }
-    return load_lambda_document_transform_doc(latex_url, transform, nullptr, 0,
-                                              viewport_width, viewport_height, pool);
+static DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height,
+                                   Pool* pool) {
+    return load_input_type_transform_doc("latex", latex_url, nullptr, 0,
+                                         viewport_width, viewport_height, pool);
 }
 
-DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool) {
-    const LambdaDocumentTransformConfig* transform =
-        lambda_document_transform_for_input_type("tikz");
-    if (!transform) {
-        log_error("document-transform: TikZ runtime configuration is missing");
-        return nullptr;
-    }
+static DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height,
+                                  Pool* pool) {
     char text_width_px[32];
     snprintf(text_width_px, sizeof(text_width_px), "%d", viewport_width);
     LambdaDocumentTransformOption option = {
         "text_width_px", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, text_width_px, false
     };
-    return load_lambda_document_transform_doc(tikz_url, transform, &option, 1,
-                                              viewport_width, viewport_height, pool);
+    return load_input_type_transform_doc("tikz", tikz_url, &option, 1,
+                                         viewport_width, viewport_height, pool);
 }
 
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool) {
@@ -3789,7 +3843,7 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
 }
 
 // One-shot CLI diagnostic: the loader copies the message out of the error
-// value before the document Runtime that owns it is released.
+// value before the Runtime that owns it releases or collects it.
 static thread_local char g_lambda_document_load_diagnostic[512];
 
 static void lambda_document_set_load_diagnostic(Item result) {
@@ -3810,7 +3864,10 @@ const char* lambda_document_load_diagnostic(void) {
 static DomDocument* load_lambda_document_doc(Url* script_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool, bool print_media) {
+        int viewport_width, int viewport_height, Pool* pool,
+        InputResourcePolicy resource_policy = g_css_resource_policy,
+        bool print_media = false) {
+    CssSourceScope request_scope(nullptr, resource_policy);
     auto total_start = time_now_ns();
 
     if (!script_url || !pool) {
@@ -3836,27 +3893,48 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     // Step 1: Initialize Runtime and evaluate the Lambda script
     auto step1_start = time_now_ns();
 
-    Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
-    runtime_init(runtime);
+    // A stateless transform in a window runs on the window's shared loader
+    // runtime. A script page, the edit application, and a load outside any
+    // window (an iframe, a worker) own a runtime per document.
+    bool stateless = transform && transform->stateless;
+    Runtime* shared_runtime = stateless ? layout_loader_runtime() : nullptr;
+    Runtime* runtime = shared_runtime;
+    if (!runtime) {
+        runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+        runtime_init(runtime);
+    }
+    // shared loaders must use the resource policy of the current document.
+    runtime->resource_policy = resource_policy;
+    Runtime* owned_runtime = shared_runtime ? nullptr : runtime;
+    // A load that builds no document here releases a document-owned runtime;
+    // the shared one stays with its window.
+    auto release_runtime = [&]() {
+        if (shared_runtime) loader_runtime_finish_document(nullptr, shared_runtime);
+        else release_layout_runtime(runtime);
+    };
     EvalContext* layout_context = runtime_get_eval_context(runtime);
     if (!layout_context) {
-        mem_free(runtime);
+        if (owned_runtime) mem_free(owned_runtime);
         return nullptr;
     }
     if (!radiant_eval_context_switch(layout_context)) {
         log_error("load_lambda_script_doc: failed to acquire eval thread");
-        release_layout_runtime(runtime);
+        release_runtime();
         return nullptr;
     }
 
     Pool* result_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     Input* result_input = Input::create(result_pool, script_url);
     result_input->ui_mode = true;
-    runtime_set_ui_result_arena(runtime, result_input->arena);
+    runtime_bind_ui_result_input(runtime, result_input);
 
-    source_pos_bridge_reset();
-    render_map_init();
-    render_map_set_path_recorder(&render_map_record_path);
+    // The render map and source-position bridge serve templates and the
+    // editor, which stateless loader packages never use.
+    if (!stateless) {
+        source_pos_bridge_reset();
+        render_map_init();
+        render_map_set_path_recorder(&render_map_record_path);
+    }
 
     // Transforms enter Lambda's local-input boundary after URL resolution, so
     // retain the decoded path instead of passing a navigation URL as a filename.
@@ -3870,13 +3948,10 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         layout_context->heap = runtime_heap(runtime);
         layout_context->name_pool = runtime_name_pool(runtime);
         layout_context->pool = runtime_heap(runtime)->pool;
-        if (runtime->ui_mode && runtime->result_arena) {
-            layout_context->ui_mode = true;
-            layout_context->arena = runtime->result_arena;
-        }
+        runtime_context_follow_ui_result(runtime, layout_context);
         if (!eval_context_matches(layout_context)) {
             log_error("load_lambda_script_doc: eval owner changed during execution");
-            release_layout_runtime(runtime);
+            release_runtime();
             pool_destroy(result_pool);
             return nullptr;
         }
@@ -3885,7 +3960,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
 
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
-        release_layout_runtime(runtime);
+        release_runtime();
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -3899,7 +3974,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
         lambda_document_set_load_diagnostic(script_output->root);
-        release_layout_runtime(runtime);
+        release_runtime();
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -3912,7 +3987,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
             "svg{display:block;}"
             "</style></head><body>%s</body></html>",
             svg_content);
-        release_layout_runtime(runtime);
+        release_runtime();
         pool_destroy(result_pool);
         url_destroy(script_url);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
@@ -3931,7 +4006,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
                 return write_svg_wrapped_html(svg_str->chars);
             }
             log_error("[Lambda Script] Failed to format SVG element");
-            release_layout_runtime(runtime);
+            release_runtime();
             pool_destroy(result_pool);
             return nullptr;
         }
@@ -3947,7 +4022,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
                  (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
             log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
             DomDocument* doc = load_html_string_doc(result_str->chars, viewport_width, viewport_height);
-            release_layout_runtime(runtime);
+            release_runtime();
             pool_destroy(result_pool);
             url_destroy(script_url);
             return doc;
@@ -4021,15 +4096,18 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     CssEngine* css_engine = nullptr;
     DomDocument* dom_doc = create_layout_css_document(
         result_input, html_elem, "Lambda Script", DOM_PAGE_KIND_LAMBDA_SCRIPT,
-        runtime,
+        owned_runtime,
         viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) {
+        if (shared_runtime) release_runtime();
         pool_destroy(result_pool);
         return nullptr;
     }
     css_engine->context.print_media = print_media;
 
     auto step5_end = time_now_ns();
+    dom_doc->resource_policy = resource_policy;
+    CssSourceScope source_scope(dom_doc);
     log_info("[TIMING] Step 5 - Build DOM tree: %.1fms",
         time_elapsed_ms_f(step5_start, step5_end));
 
@@ -4078,12 +4156,15 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         dom_doc->services.cached_css_engine = css_engine;
     }
 
-    Item html_item_root = {.element = html_elem};
-    render_map_set_doc_root(html_item_root);
+    if (!stateless) {
+        Item html_item_root = {.element = html_elem};
+        render_map_set_doc_root(html_item_root);
+    }
 
     input_context = nullptr;
 
-    dom_doc->lambda_runtime = runtime;
+    if (shared_runtime) layout_adopt_loader_runtime(dom_doc, shared_runtime);
+    else dom_doc->lambda_runtime = runtime;
 
     auto total_end = time_now_ns();
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",
@@ -4096,14 +4177,15 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool, bool print_media) {
+        int viewport_width, int viewport_height, Pool* pool,
+        InputResourcePolicy resource_policy, bool print_media) {
     return load_lambda_document_doc(document_url, transform, options, option_count,
-        viewport_width, viewport_height, pool, print_media);
+        viewport_width, viewport_height, pool, resource_policy, print_media);
 }
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
     return load_lambda_document_doc(script_url, nullptr, nullptr, 0,
-        viewport_width, viewport_height, pool, false);
+        viewport_width, viewport_height, pool, g_css_resource_policy, false);
 }
 
 static View* find_matching_input(View* root, const char* match_tag, const char* match_class) {
@@ -4537,6 +4619,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
         DomElement* parent_dom = lam::dom_require_element(old_dom->parent);
+        bool replaces_document_root = old_dom == doc->root;
         DomNode* old_previous = old_dom->prev_sibling;
         DomNode* old_next = old_dom->next_sibling;
 
@@ -4580,6 +4663,11 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
                 log_error("rebuild_lambda_doc_incremental: failed to replace entry %d", i);
                 continue;
             }
+        }
+        if (replaces_document_root) {
+            // the retained #document links and layout must publish the same root.
+            doc->root = lam::up(new_dom);
+            doc->input->root = {.element = html_elem};
         }
         if (i < 16) new_doms[i] = new_dom;
 
@@ -4674,7 +4762,9 @@ struct LayoutOptions {
     const char* memory_profile_output_file;      // post-layout six-domain snapshot
     bool auto_close;                            // cancel async JS timers after load/onload
     int post_load_settle_ms;                    // deterministic timer window before auto-close
+    bool post_load_settle_given;
     bool disable_animations;                    // freeze CSS animation/transition effects for snapshots
+    bool block_remote_resources;
     bool stream_layout_results;                 // write compact framed results to stdout
 };
 
@@ -4729,6 +4819,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         {nullptr, "--post-load-settle-ms", "--post-load-settle-ms",
          &opts->post_load_settle_ms, LAYOUT_OPTION_INTEGER},
         {nullptr, "--disable-animations", nullptr, &opts->disable_animations, LAYOUT_OPTION_FLAG},
+        {nullptr, "--block-remote-resources", nullptr, &opts->block_remote_resources, LAYOUT_OPTION_FLAG},
         {nullptr, "--stream-layout-results", nullptr,
          &opts->stream_layout_results, LAYOUT_OPTION_FLAG}
     };
@@ -4749,6 +4840,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
                     } else {
                         *(int*)spec->target = (int)str_to_int64_default(
                             value, strlen(value), 0); // INT_CAST_OK: CLI viewport option
+                        if (spec->target == &opts->post_load_settle_ms) opts->post_load_settle_given = true;
                     }
                 }
                 matched = true;
@@ -5106,6 +5198,7 @@ static bool layout_single_file(
     bool auto_close = false,
     int post_load_settle_ms = 0,
     bool disable_animations = false,
+    bool block_remote_resources = false,
     FILE* result_stream = nullptr
 ) {
     auto total_start = time_now_ns();
@@ -5132,11 +5225,13 @@ static bool layout_single_file(
         ui_context,
         false,
         auto_close,
-        post_load_settle_ms > 0,
+        // static captures keep startup time fixed even when their post-load window is zero.
+        auto_close,
         0.0,
         (double)post_load_settle_ms,
         result_stream != nullptr,
-        disable_animations
+        disable_animations,
+        block_remote_resources ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK
     };
 
     Url* input_url = url_parse_path_or_url(input_file, cwd);
@@ -5195,8 +5290,12 @@ static bool layout_single_file(
 
     bool special_handled = false;
     const char* route_path = effective_ext ? effective_ext : input_file;
-    doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
-                                   pool, false, &special_handled);
+    {
+        // the batch's documents share one loader runtime, as a window's do
+        LayoutLoaderHostScope loader_host(ui_context);
+        doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
+                                       pool, false, &special_handled, &js_host_config);
+    }
     if (!special_handled) {
         const int max_redirects = 8;
         for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
@@ -5380,8 +5479,10 @@ static bool layout_single_file(
                 cleanup_phase_start, time_now_ns());
         }
         Runtime* render_runtime = dom_document_script_runtime(doc);
+        // A custom layout may have left the batch's loader runtime bound;
+        // teardown is quiescent, so take the binding as free_document does.
         if (render_runtime &&
-                !eval_context_init(runtime_get_eval_context(render_runtime))) {
+                !radiant_eval_context_switch(runtime_get_eval_context(render_runtime))) {
             log_error("[Layout] document cleanup reached a foreign eval thread");
         }
         source_pos_bridge_reset();
@@ -5717,7 +5818,8 @@ int cmd_layout(int argc, char** argv) {
         opts.stream_layout_results;
     bool auto_close = opts.auto_close || shell_getenv("LAMBDA_AUTO_CLOSE") != nullptr;
     int post_load_settle_ms = opts.post_load_settle_ms;
-    if (post_load_settle_ms == 0) {
+    // an explicit zero freezes delayed capture tasks even when a host supplies a default window.
+    if (!opts.post_load_settle_given) {
         const char* settle_env = shell_getenv("LAMBDA_POST_LOAD_SETTLE_MS");
         if (settle_env) {
             post_load_settle_ms = (int)str_to_int64_default(
@@ -5805,6 +5907,7 @@ int cmd_layout(int argc, char** argv) {
                 auto_close,
                 post_load_settle_ms,
                 opts.disable_animations,
+                opts.block_remote_resources,
                 opts.stream_layout_results ? stdout : nullptr
                 );
             } catch (...) {

@@ -1,0 +1,93 @@
+{
+  "name": "Named Lambda frames preserve payload, cancel by owner and stop on detach",
+  "html": "test/ui/lambda_frame_delivery.ls",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-calls",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-cancelled",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-wrong-owner",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-token-matches",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-time-increases",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-detached-fired",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-cross-cancel",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-source-present",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#owner"
+      },
+      "attribute": "data-source-retained",
+      "equals": "true"
+    }
+  ]
+}

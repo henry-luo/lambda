@@ -25,18 +25,10 @@ static Bound dl_replay_clip_at_offset(const Bound* clip, const ImageSurface* sur
 void dl_replay_offset_clip_params(int clip_type, const float* source, float* destination,
                                   float offset_x, float offset_y) {
     if (!source || !destination) return;
-    memcpy(destination, source, 8 * sizeof(float));
-    switch ((ClipShapeType)clip_type) {
-        case CLIP_SHAPE_CIRCLE:
-        case CLIP_SHAPE_ELLIPSE:
-        case CLIP_SHAPE_INSET:
-        case CLIP_SHAPE_ROUNDED_RECT:
-            destination[0] -= offset_x;
-            destination[1] -= offset_y;
-            break;
-        default:
-            break;
-    }
+    ClipShape shape = clip_shape_from_params(clip_type, source);
+    clip_shape_offset(&shape, offset_x, offset_y);
+    int output_type = 0;
+    clip_shape_to_params(&shape, &output_type, destination);
 }
 
 void dl_replay_apply_filter(ScratchArena* scratch,

@@ -51,6 +51,7 @@
 #include "../../lib/uv_loop.h"
 #endif
 #include "../dom/dom.h"
+#include "context_capsule.h"
 
 extern "C" Item js_get_key_default(Item object, Item key);
 struct DomDocument;
@@ -2854,12 +2855,8 @@ void runner_setup_context(Runner* runner) {
     if (!lambda_side_stack_bind()) {
         log_error("runner side-stack: failed to initialize execution regions");
     }
-    // Phase 5: propagate ui_mode and result_arena from Runtime to context
-    Runtime* ui_rt = runner->runtime;
-    if (ui_rt && ui_rt->ui_mode && ui_rt->result_arena) {
-        ctx->ui_mode = true;
-        ctx->arena = ui_rt->result_arena;
-    }
+    // Phase 5: the context allocates UI results in the runtime's bound Input
+    runtime_context_follow_ui_result(runner->runtime, ctx);
 
     // Reuse or create the GC heap and name_pool from the Runtime.
     // These persist across multiple evaluations on the same Runtime.
@@ -3112,10 +3109,24 @@ void runtime_init(Runtime* runtime) {
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 
-void runtime_set_ui_result_arena(Runtime* runtime, Arena* arena) {
+void runtime_set_ui_result_input(Runtime* runtime, Input* input) {
     if (!runtime) return;
     runtime->ui_mode = true;
-    runtime->result_arena = arena;
+    runtime->result_input = input;
+}
+
+bool runtime_context_follow_ui_result(Runtime* runtime, EvalContext* ctx) {
+    if (!ctx) return false;
+    Input* result = runtime && runtime->ui_mode ? runtime->result_input : nullptr;
+    ctx->ui_mode = result != nullptr;
+    ctx->arena = result ? result->arena : nullptr;
+    return ctx->ui_mode;
+}
+
+void runtime_bind_ui_result_input(Runtime* runtime, Input* input) {
+    if (!runtime) return;
+    runtime_set_ui_result_input(runtime, input);
+    runtime_context_follow_ui_result(runtime, runtime->eval_context);
 }
 
 void runtime_register_script(Runtime* runtime, Script* script) {
@@ -3473,6 +3484,9 @@ void runtime_reset_heap(Runtime* runtime) {
             dom_batch_reset();
         }
 
+        // native owners belong to the evaluator even when no JS realm exists.
+        runtime_resource_table_clear(runtime_resource_table_context(cleanup_context));
+
 #ifndef LAMBDA_NO_TASKS
         if (runtime_scheduler(runtime)) {
             lambda_scheduler_destroy(runtime_scheduler(runtime));
@@ -3512,6 +3526,7 @@ void runtime_reset_heap(Runtime* runtime) {
         heap_destroy();
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
+        runtime_shape_tree_release(cleanup_context);
         // D4.2.1v2/RN-NamePool: GC finalizers may still inspect NameRecords;
         // release the dedicated runtime pool only after heap destruction.
         if (runtime_name_pool(runtime)) {
@@ -3593,13 +3608,8 @@ void runtime_cleanup(Runtime* runtime) {
         render_map_destroy();
         tmpl_state_destroy();
 
-        if (js_runtime_state_for(cleanup_context)) {
-            // Cancel host tasks while their roots and native owners are still
-            // valid; scheduler teardown only drains their inert completions.
-#ifndef LAMBDA_NO_TASKS
-            runtime_resource_table_clear(js_runtime_resource_table());
-#endif
-        }
+        // cancel native owners while their heap is valid, including Lambda DOM loads.
+        runtime_resource_table_clear(runtime_resource_table_context(cleanup_context));
 #ifndef LAMBDA_NO_TASKS
         if (runtime_scheduler(runtime)) {
             cleanup_context->scheduler = runtime_scheduler(runtime);
@@ -3668,6 +3678,7 @@ void runtime_cleanup(Runtime* runtime) {
         heap_destroy();
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
+        runtime_shape_tree_release(cleanup_context);
         // D4.2.1v2/RN-NamePool: GC finalizers can traverse name-backed
         // shapes, so the dedicated runtime pool outlives heap teardown.
         if (runtime_name_pool(runtime)) {
@@ -3704,6 +3715,8 @@ void runtime_cleanup(Runtime* runtime) {
         }
         js_runtime_state_destroy_context();
         lambda_module_state_destroy();
+        // core capsules are evaluator-owned, independently of the optional JS capsule.
+        context_capsule_destroy_all(retiring_context);
         if (!eval_context_shutdown(retiring_context)) return;
         mem_free(runtime->eval_context);
         runtime->eval_context = NULL;

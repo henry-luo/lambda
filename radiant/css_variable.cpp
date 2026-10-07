@@ -4,6 +4,7 @@
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lib/str.h"
+#include "../lib/mem_grow.hpp"
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
@@ -11,20 +12,6 @@
 
 // substitution is shared by layout, CSSOM and animation; allocations follow the caller's pool (D4.5.1v4).
 // inherited custom properties resolve in the environment where they were specified.
-static const CssValue* lookup_css_variable_from(DomElement* element,
-                                                  const char* var_name) {
-    if (!element || !var_name) return nullptr;
-    CssCustomProp* winner = nullptr;
-    for (CssCustomProp* var = element->css_variables; var; var = var->next) {
-        if (!css_custom_property_name_matches(var->name, var_name)) continue;
-        if (!winner || !winner->declaration || !var->declaration ||
-            css_declaration_cascade_compare(var->declaration, winner->declaration) > 0) {
-            winner = var;
-        }
-    }
-    return winner ? winner->value : nullptr;
-}
-
 struct CssVarStack {
     const char* name;
     DomElement* element;
@@ -175,7 +162,7 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
     // Script names can contain NUL; CSS identifiers cannot match their truncated prefix.
     bool token_name = !memchr(name, '\0', name_length);
     if (token_name && css_var_stack_contains(stack, element, name)) return nullptr;
-    const CssValue* value = token_name ? lookup_css_variable_from(element, name) : nullptr;
+    const CssValue* value = token_name ? dom_element_lookup_own_custom_property(element, name) : nullptr;
     bool inherit = registration ? registration->inherits : true;
     if (value && css_value_is_global_keyword(value)) {
         CssEnum keyword = value->data.keyword;
@@ -196,6 +183,8 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
             const CssValue* computed = css_compute_registered_atom(pool, element, matched, resolved);
             if (computed && !invalid) return computed;
         }
+        // an invalid unregistered declaration stays invalid instead of inheriting a parent value.
+        if (!registration) return nullptr;
         // Invalid computed values use the registered default; the losing declaration stays discarded.
     }
     DomElement* parent = element->doc && element == element->doc->root
@@ -216,11 +205,58 @@ static const char* css_var_function_name(const CssFunction* func) {
     return first_arg->type == CSS_VALUE_TYPE_STRING ? first_arg->data.string : nullptr;
 }
 
-static bool css_value_is_var_reference(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_TYPE_VAR ||
-        (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-         value->data.function->name &&
-         strcmp(value->data.function->name, "var") == 0));
+struct CssSubstitutedTokens {
+    CssValue** values;
+    int count;
+    int capacity;
+};
+
+static bool css_append_substituted_tokens(Pool* pool, const CssValue* value,
+                                          CssSubstitutedTokens* tokens) {
+    if (value && value->type == CSS_VALUE_TYPE_LIST) {
+        if (value->data.list.count < 0 ||
+            (value->data.list.count && !value->data.list.values)) return false;
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (i && value->data.list.comma_separated &&
+                !css_append_substituted_tokens(pool, nullptr, tokens)) return false;
+            if (!value->data.list.values[i] ||
+                !css_append_substituted_tokens(pool, value->data.list.values[i], tokens))
+                return false;
+        }
+        return true;
+    }
+    if (tokens->count == INT_MAX || !lam::pool_copy_grow_array(pool,
+            &tokens->values, &tokens->capacity, tokens->count,
+            tokens->count + 1, 4, false)) return false;
+    // null is a comma boundary here; empty lists contribute no tokens.
+    tokens->values[tokens->count++] = (CssValue*)value;
+    return true;
+}
+
+static CssValue* css_substituted_token_group(Pool* pool, CssValue** values, int count) {
+    return count == 1 ? values[0] : css_value_create_list(pool, values, (size_t)count);
+}
+
+static const CssValue* css_normalize_substituted_list(Pool* pool, const CssValue* value) {
+    CssSubstitutedTokens tokens = {};
+    if (!css_append_substituted_tokens(pool, value, &tokens)) return nullptr;
+    int groups = 1;
+    for (int i = 0; i < tokens.count; i++) {
+        if (!tokens.values[i]) groups++;
+    }
+    if (groups == 1) return css_substituted_token_group(pool, tokens.values, tokens.count);
+    CssValue** values = (CssValue**)pool_alloc(pool, (size_t)groups * sizeof(CssValue*));
+    if (!values) return nullptr;
+    int start = 0, next = 0;
+    for (int i = 0; i <= tokens.count; i++) {
+        if (i < tokens.count && tokens.values[i]) continue;
+        values[next] = css_substituted_token_group(pool, tokens.values + start, i - start);
+        if (!values[next++]) return nullptr;
+        start = i + 1;
+    }
+    CssValue* result = css_value_create_list(pool, values, (size_t)groups);
+    if (result) result->data.list.comma_separated = true;
+    return result;
 }
 
 static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* value,
@@ -232,8 +268,7 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
     if (value->type == CSS_VALUE_TYPE_LIST) {
         CssValue** substituted = nullptr;
         int count = value->data.list.count;
-        int expanded_count = count;
-        if (count > 0 && !value->data.list.values) return nullptr;
+        if (count < 0 || (count > 0 && !value->data.list.values)) return nullptr;
         for (int i = 0; i < count; i++) {
             const CssValue* item = value->data.list.values[i];
             const CssValue* replacement = resolve_var_function_inner(
@@ -248,46 +283,12 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
                        (size_t)count * sizeof(CssValue*));
             }
             if (substituted) substituted[i] = (CssValue*)replacement;
-            // A var() replaces tokens in its surrounding list. Keep a list
-            // nested only when its separator differs from the outer list.
-            if (css_value_is_var_reference(item) && replacement &&
-                replacement->type == CSS_VALUE_TYPE_LIST &&
-                replacement->data.list.comma_separated ==
-                    value->data.list.comma_separated) {
-                int replacement_count = replacement->data.list.count;
-                if (replacement_count < 0 ||
-                    replacement_count > INT_MAX - expanded_count + 1)
-                    return nullptr;
-                expanded_count += replacement_count - 1;
-            }
         }
         if (!substituted) return value;
-        if (expanded_count != count) {
-            CssValue** expanded = (CssValue**)pool_alloc(pool,
-                (size_t)expanded_count * sizeof(CssValue*));
-            if (!expanded) return nullptr;
-            int next = 0;
-            for (int i = 0; i < count; i++) {
-                const CssValue* item = value->data.list.values[i];
-                const CssValue* replacement = substituted[i];
-                if (css_value_is_var_reference(item) && replacement &&
-                    replacement->type == CSS_VALUE_TYPE_LIST &&
-                    replacement->data.list.comma_separated ==
-                        value->data.list.comma_separated) {
-                    for (int j = 0; j < replacement->data.list.count; j++)
-                        expanded[next++] = replacement->data.list.values[j];
-                } else {
-                    expanded[next++] = (CssValue*)replacement;
-                }
-            }
-            substituted = expanded;
-        }
-        CssValue* result = (CssValue*)pool_alloc(pool, sizeof(CssValue));
-        if (!result) return nullptr;
-        *result = *value;
-        result->data.list.values = substituted;
-        result->data.list.count = expanded_count;
-        return result;
+        CssValue result = *value;
+        result.data.list.values = substituted;
+        // substitution joins adjacent tokens across comma and space boundaries.
+        return css_normalize_substituted_list(pool, &result);
     }
     const CssFunction* func = value->type == CSS_VALUE_TYPE_FUNCTION
         ? value->data.function : nullptr;
@@ -297,33 +298,53 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
     if (func && !func->name) return value;
     if (func && func->arg_count > 0 && !func->args) return nullptr;
     if (func && strcmp(func->name, "var") != 0) {
-        CssValue** substituted = nullptr;
-        for (int i = 0; i < func->arg_count; i++) {
-            const CssValue* arg = func->args[i];
-            const CssValue* replacement = resolve_var_function_inner(
-                pool, arg, context_element, lookup, lookup_context, stack);
-            if (arg && !replacement) return nullptr;
-            if (replacement != arg && !substituted) {
-                if (!pool) return nullptr;
-                substituted = (CssValue**)pool_alloc(pool,
-                    (size_t)func->arg_count * sizeof(CssValue*));
-                if (!substituted) return nullptr;
-                memcpy(substituted, func->args,
-                       (size_t)func->arg_count * sizeof(CssValue*));
-            }
-            if (substituted) substituted[i] = (CssValue*)replacement;
+        CssValue arguments = {};
+        arguments.type = CSS_VALUE_TYPE_LIST;
+        arguments.data.list.values = func->args;
+        arguments.data.list.count = func->arg_count;
+        arguments.data.list.comma_separated = true;
+        const CssValue* substituted = resolve_var_function_inner(pool, &arguments,
+            context_element, lookup, lookup_context, stack);
+        if (!substituted) return nullptr;
+        if (substituted == &arguments) return value;
+        CssFunction* new_func = (CssFunction*)pool_alloc(pool,
+                                                        sizeof(CssFunction));
+        CssValue* result = (CssValue*)pool_alloc(pool, sizeof(CssValue));
+        if (!new_func || !result) return nullptr;
+        *new_func = *func;
+        if (substituted->type == CSS_VALUE_TYPE_LIST &&
+            (substituted->data.list.comma_separated || substituted->data.list.count == 0)) {
+            new_func->args = substituted->data.list.values;
+            new_func->arg_count = substituted->data.list.count;
+        } else {
+            new_func->args = (CssValue**)pool_alloc(pool, sizeof(CssValue*));
+            if (!new_func->args) return nullptr;
+            new_func->args[0] = (CssValue*)substituted;
+            new_func->arg_count = 1;
         }
-        if (!substituted) return value;
-        return css_value_create_function(pool, func->name, substituted, func->arg_count);
+        *result = *value;
+        result->data.function = new_func;
+        return result;
+    }
+    CssValue fallback_tokens = {};
+    fallback_tokens.type = CSS_VALUE_TYPE_LIST;
+    if (func && func->arg_count >= 2) {
+        // every comma after the first belongs to the fallback token sequence.
+        fallback_tokens.data.list.values = func->args + 1;
+        fallback_tokens.data.list.count = func->arg_count - 1;
+        fallback_tokens.data.list.comma_separated = true;
     }
     const CssValue* fallback_value = var_ref
         ? (var_ref->has_fallback ? var_ref->fallback : nullptr)
-        : (func->arg_count >= 2 ? func->args[1] : nullptr);
+        : (func->arg_count >= 2 ? (func->arg_count == 2 ? func->args[1] : &fallback_tokens)
+            : nullptr);
     auto resolve_fallback = [&]() -> const CssValue* {
-        return fallback_value
-            ? resolve_var_function_inner(pool, fallback_value, context_element,
-                                         lookup, lookup_context, stack)
-            : nullptr;
+        if (!fallback_value) return nullptr;
+        const CssValue* resolved = resolve_var_function_inner(pool, fallback_value,
+            context_element, lookup, lookup_context, stack);
+        // synthetic fallback lists cannot escape their stack frame.
+        return resolved == &fallback_tokens
+            ? (pool ? css_normalize_substituted_list(pool, resolved) : nullptr) : resolved;
     };
     const char* var_name = var_ref ? var_ref->name : css_var_function_name(func);
     if (!var_name) {
@@ -333,21 +354,22 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
         const CssValue* computed = css_compute_custom_property(pool, context_element, var_name, stack);
         return computed ? computed : resolve_fallback();
     }
-    if (css_var_stack_contains(stack, nullptr, var_name)) return resolve_fallback();
-    const CssValue* var_value = lookup(lookup_context, var_name);
+    DomElement* owner = nullptr;
+    const CssValue* var_value = lookup(lookup_context, context_element, var_name, &owner);
+    if (css_var_stack_contains(stack, owner, var_name)) return nullptr;
     if (var_value) {
         bool invalid = false;
-        CssVarStack current = {var_name, nullptr, stack, &invalid, CSS_PROPERTY_UNKNOWN};
+        CssVarStack current = {var_name, owner, stack, &invalid, CSS_PROPERTY_UNKNOWN};
         const CssValue* resolved = resolve_var_function_inner(
-            pool, var_value, nullptr, lookup, lookup_context, &current);
+            pool, var_value, owner, lookup, lookup_context, &current);
         if (resolved && !invalid) return resolved;
     }
     return resolve_fallback();
 }
 
 const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
-                                     CssVariableLookupFn lookup, void* context) {
-    return resolve_var_function_inner(pool, value, nullptr, lookup, context, nullptr);
+                                     CssVariableLookupFn lookup, void* context, DomElement* element) {
+    return resolve_var_function_inner(pool, value, element, lookup, context, css_active_var_stack);
 }
 
 // Resolve in the declaration owner's environment for inherited custom properties.

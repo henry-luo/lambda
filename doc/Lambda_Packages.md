@@ -38,6 +38,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
+| `slide` | `lambda.slide` | Library, experimental | Slide elements, deterministic cues/effects, live playback, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.ls` |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor` | `lambda.editor.mod_editor` | Engine internal | The editing model: documents, selections, transactions, history | `lambda edit`, through `edit` |
 | `dom` | `lambda.dom.dom` | Engine internal | Browser behaviour for HTML: form controls, links, focus, `<details>`, editing | `lambda view` on interactive pages |
@@ -74,12 +75,13 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4). Shipped pa
 | Import path | Loads |
 |-------------|-------|
 | `lambda.<package>.<module>` | `<LAMBDA_HOME>/package/<package>/<module>.ls` |
+| `lambda.slide` | `<LAMBDA_HOME>/package/slide.ls` (explicit public module) |
 | `lambda.<package>.<dir>.<module>` | `<LAMBDA_HOME>/package/<package>/<dir>/<module>.ls` |
 | `lambda.doc.math.<module>` | `<LAMBDA_HOME>/package/math/<module>.ls` |
 | `lambda.math`, `lambda.io` | The built-in `math` and `io` modules, which are not packages |
 | `lambda.sys.<name>` | A system function, reachable even when a script shadows its name (S17.2.1, S17.2.2) |
 
-- **Name a module, not just the package.** There is no index module, so `import chart: lambda.chart` fails with E217; write `lambda.chart.chart`.
+- **Name an existing module.** There is no implicit directory index, so `import chart: lambda.chart` fails with E217; write `lambda.chart.chart`. `lambda.slide` has an explicit `package/slide.ls` entry file.
 - **`lambda.doc.*` holds only the math typesetting package today.** It sits there so that `lambda.math` can stay the built-in math module (D7.2.4); the LaTeX package is `lambda.latex`, not `lambda.doc.latex`.
 - **An alias is a binding name**, so it can be neither a keyword nor `lambda` itself (S16.10.1v2). Choose another alias for the `edit` package:
 

@@ -1,4 +1,5 @@
 #include "view.hpp"
+#include "layout.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lib/log.h"
@@ -41,32 +42,32 @@ static const CssPropertyRuntimeMetadata kCssPropertyRuntimeMetadata[] = {
     {CSS_PROPERTY_TRANSFORM, ANIM_VAL_TRANSFORM, false, false},
     {CSS_PROPERTY_BACKGROUND_COLOR, ANIM_VAL_COLOR, true, false},
     {CSS_PROPERTY_COLOR, ANIM_VAL_COLOR, true, false},
-    {CSS_PROPERTY_BORDER_TOP_COLOR, ANIM_VAL_COLOR, false, false},
-    {CSS_PROPERTY_BORDER_RIGHT_COLOR, ANIM_VAL_COLOR, false, false},
-    {CSS_PROPERTY_BORDER_BOTTOM_COLOR, ANIM_VAL_COLOR, false, false},
-    {CSS_PROPERTY_BORDER_LEFT_COLOR, ANIM_VAL_COLOR, false, false},
+    {CSS_PROPERTY_BORDER_TOP_COLOR, ANIM_VAL_COLOR, true, false},
+    {CSS_PROPERTY_BORDER_RIGHT_COLOR, ANIM_VAL_COLOR, true, false},
+    {CSS_PROPERTY_BORDER_BOTTOM_COLOR, ANIM_VAL_COLOR, true, false},
+    {CSS_PROPERTY_BORDER_LEFT_COLOR, ANIM_VAL_COLOR, true, false},
     {CSS_PROPERTY_WIDTH, ANIM_VAL_LENGTH, true, false},
     {CSS_PROPERTY_HEIGHT, ANIM_VAL_LENGTH, true, false},
     {CSS_PROPERTY_MIN_WIDTH, ANIM_VAL_LENGTH, true, false},
     {CSS_PROPERTY_MAX_WIDTH, ANIM_VAL_LENGTH, true, false},
     {CSS_PROPERTY_MIN_HEIGHT, ANIM_VAL_LENGTH, true, false},
     {CSS_PROPERTY_MAX_HEIGHT, ANIM_VAL_LENGTH, true, false},
-    {CSS_PROPERTY_TOP, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_RIGHT, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_BOTTOM, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_LEFT, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_MARGIN_TOP, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_MARGIN_RIGHT, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_MARGIN_BOTTOM, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_MARGIN_LEFT, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_PADDING_TOP, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_PADDING_RIGHT, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_PADDING_BOTTOM, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_PADDING_LEFT, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_BORDER_TOP_WIDTH, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_BORDER_RIGHT_WIDTH, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_BORDER_BOTTOM_WIDTH, ANIM_VAL_LENGTH, false, false},
-    {CSS_PROPERTY_BORDER_LEFT_WIDTH, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_TOP, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_RIGHT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_BOTTOM, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_LEFT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_MARGIN_TOP, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_MARGIN_RIGHT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_MARGIN_BOTTOM, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_MARGIN_LEFT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_PADDING_TOP, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_PADDING_RIGHT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_PADDING_BOTTOM, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_PADDING_LEFT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_BORDER_TOP_WIDTH, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_BORDER_RIGHT_WIDTH, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_BORDER_BOTTOM_WIDTH, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_BORDER_LEFT_WIDTH, ANIM_VAL_LENGTH, true, false},
     {CSS_PROPERTY_ASPECT_RATIO, ANIM_VAL_ASPECT_RATIO, true, false},
     {CSS_PROPERTY_DISPLAY, ANIM_VAL_DISPLAY, false, false},
     {CSS_PROPERTY_FONT, ANIM_VAL_NONE, false, true},
@@ -270,6 +271,17 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
                              const CssValue* value, char* out, size_t out_size,
                              Pool* scratch = nullptr) {
     if (!value) return copy_text(out, out_size, property_initial(id));
+    if (id == CSS_PROPERTY_OPACITY) {
+        // numeric opacity math needs a value context, without consuming pending geometry.
+        Pool* scratch = pool_create();
+        if (!scratch) return false;
+        LayoutContext context = {};
+        context.pool = lam::up(scratch);
+        context.view = lam::up(static_cast<View*>(element));
+        bool result = format_number(out, out_size, resolve_css_opacity_value(&context, value), "");
+        pool_destroy(scratch);
+        return result;
+    }
     if (id == CSS_PROPERTY_COLOR || id == CSS_PROPERTY_BACKGROUND_COLOR ||
         id == CSS_PROPERTY_BORDER_TOP_COLOR || id == CSS_PROPERTY_BORDER_RIGHT_COLOR ||
         id == CSS_PROPERTY_BORDER_BOTTOM_COLOR || id == CSS_PROPERTY_BORDER_LEFT_COLOR) {
@@ -731,6 +743,30 @@ static bool serialize_visibility(const CssPropAccessor*, DomElement* element,
     }
 }
 
+static bool serialize_transform(const CssPropAccessor* accessor, DomElement* element,
+                                 int pseudo_type, char* out, size_t out_size) {
+    if (!accessor || !element || pseudo_type != 0) return false;
+    TransformFunction* functions = element->transform ? element->transform->functions.get() : nullptr;
+    if (!functions) return copy_text(out, out_size, "none");
+    // CSS Transforms 1 §4.2 serializes the function product without transform-origin.
+    RdtMatrix4 matrix = radiant::compute_transform_matrix_3d(functions,
+        element->width, element->height, 0.0f, 0.0f, 0.0f);
+    const float* values = matrix.values;
+    bool is_2d = rdt_matrix4_is_2d(&matrix);
+    const int planar_indices[] = {0, 4, 1, 5, 3, 7};
+    int count = is_2d ? 6 : 16;
+    size_t used = str_copy(out, out_size, is_2d ? "matrix(" : "matrix3d(", is_2d ? 7 : 9);
+    for (int index = 0; index < count; index++) {
+        if (index) used = str_cat(out, used, out_size, ", ", 2);
+        int component = is_2d ? planar_indices[index] : (index % 4) * 4 + index / 4;
+        char number[64];
+        format_number(number, sizeof(number), values[component], "");
+        used = str_cat(out, used, out_size, number, strlen(number));
+    }
+    str_cat(out, used, out_size, ")", 1);
+    return true;
+}
+
 static bool serialize_used_size(const CssPropAccessor* accessor, DomElement* element,
                                 int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
@@ -1108,7 +1144,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_COLOR, serialize_border_component, 0),
     DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_COLOR, serialize_border_component, 0),
     DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_COLOR, serialize_border_component, 0),
-    DECL_ROW(CSS_PROPERTY_TRANSFORM),
+    DERIVED_ROW(CSS_PROPERTY_TRANSFORM, serialize_transform, CSS_PROP_ACCESSOR_USED_VALUE),
     DIRECT_ROW(CSS_PROPERTY_BACKFACE_VISIBILITY, PROP_GROUP_TRANSFORM, TransformProp,
         backface_visibility, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_TRANSFORM_STYLE, PROP_GROUP_TRANSFORM, TransformProp,
@@ -1216,11 +1252,19 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
         // tree exists but has not yet propagated inherited font properties.
         return serialize_cssom_font_size(element, pseudo_type, out, out_size);
     }
-    bool computed = dom_ensure_computed(element,
-        (accessor->flags & CSS_PROP_ACCESSOR_USED_VALUE) != 0);
+    // only actual effects add a sampling dependency to ordinary declaration reads.
+    const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(id);
+    bool needs_used = (accessor->flags & CSS_PROP_ACCESSOR_USED_VALUE) != 0;
+    bool computed = dom_ensure_computed(element, needs_used);
+    if (!computed && !needs_used && metadata && metadata->animation_type != ANIM_VAL_NONE &&
+        css_animation_needs_computed_sample(element, id)) {
+        computed = dom_ensure_computed(element, true);
+    }
     const CssProperty* property = css_property_get_by_code(id);
     if (property && property->type == PROP_TYPE_COLOR &&
+        !css_animation_needs_computed_sample(element, id) &&
         serialize_decl_value(element, id, pseudo_type, out, out_size, true)) return true;
+
     if (!computed) {
         // Before the first UiContext exists, loader scripts can only observe
         // the already-cascaded declaration tree; keep this compatibility seam
@@ -1238,21 +1282,21 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                                       out, out_size);
 }
 
-String* css_prop_serialize_registered_custom_property(Pool* pool, DomElement* element,
+String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length) {
     if (!pool || !element || !element->doc) return nullptr;
     DomDocument* doc = element->doc;
     const CssPropertyRegistration* registration = css_find_document_property_registration(doc, name, name_length);
-    if (!registration) return nullptr;
     dom_ensure_computed(element, false);
     Pool* scratch = pool_create();
     if (!scratch) return nullptr;
     const CssValue* value = css_compute_element_custom_property(scratch, element, name, name_length);
-    const CssPropertySyntaxComponent* matched = css_match_property_syntax(registration, value);
+    const CssPropertySyntaxComponent* matched = registration
+        ? css_match_property_syntax(registration, value) : nullptr;
     CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
     if (!formatter) {pool_destroy(scratch); return nullptr;}
     formatter->options.computed_colors = matched && matched->type == CSS_SYNTAX_COLOR;
-    if (registration->universal && value == registration->initial_value && registration->initial_text) {
+    if (registration && registration->universal && value == registration->initial_value && registration->initial_text) {
         // Universal defaults retain their original token spelling and length, including embedded NUL.
         stringbuf_append_str_n(formatter->output, registration->initial_text, registration->initial_text_length);
     } else if (value) css_format_value(formatter, (CssValue*)value);

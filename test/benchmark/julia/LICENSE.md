@@ -5,6 +5,34 @@ The applicable upstream notices remain attached to each source or are reproduced
 here. AWFY's Richards and DeltaBlue retain their historical license notes;
 this file does not replace those terms with a new license.
 
+## jq interpreter and prelude
+
+`text/jq_{values,native,parse,compile,vm}.jl` adapts Lambda's
+`test/benchmark/jq_vm.ls` and `test/benchmark/text/c2mir/jq_*.h`.
+The prelude definitions come from jq 1.7.1's `src/builtin.jq`, under
+[jq's MIT license](https://github.com/jqlang/jq/blob/jq-1.7.1/COPYING):
+
+```text
+jq is copyright (C) 2012 Stephen Dolan
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
 ## `ref/are-we-fast-yet/benchmarks/JavaScript/sieve.js`, `ref/are-we-fast-yet/benchmarks/JavaScript/permute.js`, `ref/are-we-fast-yet/benchmarks/JavaScript/queens.js`, `ref/are-we-fast-yet/benchmarks/JavaScript/towers.js`, `ref/are-we-fast-yet/benchmarks/JavaScript/list.js`, `ref/are-we-fast-yet/benchmarks/JavaScript/storage.js`
 
 ```text
@@ -609,4 +637,3 @@ this file does not replace those terms with a new license.
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 ```
-

@@ -1,0 +1,69 @@
+{
+  "name": "Toolbar speed range changes the playback clock without navigation or unpausing",
+  "html": "test/demo/slides/slide_presentation.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 700
+  },
+  "env": [
+    {
+      "key": "LAMBDA_GC_FORCE_EVERY",
+      "value": "1"
+    },
+    {
+      "key": "LAMBDA_GC_POISON_FREED",
+      "value": "1"
+    }
+  ],
+  "events": [
+    {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "1"},
+    {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "1×"},
+    {"type": "focus", "target": {"selector": "#demo-speed"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "4"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-rate", "equals": "4"},
+    {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "4×"},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 98, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220},
+    {"type": "mouse_drag", "target": {"selector": "#demo-speed"}, "dx": -120, "dy": 0},
+    {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "0.5"},
+    {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "0.5×"},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 6, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 98, "offset_y": 6}, "max_r": 30, "max_g": 60, "max_b": 80},
+    {"type": "mouse_drag", "target": {"selector": "#demo-speed"}, "dx": 120, "dy": 0},
+    {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "4"},
+    {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "4×"},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 98, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 6, "offset_y": 6}, "max_r": 30, "max_g": 60, "max_b": 80},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "0.5"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-rate", "equals": "0.5"},
+    {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "0.5×"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "0.75"},
+    {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "0.75×"},
+    {"type": "click", "target": {"selector": "#demo-speed", "offset_x": 103, "offset_y": 10}},
+    {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "4"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-index", "equals": "0"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-autoplay", "equals": "false"},
+    {"type": "click", "target": {"selector": "[data-slide-command=play]"}},
+    {"type": "click", "target": {"selector": "[data-slide-command=pause]"}},
+    {"type": "focus", "target": {"selector": "#demo-speed"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "advance_time", "ms": 2000, "steps": 4},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-paused", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-rate", "equals": "0.5"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-index", "equals": "0"},
+    {"type": "key_press", "key": "End"},
+    {"type": "click", "target": {"selector": "[data-slide-command=play]"}},
+    {"type": "advance_time", "ms": 10000, "steps": 40},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-index", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-autoplay", "equals": "false"},
+    {"type": "click", "target": {"selector": "[data-slide-command=restart]"}},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-index", "equals": "0"},
+    {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-rate", "equals": "4"},
+    {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "4"},
+    {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "4×"},
+    {"type": "advance_time", "ms": 700, "steps": 14},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 98, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220}
+  ]
+}

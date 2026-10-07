@@ -1,5 +1,5 @@
 // Unit tests for the CSS shorthand resolve-only declaration helpers
-// (radiant/css_temp_decl.hpp). See vibe/Memory_Safety_Template4.md §10 Phase 1.
+// (radiant/view.hpp). See vibe/Memory_Safety_Template.md §8.2.
 //
 // These tests exercise the engine-independent surface: capacity, append
 // semantics, single-vs-list routing, and non-copyability. resolve_css_property

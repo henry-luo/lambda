@@ -5,6 +5,7 @@
 #include "../../lambda/input/css/css_engine.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/css_formatter.hpp"
+#include "../../lambda/input/css/css_paged_media.hpp"
 #include "../../lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
@@ -76,6 +77,48 @@ TEST_F(CssParserTest, ParseInvalidCSS) {
     validateTokenization(css, 3); // Should still tokenize even if semantically invalid
 }
 
+TEST_F(CssParserTest, PropertyValueFragmentsKeepNestedTokensAndRejectDeclarationPunctuation) {
+    const struct { const char* property; const char* value; bool valid; } cases[] = {
+        {"width", " 10px ", true}, {"width", "10px;", false},
+        {"width", "10px !important", false}, {"width", "10px !/*x*/important", false},
+        {"width", "10px; height: 20px", false}, {"width", "invalid", false},
+        {"--value", "\"!important\"", true}, {"--value", "{ a: b; }", true},
+        {"--value", "fn(a;b)", true}, {"--value", "fn(!important)", true},
+        {"--value", "x !important", false}, {"--value", "x;", false},
+        {"--value", "[x)", false}, {"--value", "]", false},
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.value);
+        CssDeclaration* declaration = css_parse_property_value_declaration(entry.property,
+            strlen(entry.property), entry.value, strlen(entry.value), pool);
+        EXPECT_EQ(declaration != nullptr, entry.valid);
+        if (declaration) EXPECT_FALSE(declaration->important);
+    }
+}
+
+TEST_F(CssParserTest, VarReferencePreservesEmptyAndNestedFallbacks) {
+    CssPropertyValueParser* parser = css_property_value_parser_create(pool);
+    ASSERT_NE(parser, nullptr);
+    const char* cases[] = {" --missing , )", "--missing, rgb(255,0,0))"};
+    for (int i = 0; i < 2; i++) {
+        size_t count = 0;
+        CssToken* tokens = css_tokenize(cases[i], strlen(cases[i]), pool, &count);
+        ASSERT_NE(tokens, nullptr);
+        CSSVarRef* reference = css_parse_var_function(parser, tokens, (int)count);
+        ASSERT_NE(reference, nullptr);
+        EXPECT_TRUE(reference->has_fallback);
+        ASSERT_NE(reference->fallback, nullptr);
+        if (i == 0) {
+            EXPECT_EQ(reference->fallback->type, CSS_VALUE_TYPE_LIST);
+            EXPECT_EQ(reference->fallback->data.list.count, 0);
+        } else {
+            ASSERT_EQ(reference->fallback->type, CSS_VALUE_TYPE_FUNCTION);
+            ASSERT_NE(reference->fallback->data.function, nullptr);
+            EXPECT_EQ(reference->fallback->data.function->arg_count, 3);
+        }
+    }
+}
+
 // ============================================================================
 // CSS Engine Stylesheet Parsing Tests
 // ============================================================================
@@ -127,6 +170,69 @@ TEST_F(CssEngineParserTest, InvalidSizeValuesDoNotEnterCascade) {
     }
 }
 
+TEST_F(CssEngineParserTest, PhysicalSideLengthsValidateWholeValues) {
+    const char* valid[] = {"margin-left:-2px", "top:-5%", "padding-top:calc(-2px + 4px)",
+        "border-top-width:calc(1px + 2px)", "column-rule-width:thin", "right:auto"};
+    const char* invalid[] = {"margin-left:3", "left:calc(1px + wat)",
+        "padding-top:-1px", "padding-left:2px 3px", "border-top-width:3furlong",
+        "border-left-width:2%", "column-rule-width:3", "margin-right:2deg"};
+    for (const char* value : valid)
+        EXPECT_NE(css_parse_declaration_text(value, strlen(value), pool), nullptr) << value;
+    for (const char* value : invalid)
+        EXPECT_EQ(css_parse_declaration_text(value, strlen(value), pool), nullptr) << value;
+}
+
+TEST_F(CssEngineParserTest, ImportantMarkerRequiresTrailingCaseInsensitiveTokens) {
+    const char* important[] = {"width:20px !important", "width:20px !IMPORTANT",
+        "width:20px ! /*priority*/ ImPoRtAnT /*end*/", "--size:20px !IMPORTANT"};
+    for (const char* source : important) {
+        CssDeclaration* declaration = css_parse_declaration_text(source, strlen(source), pool);
+        ASSERT_NE(declaration, nullptr) << source;
+        EXPECT_TRUE(declaration->important) << source;
+    }
+    const char* nested[] = {"--size:[!important]", "--size:(!important)",
+        "--size:{!important}", "--size:var(--other, !important)"};
+    for (const char* source : nested) {
+        CssDeclaration* declaration = css_parse_declaration_text(source, strlen(source), pool);
+        ASSERT_NE(declaration, nullptr) << source;
+        EXPECT_FALSE(declaration->important) << source;
+    }
+    const char* invalid[] = {"width:20px !important junk", "width:20px !important 30px"};
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+}
+
+TEST_F(CssEngineParserTest, ImportantFontFamilyListValidatesWithoutPriorityTokens) {
+    const char* source = "h1,h2,h3,h4,h5,h6{font-family:Cairo,\"Helvetica Neue\","
+        "Helvetica,Arial,Geneva,sans-serif!important}";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, source, nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    CssRule* rule = sheet->rules[0];
+    ASSERT_NE(rule->data.style_rule.selector_group, nullptr);
+    ASSERT_EQ(rule->data.style_rule.selector_group->selector_count, 6);
+    ASSERT_EQ(rule->data.style_rule.declaration_count, 1u);
+    CssDeclaration* declaration = rule->data.style_rule.declarations[0];
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_TRUE(declaration->important);
+    ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_LIST);
+    EXPECT_EQ(declaration->value->data.list.count, 6);
+    EXPECT_EQ(declaration->value->data.list.values[5]->type, CSS_VALUE_TYPE_KEYWORD);
+    EXPECT_EQ(declaration->value->data.list.values[5]->data.keyword, CSS_VALUE_SANS_SERIF);
+}
+
+TEST_F(CssEngineParserTest, KeyframesPreserveMathWhitespace) {
+    const char* css = "@keyframes units { from { width:calc(2em + 10%); } "
+        "to { width:calc(4em + 20%); } }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    ASSERT_EQ(sheet->rules[0]->type, CSS_RULE_KEYFRAMES);
+    ASSERT_NE(sheet->rules[0]->data.generic_rule.content, nullptr);
+    EXPECT_NE(strstr(sheet->rules[0]->data.generic_rule.content, "calc(2em + 10%)"), nullptr);
+    EXPECT_NE(strstr(sheet->rules[0]->data.generic_rule.content, "calc(4em + 20%)"), nullptr);
+}
+
 TEST_F(CssEngineParserTest, SpacingShorthandsValidateTokensBeforeCascade) {
     const char* valid[] = {
         "margin: -2px 5% auto", "padding: calc(2px + 3px) 4px",
@@ -147,6 +253,136 @@ TEST_F(CssEngineParserTest, SpacingShorthandsValidateTokensBeforeCascade) {
         EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr)
             << text;
     }
+}
+
+TEST_F(CssEngineParserTest, AnimationValuesValidateWholeDeclaration) {
+    const char* valid[] = {
+        "animation:grow 1s linear -.5s 2 alternate both paused",
+        "animation:2s step-start none", "animation:spin 1s, grow 2s",
+        "animation:\"reverse\" 2s cubic-bezier(.1,2,.8,-1)",
+        "animation:var(--motion)", "animation-name:grow, \"Grow\"",
+        "animation:grow -1s", "animation:grow -1s 2s",
+        "animation-duration:1s, 250ms", "animation-delay:-1s, 0s",
+        "animation-iteration-count:0, .5, infinite",
+        "animation-timing-function:steps(2,jump-none), cubic-bezier(0,0,1,1)"
+    };
+    const char* invalid[] = {
+        "animation:grow -1s -2s", "animation:grow 1px", "animation:grow 1s 2s 3s",
+        "animation:grow spin 1s", "animation:grow 1s running paused",
+        "animation:grow 1s cubic-bezier(-.1,0,1,1)",
+        "animation:grow 1s steps(1,jump-none)", "animation:grow 1s steps(1.5)",
+        "animation:grow 1s steps(2.0)", "animation:grow 1s steps(2e0)",
+        "animation-name:default", "animation-name:grow spin",
+        "animation:grow 1foo", "animation-name:1foo",
+        "animation-duration:-1s", "animation-duration:1s 2s",
+        "animation-duration:0", "animation-iteration-count:-.5",
+        "animation-direction:normal, inherit", "animation-fill-mode:red"
+    };
+    for (const char* source : valid) {
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    }
+    for (const char* source : invalid) {
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    }
+}
+
+TEST_F(CssEngineParserTest, ColorVariableGrammarDefersUntilSubstitution) {
+    const char* valid[] = {
+        "color:var(--x)", "color:{var(--x)}", "color:{ var(--x) }",
+        "background-color:rgb(var(--channels) / .5)", "border-left-color:var(--border)"
+    };
+    const char* invalid[] = {
+        "color:1px", "color:{red}", "color:var(--x) {}", "color:{} var(--x)",
+        "color:{var(--x)} red", "color:red {var(--x)}"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, OpacityValidatesNumericDomainAndWholeValue) {
+    const char* valid[] = {
+        "opacity:50%", "opacity:-1", "opacity:2", "opacity:inherit",
+        "opacity:var(--fade)", "opacity:calc(20% + 30%)",
+        "opacity:clamp(0%, calc(10% + 20%), 100%)", "opacity:calc(50% * 2)",
+        "opacity:min(80%, 90%)", "opacity:sin(30deg)"
+    };
+    const char* invalid[] = {
+        "opacity:auto", "opacity:red", "opacity:1px", "opacity:1deg", "opacity:pi",
+        "opacity:.5 .2", "opacity:50%, 80%", "opacity:calc(.2 + 1px)",
+        "opacity:calc(10% + 2deg)", "opacity:calc(.2 + 30%)", "opacity:calc(50% * 50%)", "opacity:wobble(.5)", "opacity:calc(.2 +)"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, TransformValidatesFunctionArityAndNumericDomains) {
+    const char* valid[] = {
+        "transform:none", "transform:inherit", "transform:var(--motion)",
+        "transform:translateX(var(--end))", "transform:translate(1em, 50%) rotate(.5turn)",
+        "transform:scale(50%, 150%)", "transform:translate3d(10%, 1px, 2em)",
+        "transform:rotate3d(0, 1, 0, 90deg)", "transform:matrix(1,0,0,1,10,20)",
+        "transform:skewY(0)", "transform:perspective(100px)", "transform:perspective(none)",
+        "transform:perspective(0)", "transform:perspective(.5px)",
+        "transform:translateX(calc(10px + 50%))", "transform:scale(calc(50% * 2))"
+    };
+    const char* invalid[] = {
+        "transform:wobble(1)", "transform:translateX()", "transform:translateX(1px,2px)",
+        "transform:translate(10)", "transform:translateX(10deg)", "transform:rotate(10)",
+        "transform:rotate(2px)", "transform:scale(2px)", "transform:translate3d(1px,2px,3%)",
+        "transform:matrix(1,0,0,1,10)", "transform:perspective(-1px)",
+        "transform:perspective(50%)", "transform:translateX(1px), rotate(0)",
+        "transform:translateX(1px) garbage", "transform:none translateX(1px)",
+        "transform:translateX(calc(10px + 1deg))"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, TransitionValuesValidateWholeDeclaration) {
+    const char* valid[] = {
+        "transition:opacity 1s linear -.5s, width 250ms steps(2,jump-start)",
+        "transition:1s", "transition:none 2s", "transition:var(--motion)",
+        "transition:opacity -1s", "transition:opacity -1s 2s",
+        "transition-property:width, unknown-target, opacity",
+        "transition-duration:1s, 250ms", "transition-delay:-1s, 0s",
+        "transition-timing-function:steps(2,jump-none), ease", "transition:inherit"
+    };
+    const char* invalid[] = {
+        "transition:opacity -1s -2s", "transition:opacity 1px",
+        "transition:opacity 1s 2s 3s", "transition:opacity width 1s",
+        "transition:opacity 1s linear ease", "transition:none 1s, opacity 2s",
+        "transition-property:none, opacity", "transition-property:width opacity",
+        "transition-property:default", "transition-property:\"opacity\"",
+        "transition-property:1foo", "transition-duration:-1s",
+        "transition-duration:0", "transition-duration:1s 2s",
+        "transition-delay:1s, inherit", "transition-timing-function:steps(2.0)",
+        "transition-timing-function:cubic-bezier(-1,0,1,1)"
+    };
+    for (const char* source : valid) {
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    }
+    for (const char* source : invalid) {
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    }
+}
+
+TEST_F(CssEngineParserTest, CustomPropertiesPreserveEmptyValuesAndCommaBoundaries) {
+    const char* sources[] = {"--empty:;", "--space: ;", "--comma:,;", "--tail:red,;", "--leading:,blue;"};
+    for (int i = 0; i < 5; i++) {
+        CssDeclaration* declaration = css_parse_declaration_text(sources[i], strlen(sources[i]), pool);
+        ASSERT_NE(declaration, nullptr) << sources[i];
+        ASSERT_NE(declaration->value, nullptr) << sources[i];
+        ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_LIST) << sources[i];
+        EXPECT_EQ(declaration->value->data.list.count, i < 2 ? 0 : 2) << sources[i];
+        EXPECT_EQ(declaration->value->data.list.comma_separated, i >= 2) << sources[i];
+    }
+    EXPECT_EQ(css_parse_declaration_text("margin:;", 8, pool), nullptr);
 }
 
 TEST_F(CssEngineParserTest, LogicalOverflowValidatesAxisValues) {
@@ -367,6 +603,8 @@ TEST_F(CssEngineParserTest, IndividualTransformsValidateAxisAndComponentGrammar)
 
 TEST_F(CssEngineParserTest, AnimationShorthandAndLonghandsValidateComponentGrammar) {
     const char* valid[] = {
+        // a negative first time fills delay when the duration grammar rejects it.
+        "animation: fade -2s",
         "animation: fade 2s linear -1s 1.5 alternate both paused",
         "animation: 2s ease ease", "animation: 3s none backwards",
         "animation: fade 1s, grow 2s steps(4, jump-none) forwards",
@@ -378,7 +616,7 @@ TEST_F(CssEngineParserTest, AnimationShorthandAndLonghandsValidateComponentGramm
     for (const char* text : valid)
         EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
     const char* invalid[] = {
-        "animation: fade -2s", "animation: fade 1s 2s 3s", "animation: fade grow 1s",
+        "animation: fade 1s 2s 3s", "animation: fade grow 1s",
         "animation: fade 1px", "animation: fade 1s inherit", "animation: fade -1",
         "animation: fade 1s cubic-bezier(-1, 0, 1, 1)",
         "animation: fade 1s steps(1, jump-none)", "animation: fade 1s steps(2.5)",
@@ -392,6 +630,7 @@ TEST_F(CssEngineParserTest, AnimationShorthandAndLonghandsValidateComponentGramm
 
 TEST_F(CssEngineParserTest, TransitionShorthandAndListsValidateBeforeCascade) {
     const char* valid[] = {
+        "transition: opacity -1s",
         "transition: opacity 2s linear -1s, width 4s steps(4, jump-both)",
         "transition: 1s", "transition: none 2s", "transition: var(--motion)",
         "transition-property: unknown-name, opacity, all, opacity",
@@ -401,7 +640,7 @@ TEST_F(CssEngineParserTest, TransitionShorthandAndListsValidateBeforeCascade) {
     for (const char* text : valid)
         EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
     const char* invalid[] = {
-        "transition: opacity -1s", "transition: opacity 1s 2s 3s",
+        "transition: opacity 1s 2s 3s",
         "transition: opacity width 1s", "transition: opacity 1px",
         "transition: none 1s, opacity 2s", "transition-property: none, opacity",
         "transition-property: \"opacity\"", "transition-duration: -1s",
@@ -1684,4 +1923,47 @@ TEST_F(CssEngineParserTest, ComputedColorSerializationRetainsCurrentColorAndMiss
             EXPECT_EQ(a, 0);
         }
     }
+}
+
+TEST_F(CssEngineParserTest, PageSelectorFragmentsRetainCanonicalPreludeAndSpecificity) {
+    struct Case { const char* source; const char* expected; };
+    const Case cases[] = {
+        {"", ""}, {"  :LEFT , Invoice:first:first  ", ":left, Invoice:first:first"},
+        {"foo\\.bar:left", "foo\\.bar:left"},
+        {"\\31 invoice:blank", "\\31 invoice:blank"},
+        {"Report:first/**/:right", "Report:first:right"},
+    };
+    for (const Case& test : cases) {
+        CssPageRule* page = css_page_selectors_parse_text(test.source, strlen(test.source), pool);
+        ASSERT_NE(page, nullptr) << test.source;
+        EXPECT_STREQ(page->selector_text, test.expected) << test.source;
+    }
+    CssPageRule* repeated = css_page_selectors_parse_text(":first:first", 12, pool);
+    ASSERT_NE(repeated, nullptr);
+    EXPECT_EQ(repeated->selectors[0].state_specificity, 2u);
+    const char* invalid[] = {":unknown", "auto", ":first,", ":first {}", "Foo :left", "@page :left"};
+    for (const char* source : invalid)
+        EXPECT_EQ(css_page_selectors_parse_text(source, strlen(source), pool), nullptr) << source;
+}
+
+TEST_F(CssEngineParserTest, IdentifierSerializationPreservesFullInputAndRoundTripEscapes) {
+    struct Case { const char* source; size_t length; const char* expected; };
+    const Case cases[] = {
+        {"-1x", 3, "-\\31 x"},
+        {"1a", 2, "\\31 a"}, {"a b.c:d\\e", 9, "a\\ b\\.c\\:d\\\\e"},
+        {"-", 1, "\\-"}, {"a\0b", 3, "a\xef\xbf\xbd" "b"},
+        {"\x01\x7f", 2, "\\1 \\7f "}, {"caf\xc3\xa9", 5, "caf\xc3\xa9"},
+    };
+    for (const Case& test : cases) {
+        StringBuf* buffer = stringbuf_new(pool);
+        css_append_identifier(buffer, test.source, test.length);
+        String* result = stringbuf_to_string(buffer);
+        EXPECT_STREQ(result->chars, test.expected) << test.source;
+    }
+    char long_name[2049];
+    memset(long_name, 'a', 2048);
+    long_name[2048] = '\0';
+    StringBuf* buffer = stringbuf_new(pool);
+    css_append_identifier(buffer, long_name, 2048);
+    EXPECT_EQ(stringbuf_to_string(buffer)->len, 2048u);
 }

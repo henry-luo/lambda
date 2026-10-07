@@ -370,6 +370,8 @@ func runText(name string) bool {
 		return runPrettierAST()
 	case "hyphen":
 		return runHyphen()
+	case "jq_mix", "jq_records", "jq_bf", "jq_tree":
+		return runJq(name)
 	default:
 		return false
 	}

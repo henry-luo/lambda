@@ -12,8 +12,10 @@ extern "C" {
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
+#include "../lambda/dom/dom.h"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_grow.hpp"
+#include "../lib/mem_factory.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -34,10 +36,17 @@ static inline uint8_t lerp_u8(uint8_t a, uint8_t b, float t) {
 }
 
 Color css_interpolate_color(Color a, Color b, float t) {
-    Color result;
-    result.r = lerp_u8(a.r, b.r, t);
-    result.g = lerp_u8(a.g, b.g, t);
-    result.b = lerp_u8(a.b, b.b, t);
+    Color result = {};
+    // transparent endpoints contribute no color in premultiplied sRGB.
+    float alpha = css_interpolate_float((float)a.a, (float)b.a, t);
+    if (alpha > 0.0f) {
+        result.r = clamp_byte_round(css_interpolate_float((float)a.r * a.a,
+            (float)b.r * b.a, t) / alpha);
+        result.g = clamp_byte_round(css_interpolate_float((float)a.g * a.a,
+            (float)b.g * b.a, t) / alpha);
+        result.b = clamp_byte_round(css_interpolate_float((float)a.b * a.a,
+            (float)b.b * b.a, t) / alpha);
+    }
     result.a = lerp_u8(a.a, b.a, t);
     return result;
 }
@@ -46,236 +55,40 @@ Color css_interpolate_color(Color a, Color b, float t) {
 // Keyframe Content Parsing
 // ============================================================================
 
-// Parse a float number from string, advance pointer
-static float parse_float(const char** s) {
-    char* end;
-    float val = strtof(*s, &end);
-    *s = end;
-    return val;
-}
-
-static float parse_transform_angle(const char** source) {
-    const char* value = str_skip_ascii_space(*source);
-    char* end = NULL;
-    float angle = strtof(value, &end);
-    if (end == value) return 0.0f;
-
-    const char* unit = end;
-    if (str_istarts_with_cstr(unit, "rad")) {
-        *source = unit + 3;
-        return angle;
-    }
-    if (str_istarts_with_cstr(unit, "grad")) {
-        *source = unit + 4;
-        return math_gradians_to_radians(angle);
-    }
-    if (str_istarts_with_cstr(unit, "turn")) {
-        *source = unit + 4;
-        return math_turns_to_radians(angle);
-    }
-    if (str_istarts_with_cstr(unit, "deg")) {
-        *source = unit + 3;
-        return math_degrees_to_radians(angle);
-    }
-
-    // Preserve the legacy unitless interpretation while normalizing it to radians.
-    *source = end;
-    return math_degrees_to_radians(angle);
-}
-
 static const char* skip_css_balanced_block(const char* source) {
     if (!source) return source;
     return str_scan_balanced(str_scan_until_char(source, '{'), '{', '}', false, NULL);
 }
 
-static void parse_transform_translate_component(const char** source, float* length,
-                                                float* percentage) {
-    const char* value = str_skip_ascii_space(*source);
-    char* end = NULL;
-    float parsed = strtof(value, &end);
-    if (end == value) return;
-
-    *length = parsed;
-    if (*end == '%') {
-        *percentage = parsed;
-        *length = 0.0f;
-        end++;
-    } else {
-        while (isalpha((unsigned char)*end)) end++;
-    }
-    *source = end;
-}
-
-// Parse a CSS color value from string (supports: named colors, #hex, rgb())
-static bool parse_color_value(const char* val, Color* out) {
-    val = str_skip_ascii_space(val);
-
-    // hex color — count the hex-digit run (tolerates trailing content) and let
-    // lib/color.h handle the digit-count expansion.
-    if (val[0] == '#') {
-        const char* p = val + 1;
-        int len = 0;
-        while (isxdigit((unsigned char)p[len])) len++;
-        if (len == 3 || len == 4 || len == 6 || len == 8) {
-            char tmp[9];
-            str_copy(tmp, sizeof(tmp), p, len);
-            uint8_t r, g, b, a;
-            if (color_parse_hex(tmp, &r, &g, &b, &a)) {
-                out->r = r; out->g = g; out->b = b; out->a = a;
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // rgb(r, g, b) or rgba(r, g, b, a)
-    if (strncmp(val, "rgb", 3) == 0) {
-        const char* p = val + 3;
-        if (*p == 'a') p++;
-        if (*p != '(') return false;
-        p++;
-        out->r = (uint8_t)strtol(p, (char**)&p, 10); while (*p == ',' || isspace((unsigned char)*p)) p++;
-        out->g = (uint8_t)strtol(p, (char**)&p, 10); while (*p == ',' || isspace((unsigned char)*p)) p++;
-        out->b = (uint8_t)strtol(p, (char**)&p, 10); while (*p == ',' || isspace((unsigned char)*p)) p++;
-        if (*p == ')') { out->a = 255; return true; }
-        float a = strtof(p, (char**)&p);
-        out->a = clamp_byte_round(a * 255.0f);
-        return true;
-    }
-
-    // named colors (common ones for animation)
-    CssEnum enum_id = css_enum_by_name(val);
-    if (enum_id != CSS_VALUE__UNDEF) {
-        uint8_t r, g, b, a;
-        if (css_named_color_to_rgba(enum_id, &r, &g, &b, &a)) {
-            out->r = r; out->g = g; out->b = b; out->a = a;
-            return true;
-        }
-    }
-
-    // transparent
-    if (str_istarts_with_cstr(val, "transparent")) {
-        out->r = out->g = out->b = out->a = 0;
-        return true;
-    }
-
-    return false;
-}
-
-// Determine the animation value type from the shared CSS property metadata.
 static CssAnimValueType property_value_type(CssPropertyCode id) {
     const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(id);
     return metadata ? metadata->animation_type : ANIM_VAL_NONE;
 }
 
-// Parse a single transform function from string (e.g., "translateX(20px)")
-// Returns a TransformFunction allocated from pool, or NULL
-static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
-    const char* p = str_skip_ascii_space(*s);
-
-    // find function name
-    const char* name_start = p;
-    while (*p && *p != '(' && !isspace((unsigned char)*p)) p++;
-    if (*p != '(') return NULL;
-
-    size_t name_len = p - name_start;
-    p++; // skip '('
-
-    TransformFunction* tf = (TransformFunction*)pool_calloc(pool, sizeof(TransformFunction));
-    if (!tf) return NULL;
-    tf->translate_x_percent = NAN;
-    tf->translate_y_percent = NAN;
-
-    if (name_len == 10 && strncmp(name_start, "translateX", 10) == 0) {
-        tf->type = TRANSFORM_TRANSLATEX;
-        parse_transform_translate_component(&p, &tf->params.translate.x,
-                                            &tf->translate_x_percent);
-        // skip unit
-        while (*p && *p != ')') p++;
-    } else if (name_len == 10 && strncmp(name_start, "translateY", 10) == 0) {
-        tf->type = TRANSFORM_TRANSLATEY;
-        parse_transform_translate_component(&p, &tf->params.translate.y,
-                                            &tf->translate_y_percent);
-        while (*p && *p != ')') p++;
-    } else if (name_len == 9 && strncmp(name_start, "translate", 9) == 0) {
-        tf->type = TRANSFORM_TRANSLATE;
-        parse_transform_translate_component(&p, &tf->params.translate.x,
-                                            &tf->translate_x_percent);
-        p = str_skip_ascii_space(p);
-        if (*p == ',') p++;
-        if (*p != ')') {
-            parse_transform_translate_component(&p, &tf->params.translate.y,
-                                                &tf->translate_y_percent);
+static bool transform_value_is_context_free(const CssValue* value) {
+    if (!value) return false;
+    switch (value->type) {
+        case CSS_VALUE_TYPE_NUMBER:
+        case CSS_VALUE_TYPE_PERCENTAGE:
+        case CSS_VALUE_TYPE_ANGLE: return true;
+        case CSS_VALUE_TYPE_LENGTH: {
+            double pixels = 0.0;
+            return css_absolute_length_to_px(value->data.length.unit, value->data.length.value, &pixels) ||
+                (value->data.length.unit >= CSS_UNIT_DEG && value->data.length.unit <= CSS_UNIT_TURN);
         }
-        while (*p && *p != ')') p++;
-    } else if (name_len == 6 && strncmp(name_start, "scaleX", 6) == 0) {
-        tf->type = TRANSFORM_SCALEX;
-        tf->params.scale.x = parse_float(&p);
-        while (*p && *p != ')') p++;
-    } else if (name_len == 6 && strncmp(name_start, "scaleY", 6) == 0) {
-        tf->type = TRANSFORM_SCALEY;
-        tf->params.scale.y = parse_float(&p);
-        while (*p && *p != ')') p++;
-    } else if (name_len == 5 && strncmp(name_start, "scale", 5) == 0) {
-        tf->type = TRANSFORM_SCALE;
-        tf->params.scale.x = parse_float(&p);
-        while (*p && *p != ',' && *p != ')') p++;
-        if (*p == ',') { p++; tf->params.scale.y = parse_float(&p); }
-        else { tf->params.scale.y = tf->params.scale.x; }
-        while (*p && *p != ')') p++;
-    } else if (name_len == 6 && strncmp(name_start, "rotate", 6) == 0) {
-        tf->type = TRANSFORM_ROTATE;
-        tf->params.angle = parse_transform_angle(&p);
-        while (*p && *p != ')') p++;
-    } else if (name_len == 4 && strncmp(name_start, "skew", 4) == 0) {
-        tf->type = TRANSFORM_SKEW;
-        tf->params.skew.x = parse_transform_angle(&p);
-        p = str_skip_ascii_space(p);
-        if (*p == ',') p++;
-        if (*p != ')') tf->params.skew.y = parse_transform_angle(&p);
-        while (*p && *p != ')') p++;
-    } else if (name_len == 5 && strncmp(name_start, "skewX", 5) == 0) {
-        tf->type = TRANSFORM_SKEWX;
-        tf->params.skew.x = parse_transform_angle(&p);
-        while (*p && *p != ')') p++;
-    } else if (name_len == 5 && strncmp(name_start, "skewY", 5) == 0) {
-        tf->type = TRANSFORM_SKEWY;
-        tf->params.skew.y = parse_transform_angle(&p);
-        while (*p && *p != ')') p++;
-    } else {
-        // unsupported transform function — skip
-        while (*p && *p != ')') p++;
-        if (*p == ')') p++;
-        *s = p;
-        return NULL;
-    }
-
-    if (*p == ')') p++;
-    *s = p;
-    return tf;
-}
-
-// Parse transform value string into linked list of TransformFunction
-static TransformFunction* parse_transform_value(const char* val, Pool* pool) {
-    TransformFunction* head = NULL;
-    TransformFunction* tail = NULL;
-    const char* p = str_skip_ascii_space(val);
-
-    while (*p) {
-        p = str_skip_ascii_space(p);
-        if (!*p) break;
-
-        TransformFunction* tf = parse_transform_func(&p, pool);
-        if (tf) {
-            tf->next = NULL;
-            if (tail) { tail->next = lam::own(tf); tail = tf; }
-            else { head = tail = tf; }
-        } else {
-            // skip unknown token
-            while (*p && !isspace((unsigned char)*p)) p++;
+        case CSS_VALUE_TYPE_FUNCTION: {
+            const CssFunction* function = value->data.function;
+            if (!function || !css_transform_function_info(function->name)) return false;
+            for (int index = 0; index < function->arg_count; index++)
+                if (!transform_value_is_context_free(function->args[index])) return false;
+            return true;
         }
+        case CSS_VALUE_TYPE_LIST:
+            for (int index = 0; index < value->data.list.count; index++)
+                if (!transform_value_is_context_free(value->data.list.values[index])) return false;
+            return true;
+        default: return false;
     }
-    return head;
 }
 
 static bool parse_aspect_ratio_value(const char* val, CssAnimatedProp* out) {
@@ -324,34 +137,73 @@ static bool parse_aspect_ratio_value(const char* val, CssAnimatedProp* out) {
 // Parse a property value into CssAnimatedProp
 static bool parse_property_value(CssPropertyCode prop_id, const char* val,
                                   CssAnimatedProp* out, Pool* pool) {
+    memset(out, 0, sizeof(*out));
     out->property_code = prop_id;
     out->value_type = property_value_type(prop_id);
     out->composite = CSS_ANIM_COMPOSITE_REPLACE;
 
+    const CssProperty* property = css_property_get_by_code(prop_id);
+    CssDeclaration* declaration = property ? css_parse_property_declaration(
+        property->name, strlen(property->name), val, strlen(val), pool) : nullptr;
+    // keyframe declarations never participate in the important cascade.
+    if (!declaration || !declaration->value || declaration->important) return false;
+
     switch (out->value_type) {
         case ANIM_VAL_FLOAT: {
-            out->value.f = strtof(val, NULL);
+            const CssValue* value = declaration->value;
+            if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                LayoutContext context = {};
+                context.pool = lam::up(pool);
+                out->value.f = resolve_css_opacity_value(&context, value);
+            } else out->expression = value;
             return true;
         }
         case ANIM_VAL_COLOR: {
-            return parse_color_value(val, &out->value.color);
+            const CssValue* value = declaration->value;
+            const CssEnumInfo* keyword = value->type == CSS_VALUE_TYPE_KEYWORD
+                ? css_enum_info(value->data.keyword) : nullptr;
+            if (css_value_contains_var_reference(value) ||
+                (keyword && (keyword->group == CSS_VALUE_GROUP_GLOBAL ||
+                             value->data.keyword == CSS_VALUE_CURRENTCOLOR)) ||
+                (value->type == CSS_VALUE_TYPE_COLOR && value->data.color.type == CSS_COLOR_CURRENTCOLOR)) {
+                out->expression = value;
+            } else {
+                LayoutContext context = {};
+                context.pool = lam::up(pool);
+                out->value.color = resolve_color_value(&context, value);
+            }
+            return true;
         }
         case ANIM_VAL_LENGTH: {
-            char* end;
-            out->value.length.value = strtof(val, &end);
-            out->value.length.is_percent = (*end == '%');
+            const CssValue* value = declaration->value;
+            // keep units and variable/math trees until the element's style context exists.
+            out->expression = value;
+            out->value.length.is_percent = value->type == CSS_VALUE_TYPE_PERCENTAGE;
+            out->value.length.keyword = CSS_VALUE__UNDEF;
+            out->value.length.value = NAN;
+            double pixels = 0.0;
+            if (value->type == CSS_VALUE_TYPE_LENGTH &&
+                css_absolute_length_to_px(value->data.length.unit, value->data.length.value, &pixels)) {
+                out->value.length.value = (float)pixels;
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                out->value.length.value = (float)value->data.number.value;
+            }
             return true;
         }
         case ANIM_VAL_ASPECT_RATIO:
             return parse_aspect_ratio_value(val, out);
         case ANIM_VAL_TRANSFORM: {
-            out->value.transform = parse_transform_value(val, pool);
-            return out->value.transform != NULL;
+            if (declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                declaration->value->data.keyword == CSS_VALUE_NONE) {
+                out->value.transform = nullptr;
+                return true;
+            }
+            if (transform_value_is_context_free(declaration->value))
+                out->value.transform = resolve_transform_value(nullptr, declaration->value, pool);
+            else out->expression = declaration->value;
+            return true;
         }
         case ANIM_VAL_DISPLAY: {
-            CssDeclaration* declaration = css_parse_property_declaration(
-                "display", 7, val, strlen(val), pool);
-            if (!declaration || !declaration->value) return false;
             out->value.display.value = declaration->value;
             out->value.display.has_used = false;
             return true;
@@ -369,11 +221,25 @@ bool css_animation_parse_property_value(CssPropertyCode property,
     return parse_property_value(property, value, out, pool);
 }
 
-static CssAnimComposite parse_animation_composition(const char* value) {
-    if (!value) return CSS_ANIM_COMPOSITE_REPLACE;
-    if (str_icmp_cstr(value, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
-    if (str_icmp_cstr(value, "accumulate") == 0) return CSS_ANIM_COMPOSITE_ACCUMULATE;
-    return CSS_ANIM_COMPOSITE_REPLACE;
+static bool parse_animation_composition(const char* value, Pool* pool,
+                                        CssAnimComposite* result) {
+    CssDeclaration* declaration = value ? css_parse_property_declaration(
+        "animation-composition", 21, value, strlen(value), pool) : nullptr;
+    if (!declaration || declaration->important) return false;
+    const char* name = css_math_token_name(declaration->value);
+    if (!name) return false;
+    if (str_icmp_cstr(name, "replace") == 0) *result = CSS_ANIM_COMPOSITE_REPLACE;
+    else if (str_icmp_cstr(name, "add") == 0) *result = CSS_ANIM_COMPOSITE_ADD;
+    else if (str_icmp_cstr(name, "accumulate") == 0) *result = CSS_ANIM_COMPOSITE_ACCUMULATE;
+    else return false;
+    return true;
+}
+
+static CssAnimatedProp* find_prop_in_stop(CssKeyframeStop* stop, CssPropertyCode id) {
+    for (int i = 0; i < stop->property_count; i++) {
+        if (stop->properties[i].property_code == id) return &stop->properties[i];
+    }
+    return nullptr;
 }
 
 // Parse the content of a @keyframes rule into structured CssKeyframes
@@ -381,29 +247,31 @@ static CssAnimComposite parse_animation_composition(const char* value) {
 static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
     if (!content || !pool) return NULL;
 
-    const char* p = str_skip_ascii_space(content);
-
-    // extract animation name (everything before first '{')
-    const char* name_start = p;
-    p = str_scan_top_level(p, "{", '(', ')', "\"'", true);
-    if (!*p) return NULL;
-
-    // trim trailing whitespace from name
-    const char* name_end = p;
-    while (name_end > name_start && isspace((unsigned char)*(name_end - 1))) name_end--;
-    size_t name_len = name_end - name_start;
-    if (name_len == 0) return NULL;
-
-    CssDeclaration* name_declaration = css_parse_property_declaration("animation-name", 14,
-        name_start, name_len, pool);
+    // token boundaries preserve quoted/escaped names, including a quoted brace.
+    Pool* scratch = pool_create();
+    if (!scratch) return nullptr;
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(content, strlen(content), scratch, &token_count);
+    const char* brace = nullptr;
+    for (size_t i = 0; tokens && i < token_count; i++) {
+        if (tokens[i].type == CSS_TOKEN_LEFT_BRACE) {
+            brace = tokens[i].start;
+            break;
+        }
+    }
+    CssDeclaration* name_declaration = brace ? css_parse_property_declaration(
+        "animation-name", 14, content, brace - content, pool) : nullptr;
+    pool_destroy(scratch);
     const CssValue* name_value = name_declaration ? name_declaration->value : nullptr;
-    if (!name_value || !css_motion_longhand_accepts(CSS_PROPERTY_ANIMATION_NAME, name_value) ||
-        (name_value->type == CSS_VALUE_TYPE_KEYWORD && name_value->data.keyword == CSS_VALUE_NONE))
-        return nullptr;
-    const char* name = css_value_identifier_name(name_value);
+    const CssEnumInfo* keyword = name_value && name_value->type == CSS_VALUE_TYPE_KEYWORD
+        ? css_enum_info(name_value->data.keyword) : nullptr;
+    if (!name_value || name_value->type == CSS_VALUE_TYPE_LIST ||
+        (keyword && (keyword->group == CSS_VALUE_GROUP_GLOBAL ||
+         name_value->data.keyword == CSS_VALUE_NONE))) return nullptr;
+    const char* name = name_value->type == CSS_VALUE_TYPE_STRING
+        ? name_value->data.string : css_math_token_name(name_value);
     if (!name) return nullptr;
-
-    p++; // skip outer '{'
+    const char* p = brace + 1;
 
     // parse keyframe stops — temporary storage
     CssKeyframeStop temp_stops[64];
@@ -446,8 +314,10 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
         // parse declarations inside keyframe stop
         int prop_count = 0;
         CssAnimComposite stop_composite = CSS_ANIM_COMPOSITE_REPLACE;
+        TimingFunction stop_timing = {};
+        bool has_timing = false;
 
-        while (*p && *p != '}' && prop_count < 32) {
+        while (*p && *p != '}') {
             p = str_skip_ascii_space(p);
             if (*p == '}') break;
 
@@ -482,31 +352,46 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             if (*p == ';') p++;
 
             if (str_icmp_cstr(prop_name, "animation-composition") == 0) {
-                stop_composite = parse_animation_composition(val_buf);
+                parse_animation_composition(val_buf, pool, &stop_composite);
+                continue;
+            }
+            if (str_icmp_cstr(prop_name, "animation-timing-function") == 0) {
+                TimingFunction timing = {};
+                if (css_animation_parse_timing_function_text(val_buf, &timing)) {
+                    stop_timing = timing;
+                    has_timing = true;
+                }
                 continue;
             }
 
             // resolve property and parse value
             CssPropertyCode prop_id = (CssPropertyCode)css_property_code_from_name(prop_name);
             if (prop_id != (CssPropertyCode)0) {
-                if (parse_property_value(prop_id, val_buf, &temp_props[prop_count], pool)) {
-                    prop_count++;
+                CssAnimatedProp parsed = {};
+                if (parse_property_value(prop_id, val_buf, &parsed, pool)) {
+                    // invalid later declarations leave the preceding valid endpoint eligible.
+                    CssKeyframeStop pending = {offset, lam::own_arr(temp_props), prop_count, nullptr};
+                    CssAnimatedProp* previous = find_prop_in_stop(&pending, prop_id);
+                    if (previous) *previous = parsed;
+                    else if (prop_count < 32) temp_props[prop_count++] = parsed;
                 }
             }
         }
 
         if (*p == '}') p++; // skip closing brace of keyframe stop
 
-        if (prop_count > 0) {
+        if (prop_count > 0 || has_timing) {
             for (int i = 0; i < prop_count; i++) {
                 temp_props[i].composite = stop_composite;
             }
             CssKeyframeStop* stop = &temp_stops[stop_count];
             stop->offset = offset;
-            stop->timing = NULL;
+            stop->timing = has_timing ? (TimingFunction*)pool_alloc(pool, sizeof(TimingFunction)) : nullptr;
+            if (stop->timing) *stop->timing = stop_timing;
             stop->property_count = prop_count;
-            stop->properties = lam::own_arr((CssAnimatedProp*)pool_alloc(pool, sizeof(CssAnimatedProp) * prop_count));
-            memcpy(stop->properties, temp_props, sizeof(CssAnimatedProp) * prop_count);
+            stop->properties = prop_count > 0 ? lam::own_arr((CssAnimatedProp*)pool_alloc(
+                pool, sizeof(CssAnimatedProp) * prop_count)) : nullptr;
+            if (prop_count > 0) memcpy(stop->properties, temp_props, sizeof(CssAnimatedProp) * prop_count);
             stop_count++;
         }
     }
@@ -595,68 +480,6 @@ CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* nam
 // CSS Animation Tick
 // ============================================================================
 
-// Find two surrounding keyframe stops for progress t, and compute local interpolation t
-static void find_keyframe_pair(CssKeyframes* kf, float t,
-                                int* out_stop_a, int* out_stop_b, float* out_local_t) {
-    // Preserve extrapolated easing progress when the keyframes provide both
-    // endpoints; clamping here discards valid CSS animation overshoot.
-    if (t <= kf->stops[0].offset) {
-        if (kf->stop_count > 1 && kf->stops[0].offset <= 0.0f &&
-            kf->stops[1].offset > kf->stops[0].offset) {
-            *out_stop_a = 0;
-            *out_stop_b = 1;
-            *out_local_t = (t - kf->stops[0].offset) /
-                (kf->stops[1].offset - kf->stops[0].offset);
-        } else {
-            *out_stop_a = 0;
-            *out_stop_b = 0;
-            *out_local_t = 0.0f;
-        }
-        return;
-    }
-    if (t >= kf->stops[kf->stop_count - 1].offset) {
-        int last = kf->stop_count - 1;
-        if (last > 0 && kf->stops[last].offset >= 1.0f &&
-            kf->stops[last].offset > kf->stops[last - 1].offset) {
-            *out_stop_a = last - 1;
-            *out_stop_b = last;
-            *out_local_t = (t - kf->stops[last - 1].offset) /
-                (kf->stops[last].offset - kf->stops[last - 1].offset);
-        } else {
-            *out_stop_a = last;
-            *out_stop_b = last;
-            *out_local_t = 1.0f;
-        }
-        return;
-    }
-
-    // find surrounding stops
-    for (int i = 0; i < kf->stop_count - 1; i++) {
-        if (t >= kf->stops[i].offset && t <= kf->stops[i + 1].offset) {
-            *out_stop_a = i;
-            *out_stop_b = i + 1;
-            float range = kf->stops[i + 1].offset - kf->stops[i].offset;
-            *out_local_t = (range > 0.0001f) ? (t - kf->stops[i].offset) / range : 0.0f;
-            return;
-        }
-    }
-
-    // fallback: use last stop
-    *out_stop_a = kf->stop_count - 1;
-    *out_stop_b = kf->stop_count - 1;
-    *out_local_t = 1.0f;
-}
-
-// Find a property in a keyframe stop by ID
-static CssAnimatedProp* find_prop_in_stop(CssKeyframeStop* stop, CssPropertyCode id) {
-    for (int i = 0; i < stop->property_count; i++) {
-        if (stop->properties[i].property_code == id) {
-            return &stop->properties[i];
-        }
-    }
-    return NULL;
-}
-
 static CssAnimatedProp* find_underlying_prop(CssAnimState* state, CssPropertyCode id) {
     if (!state) return NULL;
     for (int i = 0; i < state->underlying_count; i++) {
@@ -665,42 +488,273 @@ static CssAnimatedProp* find_underlying_prop(CssAnimState* state, CssPropertyCod
     return NULL;
 }
 
+static bool capture_underlying_length(DomElement* element, CssPropertyCode id,
+                                      CssAnimatedProp* out);
+
+static bool css_animation_property_is_important(CssAnimState* state, CssPropertyCode property) {
+    for (int index = 0; index < state->important_property_count; index++) {
+        if (state->important_properties[index] == property) return true;
+    }
+    return false;
+}
+
+static void css_animation_refresh_priority(CssAnimState* state) {
+    if (!state || !state->keyframes) return;
+    state->important_property_count = 0;
+    for (int stop_index = 0; stop_index < state->keyframes->stop_count; stop_index++) {
+        CssKeyframeStop* stop = &state->keyframes->stops[stop_index];
+        for (int index = 0; index < stop->property_count; index++) {
+            CssPropertyCode property = stop->properties[index].property_code;
+            if (css_animation_property_is_important(state, property)) continue;
+            CssDeclaration* winner = layout_cascaded_physical_declaration(state->element, property);
+            if (!winner || !(winner->important || winner->specificity.important)) continue;
+            if (!lam::pool_grow_array(state->pool, &state->important_properties,
+                    &state->important_property_capacity, state->important_property_count + 1, 8)) {
+                log_error("css-anim: important property cache allocation failed");
+                return;
+            }
+            state->important_properties[state->important_property_count++] = property;
+        }
+    }
+}
+
+static bool capture_underlying_value(DomElement* element, CssPropertyCode property,
+                                     CssAnimatedProp* out);
+
+
+static void css_animation_clear_value_samples(CssAnimState* state) {
+    for (int index = 0; index < state->value_sample_count; index++) {
+        CssAnimValueSample* sample = &state->value_samples[index];
+        if (sample->computed.value_type == ANIM_VAL_TRANSFORM)
+            radiant::destroy_transform_list(state->pool, sample->computed.value.transform);
+    }
+    state->value_sample_count = 0;
+}
+
+static bool css_animation_compute_property(CssAnimState* state, LayoutContext* lycon,
+                                           const CssAnimatedProp* property,
+                                           CssAnimatedProp* computed) {
+    *computed = *property;
+    computed->expression = nullptr;
+    const CssValue* value = resolve_var_function(lycon, property->expression);
+    const CssEnumInfo* keyword = value && value->type == CSS_VALUE_TYPE_KEYWORD
+        ? css_enum_info(value->data.keyword) : nullptr;
+    bool invalid = !value || !css_property_validate_value(property->property_code, value);
+    bool global = keyword && keyword->group == CSS_VALUE_GROUP_GLOBAL;
+    if (invalid || global) {
+        bool inherit = global && value->data.keyword == CSS_VALUE_INHERIT;
+        if (invalid || (global && value->data.keyword == CSS_VALUE_UNSET))
+            inherit = css_property_runtime_inherited(property->property_code);
+        CssAnimatedProp inherited = {};
+        if (inherit && capture_underlying_value(dom_parent_element(state->element),
+                property->property_code, &inherited)) {
+            computed->value = inherited.value;
+            // computed transform caches own copies, never a parent's mutable view-pool chain (D4.5.1v4).
+            if (property->value_type == ANIM_VAL_TRANSFORM)
+                computed->value.transform = radiant::clone_transform_list(
+                    state->pool, inherited.value.transform);
+            return true;
+        }
+        // invalid substitution defaults just like unset; noninherited values use initial.
+        const CssProperty* metadata = css_property_get_by_code(property->property_code);
+        CssDeclaration* initial = metadata ? css_parse_property_declaration(
+            metadata->name, strlen(metadata->name), metadata->initial_value,
+            strlen(metadata->initial_value), lycon->pool) : nullptr;
+        value = initial ? initial->value : nullptr;
+        if (!value) return false;
+    }
+    switch (property->value_type) {
+        case ANIM_VAL_FLOAT:
+            computed->value.f = resolve_css_opacity_value(lycon, value);
+            return isfinite(computed->value.f);
+        case ANIM_VAL_COLOR:
+            computed->value.color = property->property_code == CSS_PROPERTY_COLOR
+                ? resolve_text_color_value(lycon, value) : resolve_color_value(lycon, value);
+            return true;
+        case ANIM_VAL_TRANSFORM:
+            computed->value.transform = resolve_transform_value(lycon, value, state->pool);
+            return true;
+        case ANIM_VAL_LENGTH:
+            computed->value.length.is_percent = false;
+            computed->value.length.keyword = CSS_VALUE__UNDEF;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                value->data.keyword != CSS_VALUE_THIN && value->data.keyword != CSS_VALUE_MEDIUM &&
+                value->data.keyword != CSS_VALUE_THICK) {
+                computed->value.length.keyword = value->data.keyword;
+                computed->value.length.value = 0.0f;
+                return true;
+            }
+            computed->value.length.value = resolve_length_value(lycon, property->property_code, value);
+            return isfinite(computed->value.length.value);
+        default: return false;
+    }
+}
+
+static void css_animation_refresh_value_samples(CssAnimState* state, LayoutContext* lycon) {
+    if (!state || !state->keyframes || !lycon) return;
+    css_animation_clear_value_samples(state);
+    int count = 0;
+    for (int stop_index = 0; stop_index < state->keyframes->stop_count; stop_index++) {
+        CssKeyframeStop* stop = &state->keyframes->stops[stop_index];
+        for (int index = 0; index < stop->property_count; index++)
+            if (stop->properties[index].expression) count++;
+    }
+    if (count == 0) return;
+    if (!lam::pool_grow_array(state->pool, &state->value_samples,
+            &state->value_sample_capacity, count, 8)) {
+        log_error("css-anim: computed value sample allocation failed (count=%d)", count);
+        return;
+    }
+    for (int stop_index = 0; stop_index < state->keyframes->stop_count; stop_index++) {
+        CssKeyframeStop* stop = &state->keyframes->stops[stop_index];
+        for (int index = 0; index < stop->property_count; index++) {
+            CssAnimatedProp* property = &stop->properties[index];
+            if (!property->expression) continue;
+            CssAnimValueSample* sample = &state->value_samples[state->value_sample_count++];
+            sample->source = property;
+            sample->valid = css_animation_compute_property(state, lycon, property, &sample->computed);
+        }
+    }
+}
+
+static bool css_animation_resolved_property(CssAnimState* state,
+                                            const CssAnimatedProp* source,
+                                            CssAnimatedProp* resolved) {
+    // CSS and Web effects share animation-origin priority; transitions sample separately.
+    if (css_animation_property_is_important(state, source->property_code)) return false;
+    if (source->expression) {
+        for (int index = 0; index < state->value_sample_count; index++) {
+            if (state->value_samples[index].source == source) {
+                if (!state->value_samples[index].valid) return false;
+                *resolved = state->value_samples[index].computed;
+                return true;
+            }
+        }
+        return false;
+    }
+    *resolved = *source;
+    return true;
+}
+
+static void css_animation_interpolate_length(const CssAnimatedProp* from,
+                                              const CssAnimatedProp* to, float progress,
+                                              CssAnimatedProp* result) {
+    if (from->value.length.keyword != CSS_VALUE__UNDEF ||
+        to->value.length.keyword != CSS_VALUE__UNDEF) {
+        result->value.length = progress < .5f ? from->value.length : to->value.length;
+    } else {
+        result->value.length.value = css_interpolate_float(
+            from->value.length.value, to->value.length.value, progress);
+        result->value.length.keyword = CSS_VALUE__UNDEF;
+        result->expression = nullptr;
+        result->value.length.is_percent = false;
+    }
+}
+
 struct CssAnimationLengthSlot {
-    float* value;
-    CssEnum* type;
-    float* percent;
+    float* value = nullptr;
+    CssEnum* type = nullptr;
+    float* percent = nullptr;
+    bool* present = nullptr;
+    float* flow_value = nullptr;
+    CssEnum* flow_type = nullptr;
+    bool allow_negative = false;
 };
 
-static CssAnimationLengthSlot css_animation_length_slot(BlockProp* block,
-                                                        CssPropertyCode property) {
-    if (!block) return {nullptr, nullptr, nullptr};
+static CssAnimationLengthSlot css_animation_length_slot(DomElement* element,
+                                                        CssPropertyCode property,
+                                                        bool writable = false) {
+    if (!element) return {};
+    ViewTree* tree = element->doc ? element->doc->view_tree : nullptr;
+    BlockProp* block = element->blk;
+    BoundaryProp* boundary = element->bound;
+    CssBoxSide side = radiant_css_box_side(property);
     switch (property) {
         case CSS_PROPERTY_WIDTH:
+            if (!block) return {};
             return {&block->given_width, &block->given_width_type,
                     &block->given_width_percent};
         case CSS_PROPERTY_HEIGHT:
+            if (!block) return {};
             return {&block->given_height, &block->given_height_type,
                     &block->given_height_percent};
-        case CSS_PROPERTY_MIN_WIDTH: return {&block->given_min_width, nullptr, nullptr};
-        case CSS_PROPERTY_MAX_WIDTH: return {&block->given_max_width, nullptr, nullptr};
-        case CSS_PROPERTY_MIN_HEIGHT: return {&block->given_min_height, nullptr, nullptr};
-        case CSS_PROPERTY_MAX_HEIGHT: return {&block->given_max_height, nullptr, nullptr};
-        default: return {nullptr, nullptr, nullptr};
+        case CSS_PROPERTY_MIN_WIDTH:
+            return block ? CssAnimationLengthSlot{&block->given_min_width,
+                &block->given_min_width_type, &block->given_min_width_percent} : CssAnimationLengthSlot{};
+        case CSS_PROPERTY_MAX_WIDTH:
+            return block ? CssAnimationLengthSlot{&block->given_max_width,
+                &block->given_max_width_type, &block->given_max_width_percent} : CssAnimationLengthSlot{};
+        case CSS_PROPERTY_MIN_HEIGHT:
+            return block ? CssAnimationLengthSlot{&block->given_min_height,
+                &block->given_min_height_type, &block->given_min_height_percent} : CssAnimationLengthSlot{};
+        case CSS_PROPERTY_MAX_HEIGHT:
+            return block ? CssAnimationLengthSlot{&block->given_max_height,
+                &block->given_max_height_type, &block->given_max_height_percent} : CssAnimationLengthSlot{};
+        case CSS_PROPERTY_MARGIN_TOP:
+        case CSS_PROPERTY_MARGIN_RIGHT:
+        case CSS_PROPERTY_MARGIN_BOTTOM:
+        case CSS_PROPERTY_MARGIN_LEFT: {
+            if (writable) boundary = element->ensure_boundary(tree);
+            if (!boundary) return {};
+            // collapse mutates margin; transitions capture the uncollapsed source.
+            Margin* margin = !writable && boundary->has_flow_margin
+                ? &boundary->flow_margin : &boundary->margin;
+            return {radiant_spacing_value(margin, side), radiant_margin_type(margin, side),
+                nullptr, nullptr,
+                writable && boundary->has_flow_margin
+                    ? radiant_spacing_value(&boundary->flow_margin, side) : nullptr,
+                writable && boundary->has_flow_margin
+                    ? radiant_margin_type(&boundary->flow_margin, side) : nullptr, true};
+        }
+        case CSS_PROPERTY_PADDING_TOP:
+        case CSS_PROPERTY_PADDING_RIGHT:
+        case CSS_PROPERTY_PADDING_BOTTOM:
+        case CSS_PROPERTY_PADDING_LEFT:
+            if (writable) boundary = element->ensure_boundary(tree);
+            return boundary ? CssAnimationLengthSlot{
+                radiant_spacing_value(&boundary->padding, side)} : CssAnimationLengthSlot{};
+        case CSS_PROPERTY_BORDER_TOP_WIDTH:
+        case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
+        case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
+        case CSS_PROPERTY_BORDER_LEFT_WIDTH: {
+            if (writable) boundary = element->ensure_boundary(tree);
+            BorderProp* border = writable
+                ? radiant_ensure_border_prop(boundary, tree ? tree->prop_pool : nullptr)
+                : boundary ? boundary->border.get() : nullptr;
+            return border ? CssAnimationLengthSlot{
+                radiant_border_side(border, side).width.get()} : CssAnimationLengthSlot{};
+        }
+        case CSS_PROPERTY_TOP:
+        case CSS_PROPERTY_RIGHT:
+        case CSS_PROPERTY_BOTTOM:
+        case CSS_PROPERTY_LEFT: {
+            PositionProp* position = writable ? element->ensure_position(tree) : element->position;
+            if (!position) return {};
+            RadiantInsetSide inset = radiant_inset_side(position, side);
+            return {inset.value.get(), nullptr, inset.percent.get(), inset.has.get(),
+                    nullptr, nullptr, true};
+        }
+        default: return {};
     }
 }
 
 static bool capture_underlying_length(DomElement* element, CssPropertyCode id,
                                       CssAnimatedProp* out) {
-    if (!element || !out || !element->blk) return false;
-    CssAnimationLengthSlot slot = css_animation_length_slot(element->block_mut(), id);
+    if (!element || !out) return false;
+    CssAnimationLengthSlot slot = css_animation_length_slot(element, id);
     if (!slot.value) return false;
     float value = *slot.value;
-    if (value < 0.0f) return false;
+    CssEnum keyword = slot.type ? *slot.type : CSS_VALUE__UNDEF;
+    if (slot.present && !*slot.present) keyword = CSS_VALUE_AUTO;
+    if (keyword == CSS_VALUE__UNDEF &&
+        (!isfinite(value) || (!slot.allow_negative && value < 0.0f))) return false;
     out->property_code = id;
     out->value_type = ANIM_VAL_LENGTH;
     out->composite = CSS_ANIM_COMPOSITE_REPLACE;
     out->value.length.value = value;
     out->value.length.is_percent = false;
+    out->expression = nullptr;
+    out->value.length.keyword = keyword;
     return true;
 }
 
@@ -708,13 +762,13 @@ static bool capture_underlying_aspect_ratio(DomElement* element,
                                             CssAnimatedProp* out) {
     if (!element || !out) return false;
     float ratio = element->fi ? element->fi->aspect_ratio : 0.0f;
-    if (ratio <= 0.0f || !isfinite(ratio)) return false;
+    if (!isfinite(ratio)) return false;
 
     out->property_code = CSS_PROPERTY_ASPECT_RATIO;
     out->value_type = ANIM_VAL_ASPECT_RATIO;
     out->composite = CSS_ANIM_COMPOSITE_REPLACE;
     out->value.aspect_ratio.value = ratio;
-    out->value.aspect_ratio.is_auto = false;
+    out->value.aspect_ratio.is_auto = ratio <= 0.0f;
     return true;
 }
 
@@ -738,67 +792,253 @@ static void animation_update_layout_bounds(AnimationInstance* animation, View* t
     animation->bounds[3] = target->height;
 }
 
+static TransformFunction css_animation_identity_transform(TransformFunctionType type) {
+    TransformFunction identity = {};
+    identity.type = type;
+    identity.translate_x_percent = NAN;
+    identity.translate_y_percent = NAN;
+    if (type == TRANSFORM_SCALE || type == TRANSFORM_SCALEX || type == TRANSFORM_SCALEY) {
+        identity.params.scale = {1.0f, 1.0f};
+    } else if (type == TRANSFORM_SCALE3D || type == TRANSFORM_SCALEZ) {
+        identity.params.scale3d = {1.0f, 1.0f, 1.0f};
+    } else if (type == TRANSFORM_MATRIX) {
+        identity.params.matrix.a = identity.params.matrix.d = 1.0f;
+    } else if (type == TRANSFORM_MATRIX3D) {
+        identity.params.matrix3d[0] = identity.params.matrix3d[5] =
+            identity.params.matrix3d[10] = identity.params.matrix3d[15] = 1.0f;
+    } else if (type == TRANSFORM_PERSPECTIVE) {
+        identity.params.perspective = INFINITY;
+    }
+    return identity;
+}
+
+static TransformFunctionType transform_interpolation_primitive(TransformFunctionType type) {
+    switch (type) {
+        case TRANSFORM_TRANSLATE: case TRANSFORM_TRANSLATEX: case TRANSFORM_TRANSLATEY:
+        case TRANSFORM_TRANSLATE3D: case TRANSFORM_TRANSLATEZ: return TRANSFORM_TRANSLATE3D;
+        case TRANSFORM_SCALE: case TRANSFORM_SCALEX: case TRANSFORM_SCALEY:
+        case TRANSFORM_SCALE3D: case TRANSFORM_SCALEZ: return TRANSFORM_SCALE3D;
+        case TRANSFORM_ROTATE: case TRANSFORM_ROTATEZ: case TRANSFORM_ROTATEX:
+        case TRANSFORM_ROTATEY: case TRANSFORM_ROTATE3D: return TRANSFORM_ROTATE3D;
+        default: return type;
+    }
+}
+
+static TransformFunction normalize_transform_primitive(const TransformFunction* source,
+                                                       TransformFunctionType type) {
+    TransformFunction result = *source;
+    if (type == TRANSFORM_SCALE3D && source->type != TRANSFORM_SCALE3D && source->type != TRANSFORM_SCALEZ)
+        result.params.scale3d.z = 1.0f;
+    if (type == TRANSFORM_ROTATE3D) {
+        if (source->type != TRANSFORM_ROTATE3D) {
+            result.params.rotate3d = {source->type == TRANSFORM_ROTATEX ? 1.0f : 0.0f,
+                source->type == TRANSFORM_ROTATEY ? 1.0f : 0.0f,
+                source->type == TRANSFORM_ROTATE || source->type == TRANSFORM_ROTATEZ ? 1.0f : 0.0f,
+                source->params.angle};
+        }
+        float axis[3] = {result.params.rotate3d.x, result.params.rotate3d.y, result.params.rotate3d.z};
+        if (radiant::normalize_transform_vector3(axis) == 0.0f) result.params.rotate3d.angle = 0.0f;
+        result.params.rotate3d.x = axis[0]; result.params.rotate3d.y = axis[1]; result.params.rotate3d.z = axis[2];
+    }
+    result.type = type;
+    return result;
+}
+
+static bool transform_list_depends_on_reference_box(const TransformFunction* function) {
+    for (; function; function = function->next) {
+        if ((!isnan(function->translate_x_percent) && function->translate_x_percent != 0.0f) ||
+            (!isnan(function->translate_y_percent) && function->translate_y_percent != 0.0f) ||
+            function->translate_math[0] || function->translate_math[1] || function->matrix_interpolation) return true;
+    }
+    return false;
+}
+
+static TransformFunction* interpolate_transform_matrix_functions(TransformFunction* a, TransformFunction* b,
+                                                                  float progress, CssAnimState* state,
+                                                                  bool* decomposable) {
+    Pool* pool = state->pool;
+    RdtMatrix4 from = radiant::compute_transform_matrix_3d(a, state->element->width, state->element->height, 0.0f, 0.0f);
+    RdtMatrix4 to = radiant::compute_transform_matrix_3d(b, state->element->width, state->element->height, 0.0f, 0.0f);
+    RdtMatrix4 matrix;
+    *decomposable = radiant::interpolate_transform_matrix(&from, &to, progress, &matrix);
+    if (!*decomposable) return nullptr;
+    TransformFunction* sampled = (TransformFunction*)pool_calloc(pool, sizeof(TransformFunction));
+    if (!sampled) return nullptr;
+    sampled->translate_x_percent = sampled->translate_y_percent = NAN;
+    if (rdt_matrix4_is_2d(&matrix)) {
+        sampled->type = TRANSFORM_MATRIX;
+        sampled->params.matrix = {matrix.values[0], matrix.values[4], matrix.values[1],
+            matrix.values[5], matrix.values[3], matrix.values[7]};
+    } else {
+        sampled->type = TRANSFORM_MATRIX3D;
+        for (int row = 0; row < 4; row++)
+            for (int column = 0; column < 4; column++) sampled->params.matrix3d[column * 4 + row] = matrix.values[row * 4 + column];
+    }
+    if (transform_list_depends_on_reference_box(a) || transform_list_depends_on_reference_box(b)) {
+        // retain endpoint products until used-value matrix construction knows the sized box.
+        sampled->type = TRANSFORM_MATRIX3D;
+        sampled->matrix_interpolation = lam::own((TransformMatrixInterpolation*)pool_calloc(pool, sizeof(TransformMatrixInterpolation)));
+        if (sampled->matrix_interpolation) {
+            sampled->matrix_interpolation->progress = progress;
+            sampled->matrix_interpolation->from = lam::own(radiant::clone_transform_list(pool, a));
+            sampled->matrix_interpolation->to = lam::own(radiant::clone_transform_list(pool, b));
+        }
+        if (!sampled->matrix_interpolation ||
+            (a && !sampled->matrix_interpolation->from) || (b && !sampled->matrix_interpolation->to)) {
+            radiant::destroy_transform_list(pool, sampled);
+            return nullptr;
+        }
+    }
+    return sampled;
+}
+
+template <typename Vector>
+static void interpolate_transform_components(Vector* result, const Vector* a, const Vector* b,
+                                               float progress) {
+    result->x = css_interpolate_float(a->x, b->x, progress);
+    result->y = css_interpolate_float(a->y, b->y, progress);
+}
+
 // Interpolate a single transform function pair
 static TransformFunction* interpolate_transform_func(TransformFunction* a, TransformFunction* b,
-                                                       float t, Pool* pool) {
+                                                       float t, CssAnimState* state, bool* decomposable) {
+    Pool* pool = state->pool;
     if (!a && !b) return NULL;
+    // `none` and shorter lists pad with matching identity functions.
+    TransformFunction identity = css_animation_identity_transform(a ? a->type : b->type);
+    if (!a) a = &identity;
+    if (!b) b = &identity;
 
+    TransformFunction normalized_a, normalized_b;
+    if ((a->type != b->type || a->type == TRANSFORM_ROTATE3D) &&
+        transform_interpolation_primitive(a->type) == transform_interpolation_primitive(b->type)) {
+        TransformFunctionType primitive = transform_interpolation_primitive(a->type);
+        if (primitive == TRANSFORM_ROTATE3D &&
+            (a->type == TRANSFORM_ROTATE || a->type == TRANSFORM_ROTATEZ) &&
+            (b->type == TRANSFORM_ROTATE || b->type == TRANSFORM_ROTATEZ)) primitive = TRANSFORM_ROTATE;
+        normalized_a = normalize_transform_primitive(a, primitive);
+        normalized_b = normalize_transform_primitive(b, primitive);
+        a = &normalized_a; b = &normalized_b;
+    }
+    bool rotation_matrix = a->type == TRANSFORM_ROTATE3D && b->type == TRANSFORM_ROTATE3D &&
+        a->params.rotate3d.angle != 0.0f && b->params.rotate3d.angle != 0.0f &&
+        (a->params.rotate3d.x != b->params.rotate3d.x || a->params.rotate3d.y != b->params.rotate3d.y ||
+         a->params.rotate3d.z != b->params.rotate3d.z);
+    if (rotation_matrix || a->type == TRANSFORM_MATRIX || a->type == TRANSFORM_MATRIX3D || a->type == TRANSFORM_PERSPECTIVE) {
+        // matching matrix/rotation pairs interpolate locally; subsequent functions retain their turns.
+        TransformFunction local_a = *a, local_b = *b;
+        local_a.next = local_b.next = nullptr;
+        return interpolate_transform_matrix_functions(&local_a, &local_b, t, state, decomposable);
+    }
     TransformFunction* result = (TransformFunction*)pool_calloc(pool, sizeof(TransformFunction));
+    if (!result) return nullptr;
     result->translate_x_percent = NAN;
     result->translate_y_percent = NAN;
 
-    if (a && b && a->type == b->type) {
+    if (a->type == b->type) {
         result->type = a->type;
         switch (a->type) {
             case TRANSFORM_TRANSLATE:
             case TRANSFORM_TRANSLATEX:
             case TRANSFORM_TRANSLATEY:
-                result->params.translate.x = css_interpolate_float(a->params.translate.x, b->params.translate.x, t);
-                result->params.translate.y = css_interpolate_float(a->params.translate.y, b->params.translate.y, t);
+            case TRANSFORM_TRANSLATE3D:
+            case TRANSFORM_TRANSLATEZ:
+                interpolate_transform_components(&result->params.translate3d, &a->params.translate3d,
+                    &b->params.translate3d, t);
+                if (a->type == TRANSFORM_TRANSLATE3D || a->type == TRANSFORM_TRANSLATEZ)
+                    result->params.translate3d.z = css_interpolate_float(a->params.translate3d.z, b->params.translate3d.z, t);
+                // a computed translation can contain both pixels and a reference-box percentage.
+                if (!isnan(a->translate_x_percent) || !isnan(b->translate_x_percent))
+                    result->translate_x_percent = css_interpolate_float(
+                        isnan(a->translate_x_percent) ? 0.0f : a->translate_x_percent,
+                        isnan(b->translate_x_percent) ? 0.0f : b->translate_x_percent, t);
+                if (!isnan(a->translate_y_percent) || !isnan(b->translate_y_percent))
+                    result->translate_y_percent = css_interpolate_float(
+                        isnan(a->translate_y_percent) ? 0.0f : a->translate_y_percent,
+                        isnan(b->translate_y_percent) ? 0.0f : b->translate_y_percent, t);
+                for (int axis = 0; axis < 2; axis++) {
+                    result->translate_math[axis] = lam::own(radiant::interpolate_transform_length_terms(
+                        pool, a->translate_math[axis], b->translate_math[axis], t));
+                    if ((a->translate_math[axis] || b->translate_math[axis]) && !result->translate_math[axis]) {
+                        radiant::destroy_transform_list(pool, result);
+                        return nullptr;
+                    }
+                }
                 break;
             case TRANSFORM_SCALE:
             case TRANSFORM_SCALEX:
             case TRANSFORM_SCALEY:
-                result->params.scale.x = css_interpolate_float(a->params.scale.x, b->params.scale.x, t);
-                result->params.scale.y = css_interpolate_float(a->params.scale.y, b->params.scale.y, t);
+            case TRANSFORM_SCALE3D:
+            case TRANSFORM_SCALEZ:
+                interpolate_transform_components(&result->params.scale3d, &a->params.scale3d,
+                    &b->params.scale3d, t);
+                if (a->type == TRANSFORM_SCALE3D || a->type == TRANSFORM_SCALEZ)
+                    result->params.scale3d.z = css_interpolate_float(a->params.scale3d.z, b->params.scale3d.z, t);
                 break;
             case TRANSFORM_ROTATE:
+            case TRANSFORM_ROTATEX:
+            case TRANSFORM_ROTATEY:
+            case TRANSFORM_ROTATEZ:
+            case TRANSFORM_SKEWX:
+            case TRANSFORM_SKEWY:
                 result->params.angle = css_interpolate_float(a->params.angle, b->params.angle, t);
                 break;
             case TRANSFORM_SKEW:
-            case TRANSFORM_SKEWX:
-            case TRANSFORM_SKEWY:
-                result->params.skew.x = css_interpolate_float(a->params.skew.x, b->params.skew.x, t);
-                result->params.skew.y = css_interpolate_float(a->params.skew.y, b->params.skew.y, t);
+                interpolate_transform_components(&result->params.skew, &a->params.skew,
+                    &b->params.skew, t);
                 break;
+            case TRANSFORM_ROTATE3D: {
+                const TransformFunction* direction = a->params.rotate3d.angle != 0.0f ? a : b;
+                result->params.rotate3d = direction->params.rotate3d;
+                if (a->params.rotate3d.angle == 0.0f && b->params.rotate3d.angle == 0.0f)
+                    result->params.rotate3d = {0.0f, 0.0f, 1.0f, 0.0f};
+                result->params.rotate3d.angle = css_interpolate_float(a->params.rotate3d.angle, b->params.rotate3d.angle, t);
+                break;
+            }
             default:
                 // unsupported — use 'a' value
-                *result = *a;
-                break;
+                pool_free(pool, result);
+                return radiant::clone_transform_function(pool, a);
         }
-    } else if (a) {
-        *result = *a;
     } else {
-        *result = *b;
+        pool_free(pool, result);
+        return radiant::clone_transform_function(pool, a);
     }
     return result;
 }
 
-// Interpolate transform function lists
+// at the first incompatible pair, interpolate the entire remaining matrix product.
 static TransformFunction* interpolate_transform_list(TransformFunction* a, TransformFunction* b,
-                                                       float t, Pool* pool) {
-    TransformFunction* head = NULL;
-    TransformFunction* tail = NULL;
-
+                                                       float t, CssAnimState* state) {
+    Pool* pool = state->pool;
+    TransformFunction* full_a = a;
+    TransformFunction* full_b = b;
+    TransformFunction* head = nullptr;
+    TransformFunction* tail = nullptr;
     while (a || b) {
-        TransformFunction* interp = interpolate_transform_func(a, b, t, pool);
-        if (interp) {
-            interp->next = NULL;
-            if (tail) { tail->next = lam::own(interp); tail = interp; }
-            else { head = tail = interp; }
+        TransformFunction* sampled = nullptr;
+        bool decomposable = true;
+        bool matrix_suffix = a && b && transform_interpolation_primitive(a->type) != transform_interpolation_primitive(b->type);
+        if (matrix_suffix) {
+            sampled = interpolate_transform_matrix_functions(a, b, t, state, &decomposable);
+            a = b = nullptr;
+        } else {
+            sampled = interpolate_transform_func(a, b, t, state, &decomposable);
+            if (a) a = a->next;
+            if (b) b = b->next;
         }
-        if (a) a = a->next;
-        if (b) b = b->next;
+        if (!decomposable) {
+            // a singular endpoint makes the entire property, including any prefix, discrete.
+            radiant::destroy_transform_list(pool, head);
+            return radiant::clone_transform_list(pool, t < .5f ? full_a : full_b);
+        }
+        if (!sampled) { radiant::destroy_transform_list(pool, head); return nullptr; }
+        if (sampled) {
+            sampled->next = nullptr;
+            if (tail) tail->next = lam::own(sampled);
+            else head = sampled;
+            tail = sampled;
+        }
     }
     return head;
 }
@@ -820,7 +1060,7 @@ static InlineProp* ensure_inline_prop(ViewSpan* span) {
 static BackgroundProp* ensure_background_prop(ViewSpan* span) {
     DomElement* el = lam::dom_require_element(span);
     Pool* pool = (el->doc && el->doc->view_tree) ? el->doc->view_tree->prop_pool : NULL;
-    if (!pool) return NULL;
+    if (!pool) return span->bound ? span->boundary()->background.get() : nullptr;
     if (!span->bound) span->ensure_boundary(el->doc->view_tree);
     if (span->bound && !span->boundary()->background) {
         span->bound->background = lam::own((BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp)));
@@ -828,10 +1068,140 @@ static BackgroundProp* ensure_background_prop(ViewSpan* span) {
     return span->bound ? span->boundary()->background : NULL;
 }
 
-// Apply an interpolated property value to a DomElement
-static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
+struct CssAnimationColorSlot {
+    Color* value;
+    bool* present;
+};
+
+static CssAnimationColorSlot css_animation_color_slot(DomElement* element,
+                                                       CssPropertyCode property,
+                                                       bool writable = false) {
+    if (!element) return {};
     ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
-    bool needs_layout = false;
+    switch (property) {
+        case CSS_PROPERTY_COLOR: {
+            InlineProp* style = writable ? ensure_inline_prop(span) : element->in_line;
+            return style ? CssAnimationColorSlot{&style->color, &style->has_color}
+                : CssAnimationColorSlot{};
+        }
+        case CSS_PROPERTY_BACKGROUND_COLOR: {
+            BackgroundProp* background = writable ? ensure_background_prop(span)
+                : element->bound ? element->boundary()->background.get() : nullptr;
+            return background ? CssAnimationColorSlot{&background->color} : CssAnimationColorSlot{};
+        }
+        case CSS_PROPERTY_BORDER_TOP_COLOR:
+        case CSS_PROPERTY_BORDER_RIGHT_COLOR:
+        case CSS_PROPERTY_BORDER_BOTTOM_COLOR:
+        case CSS_PROPERTY_BORDER_LEFT_COLOR: {
+            ViewTree* tree = element->doc ? element->doc->view_tree : nullptr;
+            BoundaryProp* boundary = writable ? element->ensure_boundary(tree) : element->bound;
+            BorderProp* border = writable
+                ? radiant_ensure_border_prop(boundary, tree ? tree->prop_pool : nullptr)
+                : boundary ? boundary->border.get() : nullptr;
+            return border ? CssAnimationColorSlot{
+                radiant_border_side(border, radiant_css_box_side(property)).color.get()}
+                : CssAnimationColorSlot{};
+        }
+        default: return {};
+    }
+}
+
+static bool capture_underlying_value(DomElement* element, CssPropertyCode property,
+                                     CssAnimatedProp* out) {
+    if (!element || !out) return false;
+    out->property_code = property;
+    out->value_type = property_value_type(property);
+    out->composite = CSS_ANIM_COMPOSITE_REPLACE;
+    switch (out->value_type) {
+        case ANIM_VAL_LENGTH:
+            return capture_underlying_length(element, property, out);
+        case ANIM_VAL_ASPECT_RATIO:
+            return capture_underlying_aspect_ratio(element, out);
+        case ANIM_VAL_DISPLAY:
+            return capture_underlying_display(element, out);
+        case ANIM_VAL_FLOAT:
+            out->value.f = element->in_line ? element->in_line->opacity : 1.0f;
+            return true;
+        case ANIM_VAL_TRANSFORM:
+            out->value.transform = element->transform ? element->transform->functions.get() : nullptr;
+            return true;
+        case ANIM_VAL_COLOR: {
+            CssAnimationColorSlot slot = css_animation_color_slot(element, property);
+            out->value.color = slot.value && (!slot.present || *slot.present)
+                ? *slot.value : property == CSS_PROPERTY_BACKGROUND_COLOR ? Color{0}
+                    : get_current_color_for_view(lam::view_require_element(static_cast<View*>(element)));
+            return true;
+        }
+        default: return false;
+    }
+}
+
+// Apply an interpolated property value to a DomElement
+static bool apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
+    ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
+    bool layout_changed = false;
+
+    if (prop->value_type == ANIM_VAL_LENGTH) {
+        CssAnimationLengthSlot slot = css_animation_length_slot(element, prop->property_code, true);
+        if (!slot.value) return false;
+        if (prop->value.length.keyword != CSS_VALUE__UNDEF) {
+            float before = *slot.value;
+            CssEnum before_type = slot.type ? *slot.type : CSS_VALUE__UNDEF;
+            bool before_present = slot.present && *slot.present;
+            ViewBlock* block = lam::view_as_block(static_cast<View*>(element));
+            if (block && (prop->property_code == CSS_PROPERTY_WIDTH ||
+                          prop->property_code == CSS_PROPERTY_HEIGHT ||
+                          prop->property_code == CSS_PROPERTY_MIN_WIDTH ||
+                          prop->property_code == CSS_PROPERTY_MAX_WIDTH ||
+                          prop->property_code == CSS_PROPERTY_MIN_HEIGHT ||
+                          prop->property_code == CSS_PROPERTY_MAX_HEIGHT)) {
+                LayoutContext context = {};
+                context.doc = element->doc;
+                context.view = lam::up(static_cast<View*>(element));
+                context.elmt = lam::up(element);
+                context.pool = lam::up(element->doc && element->doc->view_tree
+                    ? element->doc->view_tree->prop_pool : nullptr);
+                CssValue value = {};
+                value.type = CSS_VALUE_TYPE_KEYWORD;
+                value.data.keyword = prop->value.length.keyword;
+                if (prop->property_code == CSS_PROPERTY_WIDTH || prop->property_code == CSS_PROPERTY_HEIGHT) {
+                    resolve_css_axis_size(&context, block, &value,
+                        prop->property_code == CSS_PROPERTY_WIDTH ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
+                } else resolve_css_dimension_constraint(&context, block, prop->property_code, &value);
+            } else {
+                *slot.value = 0.0f;
+                if (slot.type) *slot.type = prop->value.length.keyword;
+                if (slot.percent) *slot.percent = NAN;
+                if (slot.present) *slot.present = false;
+                if (slot.flow_value) *slot.flow_value = *slot.value;
+                if (slot.flow_type) *slot.flow_type = prop->value.length.keyword;
+            }
+            return before != *slot.value ||
+                (slot.type && before_type != *slot.type) ||
+                (slot.present && before_present != *slot.present);
+        }
+        if (!isfinite(prop->value.length.value)) return false;
+        // easing can extrapolate beyond valid endpoints; signed spacing remains legal.
+        float value = slot.allow_negative ? prop->value.length.value
+            : fmaxf(0.0f, prop->value.length.value);
+        layout_changed = *slot.value != value ||
+            (slot.present && !*slot.present) ||
+            (slot.type && *slot.type != CSS_VALUE__UNDEF) ||
+            (slot.percent && !isnan(*slot.percent));
+        *slot.value = value;
+        if (slot.type) *slot.type = CSS_VALUE__UNDEF;
+        if (slot.percent) *slot.percent = NAN;
+        if (slot.present) *slot.present = true;
+        if (slot.flow_value) *slot.flow_value = *slot.value;
+        if (slot.flow_type) *slot.flow_type = CSS_VALUE__UNDEF;
+        return layout_changed;
+    }
+    if (prop->value_type == ANIM_VAL_COLOR) {
+        CssAnimationColorSlot slot = css_animation_color_slot(element, prop->property_code, true);
+        if (slot.value) *slot.value = prop->value.color;
+        if (slot.present) *slot.present = true;
+        return false;
+    }
 
     switch (prop->property_code) {
         case CSS_PROPERTY_DISPLAY: {
@@ -841,8 +1211,9 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
                 : css_resolve_display_css_value(
                     element, prop->value.display.value, &display);
             if (resolved) {
-                needs_layout = element->display.outer != display.outer ||
-                    element->display.inner != display.inner;
+                layout_changed = element->display.outer != display.outer ||
+                    element->display.inner != display.inner ||
+                    element->display.list_item != display.list_item;
                 element->display = display;
                 element->set_animated_display(display);
             }
@@ -850,7 +1221,7 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
         }
         case CSS_PROPERTY_OPACITY: {
             InlineProp* il = ensure_inline_prop(span);
-            if (il) il->opacity = prop->value.f;
+            if (il) il->opacity = clamp_unit(prop->value.f);
             break;
         }
         case CSS_PROPERTY_TRANSFORM: {
@@ -859,44 +1230,15 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
                     span->ensure_transform(element->doc->view_tree);
             }
             if (span->transform) {
+                if (span->transform->functions_owner == TRANSFORM_FUNCTIONS_VIEW_POOL &&
+                    element->doc && element->doc->view_tree) {
+                    radiant::destroy_transform_list(element->doc->view_tree->prop_pool,
+                        span->transform->functions);
+                }
                 span->transform->functions = lam::shared(prop->value.transform);
                 // Keyframe lists are document-owned and may be sampled again
                 // after a retained view-pool reset.
                 span->transform->functions_owner = TRANSFORM_FUNCTIONS_DOCUMENT_POOL;
-            }
-            break;
-        }
-        case CSS_PROPERTY_BACKGROUND_COLOR: {
-            BackgroundProp* bg = ensure_background_prop(span);
-            if (bg) bg->color = prop->value.color;
-            break;
-        }
-        case CSS_PROPERTY_COLOR: {
-            InlineProp* il = ensure_inline_prop(span);
-            if (il) {
-                il->color = prop->value.color;
-                il->has_color = true;
-            }
-            break;
-        }
-        case CSS_PROPERTY_WIDTH:
-        case CSS_PROPERTY_HEIGHT:
-        case CSS_PROPERTY_MIN_WIDTH:
-        case CSS_PROPERTY_MAX_WIDTH:
-        case CSS_PROPERTY_MIN_HEIGHT:
-        case CSS_PROPERTY_MAX_HEIGHT: {
-            ViewBlock* block = lam::view_as_block(static_cast<View*>(element));
-            if (!block || !block->blk) break;
-            // animated sizing writes the computed value back into the same
-            // BlockProp consumed by layout; leaving it in the cascade only
-            // changes paint-time state and cannot affect descendants.
-            CssAnimationLengthSlot slot = css_animation_length_slot(
-                block->block_mut(), prop->property_code);
-            if (slot.value) {
-                needs_layout = *slot.value != prop->value.length.value;
-                *slot.value = prop->value.length.value;
-                if (slot.type) *slot.type = CSS_VALUE__UNDEF;
-                if (slot.percent) *slot.percent = NAN;
             }
             break;
         }
@@ -906,16 +1248,14 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
             // Layout reads the resolved ratio from the flex-item property; the
             // keyframe value must update that same used-value source each tick.
             float ratio = prop->value.aspect_ratio.is_auto ? 0.0f : prop->value.aspect_ratio.value;
-            needs_layout = block->fi->aspect_ratio != ratio;
+            layout_changed = block->fi->aspect_ratio != ratio;
             block->fi->aspect_ratio = ratio;
             break;
         }
         default:
             break;
     }
-    // layout-affecting samples must rebuild boxes before geometry and paint consume them.
-    if (needs_layout && element->doc && element->doc->state)
-        doc_state_request_reflow(element->doc->state);
+    return layout_changed;
 }
 
 static float css_animation_composite_length(CssAnimState* state,
@@ -925,7 +1265,8 @@ static float css_animation_composite_length(CssAnimState* state,
         return value;
     }
     CssAnimatedProp* underlying = find_underlying_prop(state, prop->property_code);
-    if (!underlying) return value;
+    if (!underlying || underlying->value.length.keyword != CSS_VALUE__UNDEF ||
+        prop->value.length.keyword != CSS_VALUE__UNDEF) return value;
 
     // Keyframe composition was previously discarded, so additive sizing effects
     // replaced the underlying used value instead of composing over it.
@@ -939,20 +1280,6 @@ static float css_interpolate_aspect_ratio(float from, float to, float t) {
     // CSS Values combines positive ratios in log space, so 1/2 -> 2/1 passes
     // through 1/1 at the midpoint instead of linearly producing 1.25/1.
     return expf(logf(from) + (logf(to) - logf(from)) * t);
-}
-
-static float css_animation_composite_aspect_ratio(CssAnimState* state,
-                                                   CssAnimatedProp* prop,
-                                                   float value) {
-    if (!state || !prop || prop->composite == CSS_ANIM_COMPOSITE_REPLACE) {
-        return value;
-    }
-    CssAnimatedProp* underlying = find_underlying_prop(
-        state, prop->property_code);
-    // aspect-ratio has no addition operation; non-replace composition uses the
-    // underlying value as the second value in the composite operation.
-    return underlying && underlying->value_type == ANIM_VAL_ASPECT_RATIO
-        ? underlying->value.aspect_ratio.value : value;
 }
 
 static bool css_display_is_none(DisplayValue display) {
@@ -992,27 +1319,136 @@ static DisplayValue css_interpolate_display(DomElement* element,
     return t < 0.5f ? from_display : to_display;
 }
 
-static bool css_animation_dispatch_start(AnimationInstance* anim, CssAnimState* state) {
-    if (state->suppress_events || state->event_started ||
-        anim->sample_time - anim->start_time < anim->delay) return false;
-    // backwards fill paints before the active phase without starting its events.
-    state->event_started = true;
-    state->event_iteration = anim->current_iteration;
-    double elapsed = fmax(-anim->delay, 0.0);
-    if (anim->iteration_count >= 0.0)
-        elapsed = fmin(elapsed, anim->duration * anim->iteration_count);
-    radiant_dispatch_css_event(state->ui_context, state->element,
-        "animationstart", "animationName", state->keyframes->name, elapsed);
-    return true;
+struct CssAnimationPropertyEndpoint {
+    CssAnimatedProp property;
+    float offset;
+    const TimingFunction* timing;
+};
+
+struct CssAnimationPropertyPair {
+    CssAnimationPropertyEndpoint from, to;
+};
+
+static void css_animation_append_endpoint(CssAnimationPropertyEndpoint endpoint,
+                                           float progress,
+                                           CssAnimationPropertyEndpoint* previous,
+                                           bool* has_previous, bool* has_pair,
+                                           CssAnimationPropertyPair* pair) {
+    if (*has_previous && (!*has_pair || progress >= previous->offset)) {
+        pair->from = *previous;
+        pair->to = endpoint;
+        *has_pair = true;
+    }
+    *previous = endpoint;
+    *has_previous = true;
+}
+
+static bool css_animation_property_pair(CssAnimState* state, CssPropertyCode property,
+                                         float progress, CssAnimationPropertyPair* pair) {
+    CssAnimatedProp* underlying = find_underlying_prop(state, property);
+    CssAnimationPropertyEndpoint previous = {};
+    bool has_previous = false, has_pair = false;
+    for (int index = 0; index < state->keyframes->stop_count; ) {
+        CssKeyframeStop* stop = &state->keyframes->stops[index];
+        CssAnimationPropertyEndpoint endpoint = {};
+        endpoint.offset = stop->offset;
+        bool has_property = false;
+        // equal-offset blocks cascade in source order, including their timing descriptor.
+        do {
+            stop = &state->keyframes->stops[index++];
+            CssAnimatedProp* source = find_prop_in_stop(stop, property);
+            CssAnimatedProp resolved = {};
+            if (source && css_animation_resolved_property(state, source, &resolved)) {
+                endpoint.property = resolved;
+                has_property = true;
+            }
+            if (stop->timing) endpoint.timing = stop->timing;
+        } while (index < state->keyframes->stop_count &&
+                 state->keyframes->stops[index].offset == endpoint.offset);
+        if (!has_property) continue;
+        if (!has_previous && endpoint.offset > 0.0f) {
+            if (!underlying) return false;
+            CssAnimationPropertyEndpoint neutral = {*underlying, 0.0f, nullptr};
+            css_animation_append_endpoint(neutral, progress, &previous,
+                &has_previous, &has_pair, pair);
+        }
+        css_animation_append_endpoint(endpoint, progress, &previous,
+            &has_previous, &has_pair, pair);
+    }
+    if (has_previous && previous.offset < 1.0f) {
+        if (!underlying) return false;
+        CssAnimationPropertyEndpoint neutral = {*underlying, 1.0f, nullptr};
+        css_animation_append_endpoint(neutral, progress, &previous,
+            &has_previous, &has_pair, pair);
+    }
+    return has_pair;
+}
+
+static void css_animation_composite_endpoint(CssAnimState* state, CssAnimatedProp* property) {
+    if (property->value_type == ANIM_VAL_LENGTH) {
+        property->value.length.value = css_animation_composite_length(
+            state, property, property->value.length.value);
+    } else if (property->value_type == ANIM_VAL_ASPECT_RATIO &&
+               property->composite != CSS_ANIM_COMPOSITE_REPLACE) {
+        CssAnimatedProp* underlying = find_underlying_prop(state, property->property_code);
+        if (underlying) property->value.aspect_ratio = underlying->value.aspect_ratio;
+    }
+}
+
+static void css_animation_interpolate_property(CssAnimState* state,
+                                               CssAnimatedProp* from, CssAnimatedProp* to,
+                                               float progress, CssAnimatedProp* result) {
+    switch (result->value_type) {
+        case ANIM_VAL_FLOAT:
+            result->value.f = css_interpolate_float(from->value.f, to->value.f, progress);
+            break;
+        case ANIM_VAL_COLOR:
+            result->value.color = css_interpolate_color(from->value.color, to->value.color, progress);
+            break;
+        case ANIM_VAL_LENGTH:
+            css_animation_interpolate_length(from, to, progress, result);
+            break;
+        case ANIM_VAL_ASPECT_RATIO:
+            if (from->value.aspect_ratio.is_auto || to->value.aspect_ratio.is_auto) {
+                result->value.aspect_ratio = progress < .5f
+                    ? from->value.aspect_ratio : to->value.aspect_ratio;
+            } else {
+                result->value.aspect_ratio.value = css_interpolate_aspect_ratio(
+                    from->value.aspect_ratio.value, to->value.aspect_ratio.value, progress);
+                result->value.aspect_ratio.is_auto = false;
+            }
+            break;
+        case ANIM_VAL_TRANSFORM:
+            result->value.transform = interpolate_transform_list(from->value.transform,
+                to->value.transform, progress, state);
+            break;
+        case ANIM_VAL_DISPLAY:
+            result->value.display.used = css_interpolate_display(state->element, from, to, progress);
+            result->value.display.value = nullptr;
+            result->value.display.has_used = true;
+            break;
+        default: break;
+    }
+}
+
+static void css_animation_dispatch_start(AnimationInstance* anim, CssAnimState* state) {
+    if (!state->suppress_events && !state->event_started && anim->active_time >= 0.0) {
+        state->event_started = true;
+        state->event_iteration = anim->current_iteration;
+        double duration = anim->iteration_count >= 0.0
+            ? anim->duration * anim->iteration_count : INFINITY;
+        double elapsed = fmin(fmax(-anim->delay, 0.0), duration);
+        radiant_dispatch_css_event(state->ui_context, state->element,
+            "animationstart", "animationName", state->keyframes->name, elapsed);
+    }
 }
 
 void css_animation_tick(AnimationInstance* anim, float t) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (!state || !state->keyframes || !state->element) return;
-
-    if (!css_animation_dispatch_start(anim, state) && !state->suppress_events &&
-               state->event_started && anim->play_state != ANIM_PLAY_FINISHED &&
-               anim->sample_time - anim->start_time >= anim->delay &&
+    bool started = state->event_started;
+    css_animation_dispatch_start(anim, state);
+    if (started && !state->suppress_events &&
                anim->current_iteration > state->event_iteration) {
         state->event_iteration = anim->current_iteration;
         radiant_dispatch_css_event(state->ui_context, state->element,
@@ -1020,205 +1456,37 @@ void css_animation_tick(AnimationInstance* anim, float t) {
             anim->duration * (double)anim->current_iteration);
     }
 
-    CssKeyframes* kf = state->keyframes;
-
-    int stop_a, stop_b;
-    float local_t;
-    find_keyframe_pair(kf, t, &stop_a, &stop_b, &local_t);
-
-    CssKeyframeStop* sa = &kf->stops[stop_a];
-    CssKeyframeStop* sb = &kf->stops[stop_b];
-
-    // apply per-keyframe easing if present
-    if (sa->timing) {
-        local_t = timing_function_eval(sa->timing, local_t);
-    }
-
-    Pool* pool = anim->play_state != ANIM_PLAY_FINISHED ?
-                 state->element->doc->document_pool : NULL;
-
-    // interpolate each property present in either stop
-    // use stop_b's properties as the canonical set
-    for (int i = 0; i < sb->property_count; i++) {
-        CssAnimatedProp* prop_b = &sb->properties[i];
-        CssAnimatedProp* prop_a = find_prop_in_stop(sa, prop_b->property_code);
-
-        CssAnimatedProp interp;
-        interp.property_code = prop_b->property_code;
-        interp.value_type = prop_b->value_type;
-        interp.composite = prop_b->composite;
-
-        if (stop_a == stop_b || !prop_a) {
-            // same stop or property only in one stop — use directly
-            if (kf->stop_count == 1 && prop_b->value_type == ANIM_VAL_LENGTH) {
-                CssAnimatedProp* underlying = find_underlying_prop(state, prop_b->property_code);
-                if (underlying) {
-                    // CSS animation interpolation extrapolates outside the keyframe interval;
-                    // the property-specific used-value rules clamp the resulting size later.
-                    float progress = t;
-                    bool starts_at_to = sb->offset >= 1.0f;
-                    float from = starts_at_to ? underlying->value.length.value : prop_b->value.length.value;
-                    float to = starts_at_to ? prop_b->value.length.value : underlying->value.length.value;
-                    interp.value.length.value = css_interpolate_float(from, to, progress);
-                    interp.value.length.is_percent = prop_b->value.length.is_percent;
-                } else {
-                    interp.value = prop_b->value;
-                }
-            } else if (kf->stop_count == 1 &&
-                       prop_b->value_type == ANIM_VAL_ASPECT_RATIO) {
-                CssAnimatedProp* underlying = find_underlying_prop(
-                    state, prop_b->property_code);
-                if (underlying && !prop_b->value.aspect_ratio.is_auto) {
-                    interp.value.aspect_ratio.value = css_interpolate_aspect_ratio(
-                        underlying->value.aspect_ratio.value,
-                        css_animation_composite_aspect_ratio(
-                            state, prop_b, prop_b->value.aspect_ratio.value), t);
-                    interp.value.aspect_ratio.is_auto = false;
-                } else {
-                    interp.value = prop_b->value;
-                }
-            } else {
-                interp.value = prop_b->value;
-            }
-        } else {
-            switch (prop_b->value_type) {
-                case ANIM_VAL_FLOAT:
-                    interp.value.f = css_interpolate_float(
-                        prop_a->value.f, prop_b->value.f, local_t);
-                    break;
-                case ANIM_VAL_COLOR:
-                    interp.value.color = css_interpolate_color(
-                        prop_a->value.color, prop_b->value.color, local_t);
-                    break;
-                case ANIM_VAL_LENGTH:
-                    {
-                        CssAnimatedProp* underlying = find_underlying_prop(state, prop_b->property_code);
-                        float from = prop_a ? prop_a->value.length.value :
-                            (underlying ? underlying->value.length.value : prop_b->value.length.value);
-                        float to = prop_b->value.length.value;
-                        interp.value.length.value = css_interpolate_float(from, to, local_t);
-                    }
-                    interp.value.length.is_percent = prop_b->value.length.is_percent;
-                    break;
-                case ANIM_VAL_ASPECT_RATIO: {
-                    bool discrete = prop_a->value.aspect_ratio.is_auto ||
-                        prop_b->value.aspect_ratio.is_auto;
-                    if (discrete) {
-                        interp.value.aspect_ratio = local_t < 0.5f
-                            ? prop_a->value.aspect_ratio
-                            : prop_b->value.aspect_ratio;
-                    } else {
-                        float from = css_animation_composite_aspect_ratio(
-                            state, prop_a, prop_a->value.aspect_ratio.value);
-                        float to = css_animation_composite_aspect_ratio(
-                            state, prop_b, prop_b->value.aspect_ratio.value);
-                        interp.value.aspect_ratio.value =
-                            css_interpolate_aspect_ratio(from, to, local_t);
-                        interp.value.aspect_ratio.is_auto = false;
-                    }
-                    break;
-                }
-                case ANIM_VAL_TRANSFORM:
-                    if (pool) {
-                        interp.value.transform = interpolate_transform_list(
-                            prop_a->value.transform, prop_b->value.transform, local_t, pool);
-                    } else {
-                        interp.value.transform = prop_b->value.transform;
-                    }
-                    break;
-                case ANIM_VAL_DISPLAY:
-                    interp.value.display.used = css_interpolate_display(
-                        state->element, prop_a, prop_b, local_t);
-                    interp.value.display.value = NULL;
-                    interp.value.display.has_used = true;
-                    break;
-                default:
-                    interp.value = prop_b->value;
-                    break;
-            }
-        }
-
-        if (interp.value_type == ANIM_VAL_LENGTH &&
-            interp.composite != CSS_ANIM_COMPOSITE_REPLACE &&
-            prop_a && prop_b) {
-            interp.value.length.value = css_animation_composite_length(
-                state, &interp, interp.value.length.value);
-        }
-
-        apply_animated_value(state->element, &interp);
-    }
-
-    // also apply properties only present in stop_a (but not in stop_b)
-    for (int i = 0; i < sa->property_count; i++) {
-        CssAnimatedProp* prop_a = &sa->properties[i];
-        if (!find_prop_in_stop(sb, prop_a->property_code)) {
-            CssAnimatedProp* underlying = find_underlying_prop(state, prop_a->property_code);
-            if (underlying && prop_a->value_type == ANIM_VAL_LENGTH) {
-                CssAnimatedProp interp = *prop_a;
-                interp.value.length.value = css_interpolate_float(
-                    prop_a->value.length.value,
-                    underlying->value.length.value, local_t);
-                interp.value.length.value = css_animation_composite_length(
-                    state, &interp, interp.value.length.value);
-                apply_animated_value(state->element, &interp);
-            } else if (underlying &&
-                       prop_a->value_type == ANIM_VAL_ASPECT_RATIO) {
-                CssAnimatedProp interp = *prop_a;
-                interp.value.aspect_ratio.value = css_interpolate_aspect_ratio(
-                    prop_a->value.aspect_ratio.value,
-                    underlying->value.aspect_ratio.value, local_t);
-                interp.value.aspect_ratio.is_auto = false;
-                apply_animated_value(state->element, &interp);
-            } else if (underlying &&
-                       prop_a->value_type == ANIM_VAL_DISPLAY) {
-                CssAnimatedProp interp = *prop_a;
-                interp.value.display.used = css_interpolate_display(
-                    state->element, prop_a, underlying, local_t);
-                interp.value.display.value = NULL;
-                interp.value.display.has_used = true;
-                apply_animated_value(state->element, &interp);
-            } else {
-                apply_animated_value(state->element, prop_a);
+    // Each property has its own sequence; unrelated stops cannot split its interval.
+    bool visited[CSS_PROPERTY_COUNT] = {};
+    for (int stop_index = 0; stop_index < state->keyframes->stop_count; stop_index++) {
+        CssKeyframeStop* stop = &state->keyframes->stops[stop_index];
+        for (int index = 0; index < stop->property_count; index++) {
+            CssPropertyCode property = stop->properties[index].property_code;
+            if (property >= CSS_PROPERTY_COUNT || visited[property]) continue;
+            visited[property] = true;
+            if (css_animation_property_is_important(state, property)) continue;
+            CssAnimationPropertyPair pair = {};
+            if (!css_animation_property_pair(state, property, t, &pair)) continue;
+            float local_t = (t - pair.from.offset) / (pair.to.offset - pair.from.offset);
+            const TimingFunction* timing = pair.from.timing ? pair.from.timing : &anim->timing;
+            local_t = timing_function_eval(timing, local_t, animation_easing_before(anim));
+            css_animation_composite_endpoint(state, &pair.from.property);
+            css_animation_composite_endpoint(state, &pair.to.property);
+            CssAnimatedProp result = pair.to.property;
+            css_animation_interpolate_property(state, &pair.from.property,
+                &pair.to.property, local_t, &result);
+            anim->layout_changed |= apply_animated_value(state->element, &result);
+            if (result.value_type == ANIM_VAL_TRANSFORM) {
+                // D4.5.1v4: replace the live borrow before reclaiming the preceding sample.
+                radiant::destroy_transform_list(state->pool, state->sampled_transform);
+                state->sampled_transform = lam::own(result.value.transform);
             }
         }
     }
 
-    // update bounds from element's current layout position (may have been
-    // zero at creation time because css_animation_create runs before layout)
-    // use absolute coordinates (walk parent chain) for correct dirty-region marking
-    View* span = static_cast<View*>(anim->target);
-    animation_update_layout_bounds(anim, span);
-
-    // offset bounds by transform displacement so dirty region covers the
-    // element's actual visual position (not expanded to include both static
-    // and transformed positions — the previous-bounds tracking in
-    // animation_scheduler_tick handles the old position separately)
-    ViewSpan* vs = lam::view_require_element(span);
-    if (vs->transform && vs->transform->functions) {
-        TransformFunction* tf = vs->transform->functions;
-        while (tf) {
-            if (tf->type == TRANSFORM_TRANSLATE || tf->type == TRANSFORM_TRANSLATEX ||
-                tf->type == TRANSFORM_TRANSLATEY) {
-                float tx = tf->params.translate.x;
-                float ty = tf->params.translate.y;
-                if (!isnan(tf->translate_x_percent))
-                    tx = tf->translate_x_percent * span->width / 100.0f;
-                if (!isnan(tf->translate_y_percent))
-                    ty = tf->translate_y_percent * span->height / 100.0f;
-                anim->bounds[0] += tx;
-                anim->bounds[1] += ty;
-            } else if (tf->type == TRANSFORM_SCALE || tf->type == TRANSFORM_SCALEX ||
-                       tf->type == TRANSFORM_SCALEY || tf->type == TRANSFORM_ROTATE) {
-                // scale/rotate can expand bounds — use generous margin
-                float margin = span->width > span->height ? span->width : span->height;
-                anim->bounds[0] -= margin * 0.5f;
-                anim->bounds[1] -= margin * 0.5f;
-                anim->bounds[2] += margin;
-                anim->bounds[3] += margin;
-            }
-            tf = tf->next;
-        }
-    }
+    // transformed dirty bounds share the client-rectangle geometry, including matrix/3D samples.
+    view_get_visual_bounds(static_cast<View*>(anim->target), &anim->bounds[0],
+        &anim->bounds[1], &anim->bounds[2], &anim->bounds[3]);
 }
 
 void css_animation_finish(AnimationInstance* anim) {
@@ -1242,19 +1510,36 @@ void css_animation_finish(AnimationInstance* anim) {
 
 static void css_animation_cancel(AnimationInstance* anim) {
     CssAnimState* state = (CssAnimState*)anim->state;
-    if (!state || state->suppress_events || anim->suppress_cancel_event ||
-        anim->play_state == ANIM_PLAY_FINISHED) return;
-    double now = anim->play_state == ANIM_PLAY_PAUSED ? anim->pause_time : anim->sample_time;
-    if (anim->play_state != ANIM_PLAY_PAUSED && state->ui_context &&
-        state->ui_context->document && state->ui_context->document->state) {
-        AnimationScheduler* scheduler = state->ui_context->document->state->animation_scheduler;
-        if (scheduler) now = scheduler->current_time;
+    if (!state) return;
+    if (!anim->suppress_cancel_event && !state->suppress_events && !anim->finish_notified) {
+        double now = anim->play_state == ANIM_PLAY_PAUSED ? anim->pause_time : anim->sample_time;
+        if (anim->play_state != ANIM_PLAY_PAUSED && state->ui_context &&
+            state->ui_context->document && state->ui_context->document->state) {
+            AnimationScheduler* scheduler = state->ui_context->document->state->animation_scheduler;
+            if (scheduler) now = scheduler->current_time;
+        }
+        double elapsed = fmax(now - anim->start_time - anim->delay, 0.0);
+        if (anim->iteration_count >= 0.0)
+            elapsed = fmin(elapsed, anim->duration * anim->iteration_count);
+        radiant_dispatch_css_event(state->ui_context, state->element,
+            "animationcancel", "animationName", state->keyframes->name, elapsed);
     }
-    double elapsed = fmax(now - anim->start_time - anim->delay, 0.0);
-    if (anim->iteration_count >= 0.0)
-        elapsed = fmin(elapsed, anim->duration * anim->iteration_count);
-    radiant_dispatch_css_event(state->ui_context, state->element,
-        "animationcancel", "animationName", state->keyframes->name, elapsed);
+    if (state->underlying) pool_free(state->pool, state->underlying);
+    if (state->element && state->element->transform &&
+        state->element->transform->functions.get() == state->sampled_transform.get()) {
+        ViewTree* tree = state->element->doc ? state->element->doc->view_tree.get() : nullptr;
+        Pool* target_pool = tree ? tree->prop_pool : state->pool;
+        state->element->transform->functions = lam::shared(
+            radiant::clone_transform_list(target_pool, state->underlying_transform));
+        state->element->transform->functions_owner = TRANSFORM_FUNCTIONS_VIEW_POOL;
+    }
+    radiant::destroy_transform_list(state->pool, state->sampled_transform);
+    radiant::destroy_transform_list(state->pool, state->underlying_transform);
+    css_animation_clear_value_samples(state);
+    if (state->value_samples) pool_free(state->pool, state->value_samples);
+    if (state->important_properties) pool_free(state->pool, state->important_properties);
+    pool_free(state->pool, state);
+    anim->state = nullptr;
 }
 
 // ============================================================================
@@ -1264,20 +1549,28 @@ static void css_animation_cancel(AnimationInstance* anim) {
 static void capture_animation_underlying(CssAnimState* state) {
     if (!state || !state->element || !state->keyframes) return;
     state->underlying_count = 0;
-    for (int i = 0; i < state->keyframes->stop_count &&
-                    state->underlying_count < 32; i++) {
+    for (int i = 0; i < state->keyframes->stop_count; i++) {
         CssKeyframeStop* stop = &state->keyframes->stops[i];
-        for (int j = 0; j < stop->property_count &&
-                        state->underlying_count < 32; j++) {
+        for (int j = 0; j < stop->property_count; j++) {
             CssPropertyCode id = stop->properties[j].property_code;
             if (find_underlying_prop(state, id)) continue;
-            CssAnimatedProp* slot = &state->underlying[state->underlying_count];
-            bool captured = id == CSS_PROPERTY_DISPLAY
-                ? capture_underlying_display(state->element, slot)
-                : (id == CSS_PROPERTY_ASPECT_RATIO
-                    ? capture_underlying_aspect_ratio(state->element, slot)
-                    : capture_underlying_length(state->element, id, slot));
-            if (captured) state->underlying_count++;
+            CssAnimatedProp captured = {};
+            if (!capture_underlying_value(state->element, id, &captured)) continue;
+            if (captured.value_type == ANIM_VAL_TRANSFORM) {
+                // D4.5.1v4: snapshots cannot borrow a relayout-owned function list.
+                TransformFunction* copy = radiant::clone_transform_list(
+                    state->pool, captured.value.transform);
+                if (captured.value.transform && !copy) continue;
+                radiant::destroy_transform_list(state->pool, state->underlying_transform);
+                state->underlying_transform = lam::own(copy);
+                captured.value.transform = copy;
+            }
+            if (!lam::pool_grow_array(state->pool, &state->underlying,
+                    &state->underlying_capacity, state->underlying_count + 1, 8)) {
+                log_error("css-anim: underlying value cache allocation failed");
+                return;
+            }
+            state->underlying[state->underlying_count++] = captured;
         }
     }
 }
@@ -1292,20 +1585,28 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
 
     // allocate runtime state
     CssAnimState* state = (CssAnimState*)pool_calloc(pool, sizeof(CssAnimState));
+    if (!state) return nullptr;
     state->keyframes = keyframes;
     state->element = element;
+    state->pool = pool;
     state->event_iteration = -1;
     // Capture the cascade value once; a neutral keyframe must interpolate from
     // this value even after later ticks have overwritten the live BlockProp.
     capture_animation_underlying(state);
 
     AnimationInstance* inst = animation_instance_create(scheduler);
-    if (!inst) return NULL;
+    if (!inst) {
+        if (state->underlying) pool_free(pool, state->underlying);
+        radiant::destroy_transform_list(pool, state->underlying_transform);
+        pool_free(pool, state);
+        return NULL;
+    }
 
     inst->type = ANIM_CSS_ANIMATION;
     inst->retain_after_finish = true;
     inst->target = element;
     inst->state = state;
+    css_animation_refresh_priority(state);
     inst->start_time = now;
     inst->sample_time = now;
     inst->duration = anim_prop->duration;
@@ -1328,11 +1629,19 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
     animation_scheduler_add(scheduler, inst);
 
 
-    log_debug("css-anim: created animation '%s' for <%s> (duration=%.3fs delay=%.3fs iterations=%.3f)",
+    log_debug("css-anim: created animation '%s' for <%s> (duration=%.3fs delay=%.3fs iterations=%g)",
               keyframes->name, element->tag_name ? element->tag_name : "?",
               anim_prop->duration, anim_prop->delay, anim_prop->iteration_count);
 
     return inst;
+}
+
+static void css_web_animation_request_sampling(CssWebAnimationState* state) {
+    DomElement* element = state ? state->element : nullptr;
+    if (!element) return;
+    // effect changes require computed style without fabricating a DOM mutation.
+    dom_invalidate_layout_subtree(element);
+    if (element->doc) doc_state_request_reflow(element->doc->state);
 }
 
 CssWebAnimationState* css_web_animation_create(DomElement* element,
@@ -1352,12 +1661,14 @@ CssWebAnimationState* css_web_animation_create(DomElement* element,
     else state->timing.type = TIMING_LINEAR;
     state->sample.keyframes = keyframes;
     state->sample.element = element;
+    state->sample.pool = pool;
     state->sample.event_iteration = -1;
     state->sample.suppress_events = true;
     state->underlying_captured = false;
 
     state->next = (CssWebAnimationState*)element->web_animation_state();
     element->set_web_animation_state(state);
+    css_web_animation_request_sampling(state);
     log_debug("web-anim: created effect for <%s> duration=%.1fms",
               element->tag_name ? element->tag_name : "?", state->duration_ms);
     return state;
@@ -1369,7 +1680,9 @@ void css_web_animation_set_current_time(CssWebAnimationState* state,
     if (!isfinite(current_time_ms) || current_time_ms < 0.0) {
         current_time_ms = 0.0;
     }
+    if (state->current_time_ms == current_time_ms) return;
     state->current_time_ms = current_time_ms;
+    css_web_animation_request_sampling(state);
 }
 
 void css_web_animation_resolve(DomElement* element, LayoutContext* lycon) {
@@ -1382,6 +1695,8 @@ void css_web_animation_resolve(DomElement* element, LayoutContext* lycon) {
     CssWebAnimationState* state =
         (CssWebAnimationState*)element->web_animation_state();
     while (state) {
+        css_animation_refresh_priority(&state->sample);
+        css_animation_refresh_value_samples(&state->sample, lycon);
         if (!state->underlying_captured) {
             capture_animation_underlying(&state->sample);
             state->underlying_captured = true;
@@ -1401,6 +1716,7 @@ void css_web_animation_resolve(DomElement* element, LayoutContext* lycon) {
         sample.duration = state->duration_ms / 1000.0;
         sample.current_iteration = 0;
         sample.play_state = ANIM_PLAY_RUNNING;
+        sample.timing.type = TIMING_LINEAR;
         css_animation_tick(&sample, eased);
         if (lycon && element->blk) {
             // block layout consumes the context snapshot, so copy the sampled
@@ -1418,6 +1734,10 @@ void css_web_animation_resolve(DomElement* element, LayoutContext* lycon) {
 
 // Parse a timing function from a CssValue (keyword or cubic-bezier function)
 static void parse_timing_function_value(const CssValue* value, TimingFunction* out) {
+    if (!css_value_is_timing_function(value)) {
+        *out = TIMING_EASE;
+        return;
+    }
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         switch (value->data.keyword) {
             case CSS_VALUE_EASE:        *out = TIMING_EASE; return;
@@ -1441,14 +1761,14 @@ static void parse_timing_function_value(const CssValue* value, TimingFunction* o
         }
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
         CssFunction* func = value->data.function;
-        if (func->name && strcmp(func->name, "cubic-bezier") == 0 && func->arg_count >= 4) {
+        if (str_ieq_cstr(func->name, "cubic-bezier")) {
             float x1 = (float)func->args[0]->data.number.value;
             float y1 = (float)func->args[1]->data.number.value;
             float x2 = (float)func->args[2]->data.number.value;
             float y2 = (float)func->args[3]->data.number.value;
             timing_cubic_bezier_init(out, x1, y1, x2, y2);
             return;
-        } else if (func->name && strcmp(func->name, "steps") == 0 && func->arg_count >= 1) {
+        } else if (str_ieq_cstr(func->name, "steps")) {
             out->type = TIMING_STEPS;
             out->steps.count = func->args[0]->data.number.value;
             out->steps.position = STEP_JUMP_END; // default
@@ -1473,11 +1793,9 @@ bool css_animation_parse_timing_function_text(const char* value, TimingFunction*
     if (!value || !out) return false;
     Pool* scratch = pool_create();
     if (!scratch) return false;
-    const char* property = "animation-timing-function";
-    CssDeclaration* declaration = css_parse_property_declaration(property, strlen(property),
-        value, strlen(value), scratch);
-    bool valid = declaration && css_motion_longhand_accepts(
-        CSS_PROPERTY_ANIMATION_TIMING_FUNCTION, declaration->value);
+    CssDeclaration* declaration = css_parse_property_declaration(
+        "animation-timing-function", 25, value, strlen(value), scratch);
+    bool valid = declaration && !declaration->important && css_value_is_timing_function(declaration->value);
     if (valid) parse_timing_function_value(declaration->value, out);
     pool_destroy(scratch);
     return valid;
@@ -1487,6 +1805,16 @@ struct CssAnimationKeywordOption {
     CssEnum keyword;
     int value;
 };
+
+static int css_animation_keyword(const CssValue* value,
+                                  const CssAnimationKeywordOption* options,
+                                  int count, int initial) {
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return initial;
+    for (int i = 0; i < count; i++) {
+        if (options[i].keyword == value->data.keyword) return options[i].value;
+    }
+    return initial;
+}
 
 static const CssValue* css_motion_normalize_value(Pool* pool, const CssValue* value,
     CssPropertyCode property) {
@@ -1525,10 +1853,44 @@ static const CssValue* css_motion_normalize_value(Pool* pool, const CssValue* va
     return output ? output : value;
 }
 
+static constexpr size_t MOTION_ANIMATION_INITIAL_COUNT =
+    CSS_PROPERTY_ANIMATION_PLAY_STATE - CSS_PROPERTY_ANIMATION_NAME + 1;
+static constexpr size_t MOTION_INITIAL_COUNT = MOTION_ANIMATION_INITIAL_COUNT +
+    CSS_PROPERTY_TRANSITION_DELAY - CSS_PROPERTY_TRANSITION_PROPERTY + 1;
+
+struct CssMotionInitialCache : DomDocumentResourceData {
+    Pool* pool;
+    const CssValue* values[MOTION_INITIAL_COUNT];
+};
+
+static void css_motion_initial_cache_destroy(DomDocumentResourceData* resource) {
+    auto* cache = static_cast<CssMotionInitialCache*>(resource);
+    if (cache->pool) mem_pool_destroy(cache->pool);
+    mem_free(cache);
+}
+
+static CssMotionInitialCache* css_motion_initial_cache(DomDocument* doc) {
+    if (!doc) return nullptr;
+    for (DomDocumentResource* resource = doc->resources; resource; resource = resource->next)
+        if (resource->destroy == css_motion_initial_cache_destroy)
+            return static_cast<CssMotionInitialCache*>(resource->data);
+    auto* cache = static_cast<CssMotionInitialCache*>(
+        mem_calloc(1, sizeof(CssMotionInitialCache), MEM_CAT_LAYOUT));
+    if (!cache) return nullptr;
+    cache->pool = mem_pool_create((MemContext*)doc->services.mem_ctx,
+        MEM_ROLE_CSS, "css.motion.initial_values");
+    if (!cache->pool || !dom_document_add_resource(doc, cache, css_motion_initial_cache_destroy)) {
+        css_motion_initial_cache_destroy(cache);
+        return nullptr;
+    }
+    return cache;
+}
+
 const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode property) {
     if (!pool || (css_animation_longhand_index(property) < 0 &&
         css_transition_longhand_index(property) < 0)) return nullptr;
+    DomDocument* doc = element ? element->doc : nullptr;
     while (element) {
         CssDeclaration* declaration = style_tree_get_declaration(element->specified_style, property);
         const CssValue* value = declaration
@@ -1552,64 +1914,74 @@ const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     }
     const CssProperty* metadata = css_property_get_by_code(property);
     if (!metadata) return nullptr;
+    // Initial metadata is immutable. Re-parsing it into retained view storage on
+    // every restyle otherwise accumulates four default transition graphs per element.
+    CssMotionInitialCache* cache = css_motion_initial_cache(doc);
+    size_t index = css_animation_longhand_index(property) >= 0
+        ? (size_t)css_animation_longhand_index(property)
+        : MOTION_ANIMATION_INITIAL_COUNT + (size_t)css_transition_longhand_index(property);
+    if (cache && cache->values[index]) return cache->values[index];
+    Pool* initial_pool = cache ? cache->pool : pool;
     CssDeclaration* initial = css_parse_property_declaration(metadata->name, strlen(metadata->name),
-        metadata->initial_value, strlen(metadata->initial_value), pool);
-    return initial ? initial->value : nullptr;
+        metadata->initial_value, strlen(metadata->initial_value), initial_pool);
+    const CssValue* value = initial ? initial->value : nullptr;
+    if (cache) cache->values[index] = value;
+    return value;
 }
 
-static bool css_animation_apply_keyword(const CssValue* value,
-                                        const CssAnimationKeywordOption* options,
-                                        int option_count, int* out_value) {
-    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD || !options || !out_value) return false;
-    CssEnum keyword = value->data.keyword;
-    for (int i = 0; i < option_count; i++) {
-        if (options[i].keyword == keyword) {
-            *out_value = options[i].value;
-            return true;
-        }
+static const CssValue* css_animation_list_item(const CssValue* value, int index) {
+    if (!value || value->type != CSS_VALUE_TYPE_LIST) return value;
+    return value->data.list.count > 0 && value->data.list.values
+        ? value->data.list.values[index % value->data.list.count] : nullptr;
+}
+
+static const char* css_animation_name(const CssValue* value) {
+    if (!value || (value->type == CSS_VALUE_TYPE_KEYWORD &&
+        value->data.keyword == CSS_VALUE_NONE)) return nullptr;
+    return value->type == CSS_VALUE_TYPE_STRING ? value->data.string : css_math_token_name(value);
+}
+
+static bool css_keyframes_animates_property(CssKeyframes* keyframes, CssPropertyCode property) {
+    for (int index = 0; keyframes && index < keyframes->stop_count; index++) {
+        if (find_prop_in_stop(&keyframes->stops[index], property)) return true;
     }
     return false;
 }
 
-static void css_animation_config(const CssValue* const* values, int index,
-    CssAnimProp* config) {
-    memset(config, 0, sizeof(*config));
-    config->name = lam::up(css_value_identifier_name(css_value_comma_at(values[0], index)));
-    config->iteration_count = 1.0;
-    config->direction = ANIM_DIR_NORMAL;
-    config->fill_mode = ANIM_FILL_NONE;
-    config->play_state = ANIM_PLAY_RUNNING;
-    config->timing = TIMING_EASE;
-    float* times[] = {&config->duration, &config->delay};
-    const int slots[] = {1, 3};
-    for (int i = 0; i < 2; i++) {
-        const CssValue* value = css_value_comma_at(values[slots[i]], index);
-        if (value) *times[i] = (float)value->data.length.value /
-            (value->data.length.unit == CSS_UNIT_MS ? 1000.0f : 1.0f);
+bool css_animation_needs_computed_sample(DomElement* element, CssPropertyCode property) {
+    if (!element || !element->doc) return false;
+    DomDocument* doc = element->doc;
+    if (doc->disable_css_animations) return false;
+    for (CssWebAnimationState* effect = element->web_animation_state(); effect; effect = effect->next) {
+        if (css_keyframes_animates_property(effect->sample.keyframes, property)) return true;
     }
-    const CssValue* iterations = css_value_comma_at(values[4], index);
-    if (iterations) config->iteration_count = iterations->type == CSS_VALUE_TYPE_NUMBER
-        ? iterations->data.number.value : -1.0;
-    static const CssAnimationKeywordOption directions[] = {
-        {CSS_VALUE_NORMAL, ANIM_DIR_NORMAL}, {CSS_VALUE_REVERSE, ANIM_DIR_REVERSE},
-        {CSS_VALUE_ALTERNATE, ANIM_DIR_ALTERNATE},
-        {CSS_VALUE_ALTERNATE_REVERSE, ANIM_DIR_ALTERNATE_REVERSE}
-    };
-    static const CssAnimationKeywordOption fills[] = {
-        {CSS_VALUE_NONE, ANIM_FILL_NONE}, {CSS_VALUE_FORWARDS, ANIM_FILL_FORWARDS},
-        {CSS_VALUE_BACKWARDS, ANIM_FILL_BACKWARDS}, {CSS_VALUE_BOTH, ANIM_FILL_BOTH}
-    };
-    int mapped = 0;
-    if (css_animation_apply_keyword(css_value_comma_at(values[5], index), directions,
-        sizeof(directions) / sizeof(*directions), &mapped))
-        config->direction = (AnimationDirection)mapped;
-    if (css_animation_apply_keyword(css_value_comma_at(values[6], index), fills,
-        sizeof(fills) / sizeof(*fills), &mapped)) config->fill_mode = (AnimationFillMode)mapped;
-    const CssValue* play = css_value_comma_at(values[7], index);
-    if (play && play->type == CSS_VALUE_TYPE_KEYWORD && play->data.keyword == CSS_VALUE_PAUSED)
-        config->play_state = ANIM_PLAY_PAUSED;
-    const CssValue* timing = css_value_comma_at(values[2], index);
-    if (timing) parse_timing_function_value(timing, &config->timing);
+    DocState* state = (DocState*)doc->state;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    for (AnimationInstance* effect = scheduler ? scheduler->first : nullptr;
+         effect; effect = effect->next) {
+        if (effect->target != element || !effect->state) continue;
+        if (effect->type == ANIM_CSS_ANIMATION && css_keyframes_animates_property(
+                ((CssAnimState*)effect->state)->keyframes, property)) return true;
+        if (effect->type == ANIM_CSS_TRANSITION &&
+            ((CssTransitionState*)effect->state)->property_code == property) return true;
+    }
+    // first reads can precede effect creation; inspect the newly cascaded animation names.
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    const CssValue* names = css_motion_computed_value(scratch, element, CSS_PROPERTY_ANIMATION_NAME);
+    int count = names ? names->type == CSS_VALUE_TYPE_LIST ? names->data.list.count : 1 : 0;
+    bool needs_sample = false;
+    for (int index = 0; index < count && !needs_sample; index++) {
+        const char* name = css_animation_name(css_animation_list_item(names, index));
+        if (!name) continue;
+        if (!doc->services.keyframe_registry) {
+            doc->services.keyframe_registry = keyframe_registry_create(doc, doc->document_pool);
+        }
+        needs_sample = css_keyframes_animates_property(
+            keyframe_registry_find((KeyframeRegistry*)doc->services.keyframe_registry, name), property);
+    }
+    pool_destroy(scratch);
+    return needs_sample;
 }
 
 void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
@@ -1619,88 +1991,133 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     DocState* state = (DocState*)doc->state;
     AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
     if (!scheduler) return;
-    bool had_animation = false;
+
+    static const CssPropertyCode properties[] = {
+        CSS_PROPERTY_ANIMATION_NAME, CSS_PROPERTY_ANIMATION_DURATION,
+        CSS_PROPERTY_ANIMATION_TIMING_FUNCTION, CSS_PROPERTY_ANIMATION_DELAY,
+        CSS_PROPERTY_ANIMATION_ITERATION_COUNT, CSS_PROPERTY_ANIMATION_DIRECTION,
+        CSS_PROPERTY_ANIMATION_FILL_MODE, CSS_PROPERTY_ANIMATION_PLAY_STATE
+    };
+    const CssValue* values[8] = {};
+    for (int i = 0; i < 8; i++) {
+        values[i] = css_motion_computed_value(lycon->pool, element, properties[i]);
+    }
+    int count = values[0] ? (values[0]->type == CSS_VALUE_TYPE_LIST
+        ? values[0]->data.list.count : 1) : 0;
+    AnimationInstance** instances = count > 0 ? (AnimationInstance**)pool_calloc(
+        lycon->pool, sizeof(AnimationInstance*) * count) : nullptr;
+    if (count > 0 && !instances) return;
     for (AnimationInstance* instance = scheduler->first; instance; instance = instance->next) {
-        if (instance->target == element && instance->type == ANIM_CSS_ANIMATION) {
-            ((CssAnimState*)instance->state)->css_matched = false;
-            had_animation = true;
+        if (instance->target == element && instance->type == ANIM_CSS_ANIMATION && instance->state) {
+            ((CssAnimState*)instance->state)->matched = false;
         }
     }
-    if (!had_animation && !style_tree_get_declaration(element->specified_style,
-        CSS_PROPERTY_ANIMATION_NAME)) return;
-
-    const CssValue* values[8];
-    for (int i = 0; i < 8; i++) values[i] = css_motion_computed_value(lycon->pool, element,
-        (CssPropertyCode)(CSS_PROPERTY_ANIMATION_NAME + i));
-    int count = css_value_comma_count(values[0]);
-    AnimationInstance** matched = count > 0 ? (AnimationInstance**)pool_calloc(
-        lycon->pool, count * sizeof(AnimationInstance*)) : nullptr;
-    if (count > 0 && !matched) return;
+    if (count && !doc->services.keyframe_registry) {
+        doc->services.keyframe_registry = keyframe_registry_create(doc, doc->document_pool);
+    }
+    static const CssAnimationKeywordOption direction_options[] = {
+        {CSS_VALUE_NORMAL, ANIM_DIR_NORMAL}, {CSS_VALUE_REVERSE, ANIM_DIR_REVERSE},
+        {CSS_VALUE_ALTERNATE, ANIM_DIR_ALTERNATE},
+        {CSS_VALUE_ALTERNATE_REVERSE, ANIM_DIR_ALTERNATE_REVERSE}
+    };
+    static const CssAnimationKeywordOption fill_options[] = {
+        {CSS_VALUE_NONE, ANIM_FILL_NONE}, {CSS_VALUE_FORWARDS, ANIM_FILL_FORWARDS},
+        {CSS_VALUE_BACKWARDS, ANIM_FILL_BACKWARDS}, {CSS_VALUE_BOTH, ANIM_FILL_BOTH}
+    };
     double now = scheduler->current_time;
-    // matching from the end preserves the timeline of the last repeated name.
+    // matching from the end preserves playback when repeated names are reordered.
     for (int index = count - 1; index >= 0; index--) {
-        const CssValue* name_value = css_value_comma_at(values[0], index);
-        if (!name_value || (name_value->type == CSS_VALUE_TYPE_KEYWORD &&
-            name_value->data.keyword == CSS_VALUE_NONE)) continue;
-        CssAnimProp config;
-        css_animation_config(values, index, &config);
-        if (!config.name) continue;
-        if (!doc->services.keyframe_registry)
-            doc->services.keyframe_registry = keyframe_registry_create(doc, doc->document_pool);
+        const char* name = css_animation_name(css_animation_list_item(values[0], index));
+        if (!name) continue;
         CssKeyframes* keyframes = keyframe_registry_find(
-            (KeyframeRegistry*)doc->services.keyframe_registry, config.name);
+            (KeyframeRegistry*)doc->services.keyframe_registry, name);
         if (!keyframes) continue;
-        AnimationInstance* instance = scheduler->last;
-        for (; instance; instance = instance->prev) {
-            if (instance->target != element || instance->type != ANIM_CSS_ANIMATION) continue;
-            CssAnimState* animation = (CssAnimState*)instance->state;
-            if (!animation->css_matched && animation->keyframes &&
-                strcmp(animation->keyframes->name, config.name) == 0) break;
+        CssAnimProp config = {};
+        config.name = lam::up(name);
+        config.iteration_count = 1.0;
+        config.direction = ANIM_DIR_NORMAL;
+        config.fill_mode = ANIM_FILL_NONE;
+        config.play_state = ANIM_PLAY_RUNNING;
+        config.timing = TIMING_EASE;
+        double seconds = 0.0;
+        if (css_value_as_seconds(css_animation_list_item(values[1], index), &seconds)) {
+            config.duration = seconds;
         }
-        if (instance) {
+        if (css_value_as_seconds(css_animation_list_item(values[3], index), &seconds)) {
+            config.delay = seconds;
+        }
+        const CssValue* iterations = css_animation_list_item(values[4], index);
+        if (iterations) config.iteration_count = iterations->type == CSS_VALUE_TYPE_NUMBER
+            ? iterations->data.number.value : -1.0;
+        config.direction = (AnimationDirection)css_animation_keyword(
+            css_animation_list_item(values[5], index), direction_options, 4, ANIM_DIR_NORMAL);
+        config.fill_mode = (AnimationFillMode)css_animation_keyword(
+            css_animation_list_item(values[6], index), fill_options, 4, ANIM_FILL_NONE);
+        const CssValue* play = css_animation_list_item(values[7], index);
+        if (play && play->type == CSS_VALUE_TYPE_KEYWORD && play->data.keyword == CSS_VALUE_PAUSED) {
+            config.play_state = ANIM_PLAY_PAUSED;
+        }
+        const CssValue* timing = css_animation_list_item(values[2], index);
+        if (timing) parse_timing_function_value(timing, &config.timing);
+        AnimationInstance* instance = scheduler->last;
+        while (instance) {
+            CssAnimState* sample = instance->target == element && instance->type == ANIM_CSS_ANIMATION
+                ? (CssAnimState*)instance->state : nullptr;
+            if (sample && !sample->matched && sample->keyframes &&
+                strcmp(sample->keyframes->name, name) == 0) break;
+            instance = instance->prev;
+        }
+        if (!instance) {
+            instance = css_animation_create(scheduler, element, &config, keyframes,
+                now, doc->document_pool);
+        } else {
+            // timing changes retain the original clock, including an expired effect.
             bool phase_changed = instance->duration != config.duration ||
                 instance->delay != config.delay || instance->iteration_count != config.iteration_count;
+            if (phase_changed && instance->play_state == ANIM_PLAY_FINISHED) {
+                instance->play_state = ANIM_PLAY_RUNNING;
+                instance->finish_notified = false;
+            }
             instance->duration = config.duration;
             instance->delay = config.delay;
             instance->iteration_count = config.iteration_count;
             instance->direction = config.direction;
             instance->fill_mode = config.fill_mode;
             instance->timing = config.timing;
-            // extending a retained effect must resume its original clock, even after expiry.
-            if (phase_changed && instance->play_state == ANIM_PLAY_FINISHED)
-                instance->play_state = ANIM_PLAY_RUNNING;
-            if (config.play_state == ANIM_PLAY_PAUSED) animation_instance_pause(instance, now);
+            if (config.play_state == ANIM_PLAY_PAUSED) {
+                if (instance->play_state == ANIM_PLAY_FINISHED) {
+                    instance->play_state = ANIM_PLAY_RUNNING;
+                }
+                animation_instance_pause(instance, now);
+            }
             else animation_instance_resume(instance, now);
-        } else {
-            instance = css_animation_create(scheduler, element, &config, keyframes,
-                now, doc->document_pool);
         }
-        if (!instance) continue;
-        CssAnimState* animation = (CssAnimState*)instance->state;
-        animation->css_matched = true;
-        animation->ui_context = lycon->ui_context;
-        matched[index] = instance;
+        if (!instance || !instance->state) continue;
+        CssAnimState* sample = (CssAnimState*)instance->state;
+        sample->matched = true;
+        sample->ui_context = lycon->ui_context;
+        sample->keyframes = keyframes;
+        css_animation_refresh_priority(sample);
+        css_animation_refresh_value_samples(sample, lycon);
+        capture_animation_underlying(sample);
+        instances[index] = instance;
     }
-    AnimationInstance* before_transition = nullptr;
-    for (AnimationInstance* instance = scheduler->first; instance;) {
+    AnimationInstance* before = nullptr;
+    for (AnimationInstance* instance = scheduler->first; instance; ) {
         AnimationInstance* next = instance->next;
-        if (instance->target == element) {
-            if (instance->type == ANIM_CSS_ANIMATION &&
-                !((CssAnimState*)instance->state)->css_matched)
-                animation_scheduler_cancel(scheduler, instance);
-            else if (!before_transition && instance->type == ANIM_CSS_TRANSITION)
-                before_transition = instance;
-        }
+        if (instance->target == element && instance->type == ANIM_CSS_ANIMATION &&
+            instance->state && !((CssAnimState*)instance->state)->matched) {
+            animation_scheduler_cancel(scheduler, instance);
+        } else if (!before && instance->type == ANIM_CSS_TRANSITION) before = instance;
         instance = next;
     }
-    // list order controls replacement priority, while transitions keep their higher origin.
+    // later list entries override earlier effects; transitions have higher priority.
     for (int index = 0; index < count; index++) {
-        if (matched[index]) animation_scheduler_move_before(scheduler, matched[index], before_transition);
+        if (instances[index]) {
+            animation_scheduler_move_before(scheduler, instances[index], before);
+            animation_scheduler_tick(scheduler, now, nullptr, true, instances[index]);
+        }
     }
-    animation_scheduler_tick(scheduler, now, nullptr);
-    for (AnimationInstance* instance = scheduler->first; instance; instance = instance->next)
-        if (instance->target == element && instance->type == ANIM_CSS_ANIMATION)
-            animation_instance_sample(instance, now);
     if (element->blk) {
         lycon->block.given_width = element->block()->given_width;
         lycon->block.given_height = element->block()->given_height;
@@ -1731,59 +2148,23 @@ static bool css_transition_read_used_value(DomElement* element,
                                            CssAnimValueType* out_type,
                                            float* out_f, Color* out_color,
                                            float* out_ratio) {
-    ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
-    switch (prop_id) {
-        case CSS_PROPERTY_WIDTH:
-        case CSS_PROPERTY_HEIGHT:
-        case CSS_PROPERTY_MIN_WIDTH:
-        case CSS_PROPERTY_MAX_WIDTH:
-        case CSS_PROPERTY_MIN_HEIGHT:
-        case CSS_PROPERTY_MAX_HEIGHT: {
-            if (!span->blk) return false;
-            const BlockProp* block = span->block();
-            CssAnimationLengthSlot slot = css_animation_length_slot(
-                const_cast<BlockProp*>(block), prop_id);
-            if (!slot.value || *slot.value < 0.0f || !isfinite(*slot.value)) return false;
-            *out_type = ANIM_VAL_LENGTH;
-            *out_f = *slot.value;
-            return true;
-        }
-        case CSS_PROPERTY_OPACITY: {
-            *out_type = ANIM_VAL_FLOAT;
-            // opacity defaults to 1.0 when no InlineProp/opacity has been set.
-            *out_f = (span->in_line) ? span->inl()->opacity : 1.0f;
-            return true;
-        }
-        case CSS_PROPERTY_COLOR: {
-            // Only snapshot color once it has an explicitly resolved used value;
-            // otherwise the "from" would be an arbitrary zero-initialized color.
-            if (span->in_line && span->inl()->has_color) {
-                *out_type = ANIM_VAL_COLOR;
-                *out_color = span->inl()->color;
-                return true;
-            }
-            return false;
-        }
-        case CSS_PROPERTY_BACKGROUND_COLOR: {
-            if (span->bound && span->boundary_mut()->background) {
-                *out_type = ANIM_VAL_COLOR;
-                *out_color = span->boundary()->background->color;
-                return true;
-            }
-            return false;
-        }
-        case CSS_PROPERTY_ASPECT_RATIO: {
-            // aspect-ratio is already resolved into the flex-item property;
-            // omitting this used-value source makes transitions jump to `to`.
-            if (!element->fi || element->fi->aspect_ratio <= 0.0f ||
-                !isfinite(element->fi->aspect_ratio)) return false;
-            *out_type = ANIM_VAL_ASPECT_RATIO;
-            *out_ratio = element->fi->aspect_ratio;
-            return true;
-        }
-        default:
-            return false;
+    CssAnimatedProp used = {};
+    if (!capture_underlying_value(element, prop_id, &used)) return false;
+    switch (used.value_type) {
+        case ANIM_VAL_LENGTH:
+            if (used.value.length.keyword != CSS_VALUE__UNDEF) return false;
+            *out_f = used.value.length.value;
+            break;
+        case ANIM_VAL_FLOAT: *out_f = used.value.f; break;
+        case ANIM_VAL_COLOR: *out_color = used.value.color; break;
+        case ANIM_VAL_ASPECT_RATIO:
+            if (used.value.aspect_ratio.is_auto) return false;
+            *out_ratio = used.value.aspect_ratio.value;
+            break;
+        default: return false;
     }
+    *out_type = used.value_type;
+    return true;
 }
 
 // Map a transition property to the same value type used by keyframes.
@@ -1832,7 +2213,10 @@ static bool css_transition_read_style_value(DomElement* element,
         return false;
     }
     if (vt == ANIM_VAL_FLOAT) out->value.f = parsed.value.f;
-    else if (vt == ANIM_VAL_LENGTH) out->value.f = parsed.value.length.value;
+    else if (vt == ANIM_VAL_LENGTH) {
+        if (!isfinite(parsed.value.length.value)) return false;
+        out->value.f = parsed.value.length.value;
+    }
     else if (vt == ANIM_VAL_COLOR) out->value.color = parsed.value.color;
     else if (vt == ANIM_VAL_ASPECT_RATIO) {
         out->value.aspect_ratio.value = parsed.value.aspect_ratio.value;
@@ -1868,6 +2252,7 @@ void css_transition_capture_before_change(DomElement* element, CssPropertyCode p
         es = (CssTransitionElemState*)pool_calloc(
             element->doc->document_pool, sizeof(CssTransitionElemState));
         if (!es) return;
+        es->pool = element->doc->document_pool;
         element->set_transition_state_prop(es);
     }
     CssTransitionTrack* track = css_transition_track_for(es, prop_id, vt);
@@ -1884,7 +2269,7 @@ void css_transition_tick(AnimationInstance* anim, float t) {
     CssTransitionState* st = (CssTransitionState*)anim->state;
     if (!st || !st->element) return;
 
-    CssAnimatedProp interp;
+    CssAnimatedProp interp = {};
     interp.property_code = st->property_code;
     interp.value_type = st->value_type;
     interp.composite = CSS_ANIM_COMPOSITE_REPLACE;
@@ -1918,7 +2303,7 @@ void css_transition_tick(AnimationInstance* anim, float t) {
             return; // unsupported — nothing to apply
     }
 
-    apply_animated_value(st->element, &interp);
+    anim->layout_changed |= apply_animated_value(st->element, &interp);
 
     // update bounds from element's current absolute layout position for dirty-region marking
     View* span = static_cast<View*>(anim->target);
@@ -1932,8 +2317,11 @@ static CssTransitionTrack* css_transition_track_for(CssTransitionElemState* es,
     for (int i = 0; i < es->track_count; i++) {
         if (es->tracks[i].property_code == prop_id) return &es->tracks[i];
     }
-    if (es->track_count >= CSS_TRANSITION_MAX_TRACKED) return NULL;
+    // tracks grow with the supported property set; instances retain only property IDs.
+    if (!lam::pool_grow_array(es->pool, &es->tracks, &es->track_capacity,
+            es->track_count + 1, 4)) return nullptr;
     CssTransitionTrack* tk = &es->tracks[es->track_count++];
+    *tk = {};
     tk->property_code = prop_id;
     tk->value_type = vt;
     tk->has_snapshot = false;
@@ -1970,6 +2358,10 @@ void css_transition_finish(AnimationInstance* anim) {
         "transitionend", "propertyName",
         css_property_spelling_from_code(st->property_code), anim->duration);
     log_debug("css-transition: finished prop=%d for element %p", st->property_code, st->element);
+    // the final sample is committed; a completed transition must not own future changes.
+    anim->fill_mode = ANIM_FILL_NONE;
+    pool_free(st->pool, st);
+    anim->state = nullptr;
 }
 
 static void css_transition_cancel(AnimationInstance* anim) {
@@ -1977,7 +2369,11 @@ static void css_transition_cancel(AnimationInstance* anim) {
     if (!st || !st->element) return;
     // Document teardown invalidates DOM wrappers before scheduler entries are
     // reclaimed; no transitioncancel event can target that retired document.
-    if (anim->suppress_cancel_event) return;
+    if (anim->suppress_cancel_event) {
+        pool_free(st->pool, st);
+        anim->state = nullptr;
+        return;
+    }
     double now = anim->start_time;
     if (st->ui_context && st->ui_context->document) {
         DocState* doc_state = (DocState*)st->ui_context->document->state;
@@ -1992,6 +2388,8 @@ static void css_transition_cancel(AnimationInstance* anim) {
     radiant_dispatch_css_event(st->ui_context, st->element,
         "transitioncancel", "propertyName",
         css_property_spelling_from_code(st->property_code), elapsed);
+    pool_free(st->pool, st);
+    anim->state = nullptr;
 }
 
 // Find a live transition instance for (element, property) in the scheduler, or NULL.
@@ -2026,13 +2424,14 @@ bool css_transition_select_config(const CssTransitionList* list, CssPropertyCode
         bool all = item && item->type == CSS_VALUE_TYPE_KEYWORD && item->data.keyword == CSS_VALUE_ALL;
         CssPropertyCode named_property = name ? (CssPropertyCode)css_property_code_from_name(name)
             : CSS_PROPERTY_UNKNOWN;
-        if (!all && named_property != property) continue;
+        if (!all && named_property != property &&
+            !css_property_shorthand_contains(named_property, property)) continue;
         const CssValue* duration = css_value_comma_at(list->values[1], index);
         const CssValue* delay = css_value_comma_at(list->values[3], index);
-        transition->duration = duration ? (float)duration->data.length.value /
-            (duration->data.length.unit == CSS_UNIT_MS ? 1000.0f : 1.0f) : 0.0f;
-        transition->delay = delay ? (float)delay->data.length.value /
-            (delay->data.length.unit == CSS_UNIT_MS ? 1000.0f : 1.0f) : 0.0f;
+        transition->duration = 0.0;
+        if (duration) css_value_as_seconds(duration, &transition->duration);
+        transition->delay = 0.0;
+        if (delay) css_value_as_seconds(delay, &transition->delay);
         transition->timing = TIMING_EASE;
         const CssValue* timing = css_value_comma_at(list->values[2], index);
         if (timing) parse_timing_function_value(timing, &transition->timing);
@@ -2055,7 +2454,7 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
         CssAnimValueType cvt; float cf = 0; float cr = 0; Color cc; cc.c = 0;
         if (css_transition_read_used_value(element, track->property_code,
                                            &cvt, &cf, &cc, &cr)) {
-            if (cvt == ANIM_VAL_FLOAT) from_f = cf;
+            if (cvt == ANIM_VAL_FLOAT || cvt == ANIM_VAL_LENGTH) from_f = cf;
             else if (cvt == ANIM_VAL_COLOR) from_c = cc;
             else if (cvt == ANIM_VAL_ASPECT_RATIO) from_ratio = cr;
         }
@@ -2063,8 +2462,10 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
     }
 
     CssTransitionState* st = (CssTransitionState*)pool_calloc(pool, sizeof(CssTransitionState));
+    if (!st) return;
     st->element = element;
     st->ui_context = ui_context;
+    st->pool = pool;
     st->property_code = track->property_code;
     st->value_type = vt;
     if (vt == ANIM_VAL_FLOAT || vt == ANIM_VAL_LENGTH) {
@@ -2080,7 +2481,10 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
     }
 
     AnimationInstance* inst = animation_instance_create(scheduler);
-    if (!inst) return;
+    if (!inst) {
+        pool_free(pool, st);
+        return;
+    }
     inst->type = ANIM_CSS_TRANSITION;
     inst->target = element;
     inst->state = st;
@@ -2091,7 +2495,7 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
     inst->direction = ANIM_DIR_NORMAL;
     // hold the end value after completion so the transitioned property does not
     // snap back before the next style resolution re-applies it.
-    inst->fill_mode = ANIM_FILL_FORWARDS;
+    inst->fill_mode = ANIM_FILL_BOTH;
     inst->play_state = ANIM_PLAY_RUNNING;
     inst->timing = tp->timing;
     inst->tick = css_transition_tick;
@@ -2135,7 +2539,9 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
     CssTransitionElemState* es = (CssTransitionElemState*)element->transition_state_prop();
     if (!es) {
         es = (CssTransitionElemState*)pool_calloc(pool, sizeof(CssTransitionElemState));
+        if (!es) return;
         es->track_count = 0;
+        es->pool = pool;
         element->set_transition_state_prop(es);
     }
 
@@ -2143,7 +2549,7 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
 
     // Walk the supported property set. For each: read the new used value, compare
     // to the snapshot; if changed and covered by a transition declaration (with
-    // a positive duration), start an interpolating instance. Always update the
+    // a positive combined duration), start an interpolating instance. Always update the
     // snapshot to the new used value.
     for (size_t i = 0; i < css_property_runtime_metadata_count(); i++) {
         const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata_at(i);
@@ -2161,20 +2567,30 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
         CssTransitionTrack* track = css_transition_track_for(es, prop_id, vt);
         if (!track) continue;
 
-        // A running transition owns the property: its own tick overwrites the used
-        // value each frame, so we must NOT diff against the snapshot (that would be
-        // a spurious change) and must NOT overwrite the snapshot. Scan the scheduler
-        // (authoritative) rather than trusting a raw pointer across relayouts.
-        bool is_running = (css_transition_find_running(scheduler, element, prop_id) != NULL);
-        if (is_running) {
+        // compare with the active target before sampling overwrites the new cascade.
+        CssTransitionProp timing = {};
+        bool covered = css_transition_select_config(&list, prop_id, &timing);
+        AnimationInstance* running = css_transition_find_running(scheduler, element, prop_id);
+        if (running && !covered) {
+            animation_scheduler_cancel(scheduler, running);
+            running = nullptr;
+        }
+        if (running) {
+            CssTransitionState* active = (CssTransitionState*)running->state;
+            bool same_target = (vt == ANIM_VAL_FLOAT || vt == ANIM_VAL_LENGTH)
+                ? fabsf(active->to.value.f - new_f) <= .0001f
+                : vt == ANIM_VAL_COLOR ? active->to.value.color.c == new_c.c
+                : fabsf(active->to.value.aspect_ratio.value - new_ratio) <= .0001f;
             // Retained relayout resets view properties, not the DOM-owned
-            // transition. Reapply its sampled value before sizing this box.
-            animation_scheduler_tick(scheduler, now, NULL);
-            if (element->blk) {
-                lycon->block.given_width = element->block()->given_width;
-                lycon->block.given_height = element->block()->given_height;
+            // transition. Preserve the new target before restoring the old sample.
+            animation_scheduler_tick(scheduler, now, nullptr, false, running);
+            if (same_target) {
+                if (element->blk) {
+                    lycon->block.given_width = element->block()->given_width;
+                    lycon->block.given_height = element->block()->given_height;
+                }
+                continue;
             }
-            continue;
         }
 
         bool changed = false;
@@ -2204,23 +2620,21 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
             }
         }
 
-        CssTransitionProp tp;
-        bool covered = css_transition_select_config(&list, prop_id, &tp);
-
-        if (changed && covered) {
+        if ((changed || running) && covered) {
             if (!track->has_snapshot && track->has_pending_from) {
                 // Preserve the pre-change style when this script turn defers its
                 // first layout until after the DOM mutation batch.
                 track->has_snapshot = true;
                 track->snapshot = track->pending_from;
             }
-            css_transition_start(scheduler, element, track, &tp, vt,
+            css_transition_start(scheduler, element, track, &timing, vt,
                                  from_f, from_c, from_ratio, new_f, new_c,
                                  new_ratio, now, pool,
                                  lycon->ui_context);
             // Headless layout has no frame before serialization; apply the
             // transition's current time so its negative delay affects this pass.
-            animation_scheduler_tick(scheduler, now, NULL);
+            AnimationInstance* started = css_transition_find_running(scheduler, element, prop_id);
+            if (started) animation_scheduler_tick(scheduler, now, nullptr, false, started);
             // The transition tick updates the persistent block, while block
             // layout consumes this pass's context copy; keep both at the same
             // sampled value or layout restores the cascaded target.

@@ -105,8 +105,10 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         input_context = saved_input_ctx;
         return false;
     }
-    dom_set_host_driven_loop(doc->js.host_driven_loop);
-    dom_set_document(doc);
+    if (!radiant_bind_document_script_host(uicon, doc)) {
+        input_context = saved_input_ctx;
+        return false;
+    }
     DocState* state = (DocState*)doc->state;
     // A host-loop turn is one browser task.  Defer debug state validation until
     // its DOM mutations commit, otherwise a timer building a large subtree
@@ -185,7 +187,6 @@ bool radiant_advance_js_event_loop(UiContext* uicon, double delta_ms, int frame_
 
 void render(GLFWwindow* window);
 // load_html_doc is declared in view.hpp (via layout.hpp)
-DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 bool radiant_editing_animation_active(DocState* state);
@@ -325,9 +326,10 @@ static DocFormat detect_doc_format(const char* filename) {
     return DOC_FORMAT_UNKNOWN;
 }
 
-// Load document based on detected format
+// Load a document by its detected format. Every supported format goes through
+// load_html_doc, whose router picks the format's loader.
 static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height,
-                                       Pool* pool, const DocumentJsHostConfig* js_host_config,
+                                       const DocumentJsHostConfig* js_host_config,
                                        CookieJar* top_level_cookie_jar,
                                        HtmlLoadPhaseTiming* timing,
                                        DocumentScriptPhaseTiming* script_timing) {
@@ -339,104 +341,23 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
                                       timing, script_timing);
     }
 
-    if (graph_path_is_graph(filename)) {
-        log_debug("Loading as graph document");
-        return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                             top_level_cookie_jar);
-    }
-
-    DocFormat format = detect_doc_format(filename);
-
-    switch (format) {
-        case DOC_FORMAT_HTML:
-            log_debug("Loading as HTML document");
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                                 top_level_cookie_jar);
-
-        case DOC_FORMAT_MARKDOWN: {
-            log_debug("Loading as Markdown document");
-            Url* doc_url = url_parse_with_base(filename, base_url);
-            if (!doc_url) {
-                log_error("Failed to parse document URL: %s", filename);
-                return NULL;
-            }
-            DomDocument* doc = load_markdown_doc(doc_url, width, height, pool);
-            return doc;
-        }
-
-        case DOC_FORMAT_LATEX: {
-            log_debug("Loading as LaTeX document");
-            // Use HTML conversion pipeline (LaTeX→HTML)
-            log_info("Using LaTeX→HTML pipeline for LaTeX");
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                                 top_level_cookie_jar);
-        }
-
-        case DOC_FORMAT_TIKZ: {
-            log_debug("Loading as TikZ/PGF document");
-            Url* tikz_url = url_parse_with_base(filename, base_url);
-            if (!tikz_url) {
-                log_error("Failed to parse TikZ document URL: %s", filename);
-                return nullptr;
-            }
-            return load_tikz_doc(tikz_url, width, height, pool);
-        }
-
-        case DOC_FORMAT_XML:
-            log_debug("Loading as XML document with CSS stylesheet");
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                                 top_level_cookie_jar);
-
-        case DOC_FORMAT_RST:
+    if (!graph_path_is_graph(filename)) {
+        DocFormat format = detect_doc_format(filename);
+        if (format == DOC_FORMAT_RST) {
             log_warn("RST format not yet implemented");
             return NULL;
-
-        case DOC_FORMAT_LAMBDA_SCRIPT:
-            log_debug("Loading as Lambda script document");
-            // load_html_doc will detect .ls extension and route to load_lambda_script_doc
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                                 top_level_cookie_jar);
-
-        case DOC_FORMAT_WIKI: {
-            log_debug("Loading as Wiki document");
-            Url* doc_url = url_parse_with_base(filename, base_url);
-            if (!doc_url) {
-                log_error("Failed to parse document URL: %s", filename);
-                return NULL;
-            }
-            DomDocument* doc = load_wiki_doc(doc_url, width, height, pool);
-            return doc;
         }
-
-        case DOC_FORMAT_PDF:
-            log_debug("Loading as PDF document");
-            // load_html_doc will detect .pdf extension and route to load_pdf_doc
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                                 top_level_cookie_jar);
-
-        case DOC_FORMAT_SVG:
-            log_debug("Loading as SVG document");
-            // load_html_doc will detect .svg extension and route to load_svg_doc
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                                 top_level_cookie_jar);
-
-        case DOC_FORMAT_IMAGE:
-            log_debug("Loading as image document");
-            // load_html_doc will detect image extensions and route to load_image_doc
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                                 top_level_cookie_jar);
-
-        case DOC_FORMAT_TEXT:
-            log_debug("Loading as text document (source view)");
-            // load_html_doc will detect text extensions and route to load_text_doc
-            return load_html_doc(base_url, (char*)filename, width, height, nullptr,
-                                 top_level_cookie_jar);
-
-        default:
+        if (format == DOC_FORMAT_UNKNOWN) {
             log_error("Unsupported document format for file: %s", filename);
             log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
+        }
+        // a source-text view takes no page host settings
+        if (format == DOC_FORMAT_TEXT) js_host_config = nullptr;
     }
+    log_debug("Loading document: %s", filename);
+    return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                         top_level_cookie_jar);
 }
 
 // Get human-readable format name for window title
@@ -517,8 +438,13 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
         ? session_cookie_jar(ui_context.browsing_session) : nullptr;
     DomDocument* source = ui_context.document;
     DocumentJsHostConfig host_config = document_js_host_config_inherit(&ui_context, source);
-    DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height,
-                                     source ? &host_config : nullptr, cookie_jar);
+    DomDocument* doc = nullptr;
+    {
+        // a top-level load: its stateless loaders share the window's runtime
+        LayoutLoaderHostScope loader_host(&ui_context);
+        doc = load_html_doc(base, doc_url, viewport_width, viewport_height,
+                            source ? &host_config : nullptr, cookie_jar);
+    }
     if (!doc) return nullptr;
 
     return show_loaded_html_doc(doc, doc_url);
@@ -1479,25 +1405,33 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         };
         DomDocument* doc = nullptr;
         uint64_t document_load_start = time_now_ns();
-        if (transform) {
-            Url* document_url = url_parse_with_base(file_to_load, cwd);
-            if (!document_url) {
-                log_error("document-transform: failed to parse document URL: %s", file_to_load);
-            } else {
-                doc = load_lambda_document_transform_doc(document_url, transform, options,
-                    option_count, css_width, css_height, pool);
-                if (!doc) {
-                    url_destroy(document_url);
-                } else if (!dom_document_finalize_loader_pool(doc, pool)) {
-                    log_error("document-transform: could not transfer loader pool to document");
-                    free_document(doc);
-                    doc = nullptr;
+        {
+            // the window's first document: its stateless loaders share the
+            // window's runtime with every later top-level load
+            LayoutLoaderHostScope loader_host(&ui_context);
+            if (transform) {
+                Url* document_url = url_parse_with_base(file_to_load, cwd);
+                if (!document_url) {
+                    log_error("document-transform: failed to parse document URL: %s", file_to_load);
+                } else {
+                    doc = load_lambda_document_transform_doc(document_url, transform, options,
+                        option_count, css_width, css_height, pool);
+                    if (!doc) {
+                        url_destroy(document_url);
+                    } else if (!dom_document_finalize_loader_pool(doc, pool)) {
+                        log_error("document-transform: could not transfer loader pool to document");
+                        free_document(doc);
+                        doc = nullptr;
+                    }
                 }
+            } else {
+                // the loader creates and hands over its own pool
+                pool_destroy(pool);
+                pool = nullptr;
+                doc = load_doc_by_format(file_to_load, cwd, css_width, css_height,
+                    &js_host_config, session_cookie_jar(ui_context.browsing_session),
+                    &phase_timing.html, &phase_timing.script);
             }
-        } else {
-            doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool,
-                &js_host_config, session_cookie_jar(ui_context.browsing_session),
-                &phase_timing.html, &phase_timing.script);
         }
         phase_timing.document_load_ms = view_phase_elapsed_ms(
             document_load_start, time_now_ns());
@@ -1773,7 +1707,6 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
             frame_driven = js_animation_frame_has_pending() != 0;
         }
-
         // Drain network completions on the UI thread before deciding whether
         // this tick needs a reflow/repaint.
         if (ui_context.document && ui_context.document->resource_manager) {

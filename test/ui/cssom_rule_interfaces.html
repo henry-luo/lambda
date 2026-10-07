@@ -1,0 +1,91 @@
+<!doctype html>
+<style>button { height: 24px; } #report { width: 100px; height: 30px; }</style>
+<style id="rules">
+.first { color: red; }
+@media all { .first { width: 20px; } }
+@supports (display: block) { .first { height: 20px; } }
+@font-face { font-family: test; src: url(test.woff); }
+@page :first { margin: 10px; @top-center { content: "heading"; } }
+@scope (.first) { .child { color: green; } }
+@property --example { syntax: "<length>"; inherits: false; initial-value: 10px; }
+@layer example { .first { background: green; } }
+</style>
+<button id="check">check rule interfaces</button><div id="report" class="first"></div>
+<script>
+var report = document.getElementById('report');
+function check(name, callback) {
+    try { report.setAttribute('data-' + name, String(callback())); }
+    catch (error) { report.setAttribute('data-' + name, error.name); }
+}
+var initialSelectorDescriptor = Object.getOwnPropertyDescriptor(CSSStyleRule.prototype, 'selectorText');
+var initialGroupingMethod = CSSGroupingRule.prototype.insertRule;
+document.getElementById('check').addEventListener('click', function () {
+    var sheet = document.getElementById('rules').sheet;
+    var style = sheet.cssRules[0], media = sheet.cssRules[1], supports = sheet.cssRules[2];
+    var face = sheet.cssRules[3], page = sheet.cssRules[4], scope = sheet.cssRules[5];
+    var property = sheet.cssRules[6], layer = sheet.cssRules[7];
+    check('style-condition-absent', function () { return style.conditionText === undefined && !('conditionText' in style); });
+    check('style-name-absent', function () { return style.name === undefined && !('name' in style); });
+    check('style-scope-absent', function () { return style.start === undefined && style.end === undefined && !('start' in style); });
+    check('style-property-absent', function () { return style.syntax === undefined && style.inherits === undefined && !('syntax' in style); });
+    check('media-selector-absent', function () { return media.selectorText === undefined && !('selectorText' in media); });
+    check('media-style-absent', function () { return media.style === undefined && !('style' in media); });
+    check('media-property-absent', function () { return media.name === undefined && media.initialValue === undefined && !('initialValue' in media); });
+    check('supports-selector-absent', function () { return supports.selectorText === undefined && !('selectorText' in supports); });
+    check('face-group-absent', function () { return face.cssRules === undefined && face.insertRule === undefined && !('cssRules' in face); });
+    check('property-group-absent', function () { return property.cssRules === undefined && property.deleteRule === undefined && !('deleteRule' in property); });
+    check('scope-selector-absent', function () { return scope.selectorText === undefined && !('selectorText' in scope); });
+    check('layer-selector-absent', function () { return layer.selectorText === undefined && !('selectorText' in layer); });
+    check('group-methods', function () { return typeof media.insertRule === 'function' && typeof supports.deleteRule === 'function' && typeof scope.insertRule === 'function' && typeof layer.deleteRule === 'function'; });
+    check('style-group', function () { return style.cssRules.length === 0 && typeof style.insertRule === 'function'; });
+    check('page-selector', function () { return page.selectorText === ':first'; });
+    check('page-selector-set', function () { page.selectorText = ':left'; return page.selectorText === ':left' && page.cssText.indexOf('@page :left') === 0; });
+    check('media-condition', function () { return media.conditionText === 'all'; });
+    check('supports-condition', function () { return supports.conditionText === '(display: block)'; });
+    check('scope-members', function () { return scope.start === '.first' && scope.end === null; });
+    check('property-members', function () { return property.name === '--example' && property.syntax === '<length>' && property.inherits === false && property.initialValue === '10px'; });
+    check('style-forward', function () { style.style = 'color: blue; width: 30px'; return style.style.color === 'blue' && style.style.width === '30px'; });
+    check('style-forward-identity', function () { var saved = style.style; style.style = 'height: 25px'; return style.style === saved && saved.height === '25px' && saved.color === ''; });
+    check('selector-number', function () { style.selectorText = 12; return style.selectorText === '.first'; });
+    check('selector-coercion', function () { style.selectorText = { toString: function () { return '.second'; } }; return style.selectorText === '.second'; });
+    check('selector-coercion-error', function () { var count = 0; try { style.selectorText = { toString: function () { count++; throw new Error('value'); } }; } catch (error) {} return count === 1 && style.selectorText === '.second'; });
+    check('css-text-coercion', function () { var before = style.cssText, count = 0; style.cssText = { toString: function () { count++; return '.other {}'; } }; return count === 1 && style.cssText === before; });
+    check('unrelated-expando', function () { media.selectorText = 'note'; return media.selectorText === 'note' && Object.prototype.hasOwnProperty.call(media, 'selectorText'); });
+    check('native-own-absent', function () { return Object.getOwnPropertyDescriptor(style, 'selectorText') === undefined && !Object.prototype.hasOwnProperty.call(style, 'cssText'); });
+    check('selector-prototype', function () { var desc = Object.getOwnPropertyDescriptor(CSSStyleRule.prototype, 'selectorText'); return desc && typeof desc.get === 'function' && typeof desc.set === 'function' && desc.enumerable && desc.configurable; });
+    check('css-text-prototype', function () { var desc = Object.getOwnPropertyDescriptor(CSSRule.prototype, 'cssText'); return desc && typeof desc.get === 'function' && typeof desc.set === 'function'; });
+    check('group-prototype', function () { return typeof CSSGroupingRule.prototype.insertRule === 'function' && media.insertRule === CSSGroupingRule.prototype.insertRule; });
+    check('receiver-error', function () { try { CSSGroupingRule.prototype.insertRule.call(face, '.x {}', 0); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('bare-prototypes', function () { return initialSelectorDescriptor && typeof initialSelectorDescriptor.get === 'function' && typeof initialGroupingMethod === 'function'; });
+    check('accessor-name-arity', function () { var d = initialSelectorDescriptor; return d.get.name === 'get selectorText' && d.get.length === 0 && d.set.name === 'set selectorText' && d.set.length === 1; });
+    check('readonly-accessor', function () { var d = Object.getOwnPropertyDescriptor(CSSConditionRule.prototype, 'conditionText'); return d && typeof d.get === 'function' && d.set === undefined && d.enumerable && d.configurable; });
+    check('accessor-receiver', function () { var calls = 0; try { initialSelectorDescriptor.set.call(media, { toString: function () { calls++; return '.wrong'; } }); } catch (error) { return error.name === 'TypeError' && calls === 0; } return false; });
+    check('getter-receiver', function () { try { initialSelectorDescriptor.get.call({}); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('method-receiver-before-coercion', function () { var calls = 0; try { initialGroupingMethod.call(face, { toString: function () { calls++; return '.wrong {}'; } }, 0); } catch (error) { return error.name === 'TypeError' && calls === 0; } return false; });
+    check('expando-undefined-null', function () { media.note = undefined; media.emptyNote = null; return media.note === undefined && media.emptyNote === null && 'note' in media && 'emptyNote' in media && Object.getOwnPropertyDescriptor(media, 'note').value === undefined; });
+    check('own-descriptor', function () { Object.defineProperty(style, 'memo', { value: null, writable: false, enumerable: false, configurable: true }); var d = Object.getOwnPropertyDescriptor(style, 'memo'); return d && d.value === null && !d.writable && !d.enumerable && d.configurable; });
+    check('own-shadows-native', function () { Object.defineProperty(style, 'selectorText', { value: undefined, configurable: true }); var good = style.selectorText === undefined && Object.prototype.hasOwnProperty.call(style, 'selectorText'); delete style.selectorText; return good && style.selectorText === '.second'; });
+    check('method-shadows-native', function () { var original = media.insertRule; media.insertRule = function () { return 99; }; var good = media.insertRule() === 99 && Object.prototype.hasOwnProperty.call(media, 'insertRule'); delete media.insertRule; return good && media.insertRule === original; });
+    check('prototype-replacement', function () { var d = initialSelectorDescriptor; Object.defineProperty(CSSStyleRule.prototype, 'selectorText', { get: function () { return this === style ? 'replacement' : 'wrong'; }, configurable: true }); var good = style.selectorText === 'replacement'; Object.defineProperty(CSSStyleRule.prototype, 'selectorText', d); return good && style.selectorText === '.second'; });
+    check('prototype-deletion', function () { delete CSSStyleRule.prototype.selectorText; var good = style.selectorText === undefined && !('selectorText' in style); Object.defineProperty(CSSStyleRule.prototype, 'selectorText', initialSelectorDescriptor); return good && style.selectorText === '.second'; });
+    check('inherited-constant', function () { return 'STYLE_RULE' in style && style.STYLE_RULE === 1; });
+    check('page-invalid-selector', function () { page.selectorText = ':unknown'; return page.selectorText === ':left'; });
+    check('page-empty-selector', function () { page.selectorText = ''; return page.selectorText === '' && page.cssText.indexOf('@page {') === 0; });
+    check('page-declarations-retained', function () { return page.style.margin === '10px'; });
+    check('page-selector-escapes', function () { page.selectorText = 'foo\\.bar:left'; return page.selectorText === 'foo\\.bar:left'; });
+    check('css-escape-leading', function () { return CSS.escape('-1x') === '-\\31 x' && CSS.escape('1a') === '\\31 a'; });
+    check('css-escape-null', function () { return CSS.escape('a\0b') === 'a\ufffdb'; });
+    check('css-escape-long', function () { var text = 'a'.repeat(2048); return CSS.escape(text) === text; });
+    check('css-escape-conversion', function () { var calls = 0; return CSS.escape({ toString: function () { calls++; return 'a b'; } }) === 'a\\ b' && calls === 1; });
+    check('css-escape-required', function () { try { CSS.escape(); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('group-method-arity', function () { return initialGroupingMethod.length === 1 && CSSGroupingRule.prototype.deleteRule.length === 1; });
+    check('group-required-argument', function () { try { media.insertRule(); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('group-default-index', function () { var list = supports.cssRules; var before = list[0]; var result = supports.insertRule('.default {}'); var good = result === 0 && list[0].selectorText === '.default' && list[1] === before; supports.deleteRule(0); return good; });
+    check('page-areas-retained', function () { return page.cssText.indexOf('@top-center') >= 0 && page.cssText.indexOf('heading') >= 0; });
+    check('page-style-forward', function () { var saved = page.style; page.style = 'margin: 12px'; return page.style === saved && saved.margin === '12px' && page.cssText.indexOf('margin: 12px;') >= 0 && page.cssText.indexOf('@top-center') >= 0; });
+    // CSS Fonts 4 requires forwarding; Chromium 152 retains a getter-only style attribute.
+    check('face-style-forward', function () { var saved = face.style; face.style = 'font-family: updated; src: url(updated.woff)'; return face.style === saved && saved.fontFamily === 'updated' && face.cssText.indexOf('updated.woff') >= 0; });
+    check('descriptor-style-parent', function () { return page.style.parentRule === page && face.style.parentRule === face; });
+    check('group-live', function () { var list = media.cssRules; media.insertRule('.added {}', 1); return list === media.cssRules && list.length === 2 && list[1].parentRule === media; });
+});
+</script>

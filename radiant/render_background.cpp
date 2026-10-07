@@ -1231,7 +1231,7 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         // Serialize CSS clip-path shape (if active) for masking the shadow
         int clip_type = 0;
-        float clip_params[8] = {};
+        float clip_params[RDT_CLIP_PARAM_COUNT] = {};
         if (rdcon->clip_shape_depth > 0) {
             clip_shape_to_params(rdcon->clip_shapes[rdcon->clip_shape_depth - 1],
                                  &clip_type, clip_params);
@@ -1240,7 +1240,7 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         // Element border-box (exclude shape: per CSS spec, outer shadow is not
         // visible inside the element border-box).
         int exclude_type = CLIP_SHAPE_ROUNDED_RECT;
-        float exclude_params[8];
+        float exclude_params[RDT_CLIP_PARAM_COUNT] = {};
         exclude_params[0] = rect.x;     exclude_params[1] = rect.y;
         exclude_params[2] = rect.width; exclude_params[3] = rect.height;
         exclude_params[4] = r_tl;       exclude_params[5] = r_tr;
@@ -1414,7 +1414,7 @@ void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect r
         bool inset_need_clip = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0) && s_blur > 0;
         int inset_save_rx = 0, inset_save_ry = 0, inset_save_rw = 0, inset_save_rh = 0;
         int inset_clip_type = 0;
-        float inset_clip_params[8] = {};
+        float inset_clip_params[RDT_CLIP_PARAM_COUNT] = {};
         if (inset_need_clip) {
             inset_save_rx = (int)floorf(rect.x);
             inset_save_ry = (int)floorf(rect.y);
@@ -1853,7 +1853,7 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
     const char* image_url = bg->image;
 
     // Load image via the image cache
-    ImageSurface* img = load_image(rdcon->ui_context, image_url);
+    ImageSurface* img = load_document_image(rdcon->ui_context->document, rdcon->ui_context, image_url);
     if (!img) {
         // Background images are optional paint layers; network-managed pages
         // may skip late/blocking fetches and keep rendering the base layer.
