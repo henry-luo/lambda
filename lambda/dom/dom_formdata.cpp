@@ -24,6 +24,7 @@
 #include "../js/js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../runtime/lambda-root-frame.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../module/radiant/radiant_input_value.hpp"
@@ -77,72 +78,16 @@ static bool fd_input_supports_dirname(const char* itype) {
            strcmp(itype, "submit") == 0;
 }
 
-static bool fd_utf8_decode_one(const char* s, uint32_t* out_cp, int* out_len) {
-    if (!s || !*s) return false;
-    unsigned char b0 = (unsigned char)s[0];
-    if (b0 < 0x80) {
-        *out_cp = b0;
-        *out_len = 1;
-        return true;
-    }
-    if ((b0 & 0xE0) == 0xC0 &&
-        (s[1] && (((unsigned char)s[1] & 0xC0) == 0x80))) {
-        *out_cp = ((uint32_t)(b0 & 0x1F) << 6) |
-                  (uint32_t)((unsigned char)s[1] & 0x3F);
-        *out_len = 2;
-        return true;
-    }
-    if ((b0 & 0xF0) == 0xE0 &&
-        (s[1] && (((unsigned char)s[1] & 0xC0) == 0x80)) &&
-        (s[2] && (((unsigned char)s[2] & 0xC0) == 0x80))) {
-        *out_cp = ((uint32_t)(b0 & 0x0F) << 12) |
-                  ((uint32_t)((unsigned char)s[1] & 0x3F) << 6) |
-                  (uint32_t)((unsigned char)s[2] & 0x3F);
-        *out_len = 3;
-        return true;
-    }
-    if ((b0 & 0xF8) == 0xF0 &&
-        (s[1] && (((unsigned char)s[1] & 0xC0) == 0x80)) &&
-        (s[2] && (((unsigned char)s[2] & 0xC0) == 0x80)) &&
-        (s[3] && (((unsigned char)s[3] & 0xC0) == 0x80))) {
-        *out_cp = ((uint32_t)(b0 & 0x07) << 18) |
-                  ((uint32_t)((unsigned char)s[1] & 0x3F) << 12) |
-                  ((uint32_t)((unsigned char)s[2] & 0x3F) << 6) |
-                  (uint32_t)((unsigned char)s[3] & 0x3F);
-        *out_len = 4;
-        return true;
-    }
-    return false;
-}
-JS_FORWARD_STATIC_EXPRESSION(bool, fd_codepoint_is_rtl, (uint32_t cp), ((cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF)))
+struct FormDirectionValue { DomElement* element; const char* value; };
 
-static const char* fd_direction_from_auto_value(const char* value) {
-    if (!value) return "ltr";
-    for (const char* p = value; *p; ) {
-        uint32_t cp = 0;
-        int cp_len = 0;
-        if (!fd_utf8_decode_one(p, &cp, &cp_len)) {
-            p++;
-            continue;
-        }
-        if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) return "ltr";
-        if (fd_codepoint_is_rtl(cp)) return "rtl";
-        p += cp_len;
-    }
-    return "ltr";
+static const char* fd_direction_value(DomElement* element, void* context) {
+    FormDirectionValue* source = (FormDirectionValue*)context;
+    return element == source->element ? source->value : dom_form_control_current_value(element);
 }
 
-static const char* fd_compute_dirname_direction(DomElement* elem, const char* value_hint) {
-    for (DomNode* cur = (DomNode*)elem; cur; cur = cur->parent) {
-        if (!cur->is_element()) continue;
-        DomElement* cur_elem = (DomElement*)cur;
-        const char* dir = cur_elem->get_attribute("dir");
-        if (!dir || !*dir) continue;
-        if (str_icmp_cstr(dir, "rtl") == 0) return "rtl";
-        if (str_icmp_cstr(dir, "ltr") == 0) return "ltr";
-        if (str_icmp_cstr(dir, "auto") == 0) return fd_direction_from_auto_value(value_hint);
-    }
-    return "ltr";
+static const char* fd_compute_dirname_direction(DomElement* element, const char* value) {
+    FormDirectionValue source = {element, value};
+    return dom_element_directionality(element, fd_direction_value, &source) > 0 ? "rtl" : "ltr";
 }
 
 static inline Item make_sym_iterator_key() {
@@ -223,6 +168,8 @@ static Item fd_prepare_value(Item value_item, Item filename_item) {
     return value;
 }
 
+static void fd_append_named_entry(Item entries, const char* name, Item value);
+
 static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
     Item this_fd = dom_realm_receiver();
     Item entries = fd_get_entries(this_fd);
@@ -239,10 +186,7 @@ static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
 
     JS_ASSIGN_OR_RETURN(value, fd_prepare_value(value_item, filename_item));
 
-    Item pair = js_array_new(0);
-    js_array_push(pair, make_str(name_cs));
-    js_array_push(pair, value);
-    js_array_push(entries, pair);
+    fd_append_named_entry(entries, name_cs, value);
     log_debug("fd_append: appended '%s'", name_cs);
     return make_js_undefined();
 }
@@ -358,10 +302,7 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
 
     if (first_idx < 0) {
         // Not found: append new entry
-        Item pair = js_array_new(0);
-        js_array_push(pair, make_str(name_cs));
-        js_array_push(pair, value);
-        js_array_push(entries, pair);
+        fd_append_named_entry(entries, name_cs, value);
     } else {
         // Update the first occurrence's value
         Item first_pair = js_elements_get_int(entries, first_idx);
@@ -541,8 +482,25 @@ static Item fd_normalize_newlines(const char* s) {
     return result;
 }
 
-// Get the selected option values from a <select> element.
-// Returns them as an array of strings (for multiple select).
+// retain each pair and its values through allocating conversions and array growth (D5.3.3).
+static void fd_append_named_entry(Item entries, const char* name, Item value) {
+    RootFrame roots(4);
+    Rooted<Item> entries_root(roots, entries);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> name_root(roots, fd_normalize_surrogates(name));
+    Rooted<Item> pair_root(roots, js_array_new(0));
+    js_array_push(pair_root.get(), name_root.get());
+    js_array_push(pair_root.get(), value_root.get());
+    js_array_push(entries_root.get(), pair_root.get());
+}
+
+static void fd_append_text_entry(Item entries, const char* name, const char* value) {
+    RootFrame roots(2);
+    Rooted<Item> entries_root(roots, entries);
+    Rooted<Item> value_root(roots, fd_normalize_surrogates(value));
+    fd_append_named_entry(entries_root.get(), name, value_root.get());
+}
+
 static void fd_append_select_entries(Item entries, DomElement* select_elem) {
     const char* name = select_elem->get_attribute("name");
     if (!name || !*name) return; // no name → excluded from submission
@@ -571,10 +529,7 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
                     opt_val = "";
                 }
             }
-            Item pair = js_array_new(0);
-            js_array_push(pair, fd_normalize_surrogates(name));
-            js_array_push(pair, fd_normalize_surrogates(opt_val));
-            js_array_push(entries, pair);
+            fd_append_text_entry(entries, name, opt_val);
             if (!is_multiple) break; // single select: first selected wins
         }
         // optgroup children
@@ -592,10 +547,7 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
                         opt_val = (tn && tn->is_text() && ((DomText*)tn)->text)
                             ? ((DomText*)tn)->text : "";
                     }
-                    Item pair = js_array_new(0);
-                    js_array_push(pair, fd_normalize_surrogates(name));
-                    js_array_push(pair, fd_normalize_surrogates(opt_val));
-                    js_array_push(entries, pair);
+                    fd_append_text_entry(entries, name, opt_val);
                     if (!is_multiple) goto done_select;
                 }
                 ogchild = ogchild->next_sibling;
@@ -631,36 +583,27 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
 
         if (str_icmp_cstr(tag, "input") == 0) {
             const char* name = elem->get_attribute("name");
-            if (name && *name && !dom_is_disabled(elem)) {                const char* itype = dom_input_type_lower(elem);
+            if (name && *name && !dom_is_disabled(elem)) {
+                const char* itype = dom_input_type_lower(elem);
                 // excluded from form data: type=submit, reset, button, image
                 bool excluded = (strcmp(itype, "submit") == 0 || strcmp(itype, "reset") == 0 ||
                                  strcmp(itype, "button") == 0 || strcmp(itype, "image") == 0);
                 if (!excluded) {
-                    Item name_item = fd_normalize_surrogates(name);
                     if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
                         if (dom_get_checkedness(elem)) {
                             const char* val = elem->get_attribute("value");
-                            Item pair = js_array_new(0);
-                            js_array_push(pair, name_item);
-                            js_array_push(pair, fd_normalize_surrogates(val ? val : "on"));
-                            js_array_push(entries, pair);
+                            fd_append_text_entry(entries, name, val ? val : "on");
                         }
                     } else if (strcmp(itype, "file") == 0) {
                         Item files = radiant_input_files(elem);
                         int64_t file_count = get_type_id(files) == LMD_TYPE_ARRAY
                             ? js_array_length(files) : 0;
                         if (file_count == 0) {
-                            Item pair = js_array_new(0);
-                            js_array_push(pair, name_item);
-                            js_array_push(pair, fd_make_file_stub());
-                            js_array_push(entries, pair);
+                            fd_append_named_entry(entries, name, fd_make_file_stub());
                         } else {
                             for (int64_t file_index = 0; file_index < file_count;
                                  file_index++) {
-                                Item pair = js_array_new(0);
-                                js_array_push(pair, name_item);
-                                js_array_push(pair, js_elements_get_int(files, file_index));
-                                js_array_push(entries, pair);
+                                fd_append_named_entry(entries, name, js_elements_get_int(files, file_index));
                             }
                         }
                     } else {
@@ -684,19 +627,11 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
                             val = radiant_input_live_value(elem);
                             if (!val) val = "";
                         }
-                        Item pair = js_array_new(0);
-                        js_array_push(pair, name_item);
-                        js_array_push(pair, fd_normalize_surrogates(val));
-                        js_array_push(entries, pair);
+                        fd_append_text_entry(entries, name, val);
                         // dirname: if the control has a dirname attribute, add a directionality entry
                         const char* dirname = elem->get_attribute("dirname");
                         if (dirname && *dirname && fd_input_supports_dirname(itype)) {
-                            // per spec: always "ltr" in headless (no bidi algorithm)
-                            Item dir_pair = js_array_new(0);
-                            js_array_push(dir_pair, make_str(dirname));
-                            js_array_push(dir_pair,
-                                make_str(fd_compute_dirname_direction(elem, val)));
-                            js_array_push(entries, dir_pair);
+                            fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, val));
                         }
                     }
                 }
@@ -708,19 +643,13 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
                 const char* val = elem->form && elem->form->current_value
                     ? elem->form->current_value : "";
                 // normalize newlines first, then surrogates
-                Item nl_item = fd_normalize_newlines(val);
-                const char* nl_str = fn_to_cstr(nl_item);
-                Item pair = js_array_new(0);
-                js_array_push(pair, fd_normalize_surrogates(name));
-                js_array_push(pair, fd_normalize_surrogates(nl_str ? nl_str : ""));
-                js_array_push(entries, pair);
+                RootFrame roots(1);
+                Rooted<Item> newline_value(roots, fd_normalize_newlines(val));
+                const char* nl_str = fn_to_cstr(newline_value.get());
+                fd_append_text_entry(entries, name, nl_str ? nl_str : "");
                 const char* dirname = elem->get_attribute("dirname");
                 if (dirname && *dirname) {
-                    Item dir_pair = js_array_new(0);
-                    js_array_push(dir_pair, make_str(dirname));
-                    js_array_push(dir_pair,
-                        make_str(fd_compute_dirname_direction(elem, val)));
-                    js_array_push(entries, dir_pair);
+                    fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, val));
                 }
             }
         } else if (str_icmp_cstr(tag, "select") == 0) {
@@ -844,17 +773,10 @@ static void fd_append_submitter_entry(Item entries, DomElement* elem) {
         if (strcmp(itype, "submit") != 0) return;
         const char* val = elem->get_attribute("value");
         if (!val) val = "";
-        Item pair = js_array_new(0);
-        js_array_push(pair, fd_normalize_surrogates(name));
-        js_array_push(pair, fd_normalize_surrogates(val));
-        js_array_push(entries, pair);
+        fd_append_text_entry(entries, name, val);
         const char* dirname = elem->get_attribute("dirname");
         if (dirname && *dirname && fd_input_supports_dirname(itype)) {
-            Item dir_pair = js_array_new(0);
-            js_array_push(dir_pair, make_str(dirname));
-            js_array_push(dir_pair,
-                make_str(fd_compute_dirname_direction(elem, val)));
-            js_array_push(entries, dir_pair);
+            fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, val));
         }
         return;
     }
@@ -864,10 +786,7 @@ static void fd_append_submitter_entry(Item entries, DomElement* elem) {
         if (type && *type && str_icmp_cstr(type, "submit") != 0) return;
         const char* val = elem->get_attribute("value");
         if (!val) val = "";
-        Item pair = js_array_new(0);
-        js_array_push(pair, fd_normalize_surrogates(name));
-        js_array_push(pair, fd_normalize_surrogates(val));
-        js_array_push(entries, pair);
+        fd_append_text_entry(entries, name, val);
     }
 }
 
@@ -897,8 +816,13 @@ static Item js_formdata_construct(Item first, Item submitter) {
     }
 
     // Create the FormData object
-    Item fd_obj = dom_realm_new_object_of_class(JS_CLASS_FORM_DATA);
-    Item entries = js_array_new(0);
+    RootFrame roots(4);
+    Rooted<Item> first_root(roots, first);
+    Rooted<Item> submitter_root(roots, submitter);
+    Rooted<Item> object_root(roots, dom_realm_new_object_of_class(JS_CLASS_FORM_DATA));
+    Rooted<Item> entries_root(roots, js_array_new(0));
+    Item fd_obj = object_root.get();
+    Item entries = entries_root.get();
     prop_set(fd_obj, FD_ENTRIES_KEY, entries);
     fd_install_methods(fd_obj);
 
@@ -924,7 +848,9 @@ static Item js_formdata_construct(Item first, Item submitter) {
 }
 
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem) {
-    Item entries = js_array_new(0);
+    RootFrame roots(1);
+    Rooted<Item> entries_root(roots, js_array_new(0));
+    Item entries = entries_root.get();
     DomNode* form_node = (DomNode*)form_elem;
     if (!form_node || !form_node->is_element()) return entries;
 

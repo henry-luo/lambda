@@ -3229,31 +3229,6 @@ enum FormControlType {
 // Input keywords share a coarse FormControlType for rendering, but their
 // mechanical capabilities are not identical (for example, color is not a
 // text-editing surface). Keep this descriptor separate from live form state.
-enum FormInputKind {
-    FORM_INPUT_KIND_TEXT = 0,
-    FORM_INPUT_KIND_PASSWORD,
-    FORM_INPUT_KIND_EMAIL,
-    FORM_INPUT_KIND_URL,
-    FORM_INPUT_KIND_SEARCH,
-    FORM_INPUT_KIND_TEL,
-    FORM_INPUT_KIND_NUMBER,
-    FORM_INPUT_KIND_CHECKBOX,
-    FORM_INPUT_KIND_RADIO,
-    FORM_INPUT_KIND_BUTTON,
-    FORM_INPUT_KIND_SUBMIT,
-    FORM_INPUT_KIND_RESET,
-    FORM_INPUT_KIND_IMAGE,
-    FORM_INPUT_KIND_HIDDEN,
-    FORM_INPUT_KIND_RANGE,
-    FORM_INPUT_KIND_FILE,
-    FORM_INPUT_KIND_DATE,
-    FORM_INPUT_KIND_TIME,
-    FORM_INPUT_KIND_DATETIME_LOCAL,
-    FORM_INPUT_KIND_MONTH,
-    FORM_INPUT_KIND_WEEK,
-    FORM_INPUT_KIND_COLOR,
-};
-
 enum FormInputCapability {
     FORM_INPUT_CAP_TEXT_CONTROL = 1u << 0,
     FORM_INPUT_CAP_SINGLE_LINE = 1u << 1,
@@ -3278,7 +3253,6 @@ struct FormInputDescriptor {
 // Static input-type metadata is shared by style, layout, event, editing, and
 // rendering callers. The returned descriptor is immutable and process-owned.
 const FormInputDescriptor* form_input_descriptor(const char* type);
-FormInputKind form_input_kind(const char* type);
 FormControlType form_input_control_type(const char* type);
 bool form_input_has_capability(const char* type, uint32_t capability);
 bool form_input_kind_is(const char* type, FormInputKind kind);

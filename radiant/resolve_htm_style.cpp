@@ -760,17 +760,6 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
         lycon, block, get_parent_table_rules(cell_node), is_header);
 }
 
-// Resolve dir="auto" by finding the first strong directional character.
-// Returns CSS_VALUE_RTL or CSS_VALUE_LTR.
-static CssEnum resolve_dir_auto(DomElement* elmt) {
-    for (DomNode* child = elmt->first_child; child; child = child->next_sibling) {
-        int result = layout_find_first_strong_direction(child, true);
-        if (result > 0) return CSS_VALUE_RTL;
-        if (result < 0) return CSS_VALUE_LTR;
-    }
-    return CSS_VALUE_LTR;  // default to LTR if no strong character found
-}
-
 static void apply_html_heading_default(LayoutContext* lycon, DomNode* element,
                                        ViewBlock* block, NameId tag) {
     // HTML heading defaults are a data table: the same font/margin pipeline
@@ -1807,29 +1796,20 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
 
-    // Handle HTML 'dir' attribute (global, applies to all elements)
-    // CSS 2.1 §9.10: The 'dir' attribute maps to the CSS 'direction' property
+    // html rendering maps host directionality before authored CSS declarations.
     const char* dir_attr = elmt->get_attribute("dir");
-    if (dir_attr) {
+    DomElement* direction_element = elmt->as_element();
+    bool recognized_dir = dir_attr && (str_ieq_cstr(dir_attr, "rtl") ||
+        str_ieq_cstr(dir_attr, "ltr") || str_ieq_cstr(dir_attr, "auto"));
+    bool bdi = direction_element->tag_name && str_ieq_cstr(direction_element->tag_name, "bdi");
+    if (dom_element_has_directionality_hint(direction_element)) {
         block->ensure_block(lycon);
-        if (str_ieq_cstr(dir_attr, "rtl")) {
-            block->blk->direction = CSS_VALUE_RTL;
-            // HTML rendering §15.3.5: recognized dir values isolate the element
-            // from the surrounding bidi paragraph.
+        block->blk->direction = dom_css_element_directionality(elmt) > 0 ? CSS_VALUE_RTL : CSS_VALUE_LTR;
+        if (recognized_dir || bdi) {
+            // isolation follows recognized dir states and bdi's default auto state.
             block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
-        } else if (str_ieq_cstr(dir_attr, "ltr")) {
-            block->blk->direction = CSS_VALUE_LTR;
-            // HTML rendering §15.3.5: recognized dir values isolate the element
-            // from the surrounding bidi paragraph.
-            block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
-        } else if (str_ieq_cstr(dir_attr, "auto")) {
-            // HTML5 §14.3.4: dir="auto" — resolve direction from first strong character
-            CssEnum resolved = resolve_dir_auto(lam::dom_require_element(elmt));
-            block->blk->direction = resolved;
-            // HTML rendering §15.3.5: dir=auto is isolated unless plaintext
-            // handling is required for preformatted or textarea content.
-            block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
-            if (elmt->tag() == MARKUP_NAME_PRE || elmt->tag() == MARKUP_NAME_TEXTAREA) {
+            if (dir_attr && str_ieq_cstr(dir_attr, "auto") &&
+                (elmt->tag() == MARKUP_NAME_PRE || elmt->tag() == MARKUP_NAME_TEXTAREA)) {
                 // html rendering maps pre/textarea dir=auto to plaintext bidi.
                 block->blk->unicode_bidi = CSS_VALUE_PLAINTEXT;
             }

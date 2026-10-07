@@ -321,18 +321,24 @@ extern "C" Item js_blob_slice(Item start_item, Item end_item, Item type_item) {
 // =============================================================================
 
 extern "C" Item js_file_new(Item parts, Item name_item, Item options) {
-    Item obj = js_blob_new_with_class(parts, options, JS_CLASS_FILE);
+    // native FormData callers have no JS construction receiver to retain the new File (D5.3.3).
+    RootFrame roots(4);
+    Rooted<Item> parts_root(roots, parts);
+    Rooted<Item> name_root(roots, name_item);
+    Rooted<Item> options_root(roots, options);
+    Rooted<Item> object_root(roots, js_blob_new_with_class(parts_root.get(), options_root.get(), JS_CLASS_FILE));
+    Item obj = object_root.get();
     if (get_type_id(obj) != LMD_TYPE_MAP) return obj;
     attach_known_prototype(obj, g_file_proto);
     const char* nm = "";
-    if (get_type_id(name_item) == LMD_TYPE_STRING) {
-        String* s = it2s(name_item);
+    if (get_type_id(name_root.get()) == LMD_TYPE_STRING) {
+        String* s = it2s(name_root.get());
         if (s) nm = s->chars;
     }
     dom_realm_set_cstr(obj, "name", make_str(nm));
     int64_t lm = 0;
-    if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item v = dom_realm_get_cstr(options, "lastModified");
+    if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
+        Item v = dom_realm_get_cstr(options_root.get(), "lastModified");
         if (get_type_id(v) == LMD_TYPE_INT) lm = (int64_t)it2i(v);
     }
     dom_realm_set_cstr(obj, "lastModified", (Item){.item = i2it(lm)});

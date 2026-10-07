@@ -1840,6 +1840,49 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
 
 static bool css_selector_contains_generic_pseudo(const CssSelector* selector);
 
+// validate token boundaries before decoding; whitespace cannot join two identifiers.
+static bool css_parse_linguistic_arguments(CssSimpleSelector* selector,
+        const CssSelectorFunction* function, const CssToken* tokens, Pool* pool) {
+    bool language = selector->type == CSS_SELECTOR_PSEUDO_LANG;
+    int pos = css_skip_whitespace_tokens(tokens, function->argument_start, function->argument_end);
+    const char** ranges = nullptr;
+    size_t count = 0, capacity = 0;
+    while (pos < function->argument_end) {
+        const CssToken* token = &tokens[pos];
+        if (token->type != CSS_TOKEN_IDENT && !(language && token->type == CSS_TOKEN_STRING))
+            return false;
+        const char* value = css_token_value_dup(token, pool);
+        if (!value) return false;
+        if (!language) {
+            // unknown identifiers are valid :dir() arguments but never match.
+            selector->argument = value;
+            count = 1;
+        } else {
+            if (!lam::pool_copy_grow_array(pool, &ranges, &capacity, count, count + 1, 4, false))
+                return false;
+            ranges[count++] = value;
+        }
+        pos = css_skip_whitespace_tokens(tokens, pos + 1, function->argument_end);
+        if (pos == function->argument_end) break;
+        if (!language || tokens[pos].type != CSS_TOKEN_COMMA) return false;
+        pos = css_skip_whitespace_tokens(tokens, pos + 1, function->argument_end);
+        if (pos == function->argument_end) return false;
+    }
+    if (!language) return count == 1;
+    if (!count) return false;
+    selector->language_ranges = ranges;
+    selector->language_range_count = count;
+    // selectorText retains quotes and escapes; decoded strings are only for matching.
+    const char* start = tokens[function->argument_start].start;
+    const CssToken* last = &tokens[function->argument_end - 1];
+    size_t length = (size_t)(last->start + last->length - start);
+    char* raw = (char*)pool_calloc(pool, length + 1);
+    if (!raw) return false;
+    memcpy(raw, start, length);
+    selector->argument = raw;
+    return true;
+}
+
 static CssSelectorGroup* css_parse_segmented_selector_group(
         const CssToken* tokens, int start, int end, Pool* pool,
         bool forgiving, bool relative) {
@@ -1907,10 +1950,7 @@ static bool css_apply_functional_pseudo(CssSimpleSelector* selector,
 
     if ((selector->type == CSS_SELECTOR_PSEUDO_LANG ||
          selector->type == CSS_SELECTOR_PSEUDO_DIR) &&
-        (!selector->argument || !selector->argument[0])) return false;
-    if (selector->type == CSS_SELECTOR_PSEUDO_DIR &&
-        str_icmp_cstr(selector->argument, "ltr") != 0 &&
-        str_icmp_cstr(selector->argument, "rtl") != 0) return false;
+        !css_parse_linguistic_arguments(selector, function, tokens, pool)) return false;
 
     if (css_is_nth_pseudo(selector->type)) {
         int formula_end = function->argument_end;

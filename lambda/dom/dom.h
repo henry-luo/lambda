@@ -154,8 +154,8 @@ bool dom_focus_editing_host_for_automation(void* dom_elem);
  * Implements browser-like named access on the Window object.
  * @param root  DomElement* root of the DOM tree (void* for C linkage in header)
  */
-#ifdef __cplusplus
 struct DomElement;
+#ifdef __cplusplus
 void dom_register_named_elements(DomElement* root);
 DomElement* dom_find_element_by_id(DomElement* root, const char* id);
 #endif
@@ -524,6 +524,7 @@ bool dom_css_element_is_indeterminate(void* element);
 bool dom_css_element_matches_range(void* element, bool out_of_range);
 int dom_css_element_matches_validity(void* element, bool invalid, bool user);
 int dom_css_element_placeholder_shown(void* element);
+const char* dom_form_control_current_value(struct DomElement* element);
 void dom_set_user_validity(void* element, bool value);
 void dom_form_mark_user_validity(void* form);
 

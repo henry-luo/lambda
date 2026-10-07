@@ -6501,6 +6501,40 @@ TEST(RenderOutputParity, SvgDashLengthsUseEachInstanceFontBeforeInheritance) {
         "temp/render_output_parity/svg_properties_use_css.png");
 }
 
+TEST(RenderOutputParity, LinguisticSelectorsAndFirstStrongDirectionReachPaintAndInlineLayout) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    const struct {const char* direction; const char* reference; const char* text;} rows[] = {
+        {"auto", "ltr", "<bdi>\xD7\x90</bdi>" "abc"},
+        {"auto", "rtl", "<span style='display:none'>\xF0\x9E\xA4\x80</span>"},
+        {"auto", "ltr", "\xD9\xA1\xD6\xB0\xD4\xB1"},
+        {"auto", "ltr", "123"},
+    };
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    for (size_t index = 0; index < 2; index++) {
+        strbuf_append_str(html[index], "<!doctype html><style>body{margin:0}.row{width:120px;height:20px;"
+            "font-size:0;text-align:start;margin-bottom:4px}.box{display:inline-block;width:20px;height:20px}"
+            ".first{background:red}.second{background:blue}.selected{width:120px;height:20px;background:red}");
+        strbuf_append_str(html[index], index == 0
+            ? ".selected:lang(de-DE){background:green}"
+            : ".selected{background:green}");
+        strbuf_append_str(html[index], "</style><body dir='rtl'><div lang='de-Latn-DE'><div class='selected'></div></div>");
+        for (const auto& row : rows) {
+            strbuf_append_str(html[index], "<div class='row' dir='");
+            strbuf_append_str(html[index], index == 0 ? row.direction : row.reference);
+            strbuf_append_str(html[index], "'>");
+            strbuf_append_str(html[index], row.text);
+            strbuf_append_str(html[index], "<span class='box first'></span><span class='box second'></span></div>");
+        }
+        strbuf_append_str(html[index], "</body>");
+    }
+    // compare real paint and inline ordering with explicit direction and selector references.
+    expect_html_pair_output_parity("linguistic_selectors", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
 TEST(RenderOutputParity, SvgReferencesAndColorSpacesReachExistingPaintConsumers) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

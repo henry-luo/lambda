@@ -7500,7 +7500,7 @@ static bool _elem_is_barred(DomElement* elem) {
 }
 
 // Get the current value of a form element as a C-string (UTF-8).
-static const char* _elem_current_value(DomElement* elem) {
+extern "C" const char* dom_form_control_current_value(DomElement* elem) {
     if (!elem || !elem->tag_name) return "";
     const char* tag = elem->tag_name;
     if (str_icmp_cstr(tag, "input") == 0) {
@@ -7545,7 +7545,7 @@ extern "C" int dom_css_element_placeholder_shown(void* element_ptr) {
     if (!element || !tc_is_text_control(element)) return 0;
     const char* placeholder = element->get_attribute("placeholder");
     return placeholder && *placeholder &&
-        dom_element_value_is_empty(element, _elem_current_value(element));
+        dom_element_value_is_empty(element, dom_form_control_current_value(element));
 }
 
 extern "C" bool dom_css_element_matches_range(void* element_ptr,
@@ -7563,7 +7563,7 @@ extern "C" bool dom_css_element_matches_range(void* element_ptr,
         (min_value && dom_engine_input_value_as_number(type, min_value, &parsed_bound)) ||
         (max_value && dom_engine_input_value_as_number(type, max_value, &parsed_bound));
     if (!has_limit) return false;
-    const char* value = _elem_current_value(element);
+    const char* value = dom_form_control_current_value(element);
     RadiantInputValidity validity = {};
     dom_engine_input_value_validate(type, value ? value : "",
         min_value, max_value, element->get_attribute("step"), &validity);
@@ -8683,7 +8683,7 @@ static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
         }
 
         const char* tag = elem->tag_name ? elem->tag_name : "";
-        const char* val = _elem_current_value(elem);
+        const char* val = dom_form_control_current_value(elem);
         bool val_empty = dom_element_value_is_empty(elem, val);
 
         // Typed value setters already sanitize through the module codec. Keeping
@@ -9188,6 +9188,7 @@ typedef enum JsDomReflectKind {
     X("href", "href", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK | DOM_TAG_BASE) \
     X("alt", "alt", STR, 0, DOM_TAG_IMG) \
     X("dir", "dir", STR, 0, DOM_TAG_ANY) \
+    X("lang", "lang", STR, 0, DOM_TAG_ANY) \
     X("width", "width", STR, 0, DOM_TAG_IFRAME) \
     X("height", "height", STR, 0, DOM_TAG_IFRAME) \
     X("acceptCharset", "accept-charset", STR, 0, DOM_TAG_FORM) \

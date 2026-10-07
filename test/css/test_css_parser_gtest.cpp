@@ -32,6 +32,28 @@ protected:
     }
 };
 
+TEST_F(CssParserTest, LinguisticFunctionsValidateTokensBeforeDecoding) {
+    const char* valid[] = {":lang(en)", ":lang( en, 'de-*-DE' )", ":lang(\"*\")",
+        ":lang(\\65 n)", ":lang(en/**/,fr)", ":lang(\"\")", ":lang(en", ":dir(sideways)",
+        ":dir( RTL )", ":dir(\\72 tl)"};
+    for (const char* text : valid) {
+        EXPECT_NE(css_parse_selector_group_text(text, strlen(text), pool), nullptr) << text;
+    }
+    const char* invalid[] = {":lang()", ":lang(/**/)", ":lang(en de)", ":lang(en,)",
+        ":lang(,en)", ":lang(en,,de)", ":lang(*)", ":lang(en-*-DE)", ":lang(123)",
+        ":lang(en/**/de)", ":dir()", ":dir(/**/)", ":dir(r tl)",
+        ":dir(r/**/tl)", ":dir('rtl')", ":dir(rtl,ltr)"};
+    for (const char* text : invalid) {
+        EXPECT_EQ(css_parse_selector_group_text(text, strlen(text), pool), nullptr) << text;
+    }
+    const char* text = ":is(:lang(en,), .valid)";
+    CssSelectorGroup* forgiving = css_parse_selector_group_text(text, strlen(text), pool);
+    ASSERT_NE(forgiving, nullptr);
+    EXPECT_EQ(forgiving->selectors[0]->compound_selectors[0]->simple_selectors[0]->function_selector_count, 1u);
+    text = ":not(:lang(en,), .valid)";
+    EXPECT_EQ(css_parse_selector_group_text(text, strlen(text), pool), nullptr);
+}
+
 // Test basic CSS parsing components
 TEST_F(CssParserTest, ParseEmptyStylesheet) {
     const char* css = "";

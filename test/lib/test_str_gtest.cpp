@@ -874,6 +874,28 @@ TEST_F(StrNumericTest, Int64MinValue) {
     EXPECT_EQ(v, INT64_MIN);
 }
 
+TEST_F(StrNumericTest, Int64SignedLimitsAndFailedWrites) {
+    const struct { const char* text; bool valid; int64_t value; } cases[] = {
+        {"-9223372036854775808", true, INT64_MIN},
+        {"-9223372036854775807", true, INT64_MIN + 1},
+        {"9223372036854775807", true, INT64_MAX},
+        {"-0", true, 0},
+        {"-1", true, -1},
+        {"9223372036854775808", false, 123},
+        {"-9223372036854775809", false, 123},
+        {"18446744073709551615", false, 123},
+        {"18446744073709551616", false, 123},
+        {"-18446744073709551616", false, 123},
+    };
+    for (const auto& c : cases) {
+        int64_t value = 123;
+        const char* end = c.text;
+        EXPECT_EQ(str_to_int64(c.text, strlen(c.text), &value, &end), c.valid) << c.text;
+        EXPECT_EQ(value, c.value) << c.text;
+        EXPECT_EQ(end, c.valid ? c.text + strlen(c.text) : c.text) << c.text;
+    }
+}
+
 TEST_F(StrNumericTest, Int64Empty) {
     int64_t v;
     EXPECT_FALSE(str_to_int64("", 0, &v, NULL));
@@ -1893,6 +1915,24 @@ TEST_F(UtfClassifyTest, BidiStrongClass) {
     EXPECT_EQ(utf_bidi_strong_class(0x0627), 1);  // Arabic alef
     EXPECT_EQ(utf_bidi_strong_class(0x4E00), -1); // CJK ideograph
     EXPECT_EQ(utf_bidi_strong_class('0'), 0);
+    EXPECT_EQ(utf_bidi_strong_class(0x0661), 0); // arabic-indic digit is AN, not AL.
+    EXPECT_EQ(utf_bidi_strong_class(0x0301), 0); // combining acute accent is NSM.
+    EXPECT_EQ(utf_bidi_strong_class(0x05B0), 0); // hebrew point sheva is NSM.
+    EXPECT_EQ(utf_bidi_strong_class(0x060C), 0); // arabic comma is CS.
+    EXPECT_EQ(utf_bidi_strong_class(0x00D7), 0); // multiplication sign is ON.
+    EXPECT_EQ(utf_bidi_strong_class(0x0531), -1); // armenian capital letter.
+    EXPECT_EQ(utf_bidi_strong_class(0x1E900), 1); // supplementary Adlam capital letter.
+    EXPECT_EQ(utf_bidi_strong_class(0x10800), 1); // cypriot syllabary.
+    EXPECT_EQ(utf_bidi_strong_class(0x110000), 0);
+}
+
+TEST_F(UtfClassifyTest, BidiTextSkipsNeutralAndInvalidBytesAndChoosesFirstOrLast) {
+    const char* text = "\xD9\xA1\xD6\xB0\xFF\xD7\x90" "A";
+    EXPECT_EQ(utf8_bidi_strong_direction(text, strlen(text), true), 1);
+    EXPECT_EQ(utf8_bidi_strong_direction(text, strlen(text), false), -1);
+    EXPECT_EQ(utf8_bidi_strong_direction("\xD9\xA1\xD6\xB0", 4, true), 0);
+    EXPECT_EQ(utf8_bidi_strong_direction("\xF0\x9E\xA4\x80", 4, true), 1);
+    EXPECT_EQ(utf8_bidi_strong_direction(nullptr, 0, true), 0);
 }
 
 // ── utf_is_emoji_for_zwj ─────────────────────────────────────────────

@@ -6996,6 +6996,7 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
     bool checked_broad_structural_css = false;
     // arbitrary root/limit selectors can change eligibility outside the mutated subtree.
     bool has_scope_css = dom_js_document_rule_tree_has_match(doc, dom_js_rule_is_scope, nullptr);
+    bool has_direction_css = document_has_pseudo_state_rules(doc, PSEUDO_STATE_DIRECTION_DEPENDENT);
     bool has_broad_structural_css = false;
     bool checked_class_relational_css = false;
     bool has_class_relational_css = false;
@@ -7005,6 +7006,13 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
             continue;
+        }
+        if (has_direction_css && (record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
+            record->kind == DOM_JS_MUTATION_TEXT || record->kind == DOM_JS_MUTATION_CONTROL_VALUE ||
+            record->kind == DOM_JS_MUTATION_CHILD_INSERT || record->kind == DOM_JS_MUTATION_CHILD_REMOVE)) {
+            // first-strong isolation and inherited direction can change matches outside the edited subtree.
+            if (reason) *reason = "direction-sensitive-selector";
+            return false;
         }
         if (has_scope_css && (record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
             record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
@@ -9244,7 +9252,11 @@ static bool css_simple_selector_uses_pseudo_state(CssSimpleSelector* simple,
                 simple->type == CSS_SELECTOR_PSEUDO_INVALID ||
                 simple->type == CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN ||
                 simple->type == CSS_SELECTOR_PSEUDO_USER_INVALID ||
-                simple->type == CSS_SELECTOR_PSEUDO_USER_VALID;
+                simple->type == CSS_SELECTOR_PSEUDO_USER_VALID ||
+                simple->type == CSS_SELECTOR_PSEUDO_DIR;
+            break;
+        case PSEUDO_STATE_DIRECTION_DEPENDENT:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_DIR;
             break;
         default:
             break;

@@ -6147,7 +6147,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 inheritance_span->font->font_size_from_medium = ancestor->font->font_size_from_medium;
                 continue;  // Move to next property
             }
-            if (prop_id == CSS_PROPERTY_DIRECTION && !dom_elem->get_attribute("dir")) {
+            if (prop_id == CSS_PROPERTY_DIRECTION && !dom_element_has_directionality_hint(dom_elem)) {
                 // css writing modes: direction inherits from the computed parent value;
                 // html dir can supply that value without a specified CSS declaration.
                 CssEnum inherited_direction = find_inherited_block_keyword(

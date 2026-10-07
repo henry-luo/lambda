@@ -169,10 +169,12 @@ bool utf_is_hangul(uint32_t cp);
 bool utf_is_cursive_script(uint32_t cp);
 
 /**
- * Coarse Unicode Bidirectional Algorithm first-strong classification.
+ * Unicode 17 Bidirectional Algorithm strong classification, including derived defaults.
  * @return 1 for RTL (R/AL), -1 for LTR (L), or 0 for neutral codepoints.
  */
 int utf_bidi_strong_class(uint32_t cp);
+// first/last L, AL or R in UTF-8; invalid bytes and other bidi classes are ignored.
+int utf8_bidi_strong_direction(const char* text, size_t length, bool first);
 
 /**
  * Emoji that participates in ZWJ composition sequences.

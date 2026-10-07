@@ -1,0 +1,109 @@
+<!doctype html>
+<style>#child{background:red}#child:lang(de-DE){background:green}input,#scan,#directionAncestor{background:red}input:dir(rtl),#scan:dir(rtl),#directionAncestor:dir(rtl){background:green}</style>
+<button id="check">check</button><button id="mutate">mutate</button><div id="report"></div>
+<div id="directionAncestor" dir="auto"><span id="directionIsolation" dir="rtl">אב</span>abc</div><div id="language" lang="de-Latn-DE"><span id="child">language</span></div>
+<div id="parent" dir="rtl"><span id="inherited">inherited</span><form id="form">
+<input id="tel" type="tel" name="tel" dirname="tel.dir"><input id="input" dir="auto" name="input" dirname="input.dir" value="אב">
+<textarea id="area" dir="auto" name="area" dirname="area.dir">אב</textarea><input type="checkbox" name="checked" checked value="yes"><input type="radio" name="radio" checked value="א"><input type="hidden" name="hidden" value="secret"><input type="file" name="upload"><select name="choice"><option value="first">first</option><option selected value="chosen">chosen</option></select><input id="submitter" type="submit" name="send" value="go"></form>
+<div id="neutral" dir="auto">123</div><div id="scan" dir="auto"><bdi id="isolate">אב</bdi>abc</div>
+<div id="invalidScan" dir="auto"><span dir="invalid">אב</span>abc</div>
+<div id="explicitScan" dir="auto"><span dir="ltr">אב</span>abc</div>
+<div id="excludedScan" dir="auto"><script type="text/plain">אב</script><style>/* אב */</style><textarea>אב</textarea>abc</div>
+<svg id="foreignDirection" dir="ltr" width="1" height="1"><g id="foreignLanguage" lang="fr"/></svg></div>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var report=document.getElementById('report'),child=document.getElementById('child'),parent=document.getElementById('parent'),input=document.getElementById('input'),tel=document.getElementById('tel'),area=document.getElementById('area'),neutral=document.getElementById('neutral'),scan=document.getElementById('scan'),form=document.getElementById('form'),xml='http://www.w3.org/XML/1998/namespace';
+function syntax(selector){try{child.matches(selector);return 'accepted';}catch(e){return e.name;}}
+function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(e){report.setAttribute('data-'+name,e.name);}}
+check("lang-range",function(){return child.matches(":lang(de-DE)");});
+check("lang-wildcard-range",function(){return child.matches(":lang(\"de-*-DE\")");});
+check("lang-wildcard-leading",function(){return child.matches(":lang(\"*-Latn\")");});
+check("lang-multiple",function(){return child.matches(":lang(fr, DE-de)");});
+check("lang-escaped",function(){return child.matches(":lang(\\64 e-DE)");});
+check("lang-comment",function(){return child.matches(":lang(fr/**/, de)");});
+check("lang-not-other",function(){return !child.matches(':lang(fr)');});
+check("lang-query",function(){return document.querySelectorAll('#language :lang(de-DE)').length;});
+check("lang-cascade",function(){return getComputedStyle(child).backgroundColor;});
+check("syntax-space",function(){return syntax(":lang(de en)");});
+check("syntax-trailing",function(){return syntax(":lang(de,)");});
+check("syntax-leading",function(){return syntax(":lang(,de)");});
+check("syntax-double",function(){return syntax(":lang(de,,fr)");});
+check("syntax-star",function(){return syntax(":lang(*)");});
+check("syntax-unquoted-range",function(){return syntax(":lang(de-*-DE)");});
+check("syntax-number",function(){return syntax(":lang(123)");});
+check("syntax-comment-join",function(){return syntax(":lang(de/**/en)");});
+check("syntax-empty",function(){return syntax(":lang()");});
+check("syntax-dir-space",function(){return syntax(":dir(r tl)");});
+check("syntax-dir-comment",function(){return syntax(":dir(r/**/tl)");});
+check("syntax-dir-quoted",function(){return syntax(":dir(\"rtl\")");});
+check("syntax-dir-comma",function(){return syntax(":dir(rtl,ltr)");});
+check("syntax-dir-empty",function(){return syntax(":dir()");});
+check("syntax-dir-unknown",function(){return syntax(":dir(sideways)");});
+check("syntax-unclosed",function(){return syntax(':lang(de');});
+check("dir-unknown-never",function(){return !input.matches(':dir(sideways)');});
+check("forgiving-is",function(){return child.matches(':is(:lang(de,), #child)');});
+check("strict-not",function(){return syntax(':not(:lang(de,), #child)');});
+check("dir-escaped",function(){return input.matches(':dir(\\72 tl)');});
+check("lang-singleton",function(){child.lang="de-x-DE";return !child.matches(':lang(de-DE)')});
+check("lang-mutate-cascade",function(){child.lang="fr";return getComputedStyle(child).backgroundColor});
+check("lang-empty",function(){child.lang="";return !child.matches(':lang("*")')});
+check("lang-empty-range",function(){return child.matches(':lang("")');});
+check("lang-empty-cascade",function(){return getComputedStyle(child).backgroundColor;});
+check("lang-inheritance-restored",function(){child.removeAttribute("lang");return child.matches(':lang(de-DE)')});
+check("lang-invalid-range",function(){return !child.matches(':lang("de-DE-")');});
+check("lang-literal-xml-ignored",function(){child.setAttribute("xml:lang","fr");return child.matches(':lang(de-DE)')});
+check("lang-xml-priority",function(){child.setAttributeNS(xml,"x:lang","fr");return child.matches(':lang(fr)')});
+check("lang-xml-remove",function(){child.removeAttributeNS(xml,"lang");return child.matches(':lang(de-DE)')});
+check("lang-svg",function(){return document.getElementById("foreignLanguage").matches(':lang(fr)');});
+check("dir-tel-default",function(){return tel.matches(':dir(ltr)');});
+check("dir-input-value",function(){return input.matches(':dir(rtl)');});
+check("dir-textarea-value",function(){return area.matches(':dir(rtl)');});
+check("dir-neutral-default",function(){return neutral.matches(':dir(ltr)');});
+check("dir-bdi-isolation",function(){return scan.matches(':dir(ltr)');});
+check("dir-bdi-default",function(){return document.getElementById("isolate").matches(':dir(rtl)');});
+check("dir-invalid-descendant",function(){return document.getElementById("invalidScan").matches(':dir(rtl)');});
+check("dir-recognized-descendant",function(){return document.getElementById("explicitScan").matches(':dir(ltr)');});
+check("dir-excluded-descendants",function(){return document.getElementById("excludedScan").matches(':dir(ltr)');});
+check("dir-foreign-dir",function(){return document.getElementById("foreignDirection").matches(':dir(rtl)');});
+check("input-style",function(){return getComputedStyle(input).direction;});
+check("tel-style",function(){return getComputedStyle(tel).direction;});
+check("bdi-style",function(){return getComputedStyle(document.getElementById("isolate")).direction;});
+check("input-cascade",function(){return getComputedStyle(input).backgroundColor;});
+check("form-value",function(){return new FormData(form).get("input.dir");});
+check("form-tel",function(){return new FormData(form).get("tel.dir");});
+check("form-area",function(){return new FormData(form).get("area.dir");});
+check("form-checkbox",function(){return new FormData(form).get("checked");});
+check("form-radio",function(){return new FormData(form).get("radio");});
+check("form-hidden",function(){return new FormData(form).get("hidden");});
+check("form-selected",function(){return new FormData(form).get("choice");});
+check("form-empty-file",function(){return new FormData(form).get("upload").name;});
+check("form-submitter",function(){return new FormData(form,document.getElementById("submitter")).get("send");});
+check("input-live",function(){input.value="abc";return input.matches(':dir(ltr)')});
+check("input-live-cascade",function(){return getComputedStyle(input).backgroundColor;});
+check("input-live-style",function(){return getComputedStyle(input).direction;});
+check("input-live-form",function(){return new FormData(form).get("input.dir");});
+check("input-dirty-value",function(){input.setAttribute("value","אב");return input.matches(':dir(ltr)')});
+check("input-css-independent",function(){input.style.direction="rtl";return input.matches(':dir(ltr)')});
+check("input-css-style",function(){return getComputedStyle(input).direction;});
+check("input-css-form",function(){return new FormData(form).get("input.dir");});
+check("textarea-live",function(){area.value="123";return area.matches(':dir(ltr)')});
+check("textarea-live-form",function(){return new FormData(form).get("area.dir");});
+check("form-reset",function(){form.reset();return input.matches(':dir(rtl)')&&area.matches(':dir(rtl)')});
+check("dir-auto-live-text",function(){scan.textContent="אב";return scan.matches(':dir(rtl)')});
+check("dir-auto-live-cascade",function(){return getComputedStyle(scan).backgroundColor;});
+check("dir-auto-live-style",function(){return getComputedStyle(scan).direction;});
+check("dir-parent-inherit",function(){parent.dir="ltr";return document.getElementById("inherited").matches(':dir(ltr)')});
+check("dir-default-type-change",function(){tel.type="text";parent.dir="rtl";return tel.matches(':dir(rtl)')});
+check("dir-default-type-restored",function(){tel.type="tel";return tel.matches(':dir(ltr)')});
+check("unicode-arabic-digit-latin",function(){neutral.textContent="\u0661a";return neutral.matches(":dir(ltr)")});
+check("unicode-hebrew-mark-latin",function(){neutral.textContent="\u05b0a";return neutral.matches(":dir(ltr)")});
+check("unicode-arabic-comma-latin",function(){neutral.textContent="\u060ca";return neutral.matches(":dir(ltr)")});
+check("unicode-multiply-hebrew",function(){neutral.textContent="\u00d7\u05d0";return neutral.matches(":dir(rtl)")});
+check("unicode-armenian-hebrew",function(){neutral.textContent="\u0531\u05d0";return neutral.matches(":dir(ltr)")});
+check("unicode-adlam-latin",function(){neutral.textContent="\ud83a\udd00a";return neutral.matches(":dir(rtl)")});
+check("unicode-cypriot-latin",function(){neutral.textContent="\ud802\udc00a";return neutral.matches(":dir(rtl)")});
+check("unicode-neutral",function(){neutral.textContent="123";return neutral.matches(":dir(ltr)")});
+check("selector-text-quotes",function(){var sheet=document.styleSheets[0];sheet.insertRule('#child:lang("de-*-DE"){color:green}',sheet.cssRules.length);return sheet.cssRules[sheet.cssRules.length-1].selectorText.indexOf('"de-*-DE"')>=0});
+});
+document.getElementById("mutate").addEventListener("click",function(){document.getElementById("directionIsolation").dir="invalid";});
+</script>

@@ -341,6 +341,11 @@ static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
         if (preserve_color_model) return false;
         return true;
     }
+    if (!value && id == CSS_PROPERTY_DIRECTION && pseudo_type == 0 &&
+        dom_element_has_directionality_hint(element)) {
+        // live HTML hints apply even when CSSOM reads precede the next layout pass.
+        return copy_text(out, out_size, dom_css_element_directionality(element) > 0 ? "rtl" : "ltr");
+    }
     // The specified-style tree keeps shorthands intact for CSSOM mutation.
     // Resolve their winning physical component before serializing a longhand.
     const CssValue* shorthand_value = computed_box_side_value(
@@ -1013,7 +1018,10 @@ static bool serialize_background_color(const CssPropAccessor*, DomElement* eleme
                                        int pseudo_type, char* out, size_t out_size) {
     if (!element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
-    if (boundary && boundary->background) {
+    // recascade can precede event-turn layout, leaving the old background paint cache intact.
+    bool dirty_cascade = element->doc && element->doc->js.mutation_count > 0;
+    if (boundary && boundary->background &&
+        (!dirty_cascade || css_animation_needs_computed_sample(element, CSS_PROPERTY_BACKGROUND_COLOR))) {
         return format_color(out, out_size, boundary->background->color);
     }
 

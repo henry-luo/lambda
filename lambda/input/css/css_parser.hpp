@@ -340,6 +340,8 @@ typedef struct CssSimpleSelector {
 
     // Pseudo-class argument (for :lang(), :dir(), etc.)
     const char* argument;
+    const char** language_ranges; // decoded :lang() ident/string tokens, owned by the selector pool
+    size_t language_range_count;
 
     // Function selectors (:is(), :where(), :has(), :not())
     struct CssSelector** function_selectors;
