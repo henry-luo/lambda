@@ -276,6 +276,7 @@ typedef enum {
     DOC_FORMAT_RST,
     DOC_FORMAT_WIKI,
     DOC_FORMAT_LAMBDA_SCRIPT,
+    DOC_FORMAT_SLIDES,
     DOC_FORMAT_PDF,
     DOC_FORMAT_SVG,
     DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF
@@ -308,6 +309,8 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_WIKI;
     } else if (str_ieq_const(ext, ext_len, "ls")) {
         return DOC_FORMAT_LAMBDA_SCRIPT;
+    } else if (str_ieq_const(ext, ext_len, "slides")) {
+        return DOC_FORMAT_SLIDES;
     } else if (str_ieq_const(ext, ext_len, "pdf")) {
         return DOC_FORMAT_PDF;
     } else if (str_ieq_const(ext, ext_len, "svg")) {
@@ -349,7 +352,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         }
         if (format == DOC_FORMAT_UNKNOWN) {
             log_error("Unsupported document format for file: %s", filename);
-            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
+            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
         }
         // a source-text view takes no page host settings
@@ -372,6 +375,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_RST: return "RST";
         case DOC_FORMAT_WIKI: return "Wiki";
         case DOC_FORMAT_LAMBDA_SCRIPT: return "Lambda Script";
+        case DOC_FORMAT_SLIDES: return "Slides";
         case DOC_FORMAT_PDF: return "PDF";
         case DOC_FORMAT_SVG: return "SVG";
         case DOC_FORMAT_IMAGE: return "Image";

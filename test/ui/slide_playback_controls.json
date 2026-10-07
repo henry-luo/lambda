@@ -1,6 +1,6 @@
 {
   "name": "Play runs and resumes the deck; Restart returns to the opening",
-  "html": "test/demo/slides/slide_presentation.ls",
+  "html": "test/demo/slides/slide_presentation.slides",
   "viewport": {"width": 1100, "height": 700},
   "events": [
     {"type": "click", "target": {"selector": "[data-slide-command=play]"}},

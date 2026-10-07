@@ -1,0 +1,70 @@
+// A lambda.chart visualization and paragraph builds, baked into Mark.
+// ./lambda.exe view test/demo/slides/slide_package_content.slides
+<presentation id: "content-demo", title: "Package content", width: 1280, height: 720,
+    <slide layout: 'title-body',
+        <text id: "title", role: 'title', "Reusable Lambda content">
+        <group id: "points", x: 60, y: 160, width: 420, height: 270,
+            <text id: "points-p0", x: 0, y: 0, width: 420, height: 90, font_size: 32, color: "#111827", "Lambda authors the deck.">
+            <text id: "points-p1", x: 0, y: 90, width: 420, height: 90, font_size: 32, color: "#111827", "Radiant lays out and paints it.">
+            <text id: "points-p2", x: 0, y: 180, width: 420, height: 90, font_size: 32, color: "#111827", "Existing packages supply rich content.">
+        >
+        <cue id: "points-cue0",
+            <effect target: "points-p0", kind: 'fade-in', duration: 300, easing: 'linear'>
+        >
+        <cue id: "points-cue1",
+            <effect target: "points-p1", kind: 'fade-in', duration: 300, easing: 'linear'>
+        >
+        <cue id: "points-cue2",
+            <effect target: "points-p2", kind: 'fade-in', duration: 300, easing: 'linear'>
+        >
+        <content id: "chart", x: 620, y: 200, width: 560, height: 300,
+            <svg xmlns: "http://www.w3.org/2000/svg", width: 560, height: 300, viewBox: "0 0 560 300",
+                <rect width: 560, height: 300, fill: "white">
+                <g transform: "translate(49, 44)",
+                    <g class: "marks bars",
+                        <rect x: 4, y: 195, width: 158.33333333333334, height: -4, fill: "#4e79a7", opacity: 1, rx: 0>
+                        <rect x: 166.33333333333331, y: 130, width: 158.33333333333334, height: 61, fill: "#4e79a7", opacity: 1, rx: 0>
+                        <rect x: 328.6666666666667, y: 65, width: 158.33333333333334, height: 126, fill: "#4e79a7", opacity: 1, rx: 0>
+                    >
+                    <g class: "axis x-axis",
+                        <line x1: 0, y1: 191, x2: 491, y2: 191, stroke: "#888", stroke-width: 1>
+                        <g class: "tick", transform: "translate(83.1667, 191)",
+                            <line x1: 0, y1: 0, x2: 0, y2: 5, stroke: "#888", stroke-width: 1>
+                            <text x: 0, y: 19, text-anchor: "middle", font-size: 11, fill: "#333", "A">
+                        >
+                        <g class: "tick", transform: "translate(245.5, 191)",
+                            <line x1: 0, y1: 0, x2: 0, y2: 5, stroke: "#888", stroke-width: 1>
+                            <text x: 0, y: 19, text-anchor: "middle", font-size: 11, fill: "#333", "B">
+                        >
+                        <g class: "tick", transform: "translate(407.833, 191)",
+                            <line x1: 0, y1: 0, x2: 0, y2: 5, stroke: "#888", stroke-width: 1>
+                            <text x: 0, y: 19, text-anchor: "middle", font-size: 11, fill: "#333", "C">
+                        >
+                        <text x: 245.5, y: 234, text-anchor: "middle", font-size: 13, fill: "#333", "category">
+                    >
+                    <g class: "axis y-axis",
+                        <line x1: 0, y1: 0, x2: 0, y2: 191, stroke: "#888", stroke-width: 1>
+                        <g class: "tick", transform: "translate(0, 160.5)",
+                            <line x1: 0, y1: 0, x2: -5, y2: 0, stroke: "#888", stroke-width: 1>
+                            <text x: -8, y: 3.6666666666666665, text-anchor: "end", font-size: 11, fill: "#333", "28">
+                        >
+                        <g class: "tick", transform: "translate(0, 95.5)",
+                            <line x1: 0, y1: 0, x2: -5, y2: 0, stroke: "#888", stroke-width: 1>
+                            <text x: -8, y: 3.6666666666666665, text-anchor: "end", font-size: 11, fill: "#333", "55">
+                        >
+                        <g class: "tick", transform: "translate(0, 30.5)",
+                            <line x1: 0, y1: 0, x2: -5, y2: 0, stroke: "#888", stroke-width: 1>
+                            <text x: -8, y: 3.6666666666666665, text-anchor: "end", font-size: 11, fill: "#333", "43">
+                        >
+                        <text x: -41, y: 95.5, text-anchor: "middle", font-size: 13, fill: "#333", transform: "rotate(-90, -41, 95.5)", "amount">
+                    >
+                >
+                <text x: 280, y: 36, text-anchor: "middle", font-size: 16, font-weight: "bold", fill: "#333", "Customer mix">
+            >
+        >
+        <cue
+            <effect target: "chart", kind: 'fade-in', duration: 400>
+        >
+        <notes "Each paragraph is an explicit text target. The chart is computed once.">
+    >
+>

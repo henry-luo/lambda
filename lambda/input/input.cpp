@@ -1848,6 +1848,8 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"ics", parse_ics},
     {"textile", parse_textile_input},
     {"mark", parse_mark},
+    // a .slides deck is Mark data whose root is <presentation> (lambda.slide.present)
+    {"slides", parse_mark},
     {"org", parse_org_input},
     {"typst", parse_typst_input},
 #ifndef LAMBDA_NO_CSS_INPUT

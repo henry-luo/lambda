@@ -1,7 +1,6 @@
-// ./lambda.exe view test/demo/slides/slide_presentation.ls
-import slide: lambda.slide
-
-let deck = <presentation title: "Lambda Slides", width: 960.0, height: 540.0,
+// Basic builds and slide transitions.
+// ./lambda.exe view test/demo/slides/slide_presentation.slides
+<presentation id: "demo", title: "Lambda Slides", width: 960.0, height: 540.0,
     <slide id: "welcome", background: "#eff6ff",
         <text id: "title", x: 70.0, y: 80.0, width: 820.0, height: 90.0,
             role: 'title', "Lambda Slides">
@@ -25,4 +24,3 @@ let deck = <presentation title: "Lambda Slides", width: 960.0, height: 540.0,
         <cue <effect target: "dot", kind: 'pulse', duration: 500.0, repeat: 2>>
     >
 >
-slide.page(deck, {instance: "demo", width: 960.0, height: 540.0})^

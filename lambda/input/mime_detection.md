@@ -97,6 +97,7 @@ The MIME detector uses a sophisticated multi-layered approach with priority-base
 | `text/html` | `html` | HTML pages | Content (DOCTYPE, tags) |
 | `text/markdown` | `markdown` | Markdown text | Extension + content (`#` headers) |
 | `text/x-mark`, `application/x-mark` | `mark` | Mark Notation | `.mark` only (D2.9.1); explicit `mark` accepts any filename (D2.9.2) |
+| (none) | `slides` | Slide deck: Mark syntax, `<presentation>` root | Explicit only: the `.slides` view route and `input(path, 'slides')` (D2.9.3) |
 | `text/x-rst` | `rst` | reStructuredText | Extension-based |
 | `application/rtf` | `rtf` | Rich Text Format | Content (`{\\rtf`) |
 | `application/pdf` | `pdf` | PDF documents | Content (`%PDF-`) |

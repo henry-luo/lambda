@@ -1,8 +1,8 @@
 import slide: lambda.slide
-import northstar: ~~.~~.demo.slides.northstar_deck
+let deck = input("test/demo/slides/northstar.slides", 'slides')^
 
 // check intermediate mark geometry as well as completion and reduced-motion snapping.
-let plan = slide.compile(northstar.deck)^
+let plan = slide.compile(deck)^
 fn visuals(index, at_ms) array^ {
     let ps = slide.reduce(plan, slide.initial_state(plan),
         {command: 'seek', address: {slide: index, cue: 0, time_ms: at_ms}})^;

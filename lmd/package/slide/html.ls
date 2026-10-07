@@ -116,12 +116,16 @@ fn render_object(obj, visuals, instance, theme) {
     >
 }
 
-pub fn layer(plan, scene, visuals, instance, style = "") {
-    let background = c.as_text(c.value(scene.source.background, if (plan.theme == 'dark') "#111827" else "#ffffff"));
+pub fn layer_background(plan, scene) =>
+    c.as_text(c.value(scene.source.background, if (plan.theme == 'dark') "#111827" else "#ffffff"))
+
+// `active` marks the layer the player currently shows (state, not structure).
+pub fn layer(plan, scene, visuals, instance, style = "", active = false) {
     <section id: instance ++ "-s" ++ string(scene.index), class: "slide-layer",
         ["aria-label"]: c.as_text(c.value(scene.source.title, scene.id)),
+        *: (if (active) {["data-slide-active"]: "true"} else {}),
         style: "width:" ++ c.px(plan.width) ++ ";height:" ++ c.px(plan.height) ++
-            ";background:" ++ background ++ ";" ++ style,
+            ";background:" ++ layer_background(plan, scene) ++ ";" ++ style,
         for (obj in scene.objects) render_object(obj, visuals, instance, plan.theme)
     >
 }
@@ -142,7 +146,7 @@ pub fn stage(plan, address, options = {}) {
     <div class: "slide-stage", style: "width:" ++ c.px(viewport_w) ++ ";height:" ++ c.px(viewport_h) ++ ";",
         <div class: "slide-canvas", style: "width:" ++ c.px(plan.width) ++ ";height:" ++ c.px(plan.height) ++
             ";transform:" ++ fitted.transform ++ ";",
-            layer(plan, scene, samples.scene(scene, address.cue, address.time_ms), instance)
+            layer(plan, scene, samples.scene(scene, address.cue, address.time_ms), instance, "", true)
         >
     >
 }
