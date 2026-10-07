@@ -1,10 +1,10 @@
 # LaTeX package compatibility in Lambda script
 
-**Status:** Phases I–III are implemented as bounded compatibility profiles. Phase 2 `biblatex` (§7) is checked against BibLaTeX 3.20/Biber 2.20 fixtures. Phase III (§8) covers all 30 non-Lua Overleaf samples, additional common adapters, PDF outlines, corpus audits and named TeX comparisons, checked on 2026-10-07. Advanced host limits remain explicitly diagnosed and listed below. No formal ruling is changed by this document.
+**Status:** Phases I–III are implemented as bounded compatibility profiles. Phase 2 `biblatex` (§7) is checked against BibLaTeX 3.20/Biber 2.20 fixtures. Phase III (§8) covers all 30 non-Lua Overleaf samples, additional common adapters, PDF outlines, corpus audits and named TeX comparisons, checked on 2026-10-07. Advanced host limits remain explicitly diagnosed and listed below. Phase IV (§9) is a proposal dated 2026-10-07. It adds a TeX engine for package and style files beside the document, and extends the native PGF/PGFPlots profile. Nothing in it is implemented. No formal ruling is changed by this document.
 
 **Scope:** Common LaTeX package behavior in the shipped `lambda.latex` package, targeting the existing HTML element output and its Radiant rendering path. “Support” means the documented subset works when the corresponding `\usepackage` is declared; it does not mean executing arbitrary `.sty` files or promising byte-identical TeX output.
 
-**Formal linkage:** [D7.2.1–D7.2.4](../doc/Lambda_Formal_Design.md#d72-script-packages) place shipped packages in source modules with immutable module bindings and the `lambda.*` namespace. [S16.9.8](../doc/Lambda_Formal_Semantics.md#s169-declarations-elements-paths) governs imports; [S1.8](../doc/Lambda_Formal_Semantics.md#s1-core-principles) forbids treating document strings as executable code. [S12.1.1v2](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) and [S12.4.1](../doc/Lambda_Formal_Semantics.md#s124-resources) govern pure transforms and eager input. [S7.4.1–S7.4.4](../doc/Lambda_Formal_Semantics.md#s74-the-three-failure-channels) govern diagnostics. [S2.6.3–S2.6.5](../doc/Lambda_Formal_Semantics.md#s26-content) and [D2.6.5v4](../doc/Lambda_Formal_Design.md#d26-containers-and-array-storage) govern the current command-argument array contract, whose implementation is recorded in [Input_Latex.md](input/Input_Latex.md#current-command-content-contract-2026-10-02). The package contracts proposed below require review before they become rulings.
+**Formal linkage:** [D7.2.1–D7.2.4](../doc/Lambda_Formal_Design.md#d72-script-packages) place shipped packages in source modules with immutable module bindings and the `lambda.*` namespace. [S16.9.8](../doc/Lambda_Formal_Semantics.md#s169-declarations-elements-paths) governs imports; [S1.8](../doc/Lambda_Formal_Semantics.md#s1-core-principles) forbids executing a runtime string as Lambda code; §9.2 explains how the proposed TeX engine stays within it. [S12.1.1v2](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) and [S12.4.1](../doc/Lambda_Formal_Semantics.md#s124-resources) govern pure transforms and eager input. [S7.4.1–S7.4.4](../doc/Lambda_Formal_Semantics.md#s74-the-three-failure-channels) govern diagnostics. [S2.6.3–S2.6.5](../doc/Lambda_Formal_Semantics.md#s26-content) and [D2.6.5v4](../doc/Lambda_Formal_Design.md#d26-containers-and-array-storage) govern the current command-argument array contract, whose implementation is recorded in [Input_Latex.md](input/Input_Latex.md#current-command-content-contract-2026-10-02). The package contracts proposed below require review before they become rulings.
 
 ## Implementation snapshot
 
@@ -37,7 +37,7 @@ The checked fixtures cover activation, options, nested scopes, source-order refe
 
 ## 2. Package model
 
-Place adapters under `lmd/package/latex/packages/`, for example `amsmath.ls`, `graphicx.ls`, and `hyperref.ls`. They remain ordinary Lambda script modules imported by a static registry in `lmd/package/latex/`. `\usepackage[options]{a,b}` selects named adapters from that registry; its text never becomes a dynamic Lambda import, source evaluation, or a native `.sty` loader (**S1.8, D7.2.4**). A document class supplies its existing baseline behavior. The registry records supported names, aliases, dependencies, option schemas, and package-specific hooks.
+Place adapters under `lmd/package/latex/packages/`, for example `amsmath.ls`, `graphicx.ls`, and `hyperref.ls`. They remain ordinary Lambda script modules imported by a static registry in `lmd/package/latex/`. `\usepackage[options]{a,b}` selects named adapters from that registry; its text never becomes a dynamic Lambda import, source evaluation, or a native `.sty` loader (**S1.8, D7.2.4**). Phase IV (§9) proposes running `.sty`/`.cls` files that sit beside the document on a sandboxed TeX engine. If accepted, that replaces the "no `.sty` loader" clause. The static adapter registry and the no-Lambda-import rule stay. A document class supplies its existing baseline behavior. The registry records supported names, aliases, dependencies, option schemas, and package-specific hooks.
 
 Run the document through four script stages:
 
@@ -226,6 +226,123 @@ Script implementation includes the shared theorem/proof/table models; local and 
 **Regression evidence.** Eleven focused Phase III fixtures and the 31-document corpus fixture have matching expected files. The combined existing LaTeX/math-output suite passes 41/41 checks. Native PDF writer tests pass 45/45, display-list tests 80/80, and the Radiant integer-cast lint passes. Unicode PDF export passes its regression. The final Lambda baseline passes all 2,104 input tests, all 1,154 script checks, the 921-case MathLive markup gate, and 4,167/4,170 runtime checks overall; three unrelated REPL prompt assertions remain (`λ>` versus `>`). The Radiant baseline is not green in this shared workspace; its layout/DOM/host failures include concurrent executable relinking. Five Poppler-dependent PDF checks fail because the local Poppler installation cannot load `libfontconfig.1.dylib`; ten other PDF checks pass. Direct PDF inspection works when the existing Cellar fontconfig library is supplied through the loader environment. No runner exclusions or baseline masking were added.
 
 **Remaining limits within the bounded contract.** Continuous long tables select the first head/last foot; real repeated-page rows/headers need shared pagination. Native Thai needs shaping and dictionary breaking. Font substitutes, simplified people artwork, bold-math weight, BibTeX style punctuation, preview cropping, per-page styles and flattened PDF margin fonts are diagnosed. `algebra` and `vietnamese_document` retain unknown rare package/library declarations, including unused `amscd`/`cancel`/`mathabx` declarations, rather than claiming unimplemented CTAN surfaces. Exact microtype, EPS, arbitrary styles/packages, full PGF/PGFPlots and Lua remain outside this phase. Future host work is in Appendix C.
+
+## 9. Phase IV — TeX engine for document-local packages and styles; extended PGF/PGFPlots (proposed)
+
+**Status:** Proposal dated 2026-10-07; nothing is implemented. The scope was set by USER on 2026-10-07:
+
+1. A full TeX engine for `.sty`/`.cls` files and biblatex style files.
+2. Those files load only from beside the document.
+3. PGF/PGFPlots coverage grows in the native `lambda.doc.tikz` script implementation, not by running PGF's TeX sources.
+
+The *Recommended* items in §9.8 still need confirmation. If the proposal is accepted, the engine boundary (§9.2) and the file-access gate (§9.7) should be ratified as a D7 ruling. Until then, this section changes no formal ruling.
+
+### 9.1 Decisions and alternatives
+
+| Question | USER decision (2026-10-07) | Alternatives not taken |
+|---|---|---|
+| How deep `.sty` support goes | A full TeX engine: catcodes, the TeX and e-TeX primitives, registers, grouping, boxes and expl3, so real package code runs as TeX | An interpreter for author-level LaTeX commands only, with a step limit; or a reader that accepts definitions only. Both fail on ordinary local packages that use kernel internals, `\@ifnextchar`, delimited parameters or expl3. |
+| Where package and style files come from | Only from beside the document, resolved from `base_uri`/`source_path` the way `.bib` and image files are today (**D7.1.2v2**). No TeX installation, `kpathsea` or TEXMF search | Also searching an installed TeX tree |
+| How PGF/PGFPlots support grows | Extend the native script profile in [`lambda.doc.tikz`](Lambda_Pkg_Tikz.md) | Running the real `pgf`/`pgfplots` sources on the engine with a Lambda output driver. That would need the GPL/LPPL sources vendored and TeX typesetting of node text, and would give drawing two owners. |
+
+This reverses two earlier boundaries: §2 excluded any `.sty` loader, and the TikZ proposal (its §10) deferred embedding a complete TeX engine. The engine proposed here serves the document and package layer only; it never runs PGF.
+
+### 9.2 Architecture: expansion before digestion
+
+```text
+document + .tex/.sty/.cls/.bbx/.cbx/.lbx/.dbx/data files beside it
+        |   (read-only, through the central IO door)
+TeX engine: catcode tokenizer -> expansion -> state (registers, groups, streams)
+        |        ^ kernel profile            ^ adapter signatures (registry)
+digester: constructors -> LaTeX Mark AST (S2.6.3-S2.6.5, D2.6.5v4 contract)
+        |
+existing script analysis -> render -> render_result
+```
+
+- **One digester.** Digestion turns each unexpandable control sequence owned by a script adapter (a *constructor*) into the same AST shape the direct parser produces today: star, raw argument groups and offsets, plus raw islands for verbatim, math, `tikzpicture` and `filecontents`. The direct parser's command/environment recognizer becomes this digester and takes the engine's tokens as input; it does not survive as a second front end. With no expansion, the digester sees the same token stream as today, so existing documents keep their AST. Migration runs both paths side by side over every LaTeX fixture and the 31-sample corpus and classifies every AST difference. The old generic path is retired once the two agree; there is no permanent dual front end (CLAUDE.md rule 13).
+- **Signatures decide arguments.** A TeX macro does not tell a parser how many arguments it takes. Each script adapter therefore registers its constructors in the static registry with an xparse-style argument spec (`s o m`, raw capture, environment-body mode), and the engine uses that spec to collect arguments. Package semantics stay in the script adapters (**D7.2.1–D7.2.4**).
+- **Provenance.** Every token keeps its file identity and byte offset through expansion. AST offsets and diagnostics point at the source. For text produced by a macro, they also carry a bounded expansion trace (**S7.4.1–S7.4.4**).
+- **Purity.** The engine runs at the input boundary inside `input(path, {type: "latex"})` and `parse(...)`, which yield an eager value under **S12.4.1**. Given the same source and resources, the output is always the same (**S12.1.1v2**). `\time`, `\day`, `\month`, `\year` and the random-number primitives take fixed values from options, never the clock.
+- **Strings and code.** **S1.8** comes from the C9 ruling that a runtime string never becomes *Lambda* code. Here the engine reads TeX source as TeX inside a sandbox; that text never becomes a Lambda import, Lambda source or `compile()` input. The same reading already lets Radiant run a document's `<script>` JavaScript through LambdaJS. The engine can do nothing beyond reading its document-local files and returning an AST. The no-Lua rule in §8.2 is unchanged: `\directlua` would need a second language runtime.
+
+### 9.3 Engine profile
+
+| Layer | Phase IV contract | Boundary |
+|---|---|---|
+| Input and catcodes | Unicode input with all 16 catcodes; `\catcode`/`\lccode`/`\uccode`/`\sfcode`/`\mathcode`; `\endlinechar`; `^^` notation; active characters; `\makeatletter`; `\scantokens` | Non-UTF-8 `inputenc` encodings and engine-specific font encodings are diagnosed |
+| Expansion | Delimited and undelimited parameters; `\expandafter`, `\noexpand`, `\csname`, `\edef`/`\xdef`, `\protected`, `\unexpanded`, `\detokenize`, `\expanded`; all TeX and e-TeX conditionals; `\futurelet`, `\afterassignment`, `\aftergroup`; `\numexpr`/`\dimexpr`/`\glueexpr`/`\muexpr`; string comparison | Only the primitives the bundled kernel and expl3 need. Other pdfTeX/XeTeX/LuaTeX extensions are undefined and diagnosed when used |
+| State | Count, dimen, skip, muskip and toks registers in their e-TeX ranges; `\global`; the save stack; `\let`; the `\chardef` family | — |
+| Files | `\input`, `\include`, `\InputIfFileExists`, and `\openin`/`\read` for files beside the document. `\openout`/`\write` go to in-memory streams (`.aux`, `.toc`, `.lof`, and an equivalent of biblatex's `.bcf`) that the next pass reads | Never `\write18` or shell escape, absolute paths, escapes into parent directories, or writes to disk |
+| Boxes | Box registers hold digested content. `\setbox`, `\hbox`, `\vbox`, `\wd`/`\ht`/`\dp`, `\settowidth` and `\ifdim` tests use measured dimensions supplied by a layout-metrics hook | TeX's paragraph builder, page builder, `\output`, `\vsplit`, `\lastbox`, `\unskip` on built lists and `\showbox` are not reproduced, because Radiant owns layout and a second line/page builder would contradict it. Code that inspects built lists is diagnosed. Measured widths are approximate where Radiant's final line layout differs |
+| Kernel | A Lambda-owned LaTeX2e programming layer (the `\newcommand` family, `\DeclareOption`/`\ProcessOptions`, `\RequirePackage`, `\@ifnextchar`, `\@ifundefined`, hooks, `\AtBeginDocument`, `\NewDocumentCommand`) plus expl3, preloaded into a cached format snapshot | Document-level commands (sectioning, lists, floats, tables) stay script constructors. Loading upstream `latex.ltx` would turn them into TeX typesetting instead of semantic elements |
+
+The layout-metrics hook follows **D7.1.1**: it is a header owned by the lower layer, with a null-safe default. Radiant supplies measured metrics. Without Radiant, bundled font metrics give approximate dimensions plus an `approximate-box-metrics` diagnostic.
+
+### 9.4 Package resolution and ownership
+
+`\documentclass`, `\LoadClass`, `\usepackage` and `\RequirePackage` resolve each name once, in source order:
+
+1. A built-in script adapter in the static registry (**D7.2.4**). Option validation and diagnostics stay as they are.
+2. A bundled programming package that is part of the engine profile. The §9.8 recommendation covers `keyval`, `kvoptions`, `xkeyval`, `etoolbox`, `ifthen` and `calc`; `xparse` requests are answered by the kernel.
+3. A `name.sty` or `name.cls` beside the document, run by the engine.
+4. Otherwise, the existing located `unknown-package` diagnostic.
+
+A file beside the document that has the same name as an adapter does not replace the adapter. It gets a `local-package-shadowed` diagnostic instead, because the adapter owns the HTML semantics that the file's TeX typesetting code cannot provide.
+
+Each control sequence has one owner at a time. A TeX definition in the document or a local package overrides an adapter's constructor from that point in source order, as it would in LaTeX. Patching adapter internals, such as `\patchcmd` on an adapter-owned command or `\let` to a kernel internal the profile does not define, fails the way a failed LaTeX patch does and produces a located diagnostic.
+
+### 9.5 Biblatex style files
+
+Lambda takes Biber's role and the engine takes the role of biblatex's formatting layer. The existing script modules keep BibTeX parsing, inheritance, sorting, labels and uniqueness (§7). Pass 1 collects the citation requests. The script modules then build a `.bbl`-equivalent record for each reference section. Pass 2 expands the citation commands and `\printbibliography` against that record. Two passes are inherent to the LaTeX/Biber workflow. The engine stops after pass 2, or once its auxiliary streams stop changing, within a pass budget.
+
+| Style surface | Phase IV contract |
+|---|---|
+| `.bbx`/`.cbx` beside the document | Selected by `style=`, `bibstyle=` or `citestyle=`. Supported: `\DeclareBibliographyDriver`, `\usedriver`, `\newbibmacro`/`\renewbibmacro`/`\usebibmacro`, `\DeclareFieldFormat`/`\DeclareListFormat`/`\DeclareNameFormat`, `\printfield`/`\printlist`/`\printnames`/`\printtext`/`\printdate`, the punctuation tracker (`\newunit`, `\newblock`, `\setunit`, `\finentry`), entry and field tests, `\DeclareCiteCommand`, toggles, and `\RequireBibliographyStyle`/`\RequireCitationStyle` |
+| Built-in styles as a base | The six script styles are exposed under biblatex's standard bibmacro and driver names. A local style can redefine single bibmacros in TeX. Any bibmacro or format it leaves alone reaches script as an AST element and uses the script default. `bib_style.ls` is reorganized along those names instead of gaining a second copy in TeX |
+| `.lbx` | `\DefineBibliographyStrings`, `\DeclareBibliographyExtras` and language aliases extend the English, German and French string tables |
+| `.dbx` and Biber templates | `\DeclareDatamodelEntrytypes`/`Fields`/`Constraints`, `\DeclareSourcemap` steps, `\DeclareSortingTemplate`, `\DeclareLabelalphaTemplate`, `\DeclareUniquenameTemplate` and `\DeclareLabelname`/`\DeclareLabeldate` become declarative inputs to the script data steps. Sourcemap regular expressions that the shared pattern engine cannot express are diagnosed |
+| Outside | Running Biber; `.bst` files (BibTeX's separate stack language); styles installed in a TeX tree; exact Unicode Collation Algorithm/CLDR tailoring (§4) |
+
+### 9.6 Extended PGF/PGFPlots (native)
+
+PGF/TikZ sources never run on the engine. For `tikzpicture`, `axis` and `\tikz` bodies, the engine does a limited *island expansion*. It expands only macros defined by the document or a local package, and passes every other control sequence through unchanged to the Lambda-owned TikZ parser. It also records `\tikzset`, `\pgfplotsset`, `\usetikzlibrary` and `\usepgfplotslibrary` from local packages, in source order. A local package that programs PGF internals (`\pgfdeclareshape`, `\pgfdeclaredecoration`, `.code` handlers in `\pgfkeys`) is diagnosed.
+
+The rows below extend the staged contract of the [TikZ package](Lambda_Pkg_Tikz.md). Each row needs passing and failing fixtures before it counts as supported.
+
+| Area | Phase IV additions |
+|---|---|
+| TikZ libraries | `positioning`, `calc`, `shapes.geometric`/`.misc`/`.arrows`/`.multipart`, `arrows.meta` tip specs, `fit`, `backgrounds`/layers, `matrix`, `trees`, `intersections`, `decorations.pathmorphing`/`.markings`/`.text`, `patterns.meta`, `shadings`/`shadows`, `quotes`, `angles`, `3d` |
+| Programming | `.style`/`.style 2 args` with parameters and `.default`, `pic` definitions, `\foreach` with `evaluate`/`count`/`remember`, and `\pgfmathsetmacro`/`\pgfmathparse`/`\pgfmathdeclarefunction`, all inside the bounded evaluator |
+| Basic layer | `\pgfpathmoveto`/`lineto`/`curveto`/`closepath`/`rectangle`/`circle`, `\pgfusepath`, `\pgfpoint*`, `\pgfnode`, `\pgftext`, `\pgftransform*`, and the `\pgfset*` stroke and fill settings |
+| PGFPlots plot types | `ybar`/`xbar` including stacked and interval forms, stacked and area plots, `const plot`/`jump mark`, error bars, `scatter` with `point meta` and colormaps, `quiver`, and `\addplot3` with `mesh`/`surf`/`view`/`colorbar` and pre-computed contours |
+| PGFPlots data and axes | `table` sources, inline or in a file beside the document, with column selection and `x expr`/`y expr`; `\pgfplotstableread`; symbolic and date coordinates; `groupplots`; secondary axes; `fillbetween`; `enlargelimits`; `axis equal`; `nodes near coords`; legend placement and columns; `/pgf/number format` tick labels |
+| Outside | `gnuplot`, shell and `\addplot lua` sources, `contour gnuplot`, the `external` library, `remember picture`/`overlay` page overlays, and the `spy` library |
+
+### 9.7 Safety and limits
+
+- **Budgets.** The engine limits expansion steps, token-list size, macro and input-stack depth, register use, the number and size of files, and the number of passes.
+- **Errors become diagnostics.** Running out of budget, an endless expansion loop, or a TeX error (an undefined control sequence, a runaway argument, a missing brace) becomes a located diagnostic with an expansion trace. The engine then recovers the way TeX's non-stop mode does, so the rest of the document still renders (**S7.4.1–S7.4.4**).
+- **File access.** Reads go through the central IO door, with a path gate rooted at the document's directory (**D7.5.2**). Nothing comes from the network, a TeX installation or the shell.
+- **Caches.** Format snapshots and expanded results are derived caches. Their keys are the source and resource digests, the engine and kernel versions, and the options (**D7.2.3, D7.1.2v2**).
+
+### 9.8 Decisions to confirm
+
+- **Where the engine lives.** *Recommended:* Lambda-owned native code in the input layer, beside the digester, so expansion and digestion share one token representation. *Alternatives:*
+  - A Jube native module (**D7.3.2–D7.3.5**). This keeps the core smaller, but the digester would have to be exposed through the host's export allowlist.
+  - Lambda script. TeX's mutable state would have to be threaded through pure `fn` code (**S12.1.1v2**), which is too slow for expl3-sized workloads.
+- **Kernel and bundled packages.** *Recommended:* a clean-room LaTeX2e programming layer, plus the upstream expl3 generic loader and the §9.4 programming packages shipped unmodified inside Lambda's release. They fall under the vendor rule (CLAUDE.md rule 16), with provenance and LPPL notices recorded. These are engine resources, not lookups in a TeX tree. Reading the file-source decision more strictly would leave expl3 and those packages unavailable.
+- **Typesetting boundary.** *Recommended:* the box rule in §9.3. Boxes are measured, but TeX's paragraph builder, page builder and `\output` are not reproduced.
+- **One front end.** *Recommended:* the side-by-side migration in §9.2, ending with retirement of the direct parser's generic path.
+- **Ratification.** If accepted, record the engine boundary, the S1.8 reading and the file-access gate as a D7 ruling, and update both formal specs and this section ([Doc_Convention §3](../doc/Doc_Convention.md#3-the-formal-specs-root-adrs)).
+
+### 9.9 Delivery and acceptance
+
+1. **Engine conformance first.** Add a TeX-semantics corpus that compares `\meaning`, `\showthe` and `\message` traces against pinned TeX Live e-TeX output for catcodes, expansion, conditionals, grouping and registers. This becomes the engine's own test gate, in the sense of **D7.3.5**. Then load expl3 and the bundled packages from the cached format and check each against its own documented examples.
+2. **Front-end parity.** Run the §9.2 side-by-side AST comparison over every `test/lambda/latex` fixture and the 31 Phase III samples. The Phase III corpus must keep all 93 parse/serialization records passing, with zero unsupported-output elements.
+3. **Local packages.** Build a corpus of real classes and packages kept beside their documents, recording where each came from and its license. Include journal and thesis templates, and macro packages that use delimited parameters, option processing, `etoolbox` hooks and expl3. Compare the semantic HTML and selected visible text with pinned TeX output.
+4. **Bibliography styles.** Add local `.bbx`/`.cbx`/`.lbx`/`.dbx` fixtures: a style built on `standard`, a redefined author–year bibmacro, a strings file and a sourcemap. Compare them against the pinned BibLaTeX 3.20/Biber 2.20 toolchain from §7.3. Existing biblatex fixtures must not change.
+5. **PGF corpus.** Classify the ten files in [`test/latex/fixtures/tikz/`](../test/latex/fixtures/tikz/) and a new pinned PGF/PGFPlots corpus by §9.6 row. Assert scene semantics first and compare visually second, against pinned PGF 3.1.x/PGFPlots 1.18.x references (TikZ proposal §11).
+6. **Tests and baselines.** Every new Lambda test `*.ls` has its expected `*.txt`. Run `make test-lambda-baseline`, and also `make test-radiant-baseline` when the metrics hook or rendering changes. Measure cold and warm render latency in a release build, with and without the format cache. Update §6 only from checked results; unsupported requests stay as located diagnostics.
 
 ## Appendix A. Full `microtype` requirements, deferred
 

@@ -14,7 +14,8 @@
 - **Julia microbenchmark suite:** every language uses one complete warmup, then one measured workload; formatted-output timing includes synchronous null-sink writes.
 - **QuickJS:** 2025-09-13
 - **Original measurements:** 3 run(s) per benchmark, median of self-reported `__TIMING__` milliseconds, timeout 180s per run
-- **Added measurements:** Java and Erlang columns were refreshed on 2026-10-07 after rewriting all ports as native code. Each cell is the median of three sequential samples with one full warmup; all 77 registered entries were Node-verified. Historical generated-adapter results are retained in the superseded import metadata and adapter-baseline archive. Other engine measurements retain their original provenance.
+- **Added measurements:** Java and Erlang columns were refreshed on 2026-10-07 after rewriting all ports as native code. Each cell is the median of three sequential samples with one full warmup; all 77 registered entries were Node-verified. Historical generated-adapter results are retained in the superseded import metadata and adapter-baseline archive.
+- **Added measurements:** Go and C2MIR Julia microbenchmark cells were refreshed on 2026-10-07 from the latest tuned ports: 20 samples per cell, median workload time; C2MIR process times were refreshed from the same launches. Exact samples, prior cells, source/binary hashes and evidence archives are retained with the merge provenance.
 - **Range notation:** repeated-run timing cells are `median [minimum–maximum]`; single-run cells show the one measured value; the complete ordered sample set is retained in the result JSON's status detail.
 - **Engines in this report:** MIR (untyped), MIR (typed), C2MIR, LambdaJS, QuickJS, Node.js, Python, Go, Julia, Java, Erlang
 - **Results source:** `test/benchmark/benchmark_results_v51.json`
@@ -23,6 +24,7 @@
 - **Separately measured:** Julia, Julia (startup + warmup) measured on 2026-10-07, 3 run(s) from `temp/benchmark_v51/julia_jq_refresh.json` on Lambda commit `3cc2a8a658`. Only the four jq_* text rows were added to Julia using a native Julia jq VM over the shared filters and full workloads. Each process uses one complete fresh-state warmup before its timed evaluation. Source/runtime/fixture hashes and the source archive are retained in source_metadata.
 - **Historical import (superseded):** Java, Java (startup + warmup), Erlang, Erlang (startup + warmup) measured, 1 run(s) from `test/benchmark/benchmark_results_v51_java_erlang.json`. Historical generated-adapter measurements, superseded by the native rewrite. Latest saved full-size measurements imported on 2026-10-07: one sample per row, with optional extra warmup disabled except the microbenchmark kernels. Includes recent full-size follow-ups and older saved runs from multiple adapter revisions; concurrent correctness runs were not a matched performance snapshot. Reduced jq diagnostic fixtures are excluded. Erlang text/jq_tree is failed/missing after user cancellation, with no timing recorded. Exact per-row sources, compiled artifacts and hashes are retained in source_metadata and its evidence archive.
 - **Separately measured:** Java, Java (startup + warmup), Erlang, Erlang (startup + warmup) measured, 3 run(s) from `test/benchmark/benchmark_results_v51_java_erlang_native.json` on Lambda commit `f6e11aa334`. Native rewrite measured on 2026-10-07: three sequential fresh-process samples per canonical workload, one complete warmup, median workload and process times. All 77 registered entries pass complete-output comparison with Node. Erlang jq_tree now passes at full size. Previous adapter results remain archived as historical evidence.
+- **Separately measured:** Go, C2MIR measured, 20 run(s) from `test/benchmark/benchmark_results_v51_go_c2mir_tuned.json` on Lambda commit `fb464641d5`. Only the four Julia microbenchmarks were refreshed on 2026-10-07 after tuning the native Go and C ports. Each workload cell is the median of 20 tuned samples from alternating original/tuned measurements, with one full warmup per fresh process. C2MIR process cells use the same launches. Previous cells, complete raw samples, exact sources and binaries are retained in source_metadata and its evidence archive.
 - **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists
 
 JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes/hashmap 1). Each Lambda `.ls` port implements exactly one `runIteration()`, so every engine times the same work. A previous revision hard-coded 8 repeats for every file, which made the JS engines run 8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.
@@ -44,10 +46,10 @@ Each engine's own `__TIMING__` figure: the timed workload only, with process sta
 | BENG | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 0.28x | 0.19x | 0.10x | 4.00x | 1.77x | 0.57x | 0.25x | 0.17x | 0.40x | 0.24x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 0.89x | 0.60x | 0.23x | 11.1x | 12.0x | 9.50x | 0.39x | 0.52x | 0.42x | 2.28x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 0.87x | 0.64x | 0.33x | 7.23x | 13.3x | 10.6x | 0.50x | 0.08x | 0.46x | 1.81x |
-| Julia microbenchmarks | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 2.40x | 1.75x | 0.54x | 52.3x | 25.5x | 22.7x | 1.03x | 1.02x | 0.50x | 4.34x |
+| Julia microbenchmarks | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 2.40x | 1.75x | 0.33x | 52.3x | 25.5x | 22.7x | 0.33x | 1.02x | 0.50x | 4.34x |
 | JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 4.18x | 2.24x | 0.29x | 26.3x | 12.0x | 9.25x | 0.22x | 0.75x | 0.49x | 1.49x |
 | Text | 11 | 11 | 11 | 11 | 8 | 10 | 11 | 11 | 11 | 11 | 11 | 11 | 1.62x | 1.06x | 0.47x | 29.3x | 10.9x | 5.96x | 0.52x | 4.43x | 0.69x | 3.04x |
-| **Overall** | 71 | 71 | 71 | 71 | 68 | 70 | 71 | 71 | 71 | 71 | 71 | 71 | 0.93x | 0.58x | 0.22x | 8.60x | 7.84x | 5.46x | 0.36x | 0.34x | 0.41x | 1.42x |
+| **Overall** | 71 | 71 | 71 | 71 | 68 | 70 | 71 | 71 | 71 | 71 | 71 | 71 | 0.93x | 0.58x | 0.21x | 8.60x | 7.84x | 5.46x | 0.33x | 0.34x | 0.41x | 1.42x |
 
 ### Population Accounting
 
@@ -55,8 +57,8 @@ The first population is the only one comparable with Result38; the complete-suit
 
 | Population | Rows | MIR (typed)/Node geo | MIR (untyped)/Node geo | MIR (typed)/C2MIR geo | C2MIR matched rows |
 |---|---:|---:|---:|---:|---:|
-| v38-comparable (without the four text extensions) | 67 | 0.54x | 0.85x | 2.64x | 67 |
-| complete current suite | 71 | 0.58x | 0.93x | 2.62x | 71 |
+| v38-comparable (without the four text extensions) | 67 | 0.54x | 0.85x | 2.72x | 67 |
+| complete current suite | 71 | 0.58x | 0.93x | 2.69x | 71 |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -67,14 +69,15 @@ The first population is the only one comparable with Result38; the complete-suit
 
 How far MIR (typed) is from the same workload written in a statically typed language. These columns are a reference bound, not another Lambda execution path: they say what is still on the table, and C2MIR is the sharper of the two because it shares MIR's code generator, so a gap there is attributable to Lambda's front end rather than to the backend.
 
-- **MIR (typed) / C2MIR geomean:** 2.62x over 71 of 71 rows
-- **MIR (typed) / Go geomean:** 1.62x over 71 of 71 rows
+- **MIR (typed) / C2MIR geomean:** 2.69x over 71 of 71 rows
+- **MIR (typed) / Go geomean:** 1.73x over 71 of 71 rows
 
 **Widest gaps vs C2MIR**
 
 | Benchmark | MIR (typed) | C2MIR | Go | MIR (typed)/C2MIR | MIR (typed)/Go |
 |---|---:|---:|---:|---:|---:|
 | text/jq_mix | 44.74s | 1.00s | 994.8 | 44.6x | 45.0x |
+| julia/parse_integers | 48.1 | 2.27 | 2.31 | 21.2x | 20.9x |
 | awfy/havlak | 28.0 | 1.81 | 6.05 | 15.5x | 4.63x |
 | jetstream/splay | 287.8 | 18.7 | 27.7 | 15.4x | 10.4x |
 | text/microdiff | 38.7 | 2.62 | 11.5 | 14.8x | 3.38x |
@@ -82,10 +85,9 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | awfy/deltablue | 15.7 | 1.17 | 3.55 | 13.4x | 4.43x |
 | awfy/cd | 177.7 | 15.0 | 12.5 | 11.9x | 14.2x |
 | larceny/puzzle | 14.6 | 1.27 | 2.10 | 11.4x | 6.95x |
-| julia/parse_integers | 48.1 | 4.53 | 22.1 | 10.6x | 2.18x |
 | jetstream/crypto_sha1 | 28.4 | 2.67 | 0.393 | 10.6x | 72.2x |
 | jetstream/hashmap | 27.6 | 2.72 | 4.71 | 10.2x | 5.86x |
-| kostya/base64 | 5.35 | 0.567 | 1.27 | 9.43x | 4.20x |
+| julia/formatted_output | 83.1 | 8.24 | 7.97 | 10.1x | 10.4x |
 
 ---
 
@@ -199,10 +201,10 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 
 | Benchmark | Category | MIR (untyped) (ms) | MIR (typed) (ms) | C2MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | Python (ms) | Go (ms) | Julia (ms) | Java (ms) | Erlang (ms) | MIR (untyped)/Node | MIR (typed)/Node | C2MIR/Node | LambdaJS/Node | QuickJS/Node | Python/Node | Go/Node | Julia/Node | Java/Node | Erlang/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| parse_integers | conversion | 97.4 [97.1–98.9] | 48.1 [47.7–48.6] | 4.53 [4.52–4.54] | 942.5 [938.8–957.9] | 276.0 [275.1–279.1] | 13.1 [13.1–13.2] | 186.0 [185.6–187.1] | 22.1 [21.0–26.4] | 25.1 [24.6–25.7] | 5.21 [4.79–5.49] | 19.5 [19.0–24.7] | 7.45x | 3.68x | 0.35x | 72.0x | 21.1x | 14.2x | 1.69x | 1.92x | 0.40x | 1.49x |
-| matrix_statistics | numeric | 17.3 [17.3–17.5] | 17.1 [16.8–17.2] | 10.6 [10.6–10.7] | 2.00s [1.99s–2.01s] | 1.28s [1.28s–1.29s] | 21.3 [21.0–21.3] | 1.20s [1.20s–1.21s] | 13.8 [12.3–19.1] | 14.1 [13.9–14.1] | 12.0 [11.9–13.2] | 338.0 [305.9–445.7] | 0.81x | 0.80x | 0.50x | 93.9x | 60.1x | 56.5x | 0.65x | 0.66x | 0.56x | 15.9x |
-| iteration_pi_sum | numeric | 6.82 [6.81–6.83] | 6.81 [6.81–6.86] | 2.99 [2.99–3.02] | 168.1 [167.4–169.3] | 164.2 [163.9–164.5] | 4.86 [4.81–5.10] | 291.1 [290.2–292.2] | 4.43 [3.64–6.87] | 3.76 [3.76–3.77] | 3.46 [3.45–3.58] | 45.2 [44.8–118.3] | 1.40x | 1.40x | 0.62x | 34.5x | 33.8x | 59.8x | 0.91x | 0.77x | 0.71x | 9.30x |
-| formatted_output | io | 142.5 [142.1–146.5] | 83.1 [82.5–101.1] | 29.1 [29.0–29.2] | 1.16s [1.16s–1.18s] | 358.2 [357.0–376.0] | 36.3 [36.2–36.3] | 199.2 [197.9–206.7] | 40.5 [40.3–42.0] | 40.3 [40.2–40.5] | 14.2 [14.1–14.9] | 58.4 [56.4–152.5] | 3.93x | 2.29x | 0.80x | 32.1x | 9.88x | 5.49x | 1.12x | 1.11x | 0.39x | 1.61x |
+| parse_integers | conversion | 97.4 [97.1–98.9] | 48.1 [47.7–48.6] | 2.27 [2.25–2.33] | 942.5 [938.8–957.9] | 276.0 [275.1–279.1] | 13.1 [13.1–13.2] | 186.0 [185.6–187.1] | 2.31 [2.26–2.40] | 25.1 [24.6–25.7] | 5.21 [4.79–5.49] | 19.5 [19.0–24.7] | 7.45x | 3.68x | 0.17x | 72.0x | 21.1x | 14.2x | 0.18x | 1.92x | 0.40x | 1.49x |
+| matrix_statistics | numeric | 17.3 [17.3–17.5] | 17.1 [16.8–17.2] | 9.78 [9.74–11.0] | 2.00s [1.99s–2.01s] | 1.28s [1.28s–1.29s] | 21.3 [21.0–21.3] | 1.20s [1.20s–1.21s] | 10.4 [9.79–11.6] | 14.1 [13.9–14.1] | 12.0 [11.9–13.2] | 338.0 [305.9–445.7] | 0.81x | 0.80x | 0.46x | 93.9x | 60.1x | 56.5x | 0.49x | 0.66x | 0.56x | 15.9x |
+| iteration_pi_sum | numeric | 6.82 [6.81–6.83] | 6.81 [6.81–6.86] | 3.00 [2.98–23.0] | 168.1 [167.4–169.3] | 164.2 [163.9–164.5] | 4.86 [4.81–5.10] | 291.1 [290.2–292.2] | 2.91 [2.89–5.29] | 3.76 [3.76–3.77] | 3.46 [3.45–3.58] | 45.2 [44.8–118.3] | 1.40x | 1.40x | 0.62x | 34.5x | 33.8x | 59.8x | 0.60x | 0.77x | 0.71x | 9.30x |
+| formatted_output | io | 142.5 [142.1–146.5] | 83.1 [82.5–101.1] | 8.24 [8.20–8.39] | 1.16s [1.16s–1.18s] | 358.2 [357.0–376.0] | 36.3 [36.2–36.3] | 199.2 [197.9–206.7] | 7.97 [7.81–8.82] | 40.3 [40.2–40.5] | 14.2 [14.1–14.9] | 58.4 [56.4–152.5] | 3.93x | 2.29x | 0.23x | 32.1x | 9.88x | 5.49x | 0.22x | 1.11x | 0.39x | 1.61x |
 
 ### JetStream
 
@@ -252,10 +254,10 @@ Same processes, where possible: the reference engines report their wall and `__T
 | BENG | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 0.49x | 0.47x | 1.03x | 24.7x | 0.89x | 3.37x | 1.31x | 0.33x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 1.47x | 0.92x | 0.72x | 6.44x | 0.78x | 4.18x | 6.27x | 2.90x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 1.07x | 0.68x | 1.00x | 7.75x | 0.85x | 3.89x | 2.42x | 1.92x |
-| Julia microbenchmarks | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 2.42x | 1.14x | 1.46x | 3.64x | 0.73x | 3.83x | 19.8x | 9.51x |
+| Julia microbenchmarks | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 2.42x | 1.14x | 1.23x | 3.64x | 0.73x | 3.83x | 19.8x | 9.51x |
 | JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 3.06x | 2.60x | 0.92x | 8.34x | 1.57x | 6.91x | 17.3x | 3.72x |
 | Text | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 7 | 10 | 11 | 1.79x | 1.42x | 0.74x | 11.1x | 1.40x | 6.99x | 20.5x | 6.97x |
-| **Overall** | 71 | 71 | 71 | 71 | 71 | 71 | 71 | 67 | 70 | 71 | 1.08x | 0.84x | 0.93x | 9.72x | 0.95x | 4.59x | 4.15x | 1.53x |
+| **Overall** | 71 | 71 | 71 | 71 | 71 | 71 | 71 | 67 | 70 | 71 | 1.08x | 0.84x | 0.92x | 9.72x | 0.95x | 4.59x | 4.15x | 1.53x |
 
 > Ratio < 1.0 means the engine finished the whole run faster than Node.js.
 
@@ -338,10 +340,10 @@ Same processes, where possible: the reference engines report their wall and `__T
 
 | Benchmark | Category | MIR (untyped, auto) (ms) | MIR (typed, auto) (ms) | C2MIR (ms) | Julia (startup + warmup) (ms) | Java (startup + warmup) (ms) | Erlang (startup + warmup) (ms) | LambdaJS (auto) (ms) | QuickJS (ms) | Node.js (ms) | MIR (untyped, auto)/Node | MIR (typed, auto)/Node | C2MIR/Node | Julia (startup + warmup)/Node | Java (startup + warmup)/Node | Erlang (startup + warmup)/Node | LambdaJS (auto)/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| parse_integers | conversion | 243.8 [241.9–272.6] | 136.4 [135.7–139.2] | 105.7 [105.1–107.0] | 280.4 [276.2–288.7] | 50.4 [49.1–50.9] | 184.4 [182.6–240.3] | 2.00s [1.98s–2.00s] | 558.7 [557.1–563.7] | 72.5 [72.0–72.9] | 3.36x | 1.88x | 1.46x | 3.87x | 0.70x | 2.54x | 27.5x | 7.71x |
-| matrix_statistics | numeric | 80.3 [79.6–88.2] | 78.4 [78.0–79.0] | 117.3 [117.2–119.7] | 306.5 [306.2–307.1] | 70.5 [67.7–70.6] | 790.2 [756.0–1.10s] | 4.05s [3.98s–4.07s] | 2.57s [2.57s–2.58s] | 92.1 [91.8–92.4] | 0.87x | 0.85x | 1.27x | 3.33x | 0.77x | 8.58x | 44.0x | 27.9x |
-| iteration_pi_sum | numeric | 200.8 [200.6–201.4] | 34.4 [34.2–34.7] | 101.8 [101.7–103.0] | 223.8 [221.4–224.5] | 40.6 [39.6–40.8] | 238.7 [236.7–562.6] | 340.7 [338.1–351.1] | 335.7 [335.0–335.7] | 53.9 [53.1–67.7] | 3.72x | 0.64x | 1.89x | 4.15x | 0.75x | 4.43x | 6.32x | 6.22x |
-| formatted_output | io | 374.8 [373.7–375.1] | 197.7 [195.7–200.5] | 154.7 [154.0–156.6] | 387.5 [386.7–401.9] | 82.2 [80.1–82.7] | 263.0 [256.3–721.5] | 2.39s [2.39s–2.40s] | 724.3 [723.3–740.6] | 118.6 [118.3–118.8] | 3.16x | 1.67x | 1.30x | 3.27x | 0.69x | 2.22x | 20.2x | 6.11x |
+| parse_integers | conversion | 243.8 [241.9–272.6] | 136.4 [135.7–139.2] | 92.6 [92.0–109.3] | 280.4 [276.2–288.7] | 50.4 [49.1–50.9] | 184.4 [182.6–240.3] | 2.00s [1.98s–2.00s] | 558.7 [557.1–563.7] | 72.5 [72.0–72.9] | 3.36x | 1.88x | 1.28x | 3.87x | 0.70x | 2.54x | 27.5x | 7.71x |
+| matrix_statistics | numeric | 80.3 [79.6–88.2] | 78.4 [78.0–79.0] | 107.9 [107.0–180.0] | 306.5 [306.2–307.1] | 70.5 [67.7–70.6] | 790.2 [756.0–1.10s] | 4.05s [3.98s–4.07s] | 2.57s [2.57s–2.58s] | 92.1 [91.8–92.4] | 0.87x | 0.85x | 1.17x | 3.33x | 0.77x | 8.58x | 44.0x | 27.9x |
+| iteration_pi_sum | numeric | 200.8 [200.6–201.4] | 34.4 [34.2–34.7] | 94.3 [93.4–153.5] | 223.8 [221.4–224.5] | 40.6 [39.6–40.8] | 238.7 [236.7–562.6] | 340.7 [338.1–351.1] | 335.7 [335.0–335.7] | 53.9 [53.1–67.7] | 3.72x | 0.64x | 1.75x | 4.15x | 0.75x | 4.43x | 6.32x | 6.22x |
+| formatted_output | io | 374.8 [373.7–375.1] | 197.7 [195.7–200.5] | 104.5 [103.5–106.7] | 387.5 [386.7–401.9] | 82.2 [80.1–82.7] | 263.0 [256.3–721.5] | 2.39s [2.39s–2.40s] | 724.3 [723.3–740.6] | 118.6 [118.3–118.8] | 3.16x | 1.67x | 0.88x | 3.27x | 0.69x | 2.22x | 20.2x | 6.11x |
 
 ### JetStream
 

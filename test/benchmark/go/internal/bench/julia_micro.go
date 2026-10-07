@@ -8,27 +8,35 @@ import (
 )
 
 // These scalar workloads share counts, arithmetic order and oracles with SUITE.md.
-func microDecimalText(value int64) string {
+const (
+	microDecimalBytes     = 20 // maximum signed int64 decimal width
+	microOutputBatchLines = 256
+)
+
+// Append into caller-owned storage without allocating a string for each digit.
+func microAppendDecimal(text []byte, value int64) []byte {
 	negative := value < 0
 	if negative {
 		value = -value
 	}
 	divisor := int64(1)
-	for value/divisor >= 10 {
+	// Find the leading divisor with one constant divide, then reuse each quotient.
+	limit := value / 10
+	for divisor <= limit {
 		divisor *= 10
 	}
-	text := ""
 	if negative {
-		text = "-"
+		text = append(text, '-')
 	}
 	for divisor > 0 {
-		text += string(rune(48 + value/divisor))
-		value %= divisor
+		digit := value / divisor
+		text = append(text, byte(48+digit))
+		value -= digit * divisor
 		divisor /= 10
 	}
 	return text
 }
-func microDecimalValue(text string) int64 {
+func microDecimalValue(text []byte) int64 {
 	negative, index, value := text[0] == '-', 0, int64(0)
 	if negative {
 		index = 1
@@ -44,6 +52,7 @@ func microDecimalValue(text string) int64 {
 }
 func microParseIntegers() [4]int64 {
 	seed, checksum, size, errors := int64(42), int64(0), int64(0), int64(0)
+	var storage [microDecimalBytes]byte
 	for index := 0; index < 100000; index++ {
 		seed = seed * 16807 % 2147483647
 		value := seed
@@ -52,7 +61,7 @@ func microParseIntegers() [4]int64 {
 		} else if index%8 == 1 {
 			value = -seed
 		}
-		text := microDecimalText(value)
+		text := microAppendDecimal(storage[:0], value)
 		parsed := microDecimalValue(text)
 		if parsed != value {
 			errors++
@@ -62,8 +71,7 @@ func microParseIntegers() [4]int64 {
 	}
 	return [4]int64{checksum, size, seed, errors}
 }
-func microGram(matrix []float64, rows, columns int) []float64 {
-	result := make([]float64, columns*columns)
+func microGram(matrix []float64, rows, columns int, result []float64) {
 	for i := 0; i < columns; i++ {
 		for j := 0; j < columns; j++ {
 			total := 0.0
@@ -73,26 +81,30 @@ func microGram(matrix []float64, rows, columns int) []float64 {
 			result[i*columns+j] = total
 		}
 	}
-	return result
 }
-func microSquare(matrix []float64, n int) []float64 {
-	result := make([]float64, n*n)
+func microSquare(matrix []float64, n int, result []float64) {
 	for i := 0; i < n; i++ {
-		for j := 0; j < n; j++ {
+		row := matrix[i*n : (i+1)*n]
+		out := result[i*n : (i+1)*n]
+		for j := range out {
 			total := 0.0
-			for k := 0; k < n; k++ {
-				total += matrix[i*n+k] * matrix[k*n+j]
+			for k, value := range row {
+				total += value * matrix[k*n+j]
 			}
-			result[i*n+j] = total
+			out[j] = total
 		}
 	}
-	return result
 }
-func microTraceFourth(matrix []float64, rows, columns int) float64 {
-	fourth := microSquare(microSquare(microGram(matrix, rows, columns), columns), columns)
+func microTraceFourth(matrix []float64, rows, columns int, scratch []float64) float64 {
+	n := columns * columns
+	first, second := scratch[:n], scratch[n:2*n]
+	// Each product overwrites its destination; the Gram storage can hold G^4.
+	microGram(matrix, rows, columns, first)
+	microSquare(first, columns, second)
+	microSquare(second, columns, first)
 	total := 0.0
 	for i := 0; i < columns; i++ {
-		total += fourth[i*columns+i]
+		total += first[i*columns+i]
 	}
 	return total
 }
@@ -112,8 +124,10 @@ func microVariation(values []float64) float64 {
 func microMatrixStatistics() [4]int64 {
 	seed, digest := int64(42), int64(0)
 	v, w := make([]float64, 1000), make([]float64, 1000)
+	// The largest Gram is 20x20; reuse two disjoint matrices within this workload.
+	var scratch [2 * 20 * 20]float64
+	blocks, p, q := make([]float64, 100), make([]float64, 100), make([]float64, 100)
 	for iteration := 0; iteration < 1000; iteration++ {
-		blocks, p, q := make([]float64, 100), make([]float64, 100), make([]float64, 100)
 		for i := 0; i < 100; i++ {
 			seed = seed * 16807 % 2147483647
 			blocks[i] = float64(seed)/2147483647.0*2.0 - 1.0
@@ -127,8 +141,8 @@ func microMatrixStatistics() [4]int64 {
 				}
 			}
 		}
-		v[iteration] = microTraceFourth(p, 5, 20)
-		w[iteration] = microTraceFourth(q, 10, 10)
+		v[iteration] = microTraceFourth(p, 5, 20, scratch[:])
+		w[iteration] = microTraceFourth(q, 10, 10, scratch[:])
 		digest = (digest*31 + int64(math.Floor(v[iteration]*1000))) % 1000000007
 		digest = (digest*31 + int64(math.Floor(w[iteration]*1000))) % 1000000007
 	}
@@ -150,20 +164,25 @@ func microIterationPiSum() [4]int64 {
 	return [4]int64{int64(math.Floor(values[0] * 1e12)), int64(math.Floor(values[499] * 1e12)), int64(math.Floor(digest * 1e6)), 5124750}
 }
 func microFormattedOutput() [4]int64 {
-	size, digest, writes, buffer := int64(0), int64(0), int64(0), ""
+	size, digest, writes := int64(0), int64(0), int64(0)
+	// Retain batch capacity so appending a line never copies the preceding lines.
+	buffer := make([]byte, 0, microOutputBatchLines*(2*microDecimalBytes+2))
 	for i := int64(1); i <= 100000; i++ {
-		line := microDecimalText(i) + " " + microDecimalText(i+1) + "\n"
-		for j := 0; j < len(line); j++ {
-			digest = (digest*31 + int64(line[j])) % 1000000007
+		start := len(buffer)
+		buffer = microAppendDecimal(buffer, i)
+		buffer = append(buffer, ' ')
+		buffer = microAppendDecimal(buffer, i+1)
+		buffer = append(buffer, '\n')
+		for _, value := range buffer[start:] {
+			digest = (digest*31 + int64(value)) % 1000000007
 		}
-		size += int64(len(line))
-		buffer += line
-		if i%256 == 0 || i == 100000 {
-			if err := os.WriteFile(os.DevNull, []byte(buffer), 0666); err != nil {
+		size += int64(len(buffer) - start)
+		if i%microOutputBatchLines == 0 || i == 100000 {
+			if err := os.WriteFile(os.DevNull, buffer, 0666); err != nil {
 				panic(err)
 			}
 			writes++
-			buffer = ""
+			buffer = buffer[:0]
 		}
 	}
 	return [4]int64{size, digest, writes, 100000}
