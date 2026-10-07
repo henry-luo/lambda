@@ -1,8 +1,8 @@
 # Radiant Source Editor — Implementation Plan and Record
 
 **Date:** 2026-10-06
-**Status:** P0 committed (`9007c54b3`) and P1, Markdown highlighting, committed (`8c477c3a8`), both on branch `worktree-source-editor`. P2, HTML highlighting, committed (`1ca09a3d5`, §6). P3, parity and polish, is implemented in the same worktree (§7). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5).
-**Design:** [Radiant Source Editor](../radiant/Radiant_Design_Source_Editor.md) (CED11–CED22, CED14v2, CED16v2).
+**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6) and P3 parity and polish (`c9adc7199`, §7) are on master. P4, the outstanding items, is on branch `worktree-source-editor-p4` (§8). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap) and left OQ18 open (design §14.3).
+**Design:** [Radiant Source Editor](../radiant/Radiant_Design_Source_Editor.md) (CED11–CED22, CED14v2, CED15v2, CED16v4, CED18v2, CED19v2).
 
 ## 1. What P0 has built
 
@@ -190,3 +190,67 @@ Markdown fidelity over the corpus (window versus full parse, 60,255 lines): 166 
 - Nested blocks inside containers (a heading in a quote, a fence in a list item) take only the container's marks; their inline spans are colored.
 - Caret motion by wrapped rows, word-boundary wrapping, and re-measuring on window resize.
 - Pass 2 on the next frame waits for `dom.request_frame` (OQ16).
+
+## 8. P4 — the outstanding items
+
+### 8.1 What was built
+
+| Item | How | Files |
+|---|---|---|
+| Pass 2 on the next frame (OQ16, CED14v2) | `settle` is pass 1 only (map runs through the edits); `request_exact` asks for a `source_frame` on the surface's `<body>` when the rendered rows are not exact, at most one request outstanding (`frame` holds its token); `on source_frame` swaps the exact runs in with one assignment and projects the selection again; a composing row waits for its commit. Opening a file still highlights the first window at once (line 0, no restart scan). | `source.ls` |
+| Frame requests across a rebuild | A reactive rebuild replaces the template's result subtree, so the request owned by the old `<body>` was dropped as detached. `radiant_frame_requests_follow_rebuild` moves pending requests to the structurally corresponding replacement node, beside `view_state_preserve_subtree_identity`; `view_state_nodes_correspond` is promoted to `event.hpp` for it. | `radiant/event.cpp`, `event.hpp`, `state_store.cpp`, `cmd_layout.cpp`; RAD_16 §8 |
+| Host config for `lambda edit` pages | The transform loader never received the viewer's host config, so `doc->js.host_ui_context` was null and any re-render outside a native input dispatch (a frame event, the coalesced `selectionchange`) logged "rebuild_lambda_doc_incremental: no document" and was dropped. `view_doc_in_window_with_events_internal` now applies the config to transformed documents too. | `radiant/window.cpp` |
+| Dialog fields keep their text | With those re-renders no longer dropped, the shell adopted a selection inside a dialog's text field as an editor selection and re-rendered the dialog, resetting the field (`edit_svg_text`, `edit_svg_resize_style` and one `edit_md_save_as` assertion; the last failed on master already). The shell's `selectionchange` ignores selections inside `input` and `textarea`. | `shell.ls` |
+| Reference links across the window (CED16v4) | The parser's link-definition pre-scan is a resumable method (`prescanLinkDefinitions`, `LinkPrescanState`). The highlight cache keeps, per chunk boundary, the restart state and the pre-scan's state (5 ints), and per chunk the labels it defines; the window parse is seeded with every chunk's labels. Markdown boundaries extend to the document's end; a boundary inside a rebuilt range is unknown (kind −1), which also closes a false convergence after a chunk split. | `markup_highlight.{hpp,cpp}`, `markup_parser.{hpp,cpp}`, `lambda-eval.cpp`, `source_highlight.ls` |
+| Nested blocks | The quote and list-item loops record their child blocks (`highlight_note_item`) and link definitions through the column maps; the walker paints leaf blocks, then container markers outermost first (a list in a quote colors both), then inlines. A tab after a bullet now counts. | `block_quote.cpp`, `block_list.cpp`, `block_document.cpp`, `source_highlight.ls` |
+| Long lines (§5.3) | A line over 10,000 code points gets no runs. | `source_highlight.ls` |
+| Status line (§10) | Left: `Ln, Col`, the selection's size (characters in a line, lines across several), the last message. Right: language, `LF`/`CRLF`, `Unsaved`. | `source.ls` |
+| Soft wrap motion and resize (§6.4) | Up, Down, PageUp and PageDown step by rows while wrapping, keeping an x within the row; `on resize` measures rows and columns again; `on load` measures at once. | `source.ls` |
+| Column units (CED21) | `bytes_before` and `col_at_byte` in one module, each one native UTF-8 encoding instead of per-character prefix sums (the old `col_at_byte` was quadratic in the line length). | `source_units.ls` |
+| GTest ring (§11) | (a) span text, (b) window vs full parse by per-line coverage over the corpus, (c) span recording leaves the tree identical, (d) HTML lexer vs tree parser, (e) 300 random edits with the carried cache vs a cold parse. | `test/test_input_sourcepos_gtest.cpp`, input suite |
+
+### 8.2 Measurements
+
+Release build, 100,009-line Markdown stress document (391 chunks), window of 171 lines at line 50,000:
+
+| Case | Cost |
+|---|---|
+| Native window parse, cold: the boundary and label scan of the whole document | 4.2–4.7 ms |
+| Native window parse, with the cache | 0.14 ms |
+| Pass 2 with the cache (native parse plus Lambda runs) | 6.4 ms |
+| Pass 2 after typing in the window (the edited chunk rescanned, converging) | 6.0 ms |
+| Pass 2 after opening a fence at line 1 (every later boundary changes) | 6.1 ms |
+| Pass 2 with the P3 walker, same window | 5.5 ms |
+
+The walker's extra cost against P3 comes from the nested-block spans each line is now checked against; it runs on a frame, off the keystroke path. The per-line span filter is O(lines × spans) as before.
+
+Corpus fidelity (GTest (b), `test/markdown`, 40-line windows every 17 lines): 1,577 windows, 60,391 lines, 0 windows differing from the full parse. P3 had 166 differing lines (0.28%), all reference links.
+
+### 8.3 Findings worth keeping
+
+- **`lambda edit` pages had no host UI context.** Every other loader applies `DocumentJsHostConfig`; the transform loader did not, so anything that re-rendered outside a native input dispatch was silently dropped. It also masked the dialog-field bug above.
+- **A template cannot own a frame request on its own result without the rebuild rebind.** Slides got away with it because their template's result is static model content, so the rebuild reuses the element.
+- **The headless simulator ticks frames only after a JSON event's input turns** (`sim_input_turn_drain`), which every keyboard and pointer event marks; assertions retry across host turns, so fixtures see pass 2's result without `advance_time`.
+- **`input(path, 'text')` stops at the first NUL byte** (`input_from_local_path` uses `strlen`); saving such a file from the editor would truncate it. Not fixed: OQ18.
+- **Word-boundary wrap cannot be computed in script**: Radiant's `pre-wrap` breaking follows UAX #14 in full. OQ17: the user kept character wrap.
+- **The worktree sandbox refuses shell loops and long pipelines**; scripts under `temp/` (`run_units.sh`, small Python patchers) work.
+
+### 8.4 Tests
+
+| Test | Covers | Status |
+|---|---|---|
+| `test/test_input_sourcepos_gtest.cpp` | design §11 (a)–(e) | 5/5 |
+| `test/lambda/edit/source_highlight.ls` | nested blocks (heading in a quote, fence and definition in a list item), a list marker in a quote, a tab after a bullet, the 5-int cache realignment with labels | pass |
+| `test/lambda/edit/source_highlight_window.ls` | reference links defined below and above the window, and after an edit adds a definition, with the carried cache | pass, 0 mismatches |
+| `test/ui/edit/edit_src_md_nested.json` | nested blocks, references 600 lines below, a 10,800-character plain line, typing keeps the links | 14/14 |
+| `test/ui/edit/edit_src_status.json` | selection size, language, line ends, unsaved state | 7/7 |
+| `test/ui/edit/edit_src_wrap_rows.json` | Up and Down by rows, resize re-measures (gutter height equals text height) | 10/10 |
+| all `test/ui/edit/edit_src_*.json` | P0–P3 behavior with pass 2 on a frame | 19/19 |
+| all `test/ui/edit/*.json` | the edit application | 39/41; `edit_md_scroll_chrome` (6/7) and `edit_md_view_only_keys` (a CHECK-FAIL crash) fail identically with a base binary built at `796581033`; `edit_md_save_as` now passes |
+| `make test-lambda-baseline` | parser, `parse()` | 6282/6286; the four failures fail identically with a base binary: three `LambdaReplSessionTests` expect the `λ>` prompt, which needs a UTF-8 locale the sandboxed shell lacks, and `pdf_svg_page_resources` needs the main checkout's ignored `test/pdf` data |
+| `make test-radiant-baseline` | frame rebind, host config, shell | layout, page, vector, page-load, fuzzy, WPT suites pass. Failing, all identical with a base binary built at `796581033`: `doc_editor_text_to_pdf` (1/10), `tetris_smoke` (16/17), CSS cascade memory (jqueryui 378,762 > 373,940, linuxmint 668,986 > 667,901). Failing only for missing worktree data, passing once `test/render` and `test/pdf` are linked: the PDF fixtures, the view suite and `RenderBatchReleasesImageCacheAfterDocumentOwner`; the four `dom_jquery_ui_*` fixtures need the main checkout's `test/jquery-ui` link |
+
+### 8.5 Not done
+
+- Refusing files with NUL bytes (OQ18) is left open by the user; word-boundary wrapping is not built by decision (OQ17).
+- Side findings filed as separate tasks: the `edit_md_view_only_keys` crash, a diagnostic for a module-level `let` read before its definition, `parse()` retaining every `Input`, lazy `dom` package loading riding on `mousewheel`, nested template state identity (needs a ruling), and E208 on expression-bodied functions.
