@@ -4051,11 +4051,18 @@ void doc_state_clear_drag_drop(DocState* state) {
     state_assert_after_mutation(state, "doc_state_clear_drag_drop");
 }
 
+// Render-request bookkeeping (dirty, repaint and reflow flags) advances version
+// but not doc_state_content_version: caches of painted content key on the latter.
+static void state_bump_render_version(DocState* state) {
+    state->version++;
+    state->render_flag_bumps++;
+}
+
 void doc_state_mark_dirty(DocState* state) {
     if (!state) return;
     if (state->is_dirty) return;
     state->is_dirty = true;
-    state->version++;
+    state_bump_render_version(state);
     state_assert_after_mutation(state, "doc_state_mark_dirty");
 }
 
@@ -4064,7 +4071,7 @@ void doc_state_request_repaint(DocState* state) {
     bool changed = !state->needs_repaint || !state->is_dirty;
     state->needs_repaint = true;
     state->is_dirty = true;
-    if (changed) state->version++;
+    if (changed) state_bump_render_version(state);
     state_assert_after_mutation(state, "doc_state_request_repaint");
 }
 
@@ -4085,14 +4092,14 @@ void doc_state_request_reflow(DocState* state) {
     bool changed = !state->needs_reflow || !state->is_dirty;
     state->needs_reflow = true;
     state->is_dirty = true;
-    if (changed) state->version++;
+    if (changed) state_bump_render_version(state);
     state_assert_after_mutation(state, "doc_state_request_reflow");
 }
 
 void doc_state_clear_reflow(DocState* state) {
     if (!state || !state->needs_reflow) return;
     state->needs_reflow = false;
-    state->version++;
+    state_bump_render_version(state);
     state_assert_after_mutation(state, "doc_state_clear_reflow");
 }
 
@@ -4105,14 +4112,14 @@ void doc_state_clear_render_flags(DocState* state) {
     state->needs_repaint = false;
     state->selection_layout_dirty = false;
     dirty_clear(&state->dirty_tracker);
-    if (changed) state->version++;
+    if (changed) state_bump_render_version(state);
     state_assert_after_mutation(state, "doc_state_clear_render_flags");
 }
 
 void doc_state_clear_repaint(DocState* state) {
     if (!state || !state->needs_repaint) return;
     state->needs_repaint = false;
-    state->version++;
+    state_bump_render_version(state);
     state_assert_after_mutation(state, "doc_state_clear_repaint");
 }
 

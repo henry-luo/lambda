@@ -142,7 +142,8 @@ SelectorMatcher* selector_matcher_create(Pool* pool);
 void selector_matcher_init(SelectorMatcher* matcher, Pool* pool);
 
 /**
- * Destroy a selector matcher
+ * Destroy a selector matcher from selector_matcher_create (never one set up
+ * with selector_matcher_init), returning its block to its pool
  * @param matcher Matcher to destroy
  */
 void selector_matcher_destroy(SelectorMatcher* matcher);
@@ -565,6 +566,25 @@ const char* selector_matcher_flag_to_pseudo_class(uint32_t flag);
 
 #ifdef __cplusplus
 }
+
+// One selector API call (querySelector, closest, matches, ...): the parsed
+// selector and its matcher share a scratch pool released with the query, so
+// per-call selector APIs leave nothing behind in document storage.
+struct SelectorQueryScratch {
+    Pool* pool = nullptr;
+    CssSelectorGroup* group = nullptr;
+    SelectorMatcher* matcher = nullptr;
+
+    SelectorQueryScratch() = default;
+    SelectorQueryScratch(const SelectorQueryScratch&) = delete;
+    SelectorQueryScratch& operator=(const SelectorQueryScratch&) = delete;
+    ~SelectorQueryScratch() { if (pool) pool_destroy(pool); }
+
+    Pool* ensure_pool() { if (!pool) pool = pool_create(); return pool; }
+    // Parses a DOM selector list, where unknown pseudo-classes are invalid.
+    // False with a live pool means a syntax error; a null pool means OOM.
+    bool parse_list(const char* text);
+};
 #endif
 
 #endif // SELECTOR_MATCHER_H

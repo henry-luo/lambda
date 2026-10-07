@@ -467,6 +467,7 @@ typedef struct TypeMap : Type {
     // so later initialization must detach instead of upgrading its NULL slots.
     bool is_transition_shared_shape;
     struct TypeMapTransition* transitions;
+    struct TypeMapRetypePlan* retype_plans;  // bounded plans owned by this immutable tree node
     // Tune6: immutable JS semantic metadata. Null is reserved for foreign or
     // Input TypeMaps; runtime JS families select it before publication and
     // shape transitions preserve it exactly.
@@ -555,6 +556,15 @@ typedef struct TypeMapTransition {
     TypeMap* target;
     struct TypeMapTransition* next;
 } TypeMapTransition;
+
+struct TypeMapRetypePlan {
+    const TypeMap* parent;
+    const ShapeEntry* source;
+    ShapeEntry* replacement;
+    TypeMap* target;
+    bool reuse_payload;
+    TypeMapRetypePlan* next;
+};
 
 // A shape flagged shared is reachable from more than one instance, so per-instance
 // structural or tag mutation must clone it first.
@@ -651,7 +661,7 @@ const LaneStorageDesc* shape_entry_storage(const ShapeEntry* entry);
 // Read one shaped field's value. Defined in lambda-data-runtime.cpp; declared
 // here rather than re-externed per consumer, which is how the JS adapter, the
 // document node table, and the Tier-3 write set had each grown their own copy.
-LAMBDA_RT_API Item _map_read_field(ShapeEntry* field, void* map_data);
+Item _map_read_field(ShapeEntry* field, void* map_data);
 
 // Nullable-native projection: the field's slot is int?/bool?/float?/T? lane.
 bool shape_entry_uses_native_lane(const ShapeEntry* field,
@@ -663,6 +673,27 @@ static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
 
 static inline int shape_entry_storage_size(const ShapeEntry* field) {
     return field ? shape_entry_storage(field)->byte_size : 0;
+}
+
+// D3.4.5: unchanged fields must retain their complete contracts and byte lanes.
+static inline bool typemap_payload_reusable(const TypeMap* old_type, const TypeMap* new_type,
+        const ShapeEntry* changed, const ShapeEntry* removed, ShapeEntry** replacement) {
+    *replacement = NULL;
+    ShapeEntry* old_field = old_type->shape;
+    ShapeEntry* new_field = new_type->shape;
+    while (old_field || new_field) {
+        if (old_field && old_field == removed) {
+            old_field = typemap_next_field(old_type, old_field); continue;
+        }
+        if (!old_field || !new_field || old_field->byte_offset < 0 ||
+                old_field->byte_offset != new_field->byte_offset ||
+                shape_entry_storage_size(old_field) != shape_entry_storage_size(new_field) ||
+                (old_field != changed && old_field->type != new_field->type)) return false;
+        if (old_field == changed) *replacement = new_field;
+        old_field = typemap_next_field(old_type, old_field);
+        new_field = typemap_next_field(new_type, new_field);
+    }
+    return !changed || *replacement;
 }
 
 static inline bool shape_entry_storage_fits_data(const ShapeEntry* field,
@@ -1250,12 +1281,12 @@ void* pack_alloc(Pack* pack, size_t size);
 void* pack_calloc(Pack* pack, size_t size);
 void pack_free(Pack* pack);
 
-extern LAMBDA_CORE_API Type TYPE_NULL;
+extern Type TYPE_NULL;
 extern Type TYPE_UNDEFINED;  // JavaScript undefined
-extern LAMBDA_CORE_API Type TYPE_BOOL;
-extern LAMBDA_CORE_API Type TYPE_INT;
+extern Type TYPE_BOOL;
+extern Type TYPE_INT;
 extern Type TYPE_INT64;
-extern LAMBDA_CORE_API Type TYPE_FLOAT;
+extern Type TYPE_FLOAT;
 extern Type TYPE_FLOAT64;
 extern Type TYPE_COMPLEX;
 extern Type TYPE_DECIMAL;
@@ -1266,7 +1297,7 @@ extern Type TYPE_INTEGER_VALUE;
 extern Type TYPE_NUMBER;
 // S11.1.7: `none`, the empty type -- admits no value, below every type.
 extern Type TYPE_NONE;
-extern LAMBDA_CORE_API Type TYPE_STRING;
+extern Type TYPE_STRING;
 extern Type TYPE_BINARY;
 extern Type TYPE_SYMBOL;
 extern Type TYPE_PATH;
@@ -1284,15 +1315,15 @@ extern Type TYPE_F32;
 extern Type TYPE_DTIME;
 extern Type TYPE_DATE;   // sub-type of datetime (precision: DATE_ONLY or YEAR_ONLY)
 extern Type TYPE_TIME;   // sub-type of datetime (precision: TIME_ONLY)
-extern LAMBDA_CORE_API Type TYPE_LIST;
+extern Type TYPE_LIST;
 extern Type TYPE_RANGE;
 extern TypeArray TYPE_ARRAY;
-extern LAMBDA_CORE_API Type TYPE_MAP;
+extern Type TYPE_MAP;
 extern Type TYPE_OBJECT;
 extern Type TYPE_ELMT;
 extern Type TYPE_TYPE;
-extern LAMBDA_CORE_API Type TYPE_FUNC;
-extern LAMBDA_CORE_API Type TYPE_ANY;
+extern Type TYPE_FUNC;
+extern Type TYPE_ANY;
 extern Type TYPE_ERROR;
 // The name of a type that shares another kind's TypeId (S2.1.1v4): the
 // numeric unions `integer` and `number`, and the array subkind `list`. NULL
@@ -1557,7 +1588,7 @@ static inline bool lambda_nominal_derives_from(const struct TypeNominal* actual,
     return false;
 }
 
-extern LAMBDA_CORE_API TypeMap EmptyMap;
+extern TypeMap EmptyMap;
 // D2.6.6v2: an array now has its own attribute face, so a JS array's companion
 // property map is held there — one tagged Item in an 8-byte buffer — instead of
 // in a reserved tail slot inside the elements buffer. This shape marks that

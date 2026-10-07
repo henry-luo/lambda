@@ -234,7 +234,6 @@ get_c_test_display_name() {
         "test_input_roundtrip_gtest") echo "🔄 Input Roundtrip Tests (GTest)" ;;
         "test_lambda") echo "🐑 Lambda Runtime Tests" ;;
         "test_lambda_gtest") echo "🐑 Lambda Runtime Tests (GTest)" ;;
-        "test_py_gtest") echo "🐍 Python Transpiler Tests (GTest)" ;;
         "test_lambda_proc_gtest") echo "🐑 Lambda Procedural Tests (GTest)" ;;
         "test_lambda_repl_gtest") echo "🎮 Lambda REPL Interface Tests (GTest)" ;;
         "test_markup_roundtrip") echo "📝 Markup Roundtrip Tests" ;;
@@ -399,7 +398,7 @@ run_test_with_timeout() {
     local test_timeout="$TIMEOUT_DURATION"
     local orig_base="$(basename "$test_exe" .exe)"
     case "$orig_base" in
-        test_lambda_gtest|test_py_gtest|test_js_test262_gtest)
+        test_lambda_gtest|test_js_test262_gtest)
             test_timeout="600s"  # batch mode: many scripts via subprocess
             ;;
     esac

@@ -3404,7 +3404,6 @@ static const JubeModuleDef node_fs_module = {
     (int32_t)(sizeof(node_fs_type_bindings) / sizeof(node_fs_type_bindings[0])),
     NULL,
     NULL,
-    NULL,
     &node_fs_requirements,
     NULL,
     0,

@@ -1698,11 +1698,12 @@ static void layout_apply_css_stylesheets(DomDocument* doc, DomElement* root,
                                          CssStylesheet** stylesheets, int count,
                                          Pool* pool, CssEngine* engine) {
     if (!doc || !root || !pool || !engine || count <= 0) return;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    if (!matcher) return;
-    state_configure_selector_matcher((DocState*)doc->state, matcher);
+    // caller-owned: each layout cascade must not retain a matcher in the document pool
+    SelectorMatcher matcher;
+    selector_matcher_init(&matcher, pool);
+    state_configure_selector_matcher((DocState*)doc->state, &matcher);
     radiant_apply_css_stylesheets_to_tree(
-        doc, root, stylesheets, count, pool, engine, matcher);
+        doc, root, stylesheets, count, pool, engine, &matcher);
 }
 
 struct CssCascadeMemorySnapshot {
@@ -2693,6 +2694,13 @@ static DomDocument* load_graph_transform_doc(Url* graph_url, int viewport_width,
                                          viewport_width, viewport_height, pool);
 }
 
+// A .slides deck is Mark data presented by lambda.slide.present.
+static DomDocument* load_slides_doc(Url* deck_url, int viewport_width,
+                                    int viewport_height, Pool* pool) {
+    return load_input_type_transform_doc("slides", deck_url, nullptr, 0,
+                                         viewport_width, viewport_height, pool);
+}
+
 typedef DomDocument* (*LayoutFormatLoader)(Url*, int, int, Pool*);
 
 static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
@@ -2709,6 +2717,7 @@ struct LayoutFormatRoute {
 
 static const LayoutFormatRoute layout_format_routes[] = {
     {".ls", load_lambda_script_doc},
+    {".slides", load_slides_doc},
     {".tex", load_latex_doc}, {".latex", load_latex_doc},
     {".pgf", load_tikz_doc},
     {".md", load_markdown_doc}, {".markdown", load_markdown_doc},
@@ -4634,9 +4643,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
     }
 
+    // caller-owned: one rebuild must not retain a matcher in the document pool
+    SelectorMatcher incremental_storage;
     SelectorMatcher* incremental_matcher = nullptr;
     if (css_engine && inline_sheets && inline_count > 0) {
-        incremental_matcher = selector_matcher_create(doc->document_pool);
+        selector_matcher_init(&incremental_storage, doc->document_pool);
+        incremental_matcher = &incremental_storage;
         state_configure_selector_matcher((DocState*)doc->state, incremental_matcher);
     }
 

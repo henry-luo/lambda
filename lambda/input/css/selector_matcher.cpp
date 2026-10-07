@@ -84,6 +84,12 @@ void selector_matcher_init(SelectorMatcher* matcher, Pool* pool) {
 
 }
 
+bool SelectorQueryScratch::parse_list(const char* text) {
+    if (!ensure_pool() || !text || !*text) return false;
+    group = css_parse_selector_group_text(text, strlen(text), pool);
+    return group && !css_selector_group_contains_generic_pseudo(group);
+}
+
 void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* scope_element) {
     if (!matcher) return;
     matcher->scope_element = scope_element;
@@ -125,8 +131,9 @@ void selector_matcher_destroy(SelectorMatcher* matcher) {
     if (!matcher) {
         return;
     }
-
-    // Note: Memory is pool-allocated, so it will be freed when pool is destroyed
+    // A created matcher owns only its own block; its pool is often the
+    // long-lived document pool, so per-call matchers must give it back.
+    pool_free(matcher->pool, matcher);
 }
 
 void selector_matcher_clear_cache(SelectorMatcher* matcher) {
@@ -1190,12 +1197,7 @@ static bool selector_matcher_matches_local_link(SelectorMatcher* matcher,
         if (target) url_destroy(target);
         return false;
     }
-    String* target_page = url_serialize_without_fragment(target);
-    String* document_page = url_serialize_without_fragment(element->doc->url);
-    bool matches = target_page && document_page &&
-        string_eq(target_page, document_page);
-    url_free_string(target_page);
-    url_free_string(document_page);
+    bool matches = url_equals_without_fragment(target, element->doc->url);
     url_destroy(target);
     return matches;
 }

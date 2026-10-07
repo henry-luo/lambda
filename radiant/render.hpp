@@ -1664,6 +1664,9 @@ void paint_list_init(PaintList* pl, Arena* backing_arena);
 void paint_list_clear(PaintList* pl);   // rewind count and release owned command payloads
 void paint_list_destroy(PaintList* pl);
 int  paint_list_count(const PaintList* pl);
+// transfer a newly appended path payload to a deferred list; false leaves ownership with the caller.
+bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,
+                                  RdtGradientStop* stops = nullptr);
 bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result);
 bool paint_ir_validate_or_log(const PaintList* pl, const char* context);
 const char* paint_op_name(PaintOp op);
@@ -4351,6 +4354,8 @@ void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
  * @param view ViewBlock for the SVG element
  */
 void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view);
+// Starts a paint pass: inline SVGs painted in it share one host style context.
+void render_svg_begin_paint_pass(void);
 void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element,
                                 float viewport_width, float viewport_height);
 

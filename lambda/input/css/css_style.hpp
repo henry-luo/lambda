@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "../../../lib/strview.h"
 #include "css_value.hpp"
 #include "../../core/name_identity.h"
 
@@ -1031,6 +1032,7 @@ typedef struct CssDeclaration {
     const char* source_file;  // Source file (for debugging)
     int source_line;          // Source line (for debugging)
     const char* property_name; // Original property name (for unknown/vendor properties)
+    size_t property_name_length; // CSSOM names may contain embedded NUL code points
 
     // Raw value text from source (for faithful CSSOM serialization)
     const char* value_text;
@@ -1046,6 +1048,13 @@ typedef struct CssDeclaration {
     CssDeclarationPayloadRetainFn payload_retain;
     CssDeclarationPayloadReleaseFn payload_release;
 } CssDeclaration;
+
+static inline StrView css_declaration_name(const CssDeclaration* declaration) {
+    if (!declaration) return strview_init(nullptr, 0);
+    return declaration->property_name_length
+        ? strview_init(declaration->property_name, declaration->property_name_length)
+        : strview_from_cstr(declaration->property_name);
+}
 
 // CSS Style Node for cascade resolution
 typedef struct CssStyleNode {

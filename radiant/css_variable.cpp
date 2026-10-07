@@ -18,6 +18,7 @@ struct CssVarStack {
     const CssVarStack* parent;
     bool* invalid;
     CssPropertyCode property;
+    size_t name_length = (size_t)-1;
 };
 
 static thread_local const CssVarStack* css_active_var_stack = nullptr;
@@ -37,9 +38,11 @@ static void css_var_stack_invalidate(const CssVarStack* stack, const CssVarStack
     }
 }
 
-static bool css_var_stack_contains(const CssVarStack* stack, DomElement* element, const char* name) {
+static bool css_var_stack_contains(const CssVarStack* stack, DomElement* element,
+    const char* name, size_t name_length = (size_t)-1) {
     for (const CssVarStack* current = stack; current; current = current->parent) {
-        if (current->element != element || !css_custom_property_name_matches(current->name, name)) continue;
+        if (current->element != element || !css_custom_property_name_matches(current->name,
+            name, current->name_length, name_length)) continue;
         // A fallback inside the dependency cycle cannot make its declarations valid.
         css_var_stack_invalidate(stack, current);
         return true;
@@ -159,10 +162,8 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
     const CssPropertyRegistration* registration = element->doc
         ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
     const CssValue* initial = registration ? registration->initial_value : nullptr;
-    // Script names can contain NUL; CSS identifiers cannot match their truncated prefix.
-    bool token_name = !memchr(name, '\0', name_length);
-    if (token_name && css_var_stack_contains(stack, element, name)) return nullptr;
-    const CssValue* value = token_name ? dom_element_lookup_own_custom_property(element, name) : nullptr;
+    if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
+    const CssValue* value = dom_element_lookup_own_custom_property(element, name, name_length);
     bool inherit = registration ? registration->inherits : true;
     if (value && css_value_is_global_keyword(value)) {
         CssEnum keyword = value->data.keyword;
@@ -172,7 +173,7 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
     }
     if (value) {
         bool invalid = false;
-        CssVarStack current = {name, element, stack, &invalid, CSS_PROPERTY_UNKNOWN};
+        CssVarStack current = {name, element, stack, &invalid, CSS_PROPERTY_UNKNOWN, name_length};
         CssVarResolutionScope scope(&current);
         const CssValue* resolved = resolve_var_function_inner(pool, value, element, nullptr, nullptr, &current);
         if (invalid) resolved = nullptr;

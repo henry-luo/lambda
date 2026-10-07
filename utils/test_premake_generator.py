@@ -40,7 +40,7 @@ def linux_validation_generator(module):
                                    linux_pkg_config_includes=[])
 
 
-def generate_validation_host(module, platform_name: str) -> str:
+def generate_validation_host(module, platform_name: str, dependencies=None) -> str:
     # Construct under Linux first so this pure generation test never refreshes
     # macOS archive artifacts, then select the requested output policy.
     generator = linux_validation_generator(module)
@@ -50,7 +50,7 @@ def generate_validation_host(module, platform_name: str) -> str:
     generator._generate_single_test(
         "test_runtime_full_trace_provider",
         "test/test_validator_integration.cpp",
-        ["lambda-runtime-full"],
+        dependencies if dependencies is not None else ["lambda-runtime-full"],
         "",
         "",
         ["gtest", "gtest_main"],
@@ -63,6 +63,13 @@ def expect_node_core_provider(module, platform_name: str) -> None:
     generated = generate_validation_host(module, platform_name)
     if '"node-core",' not in generated:
         fail(f"{platform_name} runtime-full test omitted the node-core trace provider")
+    option = '-exported_symbols_list,lambda_host_exports.macos.sym' if platform_name == 'macos' \
+        else '--dynamic-list=lambda_host_exports.linux.sym'
+    if option not in generated:
+        fail(f"{platform_name} dynamic test host omitted the D7.3.6 export allowlist")
+    static_host = generate_validation_host(module, platform_name, ["lambda-data"])
+    if 'lambda_host_exports.' in static_host:
+        fail(f"{platform_name} static test gained unrelated host exports")
 
 
 def lddeps_of(makefile: Path) -> set[str]:

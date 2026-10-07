@@ -575,6 +575,22 @@ bool dom_document_add_resource(DomDocument* document, DomDocumentResourceData* d
     return true;
 }
 
+bool dom_document_release_resource(DomDocument* document, DomDocumentResourceData* data) {
+    if (!document || !data) return false;
+    lam::Own<DomDocumentResource>* link = &document->resources;
+    while (*link) {
+        DomDocumentResource* resource = *link;
+        if (resource->data == data) {
+            *link = resource->next;
+            if (resource->destroy) resource->destroy(resource->data);
+            mem_free(resource);
+            return true;
+        }
+        link = &resource->next;
+    }
+    return false;
+}
+
 bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,
                                 DomElement* iframe) {
     if (!embedded || !parent || !iframe || iframe->doc != parent) return false;
@@ -958,6 +974,86 @@ void dom_element_destroy(DomElement* element) {
     // so it will be freed when the pool is destroyed
 }
 
+struct DomInlineDeclarations : DomDocumentResourceData {
+    Pool* owner_pool;
+    Pool* pool;
+    CssRule rule;
+    bool updating;
+};
+
+static void dom_inline_declarations_reset(DomInlineDeclarations* block) {
+    if (block->pool) mem_pool_destroy(block->pool);
+    block->pool = nullptr;
+    block->rule = {};
+}
+
+static void dom_inline_declarations_destroy(DomDocumentResourceData* resource) {
+    DomInlineDeclarations* block = (DomInlineDeclarations*)resource;
+    dom_inline_declarations_reset(block);
+    pool_free(block->owner_pool, block);
+}
+
+static void dom_element_clear_inline_declaration_block(DomElement* element) {
+    if (element->ext && element->ext->inline_declarations)
+        dom_inline_declarations_reset(element->ext->inline_declarations);
+}
+
+CssRule* dom_element_inline_declaration_block(DomElement* element) {
+    DomInlineDeclarations* block = element && element->ext
+        ? element->ext->inline_declarations : nullptr;
+    return block && block->pool ? &block->rule : nullptr;
+}
+
+bool dom_element_commit_inline_declarations(DomElement* element, CssRule* rule, const char* text) {
+#ifdef LAMBDA_NO_CSS_INPUT
+    return false;
+#else
+    if (!element || !element->doc || !rule || !text) return false;
+    DomElementExt* ext = element->ensure_ext();
+    if (!ext) return false;
+    DomInlineDeclarations* block = ext->inline_declarations;
+    if (!block) {
+        block = (DomInlineDeclarations*)pool_calloc(element->doc->document_pool, sizeof(DomInlineDeclarations));
+        if (!block) return false;
+        block->owner_pool = element->doc->document_pool;
+        if (!dom_document_add_resource(element->doc, block, dom_inline_declarations_destroy)) {
+            pool_free(element->doc->document_pool, block);
+            return false;
+        }
+        ext->inline_declarations = lam::up(block);
+    }
+    Pool* pool = mem_pool_create((MemContext*)element->doc->services.mem_ctx, MEM_ROLE_CSS, "css.inline.authored");
+    if (!pool) return false;
+    CssRule next = {};
+    next.pool = pool;
+    next.type = CSS_RULE_STYLE;
+    size_t count = rule->data.style_rule.declaration_count;
+    next.data.style_rule.declarations = count ? (CssDeclaration**)pool_calloc(pool, count * sizeof(CssDeclaration*)) : nullptr;
+    if (count && !next.data.style_rule.declarations) {mem_pool_destroy(pool); return false;}
+    for (size_t i = 0; i < count; i++) {
+        CssDeclaration* copy = css_declaration_snapshot(rule->data.style_rule.declarations[i], pool);
+        if (!copy) {mem_pool_destroy(pool); return false;}
+        next.data.style_rule.declarations[next.data.style_rule.declaration_count++] = copy;
+    }
+    Pool* previous_pool = block->pool;
+    CssRule previous_rule = block->rule;
+    block->pool = pool;
+    block->rule = next;
+    // CSSOM's updating flag keeps attribute serialization from reparsing raw DOMString names.
+    block->updating = true;
+    bool changed = element->set_attribute("style", text);
+    block->updating = false;
+    if (!changed) {
+        block->pool = previous_pool;
+        block->rule = previous_rule;
+        mem_pool_destroy(pool);
+        return false;
+    }
+    if (previous_pool) mem_pool_destroy(previous_pool);
+    return true;
+#endif
+}
+
 void dom_element_release_retired_storage(DomElement* element) {
     if (!element || !element->doc) return;
     Element* backing_source = dom_node_registry_backing_source(
@@ -988,6 +1084,9 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_clear_custom_properties(element, true);
     dom_element_clear_custom_properties(element, false);
     style_epoch_selection_clear_element(element);
+    // retirement releases both the authored pool and its document resource registration (D4.5.1v4).
+    if (element->ext && element->ext->inline_declarations)
+        dom_document_release_resource(element->doc, element->ext->inline_declarations);
     if (element->ext) {
         // the snapshot and its dynamic tracks survive relayout, then retire together.
         CssTransitionElemState* transition = element->transition_state_prop();
@@ -1119,7 +1218,7 @@ static bool dom_element_clear_inline_style_declarations(DomElement* element) {
 
 static void dom_element_attribute_did_set(DomElement* element,
                                           const char* lower_name,
-                                          const char* value) {
+                                          const char* value, bool same_value) {
     if (!element || !element->doc || !lower_name || !value) return;
     if (strcmp(lower_name, "id") == 0) {
         dom_element_release_cached_id(element);
@@ -1144,7 +1243,10 @@ static void dom_element_attribute_did_set(DomElement* element,
             }
         }
     } else if (strcmp(lower_name, "style") == 0) {
+        DomInlineDeclarations* block = element->ext ? element->ext->inline_declarations : nullptr;
+        if (same_value && !(block && block->updating)) return;
         dom_element_clear_inline_style_declarations(element);
+        if (!(block && block->updating)) dom_element_clear_inline_declaration_block(element);
         if (value[0] != '\0') dom_element_apply_inline_style(element, value);
     }
     element->style_version++;
@@ -1160,6 +1262,7 @@ static void dom_element_attribute_did_remove(DomElement* element,
         dom_element_release_cached_classes(element);
     } else if (strcmp(lower_name, "style") == 0) {
         dom_element_clear_inline_style_declarations(element);
+        dom_element_clear_inline_declaration_block(element);
     }
     element->style_version++;
     element->set_needs_style_recompute(true);
@@ -1243,6 +1346,9 @@ bool DomElement::set_attribute(const char* name, const char* value) {
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
+    const char* previous_value = strcmp(lower_name, "style") == 0 ? element->get_attribute(key) : nullptr;
+    bool same_value = previous_value && strcmp(previous_value, value) == 0;
+
     if (!element->is_synthetic() && element->doc) {
         Element* backing = dom_element_to_element(element);
         MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
@@ -1270,7 +1376,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
                 return false;
             }
 
-            dom_element_attribute_did_set(element, lower_name, value);
+            dom_element_attribute_did_set(element, lower_name, value, same_value);
             return true;
         }
 
@@ -1280,7 +1386,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
 
     if (element->is_synthetic() &&
         dom_element_set_synthetic_attribute(element, key, value)) {
-        dom_element_attribute_did_set(element, lower_name, value);
+        dom_element_attribute_did_set(element, lower_name, value, same_value);
         return true;
     }
     log_warn("dom_element_set_attribute: element has no mutable attribute storage");
@@ -1649,22 +1755,6 @@ static bool dom_element_uses_quirks_css(const DomElement* element) {
         is_quirks_mode((HtmlVersion)element->doc->html_version);
 }
 
-#ifndef LAMBDA_NO_CSS_INPUT
-static CssDeclaration* dom_parse_inline_declaration(const char* text,
-                                                    Pool* pool, bool quirks) {
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(text, strlen(text), pool, &token_count);
-    CssDeclaration* declaration = nullptr;
-    if (tokens && token_count > 0) {
-        int pos = 0;
-        declaration = css_parse_declaration_from_tokens_mode(tokens, &pos,
-            token_count, pool, quirks);
-    }
-    if (tokens) css_token_array_release(pool, tokens, token_count);
-    return declaration;
-}
-#endif
-
 bool dom_element_set_presentation_style(DomElement* element, const char* property,
                                         const char* value, bool* changed) {
     if (changed) *changed = false;
@@ -1720,6 +1810,19 @@ bool dom_element_clear_presentation_style(DomElement* element) {
     return changed;
 }
 
+#ifndef LAMBDA_NO_CSS_INPUT
+static bool dom_element_apply_inline_declaration(DomElement* element, const CssDeclaration* parsed) {
+    CssDeclaration* declaration = css_declaration_snapshot(parsed, element->doc->document_pool);
+    if (!declaration) return false;
+    declaration->origin = CSS_ORIGIN_AUTHOR;
+    declaration->specificity = {1, 0, 0, 0, declaration->important};
+    bool applied = dom_element_apply_declaration(element, declaration);
+    if (!applied && declaration->tree_owned_record)
+        css_declaration_destroy_owned(declaration, element->doc->document_pool);
+    return applied;
+}
+#endif
+
 int dom_element_apply_inline_style(DomElement* element, const char* style_text) {
 #ifdef LAMBDA_NO_CSS_INPUT
     // reduced profiles retain the raw HTML style attribute without CSS parsing.
@@ -1732,117 +1835,21 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
     }
 
     int applied_count = 0;
+    if (CssRule* authored = dom_element_inline_declaration_block(element)) {
+        for (size_t i = 0; i < authored->data.style_rule.declaration_count; i++)
+            applied_count += dom_element_apply_inline_declaration(element,
+                authored->data.style_rule.declarations[i]);
+        return applied_count;
+    }
     Pool* parse_pool = mem_pool_create((MemContext*)element->doc->services.mem_ctx,
         MEM_ROLE_CSS, "css.inline.parse");
     if (!parse_pool) return 0;
 
-    // Parse the style text - split by semicolons
-    // Example: "color: red; font-size: 14px; background: blue"
-    size_t style_len = strlen(style_text);
-    char* text_copy = pool_dup_n(parse_pool, style_text, style_len);
-    if (!text_copy) {
-        mem_pool_destroy(parse_pool);
-        return 0;
-    }
-
-    // A quoted "/*" is string content, and nested blocks may contain semicolons.
-    for (size_t offset = 0; offset < style_len;) {
-        char* end = (char*)dom_inline_style_declaration_end(text_copy + offset);
-        if (!end || !*end) break;
-        *end = '\0';
-        offset = (size_t)(end - text_copy) + 1;
-    }
-
-    // Iterate over NUL-separated declarations
-    size_t offset = 0;
-    while (offset < style_len) {
-        char* declaration_str = text_copy + offset;
-        // advance offset past this segment (to next NUL or end)
-        size_t seg_len = strlen(declaration_str);
-        offset += seg_len + 1; // +1 for the NUL separator
-        // Trim leading whitespace
-        while (*declaration_str == ' ' || *declaration_str == '\t' ||
-               *declaration_str == '\n' || *declaration_str == '\r') {
-            declaration_str++;
-        }
-
-        // Skip empty declarations
-        if (*declaration_str == '\0') {
-            continue;
-        }
-
-        // Find the colon separator
-        char* colon = strchr(declaration_str, ':');
-        if (!colon) {
-            continue;
-        }
-
-        // Split into property name and value
-        *colon = '\0';
-        char* prop_name = declaration_str;
-        char* prop_value = colon + 1;
-
-        // Trim property name
-        char* prop_end = colon - 1;
-        while (prop_end >= prop_name && (*prop_end == ' ' || *prop_end == '\t')) {
-            *prop_end = '\0';
-            prop_end--;
-        }
-
-        // Trim property value
-        while (*prop_value == ' ' || *prop_value == '\t') {
-            prop_value++;
-        }
-        size_t value_len = strlen(prop_value);
-        while (value_len > 0 && (prop_value[value_len - 1] == ' ' ||
-                                 prop_value[value_len - 1] == '\t')) {
-            prop_value[value_len - 1] = '\0';
-            value_len--;
-        }
-
-        // Parse the property using the proper CSS tokenizer and parser
-        // Format the declaration string for parsing
-        size_t decl_str_len = strlen(prop_name) + strlen(prop_value) + 3; // "name: value"
-        char* decl_str = (char*)pool_alloc(parse_pool, decl_str_len);
-        if (decl_str) {
-            snprintf(decl_str, decl_str_len, "%s:%s", prop_name, prop_value);
-
-            CssDeclaration* parsed = dom_parse_inline_declaration(decl_str,
-                parse_pool, dom_element_uses_quirks_css(element));
-            if (parsed) {
-                // Mutable inline values need an owned payload; parser scratch
-                // otherwise accumulates for every CSSOM write (D4.5.1v4).
-                CssDeclaration* decl = css_declaration_can_clone_owned(parsed)
-                    ? css_declaration_clone_owned(parsed, parsed->specificity,
-                        CSS_ORIGIN_AUTHOR, element->doc->document_pool)
-                    : dom_parse_inline_declaration(decl_str,
-                        element->doc->document_pool,
-                        dom_element_uses_quirks_css(element));
-
-                if (decl) {
-                    // Set origin to author (inline styles are author origin)
-                    decl->origin = CSS_ORIGIN_AUTHOR;
-
-                    // Set inline style specificity (1,0,0,0)
-                    decl->specificity.inline_style = 1;
-                    decl->specificity.ids = 0;
-                    decl->specificity.classes = 0;
-                    decl->specificity.elements = 0;
-                    decl->specificity.important = decl->important; // preserve !important for cascade
-
-                    // Apply to element
-                    bool applied = dom_element_apply_declaration(element, decl);
-                    if (applied) {
-                        applied_count++;
-                    } else if (decl->tree_owned_record) {
-                        css_declaration_destroy_owned(decl,
-                            element->doc->document_pool);
-                    }
-                }
-            }
-            pool_free(parse_pool, decl_str);
-        }
-    }
+    size_t count = 0;
+    CssDeclaration** declarations = css_parse_declaration_list_text_mode(style_text,
+        strlen(style_text), parse_pool, &count, dom_element_uses_quirks_css(element));
+    for (size_t i = 0; i < count; i++)
+        applied_count += dom_element_apply_inline_declaration(element, declarations[i]);
 
     mem_pool_destroy(parse_pool);
     return applied_count;
@@ -1884,10 +1891,12 @@ bool dom_element_remove_inline_styles(DomElement* element) {
 
 static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
     const char* name, const CssDeclaration* ceiling = nullptr,
-    const CssRollbackFilter* filters = nullptr) {
+    const CssRollbackFilter* filters = nullptr, size_t name_length = (size_t)-1) {
     CssCustomProp* winner = nullptr;
     for (CssCustomProp* variable = variables; variable; variable = variable->next) {
-        if (!css_custom_property_name_matches(variable->name, name)) continue;
+        StrView stored = variable->declaration ? css_declaration_name(variable->declaration)
+            : strview_from_cstr(variable->name);
+        if (!css_custom_property_name_matches(stored.str, name, stored.length, name_length)) continue;
         if (variable->declaration &&
             !css_declaration_cascade_eligible(variable->declaration, ceiling, filters)) continue;
         if (!winner || !winner->declaration || !variable->declaration ||
@@ -1897,14 +1906,15 @@ static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
     }
     if (winner && css_declaration_is_rollback(winner->declaration)) {
         CssRollbackFilter filter = {winner->declaration, filters};
-        return css_custom_property_winner(variables, name, winner->declaration, &filter);
+        return css_custom_property_winner(variables, name, winner->declaration, &filter, name_length);
     }
     return winner;
 }
 
 // registered-property computation needs the same rollback winner without inherited lookup.
-const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name) {
-    CssCustomProp* winner = element ? css_custom_property_winner(element->css_variables, name) : nullptr;
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name, size_t name_length) {
+    CssCustomProp* winner = element ? css_custom_property_winner(element->css_variables,
+        name, nullptr, nullptr, name_length) : nullptr;
     return winner ? winner->value : nullptr;
 }
 
@@ -1936,14 +1946,15 @@ const CssValue* dom_element_lookup_custom_property(DomElement* element,
 }
 
 bool css_custom_property_name_matches(const char* stored_name,
-                                      const char* lookup_name) {
+    const char* lookup_name, size_t stored_length, size_t lookup_length) {
     if (!stored_name || !lookup_name) return false;
-    if (strcmp(stored_name, lookup_name) == 0) return true;
-    const char* stored_body = strncmp(stored_name, "--", 2) == 0
-        ? stored_name + 2 : stored_name;
-    const char* lookup_body = strncmp(lookup_name, "--", 2) == 0
-        ? lookup_name + 2 : lookup_name;
-    return strcmp(stored_body, lookup_body) == 0;
+    StrView stored = strview_init(stored_name, stored_length == (size_t)-1 ? strlen(stored_name) : stored_length);
+    StrView lookup = strview_init(lookup_name, lookup_length == (size_t)-1 ? strlen(lookup_name) : lookup_length);
+    if (stored.length >= 2 && stored.str[0] == '-' && stored.str[1] == '-')
+        stored = strview_sub(&stored, 2, stored.length);
+    if (lookup.length >= 2 && lookup.str[0] == '-' && lookup.str[1] == '-')
+        lookup = strview_sub(&lookup, 2, lookup.length);
+    return strview_eq(&stored, &lookup);
 }
 
 // ============================================================================

@@ -1,0 +1,18 @@
+{
+  "name": "Presentation opacity/transform writes commit without layout; hit testing follows",
+  "html": "test/ui/presentation_paint_only.ls",
+  "viewport": {"width": 700, "height": 300},
+  "events": [
+    {"type": "click", "target": {"selector": "#fade"}},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "paint-only"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "opacity", "equals": "0.5"},
+    {"type": "click", "target": {"selector": "#toggle"}},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
+    {"type": "click", "target": {"selector": "#move"}},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "paint-only"},
+    {"type": "click", "x": 330, "y": 100},
+    {"type": "assert_attribute", "target": {"selector": "#probe"}, "attribute": "data-hit", "equals": "moved"},
+    {"type": "click", "x": 230, "y": 100},
+    {"type": "assert_attribute", "target": {"selector": "#probe"}, "attribute": "data-hit", "equals": "probe"}
+  ]
+}

@@ -10,6 +10,9 @@ static inline uint64_t mvp_lmd_method_token(int64_t method) {
     return ITEM_JS_UNDEFINED | ((uint64_t)method << 8);
 }
 
+// shared compile-time/runtime spelling classification; no JIT import is needed.
+int mvp_lmd_map_method(String* key);
+
 extern "C" {
 Item mvp_lmd_fail(int64_t kind, int64_t site);
 double mvp_lmd_string_to_number(String* string);

@@ -237,6 +237,8 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
             jw_kv_uint(&writer, "inline_cows", prop_stats->inline_cows);
             jw_kv_uint(&writer, "cap_fallbacks", prop_stats->cap_fallbacks);
             jw_kv_uint(&writer, "index_bytes", prop_stats->index_bytes);
+            jw_kv_uint(&writer, "font_family_lookups", prop_stats->font_family_lookups);
+            jw_kv_uint(&writer, "font_family_canonical_count", prop_stats->font_family_misses);
         jw_obj_end(&writer);
         jw_key(&writer, "style_epochs");
         jw_obj_begin(&writer);

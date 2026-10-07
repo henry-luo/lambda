@@ -132,6 +132,9 @@ typedef struct DomJsMutationRecord {
     uint32_t target_id;
     uint32_t parent_id;
     DomJsMutationAttribute attribute;
+    // The property a presentation-channel write changed (CSS_PROPERTY_UNKNOWN
+    // otherwise); such writes leave authored attributes and selectors intact.
+    CssPropertyCode presentation_property;
     // Capture connection at mutation time; a later append must not make a
     // detached node's earlier attribute/text writes look document-visible.
     bool was_connected;
@@ -162,6 +165,8 @@ struct DomJsRuntime {
     uint32_t mutation_kind_mask;
     int mutation_record_count;
     int mutation_record_overflow;
+    // a reflow was already requested when this batch recorded its first mutation
+    bool reflow_pending_before_batch;
     DomJsMutationRecord* mutation_records;
     int mutation_record_capacity;
     DomJsMutationRecord inline_mutation_records[DOM_JS_MUTATION_RECORD_CAP];
@@ -469,6 +474,12 @@ struct DomDocument : DomDocumentResourceData {
     // custom layouts. Its UA behavior still gets its own evaluator.
     lam::Up<Runtime> loader_runtime;
 
+    // Advances with mutation_epoch except for presentation writes of
+    // non-inherited properties, which reach neither other elements' computed
+    // style nor selector matching. Content caches outside the written subtree
+    // (inline SVG layers) key on this instead of every DOM write.
+    uint64_t style_content_epoch;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -500,7 +511,7 @@ struct DomDocument : DomDocumentResourceData {
                     pending_scroll_into_view_block(DOM_SCROLL_ALIGN_START),
                     pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST),
                     pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO),
-                    loader_runtime(nullptr) {}
+                    loader_runtime(nullptr), style_content_epoch(0) {}
 
     bool init(Input* input);
     void destroy();
@@ -547,6 +558,7 @@ typedef struct DomDocumentResource {
 
 bool dom_document_add_resource(DomDocument* document, struct DomDocumentResourceData* data,
                                DomDocumentResourceDestroyFn destroy);
+bool dom_document_release_resource(DomDocument* document, DomDocumentResourceData* data);
 
 // The parent iframe owns the embedded document's bounded upward edge. The
 // document keeps a generation-checked reference rather than a raw node pointer.
@@ -620,9 +632,11 @@ struct CssCustomProp {
 // Custom-property names retain their authored spelling, while var() parsing
 // may omit the leading dashes from its lookup token.
 bool css_custom_property_name_matches(const char* stored_name,
-                                      const char* lookup_name);
+    const char* lookup_name, size_t stored_length = (size_t)-1,
+    size_t lookup_length = (size_t)-1);
 DomElement* dom_parent_element(DomElement* element);
-const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name);
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element,
+    const char* name, size_t name_length = (size_t)-1);
 const CssValue* dom_element_lookup_custom_property(DomElement* element,
     const char* name, DomElement** owner);
 
@@ -798,6 +812,7 @@ struct DomElementExt {
     int synthetic_attribute_count;
     int synthetic_attribute_capacity;
     lam::Own<DomNamespacedAttribute> namespaced_attributes;
+    lam::Up<struct DomInlineDeclarations> inline_declarations; // document resource; authored CSSOM block
     // Layout-only ruby column geometry. This lives outside InlineProp because
     // computed inline styles may be absent or canonicalized across elements.
     float ruby_column_anchor_x;
@@ -1531,6 +1546,8 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style);
  * @return Number of declarations applied
  */
 int dom_element_apply_inline_style(DomElement* element, const char* style_text);
+CssRule* dom_element_inline_declaration_block(DomElement* element);
+bool dom_element_commit_inline_declarations(DomElement* element, CssRule* rule, const char* text);
 // Node-owned transient CSS values, independent of the authored Mark attributes.
 bool dom_element_set_presentation_style(DomElement* element, const char* property,
                                         const char* value, bool* changed);

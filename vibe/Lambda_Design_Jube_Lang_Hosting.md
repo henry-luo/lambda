@@ -1,5 +1,14 @@
 # Jube Hosted-Language Architecture
 
+> **Implementation removed 2026-10-07 (USER).** The `lang-python` module and
+> the host's hosted-language and hosted-compiler services (source,
+> diagnostics, output, session memory, guest execution with the MIR compiler
+> cursor, module graph, runtime catalog, data API, `JubeLanguageDef` and
+> `lambda <language>` dispatch) were deleted, with a Jube ABI bump
+> (`JUBE_ABI_VERSION` 8, `JUBE_HOST_API_VERSION` 5). No guest language is
+> hosted. This document is kept as the design record; D7.4.3 still constrains
+> any future guest, and D8.2.3v2 no longer names a guest acceptance test.
+>
 > **Status:** design proposal; overall direction agreed 2026-07-20
 >
 > **First adopter:** Python (`lang-python`)

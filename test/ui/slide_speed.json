@@ -1,6 +1,6 @@
 {
   "name": "Toolbar speed range changes the playback clock without navigation or unpausing",
-  "html": "test/demo/slides/slide_presentation.ls",
+  "html": "test/demo/slides/slide_presentation.slides",
   "viewport": {
     "width": 1100,
     "height": 700

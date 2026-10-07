@@ -2,7 +2,9 @@
 
 #include "async.h"
 #include "runtime-state.h"
+#ifndef LAMBDA_NO_JUBE
 #include "../jube/jube_registry.h"
+#endif
 #include "../../lib/log.h"
 #include "../../lib/rdb.h"
 
@@ -61,5 +63,8 @@ static const RdbRegistryHooks rdb_host_hooks = {
 
 void rdb_host_install(void) {
     rdb_set_registry_hooks(&rdb_host_hooks);
+#ifndef LAMBDA_NO_JUBE
+    // runtime-only hosts retain connection ownership without a Jube driver resolver (D7.1.6).
     rdb_set_driver_resolver(jube_rdb_resolve_driver);
+#endif
 }

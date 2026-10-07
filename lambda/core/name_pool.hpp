@@ -1,5 +1,4 @@
 #pragma once
-#include "../../lib/lambda_api.h"
 
 #include "../lambda.h"
 #include "../../lib/mempool.h"
@@ -36,7 +35,7 @@ extern "C" {
 #endif
 
 // Core functions
-LAMBDA_CORE_API NamePool* name_pool_create(Pool* memory_pool, NamePool* parent);
+NamePool* name_pool_create(Pool* memory_pool, NamePool* parent);
 NamePool* name_pool_create_mode(Pool* memory_pool, NamePool* parent,
                                 NamePoolIdMode mode);
 // Fresh runtime setup may need to collect the initial static closure after
@@ -47,7 +46,7 @@ NamePool* name_pool_create_runtime_static(Pool* memory_pool);
 NamePool* name_pool_activate_runtime_dynamic(NamePool* static_root);
 NamePool* name_pool_create_runtime(Pool* memory_pool);
 NamePool* name_pool_retain(NamePool* pool);
-LAMBDA_CORE_API void name_pool_release(NamePool* pool);
+void name_pool_release(NamePool* pool);
 bool name_pool_seal_static(NamePool* pool);
 NamePool* name_pool_dynamic_child(NamePool* pool);
 NameId name_pool_name_id(NamePool* pool, StrView name);
@@ -62,8 +61,8 @@ void name_pool_set_node_release_hook(void (*fn)(void* node));
 // parent pool). Pooled name strings are static data: immutable, outside GC,
 // never individually ref-counted. Lifetime is pool-scoped - NamePool.ref_count
 // (name_pool_retain/name_pool_release) governs when the backing memory dies.
-LAMBDA_CORE_API String* name_pool_create_name(NamePool* pool, const char* name);
-LAMBDA_CORE_API String* name_pool_create_len(NamePool* pool, const char* name, size_t len);
+String* name_pool_create_name(NamePool* pool, const char* name);
+String* name_pool_create_len(NamePool* pool, const char* name, size_t len);
 String* name_pool_create_strview(NamePool* pool, StrView name);
 String* name_pool_create_string(NamePool* pool, String* str);
 

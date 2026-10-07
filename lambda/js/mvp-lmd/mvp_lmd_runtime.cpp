@@ -150,6 +150,13 @@ extern "C" int64_t mvp_lmd_string_key(String* s) {
 }
 
 extern "C" Item mvp_lmd_array_store(Item owner, uint32_t index, Item value) {
+    Array* immediate = owner.array;
+    if (!lambda_item_uses_scalar_home(value) && index <= (uint64_t)immediate->length &&
+            index < (uint64_t)(immediate->capacity - immediate->extra)) {
+        immediate->items[index] = value;
+        if (index == immediate->length) immediate->length++;
+        return value;
+    }
     RootFrame roots(2);
     if (!roots.valid()) return Item{.item = ITEM_ERROR};
     Rooted<Item> a(roots, owner), v(roots, value);

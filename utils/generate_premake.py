@@ -582,7 +582,7 @@ class PremakeGenerator:
         if 'build_dir' in variant_config:
             self.config['build_dir'] = variant_config['build_dir']
 
-        # Append additional libraries from variant (e.g., jube adds tree-sitter-python/ruby/bash)
+        # Append additional libraries from variant (e.g., lambda-cst adds its tree-sitter grammars)
         if 'additional_libraries' in variant_config:
             existing_libs = self.config.get('libraries', [])
             for lib in variant_config['additional_libraries']:
@@ -3285,6 +3285,10 @@ class PremakeGenerator:
                 '    }',
                 '    '
             ])
+
+        # host-resolved test DSOs need the same D7.3.6 exports under LTO/dead stripping.
+        if any(configured_targets.get(dep, {}).get('link') == 'dynamic' for dep in dependencies):
+            self.premake_content.extend(self._host_export_link_options())
 
         # Add build options based on source file type
         is_cpp_test = source.endswith('.cpp')

@@ -500,8 +500,12 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
                                            Pool* pool, CssEngine* engine,
                                            SelectorMatcher* matcher) {
     if (!doc || !root || !stylesheets || count <= 0 || !pool || !engine) return;
-    if (!matcher) matcher = selector_matcher_create(pool);
-    if (!matcher) return;
+    // a caller-owned fallback keeps each full cascade from retaining a matcher
+    SelectorMatcher matcher_storage;
+    if (!matcher) {
+        selector_matcher_init(&matcher_storage, pool);
+        matcher = &matcher_storage;
+    }
 
     css_layer_rank_stylesheets(doc, stylesheets, count, engine);
     bool epoch_scope = style_epoch_cascade_begin_replace(doc, root, engine);

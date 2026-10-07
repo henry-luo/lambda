@@ -13,6 +13,7 @@
  */
 
 #include "css_parser.hpp"
+#include "css_style_node.hpp"
 #include "css_paged_media.hpp"
 #include "css_style.hpp"
 #include "../../../lib/log.h"
@@ -2465,45 +2466,13 @@ static bool css_value_is_single_var_block(const CssToken* tokens, int start, int
     return depth == 0 && has_var;
 }
 
-// Helper: Parse CSS declaration from tokens
-CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
-    int* pos, int token_count, Pool* pool, bool quirks_mode) {
-    if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
-
-    // Skip leading whitespace
-    *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
-    if (*pos >= token_count) return NULL;
-
-    // Expect property name (identifier or custom property)
-    if (tokens[*pos].type != CSS_TOKEN_IDENT && tokens[*pos].type != CSS_TOKEN_CUSTOM_PROPERTY) {
-        log_debug("[CSS Parser] Expected IDENT or CUSTOM_PROPERTY for property, got token type %d", tokens[*pos].type);
-        while (*pos < token_count &&
-               tokens[*pos].type != CSS_TOKEN_SEMICOLON &&
-               tokens[*pos].type != CSS_TOKEN_RIGHT_BRACE) {
-            (*pos)++;
-        }
-        return NULL;
-    }
-
-    // Extract property name from token (use start/length since value may be NULL)
-    char* property_name = css_token_value_dup(&tokens[*pos], pool);
-    if (!property_name) {
-        log_debug("[CSS Parser] No property name in token");
-        return NULL;
-    }
-    // Standard property names are ASCII-insensitive; custom names retain case.
-    if (!(property_name[0] == '-' && property_name[1] == '-')) {
-        str_lower_inplace(property_name, strlen(property_name));
-    }
-
-    (*pos)++;
-
-    // Skip whitespace
-    *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
-
-    // Expect colon
-    if (*pos >= token_count || tokens[*pos].type != CSS_TOKEN_COLON) return NULL;
-    (*pos)++;
+// CSS source and CSSOM share value parsing; CSSOM already supplies a decoded name.
+static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
+    int* pos, int token_count, Pool* pool, bool quirks_mode, StrView property) {
+    char* property_name = pool_dup_n(pool, property.str, property.length);
+    if (!property_name) return nullptr;
+    if (!(property.length > 2 && property_name[0] == '-' && property_name[1] == '-'))
+        str_lower_inplace(property_name, property.length);
 
     // Skip whitespace after colon
     *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
@@ -2654,10 +2623,11 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
 
     // Get property ID from name
     decl->property_code = css_property_code_from_name(property_name);
-    decl->name_id = well_known_name_id({property_name, strlen(property_name)});
+    decl->name_id = well_known_name_id({property_name, property.length});
 
     // Store original property name (important for vendor-prefixed properties where property_code = -1)
     decl->property_name = property_name;
+    decl->property_name_length = property.length;
 
     // Capture raw value text from source tokens (for faithful CSSOM serialization)
     // Find last non-whitespace token in value range (excluding !important)
@@ -3032,6 +3002,42 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
     }
 
     return decl;
+}
+
+// source declaration names are decoded by the tokenizer before value parsing
+CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
+    int* pos, int token_count, Pool* pool, bool quirks_mode) {
+    if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
+
+    // Skip leading whitespace
+    *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+    if (*pos >= token_count) return NULL;
+
+    // Expect property name (identifier or custom property)
+    if (tokens[*pos].type != CSS_TOKEN_IDENT && tokens[*pos].type != CSS_TOKEN_CUSTOM_PROPERTY) {
+        log_debug("[CSS Parser] Expected IDENT or CUSTOM_PROPERTY for property, got token type %d", tokens[*pos].type);
+        while (*pos < token_count &&
+               tokens[*pos].type != CSS_TOKEN_SEMICOLON &&
+               tokens[*pos].type != CSS_TOKEN_RIGHT_BRACE) {
+            (*pos)++;
+        }
+        return NULL;
+    }
+
+    const CssToken* token = &tokens[*pos];
+    StrView property = token->value ? strview_from_cstr(token->value)
+        : strview_init(token->start, token->length);
+    (*pos)++;
+
+    // Skip whitespace
+    *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+    // Expect colon
+    if (*pos >= token_count || tokens[*pos].type != CSS_TOKEN_COLON) return NULL;
+    (*pos)++;
+
+    return css_parse_named_declaration_value(tokens, pos, token_count, pool,
+        quirks_mode, property);
 }
 
 CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens,
@@ -4516,8 +4522,8 @@ bool css_declaration_is_supported(const CssDeclaration* declaration) {
                                     declaration->value);
 }
 
-CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,
-                                                 Pool* pool, size_t* declaration_count) {
+CssDeclaration** css_parse_declaration_list_text_mode(const char* text, size_t length,
+                                                 Pool* pool, size_t* declaration_count, bool quirks_mode) {
     if (declaration_count) *declaration_count = 0;
     if (!text || length == 0 || !pool || !declaration_count) return NULL;
 
@@ -4552,8 +4558,8 @@ CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length
         }
 
         int before = pos;
-        CssDeclaration* declaration = css_parse_declaration_from_tokens(
-            tokens, &pos, (int)token_count, pool);
+        CssDeclaration* declaration = css_parse_declaration_from_tokens_mode(
+            tokens, &pos, (int)token_count, pool, quirks_mode);
         if (declaration) {
             if (*declaration_count >= capacity) {
                 if (!lam::pool_copy_grow_array(pool, &declarations, &capacity,
@@ -4572,6 +4578,11 @@ CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length
     css_token_array_release(pool, tokens, token_count);
     if (*declaration_count == 0) return NULL;
     return declarations;
+}
+
+CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,
+    Pool* pool, size_t* declaration_count) {
+    return css_parse_declaration_list_text_mode(text, length, pool, declaration_count, false);
 }
 
 CssDeclaration* css_parse_property_declaration(const char* property, size_t property_length,
@@ -4645,9 +4656,33 @@ CssDeclaration* css_parse_property_value_declaration(const char* property, size_
     // reject top-level punctuation before parsing the value as a declaration fragment.
     bool valid = css_property_value_token_span(tokens, count, value, value_length,
         pool, &raw, &raw_length);
+    bool custom = property_length > 2 && property[0] == '-' && property[1] == '-';
+    if (!custom && memchr(property, '\0', property_length)) valid = false;
+    int pos = 0;
+    CssDeclaration* declaration = valid && property_length
+        ? css_parse_named_declaration_value(tokens, &pos, (int)count, pool,
+            false, strview_init(property, property_length)) : nullptr;
     css_token_array_release(pool, tokens, count);
-    return valid ? css_parse_property_declaration(property, property_length,
-        raw, raw_length, pool) : nullptr;
+    return declaration;
+}
+
+// snapshot payloads into the recipient's lifetime, reparsing only uncloneable value trees.
+CssDeclaration* css_declaration_snapshot(const CssDeclaration* source, Pool* pool) {
+    if (!source || !pool) return nullptr;
+    if (css_declaration_can_clone_owned(source))
+        return css_declaration_clone_owned(source, source->specificity, source->origin, pool);
+    StrView name = css_declaration_name(source);
+    CssDeclaration* copy = source->value_text ? css_parse_property_value_declaration(
+        name.str, name.length, source->value_text, source->value_text_len, pool) : nullptr;
+    if (!copy) return nullptr;
+    copy->specificity = source->specificity;
+    copy->origin = source->origin;
+    copy->important = source->important;
+    copy->source_order = source->source_order;
+    copy->layer_order = source->layer_order;
+    copy->scope_proximity = source->scope_proximity;
+    copy->presentation_value = source->presentation_value;
+    return copy;
 }
 
 bool css_parse_property_initial_value(CssPropertyRegistration* registration,

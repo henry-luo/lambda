@@ -657,7 +657,6 @@ static const JubeModuleDef node_net_module = {
     0,
     NULL,
     NULL,
-    NULL,
     &node_net_requirements,
     NULL,
     0,

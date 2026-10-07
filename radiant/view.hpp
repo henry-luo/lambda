@@ -1035,6 +1035,8 @@ typedef struct Margin : Spacing {
     };   // for CSS enum values, like 'auto'
 } Margin;
 
+struct CornerExpressions;
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct Corner {
     union {
@@ -1057,10 +1059,18 @@ typedef struct Corner {
         struct { bool tl_percent_y, tr_percent_y, br_percent_y, bl_percent_y; };  // vertical percentages
         bool vertical_percent[4];
     };
+    lam::Up<CornerExpressions> expressions;
 } Corner;
+
+// keep computed values separate from paint's overlap-constrained used radii (D4.5.1v4).
+struct CornerExpressions {
+    Corner computed;
+    lam::Up<const CssValue> horizontal[4], vertical[4];
+};
 
 inline Corner radiant_corner_scaled(const Corner* radius, float scale) {
     Corner out = *radius;
+    out.expressions = nullptr;
     for (int i = 0; i < 4; i++) {
         out.horizontal[i] *= scale;
         out.vertical[i] *= scale;
@@ -1078,6 +1088,7 @@ inline bool radiant_corner_has_radius(const Corner* radius) {
 
 inline Corner radiant_corner_inset(const Corner* radius, float inset_x, float inset_y) {
     Corner out = *radius;
+    out.expressions = nullptr;
     for (int i = 0; i < 4; i++) {
         out.horizontal[i] = max(0.0f, out.horizontal[i] - inset_x);
         out.vertical[i] = max(0.0f, out.vertical[i] - inset_y);
@@ -1087,6 +1098,7 @@ inline Corner radiant_corner_inset(const Corner* radius, float inset_x, float in
 
 inline Corner radiant_corner_expand(const Corner* radius, float expand_x, float expand_y) {
     Corner out = *radius;
+    out.expressions = nullptr;
     for (int i = 0; i < 4; i++) {
         out.horizontal[i] = max(0.0f, out.horizontal[i] + expand_x);
         out.vertical[i] = max(0.0f, out.vertical[i] + expand_y);
@@ -2345,7 +2357,8 @@ typedef struct GridProp {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct EmbedProp {
     lam::Up<ImageSurface> img;  // borrowed: the image cache or a network resource owns it (O2)
-    float content_image_resolution; // CSS image-set() density for intrinsic sizing, 0 means 1x
+    float content_image_resolution; // selected srcset/image-set density; 0 means 1x
+    lam::Own<char> selected_image_source; // view-property pool owns the selected URL
     lam::Own<DomDocument> doc;   // iframe document
     struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
     lam::Own<FlexProp> flex;
@@ -2820,6 +2833,8 @@ typedef struct CanonicalPropStats {
     uint64_t inline_cows;
     uint64_t cap_fallbacks;
     size_t index_bytes;
+    uint64_t font_family_lookups;
+    uint64_t font_family_misses;
 } CanonicalPropStats;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -2844,6 +2859,8 @@ struct ViewTree {
     size_t inline_canonical_count;
     size_t canonical_prop_cap_bytes;
     CanonicalPropStats canonical_stats;
+    // Distinct computed font-family lists; strings live in prop_pool until tree teardown.
+    lam::Own<struct CanonicalFontFamilies> canonical_font_families;
     lam::Own<TextRect> free_text_rects; // Reusable retained text fragments owned by prop_pool.
     lam::Up<View> root;
     HtmlVersion html_version;
@@ -2901,6 +2918,12 @@ void view_tree_canonical_init(ViewTree* tree);
 void view_tree_canonical_destroy(ViewTree* tree);
 void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
                                   DomElement* parent);
+// The tree's canonical copy of a computed font-family list. Inherited fonts,
+// pseudo/temporary fonts and text views all borrow family strings without
+// owning them, so a computed list must outlive every restyle: equal lists share
+// one tree-lifetime string instead of allocating per resolution.
+const char* view_tree_canonical_font_family(ViewTree* tree, const char* chars,
+                                            size_t length);
 
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
 // Release a private transform chain before retained restyle replaces its head.
@@ -3891,6 +3914,8 @@ const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* elem
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
+// Immutable `normal` keyword shared by UA and font-shorthand line-height resets.
+const CssValue* css_line_height_normal_value();
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
 const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              const CssValue* shorthand_value,
@@ -4028,7 +4053,7 @@ TransformLengthTerm* clone_transform_length_terms(Pool* pool, const TransformLen
     float coefficient = 1.0f);
 TransformLengthTerm* interpolate_transform_length_terms(Pool* pool, const TransformLengthTerm* from,
     const TransformLengthTerm* to, float progress);
-float resolve_computed_transform_length(const CssValue* value, float reference_size);
+float resolve_computed_length_percentage(const CssValue* value, float reference_size);
 extern RdtMatrix compute_transform_matrix(const TransformProp* transform,
                                           float width, float height,
                                           float origin_x, float origin_y,

@@ -12,8 +12,12 @@ pub fn compile(deck, options = {}) map^ {
     let checked_flags = if (any([for (key in ["reduced_motion", "autostart"] where options[key] != null) not (options[key] is bool)]))
         raise c.fail("options", "player flags must be bool")
     let guard_1 = if (not (deck is element) or name(deck) != 'presentation') raise c.fail("deck", "expected presentation element")
-    let checked_1 = c.attributes(deck, ["id", "title", "width", "height", "theme", "base_uri"], "deck")^;
-    let checked_2 = c.numbers(deck, ["width", "height"], true, "deck")^;
+    // autostart/reduced_motion/autoplay_dwell_ms are presenter defaults for .slides decks
+    let checked_1 = c.attributes(deck, ["id", "title", "width", "height", "theme", "base_uri",
+        "autostart", "reduced_motion", "autoplay_dwell_ms"], "deck")^;
+    let checked_2 = c.numbers(deck, ["width", "height", "autoplay_dwell_ms"], true, "deck")^;
+    let checked_deck_flags = if (any([for (key in ["reduced_motion", "autostart"] where deck[key] != null) not (deck[key] is bool)]))
+        raise c.fail("deck", "presenter flags must be bool")
     let checked_id = if (deck.id != null and not c.text_id(deck.id)) raise c.fail("deck", "ID must be nonempty text")
     let checked_text = if (any([for (key in ["title", "base_uri"] where deck[key] != null) not (deck[key] is string)]))
         raise c.fail("deck", "title and base_uri must be string")
