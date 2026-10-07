@@ -28,7 +28,7 @@ static uint64_t key_hash(Item key) {
         uint64_t bits = 0;
         if (isnan(number)) bits = UINT64_C(0x7ff8000000000000);
         else if (number != 0) memcpy(&bits, &number, sizeof(bits));
-        return hashmap_sip(&bits, sizeof(bits), 0, 0);
+        return hashmap_xxhash3(&bits, sizeof(bits), 0, 0);
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* s = key.get_string();
@@ -88,7 +88,7 @@ static Map* object_face(Item owner) {
 static ShapeEntry* own_field(Map* map, String* key) {
     return typemap_hash_lookup((TypeMap*)map->type, key->chars, (int)key->len);
 }
-static int map_method(String* key) {
+int mvp_lmd_map_method(String* key) {
     static const char* names[] = {"get", "set", "has", "delete", "clear", "entries", "keys", "values"};
     for (int i = 0; i < 8; i++) if (text_is(key, names[i])) return i + 1;
     return 0;
@@ -102,7 +102,7 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     if (field) return map_shape_field_to_item(map->data, field);
     if (map->map_kind == MAP_KIND_ORDERED) {
         if (text_is(key, "size")) return {.item = i2it(((OrderedMap*)map)->size)};
-        int method = map_method(key);
+        int method = mvp_lmd_map_method(key);
         if (method) return callee ? Item{.item = mvp_lmd_method_token(method)} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     }
     // fixed intrinsic prototype properties are not modeled as absent own fields.
@@ -120,7 +120,7 @@ extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
     Map* map = object_face(object.get());
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     if (map->map_kind == MAP_KIND_ORDERED && !own_field(map, key.get().get_string()) &&
-            (text_is(key.get().get_string(), "size") || map_method(key.get().get_string())))
+            (text_is(key.get().get_string(), "size") || mvp_lmd_map_method(key.get().get_string())))
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     return map_shape_set(map, key.get().get_string(), held.get()) ? held.get() : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
@@ -138,7 +138,7 @@ extern "C" Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited) {
     String* key = name.get_string();
     if (own_field(map, key)) return Item{.item = ITEM_TRUE};
     if (inherited) {
-        if (map->map_kind == MAP_KIND_ORDERED && (text_is(key, "size") || map_method(key))) return Item{.item = ITEM_TRUE};
+        if (map->map_kind == MAP_KIND_ORDERED && (text_is(key, "size") || mvp_lmd_map_method(key))) return Item{.item = ITEM_TRUE};
         // diagnose excluded prototype queries through the same fixed-property policy.
         Item result = mvp_lmd_property_get(owner, name, 0);
         if (get_type_id(result) == LMD_TYPE_ERROR) return result;
