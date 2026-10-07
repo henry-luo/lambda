@@ -1613,6 +1613,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 }
                 bool running = event_sim_update(sim_ctx, &ui_context, window, current_time);
                 dom_retire_idle(2000);
+                radiant_collect_stranded_dom(&ui_context, ui_context.document);
                 if (!running) break;
                 // Tick the JS event loop between sim events so deferred callbacks
                 // (setTimeout/queueMicrotask-scheduled work, e.g. the coalesced
@@ -1797,6 +1798,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                      uv_loop);
         // Reclaim retired storage after painting, between input batches.
         // Pending work wakes again promptly without running a busy idle loop.
+        if (radiant_collect_stranded_dom(&ui_context, ui_context.document) &&
+            wait_timeout > 0.001) wait_timeout = 0.001;
         if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;
         if (wait_timeout > 0.0) {
             glfwWaitEventsTimeout(wait_timeout);

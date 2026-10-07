@@ -3,6 +3,8 @@
 // document-owned named frame events, shared by scripted presentation packages
 bool radiant_document_has_pending_frames(struct DomDocument* document);
 bool radiant_bind_document_script_host(struct UiContext* uicon, struct DomDocument* document);
+// idle point: one collection when wrapper-held detached DOM has piled up
+bool radiant_collect_stranded_dom(struct UiContext* uicon, struct DomDocument* document);
 
 #ifndef RADIANT_EVENT_CORE_ONLY
 #include "view.hpp"

@@ -868,6 +868,48 @@ TEST_F(DomRetirementTest, RecycledNodesReleaseTheirRegistryRecords) {
     EXPECT_NE(dom_node_ref_validate(&doc, dom_node_ref(static_cast<DomNode*>(next))), nullptr);
 }
 
+TEST_F(DomRetirementTest, WrapperOnlyDetachedSubtreesReportStrandedBytesForIdleCollection) {
+    DomElement* parent = root();
+    DomElement* held = element("held");
+    DomElement* held_child = element("child");
+    DomElement* observed = element("observed");
+    ASSERT_TRUE(attach(parent, held));
+    ASSERT_TRUE(attach(held, held_child));
+    ASSERT_TRUE(attach(parent, observed));
+    DomNodeRef held_ref = dom_node_ref(static_cast<DomNode*>(held));
+    DomNodeRef observed_ref = dom_node_ref(static_cast<DomNode*>(observed));
+    // a wrapper on a descendant strands the whole detached subtree; an observer
+    // pin is not a wrapper, so that subtree waits on something a GC cannot clear
+    ASSERT_TRUE(dom_node_pin(&doc, dom_node_ref(static_cast<DomNode*>(held_child)), DOM_NODE_PIN_WRAPPER));
+    ASSERT_TRUE(dom_node_pin(&doc, observed_ref, DOM_NODE_PIN_OBSERVER));
+    ASSERT_TRUE(parent->remove_child(held));
+    ASSERT_TRUE(parent->remove_child(observed));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    ASSERT_GT(stats.wrapper_stranded_bytes, 0u);
+    size_t stranded = stats.wrapper_stranded_bytes;
+    EXPECT_TRUE(dom_retire_wrapper_collection_due(&doc, stranded));
+    EXPECT_FALSE(dom_retire_wrapper_collection_due(&doc, stranded + 1));
+    // repeated sweeps charge a detachment once
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.wrapper_stranded_bytes, stranded);
+    // a collection that leaves the wrapper alive resets pacing to the survivors
+    dom_retire_wrapper_collection_done(&doc);
+    EXPECT_FALSE(dom_retire_wrapper_collection_due(&doc, 1));
+
+    // clearing the wrapper (what the collection does) retires the subtree
+    ASSERT_TRUE(dom_node_unpin(&doc, dom_node_ref(static_cast<DomNode*>(held_child)), DOM_NODE_PIN_WRAPPER));
+    EXPECT_EQ(dom_retire_sweep(&doc), 2u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, held_ref), nullptr);
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.wrapper_stranded_bytes, 0u);
+    ASSERT_TRUE(dom_node_unpin(&doc, observed_ref, DOM_NODE_PIN_OBSERVER));
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+}
+
 TEST_F(DomRetirementTest, MoreThanMutationRecordCapRetiresAfterPinsRelease) {
     DomElement* parent = root();
     DomNodeRef refs[DOM_JS_MUTATION_RECORD_CAP * 4] = {};

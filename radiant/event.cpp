@@ -7722,6 +7722,34 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
     s->active = false;
 }
 
+// Primary node bytes held only by script wrappers before an idle collection;
+// the nodes' style and payload storage is several times larger.
+static const size_t RADIANT_STRANDED_DOM_COLLECT_BYTES = 64u * 1024u;
+
+// User ruling (2026-10-07): detached DOM pinned only by wrappers is reclaimed
+// by one collection at an idle point once enough of it is stranded, instead of
+// charging the GC's allocation thresholds. GC-heap allocation alone may never
+// reach them, so replaced content would otherwise accumulate.
+bool radiant_collect_stranded_dom(UiContext* uicon, DomDocument* doc) {
+    if (!uicon || !doc ||
+        !dom_retire_wrapper_collection_due(doc, RADIANT_STRANDED_DOM_COLLECT_BYTES)) return false;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    JsCtxScope scope = {};
+    // idle: no handler frame holds unrooted values while the runtime collects
+    if (!radiant_js_ctx_enter(&scope, &evcon)) return false;
+    heap_gc_collect();
+    radiant_js_ctx_exit(&scope, &evcon, time_now_ns());
+    dom_retire_sweep(doc);
+    dom_retire_wrapper_collection_done(doc);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(doc, &stats);
+    log_debug("dom-stranded-gc: collected; %zu wrapper-held bytes remain",
+              stats.wrapper_stranded_bytes);
+    return true;
+}
+
 static thread_local uint32_t js_dispatch_batch_depth = 0;
 static thread_local DomDocument* js_dispatch_batch_document = nullptr;
 
