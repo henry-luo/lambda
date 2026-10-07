@@ -3073,7 +3073,8 @@ static bool radiant_input_commit_value(DomElement* elem, DocState* state,
     if (tc_is_text_control(elem)) {
         tc_set_value(elem, committed, strlen(committed));
     } else if (elem->form) {
-        elem->form->value = committed;
+        // the view borrows document-owned storage, never the commit's stack buffer.
+        elem->form->value = radiant_input_live_value(elem);
     }
     radiant_input_sync_range_position(elem, state, committed);
     dom_notify_mutation(DOM_JS_MUTATION_CONTROL_VALUE, (void*)elem, (void*)elem->parent);
@@ -3888,8 +3889,12 @@ extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
 
 extern "C" Item dom_engine_dispatch_event(Item node_item, Item type_item,
                                           Item bubbles_item, Item cancelable_item) {
-    DomElement* elem = radiant_dom_element_from_item(node_item, "DISPATCH_EVENT");
-    const char* type = fn_to_cstr(type_item);
+    // nested dispatch allocates before copying its name; retain the GC string (D5.3.3).
+    RootFrame roots(2);
+    Rooted<Item> node_root(roots, node_item);
+    Rooted<Item> type_root(roots, type_item);
+    DomElement* elem = radiant_dom_element_from_item(node_root.get(), "DISPATCH_EVENT");
+    const char* type = fn_to_cstr(type_root.get());
     if (!elem || !type || !type[0]) return radiant_bool_item(false);
     return radiant_bool_item(radiant_dispatch_event_with_flags_from_script(
         (void*)elem, type, is_truthy(bubbles_item), is_truthy(cancelable_item)));

@@ -443,6 +443,21 @@ Clicks introduce untimed barriers. A timed capture or whole-deck autoplay must
 provide an explicit dwell schedule for those barriers; there is no intrinsic
 wall-clock time for a presenter deciding when to click.
 
+The shipped Play control supplies that schedule through the positive finite
+`autoplay_dwell_ms` player option (default 3000 ms before each click build or
+slide advance). `autostart` activates only entry cues. Dwell time is separate
+from sampled cue time so completed visuals remain fixed while waiting. This
+policy stays in the Lambda reducer and procedural frame handlers
+(S12.1.1v2/S12.1.3, D7.5.3).
+
+The toolbar provides a native range input for 0.5×–4× playback in 0.25× steps,
+with an accessible label and a live multiplier readout. A positive finite rate
+scales cues, transitions and dwell on the same logical clock. On a speed event,
+sample using the old rate, then reanchor at that progress before applying the
+new rate. Pause state and the selected rate survive speed changes and Restart;
+manual navigation retains the rate. Missed-frame boundary timestamps divide
+remaining logical duration by the rate before carrying time to the next phase.
+
 ## 8. Player behavior and lifecycle
 
 One player instance owns its active slide, cue cursor, play state, transition
@@ -452,6 +467,7 @@ returns actions; a Lambda procedure performs them and records their results.
 | Situation / command | Proposed behavior |
 |---|---|
 | Activate a slide | Establish initial state, commit layout, then run entry cues. |
+| Play | Start automatic playback or resume a paused cue/transition/dwell; replay from slide 1 if finished. Repeated Play preserves the active clock. |
 | Advance while awaiting a click | Start the next click cue. |
 | Advance while a cue runs | Finish that cue immediately; require another command to start the next. |
 | Advance after the last cue | Start the next slide transition. |
@@ -467,6 +483,11 @@ returns actions; a Lambda procedure performs them and records their results.
 The first version does not require continuous negative-rate playback. Backward
 navigation is deterministic boundary reconstruction. A later reverse command
 can share the sampler once its event-crossing policy is defined.
+
+The toolbar's Restart command resets the deck; `restart-slide` resets only the
+current slide. Manual navigation cancels autoplay. Automatic playback stops at
+the final build and releases its frame request; reduced motion snaps animations
+while preserving the dwell schedule.
 
 Initial activation must occur in a procedure, never as a hidden effect of
 `page()`'s pure template body. An explicit Play control can bootstrap the first
