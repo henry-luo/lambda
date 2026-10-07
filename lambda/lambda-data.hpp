@@ -467,6 +467,7 @@ typedef struct TypeMap : Type {
     // so later initialization must detach instead of upgrading its NULL slots.
     bool is_transition_shared_shape;
     struct TypeMapTransition* transitions;
+    struct TypeMapRetypePlan* retype_plans;  // bounded plans owned by this immutable tree node
     // Tune6: immutable JS semantic metadata. Null is reserved for foreign or
     // Input TypeMaps; runtime JS families select it before publication and
     // shape transitions preserve it exactly.
@@ -555,6 +556,15 @@ typedef struct TypeMapTransition {
     TypeMap* target;
     struct TypeMapTransition* next;
 } TypeMapTransition;
+
+struct TypeMapRetypePlan {
+    const TypeMap* parent;
+    const ShapeEntry* source;
+    ShapeEntry* replacement;
+    TypeMap* target;
+    bool reuse_payload;
+    TypeMapRetypePlan* next;
+};
 
 // A shape flagged shared is reachable from more than one instance, so per-instance
 // structural or tag mutation must clone it first.
@@ -663,6 +673,27 @@ static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
 
 static inline int shape_entry_storage_size(const ShapeEntry* field) {
     return field ? shape_entry_storage(field)->byte_size : 0;
+}
+
+// D3.4.5: unchanged fields must retain their complete contracts and byte lanes.
+static inline bool typemap_payload_reusable(const TypeMap* old_type, const TypeMap* new_type,
+        const ShapeEntry* changed, const ShapeEntry* removed, ShapeEntry** replacement) {
+    *replacement = NULL;
+    ShapeEntry* old_field = old_type->shape;
+    ShapeEntry* new_field = new_type->shape;
+    while (old_field || new_field) {
+        if (old_field && old_field == removed) {
+            old_field = typemap_next_field(old_type, old_field); continue;
+        }
+        if (!old_field || !new_field || old_field->byte_offset < 0 ||
+                old_field->byte_offset != new_field->byte_offset ||
+                shape_entry_storage_size(old_field) != shape_entry_storage_size(new_field) ||
+                (old_field != changed && old_field->type != new_field->type)) return false;
+        if (old_field == changed) *replacement = new_field;
+        old_field = typemap_next_field(old_type, old_field);
+        new_field = typemap_next_field(new_type, new_field);
+    }
+    return !changed || *replacement;
 }
 
 static inline bool shape_entry_storage_fits_data(const ShapeEntry* field,

@@ -510,55 +510,48 @@ computed growth, retyping, deletion churn, lookup/update, and key/value loops.
 
 ### 10.8 Latest validation and release evidence — 2026-10-07
 
-The bounded tuning phase in §11 is implemented. Latest gates:
+The tuning in §§11–13 is implemented. Latest gates:
 
-- MVP: **30/30**; object/Map groups with forced GC and poisoning: **10/10**.
-- Shared Lambda/input baseline: **6,286/6,286**.
-- Full-JS Test262: **zero regressions or semantic failures**; **40,259 fully
-  passed + 2 retry-only** Unicode 10 identifier cases out of 40,261. This is
-  not an all-fully-passing result.
+- MVP: **32/32**, also **32/32** with forced GC and freed-memory poisoning.
+- Shared Lambda/input baseline: **6,288/6,288**.
+- Full-JS Test262: **40,261/40,261 fully passing after existing retries**.
+  One AST Unicode-identifier batch aborted; the runner recovered 80 lost tests
+  and two individual retries. A separate replay reproduces the timeout followed
+  by an abort on both the frozen old release and the candidate. That existing
+  full-JS batch issue remains unresolved; no harness changes were made.
 
-Release comparison: 15 alternating before/after pairs per workload, with a
-second control sample and Node in each round, after one discarded process per
-lane. **All 16 workload oracles and 960 measured outputs pass.** MIR is pinned;
-the table uses self-reported execution times, excluding MVP startup and
-compilation. Node's tiering during its workload is included.
+Release comparison: **15 alternating pairs across all 30 admitted workloads**,
+with an identical-control peer and fresh LJS, Node and available untyped Lambda
+references. **All 2,475 measured outputs and 165 discarded preflight outputs
+match.** Native MIR is pinned. Times below are self-reported execution medians;
+startup/initial compilation is excluded, and Node tiering during its workload
+is included. These are not warmed steady-state V8 measurements.
 
-| Workload | Before ms | Tuned ms | Node ms | Paired speedup |
-|---|---:|---:|---:|---:|
-| larceny\_deriv | 81.871 | 54.438 | 27.544 | 1.52× |
-| larceny\_gcbench | 450.636 | 242.265 | 36.480 | 1.89× |
-| js\_micro\_lit | 79.198 | 0.152 | 4.822 | 520.46× |
-| js\_micro\_named | 36.264 | 36.074 | 7.776 | 1.00× |
-| js\_micro\_args\_ctl | 42.334 | 16.120 | 4.360 | 2.27× |
-| js\_micro\_args\_fp | 49.888 | 17.760 | 4.249 | 2.68× |
-| object\_fields | 3.951 | 3.748 | 3.573 | 1.05× |
-| object\_growth | 5.116 | 5.942 | 11.379 | 0.96× |
-| object\_retype | 61.197 | 55.000 | 2.511 | 1.05× |
-| object\_delete | 4.563 | 4.147 | 2.473 | 1.13× |
-| map\_lookup | 45.849 | 26.845 | 10.235 | 1.70× |
-| map\_iteration | 2.834 | 2.680 | 14.548 | 1.02× |
+| Workload | Before ms | Tuned ms | LJS ms | Untyped Lambda ms | Node ms | Paired speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| diviter | 2728.953 | 271.369 | 624.172 | 271.065 | 479.051 | **10.02×** |
+| pnpoly | 193.978 | 30.556 | 86.656 | 13.430 | 6.428 | **6.18×** |
 
-Speedup is the median of paired ratios; the time columns are independent
-medians. Host load was high (1-minute load **84.9 → 57.4**, eight logical CPUs).
-The clear gains are `deriv`, `gcbench`, `lit`, the two argument cases and Map
-lookup. Small changes in named fields, growth, retyping, deletion and iteration
-remain inconclusive. The four numeric/array/call/string controls also show no
-resolved change. Per-round control/control ratios and paired intervals are
-retained in the artifact; these measurements establish the bundle's gains,
-not each individual change's contribution.
+Speedup is the median of paired ratios; time columns are independent medians.
+The 95% paired-bootstrap intervals for tuned/before time are **0.0987–0.1004**
+and **0.1520–0.1652**, respectively. Their identical-control paired speedups are
+**1.000×** and **1.005×**; both gains also hold against that second control.
+The other 28 workloads have paired speedups of **0.984–1.392×**, with no material
+slowdown. The apparent `fib` gain does not hold against the identical-control
+peer and is not attributed to this change. Small movements remain inconclusive.
+One-minute host load was **49.2 → 4.7** on eight logical CPUs.
 
-The `lit` fast path removes allocation/property calls and keeps its accumulation
-in a proven integer lane. Broader shape polymorphism and retyping performance
-remain tuning work. `gcbench` includes the final long-lived traversal in every
-lane; `named` combines its two original loops.
+`diviter` now matches untyped Lambda and is about **1.77× faster than Node**.
+`pnpoly` remains **2.28× slower than untyped Lambda** and **4.75× slower than
+Node**; its remaining generic element coercion and scalar-ownership costs need
+separate profiling. The patch does not introduce numeric-array specialization.
 
-Evidence: [`tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/tuning_mir_20261007.json).
-Exact binaries, matched sources, raw output, fresh MIR and gate logs are under
-`temp/mvp_lmd_tuning/`; the latest paired run is `confirm/`.
-Release SHA-256: `d0ac0f6188f72c48f92afe5f3757583b5fa5e3b254e36dd0a2f3376174f96d46`.
-Implementation boundaries are recorded in
-[`JS_MVP_Lmd_Objects.md`](../impl/JS_MVP_Lmd_Objects.md#5-bounded-tuning-implementation).
+Evidence: [`numeric_tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/numeric_tuning_mir_20261007.json).
+Exact binaries, matched sources, finalized MIR, paired runner, raw outputs and
+gate/replay logs are in `temp/mvp_lmd_numeric_tuning/`; the final run is `confirm/`.
+Release SHA-256: `82ddfa870edc8283471cd4c0b3b40e16cae030e357cbdd4a74424ff2ce07e110`.
+Root causes and bounds are recorded in
+[JS_MVP_Lmd_Objects §7](../impl/JS_MVP_Lmd_Objects.md#7-numeric-loops-and-array-parameters).
 
 ## 11. Object and Map tuning
 
@@ -584,13 +577,58 @@ UTF8/WTF8 identity remains shared with Lambda (**S8.2.2v5**, **D4.6.1v4**);
 JS Number behavior remains governed by **D2.2.5** and **S1.11**. VMap,
 `__proto__`, descriptors, accessors and proxies remain outside the phase.
 
-The current bounds are one shape prediction per binding/return, four fields
-for scalar replacement, and 24 AST nodes for expression inlining. Escaping or
-mutated objects retain allocation; loop-body inlining and general polymorphic
-guard chains remain future work.
+The bounds and remaining tuning opportunities are recorded in the
+[implementation record](../impl/JS_MVP_Lmd_Objects.md#6-bounded-tuning-implementation).
+Section 12 extends these optimizations.
 
 Acceptance requires the existing MVP and forced-GC cases, shared-runtime
 regression gates, and output-verified release comparisons against the archived
 binary. Pin MIR and compare self-reported workload times; use alternating
 control/candidate samples and a control/control noise check. The six newly
 enabled workloads and existing object/Map cases form the performance set.
+
+## 12. Further object and Map tuning
+
+Implemented the following bounded extensions:
+
+1. Reuse shared retype plans, including destination offsets and payload reuse
+   eligibility, to avoid repeating structural work on established transitions.
+2. Preserve native field values through numeric operations and stores, with
+   guarded fallback for changing field types. Hoist guards only when effects
+   prove the shape stable.
+3. Track small immutable shape sets, including recursive child fields, to
+   handle common leaf/branch layouts without generic property lookup.
+4. Extend bounded inlining to small statement/loop bodies at loop call sites,
+   and scalar replacement to local objects with static writes, preserving
+   evaluation order and identity.
+5. Separate nonallocating Map operations from allocation/error paths and reuse
+   lookup information during insertion.
+
+Shared immutable shapes and bounded guards follow **D3.4.3v5–D3.4.6** and
+**D8.4.1v2**; native values and calls follow **D2.2.5** and **D8.4.2v2**.
+Precise roots and payload reloads across safepoints remain required (**D5.3**).
+Canonical UTF8/WTF8 identity, SameValueZero, order and live iteration retain
+their existing contracts (**S8.2.2v5**, **S1.11**). The feature exclusions in
+§10.7 remain. Apply §11's correctness and paired release measurement gates;
+report each implemented bound and any unresolved performance result.
+
+## 13. Numeric loops and array parameters
+
+Implemented two corrections for the `diviter` and `pnpoly` gaps found by
+the broader comparison:
+
+1. Preserve the callee's numeric region during inlining so proven integer
+   arithmetic does not acquire conversions from its caller.
+2. Retain complete binding-kind facts through parameter reads and inline
+   snapshots, allowing known arrays to use direct index handling.
+
+Remaining work is to measure element coercion and ownership costs before
+extending numeric-array specialization. Bounds, changing element kinds,
+aliases and precise scalar homes must remain valid.
+
+These are retained-analysis and representation corrections (**D8.2.4v2**,
+**D8.2.5v3**, **D8.2.6**, **D2.2.5**, **D8.4.1v2**, **D5.3**).
+Use the frozen current release as control,
+pin native MIR, check outputs, and compare self-reported times with alternating
+pairs and an identical-control lane. Include scalar, object, Map and array
+controls plus the existing MVP, forced-GC, Lambda and Test262 gates.

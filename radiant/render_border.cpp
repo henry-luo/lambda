@@ -404,12 +404,23 @@ void constrain_border_radii(BorderProp* border, float width, float height) {
  */
 void resolve_border_radius_percentages(Corner* radius, float width, float height) {
     if (!radius) return;
+    if (radius->expressions) {
+        CornerExpressions* expressions = radius->expressions;
+        *radius = expressions->computed;
+        radius->expressions = lam::up(expressions);
+    }
     for (int i = 0; i < 4; i++) {
-        if (radius->horizontal_percent[i]) {
+        if (radius->expressions && radius->expressions->horizontal[i]) {
+            radius->horizontal[i] = fmaxf(0.0f, radiant::resolve_computed_length_percentage(
+                radius->expressions->horizontal[i], width));
+        } else if (radius->horizontal_percent[i]) {
             radius->horizontal[i] = radius->horizontal[i] * width / 100.0f;
             radius->horizontal_percent[i] = false;
         }
-        if (radius->vertical_percent[i]) {
+        if (radius->expressions && radius->expressions->vertical[i]) {
+            radius->vertical[i] = fmaxf(0.0f, radiant::resolve_computed_length_percentage(
+                radius->expressions->vertical[i], height));
+        } else if (radius->vertical_percent[i]) {
             radius->vertical[i] = radius->vertical[i] * height / 100.0f;
             radius->vertical_percent[i] = false;
         }

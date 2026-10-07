@@ -19,6 +19,18 @@ protected:
     }
 };
 
+TEST_F(UrlTest, DocumentIdentityIgnoresOnlyTheFragmentAndKeepsEscapedHashes) {
+    Url* base = url_parse("https://example.com/a%23b?q=1#old"); ASSERT_NE(base, nullptr);
+    const char* references[] = {"#new", "a%23b?q=1#new", "a%23b?q=2#new", "a#b?q=1", "https://other.com/a%23b?q=1#new"};
+    const bool matches[] = {true, true, false, false, false};
+    for (size_t i = 0; i < sizeof(matches) / sizeof(matches[0]); i++) {
+        Url* target = url_parse_with_base(references[i], base); ASSERT_NE(target, nullptr);
+        EXPECT_EQ(url_equals_without_fragment(base, target), matches[i]);
+        EXPECT_FALSE(url_equals(base, target)); url_destroy(target);
+    }
+    EXPECT_FALSE(url_equals_without_fragment(base, nullptr)); url_destroy(base);
+}
+
 TEST_F(UrlTest, BasicUrlParsing) {
     // Test basic URL parsing functionality
     Url* url = url_parse("https://example.com/path");

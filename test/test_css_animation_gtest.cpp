@@ -170,6 +170,7 @@ TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
             dom_set_document(nullptr);
             runtime_cleanup(runtime);
             if (document) dom_document_destroy(document);
+            css_property_system_cleanup();
             if (pool) pool_destroy(pool);
         }
     } cleanup = {&runtime};
@@ -230,6 +231,20 @@ TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
     Rooted<Item> rules_root(roots, dom_cssom_stylesheet_get_css_rules(sheet_root.get()));
     Rooted<Item> nested_root(roots, dom_cssom_rule_get_css_rules(rule_root.get()));
     Rooted<Item> key_root(roots, js_name_item("parentRule"));
+    ASSERT_GT(css_property_register_custom("--probe", cleanup.pool), 0);
+    // legacy native property IDs must not collapse distinct CSSOM DOMString names.
+    key_root.set(js_make_string_len("--probe\0a", 9));
+    style_key_root.set(js_name_item("10px"));
+    EXPECT_FALSE(item_is_error(dom_cssom_rule_decl_set_value(inline_root.get(),
+        key_root.get(), style_key_root.get(), ItemNull)));
+    key_root.set(js_name_item("--probe"));
+    style_key_root.set(js_name_item("20px"));
+    EXPECT_FALSE(item_is_error(dom_cssom_rule_decl_set_value(inline_root.get(),
+        key_root.get(), style_key_root.get(), ItemNull)));
+    key_root.set(js_make_string_len("--probe\0a", 9));
+    EXPECT_STREQ(fn_to_cstr(dom_cssom_rule_decl_get_value(inline_root.get(), key_root.get())), "10px");
+    key_root.set(js_name_item("parentRule"));
+    style_key_root.set(js_name_item("style"));
     ASSERT_EQ(get_type_id(declaration_root.get()), LMD_TYPE_VMAP);
     EXPECT_EQ(sheet_root.get().item, dom_cssom_wrap_stylesheet(sheet).item);
     EXPECT_EQ(rule_root.get().item, dom_cssom_stylesheet_rule_at(

@@ -1197,12 +1197,7 @@ static bool selector_matcher_matches_local_link(SelectorMatcher* matcher,
         if (target) url_destroy(target);
         return false;
     }
-    String* target_page = url_serialize_without_fragment(target);
-    String* document_page = url_serialize_without_fragment(element->doc->url);
-    bool matches = target_page && document_page &&
-        string_eq(target_page, document_page);
-    url_free_string(target_page);
-    url_free_string(document_page);
+    bool matches = url_equals_without_fragment(target, element->doc->url);
     url_destroy(target);
     return matches;
 }

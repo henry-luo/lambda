@@ -259,7 +259,8 @@ const CssPropertyRegistration* css_find_script_property_registration(DomDocument
     const char* name, size_t name_length);
 const CssPropertyRegistration* css_find_document_property_registration(DomDocument* doc,
     const char* name, size_t name_length = (size_t)-1);
-typedef bool (*CssRegistrationVisitor)(void*, const CssPropertyRegistration*);
+// script registrations preserve the complete DOMString, including embedded NULs.
+typedef bool (*CssRegistrationVisitor)(void*, const CssPropertyRegistration*, size_t name_length);
 bool css_visit_document_property_registrations(DomDocument* doc,
     CssRegistrationVisitor visitor, void* context);
 bool css_register_document_property(DomDocument* doc,

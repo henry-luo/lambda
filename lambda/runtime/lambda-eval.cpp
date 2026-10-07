@@ -13150,29 +13150,15 @@ static void container_rebuild_data_install(Container* container, void** data_slo
 // tree target (Impl_Map_Transition_Coverage P2).
 static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_slot,
         Container* container, TypeMap* old_map_type, TypeMap* new_type,
-        ShapeEntry* changed_entry, Item new_value, int fixed_slot_count, ShapeEntry* removed_entry = NULL) {
+        ShapeEntry* changed_entry, Item new_value, int fixed_slot_count, ShapeEntry* removed_entry = NULL,
+        const TypeMapRetypePlan* plan = NULL) {
     // a heap-owned payload can stay in place when every surviving field keeps its lane.
     // validate the entire layout before the no-GC value/type commit (D3.4.5, D5.3).
     if (container->is_heap && *data_slot && !fixed_slot_count &&
             new_type->byte_size <= *cap_slot) {
-        ShapeEntry* replacement = NULL;
-        ShapeEntry* old_field = old_map_type->shape;
-        ShapeEntry* new_field = new_type->shape;
-        bool compatible = true;
-        while (old_field || new_field) {
-            if (old_field && old_field == removed_entry) {
-                old_field = typemap_next_field(old_map_type, old_field); continue;
-            }
-            if (!old_field || !new_field || old_field->byte_offset < 0 ||
-                    old_field->byte_offset != new_field->byte_offset ||
-                    shape_entry_storage_size(old_field) != shape_entry_storage_size(new_field) ||
-                    (old_field != changed_entry && old_field->type != new_field->type)) {
-                compatible = false; break;
-            }
-            if (old_field == changed_entry) replacement = new_field;
-            old_field = typemap_next_field(old_map_type, old_field);
-            new_field = typemap_next_field(new_type, new_field);
-        }
+        ShapeEntry* replacement = plan ? plan->replacement : NULL;
+        bool compatible = plan ? plan->reuse_payload :
+            typemap_payload_reusable(old_map_type, new_type, changed_entry, removed_entry, &replacement);
         TypeId storage = replacement ? shape_entry_storage_type_id(replacement) : LMD_TYPE_NULL;
         // these simple stores neither allocate nor retain a borrowed numeric home.
         bool immediate_store = !replacement || (replacement->type == type_info[storage].type &&
@@ -13429,9 +13415,10 @@ bool map_shape_set(Map* map, String* key, Item value) {
     if (field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
     Input* tree = runtime_shape_tree();
-    TypeMap* target = tree ? type_tree_retype_field(tree, type, field, tid) : NULL;
+    const TypeMapRetypePlan* plan = NULL;
+    TypeMap* target = tree ? type_tree_retype_field(tree, type, field, tid, &plan) : NULL;
     if (target) return container_move_to_type(&map->type, &map->data, &map->data_cap,
-        map, type, target, field, value, 0);
+        map, type, target, field, value, 0, NULL, plan);
     return map_rebuild_for_type_change(&map->type, &map->data, &map->data_cap,
         LMD_TYPE_MAP, map, field, type_info[tid].type, value);
 }
@@ -14683,11 +14670,12 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             if (!map_type->js_meta && map_type->type_id == map_type_id &&
                     (map_type_id != LMD_TYPE_MAP || map_item.map->map_kind == MAP_KIND_PLAIN)) {
                 Input* tree = runtime_shape_tree();
+                const TypeMapRetypePlan* plan = NULL;
                 TypeMap* target = tree
-                    ? type_tree_retype_field(tree, map_type, entry, value_type) : NULL;
+                    ? type_tree_retype_field(tree, map_type, entry, value_type, &plan) : NULL;
                 if (target) {
                     container_move_to_type(type_slot, data_slot, cap_slot, cont, map_type,
-                        target, entry, value, 0);
+                        target, entry, value, 0, NULL, plan);
                     return ItemNull;
                 }
             }

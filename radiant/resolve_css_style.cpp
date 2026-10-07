@@ -394,24 +394,26 @@ static float resolve_layout_transform_numeric(void* context, const CssValue* val
     return angle ? math_degrees_to_radians(result) : result;
 }
 
-static void normalize_transform_math_lengths(LayoutContext* context, CssValue* value) {
+static void normalize_layout_math_lengths(LayoutContext* context, CssValue* value,
+    CssPropertyCode property = CSS_PROPERTY_TRANSFORM) {
     if (!value) return;
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
         float degrees;
         if (!resolve_css_angle_degrees(value, &degrees)) {
-            value->data.length.value = resolve_layout_transform_length(context, value);
+            value->data.length.value = context ? resolve_length_value(context, property, value)
+                : resolve_layout_transform_length(nullptr, value);
             value->data.length.unit = CSS_UNIT_PX;
         }
     } else if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int index = 0; index < value->data.list.count; index++)
-            normalize_transform_math_lengths(context, value->data.list.values[index]);
+            normalize_layout_math_lengths(context, value->data.list.values[index], property);
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
         for (int index = 0; index < value->data.function->arg_count; index++)
-            normalize_transform_math_lengths(context, value->data.function->args[index]);
+            normalize_layout_math_lengths(context, value->data.function->args[index], property);
     }
 }
 
-float radiant::resolve_computed_transform_length(const CssValue* value, float reference_size) {
+float radiant::resolve_computed_length_percentage(const CssValue* value, float reference_size) {
     LayoutContext context = {};
     context.transform_length_math = true;
     context.transform_percentage_base = reference_size;
@@ -493,7 +495,7 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
         term->expression = lam::own(css_value_clone_owned(argument, pool));
         if (!term->expression) { radiant::destroy_transform_function_payload(pool, &function); return nullptr; }
         // D4.5.1v4: copied computed trees cannot retain variable-substitution scratch values.
-        normalize_transform_math_lengths(lycon, term->expression);
+        normalize_layout_math_lengths(lycon, term->expression);
     }
     TransformFunction* stored = document_pool
         ? (TransformFunction*)pool_calloc(document_pool, sizeof(TransformFunction))
@@ -2803,8 +2805,9 @@ static bool resolve_css_line_decoration_list(LayoutContext* lycon,
 }
 
 static bool parse_border_radius_component(LayoutContext* lycon, int prop_id, const CssValue* value,
-                                          float* out_radius, bool* out_percent) {
-    if (!value || !out_radius || !out_percent) return false;
+                                          float* out_radius, bool* out_percent, const CssValue** out_expression) {
+    if (!value || !out_radius || !out_percent || !out_expression) return false;
+    *out_expression = nullptr;
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
         *out_radius = (float)value->data.percentage.value;
         *out_percent = true;
@@ -2815,16 +2818,31 @@ static bool parse_border_radius_component(LayoutContext* lycon, int prop_id, con
         *out_percent = false;
         return true;
     }
+    if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+        if (layout_css_value_has_percentage(value)) {
+            CssValue* computed = css_value_clone_owned(value, layout_prop_pool(lycon));
+            if (!computed) return false;
+            // computed font/viewport lengths inherit unchanged; percentages use the recipient's box.
+            normalize_layout_math_lengths(lycon, computed, (CssPropertyCode)prop_id);
+            *out_expression = computed;
+            *out_radius = 0.0f;
+        } else {
+            *out_radius = fmaxf(0.0f, resolve_length_value(lycon, prop_id, value));
+        }
+        *out_percent = false;
+        return true;
+    }
     return false;
 }
 
 static bool expand_border_radius_values(LayoutContext* lycon, int prop_id, CssValue** values, int count,
-                                        float out_radius[4], bool out_percent[4]) {
+                                        float out_radius[4], bool out_percent[4], const CssValue* out_expression[4]) {
     if (!values || count <= 0 || count > 4) return false;
     float parsed[4] = {0, 0, 0, 0};
     bool parsed_percent[4] = {false, false, false, false};
+    const CssValue* parsed_expression[4] = {};
     for (int i = 0; i < count; i++) {
-        if (!parse_border_radius_component(lycon, prop_id, values[i], &parsed[i], &parsed_percent[i])) {
+        if (!parse_border_radius_component(lycon, prop_id, values[i], &parsed[i], &parsed_percent[i], &parsed_expression[i])) {
             return false;
         }
     }
@@ -2838,20 +2856,36 @@ static bool expand_border_radius_values(LayoutContext* lycon, int prop_id, CssVa
         uint8_t source = expansion[count - 1][corner];
         out_radius[corner] = parsed[source];
         out_percent[corner] = parsed_percent[source];
+        out_expression[corner] = parsed_expression[source];
     }
     return true;
 }
 
-static void set_corner_radius_values(Corner* radius, int corner_index,
+static void set_corner_radius_values(LayoutContext* lycon, Corner* radius, int corner_index,
                                      float radius_x, bool percent_x,
                                      float radius_y, bool percent_y,
-                                     int64_t specificity) {
+                                     int64_t specificity,
+                                     const CssValue* expression_x = nullptr,
+                                     const CssValue* expression_y = nullptr) {
     if (!radius || corner_index < 0 || corner_index >= 4) return;
     radius->horizontal[corner_index] = radius_x;
     radius->vertical[corner_index] = radius_y;
     radius->horizontal_percent[corner_index] = percent_x;
     radius->vertical_percent[corner_index] = percent_y;
     radius->specificities[corner_index] = specificity;
+    if ((expression_x || expression_y) && !radius->expressions) {
+        radius->expressions = lam::up((CornerExpressions*)pool_calloc(layout_prop_pool(lycon), sizeof(CornerExpressions)));
+        if (radius->expressions) {
+            radius->expressions->computed = *radius;
+            radius->expressions->computed.expressions = nullptr;
+        }
+    }
+    if (radius->expressions) {
+        set_corner_radius_values(lycon, &radius->expressions->computed, corner_index,
+            radius_x, percent_x, radius_y, percent_y, specificity);
+        radius->expressions->horizontal[corner_index] = lam::up(expression_x);
+        radius->expressions->vertical[corner_index] = lam::up(expression_y);
+    }
 }
 
 static bool apply_border_radius_shorthand(LayoutContext* lycon, int prop_id, Corner* radius,
@@ -2892,11 +2926,13 @@ static bool apply_border_radius_shorthand(LayoutContext* lycon, int prop_id, Cor
     }
     float radius_x[4], radius_y[4];
     bool percent_x[4], percent_y[4];
-    if (!expand_border_radius_values(lycon, prop_id, horiz_values, horiz_count, radius_x, percent_x)) return false;
-    if (!expand_border_radius_values(lycon, prop_id, vert_values, vert_count, radius_y, percent_y)) return false;
+    const CssValue* expression_x[4] = {}, *expression_y[4] = {};
+    if (!expand_border_radius_values(lycon, prop_id, horiz_values, horiz_count, radius_x, percent_x, expression_x)) return false;
+    if (!expand_border_radius_values(lycon, prop_id, vert_values, vert_count, radius_y, percent_y, expression_y)) return false;
     for (int i = 0; i < 4; i++) {
         if (specificity >= radius->specificities[i]) {
-            set_corner_radius_values(radius, i, radius_x[i], percent_x[i], radius_y[i], percent_y[i], specificity);
+            set_corner_radius_values(lycon, radius, i, radius_x[i], percent_x[i], radius_y[i], percent_y[i], specificity,
+                expression_x[i], expression_y[i]);
         }
     }
     return true;
@@ -2914,12 +2950,16 @@ static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner*
             BorderProp* parent = keyword == CSS_VALUE_INHERIT
                 ? parent_border_prop(lycon) : nullptr;
             const Corner* source = parent ? &parent->radius : nullptr;
-            set_corner_radius_values(radius, corner_index,
+            const CornerExpressions* expressions = source ? source->expressions : nullptr;
+            if (expressions) source = &expressions->computed;
+            set_corner_radius_values(lycon, radius, corner_index,
                 source ? source->horizontal[corner_index] : 0.0f,
                 source ? source->horizontal_percent[corner_index] : false,
                 source ? source->vertical[corner_index] : 0.0f,
                 source ? source->vertical_percent[corner_index] : false,
-                specificity);
+                specificity,
+                expressions ? expressions->horizontal[corner_index] : nullptr,
+                expressions ? expressions->vertical[corner_index] : nullptr);
             return true;
         }
     }
@@ -2938,17 +2978,20 @@ static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner*
     if (count <= 0) return false;
     float radius_x = 0, radius_y = 0;
     bool percent_x = false, percent_y = false;
-    if (!parse_border_radius_component(lycon, prop_id, values[0], &radius_x, &percent_x)) return false;
+    const CssValue* expression_x = nullptr, *expression_y = nullptr;
+    if (!parse_border_radius_component(lycon, prop_id, values[0], &radius_x, &percent_x, &expression_x)) return false;
     if (count == 2) {
-        if (!parse_border_radius_component(lycon, prop_id, values[1], &radius_y, &percent_y)) return false;
+        if (!parse_border_radius_component(lycon, prop_id, values[1], &radius_y, &percent_y, &expression_y)) return false;
     } else {
         radius_y = radius_x;
         percent_y = percent_x;
+        expression_y = expression_x;
     }
     if (corner_index < 0 || corner_index >= 4) return false;
     int64_t current_specificity = radius->specificities[corner_index];
     if (specificity >= current_specificity) {
-        set_corner_radius_values(radius, corner_index, radius_x, percent_x, radius_y, percent_y, specificity);
+        set_corner_radius_values(lycon, radius, corner_index, radius_x, percent_x, radius_y, percent_y, specificity,
+            expression_x, expression_y);
     }
     return true;
 }
@@ -3899,9 +3942,11 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
                 // Parent has given height but content_height not yet calculated
                 result = percentage * lycon->block.parent->given_height / 100.0;
-            } else if (!lycon->block.parent && lycon && lycon->height > 0) {
+            } else if (!lycon->block.parent && (lycon->height > 0.0f ||
+                    (lycon->selected_view_tree && lycon->height == 0.0f))) {
                 // No parent context (root html element) - use viewport height
                 // Layout uses logical pixels, so use lycon->height without raster scaling.
+                // a selected view also carries definite zero-sized containing blocks.
                 result = percentage * lycon->height / 100.0;
             } else {
                 // Per CSS 2.1 §10.7: max-height percentage → 'none', min-height percentage → '0'
