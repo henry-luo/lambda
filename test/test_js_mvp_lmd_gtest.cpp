@@ -8,6 +8,7 @@
 #include "lambda/runtime/gc/gc_heap.h"
 #include "lib/file.h"
 #include "lib/mem.h"
+#include "lib/hashmap.h"
 #include <math.h>
 #include <string.h>
 
@@ -276,7 +277,7 @@ TEST_F(JsMvpLmd, SelfTailCallsPreserveActivationAndArguments) {
     error("function f(n){if(n===0)return 0;return f(n+1)+1} f(1)", "execution failed");
 }
 TEST_F(JsMvpLmd, RejectsUnsupportedUnitBeforeExecution) {
-    error("if(false){({a:1})}", "scope");
+    error("if(false){({get a(){return 1}})}", "scope");
     error("function f(){return ()=>x; var x=1} 1", "capture");
     error("{let x=1; function f(){return x}} 1", "capture");
     error("function f(a=1){return a} 1", "scope");
@@ -331,4 +332,154 @@ TEST_F(JsMvpLmd, SharedGcDoesNotEnterJsCallbacks) {
     heap_gc_collect();
     EXPECT_EQ(js_gc_callback_entries, 0);
     EXPECT_EQ(get_type_id(mvp_lmd_result(execution)), LMD_TYPE_ARRAY);
+}
+TEST_F(JsMvpLmd, PlainObjectDataProperties) {
+    boolean("let x=3;let o={x,a:1,['b']:2,n:{c:4},u:undefined}; o.x===3 && o['a']===1 && o.b===2 && o.n.c===4 && o.missing===undefined && Object.hasOwn(o,'u') && !Object.hasOwn(o,'missing')");
+    boolean("let o={x:1,x:2}; o.x+=3; let old=o.x++; o.x*=2; o.x===12 && old===5 && delete o.x && !('x' in o) && delete o.x");
+    boolean("let o={a:0,b:null,c:2};o.a ||= 3;o.b ?""?= 4;o.c &&= 5; o.a===3 && o.b===4 && o.c===5");
+    boolean("let o={};o[true]=1;o[null]=2;o[undefined]=3;o[-0]=4;o[1.5]=5; o.true===1 && o.null===2 && o.undefined===3 && o['0']===4 && o['1.5']===5");
+    boolean("let o={f:(x)=>x+1}; o.f(2)===3 && typeof o==='object' && o===o && o!=={}");
+    boolean("let o={a:5e-324};let old=o.a;o.a='s';o.a=== 's' && old===5e-324");
+}
+TEST_F(JsMvpLmd, ObjectEvaluationOrderAndImmutableShapes) {
+    boolean("let calls=0;let o={x:1};function key(){calls++;return 'x'}function rhs(){o.x='changed';o.y=4;return 2}o[key()]+=rhs();calls===1 && o.x===3 && o.y===4");
+    boolean("let o={x:1};let alias=o;function rhs(){o={x:9};return 2}alias.x=rhs();alias.x===2 && o.x===9");
+    Item value = run("function make(){return {x:1,b:true}}let a=make();let b=make();a.x='s';[a,b,make()]");
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY);
+    Array* rows = value.array;
+    EXPECT_NE(rows->items[0].map->type, rows->items[1].map->type);
+    EXPECT_EQ(rows->items[1].map->type, rows->items[2].map->type);
+    boolean("function make(){return {x:1,b:true}}let a=make();let b=make();a.x='s';b.x='t';a.x==='s' && b.x==='t'");
+    value = run("function make(){return {x:1,b:true}}let a=make();let b=make();a.x='s';b.x='t';[a,b]");
+    EXPECT_EQ(value.array->items[0].map->type, value.array->items[1].map->type);
+    boolean("let a={x:1,y:2};let b={x:3,y:4};delete a.x;a.x=5;Object.keys(a)[0]==='y' && Object.keys(a)[1]==='x' && b.x===3");
+    value = run("let o={x:1};delete o.x;o");
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_MAP);
+    EXPECT_EQ(value.map->data, nullptr);
+    heap_gc_collect();
+    EXPECT_EQ(value.map->data, nullptr);
+}
+TEST_F(JsMvpLmd, ObjectProjectionAndCanonicalKeys) {
+    boolean("let o={b:1,'10':10,'2':2,a:3,'01':4,'4294967295':5};let k=Object.keys(o);k.length===6 && k[0]==='2' && k[1]==='10' && k[2]==='b' && k[3]==='a' && k[4]==='01' && k[5]==='4294967295'");
+    boolean("let o={'':1,'a\\0b':2};o['']===1 && o['a\\0b']===2 && Object.keys(o)[1].length===3");
+    boolean("let hi='\\uD83D',lo='\\uDE00';let o={};o[hi+lo]=3;o['\\uD83D']=4;o['\\uDE00']=5;o['😀']===3 && o[hi]===4 && o[lo]===5 && Object.keys(o).length===3");
+    boolean("let o={};o['é']=1;o['e\\u0301']=2;o['é']===1 && o['e\\u0301']===2");
+    boolean("let o={a:1,b:2};let keys=Object.keys(o);let values=Object.values(o);let entries=Object.entries(o);o.a=9;o.c=3;keys.length===2 && values[0]===1 && entries[0][0]==='a' && entries[0][1]===1 && entries[0]!==entries[1]");
+    numeric("let total=0;for(let [k,v] of Object.entries({a:1,b:2})){total+=v}total", 3);
+}
+TEST_F(JsMvpLmd, MapKeysAndMutation) {
+    boolean("let m=new Map();m.set('a',1).set('b',undefined);m.size===2 && m.get('a')===1 && m.has('b') && m.get('b')===undefined && !m.has('c') && m.get('c')===undefined");
+    boolean("let m=new Map();m.set(1,'int');m.set(1/1,'float');m.set(-0,'zero');m.set(0,'same');m.set(NaN,3);m.set(0/0,4);m.size===3 && m.get(1)==='float' && m.get(0)==='same' && m.get(NaN)===4");
+    boolean("let m=new Map();let a={},b={},c=[],f=()=>1;m.set(a,1).set(b,2).set(c,3).set(f,4).set(null,5).set(undefined,6).set(true,7);m.size===7 && m.get(a)===1 && m.get(b)===2 && m.get(c)===3 && m.get(f)===4 && m.get(null)===5 && m.get(undefined)===6 && m.get(true)===7");
+    boolean("let m=new Map();m.set('\\uD83D'+'\\uDE00',3);m.set('😀',4);m.size===1 && m.get('😀')===4");
+    boolean("let m=new Map();m.x=9;m.set('x',1);Object.keys(m)[0]==='x' && m.x===9 && m.get('x')===1 && m.delete('x') && !m.delete('x') && m.x===9 && m.size===0");
+    boolean("let m=new Map();m.set('x',5e-324);let old=m.get('x');m.set('x',2);old===5e-324 && m.get('x')===2 && m.clear()===undefined && m.size===0");
+}
+TEST_F(JsMvpLmd, LiveMapIteration) {
+    numeric("let m=new Map();m.set('a',1).set('b',2);let sum=0;for(let [k,v] of m){sum+=v}sum", 3);
+    boolean("let m=new Map();m.set('a',1).set('b',2).set('c',3);let s='';for(let [k,v] of m.entries()){s+=k+v;if(k==='a'){m.delete('b');m.set('c',4);m.set('d',5)}}s==='a1c4d5'");
+    boolean("let m=new Map();m.set('a',1).set('b',2);let s='';for(let k of m.keys()){s+=k;if(k==='a'){m.delete('b');m.set('b',3)}}s==='ab'");
+    numeric("let m=new Map();m.set('a',1).set('b',2);let s=0;for(let v of m.values()){s+=v;if(v===1){m.clear();m.set('c',4)}}s", 5);
+    numeric("let m=new Map();m.set(1,1).set(2,2);let n=0;for(let a of m.keys()){for(let b of m.values()){n+=a*b}}n", 9);
+    boolean("let m=new Map();m.set('a',1).set('b',2);let a=[];for(let pair of m){a[a.length]=pair}a[0]!==a[1] && a[0][0]==='a' && a[1][0]==='b'");
+    numeric("let m=new Map();m.set(1,1).set(2,2).set(3,3);let s=0;outer:for(let v of m.values()){if(v===1)continue outer;s+=v;if(v===2)break outer}s", 2);
+}
+TEST_F(JsMvpLmd, ObjectAndMapScopeBoundary) {
+    error("({get x(){return 1}})", "scope");
+    error("({__proto__:null})", "scope");
+    error("let o={};o.__proto__", "scope");
+    error("let o={};o['__'+'proto__']=1", "capability");
+    error("new Map([])", "capability");
+    error("let m=new Map();let f=m.get", "capability");
+    error("let m=new Map();m.set=()=>1", "capability");
+    error("let o={};o.toString", "capability");
+    error("let o={};o[{}]=1", "capability");
+    error("for(let k in {}){}", "scope");
+    numeric("let Object={keys:()=>7};Object.keys({})", 7);
+    numeric("let Map=()=>7;Map()", 7);
+    error("let Map=()=>7;new Map()", "capability");
+}
+static void unexpected_js_native_gc(void*, gc_heap_t*) { js_gc_callback_entries++; }
+static void unexpected_js_native_destroy(void*) { js_gc_callback_entries++; }
+static void (*ordered_index_free)(void*);
+static int ordered_index_frees;
+static void count_ordered_index_free(void* allocation) {
+    ordered_index_frees++;
+    ordered_index_free(allocation);
+}
+TEST_F(JsMvpLmd, OrderedMapPreciseEdgesAndNativeCleanup) {
+    Item result = run("let m=new Map();let o={x:5e-324};m.set(o,[o,()=>1]);m.set('wide',5e-324);m");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    EXPECT_EQ(result.map->map_kind, MAP_KIND_ORDERED);
+    EXPECT_EQ(context_capsule(context, CONTEXT_CAPSULE_JS_RUNTIME), nullptr);
+    gc_heap_t* gc = context->heap->gc;
+    js_gc_callback_entries = 0;
+    gc->js_native_trace = unexpected_js_native_gc;
+    gc->js_native_destroy = unexpected_js_native_destroy;
+    heap_gc_collect();
+    EXPECT_EQ(js_gc_callback_entries, 0);
+    String* wide = heap_strcpy("wide", 4);
+    Item read = mvp_lmd_map_call(result, Item{.item = mvp_lmd_method_token(1)}, Item{.item = s2it(wide)}, ItemNull);
+    EXPECT_EQ(it2d(read), 5e-324);
+    // replace only these indices' allocator callbacks to observe sweep and teardown.
+    Item abandoned = mvp_lmd_object_new((TypeMap*)result.map->type, 1);
+    ASSERT_EQ(get_type_id(abandoned), LMD_TYPE_MAP);
+    OrderedMap* dead = (OrderedMap*)abandoned.map;
+    ordered_index_free = dead->index->_free; ordered_index_frees = 0;
+    dead->index->_free = count_ordered_index_free;
+    heap_gc_collect();
+    EXPECT_GT(ordered_index_frees, 0);
+    ((OrderedMap*)result.map)->index->_free = count_ordered_index_free;
+    int swept_frees = ordered_index_frees;
+    mvp_lmd_destroy(execution); execution = NULL;
+    EXPECT_GT(ordered_index_frees, swept_frees);
+    EXPECT_EQ(js_gc_callback_entries, 0);
+}
+TEST_F(JsMvpLmd, ObjectShapeGuardsAndDirectMapPairs) {
+    numeric("let o={x:1};let s=0;for(let i=0;i<100;i++){o.x++;s+=o.x}s", 5150);
+    char* mir = dump("temp/mvp_lmd_object_fields.mir");
+    ASSERT_NE(mir, nullptr);
+    // finalized MIR renames registers; retain the register-to-register shape guard.
+    bool guarded = false;
+    for (const char* line = mir; (line = strstr(line, "\tbne\t")); line++) {
+        const char* end = strchr(line, '\n');
+        const char* first = strstr(line, ", %r");
+        const char* second = first ? strstr(first + 1, ", %r") : NULL;
+        if (second && end && second < end) guarded = true;
+    }
+    EXPECT_TRUE(guarded);
+    EXPECT_EQ(strstr(mir, "\timport\tjs_"), nullptr);
+    mem_free(mir);
+    boolean("let o={x:1,b:true};function rhs(){delete o.x;o.c=3;o.x='changed';return 2}o.x=rhs();o.x===2 && o.b && o.c===3");
+    error("let m=new Map();m.x=1;m.x()", "TypeError");
+    numeric("let m=new Map();m.set(1,2).set(3,4);let s=0;for(let [k,v] of m){s+=k*v}s", 14);
+    mir = dump("temp/mvp_lmd_direct_map_pairs.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_map_entry"), nullptr);
+    mem_free(mir);
+    boolean("let o={};o.self=o;let m=new Map();m.set(m,o);m.get(m).self===o");
+}
+TEST_F(JsMvpLmd, CollectionProjectionBindingAndGrowth) {
+    numeric("let Object={entries:()=>[[1,2],[3,4]]};let s=0;for(let [k,v] of Object.entries({})){s+=k*v}s", 14);
+    numeric("let o={keys:()=>[2,3]};let s=0;for(let k of o.keys()){s+=k}s", 5);
+    numeric("let m=new Map();m.set(2,3);let o={keys:()=>m,values:()=>m};let s=0;for(let pair of o.keys()){s+=pair[0]+pair[1]}for(let [k,v] of o.values()){s+=k*v}s", 11);
+    boolean("let v=1;let m=new Map();m.set(1,'text');for(v of m.values()){}v==='text'");
+    boolean("let m=new Map();for(let i=0;i<1000;i++){m.set('k'+i,{i})}for(let i=0;i<1000;i+=2){m.delete('k'+i)}let s=0;for(let [k,v] of m){s+=v.i}m.size===500 && s===250000");
+    numeric("let m=new Map();m.set(1,5e-324);let s=0;for(let [k,v] of m){m.clear();s=v}s", 5e-324);
+    Item result = run("let o={};o['\\uD83D'+'\\uDE00']=7;o['a\\0b']=9;o");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    const char cesu[] = "\xed\xa0\xbd\xed\xb8\x80";
+    String* raw = heap_strcpy(cesu, 6);
+    EXPECT_EQ(it2i(map_get(result.map, Item{.item = s2it(raw)})), 7);
+    raw = heap_strcpy("a\0b", 3);
+    EXPECT_EQ(it2i(map_get(result.map, Item{.item = s2it(raw)})), 9);
+}
+TEST_F(JsMvpLmd, MapCursorCleanupAndTombstoneCompaction) {
+    Item result = run("let m=new Map();m.set(1,1);function f(){for(let pair of m){return pair}}f();for(let k of m.keys()){break}for(let i=0;i<300;i++){m.set(i,i);m.delete(i)}m.set('live',5e-324);m");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    OrderedMap* map = (OrderedMap*)result.map;
+    EXPECT_EQ(map->cursors, 0);
+    EXPECT_LT(map->entries->length, 140);
+    boolean("let m=new Map();m.set(1,1);outer:for(let a of m){for(let b of m){break outer}}m.clear();m.set(2,2);let s=0;for(let [k,v] of m){s+=k+v}s===4");
+    numeric("let m=new Map();m.set(1,1).set(2,2);let s=0;for(let [k,v] of m){m.delete(k);m.set(k+2,v+2);s+=v;if(k===4)break}s", 10);
 }

@@ -1490,7 +1490,8 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
                 arr->capacity = 0;
             }
         }
-        else if (tag == LMD_TYPE_MAP) {
+        else if (tag == LMD_TYPE_MAP && ((Map*)obj)->map_kind != MAP_KIND_PLAIN &&
+                ((Map*)obj)->map_kind != MAP_KIND_ORDERED) {
             gc_finalize_js_native_map((Map*)obj, &seen_native);
         }
         // All other types: items[], data, closure_env are zone-managed (data zone or object zone)

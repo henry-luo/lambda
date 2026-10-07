@@ -2566,7 +2566,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nOptions:\n");
             printf("  -h, --help              Show this help message\n");
             printf("  -e, --eval <script>     Evaluate JavaScript source text\n");
-            fputs("  --runtime=mvp-lmd      Scalar/dense-array MIR on the Lambda runtime\n", stdout);
+            fputs("  --runtime=mvp-lmd      MVP MIR with Lambda arrays, objects, and Map\n", stdout);
             fputs("  --timing               MVP-Lmd execution time, excluding compilation\n", stdout);
             printf("  --document <file.html>  Load HTML document for DOM API access\n");
             printf("  --diagnose              Enable extra JS fast-path diagnostic logging\n");

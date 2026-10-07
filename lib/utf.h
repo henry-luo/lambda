@@ -121,6 +121,10 @@ int utf8_wtf8_encoded_len(const char* chars, int byte_len);
 /** Encode a WTF-8 string as well-formed UTF-8 into an existing output buffer. */
 void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* out);
 
+// canonical UTF-8/WTF-8: combine surrogate pairs, preserve lone units; no Unicode normalization.
+bool utf8_key_is_canonical(const char* chars, size_t length);
+size_t utf8_canonical_key(const char* chars, size_t length, char* out);
+
 /* ── Codepoint Classification ─────────────────────────────────────── */
 
 /** True if cp is a UTF-16 surrogate (0xD800–0xDFFF). */

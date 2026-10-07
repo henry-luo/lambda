@@ -9,6 +9,38 @@
 #include "utf.h"
 #include <string.h>
 
+bool utf8_key_is_canonical(const char* chars, size_t length) {
+    for (size_t i = 0; i + 5 < length; i++) {
+        const unsigned char* p = (const unsigned char*)chars + i;
+        if (p[0] == 0xed && p[1] >= 0xa0 && p[1] <= 0xaf &&
+                p[3] == 0xed && p[4] >= 0xb0 && p[4] <= 0xbf) return false;
+    }
+    return true;
+}
+
+size_t utf8_canonical_key(const char* chars, size_t length, char* out) {
+    Utf16Iterator iter = {(const unsigned char*)chars, (int64_t)length, 0, -1};
+    uint16_t unit;
+    int pending = -1;
+    size_t size = 0;
+    while (pending >= 0 || utf16_iterator_next(&iter, &unit)) {
+        if (pending >= 0) { unit = (uint16_t)pending; pending = -1; }
+        uint32_t cp = unit;
+        if (unit >= 0xd800 && unit <= 0xdbff) {
+            uint16_t next;
+            if (utf16_iterator_next(&iter, &next)) {
+                if (next >= 0xdc00 && next <= 0xdfff) cp = utf16_decode_pair(unit, next);
+                else pending = next;
+            }
+        }
+        char bytes[4];
+        size_t count = utf8_encode_wtf8(cp, bytes);
+        if (out) memcpy(out + size, bytes, count);
+        size += count;
+    }
+    return size;
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  UTF-8 Codec
  * ══════════════════════════════════════════════════════════════════════ */

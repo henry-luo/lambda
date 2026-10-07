@@ -732,6 +732,15 @@ typedef struct LambdaGcMapLayout {
     int data_cap;
 } LambdaGcMapLayout;
 
+// ordered keyed storage keeps strong edges in an ordinary traced Array.
+typedef struct LambdaGcOrderedMapLayout {
+    LambdaGcMapLayout map;
+    void* entries;
+    struct hashmap* index;
+    int64_t size;
+    int64_t cursors;
+} LambdaGcOrderedMapLayout;
+
 typedef struct LambdaGcListLayout {
     LambdaGcMapLayout map;
     void* items;
@@ -1003,6 +1012,7 @@ enum MapKind {
     MAP_KIND_REGEXP      = 16, // RegExp carrier with typed trailing native payload
     MAP_KIND_ASYNC_FRAME = 17, // JSCU10: suspended async activation (internal, no property face)
     MAP_KIND_GENERATOR   = 18, // JSCU9: generator carrier with suspended native state
+    MAP_KIND_ORDERED     = 19, // shared ordered Item entries plus a native ordinal index
 };
 
 #define CONTAINER_FLAG_STATIC (1u << 4)
@@ -2685,6 +2695,9 @@ extern "C" {
     Map* map_alloc_for_type(struct TypeMap* map_type, LambdaRegion* region,
         int64_t minimum_capacity);
     bool map_field_store(void* field_ptr, Item value, TypeId value_type);
+    // neutral packed-field mutation; no descriptors, prototype dispatch, or JS hooks.
+    bool map_shape_set(Map* map, String* key, Item value);
+    bool map_shape_delete(Map* map, String* key);
     bool map_field_store_dynamic_item(void* field_ptr, Item value);
     Map* map_with_tl(int64_t type_index, void* type_list_ptr);
     Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,

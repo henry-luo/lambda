@@ -20613,6 +20613,14 @@ static int js_collection_compare(const void *a, const void *b, void *udata) {
 }
 
 static Item js_collection_canonical_key(Item key) {
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* string = key.get_string();
+        if (!utf8_key_is_canonical(string->chars, string->len)) {
+            // S1.11/S8.2.2v5: collection hashing and equality need one lossless byte form.
+            String* canonical = heap_create_name(string->chars, string->len);
+            return canonical ? Item{.item = s2it(canonical)} : ItemError;
+        }
+    }
     if (get_type_id(key) == LMD_TYPE_FLOAT) {
         double value = it2d(key);
         if (value == 0.0 && signbit(value)) {
@@ -20913,7 +20921,7 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
             if (cd->is_weak && !js_can_be_held_weakly(arg1)) {
                 return js_throw_type_error("Invalid value used as weak collection key");
             }
-            Item key = js_collection_canonical_key(arg1);
+            JS_ASSIGN_OR_RETURN(key, js_collection_canonical_key(arg1));
             Item value = ItemNull;
             if (cd->type == JS_COLLECTION_SET) {
                 value = (Item){.item = b2it(BOOL_TRUE)};
@@ -20937,18 +20945,18 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
             return obj; // return collection for chaining
         }
         case 1: { // get(key) — Map only
-            JsCollectionOrderNode* node = js_collection_find_node(cd,
-                js_collection_canonical_key(arg1));
+            JS_ASSIGN_OR_RETURN(key, js_collection_canonical_key(arg1));
+            JsCollectionOrderNode* node = js_collection_find_node(cd, key);
             if (node) return js_collection_node_read_item(node,
                 JS_COLLECTION_NODE_VALUE);
             return make_js_undefined();
         }
         case 2: { // has(key)
-            return (Item){.item = b2it(js_collection_find_node(cd,
-                js_collection_canonical_key(arg1)) ? BOOL_TRUE : BOOL_FALSE)};
+            JS_ASSIGN_OR_RETURN(key, js_collection_canonical_key(arg1));
+            return (Item){.item = b2it(js_collection_find_node(cd, key) ? BOOL_TRUE : BOOL_FALSE)};
         }
         case 3: { // delete(key)
-            Item key = js_collection_canonical_key(arg1);
+            JS_ASSIGN_OR_RETURN(key, js_collection_canonical_key(arg1));
             JsCollectionOrderNode* node = js_collection_find_node(cd, key);
             if (!node) return (Item){.item = ITEM_FALSE};
             JsCollectionEntry entry = {.node = node};
@@ -21975,14 +21983,14 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 };
 
                 auto set_record_has = [](JsSetRecordLocal* rec, Item key) -> Item {
-                    Item fn_args[1] = {js_collection_canonical_key(key)};
+                    JS_ASSIGN_OR_RETURN(canonical, js_collection_canonical_key(key));
+                    Item fn_args[1] = {canonical};
                     JS_ASSIGN_OR_RETURN(result, js_call_function(rec->has_fn, rec->obj, fn_args, 1));
                     return (Item){.item = b2it(js_is_truthy(result))};
                 };
 
                 auto set_contains_key = [](JsCollectionData* set_cd, Item key) -> bool {
-                    return js_collection_find_node(set_cd,
-                        js_collection_canonical_key(key)) != NULL;
+                    return js_collection_find_node(set_cd, key) != NULL;
                 };
 
                 auto set_record_keys_iterator = [](JsSetRecordLocal* rec) -> Item {
@@ -22018,6 +22026,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                         if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         if (key.item == JS_ITER_DONE_SENTINEL) break;
                         key = js_collection_canonical_key(key);
+                        if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         if (set_contains_key(cd, key)) {
                             JS_ASSIGN_OR_RETURN(add_result, js_collection_method(result, 0, key, ItemNull));
                         }
@@ -22032,6 +22041,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                         if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         if (key.item == JS_ITER_DONE_SENTINEL) break;
                         key = js_collection_canonical_key(key);
+                        if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         JS_ASSIGN_OR_RETURN(delete_result, js_collection_method(result, 3, key, ItemNull));
                     }
                     return result;
@@ -22044,6 +22054,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                         if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         if (key.item == JS_ITER_DONE_SENTINEL) break;
                         key = js_collection_canonical_key(key);
+                        if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         JS_ASSIGN_OR_RETURN(add_result, js_collection_method(result, 0, key, ItemNull));
                     }
                     return result;
@@ -22058,6 +22069,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                         if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         if (key.item == JS_ITER_DONE_SENTINEL) break;
                         key = js_collection_canonical_key(key);
+                        if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         bool in_receiver = set_contains_key(cd, key);
                         if (set_contains_key(result_cd, key)) {
                             if (in_receiver) {
@@ -22166,6 +22178,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                         if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         if (key.item == JS_ITER_DONE_SENTINEL) break;
                         key = js_collection_canonical_key(key);
+                        if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                         if (!set_contains_key(cd, key)) {
                             JS_ASSIGN_OR_RETURN(close_status, close_iterator_for_return(iterator));
                             return (Item){.item = ITEM_FALSE};
@@ -22194,6 +22207,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                             if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                             if (key.item == JS_ITER_DONE_SENTINEL) break;
                             key = js_collection_canonical_key(key);
+                            if (item_is_error(key)) return js_iterator_close_preserve_exception(iterator, key);
                             if (set_contains_key(cd, key)) {
                                 JS_ASSIGN_OR_RETURN(close_status, close_iterator_for_return(iterator));
                                 return (Item){.item = ITEM_FALSE};
