@@ -390,6 +390,21 @@
     X(translate) \
     X(rotate) \
     X(scale) \
+    X(fill_opacity) \
+    X(stroke_opacity) \
+    X(stroke_dasharray) \
+    X(stroke_dashoffset) \
+    X(stroke_linecap) \
+    X(stroke_linejoin) \
+    X(stroke_miterlimit) \
+    X(fill_rule) \
+    X(clip_rule) \
+    X(paint_order) \
+    X(stop_color) \
+    X(stop_opacity) \
+    X(flood_color) \
+    X(flood_opacity) \
+    X(lighting_color) \
     X(css_float)
 
 #define CSS_STYLE_PROPERTIES_ATTRIBUTES(X) \
@@ -1114,6 +1129,36 @@
     X(translate, "translate", "translate") \
     X(rotate, "rotate", "rotate") \
     X(scale, "scale", "scale") \
+    X(fill_opacity, "fillOpacity", "fill-opacity") \
+    X(fill_opacity, "fill-opacity", "fill-opacity") \
+    X(stroke_opacity, "strokeOpacity", "stroke-opacity") \
+    X(stroke_opacity, "stroke-opacity", "stroke-opacity") \
+    X(stroke_dasharray, "strokeDasharray", "stroke-dasharray") \
+    X(stroke_dasharray, "stroke-dasharray", "stroke-dasharray") \
+    X(stroke_dashoffset, "strokeDashoffset", "stroke-dashoffset") \
+    X(stroke_dashoffset, "stroke-dashoffset", "stroke-dashoffset") \
+    X(stroke_linecap, "strokeLinecap", "stroke-linecap") \
+    X(stroke_linecap, "stroke-linecap", "stroke-linecap") \
+    X(stroke_linejoin, "strokeLinejoin", "stroke-linejoin") \
+    X(stroke_linejoin, "stroke-linejoin", "stroke-linejoin") \
+    X(stroke_miterlimit, "strokeMiterlimit", "stroke-miterlimit") \
+    X(stroke_miterlimit, "stroke-miterlimit", "stroke-miterlimit") \
+    X(fill_rule, "fillRule", "fill-rule") \
+    X(fill_rule, "fill-rule", "fill-rule") \
+    X(clip_rule, "clipRule", "clip-rule") \
+    X(clip_rule, "clip-rule", "clip-rule") \
+    X(paint_order, "paintOrder", "paint-order") \
+    X(paint_order, "paint-order", "paint-order") \
+    X(stop_color, "stopColor", "stop-color") \
+    X(stop_color, "stop-color", "stop-color") \
+    X(stop_opacity, "stopOpacity", "stop-opacity") \
+    X(stop_opacity, "stop-opacity", "stop-opacity") \
+    X(flood_color, "floodColor", "flood-color") \
+    X(flood_color, "flood-color", "flood-color") \
+    X(flood_opacity, "floodOpacity", "flood-opacity") \
+    X(flood_opacity, "flood-opacity", "flood-opacity") \
+    X(lighting_color, "lightingColor", "lighting-color") \
+    X(lighting_color, "lighting-color", "lighting-color") \
     X(css_float, "cssFloat", "float")
 
 #define CSS_FONT_FACE_DESCRIPTORS_FIELDS(X) \

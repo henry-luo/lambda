@@ -198,6 +198,21 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_FILL, "fill", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_STROKE, "stroke", PROP_TYPE_COLOR, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_STROKE_WIDTH, "stroke-width", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "1px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_FILL_OPACITY, "fill-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "1", true, false, NULL, 0, validate_number, NULL},
+    {CSS_PROPERTY_STROKE_OPACITY, "stroke-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "1", true, false, NULL, 0, validate_number, NULL},
+    {CSS_PROPERTY_STROKE_DASHARRAY, "stroke-dasharray", PROP_TYPE_LIST, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_STROKE_DASHOFFSET, "stroke-dashoffset", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_STROKE_LINECAP, "stroke-linecap", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "butt", true, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_STROKE_LINEJOIN, "stroke-linejoin", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "miter", true, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_STROKE_MITERLIMIT, "stroke-miterlimit", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "4", true, false, NULL, 0, validate_number, NULL},
+    {CSS_PROPERTY_FILL_RULE, "fill-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "nonzero", true, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_CLIP_RULE, "clip-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "nonzero", true, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_PAINT_ORDER, "paint-order", PROP_TYPE_LIST, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_STOP_COLOR, "stop-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "black", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_STOP_OPACITY, "stop-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},
+    {CSS_PROPERTY_FLOOD_COLOR, "flood-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "black", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_FLOOD_OPACITY, "flood-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},
+    {CSS_PROPERTY_LIGHTING_COLOR, "lighting-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "white", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_FONT_FAMILY, "font-family", PROP_TYPE_STRING, PROP_INHERIT_YES, "serif", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_FONT_SIZE, "font-size", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_FONT_WEIGHT, "font-weight", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_keyword, NULL},
@@ -1020,6 +1035,21 @@ bool css_property_is_svg_paint(CssPropertyCode id) {
     return id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE || id == CSS_PROPERTY_STROKE_WIDTH;
 }
 
+bool css_property_is_svg_presentation(CssPropertyCode id) {
+    return css_property_is_svg_paint(id) ||
+        (id >= CSS_PROPERTY_FILL_OPACITY && id <= CSS_PROPERTY_LIGHTING_COLOR);
+}
+
+bool css_property_is_svg_length(CssPropertyCode id) {
+    return id == CSS_PROPERTY_STROKE_WIDTH || id == CSS_PROPERTY_STROKE_DASHARRAY ||
+        id == CSS_PROPERTY_STROKE_DASHOFFSET;
+}
+
+bool css_property_is_svg_opacity(CssPropertyCode id) {
+    return id == CSS_PROPERTY_FILL_OPACITY || id == CSS_PROPERTY_STROKE_OPACITY ||
+        id == CSS_PROPERTY_STOP_OPACITY || id == CSS_PROPERTY_FLOOD_OPACITY;
+}
+
 static bool css_value_is_svg_paint(const CssValue* value, bool fallback = false) {
     if (!value) return false;
     if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value))
@@ -1039,7 +1069,7 @@ static bool css_value_is_svg_paint(const CssValue* value, bool fallback = false)
         (!fallback && value->type == CSS_VALUE_TYPE_URL);
 }
 
-static bool css_value_is_svg_stroke_width(const CssValue* value) {
+static bool css_value_is_svg_stroke_width(const CssValue* value, bool nonnegative = true) {
     if (!value) return false;
     if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
     double scalar = value->type == CSS_VALUE_TYPE_NUMBER ? value->data.number.value
@@ -1047,11 +1077,43 @@ static bool css_value_is_svg_stroke_width(const CssValue* value) {
         : value->type == CSS_VALUE_TYPE_PERCENTAGE ? value->data.percentage.value : NAN;
     if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_PERCENTAGE ||
         value->type == CSS_VALUE_TYPE_LENGTH)
-        return isfinite(scalar) && scalar >= 0.0 && (value->type != CSS_VALUE_TYPE_LENGTH ||
+        return isfinite(scalar) && (!nonnegative || scalar >= 0.0) && (value->type != CSS_VALUE_TYPE_LENGTH ||
             css_unit_is_length(value->data.length.unit));
     CssMathType type = css_math_value_type(value);
     return type == CSS_MATH_NUMBER || type == CSS_MATH_LENGTH ||
         type == CSS_MATH_PERCENT || type == CSS_MATH_LENGTH_PERCENT;
+}
+
+static bool css_svg_dash_item_valid(const CssValue* value, void*) {
+    return !css_value_is_global_keyword(value) && css_value_is_svg_stroke_width(value);
+}
+
+static bool css_svg_keyword_value_valid(CssPropertyCode id, const CssValue* value) {
+    if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+    if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    CssEnum keyword = value->data.keyword;
+    if (id == CSS_PROPERTY_FILL_RULE || id == CSS_PROPERTY_CLIP_RULE)
+        return keyword == CSS_VALUE_NONZERO || keyword == CSS_VALUE_EVENODD;
+    if (id == CSS_PROPERTY_STROKE_LINECAP)
+        return keyword == CSS_VALUE_BUTT || keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_SQUARE;
+    return keyword == CSS_VALUE_MITER || keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_BEVEL;
+}
+
+static bool css_svg_paint_order_valid(const CssValue* value) {
+    if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) return true;
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated) return false;
+    struct Order {unsigned seen; int count;} order = {};
+    auto visit = [](const CssValue* item, void* context) -> bool {
+        Order* order = (Order*)context;
+        if (item->type != CSS_VALUE_TYPE_KEYWORD || ++order->count > 3) return false;
+        unsigned bit = item->data.keyword == CSS_VALUE_FILL ? 1u
+            : item->data.keyword == CSS_VALUE_STROKE ? 2u : item->data.keyword == CSS_VALUE_MARKERS ? 4u : 0u;
+        if (!bit || (order->seen & bit)) return false;
+        order->seen |= bit;
+        return true;
+    };
+    return css_value_visit_list_items(value, visit, &order);
 }
 
 bool css_value_is_custom_ident(const CssValue* value) {
@@ -2007,6 +2069,24 @@ bool css_property_validate_value_mode(CssPropertyCode id,
 
     if (id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE) return css_value_is_svg_paint(value);
     if (id == CSS_PROPERTY_STROKE_WIDTH) return css_value_is_svg_stroke_width(value);
+    if (id == CSS_PROPERTY_STROKE_DASHOFFSET) return css_value_is_svg_stroke_width(value, false);
+    if (id == CSS_PROPERTY_STROKE_DASHARRAY) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) return true;
+        return css_value_visit_list_items(value, css_svg_dash_item_valid, nullptr);
+    }
+    if (id == CSS_PROPERTY_STROKE_MITERLIMIT) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        return value->type == CSS_VALUE_TYPE_NUMBER
+            ? isfinite(value->data.number.value) && value->data.number.value >= 0.0
+            : value->type == CSS_VALUE_TYPE_FUNCTION && css_math_value_type(value) == CSS_MATH_NUMBER;
+    }
+    if (id == CSS_PROPERTY_FILL_RULE || id == CSS_PROPERTY_CLIP_RULE ||
+        id == CSS_PROPERTY_STROKE_LINECAP || id == CSS_PROPERTY_STROKE_LINEJOIN)
+        return css_svg_keyword_value_valid(id, value);
+    if (id == CSS_PROPERTY_PAINT_ORDER) return css_svg_paint_order_valid(value);
+    if (id == CSS_PROPERTY_STOP_COLOR || id == CSS_PROPERTY_FLOOD_COLOR || id == CSS_PROPERTY_LIGHTING_COLOR)
+        return css_value_is_supported_color(value);
 
     if (id == CSS_PROPERTY_BACKFACE_VISIBILITY || id == CSS_PROPERTY_TRANSFORM_STYLE) {
         if (css_value_contains_var_reference(value) || css_value_is_global_keyword(value)) return true;
@@ -2032,7 +2112,11 @@ bool css_property_validate_value_mode(CssPropertyCode id,
     switch (id) {
         case CSS_PROPERTY_TRANSFORM:
             return css_transform_value_valid(value);
-        case CSS_PROPERTY_OPACITY: {
+        case CSS_PROPERTY_OPACITY:
+        case CSS_PROPERTY_FILL_OPACITY:
+        case CSS_PROPERTY_STROKE_OPACITY:
+        case CSS_PROPERTY_STOP_OPACITY:
+        case CSS_PROPERTY_FLOOD_OPACITY: {
             if (css_value_is_global_keyword(value) || css_value_contains_var_reference(value)) return true;
             // a bare list is never a numeric expression outside a math function.
             if (value->type != CSS_VALUE_TYPE_NUMBER &&

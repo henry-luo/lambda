@@ -6428,6 +6428,79 @@ TEST(RenderOutputParity, SvgInvalidPaintAndWidthSubstitutionsUseInheritedCompute
     expect_pngs_exactly_equal(reference, computed);
 }
 
+TEST(RenderOutputParity, SvgPresentationMathKeywordsAndInheritedLengthsReachPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* literal_css =
+        "body{fill-opacity:.5}.dash{stroke-dasharray:6px 4px;stroke-dashoffset:-2px;"
+        "stroke-linecap:round;stroke-opacity:.5}.join{stroke-linejoin:bevel;stroke-miterlimit:0}"
+        ".order{paint-order:stroke}.hole{fill-rule:evenodd}.clip{clip-rule:evenodd}"
+        "stop{stop-color:green;stop-opacity:.5}feFlood{flood-color:blue;flood-opacity:.5}"
+        "feDiffuseLighting{lighting-color:lime}g{font-size:2px;stroke-dasharray:4px 6px;stroke-dashoffset:4px}";
+    const char* computed_css =
+        "body{fill-opacity:calc(25% + 25%)}.dash{stroke-dasharray:calc(2 * 3) min(4px,5px);"
+        "stroke-dashoffset:calc(2px - 4px);stroke-linecap:RoUnD;stroke-opacity:calc(25% + 25%)}"
+        ".join{stroke-linejoin:MiTeR;stroke-miterlimit:calc(0 * 4)}"
+        ".order{paint-order:StRoKe}.hole{fill-rule:EvEnOdD}.clip{clip-rule:EvEnOdD}"
+        "stop{stop-color:rgb(0,128,0);stop-opacity:calc(25% + 25%)}"
+        "feFlood{flood-color:rgb(0,0,255);flood-opacity:calc(25% + 25%)}"
+        "feDiffuseLighting{lighting-color:rgb(0,255,0)}"
+        "g{font-size:2px;stroke-dasharray:2em calc(2 * 3);stroke-dashoffset:2em}"
+        ".inherited{font-size:1px;stroke-dasharray:1 1;stroke-dasharray:var(--bad);--bad:2 -1}";
+    const char* geometry =
+        "</style><svg width='240' height='140' xmlns='http://www.w3.org/2000/svg'><defs>"
+        "<linearGradient id='grad'><stop offset='0'/><stop offset='1'/></linearGradient>"
+        "<clipPath id='clip'><path class='clip' d='M100 50h40v40h-40z M110 60h20v20h-20z'/></clipPath>"
+        "<filter id='flood'><feFlood/></filter><filter id='light'><feDiffuseLighting diffuseConstant='1'>"
+        "<feDistantLight azimuth='90' elevation='90'/></feDiffuseLighting></filter></defs>"
+        "<path class='dash' d='M10 12H90' fill='none' stroke='blue' stroke-width='6'/>"
+        "<path class='join' d='M110 25L120 5L130 25' fill='none' stroke='red' stroke-width='8'/>"
+        "<rect class='order' x='155' y='5' width='30' height='25' fill='red' stroke='lime' stroke-width='8'/>"
+        "<path class='hole' d='M5 50h40v40h-40z M15 60h20v20h-20z' fill='purple'/>"
+        "<rect x='100' y='50' width='40' height='40' fill='blue' clip-path='url(#clip)'/>"
+        "<rect x='55' y='50' width='30' height='40' fill='url(#grad)'/>"
+        "<rect x='150' y='50' width='30' height='40' filter='url(#flood)'/>"
+        "<rect x='195' y='50' width='30' height='40' filter='url(#light)'/>"
+        "<g><path class='inherited' d='M10 120H200' fill='none' stroke='green' stroke-width='4'/></g></svg>";
+    const char* html_paths[] = {"temp/render_output_parity/svg_properties_literal.html",
+        "temp/render_output_parity/svg_properties_css.html"};
+    const char* png_paths[] = {"temp/render_output_parity/svg_properties_literal.png",
+        "temp/render_output_parity/svg_properties_css.png"};
+    const char* styles[] = {literal_css, computed_css};
+    for (int index = 0; index < 2; index++) {
+        StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+        strbuf_append_str(html, "<!doctype html><style>body{margin:0}svg{display:block}");
+        strbuf_append_str(html, styles[index]); strbuf_append_str(html, geometry);
+        bool rendered = render_html_fixture(html_paths[index], png_paths[index], html->str);
+        strbuf_free(html); ASSERT_TRUE(rendered);
+    }
+    // exact pixels require computed math, canonical keywords and declaration-font inheritance to reach existing paint consumers.
+    expect_pngs_exactly_equal(png_paths[0], png_paths[1]);
+}
+
+TEST(RenderOutputParity, SvgDashLengthsUseEachInstanceFontBeforeInheritance) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/svg_properties_use_literal.html",
+        "temp/render_output_parity/svg_properties_use_literal.png",
+        "<!doctype html><style>body{margin:0}svg{display:block}</style><svg width='220' height='70'>"
+        "<path d='M10 20H200' fill='none' stroke='blue' stroke-width='4' stroke-dasharray='4 2' stroke-dashoffset='2'/>"
+        "<path d='M10 50H200' fill='none' stroke='blue' stroke-width='4' stroke-dasharray='8 4' stroke-dashoffset='4'/></svg>"));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/svg_properties_use_css.html",
+        "temp/render_output_parity/svg_properties_use_css.png",
+        "<!doctype html><style>body{margin:0}svg{display:block}</style><svg width='220' height='70'>"
+        "<defs><g id='units' stroke-dasharray='calc(2 * 1em) 1em' stroke-dashoffset='1em'>"
+        "<path d='M10 0H200' fill='none' stroke='blue' stroke-width='4' font-size='1'/></g></defs>"
+        "<use href='#units' y='20' font-size='2'/><use href='#units' y='50' font-size='4'/></svg>"));
+    // the shared definition computes against each use host, and its child inherits lengths without using its own font.
+    expect_pngs_exactly_equal("temp/render_output_parity/svg_properties_use_literal.png",
+        "temp/render_output_parity/svg_properties_use_css.png");
+}
+
 TEST(RenderOutputParity, SvgPaintResourceUrlsUseStylesheetAndVariableConsumerBases) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

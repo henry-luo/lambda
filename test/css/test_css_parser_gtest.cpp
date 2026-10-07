@@ -199,6 +199,30 @@ TEST_F(CssEngineParserTest, SvgPaintAndStrokeWidthUseCompleteGrammar) {
         EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
 }
 
+TEST_F(CssEngineParserTest, SvgPresentationFamiliesValidateWholeDeclaration) {
+    const char* valid[] = {"fill-opacity:25%", "stroke-opacity:calc(25% + 50%)",
+        "stop-opacity:2", "flood-opacity:-1", "stroke-dasharray:3 4, 5%",
+        "stroke-dasharray:calc(2 * 3) min(4px, 5px)", "stroke-dasharray:none",
+        "stroke-dashoffset:-2em", "stroke-dashoffset:calc(2px - 4px)",
+        "stroke-linecap:RoUnD", "stroke-linejoin:BeVeL", "stroke-miterlimit:0",
+        "stroke-miterlimit:calc(2 * 3)", "fill-rule:EvEnOdD", "clip-rule:nonzero",
+        "paint-order:markers stroke fill", "paint-order:stroke", "paint-order:normal",
+        "stop-color:currentColor", "flood-color:rgb(1, 2, 3)", "lighting-color:red",
+        "stroke-dasharray:var(--dashes)", "fill-rule:inherit"};
+    const char* invalid[] = {"fill-opacity:4px", "stroke-opacity:1 2", "stop-opacity:red",
+        "flood-opacity:calc(2px + 3px)", "stroke-dasharray:2 -3", "stroke-dasharray:2,,3",
+        "stroke-dasharray:2,", "stroke-dasharray:round", "stroke-dasharray:inherit 2",
+        "stroke-dashoffset:2deg", "stroke-linecap:bevel", "stroke-linejoin:square",
+        "stroke-miterlimit:-1", "stroke-miterlimit:20%", "stroke-miterlimit:calc(2px * 3)",
+        "fill-rule:round", "clip-rule:evenodd nonzero", "paint-order:fill fill",
+        "paint-order:fill, stroke", "paint-order:normal fill", "stop-color:url(#paint)",
+        "flood-color:red blue", "lighting-color:2"};
+    for (const char* source : valid)
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+}
+
 TEST_F(CssEngineParserTest, ImportantMarkerRequiresTrailingCaseInsensitiveTokens) {
     const char* important[] = {"width:20px !important", "width:20px !IMPORTANT",
         "width:20px ! /*priority*/ ImPoRtAnT /*end*/", "--size:20px !IMPORTANT"};

@@ -19,6 +19,22 @@ static double css_color_clamp(double value, double maximum = 1.0) {
     return isnan(value) ? 0.0 : fmax(0.0, fmin(maximum, value));
 }
 
+static bool css_visit_list_items(const CssValue* value, CssListItemVisitor visitor,
+    void* context, int depth) {
+    if (!value || depth > 32) return false;
+    if (value->type != CSS_VALUE_TYPE_LIST) return visitor(value, context);
+    const auto& list = value->data.list;
+    if (!list.values || list.count <= 0) return false;
+    // comma and whitespace groups flatten alike; functions remain atomic component values.
+    for (int index = 0; index < list.count; index++)
+        if (!css_visit_list_items(list.values[index], visitor, context, depth + 1)) return false;
+    return true;
+}
+
+bool css_value_visit_list_items(const CssValue* value, CssListItemVisitor visitor, void* context) {
+    return visitor && css_visit_list_items(value, visitor, context, 0);
+}
+
 static bool css_color_component(const CssValue* value, bool hue, bool percentage_only,
     bool allow_missing, bool clamp_component, double percentage_scale, double number_scale, double* result,
     bool* missing, CssMathType* type) {
@@ -998,6 +1014,13 @@ static const CssEnumInfo css_value_definitions[] = {
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
     {"col-resize", 10, CSS_VALUE_COL_RESIZE, CSS_VALUE_GROUP_CURSOR},
     {"row-resize", 10, CSS_VALUE_ROW_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"nonzero", 7, CSS_VALUE_NONZERO, CSS_VALUE_GROUP_SVG_PAINT},
+    {"evenodd", 7, CSS_VALUE_EVENODD, CSS_VALUE_GROUP_SVG_PAINT},
+    {"butt", 4, CSS_VALUE_BUTT, CSS_VALUE_GROUP_SVG_PAINT},
+    {"miter", 5, CSS_VALUE_MITER, CSS_VALUE_GROUP_SVG_PAINT},
+    {"bevel", 5, CSS_VALUE_BEVEL, CSS_VALUE_GROUP_SVG_PAINT},
+    {"stroke", 6, CSS_VALUE_STROKE, CSS_VALUE_GROUP_SVG_PAINT},
+    {"markers", 7, CSS_VALUE_MARKERS, CSS_VALUE_GROUP_SVG_PAINT},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);

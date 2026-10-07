@@ -103,6 +103,7 @@ wrap-flow wrap-through line-clamp -webkit-line-clamp contain-intrinsic-inline-si
 scroll-margin-top scroll-margin-right scroll-margin-bottom scroll-margin-left scroll-margin-block scroll-margin-block-start scroll-margin-block-end scroll-margin-inline scroll-margin-inline-start scroll-margin-inline-end
 scroll-padding-top scroll-padding-right scroll-padding-bottom scroll-padding-left scroll-padding-block scroll-padding-block-start scroll-padding-block-end scroll-padding-inline scroll-padding-inline-start scroll-padding-inline-end
 translate rotate scale
+fill-opacity stroke-opacity stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit fill-rule clip-rule paint-order stop-color stop-opacity flood-color flood-opacity lighting-color
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

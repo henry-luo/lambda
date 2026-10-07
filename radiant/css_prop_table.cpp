@@ -104,6 +104,10 @@ const CssPropertyRuntimeMetadata* css_property_runtime_metadata_at(size_t index)
 }
 
 bool css_property_runtime_inherited(CssPropertyCode property) {
+    if (css_property_is_svg_presentation(property) && !css_property_is_svg_paint(property)) {
+        const CssProperty* metadata = css_property_get_by_code(property);
+        return metadata && metadata->inheritance == PROP_INHERIT_YES;
+    }
     static const CssPropertyCode resolver_inherited[] = {
         CSS_PROPERTY_FONT_FAMILY, CSS_PROPERTY_FONT_SIZE,
         CSS_PROPERTY_FONT_WEIGHT, CSS_PROPERTY_FONT_STYLE,
@@ -631,60 +635,103 @@ static bool cssom_svg_length_leaf(void* data, const CssValue* value, double* res
     return cssom_font_math_leaf(&context->font, value, result);
 }
 
+struct CssomSvgScalarWriter {
+    CssFormatter* formatter;
+    CssomSvgLengthContext lengths;
+    bool nonnegative;
+    bool comma;
+    bool written;
+};
+
+static bool cssom_append_svg_length(const CssValue* input, void* data) {
+    CssomSvgScalarWriter* writer = (CssomSvgScalarWriter*)data;
+    // normalization writes only to the caller-owned projection, never retained declaration values (D4.5.1v4).
+    CssValue* value = css_value_clone_owned(input, writer->formatter->pool);
+    if (!value || !svg_normalize_length_value(value, &writer->lengths.svg, SVG_LENGTH_DIAGONAL,
+        true, cssom_svg_length_leaf, &writer->lengths)) return false;
+    CssMathEvaluationContext context = {cssom_svg_length_leaf, &writer->lengths, 1.0, true};
+    CssMathResult math = css_math_evaluate(value, &context);
+    if (writer->comma && writer->written) stringbuf_append_str(writer->formatter->output, ", ");
+    writer->written = true;
+    double scalar = isnan(math.value) ? 0.0 : math.value;
+    if (writer->nonnegative) scalar = fmax(0.0, scalar);
+    if (math.resolved && (math.type == CSS_MATH_NUMBER || math.type == CSS_MATH_LENGTH))
+        stringbuf_append_format(writer->formatter->output, "%.6gpx", scalar);
+    else if (math.resolved && math.type == CSS_MATH_PERCENT)
+        stringbuf_append_format(writer->formatter->output, "%.6g%%",
+            writer->nonnegative ? fmax(0.0, math.percentage) : math.percentage);
+    else if (math.resolved && math.type == CSS_MATH_LENGTH_PERCENT)
+        stringbuf_append_format(writer->formatter->output, "calc(%.6g%% %c %.6gpx)",
+            math.percentage, math.value < 0.0 ? '-' : '+', fabs(math.value));
+    else css_format_value(writer->formatter, value);
+    return true;
+}
+
+String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
+    CssPropertyCode id, const CssValue* value) {
+    if (!pool || !declaring || !value) return nullptr;
+    CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+    if (!formatter) return nullptr;
+    formatter->options.computed_colors = true;
+    formatter->options.quote_urls = true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        css_format_value(formatter, (CssValue*)value);
+    } else if (css_property_is_svg_length(id)) {
+        CssomSvgScalarWriter writer = {formatter,
+            {dom_svg_length_context(declaring), {declaring, 16.0f, 16.0f}},
+            id != CSS_PROPERTY_STROKE_DASHOFFSET, id == CSS_PROPERTY_STROKE_DASHARRAY, false};
+        if (!dom_element_is_svg(declaring))
+            css_compute_cascaded_font_size(declaring, &writer.lengths.svg.font_size);
+        writer.lengths.font.parent_size = writer.lengths.svg.font_size;
+        if (declaring->doc && declaring->doc->root)
+            css_compute_cascaded_font_size(declaring->doc->root, &writer.lengths.font.root_size);
+        if (id == CSS_PROPERTY_STROKE_DASHARRAY) {
+            if (!css_value_visit_list_items(value, cssom_append_svg_length, &writer)) return nullptr;
+        } else if (!cssom_append_svg_length(value, &writer)) return nullptr;
+    } else if (css_property_is_svg_opacity(id)) {
+        LayoutContext context = {};
+        context.pool = lam::up(pool);
+        context.view = lam::up(static_cast<View*>(declaring));
+        stringbuf_append_format(formatter->output, "%.6g", resolve_css_opacity_value(&context, value));
+    } else if (id == CSS_PROPERTY_STROKE_MITERLIMIT) {
+        CssMathEvaluationContext context = {};
+        CssMathResult math = css_math_evaluate(value, &context);
+        if (!math.resolved || math.type != CSS_MATH_NUMBER) return nullptr;
+        stringbuf_append_format(formatter->output, "%.6g", isnan(math.value) ? 0.0 : fmax(0.0, math.value));
+    } else css_format_value(formatter, (CssValue*)value);
+    return stringbuf_to_string(formatter->output);
+}
+
 static String* serialize_svg_paint_value(Pool* pool, DomElement* element, CssPropertyCode id) {
     const CssProperty* property = css_property_get_by_code(id);
     if (!pool || !element || !property) return nullptr;
     char* owned_text = nullptr;
     DomElement* owner = nullptr;
-    const char* text = svg_get_dom_presentation_property(element, property->name, true,
-        nullptr, 0, nullptr, &owned_text, &owner);
+    const char* text = svg_get_dom_presentation_property(element, property->name,
+        property->inheritance == PROP_INHERIT_YES, nullptr, 0, nullptr, &owned_text, &owner);
     lam::Temp<char> text_owner(owned_text);
     CssValue* value = svg_parse_property_value(pool, text ? text : property->initial_value, property->name);
     if (!value) return nullptr;
-    CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
-    if (!formatter) return nullptr;
-    formatter->options.computed_colors = true;
-    formatter->options.quote_urls = true;
-    if (id == CSS_PROPERTY_STROKE_WIDTH) {
-        DomElement* declaring = owner ? owner : element;
-        CssomSvgLengthContext context = {dom_svg_length_context(declaring), {declaring, 16.0f, 16.0f}};
-        if (!dom_element_is_svg(declaring)) css_compute_cascaded_font_size(declaring, &context.svg.font_size);
-        context.font.parent_size = context.svg.font_size;
-        if (element->doc && element->doc->root)
-            css_compute_cascaded_font_size(element->doc->root, &context.font.root_size);
-        if (!svg_normalize_length_value(value, &context.svg, SVG_LENGTH_DIAGONAL, true,
-            cssom_svg_length_leaf, &context)) return nullptr;
-        CssMathEvaluationContext math_context = {cssom_svg_length_leaf, &context, 1.0, true};
-        CssMathResult math = css_math_evaluate(value, &math_context);
-        if (math.resolved && (math.type == CSS_MATH_NUMBER || math.type == CSS_MATH_LENGTH))
-            stringbuf_append_format(formatter->output, "%.6gpx", isnan(math.value) ? 0.0 : fmax(0.0, math.value));
-        else if (math.resolved && math.type == CSS_MATH_PERCENT)
-            stringbuf_append_format(formatter->output, "%.6g%%", fmax(0.0, math.percentage));
-        else if (math.resolved && math.type == CSS_MATH_LENGTH_PERCENT)
-            stringbuf_append_format(formatter->output, "calc(%.6g%% %c %.6gpx)",
-                math.percentage, math.value < 0.0 ? '-' : '+', fabs(math.value));
-        else css_format_value(formatter, value);
-    } else {
-        CssValue* color = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[1] : value;
-        const char* keyword = css_value_identifier_name(value);
-        if (keyword && (str_icmp_cstr(keyword, "context-fill") == 0 ||
-            str_icmp_cstr(keyword, "context-stroke") == 0))
-            return create_string(pool, str_icmp_cstr(keyword, "context-fill") == 0 ? "context-fill" : "context-stroke");
-        CssComputedColor computed;
-        if (css_color_compute(color, &computed) && computed.type == CSS_COLOR_CURRENTCOLOR) {
-            char* owned_color = nullptr;
-            const char* current = svg_get_dom_presentation_property(element, "color", true,
-                nullptr, 0, nullptr, &owned_color);
-            lam::Temp<char> color_owner(owned_color);
-            CssValue* resolved = svg_parse_property_value(pool, current ? current : "black", "color");
-            if (!resolved) return nullptr;
-            // inherited currentColor remains a keyword until it resolves against this element's color.
-            if (color == value) value = resolved;
-            else value->data.list.values[1] = resolved;
-        }
-        css_format_value(formatter, value);
+    // only paint server fallbacks form a two-item color list; dash lists are length projections.
+    CssValue* color = (id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE) &&
+        value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[1] : value;
+    const char* keyword = css_value_identifier_name(value);
+    if (keyword && (str_icmp_cstr(keyword, "context-fill") == 0 ||
+        str_icmp_cstr(keyword, "context-stroke") == 0))
+        return create_string(pool, str_icmp_cstr(keyword, "context-fill") == 0 ? "context-fill" : "context-stroke");
+    CssComputedColor computed;
+    if (css_color_compute(color, &computed) && computed.type == CSS_COLOR_CURRENTCOLOR) {
+        char* owned_color = nullptr;
+        const char* current = svg_get_dom_presentation_property(element, "color", true,
+            nullptr, 0, nullptr, &owned_color);
+        lam::Temp<char> color_owner(owned_color);
+        CssValue* resolved = svg_parse_property_value(pool, current ? current : "black", "color");
+        if (!resolved) return nullptr;
+        // inherited currentColor resolves against the receiving element's color.
+        if (color == value) value = resolved;
+        else value->data.list.values[1] = resolved;
     }
-    return stringbuf_to_string(formatter->output);
+    return css_prop_serialize_svg_value(pool, owner ? owner : element, id, value);
 }
 
 static bool serialize_svg_paint(const CssPropAccessor* accessor, DomElement* element,
@@ -1135,6 +1182,21 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_FILL, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE_WIDTH, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_FILL_OPACITY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_STROKE_OPACITY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_STROKE_DASHARRAY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_STROKE_DASHOFFSET, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_STROKE_LINECAP, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_STROKE_LINEJOIN, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_STROKE_MITERLIMIT, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_FILL_RULE, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_CLIP_RULE, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_PAINT_ORDER, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_STOP_COLOR, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_STOP_OPACITY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_FLOOD_COLOR, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_FLOOD_OPACITY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_LIGHTING_COLOR, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_DISPLAY, serialize_display, 0),
     DIRECT_ROW(CSS_PROPERTY_POSITION, PROP_GROUP_POSITION, PositionProp, position, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_TOP, serialize_inset, CSS_PROP_ACCESSOR_USED_VALUE),
@@ -1337,7 +1399,7 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
         // tree exists but has not yet propagated inherited font properties.
         return serialize_cssom_font_size(element, pseudo_type, out, out_size);
     }
-    if (css_property_is_svg_paint(id) && pseudo_type == 0)
+    if (css_property_is_svg_presentation(id) && pseudo_type == 0)
         return accessor->serialize(accessor, element, pseudo_type, out, out_size);
     // only actual effects add a sampling dependency to ordinary declaration reads.
     const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(id);
@@ -1372,7 +1434,7 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
 String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type) {
     if (!pool || !element) return nullptr;
-    if (css_property_is_svg_paint(id) && pseudo_type == 0) {
+    if (css_property_is_svg_presentation(id) && pseudo_type == 0) {
         dom_ensure_computed(element, false);
         return serialize_svg_paint_value(pool, element, id);
     }

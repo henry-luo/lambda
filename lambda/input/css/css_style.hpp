@@ -767,6 +767,23 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_ROTATE,
     CSS_PROPERTY_SCALE,
 
+    // registered SVG presentation properties share their existing paint consumers.
+    CSS_PROPERTY_FILL_OPACITY,
+    CSS_PROPERTY_STROKE_OPACITY,
+    CSS_PROPERTY_STROKE_DASHARRAY,
+    CSS_PROPERTY_STROKE_DASHOFFSET,
+    CSS_PROPERTY_STROKE_LINECAP,
+    CSS_PROPERTY_STROKE_LINEJOIN,
+    CSS_PROPERTY_STROKE_MITERLIMIT,
+    CSS_PROPERTY_FILL_RULE,
+    CSS_PROPERTY_CLIP_RULE,
+    CSS_PROPERTY_PAINT_ORDER,
+    CSS_PROPERTY_STOP_COLOR,
+    CSS_PROPERTY_STOP_OPACITY,
+    CSS_PROPERTY_FLOOD_COLOR,
+    CSS_PROPERTY_FLOOD_OPACITY,
+    CSS_PROPERTY_LIGHTING_COLOR,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 
@@ -1698,6 +1715,12 @@ enum CssTextDecorationLineFlag : uint8_t {
 uint8_t css_text_decoration_line_flag(CssEnum keyword);
 bool css_property_validate_value(CssPropertyCode id, const CssValue* value);
 bool css_property_is_svg_paint(CssPropertyCode id);
+bool css_property_is_svg_presentation(CssPropertyCode id);
+bool css_property_is_svg_opacity(CssPropertyCode id);
+bool css_property_is_svg_length(CssPropertyCode id);
+
+typedef bool (*CssListItemVisitor)(const CssValue* value, void* context);
+bool css_value_visit_list_items(const CssValue* value, CssListItemVisitor visitor, void* context);
 bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode);

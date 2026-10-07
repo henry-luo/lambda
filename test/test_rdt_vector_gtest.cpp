@@ -1970,6 +1970,32 @@ TEST_F(SvgAnimationLifetimeTest, ComputedPaintOwnsOutputAndRejectsShortDestinati
     mem_pool_destroy(output);
 }
 
+TEST_F(SvgAnimationLifetimeTest, SvgPresentationListsOwnUnboundedComputedOutput) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* group = element("g", svg); ASSERT_NE(group, nullptr);
+    DomElement* child = element("rect", group); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(group->set_attribute("font-size", "20"));
+    ASSERT_TRUE(group->set_attribute("stroke-dasharray", "3 2em 10%"));
+    ASSERT_TRUE(child->set_attribute("font-size", "10"));
+    Pool* output = mem_pool_create(nullptr, MEM_ROLE_CSS, "test.svg.presentation_output");
+    ASSERT_NE(output, nullptr);
+    String* inherited = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_STROKE_DASHARRAY, 0);
+    ASSERT_NE(inherited, nullptr); EXPECT_STREQ(inherited->chars, "3px, 40px, 10%");
+    StrBuf* list = strbuf_new(); ASSERT_NE(list, nullptr);
+    for (int index = 0; index < 250; index++) strbuf_append_str(list, index ? " 1" : "1");
+    ASSERT_TRUE(child->set_attribute("stroke-dasharray", list->str));
+    strbuf_free(list);
+    String* full = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_STROKE_DASHARRAY, 0);
+    ASSERT_NE(full, nullptr); EXPECT_EQ(full->len, 1248u);
+    char small[512] = {};
+    EXPECT_FALSE(css_prop_serialize_computed(child, CSS_PROPERTY_STROKE_DASHARRAY, 0, small, sizeof(small)));
+    EXPECT_STREQ(small, "");
+    ASSERT_TRUE(group->remove_child(child));
+    EXPECT_STREQ(inherited->chars, "3px, 40px, 10%"); EXPECT_EQ(full->len, 1248u);
+    mem_pool_destroy(output);
+}
+
 TEST(SvgCascadeTest, SharedCssUrlResolutionKeepsLocalAndEmptyReferences) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
     Url* base = url_parse("https://example.test/styles/main.css"); ASSERT_NE(base, nullptr);
@@ -2097,6 +2123,21 @@ TEST(SvgLengthTest, DashZerosOddListsAndInvalidLists) {
     float long_dashes[42];
     ASSERT_EQ(svg_resolve_dash_array(long_list, &lengths, long_dashes, 42), 42);
     EXPECT_FLOAT_EQ(long_dashes[20], 21.0f); EXPECT_FLOAT_EQ(long_dashes[41], 21.0f);
+}
+
+TEST(SvgLengthTest, DashMathComputesWithoutTruncatingFunctions) {
+    SvgLengthContext lengths = {200.0f, 100.0f, 30.0f, 17.0f};
+    float dashes[6];
+    ASSERT_EQ(svg_resolve_dash_array("calc(2 * 3), min(2em, 50%), calc(2px - 4px)", &lengths, dashes, 6), 6);
+    EXPECT_FLOAT_EQ(dashes[0], 6.0f);
+    EXPECT_FLOAT_EQ(dashes[1], 60.0f);
+    EXPECT_FLOAT_EQ(dashes[2], 0.0f);
+    EXPECT_FLOAT_EQ(dashes[3], 6.0f);
+    EXPECT_EQ(svg_resolve_dash_array("calc(2px + 3), 4", &lengths, dashes, 6), 0);
+    const char* long_function = "calc(1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px) 2";
+    ASSERT_EQ(svg_resolve_dash_array(long_function, &lengths, dashes, 6), 2);
+    EXPECT_FLOAT_EQ(dashes[0], 20.0f);
+    EXPECT_FLOAT_EQ(dashes[1], 2.0f);
 }
 
 struct SvgPathTrace {
