@@ -2156,6 +2156,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     MarkBuilder builder(doc->input);
     DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
+    // Every DOM Event has a timeStamp; a native record takes its creation
+    // time, as a constructed event does (dom_events.cpp event_now_ms), on the
+    // document's clock (virtual under EventSim). Lambda handlers read it as
+    // `time_stamp`; without it they all saw 0.
+    if (created_event) mb.put("timeStamp", js_performance_now_ms());
     // Behavior-only hooks have no preceding JS dispatch to set their target.
     // Seed it on a freshly created record so package policy sees the real hit
     // target in Lambda-only and JS-backed documents alike.
@@ -6151,7 +6156,9 @@ static void dispatch_selectstart(EventContext* evcon, View* target) {
 }
 
 static void dispatch_selectionchange(EventContext* evcon, DocState* state, View* target) {
-    if (!evcon || !selection_has(state) || !target) return;
+    // A caret is a selection too: a click that only places it must reach the
+    // editing model (selection_has would demand a non-collapsed range).
+    if (!evcon || !selection_has_projection(state) || !target) return;
     DomSelectionOrigin origin = state->selection_origin;
     if (evcon->event.type == RDT_EVENT_MOUSE_DOWN ||
         evcon->event.type == RDT_EVENT_MOUSE_UP ||

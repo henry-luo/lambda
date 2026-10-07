@@ -50,7 +50,9 @@ pub let descriptor = {
 // `top` is the first rendered line and `row` how many of its wrapped rows lie
 // above the surface (design §6.4); `rows` is the rendered row count (the
 // viewport's rows plus OVERSCAN) and `cols` the text width in characters.
-// Without `wrap` every line is one row and `row` stays 0.
+// Without `wrap` every line is one row and `row` stays 0, and `left` columns
+// are scrolled out of view to the left (design §6.2); `char_w` is the
+// measured advance of one column.
 // ---------------------------------------------------------------------------
 
 let LINE_H = 20.0
@@ -65,7 +67,7 @@ let MEASURE_TEXT = "00000000000000000000"
 // the text column's horizontal padding (.src-text) and a caret's width
 let TEXT_PAD = 14.0
 
-fn new_view() => {handle: null, top: 0, row: 0, rows: DEFAULT_ROWS, cols: 0, wrap: false}
+fn new_view() => {handle: null, top: 0, row: 0, rows: DEFAULT_ROWS, cols: 0, wrap: false, left: 0, char_w: 0.0}
 
 // Rendered rows for a surface `height` pixels tall.
 fn rows_for(height) => max(1, int(height / LINE_H) + OVERSCAN)
@@ -139,7 +141,9 @@ fn rows_through(b, vw, line, r) =>
 
 // The view that keeps position `p` visible: unchanged when it already is,
 // else scrolled just enough, as the caret moves in every editor.
-fn follow(b, vw, p) {
+fn follow(b, vw, p) => follow_left(b, follow_rows(b, vw, p), p)
+
+fn follow_rows(b, vw, p) {
   let r = pos_row(b, vw, p)
   if (p.line < vw.top or (p.line == vw.top and r < vw.row)) {*: vw, top: p.line, row: r}
   else if (p.line - vw.top < visible(vw) and rows_through(b, vw, p.line, r) <= visible(vw)) vw
@@ -165,6 +169,29 @@ fn col_at_display(parts, i, d, at, col) {
 
 fn col_of_display(text, d) =>
   if (contains(text, "\t")) col_at_display(split(text, "\t"), 0, d, 0, 0) else min(max(d, 0), len(text))
+
+// Unwrapped, the text column scrolls sideways to keep `p` in view, with a
+// few columns of context; wrapped lines never need it.
+fn follow_left(b, vw, p) {
+  if (wrapping(vw) or vw.cols <= 0) (if (vw.left == 0) vw else {*: vw, left: 0})
+  else {
+    let x = display_col(buf.line(b, p.line), p.col)
+    let context = min(8, vw.cols div 4)
+    if (x < vw.left) {*: vw, left: max(0, x - context)}
+    else if (x >= vw.left + vw.cols - 1) {*: vw, left: x - vw.cols + 1 + context}
+    else vw
+  }
+}
+
+// The farthest the text column scrolls: the widest rendered line's end, in view.
+fn max_left(b, vw) {
+  let widths = [for (l in vw.top to vw.top + window_count(b, vw) - 1) display_len(buf.line(b, l))]
+  max(0, (if (len(widths) == 0) 0 else max(widths)) - vw.cols + 2)
+}
+
+// The view scrolled sideways by `n` columns.
+fn scrolled_left(b, vw, n) =>
+  if (wrapping(vw)) vw else {*: vw, left: min(max(0, vw.left + n), max(vw.left, max_left(b, vw)))}
 
 // Wheel motion arrives in pixels; whole lines move the window and the
 // remainder carries to the next event, so slow trackpad motion still scrolls.
@@ -213,11 +240,21 @@ fn window_doc(b, vw, hs) =>
 // text and the gutter up together.
 fn shift_style(vw) => if (vw.row > 0) "margin-top: " ++ string(0.0 - float(vw.row) * LINE_H) ++ "px" else null
 
+fn left_px(vw) => float(vw.left) * vw.char_w
+
+// The text column scrolled sideways slides under the gutter, which paints
+// above it; a negative margin widens it by as much, so its right edge stays.
+fn surface_style(vw) =>
+  if (vw.row > 0) shift_style(vw)
+  else if (vw.left > 0 and vw.char_w > 0.0) "margin-left: " ++ string(0.0 - left_px(vw)) ++ "px"
+  else null
+
 // A wrapped line's number keeps the height of all its rows.
 fn line_number(b, vw, l) {
   let n = line_rows(b, vw, l)
-  if (n == 1) <div class: "src-num", string(l + 1)>
-  else <div class: "src-num", style: "height: " ++ string(float(n) * LINE_H) ++ "px", string(l + 1)>
+  if (n == 1) <div class: "src-num", ["data-line"]: string(l), string(l + 1)>
+  else <div class: "src-num", ["data-line"]: string(l), style: "height: " ++ string(float(n) * LINE_H) ++ "px",
+            string(l + 1)>
 }
 
 fn gutter(b, vw) =>
@@ -472,16 +509,28 @@ fn intent_edit(b, sel, input_type, data) {
   else null
 }
 
-// Typing one character next to the previous one extends its undo step; the
-// first character may replace a selection, so typing over it undoes at once.
+// A pause this long between two keystrokes starts a new undo step.
+let TYPING_GAP_MS = 500.0
+
+// Typing one character next to the previous one extends its undo step until a
+// word boundary, a pause or a caret move (design §5.2); the first character
+// may replace a selection, so typing over it undoes at once.
 fn typed_char(d) => len(d.insert) == 1 and len(d.insert[0]) == 1
 
-fn joins_last(hist, d) {
+fn joins_last(hist, d, now) {
   if (len(hist.undo) == 0 or not typed_char(d) or buf.pos_cmp(d.from, d.to) != 0) false
   else {
     let prev = hist.undo[len(hist.undo) - 1]
-    prev.typing and buf.pos_cmp(prev.after.head, d.from) == 0 and is_word_char(d.insert[0])
+    prev.typing and buf.pos_cmp(prev.after.head, d.from) == 0 and is_word_char(d.insert[0]) and
+      now != null and prev.at != null and now - prev.at < TYPING_GAP_MS
   }
+}
+
+// The history after the caret moved on its own: the last typing step is over.
+fn closed(hist) {
+  let n = len(hist.undo)
+  if (n == 0 or not hist.undo[n - 1].typing) hist
+  else {*: hist, undo: [*take(hist.undo, n - 1), {*: hist.undo[n - 1], typing: false}]}
 }
 
 // Apply one delta: the new buffer, selection, and history.
@@ -489,11 +538,11 @@ fn edit_step(st, d) {
   let r = buf.apply_delta(st.b, d)
   let head = buf.insert_end(d.from, d.insert)
   let after = caret(head)
-  let entry = {inverses: [r.inverse], before: st.sel, after: after, typing: typed_char(d)}
-  let undo = if (joins_last(st.hist, d)) {
+  let entry = {inverses: [r.inverse], before: st.sel, after: after, typing: typed_char(d), at: st.now}
+  let undo = if (joins_last(st.hist, d, st.now)) {
                let prev = st.hist.undo[len(st.hist.undo) - 1];
                [*take(st.hist.undo, len(st.hist.undo) - 1),
-                {*: prev, inverses: [*prev.inverses, r.inverse], after: after}]
+                {*: prev, inverses: [*prev.inverses, r.inverse], after: after, at: st.now}]
              }
              else [*st.hist.undo, entry]
   {b: r.buf, sel: after, hist: {undo: undo, redo: []}, steps: [{delta: d, applied: r}]}
@@ -537,7 +586,7 @@ fn composition_step(st, comp, input_type, data) {
     {b: st.b, sel: st.sel, hist: st.hist, steps: [],
      comp: {base: st.b, base_sel: st.sel, base_hist: st.hist, from: sel_from(st.sel), to: sel_to(st.sel)}}
   else if (input_type == "insertFromComposition") {
-    let base = if (comp == null) st else {b: rebased(comp.base, st.b), sel: comp.base_sel, hist: comp.base_hist}
+    let base = if (comp == null) st else {b: rebased(comp.base, st.b), sel: comp.base_sel, hist: comp.base_hist, now: st.now}
     let committed = edit_step(base, buf.delta(sel_from(base.sel), sel_to(base.sel), buf.text_lines(string(data or ""))));
     // the commit applies to the pre-composition buffer: drop the mapped runs
     {*: committed, steps: null}
@@ -741,9 +790,12 @@ fn find_bar(f) =>
 fn selection_label(sel) {
   let from = sel_from(sel)
   let to = sel_to(sel)
+  // a selection that ends at a line's start does not include that line
+  let lines = to.line - from.line + (if (to.col == 0) 0 else 1);
   if (collapsed(sel)) null
   else if (from.line == to.line) string(to.col - from.col) ++ " selected"
-  else string(to.line - from.line + 1) ++ " lines selected"
+  else if (lines == 1) "1 line selected"
+  else string(lines) ++ " lines selected"
 }
 
 fn language_label(lang) => if (lang == 'markdown') "Markdown" else if (lang == 'html') "HTML" else "Plain Text"
@@ -779,7 +831,8 @@ let source_css = "
               font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 13px;
               background: #ffffff; color: #1f2328; }
   .src-gutter { flex: none; padding: 4px 10px 0 12px; text-align: right; color: #8c959f;
-                background: #f6f8fa; border-right: 1px solid #d8dee4; user-select: none; }
+                background: #f6f8fa; border-right: 1px solid #d8dee4; user-select: none;
+                position: relative; z-index: 1; cursor: default; }
   .src-num { height: 20px; line-height: 20px; }
   .src-text { flex: 1; min-width: 0; padding: 4px 0 0 10px; outline: none; overflow: hidden;
               white-space: pre; }
@@ -862,8 +915,10 @@ pn measured(vw, root) {
   let probe = dom.get_element_by_id(root, "src-measure")
   let m = if (probe == null) null else dom.bounding_box(probe)
   let char_w = if (m != null and m.width > 0) m.width / float(MEASURE_CHARS) else 0.0
+  // a column scrolled out to the left widens the surface's box by as much
   {*: vw, rows: if (r != null and r.height > 0) rows_for(r.height) else vw.rows,
-   cols: if (r != null and char_w > 0.0) int((r.width - TEXT_PAD) / char_w) else vw.cols}
+   cols: if (r != null and char_w > 0.0) int((r.width - TEXT_PAD - left_px(vw)) / char_w) else vw.cols,
+   char_w: if (char_w > 0.0) char_w else vw.char_w}
 }
 
 // Bind the surface once and measure it.
@@ -891,7 +946,7 @@ fn typed_step(st, text) => edit_step(st, buf.delta(sel_from(st.sel), sel_to(st.s
 
 edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: caret(buf.loc(0, 0)),
                          vw: new_view(), hist: {undo: [], redo: []},
-                         rev: 0, comp: null, hs: ~.hs, frame: 0, wheel_px: 0.0, drag: null, dialog: null,
+                         rev: 0, comp: null, hs: ~.hs, frame: 0, wheel_px: 0.0, wheel_dx: 0.0, drag: null, dialog: null,
                          after_save: null {
   let dirty = sess.is_dirty(session, b);
   <body class: "edit-app edit-format-source",
@@ -903,7 +958,7 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
     <div class: "src-main",
       gutter(b, vw);
       <div id: "edit-surface", class: if (vw.wrap) "src-text src-wrap" else "src-text", contenteditable: "true",
-           spellcheck: "false", tabindex: "0", style: shift_style(vw), apply(window_doc(b, vw, hs))>
+           spellcheck: "false", tabindex: "0", style: surface_style(vw), apply(window_doc(b, vw, hs))>
       scrollbar(b, vw);
       <span id: "src-measure", class: "src-measure", ["aria-hidden"]: "true", MEASURE_TEXT>
       if (hs.find != null) find_bar(hs.find) else null
@@ -928,7 +983,7 @@ on editaction(evt) {
   }
   let history = input_type == "historyUndo" or input_type == "historyRedo"
   let composing = contains(composition_types, input_type)
-  let st = {b: b, sel: target, hist: hist}
+  let st = {b: b, sel: target, hist: hist, now: evt.time_stamp}
   let next = if (composing) composition_step(st, comp, input_type, evt.data)
              else if (history) history_step(st, input_type == "historyUndo")
              else {
@@ -956,7 +1011,12 @@ on editaction(evt) {
 on selectionchange(evt) {
   let picked = model_selection(b, vw.top, hs, evt.source_selection)
   // the selection the surface itself projected keeps the model's own
-  if (picked != null and evt.source_selection != source_selection_of(b, vw, hs, sel)) { sel = picked }
+  if (picked != null and evt.source_selection != source_selection_of(b, vw, hs, sel)) {
+    sel = picked
+    hist = closed(hist)
+    // the status redraw replaces the rows the native caret is in
+    rev = project(vw, b, hs, sel, rev)
+  }
 }
 on edit_cmd(req) {
   vw = mounted(vw, req.node, rev)
@@ -1101,7 +1161,7 @@ on keydown(evt) {
     rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
-  let st = {b: b, sel: adopted, hist: hist}
+  let st = {b: b, sel: adopted, hist: hist, now: evt.time_stamp}
   let undo_key = primary and lower(string(evt.key)) == "z"
   let next = if (undo_key) history_step(st, evt.shiftKey != true)
              else if (evt.key == "Tab" and evt.shiftKey == true) reindent_step(st, indent_unit(b), false)
@@ -1126,7 +1186,10 @@ on keydown(evt) {
     hist = next.hist
     files.sync_window(evt.target, session, b)
   }
-  else { sel = moved_sel }
+  else {
+    sel = moved_sel
+    hist = closed(hist)
+  }
   vw = follow(b, vw, sel.head)
   hs = settle(hs, if (next == null) [] else next.steps, b)
   frame = request_exact(evt.target, hs, b, vw, frame)
@@ -1140,8 +1203,12 @@ on wheel(evt) {
   vw = mounted(vw, evt.target, rev)
   let step = wheel_step(wheel_px + float(evt.deltaY or 0))
   wheel_px = step.rest
-  let next = scrolled(b, vw, step.lines)
-  if (next.top != vw.top or next.row != vw.row) {
+  // sideways motion moves whole columns; the remainder carries like lines
+  let dx = wheel_dx + float(evt.deltaX or 0)
+  let cols = if (vw.char_w > 0.0) int(dx / vw.char_w) else 0
+  wheel_dx = dx - float(cols) * vw.char_w
+  let next = scrolled_left(b, scrolled(b, vw, step.lines), cols)
+  if (next.top != vw.top or next.row != vw.row or next.left != vw.left) {
     vw = next
     frame = request_exact(evt.target, hs, b, vw, frame)
     rev = project(vw, b, hs, sel, rev)
@@ -1152,9 +1219,27 @@ on wheel(evt) {
 // Shift+press extends the model selection: its anchor may lie outside the
 // window, where the clamped DOM selection cannot extend from it.
 on mousedown(evt) {
+  // A press on a line number selects the line, as in every editor; Shift
+  // extends the selection to it (design §6.3).
+  let num = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
+  if (dialog == null and num != null and dom.node_type(num) == 1 and dom.matches(num, ".src-num")) {
+    vw = mounted(vw, evt.target, rev)
+    let l = int(dom.get_attribute(num, "data-line"))
+    let start = buf.loc(l, 0)
+    let stop = if (l + 1 < b.count) buf.loc(l + 1, 0) else buf.loc(l, buf.line_len(b, l))
+    sel = if (evt.shiftKey != true) {anchor: start, head: stop, goal: null}
+          else {anchor: sel.anchor, head: if (buf.pos_cmp(start, sel.anchor) < 0) start else stop, goal: null}
+    hist = closed(hist)
+    vw = follow(b, vw, sel.head)
+    frame = request_exact(evt.target, hs, b, vw, frame)
+    files.focus_surface(evt.target)
+    rev = project(vw, b, hs, sel, rev)
+    return 'prevent-default'
+  }
   if (evt.shiftKey == true and evt.source_pos != null and dialog == null) {
     vw = mounted(vw, evt.target, rev)
     sel = {anchor: sel.anchor, head: from_source(b, vw.top, hs, evt.source_pos), goal: null}
+    hist = closed(hist)
     vw = follow(b, vw, sel.head)
     frame = request_exact(evt.target, hs, b, vw, frame)
     rev = project(vw, b, hs, sel, rev)

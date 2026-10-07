@@ -1,0 +1,29 @@
+{
+  "name": "unwrapped, the text column scrolls sideways to keep the caret in view, under a fixed gutter; a click on scrolled text lands where it shows; the sideways wheel scrolls; Home scrolls back",
+  "command": "edit",
+  "source": true,
+  "html": "test/ui/edit/wrap_sample.txt",
+  "working_copy": "temp/edit-ui/edit_src_hscroll.txt",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "present": false},
+    {"type": "click", "target": {"text": "long:"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 7, Col 5006"},
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "contains": "margin-left: -"},
+    {"type": "assert_rect", "target": {"selector": ".src-num", "index": 0}, "x": 0, "tolerance": 30},
+    {"type": "type", "text": "Z"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "token0499Z"},
+    {"type": "click", "target": {"text": "token0495"}},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 7, Col 49"},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "present": false},
+    {"type": "scroll", "x": 500, "y": 300, "dx": -2, "dy": 0},
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "contains": "margin-left: -"},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 7, Col 1"},
+    {"type": "key_combo", "key": "z", "mods_str": "alt"},
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "present": false},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_hscroll.txt", "contains": "token0499Z\nafter the long line\n"}
+  ]
+}

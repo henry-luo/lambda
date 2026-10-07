@@ -1,0 +1,19 @@
+{
+  "name": "a click past a line's end puts the caret at its end; a click on a line number selects the line, Shift+click extends the selection to another line, and typing replaces the selected lines",
+  "command": "edit",
+  "html": "test/ui/edit/sample.txt",
+  "working_copy": "temp/edit-ui/edit_src_gutter.txt",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-doc > div", "index": 1, "offset_x": 700, "offset_y": 10}},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 2, Col 12"},
+    {"type": "click", "target": {"selector": ".src-num", "index": 1}},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 3, Col 1  ·  1 line selected"},
+    {"type": "click", "target": {"selector": ".src-num", "index": 3}, "mods_str": "shift"},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 5, Col 1  ·  3 lines selected"},
+    {"type": "click", "target": {"selector": ".src-num", "index": 1}},
+    {"type": "type", "text": "X"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_gutter.txt", "contains": "Source editor sample\nX    indented line\n"}
+  ]
+}
