@@ -79,7 +79,7 @@ typedef struct CssRegistrationWalk {
 static bool css_visit_registration_rule(void* context, const CssRule* rule) {
     CssRegistrationWalk* walk = (CssRegistrationWalk*)context;
     return rule->type != CSS_RULE_PROPERTY ||
-        walk->visitor(walk->context, &rule->data.property_rule);
+        walk->visitor(walk->context, &rule->data.property_rule, strlen(rule->data.property_rule.name));
 }
 
 static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
@@ -89,7 +89,7 @@ static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* s
         css_visit_registration_rule, &walk, depth);
 }
 
-static bool css_index_property_registration(void* context, const CssPropertyRegistration* registration) {
+static bool css_index_property_registration(void* context, const CssPropertyRegistration* registration, size_t) {
     CssEngine* engine = (CssEngine*)context;
     size_t count = engine->property_registration_count;
     if (!lam::pool_grow_array(engine->pool, &engine->property_registrations,
@@ -108,7 +108,7 @@ static int css_compare_property_registrations(const void* left, const void* righ
 
 struct CssRegistrationLookup {const char* name; const CssPropertyRegistration* result;};
 
-static bool css_lookup_property_registration(void* context, const CssPropertyRegistration* registration) {
+static bool css_lookup_property_registration(void* context, const CssPropertyRegistration* registration, size_t) {
     CssRegistrationLookup* lookup = (CssRegistrationLookup*)context;
     if (css_custom_property_name_matches(registration->name, lookup->name)) lookup->result = registration;
     return true;
@@ -377,7 +377,7 @@ bool css_visit_document_property_registrations(DomDocument* doc,
     }
     for (CssScriptPropertyRegistration* entry = (CssScriptPropertyRegistration*)doc->services.registered_property_set;
          entry; entry = entry->next)
-        if (!visitor(context, &entry->registration)) return false;
+        if (!visitor(context, &entry->registration, entry->name_length)) return false;
     return true;
 }
 

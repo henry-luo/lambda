@@ -26,6 +26,7 @@
 #include "../jube/jube_registry.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/strview.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/mempool.h"
@@ -1587,45 +1588,47 @@ static String* cssom_decl_text(CssRule* rule) {
 
 static bool cssom_computed_name(const CssProperty* property, void* data) {
     return property->shorthand ||
-        ((lam::ArrayList<const char*>*)data)->append(property->name);
+        ((lam::ArrayList<StrView>*)data)->append(strview_from_cstr(property->name));
 }
 
 static int cssom_compare_names(const void* left, const void* right) {
-    return strcmp(*(const char* const*)left, *(const char* const*)right);
+    const StrView* a = (const StrView*)left;
+    const StrView* b = (const StrView*)right;
+    return str_cmp(a->str, a->length, b->str, b->length);
 }
 
 struct CssomComputedNames {
     DomElement* element;
     Pool* scratch;
-    lam::ArrayList<const char*>* names;
+    lam::ArrayList<StrView>* names;
 };
 
-static bool cssom_computed_custom_name(CssomComputedNames* data, const char* name) {
+static bool cssom_computed_custom_name(CssomComputedNames* data, StrView name) {
     for (size_t i = 0; i < data->names->size(); i++)
-        if (strcmp((*data->names)[i], name) == 0) return true;
+        if (strview_eq(&(*data->names)[i], &name)) return true;
     // empty computed token lists are valid; only the guaranteed-invalid value is omitted.
-    return !css_compute_element_custom_property(data->scratch, data->element, name) ||
+    return !css_compute_element_custom_property(data->scratch, data->element, name.str, name.length) ||
         data->names->append(name);
 }
 
-static bool cssom_computed_registration(void* data, const CssPropertyRegistration* registration) {
-    return cssom_computed_custom_name((CssomComputedNames*)data, registration->name);
+static bool cssom_computed_registration(void* data, const CssPropertyRegistration* registration, size_t name_length) {
+    return cssom_computed_custom_name((CssomComputedNames*)data, strview_init(registration->name, name_length));
 }
 
-static void cssom_computed_names(Item receiver, lam::ArrayList<const char*>* names) {
+static void cssom_computed_names(Item receiver, lam::ArrayList<StrView>* names) {
     DomComputedStyleHost* host = (DomComputedStyleHost*)virtual_host_data(receiver);
     DomElement* element = host ? (DomElement*)host->elem : nullptr;
     if (!element || !dom_element_is_connected(element)) return;
     css_property_foreach(cssom_computed_name, names);
     if (names->size() > 1)
-        qsort(names->data(), names->size(), sizeof(const char*), cssom_compare_names);
+        qsort(names->data(), names->size(), sizeof(StrView), cssom_compare_names);
     Pool* scratch = pool_create();
     if (!scratch) return;
     CssomComputedNames data = {element, scratch, names};
     dom_ensure_computed(element, false);
     for (DomElement* ancestor = element; ancestor; ancestor = dom_parent_element(ancestor))
         for (CssCustomProp* variable = ancestor->css_variables; variable; variable = variable->next)
-            cssom_computed_custom_name(&data, variable->name);
+            cssom_computed_custom_name(&data, strview_from_cstr(variable->name));
     css_visit_document_property_registrations(element->doc, cssom_computed_registration, &data);
     pool_destroy(scratch);
 }
@@ -1639,7 +1642,7 @@ extern "C" Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name)
         if (view.computed) {
             if (strcmp(property, "cssText") == 0) return make_string_item("");
             if (strcmp(property, "length") == 0) {
-                lam::ArrayList<const char*> names;
+                lam::ArrayList<StrView> names;
                 cssom_computed_names(decl_item, &names);
                 return (Item){.item = i2it((int64_t)names.size())};
             }
@@ -1826,9 +1829,11 @@ extern "C" Item dom_cssom_rule_decl_item(Item receiver, Item index_item) {
     uint32_t index = (uint32_t)js_to_int32(it2d(number));
     CssomDeclarationView view(receiver_root.get());
     if (view.computed) {
-        lam::ArrayList<const char*> names;
+        lam::ArrayList<StrView> names;
         cssom_computed_names(receiver_root.get(), &names);
-        return make_string_item(index < names.size() ? names[index] : "");
+        if (index >= names.size()) return make_string_item("");
+        StrView name = names[index];
+        return (Item){.item = s2it(heap_strcpy(name.str, name.length))};
     }
     CssRule* rule = view.rule;
     if (!rule) return make_string_item("");
