@@ -5082,11 +5082,7 @@ static void emit_int53_in_band_into(MirTranspiler* mt, MIR_reg_t in_band,
 static void emit_int53_branch(MirTranspiler* mt, MIR_reg_t value,
         MIR_label_t target, bool when_in_band) {
     if (!when_in_band) {
-        MIR_reg_t shifted = new_reg(mt, "band_shift", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, shifted),
-            MIR_new_reg_op(mt->ctx, value), MIR_new_int_op(mt->ctx, INT53_MAX)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_UBGT, MIR_new_label_op(mt->ctx, target),
-            MIR_new_reg_op(mt->ctx, shifted), MIR_new_int_op(mt->ctx, 2 * INT53_MAX)));
+        em_branch_int53_outside(&mt->em, value, target);
         return;
     }
     MIR_label_t out = new_label(mt);
@@ -5124,7 +5120,6 @@ static MIR_reg_t emit_int53_in_band(MirTranspiler* mt, MIR_reg_t value,
 static BoxedReg emit_box_int_lane(MirTranspiler* mt, LaneReg lane) {
     MIR_reg_t lane_reg = lane.r;
     MIR_reg_t result = new_reg(mt, "boxi", MIR_T_I64);
-    MIR_reg_t payload = new_reg(mt, "ibpay", MIR_T_I64);
     MIR_label_t l_pack = new_label(mt);
     MIR_label_t l_end = new_label(mt);
 
@@ -5137,11 +5132,7 @@ static BoxedReg emit_box_int_lane(MirTranspiler* mt, LaneReg lane) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     emit_label(mt, l_pack);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, payload),
-        MIR_new_reg_op(mt->ctx, lane_reg),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT_PAYLOAD_MASK)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, payload), MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT)));
+    em_box_finite_int_item(&mt->em, lane_reg, result);
     emit_label(mt, l_end);
     return BoxedReg(result);
 }
@@ -6082,15 +6073,7 @@ static MIR_reg_t emit_unbox_contract_lane(MirTranspiler* mt, MIR_reg_t item_reg,
 // A TG8 exact-key matcher has already established an `int` Item. Unlike the
 // general conversion above, this path must not repeat that tag test per loop.
 static MIR_reg_t emit_unbox_exact_int_lane(MirTranspiler* mt, MIR_reg_t item_reg) {
-    MIR_reg_t shifted = new_reg(mt, "tg8_int_bits", MIR_T_I64);
-    MIR_reg_t result = new_reg(mt, "tg8_int_lane", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH,
-        MIR_new_reg_op(mt->ctx, shifted), MIR_new_reg_op(mt->ctx, item_reg),
-        MIR_new_int_op(mt->ctx, 8)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, shifted),
-        MIR_new_int_op(mt->ctx, 8)));
-    return result;
+    return em_unbox_finite_int_item(&mt->em, item_reg);
 }
 
 static MIR_reg_t emit_unbox_exact_variant_lane(MirTranspiler* mt,
@@ -6144,7 +6127,6 @@ static LaneReg emit_unbox_int_lane(MirTranspiler* mt, BoxedReg item) {
     MIR_reg_t out = new_reg(mt, "ulane", MIR_T_I64);
     MIR_reg_t tag = new_reg(mt, "ulane_t", MIR_T_I64);
     MIR_reg_t is_int = new_reg(mt, "ulane_ii", MIR_T_I64);
-    MIR_reg_t shifted = new_reg(mt, "ulane_s", MIR_T_I64);
     MIR_label_t l_poison = new_label(mt);
     MIR_label_t l_done = new_label(mt);
     // The inline arm requires an actual INT-tagged Item. A statically int-typed
@@ -6159,10 +6141,7 @@ static LaneReg emit_unbox_int_lane(MirTranspiler* mt, BoxedReg item) {
         MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_poison),
         MIR_new_reg_op(mt->ctx, is_int)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, shifted),
-        MIR_new_reg_op(mt->ctx, item_reg), MIR_new_int_op(mt->ctx, 8)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, out),
-        MIR_new_reg_op(mt->ctx, shifted), MIR_new_int_op(mt->ctx, 8)));
+    em_unbox_finite_int_item(&mt->em, item_reg, out);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
     emit_label(mt, l_poison);
     MIR_reg_t cold = emit_call_1(mt, "lambda_item_to_int_lane_c", MIR_T_I64, MIR_T_I64,

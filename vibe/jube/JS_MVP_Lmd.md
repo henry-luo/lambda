@@ -2,9 +2,11 @@
 
 **Date:** 2026-10-07
 
-**Status:** IMPLEMENTED MVP — authorized by the user on 2026-10-07, in
-worktree `temp/js-mvp-lmd`, branch `codex/js-mvp-lmd`. The four design goals
-in §1 remain fixed. Appendix A records the concrete implementation and checks.
+**Status:** IMPLEMENTED MVP INCLUDING INTEGER TUNING — user decision
+2026-10-07, in worktree `temp/js-mvp-lmd`, branch `codex/js-mvp-lmd`.
+Section 9 records integer tuning and its validation. The four design goals
+in §1 remain fixed. Appendix A preserves the implementation and measurements
+before this phase; §9.6 records the integer subtype's release comparison.
 
 **Implementation destination:** `lambda/js/mvp-lmd/`
 
@@ -69,16 +71,18 @@ The [formal semantics](../../doc/Lambda_Formal_Semantics.md) and
 |---|---|---|
 | Hosted language semantics | **S1.11**, **D1.1** | Admitted programs retain JS meaning; unsupported capabilities are explicit. |
 | Shared substrate and values | **D1.2v2–D1.3v3** | Use host `Item`, heap, execution ownership, and MIR infrastructure. |
+| Integer runtime subtype | **D2.2.5**, **S4.1.1–S4.1.2**, **S4.9.1** | Admit Lambda `int` under JS Number inside MVP; retain JS overflow and the existing host numeric FFI contract. |
 | Representation versus conversion | **D2.4.1–D2.4.3** | Native representation never substitutes for JS coercion. |
 | Returned failures | **D1.4v4**, **D8.4.3v2** | Failures return through every frame and its cleanup. |
 | Scalar lifetime and rooting | **D5.2.1v3–D5.2.3**, **D5.3.1–D5.3.5** | Shared companion returns, destination ownership, and precise roots. |
 | AST and passes | **D8.2.1–D8.2.6** | Existing indexed AST and pass manager; new lowering consumes resolved facts. |
 | Specialization | **D8.3.1v2**, **D8.4.1v2** | Use proven native operations and necessary local guards; no automatic body cloning, feedback vectors, or mutable inline caches. |
 
-The user's new experimental lane is recorded here. It does not change Lambda
-language rulings or authorize changing the behavior of full LambdaJS. The
-implementation uses the boundary and ten helpers recorded below. No formal
-Lambda ruling is revised by this experiment.
+The experimental lane and its integer-tuning phase are recorded here. The
+new runtime-subtype decision is **D2.2.5**; Lambda language semantics and
+full LambdaJS behavior remain governed by their existing rules. The
+implementation uses the boundary and ten helpers recorded below. Section 9
+adds no runtime helper.
 
 ## 2. What “based on untyped Lambda” means
 
@@ -98,8 +102,9 @@ flowchart TD
     helpers --> core
 ```
 
-Untyped source may still compile to native `MIR_T_D` and Boolean registers.
-Unknown or changing values use `Item`. Preserve JS semantics at every join,
+Untyped source may compile to native integer, double, and Boolean registers;
+§9 introduces the integer Number subtype. Unknown or changing values use
+`Item`. Preserve JS semantics at every join,
 store, call, and return; an inferred Number is a representation opportunity,
 not a declaration restricting what a JS variable may later contain.
 
@@ -187,10 +192,23 @@ not replayed or rolled back.
 
 ### 4.1 Scalars and operators
 
-All JS Numbers use Lambda's canonical FLOAT Item encoding at boxed boundaries;
-native Number computations use binary64. Machine integers may implement
-indices and proven bitwise operations, but they never change the observable
-Number type or import Lambda int53 poison/overflow rules.
+Lambda `int` is an internal runtime subtype of JS Number under **D2.2.5**.
+Finite integer values can use canonical INT Items throughout variables,
+arrays, and calls, and native i64 registers inside proven regions. Other
+Numbers use canonical FLOAT Items and binary64 registers. JS still observes
+one Number type; mixed INT/FLOAT values retain JS numeric equality and
+conversion. The precise domain, widening rules, and implementation work are
+the integer-tuning phase in §9. No new Item tag or numeric source syntax is
+introduced, and Lambda integer saturation never substitutes for JS arithmetic.
+
+ToInt32 truncates Numbers in the guarded inclusive range ±2⁵³ and keeps the
+low 32 bits; other values retain the existing `fmod` path. Remainder by a
+positive literal power of two up to 2⁵³ uses a mask only for exact integer
+dividends in [1, 2⁵³−1]. Negative values, both zeros, fractions, NaN, infinities,
+and larger values retain `fmod`, preserving signed zero and Number rounding
+(**S1.11**, **D2.4.3**). The same bounded integer emitter validates array indices
+and lengths. Section 9 extends integer reuse without integer loop clones or
+new numeric runtime helpers.
 
 Scalar conversion must distinguish null, undefined, Boolean, Number, and String.
 For example, `null + 1` is `1`, `undefined + 1` is NaN, and `"2" + 1` is `"21"`.
@@ -322,17 +340,33 @@ results only when all admitted incoming edges prove their contracts; otherwise
 use Item where needed and keep proven local computations native. Do not emit
 a boxed/native pair of full bodies by default or clone loops speculatively.
 
-Every function currently has one boxed `Item* + argc` entry/body, shared by
-direct and indirect MIR calls. This experimental ABI choice differs from the
-core native direct ABI (**D8.4.2v2**); scalar return transport still follows
-**D5.2.1v3**. There are no entry adapters or cloned bodies.
 Stable declarations used only as direct callees have a closed incoming domain:
-a fixed point unions the kinds at every call, missing arguments, and parameter
-writes. Proven Number/Boolean parameters unbox once into native locals; all
-other parameters keep Item. Functions observed as values or reassigned retain
-generic parameters. This preserves every admitted incoming value without an
-extra wrapper or a coercing native-only entry. Unobservable declaration
-function allocations are omitted; function expressions retain fresh identity.
+a joint fixed point unions parameter, binding, and return kinds, including
+recursive calls, missing arguments, parameter writes, and implicit undefined
+returns. Nested functions have separate return summaries. Unresolved recursive
+domains widen to the generic domain before representation selection.
+
+A closed function whose parameters and result are each proven Number or
+Boolean gets one native entry within the shared operand limit: individual
+scalar operands after `Context*` and the execution-owned program pointer,
+and a native result with an error companion (**D8.4.2v2**, **D5.2.1v3**).
+Section 9 selects a finite integer carrier only where the complete incoming
+domain and return analysis justify it; a Number result that can widen uses
+double or Item. An indirect boxed call accepts both numeric runtime subtypes.
+All other functions keep one boxed `Item* + argc` entry. Functions observed as
+values or reassigned retain generic incoming parameters. Direct calls still
+use their return summaries where the target is stable. Every argument is
+evaluated in source order, including discarded extras; no argument is coerced
+to satisfy a native entry. There are no entry adapters or cloned bodies.
+Unobservable declaration function allocations are omitted; function expressions
+retain fresh identity.
+
+An explicit self-call directly in return position in a native body evaluates
+all arguments into snapshots, assigns parameters, and jumps to the body entry.
+The re-entry point runs local declaration initialization again while retaining
+the activation's precise root/scalar storage. Other calls retain the ordinary
+call path; mutual recursion and calls beneath arithmetic are not rewritten.
+Each actual function entry retains the shared native-stack limit check.
 
 An indirect call checks the MVP callable ABI, loads its boxed entry, and emits
 `MIR_CALL` through that pointer using the same call emitter as direct calls.
@@ -366,14 +400,16 @@ pass manager without a shadow AST:
 1. Existing parse/build → bind → validate → index.
 2. `mvp-admit`: binding/function collection, reused parameter/function facts,
    whole-unit admission, and capture checks.
-3. `mvp-plan`: monotone kind inference, closed-call parameter facts, dominance
-   and observability proofs, native versus Item representation.
+3. `mvp-plan`: joint monotone parameter/binding/return inference, dominance
+   and observability proofs, native versus Item representation and function ABI.
 4. `mvp-lower`: forward declarations, one MIR body per source function, shared
    root/scalar-home insertion, finalization and linking.
 
 The public semantic type remains on its existing AST authority; lowering plans
-carry physical choices and guards (**D2.4.1**, **D8.2.5v3**). JS Number evidence
-must not be interpreted as a Lambda integer contract. Facts coupled to old
+carry physical choices and guards (**D2.4.1**, **D8.2.5v3**). Under §9, JS Number
+can refine to the Lambda integer runtime subtype; Number evidence alone does
+not prove integrality or range, and an integer refinement does not select
+Lambda's saturating operator semantics (**D2.2.5**). Facts coupled to old
 backend storage are converted at an explicit analysis seam, not treated as
 portable merely because their fields have similar names.
 
@@ -390,13 +426,15 @@ direct calls are compiler emission responsibilities. Do not create one C
 runtime call per such operation. Keep branch results native, discard unused function-body expression values,
 and use native binding destinations to avoid Item materialization
 (**D8.2.6**). A small compiler value record tracks native/boxed kinds and
-constant Numbers; no new runtime value representation is introduced.
+constant Numbers; §9 extends its facts while reusing existing INT/FLOAT
+encodings and introducing no private value format.
 
 ### MIR and runtime-code minimization decisions
 
 | Decision | Required emitted form |
 |---|---|
 | Proven Number arithmetic | Native arithmetic; no coercion helper, Item round trip, or redundant error check. |
+| Proven integer Number arithmetic | Native integer arithmetic where range and zero-sign facts suffice; shared local guards only where needed, JS double arithmetic on a miss (§9). |
 | Branch-only result | Direct comparison/branch; no materialized boxed Boolean. |
 | Assignment | Write the planned destination directly; do not produce an unused temporary or result. Preserve RHS effects. |
 | Scalar conversion | Handle constant-time primitive cases locally; use a small string/formatting leaf only for variable-length work. |
@@ -405,7 +443,8 @@ constant Numbers; no new runtime value representation is introduced.
 | Array literal | Reserve known capacity once and evaluate/store elements in order; do not grow once per element. |
 | Dense array write | Direct store for proven immediate/reference cases; reviewed slow leaf only for growth or scalar-home ownership. |
 | Array length shrink | Required conversion/validation and a length store; no resize helper, tail-clearing loop, or buffer copy. |
-| Function calls | Direct or checked indirect MIR call; one necessary ABI adapter, no C dispatch hop. |
+| Function calls | Native operands/results for proven closed scalar functions; otherwise one boxed entry. Checked indirect MIR call, no C dispatch hop or adapter. |
+| Self-tail calls | Snapshot arguments, assign parameters, reinitialize locals, and jump inside the existing native body. |
 | Function/loop bodies | One body; no automatic generic/specialized clones. |
 | GC roots | Existing liveness/effect-driven root stores at MAY_GC calls; no root frame for a proven zero-root body (**D5.3.1**). |
 | Failure checks | Check fallible results once; share cold failure blocks by category/site needs. No error check on an infallible raw result. |
@@ -612,13 +651,355 @@ implementation acceptance includes `make test-lambda-baseline` and the
 unchanged full-JS Test262 baseline, in addition to MVP-specific tests. Add any
 new Lambda `*.ls` regression with its corresponding expected `*.txt`.
 
-## 9. Review boundary
+## 9. Integer-tuning phase
+
+**Design accepted and implemented:** USER, 2026-10-07.
+This phase tunes the scalar, assignment, dense-array, control-flow, and
+function features already admitted by §3. Its governing rule is **D2.2.5**;
+all four minimization/efficiency goals in §1 apply. The phase adds Lambda
+`int` as a JS runtime subtype, including at boxed storage and call boundaries.
+Integer registers alone, followed by unconditional FLOAT boxing at every
+boundary, do not complete this phase.
+
+### 9.1 Runtime subtype and observable behavior
+
+The runtime/type-planning relation is **Lambda `int` ⊑ JS Number**. Reuse the
+existing Lambda type and encodings; introduce neither a new TypeId nor a JS
+`int` keyword. This is an internal refinement of the retained JS Number
+contract (**D2.4.1–D2.4.3**), not a source annotation or a restriction on later
+assignment.
+
+| Numeric case | MVP representation and contract |
+|---|---|
+| Finite integer in ±(2⁵³−1), excluding `-0` | Existing `LMD_TYPE_INT` / INT Item; unboxed finite i64 when proven. Zero in this carrier means JS `+0`. |
+| Fractions, `-0`, and finite Numbers outside that band | Existing FLOAT Item / binary64. This includes exactly representable values such as `2⁵³`; leaving the int band is not JS infinity. |
+| NaN and ±Infinity | Shared merged-poison values, still canonically FLOAT-tagged at Item boundaries under **D2.2.2**. Native integer fast paths admit only finite band values, never Lambda lane sentinels. |
+
+Lambda's full `int` domain includes merged poison (**S4.1.1**, **S4.2.1**);
+the INT tag specifically establishes a finite integer (**D2.2.2**). A FLOAT
+tag does not establish fractionality: existing double computations may yield
+integral values. Keep each runtime subtype's canonical construction path;
+do not add a universal float-to-int normalization pass or inspect every
+double result merely to retag it.
+
+`typeof` reports `"number"` for both carriers. Strict/loose equality, ordering,
+truthiness, switch matching, string conversion, and numeric array-key/length
+validation use the JS numeric domain across both tags. In particular, INT 1
+and FLOAT 1 compare strictly equal, ±0 compare equal, and NaN compares unequal
+to itself. Raw Item/tag equality cannot decide mixed numeric equality.
+ToNumber accepts an INT value without semantic conversion; producing a
+double operand from a finite INT is exact. FLOAT-to-INT narrowing requires
+an integral, finite, in-band value with no negative zero; truncation is not
+an admission test. These requirements follow **S1.11**, **D2.4.3**, and
+[ECMAScript Number operations](https://tc39.es/ecma262/multipage/ecmascript-data-types-and-values.html#sec-ecmascript-language-types-number-type).
+
+This is an internal runtime relation. The semantic JS-to-Lambda numeric FFI
+continues to export Number as Lambda `float` under **S4.9.1**, even when its
+internal Item is INT. Host diagnostic inspection of an execution-owned Item
+does not constitute a Lambda-language import. No new guest bridge is added.
+
+### 9.2 Arithmetic and widening
+
+The integer subtype is **not closed under JS operators**. `int + int` may
+produce FLOAT; division may produce a fraction; negating zero produces `-0`.
+Preserve JS binary64 rounding at each source operation. Never keep an
+out-of-band exact integer intermediate through later arithmetic, reassociate
+expressions, or apply Lambda's int53 saturation (**S4.1.2**) to a JS result.
+The [safe-integer boundary](https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-number.max_safe_integer)
+is an optimization boundary, not a JS overflow boundary (**S1.11**).
+
+| Operation | Integer path and required exit |
+|---|---|
+| Numeric `+`, `-`, updates | For two finite int53 operands, a machine i64 add/subtract cannot overflow i64. Keep an INT result only if it is in band; otherwise evaluate the double operation from the saved operands. Elide the band check when ranges prove it. Dynamic `+` retains string-concatenation dispatch. |
+| `*` | Use integer multiplication when range facts prove a safe product and exclude negative zero. Any dynamic path must detect machine overflow as well as int53 overflow and handle zero sign. Otherwise retain the existing double multiply; never check only an already-wrapped product. |
+| `/` | Keep double division unless a nonzero divisor, exact quotient, and correct zero sign are proven. An even, nonnegative in-band integer divided by two may use a 64-bit shift with those facts; general JS `/` never becomes ToInt32 division. |
+| `%` | Integer remainder requires finite integral operands and nonzero divisor. A zero result from a negative dividend is FLOAT `-0`; zero divisor follows JS NaN behavior without a hardware division fault. Reuse the existing guarded power-of-two optimization where applicable. |
+| Unary `-` | Negate finite nonzero INT directly; zero produces FLOAT `-0`. |
+| Comparisons | Compare two finite INTs directly; widen INT exactly for mixed INT/FLOAT comparisons, retaining NaN and signed-zero rules. |
+| Bitwise/shifts | Reuse JS 32-bit conversion, truncation, and masked shift-count rules; an INT operand avoids double conversion. Signed and unsigned results both fit int53 and can be INT. Lambda's general integer shift semantics are not substituted. |
+| `**` | Retain the existing JS double/power leaf; a general integer exponentiation implementation is not needed for this phase. |
+
+For a runtime-dependent boxed integer addition, the conceptual lowering is:
+
+```text
+evaluate left and right once in JS order
+if both values are INT:
+    sum = machine_i64_add(unbox(left), unbox(right))
+    if sum is in int53: result = canonical_int_item(sum)
+    else: result = canonical_float_item(double(left) + double(right))
+else:
+    use the existing admitted JS addition path
+```
+
+Branch-local temporaries preserve the original operands; a miss performs
+only the pending operation and rejoins the same body. It never reruns source
+effects, restarts a loop, invokes another JS engine, or boxes an out-of-band
+machine integer through a saturating Lambda constructor. For example,
+`9007199254740991 + 1` must become FLOAT `9007199254740992`, and
+`(9007199254740992 + 1) - 9007199254740992` must remain zero.
+
+### 9.3 Planning, storage, and functions
+
+Extend the existing `mvp-plan` facts with integer membership, conservative
+bounds, and possible negative zero. Do not change the parser or invent a
+second semantic AST/type authority. Literal admission uses the Number already
+produced by the JS parser, preserving its rounding. In-band integer literals,
+lengths, and integer-producing operators can construct INT values directly.
+Do not change the string-to-number helper's double ABI just to obtain INTs.
+
+Propagate facts through assignments, branch joins, loop backedges, and stable
+direct calls. Account for all writes, missing/extra arguments, implicit
+returns, recursion, and calls that can mutate program bindings. Loops and
+recursive analysis need a terminating conservative fixed point; a failed
+range proof selects the existing Number/Item route. Compiler-side range
+arithmetic must itself be checked. No benchmark-name or input-specific rule
+is permitted.
+
+Plan one carrier per binding region/join: finite native integer where every
+incoming edge proves it, double for native Number regions that may widen,
+and Item for dynamic storage. A runtime guard returning INT or FLOAT joins
+through a carrier capable of both. Do not route that result back into an
+unconditionally integer destination or narrow a later fractional assignment.
+Hoist or eliminate guards only with an invariant covering every relevant
+write and backedge. Keep profitable integer state across an entire loop;
+double-to-int-to-double conversion around each addition is not the objective.
+
+Program slots, mixed locals, dense array elements, generic arguments, and
+boxed returns must all preserve INT Items and accept FLOAT Items. Arrays
+remain ordinary mixed Item arrays; introduce no ArrayInt/ArrayNum promotion.
+Integer stores are immediate, with no number home or GC pointer. FLOAT stores
+and escapes retain existing scalar-home ownership, including after INT/FLOAT
+overwrites, array growth, and calls (**D5.2**, **D5.3**).
+
+A closed direct function may use native finite integer operands/results only
+when its complete facts establish that contract. If its result may widen,
+select double or Item for that result and convert at the actual return edge.
+Unknown/indirect calls retain the existing boxed ABI and preserve numeric
+subtypes. Every function still has one body and one chosen entry; self-tail
+reentry preserves the same parameter/local initialization and carrier rules.
+Reuse the existing error companion; no new success/error sentinel or adapter
+is introduced (**D5.2.1v3**, **D8.4.2v2**).
+
+### 9.4 Reuse and helper budget
+
+**New runtime helpers: zero.** The ten-entry inventory in §7 remains
+the complete inventory. Reuse these existing pieces after their contracts
+are checked:
+
+- Lambda's INT tag, payload, finite unboxing, and canonical in-band boxing
+  (**D2.2.2**); bypass its out-of-band saturation arm by proving/guarding first.
+- Existing integer MIR operations, int53 range checks, and conversion emission.
+  Promote useful physical emitters from `transpile-mir.cpp` into the shared
+  emitter and update both callers; do not copy its static implementations or
+  reuse Lambda-specific operator/error policy.
+- Existing primitive dispatch shapes for the shared Number test accepting
+  INT/FLOAT. Extract repeated classification/conversion shapes before adding
+  another per-kind copy; do not add an arithmetic dispatcher runtime helper.
+- Existing array/slot storage, roots, and call/return machinery. INT requires
+  no allocation; ownership paths must continue to handle FLOAT correctly.
+- The existing double string-formatting, string-to-number, `fmod`, and power
+  leaves. Convert finite INT exactly at double-only leaf boundaries; add no
+  separate integer formatting/parser library or helper family.
+
+Count changes to existing runtime helpers, internal utility code, shared
+owners, compiler code, and emitted MIR separately. Zero new exported helpers
+does not permit growing unmeasured helper bodies. Any runtime helper found
+necessary during implementation must first be added to §7 with its precise
+contract and code/dependency cost for the review required by §1.
+
+### 9.5 Implementation order and acceptance
+
+Implement this phase in three steps, keeping the baseline in Appendix A:
+
+1. **Runtime subtype throughout the scope.** Add INT construction and the
+   common Number classification; update every primitive consumer, mutable
+   slot, dense-array path, and generic/native call boundary. Initially retain
+   double arithmetic where needed. Verify actual INT storage and passage
+   through calls, not only equivalent printed output.
+2. **Integer arithmetic and proofs.** Add the shared checked paths and bounded
+   native loop/call planning from §9.2–§9.3. Prefer proven integer regions;
+   retain a guarded path only where its generated code and release results
+   justify the cost. No function/loop clones, feedback system, deoptimizer,
+   or additional language capability.
+3. **Correctness, MIR, and release comparison.** Complete all gates below
+   before recording the phase as implemented or claiming a speedup.
+
+Behavior tests must exercise both INT and FLOAT representations of equal
+Numbers, both sides of ±(2⁵³−1), arithmetic across `2⁵³`, machine-multiply
+overflow, fractions, NaN/infinities, and every signed-zero-producing operator.
+Use reciprocal checks for zero sign within the admitted scope. Cover mixed
+numeric equality/typeof/coercion, bitwise wrapping, keys/lengths, changing
+assignment, branch/backedge widening, prefix/postfix snapshots, and exactly-once
+operand effects when guards miss. Check intermediate rounding, not just final
+mathematical values. Test direct/indirect calls, missing arguments, recursion,
+tail reentry, and values stored/returned through aliased dense arrays.
+
+Run focused tests normally and with forced GC plus freed-memory poisoning.
+Inspect immediate INT storage and transitions to owned wide FLOAT storage,
+and verify no Lambda lane sentinel reaches a slot or return. Run
+`make test-lambda-baseline` and the unchanged Test262 baseline after shared
+emitter changes; retain all existing failure oracles and timeouts.
+
+Build release and compare the pre-phase MVP executable with the tuned MVP,
+LambdaJS, untyped Lambda, and Node using the pinned-MIR procedure in Appendix A.
+Use identical benchmark sources, inputs, and correctness oracles and report
+median **self-reported execution time** over the rotating five-run comparison;
+startup/compile time cannot replace it. Record binary/source hashes and fresh
+MIR evidence. Keep the seven current benchmark rows, including unchanged or
+regressed rows; `sum`/`diviter` target bounded integer loops and `collatz`
+exercises mixed arithmetic/guard costs, without assuming a static bound on
+its intermediate values or promising a particular gain.
+
+Also measure small in-scope dense-array and indirect-call workloads that
+carry numeric Items, to establish the value of the runtime subtype beyond
+register-only loops. Record instructions, branches, conversions, helper calls,
+root/home operations, body count, and helper implementation size. Completion
+requires passing semantic/ownership gates, demonstrated INT use across storage
+and calls, and measured justification for retained tuning machinery. The
+implementation and release evidence are recorded in §9.6.
+
+### 9.6 Implementation and release evidence — 2026-10-07
+
+The implementation satisfies **D2.2.5** using existing INT Items, with no new
+TypeId or runtime helper. Integer literals, bitwise results, lengths, guarded
+arithmetic results, and proven native returns retain INT across program slots,
+mixed locals, dense arrays, and generic calls. Primitive Number dispatch
+accepts INT/FLOAT, and finite INT-to-double conversion is exact. Existing
+FLOAT homes, precise roots, and the error companion remain unchanged
+(**D2.4.3**, **D5.2.1v3**, **D5.3**).
+
+Range planning uses a terminating finite-interval fixed point; an unresolved
+cycle or continued expansion after sixteen range changes widens to unknown.
+Counted-loop proofs require one initializer, one additive write, and a monotone induction
+update on every completed iteration. Nested loops, `do`/`while`, bindings
+written in the condition, and bodies with `break`/`continue` do not receive this
+proof. Endpoint, trip-count, and product calculations use exact i64 arithmetic with checks
+before multiplication; rounded compiler-side double arithmetic must not
+underestimate an int53 endpoint. Unknown ranges keep the Number/Item route.
+
+Closed native functions use a coherent numeric register region: retain i64
+when all native numeric bindings and numeric returns prove finite integer
+membership; otherwise keep their numeric bindings in double. This avoids
+repeated conversions of invariant integer parameters inside floating-point
+loops. Constants are emitted in the selected region's carrier; boxed finite
+integer literals use the existing canonical INT constructor at compile time.
+Generic bodies retain independently proven local integer bindings. There is
+still one body and one entry per source function, with no adapters or clones.
+
+Guarded boxed addition, subtraction, remainder, and comparisons reuse saved
+operands and join through Item/Boolean. A miss performs the double operation
+once. Multiplication uses i64 only with a complete safe-product/zero-sign proof;
+division and power retain double. Collatz receives no assumed intermediate
+bound, so its numeric loop remains floating-point. Recursive range growth also
+widens; this phase does not turn Fibonacci into an integer worker merely
+because the tested input happens to produce a safe result (**S1.11**).
+
+The three shared finite boxing, unboxing, and band-check emitters add 24 lines
+to the shared compiler header. Their extraction removes 21 net lines from
+Lambda's compiler and preserves its emitted instruction budgets. The MVP
+compiler grows from 1,779 to 2,146 lines (**367 net lines**); function-level MIR
+counts are recorded below and in the result archive. Runtime helper count and
+code remain **10 helpers / 181 physical implementation lines**, including the
+function allocator: zero new or enlarged
+runtime helpers. Compiler-side emission utilities are not runtime helpers.
+
+All **20 focused test groups** pass normally and with collection forced at
+every allocation plus freed-memory poisoning. Tests inspect actual INT/FLOAT
+Items in arrays and generic calls; cover widening, negative zero, intermediate
+rounding, machine-product overflow, postfix snapshots, exactly-once effects,
+implicit undefined returns, and invalidated loop proofs; and assert that a
+bounded integer sum emits no double add/subtract. Shared-emitter validation
+passes **6,284/6,284 Lambda/input baseline tests**, including the unchanged
+MIR-size ratchet, and **40,261/40,261 unchanged full-JS Test262 baseline cases**
+with zero regressions. Test262 is a full-JS nonregression check; the focused
+suite validates this MVP subset. No harness, oracle, budget, or timeout was
+relaxed.
+
+[`integer_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/integer_mir_20261007.json)
+archives 225 checked timed samples and 36 fresh hashed MIR artifacts, plus
+warm-up frame telemetry, implementation/source/binary hashes, and the complete
+before/after static audit. The preserved pre-phase release executable matches
+the optimized record in Appendix A. All three Lambda lanes are pinned to
+native MIR; Node uses V8. Each engine has an untimed warm-up, followed by five
+rotating timed rounds in fresh processes. Times are median **self-reported
+execution milliseconds** with the same boundaries as Appendix A; startup and
+initial compilation are excluded, and Node's workload-time tiering is included.
+
+The two additional fixtures append 20,000 integer Items and traverse them
+50 times, and make 200,000 calls through a function variable while accumulating
+their numeric results. JS sources are identical across JS engines; the
+unannotated Lambda ports use ordinary Lambda semantics and `push` for dense
+append. Collatz's existing Lambda port uses `shr` where JS divides by two.
+These remain port comparisons, not isolation of the back end's cost.
+
+| Kernel | MVP before | MVP integer | Speedup | LambdaJS MIR | Untyped Lambda MIR | Node v24.7.0 |
+|---|---:|---:|---:|---:|---:|---:|
+| r7rs/fib2 | 1.289 | 1.291 | 1.00× | 1.782 | 1.277 | 1.283 |
+| r7rs/fibfp2 | 1.275 | 1.282 | 0.99× | 1.672 | 1.888 | 1.356 |
+| r7rs/sum2 | 0.677 | 0.252 | 2.69× | 0.656 | 0.255 | 0.737 |
+| r7rs/tak2 | 0.117 | 0.117 | 1.00× | 0.341 | 0.122 | 0.312 |
+| larceny/diviter | 600.719 | 253.543 | 2.37× | 648.633 | 252.250 | 383.018 |
+| larceny/divrec | 0.640 | 0.638 | 1.00× | 15.053 | 1.167 | 7.615 |
+| kostya/collatz | 480.511 | 481.496 | 1.00× | 1335.798 | 280.328 | 1180.324 |
+| js_mvp_lmd/integer_dense | 5.672 | 3.520 | 1.61× | 19.256 | 13.741 | 3.810 |
+| js_mvp_lmd/integer_indirect | 2.083 | 1.482 | 1.41× | 6.498 | 4.929 | 1.168 |
+
+Sum and iterative division improve **2.69×** and **2.37×**, reaching the
+untyped Lambda ports' execution times without increasing either kernel's MIR
+instruction count. Dense numeric Items improve **1.61×** and indirect calls
+**1.41×**. All four workloads beat their pre-phase control in every paired
+round. Fib/fibfp, Takeuchi, recursive division, and Collatz are essentially
+unchanged. Collatz still trails the integer Lambda port; its JS division and
+unproven intermediate bounds remain relevant differences. All samples are
+retained without outlier removal; few-percent differences between engines
+are not evidence of a general advantage.
+
+Static counts below include cold/error paths. Conversions count native
+integer/double MIR conversions. Calls include shared helpers and indirect
+user calls; the archive records every target. Root slots/stores and scalar
+homes are emitter frame-plan counts, not executed operations.
+
+| MVP body | Instructions before → after | Branches | Conversions | Calls | Root slots/stores | Homes |
+|---|---:|---:|---:|---:|---:|---:|
+| sum | 29 → 29 | 4 → 4 | 0 → 0 | 0 → 0 | 0/0 → 0/0 | 0 → 0 |
+| diviter division | 30 → 30 | 4 → 4 | 0 → 0 | 0 → 0 | 0/0 → 0/0 | 0 → 0 |
+| dense Items | 639 → 618 | 209 → 196 | 10 → 11 | 27 → 25 | 3/11 → 3/11 | 7 → 6 |
+| indirect callback | 246 → 278 | 83 → 93 | 1 → 3 | 10 → 10 | 2/2 → 2/2 | 3 → 3 |
+| indirect workload | 508 → 510 | 167 → 164 | 2 → 5 | 21 → 19 | 4/7 → 4/7 | 7 → 6 |
+
+The integer kernels have no helper call or root/home operations in their
+bodies. The guarded callback adds 32 instructions and ten branches while
+the complete indirect workload improves 1.41× and loses one scalar home;
+that measured tradeoff justifies retaining the local guard. Dense traversal
+removes 21 instructions and one home. Fib/fibfp, Takeuchi, and divrec retain
+their pre-phase kernel instruction counts; Collatz retains 55 instructions.
+All 18 MVP/control modules were checked against their source function count:
+one MIR body per source function, plus the generated program entry.
+
+Reproduce with the preserved pre-phase release executable:
+
+```sh
+python3 test/benchmark/js_mvp_lmd/compare_existing.py --runs 5 --integer-items \
+  --output temp/mvp_lmd_integer/measured/comparison.json \
+  --mvp-control temp/mvp_lmd_integer/before.exe \
+  --control-record test/benchmark/js_mvp_lmd/optimized_mir_20261007.json
+```
+
+Build and validation logs are retained under `temp/mvp_lmd_integer/`.
+
+## 10. Review boundary
 
 The implementation remains opt-in and limited to §3. Its ten helpers, total
 helper code, shared ownership changes, and release measurements are reviewable
 below. No further runtime helper or language capability is part of this MVP.
+The integer runtime subtype is implemented under **D2.2.5** within §9's
+proof and fallback limits.
 
 ## Appendix A. Implementation and validation
+
+This appendix records the implementations before §9. All JS Numbers in those
+archived builds use FLOAT Items at boxed boundaries. Their binaries, validation
+totals, and benchmark results are historical; current results are in §9.6.
 
 ```text
 lambda/js/mvp-lmd/
@@ -702,7 +1083,7 @@ arguments rather than coercing them to satisfy a numeric entry. The shared
 emitter inserts precise roots only at MAY_GC boundaries; the hot numeric loop
 has no runtime helper or root-store call.
 
-The recursive scalar audit exposes a current minimization gap. Parameter
+The initial implementation's recursive scalar audit exposed a minimization gap. Parameter
 kinds reach a fixed point, but there are no function-return-kind summaries:
 `kind()` treats call expressions as unknown, and `call()` returns a boxed
 value with `K_ANY`. Thus even numeric `fib` loses its Number proof at the two
@@ -723,12 +1104,12 @@ the same instruction count and numeric representation: JS integer-looking
 and floating-looking literals are both Numbers (**S1.11**). At `n=27`, naive Fibonacci enters its function 635,621
 times, magnifying the call-boundary overhead.
 
-MVP has no explicit tail-recursion elimination: a return expression is
+That initial implementation had no explicit tail-recursion elimination: a return expression was
 evaluated through the ordinary call emitter and shared return cleanup. The
 benchmark expression `return fib(n-1) + fib(n-2)` is not tail-recursive;
 addition remains after both calls, so ordinary tail-call elimination would
 not help these two kernels. Missing return-kind propagation and the boxed
-direct-call ABI are the relevant current limitations for this comparison
+direct-call ABI were the relevant limitations for this comparison
 (**D2.4.1–D2.4.3**, **D8.4.2v2**).
 
 The initial release measurement used `test/benchmark/js_mvp_lmd/run.py --runs 3`: one
@@ -761,7 +1142,7 @@ release-build stamp so a debug rebuild is not timed accidentally.
 
 ### Recorded pinned-MIR results — 2026-10-07
 
-The authoritative four-engine result record is
+The initial four-engine result record is
 [`pinned_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/pinned_mir_20261007.json).
 MVP-Lmd, LambdaJS and untyped Lambda all execute native MIR JIT code in this
 record; Node executes V8, not MIR. The archive preserves all 140 timed samples,
@@ -836,6 +1217,100 @@ and Node from 1251.220 to 1404.594 ms. Do not infer a general advantage from
 the few-percent differences. All samples are retained without
 outlier removal. The new timer's release smoke check and all 14 focused MVP
 test groups pass, normally and under forced GC with freed-memory poisoning.
+
+### Optimized pinned-MIR results — 2026-10-07
+
+The current implementation adds joint return inference, single-body native
+scalar entries, explicit self-tail-call elimination, zero-storage-frame
+elision, and guarded integer operations described in §4. These follow
+**D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.1–D5.3.2**, and **D8.4.2v2**;
+they change no language scope or semantic ruling. Generic entry behavior,
+explicit error companions, and precise GC ownership remain intact. Call
+effects remain conservatively MAY_GC; numeric bodies eliminate frames because
+their live values and results no longer need root slots or scalar homes.
+
+No runtime helper was added or enlarged. The inventory remains ten helpers
+and 181 physical implementation lines. The MIR compiler grows by 191 net
+lines. The shared call builder now accepts an optional companion result, and
+the existing Lambda direct-call emitter uses it too, removing its duplicated
+operand assembly: the shared header shrinks by 17 net lines. Array key/length
+validation and integer fast paths share one bounded-conversion emitter.
+
+[`optimized_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/optimized_mir_20261007.json)
+records 175 checked timed samples: seven workloads, five engines including
+the original MVP control, and five rotating rounds after one warm-up each.
+The control executable's SHA-256 must match the original release record.
+All four Lambda executable/lane combinations produced fresh finalized MIR
+artifacts during warm-up, giving 28 hashed artifacts. The same native-MIR
+environment pins and execution-timer boundaries as the initial record apply;
+Node uses V8. All samples are retained, and both executables and every source
+remain unchanged through the run. The original control is the implementation
+committed as `c883aaeec`.
+
+Median self-reported execution milliseconds, lower is better:
+
+| Kernel | MVP before | MVP optimized | MVP speedup | LambdaJS MIR | Untyped Lambda MIR | Node v24.7.0 |
+|---|---:|---:|---:|---:|---:|---:|
+| r7rs/fib2 | 4.046 | 1.280 | 3.16× | 1.726 | 1.259 | 1.320 |
+| r7rs/fibfp2 | 4.087 | 1.262 | 3.24× | 1.717 | 1.851 | 1.345 |
+| r7rs/sum2 | 0.663 | 0.670 | 0.99× | 0.654 | 0.248 | 0.747 |
+| r7rs/tak2 | 0.719 | 0.117 | 6.15× | 0.328 | 0.120 | 0.305 |
+| larceny/diviter | 595.939 | 565.507 | 1.05× | 625.221 | 246.181 | 375.933 |
+| larceny/divrec | 12.220 | 0.611 | 20.00× | 14.831 | 1.128 | 7.240 |
+| kostya/collatz | 1343.617 | 474.156 | 2.83× | 1323.352 | 277.038 | 1167.463 |
+
+The optimized MVP is faster than its control in all five paired rounds for
+six kernels. Sum is effectively unchanged (two of five rounds faster), as
+expected for a kernel whose existing hot loop already uses native doubles.
+The other iterative division loop also remains floating-point; its modest
+gain does not imply that the integer-loop gap is closed. Relative to native
+LambdaJS, MVP now has lower medians on six rows and is within about 3% on sum.
+Its Fibonacci and Takeuchi medians are close to untyped Lambda, while sum,
+diviter, and Collatz still trail the integer ports. These remain five-sample
+measurements, with the port/Number differences stated above (**S1.11**, **S4.1.1**).
+
+Finalized MIR confirms the intended changes. Counts include cold/error paths
+and exclude labels/declarations; they are not executed instruction counts.
+
+| MVP kernel body | Instructions before → after | Locals before → after | Calls in optimized body |
+|---|---:|---:|---|
+| fib / fibfp | 444 → 39 | 190 → 27 | Two native self-calls; no helper or side-stack reservation |
+| sum | 93 → 29 | 50 → 24 | None |
+| tak | 909 → 62 | 426 → 46 | Three native self-calls; final self-call becomes a jump |
+| diviter division | 113 → 30 | 62 → 25 | None |
+| divrec division helper | 213 → 30 | 105 → 23 | None; self-recursion becomes a loop |
+| divrec remainder | 171 → 25 | 83 → 19 | None; self-recursion becomes a loop |
+| collatz length | 107 → 55 | 61 → 42 | `fmod` remains only on the guarded remainder miss |
+
+Fibonacci gains come from type propagation and the native call boundary;
+its recursive addition is not a tail call. Collatz's fast path uses a machine
+integer only for the proven remainder operation, then returns to binary64.
+No speculative integer loop, body clone, or replacement of JS division with
+a truncating 32-bit shift was introduced.
+
+Validation: all 17 focused groups pass normally and with collection forced at
+every allocation plus freed-memory poisoning. Tests cover recursive/mutual
+return inference, missing/mixed arguments and implicit returns, extra-argument
+effects, native error propagation, tiny Numbers and signed zero, tail-call
+parameter swaps/local reinitialization/allocation, and guarded-integer misses.
+The stack-exhaustion test uses nonterminating non-tail recursion rather than
+assuming a host-independent failing depth; entry guards use the shared
+recoverable stack budget and unwind headroom. The Lambda baseline passes
+6,281/6,281 under `LANG=C LC_ALL=C`; the unchanged Test262 baseline passes
+40,261/40,261 with zero regressions. A release forced-GC smoke check also passes.
+
+Reproduce the paired run with the archived original release executable:
+
+```sh
+python3 test/benchmark/js_mvp_lmd/compare_existing.py --runs 5 \
+  --output temp/mvp_lmd_optimized/comparison.json \
+  --mvp-control temp/mvp_lmd_before_opt.exe \
+  --control-record test/benchmark/js_mvp_lmd/pinned_mir_20261007.json
+```
+
+Omitting the two control options performs the usual four-engine comparison.
+Build/validation logs remain under `temp/mvp_opt_*.log`; the archived result
+contains the before/after function-level MIR audit.
 
 ### Earlier end-to-end measurements (historical)
 
@@ -917,3 +1392,18 @@ the original three-engine table above. No background process was changed.
   account for those outcomes rather than repeat them unexamined.
 - [Earlier unification investigation](../Lambda_Proposal_JS_Unify_P7.md):
   shared AST tags alone do not establish removable lowering duplication.
+
+## Appendix C. Superseded representation decision
+
+**Superseded 2026-10-07 by USER and D2.2.5; current rule: §4.1 and §9.**
+
+~~All JS Numbers use Lambda's canonical FLOAT Item encoding at boxed
+boundaries; native Number computations use binary64. Machine integers
+implement indices, guarded ToInt32 conversion, and guarded power-of-two
+remainders, but never change the observable Number type or import Lambda
+int53 poison/overflow rules.~~
+
+The former rule kept the first implementation's numeric dispatch small.
+The accepted phase now also uses canonical INT Items through mutable storage
+and calls. The obligations to preserve observable Number behavior and avoid
+Lambda saturation remain in force.

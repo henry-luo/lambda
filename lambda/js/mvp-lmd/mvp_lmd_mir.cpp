@@ -14,6 +14,7 @@
 
 enum LmdKind { K_UNDEFINED = 1, K_NULL = 2, K_BOOL = 4, K_NUMBER = 8,
     K_STRING = 16, K_ARRAY = 32, K_FUNCTION = 64, K_ANY = 127 };
+struct LmdRange { double lower = 0, upper = 0; unsigned state = 0; };
 struct LmdFunction;
 struct LmdBinding {
     NameEntry* entry;
@@ -22,10 +23,15 @@ struct LmdBinding {
     AstNode* initializer;
     uint32_t slot;
     unsigned kinds;
+    LmdRange range;
+    AstNode* update;
+    unsigned writes;
+    unsigned range_changes;
     bool assigned;
     bool observed;
     bool external;
     bool native;
+    bool integer;
     uint8_t intrinsic;
     bool dominated;
     MIR_reg_t reg;
@@ -39,6 +45,16 @@ struct LmdFunction {
     uint32_t id;
     void* address;
     bool closed_calls;
+    bool native;
+    bool integer;
+    bool integer_region;
+    unsigned returns;
+    LmdRange range;
+    unsigned range_changes;
+    FnReturnAnalysis return_abi;
+    MirImportEntry entry;
+    MIR_var_t signature[LAMBDA_MAX_FUNCTION_ARGS];
+    int arity;
 };
 struct MvpLmdProgram {
     JsTranspiler* frontend;
@@ -81,10 +97,11 @@ struct LmdCompiler {
     MIR_reg_t argument_span;
     MIR_insn_t argument_fixup;
     int argument_count;
+    MIR_label_t tail_entry;
     LmdControl* control;
     bool strict;
 };
-struct LmdValue { MIR_reg_t reg; unsigned kind; bool literal = false; double number = 0; };
+struct LmdValue { MIR_reg_t reg; unsigned kind; bool literal = false; double number = 0; bool integer = false; LmdRange range; };
 struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     bool key_known = false; int64_t index = 0; };
 
@@ -195,6 +212,7 @@ static void walk(AstNode* n, LmdWalk* state) {
         else {
             LmdBinding* b = binding(p, ((AstIdentNode*)d->id)->entry);
             if (b && d->init) {
+                if (!state->facts) b->writes++;
                 if (b->initializer) b->assigned = true;
                 else {
                     b->initializer = d->init;
@@ -255,10 +273,19 @@ static void walk(AstNode* n, LmdWalk* state) {
     case AST_NODE_ASSIGN:
         if (((AstAssignNode*)n)->left && ((AstAssignNode*)n)->left->node_type == AST_NODE_IDENT) {
             LmdBinding* b = binding(p, ((AstIdentNode*)((AstAssignNode*)n)->left)->entry);
-            if (b) b->assigned = true;
+            if (b) {
+                b->assigned = true;
+                if (!state->facts) { b->writes++; b->update = n; }
+            }
         }
         break;
     case AST_NODE_UNARY:
+        if (!state->facts && (((AstUnaryNode*)n)->op == OPERATOR_JS_INCREMENT ||
+                ((AstUnaryNode*)n)->op == OPERATOR_JS_DECREMENT) &&
+                ((AstUnaryNode*)n)->operand->node_type == AST_NODE_IDENT) {
+            LmdBinding* b = identifier_binding(p, (AstIdentNode*)((AstUnaryNode*)n)->operand);
+            if (b) { b->writes++; b->update = n; }
+        }
         if (((AstUnaryNode*)n)->op == OPERATOR_JS_DELETE)
             diagnostic(p, n, "delete"); break;
     case AST_NODE_BINARY:
@@ -282,11 +309,17 @@ static void walk(AstNode* n, LmdWalk* state) {
 }
 
 static Operator compound_operator(Operator op);
+static LmdFunction* direct_target(MvpLmdProgram* p, AstCallNode* call) {
+    LmdBinding* b = call->callee->node_type == AST_NODE_IDENT
+        ? identifier_binding(p, (AstIdentNode*)call->callee) : NULL;
+    return b && b->target && !b->assigned ? b->target : NULL;
+}
 static unsigned binary_kind(Operator op, unsigned left, unsigned right) {
     if (op == OPERATOR_AND || op == OPERATOR_OR || op == OPERATOR_JS_NULLISH_COALESCE)
         return left | right;
     if (op == OPERATOR_ADD) return ((left | right) & K_STRING ? K_STRING : 0) |
         ((left & ~K_STRING) && (right & ~K_STRING) ? K_NUMBER : 0);
+    if (op == OPERATOR_JS_STRICT_EQ || op == OPERATOR_JS_STRICT_NE) return K_BOOL;
     MirNumericOpPlan plan;
     return em_numeric_op_plan(op, &plan) && plan.is_comparison ? K_BOOL : K_NUMBER;
 }
@@ -306,6 +339,10 @@ static unsigned kind(MvpLmdProgram* p, AstNode* n) {
         return K_UNDEFINED;
     }
     case AST_NODE_ARRAY: return K_ARRAY;
+    case AST_NODE_CALL_EXPR: {
+        LmdFunction* f = direct_target(p, (AstCallNode*)n);
+        return f ? f->returns : K_ANY;
+    }
     case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_ARROW_FUNC: return K_FUNCTION;
     case AST_NODE_UNARY: {
         Operator op = ((AstUnaryNode*)n)->op;
@@ -334,21 +371,47 @@ static unsigned kind(MvpLmdProgram* p, AstNode* n) {
     default: return K_ANY;
     }
 }
-struct LmdTypes { MvpLmdProgram* p; bool changed; };
+// only proven abrupt paths exclude the implicit undefined return.
+static bool falls_through(AstNode* n) {
+    if (!n) return true;
+    if (n->node_type == AST_NODE_RETURN_STAM) return false;
+    if (n->node_type == AST_NODE_BLOCK) {
+        for (AstNode* s = ((AstBlockNode*)n)->statements; s; s = s->next)
+            if (!falls_through(s)) return false;
+    } else if (n->node_type == AST_NODE_IF_EXPR) {
+        JsIfNode* branch = (JsIfNode*)n;
+        return falls_through(branch->then) || falls_through(branch->otherwise);
+    }
+    return true;
+}
+struct LmdTypes { MvpLmdProgram* p; bool changed; LmdFunction* owner = NULL; };
+static void union_kinds(LmdTypes* t, unsigned* target, unsigned incoming) {
+    if ((*target | incoming) != *target) { *target |= incoming; t->changed = true; }
+}
 static void type_walk(AstNode* n, void* arg) {
     if (!n) return;
     LmdTypes* t = (LmdTypes*)arg;
+    if (n->node_type == AST_NODE_FUNC || n->node_type == AST_NODE_FUNC_EXPR ||
+            n->node_type == AST_NODE_ARROW_FUNC) {
+        LmdFunction* f = function(t->p, n);
+        LmdTypes inner = {t->p, false, f};
+        union_kinds(&inner, &f->returns, f->ast->body->node_type == AST_NODE_BLOCK
+            ? (falls_through(f->ast->body) ? K_UNDEFINED : 0) : kind(t->p, f->ast->body));
+        js_ast_visit_children(n, type_walk, &inner);
+        t->changed |= inner.changed;
+        return;
+    }
+    if (n->node_type == AST_NODE_RETURN_STAM && t->owner)
+        union_kinds(t, &t->owner->returns, kind(t->p, ((AstReturnNode*)n)->value));
     if (n->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)n;
-        LmdBinding* callee = call->callee->node_type == AST_NODE_IDENT
-            ? identifier_binding(t->p, (AstIdentNode*)call->callee) : NULL;
-        LmdFunction* f = callee ? callee->target : NULL;
+        LmdFunction* f = direct_target(t->p, call);
         if (f && f->closed_calls) {
             AstNode* actual = call->arguments;
             for (AstNode* formal = f->ast->params; formal; formal = formal->next) {
                 LmdBinding* b = binding(t->p, js_ast_parameter_binding_identifier(formal)->entry);
                 unsigned incoming = actual ? kind(t->p, actual) : K_UNDEFINED;
-                if ((b->kinds | incoming) != b->kinds) { b->kinds |= incoming; t->changed = true; }
+                union_kinds(t, &b->kinds, incoming);
                 if (actual) actual = actual->next;
             }
         }
@@ -371,9 +434,213 @@ static void type_walk(AstNode* n, void* arg) {
     }
     if (target && target->node_type == AST_NODE_IDENT) {
         LmdBinding* b = identifier_binding(t->p, (AstIdentNode*)target);
-        if (b && !b->intrinsic && (b->kinds | mask) != b->kinds) { b->kinds |= mask; t->changed = true; }
+        if (b && !b->intrinsic) union_kinds(t, &b->kinds, mask);
     }
     js_ast_visit_children(n, type_walk, t);
+}
+
+// ranges describe finite JS integer values only; unknown includes fractional and signed-zero values.
+static LmdRange finite_range(double lower, double upper) {
+    return isfinite(lower) && isfinite(upper) && lower >= INT53_MIN && upper <= INT53_MAX
+        ? LmdRange{lower, upper, 1} : LmdRange{0, 0, 2};
+}
+static LmdRange range_binary(Operator operation, LmdRange left, LmdRange right) {
+    if (!left.state || !right.state) return {};
+    if (left.state != 1 || right.state != 1) return {0, 0, 2};
+    if (operation == OPERATOR_ADD) return finite_range(left.lower + right.lower, left.upper + right.upper);
+    if (operation == OPERATOR_SUB) return finite_range(left.lower - right.upper, left.upper - right.lower);
+    if (operation == OPERATOR_MUL) {
+        if ((left.lower <= 0 && left.upper >= 0 && right.lower < 0) ||
+                (right.lower <= 0 && right.upper >= 0 && left.lower < 0)) return {0, 0, 2};
+        double products[] = {left.lower * right.lower, left.lower * right.upper,
+            left.upper * right.lower, left.upper * right.upper};
+        double lo = products[0], hi = lo;
+        for (double product : products) { lo = fmin(lo, product); hi = fmax(hi, product); }
+        return finite_range(lo, hi);
+    }
+    if (operation == OPERATOR_MOD && left.lower >= 0 && right.lower > 0)
+        return finite_range(0, fmin(left.upper, right.upper - 1));
+    return {0, 0, 2};
+}
+static LmdRange range(MvpLmdProgram* p, AstNode* n) {
+    if (!n) return {0, 0, 2};
+    switch (n->node_type) {
+    case AST_NODE_LITERAL: {
+        AstLiteralNode* literal = (AstLiteralNode*)n;
+        if (literal->literal_type != AST_LITERAL_NUMBER) break;
+        double value = literal->value.number_value;
+        if (value != trunc(value) || (value == 0 && signbit(value))) break;
+        return finite_range(value, value);
+    }
+    case AST_NODE_IDENT: {
+        LmdBinding* b = identifier_binding(p, (AstIdentNode*)n);
+        return b && !b->external && !b->intrinsic && (b->dominated || b->entry->is_parameter)
+            ? b->range : LmdRange{0, 0, 2};
+    }
+    case AST_NODE_CALL_EXPR: {
+        LmdFunction* f = direct_target(p, (AstCallNode*)n);
+        // explicit numeric returns do not exclude an implicit undefined return.
+        return f && f->returns == K_NUMBER ? f->range : LmdRange{0, 0, 2};
+    }
+    case AST_NODE_ASSIGN: {
+        AstAssignNode* a = (AstAssignNode*)n;
+        return a->op == OPERATOR_ASSIGN ? range(p, a->right) :
+            range_binary(compound_operator(a->op), range(p, a->left), range(p, a->right));
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* b = (AstBinaryNode*)n;
+        if (b->op >= OPERATOR_JS_BIT_AND && b->op <= OPERATOR_JS_URSHIFT)
+            return finite_range(b->op == OPERATOR_JS_URSHIFT ? 0 : INT32_MIN,
+                b->op == OPERATOR_JS_URSHIFT ? UINT32_MAX : INT32_MAX);
+        return range_binary(b->op, range(p, b->left), range(p, b->right));
+    }
+    case AST_NODE_UNARY: {
+        AstUnaryNode* u = (AstUnaryNode*)n;
+        LmdRange r = range(p, u->operand);
+        if (u->op == OPERATOR_POS) return r;
+        if (u->op == OPERATOR_JS_BIT_NOT) return finite_range(INT32_MIN, INT32_MAX);
+        if (u->op == OPERATOR_NEG && r.state == 1 && (r.upper < 0 || r.lower > 0))
+            return finite_range(-r.upper, -r.lower);
+        if (u->op == OPERATOR_JS_INCREMENT || u->op == OPERATOR_JS_DECREMENT) {
+            LmdRange after = range_binary(u->op == OPERATOR_JS_INCREMENT ? OPERATOR_ADD : OPERATOR_SUB, r, {1, 1, 1});
+            // postfix consumers see the snapshot; include the write for the binding fixed point too.
+            if (!u->prefix && r.state == 1 && after.state == 1)
+                return finite_range(fmin(r.lower, after.lower), fmax(r.upper, after.upper));
+            return after;
+        }
+        break;
+    }
+    default: break;
+    }
+    return {0, 0, 2};
+}
+static bool same_binding(MvpLmdProgram* p, AstNode* n, LmdBinding* b) {
+    return n && n->node_type == AST_NODE_IDENT && identifier_binding(p, (AstIdentNode*)n) == b;
+}
+static LmdRange update_delta(MvpLmdProgram* p, LmdBinding* b) {
+    AstNode* n = b->update;
+    if (!n) return {0, 0, 2};
+    if (n->node_type == AST_NODE_UNARY) {
+        double step = ((AstUnaryNode*)n)->op == OPERATOR_JS_INCREMENT ? 1 : -1;
+        return {step, step, 1};
+    }
+    AstAssignNode* a = (AstAssignNode*)n;
+    Operator operation = a->op == OPERATOR_ASSIGN ? OPERATOR_ASSIGN : compound_operator(a->op);
+    AstNode* rhs = a->right;
+    if (operation == OPERATOR_ASSIGN && rhs->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)rhs;
+        if (!same_binding(p, binary->left, b)) return {0, 0, 2};
+        operation = binary->op; rhs = binary->right;
+    }
+    LmdRange delta = range(p, rhs);
+    if (operation == OPERATOR_SUB && delta.state == 1) return {-delta.upper, -delta.lower, 1};
+    return operation == OPERATOR_ADD ? delta : LmdRange{0, 0, 2};
+}
+static bool loop_linear(MvpLmdProgram* p, AstNode* n) {
+    if (!n) return true;
+    if (n->node_type == AST_NODE_LOOP || n->node_type == AST_NODE_BREAK_STAM ||
+            n->node_type == AST_NODE_CONTINUE_STAM || n->node_type == AST_NODE_FUNC ||
+            n->node_type == AST_NODE_FUNC_EXPR || n->node_type == AST_NODE_ARROW_FUNC) return false;
+    struct Check { MvpLmdProgram* p; bool ok; } check = {p, true};
+    js_ast_visit_children(n, [](AstNode* child, void* opaque) {
+        Check* c = (Check*)opaque; c->ok &= loop_linear(c->p, child);
+    }, &check);
+    return check.ok;
+}
+// a unique additive write in a counted loop has a finite activation-wide bound.
+static LmdRange counted_range(MvpLmdProgram* p, LmdBinding* b) {
+    if (b->writes != 2 || !b->initializer || !b->update || b->external) return {0, 0, 2};
+    AstNode* ancestor = ast_index_parent(&p->frontend->ast_index, b->update);
+    while (ancestor && ancestor->node_type != AST_NODE_LOOP && ancestor != (AstNode*)b->owner->ast)
+        ancestor = ast_index_parent(&p->frontend->ast_index, ancestor);
+    if (!ancestor || ancestor->node_type != AST_NODE_LOOP) return {0, 0, 2};
+    AstLoopControlNode* loop = (AstLoopControlNode*)ancestor;
+    if (loop->form == LOOP_FORM_DO_WHILE) return {0, 0, 2};
+    // condition writes also execute on the final failed test, outside the body trip count.
+    AstNode* location = b->update;
+    while (location && location != loop->body && location != ancestor)
+        location = ast_index_parent(&p->frontend->ast_index, location);
+    if (location != loop->body && loop->update != b->update) return {0, 0, 2};
+    // repeated enclosing loops can re-enter without resetting the accumulator.
+    for (AstNode* outer = ast_index_parent(&p->frontend->ast_index, ancestor);
+            outer && outer != (AstNode*)b->owner->ast;
+            outer = ast_index_parent(&p->frontend->ast_index, outer))
+        if (outer->node_type == AST_NODE_LOOP) return {0, 0, 2};
+    if (!loop->cond || loop->cond->node_type != AST_NODE_BINARY || !loop_linear(p, loop->body)) return {0, 0, 2};
+    AstBinaryNode* cond = (AstBinaryNode*)loop->cond;
+    if (!cond->left || cond->left->node_type != AST_NODE_IDENT) return {0, 0, 2};
+    LmdBinding* index = identifier_binding(p, (AstIdentNode*)cond->left);
+    if (!index || index->writes != 2 || !index->initializer || !index->update || index->external) return {0, 0, 2};
+    AstNode* write = ast_index_parent(&p->frontend->ast_index, index->update);
+    if (loop->update != index->update && (!write || write->node_type != AST_NODE_EXPR_STMT ||
+            ast_index_parent(&p->frontend->ast_index, write) != loop->body)) return {0, 0, 2};
+    LmdRange initial = range(p, index->initializer), limit = range(p, cond->right);
+    LmdRange step = update_delta(p, index), start = range(p, b->initializer), delta = update_delta(p, b);
+    if (!initial.state || !limit.state || !step.state || !start.state || !delta.state) return {};
+    if (initial.state != 1 || limit.state != 1 || step.state != 1 || start.state != 1 || delta.state != 1)
+        return {0, 0, 2};
+    int64_t distance, stride;
+    if (step.lower > 0 && (cond->op == OPERATOR_LT || cond->op == OPERATOR_LE))
+        { distance = (int64_t)limit.upper - (int64_t)initial.lower; stride = (int64_t)step.lower; }
+    else if (step.upper < 0 && (cond->op == OPERATOR_GT || cond->op == OPERATOR_GE))
+        { distance = (int64_t)initial.upper - (int64_t)limit.lower; stride = -(int64_t)step.upper; }
+    else return {0, 0, 2};
+    // differences fit i64; divide before multiplying so even int53 endpoint proofs stay exact.
+    int64_t count = distance < 0 ? 0 : distance / stride + 1;
+    int64_t lo = (int64_t)start.lower, hi = (int64_t)start.upper;
+    int64_t down = delta.lower < 0 ? -(int64_t)delta.lower : 0;
+    int64_t up = delta.upper > 0 ? (int64_t)delta.upper : 0;
+    if ((down && count > (lo - INT53_MIN) / down) ||
+            (up && count > (INT53_MAX - hi) / up)) return {0, 0, 2};
+    return finite_range((double)(lo - count * down), (double)(hi + count * up));
+}
+struct LmdRanges { MvpLmdProgram* p; LmdFunction* owner; bool changed; };
+static void join_range(LmdRanges* t, LmdRange* into, unsigned* changes, LmdRange incoming) {
+    if (!incoming.state || into->state == 2) return;
+    if (into->state == 1 && incoming.state == 1)
+        incoming = {fmin(into->lower, incoming.lower), fmax(into->upper, incoming.upper), 1};
+    if (into->state == incoming.state && into->lower == incoming.lower && into->upper == incoming.upper) return;
+    // cyclic growth without a counted-loop proof widens, rather than assuming a benchmark bound.
+    if (++*changes > 16) incoming = {0, 0, 2};
+    *into = incoming; t->changed = true;
+}
+static void range_walk(AstNode* n, void* opaque) {
+    if (!n) return;
+    LmdRanges* t = (LmdRanges*)opaque;
+    MvpLmdProgram* p = t->p;
+    if (n->node_type == AST_NODE_FUNC || n->node_type == AST_NODE_FUNC_EXPR || n->node_type == AST_NODE_ARROW_FUNC) {
+        LmdFunction* f = function(p, n); LmdRanges inner = {p, f, false};
+        if (f->ast->body->node_type != AST_NODE_BLOCK)
+            join_range(&inner, &f->range, &f->range_changes, range(p, f->ast->body));
+        js_ast_visit_children(n, range_walk, &inner); t->changed |= inner.changed; return;
+    }
+    if (n->node_type == AST_NODE_RETURN_STAM && t->owner)
+        join_range(t, &t->owner->range, &t->owner->range_changes, range(p, ((AstReturnNode*)n)->value));
+    if (n->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)n; LmdFunction* f = direct_target(p, call);
+        if (f && f->closed_calls) {
+            AstNode* actual = call->arguments;
+            for (AstNode* formal = f->ast->params; formal; formal = formal->next) {
+                LmdBinding* b = binding(p, js_ast_parameter_binding_identifier(formal)->entry);
+                join_range(t, &b->range, &b->range_changes, range(p, actual));
+                if (actual) actual = actual->next;
+            }
+        }
+    }
+    AstNode* target = n->node_type == AST_NODE_VARIABLE_DECLARATOR ? ((AstDeclaratorNode*)n)->id :
+        n->node_type == AST_NODE_ASSIGN ? ((AstAssignNode*)n)->left :
+        n->node_type == AST_NODE_UNARY && (((AstUnaryNode*)n)->op == OPERATOR_JS_INCREMENT ||
+            ((AstUnaryNode*)n)->op == OPERATOR_JS_DECREMENT) ? ((AstUnaryNode*)n)->operand : NULL;
+    if (target && target->node_type == AST_NODE_IDENT) {
+        LmdBinding* b = identifier_binding(p, (AstIdentNode*)target);
+        if (b && !b->intrinsic) {
+            AstNode* value = n->node_type == AST_NODE_VARIABLE_DECLARATOR ? ((AstDeclaratorNode*)n)->init : n;
+            LmdRange incoming = b->update == n ? counted_range(p, b) : range(p, value);
+            if (b->update == n && incoming.state == 2) incoming = range(p, value);
+            join_range(t, &b->range, &b->range_changes, incoming);
+        }
+    }
+    js_ast_visit_children(n, range_walk, t);
 }
 
 static MIR_op_t reg(LmdCompiler* c, MIR_reg_t r) { return MIR_new_reg_op(c->em.ctx, r); }
@@ -390,8 +657,13 @@ static MIR_reg_t constant(LmdCompiler* c, uint64_t value) {
     MIR_reg_t r = em_new_reg(&c->em, "constant", MIR_T_I64); move(c, r, integer(c, value)); return r;
 }
 static LmdValue number(LmdCompiler* c, double value) {
-    MIR_reg_t r = em_new_reg(&c->em, "number", MIR_T_D);
-    move(c, r, MIR_new_double_op(c->em.ctx, value), true); return {r, K_NUMBER, true, value};
+    bool integral = isfinite(value) && value >= INT53_MIN && value <= INT53_MAX &&
+        value == trunc(value) && !(value == 0 && signbit(value));
+    bool native_int = integral && (!c->function->native || c->function->integer_region);
+    MIR_reg_t r = em_new_reg(&c->em, "number", native_int ? MIR_T_I64 : MIR_T_D);
+    move(c, r, native_int ? MIR_new_int_op(c->em.ctx, (int64_t)value) :
+        MIR_new_double_op(c->em.ctx, value), !native_int);
+    return {r, K_NUMBER, true, value, native_int, integral ? finite_range(value, value) : LmdRange{0, 0, 2}};
 }
 static MIR_reg_t op(LmdCompiler* c, MIR_insn_code_t code, MIR_op_t a, MIR_op_t b,
         MIR_type_t type = MIR_T_I64) {
@@ -423,16 +695,36 @@ static LmdValue box(LmdCompiler* c, LmdValue value);
 static MIR_reg_t to_number(LmdCompiler* c, LmdValue value);
 static MIR_reg_t truth(LmdCompiler* c, LmdValue value);
 static void statement(LmdCompiler* c, AstNode* n);
+static MIR_reg_t scalar_reg(LmdCompiler* c, LmdValue value, unsigned kind, bool integral = false) {
+    if (integral) {
+        if (value.integer) return value.reg;
+        MIR_reg_t result = em_new_reg(&c->em, "proven_integer", MIR_T_I64);
+        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_D2I, reg(c, result), reg(c, to_number(c, value))));
+        return result;
+    }
+    return kind == K_NUMBER ? to_number(c, value) : truth(c, value);
+}
+static void return_error(LmdCompiler* c, MIR_reg_t error) {
+    MIR_op_t placeholder = c->em.frame.return_type == MIR_T_D
+        ? MIR_new_double_op(c->em.ctx, 0) : integer(c, 0);
+    em_stage_function_return(&c->em, c->function->native ? placeholder : reg(c, error), error);
+}
+static void return_value(LmdCompiler* c, LmdValue value) {
+    MIR_reg_t result = c->function->native
+        ? scalar_reg(c, value, c->function->returns, c->function->integer)
+        : box(c, value).reg;
+    em_stage_function_return(&c->em, reg(c, result));
+}
 static void fail(LmdCompiler* c, int kind, AstNode* n) {
     MIR_reg_t error = em_call_2(&c->em, "mvp_lmd_fail", MIR_T_I64, MIR_T_I64,
         integer(c, kind), MIR_T_I64, integer(c, n ? n->source_span.start_byte : 0), true);
-    em_stage_function_return(&c->em, reg(c, error));
+    return_error(c, error);
 }
 static void check_error(LmdCompiler* c, MIR_reg_t result) {
     MIR_label_t ok = label(c);
     MIR_reg_t tag = op(c, MIR_URSH, reg(c, result), integer(c, 56));
     branch(c, MIR_BNE, ok, reg(c, tag), integer(c, LMD_TYPE_ERROR));
-    em_stage_function_return(&c->em, reg(c, result)); put_label(c, ok);
+    return_error(c, result); put_label(c, ok);
 }
 static MIR_reg_t payload(LmdCompiler* c, MIR_reg_t value) {
     return op(c, MIR_AND, reg(c, value), integer(c, ITEM_INT_PAYLOAD_MASK));
@@ -450,6 +742,8 @@ static MIR_reg_t tag(LmdCompiler* c, LmdValue value) {
     MIR_reg_t mask = op(c, MIR_AND, reg(c, value.reg), integer(c, ITEM_DBL_MASK));
     branch_truth(c, numeric, mask);
     move(c, result, reg(c, op(c, MIR_URSH, reg(c, value.reg), integer(c, 56))));
+    // INT is a runtime subtype; primitive dispatch still sees JS Number.
+    branch(c, MIR_BEQ, numeric, reg(c, result), integer(c, LMD_TYPE_INT));
     branch_truth(c, done, result);
     branch(c, MIR_BEQ, done, reg(c, value.reg), integer(c, 0));
     move(c, result, reg(c, em_load_at(&c->em, value.reg, 0, MIR_T_U8, "container_type")));
@@ -470,11 +764,22 @@ static MIR_reg_t cold_unbox(void* owner, MIR_reg_t item) {
     return em_unbox_f64_noninline_item(&c->em, c,
         [](void* owner, MIR_reg_t item) -> MIR_reg_t {
             LmdCompiler* c = (LmdCompiler*)owner;
-            return em_load_at(&c->em, payload(c, item), 0, MIR_T_D, "wide_number");
+            MIR_reg_t result = em_new_reg(&c->em, "numeric_item", MIR_T_D);
+            MIR_label_t wide = label(c), done = label(c);
+            MIR_reg_t type = op(c, MIR_URSH, reg(c, item), integer(c, 56));
+            branch(c, MIR_BNE, wide, reg(c, type), integer(c, LMD_TYPE_INT));
+            em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, result),
+                reg(c, em_unbox_finite_int_item(&c->em, item))));
+            jump(c, done); put_label(c, wide);
+            move(c, result, reg(c, em_load_at(&c->em, payload(c, item), 0, MIR_T_D, "wide_number")), true);
+            put_label(c, done); return result;
         }, item);
 }
 static LmdValue box(LmdCompiler* c, LmdValue value) {
     if (is_boxed(value)) return value;
+    if (value.literal && value.range.state == 1)
+        return boxed(c, constant(c, i2it((int64_t)value.number)), K_NUMBER);
+    if (value.integer) return boxed(c, em_box_finite_int_item(&c->em, value.reg), K_NUMBER);
     if (value.kind == K_NUMBER && value.literal) {
         double* literal = (double*)pool_alloc(c->program->frontend->pool, sizeof(double));
         *literal = value.number;
@@ -488,8 +793,12 @@ static LmdValue box(LmdCompiler* c, LmdValue value) {
 }
 
 static MIR_reg_t to_number(LmdCompiler* c, LmdValue value) {
-    if (!is_boxed(value) && value.kind == K_NUMBER) return value.reg;
-    if (!is_boxed(value) && value.kind == K_BOOL) {
+    if (!is_boxed(value) && value.kind == K_NUMBER && !value.integer) return value.reg;
+    if (value.literal) {
+        MIR_reg_t r = em_new_reg(&c->em, "number_literal", MIR_T_D);
+        move(c, r, MIR_new_double_op(c->em.ctx, value.number), true); return r;
+    }
+    if (value.integer || (!is_boxed(value) && value.kind == K_BOOL)) {
         MIR_reg_t r = em_new_reg(&c->em, "boolean_number", MIR_T_D);
         em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, r), reg(c, value.reg))); return r;
     }
@@ -498,7 +807,7 @@ static MIR_reg_t to_number(LmdCompiler* c, LmdValue value) {
     if (k == K_NUMBER) return em_unbox_f64_item(&c->em, c, cold_unbox, value.reg);
     if (k == K_STRING) return em_call_1(&c->em, "mvp_lmd_string_to_number", MIR_T_D,
         MIR_T_P, reg(c, payload(c, value.reg)), true);
-    if (k == K_NULL || k == K_UNDEFINED) return number(c, k == K_NULL ? 0 : NAN).reg;
+    if (k == K_NULL || k == K_UNDEFINED) return to_number(c, number(c, k == K_NULL ? 0 : NAN));
     MIR_reg_t tid = tag(c, value), result = em_new_reg(&c->em, "converted_number", MIR_T_D);
     MIR_label_t done = label(c);
     TypeId types[] = {LMD_TYPE_FLOAT, LMD_TYPE_STRING, LMD_TYPE_BOOL, LMD_TYPE_NULL, LMD_TYPE_UNDEFINED};
@@ -513,7 +822,7 @@ static MIR_reg_t to_number(LmdCompiler* c, LmdValue value) {
         else if (i == 1) r = em_call_1(&c->em, "mvp_lmd_string_to_number", MIR_T_D,
             MIR_T_P, reg(c, payload(c, value.reg)), true);
         else if (i == 2) r = to_number(c, {payload(c, value.reg), K_BOOL});
-        else r = number(c, i == 3 ? 0 : NAN).reg;
+        else r = to_number(c, number(c, i == 3 ? 0 : NAN));
         move(c, result, reg(c, r), true); jump(c, done);
     }
     put_label(c, done); return result;
@@ -521,6 +830,7 @@ static MIR_reg_t to_number(LmdCompiler* c, LmdValue value) {
 static MIR_reg_t truth(LmdCompiler* c, LmdValue v) {
     unsigned k = semantic(v);
     if (k == K_NUMBER) {
+        if (v.integer) return op(c, MIR_NE, reg(c, v.reg), integer(c, 0));
         MIR_reg_t d = to_number(c, v);
         MIR_reg_t nonzero = op(c, MIR_DNE, reg(c, d), MIR_new_double_op(c->em.ctx, 0));
         return op(c, MIR_AND, reg(c, nonzero), reg(c, op(c, MIR_DEQ, reg(c, d), reg(c, d))));
@@ -586,20 +896,44 @@ static LmdValue to_string(LmdCompiler* c, LmdValue v) {
     }
     put_label(c, done); return boxed(c, result, K_STRING);
 }
+static MIR_reg_t integer_lane(LmdCompiler* c, MIR_reg_t d, double lower, double upper,
+        MIR_label_t miss, bool exact) {
+    branch_truth(c, miss, op(c, MIR_DGE, reg(c, d), MIR_new_double_op(c->em.ctx, lower)), false);
+    branch_truth(c, miss, op(c, MIR_DLE, reg(c, d), MIR_new_double_op(c->em.ctx, upper)), false);
+    MIR_reg_t i = em_new_reg(&c->em, "integer", MIR_T_I64);
+    em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_D2I, reg(c, i), reg(c, d)));
+    if (exact) {
+        MIR_reg_t round = em_new_reg(&c->em, "integer_roundtrip", MIR_T_D);
+        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, round), reg(c, i)));
+        branch_truth(c, miss, op(c, MIR_DEQ, reg(c, d), reg(c, round)), false);
+    }
+    return i;
+}
 static MIR_reg_t int32(LmdCompiler* c, LmdValue v) {
+    if (v.integer) {
+        MIR_reg_t result = em_new_reg(&c->em, "int32", MIR_T_I64);
+        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_EXT32, reg(c, result), reg(c, v.reg)));
+        return result;
+    }
     MIR_reg_t d = to_number(c, v);
-    MIR_label_t zero = label(c), done = label(c);
+    MIR_label_t zero = label(c), done = label(c), slow = label(c), narrow = label(c);
     MIR_reg_t result = em_new_reg(&c->em, "int32", MIR_T_I64);
+    // truncating finite bounded Numbers before EXT32 is exactly ToInt32, including fractions.
+    move(c, result, reg(c, integer_lane(c, d, -9007199254740992.0, 9007199254740992.0, slow, false)));
+    jump(c, narrow); put_label(c, slow);
     MIR_reg_t bounded = em_call_2(&c->em, "fmod", MIR_T_D, MIR_T_D, reg(c, d),
         MIR_T_D, MIR_new_double_op(c->em.ctx, 4294967296.0), true);
     branch_truth(c, zero, op(c, MIR_DEQ, reg(c, bounded), reg(c, bounded)), false);
     em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_D2I, reg(c, result), reg(c, bounded)));
+    put_label(c, narrow);
     em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_EXT32, reg(c, result), reg(c, result)));
     jump(c, done); put_label(c, zero); move(c, result, integer(c, 0)); put_label(c, done); return result;
 }
 
 static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, LmdValue right);
 static LmdValue equal(LmdCompiler* c, LmdValue left, LmdValue right, bool loose) {
+    if (left.integer && right.integer)
+        return {op(c, MIR_EQ, reg(c, left.reg), reg(c, right.reg)), K_BOOL};
     if (semantic(left) == K_NUMBER && semantic(right) == K_NUMBER)
         return {op(c, MIR_DEQ, reg(c, to_number(c, left)), reg(c, to_number(c, right))), K_BOOL};
     left = box(c, left); right = box(c, right);
@@ -647,6 +981,50 @@ static LmdValue equal(LmdCompiler* c, LmdValue left, LmdValue right, bool loose)
     move(c, result, reg(c, op(c, MIR_EQ, reg(c, order), integer(c, 0))));
     put_label(c, done); return {result, K_BOOL};
 }
+// keep guarded integer results as Items so an overflowing edge can widen in the same body.
+static bool integer_binary(LmdCompiler* c, Operator operation, LmdValue left,
+        LmdValue right, LmdValue* out) {
+    MirNumericOpPlan plan = {};
+    if (!em_numeric_op_plan(operation, &plan) ||
+            (!plan.is_comparison && operation != OPERATOR_ADD && operation != OPERATOR_SUB &&
+             operation != OPERATOR_MOD)) return false;
+    if ((!left.integer && !is_boxed(left)) || (!right.integer && !is_boxed(right)) ||
+            !(semantic(left) & semantic(right) & K_NUMBER)) return false;
+    MIR_label_t miss = label(c), done = label(c);
+    MIR_reg_t result = em_new_reg(&c->em, "integer_result", MIR_T_I64);
+    LmdValue operands[] = {left, right};
+    MIR_reg_t ints[2];
+    for (int i = 0; i < 2; i++) {
+        if (operands[i].integer) ints[i] = operands[i].reg;
+        else {
+            MIR_reg_t type = op(c, MIR_URSH, reg(c, operands[i].reg), integer(c, 56));
+            branch(c, MIR_BNE, miss, reg(c, type), integer(c, LMD_TYPE_INT));
+            ints[i] = em_unbox_finite_int_item(&c->em, operands[i].reg);
+        }
+    }
+    MIR_insn_code_t code = plan.is_comparison ? plan.i64_opcode :
+        operation == OPERATOR_ADD ? MIR_ADD : operation == OPERATOR_SUB ? MIR_SUB : MIR_MOD;
+    if (operation == OPERATOR_MOD) branch(c, MIR_BEQ, miss, reg(c, ints[1]), integer(c, 0));
+    MIR_reg_t value = op(c, code, reg(c, ints[0]), reg(c, ints[1]));
+    if (!plan.is_comparison) {
+        if (operation == OPERATOR_MOD) {
+            // a negative exact multiple has JS -0, which has no finite integer carrier.
+            MIR_label_t nonzero = label(c);
+            branch(c, MIR_BNE, nonzero, reg(c, value), integer(c, 0));
+            branch(c, MIR_BLT, miss, reg(c, ints[0]), integer(c, 0)); put_label(c, nonzero);
+        } else em_branch_int53_outside(&c->em, value, miss);
+        value = em_box_finite_int_item(&c->em, value);
+    }
+    move(c, result, reg(c, value)); jump(c, done); put_label(c, miss);
+    MIR_reg_t l = to_number(c, left), r = to_number(c, right);
+    LmdValue slow = plan.helper_name ? LmdValue{em_call_2(&c->em, plan.helper_name, MIR_T_D,
+        MIR_T_D, reg(c, l), MIR_T_D, reg(c, r), true), K_NUMBER} :
+        LmdValue{op(c, plan.f64_opcode, reg(c, l), reg(c, r), plan.is_comparison ? MIR_T_I64 : MIR_T_D),
+            plan.is_comparison ? K_BOOL : K_NUMBER};
+    move(c, result, reg(c, plan.is_comparison ? slow.reg : box(c, slow).reg)); put_label(c, done);
+    *out = plan.is_comparison ? LmdValue{result, K_BOOL} : boxed(c, result, K_NUMBER);
+    return true;
+}
 static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, LmdValue right) {
     if (operation == OPERATOR_EQ || operation == OPERATOR_NE ||
             operation == OPERATOR_JS_STRICT_EQ || operation == OPERATOR_JS_STRICT_NE) {
@@ -661,8 +1039,10 @@ static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, 
         MIR_reg_t lt = tag(c, left), rt = tag(c, right);
         branch(c, MIR_BEQ, strings, reg(c, lt), integer(c, LMD_TYPE_STRING));
         branch(c, MIR_BEQ, strings, reg(c, rt), integer(c, LMD_TYPE_STRING));
+        LmdValue numeric_left = left, numeric_right = right;
+        numeric_left.kind &= ~K_STRING; numeric_right.kind &= ~K_STRING;
         move(c, result, reg(c, box(c, binary_value(c, OPERATOR_ADD,
-            {to_number(c, left), K_NUMBER}, {to_number(c, right), K_NUMBER})).reg)); jump(c, done);
+            numeric_left, numeric_right)).reg)); jump(c, done);
         put_label(c, strings);
         LmdValue l = to_string(c, left), r = to_string(c, right);
         MIR_reg_t joined = em_call_2(&c->em, "mvp_lmd_string_concat", MIR_T_I64,
@@ -686,7 +1066,38 @@ static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, 
         put_label(c, done); return {result, K_BOOL};
     }
     if (planned) {
+        if (left.integer && right.integer && plan.is_comparison)
+            return {op(c, plan.i64_opcode, reg(c, left.reg), reg(c, right.reg)), K_BOOL};
+        if (left.literal && right.literal && left.integer && right.integer &&
+                (operation == OPERATOR_ADD || operation == OPERATOR_SUB || operation == OPERATOR_MUL))
+            return number(c, operation == OPERATOR_ADD ? left.number + right.number :
+                operation == OPERATOR_SUB ? left.number - right.number : left.number * right.number);
+        LmdRange bounds = range_binary(operation, left.range, right.range);
+        if (left.integer && right.integer && bounds.state == 1 &&
+                (operation == OPERATOR_ADD || operation == OPERATOR_SUB || operation == OPERATOR_MUL || operation == OPERATOR_MOD)) {
+            MIR_insn_code_t code = operation == OPERATOR_ADD ? MIR_ADD : operation == OPERATOR_SUB ? MIR_SUB :
+                operation == OPERATOR_MUL ? MIR_MUL : MIR_MOD;
+            return {op(c, code, reg(c, left.reg), reg(c, right.reg)), K_NUMBER, false, 0, true, bounds};
+        }
+        LmdValue integer_result;
+        if (integer_binary(c, operation, left, right, &integer_result)) return integer_result;
         MIR_reg_t l = to_number(c, left), r = to_number(c, right);
+        if (operation == OPERATOR_MOD && right.literal && right.number >= 1 &&
+                right.number <= 9007199254740992.0 && right.number == trunc(right.number)) {
+            uint64_t divisor = (uint64_t)right.number;
+            if (!(divisor & (divisor - 1))) {
+                MIR_label_t slow = label(c), done = label(c);
+                MIR_reg_t result = em_new_reg(&c->em, "remainder", MIR_T_D);
+                // positive exact integers admit masking; zero/negative/fractional values retain fmod's sign rules.
+                MIR_reg_t i = integer_lane(c, l, 1, 9007199254740991.0, slow, true);
+                MIR_reg_t bits = op(c, MIR_AND, reg(c, i), integer(c, divisor - 1));
+                em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, result), reg(c, bits)));
+                jump(c, done); put_label(c, slow);
+                move(c, result, reg(c, em_call_2(&c->em, plan.helper_name, MIR_T_D,
+                    MIR_T_D, reg(c, l), MIR_T_D, reg(c, r), true)), true);
+                put_label(c, done); return {result, K_NUMBER};
+            }
+        }
         if (plan.helper_name) return {em_call_2(&c->em, plan.helper_name, MIR_T_D,
             MIR_T_D, reg(c, l), MIR_T_D, reg(c, r), true), K_NUMBER};
         return {op(c, plan.f64_opcode, reg(c, l), reg(c, r), plan.is_comparison ? MIR_T_I64 : MIR_T_D),
@@ -710,9 +1121,9 @@ static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, 
     MIR_reg_t bits = op(c, code, reg(c, l), reg(c, r));
     em_emit_insn(&c->em, MIR_new_insn(c->em.ctx,
         operation == OPERATOR_JS_URSHIFT ? MIR_UEXT32 : MIR_EXT32, reg(c, bits), reg(c, bits)));
-    MIR_reg_t result = em_new_reg(&c->em, "bitwise_number", MIR_T_D);
-    em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, result), reg(c, bits)));
-    return {result, K_NUMBER};
+    return {bits, K_NUMBER, false, 0, true, finite_range(
+        operation == OPERATOR_JS_URSHIFT ? 0 : INT32_MIN,
+        operation == OPERATOR_JS_URSHIFT ? UINT32_MAX : INT32_MAX)};
 }
 static MIR_reg_t module_slots(LmdCompiler* c) {
     return em_load_at(&c->em, c->unit, offsetof(MvpLmdProgram, slots), MIR_T_I64, "program_slots");
@@ -741,9 +1152,9 @@ static LmdValue read_binding(LmdCompiler* c, LmdBinding* b, AstNode* site) {
         : number(c, b->intrinsic == 2 ? NAN : INFINITY);
     MIR_reg_t source = b->native ? b->reg : binding_item(c, b);
     if (!b->native) check_tdz(c, b, source, site);
-    MIR_reg_t copy = em_new_reg(&c->em, "read", b->native && b->kinds == K_NUMBER ? MIR_T_D : MIR_T_I64);
-    move(c, copy, reg(c, source), b->native && b->kinds == K_NUMBER);
-    if (b->native) return {copy, b->kinds};
+    MIR_reg_t copy = em_new_reg(&c->em, "read", b->native && b->kinds == K_NUMBER && !b->integer ? MIR_T_D : MIR_T_I64);
+    move(c, copy, reg(c, source), b->native && b->kinds == K_NUMBER && !b->integer);
+    if (b->native) return {copy, b->kinds, false, 0, b->integer, b->range};
     bool known = b->dominated || (b->target && b->target->ast->entry == b->entry &&
         b->entry->node && b->entry->node->node_type == AST_NODE_FUNC && !b->entry->is_annex_b_companion);
     if (known && !(b->kinds & K_NUMBER)) return boxed(c, copy, b->kinds);
@@ -760,7 +1171,7 @@ static void write_binding(LmdCompiler* c, LmdBinding* b, LmdValue v, AstNode* si
         return;
     }
     if (b->native) {
-        move(c, b->reg, reg(c, b->kinds == K_NUMBER ? to_number(c, v) : truth(c, v)), b->kinds == K_NUMBER);
+        move(c, b->reg, reg(c, scalar_reg(c, v, b->kinds, b->integer)), b->kinds == K_NUMBER && !b->integer);
     } else {
         v = box(c, v);
         if (!b->owner->id) em_call_void_4(&c->em, "owned_item_slot_store", MIR_T_P, reg(c, module_slots(c)),
@@ -777,6 +1188,13 @@ static void write_binding(LmdCompiler* c, LmdBinding* b, LmdValue v, AstNode* si
 static MIR_reg_t property_key(LmdCompiler* c, LmdValue value) {
     if (value.literal) return constant(c, value.number >= 0 && value.number < UINT32_MAX &&
         value.number == trunc(value.number) ? (uint64_t)value.number : (uint64_t)-2);
+    if (value.integer) {
+        if (value.range.state == 1 && value.range.lower >= 0 && value.range.upper < UINT32_MAX)
+            return value.reg;
+        MIR_reg_t index = constant(c, (uint64_t)-2); MIR_label_t done = label(c);
+        branch(c, MIR_UBGE, done, reg(c, value.reg), integer(c, UINT32_MAX));
+        move(c, index, reg(c, value.reg)); put_label(c, done); return index;
+    }
     unsigned k = semantic(value);
     MIR_reg_t result = em_new_reg(&c->em, "index", MIR_T_I64);
     MIR_label_t numeric = label(c), done = label(c);
@@ -789,13 +1207,7 @@ static MIR_reg_t property_key(LmdCompiler* c, LmdValue value) {
     put_label(c, numeric);
     MIR_reg_t d = to_number(c, value);
     move(c, result, MIR_new_int_op(c->em.ctx, -2));
-    branch_truth(c, done, op(c, MIR_DGE, reg(c, d), MIR_new_double_op(c->em.ctx, 0)), false);
-    branch_truth(c, done, op(c, MIR_DLT, reg(c, d), MIR_new_double_op(c->em.ctx, UINT32_MAX)), false);
-    MIR_reg_t i = em_new_reg(&c->em, "integer_index", MIR_T_I64);
-    em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_D2I, reg(c, i), reg(c, d)));
-    MIR_reg_t round = em_new_reg(&c->em, "index_roundtrip", MIR_T_D);
-    em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, round), reg(c, i)));
-    branch_truth(c, done, op(c, MIR_DEQ, reg(c, d), reg(c, round)), false);
+    MIR_reg_t i = integer_lane(c, d, 0, UINT32_MAX - 1.0, done, true);
     move(c, result, reg(c, i)); put_label(c, done); return result;
 }
 static LmdReference reference(LmdCompiler* c, AstNode* n) {
@@ -834,9 +1246,7 @@ static void property_failure(LmdCompiler* c, LmdValue owner, AstNode* site) {
 static LmdValue array_read(LmdCompiler* c, LmdReference ref) {
     MIR_reg_t size = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "array_length");
     if (ref.key_known && ref.index == -1) {
-        MIR_reg_t d = em_new_reg(&c->em, "length_number", MIR_T_D);
-        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, d), reg(c, size)));
-        return {d, K_NUMBER};
+        return {size, K_NUMBER, false, 0, true, finite_range(0, UINT32_MAX)};
     }
     MIR_label_t length = ref.key_known ? NULL : label(c), done = label(c);
     MIR_reg_t result = em_new_reg(&c->em, "element", MIR_T_I64);
@@ -858,9 +1268,7 @@ static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
         MIR_reg_t bytes = op(c, MIR_ADD, reg(c, string), integer(c, offsetof(String, chars)));
         MIR_reg_t size = em_call_2(&c->em, "utf8_to_utf16_length", MIR_T_I64, MIR_T_P, reg(c, bytes),
             MIR_T_I64, reg(c, em_load_at(&c->em, string, offsetof(String, len), MIR_T_U32, "byte_length")), true);
-        MIR_reg_t d = em_new_reg(&c->em, "length_number", MIR_T_D);
-        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, d), reg(c, size)));
-        return {d, K_NUMBER};
+        return {size, K_NUMBER, false, 0, true, finite_range(0, UINT32_MAX)};
     }
     MIR_label_t length = ref.key_known ? NULL : label(c), done = ref.key_known ? NULL : label(c);
     MIR_reg_t result = em_new_reg(&c->em, "string_property", MIR_T_I64);
@@ -894,10 +1302,12 @@ static void array_index_write(LmdCompiler* c, LmdReference ref, LmdValue value) 
     MIR_label_t done = label(c), slow = label(c), store = label(c);
     branch(c, MIR_UBGT, slow, reg(c, ref.key), reg(c, size));
     // only out-of-band Numbers require an owned scalar home; zero sentinels store verbatim.
-    MIR_reg_t wide_tag = op(c, MIR_URSH, reg(c, item.reg), integer(c, 56));
-    MIR_label_t immediate = label(c);
-    branch(c, MIR_BNE, immediate, reg(c, wide_tag), integer(c, LMD_TYPE_FLOAT));
-    branch(c, MIR_UBGT, slow, reg(c, item.reg), integer(c, ITEM_FLOAT_N0)); put_label(c, immediate);
+    if (!value.integer) {
+        MIR_reg_t wide_tag = op(c, MIR_URSH, reg(c, item.reg), integer(c, 56));
+        MIR_label_t immediate = label(c);
+        branch(c, MIR_BNE, immediate, reg(c, wide_tag), integer(c, LMD_TYPE_FLOAT));
+        branch(c, MIR_UBGT, slow, reg(c, item.reg), integer(c, ITEM_FLOAT_N0)); put_label(c, immediate);
+    }
     branch(c, MIR_UBLT, store, reg(c, ref.key), reg(c, size));
     MIR_reg_t capacity = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_CAPACITY, MIR_T_I64, "capacity");
     MIR_reg_t extra = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_EXTRA, MIR_T_I64, "tail_homes");
@@ -913,14 +1323,9 @@ static void array_index_write(LmdCompiler* c, LmdReference ref, LmdValue value) 
     check_error(c, stored); put_label(c, done);
 }
 static void array_length_write(LmdCompiler* c, LmdReference ref, LmdValue value, AstNode* site) {
-    MIR_reg_t d = to_number(c, value), i = em_new_reg(&c->em, "new_length", MIR_T_I64);
+    MIR_reg_t d = to_number(c, value);
     MIR_label_t range_error = label(c), capability = label(c), done = label(c);
-    branch_truth(c, range_error, op(c, MIR_DGE, reg(c, d), MIR_new_double_op(c->em.ctx, 0)), false);
-    branch_truth(c, range_error, op(c, MIR_DLE, reg(c, d), MIR_new_double_op(c->em.ctx, UINT32_MAX)), false);
-    em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_D2I, reg(c, i), reg(c, d)));
-    MIR_reg_t round = em_new_reg(&c->em, "length_roundtrip", MIR_T_D);
-    em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, round), reg(c, i)));
-    branch_truth(c, range_error, op(c, MIR_DEQ, reg(c, d), reg(c, round)), false);
+    MIR_reg_t i = integer_lane(c, d, 0, UINT32_MAX, range_error, true);
     MIR_reg_t size = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "old_length");
     branch(c, MIR_UBGT, capability, reg(c, i), reg(c, size));
     em_store_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, i); jump(c, done);
@@ -950,16 +1355,25 @@ static LmdValue new_function(LmdCompiler* c, LmdFunction* f) {
         MIR_T_I64, integer(c, f->id), MIR_T_P, reg(c, c->unit), true);
     check_error(c, value); return boxed(c, value, K_FUNCTION);
 }
+static LmdValue* call_arguments(LmdCompiler* c, AstCallNode* n, bool boxed_args) {
+    int count = ast_linked_node_count(n->arguments), i = 0;
+    LmdValue* values = (LmdValue*)mem_calloc((size_t)count, sizeof(LmdValue), MEM_CAT_TEMP);
+    for (AstNode* a = n->arguments; a; a = a->next) {
+        LmdValue value = expression(c, a);
+        values[i++] = boxed_args ? box(c, value) : value;
+    }
+    return values;
+}
 static LmdValue call(LmdCompiler* c, AstCallNode* n) {
     LmdBinding* b = n->callee->node_type == AST_NODE_IDENT
         ? identifier_binding(c->program, (AstIdentNode*)n->callee) : NULL;
-    LmdFunction* direct = b && b->target && !b->assigned ? b->target : NULL;
+    LmdFunction* direct = direct_target(c->program, n);
+    bool native = direct && direct->native;
     LmdValue callee = direct && !b->observed ? boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED)
         : box(c, expression(c, n->callee));
     int count = ast_linked_node_count(n->arguments);
-    LmdValue* values = (LmdValue*)mem_calloc((size_t)count, sizeof(LmdValue), MEM_CAT_TEMP);
+    LmdValue* values = call_arguments(c, n, !native);
     int i = 0;
-    for (AstNode* a = n->arguments; a; a = a->next) values[i++] = box(c, expression(c, a));
     MIR_reg_t target = 0;
     if (!direct) {
         MIR_label_t valid = label(c);
@@ -972,25 +1386,42 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n) {
         target = em_load_at(&c->em, callee.reg, offsetof(Function, ptr), MIR_T_I64, "entry");
     }
     MIR_reg_t span = 0;
-    if (count) {
+    if (count && !native) {
         if (count > c->argument_count) c->argument_count = count;
         span = em_deferred_root_span_base(&c->em, &c->argument_span, &c->argument_fixup);
         for (i = 0; i < count; i++) em_store_at(&c->em, span, i * sizeof(Item), MIR_T_I64, values[i].reg);
     }
-    mem_free(values);
-    MIR_type_t types[] = {MIR_T_P, MIR_T_P, MIR_T_P, MIR_T_I64, MIR_T_I64};
-    MIR_op_t args[] = {reg(c, c->em.frame.runtime), reg(c, c->unit), span ? reg(c, span) : integer(c, 0),
+    MIR_type_t types[LAMBDA_MAX_FUNCTION_ARGS] = {MIR_T_P, MIR_T_P, MIR_T_P, MIR_T_I64, MIR_T_I64};
+    MIR_op_t args[LAMBDA_MAX_FUNCTION_ARGS] = {reg(c, c->em.frame.runtime), reg(c, c->unit), span ? reg(c, span) : integer(c, 0),
         integer(c, count), reg(c, callee.reg)};
-    MirImportEntry copy = c->program->entry; copy.call.abi_args = copy.abi_args;
-    em_before_resolved_call(&c->em, "mvp_lmd_entry", &copy.call, 5, types, args);
-    MIR_reg_t result = em_new_reg(&c->em, "call_result", MIR_T_I64);
-    MIR_insn_t insn = mir_new_call_with_target(c->em.ctx, copy.proto,
-        direct ? MIR_new_ref_op(c->em.ctx, direct->forward) : reg(c, target), result, 5, args);
+    MirImportEntry* entry = native ? &direct->entry : &c->program->entry;
+    int nargs = native ? direct->arity : 5;
+    AstNode* formal = native ? direct->ast->params : NULL;
+    if (native) for (i = 2; i < nargs; i++, formal = formal->next) {
+        types[i] = direct->signature[i].type;
+        LmdBinding* parameter = binding(c->program,
+            js_ast_parameter_binding_identifier(formal)->entry);
+        args[i] = reg(c, scalar_reg(c, values[i - 2], parameter->kinds, parameter->integer));
+    }
+    mem_free(values);
+    MIR_type_t result_type = native && direct->returns == K_NUMBER && !direct->integer ? MIR_T_D : MIR_T_I64;
+    MIR_reg_t result = em_new_reg(&c->em, "call_result", result_type);
+    bool pair = native && em_returns_result_pair(direct->return_abi.companion);
+    MIR_reg_t companion = pair ? em_new_reg(&c->em, "call_error", MIR_T_I64) : 0;
+    em_before_resolved_call(&c->em, "mvp_lmd_entry", &entry->call, nargs, types, args);
+    MIR_insn_t insn = mir_new_call_with_target(c->em.ctx, entry->proto,
+        direct ? MIR_new_ref_op(c->em.ctx, direct->forward) : reg(c, target), result, nargs, args, companion);
     mir_append_emit_insn(c->em.ctx, c->em.func_item, insn);
-    em_after_resolved_call(&c->em, "mvp_lmd_entry", &copy.call, insn, 0, MIR_T_I64);
+    em_after_resolved_call(&c->em, "mvp_lmd_entry", &entry->call, insn, 0, result_type);
     // consume the context companion before any safepoint or rooted store (D5.2.1v3).
-    MIR_reg_t companion = em_load_at(&c->em, c->em.frame.runtime,
+    if (!pair) companion = em_load_at(&c->em, c->em.frame.runtime,
         offsetof(Context, mir_companion_slot), MIR_T_I64, "companion");
+    if (native) {
+        MIR_label_t ok = label(c);
+        branch(c, MIR_BEQ, ok, reg(c, companion), integer(c, pair ? ITEM_NULL : 0));
+        return_error(c, companion); put_label(c, ok);
+        return {result, direct->returns, false, 0, direct->integer, direct->range};
+    }
     int home = em_scalar_home_new(&c->em);
     MIR_reg_t address = em_materialize_frame_ref(&c->em, em_scalar_home_ref(&c->em, home));
     MIR_reg_t resolved = em_resolve_pending_pair(&c->em, result, companion, address);
@@ -999,14 +1430,28 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n) {
         MIR_reg_t absent = constant(c, ITEM_JS_UNDEFINED);
         for (i = 0; i < count; i++) em_store_at(&c->em, span, i * sizeof(Item), MIR_T_I64, absent);
     }
-    check_error(c, resolved); return boxed(c, resolved);
+    check_error(c, resolved); return boxed(c, resolved, direct ? direct->returns : K_ANY);
+}
+static bool tail_call(LmdCompiler* c, AstNode* n) {
+    if (!c->tail_entry || !n || n->node_type != AST_NODE_CALL_EXPR ||
+            direct_target(c->program, (AstCallNode*)n) != c->function) return false;
+    LmdValue* values = call_arguments(c, (AstCallNode*)n, false);
+    int i = 0;
+    // evaluate every argument before overwriting any parameter, including discarded extras.
+    for (AstNode* a = c->function->ast->params; a; a = a->next, i++) {
+        LmdBinding* b = binding(c->program, js_ast_parameter_binding_identifier(a)->entry);
+        write_binding(c, b, values[i], n, true);
+    }
+    mem_free(values); jump(c, c->tail_entry); return true;
 }
 static Operator compound_operator(Operator op) {
     static const Operator operations[] = {OPERATOR_ADD, OPERATOR_SUB, OPERATOR_MUL,
         OPERATOR_DIV, OPERATOR_MOD, OPERATOR_JS_EXP, OPERATOR_JS_BIT_AND,
         OPERATOR_JS_BIT_OR, OPERATOR_JS_BIT_XOR, OPERATOR_JS_LSHIFT,
         OPERATOR_JS_RSHIFT, OPERATOR_JS_URSHIFT};
-    return operations[op - OPERATOR_JS_ADD_ASSIGN];
+    // logical assignments have no eager arithmetic operation in the range planner.
+    return op >= OPERATOR_JS_ADD_ASSIGN && op <= OPERATOR_JS_URSHIFT_ASSIGN
+        ? operations[op - OPERATOR_JS_ADD_ASSIGN] : op;
 }
 static LmdValue logical(LmdCompiler* c, Operator operation, AstNode* left, AstNode* right,
         bool assignment = false) {
@@ -1062,10 +1507,11 @@ static LmdValue expression(LmdCompiler* c, AstNode* n) {
         AstUnaryNode* u = (AstUnaryNode*)n;
         if (u->op == OPERATOR_JS_INCREMENT || u->op == OPERATOR_JS_DECREMENT) {
             LmdReference ref = reference(c, u->operand);
-            MIR_reg_t before = to_number(c, read_reference(c, ref, n));
+            LmdValue before = read_reference(c, ref, n);
+            if (semantic(before) != K_NUMBER) before = {to_number(c, before), K_NUMBER};
             LmdValue after = binary_value(c, u->op == OPERATOR_JS_INCREMENT ? OPERATOR_ADD : OPERATOR_SUB,
-                {before, K_NUMBER}, number(c, 1));
-            write_reference(c, ref, after, n); return u->prefix ? after : LmdValue{before, K_NUMBER};
+                before, number(c, 1));
+            write_reference(c, ref, after, n); return u->prefix ? after : before;
         }
         if (u->op == OPERATOR_JS_TYPEOF && u->operand->node_type == AST_NODE_IDENT &&
                 !identifier_binding(c->program, (AstIdentNode*)u->operand)) return text(c, "undefined");
@@ -1087,12 +1533,18 @@ static LmdValue expression(LmdCompiler* c, AstNode* n) {
         }
         if (u->op == OPERATOR_JS_BIT_NOT) {
             MIR_reg_t bits = op(c, MIR_XOR, reg(c, int32(c, v)), integer(c, UINT64_MAX));
-            MIR_reg_t d = em_new_reg(&c->em, "bit_not", MIR_T_D);
-            em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, d), reg(c, bits))); return {d, K_NUMBER};
+            return {bits, K_NUMBER, false, 0, true};
+        }
+        if (u->op == OPERATOR_POS && semantic(v) == K_NUMBER) return v;
+        if (u->op == OPERATOR_NEG && v.literal) return number(c, -v.number);
+        if (u->op == OPERATOR_NEG && v.integer && v.range.state == 1 &&
+                (v.range.lower > 0 || v.range.upper < 0)) {
+            MIR_reg_t negated = em_new_reg(&c->em, "negative_integer", MIR_T_I64);
+            em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_NEG, reg(c, negated), reg(c, v.reg)));
+            return {negated, K_NUMBER, false, 0, true, finite_range(-v.range.upper, -v.range.lower)};
         }
         MIR_reg_t d = to_number(c, v);
         if (u->op == OPERATOR_POS) return {d, K_NUMBER};
-        if (v.literal) return number(c, -v.number);
         MIR_reg_t result = em_new_reg(&c->em, "negate", MIR_T_D);
         em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_DNEG, reg(c, result), reg(c, d))); return {result, K_NUMBER};
     }
@@ -1211,7 +1663,9 @@ static void statement(LmdCompiler* c, AstNode* n) {
         move(c, c->em.frame.return_reg, reg(c, v.reg)); break;
     }
     case AST_NODE_RETURN_STAM:
-        em_stage_function_return(&c->em, reg(c, box(c, expression(c, ((AstReturnNode*)n)->value)).reg)); break;
+        if (!tail_call(c, ((AstReturnNode*)n)->value))
+            return_value(c, expression(c, ((AstReturnNode*)n)->value));
+        break;
     case AST_NODE_IF_EXPR: {
         control_completion(c);
         JsIfNode* f = (JsIfNode*)n;
@@ -1319,55 +1773,82 @@ static void* import_resolver(const char* name) {
 
 static const MIR_var_t entry_arguments[] = {{MIR_T_P, "runtime", 0}, {MIR_T_P, "unit", 0},
     {MIR_T_P, "arguments", 0}, {MIR_T_I64, "argc", 0}, {MIR_T_I64, "self", 0}};
+static void emit_return(LmdCompiler* c, bool unentered = false) {
+    MirFrameState* frame = &c->em.frame;
+    MIR_reg_t result, companion;
+    if (unentered) {
+        result = c->function->native ? (frame->return_type == MIR_T_D
+            ? to_number(c, number(c, 0)) : constant(c, 0)) : constant(c, ITEM_ERROR);
+        companion = constant(c, c->function->native ? ITEM_ERROR : 0);
+    } else if (c->function->native) {
+        result = frame->return_reg; companion = frame->error_return_reg;
+    } else em_build_pending_pair(&c->em, frame->return_reg, &result, &companion);
+    bool pair = em_returns_result_pair(frame->plan.companion);
+    if (!pair) em_store_frame_top(&c->em, frame->runtime, offsetof(Context, mir_companion_slot), companion);
+    if (!unentered) {
+        em_store_frame_top(&c->em, frame->runtime, offsetof(Context, side_root_top), frame->root_base);
+        // audited MVP imports preserve the watermark; only owned scalar storage needs an extent.
+        if (frame->scalar_home_count || frame->fixed_number_slots || frame->number_frame_required)
+            em_store_frame_top(&c->em, frame->runtime, offsetof(Context, side_number_top), frame->number_base);
+    }
+    em_emit_insn(&c->em, pair ? MIR_new_ret_insn(c->em.ctx, 2, reg(c, result), reg(c, companion))
+        : MIR_new_ret_insn(c->em.ctx, 1, reg(c, result)));
+}
 static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
     LmdCompiler c = {}; c.program = p; c.function = f;
     c.em.ctx = p->mir; c.em.call_owner = &c; c.em.root_call_value = root_value;
     c.em.lookup_import_metadata = import_metadata; c.em.import_cache = p->import_cache;
     c.em.helper_results_skip_rehome = true;
     c.em.name_pool = p->frontend->name_pool;
-    MIR_type_t result_type = MIR_T_I64;
+    MIR_type_t result_types[] = {f->native && f->returns == K_NUMBER && !f->integer ? MIR_T_D : MIR_T_I64, MIR_T_I64};
     // the MIR API interns descriptor names; keep the reusable template immutable.
-    MIR_var_t arguments[5]; memcpy(arguments, entry_arguments, sizeof(arguments));
-    f->item = MIR_new_func_arr(p->mir, f->name, 1, &result_type, 5, arguments);
+    MIR_var_t arguments[LAMBDA_MAX_FUNCTION_ARGS]; memcpy(arguments, f->signature, f->arity * sizeof(MIR_var_t));
+    f->item = MIR_new_func_arr(p->mir, f->name, em_return_nres(f->return_abi.companion), result_types, f->arity, arguments);
     c.em.func_item = f->item; c.em.func = MIR_get_item_func(p->mir, f->item);
     MirFrameState* frame = &c.em.frame;
-    frame->active = true; frame->number_active = true; frame->item_return = true;
-    frame->return_type = MIR_T_I64; frame->scalar_return_mode = SCALAR_RETURN_F64;
-    frame->return_lane_kind = RETURN_LANE_SCALAR;
+    frame->active = true; frame->number_active = true; frame->item_return = !f->native;
+    frame->return_type = result_types[0]; frame->scalar_return_mode = f->native ? SCALAR_RETURN_NONE : SCALAR_RETURN_F64;
+    frame->return_lane_kind = f->native ? RETURN_LANE_ERROR : RETURN_LANE_SCALAR;
     frame->runtime = MIR_reg(p->mir, "runtime", c.em.func);
     c.unit = MIR_reg(p->mir, "unit", c.em.func);
-    c.arguments = MIR_reg(p->mir, "arguments", c.em.func);
-    c.argc = MIR_reg(p->mir, "argc", c.em.func);
-    c.self = MIR_reg(p->mir, "self", c.em.func);
-    for (const MIR_var_t& arg : entry_arguments)
-        em_function_argument_register(&c.em, MIR_reg(p->mir, arg.name, c.em.func));
+    if (!f->native) {
+        c.arguments = MIR_reg(p->mir, "arguments", c.em.func);
+        c.argc = MIR_reg(p->mir, "argc", c.em.func);
+        c.self = MIR_reg(p->mir, "self", c.em.func);
+    }
+    for (int i = 0; i < f->arity; i++)
+        em_function_argument_register(&c.em, MIR_reg(p->mir, f->signature[i].name, c.em.func));
     frame->root_base = em_new_reg(&c.em, "root_frame", MIR_T_I64);
     frame->root_end = em_new_reg(&c.em, "root_end", MIR_T_I64);
     frame->number_base = em_new_reg(&c.em, "number_frame", MIR_T_I64);
-    frame->return_reg = em_new_reg(&c.em, "completion", MIR_T_I64);
-    root_value(&c, frame->return_reg, JIT_VALUE_BOXED_ITEM);
+    frame->return_reg = em_new_reg(&c.em, "completion", frame->return_type);
+    if (f->native) frame->error_return_reg = em_new_reg(&c.em, "error", MIR_T_I64);
+    else root_value(&c, frame->return_reg, JIT_VALUE_BOXED_ITEM);
     frame->anchor = label(&c); frame->return_label = label(&c);
-    frame->plan.entry_kind = FN_ENTRY_BOXED_BODY;
-    frame->plan.entry_mode = MIR_ENTRY_CHECKED; frame->plan.debug_name = f->name;
-    em_plan_bind_return(&frame->plan, NULL, true);
+    frame->native_stack_overflow = label(&c);
+    frame->plan.entry_kind = f->native ? FN_ENTRY_NATIVE_BODY : FN_ENTRY_BOXED_BODY;
+    frame->plan.entry_mode = f->native ? MIR_ENTRY_BOUND_INTERNAL : MIR_ENTRY_CHECKED;
+    frame->plan.debug_name = f->name;
+    em_plan_bind_return(&frame->plan, &f->return_abi, !f->native);
     put_label(&c, frame->anchor);
-    move(&c, frame->return_reg, integer(&c, ITEM_JS_UNDEFINED));
+    if (!f->native) move(&c, frame->return_reg, integer(&c, ITEM_JS_UNDEFINED));
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
         b->scalar_home = 0;
         if (b->owner != f || (!f->id && !b->native)) continue;
-        b->reg = em_new_reg(&c.em, "binding", b->native && b->kinds == K_NUMBER ? MIR_T_D : MIR_T_I64);
+        b->reg = em_new_reg(&c.em, "binding", b->native && b->kinds == K_NUMBER && !b->integer ? MIR_T_D : MIR_T_I64);
         if (!b->native) root_value(&c, b->reg, JIT_VALUE_BOXED_ITEM);
     }
     if (f->ast) {
         c.strict = f->ast->has_use_strict_directive || (f->ast->vars && f->ast->vars->strict);
-        scope_initialize(&c, f->ast->vars);
-        if (f->ast->vars && f->ast->vars->parent && f->ast->vars->parent->is_function_name_scope)
-            scope_initialize(&c, f->ast->vars->parent);
         uint64_t i = 0;
         for (AstNode* a = f->ast->params; a; a = a->next, i++) {
             AstIdentNode* id = js_ast_parameter_binding_identifier(a);
             LmdBinding* b = binding(p, id->entry);
+            if (f->native) {
+                write_binding(&c, b, {MIR_reg(p->mir, f->signature[i + 2].name, c.em.func), b->kinds, false, 0, b->integer, b->range}, a, true);
+                continue;
+            }
             MIR_reg_t value = em_new_reg(&c.em, "parameter", MIR_T_I64);
             if (f->closed_calls && !(b->kinds & K_UNDEFINED)) {
                 move(&c, value, reg(&c, em_load_at(&c.em, c.arguments, i * sizeof(Item), MIR_T_I64, "argument")));
@@ -1380,21 +1861,21 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
             }
             write_binding(&c, b, boxed(&c, value, b->kinds), a, true);
         }
+        // re-enter after parameter installation so self-tail calls reset activation locals.
+        if (f->native) { c.tail_entry = label(&c); put_label(&c, c.tail_entry); }
+        scope_initialize(&c, f->ast->vars);
+        if (f->ast->vars && f->ast->vars->parent && f->ast->vars->parent->is_function_name_scope)
+            scope_initialize(&c, f->ast->vars->parent);
         if (f->ast->body->node_type == AST_NODE_BLOCK) {
             statement(&c, f->ast->body);
-            em_stage_function_return(&c.em, integer(&c, ITEM_JS_UNDEFINED));
-        } else em_stage_function_return(&c.em, reg(&c, box(&c, expression(&c, f->ast->body)).reg));
+            if (falls_through(f->ast->body)) return_value(&c, expression(&c, NULL));
+        } else return_value(&c, expression(&c, f->ast->body));
     } else {
         c.strict = ((AstScript*)p->frontend->ast_root)->has_use_strict_directive;
         statement(&c, p->frontend->ast_root); jump(&c, frame->return_label);
     }
     put_label(&c, frame->return_label);
-    MIR_reg_t result, companion;
-    em_build_pending_pair(&c.em, frame->return_reg, &result, &companion);
-    em_store_frame_top(&c.em, frame->runtime, offsetof(Context, mir_companion_slot), companion);
-    em_store_frame_top(&c.em, frame->runtime, offsetof(Context, side_root_top), frame->root_base);
-    em_store_frame_top(&c.em, frame->runtime, offsetof(Context, side_number_top), frame->number_base);
-    em_emit_insn(&c.em, MIR_new_ret_insn(p->mir, 1, reg(&c, result)));
+    emit_return(&c);
     frame->fixed_root_slots = c.argument_count;
     MirRootWriteBackResult roots = {};
     if (!em_finalize_semantic_root_write_back(&c.em, frame->root_base, frame->anchor, false, 0,
@@ -1413,8 +1894,7 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
         offsetof(Context, side_number_top), offsetof(Context, side_number_limit),
         offsetof(Context, side_root_commit_limit), offsetof(Context, side_number_commit_limit));
     // reservation/stack failure has no frame to unwind and allocates nothing.
-    em_store_at(&c.em, frame->runtime, offsetof(Context, mir_companion_slot), MIR_T_I64, constant(&c, 0));
-    em_emit_insn(&c.em, MIR_new_ret_insn(p->mir, 1, integer(&c, ITEM_ERROR)));
+    emit_return(&c, true);
     em_finalize_function_metadata(&c.em);
     MIR_finish_func(p->mir);
     em_frame_dispose(&c.em);
@@ -1462,11 +1942,57 @@ static int representation_pass(void* opaque) {
     }
     LmdTypes types = {p, true};
     while (types.changed) { types.changed = false; type_walk(p->frontend->ast_root, &types); }
+    // unresolved recursive domains remain generic; propagate that widening before selecting ABIs.
+    for (int i = 0; i < p->functions->length; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        if (!f->returns) { f->returns = K_ANY; types.changed = true; }
+    }
+    for (int i = 0; i < p->bindings->length; i++) {
+        LmdBinding* b = (LmdBinding*)p->bindings->data[i];
+        if (!b->kinds) { b->kinds = K_ANY; types.changed = true; }
+    }
+    while (types.changed) { types.changed = false; type_walk(p->frontend->ast_root, &types); }
+    LmdRanges ranges = {p, NULL, true};
+    while (ranges.changed) { ranges.changed = false; range_walk(p->frontend->ast_root, &ranges); }
+    // unresolved cycles cannot establish integer admission; propagate widening before choosing carriers.
+    for (int i = 0; i < p->bindings->length; i++) {
+        LmdBinding* b = (LmdBinding*)p->bindings->data[i];
+        if (!b->range.state) { b->range.state = 2; ranges.changed = true; }
+    }
+    for (int i = 0; i < p->functions->length; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        if (!f->range.state) { f->range.state = 2; ranges.changed = true; }
+    }
+    while (ranges.changed) { ranges.changed = false; range_walk(p->frontend->ast_root, &ranges); }
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
         if (!b->kinds) b->kinds = K_ANY;
         b->native = !b->external && (b->kinds == K_NUMBER || b->kinds == K_BOOL) &&
             (b->entry->is_parameter ? b->owner->closed_calls : b->initializer && b->dominated);
+        b->integer = b->native && b->kinds == K_NUMBER && b->range.state == 1;
+    }
+    for (int i = 1; i < p->functions->length; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        f->native = f->closed_calls && (f->returns == K_NUMBER || f->returns == K_BOOL) &&
+            ast_linked_node_count(f->ast->params) + 2 <= LAMBDA_MAX_FUNCTION_ARGS;
+        for (AstNode* a = f->ast->params; a; a = a->next)
+            f->native &= binding(p, js_ast_parameter_binding_identifier(a)->entry)->native;
+        f->integer = f->native && f->returns == K_NUMBER && f->range.state == 1;
+    }
+    // keep closed native numeric regions coherent instead of converting invariant operands in a float loop.
+    for (int i = 1; i < p->functions->length; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        if (!f->native) continue;
+        bool integral = f->returns != K_NUMBER || f->integer;
+        for (int j = 0; j < p->bindings->length; j++) {
+            LmdBinding* b = (LmdBinding*)p->bindings->data[j];
+            if (b->owner == f && b->native && b->kinds == K_NUMBER) integral &= b->integer;
+        }
+        f->integer_region = integral;
+        if (!integral) for (int j = 0; j < p->bindings->length; j++) {
+            LmdBinding* b = (LmdBinding*)p->bindings->data[j];
+            if (b->owner == f) b->integer = false;
+        }
     }
     return true;
 }
@@ -1483,6 +2009,36 @@ static int lower_pass(void* opaque) {
     for (int i = 0; i < p->functions->length; i++) {
         LmdFunction* f = (LmdFunction*)p->functions->data[i];
         f->forward = MIR_new_forward(p->mir, f->name);
+        f->return_abi.shape = f->native ? RETURN_SHAPE_NATIVE_ERROR : RETURN_SHAPE_ITEM_SCALAR;
+        f->return_abi.companion = em_companion_transport(f->return_abi.shape, !f->native);
+        f->return_abi.normal = {f->native ? (f->returns == K_NUMBER ? (f->integer ? LMD_TYPE_INT : LMD_TYPE_FLOAT) : LMD_TYPE_BOOL) : LMD_TYPE_ANY,
+            f->native ? (f->returns == K_NUMBER ? (f->integer ? VALUE_REP_INT_LANE : VALUE_REP_F64) : VALUE_REP_I64) : VALUE_REP_ITEM,
+            f->native ? SCALAR_RETURN_NONE : SCALAR_RETURN_F64};
+        if (f->native) {
+            f->return_abi.error_lane = FN_ERROR_LANE_CONTEXT_ITEM;
+            f->return_abi.error = {LMD_TYPE_ERROR, VALUE_REP_ITEM, SCALAR_RETURN_NONE};
+        }
+        if (f->native) {
+            MIR_type_t types[LAMBDA_MAX_FUNCTION_ARGS] = {MIR_T_P, MIR_T_P};
+            uint64_t classes = ARG(0,RAW_PTR) | ARG(1,RAW_PTR);
+            f->arity = 2;
+            for (AstNode* a = f->ast->params; a; a = a->next) {
+                LmdBinding* b = binding(p, js_ast_parameter_binding_identifier(a)->entry);
+                types[f->arity] = b->kinds == K_NUMBER && !b->integer ? MIR_T_D : MIR_T_I64;
+                classes |= ARG(f->arity, SCALAR); f->arity++;
+            }
+            mir_prepare_call_args(f->signature, types, f->arity);
+            f->signature[0].name = "runtime"; f->signature[1].name = "unit";
+            MIR_type_t results[] = {f->returns == K_NUMBER && !f->integer ? MIR_T_D : MIR_T_I64, MIR_T_I64};
+            char name[64]; snprintf(name, sizeof(name), "%s_signature", f->name);
+            f->entry.proto = MIR_new_proto_arr(p->mir, name, em_return_nres(f->return_abi.companion), results, f->arity, f->signature);
+            f->entry.audit = (JitImportMetadata)AUDIT(JIT_EFFECT_MAY_GC, SCALAR, classes);
+            em_normalize_import_call(&f->entry, results[0], f->arity, f->signature, em_return_nres(f->return_abi.companion));
+            f->entry.call.return_shape = f->return_abi.shape;
+            f->entry.call.abi = &f->return_abi;
+        } else {
+            f->arity = 5; memcpy(f->signature, entry_arguments, sizeof(entry_arguments));
+        }
     }
     bool ok = true;
     for (int i = 0; i < p->functions->length && ok; i++) ok = compile_function(p, (LmdFunction*)p->functions->data[i]);
@@ -1532,7 +2088,9 @@ MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* exec
     e->result = Item{.item = ITEM_ERROR};
     if (!source || !compile(&e->program, source, length)) return e;
     if (context) { diagnostic(&e->program, NULL, "execution needs its own unbound evaluator thread"); return e; }
-    lambda_stack_init(); e->context.stack_limit = _lambda_stack_limit;
+    lambda_stack_init();
+    // use the shared recoverable budget and unwind headroom for native entry guards.
+    e->context.stack_limit = lambda_stack_recoverable_limit();
     if (!eval_context_init(&e->context)) return e;
     e->active = true; heap_init();
     if (!e->context.heap) return e;
