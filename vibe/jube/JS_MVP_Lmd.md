@@ -50,7 +50,8 @@ The requested constraints are:
 
 1. Keep the current JS parser, AST, binding, validation, and applicable analysis.
 2. Emit **new MIR** under `lambda/js/mvp-lmd/`; do not invoke the current JS
-   lowering, JS interpreter, or the private-value MVP under `lambda/js/mvp/`.
+   lowering, JS interpreter, or the retired private-value MVP backend
+   (removed from the active tree on 2026-10-07).
 3. Base execution on untyped Lambda's `Item`, native scalar lanes, containers,
    precise roots, memory ownership, and shared MIR emitter.
 4. Support JS `var` declaration and assignment, including runtime type changes.
@@ -492,7 +493,7 @@ Maintain an explicit import/helper manifest for this lane. It covers generated
 MIR imports, new helper dependencies, indirect function targets, and lifecycle
 callbacks. Permit existing `js_*` frontend analysis calls only during
 compilation; execution, collection, teardown, and error handling must never
-enter existing JS runtime helpers or `lambda/js/mvp/`.
+enter existing JS runtime helpers or the retired private-value MVP backend.
 
 Do not call a renamed wrapper around a forbidden helper or copy its body into
 this directory. Reuse non-JS physical primitives after audit. If a useful

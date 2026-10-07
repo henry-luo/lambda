@@ -111,7 +111,7 @@ Another excerpt shows a numeric value encoded as an `Item`, roots published, and
 
 ### 3.1 Current release comparison is unavailable
 
-The live command `./lambda.exe js --runtime=mvp test/benchmark/r7rs/fib2.js` exits **9** with `MVP runtime is available only in debug builds`. No debug timing was substituted. A future release MVP comparator requires its own explicit build/validation work; it is not a prerequisite for making full-JS improvements or a reason to weaken semantics.
+The former command `./lambda.exe js --runtime=mvp test/benchmark/r7rs/fib2.js` is no longer available: the private-value MVP backend and selector were removed from the active tree on 2026-10-07. No debug timing was substituted in this analysis. The archived full/MVP measurements remain historical evidence, not a current comparator or a prerequisite for full-JS work (**S1.11**, **D1.2v2**, **D1.3v3**).
 
 The earlier [MVP/full comparison](JS_MVP_Full_Runtime_Comparison.md) supplies historical experiments, not a current performance baseline. Its numeric-coercion, replaced-method, and typed-array probes also show why benchmark sufficiency is not semantic parity. The source comparison below was refreshed against this worktree.
 
@@ -124,7 +124,7 @@ The earlier [MVP/full comparison](JS_MVP_Full_Runtime_Comparison.md) supplies hi
 | Values and GC | Most ordinary doubles are already inline `Item`s; out-of-band scalars need explicit ownership; shared precise roots use liveness planning | Compact private value representation and heap/root interface; generic MIR pins temporary values | Avoid repeated encode/decode and unnecessary ownership transfers; do not claim every full-JS Number allocates |
 | Error handling | Explicit returned completions under the helper catalog contract | Generic MVP MIR reads `MvpExecution::error` after operations | This is not a pattern to copy: **D1.4v4 / D8.4.3v2** require explicit completion, not a pending-error side channel |
 
-Sources: [full value helpers](../../lambda/js/js_runtime_value.cpp), [full property/call runtime](../../lambda/js/js_runtime.cpp), [MVP runtime](../../lambda/js/mvp/mvp_runtime.cpp), [MVP heap](../../lambda/js/mvp/mvp_heap.cpp), [MVP generic lowering](../../lambda/js/mvp/mvp_generic_mir.cpp).
+Sources: [full value helpers](../../lambda/js/js_runtime_value.cpp), [full property/call runtime](../../lambda/js/js_runtime.cpp), historical [MVP runtime](https://github.com/henry-luo/lambda/blob/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp/mvp_runtime.cpp), [MVP heap](https://github.com/henry-luo/lambda/blob/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp/mvp_heap.cpp), and [MVP generic lowering](https://github.com/henry-luo/lambda/blob/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp/mvp_generic_mir.cpp).
 
 ### 3.2 Do not re-propose already implemented work
 

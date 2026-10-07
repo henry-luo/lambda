@@ -515,7 +515,7 @@ python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save --typed
 | `-m, --mode` | `time` (default), `memory`, or `mir-vs-c` |
 | `-s, --suite` | Comma-separated suite filter (substring match) |
 | `-b, --bench` | Comma-separated benchmark filter (substring match) |
-| `-e, --engines` | Comma-separated engine filter: `mir,c2mir,go,lambdajs,mvpjs,quickjs,nodejs,python,julia` |
+| `-e, --engines` | Comma-separated engine filter: `mir,c2mir,go,lambdajs,quickjs,nodejs,python,julia` |
 | `-n, --runs` | Number of runs per engine (default: 3 for time, 1 for memory) |
 | `-t, --timeout` | Timeout per run in seconds (default: 120) |
 | `--typed` | In time mode, run both MIR variants (`mir` = untyped, `mir_typed` = typed); in mir-vs-c mode, include typed R7RS variants. **Time mode requires this or `--legacy`** |

@@ -92,7 +92,7 @@ MIR_VS_C_CSV_PATH = "temp/mir_vs_c_bench.csv"
 
 IS_MACOS = platform.system() == "Darwin"
 
-ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "mvpjs", "quickjs", "nodejs", "python", "julia", "java", "erlang"]
+ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "quickjs", "nodejs", "python", "julia", "java", "erlang"]
 
 # Native statically-typed reference ports. They are not alternative Lambda
 # execution paths — they bound what a fully typed Lambda program could reach on
@@ -113,7 +113,7 @@ GO_BUILD_DIR = go_ports.DEFAULT_BUILD_DIR
 WRONG_OUTPUT_ROWS = {}
 ENGINE_LABELS = {
     "mir": "MIR-U", "mir_typed": "MIR-T", "c2mir": "C2MIR", "go": "Go",
-    "lambdajs": "LambdaJS", "mvpjs": "JS MVP", "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
+    "lambdajs": "LambdaJS", "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
     "julia": "Julia",
     "java": "Java",
     "erlang": "Erlang",
@@ -681,11 +681,6 @@ def time_lambdajs(results, row, suite, name, script_path, num_runs, timeout_s):
     print(f" {fmt_ms(aw)}")
 
 
-def mvpjs_run_cmd(script_path):
-    """Run a source script through the independent JS MVP selector."""
-    return f"{LAMBDA_EXE} js --runtime=mvp {shlex.quote(expand_benchmark_js(script_path))}"
-
-
 def expand_benchmark_js(script_path):
     """Bundle shared benchmark helpers for engines without local CommonJS loading."""
     with open(script_path) as source:
@@ -785,25 +780,6 @@ def make_jetstream_node_wrapper(bench_name, js_path, post_timing_oracle=None):
     with open(wrapper, "w") as f:
         f.write(code)
         f.write(jetstream_timing_trailer(run_expr, run_count, post_timing_oracle))
-    return wrapper
-
-
-def make_jetstream_mvpjs_wrapper(bench_name, js_path):
-    """Create a strict-source-preserving wrapper for one MVP JetStream payload."""
-    detected = _detect_jetstream_run_function(js_path)
-    if detected is None:
-        return None
-    run_expr, run_count = detected
-    os.makedirs("temp", exist_ok=True)
-    wrapper = os.path.join("temp", f"_mvpjs_jetstream_{bench_name}.js")
-    with open(js_path) as stream:
-        code = stream.read()
-    with open(wrapper, "w") as stream:
-        stream.write(code)
-        stream.write("\nvar _mvp_t0 = performance.now();\n")
-        stream.write(f"for (var _mvp_i = 0; _mvp_i < {run_count}; _mvp_i++) {{ {run_expr}; }}\n")
-        stream.write("var _mvp_t1 = performance.now();\n")
-        stream.write('process.stdout.write("__TIMING__:" + (_mvp_t1 - _mvp_t0) + "\\n");\n')
     return wrapper
 
 
@@ -1297,21 +1273,6 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
         bundle_path = js_path.replace("2.js", "2_bundle.js") if js_path else None
         standalone_js = bundle_path if (suite == "awfy" and bundle_path and os.path.exists(bundle_path)) else js_path
 
-        # --- Independent JS MVP ---
-        if "mvpjs" in engines:
-            if standalone_js and os.path.exists(standalone_js):
-                print(f"  JS MVP   ", end="", flush=True)
-                w, e, ok, status, detail = time_run_benchmark(
-                    mvpjs_run_cmd(standalone_js), num_runs, timeout_s)
-                record_time_result(results, row, suite, name, "mvpjs", w, e, ok, status, detail,
-                                   e2e_engine="mvpjs_e2e")
-                print(f" {fmt_ms(e if e is not None else w)}")
-            else:
-                results[suite][name]["mvpjs"] = None
-                row["mvpjs"] = None
-                record_status(results, suite, name, "mvpjs", "missing_file")
-                print("  JS MVP    ---")
-
         # --- LambdaJS ---
         if "lambdajs" in engines:
             if standalone_js and os.path.exists(standalone_js):
@@ -1370,23 +1331,6 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                 print(f"  Python    ---")
     else:
         # JetStream suite
-        if "mvpjs" in engines:
-            mvpjs_js = JETSTREAM_NODE.get(name)
-            wrapper = make_jetstream_mvpjs_wrapper(name, mvpjs_js) if mvpjs_js and \
-                os.path.exists(mvpjs_js) else None
-            if wrapper:
-                print(f"  JS MVP   ", end="", flush=True)
-                w, e, ok, status, detail = time_run_benchmark(mvpjs_run_cmd(wrapper),
-                    num_runs, timeout_s)
-                record_time_result(results, row, suite, name, "mvpjs", w, e, ok, status, detail,
-                                   e2e_engine="mvpjs_e2e")
-                print(f" {fmt_ms(e if e is not None else w)}")
-            else:
-                results[suite][name]["mvpjs"] = None
-                row["mvpjs"] = None
-                record_status(results, suite, name, "mvpjs", "wrapper_unavailable")
-                print("  JS MVP    ---")
-
         if "lambdajs" in engines:
             ljs_js = JETSTREAM_LJS.get(name)
             if ljs_js and os.path.exists(ljs_js):
@@ -2289,7 +2233,7 @@ Examples:
     # Lambda's build gate applies whenever a Lambda engine will run.
     if args.coverage:
         print("coverage build check enabled: LLVM-instrumented build accepted")
-    elif mode == "mir-vs-c" or any(engine in engines for engine in ("mir", "lambdajs", "mvpjs")):
+    elif mode == "mir-vs-c" or any(engine in engines for engine in ("mir", "lambdajs")):
         check_release_build()
     require_pinned_node_version(engines, mode)
 

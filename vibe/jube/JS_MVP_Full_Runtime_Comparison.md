@@ -116,13 +116,13 @@ Consequences in the fresh finalized MIR:
 - `fib(n)` also has an Item body. Its recursive edges **already directly call that body**. Each non-base invocation nevertheless calls two subtract helpers and one add helper, and handles boxed returns and ownership. Its deficit is not solely the dynamic call kernel.
 - No `_n` numeric variant is emitted for these benchmark functions in the captured artifacts.
 
-MVP's [`mvp_numeric_mir.cpp`](../../lambda/js/mvp/mvp_numeric_mir.cpp) emits F64 arithmetic and direct numeric recursion. Its [generic compiler](../../lambda/js/mvp/mvp_generic_mir.cpp) also attempts a numeric kernel per eligible non-closure function, so timing/printing in the surrounding benchmark does not prevent that specialization.
+The historical [MVP numeric lowering](https://github.com/henry-luo/lambda/blob/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp/mvp_numeric_mir.cpp) emitted F64 arithmetic and direct numeric recursion. Its [generic compiler](https://github.com/henry-luo/lambda/blob/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp/mvp_generic_mir.cpp) also attempted a numeric kernel per eligible non-closure function, so timing/printing in the surrounding benchmark did not prevent that specialization.
 
 This explains a concrete structural difference behind the numeric benchmark gaps. It does not establish that every instruction in full JS's finalized MIR survives MIR's later native optimizer, or quantify each instruction's cost.
 
 ### 4.2 The necessary correction to MVP's approach
 
-`mvp_host_numeric_call_values` in [mvp_runtime.cpp](../../lambda/js/mvp/mvp_runtime.cpp) applies `mvp_to_number` to arguments before entering a numeric kernel. This is semantic coercion, not a Number representation guard. The fresh probe:
+`mvp_host_numeric_call_values` in the historical [MVP runtime source](https://github.com/henry-luo/lambda/blob/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp/mvp_runtime.cpp) applied `mvp_to_number` to arguments before entering a numeric kernel. This is semantic coercion, not a Number representation guard. The fresh probe:
 
 ```js
 function add1(x) { return x + 1; }
@@ -153,7 +153,7 @@ In [full js_runtime.cpp](../../lambda/js/js_runtime.cpp), `js_collection_method`
 
 Thus constructing N distinct entries performs O(N²) order-list comparisons even though the collection has a hash table. Repeated updates are O(N) in the position of the key. The collection `get` path already uses a hash lookup; this is not a claim that all Map operations are linear.
 
-In [MVP mvp_heap.cpp](../../lambda/js/mvp/mvp_heap.cpp), `mvp_map_set` uses the hash index's entry position to update the value or append a new ordered entry. There is no second full key search.
+In the historical [MVP heap source](https://github.com/henry-luo/lambda/blob/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp/mvp_heap.cpp), `mvp_map_set` used the hash index's entry position to update the value or append a new ordered entry. There was no second full key search.
 
 A diagnostic constructs four maps with distinct numeric keys per process, with three processes per size/backend and alternating backend order. It checks the resulting sizes. Its sources and samples are in the evidence JSON.
 

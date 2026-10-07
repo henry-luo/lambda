@@ -6,7 +6,6 @@
   "exclude_dirs": [
     "lambda/mir",
     "lambda/tree-sitter",
-    "lambda/js/mvp",
     "lambda/module",
     "lib/sqlite",
     "lib/re2",
