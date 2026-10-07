@@ -270,7 +270,8 @@ fn render_element(el, info) {
             } else picture.render_picture(el, info.unitlength)
         case 'tikzpicture': tikz.render_picture(el, info.macros,
             info.tikz_declarations, info.tikz_math_declarations,
-            info.custom_colors, registry.active(info.packages, "tikzpeople"))
+            info.custom_colors, registry.active(info.packages, "tikzpeople"),
+            info.base_uri)
         case 'alltikzpeople': if (registry.active(info.packages, "tikzpeople") and
             registry.options_for(info.packages, "tikzpeople").demo != null)
             tikz.render_gallery(el) ^ {

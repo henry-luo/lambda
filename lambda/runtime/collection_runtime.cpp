@@ -606,6 +606,16 @@ void list_push_spread(List* list, Item item) {
             RootFrame roots(2);
             Rooted<List*> rooted_list(roots, list);
             Rooted<Item> rooted_source(roots, item);
+            if (array_num_rank(arr) > 1) {
+                // an N-D array spreads its leading-axis rows (S11.1.1v3)
+                int64_t count = array_num_iter_count(arr);
+                for (int64_t i = 0; i < count; i++) {
+                    Item row = array_num_get(rooted_source.get().array_num, i);
+                    cow_capture_value(row);  // S9.3.1
+                    list_push(rooted_list.get(), row);
+                }
+                return;
+            }
             for (int64_t i = 0; i < arr->length; i++) {
                 list = rooted_list.get();
                 arr = rooted_source.get().array_num;

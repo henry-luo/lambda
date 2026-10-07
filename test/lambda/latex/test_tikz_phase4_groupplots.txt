@@ -1,0 +1,8 @@
+["group style={group size=2 by 2, horizontal sep=2cm}, width=5cm, height=4cm", 3]
+[["grid=major", "group style=group size=2 by 2, horizontal sep=2cm", "width=5cm", "height=4cm", "title=A"], ["grid=major", "group style=group size=2 by 2, horizontal sep=2cm", "width=5cm", "height=4cm", "ybar", "enlarge x limits=0.5"], ["grid=major", "group style=group size=2 by 2, horizontal sep=2cm", "width=5cm", "height=4cm"]]
+[1, 1, 1]
+[true, true, true, 3, true]
+["0:1", "0.5:2.5", "0:4"]
+[["line"], ["bar"], ["line"]]
+[true, true]
+["PGFPlots groupplot has more plots than its group size", "PGFPlots groupplot needs group size=<columns> by <rows>", "unsupported PGFPlots group style: xlabels at", "PGFPlots group size must be positive integers", "parse: Parse errors (1 error):\n\nline 1, col 70: error: tikz: groupplot requires \\nextgroupplot before its plots\n  \\begin{tikzpicture}\\begin{groupplot}[group style={group size=2 by 1}]\\addplot coordinates {(0,0)};\\end{groupplot}\\end{tikzpicture}\n                                                                       ^\n", "parse: Parse errors (1 error):\n\nline 1, col 130: error: tikz: mismatched environment end\n  \\begin{tikzpicture}\\begin{groupplot}[group style={group size=2 by 1}]\\nextgroupplot\\addplot coordinates {(0,0)};\\end{tikzpicture}\n                                                                                                                                   ^\n"]

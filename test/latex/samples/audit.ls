@@ -13,7 +13,7 @@ pub let SAMPLES = ["algebra", "arithmetic_lualatex", "biblatex_biber", "booktabs
     "ubc_math_220", "unit_circle", "vietnamese_document", "xltabular"]
 
 pub fn record(file, target, include_html = false) {
-    let ast = input("test/latex/samples/" ++ file ++ ".tex", "latex") ^ { null }
+    let ast = latex.parse_file("test/latex/samples/" ++ file ++ ".tex")
     if (ast == null) {file: file, target: target, parsed: false}
     else {
         let result = latex.render_result(ast, {standalone: true,

@@ -1,0 +1,44 @@
+"float rows:"
+[[0, 1], [2, 3], [0, 1], [2, 3]]
+"int rows:"
+[[0, 1], [2, 3], [0, 1], [2, 3]]
+"comprehension rows:"
+[[1, 1], [2, 2], [3, 4], [5, 6]]
+"row count:"
+4
+"ragged:"
+[[1, 2], [3]]
+"scalar first:"
+[9, [0, 1], [2, 3]]
+"scalar last:"
+[[0, 1], [2, 3], 9]
+"generic rows:"
+[[0, 1], [2, 3], [1, "x"]]
+"empty and null:"
+[[[0, 1], [2, 3]], [[0, 1], [2, 3]]]
+"equals literal:"
+true
+"keeps rank:"
+true
+"spread:"
+[[0, 1], [2, 3], [0, 1], [2, 3]]
+"spread ints:"
+[[0, 1], [2, 3]]
+"spread comprehension:"
+[[0, 1], [2, 3], [0, 1], [2, 3]]
+"spread content:"
+<row
+  [0, 1]
+  [2, 3]>
+"3-d join:"
+[[[1, 2], [3, 4]], [[5, 6], [7, 8]], [[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+"3-d spread:"
+[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+"transposed spread:"
+[[1, 4], [2, 5], [3, 6]]
+"transposed join:"
+[[1, 4], [2, 5], [3, 6], [1, 2, 3]]
+"unique:"
+[[0, 1], [2, 3]]
+"except:"
+[[4, 5]]

@@ -1,0 +1,22 @@
+"packages:"
+["amsmath", "xcolor"]
+"engine packages:"
+["lmdreport", "lmdnotes"]
+"diagnostics:"
+[]
+"class macros:"
+true
+"package option:"
+true
+"begin-document hook:"
+true
+"optional argument:"
+true
+"delimited macro:"
+true
+"package counter:"
+true
+"package environment:"
+true
+"required adapter:"
+true
