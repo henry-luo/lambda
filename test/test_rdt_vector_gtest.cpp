@@ -1996,6 +1996,29 @@ TEST_F(SvgAnimationLifetimeTest, SvgPresentationListsOwnUnboundedComputedOutput)
     mem_pool_destroy(output);
 }
 
+TEST_F(SvgAnimationLifetimeTest, SvgMarkerProjectionOwnsOutputAcrossMutationAndRemoval) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* group = element("g", svg); ASSERT_NE(group, nullptr);
+    DomElement* child = element("path", group); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(group->set_attribute("style", "marker:url(#inherited);text-anchor:END"));
+    ASSERT_TRUE(child->set_attribute("marker", "url(#ignored)"));
+    ASSERT_TRUE(child->set_attribute("style", "marker:url(#losing);marker:var(--bad);--bad:url(#m) red"));
+    Pool* output = mem_pool_create(nullptr, MEM_ROLE_CSS, "test.svg.marker_output");
+    ASSERT_NE(output, nullptr);
+    String* inherited = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_MARKER, 0);
+    ASSERT_NE(inherited, nullptr); EXPECT_STREQ(inherited->chars, "url(\"#inherited\")");
+    ASSERT_TRUE(child->set_attribute("style", "marker:url(#m);marker-end:url(#n)"));
+    String* mixed = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_MARKER, 0);
+    ASSERT_NE(mixed, nullptr); EXPECT_STREQ(mixed->chars, "");
+    char small[4] = "x";
+    EXPECT_FALSE(css_prop_serialize_computed(child, CSS_PROPERTY_MARKER_START, 0, small, sizeof(small)));
+    EXPECT_STREQ(small, "");
+    ASSERT_TRUE(group->remove_child(child));
+    EXPECT_STREQ(inherited->chars, "url(\"#inherited\")"); EXPECT_STREQ(mixed->chars, "");
+    mem_pool_destroy(output);
+}
+
 TEST(SvgCascadeTest, SharedCssUrlResolutionKeepsLocalAndEmptyReferences) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
     Url* base = url_parse("https://example.test/styles/main.css"); ASSERT_NE(base, nullptr);

@@ -11871,7 +11871,10 @@ static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
 
 static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
                                                    const char* interface_name) {
-    Item result = js_new_object();
+    // keep the matrix rooted while installing methods (D5.3.3).
+    RootFrame roots(1);
+    Rooted<Item> result_root(roots, js_new_object());
+    Item result = result_root.get();
     dom_set_number_property(result, "a", matrix.e11);
     dom_set_number_property(result, "b", matrix.e21);
     dom_set_number_property(result, "c", matrix.e12);

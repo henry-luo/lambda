@@ -841,10 +841,10 @@ static const char* svg_resolve_property_declaration(SvgStyleContext* style, DomE
     if (css_property_is_svg_presentation(property) &&
         !css_property_validate_value(property, declaration->value)) return nullptr;
     // only validated paint lists contain a URL head; other properties can substitute an empty list.
-    const CssValue* paint = css_property_is_svg_paint(property) && declaration->value &&
+    const CssValue* paint = css_property_is_svg_resource(property) && declaration->value &&
         declaration->value->type == CSS_VALUE_TYPE_LIST
         ? declaration->value->data.list.values[0] : declaration->value;
-    if (css_property_is_svg_paint(property) && paint && paint->type == CSS_VALUE_TYPE_URL) {
+    if (css_property_is_svg_resource(property) && paint && paint->type == CSS_VALUE_TYPE_URL) {
         Url* base = declaration->source_file ? url_parse_path_or_url(declaration->source_file,
             style->document ? style->document->url.get() : nullptr) : nullptr;
         const char* address = radiant_resolve_css_url(style->pool, paint->data.url,
@@ -888,9 +888,7 @@ static const char* svg_resolve_attribute_variables(SvgStyleContext* style, DomEl
 struct SvgPropertyDefault { const char* name; const char* initial; bool inherits; };
 static const SvgPropertyDefault svg_property_defaults[] = {
         {"mask-type", "luminance", false},
-        {"marker-start", "none", true}, {"marker-mid", "none", true}, {"marker-end", "none", true},
-        {"color-interpolation", "sRGB", true}, {"color-interpolation-filters", "linearRGB", true},
-        {"vector-effect", "none", false}, {"clip-path", "none", false}, {"mask", "none", false}, {"filter", "none", false},
+        {"clip-path", "none", false}, {"mask", "none", false}, {"filter", "none", false},
     };
 
 const char* svg_property_initial(const char* name, bool* inherits) {
@@ -926,9 +924,9 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
             !dom_element_is_svg(entry->node));
         prop->from_css = true;
     } else {
-        prop->value = dom_element_is_svg(entry->node) ? get_svg_attr(elem, name) : nullptr;
-        if (!prop->value && (strcmp(name, "marker-start") == 0 || strcmp(name, "marker-mid") == 0 ||
-            strcmp(name, "marker-end") == 0)) prop->value = get_svg_attr(elem, "marker");
+        // css shorthands have no SVG presentation-attribute form.
+        prop->value = dom_element_is_svg(entry->node) &&
+            !css_property_is_identity_shorthand(css_property_code_from_name(name)) ? get_svg_attr(elem, name) : nullptr;
         prop->value = svg_resolve_attribute_variables(style, entry->node, name, prop->value, nullptr, false);
     }
     if (!declaration.important) {
@@ -1020,7 +1018,9 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
             matcher, current, doc->stylesheets, (size_t)doc->stylesheet_count,
             inline_declarations, inline_count, name, &declaration);
         const char* value = selected ? svg_resolve_property_declaration(&query, current, name, &declaration, scope)
-            : dom_element_is_svg(current) ? svg_animation_attribute(current, name) : nullptr;
+            : dom_element_is_svg(current) &&
+                !css_property_is_identity_shorthand(css_property_code_from_name(name))
+                ? svg_animation_attribute(current, name) : nullptr;
         bool svg_transform_sample = false;
         if (!declaration.important) {
             const char* animated = svg_animation_value(current, name, true);
@@ -1029,8 +1029,6 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
                 svg_transform_sample = strcmp(name, "transform") == 0;
             }
         }
-        if (!value && (strcmp(name, "marker-start") == 0 || strcmp(name, "marker-mid") == 0 ||
-            strcmp(name, "marker-end") == 0)) value = current->get_attribute("marker");
         if (!selected) value = svg_resolve_attribute_variables(&query, current, name, value, scope);
         bool inherit = value && (str_icmp_cstr(value, "inherit") == 0 ||
             (inherits && str_icmp_cstr(value, "unset") == 0) ||
@@ -6457,7 +6455,7 @@ static bool svg_effect_coverage(SvgInlineRenderContext* ctx, const SvgResourceRe
     const char* type = svg_style_property_value(&style, resource, "mask-type");
     *luminance = !type || strcmp(type, "alpha") != 0;
     const char* interpolation = svg_style_ancestor_property_value(&style, resource, "color-interpolation");
-    *linear = interpolation && strcmp(interpolation, "linearRGB") == 0;
+    *linear = interpolation && str_ieq_cstr(interpolation, "linearRGB");
     return svg_rasterize_traversal(&style, resource, svg_draw_mask_children, &region, coverage, &bounds);
 }
 
@@ -6552,7 +6550,7 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
         for (size_t axis = 0; axis < 4; axis++) node->region[axis] = lam::own(svg_filter_compile_token(program, memory, get_svg_attr(child, region_names[axis])));
         if (!program->valid) break;
         const char* interpolation = svg_style_ancestor_property_value(&style, child, "color-interpolation-filters");
-        node->linear = !interpolation || strcmp(interpolation, "sRGB") != 0;
+        node->linear = !interpolation || !str_ieq_cstr(interpolation, "sRGB");
         if (node->kind == RDT_SVG_FILTER_BLUR || node->kind == RDT_SVG_FILTER_SHADOW) {
             node->valid = svg_filter_pair(get_svg_attr(child, "stdDeviation"), node->kind == RDT_SVG_FILTER_SHADOW ? 2.0f : 0.0f, node->values, false);
             if (node->kind == RDT_SVG_FILTER_BLUR) {

@@ -116,6 +116,11 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
                                            Pool* pool, CssEngine* engine,
                                            SelectorMatcher* matcher = nullptr);
 
+struct TextRect;
+// layout position follows containing blocks and scrolling, before CSS transforms.
+void view_get_layout_position(View* view, TextRect* rect, float* out_x, float* out_y,
+                              View* boundary = nullptr);
+
 // Return a committed view's visual CSS-pixel bounds, including transforms on
 // the view and its ancestors. Geometry consumers must share this with painting
 // so test assertions and DOM rectangles do not observe different boxes.

@@ -189,6 +189,12 @@ RdtLogicalPoint view_geometry_local_to_block_document(
 
 RdtLogicalPoint view_geometry_node_viewport_origin(
         View* view, ViewGeometryScrollResolver resolve_scroll, void* context) {
+    if (!resolve_scroll) {
+        // committed positions use containing blocks; summing DOM ancestors double-counts absolute offsets.
+        RdtLogicalPoint point = {};
+        view_get_layout_position(view, nullptr, &point.x, &point.y);
+        return point;
+    }
     RdtLogicalPoint point = view_geometry_apply_node(
         view, {0.0f, 0.0f}, false, 1.0f, 0.0f, resolve_scroll, context);
     return view_geometry_map_chain(

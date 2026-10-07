@@ -783,6 +783,14 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_FLOOD_COLOR,
     CSS_PROPERTY_FLOOD_OPACITY,
     CSS_PROPERTY_LIGHTING_COLOR,
+    CSS_PROPERTY_MARKER_START,
+    CSS_PROPERTY_MARKER_MID,
+    CSS_PROPERTY_MARKER_END,
+    CSS_PROPERTY_MARKER,
+    CSS_PROPERTY_VECTOR_EFFECT,
+    CSS_PROPERTY_COLOR_INTERPOLATION,
+    CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS,
+    CSS_PROPERTY_TEXT_ANCHOR,
 
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
@@ -1046,6 +1054,7 @@ typedef struct CssDeclaration {
     uint32_t layer_order;     // zero is unlayered; named layers follow declaration order
     uint32_t scope_proximity; // zero is unscoped; scoped values store ancestor hops plus one
     bool important;           // !important flag
+    bool pending_identity_shorthand; // projected var()/env() longhands serialize as pending
     const char* source_file;  // Source file (for debugging)
     int source_line;          // Source line (for debugging)
     const char* property_name; // Original property name (for unknown/vendor properties)
@@ -1447,6 +1456,7 @@ typedef struct CssProperty {
     // Value computation function
     void* (*compute_value)(void* specified_value, void* parent_value, Pool* pool);
     NameId name_id;                // generated identity for predefined property spelling
+    bool identity_shorthand;      // one complete value is shared by every longhand
 } CssProperty;
 
 // ============================================================================
@@ -1531,6 +1541,7 @@ int css_property_get_longhand_properties(CssPropertyCode shorthand_id,
                                         CssPropertyCode* longhand_ids,
                                         int max_count);
 CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property);
+bool css_property_is_identity_shorthand(CssPropertyCode property);
 
 /**
  * Get the initial value for a property
@@ -1715,6 +1726,7 @@ enum CssTextDecorationLineFlag : uint8_t {
 uint8_t css_text_decoration_line_flag(CssEnum keyword);
 bool css_property_validate_value(CssPropertyCode id, const CssValue* value);
 bool css_property_is_svg_paint(CssPropertyCode id);
+bool css_property_is_svg_resource(CssPropertyCode id);
 bool css_property_is_svg_presentation(CssPropertyCode id);
 bool css_property_is_svg_opacity(CssPropertyCode id);
 bool css_property_is_svg_length(CssPropertyCode id);

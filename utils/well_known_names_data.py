@@ -104,6 +104,7 @@ scroll-margin-top scroll-margin-right scroll-margin-bottom scroll-margin-left sc
 scroll-padding-top scroll-padding-right scroll-padding-bottom scroll-padding-left scroll-padding-block scroll-padding-block-start scroll-padding-block-end scroll-padding-inline scroll-padding-inline-start scroll-padding-inline-end
 translate rotate scale
 fill-opacity stroke-opacity stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit fill-rule clip-rule paint-order stop-color stop-opacity flood-color flood-opacity lighting-color
+marker-start marker-mid marker-end marker vector-effect color-interpolation color-interpolation-filters text-anchor
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

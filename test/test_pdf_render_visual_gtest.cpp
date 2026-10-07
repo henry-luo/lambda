@@ -6501,6 +6501,43 @@ TEST(RenderOutputParity, SvgDashLengthsUseEachInstanceFontBeforeInheritance) {
         "temp/render_output_parity/svg_properties_use_css.png");
 }
 
+TEST(RenderOutputParity, SvgReferencesAndColorSpacesReachExistingPaintConsumers) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    const char* styles[] = {
+        "body{marker:url(#m)}.marked{marker:url(#n);marker:var(--bad);--bad:url(#n) red}"
+        ".scaled{vector-effect:NoN-ScAlInG-StRoKe}.label{text-anchor:MiDdLe}"
+        "mask{color-interpolation:LiNeArRgB}filter{color-interpolation-filters:SrGb}",
+        "body{marker-start:url(#m);marker-mid:url(#m);marker-end:url(#m)}"
+        ".scaled{vector-effect:non-scaling-stroke}.label{text-anchor:middle}"
+        "mask{color-interpolation:linearRGB}filter{color-interpolation-filters:sRGB}",
+    };
+    const char* geometry =
+        "</style><svg width='220' height='120'><defs>"
+        "<marker id='m' markerWidth='8' markerHeight='8' refX='4' refY='4' markerUnits='userSpaceOnUse'>"
+        "<rect width='8' height='8' fill='red'/></marker>"
+        "<marker id='n' markerWidth='8' markerHeight='8' refX='4' refY='4' markerUnits='userSpaceOnUse'>"
+        "<rect width='8' height='8' fill='blue'/></marker>"
+        "<mask id='mask'><rect width='220' height='120' fill='#808080'/></mask>"
+        "<filter id='filter'><feColorMatrix type='matrix' values='.5 0 0 0 0 0 .5 0 0 0 "
+        "0 0 .5 0 0 0 0 0 1 0'/></filter></defs>"
+        "<path class='marked' d='M10 12L40 12L70 12' fill='none' stroke='green' stroke-width='2'/>"
+        "<path class='scaled' transform='translate(80 0) scale(2)' d='M5 6H60' fill='none' stroke='purple' stroke-width='6'/>"
+        "<text class='label' x='110' y='48' font-size='16'>anchor</text>"
+        "<rect x='10' y='60' width='80' height='40' fill='green' mask='url(#mask)'/>"
+        "<rect x='110' y='60' width='80' height='40' fill='#808080' filter='url(#filter)'/></svg>";
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    for (int index = 0; index < 2; index++) {
+        strbuf_append_str(html[index], "<!doctype html><style>body{margin:0}svg{display:block}");
+        strbuf_append_str(html[index], styles[index]); strbuf_append_str(html[index], geometry);
+    }
+    // canonical CSS tokens, invalid substitution fallback and root inheritance must reach real paint.
+    expect_html_pair_output_parity("svg_references", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
 TEST(RenderOutputParity, SvgPaintResourceUrlsUseStylesheetAndVariableConsumerBases) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

@@ -705,6 +705,18 @@ String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
 static String* serialize_svg_paint_value(Pool* pool, DomElement* element, CssPropertyCode id) {
     const CssProperty* property = css_property_get_by_code(id);
     if (!pool || !element || !property) return nullptr;
+    if (property->identity_shorthand) {
+        // computed shorthands exist only when every member has the same complete value.
+        String* selected = nullptr;
+        for (int i = 0; i < property->longhand_count; i++) {
+            String* member = css_prop_serialize_computed_value(pool, element, property->longhand_props[i], 0);
+            if (!member) return nullptr;
+            if (selected && (selected->len != member->len || memcmp(selected->chars, member->chars, member->len)))
+                return create_string(pool, "");
+            selected = member;
+        }
+        return selected;
+    }
     char* owned_text = nullptr;
     DomElement* owner = nullptr;
     const char* text = svg_get_dom_presentation_property(element, property->name,
@@ -1197,6 +1209,14 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_FLOOD_COLOR, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_FLOOD_OPACITY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_LIGHTING_COLOR, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_MARKER_START, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_MARKER_MID, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_MARKER_END, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_MARKER, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_VECTOR_EFFECT, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_COLOR_INTERPOLATION, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_TEXT_ANCHOR, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_DISPLAY, serialize_display, 0),
     DIRECT_ROW(CSS_PROPERTY_POSITION, PROP_GROUP_POSITION, PositionProp, position, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_TOP, serialize_inset, CSS_PROP_ACCESSOR_USED_VALUE),

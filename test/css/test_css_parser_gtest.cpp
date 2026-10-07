@@ -223,6 +223,44 @@ TEST_F(CssEngineParserTest, SvgPresentationFamiliesValidateWholeDeclaration) {
         EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
 }
 
+TEST_F(CssEngineParserTest, PropertyDispatchMetadataResetsWithItsRegistryOwner) {
+    auto check = [](const CssProperty* property, void*) -> bool {
+        EXPECT_EQ(css_property_get_by_code(property->code), property) << property->name;
+        EXPECT_EQ(css_property_get_by_name(property->name), property);
+        EXPECT_EQ(css_property_code_from_name_id(property->name_id), property->code);
+        return true;
+    };
+    EXPECT_EQ(css_property_foreach(check, nullptr), css_property_get_count());
+    css_property_system_cleanup();
+    EXPECT_EQ(css_property_get_by_code(CSS_PROPERTY_MARKER), nullptr);
+    EXPECT_EQ(css_property_get_by_code(CSS_PROPERTY_UNKNOWN), nullptr);
+    ASSERT_TRUE(css_property_system_init(pool));
+    EXPECT_EQ(css_property_foreach(check, nullptr), css_property_get_count());
+}
+
+TEST_F(CssEngineParserTest, SvgReferencesAndKeywordFamiliesRejectForeignGrammar) {
+    const char* valid[] = {"marker:url(#m)", "marker-start:none", "marker-mid:inherit",
+        "marker-end:var(--reference)", "marker:env(reference, url(#m))",
+        "vector-effect:NoN-ScAlInG-StRoKe", "vector-effect:none", "vector-effect:unset",
+        "color-interpolation:LiNeArRgB", "color-interpolation:sRGB", "color-interpolation:auto",
+        "color-interpolation-filters:SrGb", "color-interpolation-filters:linearRGB",
+        "text-anchor:MiDdLe", "text-anchor:start", "text-anchor:end"};
+    const char* invalid[] = {"marker:red", "marker:url(#m) red", "marker-start:url(#m),url(#n)",
+        "marker-mid:url(#m) url(#n)", "marker-end:context-fill", "marker:\"url(#m)\"",
+        "vector-effect:non-scaling-size", "vector-effect:potato", "vector-effect:none none",
+        "color-interpolation:red", "color-interpolation-filters:2", "color-interpolation:auto sRGB",
+        "text-anchor:center", "text-anchor:middle end"};
+    for (const char* source : valid)
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    const CssProperty* marker = css_property_get_by_code(CSS_PROPERTY_MARKER);
+    ASSERT_NE(marker, nullptr);
+    EXPECT_TRUE(marker->identity_shorthand);
+    EXPECT_EQ(marker->longhand_count, 3);
+    EXPECT_FALSE(css_property_is_animatable(CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS));
+}
+
 TEST_F(CssEngineParserTest, ImportantMarkerRequiresTrailingCaseInsensitiveTokens) {
     const char* important[] = {"width:20px !important", "width:20px !IMPORTANT",
         "width:20px ! /*priority*/ ImPoRtAnT /*end*/", "--size:20px !IMPORTANT"};

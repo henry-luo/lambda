@@ -1021,6 +1021,9 @@ static const CssEnumInfo css_value_definitions[] = {
     {"bevel", 5, CSS_VALUE_BEVEL, CSS_VALUE_GROUP_SVG_PAINT},
     {"stroke", 6, CSS_VALUE_STROKE, CSS_VALUE_GROUP_SVG_PAINT},
     {"markers", 7, CSS_VALUE_MARKERS, CSS_VALUE_GROUP_SVG_PAINT},
+    {"non-scaling-stroke", 18, CSS_VALUE_NON_SCALING_STROKE, CSS_VALUE_GROUP_SVG_PAINT},
+    {"srgb", 4, CSS_VALUE_SRGB, CSS_VALUE_GROUP_SVG_PAINT},
+    {"linearrgb", 9, CSS_VALUE_LINEARRGB, CSS_VALUE_GROUP_SVG_PAINT},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);

@@ -405,6 +405,14 @@
     X(flood_color) \
     X(flood_opacity) \
     X(lighting_color) \
+    X(marker_start) \
+    X(marker_mid) \
+    X(marker_end) \
+    X(marker) \
+    X(vector_effect) \
+    X(color_interpolation) \
+    X(color_interpolation_filters) \
+    X(text_anchor) \
     X(css_float)
 
 #define CSS_STYLE_PROPERTIES_ATTRIBUTES(X) \
@@ -1159,6 +1167,21 @@
     X(flood_opacity, "flood-opacity", "flood-opacity") \
     X(lighting_color, "lightingColor", "lighting-color") \
     X(lighting_color, "lighting-color", "lighting-color") \
+    X(marker_start, "markerStart", "marker-start") \
+    X(marker_start, "marker-start", "marker-start") \
+    X(marker_mid, "markerMid", "marker-mid") \
+    X(marker_mid, "marker-mid", "marker-mid") \
+    X(marker_end, "markerEnd", "marker-end") \
+    X(marker_end, "marker-end", "marker-end") \
+    X(marker, "marker", "marker") \
+    X(vector_effect, "vectorEffect", "vector-effect") \
+    X(vector_effect, "vector-effect", "vector-effect") \
+    X(color_interpolation, "colorInterpolation", "color-interpolation") \
+    X(color_interpolation, "color-interpolation", "color-interpolation") \
+    X(color_interpolation_filters, "colorInterpolationFilters", "color-interpolation-filters") \
+    X(color_interpolation_filters, "color-interpolation-filters", "color-interpolation-filters") \
+    X(text_anchor, "textAnchor", "text-anchor") \
+    X(text_anchor, "text-anchor", "text-anchor") \
     X(css_float, "cssFloat", "float")
 
 #define CSS_FONT_FACE_DESCRIPTORS_FIELDS(X) \

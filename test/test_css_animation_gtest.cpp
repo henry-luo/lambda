@@ -189,7 +189,7 @@ TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
     CssEngine* engine = css_engine_create(cleanup.pool);
     ASSERT_NE(engine, nullptr);
     CssStylesheet* sheet = css_parse_stylesheet(engine,
-        ".a { color: red; & .b { color: blue; } color: green; }", nullptr);
+        ".a { color: red; marker: url(#probe); & .b { color: blue; } color: green; }", nullptr);
     CssStylesheet* imported = css_parse_stylesheet(engine, ".child { width: 10px; }", "child.css");
     const char* import_text = "@import 'child.css';";
     CssRule* import_rule = css_parse_rule_text(import_text, strlen(import_text), cleanup.pool);
@@ -212,7 +212,8 @@ TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
         Item result = dom_cssom_wrap_stylesheet(call->sheet);
         return js_runtime_state_shutdown(call->eval) ? result : ItemError;
     }, &call);
-    RootFrame roots(13);
+    RootFrame roots(14);
+    Rooted<Item> read_root(roots, ItemNull);
     Rooted<Item> sheet_root(roots, wrapper);
     ASSERT_TRUE(js_runtime_state_init(call.eval));
     ASSERT_EQ(get_type_id(sheet_root.get()), LMD_TYPE_VMAP);
@@ -243,6 +244,27 @@ TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
         key_root.get(), style_key_root.get(), ItemNull)));
     key_root.set(js_make_string_len("--probe\0a", 9));
     EXPECT_STREQ(fn_to_cstr(dom_cssom_rule_decl_get_value(inline_root.get(), key_root.get())), "10px");
+    key_root.set(js_name_item("marker-end"));
+    read_root.set(dom_cssom_rule_decl_get_value(declaration_root.get(), key_root.get()));
+    EXPECT_STREQ(fn_to_cstr(read_root.get()), "url(\"#probe\")");
+    style_key_root.set(js_name_item("markerEnd"));
+    read_root.set(dom_cssom_rule_decl_get_property(declaration_root.get(), style_key_root.get()));
+    style_key_root.set(js_name_item("cssText"));
+    read_root.set(dom_cssom_rule_decl_get_property(declaration_root.get(), style_key_root.get()));
+    CssRule* block = (CssRule*)virtual_host_data(declaration_root.get());
+    ASSERT_NE(block, nullptr); ASSERT_NE(block->pool, nullptr);
+    size_t bytes_before = 0, count_before = 0;
+    pool_get_stats(block->pool, &bytes_before, &count_before);
+    for (int repeat = 0; repeat < 32; repeat++) {
+        read_root.set(dom_cssom_rule_decl_get_value(declaration_root.get(), key_root.get()));
+        EXPECT_STREQ(fn_to_cstr(read_root.get()), "url(\"#probe\")");
+        read_root.set(dom_cssom_rule_decl_get_property(declaration_root.get(), style_key_root.get()));
+        EXPECT_EQ(get_type_id(read_root.get()), LMD_TYPE_STRING);
+    }
+    size_t bytes_after = 0, count_after = 0;
+    pool_get_stats(block->pool, &bytes_after, &count_after);
+    // read projections must not accumulate allocations in a retained stylesheet (D4.5.1v4).
+    EXPECT_EQ(bytes_after, bytes_before); EXPECT_EQ(count_after, count_before);
     key_root.set(js_name_item("parentRule"));
     style_key_root.set(js_name_item("style"));
     ASSERT_EQ(get_type_id(declaration_root.get()), LMD_TYPE_VMAP);

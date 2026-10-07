@@ -138,10 +138,6 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     const CssDeclaration* declaration, CssSpecificity specificity, CssOrigin origin,
     const char* source_url = nullptr) {
     if (!declaration || !declaration->valid || !declaration->property_name) return;
-    // SVG declaration queries need shorthand priority before projecting their resolved longhand value.
-    bool marker_shorthand = str_icmp_cstr(declaration->property_name, "marker") == 0 &&
-        (strcmp(query->property, "marker-start") == 0 || strcmp(query->property, "marker-mid") == 0 ||
-         strcmp(query->property, "marker-end") == 0);
     bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
         css_font_shorthand_contains_property(query->property);
     bool custom_property = strncmp(declaration->property_name, "--", 2) == 0;
@@ -157,7 +153,7 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool all_reset = strcmp(declaration->property_name, "all") == 0 &&
         strncmp(query->property, "--", 2) != 0 && strcmp(query->property, "direction") != 0 &&
         strcmp(query->property, "unicode-bidi") != 0;
-    if (!marker_shorthand && !font_shorthand && !shorthand && !break_alias && !all_reset && !same_property) return;
+    if (!font_shorthand && !shorthand && !break_alias && !all_reset && !same_property) return;
     CssDeclaration candidate = *declaration;
     // computed URLs use the winning sheet's base, including imported and nested rules.
     if (source_url) candidate.source_file = source_url;

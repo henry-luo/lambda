@@ -79,6 +79,10 @@ static CssPropertyCode transition_longhands[] = {
     CSS_PROPERTY_TRANSITION_TIMING_FUNCTION, CSS_PROPERTY_TRANSITION_DELAY
 };
 
+static CssPropertyCode marker_longhands[] = {
+    CSS_PROPERTY_MARKER_START, CSS_PROPERTY_MARKER_MID, CSS_PROPERTY_MARKER_END
+};
+
 static CssProperty property_definitions[] = {
     // Layout Properties
     {CSS_PROPERTY_DISPLAY, "display", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "block", false, false, NULL, 0, validate_keyword, NULL},
@@ -213,6 +217,14 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_FLOOD_COLOR, "flood-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_FLOOD_OPACITY, "flood-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_LIGHTING_COLOR, "lighting-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "white", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_MARKER_START, "marker-start", PROP_TYPE_URL, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_MARKER_MID, "marker-mid", PROP_TYPE_URL, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_MARKER_END, "marker-end", PROP_TYPE_URL, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_MARKER, "marker", PROP_TYPE_URL, PROP_INHERIT_YES, "none", true, true, marker_longhands, 3, validate_string, NULL, NAME_ID_NONE, true},
+    {CSS_PROPERTY_VECTOR_EFFECT, "vector-effect", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", true, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLOR_INTERPOLATION, "color-interpolation", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "srgb", true, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS, "color-interpolation-filters", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "linearrgb", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_ANCHOR, "text-anchor", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "start", true, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FONT_FAMILY, "font-family", PROP_TYPE_STRING, PROP_INHERIT_YES, "serif", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_FONT_SIZE, "font-size", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_FONT_WEIGHT, "font-weight", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_keyword, NULL},
@@ -1035,9 +1047,14 @@ bool css_property_is_svg_paint(CssPropertyCode id) {
     return id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE || id == CSS_PROPERTY_STROKE_WIDTH;
 }
 
+bool css_property_is_svg_resource(CssPropertyCode id) {
+    return id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE ||
+        (id >= CSS_PROPERTY_MARKER_START && id <= CSS_PROPERTY_MARKER);
+}
+
 bool css_property_is_svg_presentation(CssPropertyCode id) {
     return css_property_is_svg_paint(id) ||
-        (id >= CSS_PROPERTY_FILL_OPACITY && id <= CSS_PROPERTY_LIGHTING_COLOR);
+        (id >= CSS_PROPERTY_FILL_OPACITY && id <= CSS_PROPERTY_TEXT_ANCHOR);
 }
 
 bool css_property_is_svg_length(CssPropertyCode id) {
@@ -1091,12 +1108,22 @@ static bool css_svg_dash_item_valid(const CssValue* value, void*) {
 static bool css_svg_keyword_value_valid(CssPropertyCode id, const CssValue* value) {
     if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
     if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
-    CssEnum keyword = value->data.keyword;
-    if (id == CSS_PROPERTY_FILL_RULE || id == CSS_PROPERTY_CLIP_RULE)
-        return keyword == CSS_VALUE_NONZERO || keyword == CSS_VALUE_EVENODD;
-    if (id == CSS_PROPERTY_STROKE_LINECAP)
-        return keyword == CSS_VALUE_BUTT || keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_SQUARE;
-    return keyword == CSS_VALUE_MITER || keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_BEVEL;
+    struct Grammar {CssPropertyCode property; CssEnum keywords[3];};
+    static const Grammar grammar[] = {
+        {CSS_PROPERTY_FILL_RULE, {CSS_VALUE_NONZERO, CSS_VALUE_EVENODD}},
+        {CSS_PROPERTY_CLIP_RULE, {CSS_VALUE_NONZERO, CSS_VALUE_EVENODD}},
+        {CSS_PROPERTY_STROKE_LINECAP, {CSS_VALUE_BUTT, CSS_VALUE_ROUND, CSS_VALUE_SQUARE}},
+        {CSS_PROPERTY_STROKE_LINEJOIN, {CSS_VALUE_MITER, CSS_VALUE_ROUND, CSS_VALUE_BEVEL}},
+        {CSS_PROPERTY_VECTOR_EFFECT, {CSS_VALUE_NONE, CSS_VALUE_NON_SCALING_STROKE}},
+        {CSS_PROPERTY_COLOR_INTERPOLATION, {CSS_VALUE_AUTO, CSS_VALUE_SRGB, CSS_VALUE_LINEARRGB}},
+        {CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS, {CSS_VALUE_AUTO, CSS_VALUE_SRGB, CSS_VALUE_LINEARRGB}},
+        {CSS_PROPERTY_TEXT_ANCHOR, {CSS_VALUE_START, CSS_VALUE_MIDDLE, CSS_VALUE_END}},
+    };
+    for (const Grammar& rule : grammar) {
+        if (rule.property != id) continue;
+        for (CssEnum keyword : rule.keywords) if (keyword && keyword == value->data.keyword) return true;
+    }
+    return false;
 }
 
 static bool css_svg_paint_order_valid(const CssValue* value) {
@@ -2068,6 +2095,10 @@ bool css_property_validate_value_mode(CssPropertyCode id,
     if (!value) return false;
 
     if (id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE) return css_value_is_svg_paint(value);
+    if (id >= CSS_PROPERTY_MARKER_START && id <= CSS_PROPERTY_MARKER)
+        return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
+            value->type == CSS_VALUE_TYPE_URL ||
+            (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE);
     if (id == CSS_PROPERTY_STROKE_WIDTH) return css_value_is_svg_stroke_width(value);
     if (id == CSS_PROPERTY_STROKE_DASHOFFSET) return css_value_is_svg_stroke_width(value, false);
     if (id == CSS_PROPERTY_STROKE_DASHARRAY) {
@@ -2082,7 +2113,8 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             : value->type == CSS_VALUE_TYPE_FUNCTION && css_math_value_type(value) == CSS_MATH_NUMBER;
     }
     if (id == CSS_PROPERTY_FILL_RULE || id == CSS_PROPERTY_CLIP_RULE ||
-        id == CSS_PROPERTY_STROKE_LINECAP || id == CSS_PROPERTY_STROKE_LINEJOIN)
+        id == CSS_PROPERTY_STROKE_LINECAP || id == CSS_PROPERTY_STROKE_LINEJOIN ||
+        (id >= CSS_PROPERTY_VECTOR_EFFECT && id <= CSS_PROPERTY_TEXT_ANCHOR))
         return css_svg_keyword_value_valid(id, value);
     if (id == CSS_PROPERTY_PAINT_ORDER) return css_svg_paint_order_valid(value);
     if (id == CSS_PROPERTY_STOP_COLOR || id == CSS_PROPERTY_FLOOD_COLOR || id == CSS_PROPERTY_LIGHTING_COLOR)
@@ -2932,6 +2964,7 @@ static bool g_system_initialized = false;
 // Hash table for property name lookups
 #define PROPERTY_HASH_SIZE 1024
 static CssProperty* g_property_hash[PROPERTY_HASH_SIZE];
+static CssProperty* g_property_by_code[CSS_PROPERTY_CUSTOM];
 
 // Custom property registry
 static CssProperty* g_custom_properties = NULL;
@@ -3013,11 +3046,16 @@ bool css_property_system_init(Pool* pool) {
 
     // Initialize hash table
     memset(g_property_hash, 0, sizeof(g_property_hash));
+    memset(g_property_by_code, 0, sizeof(g_property_by_code));
 
     // Build hash table for name lookups
     for (int i = 0; i < g_property_count; i++) {
         // The generated map keeps sparse identity separate from dense dispatch;
         // a missing NameId here means the catalog and behavior table drifted.
+        // dense dispatch metadata is queried inside cascade/CSSOM loops; avoid scanning every definition.
+        CssPropertyCode code = g_property_database[i].code;
+        assert(code > 0 && code < CSS_PROPERTY_CUSTOM);
+        if (!g_property_by_code[code]) g_property_by_code[code] = &g_property_database[i];
         g_property_database[i].name_id = css_standard_name_id(g_property_database[i].code);
         assert(g_property_database[i].name_id != NAME_ID_NONE);
         unsigned int hash = hash_string(g_property_database[i].name);
@@ -3038,6 +3076,7 @@ void css_property_system_cleanup(void) {
     // Free the malloc-allocated property database
     mem_free(g_property_database);
     memset(g_property_hash, 0, sizeof(g_property_hash));
+    memset(g_property_by_code, 0, sizeof(g_property_by_code));
     g_system_initialized = false;
     g_property_database = NULL;
     g_property_count = 0;
@@ -3059,14 +3098,8 @@ const CssProperty* css_property_get_by_code(CssPropertyCode property_code) {
         return NULL;
     }
 
-    // Handle standard properties
-    for (int i = 0; i < g_property_count; i++) {
-        if (g_property_database[i].code == property_code) {
-            return &g_property_database[i];
-        }
-    }
-
-    return NULL;
+    return property_code > 0 && property_code < CSS_PROPERTY_CUSTOM
+        ? g_property_by_code[property_code] : NULL;
 }
 
 const CssProperty* css_property_get_by_name(const char* name) {
@@ -3167,12 +3200,22 @@ bool css_property_is_shorthand(CssPropertyCode property_code) {
     return prop && prop->shorthand;
 }
 
+bool css_property_is_identity_shorthand(CssPropertyCode property) {
+    const CssProperty* definition = css_property_get_by_code(property);
+    return definition && definition->identity_shorthand;
+}
+
 CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property) {
     // these consumers project the winning shorthand after the shared rollback cascade.
-    if (css_animation_longhand_index(property) >= 0) return CSS_PROPERTY_ANIMATION;
-    if (css_transition_longhand_index(property) >= 0) return CSS_PROPERTY_TRANSITION;
-    for (CssPropertyCode longhand : border_image_longhands)
-        if (longhand == property) return CSS_PROPERTY_BORDER_IMAGE;
+    struct Group {CssPropertyCode shorthand; const CssPropertyCode* members; size_t count;};
+    static const Group groups[] = {
+        {CSS_PROPERTY_ANIMATION, animation_longhands, sizeof(animation_longhands) / sizeof(*animation_longhands)},
+        {CSS_PROPERTY_TRANSITION, transition_longhands, sizeof(transition_longhands) / sizeof(*transition_longhands)},
+        {CSS_PROPERTY_BORDER_IMAGE, border_image_longhands, sizeof(border_image_longhands) / sizeof(*border_image_longhands)},
+        {CSS_PROPERTY_MARKER, marker_longhands, sizeof(marker_longhands) / sizeof(*marker_longhands)},
+    };
+    for (const Group& group : groups)
+        for (size_t i = 0; i < group.count; i++) if (group.members[i] == property) return group.shorthand;
     return (CssPropertyCode)0;
 }
 

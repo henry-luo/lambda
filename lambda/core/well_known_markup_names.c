@@ -599,5 +599,13 @@ const WellKnownNameRecord g_well_known_markup_names[] = {
     { { 0x42073855u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000253u }, 11u, 0x05u, "flood-color" },
     { { 0xA71DE133u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000254u }, 13u, 0x05u, "flood-opacity" },
     { { 0x2387CEB3u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000255u }, 14u, 0x05u, "lighting-color" },
+    { { 0xB47C18BEu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000256u }, 12u, 0x05u, "marker-start" },
+    { { 0x35C7635Cu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000257u }, 10u, 0x05u, "marker-mid" },
+    { { 0x8E981FCBu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000258u }, 10u, 0x05u, "marker-end" },
+    { { 0xB7F83197u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000259u }, 6u, 0x05u, "marker" },
+    { { 0x13CA1FACu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000025Au }, 13u, 0x05u, "vector-effect" },
+    { { 0xA2CBA947u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000025Bu }, 19u, 0x05u, "color-interpolation" },
+    { { 0xDF469451u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000025Cu }, 27u, 0x05u, "color-interpolation-filters" },
+    { { 0x7A126908u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000025Du }, 11u, 0x05u, "text-anchor" },
 };
 const size_t g_well_known_markup_name_count = sizeof(g_well_known_markup_names) / sizeof(g_well_known_markup_names[0]);

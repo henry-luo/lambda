@@ -1442,7 +1442,8 @@ static const char* svg_animation_sample_values(SvgTimeline* timeline, DomElement
     char color_space[32];
     const char* interpolation = svg_get_dom_presentation_property(animation, "color-interpolation", true,
         color_space, sizeof(color_space));
-    bool linear_color = interpolation && strcmp(interpolation, "linearRGB") == 0;
+    // css computation canonicalizes the keyword before SMIL consumes its color space.
+    bool linear_color = interpolation && str_ieq_cstr(interpolation, "linearRGB");
     const char* values[256];
     unsigned count = 0;
     const char* list = animation->get_attribute("values");
