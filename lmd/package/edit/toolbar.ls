@@ -17,6 +17,11 @@ pub let file_group = [
   {cmd: "redo", label: "Redo", title: "Redo (Shift+Cmd/Ctrl+Z)", input_type: "historyRedo", payload: {}, history: 'redo'}
 ]
 
+// The view switch (Radiant_Design_Source_Editor OQ7): each surface offers
+// the other view of the same file.
+pub let source_view_group = [{cmd: "view_source", label: "Source", title: "Show the source (Cmd/Ctrl+/)", app: true}]
+pub let rich_view_group = [{cmd: "view_rich", label: "Rich", title: "Show the rich view (Cmd/Ctrl+/)", app: true}]
+
 fn block_button(tag, label, title) =>
   {cmd: string(tag), label: label, title: title, input_type: "formatBlock", payload: {tag: tag}, block: tag}
 
@@ -110,11 +115,16 @@ fn item_active(item, editor, ds) {
   else false
 }
 
+// The source surface passes {kind: 'source', can_undo, can_redo} for
+// `editor`: its buffer history is not a lambda.editor history (source.ls).
+fn can_undo(editor) => if (editor.kind == 'source') editor.can_undo else edit_can_undo(editor)
+fn can_redo(editor) => if (editor.kind == 'source') editor.can_redo else edit_can_redo(editor)
+
 fn item_disabled(item, editor, dirty, ds) {
   if (item.cmd == "save") not dirty
   else if (item.needs_pick == true) ds == null or len(ds.picked) == 0
-  else if (item.history == 'undo') not edit_can_undo(editor)
-  else if (item.history == 'redo') not edit_can_redo(editor)
+  else if (item.history == 'undo') not can_undo(editor)
+  else if (item.history == 'redo') not can_redo(editor)
   else false
 }
 

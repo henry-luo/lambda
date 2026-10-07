@@ -6,6 +6,7 @@
 #include <string.h>
 #include "html5_token.h"
 #include "../../../lib/stringbuf.h"
+#include "../../../lib/mem_kind.hpp"
 #include "../line_counter.hpp"
 
 // ============================================================================
@@ -166,10 +167,12 @@ typedef struct Html5Parser {
     // Memory management
     Pool* pool;
     Arena* arena;
+    // parser-only stacks and buffers; published Mark data stays in arena/input.
+    lam::Own<Arena> work_arena;
     // Token strings (tag and attribute names, text runs, comment and doctype
     // text), which the tree builder copies: a private scratch arena during
-    // html5_parse/html5_parse_ex, reset between tokens; the Input arena for
-    // a fragment parser, which has no end of parse to release it.
+    // full and fragment parse calls, reset between tokens; the parser's arena
+    // between calls so a fragment parser can continue parsing later input.
     Arena* token_arena;
     Input* input;
 
@@ -236,6 +239,11 @@ typedef struct Html5Parser {
     bool track_source_lines;    // whether to record source line numbers on elements
     LineCounter source_line_counter; // running source-line counter for __source_line
     size_t line_scan_pos;       // byte position up to which lines have been counted
+
+    // Lexical mode only (html5_lex_spans): told of every tokenizer state
+    // change with the input position, to locate attribute names and values.
+    void (*state_hook)(void* ctx, int old_state, int new_state, size_t pos);
+    void* state_hook_ctx;
 } Html5Parser;
 
 // Parse options for html5_parse_ex
@@ -247,6 +255,15 @@ typedef struct Html5ParseOptions {
 Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input);
 void html5_parser_destroy(Html5Parser* parser);
 
+class Html5ParserScope {
+    lam::Own<Html5Parser> parser_;
+public:
+    explicit Html5ParserScope(Html5Parser* parser) : parser_(lam::own(parser)) {}
+    ~Html5ParserScope() { html5_parser_destroy(parser_.get()); }
+    Html5ParserScope(const Html5ParserScope&) = delete;
+    Html5ParserScope& operator=(const Html5ParserScope&) = delete;
+};
+
 // Main parsing function
 Element* html5_parse(Input* input, const char* html);
 
@@ -257,6 +274,14 @@ int html5_determine_quirks_mode(const char* name, const char* public_id,
 
 // Extended parsing function with options
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
+
+// Lexical mode for source highlighting (Radiant_Design_Source_Editor CED18):
+// tokenize `text` with the tree builder bypassed and report where each token
+// lies, in source order, as byte ranges [start, end). Kinds: "tag" (a whole
+// start or end tag), "tag-name", "attr-name", "attr-value" (quotes included),
+// "comment", "doctype", "entity", "raw" (script/style/textarea/title text).
+typedef void (*Html5LexEmit)(void* ctx, const char* kind, size_t start, size_t end);
+void html5_lex_spans(Input* input, const char* text, size_t len, Html5LexEmit emit, void* ctx);
 
 // Fragment parsing (for markdown HTML blocks/inline)
 // Creates a parser in body mode for parsing HTML fragments

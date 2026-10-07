@@ -2316,6 +2316,7 @@ LayoutFlexStyleInfo layout_flex_declared_style_info(LayoutContext* lycon,
                                                     DomElement* element);
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback = (CssEnum)0);
+CssEnum logical_inline_direction(DomElement* element);
 
 inline FlexProp* layout_embedded_flex(ViewElement* element) {
     if (!element || (element->view_type != RDT_VIEW_BLOCK &&

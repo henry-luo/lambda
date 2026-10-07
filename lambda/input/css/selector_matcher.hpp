@@ -138,6 +138,8 @@ typedef struct SelectorMatcher {
  * @return New SelectorMatcher or NULL on failure
  */
 SelectorMatcher* selector_matcher_create(Pool* pool);
+// caller-owned matchers avoid retaining one allocation per reconcile turn.
+void selector_matcher_init(SelectorMatcher* matcher, Pool* pool);
 
 /**
  * Destroy a selector matcher

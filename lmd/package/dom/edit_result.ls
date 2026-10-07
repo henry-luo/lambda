@@ -23,7 +23,10 @@ pub fn make(supported, enabled, claimed, changed, selection_changed,
         // commits. Native only transports this record to InputEvent.
         api_input: false,
         api_input_type: "",
-        api_input_data: null
+        api_input_data: null,
+        // A model action's copy or cut payload; null lets Radiant copy the
+        // DOM selection instead.
+        clipboard_text: null
     }
 }
 
@@ -42,8 +45,12 @@ pub fn model_applied(changed, selection_changed, history_recorded,
       query_bool: false, query_value: "", failure: null, plan_id: 0,
       history_group: history_group, selection_after: selection_after,
       selection_space: "source", model_revision: model_revision,
-      api_input: false, api_input_type: "", api_input_data: null }
+      api_input: false, api_input_type: "", api_input_data: null, clipboard_text: null }
 }
+
+// A model surface's selection can reach past what the DOM shows, so it names
+// the text a copy or cut puts on the clipboard; Radiant transports it (D7.2.5).
+pub fn with_clipboard_text(edit_result, text) => { *: edit_result, clipboard_text: text }
 
 pub fn decline(supported, enabled, failure, plan_id) {
     make(supported, enabled, false, false, false, false, "", failure,

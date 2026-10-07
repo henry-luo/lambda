@@ -1653,9 +1653,13 @@ static void render_range(RasterRenderContext* rdcon, ViewBlock* block, FormContr
     float thumb_size = FormDefaults::RANGE_THUMB_SIZE * s;
     float thumb_x = x + range_value * (w - thumb_size);
     float thumb_y = y + (h - thumb_size) / 2;
+    float thumb_radius = thumb_size / 2;
+    float thumb_cx = thumb_x + thumb_radius;
+    float thumb_cy = thumb_y + thumb_radius;
     Color thumb_color = make_color(240, 240, 240);
-    fill_rect(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, thumb_color);
-    draw_3d_border(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, false, 1 * s);
+    fill_circle(rdcon, thumb_cx, thumb_cy, thumb_radius, thumb_color);
+    stroke_circle(rdcon, thumb_cx, thumb_cy, thumb_radius - s / 2,
+                  make_color(180, 180, 180), s);
 
 }
 

@@ -372,6 +372,10 @@ static void html5_reconsume(Html5Parser* parser) {
 
 // helper: switch tokenizer state
 void html5_switch_tokenizer_state(Html5Parser* parser, Html5TokenizerState new_state) {
+    if (parser->state_hook) {
+        parser->state_hook(parser->state_hook_ctx, (int)parser->tokenizer_state, (int)new_state,
+                           parser->pos);
+    }
     parser->tokenizer_state = new_state;
 }
 
@@ -392,7 +396,7 @@ static String* html5_create_lowercase_string_from_temp_buffer(Html5Parser* parse
 
 // helper: append character to temp buffer
 static void html5_append_to_temp_buffer(Html5Parser* parser, char c) {
-    if (!lam::arena_grow_array(parser->arena, &parser->temp_buffer,
+    if (!lam::arena_grow_array(parser->work_arena, &parser->temp_buffer,
             &parser->temp_buffer_capacity, parser->temp_buffer_len,
             parser->temp_buffer_len + 1, 4096)) return;
     parser->temp_buffer[parser->temp_buffer_len++] = c;
@@ -419,7 +423,7 @@ static void html5_clear_temp_buffer(Html5Parser* parser) {
 
 // helper: append to attribute name buffer
 static void html5_append_to_attr_name(Html5Parser* parser, char c) {
-    if (!lam::arena_grow_array(parser->arena, &parser->current_attr_name,
+    if (!lam::arena_grow_array(parser->work_arena, &parser->current_attr_name,
             &parser->current_attr_name_capacity, parser->current_attr_name_len,
             parser->current_attr_name_len + 2, 32)) return;
     parser->current_attr_name[parser->current_attr_name_len++] = c;
@@ -526,7 +530,7 @@ static Html5Token* html5_emit_end_tag_as_text(Html5Parser* parser,
     }
     html5_switch_tokenizer_state(parser, state);
     size_t len = 2 + parser->temp_buffer_len;
-    char* text = (char*)arena_alloc(parser->arena, len + 1);
+    char* text = (char*)arena_alloc(parser->token_arena, len + 1);
     text[0] = '<';
     text[1] = '/';
     memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
@@ -538,7 +542,7 @@ static Html5Token* html5_emit_end_tag_as_text(Html5Parser* parser,
 static void html5_save_last_start_tag(Html5Parser* parser, const char* name, size_t len) {
     // Allocate or reuse buffer
     if (parser->last_start_tag_name == nullptr || len > parser->last_start_tag_name_len) {
-        parser->last_start_tag_name = (char*)arena_alloc(parser->arena, len + 1);
+        parser->last_start_tag_name = (char*)arena_alloc(parser->work_arena, len + 1);
     }
     str_copy(parser->last_start_tag_name, len + 1, name, len);
     parser->last_start_tag_name_len = len;
@@ -2010,4 +2014,112 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             }
         }
     }
+}
+
+// ============================================================================
+// Lexical mode (html5_lex_spans): the tokenizer alone, for source highlighting
+// (vibe/radiant/Radiant_Design_Source_Editor.md CED18v2). A token's source range
+// is the input the tokenizer consumed to produce it; attribute names and
+// values are located from the tokenizer's own state transitions.
+// ============================================================================
+
+struct Html5LexState {
+    Html5LexEmit emit;
+    void* ctx;
+    size_t name_start;
+    size_t value_start;
+};
+
+static void html5_lex_state_hook(void* data, int old_state, int new_state, size_t pos) {
+    Html5LexState* lex = (Html5LexState*)data;
+    // the first character of a name or unquoted value is reconsumed, so
+    // `pos` is at it; a quote has been consumed, so it starts one earlier
+    if (new_state == HTML5_TOK_ATTRIBUTE_NAME && old_state != HTML5_TOK_ATTRIBUTE_NAME) {
+        lex->name_start = pos;
+    } else if (old_state == HTML5_TOK_ATTRIBUTE_NAME && new_state != HTML5_TOK_ATTRIBUTE_NAME) {
+        // a name ends at its reconsumed terminator, or before a consumed '='
+        size_t end = new_state == HTML5_TOK_AFTER_ATTRIBUTE_NAME ? pos : pos - 1;
+        if (end > lex->name_start) lex->emit(lex->ctx, "attr-name", lex->name_start, end);
+    }
+    if (new_state == HTML5_TOK_ATTRIBUTE_VALUE_DOUBLE_QUOTED ||
+        new_state == HTML5_TOK_ATTRIBUTE_VALUE_SINGLE_QUOTED) {
+        lex->value_start = pos - 1;
+    } else if (new_state == HTML5_TOK_ATTRIBUTE_VALUE_UNQUOTED) {
+        lex->value_start = pos;
+    } else if (old_state == HTML5_TOK_ATTRIBUTE_VALUE_DOUBLE_QUOTED ||
+               old_state == HTML5_TOK_ATTRIBUTE_VALUE_SINGLE_QUOTED) {
+        lex->emit(lex->ctx, "attr-value", lex->value_start, pos);
+    } else if (old_state == HTML5_TOK_ATTRIBUTE_VALUE_UNQUOTED) {
+        lex->emit(lex->ctx, "attr-value", lex->value_start, pos - 1);
+    }
+}
+
+static bool html5_lex_state_is_text(int state) {
+    return state == HTML5_TOK_RCDATA || state == HTML5_TOK_RAWTEXT || state == HTML5_TOK_PLAINTEXT;
+}
+
+// The tree builder switches the tokenizer for these start tags; with no tree
+// builder running, the lexer does (the tokenizer recognizes their end tags).
+static void html5_lex_after_start_tag(Html5Parser* parser, Html5Token* token) {
+    if (html5_token_is(token, MARKUP_NAME_TITLE) || html5_token_is(token, MARKUP_NAME_TEXTAREA)) {
+        html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
+    } else if (html5_token_is(token, MARKUP_NAME_STYLE) || html5_token_is(token, MARKUP_NAME_SCRIPT) ||
+               html5_token_is(token, MARKUP_NAME_XMP) || html5_token_is(token, MARKUP_NAME_IFRAME) ||
+               html5_token_is(token, MARKUP_NAME_NOEMBED) || html5_token_is(token, MARKUP_NAME_NOFRAMES) ||
+               html5_token_is(token, MARKUP_NAME_NOSCRIPT)) {
+        html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
+    } else if (html5_token_is(token, MARKUP_NAME_PLAINTEXT)) {
+        html5_switch_tokenizer_state(parser, HTML5_TOK_PLAINTEXT);
+    }
+}
+
+void html5_lex_spans(Input* input, const char* text, size_t len, Html5LexEmit emit, void* ctx) {
+    if (!input || !text || !emit) return;
+    Html5Parser* parser = html5_parser_create(input->pool, input->arena, input);
+    if (!parser) return;
+    Html5LexState lex = {emit, ctx, 0, 0};
+    parser->html = text;
+    parser->length = len;
+    parser->pos = 0;
+    parser->tokenizer_state = HTML5_TOK_DATA;
+    parser->state_hook = html5_lex_state_hook;
+    parser->state_hook_ctx = &lex;
+    while (parser->pos <= len) {
+        size_t start = parser->pos;
+        int state_before = (int)parser->tokenizer_state;
+        Html5Token* token = html5_tokenize_next(parser);
+        size_t end = parser->pos;
+        if (!token || token->type == HTML5_TOKEN_EOF) break;
+        switch (token->type) {
+        case HTML5_TOKEN_START_TAG:
+        case HTML5_TOKEN_END_TAG: {
+            emit(ctx, "tag", start, end);
+            size_t name = start + 1;
+            if (name < end && text[name] == '/') name++;
+            size_t name_end = name;
+            while (name_end < end && !str_is_space(text[name_end]) &&
+                   text[name_end] != '/' && text[name_end] != '>') {
+                name_end++;
+            }
+            if (name_end > name) emit(ctx, "tag-name", name, name_end);
+            if (token->type == HTML5_TOKEN_START_TAG) html5_lex_after_start_tag(parser, token);
+            break;
+        }
+        case HTML5_TOKEN_COMMENT:
+            emit(ctx, "comment", start, end);
+            break;
+        case HTML5_TOKEN_DOCTYPE:
+            emit(ctx, "doctype", start, end);
+            break;
+        case HTML5_TOKEN_CHARACTER:
+            if (html5_lex_state_is_text(state_before)) emit(ctx, "raw", start, end);
+            else if (text[start] == '&' && end > start + 1) emit(ctx, "entity", start, end);
+            break;
+        default:
+            break;
+        }
+        // every token consumes input; a stall would loop forever
+        if (end <= start && parser->pos <= start) break;
+    }
+    parser->state_hook = nullptr;
 }

@@ -1,0 +1,27 @@
+<!doctype html>
+<style>button{height:24px}#report{height:30px}</style>
+<style id="rules" title="members">#report { width: 50px !important; }</style>
+<button id="check">check sheet members</button><div id="report" style="width:80px">text</div>
+<script>
+var report = document.getElementById('report');
+function check(name, callback) {
+    try { report.setAttribute('data-' + name, String(callback())); }
+    catch (error) { report.setAttribute('data-' + name, error.name); }
+}
+document.getElementById('check').addEventListener('click', function () {
+    var owner = document.getElementById('rules');
+    var sheet = owner.sheet;
+    var constructed = new CSSStyleSheet();
+    check('owner-node', function () { return sheet.ownerNode === owner; });
+    check('parent-sheet', function () { return sheet.parentStyleSheet === null; });
+    check('owner-rule', function () { return sheet.ownerRule === null; });
+    check('inline-href', function () { return sheet.href === null; });
+    check('constructed-owner', function () { return constructed.ownerNode === null && constructed.ownerRule === null && constructed.parentStyleSheet === null; });
+    check('constructed-href', function () { return constructed.href === null; });
+    check('initial-enabled', function () { return sheet.disabled === false && getComputedStyle(report).width === '50px'; });
+    check('disable-cascade', function () { sheet.disabled = true; return sheet.disabled === true && getComputedStyle(report).width === '80px'; });
+    check('enable-cascade', function () { sheet.disabled = false; return sheet.disabled === false && getComputedStyle(report).width === '50px'; });
+    check('disabled-coercion', function () { sheet.disabled = 1; return sheet.disabled === true; });
+    check('constructed-disabled', function () { constructed.disabled = true; return constructed.disabled === true; });
+});
+</script>

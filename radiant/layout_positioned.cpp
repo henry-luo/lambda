@@ -686,15 +686,13 @@ static TextDirection get_static_position_direction(ViewElement* parent) {
         DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(parent);
         if (parent_elem->blk && parent_elem->block_mut()->direction == CSS_VALUE_RTL) {
             static_direction = TD_RTL;
-        } else if (parent_elem->specified_style) {
-            CssValue* direction = (CssValue*)style_tree_get_computed_value(
-                parent_elem->specified_style, CSS_PROPERTY_DIRECTION,
-                parent_elem->parent && parent_elem->parent->is_element() ?
-                    lam::dom_require<DOM_NODE_ELEMENT>(parent_elem->parent)->specified_style : NULL);
-            if (direction && direction->type == CSS_VALUE_TYPE_KEYWORD &&
-                direction->data.keyword == CSS_VALUE_RTL) {
-                static_direction = TD_RTL;
-            }
+        } else {
+            // the legacy computed-value getter returns an allocated string for initial values.
+            CssEnum direction = layout_specified_keyword(
+                parent_elem, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+            if (direction != CSS_VALUE_LTR && direction != CSS_VALUE_RTL &&
+                direction != CSS_VALUE_INITIAL) direction = logical_inline_direction(parent_elem);
+            if (direction == CSS_VALUE_RTL) static_direction = TD_RTL;
         }
     }
     return static_direction;

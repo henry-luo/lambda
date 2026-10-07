@@ -1,0 +1,2014 @@
+{
+  "metadata": {
+    "started_at": "2026-10-07T07:47:29.918488+08:00",
+    "platform": "macOS-26.3-arm64-arm-64bit",
+    "runs": 5,
+    "warmups": 1,
+    "binary": "/Users/henryluo/Projects/lambda/temp/js-mvp-lmd/lambda.exe",
+    "binary_sha256": "01962fb935e2dc8e23a21a494878279672d5eb5452e04b5aa01b38deb9ccb325",
+    "runner_sha256": "0e9a0ffeeb71347dda414bbd141bc74e7ac1affdc704286acba89f0c5514eb4b",
+    "mvp_control": {
+      "binary": "/Users/henryluo/Projects/lambda/temp/js-mvp-lmd/temp/mvp_lmd_before_opt.exe",
+      "sha256": "27bdf95a2f1a44084d91ce571000ce71d633b9b145a1cc263d97ad61f419b23f",
+      "record": "test/benchmark/js_mvp_lmd/pinned_mir_20261007.json",
+      "record_sha256": "fa58861902a9995497ebd8e40e31f9c3f41ced93d42c7c995b5bea8a9f315dff"
+    },
+    "node_version": "v24.7.0",
+    "backend_flags": {
+      "JS_EXEC_BACKEND": "mir",
+      "LAMBDA_EXEC_BACKEND": "jit",
+      "JS_MIR_INTERP": "0",
+      "LAMBDA_JS_LARGE_INTERP": "0"
+    },
+    "backend_validation": "Each Lambda lane must emit a fresh finalized MIR artifact during its untimed warmup. AST/AUTO and MIR interpreter selection are disabled.",
+    "timing": "self_reported_execution_ms_from___TIMING___only",
+    "boundaries": "MVP measures its generated program entry; other engines use the original benchmark timers. Startup, parsing, compilation, printing and teardown are excluded. Node tiering during execution is included.",
+    "order": "one warmup per engine, then rotating engine order each round",
+    "lambda_scope": "Unannotated canonical ports; normal Lambda numeric semantics. Collatz uses shr where JS divides by two. These are port comparisons.",
+    "finished_at": "2026-10-07T07:48:16.288767+08:00",
+    "binary_unchanged": true,
+    "control_unchanged": true,
+    "sources_unchanged": true,
+    "implementation_sources": [
+      {
+        "path": "lambda/js/mvp-lmd/mvp_lmd_mir.cpp",
+        "before_sha256": "fd8c36448f52770b77f4b708a13002d6fbc13f6baac0f32e7b1e3cc5b213f5ac",
+        "after_sha256": "1627592eafb39788f6cd1567d7426f737a1eeda3bda4c50f7f1e393905738810"
+      },
+      {
+        "path": "lambda/runtime/mir_emitter_shared.hpp",
+        "before_sha256": "fecf0093b14c701b87e6efc288d1d8d8352b7211ba2bcda23d80c12deea8e8bc",
+        "after_sha256": "f935bba12cc36e91ca83dc22d090e5c6d0f78283a6305af10dbc8503e21b03ff"
+      }
+    ],
+    "base_commit": "c883aaeecbf4d9b2fadf465c0c5f8475b11270d3"
+  },
+  "rows": [
+    {
+      "id": "r7rs/fib2",
+      "expected": "196418",
+      "sources": [
+        {
+          "path": "test/benchmark/r7rs/fib2.js",
+          "sha256": "6e681b5f5db08d124b8b4503375b0b880e1f557c27c031d383e73a18db315380"
+        },
+        {
+          "path": "test/benchmark/r7rs/fib.ls",
+          "sha256": "7ef03c419a02bf62e5cd6ce26eafb3b55cab7751643b59de98cffec5ff9d1895"
+        },
+        {
+          "path": "temp/mvp_lmd_optimized/r7rs_fib2.js",
+          "sha256": "070502b57ac751f7419503266cdf8d03951363e9681be87939c4ddde6ea3dc9d"
+        }
+      ],
+      "samples": [
+        {
+          "engine": "mvp_lmd_before",
+          "round": 1,
+          "exec_ms": 4.046,
+          "wall_ms": 15.168124999999977,
+          "stdout": "196418\n__TIMING__:4.046000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 1.725708320736885,
+          "wall_ms": 18.375333000000047,
+          "stdout": "fib: PASS\n__TIMING__:1.725708320736885\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 1,
+          "exec_ms": 1.241,
+          "wall_ms": 11.897999999999964,
+          "stdout": "fib: PASS\n__TIMING__:1.241\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 1.2662910000000007,
+          "wall_ms": 24.03487500000001,
+          "stdout": "fib: PASS\n__TIMING__:1.2662910000000007\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 1.28,
+          "wall_ms": 10.82154099999999,
+          "stdout": "196418\n__TIMING__:1.280000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 1.7317499965429306,
+          "wall_ms": 18.33179100000004,
+          "stdout": "fib: PASS\n__TIMING__:1.7317499965429306\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 2,
+          "exec_ms": 1.259,
+          "wall_ms": 12.123666999999895,
+          "stdout": "fib: PASS\n__TIMING__:1.259\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 1.2962919999999993,
+          "wall_ms": 24.11591599999996,
+          "stdout": "fib: PASS\n__TIMING__:1.2962919999999993\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 1.264,
+          "wall_ms": 10.989708999999959,
+          "stdout": "196418\n__TIMING__:1.264000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 2,
+          "exec_ms": 4.089,
+          "wall_ms": 14.789375000000105,
+          "stdout": "196418\n__TIMING__:4.089000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 3,
+          "exec_ms": 1.262,
+          "wall_ms": 12.764792000000025,
+          "stdout": "fib: PASS\n__TIMING__:1.262\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 1.3599160000000001,
+          "wall_ms": 25.347584000000147,
+          "stdout": "fib: PASS\n__TIMING__:1.3599160000000001\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 1.303,
+          "wall_ms": 11.087833999999797,
+          "stdout": "196418\n__TIMING__:1.303000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 3,
+          "exec_ms": 4.332,
+          "wall_ms": 16.183958000000054,
+          "stdout": "196418\n__TIMING__:4.332000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 1.6955416649580002,
+          "wall_ms": 19.401165999999968,
+          "stdout": "fib: PASS\n__TIMING__:1.6955416649580002\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 1.3198340000000002,
+          "wall_ms": 24.60858399999988,
+          "stdout": "fib: PASS\n__TIMING__:1.3198340000000002\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 1.261,
+          "wall_ms": 11.104416999999867,
+          "stdout": "196418\n__TIMING__:1.261000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 4,
+          "exec_ms": 4.033,
+          "wall_ms": 14.681750000000049,
+          "stdout": "196418\n__TIMING__:4.033000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 1.686166673898697,
+          "wall_ms": 18.178374999999967,
+          "stdout": "fib: PASS\n__TIMING__:1.686166673898697\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 4,
+          "exec_ms": 1.245,
+          "wall_ms": 12.146374999999932,
+          "stdout": "fib: PASS\n__TIMING__:1.245\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 1.281,
+          "wall_ms": 10.727041999999853,
+          "stdout": "196418\n__TIMING__:1.281000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 5,
+          "exec_ms": 4.001,
+          "wall_ms": 15.057165999999844,
+          "stdout": "196418\n__TIMING__:4.001000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 1.7416249960660934,
+          "wall_ms": 18.385625000000072,
+          "stdout": "fib: PASS\n__TIMING__:1.7416249960660934\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 5,
+          "exec_ms": 1.285,
+          "wall_ms": 12.599167000000078,
+          "stdout": "fib: PASS\n__TIMING__:1.285\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 1.340833,
+          "wall_ms": 24.067582999999892,
+          "stdout": "fib: PASS\n__TIMING__:1.340833\n",
+          "oracle_equal": true
+        }
+      ],
+      "backend_validation": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_optimized/r7rs_fib2_mvp_lmd.mir",
+          "sha256": "a68f86ec730b2751bcc0ebcc9d179750f8fe04be8cd937d577c3313f96187aa8",
+          "bytes": 4679
+        },
+        "mvp_lmd_before": {
+          "path": "temp/mvp_lmd_optimized/r7rs_fib2_mvp_lmd_before.mir",
+          "sha256": "a6672eecbcb0fb54f21882ae21c7b0100fc21bcf83b93e4f8ce13e49393599e6",
+          "bytes": 18570
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_optimized/r7rs_fib2_lambda_js.mir",
+          "sha256": "e4178fd6dea4f15d41d52b806976a1f24cec9d248281c966630a0769090cabb8",
+          "bytes": 33931
+        },
+        "lambda_untyped": {
+          "path": "temp/mvp_lmd_optimized/r7rs_fib2_lambda_untyped.mir",
+          "sha256": "d7ca818ab9bb6010102c3d124afb937120c157e3003090925b4384f058428734",
+          "bytes": 13048
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 1.28,
+        "mvp_lmd_before": 4.046,
+        "lambda_js": 1.725708320736885,
+        "lambda_untyped": 1.259,
+        "node": 1.3198340000000002
+      }
+    },
+    {
+      "id": "r7rs/fibfp2",
+      "expected": "196418.0",
+      "sources": [
+        {
+          "path": "test/benchmark/r7rs/fibfp2.js",
+          "sha256": "2e10fe27110881ef0fe9d5f875a39ba415c5534d422b913810a903e98aeb660c"
+        },
+        {
+          "path": "test/benchmark/r7rs/fibfp.ls",
+          "sha256": "3d26ec3234cd3ffee453aa78a4e6a1248bffe1f39b7794b3438bc8b5a990e527"
+        },
+        {
+          "path": "temp/mvp_lmd_optimized/r7rs_fibfp2.js",
+          "sha256": "d3687775182fe9525164c60daf7be2300c1cb39435e5c7175d8d281c412bbcb1"
+        }
+      ],
+      "samples": [
+        {
+          "engine": "mvp_lmd_before",
+          "round": 1,
+          "exec_ms": 4.102,
+          "wall_ms": 15.101957999999804,
+          "stdout": "196418\n__TIMING__:4.102000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 1.695291668176651,
+          "wall_ms": 19.08516700000007,
+          "stdout": "fibfp: PASS\n__TIMING__:1.695291668176651\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 1,
+          "exec_ms": 1.827,
+          "wall_ms": 13.134792000000006,
+          "stdout": "fibfp: PASS\n__TIMING__:1.827\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 1.41925,
+          "wall_ms": 23.963458000000102,
+          "stdout": "fibfp: PASS\n__TIMING__:1.41925\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 1.262,
+          "wall_ms": 10.712834000000004,
+          "stdout": "196418\n__TIMING__:1.262000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 1.6942916810512543,
+          "wall_ms": 18.68037499999997,
+          "stdout": "fibfp: PASS\n__TIMING__:1.6942916810512543\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 2,
+          "exec_ms": 1.857,
+          "wall_ms": 12.524916999999913,
+          "stdout": "fibfp: PASS\n__TIMING__:1.857\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 1.330582999999999,
+          "wall_ms": 23.89620800000003,
+          "stdout": "fibfp: PASS\n__TIMING__:1.330582999999999\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 1.27,
+          "wall_ms": 10.933708999999903,
+          "stdout": "196418\n__TIMING__:1.270000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 2,
+          "exec_ms": 4.104,
+          "wall_ms": 15.033999999999992,
+          "stdout": "196418\n__TIMING__:4.104000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 3,
+          "exec_ms": 1.84,
+          "wall_ms": 13.053792000000008,
+          "stdout": "fibfp: PASS\n__TIMING__:1.84\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 1.2232079999999996,
+          "wall_ms": 24.13504199999994,
+          "stdout": "fibfp: PASS\n__TIMING__:1.2232079999999996\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 1.304,
+          "wall_ms": 10.620458,
+          "stdout": "196418\n__TIMING__:1.304000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 3,
+          "exec_ms": 4.087,
+          "wall_ms": 15.364000000000155,
+          "stdout": "196418\n__TIMING__:4.087000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 1.7317499965429306,
+          "wall_ms": 18.45195799999999,
+          "stdout": "fibfp: PASS\n__TIMING__:1.7317499965429306\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 1.3491250000000008,
+          "wall_ms": 23.837457999999813,
+          "stdout": "fibfp: PASS\n__TIMING__:1.3491250000000008\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 1.258,
+          "wall_ms": 10.784707999999865,
+          "stdout": "196418\n__TIMING__:1.258000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 4,
+          "exec_ms": 4.005,
+          "wall_ms": 15.191458000000102,
+          "stdout": "196418\n__TIMING__:4.005000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 1.716708317399025,
+          "wall_ms": 18.37945800000007,
+          "stdout": "fibfp: PASS\n__TIMING__:1.716708317399025\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 4,
+          "exec_ms": 1.851,
+          "wall_ms": 13.266124999999906,
+          "stdout": "fibfp: PASS\n__TIMING__:1.851\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 1.255,
+          "wall_ms": 10.356625000000008,
+          "stdout": "196418\n__TIMING__:1.255000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 5,
+          "exec_ms": 4.015,
+          "wall_ms": 14.60516700000003,
+          "stdout": "196418\n__TIMING__:4.015000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 1.7949583232402802,
+          "wall_ms": 18.19820800000005,
+          "stdout": "fibfp: PASS\n__TIMING__:1.7949583232402802\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 5,
+          "exec_ms": 1.851,
+          "wall_ms": 12.70437499999999,
+          "stdout": "fibfp: PASS\n__TIMING__:1.851\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 1.344958,
+          "wall_ms": 23.531915999999818,
+          "stdout": "fibfp: PASS\n__TIMING__:1.344958\n",
+          "oracle_equal": true
+        }
+      ],
+      "backend_validation": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_optimized/r7rs_fibfp2_mvp_lmd.mir",
+          "sha256": "7949e4ec0333ec289ed2b8e708bba8f9ee970aa4762c485aa4a0a55ca92c58e7",
+          "bytes": 4679
+        },
+        "mvp_lmd_before": {
+          "path": "temp/mvp_lmd_optimized/r7rs_fibfp2_mvp_lmd_before.mir",
+          "sha256": "5198029769a4447c803dd5485312c2f0a2e107b032315b67f97cb40eb6fc0a57",
+          "bytes": 18570
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_optimized/r7rs_fibfp2_lambda_js.mir",
+          "sha256": "6386c4e975ff79530b5c8fc240a5531c8aad4d30f0cfa3f722efa4c9b0c8e9cb",
+          "bytes": 34011
+        },
+        "lambda_untyped": {
+          "path": "temp/mvp_lmd_optimized/r7rs_fibfp2_lambda_untyped.mir",
+          "sha256": "47d546777d16f63240b743446f63b1d94157b13cd28c79b358c58cd876db6c7c",
+          "bytes": 14241
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 1.262,
+        "mvp_lmd_before": 4.087,
+        "lambda_js": 1.716708317399025,
+        "lambda_untyped": 1.851,
+        "node": 1.344958
+      }
+    },
+    {
+      "id": "r7rs/sum2",
+      "expected": "50005000",
+      "sources": [
+        {
+          "path": "test/benchmark/r7rs/sum2.js",
+          "sha256": "eababc2f0ff053df9c232ff1af8a16f05bcec46c928ef8bb2709538087f862a3"
+        },
+        {
+          "path": "test/benchmark/r7rs/sum.ls",
+          "sha256": "04b988e82eaadb39ab8dab0ce70d9ab2c43fe7c1c2359d8636d0fcb41837eb78"
+        },
+        {
+          "path": "temp/mvp_lmd_optimized/r7rs_sum2.js",
+          "sha256": "2cd15a392804ecacc73e464a0d23e616067d31fd1986e1c47703b390c487b287"
+        }
+      ],
+      "samples": [
+        {
+          "engine": "mvp_lmd_before",
+          "round": 1,
+          "exec_ms": 0.671,
+          "wall_ms": 10.470999999999897,
+          "stdout": "50005000\n__TIMING__:0.671000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 0.6467083394527435,
+          "wall_ms": 17.324125000000024,
+          "stdout": "sum: PASS\n__TIMING__:0.6467083394527435\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 1,
+          "exec_ms": 0.241,
+          "wall_ms": 11.569290999999815,
+          "stdout": "sum: PASS\n__TIMING__:0.241\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 0.7283749999999998,
+          "wall_ms": 23.2529159999999,
+          "stdout": "sum: PASS\n__TIMING__:0.7283749999999998\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 0.668,
+          "wall_ms": 10.454375000000127,
+          "stdout": "50005000\n__TIMING__:0.668000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 0.6856666803359985,
+          "wall_ms": 17.481625000000058,
+          "stdout": "sum: PASS\n__TIMING__:0.6856666803359985\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 2,
+          "exec_ms": 0.248,
+          "wall_ms": 11.535583000000127,
+          "stdout": "sum: PASS\n__TIMING__:0.248\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 0.9946669999999997,
+          "wall_ms": 23.48145800000001,
+          "stdout": "sum: PASS\n__TIMING__:0.9946669999999997\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 0.67,
+          "wall_ms": 10.552333999999775,
+          "stdout": "50005000\n__TIMING__:0.670000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 2,
+          "exec_ms": 0.673,
+          "wall_ms": 10.288249999999888,
+          "stdout": "50005000\n__TIMING__:0.673000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 3,
+          "exec_ms": 0.248,
+          "wall_ms": 11.066166999999627,
+          "stdout": "sum: PASS\n__TIMING__:0.248\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 0.7467500000000005,
+          "wall_ms": 23.16995799999999,
+          "stdout": "sum: PASS\n__TIMING__:0.7467500000000005\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 0.671,
+          "wall_ms": 10.322708000000347,
+          "stdout": "50005000\n__TIMING__:0.671000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 3,
+          "exec_ms": 0.662,
+          "wall_ms": 10.465917000000324,
+          "stdout": "50005000\n__TIMING__:0.662000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 0.6522083431482315,
+          "wall_ms": 17.585624999999716,
+          "stdout": "sum: PASS\n__TIMING__:0.6522083431482315\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 0.7423339999999996,
+          "wall_ms": 23.217292,
+          "stdout": "sum: PASS\n__TIMING__:0.7423339999999996\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 0.666,
+          "wall_ms": 10.23616599999988,
+          "stdout": "50005000\n__TIMING__:0.666000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 4,
+          "exec_ms": 0.663,
+          "wall_ms": 10.385499999999936,
+          "stdout": "50005000\n__TIMING__:0.663000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 0.6541250050067902,
+          "wall_ms": 17.36579100000002,
+          "stdout": "sum: PASS\n__TIMING__:0.6541250050067902\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 4,
+          "exec_ms": 0.259,
+          "wall_ms": 11.127582999999941,
+          "stdout": "sum: PASS\n__TIMING__:0.259\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 0.684,
+          "wall_ms": 10.251124999999917,
+          "stdout": "50005000\n__TIMING__:0.684000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 5,
+          "exec_ms": 0.66,
+          "wall_ms": 9.813917000000227,
+          "stdout": "50005000\n__TIMING__:0.660000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 0.6639583259820938,
+          "wall_ms": 17.20625000000009,
+          "stdout": "sum: PASS\n__TIMING__:0.6639583259820938\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 5,
+          "exec_ms": 0.248,
+          "wall_ms": 11.48454199999982,
+          "stdout": "sum: PASS\n__TIMING__:0.248\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 0.7466669999999986,
+          "wall_ms": 23.556249999999945,
+          "stdout": "sum: PASS\n__TIMING__:0.7466669999999986\n",
+          "oracle_equal": true
+        }
+      ],
+      "backend_validation": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_optimized/r7rs_sum2_mvp_lmd.mir",
+          "sha256": "0ab36731ec7bccee616a3b9e9a9b1f158bf4647a6fdba100ae6e454c11e87e51",
+          "bytes": 4738
+        },
+        "mvp_lmd_before": {
+          "path": "temp/mvp_lmd_optimized/r7rs_sum2_mvp_lmd_before.mir",
+          "sha256": "96486bdd0630571db1d34291bc1e15c4eaac9a18e010a62b1bd9fb6d826fdd8f",
+          "bytes": 9741
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_optimized/r7rs_sum2_lambda_js.mir",
+          "sha256": "86a7881592da5db9ff96063d1358c850031bb54838bba2f6a465bcc08f7c63cc",
+          "bytes": 34279
+        },
+        "lambda_untyped": {
+          "path": "temp/mvp_lmd_optimized/r7rs_sum2_lambda_untyped.mir",
+          "sha256": "9b933a11a5954cfe4134813b1b81630bfda91575fe7018b06407b33bb83e9c27",
+          "bytes": 13556
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 0.67,
+        "mvp_lmd_before": 0.663,
+        "lambda_js": 0.6541250050067902,
+        "lambda_untyped": 0.248,
+        "node": 0.7466669999999986
+      }
+    },
+    {
+      "id": "r7rs/tak2",
+      "expected": "7",
+      "sources": [
+        {
+          "path": "test/benchmark/r7rs/tak2.js",
+          "sha256": "0ac38fc0eb3df05ccb7c57269fcadbfa5f0e0e37d0b419971e59d8539c1d07a9"
+        },
+        {
+          "path": "test/benchmark/r7rs/tak.ls",
+          "sha256": "0f55d8916b298e35776b41add14d515fe2e3d8414d56add97c8cbfff210a44fc"
+        },
+        {
+          "path": "temp/mvp_lmd_optimized/r7rs_tak2.js",
+          "sha256": "e08f4a3eb0f8290b680aa40d96ff1da7f31cc03c37abb98e4d88259bed865aae"
+        }
+      ],
+      "samples": [
+        {
+          "engine": "mvp_lmd_before",
+          "round": 1,
+          "exec_ms": 0.718,
+          "wall_ms": 14.200375000000154,
+          "stdout": "7\n__TIMING__:0.718000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 0.3284166753292084,
+          "wall_ms": 18.118250000000113,
+          "stdout": "tak: PASS\n__TIMING__:0.3284166753292084\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 1,
+          "exec_ms": 0.119,
+          "wall_ms": 11.42604200000008,
+          "stdout": "tak: PASS\n__TIMING__:0.119\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 0.30562499999999915,
+          "wall_ms": 22.937291999999943,
+          "stdout": "tak: PASS\n__TIMING__:0.30562499999999915\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 0.117,
+          "wall_ms": 9.50799999999985,
+          "stdout": "7\n__TIMING__:0.117000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 0.33558332920074463,
+          "wall_ms": 18.286459000000033,
+          "stdout": "tak: PASS\n__TIMING__:0.33558332920074463\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 2,
+          "exec_ms": 0.117,
+          "wall_ms": 12.219874999999991,
+          "stdout": "tak: PASS\n__TIMING__:0.117\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 0.30549999999999855,
+          "wall_ms": 22.84833300000022,
+          "stdout": "tak: PASS\n__TIMING__:0.30549999999999855\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 0.115,
+          "wall_ms": 9.853999999999807,
+          "stdout": "7\n__TIMING__:0.115000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 2,
+          "exec_ms": 0.719,
+          "wall_ms": 13.954916999999956,
+          "stdout": "7\n__TIMING__:0.719000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 3,
+          "exec_ms": 0.121,
+          "wall_ms": 11.442916000000025,
+          "stdout": "tak: PASS\n__TIMING__:0.121\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 0.2959580000000006,
+          "wall_ms": 22.649125000000048,
+          "stdout": "tak: PASS\n__TIMING__:0.2959580000000006\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 0.116,
+          "wall_ms": 9.534916999999865,
+          "stdout": "7\n__TIMING__:0.116000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 3,
+          "exec_ms": 0.726,
+          "wall_ms": 13.98920799999992,
+          "stdout": "7\n__TIMING__:0.726000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 0.33662499487400055,
+          "wall_ms": 18.12354100000002,
+          "stdout": "tak: PASS\n__TIMING__:0.33662499487400055\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 0.30183400000000127,
+          "wall_ms": 22.946750000000016,
+          "stdout": "tak: PASS\n__TIMING__:0.30183400000000127\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 0.117,
+          "wall_ms": 9.688249999999954,
+          "stdout": "7\n__TIMING__:0.117000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 4,
+          "exec_ms": 0.763,
+          "wall_ms": 14.185375000000278,
+          "stdout": "7\n__TIMING__:0.763000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 0.32216665148735046,
+          "wall_ms": 18.019250000000042,
+          "stdout": "tak: PASS\n__TIMING__:0.32216665148735046\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 4,
+          "exec_ms": 0.127,
+          "wall_ms": 11.85774999999989,
+          "stdout": "tak: PASS\n__TIMING__:0.127\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 0.121,
+          "wall_ms": 9.580042000000066,
+          "stdout": "7\n__TIMING__:0.121000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 5,
+          "exec_ms": 0.705,
+          "wall_ms": 13.69016700000003,
+          "stdout": "7\n__TIMING__:0.705000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 0.3229166716337204,
+          "wall_ms": 17.47741699999983,
+          "stdout": "tak: PASS\n__TIMING__:0.3229166716337204\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 5,
+          "exec_ms": 0.12,
+          "wall_ms": 11.390083999999856,
+          "stdout": "tak: PASS\n__TIMING__:0.12\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 0.34329199999999993,
+          "wall_ms": 23.111334000000205,
+          "stdout": "tak: PASS\n__TIMING__:0.34329199999999993\n",
+          "oracle_equal": true
+        }
+      ],
+      "backend_validation": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_optimized/r7rs_tak2_mvp_lmd.mir",
+          "sha256": "ba1a72c31eea4244d04e7c9f264d18a2f833ee28d47fad4bc622e0beaa6ed4a2",
+          "bytes": 5579
+        },
+        "mvp_lmd_before": {
+          "path": "temp/mvp_lmd_optimized/r7rs_tak2_mvp_lmd_before.mir",
+          "sha256": "a458095ef44130eccfa47b628e8e4241a829762755776205a643b7c63c92a6ef",
+          "bytes": 33895
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_optimized/r7rs_tak2_lambda_js.mir",
+          "sha256": "647934d743d343bbd80da9a09de66efb5d261882ab0a12ac03cc726cb3aa5fef",
+          "bytes": 41088
+        },
+        "lambda_untyped": {
+          "path": "temp/mvp_lmd_optimized/r7rs_tak2_lambda_untyped.mir",
+          "sha256": "a7ea93d321c8a7f4d3f15195f483e32213bc501fe8209b3ee79277d6db2597a5",
+          "bytes": 18621
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 0.117,
+        "mvp_lmd_before": 0.719,
+        "lambda_js": 0.3284166753292084,
+        "lambda_untyped": 0.12,
+        "node": 0.30549999999999855
+      }
+    },
+    {
+      "id": "larceny/diviter",
+      "expected": "500000000",
+      "sources": [
+        {
+          "path": "test/benchmark/larceny/diviter.js",
+          "sha256": "d3445de07b40f4ca9e453a3035218e1a90108d64db34dc12740e8f208e7f1d01"
+        },
+        {
+          "path": "test/benchmark/larceny/diviter.ls",
+          "sha256": "6284b630e631dbce4486d53a458c0eab7d5e22985576c869f6f89487b913f029"
+        },
+        {
+          "path": "temp/mvp_lmd_optimized/larceny_diviter.js",
+          "sha256": "5ebec65c0bc952225959c0a70dc3157d482c1327d80c122fbaa02e3832e91b97"
+        }
+      ],
+      "samples": [
+        {
+          "engine": "mvp_lmd_before",
+          "round": 1,
+          "exec_ms": 598.618,
+          "wall_ms": 611.5050000000002,
+          "stdout": "500000000\n__TIMING__:598.618000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 634.3283333182335,
+          "wall_ms": 653.7244580000001,
+          "stdout": "diviter: PASS\n__TIMING__:634.3283333182335\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 1,
+          "exec_ms": 247.205,
+          "wall_ms": 259.7275000000003,
+          "stdout": "diviter: PASS\n__TIMING__:247.205\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 376.389708,
+          "wall_ms": 399.4405409999997,
+          "stdout": "diviter: PASS\n__TIMING__:376.389708\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 584.972,
+          "wall_ms": 594.9198750000004,
+          "stdout": "500000000\n__TIMING__:584.972000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 637.8303333371878,
+          "wall_ms": 656.7512499999992,
+          "stdout": "diviter: PASS\n__TIMING__:637.8303333371878\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 2,
+          "exec_ms": 247.105,
+          "wall_ms": 259.24320799999913,
+          "stdout": "diviter: PASS\n__TIMING__:247.105\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 375.989042,
+          "wall_ms": 399.50862499999926,
+          "stdout": "diviter: PASS\n__TIMING__:375.989042\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 574.809,
+          "wall_ms": 585.0125830000011,
+          "stdout": "500000000\n__TIMING__:574.809000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 2,
+          "exec_ms": 595.939,
+          "wall_ms": 608.642957999999,
+          "stdout": "500000000\n__TIMING__:595.939000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 3,
+          "exec_ms": 246.181,
+          "wall_ms": 258.47145799999896,
+          "stdout": "diviter: PASS\n__TIMING__:246.181\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 375.932791,
+          "wall_ms": 399.4374159999996,
+          "stdout": "diviter: PASS\n__TIMING__:375.932791\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 558.685,
+          "wall_ms": 568.8874170000009,
+          "stdout": "500000000\n__TIMING__:558.685000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 3,
+          "exec_ms": 597.483,
+          "wall_ms": 610.3916250000001,
+          "stdout": "500000000\n__TIMING__:597.483000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 624.5214583277702,
+          "wall_ms": 643.4268330000012,
+          "stdout": "diviter: PASS\n__TIMING__:624.5214583277702\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 375.814292,
+          "wall_ms": 398.8546670000002,
+          "stdout": "diviter: PASS\n__TIMING__:375.814292\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 565.507,
+          "wall_ms": 575.8888330000004,
+          "stdout": "500000000\n__TIMING__:565.507000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 4,
+          "exec_ms": 595.015,
+          "wall_ms": 607.6053750000003,
+          "stdout": "500000000\n__TIMING__:595.015000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 625.020708322525,
+          "wall_ms": 644.8169579999999,
+          "stdout": "diviter: PASS\n__TIMING__:625.020708322525\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 4,
+          "exec_ms": 245.229,
+          "wall_ms": 257.3178330000001,
+          "stdout": "diviter: PASS\n__TIMING__:245.229\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 562.868,
+          "wall_ms": 572.9074579999996,
+          "stdout": "500000000\n__TIMING__:562.868000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 5,
+          "exec_ms": 595.929,
+          "wall_ms": 608.5375840000005,
+          "stdout": "500000000\n__TIMING__:595.929000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 625.2209583222866,
+          "wall_ms": 645.0704999999992,
+          "stdout": "diviter: PASS\n__TIMING__:625.2209583222866\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 5,
+          "exec_ms": 244.69,
+          "wall_ms": 256.73695900000126,
+          "stdout": "diviter: PASS\n__TIMING__:244.69\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 374.916167,
+          "wall_ms": 398.7247079999996,
+          "stdout": "diviter: PASS\n__TIMING__:374.916167\n",
+          "oracle_equal": true
+        }
+      ],
+      "backend_validation": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_optimized/larceny_diviter_mvp_lmd.mir",
+          "sha256": "410803e4d93362f4a1816649c0aca91733f169480f068039b6ddd5da95dd9816",
+          "bytes": 6225
+        },
+        "mvp_lmd_before": {
+          "path": "temp/mvp_lmd_optimized/larceny_diviter_mvp_lmd_before.mir",
+          "sha256": "344a84df0de4b4048cd6dc044fd245d2ab48e8e79aa2f1e11b434b02d2f7e946",
+          "bytes": 27054
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_optimized/larceny_diviter_lambda_js.mir",
+          "sha256": "5df0093c9f7d072e479d9ab0646bebf941563c76af169f3e3b815837fb3551d5",
+          "bytes": 45350
+        },
+        "lambda_untyped": {
+          "path": "temp/mvp_lmd_optimized/larceny_diviter_lambda_untyped.mir",
+          "sha256": "a37c214530c05c961ae5a350b4ece1dfcc84bb9ba6b7fbedca78083311cc453d",
+          "bytes": 18770
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 565.507,
+        "mvp_lmd_before": 595.939,
+        "lambda_js": 625.2209583222866,
+        "lambda_untyped": 246.181,
+        "node": 375.932791
+      }
+    },
+    {
+      "id": "larceny/divrec",
+      "expected": "500000",
+      "sources": [
+        {
+          "path": "test/benchmark/larceny/divrec.js",
+          "sha256": "0ee5bcdb4738d22e4f9fa9efd719d70d0ca206725ff5e74555b5c37474a6ae90"
+        },
+        {
+          "path": "test/benchmark/larceny/divrec.ls",
+          "sha256": "5d2f4b7af24c04a48cc0e8eb3106a15604f64fbf7c22201be88a818b00a3acd8"
+        },
+        {
+          "path": "temp/mvp_lmd_optimized/larceny_divrec.js",
+          "sha256": "27ced9ed34894dcbea0d8ea48c5d7ac3e2acc1de3ec410447408ba17d418886b"
+        }
+      ],
+      "samples": [
+        {
+          "engine": "mvp_lmd_before",
+          "round": 1,
+          "exec_ms": 12.063,
+          "wall_ms": 25.496249999999776,
+          "stdout": "500000\n__TIMING__:12.063000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 14.831333339214325,
+          "wall_ms": 33.704917000001444,
+          "stdout": "divrec: PASS\n__TIMING__:14.831333339214325\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 1,
+          "exec_ms": 1.119,
+          "wall_ms": 12.972832999999184,
+          "stdout": "divrec: PASS\n__TIMING__:1.119\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 7.288542,
+          "wall_ms": 30.535707999998607,
+          "stdout": "divrec: PASS\n__TIMING__:7.288542\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 0.6,
+          "wall_ms": 10.211874999999537,
+          "stdout": "500000\n__TIMING__:0.600000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 15.033500000834465,
+          "wall_ms": 33.904916999997425,
+          "stdout": "divrec: PASS\n__TIMING__:15.033500000834465\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 2,
+          "exec_ms": 1.128,
+          "wall_ms": 13.28429099999795,
+          "stdout": "divrec: PASS\n__TIMING__:1.128\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 7.239750000000001,
+          "wall_ms": 29.887833000000086,
+          "stdout": "divrec: PASS\n__TIMING__:7.239750000000001\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 0.611,
+          "wall_ms": 10.356417000000562,
+          "stdout": "500000\n__TIMING__:0.611000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 2,
+          "exec_ms": 12.179,
+          "wall_ms": 24.823208000000818,
+          "stdout": "500000\n__TIMING__:12.179000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 3,
+          "exec_ms": 1.13,
+          "wall_ms": 13.297957999999,
+          "stdout": "divrec: PASS\n__TIMING__:1.13\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 7.225875,
+          "wall_ms": 29.918458000000925,
+          "stdout": "divrec: PASS\n__TIMING__:7.225875\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 0.591,
+          "wall_ms": 10.20204099999944,
+          "stdout": "500000\n__TIMING__:0.591000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 3,
+          "exec_ms": 12.276,
+          "wall_ms": 25.098874999997633,
+          "stdout": "500000\n__TIMING__:12.276000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 14.878333330154419,
+          "wall_ms": 33.005040999999125,
+          "stdout": "divrec: PASS\n__TIMING__:14.878333330154419\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 7.353292,
+          "wall_ms": 30.09508300000263,
+          "stdout": "divrec: PASS\n__TIMING__:7.353292\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 0.621,
+          "wall_ms": 10.227624999998852,
+          "stdout": "500000\n__TIMING__:0.621000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 4,
+          "exec_ms": 12.292,
+          "wall_ms": 25.168582999999245,
+          "stdout": "500000\n__TIMING__:12.292000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 14.710916668176651,
+          "wall_ms": 32.73612499999956,
+          "stdout": "divrec: PASS\n__TIMING__:14.710916668176651\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 4,
+          "exec_ms": 1.121,
+          "wall_ms": 12.990250000001424,
+          "stdout": "divrec: PASS\n__TIMING__:1.121\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 0.616,
+          "wall_ms": 10.023165999999861,
+          "stdout": "500000\n__TIMING__:0.616000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 5,
+          "exec_ms": 12.22,
+          "wall_ms": 25.054582999999297,
+          "stdout": "500000\n__TIMING__:12.220000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 14.705208346247673,
+          "wall_ms": 33.27554199999838,
+          "stdout": "divrec: PASS\n__TIMING__:14.705208346247673\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 5,
+          "exec_ms": 1.136,
+          "wall_ms": 12.751083000001273,
+          "stdout": "divrec: PASS\n__TIMING__:1.136\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 7.138042,
+          "wall_ms": 29.771833000001635,
+          "stdout": "divrec: PASS\n__TIMING__:7.138042\n",
+          "oracle_equal": true
+        }
+      ],
+      "backend_validation": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_optimized/larceny_divrec_mvp_lmd.mir",
+          "sha256": "8864542e12a67fae2187cc0ec1f5ca76dda5cbe3d8725e97a5aef1fbc51daa97",
+          "bytes": 7086
+        },
+        "mvp_lmd_before": {
+          "path": "temp/mvp_lmd_optimized/larceny_divrec_mvp_lmd_before.mir",
+          "sha256": "3d6765c249656af0625aaa0897a7b44e9847d59c01ae5f317d2f1d60e7fa072b",
+          "bytes": 36294
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_optimized/larceny_divrec_lambda_js.mir",
+          "sha256": "008e9c4474f9ff3fde21b05e6b2082bb5e91957f85e32c5082a8cc2f07524ef6",
+          "bytes": 46809
+        },
+        "lambda_untyped": {
+          "path": "temp/mvp_lmd_optimized/larceny_divrec_lambda_untyped.mir",
+          "sha256": "339ac73c5659e8c63e82f632a1c16ab58fda6698a2d799f6b466dbf38beee6cc",
+          "bytes": 21351
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 0.611,
+        "mvp_lmd_before": 12.22,
+        "lambda_js": 14.831333339214325,
+        "lambda_untyped": 1.128,
+        "node": 7.239750000000001
+      }
+    },
+    {
+      "id": "kostya/collatz",
+      "expected": "837799",
+      "sources": [
+        {
+          "path": "test/benchmark/kostya/collatz.js",
+          "sha256": "2fe151d0458aeca7d6f9a06a1d718dadf8606173e280dc92c1f2c1fdff6fa19e"
+        },
+        {
+          "path": "test/benchmark/kostya/collatz.ls",
+          "sha256": "acfc6c9ce0959752e211f6502a7fd3676659776e6d85e60f0329849b77271f17"
+        },
+        {
+          "path": "temp/mvp_lmd_optimized/kostya_collatz.js",
+          "sha256": "a556559c5f103da507c0d10005bc8de49e00aadcb876891f13f0815e7be929aa"
+        }
+      ],
+      "samples": [
+        {
+          "engine": "mvp_lmd_before",
+          "round": 1,
+          "exec_ms": 1341.975,
+          "wall_ms": 1354.3547500000025,
+          "stdout": "837799\n__TIMING__:1341.975000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 1322.7839999943972,
+          "wall_ms": 1341.197417,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1322.7839999943972\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 1,
+          "exec_ms": 277.173,
+          "wall_ms": 289.47508399999936,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:277.173\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 1167.4634170000002,
+          "wall_ms": 1191.640458000002,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1167.4634170000002\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 474.156,
+          "wall_ms": 484.2487920000025,
+          "stdout": "837799\n__TIMING__:474.156000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 1322.2750833183527,
+          "wall_ms": 1340.792541999999,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1322.2750833183527\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 2,
+          "exec_ms": 277.038,
+          "wall_ms": 289.0952079999991,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:277.038\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 1166.575875,
+          "wall_ms": 1190.3686670000013,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1166.575875\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 474.241,
+          "wall_ms": 485.14354199999946,
+          "stdout": "837799\n__TIMING__:474.241000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 2,
+          "exec_ms": 1343.617,
+          "wall_ms": 1355.6264170000034,
+          "stdout": "837799\n__TIMING__:1343.617000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 3,
+          "exec_ms": 277.349,
+          "wall_ms": 289.8238329999998,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:277.349\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 1170.2885,
+          "wall_ms": 1193.6129159999994,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1170.2885\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 474.566,
+          "wall_ms": 484.6581250000028,
+          "stdout": "837799\n__TIMING__:474.566000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 3,
+          "exec_ms": 1339.502,
+          "wall_ms": 1351.2408329999985,
+          "stdout": "837799\n__TIMING__:1339.502000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 1323.35150000453,
+          "wall_ms": 1341.3973749999996,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1323.35150000453\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 1164.9665420000001,
+          "wall_ms": 1187.722082999997,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1164.9665420000001\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 474.035,
+          "wall_ms": 484.43466700000215,
+          "stdout": "837799\n__TIMING__:474.035000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 4,
+          "exec_ms": 1360.782,
+          "wall_ms": 1372.4455409999975,
+          "stdout": "837799\n__TIMING__:1360.782000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 1323.8514583557844,
+          "wall_ms": 1342.0061659999974,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1323.8514583557844\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 4,
+          "exec_ms": 276.076,
+          "wall_ms": 288.35037500000027,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:276.076\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 473.659,
+          "wall_ms": 484.11779199999927,
+          "stdout": "837799\n__TIMING__:473.659000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "mvp_lmd_before",
+          "round": 5,
+          "exec_ms": 1370.045,
+          "wall_ms": 1382.670333,
+          "stdout": "837799\n__TIMING__:1370.045000\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 1323.425916671753,
+          "wall_ms": 1342.380917,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1323.425916671753\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "lambda_untyped",
+          "round": 5,
+          "exec_ms": 276.609,
+          "wall_ms": 288.91649999999913,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:276.609\n\n",
+          "oracle_equal": true
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 1168.808334,
+          "wall_ms": 1192.804499999994,
+          "stdout": "collatz: PASS (start=837799)\n__TIMING__:1168.808334\n",
+          "oracle_equal": true
+        }
+      ],
+      "backend_validation": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_optimized/kostya_collatz_mvp_lmd.mir",
+          "sha256": "1a3cbee78cc27d059e6996e7ed1d7bb75ab02e5cd4a2fb43a730389e1434f866",
+          "bytes": 6951
+        },
+        "mvp_lmd_before": {
+          "path": "temp/mvp_lmd_optimized/kostya_collatz_mvp_lmd_before.mir",
+          "sha256": "1f15764f9a0b224230fa10a1446e98e336af9141bc166d80e1e087952ec546df",
+          "bytes": 20787
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_optimized/kostya_collatz_lambda_js.mir",
+          "sha256": "161e82621c9b037b1c856152af3f09e43b29f97fdd8b36098b3a69d54358a5b9",
+          "bytes": 42801
+        },
+        "lambda_untyped": {
+          "path": "temp/mvp_lmd_optimized/kostya_collatz_lambda_untyped.mir",
+          "sha256": "1bd70e884668ae73fc697dda8a487027e4c7767b2fac95168fd221781a9ed825",
+          "bytes": 21582
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 474.156,
+        "mvp_lmd_before": 1343.617,
+        "lambda_js": 1323.35150000453,
+        "lambda_untyped": 277.038,
+        "node": 1167.4634170000002
+      }
+    }
+  ],
+  "mir_audit": {
+    "definition": "Finalized pre-JIT MIR; instructions exclude declarations and labels and include cold/error paths. Counts are static, not executed instructions.",
+    "functions": [
+      {
+        "kernel": "r7rs/fib2",
+        "engine": "mvp_lmd_before",
+        "function": "mvp_lmd_f1",
+        "signature": "i64, p:runtime, p:unit, p:arguments, i64:argc, i64:self",
+        "instructions": 444,
+        "locals": 190,
+        "calls": {
+          "mvp_lmd_f1": 2,
+          "mvp_lmd_fail": 4,
+          "mvp_lmd_string_to_number": 2,
+          "mvp_lmd_number_to_string": 2,
+          "mvp_lmd_string_concat": 1,
+          "lambda_side_stack_ensure_for": 1
+        },
+        "branches": 139,
+        "numeric_conversions": 2
+      },
+      {
+        "kernel": "r7rs/fib2",
+        "engine": "mvp_lmd",
+        "function": "mvp_lmd_f1",
+        "signature": "d, i64, p:runtime, p:unit, d:c",
+        "instructions": 39,
+        "locals": 27,
+        "calls": {
+          "mvp_lmd_f1": 2
+        },
+        "branches": 9,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "r7rs/fibfp2",
+        "engine": "mvp_lmd_before",
+        "function": "mvp_lmd_f1",
+        "signature": "i64, p:runtime, p:unit, p:arguments, i64:argc, i64:self",
+        "instructions": 444,
+        "locals": 190,
+        "calls": {
+          "mvp_lmd_f1": 2,
+          "mvp_lmd_fail": 4,
+          "mvp_lmd_string_to_number": 2,
+          "mvp_lmd_number_to_string": 2,
+          "mvp_lmd_string_concat": 1,
+          "lambda_side_stack_ensure_for": 1
+        },
+        "branches": 139,
+        "numeric_conversions": 2
+      },
+      {
+        "kernel": "r7rs/fibfp2",
+        "engine": "mvp_lmd",
+        "function": "mvp_lmd_f1",
+        "signature": "d, i64, p:runtime, p:unit, d:c",
+        "instructions": 39,
+        "locals": 27,
+        "calls": {
+          "mvp_lmd_f1": 2
+        },
+        "branches": 9,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "r7rs/sum2",
+        "engine": "mvp_lmd_before",
+        "function": "mvp_lmd_f1",
+        "signature": "i64, p:runtime, p:unit, p:arguments, i64:argc, i64:self",
+        "instructions": 93,
+        "locals": 50,
+        "calls": {
+          "lambda_side_stack_ensure_for": 1
+        },
+        "branches": 21,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "r7rs/sum2",
+        "engine": "mvp_lmd",
+        "function": "mvp_lmd_f1",
+        "signature": "d, i64, p:runtime, p:unit, d:c",
+        "instructions": 29,
+        "locals": 24,
+        "calls": {},
+        "branches": 4,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "r7rs/tak2",
+        "engine": "mvp_lmd_before",
+        "function": "mvp_lmd_f1",
+        "signature": "i64, p:runtime, p:unit, p:arguments, i64:argc, i64:self",
+        "instructions": 909,
+        "locals": 426,
+        "calls": {
+          "lambda_item_adopt_scalar_home": 24,
+          "mvp_lmd_string_compare": 1,
+          "mvp_lmd_fail": 5,
+          "mvp_lmd_string_to_number": 5,
+          "mvp_lmd_f1": 4,
+          "lambda_side_stack_ensure_for": 1
+        },
+        "branches": 297,
+        "numeric_conversions": 5
+      },
+      {
+        "kernel": "r7rs/tak2",
+        "engine": "mvp_lmd",
+        "function": "mvp_lmd_f1",
+        "signature": "d, i64, p:runtime, p:unit, d:c, d:d, d:e",
+        "instructions": 62,
+        "locals": 46,
+        "calls": {
+          "mvp_lmd_f1": 3
+        },
+        "branches": 11,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "larceny/diviter",
+        "engine": "mvp_lmd_before",
+        "function": "mvp_lmd_f1",
+        "signature": "i64, p:runtime, p:unit, p:arguments, i64:argc, i64:self",
+        "instructions": 113,
+        "locals": 62,
+        "calls": {
+          "lambda_side_stack_ensure_for": 1
+        },
+        "branches": 25,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "larceny/diviter",
+        "engine": "mvp_lmd",
+        "function": "mvp_lmd_f1",
+        "signature": "d, i64, p:runtime, p:unit, d:c, d:d",
+        "instructions": 30,
+        "locals": 25,
+        "calls": {},
+        "branches": 4,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "larceny/divrec",
+        "engine": "mvp_lmd_before",
+        "function": "mvp_lmd_f1",
+        "signature": "i64, p:runtime, p:unit, p:arguments, i64:argc, i64:self",
+        "instructions": 213,
+        "locals": 105,
+        "calls": {
+          "mvp_lmd_f1": 1,
+          "lambda_side_stack_ensure_for": 1
+        },
+        "branches": 49,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "larceny/divrec",
+        "engine": "mvp_lmd_before",
+        "function": "mvp_lmd_f3",
+        "signature": "i64, p:runtime, p:unit, p:arguments, i64:argc, i64:self",
+        "instructions": 171,
+        "locals": 83,
+        "calls": {
+          "mvp_lmd_f3": 1,
+          "lambda_side_stack_ensure_for": 1
+        },
+        "branches": 40,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "larceny/divrec",
+        "engine": "mvp_lmd",
+        "function": "mvp_lmd_f1",
+        "signature": "d, i64, p:runtime, p:unit, d:c, d:d, d:e",
+        "instructions": 30,
+        "locals": 23,
+        "calls": {},
+        "branches": 5,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "larceny/divrec",
+        "engine": "mvp_lmd",
+        "function": "mvp_lmd_f3",
+        "signature": "d, i64, p:runtime, p:unit, d:c, d:d",
+        "instructions": 25,
+        "locals": 19,
+        "calls": {},
+        "branches": 5,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "kostya/collatz",
+        "engine": "mvp_lmd_before",
+        "function": "mvp_lmd_f1",
+        "signature": "i64, p:runtime, p:unit, p:arguments, i64:argc, i64:self",
+        "instructions": 107,
+        "locals": 61,
+        "calls": {
+          "fmod": 1,
+          "lambda_side_stack_ensure_for": 1
+        },
+        "branches": 23,
+        "numeric_conversions": 0
+      },
+      {
+        "kernel": "kostya/collatz",
+        "engine": "mvp_lmd",
+        "function": "mvp_lmd_f1",
+        "signature": "d, i64, p:runtime, p:unit, d:c",
+        "instructions": 55,
+        "locals": 42,
+        "calls": {
+          "fmod": 1
+        },
+        "branches": 10,
+        "numeric_conversions": 3
+      }
+    ]
+  }
+}

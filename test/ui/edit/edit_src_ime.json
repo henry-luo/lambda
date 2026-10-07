@@ -1,0 +1,28 @@
+{
+  "name": "IME in the source surface: preedit shows live, the commit is one undo step, a cancel leaves the line as it was",
+  "command": "edit",
+  "html": "test/ui/edit/sample.txt",
+  "working_copy": "temp/edit-ui/edit_src_ime.txt",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "second line"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "にほ", "caret": 2},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "second lineにほ"},
+    {"type": "ime_compose", "phase": "update", "preedit": "にほん", "caret": 3},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "second lineにほん"},
+    {"type": "ime_compose", "phase": "commit", "commit": "日本"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "second line日本"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "にほ"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_ime.txt", "contains": "\nsecond line日本\n"},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "か", "caret": 1},
+    {"type": "ime_compose", "phase": "cancel"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "か"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_ime.txt", "contains": "\nsecond line\n    indented"}
+  ]
+}

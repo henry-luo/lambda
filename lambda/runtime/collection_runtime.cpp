@@ -49,7 +49,9 @@ static bool list_reserve_capacity(List* list, int64_t required_capacity,
     // Arena-owned UI elements are not GC roots. Keep their child buffers in
     // the result arena so a collection cannot reclaim a live DOM child list.
     if (!arena) {
-        arena = ui_collection_arena();
+        Arena* ui_arena = ui_collection_arena();
+        // UI mode does not change ownership of temporary runtime arrays.
+        if (ui_arena && arena_owns(ui_arena, list)) arena = ui_arena;
     }
     // Markup parsers build Input-owned lists outside an EvalContext.
     if (!arena && input_allocation_context) {

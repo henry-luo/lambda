@@ -226,17 +226,8 @@ MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt) {
         log_error("js-mir arg-frame invariant: base without active root frame");
         abort();
     }
-    if (mt->arg_frame_base) return mt->arg_frame_base;
-    mt->arg_frame_base = jm_new_reg(mt, "js_arg_frame", MIR_T_I64);
-    mt->arg_frame_base_add = MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, mt->arg_frame_base),
-        MIR_new_reg_op(mt->ctx, mt->func_em->em.frame.root_base),
-        MIR_new_int_op(mt->ctx, 0));
-    // The semantic-root count is known only after liveness coloring. Keep one
-    // entry add and patch its displacement when the complete frame is fixed.
-    MIR_insert_insn_after(mt->ctx, mt->func_em->em.func_item,
-        mt->func_em->em.frame.anchor, mt->arg_frame_base_add);
-    return mt->arg_frame_base;
+    return em_deferred_root_span_base(&mt->func_em->em,
+        &mt->arg_frame_base, &mt->arg_frame_base_add);
 }
 
 void jm_emit_arg_frame_clear(JsMirTranspiler* mt, JsMirArgStackScope* scope) {

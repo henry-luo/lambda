@@ -224,7 +224,7 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
         float shadow_radii[4];
         for (int i = 0; i < 4; i++) shadow_radii[i] = fmaxf(0.0f, radii[i] + spread);
 
-        float exclude_params[8] = {
+        float exclude_params[RDT_CLIP_PARAM_COUNT] = {
             x, y, width, height,
             radii[0], radii[1], radii[2], radii[3]
         };

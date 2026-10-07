@@ -105,8 +105,10 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         input_context = saved_input_ctx;
         return false;
     }
-    dom_set_host_driven_loop(doc->js.host_driven_loop);
-    dom_set_document(doc);
+    if (!radiant_bind_document_script_host(uicon, doc)) {
+        input_context = saved_input_ctx;
+        return false;
+    }
     DocState* state = (DocState*)doc->state;
     // A host-loop turn is one browser task.  Defer debug state validation until
     // its DOM mutations commit, otherwise a timer building a large subtree
@@ -1705,7 +1707,6 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
             frame_driven = js_animation_frame_has_pending() != 0;
         }
-
         // Drain network completions on the UI thread before deciding whether
         // this tick needs a reflow/repaint.
         if (ui_context.document && ui_context.document->resource_manager) {
@@ -1835,7 +1836,7 @@ int view_lambda_document_transform_with_events(const char* document_file,
         enable_event_log, enable_state_dump, UI_APP_MODE_VIEW);
 }
 
-int edit_doc_in_window_with_events(const char* document_file,
+int edit_doc_in_window_with_events(const char* document_file, bool source_surface,
         const char* event_file, bool headless, const char** font_dirs,
         int font_dir_count, bool enable_event_log, bool enable_state_dump) {
     const LambdaDocumentTransformConfig* transform =
@@ -1844,7 +1845,11 @@ int edit_doc_in_window_with_events(const char* document_file,
         log_error("edit: the edit document transform is not configured");
         return -1;
     }
-    return view_doc_in_window_with_events_internal(document_file, transform, nullptr, 0,
+    // open_document(path, options) reads `options.source` (lambda.edit)
+    LambdaDocumentTransformOption options[1] = {
+        {"source", LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL, nullptr, true}};
+    return view_doc_in_window_with_events_internal(document_file, transform,
+        source_surface ? options : nullptr, source_surface ? 1 : 0,
         event_file, headless, font_dirs, font_dir_count,
         enable_event_log, enable_state_dump, UI_APP_MODE_EDIT);
 }

@@ -1,0 +1,65 @@
+<!doctype html>
+<style>button{height:24px}#report{width:80px;height:30px}</style>
+<style id="rules">
+.a { color: red; & .b { color: blue; } color: green; }
+@media all { .a { width: 40px; } }
+@supports (display: block) { .a { height: 30px; } }
+@scope (.a) { .b { color: purple; } }
+@property --size { syntax: "<length>"; inherits: false; initial-value: 10px; }
+@layer example { .a { background: lime; } }
+</style>
+<button id="check">check CSSOM</button><div id="report" class="a"><span class="b">text</span></div>
+<script>
+var report = document.getElementById('report');
+function check(name, callback) {
+    try { report.setAttribute('data-' + name, String(callback())); }
+    catch (error) { report.setAttribute('data-' + name, error.name); }
+}
+document.getElementById('check').addEventListener('click', function () {
+    var owner = document.getElementById('rules');
+    var sheet = owner.sheet;
+    var rules = sheet.cssRules;
+    var style = rules[0];
+    var child = style.cssRules[0];
+    var declarations = style.cssRules[1];
+    check('sheet', function () { return sheet === owner.sheet; });
+    check('sheet-list', function () { return document.styleSheets === document.styleSheets; });
+    check('sheet-index', function () { return document.styleSheets[1] === sheet; });
+    check('rules', function () { return rules === sheet.cssRules; });
+    check('rules-alias', function () { return rules === sheet.rules; });
+    check('rule', function () { return rules[0] === style; });
+    check('rule-map', function () { return new Set([rules[0], style]).size === 1; });
+    check('nested-list', function () { return style.cssRules === style.cssRules; });
+    check('nested-rule', function () { return style.cssRules[0] === child; });
+    check('declarations', function () { return style.cssRules[1] === declarations; });
+    check('style', function () { return style.style === style.style; });
+    check('style-distinct', function () { return style !== style.style; });
+    check('style-parent', function () { return style.style.parentRule === style; });
+    check('nested-parent', function () { return child.parentRule === style; });
+    check('nested-sheet', function () { return child.parentStyleSheet === sheet; });
+    check('declaration-parent', function () { return declarations.style.parentRule === declarations; });
+    check('sheet-expando', function () { sheet.note = 17; return owner.sheet.note === 17; });
+    check('rule-expando', function () { style.note = 19; return rules[0].note === 19; });
+    check('sheet-interface', function () { return sheet instanceof CSSStyleSheet && sheet instanceof StyleSheet; });
+    check('rule-interface', function () { return style instanceof CSSStyleRule && style instanceof CSSGroupingRule && style instanceof CSSRule; });
+    check('media-interface', function () { return rules[1] instanceof CSSMediaRule && rules[1] instanceof CSSConditionRule && rules[1] instanceof CSSGroupingRule; });
+    check('supports-interface', function () { return rules[2] instanceof CSSSupportsRule && rules[2] instanceof CSSConditionRule; });
+    check('scope-interface', function () { return rules[3] instanceof CSSScopeRule && rules[3] instanceof CSSGroupingRule; });
+    check('property-interface', function () { return rules[4] instanceof CSSPropertyRule && rules[4] instanceof CSSRule; });
+    check('layer-interface', function () { return rules[5] instanceof CSSLayerBlockRule && rules[5] instanceof CSSGroupingRule; });
+    check('declarations-interface', function () { return declarations instanceof CSSNestedDeclarations && declarations instanceof CSSRule; });
+    check('style-interface', function () { return style.style instanceof CSSStyleDeclaration; });
+    check('rule-tag', function () { return Object.prototype.toString.call(style) === '[object CSSStyleRule]'; });
+    check('constants', function () { return CSSRule.STYLE_RULE === 1 && style.STYLE_RULE === 1 && CSSRule.MEDIA_RULE === 4; });
+    var descriptors = new CSSStyleSheet();
+    descriptors.insertRule('@font-face {}', 0);
+    descriptors.insertRule('@page {}', 1);
+    check('empty-face-style', function () { return descriptors.cssRules[0].style === descriptors.cssRules[0].style && descriptors.cssRules[0].style.length === 0; });
+    check('empty-face-parent', function () { return descriptors.cssRules[0].style.parentRule === descriptors.cssRules[0]; });
+    check('empty-page-style', function () { return descriptors.cssRules[1].style === descriptors.cssRules[1].style && descriptors.cssRules[1].style.length === 0; });
+    check('empty-page-parent', function () { return descriptors.cssRules[1].style.parentRule === descriptors.cssRules[1]; });
+    check('list-live', function () { sheet.insertRule('.last { color: black; }', rules.length); return rules.length === 7; });
+    check('detached', function () { sheet.deleteRule(0); return style.parentRule === null && style.parentStyleSheet === null && child.parentRule === style; });
+    check('detached-style', function () { style.style.color = 'blue'; return style.style.color === 'blue' && style.style.parentRule === style; });
+});
+</script>

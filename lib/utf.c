@@ -495,3 +495,61 @@ bool utf_is_zwj_composition_base(uint32_t cp) {
            cp == 0x1F43B || cp == 0x1F426 ||   /* Bear, Bird */
            cp == 0x1F48B || cp == 0x2764;       /* Kiss Mark, Heart */
 }
+
+
+
+static uint32_t utf16_next_codepoint(Utf16Iterator* iter) {
+    if (iter->pos >= iter->len) return 0;
+    unsigned char lead = iter->data[iter->pos++];
+    if (lead < 0x80) return lead;
+    if ((lead & 0xE0) == 0xC0 && iter->pos < iter->len) {
+        unsigned char second = iter->data[iter->pos++];
+        return ((uint32_t)(lead & 0x1F) << 6) | (uint32_t)(second & 0x3F);
+    }
+    if ((lead & 0xF0) == 0xE0 && iter->pos + 1 < iter->len) {
+        unsigned char second = iter->data[iter->pos++];
+        unsigned char third = iter->data[iter->pos++];
+        return ((uint32_t)(lead & 0x0F) << 12) |
+               ((uint32_t)(second & 0x3F) << 6) |
+               (uint32_t)(third & 0x3F);
+    }
+    if ((lead & 0xF8) == 0xF0 && iter->pos + 2 < iter->len) {
+        unsigned char second = iter->data[iter->pos++];
+        unsigned char third = iter->data[iter->pos++];
+        unsigned char fourth = iter->data[iter->pos++];
+        return ((uint32_t)(lead & 0x07) << 18) |
+               ((uint32_t)(second & 0x3F) << 12) |
+               ((uint32_t)(third & 0x3F) << 6) |
+               (uint32_t)(fourth & 0x3F);
+    }
+    return lead;
+}
+
+bool utf16_iterator_next(Utf16Iterator* iter, uint16_t* out_unit) {
+    if (iter->pending_low_surrogate >= 0) {
+        *out_unit = (uint16_t)iter->pending_low_surrogate;
+        iter->pending_low_surrogate = -1;
+        return true;
+    }
+    if (iter->pos >= iter->len) return false;
+    uint32_t codepoint = utf16_next_codepoint(iter);
+    if (codepoint > 0xFFFF) {
+        uint32_t pair_value = codepoint - 0x10000;
+        *out_unit = (uint16_t)(0xD800 + (pair_value >> 10));
+        iter->pending_low_surrogate = (int)(0xDC00 + (pair_value & 0x3FF));
+        return true;
+    }
+    *out_unit = (uint16_t)codepoint;
+    return true;
+}
+
+int utf16_compare(const char* left, size_t left_len, const char* right, size_t right_len) {
+    Utf16Iterator l = {(const unsigned char*)left, (int64_t)left_len, 0, -1};
+    Utf16Iterator r = {(const unsigned char*)right, (int64_t)right_len, 0, -1};
+    uint16_t a, b;
+    for (;;) {
+        bool has_a = utf16_iterator_next(&l, &a), has_b = utf16_iterator_next(&r, &b);
+        if (!has_a || !has_b) return (int)has_a - (int)has_b;
+        if (a != b) return a < b ? -1 : 1;
+    }
+}

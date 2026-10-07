@@ -11,6 +11,7 @@
  * - Org-mode: * Header, ** Header
  */
 #include "block_common.hpp"
+#include "../markup_highlight.hpp"
 #include <cstdio>
 #include "../../../../lib/mem.h"
 
@@ -170,8 +171,17 @@ Item parse_header(MarkupParser* parser, const char* line) {
                 header_text[--text_len] = '\0';
             }
 
-            // Parse inline content
+            // Parse inline content; in highlight mode the copy maps to the line
+            const char* source_line = parser->lines[parser->current_line];
+            bool in_line = source_line && text_start >= source_line &&
+                           text_start <= source_line + strlen(source_line);
+            highlight_begin_inline(parser);
+            if (in_line) {
+                highlight_add_segment(parser, 0, parser->current_line,
+                                      (int)(text_start - source_line)); // INT_CAST_OK: within one line
+            }
             Item content = parse_inline_spans(parser, header_text);
+            highlight_end_inline(parser);
             if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
                 list_push((List*)header, content);
             }

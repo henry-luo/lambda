@@ -73,6 +73,7 @@ const char* latex_environments[] = {
     "verse", "center", "flushleft", "flushright", "verbatim", "tabular", "array",
     "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "cases",
     "align", "aligned", "equation", "eqnarray", "gather", "multline", "split",
+    "IEEEeqnarray",
     "figure", "table", "minipage", "theorem", "proof", "definition",
     "example", "remark", "note", "warning", NULL
 };
@@ -80,13 +81,15 @@ const char* latex_environments[] = {
 // Math environments
 const char* math_environments[] = {
     "equation", "eqnarray", "align", "alignat", "aligned", "gather", "multline", "split",
+    "IEEEeqnarray",
     "cases", "array", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", NULL
 };
 
 // Raw text environments
 const char* raw_text_environments[] = {
     "verbatim", "lstlisting", "minted", "alltt", "Verbatim", "BVerbatim",
-    "LVerbatim", "SaveVerbatim", "VerbatimOut", "fancyvrb", "comment", NULL
+    "LVerbatim", "SaveVerbatim", "VerbatimOut", "fancyvrb", "comment",
+    "filecontents", "filecontents*", "luacode", "luacode*", NULL
 };
 
 // ── Binary search infrastructure ───────────────────────────────────

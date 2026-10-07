@@ -136,6 +136,34 @@ TEST_F(PdfWriterTest, SetCompressionMode) {
     HPDF_Free(doc);
 }
 
+TEST_F(PdfWriterTest, OutlineHierarchyAndUnicodeTitles) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc);
+    ASSERT_EQ(HPDF_Doc_AddNamedDestination(doc, "chapter", page, 0, 100), HPDF_OK);
+    ASSERT_EQ(HPDF_Doc_AddNamedDestination(doc, "section", page, 0, 50), HPDF_OK);
+    ASSERT_EQ(HPDF_Doc_AddOutline(doc, "Chapter", "chapter", 0), HPDF_OK);
+    ASSERT_EQ(HPDF_Doc_AddOutline(doc, "Ενότητα", "section", 2), HPDF_OK);
+    const char* path = "temp/pdf_writer_outlines.pdf";
+    ASSERT_EQ(HPDF_SaveToFile(doc, path), HPDF_OK);
+    EXPECT_TRUE(file_contains(path, "/Outlines"));
+    EXPECT_TRUE(file_contains(path, "/Parent "));
+    EXPECT_TRUE(file_contains(path, "/Count 1"));
+    EXPECT_TRUE(file_contains(path, "FEFF"));
+    HPDF_Free(doc);
+    remove(path);
+}
+
+TEST_F(PdfWriterTest, UnresolvedOutlineRejectsSave) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    ASSERT_NE(doc, nullptr);
+    ASSERT_NE(HPDF_AddPage(doc), nullptr);
+    ASSERT_EQ(HPDF_Doc_AddOutline(doc, "Missing", "missing", 0), HPDF_OK);
+    EXPECT_NE(HPDF_SaveToFile(doc, "temp/pdf_writer_unresolved_outline.pdf"), HPDF_OK);
+    EXPECT_NE(HPDF_Doc_AddOutline(doc, "Too deep", "missing", 33), HPDF_OK);
+    HPDF_Free(doc);
+}
+
 /*---------------------------------------------------------------------------*/
 /*  Page Management Tests                                                    */
 /*---------------------------------------------------------------------------*/

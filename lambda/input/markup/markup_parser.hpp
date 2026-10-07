@@ -150,6 +150,9 @@ public:
     // a single DOM tree using this parser. nullptr if no HTML encountered.
     Html5Parser* html5_parser_;
 
+    // Highlight mode only (markup_highlight.hpp): collects construct spans.
+    struct MarkupSpanSink* span_sink;
+
     // ========================================================================
     // Construction / Destruction
     // ========================================================================

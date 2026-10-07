@@ -14,6 +14,7 @@
  * Match inner-most first (closest matching pair).
  */
 #include "inline_common.hpp"
+#include "../markup_highlight.hpp"
 extern "C" {
 #include "../../../../lib/log.h"
 #include "../../../../lib/str.h"
@@ -546,6 +547,7 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
 
     // Parse inner content (may contain more emphasis)
     char* content = mem_strndup(content_start, content_len, MEM_CAT_INPUT_MARKUP);
+    highlight_set_child_origin(parser, content_start);
     if (content) {
         Item inner = parse_inline_spans(parser, content);
         if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {

@@ -12,6 +12,7 @@
  * Supports nested lists with proper indentation handling.
  */
 #include "block_common.hpp"
+#include "../markup_highlight.hpp"
 #include <cstdio>
 #include "../../../../lib/mem.h"
 #include "lib/arraylist.h"
@@ -588,7 +589,8 @@ static Item build_nested_list_from_content(MarkupParser* parser, const char* con
 Item parse_nested_list_content(MarkupParser* parser, int content_column) {
     if (!parser) return Item{.item = ITEM_ERROR};
 
-    // Collect all lines belonging to this list item
+    // Collect all lines belonging to this list item, one per source line
+    const int64_t first_source_line = parser->current_line;
     ArrayList* content_lines = arraylist_new(16);
     bool had_blank_line = false;
 
@@ -681,6 +683,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
     parser->state.list_depth = 0;
 
     // Set up parser to process the content lines
+    highlight_push_lines(parser, lines_array, num_lines, first_source_line);
     parser->lines = lines_array;
     parser->line_count = num_lines;
     parser->current_line = 0;
@@ -725,6 +728,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
 
     // Restore parser state
     parser->lines = saved_lines;
+    highlight_pop_lines(parser, lines_array);
     parser->line_count = saved_line_count;
     parser->current_line = saved_current_line;
     parser->state.list_depth = saved_list_depth;
@@ -944,6 +948,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 // Add first line content (properly stripped to preserve code block indentation)
                 // first_line_stripped is already allocated by strip_to_column_with_tabs or strdup
                 bool first_line_empty = !first_line_stripped || !*first_line_stripped;
+                const int64_t first_source_line = parser->current_line + (first_line_empty ? 1 : 0);
                 if (!first_line_empty) {
                     arraylist_append(content_lines, first_line_stripped);
                 } else {
@@ -1084,6 +1089,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     bool saved_parsing_list_content = parser->state.parsing_list_content;
                     parser->state.parsing_list_content = true;
 
+                    highlight_push_lines(parser, lines_array, num_lines, first_source_line);
                     parser->lines = lines_array;
                     parser->line_count = num_lines;
                     parser->current_line = 0;
@@ -1167,6 +1173,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
                     // Restore parser state
                     parser->lines = saved_lines;
+                    highlight_pop_lines(parser, lines_array);
                     parser->line_count = saved_line_count;
                     parser->current_line = saved_current_line;
                     parser->state.list_depth = saved_list_depth;

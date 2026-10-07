@@ -328,7 +328,9 @@ int view_lambda_document_transform_with_events(const char* document_file,
 // Open a local document in the lambda.edit authoring application. The window
 // runs in edit app mode: Escape reaches the document, and a close request
 // consults the session's close guard (Radiant_Design_Edit_Mode §7-§8).
-int edit_doc_in_window_with_events(const char* document_file,
+// `source_surface` opens any file in the source editor
+// (Radiant_Design_Source_Editor CED20).
+int edit_doc_in_window_with_events(const char* document_file, bool source_surface,
     const char* event_file, bool headless, const char** font_dirs,
     int font_dir_count, bool enable_event_log, bool enable_state_dump);
 // Edit-application window decisions. Each acts only when `doc` is the

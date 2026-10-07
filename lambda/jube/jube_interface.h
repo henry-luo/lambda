@@ -27,9 +27,13 @@ bool jube_type_has_interface(const JubeTypeDef* type);
 // Record-driven dispatch. Each returns 1 when the receiver's type has a
 // compiled interface and the operation was handled (out is set), 0 when the
 // receiver is not a declared host object.
+// Lambda projection and JS prototype access select their surface explicitly.
 int jube_member_get(Item receiver, Item key, Item* out);
+int jube_member_get_js(Item target, Item key, Item receiver, Item* out);
 int jube_member_projected_get(Item receiver, Item key, Item* out);
 int jube_member_set(Item receiver, Item key, Item value, Item* out);
+// JS Set completes with a boolean or an error; Lambda Set returns the assigned value.
+int jube_member_set_js(Item target, Item key, Item value, Item receiver, Item* out);
 int jube_member_define_own(Item receiver, Item key, Item descriptor, Item* out);
 int jube_member_has(Item receiver, Item key, Item* out);
 int jube_member_delete(Item receiver, Item key, Item* out);

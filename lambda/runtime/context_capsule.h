@@ -56,6 +56,8 @@ typedef enum ContextCapsuleId {
     CONTEXT_CAPSULE_SYSINFO,
     // UI result-arena attributes may retain GC values beyond one evaluation.
     CONTEXT_CAPSULE_UI_ATTRIBUTE_ROOTS,
+    // dom and CSSOM weak identity follows the evaluator across quiescent handoff.
+    CONTEXT_CAPSULE_DOM_WRAPPER_CACHE,
     CONTEXT_CAPSULE_COUNT
 } ContextCapsuleId;
 

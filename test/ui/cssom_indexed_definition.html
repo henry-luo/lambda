@@ -1,0 +1,44 @@
+<!doctype html>
+<style id="rules">.item { color: red; width: 10px; } .other { color: blue; }</style>
+<button id="check">check indexed definitions</button><div id="report" class="item"></div>
+<script>
+function check(name, callback) {
+    var report = document.getElementById('report');
+    try { report.setAttribute('data-' + name, String(callback())); }
+    catch (error) { report.setAttribute('data-' + name, error.name); }
+}
+document.getElementById('check').addEventListener('click', function () {
+    var sheet = document.getElementById('rules').sheet;
+    var style = sheet.cssRules[0].style, list = sheet.cssRules;
+    var nodes = document.querySelectorAll('.item'), children = document.body.children;
+    check('style-define-supported', function () { return Reflect.defineProperty(style, '0', {value:'width'}) === false && style[0] === 'color'; });
+    check('style-define-unsupported', function () { return Reflect.defineProperty(style, '99', {value:'extra'}) === false && style[99] === undefined; });
+    check('style-define-generic', function () { return Reflect.defineProperty(style, '98', {}) === false && style[98] === undefined; });
+    check('style-define-accessor', function () { return Reflect.defineProperty(style, '97', {get:function(){return 'extra';}}) === false && style[97] === undefined; });
+    check('style-object-define', function () { try { Object.defineProperty(style, '96', {value:'extra'}); } catch(error) { return error.name === 'TypeError' && style[96] === undefined; } return false; });
+    check('style-set-unsupported', function () { return Reflect.set(style, '95', 'extra') === false && style[95] === undefined; });
+    check('style-strict-unsupported', function () { try { (function(){'use strict'; style[94] = 'extra';})(); } catch(error) { return error.name === 'TypeError' && style[94] === undefined; } return false; });
+    check('list-define-supported', function () { return Reflect.defineProperty(list, '0', {value:null}) === false && list[0].type === 1; });
+    check('list-define-unsupported', function () { return Reflect.defineProperty(list, '99', {value:null}) === false && list[99] === undefined; });
+    check('list-set-unsupported', function () { return Reflect.set(list, '98', 'extra') === false && list[98] === undefined; });
+    check('nodes-define-unsupported', function () { return Reflect.defineProperty(nodes, '99', {value:null}) === false && nodes[99] === undefined; });
+    check('children-define-unsupported', function () { return Reflect.defineProperty(children, '99', {value:null}) === false && children[99] === undefined; });
+    check('noncanonical-define', function () { return Reflect.defineProperty(style, '01', {value:false,configurable:true}) === true && style['01'] === false && style[1] === 'width'; });
+    check('large-define', function () { return Reflect.defineProperty(style, '4294967295', {value:false,configurable:true}) === true && style['4294967295'] === false; });
+    check('alternate-receiver', function () { var receiver = {}; return Reflect.set(style, '93', false, receiver) === true && receiver[93] === false && style[93] === undefined; });
+    check('descriptor-order', function () { var seen = '', descriptor = {}; Object.defineProperty(descriptor, 'enumerable', {get:function(){seen+='e'; return true;}}); Object.defineProperty(descriptor, 'value', {get:function(){seen+='v';return 'extra';}}); return Reflect.defineProperty(style, '92', descriptor) === false && seen === 'ev' && style[92] === undefined; });
+    check('descriptor-error', function () { try { Reflect.defineProperty(style, '91', {get:3}); } catch(error) { return error.name === 'TypeError' && style[91] === undefined; } return false; });
+    check('descriptor-primitive', function () { try { Reflect.defineProperty(style, '90', 1); } catch(error) { return error.name === 'TypeError' && style[90] === undefined; } return false; });
+    check('maximum-index', function () { return Reflect.defineProperty(style, '4294967294', {value:'extra'}) === false && style[4294967294] === undefined; });
+    check('negative-zero-key', function () { return Reflect.defineProperty(style, '-0', {value:false,configurable:true}) === true && style['-0'] === false && style[0] === 'color'; });
+    check('symbol-key', function () { var key = Symbol('0'); return Reflect.defineProperty(style, key, {value:false,configurable:true}) === true && style[key] === false; });
+    check('alternate-supported', function () { var receiver = {}; return Reflect.set(style, '0', false, receiver) === false && !Object.prototype.hasOwnProperty.call(receiver, '0') && style[0] === 'color'; });
+    check('key-before-descriptor', function () { var seen = '', key = {toString:function(){seen+='k';return '89';}}, descriptor = {get value(){seen+='v';return 3;}}; return Reflect.defineProperty(style, key, descriptor) === false && seen === 'kv' && style[89] === undefined; });
+    check('mixed-descriptor-order', function () { var seen = '', descriptor = {get enumerable(){seen+='e';return true;},get value(){seen+='v';return 3;},get get(){seen+='g';return undefined;}}; try { Reflect.defineProperty(style, '88', descriptor); } catch(error) { return error.name === 'TypeError' && seen === 'evg' && style[88] === undefined; } return false; });
+    check('descriptor-abrupt', function () { var sentinel = {}, descriptor = {get enumerable(){throw sentinel;}}; try { Reflect.defineProperty(style, '87', descriptor); } catch(error) { return error === sentinel && style[87] === undefined; } return false; });
+    check('descriptor-host-object', function () { return Reflect.defineProperty(style, '86', list) === false && style[86] === undefined; });
+    check('sheet-no-indexed', function () { return sheet[0] === undefined && !('0' in sheet) && Object.getOwnPropertyDescriptor(sheet, '0') === undefined; });
+    check('sheet-numeric-define', function () { return Reflect.defineProperty(sheet, '99', {value:'extra',writable:true,configurable:true}) === true && sheet[99] === 'extra' && Object.getOwnPropertyDescriptor(sheet, '99').value === 'extra'; });
+    check('sheet-numeric-set', function () { return Reflect.set(sheet, '98', false) === true && sheet[98] === false; });
+});
+</script>

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="54" viewBox="0 0 120 54">
+  <defs>
+    <g id="hero" stroke="#283532" stroke-width="1.5" stroke-linejoin="round">
+      <path fill="#ef6248" d="M11 25Q5 27 5 36L12 37 15 28Z"/>
+      <path fill="#fff6df" d="M5 35Q1 37 4 41Q8 44 11 39L11 36Z"/>
+      <path fill="#ef6248" d="M26 26Q32 26 35 34L30 38 23 29Z"/>
+      <path fill="#fff6df" d="M31 34Q35 32 37 35L38 39Q35 43 31 40Z"/>
+      <path fill="#e7553f" d="M12 24L25 24 29 35 10 35Z"/>
+      <path fill="#2c7795" d="M12 28L16 28 16 34 23 34 23 28 27 28 29 43 10 43Z"/>
+      <circle cx="15" cy="35" r="1.4" fill="#ffd35f" stroke="none"/>
+      <circle cx="25" cy="35" r="1.4" fill="#ffd35f" stroke="none"/>
+      <path fill="#f1bb83" d="M12 10Q7 17 12 23Q19 29 28 23L29 21Q36 22 35 17L30 15 29 10Z"/>
+      <path fill="#725038" d="M10 12L17 12 16 18 13 17 13 22 10 20Z" stroke="none"/>
+      <ellipse cx="14" cy="20" rx="3" ry="3.5" fill="#f1bb83"/>
+      <path d="M24 16L24 19" stroke-width="2" stroke-linecap="round"/>
+      <path d="M22 22Q26 24 30 21" fill="none" stroke-width="2" stroke-linecap="round"/>
+      <path fill="#ef6248" d="M8 12Q7 3 17 2L26 2Q31 3 30 10L35 10 36 13 13 14Z"/>
+      <path d="M10 9Q11 4 18 4" fill="none" stroke="#ff9673" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="23" cy="7.5" r="4.5" fill="#fff6df" stroke="none"/>
+      <path d="M21.5 4.5L24.4 10.3 26 10.3M22.7 7L20.5 10.3" fill="none" stroke="#dd533c" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+  </defs>
+  <g stroke="#283532" stroke-width="1.5" stroke-linejoin="round">
+    <path fill="#2c7795" d="M11 39L19 39 18 49 11 49ZM21 39L28 39 29 49 22 49Z"/>
+    <path fill="#795338" d="M10 47L18 47 19 52 7 52Q5 48 10 47ZM23 47L30 47Q35 48 34 52L22 52Z"/>
+    <use href="#hero"/>
+  </g>
+  <g transform="translate(40 0)" stroke="#283532" stroke-width="1.5" stroke-linejoin="round">
+    <path fill="#2c7795" d="M11 39L20 40 14 47 7 46ZM21 39L28 39 32 46 25 48Z"/>
+    <path fill="#795338" d="M7 44L15 46 13 51 2 48Q0 45 7 44ZM26 46L32 44Q37 45 38 49L27 52Z"/>
+    <use href="#hero"/>
+  </g>
+  <g transform="translate(80 0)" stroke="#283532" stroke-width="1.5" stroke-linejoin="round">
+    <path fill="#2c7795" d="M11 39L19 40 14 46 8 43ZM21 39L28 39 27 46 20 46Z"/>
+    <path fill="#795338" d="M7 41L14 44 11 48 2 44Q1 41 7 41ZM21 44L28 44Q33 45 33 49L20 49Z"/>
+    <use href="#hero"/>
+  </g>
+</svg>

@@ -391,7 +391,10 @@ static bool render_clip_push_shape_scope(RasterRenderContext* rdcon, RenderClipS
     if (!clip_path) {
         return false;
     }
-    rc_push_clip(rdcon, clip_path, nullptr);
+    RdtMatrix transform;
+    const RdtMatrix* matrix = shape->transformed && rdt_matrix_inverse(&shape->inverse_transform, &transform)
+        ? &transform : nullptr;
+    rc_push_clip(rdcon, clip_path, matrix);
     rdt_path_free(clip_path);
 
     scope->shape = lam::up(shape);
@@ -436,7 +439,7 @@ RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock
     float abs_y = parent_y + block->y * scale;
     RdtPath* css_path = render_clip_parse_path_function(clip_str, abs_x, abs_y);
     if (css_path) {
-        rc_push_clip(rdcon, css_path, nullptr);
+        rc_push_clip(rdcon, css_path, render_state_current_transform(rdcon));
         rdt_path_free(css_path);
         scope.active = true;
         log_debug("[CLIP] CSS clip-path path(): %s on element %s", clip_str, block->node_name());
@@ -446,6 +449,12 @@ RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock
     ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
     ClipShape* css_shape = render_clip_parse_css_shape(&rdcon->scratch, &mem, clip_str,
                                                        elem_w, elem_h, abs_x, abs_y);
+    const RdtMatrix* matrix = render_state_current_transform(rdcon);
+    if (css_shape && matrix) {
+        // Keep vector and CPU clips in the same transformed coordinate system.
+        css_shape->transformed = rdt_matrix_inverse(matrix, &css_shape->inverse_transform);
+        if (!css_shape->transformed) css_shape = nullptr;
+    }
     if (!render_clip_push_owned_shape(rdcon, &scope, css_shape, &mem)) return scope;
     log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
     return scope;

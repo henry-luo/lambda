@@ -64,6 +64,10 @@ fn serialize_element(el) {
     if (el.math_raw_markup != null) {
         // SVG arrow boxes retain MathLive's exact markup alongside live elements.
         string(el.math_raw_markup)
+    } else if (tag == "style") {
+        // HTML style is raw text: entity-escaping '>' changes CSS selectors.
+        let css = join(content(el), "") ^ { "" }
+        "<style" ++ serialize_attrs(el) ++ ">" ++ replace(css, "<", "\\3c ") ++ "</style>"
     } else if (is_transparent_math_boundary(el)) {
         serialize_children(el)
     } else if (is_void_element(tag)) {

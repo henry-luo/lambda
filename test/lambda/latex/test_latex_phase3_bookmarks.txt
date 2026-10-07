@@ -1,0 +1,7 @@
+{
+  unsupported: 0,
+  explicit: true,
+  numbered: true,
+  hierarchy: true,
+  destination: true
+}

@@ -1,0 +1,24 @@
+{
+  "name": "a selection reaching past the rendered window stays whole in the model: typing replaces all of it, and the track pages the window",
+  "command": "edit",
+  "html": "temp/edit-ui/window_select.txt",
+  "prepare": ["python3", "test/ui/edit/gen_large_source.py", "temp/edit-ui/window_select.txt", "300"],
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "line 000002"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_combo", "key": "PageDown", "mods_str": "shift"},
+    {"type": "key_combo", "key": "PageDown", "mods_str": "shift"},
+    {"type": "key_combo", "key": "PageDown", "mods_str": "shift"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 95, Col 1"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "line 000002"},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 2, Col 2"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/window_select.txt", "contains": "line 000001: the quick brown fox jumps over the lazy dog\nXline 000095:"},
+    {"type": "assert_file", "path": "temp/edit-ui/window_select.txt", "not_contains": "line 000050:"},
+    {"type": "click", "x": 993, "y": 600},
+    {"type": "assert_text", "target": {"selector": ".src-gutter"}, "contains": "40"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "line 000001:"}
+  ]
+}

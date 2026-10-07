@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>DOM mutation overflow retained full layout</title>
+<title>Large DOM mutation batch retains interaction state</title>
 <style>
   body { font-family: sans-serif; margin: 24px; }
   #name { width: 220px; padding: 8px; border: 2px solid #333; }
@@ -30,7 +30,7 @@
         row.textContent = 'row ' + i;
         items.appendChild(row);
       }
-      status.textContent = 'overflow mutation complete';
+      status.textContent = 'large mutation complete';
     });
   </script>
 </body>

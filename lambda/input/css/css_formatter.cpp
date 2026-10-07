@@ -1,6 +1,7 @@
 #include "css_formatter.hpp"
 #include "css_parser.hpp"
 #include "css_style.hpp"
+#include "../../../lib/str.h"
 #include "../../../lib/stringbuf.h"
 #include <stdio.h>
 #include <string.h>
@@ -85,24 +86,53 @@ static void append_space(CssFormatter* formatter) {
     }
 }
 
-// Append a CSS identifier with proper escaping for characters that need it
+// CSSOM identifier serialization is shared by selectors, page preludes and CSS.escape.
+void css_append_identifier(StringBuf* output, const char* text, size_t length) {
+    if (!output || !text) return;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char ch = (unsigned char)text[i];
+        bool digit = ch >= '0' && ch <= '9';
+        if (!ch) stringbuf_append_utf8(output, 0xfffd);
+        else if (ch <= 0x1f || ch == 0x7f ||
+                (digit && (i == 0 || (i == 1 && text[0] == '-')))) {
+            stringbuf_append_format(output, "\\%x ", ch);
+        } else if ((i == 0 && ch == '-' && length == 1) ||
+                !(ch >= 0x80 || ch == '-' || ch == '_' || digit ||
+                  (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))) {
+            stringbuf_append_char(output, '\\');
+            stringbuf_append_char(output, (char)ch);
+        } else stringbuf_append_char(output, (char)ch);
+    }
+}
+
 static void append_css_ident(CssFormatter* formatter, const char* ident) {
-    if (!ident) return;
-    for (const char* p = ident; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        // Characters that must be escaped in CSS identifiers
-        if (c == '@' || c == '!' || c == '#' || c == '$' || c == '%' ||
-            c == '&' || c == '*' || c == '(' || c == ')' || c == '+' ||
-            c == ',' || c == '/' || c == ';' || c == '<' || c == '=' ||
-            c == '>' || c == '?' || c == '[' || c == ']' || c == '^' ||
-            c == '`' || c == '{' || c == '|' || c == '}' || c == '~') {
-            char esc[3] = {'\\', (char)c, '\0'};
-            stringbuf_append_str(formatter->output, esc);
-        } else {
-            char ch[2] = {(char)c, '\0'};
-            stringbuf_append_str(formatter->output, ch);
+    if (ident) css_append_identifier(formatter->output, ident, strlen(ident));
+}
+
+const char* css_format_page_selector_tokens(const CssToken* tokens, int start, int end, Pool* pool) {
+    CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+    if (!formatter) return nullptr;
+    bool pseudo = false;
+    for (int pos = start; pos < end; pos++) {
+        const CssToken* token = &tokens[pos];
+        if (token->type == CSS_TOKEN_COLON) {
+            stringbuf_append_str(formatter->output, ":");
+            pseudo = true;
+        } else if (token->type == CSS_TOKEN_COMMA) {
+            stringbuf_append_str(formatter->output, ", ");
+            pseudo = false;
+        } else if (token->type == CSS_TOKEN_IDENT) {
+            if (pseudo) {
+                const char* names[] = {"first", "left", "right", "blank"};
+                for (const char* name : names) {
+                    if (str_icmp_cstr(token->value, name) == 0)
+                        stringbuf_append_str(formatter->output, name);
+                }
+            } else append_css_ident(formatter, token->value);
         }
     }
+    String* result = stringbuf_to_string(formatter->output);
+    return result ? result->chars : nullptr;
 }
 
 // Helper function to determine if a property uses comma-separated lists

@@ -1,0 +1,10 @@
+{
+  unsupported: 0,
+  panels: true,
+  parent: true,
+  captionof: true,
+  references: true,
+  formatting: true,
+  no_blank_separators: true,
+  unnumbered: true
+}

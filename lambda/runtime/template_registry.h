@@ -73,6 +73,8 @@ typedef struct TemplateEntry {
     // A compact prefilter for the exact handler list. Hash collisions only
     // cause the exact lookup below to run; they can never hide a handler.
     uint64_t handler_event_mask;
+    // exact bits by template_continuous_event_index for the handlers declared
+    uint32_t handler_continuous_mask;
 
     // A T0 view/edit entry has no generated function pointer. The interpreter
     // evaluates its body against the active `~` context when apply()
@@ -98,6 +100,9 @@ typedef struct TemplateRegistry {
     // walk without changing the exact per-entry handler contract.
     uint64_t author_event_mask;
     uint64_t behavior_event_mask;
+    // Exact, one bit per continuous event (template_continuous_event_index):
+    // set when an author template declares that event's handler.
+    uint32_t author_continuous_mask;
 } TemplateRegistry;
 
 // Initialize a new template registry
@@ -159,6 +164,15 @@ bool template_registry_may_have_author_handler(TemplateRegistry* registry,
                                                const char* event_name);
 bool template_registry_may_have_behavior_handler(TemplateRegistry* registry,
                                                  const char* event_name);
+
+// Continuous input events (pointer motion, scroll, wheel, drag-over) arrive
+// many times per gesture. Index of `event_name` in that set, or -1.
+int template_continuous_event_index(const char* event_name);
+// Exact: whether an author template declares a handler for the continuous
+// event `event_name`. A document whose own templates do not declare one never
+// builds an event record or walks ancestors for it (ES5v2).
+bool template_registry_has_author_continuous_handler(TemplateRegistry* registry,
+                                                     const char* event_name);
 
 // Best behavior template governing `target` that handles `event_name`, or NULL.
 // Unlike template_registry_match, this never consults author templates.

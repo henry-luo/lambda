@@ -6,6 +6,7 @@
 #include "../../../lib/arena.h"
 #include "../../../lib/log.h"
 #include "../../../lib/time_util.h"
+#include "../../../lib/mem_grow.hpp"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -23,6 +24,12 @@ typedef struct DomNodeRecord {
     bool retiring;
     size_t primary_size;
     Element* backing_source;
+    Item backing_root;
+    void* backing_gc;
+    void* borrowed_data;
+    Item* borrowed_items;
+    bool borrows_data;
+    bool borrows_items;
     uint32_t pins[DOM_NODE_PIN_REASON_COUNT];
     struct DomNodeRecord* bucket_next;
     struct DomNodeRecord* all_next;
@@ -75,6 +82,8 @@ __attribute__((weak)) void view_pool_release_detached_form_props(DomNode*) {}
 __attribute__((weak)) void form_control_release_prop(DomElement*) {}
 __attribute__((weak)) void dom_range_refresh_lifecycle_pins(DomDocument*) {}
 __attribute__((weak)) void dom_retire_release_render_result(DomDocument*, Item) {}
+extern "C" __attribute__((weak)) void* dom_retain_backing_root(DomDocument*, Item*, void*) { return nullptr; }
+extern "C" __attribute__((weak)) void dom_release_backing_root(void*, Item*) {}
 extern "C" __attribute__((weak)) void dom_expando_attachment_changed(
     DomDocument*, DomNode*, bool) {}
 
@@ -163,8 +172,46 @@ bool dom_lifecycle_init(DomDocument* doc) {
     return true;
 }
 
+static void dom_record_release_backing_root(DomNodeRecord* record) {
+    if (record->backing_gc) {
+        dom_release_backing_root(record->backing_gc, &record->backing_root);
+        if (record->current_owner) record->address->node_flags &= ~DOM_NODE_FLAG_GC_BACKING;
+    }
+    record->backing_gc = nullptr;
+    record->backing_root = ItemNull;
+}
+
+void dom_lifecycle_release_backing_roots(DomDocument* doc) {
+    DomNodeRegistry* registry = dom_registry(doc);
+    if (!registry) return;
+    for (DomNodeRecord* record = registry->all_records; record; record = record->all_next) {
+        dom_record_release_backing_root(record);
+    }
+}
+
+static void dom_record_set_backing_value(DomDocument* doc, DomNodeRecord* record,
+                                        Item value, void* owner_gc = nullptr) {
+    dom_record_release_backing_root(record);
+    Element* source = get_type_id(value) == LMD_TYPE_ELEMENT ? value.element : nullptr;
+    record->backing_source = source;
+    record->backing_root = value;
+    // native nodes can outlive both their parent and the model's next update.
+    record->backing_gc = dom_retain_backing_root(doc, &record->backing_root, owner_gc);
+    if (record->backing_gc) {
+        if (source && record->address->is_element()) {
+            DomElement* element = record->address->as_element();
+            record->borrowed_data = element->elmt.data;
+            record->borrowed_items = element->elmt.items;
+            record->borrows_data = record->borrowed_data == source->data;
+            record->borrows_items = record->borrowed_items == source->items;
+        }
+        record->address->node_flags |= DOM_NODE_FLAG_GC_BACKING;
+    }
+}
+
 void dom_lifecycle_destroy(DomDocument* doc) {
     if (!doc) return;
+    dom_lifecycle_release_backing_roots(doc);
     dom_retire_dequeue(dom_registry(doc));
     // Registry records are document-pool allocations and disappear in the
     // immediately following pool destruction; clearing the owner blocks any
@@ -174,7 +221,8 @@ void dom_lifecycle_destroy(DomDocument* doc) {
 
 static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
         Arena* primary_arena, uint32_t id, DomNodeType type,
-        size_t primary_size, bool recyclable, Element* backing_source) {
+        size_t primary_size, bool recyclable, Item backing_value,
+        void* backing_gc = nullptr) {
     DomNodeRegistry* registry = dom_registry(doc);
     if (!registry || !node || !id || !primary_size) return false;
     if (recyclable && !primary_arena) {
@@ -200,7 +248,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
         record->candidate = false;
         record->current_owner = true;
         record->primary_size = primary_size;
-        record->backing_source = backing_source;
+        dom_record_set_backing_value(doc, record, backing_value, backing_gc);
         registry->stats.reused_addresses++;
         registry->stats.registered_nodes++;
         return true;
@@ -219,7 +267,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
     record->recyclable = recyclable;
     record->current_owner = true;
     record->primary_size = primary_size;
-    record->backing_source = backing_source;
+    dom_record_set_backing_value(doc, record, backing_value, backing_gc);
     size_t bucket = dom_node_bucket(registry, node);
     record->bucket_next = registry->buckets[bucket];
     registry->buckets[bucket] = record;
@@ -235,7 +283,7 @@ bool dom_node_registry_register(DomDocument* doc, DomNode* node,
     Arena* primary_arena = dom_node_primary_arena(doc, node);
     return dom_node_registry_register_owned(doc, node, primary_arena,
         node ? node->id : 0, node ? node->node_type : DOM_NODE_ELEMENT,
-        primary_size, recyclable, nullptr);
+        primary_size, recyclable, ItemNull);
 }
 
 bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
@@ -248,6 +296,8 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
         log_error("DOM_LIFECYCLE_TRANSFER: source record is stale for node %p", (void*)node);
         return false;
     }
+    // adoption changes document ownership, never the physical source heap.
+    dom_node_registry_refresh_backing(source, node);
     DomNodeRecord* destination_record = dom_record_find(dom_registry(destination), node);
     if (destination_record && destination_record->state != DOM_NODE_RETIRED) {
         if (destination_record->current_owner) {
@@ -269,11 +319,12 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
         destination_record->candidate = false;
         destination_record->current_owner = true;
         destination_record->primary_size = source_record->primary_size;
-        destination_record->backing_source = source_record->backing_source;
+        dom_record_set_backing_value(destination, destination_record,
+            source_record->backing_root, source_record->backing_gc);
     } else if (!dom_node_registry_register_owned(destination, node,
                    source_record->primary_arena, *destination_id, source_record->type,
                    source_record->primary_size, source_record->recyclable,
-                   source_record->backing_source)) {
+                   source_record->backing_root, source_record->backing_gc)) {
         return false;
     }
     // The source registry may still own wrapper/expando pins that must unpin
@@ -281,18 +332,25 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
     source_record->candidate = false;
     source_record->state = DOM_NODE_LIVE;
     source_record->current_owner = false;
+    dom_record_release_backing_root(source_record);
     return true;
 }
 
 void dom_node_registry_set_backing_source(DomDocument* doc, DomNode* node,
                                           Element* backing_source) {
+    dom_node_registry_set_backing_value(doc, node,
+        backing_source ? Item{.element = backing_source} : ItemNull);
+}
+
+void dom_node_registry_set_backing_value(DomDocument* doc, DomNode* node,
+                                         Item backing_value) {
     DomNodeRecord* record = dom_record_find(dom_registry(doc), node);
     if (!record || record->state == DOM_NODE_RETIRED || record->id != node->id) {
-        dom_lifecycle_fail("set-backing-source-stale", dom_node_ref(node),
+        dom_lifecycle_fail("set-backing-value-stale", dom_node_ref(node),
                            DOM_NODE_PIN_EXTERNAL);
         return;
     }
-    record->backing_source = backing_source;
+    dom_record_set_backing_value(doc, record, backing_value);
 }
 
 Element* dom_node_registry_backing_source(DomDocument* doc, DomNode* node) {
@@ -301,6 +359,29 @@ Element* dom_node_registry_backing_source(DomDocument* doc, DomNode* node) {
         return nullptr;
     }
     return record->backing_source;
+}
+
+void dom_node_registry_refresh_backing(DomDocument* doc, DomNode* node) {
+    DomNodeRecord* record = dom_record_find(dom_registry(doc), node);
+    if (!record || !record->backing_gc || !node->is_element() ||
+        record->state == DOM_NODE_RETIRED) return;
+    Element* source = record->backing_source;
+    Element* backing = &node->as_element()->elmt;
+    // only the GC owner gets compaction fixups; pull its borrowed pointers on access.
+    // an Input-owned DOM edit ends the corresponding borrow instead of being overwritten.
+    if (record->borrows_data) {
+        record->borrows_data = backing->data == record->borrowed_data;
+        if (record->borrows_data) {
+            backing->data = record->borrowed_data = source->data;
+            backing->data_cap = source->data_cap;
+        }
+    }
+    if (record->borrows_items) {
+        record->borrows_items = backing->items == record->borrowed_items;
+        if (record->borrows_items) {
+            backing->items = record->borrowed_items = source->items;
+        }
+    }
 }
 
 DomNodeRef dom_node_ref(DomNode* node) {
@@ -516,6 +597,8 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
     }
 
     size_t primary_size = record->primary_size;
+    dom_record_release_backing_root(record);
+    record->backing_source = nullptr;
     record->candidate = false;
     record->state = DOM_NODE_RETIRED;
     record->retiring = true;
@@ -699,6 +782,38 @@ void dom_lifecycle_get_stats(DomDocument* doc, DomLifecycleStats* out) {
     memset(out, 0, sizeof(*out));
     DomNodeRegistry* registry = dom_registry(doc);
     if (registry) *out = registry->stats;
+}
+
+bool dom_js_mutation_records_reserve(DomDocument* doc, int count) {
+    if (!doc || count < 0) return false;
+    DomJsRuntime* js = &doc->js;
+    if (!js->mutation_records) {
+        js->mutation_records = js->inline_mutation_records;
+        js->mutation_record_capacity = DOM_JS_MUTATION_RECORD_CAP;
+    }
+    if (count <= js->mutation_record_capacity) return true;
+    int capacity = 0;
+    if (!lam::grow_capacity(js->mutation_record_capacity, count,
+                           DOM_JS_MUTATION_RECORD_CAP, &capacity)) return false;
+    // grow outside the arena: turns reuse the journal and teardown releases it.
+    DomJsMutationRecord* records = static_cast<DomJsMutationRecord*>(
+        mem_alloc(sizeof(DomJsMutationRecord) * capacity, MEM_CAT_LAYOUT));
+    if (!records) return false;
+    memcpy(records, js->mutation_records,
+           sizeof(DomJsMutationRecord) * js->mutation_record_count);
+    if (js->mutation_records != js->inline_mutation_records) mem_free(js->mutation_records);
+    js->mutation_records = records;
+    js->mutation_record_capacity = capacity;
+    return true;
+}
+
+void dom_js_mutation_records_destroy(DomDocument* doc) {
+    if (!doc) return;
+    dom_js_mutation_records_reset(doc);
+    if (doc->js.mutation_records != doc->js.inline_mutation_records)
+        mem_free(doc->js.mutation_records);
+    doc->js.mutation_records = doc->js.inline_mutation_records;
+    doc->js.mutation_record_capacity = DOM_JS_MUTATION_RECORD_CAP;
 }
 
 void dom_js_mutation_records_reset(DomDocument* doc) {

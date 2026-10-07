@@ -575,6 +575,12 @@ extern "C" const char* radiant_input_live_value(DomElement* element) {
     return entry && entry->value ? entry->value : "";
 }
 
+// layout reads an existing live value without changing untouched HTML defaults.
+extern "C" const char* radiant_input_peek_live_value(DomElement* element) {
+    RadiantInputStateEntry* entry = riv_entry_get(element, false);
+    return entry ? entry->value : nullptr;
+}
+
 extern "C" bool radiant_input_set_live_value(DomElement* element, const char* value) {
     RadiantInputStateEntry* entry = riv_entry_get(element, true);
     if (!entry) return false;

@@ -62,7 +62,9 @@ fn linked_one(context, request, key, form) {
             else if (form == "citeyear") entry.year_label
             else if (form == "textcite")
                 if (settings.citestyle == "numeric" or settings.citestyle == "numeric-comp" or
-                    settings.citestyle == "alphabetic") author ++ " [" ++ entry.label ++ "]"
+                    settings.citestyle == "alphabetic") author ++ " " ++
+                        (if (settings.citation_open == null) "[" else settings.citation_open) ++
+                        entry.label ++ (if (settings.citation_close == null) "]" else settings.citation_close)
                 else if (settings.citestyle == "authortitle") author ++ " (" ++
                     style.citation_title(entry) ++ ")"
                 else author ++ " (" ++ entry.year_label ++ ")"
@@ -70,7 +72,8 @@ fn linked_one(context, request, key, form) {
                 settings.citestyle == "alphabetic") entry.label
             else if (settings.citestyle == "authortitle") author ++ ", " ++
                 style.citation_title(entry)
-            else author ++ " " ++ entry.year_label
+            else author ++ (if (settings.author_year_sep == null) " "
+                else settings.author_year_sep) ++ entry.year_label
         link(context, request, entry, label)
     }
 }
@@ -161,8 +164,10 @@ fn item_piece(context, request, item, form) {
         single_form == "footcite"
     let bracket = numeric and single_form != "textcite" and single_form != "citeauthor" and
         single_form != "citetitle" and single_form != "citeyear" and single_form != "fullcite"
-    let open_text = if (bracket) "[" else if (parens) "(" else ""
-    let close_text = if (bracket) "]" else if (parens) ")" else "";
+    let open_text = if ((bracket or parens) and settings.citation_open != null)
+        settings.citation_open else if (bracket) "[" else if (parens) "(" else ""
+    let close_text = if ((bracket or parens) and settings.citation_close != null)
+        settings.citation_close else if (bracket) "]" else if (parens) ")" else "";
     <span class: "latex-citation-item",
         open_text
         if (item.prenote != "") { item.prenote ++ " " }
@@ -211,7 +216,7 @@ pub fn render_citation(node, context, footnotes) {
                 id: "fnref-" ++ string(footnote_index), string(footnote_index)>
         >
     } else if (request.tag == "nocite") null
-    else <span class: "latex-cites",
+    else <span class: "latex-cites", id: "cite-" ++ string(request.offset),
         for (i, item in request.items) {
             if (i > 0) { "; " }
             item_piece(context, request, item, request.tag)
@@ -246,11 +251,26 @@ fn bibliography_label(entry, settings) {
     else ""
 }
 
-fn bibliography_item(entry, record, settings) {
+fn backref_links(entry, record, requests) {
+    let citations = [for (request in requests
+        where request.section == record.scope_section and request.tag != "nocite" and
+            (record.scope_segment == null or request.segment == record.scope_segment) and
+            any([for (item in request.items, key in item.keys) key == entry.key])) request]
+    if (len(citations) == 0) null
+    else <span class: "latex-bib-backrefs", " Cited: "
+        for (index, request in citations) {
+            if (index > 0) { ", " }
+            <a href: "#cite-" ++ string(request.offset), string(index + 1)>
+        }
+    >
+}
+
+fn bibliography_item(entry, record, settings, requests) {
     <li id: model.target_for_print(record, entry.key),
         <span class: "latex-bib-label", bibliography_label(entry, settings)>
         style.bibliography_text(entry, settings);
         entry_links(entry, settings)
+        if (settings.backref) { backref_links(entry, record, requests) }
     >
 }
 
@@ -278,7 +298,7 @@ pub fn render_bibliography(node, context) {
         bibliography_heading(record, context.settings);
         <ol class: "latex-bib-list",
             for (entry in record.entries)
-                bibliography_item(entry, record, context.settings)
+                bibliography_item(entry, record, context.settings, context.requests)
         >
     >
 }

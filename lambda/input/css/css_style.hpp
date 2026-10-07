@@ -1039,6 +1039,7 @@ typedef struct CssDeclaration {
     // Memory management and validation
     bool owns_payload;        // declaration owns a deep CssValue/string snapshot
     bool tree_owned_record;   // containing StyleTree may reclaim this declaration record
+    bool presentation_value; // transient host layer; survives authored-style recascade
     bool valid;               // Validation flag
     int ref_count;            // Reference counting for memory management
     void* payload_owner;      // immutable epoch payload shared by cascade records
@@ -1140,6 +1141,7 @@ typedef struct CssLayerName {
 typedef struct CssRule {
     CssRuleType type;
     Pool* pool;
+    struct DomDocument* owner_document; // pool lifetime survives removal from CSSOM parents
     CssPageRule* page; // typed page selectors/descriptors; generic text remains available to CSSOM
 
     // Rule content varies by type
@@ -1221,6 +1223,13 @@ struct CssRuleChildList {
     size_t* count;
 };
 CssRuleChildList css_rule_child_list(CssRule* rule);
+struct CssRuleInterface {
+    const char* name;
+    const char* base;
+    uint16_t legacy_type;
+    const char* host_name;
+};
+const CssRuleInterface* css_rule_interface(const CssRule* rule);
 void css_rule_attach(CssRule* rule, CssRule* parent, CssStylesheet* stylesheet);
 
 // CSS Stylesheet structure
@@ -1244,6 +1253,7 @@ typedef struct CssStylesheet {
     bool constructed;           // constructed sheets reject @import through CSSOM.
     // Document sheets retain their owning <link> or <style> for source order.
     struct DomElement* owner_element;
+    struct DomDocument* owner_document; // native lifetime remains known after rule detachment
 
     // Source information
     const char* source_text;
@@ -1254,6 +1264,7 @@ typedef struct CssStylesheet {
 
     // Import information
     struct CssStylesheet* parent_stylesheet;
+    struct CssRule* owner_rule;  // retained import association, including after rule detachment
     struct CssStylesheet** imported_stylesheets;
     size_t imported_count;
 

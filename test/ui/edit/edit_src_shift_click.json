@@ -1,0 +1,22 @@
+{
+  "name": "shift-click extends a selection whose anchor lies above the rendered window from that anchor, not from the window edge",
+  "command": "edit",
+  "html": "temp/edit-ui/shift_click.txt",
+  "prepare": ["python3", "test/ui/edit/gen_large_source.py", "temp/edit-ui/shift_click.txt", "300"],
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "line 000002"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_combo", "key": "PageDown", "mods_str": "shift"},
+    {"type": "key_combo", "key": "PageDown", "mods_str": "shift"},
+    {"type": "key_combo", "key": "PageDown", "mods_str": "shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "line 000002"},
+    {"type": "click", "target": {"text": "line 000090"}, "mods_str": "shift"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 90, Col 1"},
+    {"type": "render", "file": "temp/edit-ui/shift_click.png"},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 2, Col 2"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/shift_click.txt", "contains": "line 000001: the quick brown fox jumps over the lazy dog\nXline 000090:"}
+  ]
+}

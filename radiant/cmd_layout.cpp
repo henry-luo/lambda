@@ -49,6 +49,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
+#include "../lambda/dom/dom.h"      // dom_find_element_by_id for focus restore
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
@@ -899,6 +900,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
             // importing rule's source position.
             imported->is_import_child = true;
             imported->parent_stylesheet = stylesheet;
+            imported->owner_rule = rule;
             rule->data.import_rule.stylesheet = imported;
         }
         if (!imported || imported->rule_count == 0) {
@@ -4254,6 +4256,11 @@ struct LambdaFocusRestore {
     uint32_t selection_start;
     uint32_t selection_end;
     uint8_t selection_direction;
+    // Any other focused element (an editing host, a button) is restored by
+    // its template path and must still have the same tag and id. The id is
+    // copied: the rebuild retires the old DOM that owns the string.
+    const char* focus_tag;
+    char focus_id[128];
 };
 
 static bool find_child_element_index(DomElement* parent, DomElement* child,
@@ -4312,18 +4319,24 @@ static bool capture_lambda_focus_restore(DocState* state,
     View* focused = focus_get(state);
     if (!focused || !focused->is_element()) return false;
     DomElement* focused_elem = lam::dom_require_element(focused);
-    if (!focused_elem->form_control() ||
-        focused_elem->form->control_type != FORM_CONTROL_TEXT) {
-        return true;
+    if (focused_elem->form_control() &&
+        focused_elem->form->control_type == FORM_CONTROL_TEXT) {
+        out->fallback_tag = focused_elem->tag_name;
+        if (focused_elem->class_count > 0 && focused_elem->class_names) {
+            out->fallback_class = focused_elem->class_names[0];
+        }
+        form_control_get_selection(state, static_cast<View*>(focused_elem),
+                                   &out->selection_start, &out->selection_end,
+                                   &out->selection_direction);
+        out->has_text_selection = true;
+    } else {
+        // A reactive render rebuilds the focused element too; without this
+        // an editing host lost focus on every edit and Tab, which only
+        // reaches the focused element, fell through to focus navigation.
+        out->focus_tag = focused_elem->tag_name;
+        const char* id = focused_elem->id;
+        if (id) snprintf(out->focus_id, sizeof(out->focus_id), "%s", id);
     }
-    out->fallback_tag = focused_elem->tag_name;
-    if (focused_elem->class_count > 0 && focused_elem->class_names) {
-        out->fallback_class = focused_elem->class_names[0];
-    }
-    form_control_get_selection(state, static_cast<View*>(focused_elem),
-                               &out->selection_start, &out->selection_end,
-                               &out->selection_direction);
-    out->has_text_selection = true;
 
     DomNode* node = static_cast<DomNode*>(focused);
     while (node) {
@@ -4394,6 +4407,16 @@ static View* resolve_lambda_focus_restore(DomDocument* doc,
     return elem ? static_cast<View*>(elem) : nullptr;
 }
 
+// A rebuilt element stands in for the focused one only when it has the same
+// tag and the same id (or neither has an id).
+static bool focus_restore_matches(View* view, const LambdaFocusRestore* restore) {
+    if (!view || !view->is_element() || !restore->focus_tag) return false;
+    DomElement* elem = lam::dom_require_element(view);
+    if (!elem->tag_name || strcmp(elem->tag_name, restore->focus_tag) != 0) return false;
+    const char* id = elem->id ? elem->id : "";
+    return strcmp(id, restore->focus_id) == 0;
+}
+
 static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_focus,
                                   const LambdaFocusRestore* restore) {
     if (!had_focus || !state || !doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
@@ -4414,10 +4437,18 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
         // The render-map path can resolve to the template root instead of the
         // focused descendant; only a matching control may retain text focus.
         if (!is_matching_text_control) focused = nullptr;
+    } else if (focused && !focus_restore_matches(focused, restore)) {
+        focused = nullptr;
     }
     if (!focused && restore->fallback_tag) {
         focused = find_matching_input(
             doc->view_tree->root, restore->fallback_tag, restore->fallback_class);
+    }
+    if (!focused && restore->focus_id[0] && doc->root) {
+        DomElement* by_id = dom_find_element_by_id(doc->root, restore->focus_id);
+        if (by_id && focus_restore_matches(static_cast<View*>(by_id), restore)) {
+            focused = static_cast<View*>(by_id);
+        }
     }
     if (focused) {
         focus_set(state, focused, false);

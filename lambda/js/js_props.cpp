@@ -782,9 +782,7 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
 }
 
 static inline Item js_props_throw_type(const char* msg) {
-    Item tn = js_props_str("TypeError", 9);
-    Item m  = js_props_str(msg, (int)strlen(msg));
-    return js_throw_value(js_new_error_with_name(tn, m));
+    return js_throw_type_error(msg);
 }
 
 extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out) {
@@ -792,83 +790,60 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     *out = (JsPropertyDescriptor){};
 
     // Reject primitive descriptors per ES §6.2.5.5 step 1 (Type(Obj) is Object).
-    TypeId dt = get_type_id(desc_obj);
-    if (dt != LMD_TYPE_MAP && dt != LMD_TYPE_FUNC &&
-        !js_props_is_array(desc_obj) && dt != LMD_TYPE_ELEMENT) {
-        // Packed numeric arrays use their scalar carrier TypeId, but remain
-        // ordinary ECMAScript objects when used as property descriptors.
+    if (!js_is_object_value(desc_obj)) {
         return js_props_throw_type("Property description must be an object");
     }
-
-    Item k_value     = js_props_str("value",        5);
-    Item k_writable  = js_props_str("writable",     8);
-    Item k_get       = js_props_str("get",          3);
-    Item k_set       = js_props_str("set",          3);
-    Item k_enum      = js_props_str("enumerable",  10);
-    Item k_config    = js_props_str("configurable",12);
-
-    JS_ASSIGN_OR_RETURN(has_val_item, js_in(k_value, desc_obj));
-    JS_ASSIGN_OR_RETURN(has_wri_item, js_in(k_writable, desc_obj));
-    JS_ASSIGN_OR_RETURN(has_get_item, js_in(k_get, desc_obj));
-    JS_ASSIGN_OR_RETURN(has_set_item, js_in(k_set, desc_obj));
-    JS_ASSIGN_OR_RETURN(has_enum_item, js_in(k_enum, desc_obj));
-    JS_ASSIGN_OR_RETURN(has_cfg_item, js_in(k_config, desc_obj));
-    bool has_val   = it2b(has_val_item);
-    bool has_wri   = it2b(has_wri_item);
-    bool has_get   = it2b(has_get_item);
-    bool has_set   = it2b(has_set_item);
-    bool has_enum  = it2b(has_enum_item);
-    bool has_cfg   = it2b(has_cfg_item);
-
-    // ES §6.2.5.4 step 9: mixed accessor + data → TypeError.
-    if ((has_get || has_set) && (has_val || has_wri)) {
+    RootFrame roots(6);
+    Rooted<Item> descriptor_root(roots, desc_obj), key_root(roots, ItemNull);
+    Rooted<Item> field_root(roots, ItemNull), value_root(roots, ItemNull);
+    Rooted<Item> getter_root(roots, ItemNull), setter_root(roots, ItemNull);
+    static const struct {
+        const char* name;
+        size_t length;
+        uint8_t present_flag;
+        uint8_t true_flag;
+    } fields[] = {
+        {"enumerable", 10, JS_PD_HAS_ENUMERABLE, JS_PD_ENUMERABLE},
+        {"configurable", 12, JS_PD_HAS_CONFIGURABLE, 0},
+        {"value", 5, JS_PD_HAS_VALUE, 0},
+        {"writable", 8, JS_PD_HAS_WRITABLE, JS_PD_WRITABLE},
+        {"get", 3, JS_PD_HAS_GET, 0},
+        {"set", 3, JS_PD_HAS_SET, 0},
+    };
+    JsPropertyDescriptor descriptor = {};
+    // each HasProperty/Get pair is observable; later callbacks may collect earlier values.
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+        key_root.set(js_name_item(fields[i].name, fields[i].length));
+        JS_ASSIGN_OR_RETURN(present, js_in(key_root.get(), descriptor_root.get()));
+        if (!it2b(present)) continue;
+        field_root.set(js_get_key_default(descriptor_root.get(), key_root.get()));
+        if (item_is_error(field_root.get())) return field_root.get();
+        uint8_t flag = fields[i].present_flag;
+        descriptor.flags |= flag;
+        if (flag == JS_PD_HAS_VALUE) {
+            value_root.set(field_root.get());
+        } else if (flag == JS_PD_HAS_GET || flag == JS_PD_HAS_SET) {
+            if (get_type_id(field_root.get()) != LMD_TYPE_UNDEFINED &&
+                    !js_is_callable(field_root.get())) {
+                return js_props_throw_type(flag == JS_PD_HAS_GET
+                    ? "Getter must be a function" : "Setter must be a function");
+            }
+            if (flag == JS_PD_HAS_GET) getter_root.set(field_root.get());
+            else setter_root.set(field_root.get());
+        } else if (js_is_truthy(field_root.get())) {
+            if (flag == JS_PD_HAS_CONFIGURABLE) js_pd_set_configurable(&descriptor, true);
+            else descriptor.flags |= fields[i].true_flag;
+        }
+    }
+    // conflicting fields are rejected after their required observable reads.
+    if (js_pd_is_accessor(&descriptor) && js_pd_is_data(&descriptor)) {
         return js_props_throw_type(
             "Invalid property descriptor. Cannot both specify accessors and a value or writable attribute");
     }
-
-    if (has_val) {
-        out->flags |= JS_PD_HAS_VALUE;
-        out->value = js_get_key_default(desc_obj, k_value);
-        if (item_is_error(out->value)) return out->value;
-    }
-    if (has_wri) {
-        out->flags |= JS_PD_HAS_WRITABLE;
-        JS_ASSIGN_OR_RETURN(writable, js_get_key_default(desc_obj, k_writable));
-        if (js_is_truthy(writable))
-            out->flags |= JS_PD_WRITABLE;
-    }
-    if (has_get) {
-        JS_ASSIGN_OR_RETURN(getter, js_get_key_default(desc_obj, k_get));
-        TypeId gt = get_type_id(getter);
-        if (gt != LMD_TYPE_UNDEFINED && !js_is_callable(getter)) {
-            // ToPropertyDescriptor uses IsCallable, so callable Proxy accessors
-            // must retain their exotic [[Call]] entry (D6.2.2v2).
-            return js_props_throw_type("Getter must be a function");
-        }
-        out->flags |= JS_PD_HAS_GET;
-        out->getter = js_is_callable(getter) ? getter : js_props_undefined();
-    }
-    if (has_set) {
-        JS_ASSIGN_OR_RETURN(setter, js_get_key_default(desc_obj, k_set));
-        TypeId st = get_type_id(setter);
-        if (st != LMD_TYPE_UNDEFINED && !js_is_callable(setter)) {
-            return js_props_throw_type("Setter must be a function");
-        }
-        out->flags |= JS_PD_HAS_SET;
-        out->setter = js_is_callable(setter) ? setter : js_props_undefined();
-    }
-    if (has_enum) {
-        out->flags |= JS_PD_HAS_ENUMERABLE;
-        JS_ASSIGN_OR_RETURN(enumerable, js_get_key_default(desc_obj, k_enum));
-        if (js_is_truthy(enumerable))
-            out->flags |= JS_PD_ENUMERABLE;
-    }
-    if (has_cfg) {
-        out->flags |= JS_PD_HAS_CONFIGURABLE;
-        JS_ASSIGN_OR_RETURN(configurable, js_get_key_default(desc_obj, k_config));
-        if (js_is_truthy(configurable))
-            out->flags2 |= 0x01u;
-    }
+    descriptor.value = value_root.get();
+    descriptor.getter = getter_root.get();
+    descriptor.setter = setter_root.get();
+    *out = descriptor;
     return js_status_ok();
 }
 

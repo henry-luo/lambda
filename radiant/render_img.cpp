@@ -390,12 +390,9 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 //   OK\t<html_file>
 //   FAIL\t<html_file>\t<reason>
 
-static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
-    if (doc) {
-        script_runner_cleanup_js_state(doc);
-        view_tree_shell_destroy(doc, doc->view_tree);
-        dom_document_destroy(doc);
-    }
+static void render_batch_cleanup_doc(UiContext* ui_context) {
+    // cache teardown consults the document scheduler; clear the binding through shared ownership cleanup first.
+    ui_context->destroy_document();
 
     js_batch_reset();
     dom_batch_reset();
@@ -408,7 +405,6 @@ static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
 
     image_cache_cleanup(ui_context);
     InputManager::reset_global_inputs();
-    ui_context->document = nullptr;
 }
 
 static bool render_batch_single(
@@ -444,7 +440,7 @@ static bool render_batch_single(
     }
     if (!doc) {
         log_error("render-batch: failed to load %s", html_file);
-        render_batch_cleanup_doc(ui_context, nullptr);
+        render_batch_cleanup_doc(ui_context);
         return false;
     }
 
@@ -483,12 +479,12 @@ static bool render_batch_single(
             render_html_doc(ui_context, doc->view_tree, png_file);
         } else {
             log_error("render-batch: no view tree for %s", html_file);
-            render_batch_cleanup_doc(ui_context, doc);
+            render_batch_cleanup_doc(ui_context);
             return false;
         }
     }
 
-    render_batch_cleanup_doc(ui_context, doc);
+    render_batch_cleanup_doc(ui_context);
     return true;
 }
 
@@ -638,5 +634,7 @@ int cmd_render_batch(int argc, char** argv) {
     }
 
     ui_context_cleanup(&ui_context);
+    // the batch owns the working-directory URL borrowed by each document loader.
+    url_destroy(cwd);
     return failure_count > 0 ? 1 : 0;
 }

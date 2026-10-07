@@ -1,0 +1,15 @@
+{
+  "name": "Post-layout Lambda load bootstraps autostart through a later frame",
+  "html": "test/ui/slide_autostart.ls",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "advance_time", "ms": 250, "steps": 5},
+    {"type": "assert_attribute", "target": {"selector": "#auto"}, "attribute": "data-slide-time", "equals": "100"},
+    {"type": "assert_attribute", "target": {"selector": "#auto"}, "attribute": "data-slide-phase", "equals": "waiting"},
+    {"type": "assert_style", "target": {"selector": "#auto-s0-o0"}, "property": "opacity", "equals": "1"},
+    {"type": "assert_style", "target": {"selector": "#auto .slide-stage"}, "property": "width", "equals": "400px"},
+    {"type": "resize", "width": 600, "height": 400},
+    {"type": "assert_style", "target": {"selector": "#auto .slide-stage"}, "property": "width", "equals": "600px"},
+    {"type": "assert_attribute", "target": {"selector": "#auto"}, "attribute": "data-slide-phase", "equals": "waiting"}
+  ]
+}

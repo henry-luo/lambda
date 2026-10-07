@@ -1568,6 +1568,7 @@ enum {
     // discriminated here rather than by a per-language magic word: every value
     // at or above FN_ENTRY_ABI_HOSTED_FIRST uses that language's layout, not
     // `Function`'s. Consumers read `type_id` at 0 and `entry_abi` at 3.
+    FN_ENTRY_ABI_MVP_LMD,  // common Function layout, boxed MVP MIR entry
     FN_ENTRY_ABI_HOSTED_FIRST,
     FN_ENTRY_ABI_JS_FUNCTION = FN_ENTRY_ABI_HOSTED_FIRST,
 };

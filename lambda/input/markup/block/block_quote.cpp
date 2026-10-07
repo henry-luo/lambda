@@ -13,6 +13,7 @@
  * Content inside blockquotes is recursively parsed for block elements.
  */
 #include "block_common.hpp"
+#include "../markup_highlight.hpp"
 #include "lib/arraylist.h"
 #include "../../../../lib/mem.h"
 #include <cstring>
@@ -439,7 +440,8 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
     // Let recursive parsing handle deeper nesting (> > > foo becomes nested blockquotes)
     const int base_depth = 1;
 
-    // Collect all content lines for this blockquote
+    // Collect all content lines for this blockquote, one per source line
+    const int64_t first_source_line = parser->current_line;
     ArrayList* content_lines = arraylist_new(16);
     ArrayList* is_lazy_line = arraylist_new(16);  // Track which lines were lazy continuations
     bool last_was_empty_quote = false;  // Tracks if previous line was just ">"
@@ -573,6 +575,7 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         size_t saved_lazy_count = parser->state.lazy_lines_count;
 
         // Set up parser to process the content lines
+        highlight_push_lines(parser, lines_array, num_lines, first_source_line);
         parser->lines = lines_array;
         parser->line_count = num_lines;
         parser->current_line = 0;
@@ -647,6 +650,7 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
 
         // Restore parser state
         parser->lines = saved_lines;
+        highlight_pop_lines(parser, lines_array);
         parser->line_count = saved_line_count;
         parser->current_line = saved_current_line;
         parser->state.lazy_lines = saved_lazy_lines;

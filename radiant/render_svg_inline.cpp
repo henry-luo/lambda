@@ -478,6 +478,7 @@ struct SvgStyleEntry {
     DomElement* node;
     CssDeclaration** inline_declarations;
     size_t inline_count;
+    bool inline_parsed;
     SvgStyleProperty* properties;
 };
 
@@ -525,9 +526,6 @@ static void svg_style_index_tree(SvgStyleContext* style, DomElement* node) {
     SvgStyleEntry entry = {};
     entry.element = dom_element_to_element(node);
     entry.node = node;
-    const char* inline_text = node->get_attribute("style");
-    if (inline_text) entry.inline_declarations = css_parse_declaration_list_text(
-        inline_text, strlen(inline_text), style->pool, &entry.inline_count);
     SvgStyleMap::set(style->entries, entry);
     // parsed images retain source Elements; inline UI inputs may use the embedded one.
     Element* source = dom_element_render_source(node);
@@ -675,7 +673,15 @@ static FontContext* svg_style_font_context(SvgStyleContext* style, const char* s
 static SvgStyleEntry* svg_style_entry(SvgStyleContext* style, Element* element) {
     SvgStyleEntry query = {};
     query.element = element;
-    return style && style->entries ? SvgStyleMap::get(style->entries, query) : nullptr;
+    SvgStyleEntry* entry = style && style->entries ? SvgStyleMap::get(style->entries, query) : nullptr;
+    if (entry && !entry->inline_parsed) {
+        // each SVG indexes the host for references; unrelated inline CSS is never queried.
+        const char* text = entry->node->get_attribute("style");
+        if (text) entry->inline_declarations = css_parse_declaration_list_text(
+            text, strlen(text), style->pool, &entry->inline_count);
+        entry->inline_parsed = true;
+    }
+    return entry;
 }
 
 static CssValue* svg_parse_property_value(Pool* pool, const char* text, const char* name) {
@@ -803,9 +809,18 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
     prop->animation_generation = generation;
     CssDeclaration declaration = {};
     DomDocument* doc = style->document;
-    if (css_select_element_declaration(style->engine, style->matcher, entry->node,
+    bool selected = css_select_element_declaration(style->engine, style->matcher, entry->node,
         doc->stylesheets, (size_t)doc->stylesheet_count, entry->inline_declarations,
-        entry->inline_count, name, &declaration)) {
+        entry->inline_count, name, &declaration);
+    CssDeclaration* presentation = style_tree_get_presentation_declaration(
+        entry->node->specified_style, css_property_code_from_name(name));
+    // The paint walk has its own CSS query, but consumes the same host layer.
+    if (presentation && (!selected ||
+        css_declaration_cascade_compare(presentation, &declaration) > 0)) {
+        declaration = *presentation;
+        selected = true;
+    }
+    if (selected) {
         prop->value = svg_resolve_property_declaration(style, entry->node, name, &declaration);
         prop->from_css = true;
     } else {
@@ -999,7 +1014,8 @@ float svg_resolve_length_unit(float number, CssUnit unit,
     switch (unit) {
         case CSS_UNIT_NONE: case CSS_UNIT_PX: return number;
         case CSS_UNIT_EM: return number * context->font_size;
-        case CSS_UNIT_EX: return number * context->x_height;
+        case CSS_UNIT_EX: return number * (context->fonts
+            ? svg_font_x_height(context->fonts, &context->font) : context->x_height);
         case CSS_UNIT_PT: return number * (96.0f / 72.0f);
         case CSS_UNIT_PC: return number * 16.0f;
         case CSS_UNIT_IN: return number * 96.0f;
@@ -1237,11 +1253,20 @@ static FontStyleDesc svg_context_font_descriptor(SvgInlineRenderContext* ctx) {
     return descriptor;
 }
 
+static float svg_context_font_size(const char* value, FontContext* fonts,
+    const FontStyleDesc* parent) {
+    char* end = nullptr;
+    strtof(value, &end);
+    // absolute and em/% sizes do not need a font database lookup.
+    float x_height = strcmp(str_skip_ascii_space(end), "ex") == 0
+        ? svg_font_x_height(fonts, parent) : 0.0f;
+    return svg_font_size_value(value, parent->size_px, x_height);
+}
+
 static SvgLengthContext svg_length_context(SvgInlineRenderContext* ctx, Element* elem = nullptr) {
     FontStyleDesc descriptor = svg_context_font_descriptor(ctx);
     const char* own_size = elem ? svg_style_property_value(ctx, elem, "font-size") : nullptr;
-    if (own_size) descriptor.size_px = svg_font_size_value(own_size, descriptor.size_px,
-        svg_font_x_height(ctx->font_ctx, &descriptor));
+    if (own_size) descriptor.size_px = svg_context_font_size(own_size, ctx->font_ctx, &descriptor);
     const char* family = elem ? svg_style_property_value(ctx, elem, "font-family") : nullptr;
     if (family) descriptor.family = family;
     const char* weight = elem ? svg_style_property_value(ctx, elem, "font-weight") : nullptr;
@@ -1250,7 +1275,7 @@ static SvgLengthContext svg_length_context(SvgInlineRenderContext* ctx, Element*
     if (slant) descriptor.slant = strcmp(slant, "italic") == 0 ? FONT_SLANT_ITALIC
         : strcmp(slant, "oblique") == 0 ? FONT_SLANT_OBLIQUE : FONT_SLANT_NORMAL;
     return {ctx->current_viewport_w, ctx->current_viewport_h, descriptor.size_px,
-        svg_font_x_height(ctx->font_ctx, &descriptor)};
+        descriptor.size_px * 0.5f, ctx->font_ctx, descriptor};
 }
 
 static const char* svg_scratch_text(SvgInlineRenderContext* ctx, const char* start, size_t length) {
@@ -1359,8 +1384,7 @@ static void svg_apply_inherited_paint_attrs(SvgInlineRenderContext* ctx, Element
     if (stroke_opacity) ctx->stroke_opacity = clamp_unit(parse_svg_pct_or_num(stroke_opacity, 1.0f));
     FontStyleDesc parent_font = svg_context_font_descriptor(ctx);
     const char* size = svg_style_property_value(ctx, elem, "font-size");
-    if (size) ctx->inherited_font_size = svg_font_size_value(size, parent_font.size_px,
-        svg_font_x_height(ctx->font_ctx, &parent_font));
+    if (size) ctx->inherited_font_size = svg_context_font_size(size, ctx->font_ctx, &parent_font);
     const char* family = svg_style_property_value(ctx, elem, "font-family");
     if (family) ctx->inherited_font_family = lam::up(family);
     const char* weight = svg_style_property_value(ctx, elem, "font-weight");
@@ -4333,19 +4357,16 @@ static FontStyleDesc svg_text_font_descriptor(const SvgTextStyle* style, const c
 }
 
 static SvgLengthContext svg_text_length_context(SvgInlineRenderContext* ctx, const SvgTextStyle* style) {
-    SvgLengthContext lengths = {ctx->current_viewport_w, ctx->current_viewport_h,
-        style->font_size, style->font_size * 0.5f};
     FontStyleDesc descriptor = svg_text_font_descriptor(style);
-    lengths.x_height = svg_font_x_height(ctx->font_ctx, &descriptor);
-    return lengths;
+    return {ctx->current_viewport_w, ctx->current_viewport_h,
+        style->font_size, style->font_size * 0.5f, ctx->font_ctx, descriptor};
 }
 
 static void svg_text_style_apply(SvgInlineRenderContext* ctx, Element* elem, SvgTextStyle* style) {
     char buf[256];
     FontStyleDesc parent_font = svg_text_font_descriptor(style);
     const char* value = get_svg_attr_or_style(ctx, elem, "font-size", buf, sizeof(buf));
-    if (value) style->font_size = svg_font_size_value(value, style->font_size,
-        svg_font_x_height(ctx->font_ctx, &parent_font));
+    if (value) style->font_size = svg_context_font_size(value, ctx->font_ctx, &parent_font);
     else style->font_size = get_svg_number_attr(elem, "font-size", style->font_size);
     value = get_svg_attr_or_style(ctx, elem, "font-family", buf, sizeof(buf));
     if (value) str_copy(style->font_family, sizeof(style->font_family), value, strlen(value));
@@ -6561,6 +6582,8 @@ static void svg_filter_resolve_lengths(RdtSvgFilterHost* host, Element* element,
     // font-relative lengths use the declaration's current font; percentages use the referencing viewport (§9.4).
     lengths->font_size = declared.font_size;
     lengths->x_height = declared.x_height;
+    lengths->fonts = declared.fonts;
+    lengths->font = declared.font;
 }
 
 static void svg_filter_draw_image(SvgInlineRenderContext* ctx, Element* element, void* data) {
@@ -7834,7 +7857,8 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
         RdtPath* clip_path = rdt_path_new();
         rdt_path_add_rect(clip_path, content_rect.x, content_rect.y,
                           content_rect.width, content_rect.height, 0, 0);
-        rc_push_clip(rdcon, clip_path, nullptr);
+        // the SVG viewport moves with its CSS ancestors, like its painted content
+        rc_push_clip(rdcon, clip_path, render_state_current_transform(rdcon));
         rdt_path_free(clip_path);
     }
 

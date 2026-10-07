@@ -12,6 +12,7 @@ import enumitem: .packages.enumitem
 import amsmath: .packages.amsmath
 import registry: .packages.registry
 import bib_style: .packages.bib_style
+import listings: .packages.listings
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -32,6 +33,10 @@ pub fn analyze_with_language(ast, packages, language) {
         packages: packages,
         language: language,
         bibliography_count: 0,
+        listing_count: 0,
+        listing_nums: [],
+        subfloat_nums: [], subfigure_count: 0, subtable_count: 0,
+        captionof_nums: [],
         docclass: "article",
         title: null,
         title_el: null,
@@ -68,6 +73,9 @@ pub fn analyze_with_language(ast, packages, language) {
         analysis_colors: [],
         page_color: null,
         theorem_defs: [],
+        theorem_style: "plain",
+        counter_within: [],
+        counter_positions: [],
         in_body: false,
         env_context: "section",
         env_context_num: ""
@@ -93,6 +101,9 @@ pub fn analyze_with_language(ast, packages, language) {
         tables: result.tables,
         theorems: result.theorems,
         bibitems: result.bibitems,
+        listing_nums: result.listing_nums,
+        subfloat_nums: result.subfloat_nums,
+        captionof_nums: result.captionof_nums,
         equation_nums: result.equation_nums,
         amsmath_numbers: result.amsmath_numbers,
         enumerate_starts: result.enumerate_starts,
@@ -134,9 +145,19 @@ fn walk_element(el, st) {
 
         // ---- figures ----
         case 'figure': walk_figure(el, st)
+        case 'subfigure': if (registry.active(st.packages, "subcaption"))
+            walk_subfloat(el, st, "figure") else walk_children(el, 0, len(el), st)
+        case 'subtable': if (registry.active(st.packages, "subcaption"))
+            walk_subfloat(el, st, "table") else walk_children(el, 0, len(el), st)
+        case 'captionof': if (registry.active(st.packages, "caption"))
+            walk_captionof(el, st) else st
+        case 'lstlisting': if (registry.active(st.packages, "listings"))
+            walk_listing(el, st) else walk_children(el, 0, len(el), st)
 
         // ---- tables ----
         case 'table': walk_table(el, st)
+        case 'longtable': walk_table(el, st)
+        case 'xltabular': walk_table(el, st)
 
         // ---- labels (inside anything) ----
         case 'label': walk_label(el, st)
@@ -174,6 +195,7 @@ fn walk_element(el, st) {
         // ---- appendix & counters ----
         case 'appendix': walk_appendix(el, st)
         case 'setcounter': walk_setcounter(el, st)
+        case 'numberwithin': walk_numberwithin(el, st)
 
         // ---- color definitions ----
         case 'definecolor': walk_definecolor(el, st)
@@ -182,6 +204,7 @@ fn walk_element(el, st) {
         // ---- \newtheorem definitions ----
         case 'newtheorem': walk_newtheorem(el, st)
         case 'newtheorem*': walk_newtheorem_star(el, st)
+        case 'theoremstyle': walk_theoremstyle(el, st)
 
         // ---- everything else: check custom theorem defs, then walk children ----
         default: walk_default(el, tag, st)
@@ -295,26 +318,74 @@ fn compute_section_num(counters, counter_name, docclass, in_appendix) {
 // Figures, tables, equations
 // ============================================================
 
+fn walk_listing(el, st) {
+    let ordinal = st.listing_count + 1
+    let selected = listings.options(el)
+    let label = selected.label
+    let entry = if (label == null) null
+        else {type: "listing", number: string(ordinal), id: util.slugify(label),
+              title: selected.caption}
+    {*:st, listing_count: ordinal,
+     listing_nums: add_entry(st.listing_nums, string(el.source_offset), ordinal),
+     labels: if (entry == null) st.labels else add_entry(st.labels, label, entry),
+     env_context: "listing", env_context_num: string(ordinal)}
+}
+
 fn walk_figure(el, st) {
     let new_counters = step_counter(st.counters, "figure")
-    let fig_num = new_counters.figure
+    let scoped = scoped_counter({*:st, counters: new_counters},
+        "figure", new_counters.figure)
+    let fig_num = scoped.number
     let fig_text = trim(util.text_of(el))
-    let entry = {number: fig_num, content: fig_text}
+    let entry = {number: fig_num, content: fig_text, offset: el.source_offset}
     let new_figures = st.figures ++ [entry]
     let new_state = {*:st, counters: new_counters, figures: new_figures,
+        counter_positions: scoped.positions,
+        subfigure_count: 0,
         env_context: "figure", env_context_num: string(fig_num)}
     walk_children(el, 0, len(el), new_state)
 }
 
 fn walk_table(el, st) {
     let new_counters = step_counter(st.counters, "table")
-    let tab_num = new_counters.table
+    let scoped = scoped_counter({*:st, counters: new_counters},
+        "table", new_counters.table)
+    let tab_num = scoped.number
     let tab_text = trim(util.text_of(el))
-    let entry = {number: tab_num, content: tab_text}
+    let entry = {number: tab_num, content: tab_text, offset: el.source_offset}
     let new_tables = st.tables ++ [entry]
     let new_state = {*:st, counters: new_counters, tables: new_tables,
+        counter_positions: scoped.positions,
+        subtable_count: 0,
         env_context: "table", env_context_num: string(tab_num)}
     walk_children(el, 0, len(el), new_state)
+}
+
+fn walk_subfloat(el, st, kind) {
+    let ordinal = (if (kind == "figure") st.subfigure_count else st.subtable_count) + 1
+    let letter = if (ordinal <= 26) chr(96 + ordinal) else string(ordinal)
+    let ordinal_text = st.env_context_num ++ letter
+    let next = {*:st,
+        subfigure_count: if (kind == "figure") ordinal else st.subfigure_count,
+        subtable_count: if (kind == "table") ordinal else st.subtable_count,
+        subfloat_nums: add_entry(st.subfloat_nums, string(el.source_offset), letter),
+        env_context: "sub" ++ kind, env_context_num: ordinal_text}
+    let walked = walk_children(el, 0, len(el), next)
+    // Subfloat labels use the combined number; following captions return to the parent.
+    {*:walked, env_context: st.env_context, env_context_num: st.env_context_num}
+}
+
+fn walk_captionof(el, st) {
+    let kind = trim(util.raw_argument(el, "required", 0))
+    if (kind != "figure" and kind != "table") st
+    else {
+        let counters = step_counter(st.counters, kind)
+        let scoped = scoped_counter({*:st, counters: counters}, kind, counters[kind])
+        {*:st, counters: counters, counter_positions: scoped.positions,
+            captionof_nums: add_entry(st.captionof_nums, string(el.source_offset),
+                string(scoped.number)), env_context: kind,
+            env_context_num: string(scoped.number)}
+    }
 }
 
 fn walk_equation(el, st) {
@@ -324,10 +395,13 @@ fn walk_equation(el, st) {
 
 fn walk_legacy_equation(el, st) {
     let new_counters = step_counter(st.counters, "equation")
-    let eq_num = new_counters.equation
+    let scoped = scoped_counter({*:st, counters: new_counters},
+        "equation", new_counters.equation)
+    let eq_num = scoped.number
     let numbers = if (el.source_offset != null)
         add_entry(st.equation_nums, string(el.source_offset), eq_num) else st.equation_nums
     let new_state = {*:st, counters: new_counters,
+        counter_positions: scoped.positions,
         equation_nums: numbers,
         env_context: "equation", env_context_num: string(eq_num)}
     walk_children(el, 0, len(el), new_state)
@@ -339,14 +413,18 @@ fn walk_amsmath_rows(rows, i, st, numbered, entries) {
         let row = rows[i]
         let automatic = numbered and not row.suppress
         let counters = if (automatic) step_counter(st.counters, "equation") else st.counters
+        let scoped = if (automatic) scoped_counter({*:st, counters: counters},
+            "equation", counters.equation)
+            else {number: null, positions: st.counter_positions}
         let display = if (row.tag != null) row.tag
-            else if (automatic) string(counters.equation) else null
+            else if (automatic) string(scoped.number) else null
         let labels = if (row.label != null)
             add_entry(st.labels, row.label,
                 {type: "equation", number: if (display != null) display else "",
                  id: util.slugify(row.label), title: null})
             else st.labels
-        let next = {*:st, counters: counters, labels: labels}
+        let next = {*:st, counters: counters, labels: labels,
+            counter_positions: scoped.positions}
         walk_amsmath_rows(rows, i + 1, next, numbered,
             entries ++ [{display: display, bare_tag: row.bare_tag}])
     }
@@ -404,11 +482,13 @@ fn walk_nonnumbered_list(el, st) {
 fn walk_numbered_env(el, st, env_type) {
     let new_counters = step_counter(st.counters, env_type)
     let env_num = get_env_counter(new_counters, env_type)
+    let scoped = scoped_counter({*:st, counters: new_counters}, env_type, env_num)
     let env_text = trim(util.text_of(el))
-    let entry = make_thm_entry(env_type, env_num, env_text)
+    let entry = make_thm_entry(env_type, scoped.number, env_text)
     let new_theorems = st.theorems ++ [entry]
     let new_state = {*:st, counters: new_counters, theorems: new_theorems,
-        env_context: env_type, env_context_num: string(env_num)}
+        counter_positions: scoped.positions,
+        env_context: env_type, env_context_num: string(scoped.number)}
     walk_children(el, 0, len(el), new_state)
 }
 
@@ -502,6 +582,20 @@ fn walk_pagecolor(el, st) {
 // \newtheorem definitions
 // ============================================================
 
+fn walk_theoremstyle(el, st) {
+    let style = trim(util.text_of(el))
+    if (style == "plain" or style == "definition" or style == "remark")
+        {*:st, theorem_style: style}
+    else st
+}
+
+fn walk_numberwithin(el, st) {
+    let args = util.command_args(el)
+    if (not registry.active(st.packages, "amsmath") or len(args) < 2) st
+    else {*:st, counter_within: add_entry(st.counter_within,
+        trim(util.text_of(args[0])), trim(util.text_of(args[1])))}
+}
+
 // \newtheorem{name}{Label}       → independent counter
 // \newtheorem{name}[counter]{Label} → shared counter with existing type
 // \newtheorem*{name}{Label}      → unnumbered (star variant)
@@ -531,11 +625,16 @@ fn build_newtheorem_def(el, st, n, is_numbered) {
     // the label text is the next curly_group or string child
     let label_idx = if (has_shared) 2 else 1
     let label_text = if (label_idx < n) get_newthm_child_text(el, label_idx) else clean_name
+    let within_idx = label_idx + 1
+    let within = if (within_idx < n and el[within_idx] is element and
+        string(name(el[within_idx])) == "brack_group")
+        trim(util.text_of(el[within_idx])) else null
 
     let def = {
         env_name: clean_name,
         label: label_text,
         shared_counter: shared_counter,
+        style: st.theorem_style,
         numbered: is_numbered
     }
     let new_defs = add_entry(st.theorem_defs, clean_name, def)
@@ -543,7 +642,10 @@ fn build_newtheorem_def(el, st, n, is_numbered) {
     let is_unnumbered = is_numbered == false
     let new_custom_counters = if (is_unnumbered or shared_counter != null) st.custom_counters
                       else add_entry(st.custom_counters, clean_name, 0)
-    {*:st, theorem_defs: new_defs, custom_counters: new_custom_counters}
+    let within_counters = if (within == null) st.counter_within
+        else add_entry(st.counter_within, clean_name, within)
+    {*:st, theorem_defs: new_defs, custom_counters: new_custom_counters,
+        counter_within: within_counters}
 }
 
 fn get_newthm_child_text(el, idx) {
@@ -560,7 +662,10 @@ fn get_newthm_child_text(el, idx) {
 fn walk_default(el, tag, st) {
     let tag_str = string(tag)
     let thm_def = util.lookup(st.theorem_defs, tag_str)
-    if (registry.active(st.packages, "amsmath") and amsmath.is_environment(tag_str))
+    if (amsmath.is_environment(tag_str) and
+        (registry.active(st.packages, "amsmath") or
+         (starts_with(tag_str, "IEEEeqnarray") and
+          registry.active(st.packages, "IEEEtrantools"))))
         walk_amsmath(el, st)
     else if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
     else { walk_children(el, 0, len(el), st) }
@@ -585,12 +690,15 @@ fn walk_custom_theorem_numbered(el, st, thm_def) {
     let env_num = stepped.num
     let new_counters = stepped.counters
     let new_custom_counters = stepped.custom_counters
+    let scoped = scoped_counter({*:st, counters: new_counters,
+        custom_counters: new_custom_counters}, counter_name, env_num)
     let env_text = trim(util.text_of(el))
-    let entry = make_thm_entry(thm_def.env_name, env_num, env_text)
+    let entry = make_thm_entry(thm_def.env_name, scoped.number, env_text)
     let new_theorems = st.theorems ++ [entry]
     let new_state = {*:st, counters: new_counters, custom_counters: new_custom_counters,
+        counter_positions: scoped.positions,
         theorems: new_theorems,
-        env_context: thm_def.env_name, env_context_num: string(env_num)}
+        env_context: thm_def.env_name, env_context_num: string(scoped.number)}
     walk_children(el, 0, len(el), new_state)
 }
 
@@ -650,6 +758,37 @@ fn get_custom_counter_val(custom_counters, counter_name) {
     if (v != null) { v } else { 0 }
 }
 
+// Scope counters lazily against the current heading identity. This keeps
+// shared theorem counters and amsmath equation rows on the same reset path.
+fn scoped_counter(st, counter_name, raw_number) {
+    let parent = util.lookup(st.counter_within, counter_name)
+    if (parent == null) {number: raw_number, positions: st.counter_positions}
+    else {
+        let identity = heading_identity(st.counters, parent)
+        let prior = util.lookup(st.counter_positions, counter_name)
+        let next = if (prior != null and prior.identity == identity)
+            prior.sequence + 1 else 1
+        let prefix = compute_section_num(st.counters, parent, st.docclass, st.in_appendix)
+        {number: string(prefix) ++ "." ++ string(next),
+         positions: add_entry(st.counter_positions, counter_name,
+            {identity: identity, sequence: next})}
+    }
+}
+
+fn heading_identity(counters, parent) {
+    let chapter = string(counters.chapter)
+    if (parent == "chapter") chapter
+    else {
+        let section = chapter ++ ":" ++ string(counters.section)
+        if (parent == "section") section
+        else {
+            let subsection = section ++ ":" ++ string(counters.subsection)
+            if (parent == "subsection") subsection
+            else subsection ++ ":" ++ string(counters.subsubsection)
+        }
+    }
+}
+
 fn get_env_counter(counters, env_type) {
     match env_type {
         case "theorem": counters.theorem
@@ -678,7 +817,11 @@ fn walk_label(el, st) {
     let heading_key = label_type ++ ":" ++ label_number
     let label_title = util.lookup(st.heading_titles, heading_key)
 
-    let entry = {type: label_type, number: label_number, id: label_id, title: label_title}
+    let subordinal = if (label_type == "subfigure") st.subfigure_count
+        else if (label_type == "subtable") st.subtable_count else null
+    let entry = {type: label_type, number: label_number, id: label_id, title: label_title,
+        subnumber: if (subordinal == null) null
+            else if (subordinal <= 26) chr(96 + subordinal) else string(subordinal)}
     let new_labels = add_entry(st.labels, label_name, entry)
     {*:st, labels: new_labels}
 }

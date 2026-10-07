@@ -1,0 +1,48 @@
+<!doctype html>
+<style id="rules">.item { color: red; } @media all { .item { width: 10px; } }</style>
+<button id="check">check reflection</button><div id="report" class="item"></div>
+<script>
+function check(name, callback) {
+    var report = document.getElementById('report');
+    try { report.setAttribute('data-' + name, String(callback())); }
+    catch (error) { report.setAttribute('data-' + name, error.name); }
+}
+document.getElementById('check').addEventListener('click', function () {
+    var sheet = document.getElementById('rules').sheet;
+    var rule = sheet.cssRules[0], media = sheet.cssRules[1];
+    check('reflect-type', function () { return Reflect.set(rule, 'type', 8) === false && rule.type === 1; });
+    check('sloppy-type', function () { return (rule.type = 8) === 8 && rule.type === 1; });
+    check('strict-type', function () { try { (function () { 'use strict'; rule.type = 8; })(); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('reflect-parent', function () { return Reflect.set(rule, 'parentStyleSheet', null) === false && rule.parentStyleSheet === sheet; });
+    check('reflect-condition', function () { return Reflect.set(media, 'conditionText', 'print') === false && media.conditionText === 'all'; });
+    check('reflect-selector', function () { return Reflect.set(rule, 'selectorText', '.next') === true && rule.selectorText === '.next'; });
+    check('reflect-own-readonly', function () { Object.defineProperty(rule, 'note', { value: 1, writable: false, configurable: true }); return Reflect.set(rule, 'note', 2) === false && rule.note === 1; });
+    check('strict-own-readonly', function () { try { (function () { 'use strict'; rule.note = 2; })(); } catch (error) { return error.name === 'TypeError' && rule.note === 1; } return false; });
+    check('reflect-shadow-readonly', function () { Object.defineProperty(rule, 'selectorText', { value: 'own', writable: false, configurable: true }); return Reflect.set(rule, 'selectorText', '.other') === false && rule.selectorText === 'own'; });
+    check('strict-shadow-readonly', function () { try { (function () { 'use strict'; rule.selectorText = '.other'; })(); } catch (error) { return error.name === 'TypeError' && rule.selectorText === 'own'; } return false; });
+    delete rule.selectorText;
+    check('reflect-get-receiver', function () { try { Reflect.get(rule, 'selectorText', {}); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('reflect-set-receiver', function () { try { Reflect.set(rule, 'selectorText', '.bad', {}); } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('inherited-rule-getter', function () { try { var child = Object.create(rule); child.selectorText; } catch (error) { return error.name === 'TypeError'; } return false; });
+    check('own-getter-receiver', function () { Object.defineProperty(rule, 'custom', { get: function () { return this === rule; }, configurable: true }); return rule.custom === true; });
+    check('reflect-own-getter-receiver', function () { var receiver = {}; Object.defineProperty(rule, 'custom', { get: function () { return this === receiver; }, configurable: true }); return Reflect.get(rule, 'custom', receiver) === true; });
+    check('own-setter-receiver', function () { var seen; Object.defineProperty(rule, 'custom', { set: function () { seen = this; }, configurable: true }); rule.custom = 3; return seen === rule; });
+    check('reflect-false-value', function () { return Reflect.set(rule, 'extra', false) === true && rule.extra === false; });
+    check('reflect-undefined-value', function () { return Reflect.set(rule, 'extra', undefined) === true && rule.extra === undefined; });
+    check('strict-false-value', function () { return (function () { 'use strict'; return (rule.extra = false) === false && rule.extra === false; })(); });
+    check('sloppy-own-readonly', function () { return (rule.note = false) === false && rule.note === 1; });
+    check('valid-get-receiver', function () { var other = media.cssRules[0]; return Reflect.get(rule, 'selectorText', other) === '.item'; });
+    check('valid-set-receiver', function () { var other = media.cssRules[0]; return Reflect.set(rule, 'selectorText', '.receiver', other) === true && other.selectorText === '.receiver' && rule.selectorText === '.next'; });
+    check('reflect-own-setter-receiver', function () { var receiver = {}, seen; Object.defineProperty(rule, 'custom', { set: function () { seen = this; return false; }, configurable: true }); return Reflect.set(rule, 'custom', false, receiver) === true && seen === receiver; });
+    check('own-getter-error', function () { Object.defineProperty(rule, 'custom', { get: function () { throw new RangeError('getter'); }, configurable: true }); try { rule.custom; } catch (error) { return error.name === 'RangeError'; } return false; });
+    check('own-setter-error', function () { Object.defineProperty(rule, 'custom', { set: function () { throw new RangeError('setter'); }, configurable: true }); try { Reflect.set(rule, 'custom', 1); } catch (error) { return error.name === 'RangeError'; } return false; });
+    check('prototype-getter-receiver', function () { var proto = Object.getPrototypeOf(rule); Object.defineProperty(proto, 'extraAccessor', { get: function () { return this === rule; }, configurable: true }); var result = rule.extraAccessor === true; delete proto.extraAccessor; return result; });
+    check('prototype-setter-receiver', function () { var proto = Object.getPrototypeOf(rule), seen; Object.defineProperty(proto, 'extraAccessor', { set: function () { seen = this; }, configurable: true }); var result = Reflect.set(rule, 'extraAccessor', false) === true && seen === rule; delete proto.extraAccessor; return result; });
+    check('data-set-receiver', function () { var receiver = {}; rule.extra = 1; return Reflect.set(rule, 'extra', 2, receiver) === true && receiver.extra === 2 && rule.extra === 1; });
+    check('proxy-set-completion', function () { var target = {}, proxy = new Proxy(target, {}); return Reflect.set(proxy, 'extra', false) === true && (function () { 'use strict'; return (proxy.extra = false) === false; })() && target.extra === false; });
+    check('promise-set-completion', function () { var promise = Promise.resolve(); return Reflect.set(promise, 'extra', false) === true && (function () { 'use strict'; return (promise.extra = undefined) === undefined; })() && promise.extra === undefined; });
+    check('promise-own-readonly', function () { var promise = Promise.resolve(); Object.defineProperty(promise, 'note', { value: 1, writable: false }); return Reflect.set(promise, 'note', 2) === false && promise.note === 1; });
+    check('promise-own-setter-receiver', function () { var promise = Promise.resolve(), seen; Object.defineProperty(promise, 'custom', { set: function () { seen = this; } }); return Reflect.set(promise, 'custom', false) === true && seen === promise; });
+    check('promise-method-shadow', function () { var promise = Promise.resolve(), replacement = function () {}; return Reflect.set(promise, 'then', replacement) === true && Object.prototype.hasOwnProperty.call(promise, 'then') && promise.then === replacement; });
+});
+</script>
