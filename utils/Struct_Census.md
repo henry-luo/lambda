@@ -10,7 +10,7 @@ The point of using clang rather than a regex sweep or `ctags` is that clang answ
 make struct-census
 ```
 
-Incremental by default — only translation units whose dependency set changed since the last run are re-parsed. A no-op run takes about 0.2 s; a cold run over all 526 TUs takes about 40 s on 10 cores.
+Incremental by default — only translation units whose dependency set changed since the last run are re-parsed. A no-op run takes about 0.2 s; a cold run re-parses every configured translation unit. The 2026-10-07 full census scanned 587 TUs.
 
 To ignore the cache and re-parse everything:
 
@@ -146,7 +146,7 @@ libclang is driven through the C API, so nothing computes the builtin-header pat
 
 ## What the census cannot see
 
-- **JS MVP and hosted language modules.** `lambda/js/mvp/**` and `lambda/module/**` (Python, Ruby, Bash, Node) are excluded by configuration. They are retained MVP or Jube-hosted code rather than part of the D7.1.1 archive set, and their data structures would swamp the layers the split is actually about.
+- **Hosted language modules.** `lambda/module/**` (Python, Ruby, Bash, Node) is excluded by configuration. The former private-value JS MVP runtime was removed from the active tree on 2026-10-07; the census no longer needs a path exclusion for it.
 - **Function-local types.** Parsing runs with `PARSE_SKIP_FUNCTION_BODIES`, which is what makes a cold run 40 s instead of several minutes. A struct declared inside a function body is not counted.
 - **Templates.** A class template has no layout until it is instantiated, so `size` and `align` come back `null`.
 - **Unreferenced headers.** A header that no `.cpp` or `.c` in `source_dirs` includes is never parsed. In practice this is a small set, but it is not zero.
@@ -155,6 +155,6 @@ libclang is driven through the C API, so nothing computes the builtin-header pat
 
 ## Parse errors
 
-The run reports how many TUs produced hard errors, and their records are flagged as possibly incomplete rather than silently dropped. The tree currently reports **zero** across all 526 TUs. A number appearing here is a signal about the tree or the config, not noise to tune out.
+The run reports how many TUs produced hard errors, and their records are flagged as possibly incomplete rather than silently dropped. The 2026-10-07 census reported **one parse error across 587 TUs**, in `radiant/app_icon_mac_static.cpp`; see the generated JSON for its details. A number appearing here is a signal about the tree or the config, not noise to tune out.
 
 One known break sits outside the census's scope: `lambda/module/bash/bash_runtime.cpp` redefines the enumerators of `BashTestOp` (declared in the `bash_ast.hpp` it includes) under a second name, `BashTestComparison`, so the file does not compile. It stopped showing up here when `lambda/module/bash` was excluded, and nothing in `lambda/module/bash/` is currently built, so the breakage is latent rather than live.

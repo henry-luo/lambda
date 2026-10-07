@@ -1,4 +1,5 @@
 #include "../io/mark_output_builder.hpp"
+#include "heap_api.h"  // owner header: its LAMBDA_RT_API markers must reach these definitions
 #include "transpiler.hpp"
 #include <limits.h>
 #include "../../lib/log.h"

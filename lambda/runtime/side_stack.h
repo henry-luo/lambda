@@ -1,5 +1,6 @@
 #ifndef LAMBDA_SIDE_STACK_H
 #define LAMBDA_SIDE_STACK_H
+#include "../../lib/lambda_api.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -67,7 +68,7 @@ bool lambda_side_stack_bind(void);
 bool lambda_side_stack_ensure_tls(size_t root_slots, size_t number_slots);
 void lambda_side_stack_reset(void);
 LambdaSideStackSnapshot lambda_side_stack_snapshot(void);
-void lambda_side_stack_restore(LambdaSideStackSnapshot snapshot);
+LAMBDA_RT_API void lambda_side_stack_restore(LambdaSideStackSnapshot snapshot);
 LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture(void);
 void lambda_recovery_checkpoint_restore(LambdaRecoveryCheckpoint* checkpoint);
 void lambda_recovery_checkpoint_disarm(LambdaRecoveryCheckpoint* checkpoint);
@@ -79,10 +80,10 @@ bool lambda_side_root_pop_n(size_t slot_count);
 uint64_t* lambda_side_number_alloc(void);
 void lambda_side_stack_decommit_unused(void);
 
-bool lambda_root_frame_begin(LambdaRootFrame* frame, size_t slot_count);
+LAMBDA_RT_API bool lambda_root_frame_begin(LambdaRootFrame* frame, size_t slot_count);
 uint64_t* lambda_root_frame_slot(LambdaRootFrame* frame, size_t index);
-uint64_t* lambda_root_frame_take_slot(LambdaRootFrame* frame);
-void lambda_root_frame_end(LambdaRootFrame* frame);
+LAMBDA_RT_API uint64_t* lambda_root_frame_take_slot(LambdaRootFrame* frame);
+LAMBDA_RT_API void lambda_root_frame_end(LambdaRootFrame* frame);
 
 // Explicit-owner variants are test/control-plane surfaces for an inactive
 // context. Runtime execution must use the TLS APIs above.

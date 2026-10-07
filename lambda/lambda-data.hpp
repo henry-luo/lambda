@@ -1,4 +1,5 @@
 #pragma once
+#include "../lib/lambda_api.h"
 
 #include <string.h>  // moved outside extern "C" block to fix C++ compatibility
 #include <mpdecimal.h>
@@ -650,7 +651,7 @@ const LaneStorageDesc* shape_entry_storage(const ShapeEntry* entry);
 // Read one shaped field's value. Defined in lambda-data-runtime.cpp; declared
 // here rather than re-externed per consumer, which is how the JS adapter, the
 // document node table, and the Tier-3 write set had each grown their own copy.
-Item _map_read_field(ShapeEntry* field, void* map_data);
+LAMBDA_RT_API Item _map_read_field(ShapeEntry* field, void* map_data);
 
 // Nullable-native projection: the field's slot is int?/bool?/float?/T? lane.
 bool shape_entry_uses_native_lane(const ShapeEntry* field,
@@ -1249,12 +1250,12 @@ void* pack_alloc(Pack* pack, size_t size);
 void* pack_calloc(Pack* pack, size_t size);
 void pack_free(Pack* pack);
 
-extern Type TYPE_NULL;
+extern LAMBDA_CORE_API Type TYPE_NULL;
 extern Type TYPE_UNDEFINED;  // JavaScript undefined
-extern Type TYPE_BOOL;
-extern Type TYPE_INT;
+extern LAMBDA_CORE_API Type TYPE_BOOL;
+extern LAMBDA_CORE_API Type TYPE_INT;
 extern Type TYPE_INT64;
-extern Type TYPE_FLOAT;
+extern LAMBDA_CORE_API Type TYPE_FLOAT;
 extern Type TYPE_FLOAT64;
 extern Type TYPE_COMPLEX;
 extern Type TYPE_DECIMAL;
@@ -1265,7 +1266,7 @@ extern Type TYPE_INTEGER_VALUE;
 extern Type TYPE_NUMBER;
 // S11.1.7: `none`, the empty type -- admits no value, below every type.
 extern Type TYPE_NONE;
-extern Type TYPE_STRING;
+extern LAMBDA_CORE_API Type TYPE_STRING;
 extern Type TYPE_BINARY;
 extern Type TYPE_SYMBOL;
 extern Type TYPE_PATH;
@@ -1283,15 +1284,15 @@ extern Type TYPE_F32;
 extern Type TYPE_DTIME;
 extern Type TYPE_DATE;   // sub-type of datetime (precision: DATE_ONLY or YEAR_ONLY)
 extern Type TYPE_TIME;   // sub-type of datetime (precision: TIME_ONLY)
-extern Type TYPE_LIST;
+extern LAMBDA_CORE_API Type TYPE_LIST;
 extern Type TYPE_RANGE;
 extern TypeArray TYPE_ARRAY;
-extern Type TYPE_MAP;
+extern LAMBDA_CORE_API Type TYPE_MAP;
 extern Type TYPE_OBJECT;
 extern Type TYPE_ELMT;
 extern Type TYPE_TYPE;
-extern Type TYPE_FUNC;
-extern Type TYPE_ANY;
+extern LAMBDA_CORE_API Type TYPE_FUNC;
+extern LAMBDA_CORE_API Type TYPE_ANY;
 extern Type TYPE_ERROR;
 // The name of a type that shares another kind's TypeId (S2.1.1v4): the
 // numeric unions `integer` and `number`, and the array subkind `list`. NULL
@@ -1556,7 +1557,7 @@ static inline bool lambda_nominal_derives_from(const struct TypeNominal* actual,
     return false;
 }
 
-extern TypeMap EmptyMap;
+extern LAMBDA_CORE_API TypeMap EmptyMap;
 // D2.6.6v2: an array now has its own attribute face, so a JS array's companion
 // property map is held there — one tagged Item in an 8-byte buffer — instead of
 // in a reserved tail slot inside the elements buffer. This shape marks that
@@ -1564,8 +1565,8 @@ extern TypeMap EmptyMap;
 // SparseArrayMap with its own fields), so what moved inline is the POINTER.
 extern TypeMap ArrayPropsShape;
 extern TypeElmt EmptyElmt;
-extern const Item ItemNull;
-extern const Item ItemError;
+extern LAMBDA_CORE_API const Item ItemNull;
+extern LAMBDA_CORE_API const Item ItemError;
 extern const Item ItemEmptyString;
 extern TypeInfo type_info[];
 // Shared concatenation reports allocation/length failure with this immutable sentinel.

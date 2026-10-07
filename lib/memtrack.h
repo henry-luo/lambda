@@ -1,5 +1,6 @@
 #ifndef MEMTRACK_H
 #define MEMTRACK_H
+#include "lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -243,11 +244,11 @@ char* mem_strndup(const char* str, size_t max_len, MemCategory category);
 // Debug Allocation API (with source line)
 // ============================================================================
 
-void* mem_alloc_loc(size_t size, MemCategory category, int line);
-void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line);
-void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, int line);
-void mem_free_loc(void* ptr, int line);
-char* mem_dup_n_loc(const char* data, size_t len, MemCategory category, int line);
+LAMBDA_LIB_API void* mem_alloc_loc(size_t size, MemCategory category, int line);
+LAMBDA_LIB_API void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line);
+LAMBDA_LIB_API void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, int line);
+LAMBDA_LIB_API void mem_free_loc(void* ptr, int line);
+LAMBDA_LIB_API char* mem_dup_n_loc(const char* data, size_t len, MemCategory category, int line);
 char* mem_join_parts_loc(const char* const* parts, const size_t* lengths, size_t count,
                          MemCategory category, int line);
 char* mem_join2_loc(const char* first, size_t first_len,
@@ -257,7 +258,7 @@ char* mem_join3_loc(const char* first, size_t first_len,
                     const char* second, size_t second_len,
                     const char* third, size_t third_len,
                     MemCategory category, int line);
-char* mem_strdup_loc(const char* str, MemCategory category, int line);
+LAMBDA_LIB_API char* mem_strdup_loc(const char* str, MemCategory category, int line);
 char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int line);
 
 #ifndef MEMTRACK_NO_LOCATION_MACROS

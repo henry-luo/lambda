@@ -1,5 +1,6 @@
 #ifndef LAMBDA_JS_HOST_HOOKS_H
 #define LAMBDA_JS_HOST_HOOKS_H
+#include "../../lib/lambda_api.h"
 
 #include "../lambda-data.hpp"
 #include "../jube/jube.h"
@@ -11,7 +12,7 @@ typedef Item (*JsHostConsoleFormatHook)(Item args);
 
 void js_host_hooks_set_shutdown_participant(JsHostShutdownParticipant participant);
 void js_host_hooks_run_shutdown_participants(void);
-void js_host_hooks_set_console_format_hook(JsHostConsoleFormatHook hook);
+LAMBDA_RT_API void js_host_hooks_set_console_format_hook(JsHostConsoleFormatHook hook);
 Item js_host_hooks_format_console(Item args);
 void js_host_hooks_set_redirect_stdout_to_stderr(bool enabled);
 bool js_host_hooks_redirect_stdout_to_stderr(void);

@@ -20,6 +20,7 @@
 
 #ifndef LIB_STR_H
 #define LIB_STR_H
+#include "lambda_api.h"
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -80,9 +81,9 @@ bool str_ieq_const(const char* s, size_t len, const char* lit);
  *  2. Prefix / Suffix
  * ────────────────────────────────────────────────────────────────────── */
 
-bool str_starts_with(const char* s, size_t s_len,
+LAMBDA_LIB_API bool str_starts_with(const char* s, size_t s_len,
                      const char* prefix, size_t prefix_len);
-bool str_ends_with(const char* s, size_t s_len,
+LAMBDA_LIB_API bool str_ends_with(const char* s, size_t s_len,
                    const char* suffix, size_t suffix_len);
 
 /** convenience overloads for NUL-terminated prefix/suffix. */
@@ -113,7 +114,7 @@ size_t str_find_byte(const char* s, size_t len, char c);
 size_t str_rfind_byte(const char* s, size_t len, char c);
 
 /** find first occurrence of needle in haystack. returns offset or STR_NPOS. */
-size_t str_find(const char* s, size_t s_len,
+LAMBDA_LIB_API size_t str_find(const char* s, size_t s_len,
                 const char* needle, size_t needle_len);
 
 /** frequency rank of a byte in typical text and source code, measured over
@@ -193,7 +194,7 @@ size_t str_teddy_find_portable(const StrTeddy* teddy, const char* s, size_t s_le
 const char* str_teddy_kernel(void);
 
 /** find last occurrence. */
-size_t str_rfind(const char* s, size_t s_len,
+LAMBDA_LIB_API size_t str_rfind(const char* s, size_t s_len,
                  const char* needle, size_t needle_len);
 
 /** case-insensitive find (ASCII). */
@@ -214,7 +215,7 @@ size_t str_find_not_any(const char* s, size_t s_len,
                         const char* chars, size_t chars_len);
 
 /** count non-overlapping occurrences of needle in s. */
-size_t str_count(const char* s, size_t s_len,
+LAMBDA_LIB_API size_t str_count(const char* s, size_t s_len,
                  const char* needle, size_t needle_len);
 
 /** count occurrences of byte c. */
@@ -261,7 +262,7 @@ size_t str_find_not_byteset(const char* s, size_t len, const StrByteSet* set);
 
 /** trim ASCII whitespace from both ends. mutates *s and *len in place.
  *  the underlying buffer is not modified — just pointer/length adjustment. */
-void str_trim(const char** s, size_t* len);
+LAMBDA_LIB_API void str_trim(const char** s, size_t* len);
 void str_ltrim(const char** s, size_t* len);
 void str_rtrim(const char** s, size_t* len);
 
@@ -298,19 +299,19 @@ void str_lut_toupper(uint8_t lut[256]);
 void str_lut_identity(uint8_t lut[256]);   /* identity mapping, base for custom LUTs */
 
 /** convenience wrappers — write into dst (must be >= len bytes). */
-void str_to_lower(char* dst, const char* src, size_t len);
-void str_to_upper(char* dst, const char* src, size_t len);
+LAMBDA_LIB_API void str_to_lower(char* dst, const char* src, size_t len);
+LAMBDA_LIB_API void str_to_upper(char* dst, const char* src, size_t len);
 
 /** in-place lower/upper on a mutable buffer. */
 void str_lower_inplace(char* s, size_t len);
 void str_upper_inplace(char* s, size_t len);
 
 /** ASCII case transforms for a length-bounded source. */
-void str_capitalize_ascii(char* dst, const char* src, size_t len);
-void str_swapcase_ascii(char* dst, const char* src, size_t len);
+LAMBDA_LIB_API void str_capitalize_ascii(char* dst, const char* src, size_t len);
+LAMBDA_LIB_API void str_swapcase_ascii(char* dst, const char* src, size_t len);
 
 /** predicate: is the whole string ASCII? (SWAR-accelerated). */
-bool str_is_ascii(const char* s, size_t len);
+LAMBDA_LIB_API bool str_is_ascii(const char* s, size_t len);
 
 /* ──────────────────────────────────────────────────────────────────────
  *  7. Copy / Fill (safe replacements for strcpy, strncpy, memset)
@@ -318,12 +319,12 @@ bool str_is_ascii(const char* s, size_t len);
 
 /** safe copy — copies up to dst_cap-1 bytes, always NUL-terminates.
  *  returns number of bytes written (excluding NUL), or 0 if dst_cap==0. */
-size_t str_copy(char* dst, size_t dst_cap,
+LAMBDA_LIB_API size_t str_copy(char* dst, size_t dst_cap,
                 const char* src, size_t src_len);
 
 /** safe concatenate — appends to dst[dst_len], NUL-terminates.
  *  returns new total length, or dst_len if no room. */
-size_t str_cat(char* dst, size_t dst_len, size_t dst_cap,
+LAMBDA_LIB_API size_t str_cat(char* dst, size_t dst_len, size_t dst_cap,
                const char* src, size_t src_len);
 
 /** allocate a NUL-terminated join through the caller's ownership allocator. */
@@ -336,7 +337,7 @@ void str_fill(char* dst, size_t n, char c);
 
 /** duplicate [s, s+len) as a NUL-terminated malloc'd string.
  *  caller must free(). returns NULL on allocation failure. */
-char* str_dup(const char* s, size_t len);
+LAMBDA_LIB_API char* str_dup(const char* s, size_t len);
 
 /** duplicate with lower-case conversion. */
 char* str_dup_lower(const char* s, size_t len);
@@ -379,13 +380,13 @@ typedef struct {
 } StrSplitIter;
 
 /** initialize a split iterator. */
-void str_split_init(StrSplitIter* it,
+LAMBDA_LIB_API void str_split_init(StrSplitIter* it,
                     const char* s, size_t s_len,
                     const char* delim, size_t delim_len);
 
 /** advance to next token. returns true if a token was found.
  *  *tok and *tok_len receive the current token (zero-copy). */
-bool str_split_next(StrSplitIter* it, const char** tok, size_t* tok_len);
+LAMBDA_LIB_API bool str_split_next(StrSplitIter* it, const char** tok, size_t* tok_len);
 
 /** split on single byte (common case: ',', '/', '.', etc.). */
 void str_split_byte_init(StrSplitIter* it,
@@ -403,7 +404,7 @@ size_t str_split_count(const char* s, size_t s_len,
  *  allocates result via malloc. caller must free().
  *  *out_len (if non-NULL) receives the result length.
  *  returns NULL on allocation failure. */
-char* str_replace_all(const char* s, size_t s_len,
+LAMBDA_LIB_API char* str_replace_all(const char* s, size_t s_len,
                       const char* old, size_t old_len,
                       const char* new_s, size_t new_len,
                       size_t* out_len);

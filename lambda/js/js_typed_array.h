@@ -9,6 +9,7 @@
  * using the same zero-overhead wrapper pattern as DOM nodes.
  */
 #pragma once
+#include "../../lib/lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,8 +47,8 @@ typedef struct JsTypedArraySpec {
 // compiler and runtime consume the same element descriptor.
 const JsTypedArraySpec* js_typed_array_spec(JsTypedArrayType type);
 
-int js_typed_array_element_size(JsTypedArrayType type);
-bool js_typed_array_is_integer_type(JsTypedArrayType type);
+LAMBDA_RT_API int js_typed_array_element_size(JsTypedArrayType type);
+LAMBDA_RT_API bool js_typed_array_is_integer_type(JsTypedArrayType type);
 
 // ArrayBuffer identity stays stable while this shared handle replaces storage
 // on resize, detach, transfer, and copy-on-write. JS owns the Map carrier;
@@ -57,7 +58,7 @@ typedef ByteBufferHandle JsArrayBuffer;
 static inline const uint8_t* js_arraybuffer_data_const(const JsArrayBuffer* ab) {
     return ab ? byte_buffer_data_const(ab) : NULL;
 }
-uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab);
+LAMBDA_RT_API uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab);
 static inline int js_arraybuffer_length(const JsArrayBuffer* ab) {
     return ab ? (int)ab->byte_length : 0;
 }
@@ -127,16 +128,16 @@ typedef enum JsAtomicsOp {
 } JsAtomicsOp;
 
 // Core typed array operations
-Item js_typed_array_new(int type_id, int length);
+LAMBDA_RT_API Item js_typed_array_new(int type_id, int length);
 // Host-owned binary construction primitive. Node-facing modules consume this
 // through JubeHostBinaryAPI so host I/O never depends on Buffer's namespace.
 Item js_buffer_from_bytes(const char* data, int len);
-Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length);
+LAMBDA_RT_API Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length);
 Item js_typed_array_new_from_array(int type_id, Item source);
-Item js_typed_array_from_binary(Binary* bin);
+LAMBDA_RT_API Item js_typed_array_from_binary(Binary* bin);
 Item binary_from_typed_array(JsTypedArray* ta);
 Item binary_from_dataview(JsDataView* dv);
-Item js_typed_array_get(Item ta, Item index);
+LAMBDA_RT_API Item js_typed_array_get(Item ta, Item index);
 Item js_typed_array_set(Item ta, Item index, Item value);
 Item js_typed_array_set_numeric(Item ta, double index, bool is_negative_zero,
                                 Item value);
@@ -145,22 +146,22 @@ Item js_typed_array_set_numeric_key(Item ta, double index, Item value);
 // kind. A false result leaves the caller to perform the complete JS Set.
 bool js_typed_array_set_number_if_kind(Item ta, double index,
                                        int expected_type, double value);
-int  js_typed_array_length(Item ta);
+LAMBDA_RT_API int  js_typed_array_length(Item ta);
 int  js_typed_array_element_type(Item ta);
-int  js_typed_array_byte_length(Item ta);
+LAMBDA_RT_API int  js_typed_array_byte_length(Item ta);
 int  js_typed_array_byte_offset(Item ta);
-bool js_typed_array_is_out_of_bounds_item(Item ta);
+LAMBDA_RT_API bool js_typed_array_is_out_of_bounds_item(Item ta);
 Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int index);
 Item js_typed_array_fill(Item ta, Item value, int start, int end,
                          bool array_semantics);
-bool js_is_typed_array(Item val);
-JsTypedArray* js_get_typed_array_ptr(Map* m);
-void* js_typed_array_current_data_ptr(Item ta_item);
+LAMBDA_RT_API bool js_is_typed_array(Item val);
+LAMBDA_RT_API JsTypedArray* js_get_typed_array_ptr(Map* m);
+LAMBDA_RT_API void* js_typed_array_current_data_ptr(Item ta_item);
 // Returns a current data pointer only after validating the receiver, exact
 // element kind, and live bounds for one immediate physical read.
 void* js_typed_array_data_at_if_kind(Item ta_item, int expected_type,
                                      int64_t index);
-void* js_typed_array_prepare_write_ptr(Item ta_item);
+LAMBDA_RT_API void* js_typed_array_prepare_write_ptr(Item ta_item);
 bool js_item_bytes(Item item, const char** data, int* len);
 Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);
 Item js_typed_array_slice(Item ta, int start, int end, bool array_semantics);
@@ -170,18 +171,18 @@ bool js_typed_array_raw_copy_reversed(Item dst, Item src);
 bool js_typed_array_raw_copy_same_type(Item dst, Item src);
 
 // ArrayBuffer operations
-Item js_arraybuffer_new(int byte_length);
+LAMBDA_RT_API Item js_arraybuffer_new(int byte_length);
 // Copies host bytes into a newly allocated ordinary ArrayBuffer.
 Item js_arraybuffer_from_bytes(const void* data, int byte_length);
 Item js_arraybuffer_construct(Item length_arg);
 Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
 Item js_arraybuffer_construct_resizable_target(Item length_arg,
     Item options_arg, Item new_target);
-Item js_arraybuffer_wrap(JsArrayBuffer* ab);
+LAMBDA_RT_API Item js_arraybuffer_wrap(JsArrayBuffer* ab);
 void js_arraybuffer_destroy(JsArrayBuffer* ab);
-bool js_is_arraybuffer(Item val);
-JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val);
-int  js_arraybuffer_byte_length(Item val);
+LAMBDA_RT_API bool js_is_arraybuffer(Item val);
+LAMBDA_RT_API JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val);
+LAMBDA_RT_API int  js_arraybuffer_byte_length(Item val);
 int  js_arraybuffer_max_byte_length(Item val);
 bool js_arraybuffer_is_resizable(Item val);
 Item js_arraybuffer_resize(Item val, Item new_length_item);
@@ -251,8 +252,8 @@ typedef enum JsDataViewOperation {
 Item js_dataview_new(Item buffer, Item offset_item, Item length_item);
 Item js_dataview_construct(Item buffer, Item offset_item, Item length_item,
     Item new_target);
-bool js_is_dataview(Item val);
-JsDataView* js_get_dataview_ptr(Item val);
+LAMBDA_RT_API bool js_is_dataview(Item val);
+LAMBDA_RT_API JsDataView* js_get_dataview_ptr(Item val);
 Item js_dataview_operation(Item dv, JsDataViewOperation operation,
     Item* args, int argc);
 

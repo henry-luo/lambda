@@ -1,6 +1,7 @@
 /* Lambda Script Log Library - zlog-compatible API with log_ prefix */
 #ifndef LOG_H
 #define LOG_H
+#include "lambda_api.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -141,8 +142,8 @@ int clog_vnotice(log_category_t *category, const char *format, va_list args);
 
 /* Default category logging functions (convenient API) */
 int log_fatal(const char *format, ...);
-int log_error(const char *format, ...);
-int log_warn(const char *format, ...);
+LAMBDA_LIB_API int log_error(const char *format, ...);
+LAMBDA_LIB_API int log_warn(const char *format, ...);
 int log_notice(const char *format, ...);
 
 /* Emit an opt-in process memory checkpoint when VIEW_MEM_STAGES is enabled. */
@@ -161,8 +162,8 @@ void log_mem_stage(const char *stage);
     #define log_trace(...) ((void)0)
 #else
     /* Debug build: use actual logging functions */
-    int log_info(const char *format, ...);
-    int log_debug(const char *format, ...);
+    LAMBDA_LIB_API int log_info(const char *format, ...);
+    LAMBDA_LIB_API int log_debug(const char *format, ...);
     int log_trace(const char *format, ...);
 #endif
 

@@ -1,5 +1,6 @@
 #ifndef FILE_UTILS_H
 #define FILE_UTILS_H
+#include "lambda_api.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,7 +22,7 @@ typedef struct {
 } DirEntry;
 
 // Free a single DirEntry (name string + struct itself).
-void dir_entry_free(DirEntry* entry);
+LAMBDA_LIB_API void dir_entry_free(DirEntry* entry);
 
 // ---------------------------------------------------------------------------
 // Callback for recursive directory walk.
@@ -51,7 +52,7 @@ int create_dir_recursive(const char* path);
 // List immediate children. Returns ArrayList of DirEntry*.
 // Caller must free each DirEntry via dir_entry_free, then arraylist_free.
 // Returns NULL on error.
-struct _ArrayList* dir_list(const char* dir_path);
+LAMBDA_LIB_API struct _ArrayList* dir_list(const char* dir_path);
 
 // Recursive depth-first walk with callback. Returns 0 on success, -1 on error.
 int dir_walk(const char* dir_path, FileWalkCallback cb, void* user_data);

@@ -11,6 +11,7 @@
 
 #ifndef LIB_UTF_H
 #define LIB_UTF_H
+#include "lambda_api.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -109,17 +110,17 @@ uint32_t utf16_decode_pair(uint16_t high, uint16_t low);
  * @return Number of uint16_t units written: 1 (BMP) or 2 (supplementary).
  *         Returns 0 on invalid codepoint (surrogate, > 0x10FFFF).
  */
-int utf16_encode(uint32_t codepoint, uint16_t utf16[2]);
+LAMBDA_LIB_API int utf16_encode(uint32_t codepoint, uint16_t utf16[2]);
 
 /**
  * Count bytes needed to encode Lambda's WTF-8 string representation as UTF-8.
  * Lone UTF-16 surrogate units are replaced with U+FFFD; valid surrogate pairs
  * are combined before encoding.
  */
-int utf8_wtf8_encoded_len(const char* chars, int byte_len);
+LAMBDA_LIB_API int utf8_wtf8_encoded_len(const char* chars, int byte_len);
 
 /** Encode a WTF-8 string as well-formed UTF-8 into an existing output buffer. */
-void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* out);
+LAMBDA_LIB_API void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* out);
 
 /* ── Codepoint Classification ─────────────────────────────────────── */
 

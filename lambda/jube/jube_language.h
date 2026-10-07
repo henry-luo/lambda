@@ -1,4 +1,5 @@
 #pragma once
+#include "../../lib/lambda_api.h"
 
 #include "jube.h"
 
@@ -24,13 +25,13 @@ int jube_run_language(const char* name, const JubeLanguageRunRequest* request);
 
 // Loads a module through the language selected by its source extension. The
 // host does not inspect namespace representation beyond the neutral Item.
-bool jube_load_hosted_module(void* host_context, const char* source_path,
+LAMBDA_RT_API bool jube_load_hosted_module(void* host_context, const char* source_path,
                              const char* importer_path, Item* out_namespace);
 
 // Resolves a source module through the registered hosted-language registry,
 // then through the reviewed built-in language bridge where applicable. This is
 // an import-time operation; evaluators and generated code never call it.
-bool jube_load_language_module(void* host_context, const char* source_path,
+LAMBDA_RT_API bool jube_load_language_module(void* host_context, const char* source_path,
                                const char* importer_path, Item* out_namespace);
 
 // Validates the language tail before a module is made visible to the registry.

@@ -33,6 +33,19 @@ def elog(*args, **kwargs):
     kwargs.setdefault('file', sys.stderr)
     print(*args, **kwargs)
 
+# The reviewed set of host symbols Jube modules may resolve (D7.3.6).
+HOST_EXPORT_LIST = Path(__file__).resolve().parent.parent / 'lambda' / 'jube' / 'jube_host_exports.txt'
+
+def read_host_export_list(path: Path = HOST_EXPORT_LIST) -> List[str]:
+    """Linker names in the allowlist: one per line, '#' starts a comment."""
+    names = []
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            name = line.split('#', 1)[0].strip()
+            if name:
+                names.append(name)
+    return names
+
 def glob_premake_paths(pattern: str) -> List[str]:
     """Return glob matches with Lua-safe, platform-neutral separators."""
     return [Path(match).as_posix() for match in glob.glob(pattern, recursive=False)]
@@ -56,6 +69,8 @@ class PremakeGenerator:
         self.premake_content = []
         self._linux_pkg_config_includes: Optional[List[str]] = linux_pkg_config_includes
         self.variant = variant
+        # (makefile-relative path, text) of the host export list; see _host_export_link_options
+        self.host_export_file = None
         self.coverage_bin_dir = os.environ.get('LAMBDA_COVERAGE_BIN_DIR', 'test/coverage/bin')
 
         # Add platform detection for use throughout the generator
@@ -689,12 +704,13 @@ class PremakeGenerator:
         return standard
 
     def generate_archive_link_deps(self) -> None:
-        """Make gmake relink a binary when a static archive in its linkoptions changes."""
+        """Make gmake relink a binary when a static archive or export list in its linkoptions changes."""
         self.premake_content.extend([
             '-- Premake lists only sibling projects in LDDEPS, but external archives such',
             '-- as the tree-sitter grammars, MIR and RE2 reach the linker through',
             '-- linkoptions (-Wl,-force_load,<lib>.a, GNU link groups, plain paths), so a',
-            '-- rebuilt archive never relinked its binary. List those archives as well.',
+            '-- rebuilt archive never relinked its binary. List those archives as well,',
+            '-- and the host export list (.sym), so an allowlist edit relinks the host.',
             'do',
             '    local gmake = require("gmake")',
             '    -- premake 5.0-beta5+ emits LDDEPS from gmake.cpp.ldDeps; the legacy gmake',
@@ -708,8 +724,10 @@ class PremakeGenerator:
             '            if cfg.kind == premake.STATICLIB then return end',
             '            local archives = {}',
             '            for _, option in ipairs(cfg.linkoptions) do',
-            '                for token in option:gmatch("[^%s,]+") do',
-            '                    if token:find("%.a$") and not token:find("^%-") and',
+            '                -- "=" separates --dynamic-list=<file> from its operand',
+            '                for token in option:gmatch("[^%s,=]+") do',
+            '                    if (token:find("%.a$") or token:find("%.sym$")) and',
+            '                            not token:find("^%-") and',
             '                            not table.contains(archives, token) then',
             '                        table.insert(archives, token)',
             '                    end',
@@ -748,6 +766,58 @@ class PremakeGenerator:
             '',
         ])
 
+    def _premake_location(self) -> str:
+        """Directory, relative to the premake file, where gmake makefiles land."""
+        if self.config.get('platform', 'macOS') == 'Linux_x64':
+            return 'build_linux/test'
+        return 'build/premake'
+
+    def _host_export_link_options(self) -> List[str]:
+        """Restrict the host's dynamic exports to the D7.3.6 allowlist.
+
+        Jube modules resolve host symbols at load time; every other global
+        stays unexported, so dead stripping and LTO may drop it. The linker
+        file is written by generate_premake_file, keeping generation pure.
+        """
+        self.host_export_file = None
+        if 'LAMBDA_NO_JUBE' in self.config.get('defines', []):
+            return []  # no Jube loader: nothing may resolve against this host
+        if self.use_macos_config:
+            platform_name, prefix = 'macos', '_'
+        elif self.use_linux_config:
+            platform_name, prefix = 'linux', ''
+        else:
+            return []  # Windows keeps its --export-all-symbols import library
+        names = [prefix + name for name in read_host_export_list()]
+        file_name = f'lambda_host_exports.{platform_name}.sym'
+        if self.use_macos_config:
+            text = ''.join(f'{name}\n' for name in names)
+            option = f'-Wl,-exported_symbols_list,{file_name}'
+        else:
+            # a dynamic list matches mangled names outside extern "C++" blocks
+            text = '{\n' + ''.join(f'    {name};\n' for name in names) + '};\n'
+            option = f'-Wl,--dynamic-list={file_name}'
+        self.host_export_file = (os.path.join(self._premake_location(), file_name), text)
+        return [f'    linkoptions {{ "{option}" }}', '    ']
+
+    def _write_host_export_file(self, output_path: str) -> None:
+        """Write the host export list beside the makefiles, only when it changed:
+        the LDDEPS hook relinks the host whenever this file is newer."""
+        if not self.host_export_file:
+            return
+        relative_path, text = self.host_export_file
+        path = os.path.join(os.path.dirname(output_path), relative_path)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                if f.read() == text:
+                    return
+        except OSError:
+            pass
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text)
+        vlog(f"Wrote host export list: {path}")
+
     def generate_workspace(self) -> None:
         """Generate the main workspace configuration"""
         vlog("DEBUG: Generating workspace configuration...")
@@ -769,12 +839,8 @@ class PremakeGenerator:
 
         platform_str = ', '.join([f'"{p}"' for p in platforms])
 
-        # Set location based on platform
         platform_config = self.config.get('platform', 'macOS')
-        if platform_config == 'Linux_x64':
-            location = 'build_linux/test'
-        else:
-            location = 'build/premake'
+        location = self._premake_location()
         vlog(f"DEBUG: platform_config={platform_config}, location={location}")
 
         self.premake_content.extend([
@@ -877,10 +943,6 @@ class PremakeGenerator:
         # Use -flto=thin (ThinLTO) on macOS/Clang and Linux/Clang, -flto on Linux/GCC
         linux_uses_clang = self.use_linux_config and base_compiler == 'clang'
         lto_flag = '"-flto=thin"' if (self.use_macos_config or linux_uses_clang) else '"-flto"'
-        has_hosted_language_module = any(
-            target.get('link') == 'dynamic' and target.get('name', '').startswith('lang-')
-            for target in self.config.get('targets', [])
-        )
 
         def add_release_link_options(strip_locals=True):
             # strip_locals=False is for release_profile: stripping local symbols
@@ -898,10 +960,8 @@ class PremakeGenerator:
                     '        linkoptions {',
                     '            "-flto=thin",',
                     '            "-Wl,-dead_strip",',
-                    '            -- Hosted Jube modules resolve approved host services at load time.',
-                    '            -- Keep executable definitions in the dynamic symbol table; this',
-                    '            -- changes link visibility only, never an evaluator/JIT hot path.',
-                    '            "-Wl,-export_dynamic",',
+                    '            -- no -export_dynamic: the host exports only its D7.3.6',
+                    '            -- allowlist, so every other global stays dead-strippable',
                 ] + ([
                     '            "-Wl,-x",  -- Strip local symbols',
                 ] if strip_locals else [
@@ -959,7 +1019,9 @@ class PremakeGenerator:
                     '        }',
                 ])
 
-        release_visibility_options = [] if has_hosted_language_module else [
+        # Hidden by default (D7.3.6): a host symbol a Jube module needs is opened
+        # by its LAMBDA_*_API marker plus an entry in lambda/jube/jube_host_exports.txt.
+        release_visibility_options = [
             '            "-fvisibility=hidden",',
             '            "-fvisibility-inlines-hidden",',
         ]
@@ -3887,13 +3949,9 @@ class PremakeGenerator:
                     self.premake_content.append(f'        "{opt}",')
                 self.premake_content.extend(['    }', '    '])
 
-        if self.use_linux_config:
-            # Linux Jube DSOs resolve their host ABI from the executable; export
-            # those definitions in every host configuration, including debug.
-            self.premake_content.extend([
-                '    linkoptions { "-Wl,--export-dynamic" }',
-                '    ',
-            ])
+        # Jube modules resolve their host ABI from the executable; export only
+        # the allowlist, in every host configuration so debug enforces it too.
+        self.premake_content.extend(self._host_export_link_options())
 
         self.premake_content.extend([
             '    defines {',
@@ -4027,6 +4085,7 @@ class PremakeGenerator:
         except IOError as e:
             elog(f"Error writing {output_path}: {e}")
             sys.exit(1)
+        self._write_host_export_file(output_path)
 
     def validate_config(self) -> bool:
         """Validate the JSON configuration"""

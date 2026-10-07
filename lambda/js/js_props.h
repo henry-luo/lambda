@@ -4,6 +4,7 @@
 
 #ifndef LAMBDA_JS_PROPS_H
 #define LAMBDA_JS_PROPS_H
+#include "../../lib/lambda_api.h"
 
 #include "../lambda-data.hpp"
 
@@ -60,7 +61,7 @@ Item js_property_key_from_lane(JsPropertyLane lane);
 // Numeric array algorithms carry an index Item through the semantic kernels;
 // only descriptor/shape code that must address the companion map asks for the
 // canonical pooled spelling.
-Item js_property_index_key(int64_t index);
+LAMBDA_RT_API Item js_property_index_key(int64_t index);
 String* js_property_index_name(int64_t index);
 const char* js_property_index_chars(int64_t index, int* out_len);
 

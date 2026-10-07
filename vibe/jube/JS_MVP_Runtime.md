@@ -4,13 +4,16 @@
 
 **Date:** 2026-09-28
 
-**Status:** IMPLEMENTED — the selected runtime executes the frozen 63-workload
-standard JavaScript benchmark population through a new MIR execution core. Two
-historical 2026-09-15 release sessions met the requested MVP / QuickJS geometric-mean target:
+**Status:** HISTORICAL — the private-value runtime and its active CLI/build
+integration were removed from the tree on 2026-10-07. The implementation source
+is preserved in git at [the pre-removal tree](https://github.com/henry-luo/lambda/tree/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp), and the benchmark records below remain historical evidence. Two
+2026-09-15 release sessions met the requested MVP / QuickJS geometric-mean target:
 **0.695110x** and **0.691519x**. Every engine/row/session sample is recorded in
 [JS_MVP_Release_Acceptance_20260915.md](../../test/benchmark/js_mvp/JS_MVP_Release_Acceptance_20260915.md).
 
-The later Lambda-`Item` alignment experiment is recorded as abandoned history in
+This design document records a removed backend; its build, CLI, test, and run
+commands describe the historical tree and are not current instructions. The
+later Lambda-`Item` alignment experiment is recorded as abandoned history in
 §7. It is not the selected runtime or a compatibility fallback.
 
 The follow-up [full LambdaJS comparison and optimization proposal](JS_MVP_Full_Runtime_Comparison.md)

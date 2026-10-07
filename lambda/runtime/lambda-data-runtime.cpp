@@ -2905,7 +2905,8 @@ static Item _map_get_keyed(TypeMap* map_type, void* map_data, const char* key,
     return result;
 }
 
-Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
+// host export (lambda/jube/jube_host_exports.txt) with no owner-header declaration
+LAMBDA_RT_API Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
     if (!key) { *is_found = false; return ItemNull; }
     int key_len = (int)strlen(key);  // INT_CAST_OK: map key length
     return _map_get_keyed(map_type, map_data, key, key_len,

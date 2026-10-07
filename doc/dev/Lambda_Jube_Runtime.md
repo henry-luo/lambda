@@ -12,8 +12,8 @@
 Lambda has one host executable: `lambda.exe` (or `lambda` in a release
 bundle). Jube is the native-module system used to add hosted languages without
 recompiling a different runtime. The same mechanism carries the Node.js
-compatibility modules (`node-core`, `node-fs`, `node-net`, `node-crypto`,
-`node-zlib`) that the standard bundle ships beside the Python descriptor.
+compatibility modules (`node-core`, `node-fs`, `node-net`, `node-crypto`)
+that the standard bundle ships beside the Python descriptor.
 
 ## Hosted Python
 

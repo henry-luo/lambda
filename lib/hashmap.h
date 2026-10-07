@@ -4,6 +4,7 @@
 
 #ifndef HASHMAP_H
 #define HASHMAP_H
+#include "lambda_api.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -42,7 +43,7 @@ struct hashmap {
 
 typedef struct hashmap HashMap;
 
-struct hashmap *hashmap_new(size_t elsize, size_t cap, uint64_t seed0, 
+LAMBDA_LIB_API struct hashmap *hashmap_new(size_t elsize, size_t cap, uint64_t seed0, 
     uint64_t seed1, 
     uint64_t (*hash)(const void *item, uint64_t seed0, uint64_t seed1),
     int (*compare)(const void *a, const void *b, void *udata),
@@ -57,19 +58,19 @@ struct hashmap *hashmap_new_with_allocator(void *(*_malloc)(size_t),
     void (*elfree)(void *item),
     void *udata);
 
-void hashmap_free(struct hashmap *map);
+LAMBDA_LIB_API void hashmap_free(struct hashmap *map);
 void hashmap_clear(struct hashmap *map, bool update_cap);
 size_t hashmap_count(struct hashmap *map);
 // check if out of memory
 bool hashmap_oom(struct hashmap *map);
-const void *hashmap_get(struct hashmap *map, const void *item);
-const void *hashmap_set(struct hashmap *map, const void *item);
+LAMBDA_LIB_API const void *hashmap_get(struct hashmap *map, const void *item);
+LAMBDA_LIB_API const void *hashmap_set(struct hashmap *map, const void *item);
 const void *hashmap_delete(struct hashmap *map, const void *item);
 const void *hashmap_probe(struct hashmap *map, uint64_t position);
 bool hashmap_scan(struct hashmap *map, bool (*iter)(const void *item, void *udata), void *udata);
 bool hashmap_iter(struct hashmap *map, size_t *i, void **item);
 
-uint64_t hashmap_sip(const void *data, size_t len, uint64_t seed0, uint64_t seed1);
+LAMBDA_LIB_API uint64_t hashmap_sip(const void *data, size_t len, uint64_t seed0, uint64_t seed1);
 uint64_t hashmap_murmur(const void *data, size_t len, uint64_t seed0, uint64_t seed1);
 uint64_t hashmap_xxhash3(const void *data, size_t len, uint64_t seed0, uint64_t seed1);
 
