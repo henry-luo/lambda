@@ -669,7 +669,12 @@ TEST_F(CssEngineParserTest, LogicalCornerRadiiValidatePhysicalValueGrammar) {
         "border-start-end-radius: 20% 5px",
         "border-end-start-radius: 0",
         "border-end-end-radius: inherit",
-        "border-end-end-radius: var(--corner)"
+        "border-end-end-radius: var(--corner)",
+        "border-start-start-radius: calc(10px + 30%)",
+        "border-start-end-radius: min(50%, 2em)",
+        "border-end-start-radius: clamp(0px, 20%, 3em) calc(1em + 5%)",
+        "border-end-end-radius: calc(-10px)",
+        "border-top-left-radius: calc(10px + 30%)"
     };
     for (const char* text : valid) {
         EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr)
@@ -681,7 +686,13 @@ TEST_F(CssEngineParserTest, LogicalCornerRadiiValidatePhysicalValueGrammar) {
         "border-end-start-radius: 1px 2px 3px",
         "border-end-end-radius: 1px / 2px",
         "border-end-end-radius: 2foo",
-        "border-start-start-radius: red"
+        "border-start-start-radius: red",
+        "border-start-start-radius: calc(1px + 1s)",
+        "border-start-start-radius: calc(2)",
+        "border-start-start-radius: min(10px, red)",
+        "border-start-start-radius: 1px, 2px",
+        "border-top-left-radius: -1px",
+        "border-bottom-right-radius: calc(2s)"
     };
     for (const char* text : invalid) {
         EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr)
