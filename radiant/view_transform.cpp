@@ -144,7 +144,7 @@ static float transform_translate_math(const TransformFunction* function, int axi
     float result = 0.0f;
     for (const TransformLengthTerm* term = function->translate_math[axis]; term; term = term->next) {
         if (term->coefficient != 0.0f)
-            result += term->coefficient * resolve_computed_transform_length(term->expression, extent);
+            result += term->coefficient * resolve_computed_length_percentage(term->expression, extent);
     }
     return result;
 }

@@ -390,7 +390,18 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     style->next = css->styles;
     css->styles = lam::up(style);
     const char* inline_text = pseudo_element ? nullptr : dom_element_get_inline_style(element);
-    if (inline_text && *inline_text) {
+    CssRule* authored = pseudo_element ? nullptr : dom_element_inline_declaration_block(element);
+    if (authored) {
+        size_t count = authored->data.style_rule.declaration_count;
+        CssDeclaration** declarations = (CssDeclaration**)pool_calloc(css->pool, count * sizeof(CssDeclaration*));
+        if (declarations) {
+            for (size_t i = 0; i < count; i++) {
+                CssDeclaration* copy = css_declaration_snapshot(authored->data.style_rule.declarations[i], css->pool);
+                if (copy) declarations[style->inline_count++] = copy;
+            }
+            style->inline_declarations = lam::up(declarations);
+        }
+    } else if (inline_text && *inline_text) {
         style->inline_declarations = lam::up(css_parse_declaration_list_text(inline_text,
             strlen(inline_text), css->pool, &style->inline_count));
     }

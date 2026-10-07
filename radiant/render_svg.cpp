@@ -93,6 +93,15 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
     paint_list_clear(&ctx->paint_list);
 }
 
+static bool svg_lower_owned_path(SvgRenderContext* ctx, int index, PaintOp op,
+                                  RdtPath* path, RdtGradientStop* stops = nullptr) {
+    bool retained = ctx->effect_fallback.active &&
+        paint_list_take_path_payload(svg_active_paint_list(ctx), index, op, stops);
+    svg_lower_paint_list(ctx);
+    if (!retained) rdt_path_free(path);
+    return retained;
+}
+
 static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx, ImageSurface* surface,
                                            float x, float y, float width, float height) {
     StrBuf* uri = render_encode_surface_data_uri(surface);
@@ -442,8 +451,8 @@ static bool svg_has_border_radius(BorderProp* border) {
 static bool svg_get_uniform_border_radius(BorderProp* border, float* radius) {
     if (!svg_has_border_radius(border)) return false;
     float value = border->radius.horizontal[0];
-    for (int i = 1; i < 4; i++) {
-        if (border->radius.horizontal[i] != value) return false;
+    for (int i = 0; i < 4; i++) {
+        if (border->radius.horizontal[i] != value || border->radius.vertical[i] != value) return false;
     }
     if (radius) *radius = value;
     return true;
@@ -619,14 +628,11 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                 svg_lower_paint_list(ctx);
             } else {
                 Rect rect = {x, y, width, height};
-                Corner radius_shape = render_path_uniform_corner(
-                    border->radius.horizontal[0], border->radius.horizontal[1],
-                    border->radius.horizontal[2], border->radius.horizontal[3]);
-                RdtPath* path = render_path_create_rounded_rect(rect, &radius_shape);
+                RdtPath* path = render_path_create_rounded_rect(rect, &border->radius);
+                int index = paint_list_count(svg_active_paint_list(ctx));
                 paint_fill_path(svg_active_paint_list(ctx), path, view->boundary()->background->color,
                                 RDT_FILL_WINDING, nullptr);
-                svg_lower_paint_list(ctx);
-                rdt_path_free(path);
+                svg_lower_owned_path(ctx, index, PAINT_FILL_PATH, path);
             }
         } else {
             paint_fill_rect(svg_active_paint_list(ctx), x, y, width, height,
@@ -647,13 +653,14 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             if (stops &&
                 render_paint_boundary_build_linear_gradient(view, x, y, stops.get(),
                                                             stop_count, &gradient)) {
+                int index = paint_list_count(svg_active_paint_list(ctx));
                 paint_fill_linear_gradient(svg_active_paint_list(ctx), gradient.path,
                                            gradient.x1, gradient.y1,
                                            gradient.x2, gradient.y2,
                                            gradient.stops, gradient.stop_count,
                                            RDT_FILL_WINDING, nullptr, nullptr);
-                svg_lower_paint_list(ctx);
-                rdt_path_free(gradient.path);
+                if (svg_lower_owned_path(ctx, index, PAINT_FILL_LINEAR_GRADIENT,
+                                         gradient.path, stops.get())) stops.release();
             }
         } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient &&
                    bg->radial_gradient->stop_count >= 2) {
@@ -664,12 +671,13 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             if (stops &&
                 render_paint_boundary_build_radial_gradient(view, x, y, stops.get(),
                                                             stop_count, &gradient)) {
+                int index = paint_list_count(svg_active_paint_list(ctx));
                 paint_fill_radial_gradient(svg_active_paint_list(ctx), gradient.path,
                                            gradient.cx, gradient.cy, gradient.r,
                                            gradient.stops, gradient.stop_count,
                                            RDT_FILL_WINDING, nullptr, nullptr);
-                svg_lower_paint_list(ctx);
-                rdt_path_free(gradient.path);
+                if (svg_lower_owned_path(ctx, index, PAINT_FILL_RADIAL_GRADIENT,
+                                         gradient.path, stops.get())) stops.release();
             }
         }
     }
@@ -797,14 +805,12 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         bool has_radius = svg_has_border_radius(border);
         if (has_radius) {
             char clip_id[64];
-            str_fmt(clip_id, sizeof(clip_id), "border-clip-%lx", (unsigned long)(uintptr_t)view);
+            // retained IDs keep exported references independent of allocator addresses (D4.5.1v4).
+            str_fmt(clip_id, sizeof(clip_id), "border-clip-%u", static_cast<View*>(view)->id);
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content, "<defs><clipPath id=\"%s\"><path d=\"", clip_id);
-            Corner radius = render_path_uniform_corner(
-                border->radius.top_left, border->radius.top_right,
-                border->radius.bottom_right, border->radius.bottom_left);
             render_path_append_svg_rounded_rect(
-                ctx->svg_content, {x, y, width, height}, &radius);
+                ctx->svg_content, {x, y, width, height}, &border->radius);
             strbuf_append_str(ctx->svg_content, "\"/></clipPath></defs>\n");
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content, "<g clip-path=\"url(#%s)\">\n", clip_id);
@@ -852,12 +858,8 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             // Use rounded rect if border has radius
             if (svg_has_border_radius(view->boundary()->border)) {
                 BorderProp* border = view->boundary()->border;
-                float r_tl = fmaxf(0, border->radius.top_left + expand);
-                float r_tr = fmaxf(0, border->radius.top_right + expand);
-                float r_br = fmaxf(0, border->radius.bottom_right + expand);
-                float r_bl = fmaxf(0, border->radius.bottom_left + expand);
                 strbuf_append_format(ctx->svg_content, "<path d=\"");
-                Corner radius = render_path_uniform_corner(r_tl, r_tr, r_br, r_bl);
+                Corner radius = radiant_corner_expand(&border->radius, expand, expand);
                 render_path_append_svg_rounded_rect(
                     ctx->svg_content, {ox, oy, ow, oh}, &radius);
                 strbuf_append_format(ctx->svg_content,
@@ -927,17 +929,21 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
             if (left && right) {
                 rdt_path_move_to(left, rule_x - offset, block_y);
                 rdt_path_line_to(left, rule_x - offset, block_y + rule_height);
+                int index = paint_list_count(svg_active_paint_list(ctx));
                 paint_stroke_path(svg_active_paint_list(ctx), left, mc->rule_color, thin_width,
                                   RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f,
                                   nullptr);
-                svg_lower_paint_list(ctx);
+                svg_lower_owned_path(ctx, index, PAINT_STROKE_PATH, left);
+                left = nullptr;
 
                 rdt_path_move_to(right, rule_x + offset, block_y);
                 rdt_path_line_to(right, rule_x + offset, block_y + rule_height);
+                index = paint_list_count(svg_active_paint_list(ctx));
                 paint_stroke_path(svg_active_paint_list(ctx), right, mc->rule_color, thin_width,
                                   RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f,
                                   nullptr);
-                svg_lower_paint_list(ctx);
+                svg_lower_owned_path(ctx, index, PAINT_STROKE_PATH, right);
+                right = nullptr;
             }
             if (left) rdt_path_free(left);
             if (right) rdt_path_free(right);
@@ -961,11 +967,11 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
             if (path) {
                 rdt_path_move_to(path, rule_x, block_y);
                 rdt_path_line_to(path, rule_x, block_y + rule_height);
+                int index = paint_list_count(svg_active_paint_list(ctx));
                 paint_stroke_path(svg_active_paint_list(ctx), path, mc->rule_color,
                                   mc->rule_width, RDT_CAP_BUTT, RDT_JOIN_MITER,
                                   dash, dash_count, 0.0f, nullptr);
-                svg_lower_paint_list(ctx);
-                rdt_path_free(path);
+                svg_lower_owned_path(ctx, index, PAINT_STROKE_PATH, path);
             }
         }
 

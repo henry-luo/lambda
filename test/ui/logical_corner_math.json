@@ -1,0 +1,125 @@
+{
+  "name": "Logical corner math retains the final box basis and inherited units",
+  "html": "test/ui/logical_corner_math.html",
+  "viewport": {
+    "width": 360,
+    "height": 320
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 15,
+      "min_r": 250,
+      "min_g": 250,
+      "min_b": 250
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 15,
+      "max_r": 5,
+      "min_g": 120,
+      "max_g": 135,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 135,
+      "y": 15,
+      "min_r": 250,
+      "min_g": 250,
+      "min_b": 250
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 135,
+      "min_r": 250,
+      "min_g": 250,
+      "min_b": 250
+    },
+    {
+      "type": "assert_pixel",
+      "x": 135,
+      "y": 135,
+      "min_r": 250,
+      "min_g": 250,
+      "min_b": 250
+    },
+    {
+      "type": "assert_pixel",
+      "x": 148,
+      "y": 140,
+      "max_r": 5,
+      "min_g": 120,
+      "max_g": 135,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 108,
+      "y": 238,
+      "max_r": 5,
+      "min_g": 120,
+      "max_g": 135,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 280,
+      "y": 15,
+      "max_r": 5,
+      "min_g": 120,
+      "max_g": 135,
+      "max_b": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 15,
+      "min_r": 250,
+      "min_g": 250,
+      "min_b": 250
+    },
+    {
+      "type": "assert_pixel",
+      "x": 280,
+      "y": 15,
+      "max_r": 5,
+      "min_g": 120,
+      "max_g": 135,
+      "max_b": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#override"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 15,
+      "max_r": 5,
+      "min_g": 120,
+      "max_g": 135,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 280,
+      "y": 15,
+      "max_r": 5,
+      "min_g": 120,
+      "max_g": 135,
+      "max_b": 5
+    }
+  ]
+}

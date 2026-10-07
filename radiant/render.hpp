@@ -1664,6 +1664,9 @@ void paint_list_init(PaintList* pl, Arena* backing_arena);
 void paint_list_clear(PaintList* pl);   // rewind count and release owned command payloads
 void paint_list_destroy(PaintList* pl);
 int  paint_list_count(const PaintList* pl);
+// transfer a newly appended path payload to a deferred list; false leaves ownership with the caller.
+bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,
+                                  RdtGradientStop* stops = nullptr);
 bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result);
 bool paint_ir_validate_or_log(const PaintList* pl, const char* context);
 const char* paint_op_name(PaintOp op);

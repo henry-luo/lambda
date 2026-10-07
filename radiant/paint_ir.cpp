@@ -116,7 +116,7 @@ static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
         paint_free_owned_gradient_payload(&cmd->fill_radial_gradient.path,
                                           &cmd->fill_radial_gradient.owned_path,
                                           &cmd->fill_radial_gradient.stops,
-                                          &cmd->fill_linear_gradient.owned_stops);
+                                          &cmd->fill_radial_gradient.owned_stops);
         lam::free_owned(cmd->fill_radial_gradient.owned_dashes);
         cmd->fill_radial_gradient.options.dash_array = nullptr;
         break;
@@ -171,6 +171,46 @@ void paint_list_destroy(PaintList* pl) {
 
 int paint_list_count(const PaintList* pl) {
     return pl ? pl->item_count() : 0;
+}
+
+bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,
+                                  RdtGradientStop* stops) {
+    if (!pl || index < 0 || pl->item_count() != index + 1) return false;
+    PaintCmd* cmd = &pl->data()[index];
+    if (cmd->op != expected_op) return false;
+    lam::Up<RdtPath>* path = nullptr;
+    lam::Own<RdtPath>* owned_path = nullptr;
+    lam::Up<const RdtGradientStop>* borrowed_stops = nullptr;
+    lam::OwnArr<RdtGradientStop>* owned_stops = nullptr;
+    switch (cmd->op) {
+    case PAINT_FILL_PATH:
+        path = &cmd->fill_path.path;
+        owned_path = &cmd->fill_path.owned_path;
+        break;
+    case PAINT_STROKE_PATH:
+        path = &cmd->stroke_path.path;
+        owned_path = &cmd->stroke_path.owned_path;
+        break;
+    case PAINT_FILL_LINEAR_GRADIENT:
+        path = &cmd->fill_linear_gradient.path;
+        owned_path = &cmd->fill_linear_gradient.owned_path;
+        borrowed_stops = &cmd->fill_linear_gradient.stops;
+        owned_stops = &cmd->fill_linear_gradient.owned_stops;
+        break;
+    case PAINT_FILL_RADIAL_GRADIENT:
+        path = &cmd->fill_radial_gradient.path;
+        owned_path = &cmd->fill_radial_gradient.owned_path;
+        borrowed_stops = &cmd->fill_radial_gradient.stops;
+        owned_stops = &cmd->fill_radial_gradient.owned_stops;
+        break;
+    default:
+        return false;
+    }
+    if (stops && (!borrowed_stops || *borrowed_stops != stops)) return false;
+    // deferred SVG/PDF effects outlive the painter's local payloads (D4.5.1v4).
+    *owned_path = lam::own((RdtPath*)*path);
+    if (stops) *owned_stops = lam::own_arr(stops);
+    return true;
 }
 
 static void paint_ir_validation_set(PaintIrValidationResult* result, bool valid,

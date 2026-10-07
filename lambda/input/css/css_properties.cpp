@@ -1363,11 +1363,11 @@ static bool css_value_is_corner_radius_component(const CssValue* value) {
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
         return value->data.percentage.value >= 0.0;
     }
-    return value->type == CSS_VALUE_TYPE_NUMBER &&
-        value->data.number.value == 0.0;
+    return (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0) ||
+        css_value_is_length_expression(value, true, false);
 }
 
-static bool css_value_is_logical_corner_radius(const CssValue* value) {
+static bool css_value_is_corner_radius(const CssValue* value) {
     if (!value) return false;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
@@ -1380,7 +1380,7 @@ static bool css_value_is_logical_corner_radius(const CssValue* value) {
     if (value->type != CSS_VALUE_TYPE_LIST) {
         return css_value_is_corner_radius_component(value);
     }
-    if (!value->data.list.values || value->data.list.count != 2) return false;
+    if (!value->data.list.values || value->data.list.comma_separated || value->data.list.count != 2) return false;
     return css_value_is_corner_radius_component(value->data.list.values[0]) &&
         css_value_is_corner_radius_component(value->data.list.values[1]);
 }
@@ -2286,11 +2286,15 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         case CSS_PROPERTY_BORDER_BLOCK_END_STYLE:
         case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
             return css_value_is_logical_border(id, value);
+        case CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS:
+        case CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS:
+        case CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS:
+        case CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS:
         case CSS_PROPERTY_BORDER_START_START_RADIUS:
         case CSS_PROPERTY_BORDER_START_END_RADIUS:
         case CSS_PROPERTY_BORDER_END_START_RADIUS:
         case CSS_PROPERTY_BORDER_END_END_RADIUS:
-            return css_value_is_logical_corner_radius(value);
+            return css_value_is_corner_radius(value);
         case CSS_PROPERTY_OVERFLOW:
         case CSS_PROPERTY_OVERFLOW_X:
         case CSS_PROPERTY_OVERFLOW_Y:

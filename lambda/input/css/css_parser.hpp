@@ -563,6 +563,9 @@ CssDeclaration* css_parse_property_declaration(const char* property, size_t prop
 // CSSOM setters consume a value, so declaration punctuation cannot escape it.
 CssDeclaration* css_parse_property_value_declaration(const char* property, size_t property_length,
     const char* value, size_t value_length, Pool* pool);
+CssDeclaration* css_declaration_snapshot(const CssDeclaration* source, Pool* pool);
+CssDeclaration** css_parse_declaration_list_text_mode(const char* text, size_t length,
+    Pool* pool, size_t* declaration_count, bool quirks_mode);
 bool css_parse_property_initial_value(CssPropertyRegistration* registration,
     const char* text, size_t length, Pool* pool);
 

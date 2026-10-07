@@ -1,0 +1,23 @@
+<!doctype html>
+<style>
+html,body{margin:0;background:white;font-size:20px}
+.box{position:absolute;width:100px;height:100px;background:green}
+#mixed{left:10px;top:10px;border-start-start-radius:4px;border-start-start-radius:calc(10px + 30%)}
+#compare{left:130px;top:10px;border-start-start-radius:min(50%,2em)}
+#overlap{left:250px;top:10px;border-top-left-radius:calc(50% + 30px);border-top-right-radius:80px}
+#ellipse{left:10px;top:130px;height:50px;border-start-start-radius:calc(10px + 30%)}
+#parent{position:absolute;left:130px;top:130px;width:200px;height:120px;border-start-start-radius:calc(1em + 20%)}
+#child{left:0;top:0;height:50px;font-size:40px;border-start-start-radius:inherit}
+#negative{left:10px;top:200px;height:40px;border-end-end-radius:calc(-10px)}
+button{position:absolute;top:270px}
+#override{left:130px}
+</style>
+<div id="mixed" class="box"></div><div id="compare" class="box"></div>
+<div id="overlap" class="box"></div>
+<div id="ellipse" class="box"></div><div id="parent"><div id="child" class="box"></div></div>
+<div id="negative" class="box"></div>
+<button id="resize">resize</button><button id="override">override</button>
+<script>
+document.getElementById('resize').addEventListener('click',function(){document.getElementById('mixed').style.width='200px';});
+document.getElementById('override').addEventListener('click',function(){document.getElementById('mixed').style.borderTopLeftRadius='5px';});
+</script>

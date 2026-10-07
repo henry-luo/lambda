@@ -1035,6 +1035,8 @@ typedef struct Margin : Spacing {
     };   // for CSS enum values, like 'auto'
 } Margin;
 
+struct CornerExpressions;
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct Corner {
     union {
@@ -1057,10 +1059,18 @@ typedef struct Corner {
         struct { bool tl_percent_y, tr_percent_y, br_percent_y, bl_percent_y; };  // vertical percentages
         bool vertical_percent[4];
     };
+    lam::Up<CornerExpressions> expressions;
 } Corner;
+
+// keep computed values separate from paint's overlap-constrained used radii (D4.5.1v4).
+struct CornerExpressions {
+    Corner computed;
+    lam::Up<const CssValue> horizontal[4], vertical[4];
+};
 
 inline Corner radiant_corner_scaled(const Corner* radius, float scale) {
     Corner out = *radius;
+    out.expressions = nullptr;
     for (int i = 0; i < 4; i++) {
         out.horizontal[i] *= scale;
         out.vertical[i] *= scale;
@@ -1078,6 +1088,7 @@ inline bool radiant_corner_has_radius(const Corner* radius) {
 
 inline Corner radiant_corner_inset(const Corner* radius, float inset_x, float inset_y) {
     Corner out = *radius;
+    out.expressions = nullptr;
     for (int i = 0; i < 4; i++) {
         out.horizontal[i] = max(0.0f, out.horizontal[i] - inset_x);
         out.vertical[i] = max(0.0f, out.vertical[i] - inset_y);
@@ -1087,6 +1098,7 @@ inline Corner radiant_corner_inset(const Corner* radius, float inset_x, float in
 
 inline Corner radiant_corner_expand(const Corner* radius, float expand_x, float expand_y) {
     Corner out = *radius;
+    out.expressions = nullptr;
     for (int i = 0; i < 4; i++) {
         out.horizontal[i] = max(0.0f, out.horizontal[i] + expand_x);
         out.vertical[i] = max(0.0f, out.vertical[i] + expand_y);
@@ -4041,7 +4053,7 @@ TransformLengthTerm* clone_transform_length_terms(Pool* pool, const TransformLen
     float coefficient = 1.0f);
 TransformLengthTerm* interpolate_transform_length_terms(Pool* pool, const TransformLengthTerm* from,
     const TransformLengthTerm* to, float progress);
-float resolve_computed_transform_length(const CssValue* value, float reference_size);
+float resolve_computed_length_percentage(const CssValue* value, float reference_size);
 extern RdtMatrix compute_transform_matrix(const TransformProp* transform,
                                           float width, float height,
                                           float origin_x, float origin_y,

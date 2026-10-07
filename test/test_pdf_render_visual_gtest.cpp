@@ -2788,6 +2788,61 @@ TEST(RenderOutputParity, LogicalCornerRadiiMapAndCompeteWithPhysicalCorners) {
         "<rect x=\"0.00\" y=\"0.00\" width=\"40.00\" height=\"20.00\" fill=\"rgb(0,0,255)\""));
 }
 
+TEST(RenderOutputParity, CornerMathUsesFinalBoxAndComputedInheritedLengths) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    struct RadiusCase { const char* name; const char* actual; const char* reference; };
+    const RadiusCase cases[] = {
+        {"corner_math_logical", "border-start-start-radius:calc(10px + 20%)", "border-start-start-radius:30px 26px"},
+        {"corner_math_quad", "border-radius:calc(10px + 20%) / calc(5px + 30%)", "border-radius:30px / 29px"},
+        {"corner_math_min", "border-radius:min(60%,2em)", "border-radius:30px"},
+        {"corner_math_clamp", "border-start-end-radius:clamp(5px,40%,35px)", "border-start-end-radius:35px 32px"},
+        {"corner_math_negative", "border-end-end-radius:calc(-10px)", "border-end-end-radius:0"},
+        {"corner_math_overlap", "border-radius:80px;border-start-start-radius:calc(50% + 30px)", "border-radius:80px;border-top-left-radius:80px 70px"},
+        {"corner_math_outline", "border-start-start-radius:calc(10px + 20%);outline:2px solid red", "border-start-start-radius:30px 26px;outline:2px solid red"},
+        {"corner_math_shadow", "border-start-start-radius:calc(10px + 20%);box-shadow:3px 3px 1px red", "border-start-start-radius:30px 26px;box-shadow:3px 3px 1px red"},
+        {"corner_math_linear_shadow", "border-radius:calc(10px + 20%);background:linear-gradient(red,blue);box-shadow:3px 3px 1px red", "border-radius:30px 30px 30px 30px / 26px 26px 26px 26px;background:linear-gradient(red,blue);box-shadow:3px 3px 1px red"},
+        {"corner_math_radial_shadow", "border-radius:calc(10px + 20%);background:radial-gradient(red,blue);box-shadow:3px 3px 1px red", "border-radius:30px 30px 30px 30px / 26px 26px 26px 26px;background:radial-gradient(red,blue);box-shadow:3px 3px 1px red"},
+        {"corner_math_rtl", "direction:rtl;border-start-start-radius:calc(10px + 20%)", "direction:rtl;border-top-right-radius:30px 26px"}
+    };
+    for (const RadiusCase& test : cases) {
+        SCOPED_TRACE(test.name);
+        char actual[1024], reference[1024];
+        const char* pattern = "<!doctype html><style>html,body{margin:0;background:white}"
+            "#box{width:100px;height:80px;background:green;font-size:15px;%s}"
+            "</style><div id='box'></div>";
+        snprintf(actual, sizeof(actual), pattern, test.actual);
+        snprintf(reference, sizeof(reference), pattern, test.reference);
+        expect_html_pair_output_parity(test.name, actual, reference);
+    }
+    EXPECT_TRUE(file_contains_text("temp/render_output_parity/corner_math_logical.svg", "L0.00,26.00"));
+    EXPECT_TRUE(file_contains_text("temp/render_output_parity/corner_math_clamp.svg", "100.00,32.00"));
+    const char* actual = "<!doctype html><style>html,body{margin:0;background:white}"
+        "#parent{width:200px;height:100px;font-size:20px;border-start-start-radius:calc(1em + 20%)}"
+        "#child{width:100px;height:50px;background:green;font-size:40px;border-start-start-radius:inherit}"
+        "</style><div id='parent'><div id='child'></div></div>";
+    const char* reference = "<!doctype html><style>html,body{margin:0;background:white}"
+        "#parent{width:200px;height:100px;font-size:20px;border-start-start-radius:60px 40px}"
+        "#child{width:100px;height:50px;background:green;font-size:40px;border-start-start-radius:40px 30px}"
+        "</style><div id='parent'><div id='child'></div></div>";
+    expect_html_pair_output_parity("corner_math_inherit", actual, reference);
+
+    // deferred effect groups must retain column stroke paths as well as rounded fills and gradients.
+    const char* styles[] = {"solid", "double", "dashed"};
+    for (const char* style : styles) {
+        char name[80], column_actual[1024], column_reference[1024];
+        snprintf(name, sizeof(name), "corner_math_columns_%s", style);
+        const char* pattern = "<!doctype html><style>html,body{margin:0;background:white}"
+            "#box{width:100px;height:80px;background:green;columns:2;column-fill:auto;column-gap:20px;"
+            "column-rule:3px %s red;box-shadow:3px 3px 1px red;border-radius:%s}"
+            "#box>div{height:80px}</style><div id='box'><div></div><div></div></div>";
+        snprintf(column_actual, sizeof(column_actual), pattern, style, "calc(10px + 20%)");
+        snprintf(column_reference, sizeof(column_reference), pattern, style, "30px / 26px");
+        expect_html_pair_output_parity(name, column_actual, column_reference);
+    }
+}
+
 TEST(RenderOutputParity, CascadeLayersShareOrderAcrossStylesheets) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

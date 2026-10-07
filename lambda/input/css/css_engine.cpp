@@ -79,7 +79,7 @@ typedef struct CssRegistrationWalk {
 static bool css_visit_registration_rule(void* context, const CssRule* rule) {
     CssRegistrationWalk* walk = (CssRegistrationWalk*)context;
     return rule->type != CSS_RULE_PROPERTY ||
-        walk->visitor(walk->context, &rule->data.property_rule);
+        walk->visitor(walk->context, &rule->data.property_rule, strlen(rule->data.property_rule.name));
 }
 
 static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* sheet,
@@ -89,7 +89,7 @@ static bool css_visit_registrations_in_sheet(CssEngine* engine, CssStylesheet* s
         css_visit_registration_rule, &walk, depth);
 }
 
-static bool css_index_property_registration(void* context, const CssPropertyRegistration* registration) {
+static bool css_index_property_registration(void* context, const CssPropertyRegistration* registration, size_t) {
     CssEngine* engine = (CssEngine*)context;
     size_t count = engine->property_registration_count;
     if (!lam::pool_grow_array(engine->pool, &engine->property_registrations,
@@ -108,7 +108,7 @@ static int css_compare_property_registrations(const void* left, const void* righ
 
 struct CssRegistrationLookup {const char* name; const CssPropertyRegistration* result;};
 
-static bool css_lookup_property_registration(void* context, const CssPropertyRegistration* registration) {
+static bool css_lookup_property_registration(void* context, const CssPropertyRegistration* registration, size_t) {
     CssRegistrationLookup* lookup = (CssRegistrationLookup*)context;
     if (css_custom_property_name_matches(registration->name, lookup->name)) lookup->result = registration;
     return true;
@@ -144,8 +144,9 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
         css_font_shorthand_contains_property(query->property);
     bool custom_property = strncmp(declaration->property_name, "--", 2) == 0;
+    StrView declaration_name = css_declaration_name(declaration);
     bool same_property = custom_property
-        ? strcmp(declaration->property_name, query->property) == 0
+        ? strview_equal(&declaration_name, query->property)
         : str_icmp_cstr(declaration->property_name, query->property) == 0;
     CssPropertyCode requested = css_property_code_from_name(query->property);
     bool shorthand = requested > 0 && css_property_shorthand_contains(declaration->property_code, requested);
@@ -377,7 +378,7 @@ bool css_visit_document_property_registrations(DomDocument* doc,
     }
     for (CssScriptPropertyRegistration* entry = (CssScriptPropertyRegistration*)doc->services.registered_property_set;
          entry; entry = entry->next)
-        if (!visitor(context, &entry->registration)) return false;
+        if (!visitor(context, &entry->registration, entry->name_length)) return false;
     return true;
 }
 
