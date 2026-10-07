@@ -21,7 +21,7 @@ Item mvp_lmd_string_concat(Item left, Item right);
 int64_t mvp_lmd_string_compare(Item left, Item right);
 Item mvp_lmd_string_at(Item string, uint32_t index);
 double mvp_lmd_number_pow(double base, double exponent);
-int64_t mvp_lmd_string_key(String* string);
+int64_t mvp_lmd_string_key(String* string, int64_t typed = 0);
 Item mvp_lmd_array_store(Item array, uint32_t index, Item value);
 Item mvp_lmd_property_key(Item string);
 Item mvp_lmd_object_new(TypeMap* shape, int64_t collection);
