@@ -1,6 +1,5 @@
 #ifndef MEM_FACTORY_H
 #define MEM_FACTORY_H
-#include "lambda_api.h"
 
 /**
  * Allocator factory — the sanctioned path for creating Pools and Arenas that
@@ -27,14 +26,14 @@ extern "C" {
 #endif
 
 // ---- Pools ----
-LAMBDA_LIB_API Pool* mem_pool_create(MemContext* ctx, MemRole role, const char* label);
+Pool* mem_pool_create(MemContext* ctx, MemRole role, const char* label);
 Pool* mem_pool_create_sized(MemContext* ctx, size_t initial_extent_size,
                             MemRole role, const char* label);
 // Unregister + destroy. Safe on NULL and on untracked pools.
 void  mem_pool_destroy(Pool* pool);
 
 // ---- Arenas (direct block owners; no backing Pool) ----
-LAMBDA_LIB_API Arena* mem_arena_create(MemContext* ctx, MemRole role, const char* label);
+Arena* mem_arena_create(MemContext* ctx, MemRole role, const char* label);
 Arena* mem_arena_create_sized(MemContext* ctx,
                               size_t initial_chunk_size, size_t max_chunk_size,
                               MemRole role, const char* label);

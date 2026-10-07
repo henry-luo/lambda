@@ -612,11 +612,6 @@ static inline StrView mir_em_persist_cstr(MirEmitter* em, const char* name) {
                                         : (StrView){NULL, 0});
 }
 
-static inline void em_function_arguments_clear(MirEmitter* em) {
-    if (!em) return;
-    memset(&em->argument_registers, 0, sizeof(em->argument_registers));
-}
-
 static inline void em_function_argument_register(MirEmitter* em, MIR_reg_t reg) {
     if (!em || !reg) return;
     MirFunctionArgumentState* arguments = &em->argument_registers;
@@ -626,21 +621,6 @@ static inline void em_function_argument_register(MirEmitter* em, MIR_reg_t reg) 
     if (arguments->count < MIR_SHARED_MAX_FUNCTION_ARGUMENT_REGS) {
         arguments->regs[arguments->count++] = reg;
     }
-}
-
-static inline MirFunctionArgumentState em_function_arguments_suspend(
-        MirEmitter* em) {
-    MirFunctionArgumentState saved = {};
-    if (!em) return saved;
-    saved = em->argument_registers;
-    em_function_arguments_clear(em);
-    return saved;
-}
-
-static inline void em_function_arguments_restore(MirEmitter* em,
-        MirFunctionArgumentState saved) {
-    if (!em) return;
-    em->argument_registers = saved;
 }
 
 static inline void em_frame_dispose(MirEmitter* em) {
@@ -1032,15 +1012,6 @@ static inline void em_plan_bind_return(MirFunctionPlan* plan,
     plan->return_shape = abi ? abi->shape : RETURN_SHAPE_ITEM_SCALAR;
     plan->companion = abi ? abi->companion
         : em_companion_transport(RETURN_SHAPE_ITEM_SCALAR, c_reachable);
-}
-
-// A hosted guest body (Jube) that accepts a caller-donated scalar home is
-// exactly one that may return a wide scalar: the universal pair shape. The
-// guest keeps the transport its own frame setup selected, so only the shape
-// is bound here. This is the second and last writer of `plan.return_shape`.
-static inline void em_plan_bind_hosted_pair(MirFunctionPlan* plan) {
-    plan->abi = NULL;
-    plan->return_shape = RETURN_SHAPE_ITEM_SCALAR;
 }
 
 // RV10's single-source-of-truth defence, enforced rather than documented.

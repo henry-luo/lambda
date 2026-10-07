@@ -1,9 +1,0 @@
-True
-a/b/c
-/root/sub/file.txt
-foo.txt
-/tmp
-hello.world
-.txt
-/
-posix

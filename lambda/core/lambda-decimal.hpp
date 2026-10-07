@@ -99,7 +99,7 @@ Item decimal_from_double(double val);
 Item decimal_from_string(const char* str);
 
 // Free mpdecimal string (wrapper for mpd_free)
-LAMBDA_CORE_API void decimal_free_string(char* str);
+void decimal_free_string(char* str);
 
 // Deep copy a decimal Item (for arena allocation in MarkBuilder), preserving
 // its source storage kind.
@@ -140,7 +140,7 @@ void decimal_big_print(StrBuf* strbuf, Decimal* decimal);
 
 // Move an owned mpd_t allocation into Decimal's embedded payload. The source
 // header is released while its coefficient allocation becomes Decimal-owned.
-LAMBDA_CORE_API bool decimal_take_mpd(Decimal* decimal, DecimalKind storage_kind, mpd_t* mpd_val);
+bool decimal_take_mpd(Decimal* decimal, DecimalKind storage_kind, mpd_t* mpd_val);
 
 // Allocate and initialize a fixed Decimal from mpd_t* (takes ownership of mpd_val)
 Decimal* decimal_create(mpd_t* mpd_val);
@@ -276,7 +276,7 @@ bool decimal_is_any(Item item);
 bool decimal_try_to_double(Item item, double* out);
 
 // Legacy scalar conversion for callers that have already checked the source.
-LAMBDA_CORE_API double decimal_to_double(Item item);
+double decimal_to_double(Item item);
 
 // Convert decimal Item to string (caller must free with decimal_free_string)
 char* decimal_to_string(Item item);
