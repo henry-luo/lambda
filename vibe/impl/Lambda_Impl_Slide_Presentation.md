@@ -21,9 +21,9 @@ change compares sampled channels before CSS formatting in `html.ls`; `live.ls`
 applies those deltas directly. The static projection still emits a full map.
 Those changes and their regression fixture are committed in `2a3c41a6d`.
 The subsequent sample relocation, Northstar deck, styled controls, animated chart
-marks, object containing-box fixes, playback-control corrections and speed slider
-remain uncommitted at this update. No native font-family ownership fix has been
-implemented yet.
+marks, object containing-box fixes, playback-control corrections, speed slider
+and range-thumb correction are committed in `c67751443`. No native font-family
+ownership fix has been implemented yet.
 
 The toolbar now includes a 0.5×–4× speed slider with a multiplier readout.
 Lambda owns rate changes and clock reanchoring for cues, transitions and dwell,
@@ -36,12 +36,21 @@ name before dispatch copied it, suppressing author input delivery. The bridge
 now roots both target and name throughout dispatch under D5.3.3. The same
 forced-GC reproduction passes after that ownership fix.
 
+The range-thumb correction fixes layout restoring the authored `value="1"`
+after input changed the live value. Range initialization now reads an existing
+live value without creating state for untouched HTML defaults. Input commit also
+gives the view document-owned value storage instead of a pointer into its stack
+buffer (D4.5.1v4). The generic input fix preserves the package boundary (D7.5.3).
+The toolbar range is 0.5×–4× in quarter steps. Pixel assertions now verify actual
+thumb movement on clicks and drags, both endpoints, and persistence through
+Restart and later layout updates; value/readout assertions alone missed the bug.
+
 | Latest verification | Result and boundary |
 |---|---|
 | Package scripts | 13 fixtures × JIT/interpreter = 26 matching expected-output runs, including chart samples, autoplay clocks, pause/resume, restart and reduced motion |
-| Focused UI | 14 slide/host fixtures, 245 assertions pass with forced collection and freed-memory poisoning, including 126 Northstar checks and 22 speed-slider checks |
+| Focused UI | 14 slide/host fixtures, 255 assertions pass with forced collection and freed-memory poisoning, including 126 Northstar checks and 32 speed-slider checks |
 | Merged native checks | 405 cases pass, including transition-track retirement |
-| Full Lambda baseline | 6,297/6,297 pass after the speed-slider and synthetic event-name ownership fix |
+| Full Lambda baseline | 6,297/6,297 pass after the range-thumb and value-storage fixes |
 | Full Radiant baseline | 4,031 pass, 350 partial, 4 fail after the speed/name-root fix; both HTTP setup failures pass with loopback access; Tetris smoke and LaTeX iframe navigation remain failed |
 | Navigation stress | Normal and forced-GC/poison runs each pass 40 assertions over 20 rounds / 120 callbacks; forced run has no raw-pointer or inconsistent-focus-ancestry diagnostics |
 | Latest lint / diff | Radiant float/int-cast lint and whitespace checks pass |
@@ -176,6 +185,17 @@ An additional existing plain-JS range replay passes 26 assertions normally;
 under forced GC/poison its JS preamble fails before input dispatch, leaving five
 assertions failed. That separate bootstrap failure is outside the slider's
 Lambda handler path and remains unresolved.
+
+The subsequent thumb correction adds painted-thumb assertions: before the fix,
+the value/readout checks passed but the endpoint pixel failed because reflow
+restored the authored value. After the generic live-value and storage fixes
+(D4.5.1v4, D7.5.3), the release speed replay passes 32 assertions, including
+dragging to both endpoints and retaining the thumb through later layout. The
+0.5×–4× toolbar range is covered by a 38-check playback reducer fixture, including
+4× completion timing. All 13 package scripts pass in both tiers (26 runs), and
+all 14 slide/host release replays pass 255 assertions with forced GC/poison.
+Existing plain-JS range and pointer replays pass 26 and 11 assertions normally.
+Float/int-cast lint passes. Artifacts: `temp/slide/thumb_*`.
 
 | Milestone | Status |
 |---|---|
