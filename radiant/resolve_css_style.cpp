@@ -1628,6 +1628,18 @@ static const char* css_join_font_family_parts(LayoutContext* lycon,
     return view_tree_canonical_font_family(tree, combined, pos);
 }
 
+// Restyles re-apply these resets every pass; allocating the keyword each time
+// grew retained view storage per element per layout.
+const CssValue* css_line_height_normal_value() {
+    static const CssValue normal = [] {
+        CssValue value = {};
+        value.type = CSS_VALUE_TYPE_KEYWORD;
+        value.data.keyword = CSS_VALUE_NORMAL;
+        return value;
+    }();
+    return &normal;
+}
+
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value) {
     if (!value) return NULL;
     if (value->type != CSS_VALUE_TYPE_LIST) return css_font_family_name_from_value(value);
@@ -8768,8 +8780,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 if (parts.size && font_family_name) {
                     span->ensure_block(lycon);
                     span->blk->line_height = lam::shared(parts.line_height
-                        ? parts.line_height
-                        : css_value_create_keyword(lycon->doc->view_tree->prop_pool, "normal"));
+                        ? parts.line_height : css_line_height_normal_value());
                 }
                 if (font_family_name) {
                     radiant_retain_font_family(span->font,

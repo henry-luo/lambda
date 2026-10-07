@@ -84,6 +84,12 @@ void selector_matcher_init(SelectorMatcher* matcher, Pool* pool) {
 
 }
 
+bool SelectorQueryScratch::parse_list(const char* text) {
+    if (!ensure_pool() || !text || !*text) return false;
+    group = css_parse_selector_group_text(text, strlen(text), pool);
+    return group && !css_selector_group_contains_generic_pseudo(group);
+}
+
 void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* scope_element) {
     if (!matcher) return;
     matcher->scope_element = scope_element;
@@ -125,8 +131,9 @@ void selector_matcher_destroy(SelectorMatcher* matcher) {
     if (!matcher) {
         return;
     }
-
-    // Note: Memory is pool-allocated, so it will be freed when pool is destroyed
+    // A created matcher owns only its own block; its pool is often the
+    // long-lived document pool, so per-call matchers must give it back.
+    pool_free(matcher->pool, matcher);
 }
 
 void selector_matcher_clear_cache(SelectorMatcher* matcher) {

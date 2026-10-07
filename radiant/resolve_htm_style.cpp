@@ -1432,8 +1432,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
         // HTML Rendering gives buttons a normal line-height, preventing an
         // inherited author line-height from inflating their anonymous content box.
-        block->blk->line_height = lam::shared(css_value_create_keyword(
-            lycon->doc->view_tree->prop_pool, "normal"));
+        block->blk->line_height = lam::shared(css_line_height_normal_value());
         // Chrome UA: font-size 13.3333px, font-family Arial for form controls
         apply_html_form_control_font(lycon, block);
         apply_html_button_box_defaults(lycon, block);
@@ -1736,8 +1735,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->ensure_block(lycon);
         // HTML form controls use their UA normal line-height unless authored CSS overrides it.
-        block->blk->line_height = lam::shared(css_value_create_keyword(
-            lycon->doc->view_tree->prop_pool, "normal"));
+        block->blk->line_height = lam::shared(css_line_height_normal_value());
         apply_html_textarea_font(lycon, block);
         // html rendering defaults textarea overflow to auto; baseline synthesis
         // needs the used overflow state, not only the serialized computed value.

@@ -9552,13 +9552,13 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
         // after the StateStore pseudo bits have been updated.
         view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
                                     clear_cascaded_styles_visitor, nullptr);
-        SelectorMatcher* matcher = selector_matcher_create(pool);
-        if (matcher) {
-            state_configure_selector_matcher(state, matcher);
-            radiant_apply_css_stylesheets_to_tree(
-                doc, doc->root, doc->stylesheets, doc->stylesheet_count,
-                pool, css_engine, matcher);
-        }
+        // caller-owned matcher: a pointer-state change must not retain one per event
+        SelectorMatcher matcher_storage;
+        selector_matcher_init(&matcher_storage, pool);
+        state_configure_selector_matcher(state, &matcher_storage);
+        radiant_apply_css_stylesheets_to_tree(
+            doc, doc->root, doc->stylesheets, doc->stylesheet_count,
+            pool, css_engine, &matcher_storage);
     }
 }
 

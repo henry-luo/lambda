@@ -1819,9 +1819,10 @@ static bool dom_resolve_selector_pseudo_state(void* context,
         doc ? doc->state : nullptr, elem, pseudo_state);
 }
 
-static SelectorMatcher* dom_create_selector_matcher(DomDocument* doc) {
-    if (!doc || !doc->document_pool) return nullptr;
-    SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
+// the matcher lives in the caller's per-query pool (SelectorQueryScratch).
+static SelectorMatcher* dom_create_selector_matcher(DomDocument* doc, Pool* pool) {
+    if (!doc || !pool) return nullptr;
+    SelectorMatcher* matcher = selector_matcher_create(pool);
     if (matcher) {
         selector_matcher_set_pseudo_state_resolver(
             matcher, dom_resolve_selector_pseudo_state, doc);
@@ -1831,8 +1832,8 @@ static SelectorMatcher* dom_create_selector_matcher(DomDocument* doc) {
 
 // native-module selector fast paths must share the DOM resolver so live form
 // state, including option:checked, agrees with ordinary JS queries.
-JS_FORWARD_RETURN(void*, dom_create_selector_matcher_bridge, (void* dom_doc),
-    dom_create_selector_matcher, ((DomDocument*)dom_doc))
+JS_FORWARD_RETURN(void*, dom_create_selector_matcher_bridge, (void* dom_doc, void* pool),
+    dom_create_selector_matcher, ((DomDocument*)dom_doc, (Pool*)pool))
 
 // Returns the lowercased input `type` attribute (e.g. "checkbox", "radio",
 // "submit", "button", "text"). Falls back to "text" when missing.
@@ -5212,15 +5213,9 @@ JS_FORWARD_ITEM(dom_throw_contenteditable_syntax_error, (void), dom_throw_syntax
 // Helper: CSS selector parse + match
 // ============================================================================
 
-static CssSelectorGroup* parse_css_selector_group(const char* sel_text, Pool* pool) {
-    if (!sel_text || !pool) return nullptr;
-    size_t sel_len = strlen(sel_text);
-    if (sel_len == 0) return nullptr;
-    // DOM selector APIs take selector lists; the shared parser preserves comma-separated
-    // alternatives used by editor hit-testing such as closest("td, th").
-    return css_parse_selector_group_text(sel_text, sel_len, pool);
-}
-
+// DOM selector APIs take selector lists (SelectorQueryScratch::parse_list); the
+// shared parser preserves comma-separated alternatives used by editor
+// hit-testing such as closest("td, th").
 static DomElement* dom_selector_group_find_first(SelectorMatcher* matcher,
                                                     CssSelectorGroup* group,
                                                     DomElement* element,
@@ -15709,56 +15704,50 @@ extern "C" Item dom_core_attribute_names(Item n) {
 }
 
 // ---------------------------------------------------------------------------
-// Selector-matching rows. Each parses its selector against the document pool
-// and raises a SyntaxError for an invalid one, so the raise is the row's, not
-// the dispatcher's -- both doors see the same error.
+// Selector-matching rows. Each parses its selector into a per-call scratch
+// query and raises a SyntaxError for an invalid one, so the raise is the
+// row's, not the dispatcher's -- both doors see the same error.
 // ---------------------------------------------------------------------------
+
+// False leaves the row's early result in *early: `empty` for a missing
+// receiver or text, a SyntaxError for an invalid selector list.
+static bool dom_selector_query_prepare(SelectorQueryScratch* query, DomElement* elem,
+                                       Item selector, Item empty, Item* early) {
+    *early = empty;
+    const char* sel_text = elem ? dom_to_dom_string_cstr(selector) : nullptr;
+    if (!sel_text || !elem->doc) return false;
+    if (!query->parse_list(sel_text)) {
+        if (query->pool) *early = dom_throw_syntax_error("Invalid selector");
+        return false;
+    }
+    query->matcher = dom_create_selector_matcher(elem->doc, query->pool);
+    // CSS Selectors defines :scope relative to the Element query receiver.
+    // Without this binding, jQuery's scoped relative selectors match no descendants.
+    selector_matcher_set_scope_element(query->matcher, elem);
+    return true;
+}
 
 extern "C" Item dom_core_query_selector(Item n, Item selector) {
     DomElement* elem = dom_op_element(n);
-    if (!elem) return ItemNull;
-    const char* sel_text = dom_to_dom_string_cstr(selector);
-    if (!sel_text || !elem->doc) return ItemNull;
-
-    Pool* pool = elem->doc->document_pool;
-    CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-    if (!selector_group) return dom_throw_syntax_error("Invalid selector");
-    if (css_selector_group_contains_generic_pseudo(selector_group)) {
-        return dom_throw_syntax_error("Invalid selector");
-    }
-
-    SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
-    // CSS Selectors defines :scope relative to the Element query receiver.
-    // Without this binding, jQuery's scoped relative selectors match no descendants.
-    selector_matcher_set_scope_element(matcher, elem);
+    SelectorQueryScratch query;
+    Item early = ItemNull;
+    if (!dom_selector_query_prepare(&query, elem, selector, ItemNull, &early)) return early;
     DomElement* found = dom_selector_group_find_first(
-        matcher, selector_group, elem, false);
+        query.matcher, query.group, elem, false);
     return found ? dom_wrap_element(found) : ItemNull;
 }
 
 extern "C" Item dom_core_query_selector_all(Item n, Item selector) {
     DomElement* elem = dom_op_element(n);
-    if (!elem) return ItemNull;
-    const char* sel_text = dom_to_dom_string_cstr(selector);
-    if (!sel_text || !elem->doc) return ItemNull;
-
-    Pool* pool = elem->doc->document_pool;
-    CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-
-    if (!selector_group) return dom_throw_syntax_error("Invalid selector");
-    if (css_selector_group_contains_generic_pseudo(selector_group)) {
-        return dom_throw_syntax_error("Invalid selector");
-    }
-
-    SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
-    // Keep :scope anchored to this Element for relative selector queries.
-    selector_matcher_set_scope_element(matcher, elem);
+    SelectorQueryScratch query;
+    Item early = ItemNull;
+    if (!dom_selector_query_prepare(&query, elem, selector, ItemNull, &early)) return early;
     RootFrame roots(1);
     Rooted<Item> items(roots, js_array_new(0));
     ArrayList* results = arraylist_new(16);
     if (results) {
         dom_selector_group_collect_all(
-            matcher, selector_group, elem, results, false);
+            query.matcher, query.group, elem, results, false);
         for (int i = 0; i < results->length; i++) {
             js_array_push(items.get(),
                 dom_wrap_element((DomElement*)results->data[i]));
@@ -15770,43 +15759,23 @@ extern "C" Item dom_core_query_selector_all(Item n, Item selector) {
 
 extern "C" Item dom_core_matches(Item n, Item selector) {
     DomElement* elem = dom_op_element(n);
-    if (!elem) return (Item){.item = ITEM_FALSE};
-    const char* sel_text = dom_to_dom_string_cstr(selector);
-    if (!sel_text || !elem->doc) return (Item){.item = ITEM_FALSE};
-
-    Pool* pool = elem->doc->document_pool;
-    CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-    if (!selector_group) return dom_throw_syntax_error("Invalid selector");
-    if (css_selector_group_contains_generic_pseudo(selector_group)) {
-        return dom_throw_syntax_error("Invalid selector");
-    }
-
-    SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
-    selector_matcher_set_scope_element(matcher, elem);
+    SelectorQueryScratch query;
+    Item early = (Item){.item = ITEM_FALSE};
+    if (!dom_selector_query_prepare(&query, elem, selector, early, &early)) return early;
     MatchResult result;
-    bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
+    bool matched = selector_matcher_matches_group(query.matcher, query.group, elem, &result);
     return (Item){.item = b2it(matched ? 1 : 0)};
 }
 
 extern "C" Item dom_core_closest(Item n, Item selector) {
     DomElement* elem = dom_op_element(n);
-    if (!elem) return ItemNull;
-    const char* sel_text = dom_to_dom_string_cstr(selector);
-    if (!sel_text || !elem->doc) return ItemNull;
-
-    Pool* pool = elem->doc->document_pool;
-    CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-    if (!selector_group) return dom_throw_syntax_error("Invalid selector");
-    if (css_selector_group_contains_generic_pseudo(selector_group)) {
-        return dom_throw_syntax_error("Invalid selector");
-    }
-
-    SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
-    selector_matcher_set_scope_element(matcher, elem);
+    SelectorQueryScratch query;
+    Item early = ItemNull;
+    if (!dom_selector_query_prepare(&query, elem, selector, ItemNull, &early)) return early;
     MatchResult mresult;
     DomElement* current = elem;
     while (current) {
-        if (selector_matcher_matches_group(matcher, selector_group, current, &mresult)) {
+        if (selector_matcher_matches_group(query.matcher, query.group, current, &mresult)) {
             return dom_wrap_element(current);
         }
         DomNode* parent = current->parent;

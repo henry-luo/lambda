@@ -33,6 +33,7 @@ typedef struct DomNodeRecord {
     uint32_t pins[DOM_NODE_PIN_REASON_COUNT];
     struct DomNodeRecord* bucket_next;
     struct DomNodeRecord* all_next;
+    struct DomNodeRecord* all_prev;
     struct DomNodeRecord* retire_next;
 } DomNodeRecord;
 
@@ -272,6 +273,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
     record->bucket_next = registry->buckets[bucket];
     registry->buckets[bucket] = record;
     record->all_next = registry->all_records;
+    if (record->all_next) record->all_next->all_prev = record;
     registry->all_records = record;
     registry->record_count++;
     registry->stats.registered_nodes++;
@@ -672,6 +674,19 @@ static size_t dom_retire_collect(DomDocument* doc) {
     return retired;
 }
 
+// Every lookup treats a missing record exactly like a retired one, so a
+// recycled slot's record only cost memory and lengthened each detach scan.
+static void dom_record_unlink_free(DomNodeRegistry* registry, DomNodeRecord* record) {
+    DomNodeRecord** edge = &registry->buckets[dom_node_bucket(registry, record->address)];
+    while (*edge && *edge != record) edge = &(*edge)->bucket_next;
+    if (*edge) *edge = record->bucket_next;
+    if (record->all_prev) record->all_prev->all_next = record->all_next;
+    else registry->all_records = record->all_next;
+    if (record->all_next) record->all_next->all_prev = record->all_prev;
+    registry->record_count--;
+    pool_free(registry->document->document_pool, record);
+}
+
 static void dom_retire_recycle_one(DomNodeRegistry* registry) {
     DomNodeRecord* record = registry->pending_free;
     registry->pending_free = record->retire_next;
@@ -683,6 +698,7 @@ static void dom_retire_recycle_one(DomNodeRegistry* registry) {
     arena_retire(record->primary_arena, record->address, record->primary_size);
     registry->stats.pending_primary_bytes -= record->primary_size;
     registry->stats.recycled_nodes++;
+    dom_record_unlink_free(registry, record);
 }
 
 size_t dom_retire_sweep(DomDocument* doc) {

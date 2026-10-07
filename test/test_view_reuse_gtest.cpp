@@ -838,6 +838,36 @@ TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
     EXPECT_GE(after.bump_back_count - warm.bump_back_count, 10000u);
 }
 
+TEST_F(DomRetirementTest, RecycledNodesReleaseTheirRegistryRecords) {
+    DomElement* parent = root();
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.document_pool, &warm);
+    DomLifecycleStats warm_stats = {};
+    dom_lifecycle_get_stats(&doc, &warm_stats);
+    DomElement* children[64] = {};
+    DomNodeRef refs[64] = {};
+    for (int i = 0; i < 64; i++) {
+        children[i] = element("child");
+        ASSERT_NE(children[i], nullptr);
+        refs[i] = dom_node_ref(static_cast<DomNode*>(children[i]));
+        ASSERT_TRUE(attach(parent, children[i]));
+    }
+    for (int i = 0; i < 64; i++) ASSERT_TRUE(parent->remove_child(children[i]));
+    EXPECT_EQ(dom_retire_sweep(&doc), 64u);
+    // a record outlives no recycled slot; a stale ref still fails validation
+    PoolStats after = {};
+    pool_get_detailed_stats(doc.document_pool, &after);
+    EXPECT_EQ(after.live_bytes, warm.live_bytes);
+    for (int i = 0; i < 64; i++) EXPECT_EQ(dom_node_ref_validate(&doc, refs[i]), nullptr);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.recycled_nodes - warm_stats.recycled_nodes, 64u);
+    // the recycled slots are reused by the next generation of nodes
+    DomElement* next = element("child");
+    ASSERT_NE(next, nullptr);
+    EXPECT_NE(dom_node_ref_validate(&doc, dom_node_ref(static_cast<DomNode*>(next))), nullptr);
+}
+
 TEST_F(DomRetirementTest, MoreThanMutationRecordCapRetiresAfterPinsRelease) {
     DomElement* parent = root();
     DomNodeRef refs[DOM_JS_MUTATION_RECORD_CAP * 4] = {};

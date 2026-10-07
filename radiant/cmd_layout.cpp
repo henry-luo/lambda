@@ -1698,11 +1698,12 @@ static void layout_apply_css_stylesheets(DomDocument* doc, DomElement* root,
                                          CssStylesheet** stylesheets, int count,
                                          Pool* pool, CssEngine* engine) {
     if (!doc || !root || !pool || !engine || count <= 0) return;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    if (!matcher) return;
-    state_configure_selector_matcher((DocState*)doc->state, matcher);
+    // caller-owned: each layout cascade must not retain a matcher in the document pool
+    SelectorMatcher matcher;
+    selector_matcher_init(&matcher, pool);
+    state_configure_selector_matcher((DocState*)doc->state, &matcher);
     radiant_apply_css_stylesheets_to_tree(
-        doc, root, stylesheets, count, pool, engine, matcher);
+        doc, root, stylesheets, count, pool, engine, &matcher);
 }
 
 struct CssCascadeMemorySnapshot {
@@ -4634,9 +4635,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
     }
 
+    // caller-owned: one rebuild must not retain a matcher in the document pool
+    SelectorMatcher incremental_storage;
     SelectorMatcher* incremental_matcher = nullptr;
     if (css_engine && inline_sheets && inline_count > 0) {
-        incremental_matcher = selector_matcher_create(doc->document_pool);
+        selector_matcher_init(&incremental_storage, doc->document_pool);
+        incremental_matcher = &incremental_storage;
         state_configure_selector_matcher((DocState*)doc->state, incremental_matcher);
     }
 

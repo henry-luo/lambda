@@ -3901,6 +3901,8 @@ const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* elem
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
+// Immutable `normal` keyword shared by UA and font-shorthand line-height resets.
+const CssValue* css_line_height_normal_value();
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
 const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              const CssValue* shorthand_value,
