@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/view.hpp"
+#include "../radiant/layout.hpp"
+#include "../radiant/render.hpp"
 #include "../radiant/event.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
@@ -91,6 +93,48 @@ TEST_F(ViewReuseTest, CanonicalIndexReusesAnExistingExactValue) {
     EXPECT_EQ(child2->in_line, first);
     EXPECT_EQ(tree.inline_canonical_count, 1u);
     EXPECT_EQ(tree.canonical_stats.inline_hits, 1u);
+}
+
+TEST_F(ViewReuseTest, ComputedFamilyListsShareOneTreeLifetimeString) {
+    CssValue* parts[] = {
+        css_value_create_string(tree.prop_pool, "Arial"),
+        css_value_create_keyword(tree.prop_pool, "sans-serif"),
+    };
+    CssValue* list = css_value_create_list(tree.prop_pool, parts, 2);
+    ASSERT_NE(list, nullptr);
+    list->data.list.comma_separated = true;
+    LayoutContext lycon = {};
+    lycon.selected_view_tree = lam::up(&tree);
+
+    const char* first = css_select_font_family(&lycon, list);
+    ASSERT_NE(first, nullptr);
+    EXPECT_STREQ(first, "Arial, sans-serif");
+    // inherited and copied fonts borrow the family; nothing frees it per restyle
+    FontProp parent = {};
+    FontProp child = {};
+    radiant_retain_font_family(&parent, lam::PoolPtr<char>((char*)first));
+    radiant_copy_font_values(&child, &parent);
+
+    PoolStats warm = {};
+    pool_get_detailed_stats(tree.prop_pool, &warm);
+    for (int i = 0; i < 256; i++) {
+        const char* again = css_select_font_family(&lycon, list);
+        ASSERT_EQ(again, first);
+        radiant_retain_font_family(&parent, lam::PoolPtr<char>((char*)again));
+    }
+    PoolStats repeated = {};
+    pool_get_detailed_stats(tree.prop_pool, &repeated);
+    EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    EXPECT_STREQ(child.family, "Arial, sans-serif");
+
+    // equal text from a foreign, unterminated buffer reuses the canonical copy
+    char foreign[] = "Arial, sans-serif, monospace";
+    EXPECT_EQ(view_tree_canonical_font_family(&tree, foreign, 17), first);
+    const char* other = view_tree_canonical_font_family(&tree, foreign, strlen(foreign));
+    ASSERT_NE(other, nullptr);
+    EXPECT_NE(other, first);
+    EXPECT_STREQ(other, "Arial, sans-serif, monospace");
+    EXPECT_EQ(tree.canonical_stats.font_family_misses, 2u);
 }
 
 TEST_F(ViewReuseTest, CanonicalCapFallsBackToOwnedStorage) {

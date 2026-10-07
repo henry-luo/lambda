@@ -2820,6 +2820,8 @@ typedef struct CanonicalPropStats {
     uint64_t inline_cows;
     uint64_t cap_fallbacks;
     size_t index_bytes;
+    uint64_t font_family_lookups;
+    uint64_t font_family_misses;
 } CanonicalPropStats;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -2844,6 +2846,8 @@ struct ViewTree {
     size_t inline_canonical_count;
     size_t canonical_prop_cap_bytes;
     CanonicalPropStats canonical_stats;
+    // Distinct computed font-family lists; strings live in prop_pool until tree teardown.
+    lam::Own<struct CanonicalFontFamilies> canonical_font_families;
     lam::Own<TextRect> free_text_rects; // Reusable retained text fragments owned by prop_pool.
     lam::Up<View> root;
     HtmlVersion html_version;
@@ -2901,6 +2905,12 @@ void view_tree_canonical_init(ViewTree* tree);
 void view_tree_canonical_destroy(ViewTree* tree);
 void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
                                   DomElement* parent);
+// The tree's canonical copy of a computed font-family list. Inherited fonts,
+// pseudo/temporary fonts and text views all borrow family strings without
+// owning them, so a computed list must outlive every restyle: equal lists share
+// one tree-lifetime string instead of allocating per resolution.
+const char* view_tree_canonical_font_family(ViewTree* tree, const char* chars,
+                                            size_t length);
 
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
 // Release a private transform chain before retained restyle replaces its head.

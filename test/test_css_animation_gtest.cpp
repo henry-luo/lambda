@@ -601,6 +601,45 @@ TEST_F(MotionCascadeTest, ExtendingExpiredDurationResumesTheRetainedTimeline) {
     doc.state = nullptr;
 }
 
+TEST_F(MotionCascadeTest, RepeatedResolveDoesNotGrowRetainedLayoutPool) {
+    CssStylesheet sheet;
+    CssRule rule;
+    CssRule* rule_ptr;
+    CssStylesheet* sheet_ptr;
+    setup_keyframes_sheet(&doc, &sheet, &rule, &rule_ptr, &sheet_ptr,
+        "fade { from { opacity: 0; } to { opacity: 1; } }");
+    InlineProp in_line = INLINE_PROP_DEFAULT;
+    element.in_line = lam::view_ref(&in_line);
+    DocState state = {};
+    state.animation_scheduler = animation_scheduler_create(pool);
+    doc.state = lam::up(&state);
+    UiContext ui = {};
+    ui.document = lam::up(&doc);
+    // the layout pool is the view tree's retained prop pool in real passes
+    Pool* view_pool = pool_create();
+    ASSERT_NE(view_pool, nullptr);
+    LayoutContext context = {};
+    context.pool = lam::up(view_pool);
+    context.ui_context = lam::up(&ui);
+
+    // unanimated elements still compute animation-name, so both shapes resolve a list
+    const char* styles[] = {"animation-name: none", "animation: fade 1s linear forwards"};
+    for (const char* style : styles) {
+        apply(style);
+        css_animation_resolve(&element, &context);
+        PoolStats warm = {};
+        pool_get_detailed_stats(view_pool, &warm);
+        for (int i = 0; i < 128; i++) css_animation_resolve(&element, &context);
+        PoolStats repeated = {};
+        pool_get_detailed_stats(view_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes) << style;
+    }
+    EXPECT_NE(state.animation_scheduler->first, nullptr);
+    animation_scheduler_destroy(state.animation_scheduler);
+    doc.state = nullptr;
+    pool_destroy(view_pool);
+}
+
 // ============================================================================
 // Float Interpolation Tests
 // ============================================================================
