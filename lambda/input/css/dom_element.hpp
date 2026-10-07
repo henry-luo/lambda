@@ -636,7 +636,8 @@ bool css_custom_property_name_matches(const char* stored_name,
     size_t lookup_length = (size_t)-1);
 DomElement* dom_parent_element(DomElement* element);
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element,
-    const char* name, size_t name_length = (size_t)-1);
+    const char* name, size_t name_length = (size_t)-1,
+    StrView* token_text = nullptr);
 const CssValue* dom_element_lookup_custom_property(DomElement* element,
     const char* name, DomElement** owner);
 

@@ -19,6 +19,7 @@ struct CssVarStack {
     bool* invalid;
     CssPropertyCode property;
     size_t name_length = (size_t)-1;
+    bool preserve_tokens = false;
 };
 
 static thread_local const CssVarStack* css_active_var_stack = nullptr;
@@ -52,6 +53,147 @@ static bool css_var_stack_contains(const CssVarStack* stack, DomElement* element
 
 static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* value,
     DomElement* element, CssVariableLookupFn lookup, void* context, const CssVarStack* stack);
+
+// CSS Syntax 3 section 9: separators preserve tokens without introducing whitespace.
+static bool css_tokens_need_separator(const CssToken& left, const CssToken& right) {
+    bool ident = right.type == CSS_TOKEN_IDENT || right.type == CSS_TOKEN_FUNCTION ||
+        right.type == CSS_TOKEN_URL || right.type == CSS_TOKEN_BAD_URL || right.type == CSS_TOKEN_CDC;
+    bool numeric = right.type == CSS_TOKEN_NUMBER || right.type == CSS_TOKEN_PERCENTAGE ||
+        right.type == CSS_TOKEN_DIMENSION;
+    bool dash = right.type == CSS_TOKEN_DELIM && right.data.delimiter == '-';
+    if (left.type == CSS_TOKEN_IDENT)
+        return ident || numeric || dash || right.type == CSS_TOKEN_LEFT_PAREN;
+    if (left.type == CSS_TOKEN_AT_KEYWORD || left.type == CSS_TOKEN_HASH ||
+        left.type == CSS_TOKEN_DIMENSION) return ident || numeric || dash;
+    if (left.type == CSS_TOKEN_NUMBER)
+        return ident || numeric || (right.type == CSS_TOKEN_DELIM && right.data.delimiter == '%');
+    if (left.type != CSS_TOKEN_DELIM) return false;
+    switch (left.data.delimiter) {
+        case '#': case '-': return ident || numeric || dash;
+        case '@': return ident || dash;
+        case '.': case '+': return numeric;
+        case '/': return right.type == CSS_TOKEN_DELIM && right.data.delimiter == '*';
+        default: return false;
+    }
+}
+
+struct CssTokenOutput {
+    StringBuf* text;
+    CssToken last;
+    bool has_last;
+};
+
+static bool css_append_token_fragment(Pool* pool, CssTokenOutput* output, StrView text) {
+    if (!text.length) return true;
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(text.str, text.length, pool, &count);
+    if (!tokens || !count) return false;
+    size_t first = 0, end = count;
+    // comments at substitution boundaries are not part of either adjacent token.
+    while (first < end && tokens[first].type == CSS_TOKEN_COMMENT) first++;
+    while (end > first && (tokens[end - 1].type == CSS_TOKEN_EOF ||
+        tokens[end - 1].type == CSS_TOKEN_COMMENT)) end--;
+    if (first < end) {
+        if (output->has_last && css_tokens_need_separator(output->last, tokens[first]))
+            stringbuf_append_str(output->text, "/**/");
+        const CssToken& last = tokens[end - 1];
+        stringbuf_append_str_n(output->text, tokens[first].start,
+            (size_t)(last.start + last.length - tokens[first].start));
+        output->last = last;
+        output->has_last = true;
+    }
+    css_token_array_release(pool, tokens, count);
+    return true;
+}
+
+static CssValue* css_parse_custom_token_text(Pool* pool, StrView text) {
+    StringBuf* declaration = stringbuf_new(pool);
+    if (!declaration) return nullptr;
+    stringbuf_append_str(declaration, "--value:");
+    stringbuf_append_str_n(declaration, text.str, text.length);
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(declaration->str->chars, declaration->length, pool, &count);
+    if (!tokens || count > INT_MAX) {stringbuf_free(declaration); return nullptr;}
+    // inserted separator comments carry no typed values or whitespace tokens.
+    count = css_token_array_remove_comments(pool, tokens, count);
+    int position = 0;
+    CssDeclaration* parsed = css_parse_declaration_from_tokens(tokens, &position,
+        (int)count, pool); // INT_CAST_OK: token count is bounded by INT_MAX above.
+    css_token_array_release(pool, tokens, count);
+    stringbuf_free(declaration);
+    if (!parsed || !parsed->value) return nullptr;
+    // declaration parsing trims outer whitespace; substitution must retain it.
+    return css_value_create_token_sequence(pool, parsed->value, text);
+}
+
+static const CssValue* css_resolve_token_text(Pool* pool, const CssValue* value,
+    DomElement* element, CssVariableLookupFn lookup, void* context, const CssVarStack* stack) {
+    const String* text = value->data.tokens.text;
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(text->chars, text->len, pool, &count);
+    if (!tokens || count > INT_MAX) return nullptr;
+    count = css_token_array_remove_comments(pool, tokens, count);
+    CssTokenOutput output = {nullptr, {}, false};
+    size_t start = 0;
+    const CssValue* result = value;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type != CSS_TOKEN_FUNCTION || !tokens[i].value ||
+            !str_ieq_cstr(tokens[i].value, "var(")) continue;
+        if (!output.text) output.text = stringbuf_new(pool);
+        if (!output.text || !css_append_token_fragment(pool, &output,
+            strview_init(text->chars + start, (size_t)(tokens[i].start - text->chars) - start))) {
+            result = nullptr; break;
+        }
+        int position = (int)i; // INT_CAST_OK: token array index is bounded by INT_MAX above.
+        CssValue* function = css_parse_function_from_tokens(tokens, &position,
+            (int)count, pool); // INT_CAST_OK: token count was checked above.
+        if (!function || function->type != CSS_VALUE_TYPE_FUNCTION) {result = nullptr; break;}
+        // retain the entire fallback, including its commas, quotes and whitespace.
+        int depth = 0;
+        for (size_t j = i + 1; j < (size_t)position; j++) {
+            CssTokenType type = tokens[j].type;
+            if (type == CSS_TOKEN_FUNCTION || type == CSS_TOKEN_LEFT_PAREN) depth++;
+            else if (type == CSS_TOKEN_RIGHT_PAREN) {if (!depth) break; depth--;}
+            else if (type == CSS_TOKEN_COMMA && !depth) {
+                const char* end = tokens[position - 1].start;
+                if (tokens[position - 1].type != CSS_TOKEN_RIGHT_PAREN)
+                    end += tokens[position - 1].length;
+                const char* begin = tokens[j].start + tokens[j].length;
+                CssValue* fallback = css_parse_custom_token_text(pool,
+                    strview_init(begin, (size_t)(end - begin)));
+                if (!fallback || function->data.function->arg_count < 2) {result = nullptr; break;}
+                function->data.function->args[1] = fallback;
+                function->data.function->arg_count = 2;
+                break;
+            }
+        }
+        if (!result) break;
+        const CssValue* replacement = resolve_var_function_inner(pool, function,
+            element, lookup, context, stack);
+        if (!replacement) {result = nullptr; break;}
+        CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        if (!formatter) {result = nullptr; break;}
+        formatter->options.preserve_tokens = true;
+        formatter->options.quote_urls = false;
+        css_format_value(formatter, (CssValue*)replacement);
+        bool appended = css_append_token_fragment(pool, &output,
+            strview_init(formatter->output->str->chars, formatter->output->length));
+        css_formatter_destroy(formatter);
+        if (!appended) {result = nullptr; break;}
+        const CssToken& last = tokens[position - 1];
+        start = (size_t)(last.start + last.length - text->chars);
+        i = (size_t)position - 1;
+    }
+    if (result && output.text) {
+        result = css_append_token_fragment(pool, &output,
+            strview_init(text->chars + start, text->len - start))
+            ? css_parse_custom_token_text(pool,
+                strview_init(output.text->str->chars, output.text->length)) : nullptr;
+    }
+    if (output.text) stringbuf_free(output.text);
+    css_token_array_release(pool, tokens, count);
+    return result;
+}
 
 static CssValue* css_compute_registered_dimension(Pool* pool, DomElement* owner, const CssValue* value) {
     if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_ANGLE ||
@@ -151,7 +293,7 @@ static CssValue* css_compute_registered_tree(Pool* pool, DomElement* owner,
 static const CssValue* css_compute_registered_atom(Pool* pool, DomElement* owner,
     const CssPropertySyntaxComponent* component, const CssValue* value) {
     // Registered inheritance retains computed values in the declaration owner's environment.
-    CssValue* owned = css_value_clone_owned(value, pool);
+    CssValue* owned = css_value_clone_owned(css_value_unwrap(value), pool);
     return owned ? css_compute_registered_tree(pool, owner, component, owned, true, 0) : nullptr;
 }
 
@@ -163,7 +305,8 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
         ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
     const CssValue* initial = registration ? registration->initial_value : nullptr;
     if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
-    const CssValue* value = dom_element_lookup_own_custom_property(element, name, name_length);
+    StrView token_text = {};
+    const CssValue* value = dom_element_lookup_own_custom_property(element, name, name_length, &token_text);
     bool inherit = registration ? registration->inherits : true;
     if (value && css_value_is_global_keyword(value)) {
         CssEnum keyword = value->data.keyword;
@@ -174,12 +317,16 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
     if (value) {
         bool invalid = false;
         CssVarStack current = {name, element, stack, &invalid, CSS_PROPERTY_UNKNOWN, name_length};
+        current.preserve_tokens = stack && stack->preserve_tokens;
         CssVarResolutionScope scope(&current);
+        // raw tokens borrow the winning declaration only during this pool-owned computation (D4.5.1v4).
+        if (current.preserve_tokens && pool && token_text.str && (!registration || registration->universal))
+            value = css_value_create_token_sequence(pool, (CssValue*)value, token_text);
         const CssValue* resolved = resolve_var_function_inner(pool, value, element, nullptr, nullptr, &current);
         if (invalid) resolved = nullptr;
         if (resolved && (!registration || registration->universal)) return resolved;
         const CssPropertySyntaxComponent* matched = registration
-            ? css_match_property_syntax(registration, resolved) : nullptr;
+            ? css_match_property_syntax(registration, css_value_unwrap(resolved)) : nullptr;
         if (matched) {
             const CssValue* computed = css_compute_registered_atom(pool, element, matched, resolved);
             if (computed && !invalid) return computed;
@@ -214,6 +361,7 @@ struct CssSubstitutedTokens {
 
 static bool css_append_substituted_tokens(Pool* pool, const CssValue* value,
                                           CssSubstitutedTokens* tokens) {
+    value = css_value_unwrap(value);
     if (value && value->type == CSS_VALUE_TYPE_LIST) {
         if (value->data.list.count < 0 ||
             (value->data.list.count && !value->data.list.values)) return false;
@@ -266,6 +414,8 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
                                                   void* lookup_context,
                                                   const CssVarStack* stack) {
     if (!value) return nullptr;
+    if (pool && value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE)
+        return css_resolve_token_text(pool, value, context_element, lookup, lookup_context, stack);
     if (value->type == CSS_VALUE_TYPE_LIST) {
         CssValue** substituted = nullptr;
         int count = value->data.list.count;
@@ -361,6 +511,7 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
     if (var_value) {
         bool invalid = false;
         CssVarStack current = {var_name, owner, stack, &invalid, CSS_PROPERTY_UNKNOWN};
+        current.preserve_tokens = stack && stack->preserve_tokens;
         const CssValue* resolved = resolve_var_function_inner(
             pool, var_value, owner, lookup, lookup_context, &current);
         if (resolved && !invalid) return resolved;
@@ -369,15 +520,20 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
 }
 
 const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
-                                     CssVariableLookupFn lookup, void* context, DomElement* element) {
-    return resolve_var_function_inner(pool, value, element, lookup, context, css_active_var_stack);
+                                     CssVariableLookupFn lookup, void* context, DomElement* element,
+                                     bool preserve_tokens) {
+    CssVarStack serialization = {nullptr, element, css_active_var_stack, nullptr, CSS_PROPERTY_UNKNOWN};
+    serialization.preserve_tokens = true;
+    const CssValue* resolved = resolve_var_function_inner(pool, value, element, lookup, context,
+        preserve_tokens ? &serialization : css_active_var_stack);
+    return preserve_tokens ? resolved : css_value_unwrap(resolved);
 }
 
 // Resolve in the declaration owner's environment for inherited custom properties.
 const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
     const CssValue* value, CssPropertyCode property) {
     if (property != CSS_PROPERTY_FONT_SIZE && property != CSS_PROPERTY_LINE_HEIGHT)
-        return resolve_var_function_inner(pool, value, element, nullptr, nullptr, css_active_var_stack);
+        return css_value_unwrap(resolve_var_function_inner(pool, value, element, nullptr, nullptr, css_active_var_stack));
     for (const CssVarStack* current = css_active_var_stack; current; current = current->parent) {
         if (current->element == element && current->property == property) {
             css_var_stack_invalidate(css_active_var_stack, current);
@@ -386,12 +542,18 @@ const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
     }
     bool invalid = false;
     CssVarStack consumer = {nullptr, element, css_active_var_stack, &invalid, property};
+    consumer.preserve_tokens = css_active_var_stack && css_active_var_stack->preserve_tokens;
     CssVarResolutionScope scope(&consumer);
     const CssValue* resolved = resolve_var_function_inner(pool, value, element, nullptr, nullptr, &consumer);
-    return invalid ? nullptr : resolved;
+    return invalid ? nullptr : css_value_unwrap(resolved);
 }
 
 const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
-    const char* name, size_t name_length) {
-    return css_compute_custom_property(pool, element, name, css_active_var_stack, name_length);
+    const char* name, size_t name_length, bool preserve_tokens) {
+    // layout keeps the typed path; only CSSOM requests source-preserving substitution.
+    CssVarStack serialization = {nullptr, element, css_active_var_stack, nullptr, CSS_PROPERTY_UNKNOWN};
+    serialization.preserve_tokens = true;
+    const CssValue* resolved = css_compute_custom_property(pool, element, name,
+        preserve_tokens ? &serialization : css_active_var_stack, name_length);
+    return preserve_tokens ? resolved : css_value_unwrap(resolved);
 }

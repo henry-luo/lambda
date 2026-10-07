@@ -36,6 +36,7 @@ typedef struct {
     bool quote_urls;          // Quote URLs in url() functions
     bool sort_properties;     // Sort properties alphabetically
     bool computed_colors;     // Serialize computed color channels; retain currentColor/none
+    bool preserve_tokens;     // Unregistered custom properties retain source token spelling
 } CssFormatOptions;
 
 // Formatter context

@@ -278,6 +278,7 @@ typedef enum CssValueType : uint8_t {
     CSS_VALUE_TYPE_COLOR_MIX,      // color-mix() function
     CSS_VALUE_TYPE_CALC,           // calc() expressions
     CSS_VALUE_TYPE_CUSTOM,         // custom property references
+    CSS_VALUE_TYPE_TOKEN_SEQUENCE, // authored custom tokens plus their typed parse
     CSS_VALUE_TYPE_UNKNOWN         // unknown or invalid value
 } CssValueType;
 
@@ -935,8 +936,16 @@ typedef struct CssValue {
 
         // Calc expression
         CssCalcNode* calc_expression;
+        struct {
+            struct String* text;
+            struct CssValue* value;
+        } tokens;
     } data;
 } CssValue;
+
+static inline const CssValue* css_value_unwrap(const CssValue* value) {
+    return value && value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE ? value->data.tokens.value : value;
+}
 
 // comma groups are list entries; a space-separated value remains one entry.
 static inline int css_value_comma_count(const CssValue* value) {
@@ -1326,6 +1335,7 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword);
 CssValue* css_value_create_string(Pool* pool, const char* string);
 CssValue* css_value_create_url(Pool* pool, const char* url);
 CssValue* css_value_create_list(Pool* pool, CssValue** values, size_t count);
+CssValue* css_value_create_token_sequence(Pool* pool, CssValue* value, StrView text);
 CssValue* css_value_create_function(Pool* pool, const char* name, CssValue** args, int count);
 void css_value_destroy(CssValue* value);
 
@@ -1356,7 +1366,7 @@ typedef const CssValue* (*CssVariableLookupFn)(void* context, DomElement* elemen
                                                const char* name, DomElement** owner);
 const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
                                       CssVariableLookupFn lookup, void* context,
-                                      DomElement* element = nullptr);
+                                      DomElement* element = nullptr, bool preserve_tokens = false);
 
 // Value conversion and computation
 double css_value_to_pixels(const CssValue* value, double font_size, double viewport_width, double viewport_height);

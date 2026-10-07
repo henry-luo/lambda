@@ -7,6 +7,7 @@
 #include "../lib/font/font_internal.h"
 #endif
 #include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/dom/dom.h"
@@ -1686,6 +1687,72 @@ TEST(CssVariableSubstitutionTest, EmptyFallbackIsRemovedButMissingValueIsInvalid
         }
     }
     pool_destroy(pool);
+}
+
+static const CssValue* css_token_test_lookup(void* context, DomElement*, const char* name,
+                                            DomElement** owner) {
+    if (owner) *owner = nullptr;
+    return strcmp(name, "--t1") == 0 ? (const CssValue*)context : nullptr;
+}
+
+TEST(CssVariableSubstitutionTest, OwnedTokenSpellingSurvivesSubstitutionBoundaries) {
+    struct Case {const char* variable; const char* expression; const char* expected;};
+    const Case cases[] = {
+        {"a", "var(--t1)b", "a/**/b"},
+        {"foo", "var(--t1)()", "foo/**/()"},
+        {"a/* edge */", "var(--t1)b", "a/**/b"},
+        {"b", "a/* edge */var(--t1)", "a/**/b"},
+        {"unused", "a/* interior */b", "a/* interior */b"},
+        {"'a/* unfinished '", "var(--t1)b", "'a/* unfinished 'b"},
+        {"'a \" '/* edge */", "var(--t1)b", "'a \" 'b"},
+        {"1e2", "var(--t1)%", "1e2/**/%"},
+        {"REd", "var(--t1)", "REd"},
+        {"a", "var(--t1)var(--missing,)b", "a/**/b"},
+        {"a", "var(--missing, 'Q',var(--t1))", " 'Q',a"},
+        {"a", "fn(var(--t1),  01.00)", "fn(a,  01.00)"},
+        {"a", "var(--t1) b", "a b"},
+        {"a", "var(--missing,  x )b", "  x b"},
+        {"\\61", "var(--t1)b", "\\61/**/b"},
+        {"a", "var(--missing,/**/)b", "b"},
+    };
+    for (const Case& test : cases) {
+        SCOPED_TRACE(test.expression);
+        Pool* source = pool_create();
+        Pool* owned = pool_create();
+        ASSERT_NE(source, nullptr); ASSERT_NE(owned, nullptr);
+        auto parse = [&](const char* text) {
+            StringBuf* declaration = stringbuf_new(source);
+            stringbuf_append_all(declaration, 2, "--value:", text);
+            CssDeclaration* parsed = css_parse_declaration_text(declaration->str->chars, declaration->length, source);
+            if (parsed) parsed->value = css_value_create_token_sequence(source, parsed->value, strview_from_cstr(text));
+            return parsed;
+        };
+        CssDeclaration* variable = parse(test.variable);
+        CssDeclaration* expression = parse(test.expression);
+        ASSERT_NE(variable, nullptr); ASSERT_NE(expression, nullptr);
+        CssValue* retained_variable = css_value_clone_owned(variable->value, owned);
+        CssValue* retained_expression = css_value_clone_owned(expression->value, owned);
+        ASSERT_NE(retained_variable, nullptr); ASSERT_NE(retained_expression, nullptr);
+        pool_destroy(source);
+        const CssValue* result = css_resolve_var_value(owned, retained_expression,
+            css_token_test_lookup, retained_variable, nullptr, true);
+        ASSERT_NE(result, nullptr);
+        if (strcmp(test.expected, "a/**/b") == 0) {
+            const CssValue* typed = css_value_unwrap(result);
+            ASSERT_EQ(typed->type, CSS_VALUE_TYPE_LIST);
+            EXPECT_EQ(typed->data.list.count, 2);
+        }
+        CssFormatter* formatter = css_formatter_create(owned, CSS_FORMAT_COMPACT);
+        ASSERT_NE(formatter, nullptr);
+        formatter->options.preserve_tokens = true;
+        css_format_value(formatter, (CssValue*)result);
+        EXPECT_EQ(formatter->output->length, strlen(test.expected));
+        EXPECT_STREQ(formatter->output->str->chars, test.expected);
+        css_formatter_destroy(formatter);
+        css_value_destroy_owned(retained_variable, owned);
+        css_value_destroy_owned(retained_expression, owned);
+        pool_destroy(owned);
+    }
 }
 
 TEST(SvgConditionalTest, LanguageMatchingUsesPreferencePrefixesAndRefreshesDocumentEpoch) {

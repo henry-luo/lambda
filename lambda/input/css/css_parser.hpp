@@ -142,6 +142,7 @@ CssTokenizer* css_tokenizer_create(Pool* pool);
 void css_tokenizer_destroy(CssTokenizer* tokenizer);
 int css_tokenizer_tokenize(CssTokenizer* tokenizer, const char* input, size_t length, CssToken** tokens);
 CssToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count);
+size_t css_token_array_remove_comments(Pool* pool, CssToken* tokens, size_t count);
 bool css_token_is_integer(const CssToken* token);
 
 // Unicode support functions
@@ -692,6 +693,8 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
 CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool);
 
 // Declaration parsing
+CssValue* css_parse_function_from_tokens(const CssToken* tokens,
+    int* pos, int token_count, Pool* pool);
 CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens,
     int* pos, int token_count, Pool* pool);
 CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,

@@ -1,5 +1,6 @@
 #include "css_style_node.hpp"
 #include "css_style.hpp"
+#include "../../../lib/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -249,6 +250,8 @@ CssDeclaration* css_declaration_clone_for_cascade(
 static bool css_value_can_clone_owned(const CssValue* value) {
     if (!value) return true;
     switch (value->type) {
+        case CSS_VALUE_TYPE_TOKEN_SEQUENCE:
+            return value->data.tokens.text && css_value_can_clone_owned(value->data.tokens.value);
         case CSS_VALUE_TYPE_KEYWORD:
         case CSS_VALUE_TYPE_LENGTH:
         case CSS_VALUE_TYPE_PERCENTAGE:
@@ -328,6 +331,10 @@ static CssValue** css_value_array_clone_owned(CssValue* const* source,
 void css_value_destroy_owned(CssValue* value, Pool* pool) {
     if (!value || !pool) return;
     switch (value->type) {
+        case CSS_VALUE_TYPE_TOKEN_SEQUENCE:
+            pool_free(pool, value->data.tokens.text);
+            css_value_destroy_owned(value->data.tokens.value, pool);
+            break;
         case CSS_VALUE_TYPE_KEYWORD:
             if (value->has_keyword_spelling)
                 pool_free(pool, (void*)value->data.keyword_token.spelling);
@@ -415,6 +422,14 @@ CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
     *clone = *source;
 
     switch (source->type) {
+        case CSS_VALUE_TYPE_TOKEN_SEQUENCE:
+            clone->data.tokens.text = nullptr;
+            clone->data.tokens.value = css_value_clone_owned(source->data.tokens.value, pool);
+            if (!clone->data.tokens.value) goto clone_failed;
+            clone->data.tokens.text = string_from_strview(strview_init(
+                source->data.tokens.text->chars, source->data.tokens.text->len), pool);
+            if (!clone->data.tokens.text) goto clone_failed;
+            break;
         case CSS_VALUE_TYPE_KEYWORD:
             // Keyword identities can retain their parsed spelling as well as
             // the enum; an owned value must not borrow parser scratch.

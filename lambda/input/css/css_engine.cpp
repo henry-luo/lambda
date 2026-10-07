@@ -481,9 +481,7 @@ static void css_condition_cache_store(CssEngine* engine, CssConditionKind kind,
 
 // Enhanced CSS Engine creation
 CssEngine* css_engine_create(Pool* pool) {
-    // Note: CssValue size is 24 bytes on 64-bit systems (1 byte enum + 7 padding + 16 byte union)
-    // The union size is determined by the largest member (16 bytes - either pointer+int for list, or color struct)
-    // Color components (HSLA/HWBA/LABA/LCHA) use a pointer to reduce union size from 40 to 16 bytes
+    // token sequences use an optional wrapper, retaining the compact typed value record.
     static_assert(sizeof(CssValue) == 24, "Expected CssValue to be 24 bytes on 64-bit systems");
 
     if (!pool) return NULL;

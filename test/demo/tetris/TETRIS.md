@@ -55,6 +55,12 @@ assertions check keyboard movement, rotation, scoring, hold, uninterrupted
 gravity, pause/resume, and restart. The replay is also registered under
 `test/ui/` for `make test-radiant-baseline`.
 
+`test/ui/tetris_gravity_resets.json` adds 17 assertions through the real buttons:
+after accumulating 500 ms, down, hold, hard drop, restart and pause/resume must
+start a fresh gravity interval. The reset uses a braced statement branch under
+S16.6.1/S16.6.8v2; the correction is already present in commit `9bdf0d93a`.
+Run it with the same `view --event-file` command as the smoke replay above.
+
 `tetris_close.json` exercises sustained gravity, piece locking, restarts, and
 the window-close path. The regression runner bounds execution so a
 shutdown hang fails the test. Radiant releases obsolete rendering fragments
