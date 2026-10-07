@@ -1527,11 +1527,11 @@ static inline MIR_reg_t em_unbox_f64_item(MirEmitter* em, void* owner,
 // it may need profile-specific completion bookkeeping. Keeping the hot bits,
 // signed-zero and branch layout here prevents the two emitters from drifting.
 typedef MIR_reg_t (*MirF64BoxColdCall)(void* owner, MIR_reg_t value);
+typedef MIR_reg_t (*MirF64BoxBitsColdCall)(void* owner, MIR_reg_t bits);
 
-static inline MIR_reg_t em_box_f64_to_item(MirEmitter* em, void* owner,
-        MirF64BoxColdCall cold_box, MIR_reg_t value) {
-    if (!em || !cold_box || !value) return 0;
-    MIR_reg_t bits = em_emit_double_bits(em, value);
+static inline MIR_reg_t em_box_f64_bits_to_item(MirEmitter* em, void* owner,
+        MirF64BoxBitsColdCall cold_box, MIR_reg_t bits) {
+    if (!em || !cold_box || !bits) return 0;
     MIR_reg_t in_band = em_new_reg(em, "box_f64_mask", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
         MIR_new_reg_op(em->ctx, in_band), MIR_new_reg_op(em->ctx, bits),
@@ -1547,12 +1547,13 @@ static inline MIR_reg_t em_box_f64_to_item(MirEmitter* em, void* owner,
         MIR_new_label_op(em->ctx, inline_label),
         MIR_new_reg_op(em->ctx, in_band)));
 
-    MIR_reg_t is_zero = em_new_reg(em, "box_f64_zero", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DEQ,
-        MIR_new_reg_op(em->ctx, is_zero), MIR_new_reg_op(em->ctx, value),
-        MIR_new_double_op(em->ctx, 0.0)));
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-        MIR_new_label_op(em->ctx, zero_label), MIR_new_reg_op(em->ctx, is_zero)));
+    // shifting out the sign identifies both IEEE zeros without a bits/double round trip.
+    MIR_reg_t magnitude = em_new_reg(em, "box_f64_magnitude", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_LSH,
+        MIR_new_reg_op(em->ctx, magnitude), MIR_new_reg_op(em->ctx, bits),
+        MIR_new_int_op(em->ctx, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, zero_label), MIR_new_reg_op(em->ctx, magnitude)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
         MIR_new_label_op(em->ctx, cold_label)));
 
@@ -1575,11 +1576,33 @@ static inline MIR_reg_t em_box_f64_to_item(MirEmitter* em, void* owner,
         MIR_new_label_op(em->ctx, done_label)));
 
     em_emit_label(em, cold_label);
-    MIR_reg_t boxed = cold_box(owner, value);
+    MIR_reg_t boxed = cold_box(owner, bits);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, boxed)));
 
     em_emit_label(em, done_label);
+    return result;
+}
+
+static inline MIR_reg_t em_box_f64_to_item(MirEmitter* em, void* owner,
+        MirF64BoxColdCall cold_box, MIR_reg_t value) {
+    if (!em || !cold_box || !value) return 0;
+    struct NativeFloat { void* owner; MirF64BoxColdCall box; MIR_reg_t value; } source = {owner, cold_box, value};
+    return em_box_f64_bits_to_item(em, &source,
+        [](void* opaque, MIR_reg_t) -> MIR_reg_t {
+            NativeFloat* source = (NativeFloat*)opaque;
+            return source->box(source->owner, source->value);
+        }, em_emit_double_bits(em, value));
+}
+
+// materialize a cold Float payload in an already-reserved destination home.
+static inline MIR_reg_t em_store_f64_home(MirEmitter* em, MIR_reg_t value,
+        MIR_reg_t home, MIR_type_t type = MIR_T_D) {
+    em_store_at(em, home, 0, type, value);
+    MIR_reg_t result = em_new_reg(em, "owned_float", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, home),
+        MIR_new_uint_op(em->ctx, (uint64_t)LMD_TYPE_FLOAT << 56)));
     return result;
 }
 
@@ -1588,15 +1611,15 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
                                                    MIR_reg_t item,
                                                    MIR_reg_t target_home) {
     if (mode == SCALAR_RETURN_NONE) return item;
-    // Classify the result in MIR so packed values pass through while only
-    // frame-backed scalar encodings call the adopter; doing this in every
-    // build keeps the ownership protocol and emitted MIR identical.
+    // packed values pass through; only admitted wide lanes need a destination copy.
+    MIR_reg_t result = em_new_reg(em, "adopt_result", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, item)));
     MIR_reg_t item_type = em_new_reg(em, "adopt_type", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
         MIR_new_reg_op(em->ctx, item_type), MIR_new_reg_op(em->ctx, item),
         MIR_new_int_op(em->ctx, 56)));
     MIR_label_t l_call = em_new_label(em);
-    MIR_label_t l_passthrough = em_new_label(em);
     MIR_label_t l_done = em_new_label(em);
     // only test the wide lanes admitted by the shared result analysis.
     const TypeId integer_types[] = {LMD_TYPE_INT64, LMD_TYPE_UINT64};
@@ -1608,55 +1631,41 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
             MIR_new_int_op(em->ctx, integer_types[i])));
     }
     if (mode == SCALAR_RETURN_F64 || mode == SCALAR_RETURN_DYNAMIC) {
-        MIR_reg_t is_float = em_new_reg(em, "adopt_float", MIR_T_I64);
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-            MIR_new_reg_op(em->ctx, is_float), MIR_new_reg_op(em->ctx, item_type),
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
+            MIR_new_label_op(em->ctx, l_done), MIR_new_reg_op(em->ctx, item_type),
             MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT)));
-        MIR_reg_t scalar_float = is_float;
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
-            MIR_new_label_op(em->ctx, l_passthrough),
-            MIR_new_reg_op(em->ctx, scalar_float)));
-        MIR_reg_t float_bits = em_new_reg(em, "adopt_float_bits", MIR_T_I64);
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
-            MIR_new_reg_op(em->ctx, float_bits), MIR_new_reg_op(em->ctx, item),
-            MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-            MIR_new_label_op(em->ctx, l_passthrough),
-            MIR_new_reg_op(em->ctx, float_bits)));
-        MIR_reg_t is_pos_zero = em_new_reg(em, "adopt_pos_zero", MIR_T_I64);
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-            MIR_new_reg_op(em->ctx, is_pos_zero), MIR_new_reg_op(em->ctx, item),
-            MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_P0)));
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-            MIR_new_label_op(em->ctx, l_passthrough),
-            MIR_new_reg_op(em->ctx, is_pos_zero)));
-        MIR_reg_t is_neg_zero = em_new_reg(em, "adopt_neg_zero", MIR_T_I64);
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-            MIR_new_reg_op(em->ctx, is_neg_zero), MIR_new_reg_op(em->ctx, item),
-            MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_N0)));
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-            MIR_new_label_op(em->ctx, l_passthrough),
-            MIR_new_reg_op(em->ctx, is_neg_zero)));
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
-            MIR_new_label_op(em->ctx, l_call)));
-
+        // the Float tag excludes inline IEEE bits; its only non-pointers are the two zeros.
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBLE,
+            MIR_new_label_op(em->ctx, l_done),
+            MIR_new_reg_op(em->ctx, item),
+            MIR_new_uint_op(em->ctx, ITEM_FLOAT_N0)));
     } else {
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
-            MIR_new_label_op(em->ctx, l_passthrough)));
+            MIR_new_label_op(em->ctx, l_done)));
     }
-
-    MIR_reg_t result = em_new_reg(em, "adopt_result", MIR_T_I64);
-    em_emit_label(em, l_passthrough);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
-        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, item)));
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
-        MIR_new_label_op(em->ctx, l_done)));
     em_emit_label(em, l_call);
-    MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
-    MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
-        MIR_new_reg_op(em->ctx, target_home)};
-    MIR_reg_t adopted = em_call_with_args(em,
-        "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true);
+    MIR_reg_t adopted;
+    if (mode == SCALAR_RETURN_F64 && target_home) {
+        // no safepoint separates the borrowed load from its destination-owned copy (D5.3).
+        MIR_reg_t pointer = em_new_reg(em, "adopt_pointer", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+            MIR_new_reg_op(em->ctx, pointer), MIR_new_reg_op(em->ctx, item),
+            MIR_new_uint_op(em->ctx, ITEM_INT_PAYLOAD_MASK)));
+        MIR_reg_t bits = em_load_at(em, pointer, 0, MIR_T_I64, "adopt_bits");
+        struct Destination { MirEmitter* em; MIR_reg_t home; } destination = {em, target_home};
+        // repack noncanonical pointer Floats exactly as lambda_item_adopt_scalar_home does.
+        adopted = em_box_f64_bits_to_item(em, &destination,
+            [](void* opaque, MIR_reg_t bits) -> MIR_reg_t {
+                Destination* target = (Destination*)opaque;
+                return em_store_f64_home(target->em, bits, target->home, MIR_T_I64);
+            }, bits);
+    } else {
+        MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
+        MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
+            MIR_new_reg_op(em->ctx, target_home)};
+        adopted = em_call_with_args(em,
+            "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true);
+    }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, adopted)));
     em_emit_label(em, l_done);

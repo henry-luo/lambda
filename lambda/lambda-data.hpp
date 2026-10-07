@@ -1644,6 +1644,8 @@ typedef struct Input {
     // without walking the tree (pool-owned; null when the document has no math)
     bool parse_embedded_math;
     Array* embedded_math;
+    // the caller's parse options, valid only while its parser runs (nullable)
+    const struct InputParseOptions* parse_options;
     // StringBuf* sb;
 
     // member functions

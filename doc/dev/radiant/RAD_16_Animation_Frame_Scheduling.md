@@ -136,7 +136,15 @@ with generation-checked native references, copied names and reusable request
 slots. Delivery uses a token watermark so requests created in a callback wait
 until the following frame. Requests are delivered in registration order; an
 owner callback may cancel a later request in the same batch. Detached/stale
-owners are skipped. Document teardown releases every queue resource, without
+owners are skipped. A reactive template rebuild replaces its result subtree, so
+`radiant_frame_requests_follow_rebuild` (called from
+`rebuild_lambda_doc_incremental` beside `view_state_preserve_subtree_identity`)
+moves a pending request to the structurally corresponding node of the
+replacement (same node type and tag along the same child path); without it a
+template could never keep a frame it requested from its own result, since
+storing the token in its state causes that rebuild. Transformed documents
+(`lambda edit`) receive the viewer's host config like other loads, so a frame
+handler's re-render has a UI context. Document teardown releases every queue resource, without
 retaining a Lambda closure or `Item` in native storage.
 
 `radiant_document_has_pending_frames` contributes to the existing window wake

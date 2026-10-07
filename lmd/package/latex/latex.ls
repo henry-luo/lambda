@@ -33,15 +33,26 @@ import caption: .packages.caption
 // Public API — HTML string output
 // ============================================================
 
+// §9.2: the TeX engine expands the document, and the package files beside
+// it, before the direct parser builds the AST
+pub fn parse_source(latex_source, base) =>
+    parse(latex_source, {type: "latex", expand: true, base: base,
+        packages: registry.adapter_names(), raw: registry.RAW_ARGUMENT_COMMANDS}) ^ { null }
+
+pub fn parse_file(file_path) {
+    let source = input(file_path, "text") ^ { null }
+    if (source == null) null else parse_source(source, file_path)
+}
+
 // parse and render a LaTeX file to HTML string
 pub fn render_file_to_html(file_path) {
-    let ast = input(file_path, {type: "latex"}) ^ { null }
+    let ast = parse_file(file_path)
     render_to_html(ast, {base_uri: paths.dirname(file_path)})
 }
 
 // parse and render a LaTeX string to HTML string
 pub fn render_string_to_html(latex_source) {
-    let ast = parse(latex_source, {type: "latex"}) ^ { null }
+    let ast = parse_source(latex_source, null)
     render_to_html(ast, null)
 }
 
@@ -141,7 +152,7 @@ pub fn render_result(ast, options) {
     } else {
         completed
     }
-    let diagnostics = loaded.diagnostics ++ math_operators.diagnostics ++
+    let diagnostics = engine_diagnostics(ast) ++ loaded.diagnostics ++ math_operators.diagnostics ++
         bibliography.diagnostics ++ language_issues ++ cleveref_issues ++ font_issues ++
         math_font_issues ++ script_font_issues ++ greek_font_issues ++ helvet_issues ++
         hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
@@ -184,6 +195,12 @@ fn document_language(options, packages, polyglossia) {
     else if (polyglossia != null) polyglossia.default
     else if (registry.active(packages, "vietnam")) "vietnamese"
     else language_profile.babel_default(registry.options_for(packages, "babel"))
+}
+
+// §9.7: TeX engine errors are located diagnostics of the `tex` package
+fn engine_diagnostics(ast) {
+    let issues = if (ast == null or ast.tex_diagnostics == null) [] else ast.tex_diagnostics;
+    [for (issue in issues) util.diagnostic(issue.code, "tex", issue.file, issue.message, issue.offset)]
 }
 
 fn resource_base(options) {
@@ -265,13 +282,13 @@ pub fn render_default(ast) {
 
 // parse and render a LaTeX file
 pub fn render_file(file_path) {
-    let ast = input(file_path, {type: "latex"}) ^ { null }
+    let ast = parse_file(file_path)
     render(ast, {base_uri: paths.dirname(file_path)})
 }
 
 // parse and render a LaTeX string
 pub fn render_string(latex_source) {
-    let ast = parse(latex_source, {type: "latex"}) ^ { null }
+    let ast = parse_source(latex_source, null)
     render(ast, null)
 }
 

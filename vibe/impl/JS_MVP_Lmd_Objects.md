@@ -267,3 +267,90 @@ the Unicode-identifier test times out, signal recovery then faults, and the
 process exits with SIGABRT. This is outside MVP lowering; the shared runtime's
 timeout/recovery defect remains open. `batch-replay.json` and both raw streams
 preserve the evidence without changing the Test262 harness or timeout policy.
+
+## 8. Generic element coercion and scalar ownership
+
+This round implements §14 of the working design (**D2.2.5**, **D5.3**,
+**D8.2.6**):
+
+- Generic numeric coercion enters `em_unbox_f64_item` directly. Its inline
+  IEEE branch supplies the number; only the other encodings enter the JS
+  primitive conversion dispatch. Packed integers are decoded before Float
+  zero-sentinel checks. Strings, booleans, null, undefined and capability
+  errors retain their existing meanings.
+- Shared `em_adopt_scalar_item_value` copies a Float payload into its existing
+  destination home in generated MIR. Shared boxing preserves canonical inline
+  values and signed zero even for noncanonical pointer Floats. Other scalar
+  return classes retain the native adopter. The Float tag already excludes
+  inline doubles, so its two zero sentinels need one unsigned comparison.
+  `em_store_f64_home` is shared with MVP's existing cold boxer; no runtime
+  import is added. Shared packing accepts payload bits directly, avoiding a
+  bits-to-double-to-bits round trip when copying an existing Float home.
+- Numeric binary consumers may borrow a scalar read until coercion completes.
+  Admission is bounded to identifiers, literals and known Array reads with
+  simple numeric/string keys. A left borrow additionally requires an admitted
+  right operand. Calls, assignments, effectful indexes and generic property
+  reads retain owned snapshots; addition and equality keep their existing
+  paths. Both operands still evaluate before conversion. Successful consumers
+  and their conversion leaves are NO_GC; capability failures exit the function.
+
+These borrows do not cross mutation, safepoints, argument publication or value
+escape. Array bounds, length, aliases and mixed element types remain dynamic.
+The changes add no array element-type inference, ArrayNum promotion, mutable
+cache or new object surface. Destination homes remain independent wherever a
+value can survive a source overwrite (**D5.3.1–D5.3.4**).
+
+`GenericElementCoercion` covers mixed primitives, signed zero, subnormals,
+nonfinite values, absent elements, string addition/comparison and excluded
+object coercion. `OwnedElementSnapshots` covers writes, aliasing, local
+reassignment, array growth, calls and effectful indexes, and checks that MIR
+does not import the scalar-adoption helper. Both join the forced-GC gate.
+
+Frozen releases, source snapshots, paired runner and raw evidence are under
+`temp/mvp_lmd_element_tuning/`. The comparison also pairs old/new LJS and
+untyped Lambda because scalar adoption belongs to the shared emitter.
+
+The reviewed `js_hoisted_modvar_write_through` emission delta is six extra
+instructions in the coercing helper, replacing its native scalar-copy call.
+Its function/frame budgets are unchanged; debug module budgets record the
+delta (**D8.6.1**). Darwin is measured; Linux/Windows need native confirmation.
+The release-profile `js_main` and `lambda_cow_nested_store` budget failures
+also reproduce with identical counts on the frozen control and are unchanged.
+The final debug baseline is the required aggregate gate.
+
+Final release evidence is in
+[`element_tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/element_tuning_mir_20261007.json).
+All 30 workloads have 15 paired rounds; six receive a 30-pair follow-up. The
+follow-up confirms 1.68× for `pnpoly` and 1.31× for `dense_array`, while
+`diviter` is unchanged. All 4,410 measured and 252 preflight outputs match.
+Object deletion's first-run slowdown does not persist in its paired median;
+the follow-up interval remains wide and is retained as inconclusive.
+
+`pnpoly` MIR shrinks from 2,926 to 2,817 instructions, calls from 113 to 90,
+and its polygon function's scalar homes from 14 to 11. Roots, root stores and
+safepoints are unchanged. `dense_array` trades 39 extra MIR instructions for
+eight fewer calls; its frame sizes are unchanged. Neither imports the scalar
+adopter. `diviter` retains the same 201 instructions and two calls. These are
+emission/frame measurements, not allocation counts or compile-time results.
+
+The final aggregate passes 6,292/6,292 and MVP passes 34/34 normally and under
+forced GC with poisoning. Two first-run child failures pass five focused
+replays and the unchanged aggregate; their initial cause is unconfirmed.
+Test262 reports zero regressions, 40,259 fully passing and two retry-only AST
+Unicode cases. An isolated replay of both cases succeeds on both releases;
+the baseline's slow/unstable classification remains visible. No harness,
+oracle or timeout changes are part of this patch.
+
+Reproduce the paired run from the retained workspace artifacts:
+
+```sh
+python3 temp/mvp_lmd_element_tuning/paired.py \
+  --control temp/mvp_lmd_element_tuning/control.exe \
+  --candidate temp/mvp_lmd_element_tuning/candidate4.exe \
+  --output temp/mvp_lmd_element_tuning/reproduce \
+  --runs 15 --references --baseline-references
+```
+
+Remaining costs include repeated generic element guards, mixed arithmetic and
+dynamic container storage. Numeric-array promotion remains a separate phase;
+any broader borrow must prove that no mutation or safepoint intervenes.

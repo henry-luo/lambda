@@ -599,6 +599,7 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
                 if (parse_link_definition(parser, content_line)) {
                     // Link definition was successfully parsed - skip it
                     // parse_link_definition already advanced current_line for multi-line defs
+                    highlight_note_block(parser, "link_def", saved, parser->current_line + 1);
                     parser->current_line++;
                     continue;
                 }
@@ -606,6 +607,7 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
             }
 
             // Detect block type of the stripped content
+            int line_before = parser->current_line;
             BlockType block_type = detect_block_type(parser, content_line);
 
             Item block_item = {.item = ITEM_UNDEFINED};
@@ -644,6 +646,8 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
             }
 
             if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
+                // a nested block's own class (a heading in a quote), through the column map
+                highlight_note_item(parser, block_item.item, line_before);
                 list_push((List*)quote, block_item);
             }
         }

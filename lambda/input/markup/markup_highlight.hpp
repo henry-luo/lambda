@@ -43,6 +43,39 @@ struct RestartState {
 };
 enum : int32_t { RESTART_NONE = 0, RESTART_FENCE = 1, RESTART_HTML = 2, RESTART_FRONT_MATTER = 3 };
 
+// What the cache keeps per chunk boundary: the restart state and, for
+// Markdown, the link-definition pre-scan's own state (a packed
+// LinkPrescanState and the lines of this chunk a definition before it
+// consumed), so each chunk's definition labels can be rescanned alone.
+struct BoundaryState {
+    RestartState restart;
+    int32_t link;
+    int32_t skip;
+};
+// Ints per boundary in the flat cache `parse` returns and accepts back. A
+// boundary whose kind is negative is unknown and never matches (a chunk the
+// editor just rebuilt).
+static const int BOUNDARY_STATE_FIELDS = 5;
+
+// The link reference labels each chunk defines, normalized: chunk k's are
+// labels [first[k], first[k + 1]). The window parse resolves `[text][ref]`
+// against every chunk's, so a definition outside the window still counts.
+struct HighlightLabels {
+    lam::ArrayList<char> bytes;         // each label NUL-terminated
+    lam::ArrayList<int64_t> offsets;    // each label's start in `bytes`
+    lam::ArrayList<int64_t> first;      // per chunk, then one closing entry
+
+    void reset() { bytes.clear(); offsets.clear(); first.clear(); first.push_back(0); }
+    int64_t chunks() const { return first.length() > 0 ? (int64_t)first.length() - 1 : 0; }
+    int64_t count() const { return (int64_t)offsets.length(); }
+    const char* label(int64_t i) const { return bytes.data() + offsets[(size_t)i]; }
+    // appends to the chunk being built; close_chunk ends it
+    void add(const char* label, size_t len);
+    void close_chunk() { first.push_back((int64_t)offsets.length()); }
+    // appends `from`'s chunk k as the next chunk
+    void copy_chunk(const HighlightLabels& from, int64_t k);
+};
+
 // A span kind is the construct's tag name, copied: tag strings live in the
 // parse's private pool, which is gone before the caller reads the result.
 struct SpanKindName { char name[24]; };
@@ -56,8 +89,18 @@ struct MarkupSpan {
 struct HighlightResult {
     lam::ArrayList<SpanKindName> kinds;     // distinct span kinds (tag names)
     lam::ArrayList<MarkupSpan> spans;
-    lam::ArrayList<RestartState> states;    // one per chunk boundary scanned
+    lam::ArrayList<BoundaryState> states;   // one per chunk boundary scanned
+    HighlightLabels labels;                 // Markdown: per chunk, for every chunk
     int64_t restart_line = 0;               // where the window parse began
+};
+
+// The cache an earlier call returned: boundary states, of which those at
+// index >= `valid` are suspect, and the labels of the chunks they cover.
+struct HighlightCache {
+    const BoundaryState* states = nullptr;
+    int64_t count = 0;
+    int64_t valid = 0;
+    const HighlightLabels* labels = nullptr;
 };
 
 // Collects spans while a MarkupParser runs in highlight mode. Positions are
@@ -90,11 +133,17 @@ struct MarkupSpanSink {
     int64_t inline_base_off = -1;
     int64_t inline_next_off = -1;
     int inline_depth = 0;
+
+    // Labels defined anywhere in the document, known before the window parse.
+    const HighlightLabels* labels = nullptr;
 };
 
 // Record a block span in parser coordinates: lines [first, end) of the
 // current line array.
 void highlight_note_block(MarkupParser* parser, const char* kind, int first, int end);
+// Record the block `item` the parser just built from lines [first,
+// current_line), at the document level or inside a container (CED17).
+void highlight_note_item(MarkupParser* parser, uint64_t item, int first);
 // Around a container's parse of its stripped `lines`, which came from the
 // current array starting at `parent_first`, one line each.
 void highlight_push_lines(MarkupParser* parser, char** lines, size_t count, int64_t parent_first);
@@ -122,18 +171,18 @@ struct InlineOriginScope {
     ~InlineOriginScope();
 };
 
-// Parse the window [first, last] of `src` (Markdown). `cache` is the restart
-// state per chunk boundary from an earlier call; entries at index >= `valid`
-// are suspect and recomputed. Returns false on allocation failure.
+// Parse the window [first, last] of `src` (Markdown). `cache` is what an
+// earlier call returned; suspect boundaries are recomputed. The boundary
+// states and labels are extended to the document's end, so the labels cover
+// every chunk. Returns false on allocation failure.
 bool markdown_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
-                               const RestartState* cache, int64_t cache_count, int64_t valid,
-                               HighlightResult* out);
+                               const HighlightCache* cache, HighlightResult* out);
 
 // The same contract for HTML: spans from the tokenizer in lexical mode
 // (html5_lex_spans), restarting at any line that begins in the data state.
+// HTML has no labels, and its boundaries are extended only to the window.
 bool html_highlight_window(const HighlightLines* src, int64_t first, int64_t last,
-                           const RestartState* cache, int64_t cache_count, int64_t valid,
-                           HighlightResult* out);
+                           const HighlightCache* cache, HighlightResult* out);
 
 } // namespace markup
 } // namespace lambda

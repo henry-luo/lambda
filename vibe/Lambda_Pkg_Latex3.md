@@ -229,7 +229,13 @@ Script implementation includes the shared theorem/proof/table models; local and 
 
 ## 9. Phase IV — TeX engine for document-local packages and styles; extended PGF/PGFPlots (proposed)
 
-**Status:** Proposal dated 2026-10-07; nothing is implemented. The scope was set by USER on 2026-10-07:
+**Status:** Proposal dated 2026-10-07, in implementation on branch `worktree-latex-phase4` ([plan and progress](impl/Lambda_Impl_Latex_Phase4.md)). Done there:
+
+- the engine and its digester integration (M1);
+- pdfTeX conformance (M2);
+- the bundled programming packages and expl3, through a cached format (M3).
+
+Still open: biblatex style files (M4), PGF/PGFPlots (M5), and the §6 matrix and docs (M6). The scope was set by USER on 2026-10-07:
 
 1. A full TeX engine for `.sty`/`.cls` files and biblatex style files.
 2. Those files load only from beside the document.
@@ -259,10 +265,16 @@ digester: constructors -> LaTeX Mark AST (S2.6.3-S2.6.5, D2.6.5v4 contract)
 existing script analysis -> render -> render_result
 ```
 
-- **One digester.** Digestion turns each unexpandable control sequence owned by a script adapter (a *constructor*) into the same AST shape the direct parser produces today: star, raw argument groups and offsets, plus raw islands for verbatim, math, `tikzpicture` and `filecontents`. The direct parser's command/environment recognizer becomes this digester and takes the engine's tokens as input; it does not survive as a second front end. With no expansion, the digester sees the same token stream as today, so existing documents keep their AST. Migration runs both paths side by side over every LaTeX fixture and the 31-sample corpus and classifies every AST difference. The old generic path is retired once the two agree; there is no permanent dual front end (CLAUDE.md rule 13).
-- **Signatures decide arguments.** A TeX macro does not tell a parser how many arguments it takes. Each script adapter therefore registers its constructors in the static registry with an xparse-style argument spec (`s o m`, raw capture, environment-body mode), and the engine uses that spec to collect arguments. Package semantics stay in the script adapters (**D7.2.1–D7.2.4**).
+- **One digester.** The direct parser stays the only producer of the LaTeX Mark AST: star, raw argument groups and offsets, plus raw islands for verbatim, math, `tikzpicture` and `filecontents`. The engine hands it a *reconstructed source* and an offset map rather than a token stream:
+  - A token that reaches the output straight from the document is copied as its exact bytes, together with the source text between it and the previous such token.
+  - A token produced by expansion is written in canonical form, and every byte of it maps back to the call site.
+  - Raw constructs are copied as source spans without being tokenized.
+  
+  Where nothing expands, the reconstruction is byte-identical to the input, so existing documents keep their AST. There is no second front end (CLAUDE.md rule 13).
+- **Echo rule.** Document-level definitions and counter and length commands (`\newcommand` and `\newenvironment` families, `\def` family, `\newcounter`/`\setcounter`/`\stepcounter`, `\setlength` family) are executed *and* kept in the reconstructed text, because script adapters such as `semantic` and `bussproofs` read them. Definitions from beside-document packages are not echoed; their effects reach the script through expansion.
+- **Signatures decide arguments.** A TeX macro does not tell a parser how many arguments it takes. The groups right after a passed-through command are that command's arguments, which LaTeX's own command would read as data rather than typeset. By default they are processed in *argument mode*: macros expand, as LaTeX's `\protected@edef` would, but registers, primitives and assignments pass through untouched. That keeps `\includegraphics[width=0.8\linewidth]` intact. A script adapter whose CTAN package reads its arguments as tokens declares them *raw* in the registry (`RAW_ARGUMENT_COMMANDS`; bussproofs splits sequents at `\fCenter`, and `semantic` parses its own rule syntax). Raw arguments reach the adapter token for token, including bussproofs' `$`-delimited forms. Package semantics stay in the script adapters (**D7.2.1–D7.2.4**).
 - **Provenance.** Every token keeps its file identity and byte offset through expansion. AST offsets and diagnostics point at the source. For text produced by a macro, they also carry a bounded expansion trace (**S7.4.1–S7.4.4**).
-- **Purity.** The engine runs at the input boundary inside `input(path, {type: "latex"})` and `parse(...)`, which yield an eager value under **S12.4.1**. Given the same source and resources, the output is always the same (**S12.1.1v2**). `\time`, `\day`, `\month`, `\year` and the random-number primitives take fixed values from options, never the clock.
+- **Purity.** The engine runs at the input boundary inside `parse(source, {type: "latex", expand: true, base, packages, raw})`, which yields an eager value under **S12.4.1**. The LaTeX package's `parse_file`/`parse_source` and its `render_file*`/`render_string*` entry points request it. A bare `input(path, "latex")` still parses without expansion until the parity work in §9.9 makes expansion the default. Given the same source and resources, the output is always the same (**S12.1.1v2**). `\time`, `\day`, `\month`, `\year` and the random-number primitives take fixed values from options, never the clock.
 - **Strings and code.** **S1.8** comes from the C9 ruling that a runtime string never becomes *Lambda* code. Here the engine reads TeX source as TeX inside a sandbox; that text never becomes a Lambda import, Lambda source or `compile()` input. The same reading already lets Radiant run a document's `<script>` JavaScript through LambdaJS. The engine can do nothing beyond reading its document-local files and returning an AST. The no-Lua rule in §8.2 is unchanged: `\directlua` would need a second language runtime.
 
 ### 9.3 Engine profile

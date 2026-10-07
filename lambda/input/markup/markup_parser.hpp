@@ -118,6 +118,19 @@ struct ParserState {
 };
 
 /**
+ * LinkPrescanState - the link-definition pre-scan's state between two lines,
+ * so a scan of a line range can resume where the previous range ended (the
+ * source editor scans its buffer a chunk at a time, markup_highlight.cpp).
+ */
+struct LinkPrescanState {
+    bool in_fenced_code = false;
+    char fence_char = 0;
+    int fence_length = 0;
+    bool in_paragraph = false;
+    int skip = 0;   // lines past the range's end that a multi-line definition consumed
+};
+
+/**
  * MarkupParser - Main parser class for lightweight markup
  *
  * Extends InputContext to use MarkBuilder for creating Lambda data structures.
@@ -328,6 +341,20 @@ public:
      * @return Pointer to LinkDefinition or nullptr if not found
      */
     const LinkDefinition* getLinkDefinition(const char* label, size_t label_len) const;
+
+    /**
+     * Collect the link reference definitions that start in lines [from, to)
+     * of `lines` (Markdown pre-scan: forward references need them before the
+     * block parse). `st` carries fence and paragraph state across ranges; a
+     * definition may read lines past `to`, which `st->skip` then reports.
+     */
+    void prescanLinkDefinitions(int from, int to, LinkPrescanState* st);
+
+    // Forget every link definition (a fresh range scan).
+    void clearLinkDefinitions();
+
+    // Call `fn` with each defined label, normalized.
+    void forEachLinkLabel(void (*fn)(void* ctx, const char* label), void* ctx) const;
 
 private:
     // Split content into lines

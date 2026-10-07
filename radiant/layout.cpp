@@ -4505,6 +4505,33 @@ static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* roo
     lycon->block.float_right_edge = border_box_width;
 }
 
+// CSS Overflow 3 §3.3: the root's overflow applies to the viewport, where
+// `visible` is used as `auto`. The root block stands for the viewport, so a
+// document whose scrollable extent `content_height` exceeds the viewport makes
+// it the vertical scroller.
+static void layout_root_viewport_scroller(LayoutContext* lycon, ViewBlock* html,
+                                          float content_height, float physical_height) {
+    html->ensure_scroll(lycon);
+    html->scroller->overflow_y = CSS_VALUE_AUTO;
+    html->scroller->has_vt_scroll = true;
+    html->scroller->has_vt_overflow = true;
+    html->scroller->has_clip = true;
+    html->scroll_mut()->clip.left = 0;
+    html->scroll_mut()->clip.top = 0;
+    html->scroll_mut()->clip.right = html->width;
+    html->scroll_mut()->clip.bottom = physical_height;
+    DocState* state = (DocState*)lycon->doc->state;
+    float h_max = 0.0f, v_max = 0.0f;
+    scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
+                                       NULL, NULL, &h_max, NULL);
+    scroll_state_set_max_for_view(state, (View*)html, html->scroll()->pane,
+                                  h_max, content_height - physical_height);
+    scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
+                                       NULL, NULL, NULL, &v_max);
+    log_info("layout: viewport scroll: content_height=%.1f, viewport_height=%.1f, v_max_scroll=%.1f",
+        content_height, physical_height, v_max);
+}
+
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     uint64_t t_start = time_now_ns();
 
@@ -5095,26 +5122,21 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         float content_height = html->height;
         html->content_height = content_height;
         html->height = physical_height;   // constrain root block to viewport height
-        html->ensure_scroll(lycon);
-
-        html->scroller->overflow_y = CSS_VALUE_AUTO;
-        html->scroller->has_vt_scroll = true;
-        html->scroller->has_vt_overflow = true;
-        html->scroller->has_clip = true;
-        html->scroll_mut()->clip.left = 0;
-        html->scroll_mut()->clip.top = 0;
-        html->scroll_mut()->clip.right = html->width;
-        html->scroll_mut()->clip.bottom = physical_height;
+        layout_root_viewport_scroller(lycon, html, content_height, physical_height);
+    } else if (root_has_explicit_height && html->height <= physical_height && html->scroller &&
+               html->scroll()->pane && html->scroll()->overflow_y == CSS_VALUE_VISIBLE) {
+        // An explicit root height keeps its box, but content overflowing it
+        // still scrolls the viewport: finalize_block_flow recorded that
+        // overflow in the root's pane without making it a scroller, so wheel,
+        // hit-testing and the scrollbar all ignored it. (A root taller than the
+        // viewport would need its box constrained like the auto-height root.)
         DocState* state = (DocState*)lycon->doc->state;
-        float h_max = 0.0f, v_max = 0.0f;
-        scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
-                                           NULL, NULL, &h_max, NULL);
-        scroll_state_set_max_for_view(state, (View*)html, html->scroll()->pane,
-                                      h_max, content_height - physical_height);
+        float v_max = 0.0f;
         scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
                                            NULL, NULL, NULL, &v_max);
-        log_info("%s viewport scroll: content_height=%.1f, viewport_height=%.1f, v_max_scroll=%.1f", elmt->source_loc(),
-            content_height, physical_height, v_max);
+        if (html->height + v_max > physical_height) {
+            layout_root_viewport_scroller(lycon, html, html->height + v_max, physical_height);
+        }
     }
 
     uint64_t t_finalize = time_now_ns();

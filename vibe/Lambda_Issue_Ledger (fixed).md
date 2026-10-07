@@ -15,12 +15,12 @@
 
 ## Archive index
 
-This archive contains **181 historical records**: 176 fixed or resolved entries,
+This archive contains **182 historical records**: 177 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
 "Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
-LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. LR03-22, LR03-23, LR07-31 and LR13-11 were found and fixed together by the constrained type and `~key` fix pass of the same day. LR03-24 and LR03-25, found by that pass, were fixed on 2026-09-26 by the predicate evaluation pass (S11.4.11). LR07-32 to LR07-36 were found by the subscript probe pass of 2026-09-25/26 and fixed on 2026-09-26 with the S8.2.4v3 implementation; LR07-37, found by the same pass, was ruled and fixed the same day (S10.1.1v2). LR03-30, found by the empty type pass (S11.1.7), was fixed the same day, and so were LR03-31, LR07-38 and LR13-12, found by that fix and by the audit of the day's rulings. LR03-15, LR03-16, LR03-19, LR03-21, LR03-26, LR03-29 and LR07-19 were closed later that day by the type-value fix pass; LR13-12 and LR03-30 had already removed the causes of LR03-15 and LR03-16. LR03-27, LR03-28, LR08-6 and LR11-2 to LR11-4 were closed the same day by the hazard and recursion pass. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR02-28, filed and resolved by the S10.1.7 implicit-field ruling the same day, followed. LR03-14 and LR03-18, two symptoms of one range-type defect, followed later that day. LR03-20, which that fix found, was fixed the same day. LR13-10, the element-content check, was fixed by P0 of [the element type plan](<impl/Lambda_Impl_Element_Type_Sharing.md>) the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. LR10-8, LR10-9, LR10-10 and LR12-25 were fixed by the error containment pass of 2026-09-27 (see the central ledger); LR10-8 by the user's S7.4.6 ruling of the same day. LR12-36, which that pass found, was fixed later the same day. The list/array kind records closed
+LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. LR03-22, LR03-23, LR07-31 and LR13-11 were found and fixed together by the constrained type and `~key` fix pass of the same day. LR03-24 and LR03-25, found by that pass, were fixed on 2026-09-26 by the predicate evaluation pass (S11.4.11). LR07-32 to LR07-36 were found by the subscript probe pass of 2026-09-25/26 and fixed on 2026-09-26 with the S8.2.4v3 implementation; LR07-37, found by the same pass, was ruled and fixed the same day (S10.1.1v2). LR03-30, found by the empty type pass (S11.1.7), was fixed the same day, and so were LR03-31, LR07-38 and LR13-12, found by that fix and by the audit of the day's rulings. LR03-15, LR03-16, LR03-19, LR03-21, LR03-26, LR03-29 and LR07-19 were closed later that day by the type-value fix pass; LR13-12 and LR03-30 had already removed the causes of LR03-15 and LR03-16. LR03-27, LR03-28, LR08-6 and LR11-2 to LR11-4 were closed the same day by the hazard and recursion pass. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR02-28, filed and resolved by the S10.1.7 implicit-field ruling the same day, followed. LR03-14 and LR03-18, two symptoms of one range-type defect, followed later that day. LR03-20, which that fix found, was fixed the same day. LR13-10, the element-content check, was fixed by P0 of [the element type plan](<impl/Lambda_Impl_Element_Type_Sharing.md>) the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. LR10-8, LR10-9, LR10-10 and LR12-25 were fixed by the error containment pass of 2026-09-27 (see the central ledger); LR10-8 by the user's S7.4.6 ruling of the same day. LR12-36, which that pass found, was fixed later the same day. LR09-33, found by the LaTeX Phase IV PGFPlots work, was filed and fixed on 2026-10-07. The list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — were moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -1404,6 +1404,22 @@ verifies the full 1514-byte formatted message. The focused error suite passes
 
 ---
 
+
+<a id="lr09-33"></a>**LR09-33 · `++` and spread walked an N-D array's leaves, not its rows · FIXED 2026-10-07**
+An array of numeric arrays is packed as an N-D `ArrayNum`. Its items are its leading-axis rows (**S11.1.1v3**), and `len`, indexing, `for` and slicing all treat it that way. Two paths walked the flat `length` instead:
+
+- **`++` (S10.6.1).**
+  - `fn_join_sequences` (`lambda-eval.cpp`) took the same-lane `ArrayNum` memcpy path for two packed operands, so it copied the leaves into a 1-D array. `[[0.0, 1.0], [2.0, 3.0]] ++ [[0.0, 1.0]]` was `[0, 1, 2, 3, 0, 1]`, on both tiers.
+  - `[9.0] ++ m` flattened too.
+  - The fix: an operand of rank above 1 now takes the generic row-wise path. That path also stops holding its result and operands unrooted across `item_at`, which allocates a row view.
+- **Spread (S12.3.5v2).** `array_push_spread_array_num_items` (`lambda-data-runtime.cpp`) and `list_push_spread` (`collection_runtime.cpp`) counted leaves but read rows, so `[*m]` padded the rows with one `null` per remaining leaf. Both now count with `array_num_iter_count` and capture each row (S9.3.1).
+- **Set functions.** `unique`, `intersect` and `except` are built on `++`, so they now walk N-D rows as S10.1.1v3 states.
+
+Fixture: `test/lambda/array_ndim_join_spread.ls`, which agrees on T0, interp and JIT and passes under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. Found by the LaTeX Phase IV PGFPlots work, whose point lists lost their rows.
+
+*Residue:*
+- A joined or spread row is a view of its source, as `m[i]` and `[for (r in m) r]` already were. A nested write through the copy therefore reaches the source: after `var s = [*m]`, `s[0][0] = 7` changes `m`. This is the open view write-through ruling (CW32v2) and [LR12-34](Lambda_Issue_Ledger.md#lr12-34), not a new path.
+- `try_promote_to_ndim` refuses view rows, so a join of matrices stays an array of row views rather than repacking.
 
 ## 10. Error handling (LR_10)
 

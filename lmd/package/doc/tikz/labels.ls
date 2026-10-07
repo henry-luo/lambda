@@ -29,12 +29,21 @@ fn mixed_parts(source, offset, acc) any^ {
     }
 }
 
+let FONT_SIZES = [{command: "\\scriptsize", size: "0.72em"},
+    {command: "\\footnotesize", size: "0.8em"}, {command: "\\small", size: "0.9em"},
+    {command: "\\large", size: "1.2em"}]
+
+// CSS font size for a supported TeX size command, or null.
+pub fn font_size(command) {
+    let matches = [for (entry in FONT_SIZES where entry.command == trim(command)) entry.size]
+    if (len(matches) == 0) null else matches[0]
+}
+
 pub fn prepare(source) map^ {
     let value = trim(source)
-    let font_command = if (starts_with(value, "\\footnotesize")) "\\footnotesize"
-        else if (starts_with(value, "\\scriptsize")) "\\scriptsize"
-        else if (starts_with(value, "\\small")) "\\small"
-        else if (starts_with(value, "\\large")) "\\large" else null
+    let font_matches = [for (entry in FONT_SIZES where starts_with(value, entry.command))
+        entry.command]
+    let font_command = if (len(font_matches) == 0) null else font_matches[0]
     if (starts_with(value, "\\textbf{")) {
         let group = util.read_balanced(value, len("\\textbf"), "{", "}")^
         let valid_tail = if (trim(slice(value, group.next, len(value))) != "")
@@ -55,9 +64,7 @@ pub fn prepare(source) map^ {
         let body = if (starts_with(remaining, "{") and ends_with(remaining, "}"))
             slice(remaining, 1, len(remaining) - 1) else remaining
         let prepared = prepare(body)^
-        let size = if (font_command == "\\scriptsize") "0.72em"
-            else if (font_command == "\\footnotesize") "0.8em"
-            else if (font_command == "\\small") "0.9em" else "1.2em";
+        let size = font_size(font_command);
         {element: <span style: "font-size:" ++ size ++ ";", prepared.element>,
          width_em: prepared.width_em, height_em: prepared.height_em,
          depth_em: prepared.depth_em}

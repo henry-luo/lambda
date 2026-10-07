@@ -9,6 +9,9 @@ import math_css: lambda.doc.math.css
 import latex_util: lambda.latex.util
 import pgfmath: .pgfmath
 import people: .people
+import arrows: .arrows
+import coords: .coords
+import shapes: .shapes
 
 fn children_named(node, tag) => [for (child in node
     where child is element and string(name(child)) == tag) child]
@@ -105,7 +108,21 @@ fn collect_drawing(container, dx, dy, stroke_width,
             let nested = collect_drawing(child, x, y, inherited,
                 basis_x, basis_y, program_data, 0, acc)^;
             {records: nested.records, program: program_data}
-        } else if (tag == "foreach")
+        } else if (tag == "pic") {
+            // A pic body is a scope translated to the pic's position.
+            let checked = opts.check(child, ["thick", "very thick"])^
+            let valid_at = if (child.x == null)
+                raise error("TikZ pic position must be a literal coordinate") else true
+            let offset = coords.literal_point(child, basis_x, basis_y, program_data)^
+            let inherited = opts.stroke_width(child, stroke_width)^
+            let nested = collect_drawing(child, dx + offset.x, dy + offset.y, inherited,
+                basis_x, basis_y, program_data, 0, acc)^;
+            {records: nested.records, program: program_data}
+        } else if (tag == "tikzset") {
+            let checked = opts.check_tikzset(child)^;
+            {records: acc, program: program_data}
+        }
+        else if (tag == "foreach")
             {records: collect_foreach(child, dx, dy, stroke_width,
                 basis_x, basis_y, program_data, 0, acc)^,
              program: program_data}
@@ -128,35 +145,43 @@ fn collect_drawing(container, dx, dy, stroke_width,
 
 fn physical_point(point, dx, dy, basis_x, basis_y,
                   program_data = null) any^ {
-    if (point.polar_angle != null) {
-        let angle = float(point.polar_angle) * 3.141592653589793 / 180.0
-        let radius = float(point.polar_radius)
-        let x_basis = if (point.radius_explicit == true) 1.0 else basis_x
-        let y_basis = if (point.radius_explicit == true) 1.0 else basis_y;
-        {x: radius * math.cos(angle) * x_basis + dx,
-         y: radius * math.sin(angle) * y_basis + dy}
-    } else {
-        let source_x = if (point.x_source == null) float(point.x)
-            else pgfmath.evaluate_source(point.x_source, program_data)^
-        let source_y = if (point.y_source == null) float(point.y)
-            else pgfmath.evaluate_source(point.y_source, program_data)^
-        let x = source_x *
-            (if (point.x_explicit == true) 1.0 else basis_x) + dx
-        let y = source_y *
-            (if (point.y_explicit == true) 1.0 else basis_y) + dy;
-        {x: x, y: y}
+    let literal = coords.literal_point(point, basis_x, basis_y, program_data)^;
+    {x: literal.x + dx, y: literal.y + dy}
+}
+
+let COORDINATE_GEOMETRY = {kind: "coordinate", half_w: 0.0, half_h: 0.0}
+
+fn record_frame(record) any^ => coords.calc_frame(record.basis_x, record.basis_y, 1.0,
+    record.dx, record.dy, record.program)^
+
+// A node or coordinate `at` target: literal, or calc/named against earlier coordinates.
+fn target_point(record, coordinates) any^ {
+    let source = record.source
+    if (source.at_calc != null) {
+        let parsed = coords.parse_calc(source.at_calc, record_frame(record)^)^
+        let point = coords.evaluate_calc(parsed, coordinates)^;
+        {x: point[0], y: point[1]}
+    } else if (source.at_ref != null) {
+        let point = coords.named_point(coordinates, source.at_ref, source.at_anchor)^;
+        {x: point[0], y: point[1]}
+    } else physical_point(source, record.dx, record.dy,
+        record.basis_x, record.basis_y, record.program)^
+}
+
+// Coordinates resolve in source order, so later ones may refer to earlier ones.
+fn coordinate_definitions(records, index = 0, acc = []) any^ {
+    if (index >= len(records)) acc
+    else {
+        let record = records[index]
+        let next = if (string(name(record.source)) != "coordinate") acc
+            else {
+                let point = target_point(record, acc)^;
+                [*acc, {id: record.source.id, x: point.x, y: point.y,
+                    geom: COORDINATE_GEOMETRY}]
+            }
+        coordinate_definitions(records, index + 1, next)^
     }
 }
-
-fn coordinate_definition(record) {
-    let point = physical_point(record.source, record.dx, record.dy,
-        record.basis_x, record.basis_y, record.program)^;
-    {id: record.source.id, x: point.x, y: point.y}
-}
-
-fn coordinate_definitions(records) => [for (record in records
-    where string(name(record.source)) == "coordinate")
-    coordinate_definition(record)]
 
 fn ellipse_extent(record, axis) any^ {
     let path_offset = path_shift(record.source, record.basis_x, record.basis_y)^
@@ -193,21 +218,18 @@ fn arc_record_point(record, point) any^ {
         record.basis_x, record.basis_y, record.program)^
 }
 
-fn resolved_point(point, coordinates) {
-    if (point.ref == null) point
-    else {
-        let matches = [for (coordinate in coordinates
-            where coordinate.id == point.ref) coordinate]
-        if (len(matches) == 1) matches[0] else point
-    }
-}
-
 fn path_point(point, coordinates, dx, dy, basis_x, basis_y,
               program_data) any^ {
-    let position = if (point.ref == null)
-        physical_point(point, dx, dy, basis_x, basis_y, program_data)^
-        else resolved_point(point, coordinates)
-    {x: position.x, y: position.y, move: point.move == true}
+    // Named coordinates are already absolute; calc literals take the scope shift.
+    let position = if (point.calc != null)
+        coords.evaluate_calc(coords.parse_calc(point.calc,
+            coords.calc_frame(basis_x, basis_y, 1.0, dx, dy, program_data))^, coordinates)^
+        else if (point.ref != null) coords.named_point(coordinates, point.ref, point.anchor)^
+        else {
+            let literal = physical_point(point, dx, dy, basis_x, basis_y, program_data)^;
+            [literal.x, literal.y]
+        };
+    {x: position[0], y: position[1], move: point.move == true}
 }
 
 fn path_data_points(path, coordinates, dx = 0.0, dy = 0.0,
@@ -236,10 +258,8 @@ fn path_points(records, coordinates) any^ => [for (record in records,
             record.basis_x, record.basis_y, record.program)^ else [])
         point]
 
-fn node_points(records) => [for (record in records
-    where string(name(record.source)) == "node")
-    physical_point(record.source, record.dx, record.dy,
-        record.basis_x, record.basis_y, record.program)^]
+fn node_points(records, coordinates) any^ => [for (record in records
+    where string(name(record.source)) == "node") target_point(record, coordinates)^]
 
 // Arc geometry stays in script; the parser only preserves its angle/radius source.
 fn arc_points(path) {
@@ -285,41 +305,13 @@ fn skip_path_space(source, at) =>
         skip_path_space(source, at + 1)
     else at
 
-fn path_component(raw, basis) any^ {
-    let source = trim(raw)
-    let units = if (ends_with(source, "cm")) "cm"
-        else if (ends_with(source, "mm")) "mm"
-        else if (ends_with(source, "pt")) "pt"
-        else if (ends_with(source, "bp")) "bp" else null
-    if (units == null) opts.numeric_value(source)^ * basis
-    else {
-        let magnitude = opts.numeric_value(slice(source, 0,
-            len(source) - len(units)))^
-        let factor = if (units == "cm") 1.0
-            else if (units == "mm") 0.1
-            else if (units == "pt") 2.54 / 72.27
-            else 2.54 / 72.0
-        magnitude * factor
-    }
-}
-
 fn arc_chain_coordinate(source, at, current_x, current_y, reference_x,
                         reference_y, basis_x, basis_y) any^ {
     let relative = slice(source, at, at + 1) == "+"
     let advance = slice(source, at, at + 2) == "++"
     let open_at = if (advance) at + 2 else if (relative) at + 1 else at
     let grouped = latex_util.read_balanced(source, open_at, "(", ")")^
-    let cartesian = latex_util.split_top_level(grouped.raw, ",")
-    let polar = latex_util.split_top_level(grouped.raw, ":")
-    let vector = if (len(cartesian) == 2)
-        [path_component(cartesian[0], basis_x)^,
-         path_component(cartesian[1], basis_y)^]
-        else if (len(polar) == 2) {
-            let angle = opts.numeric_value(polar[0])^ *
-                3.141592653589793 / 180.0
-            let radius = path_component(polar[1], basis_x)^;
-            [radius * math.cos(angle), radius * math.sin(angle)]
-        } else raise error("unsupported arc-chain coordinate")
+    let vector = coords.literal_vector(grouped.raw, basis_x, basis_y)^
     let origin_x = if (relative) reference_x else 0.0
     let origin_y = if (relative) reference_y else 0.0
     let next_x = origin_x + vector[0]
@@ -348,7 +340,7 @@ fn arc_chain_steps(source, at, current_x, current_y, reference_x,
                 else {
                     let first = opts.numeric_value(parts[0])^
                     let ending = opts.numeric_value(parts[1])^
-                    let radius = path_component(parts[2], basis_x)^
+                    let radius = coords.component(parts[2], basis_x)^
                     if (radius <= 0.0 or basis_x != basis_y)
                         raise error("unsupported arc radius or nonuniform basis")
                     else {
@@ -455,30 +447,6 @@ fn decorated_points(path, mapped) any^ {
     }
 }
 
-fn terminal_bar(endpoint, neighbor, color, stroke_width) {
-    let vx = neighbor[0] - endpoint[0]
-    let vy = neighbor[1] - endpoint[1]
-    let length = math.sqrt(vx * vx + vy * vy)
-    let px = 0.0 - vy * 4.0 / length
-    let py = vx * 4.0 / length;
-    <path d: svg.M(endpoint[0] - px, endpoint[1] - py) ++ " " ++
-        svg.L(endpoint[0] + px, endpoint[1] + py),
-        fill: "none", stroke: color, 'stroke-width': stroke_width>
-}
-
-fn dash_array(path) any^ {
-    let custom = opts.value(path, "dash pattern", null)
-    if (custom != null) {
-        let words = [for (part in split(trim(custom), " ") where trim(part) != "")
-            trim(part)]
-        if (len(words) != 4 or words[0] != "on" or words[2] != "off")
-            raise error("unsupported TikZ dash pattern: " ++ custom)
-        string(opts.dimension_px(words[1])^) ++ " " ++
-            string(opts.dimension_px(words[3])^)
-    } else if (opts.has(path, "dashed")) "4 4"
-    else null
-}
-
 fn grid_step(raw, basis) any^ {
     let value = if (ends_with(raw, "cm") or ends_with(raw, "mm") or
         ends_with(raw, "pt") or ends_with(raw, "bp") or ends_with(raw, "in"))
@@ -550,19 +518,19 @@ fn gradient_definition(spec) =>
     >
 
 fn draw_path(record, coordinates, min_x, max_y, left, top,
-             px_per_cm, custom_colors) any^ {
+             px_per_cm, custom_colors, arrow_default) any^ {
     let path = record.source
     if (path.action != "draw" and path.action != "fill" and
         path.action != "filldraw")
         raise error("unsupported TikZ path action")
     let checked = opts.check(path, ["black", "blue", "red", "green", "orange",
         "darkgreen", "purple", "gray", "color", "fill", "draw",
-        "thick", "very thick", "ultra thick",
-        "line width", "pattern", "domain", "samples", "->", "<-", "<->",
-        "|-|", "latex-latex", "step", "xstep", "ystep", "dash pattern", "dashed",
+        "thick", "very thick", "ultra thick", "thin",
+        "line width", "pattern", "domain", "samples", ">",
+        "step", "xstep", "ystep", "dash pattern", "dashed", "dotted",
         "decoration", "decorate", "shift", "rotate", "rounded corners",
         "left color", "right color", "middle color", "opacity",
-        "smooth", "variable"], custom_colors)^
+        "smooth", "variable", *arrows.option_keys(path)], custom_colors)^
     let color = opts.color(path, "black", custom_colors)^
     let points = path_data_points(path, coordinates, record.dx, record.dy,
         record.basis_x, record.basis_y, record.program)^
@@ -574,11 +542,7 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
          top + (max_y - float(point.y)) * px_per_cm]];
     let mapped = decorated_points(path, mapped_raw)^
     let move_flags = [for (point in points) point.move == true]
-    let explicit_width = opts.value(path, "line width", null)
-    let stroke_width = if (explicit_width != null) opts.dimension_px(explicit_width)^
-        else if (opts.has(path, "ultra thick")) 2.2
-        else if (opts.has(path, "very thick")) 1.7
-        else if (opts.has(path, "thick")) 1.1 else record.stroke_width
+    let stroke_width = opts.stroke_width(path, record.stroke_width)^
     let pattern = opts.value(path, "pattern", null)
     if (pattern != null and pattern != "north east lines")
         raise error("unsupported TikZ pattern: " ++ pattern)
@@ -594,13 +558,18 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
                  opts.has(path, "fill")) fill_color else "none"
     let stroke = if (path.action == "fill" and not opts.has(path, "draw"))
         "none" else color
-    let dash = dash_array(path)^
+    let dash = opts.dash_array(path)^
     let opacity_source = opts.value(path, "opacity", null)
     let opacity = if (opacity_source == null) null
         else opts.numeric_value(opacity_source)^
     if (opacity != null and (opacity < 0.0 or opacity > 1.0))
         raise error("TikZ opacity must be in [0,1]")
-    let stealth = opts.stealth_length(path)^
+    // A path `>` key overrides the picture's default tip for `->` style keys.
+    let local_default = opts.value(path, ">", null)
+    let fallback = if (local_default != null) local_default else arrow_default
+    let tips = arrows.spec(path)
+    let start_tip = arrows.resolve(tips.start, stroke_width, fallback, custom_colors)^
+    let end_tip = arrows.resolve(tips.end, stroke_width, fallback, custom_colors)^
     let rounded = opts.value(path, "rounded corners", null)
     if (rounded != null and path.shape != "l-system")
         raise error("rounded corners are unsupported for this TikZ path")
@@ -628,39 +597,36 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
             'stroke-dasharray': dash>
     else {
         let final_index = len(mapped) - 1
-        let start_arrow = opts.has(path, "<-") or opts.has(path, "<->") or
-            opts.has(path, "latex-latex")
-        let end_arrow = opts.has(path, "->") or opts.has(path, "<->") or
-            opts.has(path, "latex-latex") or stealth > 0.0
-        let barred = opts.has(path, "|-|")
-        if ((start_arrow or end_arrow or barred) and len(mapped) < 2)
-            raise error("TikZ terminal path needs two distinct points")
+        let valid_count = if ((start_tip != null or end_tip != null) and len(mapped) < 2)
+            raise error("TikZ terminal path needs two distinct points") else true
         let first_distinct = if (len(mapped) < 2) false
             else mapped[0][0] != mapped[1][0] or mapped[0][1] != mapped[1][1]
         let last_distinct = if (len(mapped) < 2) false
             else mapped[final_index][0] != mapped[final_index - 1][0] or
                 mapped[final_index][1] != mapped[final_index - 1][1]
-        if (((start_arrow or barred) and not first_distinct) or
-            ((end_arrow or barred) and not last_distinct))
-            raise error("TikZ terminal endpoint is coincident with its neighbor");
+        let valid_ends = if ((start_tip != null and not first_distinct) or
+            (end_tip != null and not last_distinct))
+            raise error("TikZ terminal endpoint is coincident with its neighbor") else true
+        // Filled tips cover the stroke end, so the drawn line stops at each tip's back.
+        let drawn = [for (index, point in mapped)
+            if (index == 0 and start_tip != null)
+                arrows.shortened(mapped[1], point, start_tip.line_end)
+            else if (index == final_index and end_tip != null)
+                arrows.shortened(mapped[final_index - 1], point, end_tip.line_end)
+            else point];
         <g opacity: opacity,
             <path d: if (path.shape == "arc-chain" or
                     len([for (flag in move_flags where flag) flag]) > 0)
-                    arc_chain_svg(mapped, move_flags)
-                    else svg.line_path(mapped),
+                    arc_chain_svg(drawn, move_flags)
+                    else svg.line_path(drawn),
                 fill: fill, stroke: stroke,
                 'stroke-width': stroke_width, 'stroke-dasharray': dash,
                 'stroke-linejoin': if (rounded == null) null else "round",
                 'stroke-linecap': if (rounded == null) null else "round">
-            if (start_arrow) svg.arrow_head(mapped[1][0], mapped[1][1],
-                mapped[0][0], mapped[0][1], stroke)
-            if (end_arrow) svg.arrow_head(mapped[final_index - 1][0],
-                mapped[final_index - 1][1], mapped[final_index][0],
-                mapped[final_index][1], stroke,
-                if (stealth > 0.0) stealth else 8.0, stealth > 0.0)
-            if (barred) terminal_bar(mapped[0], mapped[1], stroke, stroke_width)
-            if (barred) terminal_bar(mapped[final_index],
-                mapped[final_index - 1], stroke, stroke_width)
+            if (start_tip != null) arrows.tip_svg(start_tip, mapped[1], mapped[0],
+                stroke, stroke_width)
+            if (end_tip != null) arrows.tip_svg(end_tip, mapped[final_index - 1],
+                mapped[final_index], stroke, stroke_width)
         >
     }
     if (gradient == null) graphic
@@ -668,18 +634,18 @@ fn draw_path(record, coordinates, min_x, max_y, left, top,
 }
 
 fn draw_paths(records, coordinates, index, min_x, max_y, left, top,
-              px_per_cm, custom_colors, acc) any^ {
+              px_per_cm, custom_colors, arrow_default, acc) any^ {
     if (index >= len(records)) acc
     else {
         let record = records[index]
         let rendered = if (string(name(record.source)) == "path" and
             record.source.action != "clip")
             draw_path(record, coordinates, min_x, max_y, left, top,
-                px_per_cm, custom_colors)^
+                px_per_cm, custom_colors, arrow_default)^
         else null
         let next = if (rendered == null) acc else [*acc, rendered]
         draw_paths(records, coordinates, index + 1,
-            min_x, max_y, left, top, px_per_cm, custom_colors, next)^
+            min_x, max_y, left, top, px_per_cm, custom_colors, arrow_default, next)^
     }
 }
 
@@ -791,11 +757,12 @@ fn path_midpoint(path) {
     else points[int((len(points) - 1) / 2)]
 }
 
-fn render_coordinate_label(node, shift_x, shift_y, basis_x, basis_y,
-                           min_x, max_y, left, top, px_per_cm) any^ {
+fn render_coordinate_label(node, coordinates, min_x, max_y, left, top,
+                           px_per_cm) any^ {
     let label = opts.value(node, "label", null)
     if (label == null) null
     else {
+        let position = coords.named_point(coordinates, node.id, null)^
         let checked = opts.check(node, ["label"])^
         let colon = index_of(label, ":")
         if (colon == null) raise error("coordinate label needs placement:text")
@@ -809,8 +776,8 @@ fn render_coordinate_label(node, shift_x, shift_y, basis_x, basis_y,
             side != "above" and side != "below")
             raise error("unsupported coordinate label placement: " ++ side)
         labels.positioned(labels.prepare(text)^,
-            left + (float(node.x) * basis_x + shift_x - min_x) * px_per_cm + dx,
-            top + (max_y - float(node.y) * basis_y - shift_y) * px_per_cm + dy)
+            left + (position[0] - min_x) * px_per_cm + dx,
+            top + (max_y - position[1]) * px_per_cm + dy)
     }
 }
 
@@ -853,22 +820,20 @@ fn inline_path_labels(path, shift_x, shift_y, basis_x, basis_y,
     }
 }
 
-fn positioned_nodes(records, index, min_x, max_y, left, top, px_per_cm, acc) any^ {
+fn positioned_nodes(records, coordinates, index, min_x, max_y, left, top,
+                    px_per_cm, acc) any^ {
     if (index >= len(records)) acc
     else {
         let record = records[index]
         let child = record.source
         let tag = string(name(child))
-        let position = if (tag == "node") physical_point(child, record.dx,
-            record.dy, record.basis_x, record.basis_y, record.program)^
+        let position = if (tag == "node") target_point(record, coordinates)^
             else null
         let rendered = if (tag == "node")
             render_label_node(child, position.x, position.y,
                 min_x, max_y, left, top, px_per_cm)^
         else if (tag == "coordinate")
-                render_coordinate_label(child, record.dx, record.dy,
-                    record.basis_x, record.basis_y,
-                    min_x, max_y,
+                render_coordinate_label(child, coordinates, min_x, max_y,
                     left, top, px_per_cm)^
             else null
         let path_offset = if (tag == "path")
@@ -881,7 +846,7 @@ fn positioned_nodes(records, index, min_x, max_y, left, top, px_per_cm, acc) any
                 min_x, max_y, left, top, px_per_cm, record.program, [])^
             else []
         let next = (if (rendered == null) acc else [*acc, rendered]) ++ path_labels
-        positioned_nodes(records, index + 1, min_x, max_y,
+        positioned_nodes(records, coordinates, index + 1, min_x, max_y,
             left, top, px_per_cm, next)^
     }
 }
@@ -894,7 +859,7 @@ fn render_drawing(picture, external_declarations = [],
     let collected = collect_drawing(picture, 0.0, 0.0, 0.6,
         x_basis, y_basis, initial_program, 0, [])^
     let records = collected.records
-    let coordinates = coordinate_definitions(records)
+    let coordinates = coordinate_definitions(records)^
     let references = [for (record in records,
         point in if (string(name(record.source)) == "path")
             children_named(record.source, "point") else []
@@ -914,7 +879,7 @@ fn render_drawing(picture, external_declarations = [],
             record.source.arc_source != null) arc_points(record.source) else [])
         arc_record_point(record, point)^]
     let path_coordinates = path_points(records, coordinates)^ ++ arc_coordinates
-    let node_coordinates = node_points(records)
+    let node_coordinates = node_points(records, coordinates)^
     let clips = [for (record in records where
         string(name(record.source)) == "path" and
         record.source.action == "clip") record]
@@ -961,11 +926,12 @@ fn render_drawing(picture, external_declarations = [],
     let width = (max_x - min_x) * px_per_cm + left * 2.0
     let height = (max_y - min_y) * px_per_cm + top * 2.0
     let paths = draw_paths(records, coordinates, 0,
-        min_x, max_y, left, top, px_per_cm, custom_colors, [])^
+        min_x, max_y, left, top, px_per_cm, custom_colors,
+        opts.value(picture, ">", null), [])^
     let clip_mapped = [for (point in clip_points)
         [left + (float(point.x) - min_x) * px_per_cm,
          top + (max_y - float(point.y)) * px_per_cm]]
-    let label_elements = positioned_nodes(records, 0, min_x, max_y,
+    let label_elements = positioned_nodes(records, coordinates, 0, min_x, max_y,
         left, top, px_per_cm, [])^
     let background_source = opts.value(picture, "background rectangle/.style", null)
     let background = if (opts.has(picture, "show background rectangle")) {
@@ -1002,15 +968,38 @@ fn render_drawing(picture, external_declarations = [],
     >
 }
 
+fn calc_refs(source) any^ => coords.refs(coords.parse_calc(source, coords.calc_frame())^)
+
+// Measured nodes (shapes, outlines, positioning, node references) need Radiant layout.
+fn measured_picture(content) any^ {
+    let nodes = [for (child in content where string(name(child)) == "node") child]
+    let node_ids = [for (node in nodes where node.id != null) node.id]
+    let is_node = (id) => any([for (node_id in node_ids) node_id == id])
+    let shaped = [for (node in nodes where opts.has(node, "draw") or opts.has(node, "fill") or
+        opts.has(node, "shape") or
+        any([for (key in shapes.SHAPE_KEYS) key != "coordinate" and opts.has(node, key)]) or
+        any([for (key in coords.PLACEMENT_KEYS) contains(" " ++ opts.value(node, key, "") ++ " ",
+            " of ")])) node]
+    let point_refs = [for (child in content,
+        point in (if (string(name(child)) == "path") children_named(child, "point") else []),
+        ref in
+            if (point.calc != null) calc_refs(point.calc)^
+            else if (point.ref != null) [point.ref] else []) ref]
+    let at_refs = [for (child in content, ref in
+        if (child.at_calc != null) calc_refs(child.at_calc)^
+        else if (child.at_ref != null) [child.at_ref] else []) ref];
+    len(shaped) > 0 or any([for (ref in [*point_refs, *at_refs]) is_node(ref)])
+}
+
 fn render_picture(picture, options,
                   external_declarations = [], custom_colors = [],
                   clip_id = "tikz-clip-0", people_active = false) any^ {
     let tag = string(name(picture))
     // Named style values are checked on the nodes and paths where they take effect.
-    let style_keys = [for (child in picture where child is element and
-        string(name(child)) == "option" and ends_with(child.key, "/.style")) child.key]
+    let style_keys = opts.handler_keys(picture)^
     let picture_keys = [">", "scale", "show background rectangle", "background rectangle/.style",
-        "help lines/.style", "color", "x", "y", "declare function"] ++
+        "help lines/.style", "color", "x", "y", "declare function", "node distance",
+        "on grid"] ++
         style_keys ++
         (if (people_active) ["pin distance", "every pin/.append style"] else [])
     let valid = if (tag == "tikzpicture") opts.check(picture,
@@ -1018,12 +1007,11 @@ fn render_picture(picture, options,
         else if (tag == "tikz_picture") true
         else raise error("expected TikZ picture")
     let picture_color = opts.value(picture, "color", "black")
-    if (picture_color != "black")
-        raise error("unsupported TikZ picture default color: " ++ picture_color)
+    let valid_color = if (picture_color != "black")
+        raise error("unsupported TikZ picture default color: " ++ picture_color) else true
     let arrow_tip = opts.value(picture, ">", null)
-    if (arrow_tip != null and arrow_tip != "stealth" and
-        arrow_tip != "LaTeX")
-        raise error("unsupported TikZ arrow tip")
+    let valid_tip = if (arrow_tip != null and arrows.parse_key("-" ++ arrow_tip) == null)
+        raise error("unsupported TikZ arrow tip: " ++ arrow_tip) else true
     let axes = [for (child in picture
         where child is element and
             (string(name(child)) == "axis" or
@@ -1034,18 +1022,15 @@ fn render_picture(picture, options,
     let paths = drawing_nodes(picture)
     let content = [for (child in picture where child is element and
         string(name(child)) != "option") child]
-    let named_refs = [for (child in paths,
-        point in if (string(name(child)) == "path") children_named(child, "point") else []
-        where point.ref != null) point]
-    let named_nodes = [for (child in paths where string(name(child)) == "node" and
-        (opts.has(child, "draw") or opts.has(child, "diamond") or
-         len([for (reference in named_refs where reference.ref == child.id) reference]) > 0)) child]
+    let groups = children_named(picture, "groupplot")
     let people_nodes = if (people_active) [for (child in paths where
         string(name(child)) == "node" and
         len([for (shape in people.names() where opts.has(child, shape)) shape]) > 0)
         child] else []
     if (len(axes) == 1 and len(paths) == 0 and len(content) == 1)
         plots.render_axis(axes[0], options, picture)^
+    else if (len(groups) == 1 and len(content) == 1)
+        plots.render_group(groups[0], options, picture)^
     else if (len(people_nodes) > 0)
         people.render_picture(picture, custom_colors)^
     else if (len(axes) == 0 and len(content) > 0 and
@@ -1054,9 +1039,10 @@ fn render_picture(picture, options,
             string(name(child)) == "coordinate" or
             string(name(child)) == "foreach" or
             string(name(child)) == "pgf_definition" or
-            string(name(child)) == "tikzmath") child]) == len(content))
-        if (len(named_nodes) > 0)
-            named.render(picture)^
+            string(name(child)) == "tikzmath" or string(name(child)) == "pic" or
+            string(name(child)) == "tikzset") child]) == len(content))
+        if (measured_picture(content)^)
+            named.render(picture, custom_colors)^
         else render_drawing(picture, external_declarations,
             custom_colors, clip_id)^
     else raise error("mixed or scoped TikZ pictures are not supported yet")
@@ -1085,10 +1071,11 @@ pub fn render(source) any^ {
     render_parsed(parse(source, {type: "tikz"})^, null)^
 }
 
+// `options.base_uri` (or `source_path`) locates document-local plot tables.
 pub fn render_with_program(source, external_declarations,
                            custom_colors, source_offset = 0,
-                           people_active = false) any^ {
-    render_parsed(parse(source, {type: "tikz"})^, null,
+                           people_active = false, options = null) any^ {
+    render_parsed(parse(source, {type: "tikz"})^, options,
         external_declarations, custom_colors,
         "tikz-clip-" ++ string(source_offset), people_active)^
 }

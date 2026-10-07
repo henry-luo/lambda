@@ -1945,8 +1945,12 @@ static bool array_push_spread_array_num_items(Array* arr, Item item, bool requir
     RootFrame roots(2);
     Rooted<Array*> rooted_array(roots, arr);
     Rooted<Item> rooted_source(roots, item);
-    for (int64_t i = 0; i < rooted_source.get().array_num->length; i++) {
+    // an N-D array spreads its leading-axis rows (S11.1.1v3), not its flat leaves
+    int64_t count = array_num_iter_count(rooted_source.get().array_num);
+    for (int64_t i = 0; i < count; i++) {
         Item value = array_num_get(rooted_source.get().array_num, i);
+        // S9.3.1: a row view is captured like any spread element
+        cow_capture_value(value);
         array_push(rooted_array.get(), value);
     }
     return true;
