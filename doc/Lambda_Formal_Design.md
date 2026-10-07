@@ -2172,28 +2172,16 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-09-15.
+Status of `*`-marked rulings as of 2026-10-07.
 
-**D1.2v2, D1.3v3, D1.4v4, and D1.5v2** remain partially implemented as of
-2026-09-15. The selected JS MVP profile implements D1.2v2/D1.3v3's private
-NaN-boxed `MvpValue` boundary, private mark-sweep heap and root frames,
-private strings/arrays/objects/functions, parser/AST-to-MIR numeric and generic
-slices, and an explicit CLI selector. It reuses parser/AST admission, the host
-MIR library, `memtrack` allocation categories, normal build/test substrate, and
-the untyped finite-double text primitive without reusing a JS coercion helper.
-The generic slice has captured environments and receiver handling, a
-class/prototype surface, and AST-backed construction for private compound
-literals. Its 63 canonical benchmark rows completed two fresh release sessions
-with three successful samples per engine/row: MVP / QuickJS was 0.695110x and
-0.691519x against QuickJS 2025-09-13 on Darwin arm64. The focused MVP suite
-passes both normally and with `MVP_GC_FORCE_EVERY=1`, providing the current
-D1.5v2 proof for private roots. The shared Lambda baseline passes 5,546/5,546
-and Test262 reports zero regressions against its 40,261-entry baseline. D1.4v4
-remains partial: runtime faults and
-uncaught benchmark verification throws terminate at the selected script
-boundary; general returned throw/catch/finally propagation and a Lambda/Jube
-value bridge remain future work. The precise profile scope, generated release
-report, and audit commands are `vibe/jube/JS_MVP_Runtime.md`.
+**D1.2v2, D1.3v3, D1.4v4, and D1.5v2** remain partially implemented. The
+independent JS MVP profile that exercised D1.2v2/D1.3v3's private guest ABI and
+D1.5v2's private-root contract was removed from the active tree on 2026-10-07.
+Its source and release measurements are historical; see
+`vibe/jube/JS_MVP_Runtime.md`. The production LambdaJS path continues to use
+the shared `Item` and precise-GC substrate. Any future private guest runtime
+must still satisfy the explicit host-boundary, completion, and rooting
+contracts in these rulings.
 
 The D8.2.4–D8.2.6 implementation record now includes P3j, P4l, and the
 post-P6 binding/identity schedule work (2026-08-31):

@@ -1,5 +1,10 @@
 # JS MVP release-profile comparison and further LambdaJS tuning
 
+**Historical note (2026-10-07):** the private-value MVP runtime and its active
+build/CLI/benchmark hooks were removed from the current tree. The results and
+source observations below describe the archived 2026-09 implementation only;
+the source snapshot is at [commit `f6e11aa`](https://github.com/henry-luo/lambda/tree/f6e11aa3342f855205a8f3135c1f2df9cc584073).
+
 **Date:** 2026-09-28. **Status:** build, comparison, and measured tuning follow-ups complete.
 The numeric-entry and loop-state work, guarded array consumer/length slices,
 predicted-field and call-root reductions, guarded RegExp bulk-loop change, and
@@ -17,10 +22,11 @@ No normative ruling changes are proposed.
 
 ## 1. Result and scope
 
-`make build-release-profile` now links MVP into `lambda-profile.exe` under
-`NDEBUG`, O3 and LTO. The CLI accepts `js --runtime=mvp` in that configuration;
-ordinary release still excludes MVP. The JSON build configuration controls
-profile-specific definitions and source exclusions; generated Lua is not edited.
+At the time of this report, `make build-release-profile` linked MVP into
+`lambda-profile.exe` under `NDEBUG`, O3 and LTO. The CLI accepted
+`js --runtime=mvp` in that configuration; ordinary release excluded MVP. The
+JSON build configuration controlled profile-specific definitions and source
+exclusions; generated Lua was not edited.
 
 The [complete report](../../test/benchmark/js_mvp/profile_20260928/README.md)
 attempts all 63 canonical workloads. **62 validate against Node and have five
@@ -58,7 +64,7 @@ produce the expected density digest `-257786486`.
 The source's `checkResult` is a non-strict plain function which writes
 `this.result`. MVP's direct-call lowering passes `undefined` as the receiver
 for non-method calls in
-[`mvp_generic_emit_call`](../../lambda/js/mvp/mvp_generic_mir.cpp).
+[`mvp_generic_emit_call`](https://github.com/henry-luo/lambda/blob/f6e11aa3342f855205a8f3135c1f2df9cc584073/lambda/js/mvp/mvp_generic_mir.cpp).
 The independent minimal probe `function f(){this.result=1;return this.result;}`
 followed by `console.log(f())` succeeds in full JS/Node and fails in MVP.
 Thus the stronger oracle exposes a receiver-semantics limitation before it can

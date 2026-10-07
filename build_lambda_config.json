@@ -36,7 +36,6 @@
     "lambda/format",
     "lambda/validator",
     "lambda/js",
-    "lambda/js/mvp",
     "lambda/js/mvp-lmd",
     "lambda/dom",
     "lambda/dom/realm",
@@ -71,13 +70,6 @@
     "lib/font/font_config.c",
     "lib/test_font_path_gtest.cpp",
     "lambda/runtime/http_module.cpp"
-  ],
-  "release_exclude_source_files": [
-    "lambda/js/mvp/*.cpp"
-  ],
-  "release_profile_exclude_source_files": [],
-  "release_profile_defines": [
-    "LAMBDA_JS_MVP"
   ],
   "defines": [
     "SQLITE_THREADSAFE=0",
@@ -735,7 +727,6 @@
       "lang": "c++17",
       "source_patterns": [
         "lambda/js/*.cpp",
-        "lambda/js/mvp/*.cpp",
         "lambda/js/mvp-lmd/*.cpp",
         "lambda/dom/*.cpp",
         "lambda/dom/realm/*.cpp",
@@ -749,10 +740,6 @@
         "lambda/runtime/http_module_stub.cpp",
         "lambda/runtime/headless_stubs.cpp"
       ],
-      "release_exclude_patterns": [
-        "lambda/js/mvp/*.cpp"
-      ],
-      "release_profile_exclude_patterns": [],
       "source_files": [
         "lambda/module/node_core/node_events.cpp",
         "lambda/module/node_core/node_trace_events.cpp",
@@ -5299,42 +5286,6 @@
               "gtest_main"
             ],
             "requires_lambda_exe": true,
-            "icon": "\ud83e\uddee"
-          },
-          {
-            "source": "test/test_js_mvp_gtest.cpp",
-            "name": "JS MVP Runtime Tests",
-            "dependencies": [
-              "lambda-rt",
-              "node-core",
-              "radiant"
-            ],
-            "binary": "test_js_mvp_gtest.exe",
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "macos": {
-              "libraries": [
-                "CoreFoundation",
-                "Security",
-                "CoreServices",
-                "SystemConfiguration",
-                "Cocoa",
-                "IOKit",
-                "CoreVideo",
-                "AVFoundation",
-                "CoreMedia",
-                "GL",
-                "Foundation",
-                "CoreGraphics",
-                "Accelerate",
-                "CoreText",
-                "AppKit",
-                "Carbon",
-                "WebKit"
-              ]
-            },
             "icon": "\ud83e\uddee"
           },
           {

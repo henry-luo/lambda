@@ -89,7 +89,7 @@ def port_command(engine, name):
         path = SUITE / f"{name}{'2' if typed else ''}.ls"
         env = {"LAMBDA_EXEC_BACKEND": "interp" if engine.startswith("interp") else "jit"}
         return [registry.LAMBDA_EXE, "run", str(path)], env
-    if engine in ("nodejs", "lambdajs", "quickjs", "mvpjs"):
+    if engine in ("nodejs", "lambdajs", "quickjs"):
         path = str(SUITE / f"{name}.js")
         if engine == "nodejs":
             return [registry.NODE_EXE, path], {}
@@ -97,8 +97,6 @@ def port_command(engine, name):
             return [registry.QJS_EXE, "--stack-size", str(registry.QJS_STACK_SIZE), "--std", "-m",
                     registry.make_qjs_wrapper(path)], {}
         path = registry.expand_benchmark_js(path)
-        if engine == "mvpjs":
-            return [registry.LAMBDA_EXE, "js", "--runtime=mvp", path], {}
         return [registry.LAMBDA_EXE, "js", path], {"JS_EXEC_BACKEND": "mir"}
     if engine == "python":
         return [sys.executable, str(SUITE / "python" / f"{name}.py")], {}
@@ -130,7 +128,7 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "temp/julia_suite_validation.json")
     args = parser.parse_args()
     engines = args.engines.split(",")
-    if set(engines) & {"mir", "mir_typed", "interp", "interp_typed", "lambdajs", "mvpjs"}:
+    if set(engines) & {"mir", "mir_typed", "interp", "interp_typed", "lambdajs"}:
         registry.check_release_build()
     registry.require_pinned_node_version(engines, "time")
     expected = contract_oracle()

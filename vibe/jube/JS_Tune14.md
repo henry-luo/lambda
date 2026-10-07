@@ -2174,9 +2174,9 @@ The standard runner may rebuild/archive independently; verify its recorded hash
 against the paired candidate, rather than assuming a shared filename or commit
 means identical executable content. Confirm current runner/report support for
 the complete engine list before the long run, without disabling its guards.
-The template omits release-unavailable MVP. Add `mvpjs` only after its release
-availability and common-work oracle are established; retain its unavailable
-status in the milestone report otherwise.
+The private-value MVP backend was removed from the active tree on 2026-10-07
+(**D1.2v2**, **D1.3v3**). It is not an available benchmark engine; the
+historical MVP acceptance records remain under `test/benchmark/js_mvp/`.
 
 ## 6. Evidence storage and progress record
 
