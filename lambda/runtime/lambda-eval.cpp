@@ -631,9 +631,13 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
         Item native_result = ItemNull;
         if (array_concat_native_lane(left, right, &native_result)) return native_result;
     }
+    // An N-D array's items are its leading-axis rows (S11.1.1v3), so it joins
+    // row by row; its flat leaves are storage, not items (S10.6.1).
+    bool rows = (left_type == LMD_TYPE_ARRAY_NUM && array_num_rank(left.array_num) > 1) ||
+        (right_type == LMD_TYPE_ARRAY_NUM && array_num_rank(right.array_num) > 1);
     // same-type optimization: direct memcpy of native items (not for Range)
-    bool same_lane = left_type != LMD_TYPE_ARRAY_NUM || right_type != LMD_TYPE_ARRAY_NUM ||
-        left.array_num->get_elem_type() == right.array_num->get_elem_type();
+    bool same_lane = !rows && (left_type != LMD_TYPE_ARRAY_NUM || right_type != LMD_TYPE_ARRAY_NUM ||
+        left.array_num->get_elem_type() == right.array_num->get_elem_type());
     // A native-lane operand (an admitted `T?[]`) holds lane words, not Items,
     // so it takes the element-wise path below, which decodes every slot.
     bool native_lane = left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY &&
@@ -688,17 +692,26 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
     // different types: produce generic Array, convert typed elements to Items
     int64_t left_len = fn_seq_count(left), right_len = fn_seq_count(right);
     int64_t total_len = left_len + right_len;
+    // item_at allocates (a boxed wide scalar, an N-D row view): keep the
+    // operands and the destination rooted across every read
+    RootFrame roots(3);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_right(roots, right);
     // A typed source can expose one external scalar payload per element;
     // reserve the exact worst-case tail before copy-in discovers the mix.
     Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len * 2), LMD_TYPE_ARRAY);
+    if (!result) return ItemError;
+    Rooted<Array*> rooted_result(roots, result);
     result->type_id = LMD_TYPE_ARRAY;
     result->length = total_len;
     result->capacity = total_len * 2;
     result->extra = 0;
     result->items = (Item*)(result + 1);
-    for (int64_t i = 0; i < left_len; i++) array_set(result, i, item_at(left, i));
-    for (int64_t i = 0; i < right_len; i++) array_set(result, left_len + i, item_at(right, i));
-    return {.array = result};
+    for (int64_t i = 0; i < left_len; i++)
+        array_set(rooted_result.get(), i, item_at(rooted_left.get(), i));
+    for (int64_t i = 0; i < right_len; i++)
+        array_set(rooted_result.get(), left_len + i, item_at(rooted_right.get(), i));
+    return {.array = rooted_result.get()};
 }
 
 // S10.6.1: `++` concatenates sequences and places every other value as one
