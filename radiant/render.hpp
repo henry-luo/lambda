@@ -384,6 +384,10 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
     bool inherits, char* buffer, size_t buffer_size, bool* from_css = nullptr,
     char** owned_value = nullptr, DomElement** declaring_element = nullptr,
     const SvgDomStyleScope* scope = nullptr);
+CssValue* svg_parse_property_value(Pool* pool, const char* text, const char* name);
+bool svg_normalize_length_value(CssValue* value, const SvgLengthContext* context,
+    SvgLengthAxis axis, bool preserve_percentages = false,
+    CssMathLeafResolver resolve_leaf = nullptr, void* leaf_context = nullptr);
 
 // caller-owned character-cell geometry shares the painter's positioned layout.
 RdtPath* svg_text_geometry_path(DomElement* element, const SvgLengthContext* lengths,

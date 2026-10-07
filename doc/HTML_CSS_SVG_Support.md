@@ -13,7 +13,7 @@ HTML is the native input. LaTeX, Markdown, XML, Lambda script results and diagra
 
 **One tree.** Radiant does not build a separate render tree. The parsed document is the Lambda/Mark element tree: CSS is resolved onto its elements, layout writes geometry onto the same nodes, and page scripts reach the same nodes through the DOM. This is why `lambda layout` can report every element's box, and why a script mutation is a relayout of the tree it already has. See [Lambda_Doc_Pipeline.md §1.5](Lambda_Doc_Pipeline.md#15-one-representation-from-parser-to-pixel) and [§3.4](Lambda_Doc_Pipeline.md#34-lay-out-and-render); the engine design is in [dev/radiant/RAD_00_Overview.md](dev/radiant/RAD_00_Overview.md).
 
-> **Status (alpha, focused updates through 2026-10-07).** The initial matrix was compiled from the source (`lambda/input/css/`, `radiant/`, `lib/font/`), the conformance suites, and spot checks run with `lambda layout` and `lambda render` on 2026-09-28. Legend: ✅ supported · ◐ partial, with what is missing stated · ❌ not supported. *Parsed only* means the CSS parser accepts the syntax but nothing downstream applies it. Anything that could not be confirmed is marked *not verified*.
+> **Status (alpha, focused updates through 2026-10-08).** The initial matrix was compiled from the source (`lambda/input/css/`, `radiant/`, `lib/font/`), the conformance suites, and spot checks run with `lambda layout` and `lambda render` on 2026-09-28. Legend: ✅ supported · ◐ partial, with what is missing stated · ❌ not supported. *Parsed only* means the CSS parser accepts the syntax but nothing downstream applies it. Anything that could not be confirmed is marked *not verified*.
 
 **Implementation update (2026-10-03).** Selector, cascade, nesting, media, `@supports`, custom-property, marker, caret, text-alignment, text-emphasis, logical-border, grid-track, scrolling and image-rendering rows below include focused tests added during the CSS support work. The aggregate conformance and property counts remain the 2026-09-28 baseline until a full re-audit.
 
@@ -333,7 +333,7 @@ At the 2026-09-28 assessment, the parser's property table (`lambda/input/css/css
 | UI | `cursor`, `pointer-events`, `user-select`, `accent-color`, `caret-color`, `caret-shape`, `field-sizing` | `appearance` (`none` suppresses native checkbox, radio, range, button, text-control and select chrome in raster; `base-select` has a select consumer; `base` and full compatibility behavior remain open) | `resize`, `nav-index`, `nav-up`, `nav-right`, `nav-down`, `nav-left` |
 | Replaced elements | `object-fit`, `object-position`, `object-view-box`, `image-orientation`, `aspect-ratio` | `image-rendering` (`crisp-edges`/`optimizeSpeed` select nearest sampling; `pixelated` scales to the closest integer multiple with nearest sampling, then smooths to the raster target; `<img>` and background images, including inherited values, are tested by `RenderOutputParity.ImageRenderingCrispEdgesUsesSourcePixels` and `ImageRenderingPixelatedBlendsAtNonintegerScale`. Transformed/display-list images and other image consumers remain partial.) | |
 | Containment | `contain-intrinsic-size`\* and its longhands | `contain` (size containment only), `container-type`, `content-visibility` (`hidden` only) | `container`\*, `container-name` |
-| SVG | `fill`, `stroke`, `stroke-width` (on the root `<svg>` only; see [§15](#15-svg)) | | |
+| SVG | `fill`, `stroke`, `stroke-width` (inline SVG descendants share the cascade and computed getters; see [§15](#15-svg)) | | |
 | Other | `zoom` | `all` (tested `initial`, `unset`, `inherit`, `revert` and `revert-layer` behavior; full property coverage remains open) | |
 
 **Not recognized at all** (dropped): `will-change`; `touch-action`; the `mask` shorthand and the other `mask-*` properties; `shape-outside` and the other `shape-*` properties; `offset-*`; `color-scheme`; `font-synthesis`; `font-palette`; anchor positioning; scroll-driven animation timelines; `transition-behavior`; and SVG properties other than `fill`, `stroke` and `stroke-width` (`stroke-dasharray`, `fill-opacity`, … are read only as attributes or from a `<style>` inside the SVG).
@@ -540,7 +540,7 @@ Linux/Windows P13 runtime smoke. Retained source/sample ownership follows
 |---|---|---|
 | `transform` attribute | ✅ | Attribute transforms and authored CSS transforms with CSS precedence, transform origins, and view/fill reference boxes; paint and geometric hit testing share decoding. |
 | Colours | ✅ | Hex, `rgb()`/`rgba()` including percentages, `hsl()`/`hsla()` with number/degree/radian/gradian/turn hues, and CSS named colours including `rebeccapurple`. SVG uses the shared CSS color parser. |
-| `currentColor` | ✅ | Including a CSS `color` set on the `<svg>` element. |
+| `currentColor` | ✅ | Inherited paint resolves against each receiving element's CSS/presentation `color`, including live computed-style reads. |
 | `context-fill`, `context-stroke` | ✅ | Use and marker instances retain source paint, geometry bounds, coordinates and document/base. No context produces no paint. |
 | `fill="url(#gradient)"` | ✅ | Inherited typed paints apply to basic/curved shapes and text using tight geometry bounds; text glyphs share the complete text paint domain. |
 | `stroke="url(#gradient)"` | ✅ | Gradient strokes share caps, joins, dashes and paint opacity with solid strokes. |
@@ -550,13 +550,14 @@ Linux/Windows P13 runtime smoke. Retained source/sample ownership follows
 | `fill-rule` | ✅ | |
 | `clip-rule` | ✅ | Nonzero/even-odd child contours inside shared clipping. |
 | `opacity`, `fill-opacity`, `stroke-opacity` | ✅ | Shapes, containers, text and referenced content share source capture, filter, clip/mask and final opacity ordering. |
-| `stroke-width`, `stroke-linecap`, `stroke-linejoin`, `stroke-dashoffset` | ✅ | |
+| `stroke-width`, `stroke-linecap`, `stroke-linejoin`, `stroke-dashoffset` | ✅ | Stroke width validates nonnegative authored numbers/lengths/percentages and typed math; number-only calculations reach paint, and negative computed widths clamp. |
 | `stroke-dasharray` | ✅ | Preserves zero-length round-cap dots, repeats odd lists, treats all-zero/invalid negative lists as solid, and resolves percentages against the viewport diagonal. |
 | `stroke-miterlimit`, `paint-order` | ✅ | Acute miter cutoffs and every fill/stroke/marker permutation; paint and pointer geometry share stroke facts. |
 | `vector-effect` | ◐ | `none` and affine `non-scaling-stroke`. SVG2's at-risk `non-scaling-size`, `non-rotation`, `fixed-position`, combined effects and explicit `viewport`/`screen` selectors remain unsupported ([§8.13](https://www.w3.org/TR/SVG2/coords.html#VectorEffects)). |
 | `text-anchor` | ✅ | |
 | Presentation attributes vs CSS | ✅ | Shared author cascade, including inline importance and selector-list specificity; presentation attributes have specificity zero. Invalid paint declarations preserve earlier valid declarations. |
 | **Page stylesheets reaching SVG content** | ✅ | Host selectors style inline SVG descendants. Host class/style changes and stylesheet text replacement invalidate retained SVG paint; external image documents remain isolated. |
+| Computed `fill`, `stroke`, `stroke-width` | ◐ | Shared CSS/presentation cascade, inheritance, invalid-substitution fallback, currentColor, absolute/font-relative lengths, percentages, math, URL fallback colors and complete strings are verified by `test/ui/cssom_svg_paint.json` (36 checks). Paint and CSSOM share stylesheet/import URL bases; local fragments and empty URLs remain literal. Caller-owned output follows **D4.5.1v4**, with existing generated names under **D4.6.1v4**. Pseudo-element values, effect sampling and broader SVG CSSOM remain open. |
 | Font properties on `<g>` | ✅ | Presentation attributes and shared CSS inherit family, size, weight and slant into descendant text. |
 | `display="none"` | ✅ | |
 | `visibility` | ✅ | Inherited hidden content retains geometry; visible descendants can paint and receive pointer targets. Hidden text retains advances. |

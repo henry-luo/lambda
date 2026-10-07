@@ -6397,6 +6397,72 @@ TEST(RenderOutputParity, ComputedCustomPropertyNamesReachHtmlAndSvgPaint) {
     expect_pngs_exactly_equal(literal_png, variable_png);
 }
 
+TEST(RenderOutputParity, SvgInvalidPaintAndWidthSubstitutionsUseInheritedComputedValues) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* reference = "temp/render_output_parity/svg_computed_literal.png";
+    const char* computed = "temp/render_output_parity/svg_computed_css.png";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/svg_computed_literal.html", reference,
+        "<!doctype html><style>body{margin:0}svg{display:block}</style>"
+        "<svg width='160' height='22' xmlns='http://www.w3.org/2000/svg'>"
+        "<rect x='4' y='4' width='24' height='14' fill='green' stroke='blue' stroke-width='4'/>"
+        "<rect x='44' y='4' width='24' height='14' fill='purple' stroke='red' stroke-width='4'/>"
+        "<rect x='84' y='4' width='24' height='14' fill='red' stroke='none'/>"
+        "<rect x='124' y='4' width='24' height='14' fill='none' stroke='lime' stroke-width='6'/></svg>"));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/svg_computed_css.html", computed,
+        "<!doctype html><style>body{margin:0}svg{display:block}"
+        "g{fill:green;stroke:currentColor;stroke-width:2em;font-size:2px;color:red}"
+        ".invalid{fill:blue;fill:var(--paint);--paint:url(#missing) potato;color:blue;font-size:1px}"
+        ".width{fill:purple;fill:url(#missing) potato;stroke-width:10px;"
+        "stroke-width:var(--width);--width:-2}"
+        ".fallback{fill:URL(#missing) RGB(255,0,0);stroke:NONE}"
+        ".number{fill:none;stroke:lime;stroke-width:calc(2 * 3)}"
+        "</style><svg width='160' height='22' xmlns='http://www.w3.org/2000/svg'><g>"
+        "<rect class='invalid' x='4' y='4' width='24' height='14'/>"
+        "<rect class='width' x='44' y='4' width='24' height='14'/>"
+        "<rect class='fallback' x='84' y='4' width='24' height='14'/>"
+        "<rect class='number' x='124' y='4' width='24' height='14'/></g></svg>"));
+    // invalid computed winners inherit; parse-time invalid paint leaves the valid declaration in place.
+    expect_pngs_exactly_equal(reference, computed);
+}
+
+TEST(RenderOutputParity, SvgPaintResourceUrlsUseStylesheetAndVariableConsumerBases) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity/svg_css_url"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity/svg_css_url/styles"));
+    const struct {const char* path; const char* text;} resources[] = {
+        {"temp/render_output_parity/svg_css_url/styles/server.svg",
+         "<svg xmlns='http://www.w3.org/2000/svg'><defs><linearGradient id='g'>"
+         "<stop offset='0' stop-color='green'/><stop offset='1' stop-color='green'/>"
+         "</linearGradient></defs></svg>"},
+        {"temp/render_output_parity/svg_css_url/styles/paint.css",
+         "@import url(import.css);#literal{fill:url(server.svg#g) red}#variable{fill:var(--paint) blue}"},
+        {"temp/render_output_parity/svg_css_url/styles/import.css", "#imported{fill:url(server.svg#g) purple}"},
+    };
+    for (const auto& resource : resources)
+        ASSERT_TRUE(write_file_all(resource.path, resource.text, strlen(resource.text)));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/svg_css_url/reference.html",
+        "temp/render_output_parity/svg_css_url/reference.png",
+        "<!doctype html><style>body{margin:0}svg{display:block}</style><svg width='90' height='20'>"
+        "<rect width='30' height='20' fill='green'/><rect x='30' width='30' height='20' fill='green'/>"
+        "<rect x='60' width='30' height='20' fill='green'/></svg>"));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/svg_css_url/actual.html",
+        "temp/render_output_parity/svg_css_url/actual.png",
+        "<!doctype html><link rel='stylesheet' href='styles/paint.css'>"
+        "<style>body{margin:0;--paint:url(server.svg#g)}svg{display:block}</style>"
+        "<svg width='90' height='20'><rect id='literal' width='30' height='20'/>"
+        "<rect id='imported' x='30' width='30' height='20'/>"
+        "<rect id='variable' x='60' width='30' height='20'/></svg>"));
+    // inherited custom tokens acquire the using declaration's stylesheet base, not the defining document's.
+    expect_pngs_exactly_equal("temp/render_output_parity/svg_css_url/reference.png",
+        "temp/render_output_parity/svg_css_url/actual.png");
+}
+
 TEST(RenderOutputParity, OversizedCustomPropertiesUseConsumerFallbacksAcrossHtmlAndSvg) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

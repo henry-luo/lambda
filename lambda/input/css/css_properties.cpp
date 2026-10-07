@@ -197,7 +197,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_COLOR, "color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_FILL, "fill", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_STROKE, "stroke", PROP_TYPE_COLOR, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_color, NULL},
-    {CSS_PROPERTY_STROKE_WIDTH, "stroke-width", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "1", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_STROKE_WIDTH, "stroke-width", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "1px", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_FONT_FAMILY, "font-family", PROP_TYPE_STRING, PROP_INHERIT_YES, "serif", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_FONT_SIZE, "font-size", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_FONT_WEIGHT, "font-weight", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_keyword, NULL},
@@ -1014,6 +1014,44 @@ static bool css_value_is_supported_color(const CssValue* value) {
     if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
     CssComputedColor color;
     return css_color_compute(value, &color);
+}
+
+bool css_property_is_svg_paint(CssPropertyCode id) {
+    return id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE || id == CSS_PROPERTY_STROKE_WIDTH;
+}
+
+static bool css_value_is_svg_paint(const CssValue* value, bool fallback = false) {
+    if (!value) return false;
+    if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value))
+        return !fallback;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        const auto& list = value->data.list;
+        // SVG 2 paint permits one URL followed by a color or none, never a second paint server.
+        return !fallback && !list.comma_separated && list.values && list.count == 2 &&
+            list.values[0] && list.values[0]->type == CSS_VALUE_TYPE_URL &&
+            css_value_is_svg_paint(list.values[1], true);
+    }
+    CssComputedColor color;
+    if (css_color_compute(value, &color)) return true;
+    const char* name = css_value_identifier_name(value);
+    return name && (str_ieq_cstr(name, "none") || (!fallback &&
+        (str_ieq_cstr(name, "context-fill") || str_ieq_cstr(name, "context-stroke")))) ||
+        (!fallback && value->type == CSS_VALUE_TYPE_URL);
+}
+
+static bool css_value_is_svg_stroke_width(const CssValue* value) {
+    if (!value) return false;
+    if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+    double scalar = value->type == CSS_VALUE_TYPE_NUMBER ? value->data.number.value
+        : value->type == CSS_VALUE_TYPE_LENGTH ? value->data.length.value
+        : value->type == CSS_VALUE_TYPE_PERCENTAGE ? value->data.percentage.value : NAN;
+    if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+        value->type == CSS_VALUE_TYPE_LENGTH)
+        return isfinite(scalar) && scalar >= 0.0 && (value->type != CSS_VALUE_TYPE_LENGTH ||
+            css_unit_is_length(value->data.length.unit));
+    CssMathType type = css_math_value_type(value);
+    return type == CSS_MATH_NUMBER || type == CSS_MATH_LENGTH ||
+        type == CSS_MATH_PERCENT || type == CSS_MATH_LENGTH_PERCENT;
 }
 
 bool css_value_is_custom_ident(const CssValue* value) {
@@ -1966,6 +2004,9 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode) {
     if (!value) return false;
+
+    if (id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE) return css_value_is_svg_paint(value);
+    if (id == CSS_PROPERTY_STROKE_WIDTH) return css_value_is_svg_stroke_width(value);
 
     if (id == CSS_PROPERTY_BACKFACE_VISIBILITY || id == CSS_PROPERTY_TRANSFORM_STYLE) {
         if (css_value_contains_var_reference(value) || css_value_is_global_keyword(value)) return true;

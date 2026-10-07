@@ -182,6 +182,23 @@ TEST_F(CssEngineParserTest, PhysicalSideLengthsValidateWholeValues) {
         EXPECT_EQ(css_parse_declaration_text(value, strlen(value), pool), nullptr) << value;
 }
 
+TEST_F(CssEngineParserTest, SvgPaintAndStrokeWidthUseCompleteGrammar) {
+    const char* valid[] = {"fill:red", "fill:CURRENTCOLOR", "fill:none", "stroke:context-fill",
+        "fill:context-stroke", "fill:url(#paint)", "fill:url(#paint) blue",
+        "stroke:url(\"paint.svg\") none", "fill:url(#paint) currentColor", "fill:var(--paint)",
+        "stroke-width:5", "stroke-width:2em", "stroke-width:3%", "stroke-width:calc(2 * 3)",
+        "stroke-width:calc(2em + 10%)", "stroke-width:calc(2px - 4px)", "stroke-width:var(--width)"};
+    const char* invalid[] = {"fill:potato", "fill:\"red\"", "fill:3", "fill:red blue",
+        "fill:url(#paint) potato", "fill:url(#paint) context-fill", "fill:url(#paint) initial",
+        "fill:url(#paint) url(#other)", "fill:url(#paint), red", "stroke-width:-1",
+        "stroke-width:-2px", "stroke-width:-3%", "stroke-width:1deg", "stroke-width:auto",
+        "stroke-width:calc(2px + 3)", "stroke-width:4px 2px"};
+    for (const char* source : valid)
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+}
+
 TEST_F(CssEngineParserTest, ImportantMarkerRequiresTrailingCaseInsensitiveTokens) {
     const char* important[] = {"width:20px !important", "width:20px !IMPORTANT",
         "width:20px ! /*priority*/ ImPoRtAnT /*end*/", "--size:20px !IMPORTANT"};

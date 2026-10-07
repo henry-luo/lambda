@@ -1697,6 +1697,7 @@ enum CssTextDecorationLineFlag : uint8_t {
 };
 uint8_t css_text_decoration_line_flag(CssEnum keyword);
 bool css_property_validate_value(CssPropertyCode id, const CssValue* value);
+bool css_property_is_svg_paint(CssPropertyCode id);
 bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode);

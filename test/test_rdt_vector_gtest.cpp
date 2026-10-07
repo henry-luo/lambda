@@ -3,6 +3,7 @@
 #include "../radiant/render.hpp"
 #include "../radiant/event.hpp"
 #include "../radiant/svg_animation.hpp"
+#include "../radiant/radiant.hpp"
 #ifdef __APPLE__
 #include "../lib/font/font_internal.h"
 #endif
@@ -1934,6 +1935,64 @@ TEST(SvgCascadeTest, InvalidPaintDoesNotDisplaceValidDeclaration) {
     pool_destroy(pool);
 }
 
+TEST_F(SvgAnimationLifetimeTest, ComputedPaintOwnsOutputAndRejectsShortDestination) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* group = element("g", svg); ASSERT_NE(group, nullptr);
+    DomElement* child = element("rect", group); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(group->set_attribute("fill", "currentColor"));
+    ASSERT_TRUE(group->set_attribute("color", "red"));
+    ASSERT_TRUE(group->set_attribute("stroke-width", "3em"));
+    ASSERT_TRUE(group->set_attribute("font-size", "20"));
+    ASSERT_TRUE(child->set_attribute("color", "blue"));
+    ASSERT_TRUE(child->set_attribute("font-size", "10"));
+    Pool* output = mem_pool_create(nullptr, MEM_ROLE_CSS, "test.svg.computed_output");
+    ASSERT_NE(output, nullptr);
+    String* color = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_FILL, 0);
+    ASSERT_NE(color, nullptr); EXPECT_STREQ(color->chars, "rgb(0, 0, 255)");
+    String* width = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_STROKE_WIDTH, 0);
+    ASSERT_NE(width, nullptr); EXPECT_STREQ(width->chars, "60px");
+    bool changed = false;
+    ASSERT_TRUE(dom_element_set_presentation_style(child, "fill", "purple", &changed));
+    ASSERT_TRUE(changed);
+    String* presented = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_FILL, 0);
+    ASSERT_NE(presented, nullptr); EXPECT_STREQ(presented->chars, "rgb(128, 0, 128)");
+    ASSERT_TRUE(dom_element_clear_presentation_style(child));
+    char small[4] = "x";
+    EXPECT_FALSE(css_prop_serialize_computed(child, CSS_PROPERTY_FILL, 0, small, sizeof(small)));
+    EXPECT_STREQ(small, "");
+    ASSERT_TRUE(child->set_attribute("style", "fill:red;fill:var(--bad);--bad:url(#p) potato"));
+    String* invalid = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_FILL, 0);
+    ASSERT_NE(invalid, nullptr); EXPECT_STREQ(invalid->chars, "rgb(0, 0, 255)");
+    // output belongs to the caller's pool after style mutation and element removal.
+    ASSERT_TRUE(group->remove_child(child));
+    EXPECT_STREQ(color->chars, "rgb(0, 0, 255)"); EXPECT_STREQ(width->chars, "60px");
+    mem_pool_destroy(output);
+}
+
+TEST(SvgCascadeTest, SharedCssUrlResolutionKeepsLocalAndEmptyReferences) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    Url* base = url_parse("https://example.test/styles/main.css"); ASSERT_NE(base, nullptr);
+    EXPECT_STREQ(radiant_resolve_css_url(pool, "#paint", base), "#paint");
+    EXPECT_STREQ(radiant_resolve_css_url(pool, "", base), "");
+    EXPECT_STREQ(radiant_resolve_css_url(pool, "assets/paint.svg#g", base),
+        "https://example.test/styles/assets/paint.svg#g");
+    EXPECT_STREQ(radiant_resolve_css_url(pool, "https://cdn.test/paint.svg#g", base),
+        "https://cdn.test/paint.svg#g");
+    url_destroy(base); pool_destroy(pool);
+}
+
+TEST_F(SvgAnimationLifetimeTest, EmptyNonPaintSubstitutionDoesNotReadPaintListHead) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* text = element("text", svg); ASSERT_NE(text, nullptr);
+    ASSERT_TRUE(text->set_attribute("style", "--empty: ;font-size:var(--empty)"));
+    char value[32] = {};
+    // empty custom tokens are valid input to substitution, even when the consuming property defaults.
+    const char* result = svg_get_dom_presentation_property(text, "font-size", true, value, sizeof(value));
+    EXPECT_TRUE(!result || !*result);
+}
+
 TEST(SvgCascadeTest, FontDescriptorChangesAdvancePaintResourceGeneration) {
     FontContext* context = font_context_create(nullptr);
     ASSERT_NE(context, nullptr);
@@ -2011,6 +2070,8 @@ TEST(SvgLengthTest, AnglesShareCssUnitConversionAndRejectInvalidSuffixes) {
 
 TEST(SvgLengthTest, CssMathUsesSvgViewportAndMeasuredFontBases) {
     SvgLengthContext lengths = {200.0f, 100.0f, 30.0f, 17.0f};
+    EXPECT_FLOAT_EQ(svg_resolve_length("calc(2 * 3)", &lengths, SVG_LENGTH_DIAGONAL, -1.0f), 6.0f);
+    EXPECT_FLOAT_EQ(svg_resolve_length("calc(2px - 4px)", &lengths, SVG_LENGTH_X, 99.0f), -2.0f);
     EXPECT_FLOAT_EQ(svg_resolve_length("calc(50% + 2ex)", &lengths, SVG_LENGTH_X, -1.0f), 134.0f);
     EXPECT_FLOAT_EQ(svg_resolve_length("calc(50% + 2ex)", &lengths, SVG_LENGTH_Y, -1.0f), 84.0f);
     EXPECT_FLOAT_EQ(svg_resolve_length("min(2em, 50%)", &lengths, SVG_LENGTH_Y, -1.0f), 50.0f);

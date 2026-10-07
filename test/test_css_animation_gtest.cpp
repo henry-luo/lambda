@@ -347,6 +347,13 @@ TEST(CssCascade, SelectorListUsesStrongestMatchingBranch) {
 }
 
 TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
+    struct MetadataOwner {
+        Pool* pool = pool_create();
+        ~MetadataOwner() {css_property_system_cleanup(); pool_destroy(pool);}
+    } metadata;
+    ASSERT_NE(metadata.pool, nullptr);
+    // synthetic documents still need the same initialized property metadata as a loaded document.
+    ASSERT_TRUE(css_property_system_init(metadata.pool));
     size_t count = 0;
     const CssPropAccessor* rows = css_prop_accessors(&count);
     ASSERT_NE(rows, nullptr);

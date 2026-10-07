@@ -105,13 +105,8 @@ typedef struct CssUrlResolveContext {
 
 static void resolve_css_url_value(CssValue* value, void* context) {
     CssUrlResolveContext* resolve = (CssUrlResolveContext*)context;
-    if (!value || !value->data.url || !resolve || !resolve->base_url || !resolve->pool) return;
-    if (url_is_absolute_url(value->data.url)) return;
-    Url* resolved = url_parse_with_base(value->data.url, resolve->base_url);
-    if (!resolved) return;
-    const char* href = url_get_href(resolved);
-    if (href) value->data.url = pool_strdup(resolve->pool, href);
-    url_destroy(resolved);
+    if (value && resolve)
+        value->data.url = radiant_resolve_css_url(resolve->pool, value->data.url, resolve->base_url);
 }
 
 typedef struct CssUrlVisitContext {

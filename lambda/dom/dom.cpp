@@ -4615,12 +4615,13 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
         return js_name_item("");
     }
 
-    char computed[512];
-    if (css_prop_serialize_computed(elem, prop_id, pseudo_type,
-                                    computed, sizeof(computed))) {
-        return js_name_item(computed);
-    }
-    return js_name_item("");
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_value");
+    if (!pool) return js_name_item("");
+    String* computed = css_prop_serialize_computed_value(pool, elem, prop_id, pseudo_type);
+    // the JS string copies caller-owned output before the native scratch pool ends.
+    Item result = computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
+    mem_pool_destroy(pool);
+    return result;
 }
 
 // ============================================================================
@@ -5399,12 +5400,13 @@ static float dom_inline_css_dimension(DomElement* elem,
 
 static float dom_computed_css_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0.0f;
-    char value[64];
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_dimension");
+    if (!pool) return 0.0f;
     CssPropertyCode property = width_axis ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
-    if (!css_prop_serialize_computed(elem, property, 0, value, sizeof(value))) {
-        return 0.0f;
-    }
-    return dom_parse_positive_css_dimension(value);
+    String* value = css_prop_serialize_computed_value(pool, elem, property, 0);
+    float result = value ? dom_parse_positive_css_dimension(value->chars) : 0.0f;
+    mem_pool_destroy(pool);
+    return result;
 }
 
 static int64_t dom_headless_dimension(DomElement* elem, bool width_axis) {

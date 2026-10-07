@@ -2880,16 +2880,6 @@ static CssDeclaration* css_parse_named_declaration_value(const CssToken* tokens,
 
     // Validate the parsed value before returning
     if (decl->value) {
-        if ((decl->property_code == CSS_PROPERTY_FILL || decl->property_code == CSS_PROPERTY_STROKE) &&
-            decl->value->type == CSS_VALUE_TYPE_CUSTOM) {
-            const char* name = decl->value->data.custom_property.name;
-            CssColor color = {};
-            // unknown identifiers are invalid paint, so a later typo cannot
-            // replace a preceding valid declaration in the shared cascade.
-            if (!name || (!css_parse_color(name, &color) &&
-                str_icmp_cstr(name, "context-fill") != 0 &&
-                str_icmp_cstr(name, "context-stroke") != 0)) return NULL;
-        }
         // Check if this property disallows negative values
         bool disallow_negative = false;
         switch (decl->property_code) {
