@@ -18,3 +18,8 @@ len(content(root("<list>\n  <item>a</item>\n  <item>b</item>\n</list>")));
 [for (c in content(xml("<?xml version=\"1.0\"?>\n<!DOCTYPE r [\n  <!ENTITY e \"x\">\n]>\n<r>text</r>\n<!-- after -->\n"))) name(c)];
 "comments and processing instructions are written as such:";
 [format(xml("<?xml version=\"1.0\"?>\n<!-- note --><?pi data?><r>x</r>"), 'xml') or "(error)"]
+
+"Unicode text and attributes survive XML serialization:";
+let unicode = "café 中文 αβ 😀"
+let roundtrip = root(format(<word label: unicode, unicode>, 'xml')^);
+[roundtrip.label == unicode, roundtrip[0] == unicode]

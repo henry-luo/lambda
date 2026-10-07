@@ -3992,14 +3992,14 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     auto write_svg_wrapped_html = [&](const char* svg_content) -> DomDocument* {
         StrBuf* html_buf = strbuf_new_cap(strlen(svg_content) + 256);
         strbuf_append_format(html_buf,
-            "<!DOCTYPE html><html><head><style>"
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>"
             "html,body{margin:0;padding:0;background:#fff;}"
             "svg{display:block;}"
             "</style></head><body>%s</body></html>",
             svg_content);
         release_runtime();
         pool_destroy(result_pool);
-        url_destroy(script_url);
+        // The serialized result gets its own base URL; the caller still owns script_url.
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
         DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
         strbuf_free(html_buf);
@@ -4034,7 +4034,6 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
             DomDocument* doc = load_html_string_doc(result_str->chars, viewport_width, viewport_height);
             release_runtime();
             pool_destroy(result_pool);
-            url_destroy(script_url);
             return doc;
         }
     }

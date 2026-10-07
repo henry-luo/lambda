@@ -12,7 +12,7 @@ pn main() {
     let left = chr(8220)
     let right = chr(8221)
     let expected = left ++ "Hi" ++ right
-    let expected_xml = "&#xe2;&#x80;&#x9c;Hi&#xe2;&#x80;&#x9d;"
+    let expected_xml = expected
     let encoded = chr(147) ++ "Hi" ++ chr(148)
     let info = { to_unicode: null, encoding: "WinAnsiEncoding" }
     let direct_lit = font.decode_literal_with_font(encoded, info)

@@ -12,7 +12,8 @@ void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 static void format_item_reader(XmlContext& ctx, const ItemReader& item, const char* tag_name);
 
 static void format_xml_string(XmlContext& ctx, String* str, bool is_attribute = false) {
-    format_markup_string_safe_ex(ctx.output(), str, is_attribute, true, true, "xml", true);
+    // UTF-8 bytes must stay together; a reference per byte changes the codepoints.
+    format_markup_string_safe(ctx.output(), str, is_attribute, true, true, "xml");
 }
 
 static void xml_emit_attr_value(XmlContext& ctx, const ItemReader& value) {

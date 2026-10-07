@@ -12,3 +12,5 @@
 ['?xml', '!DOCTYPE', 'r', '!--']
 "comments and processing instructions are written as such:"
 ["<?xml version=\"1.0\"?>\n<!-- note --><?pi data?><r>x</r>"]
+"Unicode text and attributes survive XML serialization:"
+[true, true]

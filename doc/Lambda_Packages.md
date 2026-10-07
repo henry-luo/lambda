@@ -32,7 +32,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 
 | Package | Import path | Status | What it does | Used by the CLI |
 |---------|-------------|--------|--------------|-----------------|
-| `chart` | `lambda.chart.chart`, `lambda.chart.vega` | Library | Declarative charts in the style of Vega-Lite, rendered as SVG elements | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
+| `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative charts and weighted word clouds, rendered as SVG elements | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
@@ -230,6 +230,68 @@ svg.width                // 400, the default width
 | `<repeat>` | A `<row [fields]>` and/or `<column [fields]>` child plus one `<chart>` template whose channels say `field: {repeat: "row"}` or `field: {repeat: "column"}` |
 
 A pie or donut chart is an `arc` mark with a `theta` channel, plus `inner_radius` for a donut; grouped bars use an `x_offset` channel. Aggregate operations are `count`, `sum`, `mean` (or `average`), `median`, `min`, `max`, `distinct`, `q1`, `q3`, `stdev` and `variance`. A colour channel picks a palette with `scale: {scheme: "set1"}`: `category10` is the default for categories and `blues` for quantities, and `category20`, `set1`, `pastel1`, `dark2`, `greens`, `reds`, `oranges`, `purples`, `greys`, `red_blue` and `spectral` are also available. `scale: {domain: [...], range: [...]}` assigns colours explicitly.
+
+### 4.4 Word and tag clouds
+
+`lambda.chart.wordcloud` lays out weighted words and renders an SVG element.
+It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4).
+Each input record has a nonempty, single-line `text`, a finite positive
+`weight` (`int`, `i64` or `float`), and an optional `color` string. Phrases and
+Unicode text are supported.
+
+```lambda
+import cloud: lambda.chart.wordcloud
+
+cloud.render([
+    {text: "Lambda", weight: 40},
+    {text: "Documents", weight: 25},
+    {text: "Charts", weight: 15}
+], {width: 600, height: 400})^
+```
+
+Save the example as `words.ls`; `lambda render words.ls -o words.png` or
+`lambda view words.ls` displays the result. The raised-error return requires
+`^` propagation or a handler (S7.4.2).
+
+| Function | Result |
+|----------|--------|
+| `cloud.layout(words, opts = null)` | A map containing resolved options, placed `words` and `unplaced` words |
+| `cloud.render(words, opts = null)` | An SVG element; `data-unplaced` records the number of words that could not fit |
+
+The layout sorts by descending weight, retaining source order among ties
+(S6.2.3), and maps square roots of weights onto the font-size range. Equal
+weights use `max_font_size`. Word colours and rotations follow source indices.
+Placement follows a deterministic spiral and checks measured rectangular boxes.
+Results repeat for the same inputs, options and available fonts; fonts can
+differ across machines.
+
+Placed records retain `text`, `weight`, `color` and source `index`, and add
+`font_size`, `rotation`, center coordinates `x`/`y`, rotated box `width`/`height`,
+unrotated `text_width`/`text_height` and a text `baseline`. Unplaced records
+carry a `reason`: `"too_large"` for a box larger than the available area, or
+`"no_space"` when the bounded search finds no placement. Empty input is valid.
+Invalid data or options raise an error (S7.4.2).
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `width`, `height` | `600`, `400` | Positive viewport dimensions; fractional dimensions are preserved |
+| `margin` | `8` | Empty space inside the viewport edges |
+| `padding` | `2` | Minimum gap between word boxes |
+| `min_font_size`, `max_font_size` | `12`, `64` | Font-size range in CSS pixels |
+| `font_family` | `"sans-serif"` | CSS font family or family list |
+| `font_weight` | `400` | Integer CSS weight from 100 to 900 |
+| `colors` | Tableau 10 | Nonempty array of colour strings; a record's `color` overrides it |
+| `rotations` | `[0]` | Nonempty array drawn from `0`, `90`, `-90`; cycles by source index |
+| `step` | `4` | Distance between spiral turns in CSS pixels |
+| `max_steps` | `4000` | Positive integer candidate limit per word |
+
+Text is measured in one headless Radiant pass through the reusable
+`radiant.measure_html(html, width, height)` function. It returns copied
+`width`, `height` and `baseline` metrics for each direct body element, in order
+(`null` for an element without a layout box), then releases the temporary
+document. The package uses the same font family, weight and size in its SVG.
+Collision detection uses text boxes; arbitrary angles and glyph-mask packing
+are outside this initial API.
 
 ---
 

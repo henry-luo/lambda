@@ -1520,3 +1520,29 @@ All **659 baseline tests pass** (649 Phase A + 10 new Phase B across MIR-direct 
 ---
 
 *This proposal extends the Lambda Chart Library from its current Vega-Lite–inspired core toward full Vega-level capability, adapted for Lambda Script's pure functional model and SVG output pipeline.*
+
+## Appendix — Word clouds (2026-10-07)
+
+Implemented as `lambda.chart.wordcloud` under the source-package contract
+**D7.2.1–D7.2.4**. Weighted category text belongs to the chart family; no graph
+edges or ranking model is involved. Public `layout` and `render` functions
+share deterministic, descending-weight spiral placement, stable ties
+(**S6.2.3**), square-root size scaling, orthogonal rotations, explicit overflow
+records and raised validation failures (**S7.4.2**). The full contract and
+options are in [Lambda Packages §4.4](../doc/Lambda_Packages.md#44-word-and-tag-clouds).
+
+The implementation reuses chart scales, palettes and SVG helpers. The native
+`radiant.measure_html` primitive supplies one batch of actual CSS text-box and
+baseline measurements, with all placement policy in Lambda source. Temporary
+documents own their loader pools and layout/font resources (**D4.2.3**);
+only copied scalar metrics escape (**D4.5.2**).
+Regression coverage checks collision gaps, viewport bounds, exact integer
+ordering, tie order, rotations, proportional font widths, validation, Unicode
+output and overflow.
+
+End-to-end checking exposed two existing serialized-document defects: the
+loader destroyed a borrowed script URL, and XML text formatting emitted a
+numeric reference for each UTF-8 byte. The loader now leaves the URL with its
+caller, and the shared markup writer keeps UTF-8 sequences intact. The XML
+round-trip and serialized SVG/HTML CLI tests pin these fixes; decoded PDF
+text expectations now check its actual Unicode content.
