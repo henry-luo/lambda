@@ -11,7 +11,6 @@
 #include "../../lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
-#include "../jube/jube_language.h"
 #include "../jube/jube_registry.h"
 #endif
 #include "../../lib/hashmap_helpers.h"

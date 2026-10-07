@@ -119,9 +119,9 @@ int file_rename(const char* old_path, const char* new_path);
 // Queries & metadata
 // ---------------------------------------------------------------------------
 
-LAMBDA_LIB_API bool     file_exists(const char* path);
-LAMBDA_LIB_API bool     file_is_file(const char* path);
-LAMBDA_LIB_API bool     file_is_dir(const char* path);
+bool     file_exists(const char* path);
+bool     file_is_file(const char* path);
+bool     file_is_dir(const char* path);
 bool     file_is_symlink(const char* path);
 bool     file_is_readable(const char* path);
 bool     file_is_writable(const char* path);

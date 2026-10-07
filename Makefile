@@ -207,8 +207,7 @@ NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
 # builds fail offline before compilation begins. The Lambda grammar needs 0.25+
 # for its reserved words (S16.10.1v2), which also makes it ABI 15. The vendored
 # grammar rules pass `--abi 14`, at which 0.25 emits the parse tables 0.24.7
-# did, so their checked-in outputs change only cosmetically. Python's own
-# Makefile takes no flag, so it is ABI 15; all of its outputs are untracked.
+# did, so their checked-in outputs change only cosmetically.
 TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
 
 # Generate the reference parser outputs once. The generated parser is used only
@@ -223,7 +222,6 @@ TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
 TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
 TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javascript.a
 TREE_SITTER_BASH_LIB = lambda/tree-sitter-bash/libtree-sitter-bash.a
-TREE_SITTER_PYTHON_LIB = lambda/tree-sitter-python/libtree-sitter-python.a
 TREE_SITTER_TYPESCRIPT_LIB = lambda/tree-sitter-typescript/libtree-sitter-typescript.a
 TREE_SITTER_RUBY_LIB = lambda/tree-sitter-ruby/libtree-sitter-ruby.a
 TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
@@ -280,12 +278,6 @@ LATEX_PARSER_C = lambda/tree-sitter-latex/src/parser.c
 LATEX_GRAMMAR_JSON = lambda/tree-sitter-latex/src/grammar.json
 LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
 
-# Python grammar dependencies. parser.c is generated and gitignored, but the
-# premake tests build compiles it directly (build_lambda_config.json lang-python),
-# so it must exist on disk before that build runs. grammar.json is tracked.
-PYTHON_PARSER_C = lambda/tree-sitter-python/src/parser.c
-PYTHON_GRAMMAR_JSON = lambda/tree-sitter-python/src/grammar.json
-
 # LaTeX Math grammar dependencies
 LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
 LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
@@ -336,19 +328,6 @@ $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_GRAMMAR_JS) $(JS_SCANNER_C)
 $(TREE_SITTER_BASH_LIB): $(BASH_GRAMMAR_JS) $(BASH_SCANNER_C)
 	$(call ts_generate,bash,--abi 14)
 	$(call ts_lib_build,bash,)
-
-# Regenerate the ignored Python parser before a direct Premake compile.
-# The ABI-14 header cannot compile a stale ABI-15 parser.c from an older CLI.
-generate-tree-sitter-python-parser:
-	@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-python \
-		src/parser.c TS="$(TREE_SITTER_CLI)" 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-
-# Build tree-sitter-python library
-$(TREE_SITTER_PYTHON_LIB): generate-tree-sitter-python-parser
-	@echo "Building tree-sitter-python library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
-		libtree-sitter-python.a TS="$(TREE_SITTER_CLI)" \
-		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
 $(TS_PARSER_C): $(TS_GRAMMAR_JS)
@@ -606,8 +585,8 @@ endef
 # CST differential verifier, including Lambda/JS/TS and LaTeX/Math grammars.
 tree-sitter-cst-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
-# Jube-only parser archives (Python, Bash, Ruby) are built outside the host.
-tree-sitter-jube-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PYTHON_LIB) $(TREE_SITTER_RUBY_LIB)
+# Jube-only parser archives (Bash, Ruby) are built outside the host.
+tree-sitter-jube-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_RUBY_LIB)
 tree-sitter-libs: tree-sitter-jube-libs
 
 # Default target
@@ -615,11 +594,11 @@ tree-sitter-libs: tree-sitter-jube-libs
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
-	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-lang-python release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
+	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
-	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
-	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
+	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs \
+	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-lambda-inventory fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches verify-re2-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-parity test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
@@ -649,7 +628,7 @@ help:
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
 	@echo "  verify-mir-patches - Check lambda/mir == upstream MIR + patches/mir-*.patch"
 	@echo "  verify-re2-patches - Check lib/re2 == upstream RE2 + patches/re2-*.patch"
-	@echo "  build-jube    - Build the standard host plus hosted Python and a compatibility link"
+	@echo "  build-jube    - Build the standard host plus its lambda-jube compatibility link"
 	@echo "  release-jube  - Package the full hosted-language bundle (same host binary)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
@@ -673,7 +652,7 @@ help:
 	@echo "  build-lambda-baseline - Build Lambda baseline runtime and input test executables"
 	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
 	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
-	@echo "  build-jube-test - Build hosted Python compatibility bundle and test executables"
+	@echo "  build-jube-test - Build the lambda-jube compatibility link and test executables"
 	@echo ""
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate the Lambda CST parser from grammar.js"
@@ -984,20 +963,9 @@ endif
 # normal host, never a separately compiled runtime.
 lambda-jube: build-jube
 
-build-jube: build build-lang-python
+build-jube: build
 	@ln -sfn lambda.exe lambda-jube.exe
 	@echo "✅ Jube compatibility name points to the standard host: lambda-jube.exe -> lambda.exe"
-
-# Hosted Python is a separately loaded native module. It is never a dependency
-# of the standard host build, so Python stays absent unless this target is run.
-# Build the matching host first: an exact Jube service-table bump must not
-# leave a freshly stamped module paired with a stale executable.
-build-lang-python: build build-windows-host-import $(TREE_SITTER_LIB) $(TREE_SITTER_PYTHON_LIB)
-	@echo "Building external lang-python hosted module..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=debug_native lang-python -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	@ls -lh modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll 2>/dev/null || true
 
 build-windows-host-import: build
 	@if [ "$(findstring NT,$(OS))" != "" ]; then \
@@ -1128,18 +1096,6 @@ $(eval $(call release_node_module,fs))
 $(eval $(call release_node_module,net))
 $(eval $(call release_node_module,crypto))
 
-# The release language module is built independently, then copied next to the
-# full distribution's unchanged host executable.  The standard bundle never
-# depends on this target.
-release-lang-python: release $(TREE_SITTER_LIB) $(TREE_SITTER_PYTHON_LIB)
-	@echo "Building release lang-python hosted module..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=release_native lang-python -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	@mkdir -p release/modules/lang-python
-	@cp modules/lang-python/module.json release/modules/lang-python/module.json
-	@cp modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll release/modules/lang-python/ 2>/dev/null || true
-
 # Standard and full Jube packages deliberately reuse the identical host.  The
 # full package adds language modules; it never recompiles a second runtime.
 package-standard: release-node-core release-node-fs release-node-net release-node-crypto
@@ -1168,24 +1124,17 @@ package-standard: release-node-core release-node-fs release-node-net release-nod
 			echo "missing packaged $$module image"; exit 1; \
 		fi; \
 	done
-	# Keep a manifest-only descriptor so a missing optional language has a
-	# deterministic diagnostic without putting its grammar or native code in the host.
-	@mkdir -p release-standard/modules/lang-python
-	@cp modules/lang-python/module.json release-standard/modules/lang-python/module.json
-	# Likewise for the RDB drivers: postgresql:// and mysql:// resolve to a
-	# known-but-absent module instead of "cannot detect driver".
+	# Keep a manifest-only descriptor for the RDB drivers: postgresql:// and
+	# mysql:// resolve to a known-but-absent module instead of "cannot detect driver".
 	@mkdir -p release-standard/modules/rdb-drivers
 	@cp modules/rdb-drivers/module.json release-standard/modules/rdb-drivers/module.json
 
-package-jube: package-standard release-lang-python release-rdb-drivers
+package-jube: package-standard release-rdb-drivers
 	@mkdir -p release-jube
 	@cp release-standard/lambda release-jube/lambda
 	@rm -rf release-jube/modules/rdb-drivers
 	@mkdir -p release-jube/modules
 	@cp -R release/modules/rdb-drivers release-jube/modules/rdb-drivers
-	@mkdir -p release-jube/modules/lang-python
-	@cp release/modules/lang-python/module.json release-jube/modules/lang-python/module.json
-	@cp release/modules/lang-python/lang-python.dylib release/modules/lang-python/lang-python.so release/modules/lang-python/lang-python.dll release-jube/modules/lang-python/ 2>/dev/null || true
 
 # The first extraction leaves reduced-node equal to the compatibility host plus
 # node-core activation. Later leaf manifests extend this target without ever
@@ -1216,15 +1165,9 @@ package-minimal: release
 verify-jube-package: package-jube
 	@shasum -a 256 release-standard/lambda release-jube/lambda
 	@cmp -s release-standard/lambda release-jube/lambda
-	@mkdir -p temp/hosted-python-package-check
-	@if cd temp/hosted-python-package-check && ../../release-standard/lambda py ../../test/py/test_py_basic.py --no-log >standard.out 2>standard.err; then \
-		echo "standard bundle unexpectedly loaded lang-python"; exit 1; \
-	fi
-	@rg -q "Hosted language module for 'py' is unavailable or incompatible\." temp/hosted-python-package-check/standard.err
 	@cd release-standard && ./lambda js -e "console.log(require('buffer').Buffer === Buffer)" --no-log | rg -x "true"
 	@cd release-standard && ./lambda js -e "console.log(require('fs').existsSync('../test/node/jube_fs_exists_registry.txt'))" --no-log | rg -x "true"
 	@cd release-standard && ./lambda js -e "console.log(require('net').isIP('127.0.0.1'))" --no-log | rg -x "4"
-	@cd release-jube && ./lambda py ../test/py/test_py_basic.py --no-log >/dev/null
 	$(PYTHON) utils/verify_rdb_module_licenses.py --module-dir release-jube/modules/rdb-drivers
 	$(PYTHON) utils/check_rdb_module_architecture.py --module-dir release-jube/modules/rdb-drivers --lambda release-jube/lambda --objects build/obj/rdb-drivers/native/release
 	$(PYTHON) utils/check_rdb_module_architecture.py --module-dir release-standard/modules/rdb-drivers --lambda release-standard/lambda --expect-absent
@@ -1243,23 +1186,13 @@ verify-node-profile-packages: package-node-reduced package-minimal
 
 # The negative-fixture suite supplies an explicit digest and verifies that the
 # loader rejects tampered bytes before dlopen can execute module initializers.
-test-jube-module-integrity: build build-lang-python
+test-jube-module-integrity: build build-node-core build-node-fs
 	@$(PYTHON) utils/test_jube_module_loader_negative.py
 
-# Loader rejection matrix for the external Python module.  It uses copied
-# bundles so no test case can alter the active development module.
-test-jube-module-loader-negative: build build-lang-python
+# Loader rejection matrix, run against copied node-fs bundles so no test case
+# can alter the active development module.
+test-jube-module-loader-negative: build build-node-core build-node-fs
 	@python3 utils/test_jube_module_loader_negative.py
-
-# Generic hosted-language dispatch must work before the language descriptor is
-# loaded, including aliases and case-normalized source extensions.
-test-jube-language-dispatch: build build-lang-python
-	@python3 utils/test_jube_language_dispatch.py
-
-# The source checker must prove its own retired-boundary rules with synthetic
-# regressions, not merely pass because the current tree happens to be clean.
-test-hosted-python-architecture-checker:
-	@python3 utils/test_hosted_python_architecture_checker.py
 
 test-node-module-architecture-checker:
 	@python3 utils/test_node_module_architecture_checker.py
@@ -1519,12 +1452,8 @@ release-jube: package-jube
 	@ln -sfn lambda release-jube/lambda-jube
 	@echo "✅ Full Jube bundle uses the standard host plus modules."
 
-# Build the compatibility host/module bundle and all test executables.
+# Build the compatibility host name and all test executables.
 build-jube-test: build-jube build-test
-
-# Run hosted Python through the compatibility host name.
-test-jube: build-jube-test
-	@LAMBDA_PY_HOST_EXE=./lambda-jube.exe ./test/test_py_gtest.exe
 
 # Force rebuild (clean + build)
 rebuild: clean-all
@@ -1655,7 +1584,6 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o
 	@rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o
 	@rm -f lambda/tree-sitter-bash/libtree-sitter-bash.a lambda/tree-sitter-bash/src/*.o
-	@rm -f lambda/tree-sitter-python/libtree-sitter-python.a lambda/tree-sitter-python/src/*.o
 	@rm -f lambda/tree-sitter-typescript/libtree-sitter-typescript.a lambda/tree-sitter-typescript/src/*.o
 	@rm -f lambda/tree-sitter-ruby/libtree-sitter-ruby.a lambda/tree-sitter-ruby/src/*.o
 	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
@@ -1761,10 +1689,6 @@ test-lambda-full: test-lambda-baseline
 # Permanent exact-root CI lane. Collection is injected only at public allocator
 # boundaries, and poison makes a missed root deterministic instead of relying
 # on a stale native-stack word or recycled slab contents.
-#
-# Keep the core lane independent of an optional hosted language.  This lets the
-# standard host prove its root invariants without building or initializing
-# Python, while the aggregate target preserves the historical full check.
 test-gc-rooting-core: build
 	@mkdir -p temp
 	@echo "Running LambdaJS JIT exact-root forced-GC gate..."
@@ -1849,19 +1773,7 @@ test-mir-gc-stress:
 	@echo "Running forced-GC stress sweep over the MIR emission corpus..."
 	@./test/test_mir_gc_stress_gtest.exe
 
-test-gc-rooting-python: build build-lang-python
-	@mkdir -p temp
-	@echo "Running LambdaPy closure exact-root forced-GC gate..."
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
-		$${LAMBDA_PY_HOST_EXE:-./lambda.exe} py --no-log test/py/test_py_closures.py > temp/gc_rooting_py_closures.txt
-	@diff -u test/py/test_py_closures.txt temp/gc_rooting_py_closures.txt
-	@echo "Running LambdaPy generator exact-root forced-GC gate..."
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
-		$${LAMBDA_PY_HOST_EXE:-./lambda.exe} py --no-log test/py/test_py_generators.py > temp/gc_rooting_py_generators.txt
-	@diff -u test/py/test_py_generators.txt temp/gc_rooting_py_generators.txt
-	@echo "Hosted-Python exact-root forced-GC gates passed."
-
-test-gc-rooting: test-gc-rooting-core test-gc-rooting-python
+test-gc-rooting: test-gc-rooting-core
 	@echo "Aggregate exact-root forced-GC gates passed."
 
 test-redex-baseline: build
@@ -3356,9 +3268,6 @@ check-lambda-dup:
 check-radiant-dup:
 	@python3 test/dedup/check_code_dup.py radiant
 
-check-hosted-python-architecture:
-	@python3 utils/check_hosted_python_architecture.py
-
 check-node-module-architecture:
 	@python3 utils/check_node_module_architecture.py --require-node-core-object
 
@@ -3369,14 +3278,6 @@ hosted-node-coupling-inventory:
 # built Jube modules import nothing else from it.
 check-host-exports:
 	@$(PYTHON) utils/check_host_exports.py --host lambda.exe --modules
-
-# Generate the checked review input for every remaining hosted-Python coupling.
-# This is source analysis only; it never loads Jube or changes runtime behavior.
-hosted-python-coupling-inventory:
-	@python3 utils/check_hosted_python_architecture.py --inventory
-
-check-hosted-python-module-boundary: build build-lang-python
-	@python3 utils/check_hosted_python_architecture.py --require-module-binary
 
 # Report the current provider/include/capability debt for the static-module
 # split.  P0 is intentionally observational; P5 makes this a hard boundary
@@ -3579,8 +3480,7 @@ check-module-boundary:
 	$(PYTHON) utils/check_module_boundary.py
 	@echo "✅ module-boundary validation completed (Class-F ratcheted deferment)"
 
-# The aggregate test build includes hosted Python, which links the shared parser runtime.
-build-test: build-lambda-data build-windows-host-import $(TREE_SITTER_LIB) generate-tree-sitter-python-parser test-premake-generator
+build-test: build-lambda-data build-windows-host-import test-premake-generator
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building tests using Premake5..."; fi
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building configurations..."; fi
 	@mkdir -p build/premake
@@ -3606,7 +3506,7 @@ build-test: build-lambda-data build-windows-host-import $(TREE_SITTER_LIB) gener
 	@# The debug "all" target also rebuilds hosted modules; refresh every
 	@# manifest before restoring the release host. Otherwise a rebuilt Node DSO
 	@# retains its previous digest and all module-backed JS tests fail at load.
-	@for module_dir in modules/lang-python modules/node-core modules/node-fs; do \
+	@for module_dir in modules/node-core modules/node-fs; do \
 		$(PYTHON) utils/update_jube_manifest_integrity.py $$module_dir || exit 1; \
 	done
 	@# Restore release lambda.exe over the debug one

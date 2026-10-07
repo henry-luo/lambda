@@ -137,8 +137,8 @@ Cargo.lock
 # Tree-sitter generated parser files
 **/tree-sitter-*/src/parser.c
 
-# tree-sitter-python is regenerated on every build (see generate-tree-sitter-
-# python-parser) by the pinned CLI. The upstream vendor drop is v0.25.0, whose
+# tree-sitter-python is no longer built (lang-python was removed 2026-10-07);
+# these stay ignored for a locally regenerated copy. The upstream vendor drop is v0.25.0, whose
 # committed artifacts came from another CLI release, so tracking these made
 # every build dirty the tree and leaked churn into unrelated commits. Only
 # what the CLI writes is ignored: `tree-sitter generate` consumes

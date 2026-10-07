@@ -1,4 +1,4 @@
-// lambda counterpart of test/py/test_py_basic.py.
+// lambda counterpart of the retired test/py/test_py_basic.py (lang-python removed 2026-10-07).
 fn add(a, b) => a + b
 
 pn main() {

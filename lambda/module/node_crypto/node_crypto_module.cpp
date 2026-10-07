@@ -7834,7 +7834,6 @@ static const JubeModuleDef node_crypto_module = {
     NULL,
     NULL,
     NULL,
-    NULL,
     0,
     NULL,
     node_crypto_runtime_reset_session,

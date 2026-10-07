@@ -699,7 +699,6 @@ static const JubeModuleDef node_core_module = {
     0,
     NULL,
     NULL,
-    NULL,
     &node_core_requirements,
     node_core_globals,
     sizeof(node_core_globals) / sizeof(node_core_globals[0]),

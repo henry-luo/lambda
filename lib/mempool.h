@@ -1,6 +1,5 @@
 #ifndef MEMPOOL_H
 #define MEMPOOL_H
-#include "lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,7 +35,7 @@ Pool* pool_create_sized(size_t initial_size);
  * Destroy a memory pool and free all associated memory
  * @param pool Pool to destroy
  */
-LAMBDA_LIB_API void pool_destroy(Pool* pool);
+void pool_destroy(Pool* pool);
 
 /**
  * Drain a pool: release all allocated data but keep the Pool struct alive.
