@@ -1,6 +1,5 @@
 #ifndef ARENA_H
 #define ARENA_H
-#include "lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -81,7 +80,7 @@ Arena* arena_create_default();
  * Destroy an arena and release all directly-owned chunks
  * @param arena Arena to destroy
  */
-LAMBDA_LIB_API void arena_destroy(Arena* arena);
+void arena_destroy(Arena* arena);
 
 /**
  * Allocate memory from arena with default alignment
@@ -89,7 +88,7 @@ LAMBDA_LIB_API void arena_destroy(Arena* arena);
  * @param size Size in bytes to allocate
  * @return Pointer to allocated memory, or NULL on failure
  */
-LAMBDA_LIB_API void* arena_alloc(Arena* arena, size_t size);
+void* arena_alloc(Arena* arena, size_t size);
 
 /**
  * Allocate memory from arena with custom alignment
@@ -106,7 +105,7 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment);
  * @param size Size in bytes to allocate and zero
  * @return Pointer to zeroed memory, or NULL on failure
  */
-LAMBDA_LIB_API void* arena_calloc(Arena* arena, size_t size);
+void* arena_calloc(Arena* arena, size_t size);
 
 /**
  * Duplicate exactly len bytes in an arena and append a null terminator

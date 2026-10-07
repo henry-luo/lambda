@@ -43,6 +43,14 @@ pn patch_layer(owner, id, visual, previous = null) {
     }
 }
 
+// Control text is state: rewrite its text node rather than the element's child
+// list, which stages a new Mark child array on every replacement.
+pn set_text(node, text) {
+    let child = dom.first_child(node)
+    if (child != null and dom.node_type(child) == 3) dom.set_node_value(child, text)
+    else dom.set_text_content(node, text)
+}
+
 pn set_style(node, property, value) bool^ {
     if (not dom.presentation_style_set_property(node, property, value)) {
         raise c.fail("player.style", "host rejected " ++ property)
@@ -91,28 +99,63 @@ pn patch_morph(owner, plan, ps, key) {
     }
 }
 
+fn layer_id(key, index) => key ++ "-s" ++ string(index)
+fn shown_layers(ps) => if (ps.outgoing >= 0) [ps.outgoing, ps.slide] else [ps.slide]
+fn final_visuals(scene) array^ => sampler.scene(scene, len(scene.cues) - 1,
+    if (len(scene.cues) > 0) scene.cues[len(scene.cues) - 1].duration_ms else 0.0)^
+
+// A slide renders the first time it is needed and stays mounted; later visits
+// change state only, never markup (user ruling 2026-10-07).
+pn ensure_layer(owner, plan, index, key) {
+    if (dom.get_element_by_id(owner, layer_id(key, index)) != null) { return null }
+    let scene = plan.slides[index]
+    let canvas = dom.query_selector(owner, ".slide-canvas")
+    let fragment = dom.parse_fragment(canvas,
+        format([html.layer(plan, scene, sampler.scene(scene, -1, 0.0)^, key)], 'html'))
+    for (node in dom.child_nodes(fragment)) dom.append_child(canvas, node)
+}
+
+// Show the active slide (above any transition partner) and hide every other
+// layer the previous state showed. A shown layer gets its authored placement
+// and background back, which Morph samples overwrite.
+pn show_layers(owner, plan, before, ps, key) {
+    let shown = shown_layers(ps)
+    for (index in [*shown_layers(before), *shown]) {
+        let layer = dom.get_element_by_id(owner, layer_id(key, index))
+        let visible = contains(shown, index)
+        set_style(layer, "display", if (visible) "block" else "none")^
+        set_style(layer, "z-index", if (index == ps.slide) "2" else "1")^
+        if (index == ps.slide) dom.set_attribute(layer, "data-slide-active", "true")
+        else if (dom.has_attribute(layer, "data-slide-active")) dom.remove_attribute(layer, "data-slide-active")
+        if (visible) {
+            let scene = plan.slides[index]
+            set_style(layer, "background", html.layer_background(plan, scene))^
+            for (obj in scene.objects) {
+                let place = dom.get_element_by_id(owner, key ++ "-place-" ++ obj.dom_key)
+                for (property, value in html.placement_properties(obj)) set_style(place, string(property), value)^
+            }
+        }
+    }
+}
+
 pn present(owner, plan, before, ps, options, painted) {
     let key = instance(options)
-    let replaced = before.slide != ps.slide or before.outgoing != ps.outgoing
+    let switched = before.slide != ps.slide or before.outgoing != ps.outgoing
     let is_morph = ps.phase == 'transition' and plan.slides[ps.slide].transition == 'morph'
-    let visuals = if (replaced or not is_morph) player.sample(plan, ps)^ else null
-    if (replaced) {
-        let outgoing = if (ps.outgoing >= 0) {
-            let scene = plan.slides[ps.outgoing]
-            html.layer(plan, scene, sampler.scene(scene, len(scene.cues) - 1,
-                if (len(scene.cues) > 0) scene.cues[len(scene.cues) - 1].duration_ms else 0.0), key)
-        } else null
-        let incoming = html.layer(plan, plan.slides[ps.slide], visuals, key)
-        let canvas = dom.query_selector(owner, ".slide-canvas")
-        dom.set_inner_html(canvas, format([outgoing, incoming], 'html'))
+    let visuals = if (switched or not is_morph) player.sample(plan, ps)^ else null
+    if (switched) {
+        for (index in shown_layers(ps)) ensure_layer(owner, plan, index, key)^
+        show_layers(owner, plan, before, ps, key)^
+        // a slide leaving through a transition shows its final build
+        if (ps.outgoing >= 0) patch_objects(owner, final_visuals(plan.slides[ps.outgoing])^, null, key)^
     }
     if (is_morph) patch_morph(owner, plan, ps, key)^
-    else patch_objects(owner, visuals, if (replaced) null else painted, key)^
+    else patch_objects(owner, visuals, if (switched) null else painted, key)^
     let layers = transitions.sample(plan, ps)
-    let old_layers = if (replaced) null else transitions.sample(plan, before)
+    let old_layers = if (switched) null else transitions.sample(plan, before)
     patch_layer(owner, key ++ "-s" ++ string(ps.slide), layers.incoming, old_layers.incoming)^
     if (ps.outgoing >= 0) patch_layer(owner, key ++ "-s" ++ string(ps.outgoing), layers.outgoing, old_layers.outgoing)^
-    if (replaced or (before.phase == 'transition') != (ps.phase == 'transition'))
+    if (switched or (before.phase == 'transition') != (ps.phase == 'transition'))
       for (index in (if (ps.outgoing >= 0) [ps.outgoing, ps.slide] else [ps.slide])) {
         let layer = dom.get_element_by_id(owner, key ++ "-s" ++ string(index))
         set_style(layer, "pointer-events", if (ps.phase == 'transition') "none" else "auto")^
@@ -130,9 +173,9 @@ pn present(owner, plan, before, ps, options, painted) {
     if (not player.needs_frame(ps) or before.generation != ps.generation or before.paused != ps.paused)
         dom.set_attribute(owner, "data-slide-time", c.fmt(ps.time_ms))
     if (before.slide != ps.slide)
-        dom.set_text_content(dom.query_selector(owner, ".slide-status"), string(ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
+        set_text(dom.query_selector(owner, ".slide-status"), string(ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
     if (before.playback_rate != ps.playback_rate)
-        dom.set_text_content(dom.query_selector(owner, ".slide-speed-value"), c.fmt(ps.playback_rate) ++ "×")
+        set_text(dom.query_selector(owner, ".slide-speed-value"), c.fmt(ps.playback_rate) ++ "×")
     // retain only the last successful ordinary sample; Morph has separate placement writes.
     return if (is_morph) null else visuals
 }
@@ -151,10 +194,10 @@ pn commit_event(owner, plan, before, event, options, token, painted) {
     if (problem != null) {
         dom.set_attribute(owner, "data-slide-error", problem)
         dom.set_attribute(owner, "data-slide-paused", "true")
-        dom.set_text_content(dom.query_selector(owner, ".slide-status"), problem)
+        set_text(dom.query_selector(owner, ".slide-status"), problem)
     } else if (dom.has_attribute(owner, "data-slide-error")) {
         dom.remove_attribute(owner, "data-slide-error")
-        dom.set_text_content(dom.query_selector(owner, ".slide-status"), string(result.ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
+        set_text(dom.query_selector(owner, ".slide-status"), string(result.ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
     }
     return {ps: if (problem != null) {*: result.ps, paused: true} else result.ps, token: scheduled, painted: if (problem == null) displayed.painted else null}
 }

@@ -33,6 +33,20 @@ keep their separate `.ls` extension. The MIME identity remains `text/x-mark`
 (with the existing `application/x-mark` parser mapping); this decision changes
 filenames rather than the Mark data model or syntax.
 
+### Domain formats written in Mark (D2.9.3, 2026-10-07)
+
+The user ruled that slide decks are `.slides` files — Mark syntax with a
+`<presentation>` root — presented by `lambda view deck.slides` through a
+presenter script. Making `.slides` a filename alias of `mark` would contradict
+D2.9.1, so `slides` is its own format name: the parser table maps `slides` to
+the Mark parser, the `.slides` document route requests that format explicitly
+(the `slides` document transform), and scripts call `input(path, 'slides')`.
+Generic filename detection still recognizes only `.mark`; `input("x.slides")`
+without a format is not Mark. Options considered: keep decks as `.mark`
+files (offered; the user chose the dedicated `.slides` extension), or register
+`.slides` as a Mark filename alias (rejected: D2.9.1). Record of the deck
+format: `vibe/Lambda_Pkg_Slide_Presentation.md` §0.
+
 ## Current State Analysis
 
 ### Existing Architecture

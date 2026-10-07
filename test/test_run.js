@@ -165,7 +165,6 @@ const IDLE_TIMEOUT_MS = IDLE_TIMEOUT.timeoutMs;
 // internally in test_run.sh.
 const LONG_RUNNING_TESTS = new Set([
     'test_lambda_gtest',
-    'test_py_gtest',
     'test_js_test262_gtest',
 ]);
 const LONG_RUNNING_IDLE_TIMEOUT_MS = 600 * 1000;

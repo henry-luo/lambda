@@ -17,6 +17,9 @@ enum LmdKind { K_UNDEFINED = 1, K_NULL = 2, K_BOOL = 4, K_NUMBER = 8,
     K_STRING = 16, K_ARRAY = 32, K_FUNCTION = 64, K_OBJECT = 128, K_MAP = 256, K_ANY = 511, K_BOXED = 1024 };
 struct LmdRange { double lower = 0, upper = 0; unsigned state = 0; };
 struct LmdFunction;
+struct LmdObjectPlan;
+struct LmdValue;
+struct LmdInlineFrame;
 struct LmdBinding {
     NameEntry* entry;
     LmdFunction* owner;
@@ -24,6 +27,7 @@ struct LmdBinding {
     AstNode* initializer;
     uint32_t slot;
     unsigned kinds;
+    unsigned seed_kinds;
     LmdRange range;
     AstNode* update;
     unsigned writes;
@@ -37,6 +41,7 @@ struct LmdBinding {
     bool dominated;
     MIR_reg_t reg;
     int scalar_home;
+    LmdObjectPlan* shape_hint;
 };
 struct LmdFunction {
     AstFuncNode* ast;
@@ -46,6 +51,8 @@ struct LmdFunction {
     uint32_t id;
     void* address;
     bool closed_calls;
+    bool direct_args;
+    LmdObjectPlan* shape_hint;
     bool native;
     bool integer;
     bool integer_region;
@@ -57,7 +64,8 @@ struct LmdFunction {
     MIR_var_t signature[LAMBDA_MAX_FUNCTION_ARGS];
     int arity;
 };
-struct LmdObjectPlan { AstNode* literal; TypeMap* blueprint; TypeMap* shape; };
+struct LmdObjectPlan { AstNode* literal; TypeMap* blueprint; TypeMap* shape;
+    LmdBinding* scalar_binding; LmdValue* scalar_fields; };
 struct MvpLmdProgram {
     JsTranspiler* frontend;
     MIR_context_t mir;
@@ -107,10 +115,14 @@ struct LmdCompiler {
     MIR_label_t tail_entry;
     LmdControl* control;
     bool strict;
+    LmdInlineFrame* inlining;
 };
 struct LmdValue { MIR_reg_t reg; unsigned kind; bool literal = false; double number = 0; bool integer = false; LmdRange range; };
+struct LmdInlineFrame { LmdInlineFrame* parent; int count;
+    LmdBinding* bindings[LAMBDA_MAX_FUNCTION_ARGS]; LmdValue values[LAMBDA_MAX_FUNCTION_ARGS];
+    LmdObjectPlan* plans[LAMBDA_MAX_FUNCTION_ARGS]; };
 struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
-    bool key_known = false; int64_t index = 0; MIR_reg_t name = 0; LmdObjectPlan* plan = NULL; ShapeEntry* field = NULL; };
+    bool key_known = false; int64_t index = 0; MIR_reg_t name = 0; LmdObjectPlan* plan = NULL; ShapeEntry* field = NULL; int method = 0; };
 
 static LmdBinding* binding(MvpLmdProgram* p, NameEntry* entry) {
     for (int i = 0; i < p->bindings->length; i++) {
@@ -369,6 +381,7 @@ static unsigned binary_kind(Operator op, unsigned left, unsigned right) {
     MirNumericOpPlan plan;
     return em_numeric_op_plan(op, &plan) && plan.is_comparison ? K_BOOL : K_NUMBER;
 }
+static AstNode* scalar_field_initializer(MvpLmdProgram* p, AstNode* node);
 static unsigned kind(MvpLmdProgram* p, AstNode* n) {
     if (!n) return K_UNDEFINED;
     switch (n->node_type) {
@@ -383,6 +396,10 @@ static unsigned kind(MvpLmdProgram* p, AstNode* n) {
         if (b) return b->kinds | (!b->dominated && !b->entry->is_lexical &&
             !b->entry->is_parameter && !b->target ? K_UNDEFINED : 0);
         return K_UNDEFINED;
+    }
+    case AST_NODE_MEMBER_EXPR: {
+        AstNode* value = scalar_field_initializer(p, n);
+        return value ? kind(p, value) : K_ANY;
     }
     case AST_NODE_ARRAY: return K_ARRAY;
     case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL: return K_OBJECT;
@@ -513,6 +530,10 @@ static LmdRange range_binary(Operator operation, LmdRange left, LmdRange right) 
 static LmdRange range(MvpLmdProgram* p, AstNode* n) {
     if (!n) return {0, 0, 2};
     switch (n->node_type) {
+    case AST_NODE_MEMBER_EXPR: {
+        AstNode* value = scalar_field_initializer(p, n);
+        return value ? range(p, value) : LmdRange{0, 0, 2};
+    }
     case AST_NODE_LITERAL: {
         AstLiteralNode* literal = (AstLiteralNode*)n;
         if (literal->literal_type != AST_LITERAL_NUMBER) break;
@@ -1212,6 +1233,8 @@ static void check_tdz(LmdCompiler* c, LmdBinding* b, MIR_reg_t value, AstNode* s
     }
 }
 static LmdValue read_binding(LmdCompiler* c, LmdBinding* b, AstNode* site) {
+    for (LmdInlineFrame* frame = c->inlining; frame; frame = frame->parent)
+        for (int i = 0; i < frame->count; i++) if (frame->bindings[i] == b) return frame->values[i];
     if (!b) { fail(c, LMD_MVP_REFERENCE, site); return boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED); }
     if (b->intrinsic >= 4) { fail(c, LMD_MVP_CAPABILITY, site); return boxed(c, constant(c, ITEM_JS_UNDEFINED)); }
     if (b->intrinsic) return b->intrinsic == 1
@@ -1279,15 +1302,43 @@ static MIR_reg_t property_key(LmdCompiler* c, LmdValue value) {
     move(c, result, reg(c, i)); put_label(c, done); return result;
 }
 static LmdObjectPlan* object_plan(MvpLmdProgram* p, AstNode* node) {
-    if (node && node->node_type == AST_NODE_IDENT) {
+    // predictions may follow aliases; every use still checks the immutable shape.
+    for (int depth = 0; node && node->node_type == AST_NODE_IDENT && depth < 16; depth++) {
         LmdBinding* b = identifier_binding(p, (AstIdentNode*)node);
+        if (b && b->shape_hint) return b->shape_hint;
         node = b ? b->initializer : NULL;
+    }
+    if (node && node->node_type == AST_NODE_CALL_EXPR) {
+        LmdFunction* f = direct_target(p, (AstCallNode*)node);
+        return f ? f->shape_hint : NULL;
     }
     for (int i = 0; p->objects && i < p->objects->length; i++) {
         LmdObjectPlan* plan = (LmdObjectPlan*)p->objects->data[i];
         if (plan->literal == node) return plan;
     }
     return NULL;
+}
+static AstNode* scalar_field_initializer(MvpLmdProgram* p, AstNode* node) {
+    AstFieldNode* member = (AstFieldNode*)node;
+    if (member->computed || member->object->node_type != AST_NODE_IDENT) return NULL;
+    LmdBinding* b = identifier_binding(p, (AstIdentNode*)member->object);
+    LmdObjectPlan* plan = b ? b->shape_hint : NULL;
+    if (!plan || plan->scalar_binding != b) return NULL;
+    String* key = ((AstIdentNode*)member->property)->name;
+    for (AstNode* e = ((AstMapNode*)plan->literal)->properties; e; e = e->next) {
+        AstPropertyNode* property = (AstPropertyNode*)e;
+        String* name = ((AstIdentNode*)property->key)->name;
+        if (name->len == key->len && !memcmp(name->chars, key->chars, key->len)) return property->value;
+    }
+    return NULL;
+}
+static LmdObjectPlan* value_plan(LmdCompiler* c, AstNode* node) {
+    if (node && node->node_type == AST_NODE_IDENT) {
+        LmdBinding* b = identifier_binding(c->program, (AstIdentNode*)node);
+        for (LmdInlineFrame* frame = c->inlining; frame; frame = frame->parent)
+            for (int i = 0; i < frame->count; i++) if (frame->bindings[i] == b) return frame->plans[i];
+    }
+    return object_plan(c->program, node);
 }
 static MIR_reg_t planned_shape(LmdCompiler* c, LmdObjectPlan* plan) {
     return em_load_at(&c->em, constant(c, (uint64_t)plan), offsetof(LmdObjectPlan, shape), MIR_T_I64, "literal_shape");
@@ -1307,7 +1358,7 @@ static LmdValue field_read(LmdCompiler* c, LmdReference ref) {
         value = op(c, MIR_OR, reg(c, value), integer(c, (uint64_t)type << 56));
     return boxed(c, value);
 }
-static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_label_t miss) {
+static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_label_t miss, bool fresh = false) {
     TypeId type = ref.field->type->type_id;
     unsigned k = semantic(value);
     bool matches = type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ? k == K_NUMBER :
@@ -1317,7 +1368,7 @@ static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_la
         type == LMD_TYPE_MAP ? k == K_OBJECT || k == K_MAP : false;
     if (!matches) return false;
     // this guard runs after the RHS: calls and computed keys may have reshaped the owner.
-    em_guard_map_shape(&c->em, ref.owner.reg, planned_shape(c, ref.plan), miss,
+    if (!fresh) em_guard_map_shape(&c->em, ref.owner.reg, planned_shape(c, ref.plan), miss,
         semantic(ref.owner) == K_OBJECT || semantic(ref.owner) == K_MAP);
     MIR_reg_t data = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "field_data");
     if ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) && !value.integer) {
@@ -1339,6 +1390,12 @@ static LmdValue canonical_key(LmdCompiler* c, LmdValue value) {
 static LmdReference reference(LmdCompiler* c, AstNode* n) {
     if (n->node_type == AST_NODE_IDENT) return {identifier_binding(c->program, (AstIdentNode*)n), {}, 0};
     AstFieldNode* field = (AstFieldNode*)n;
+    LmdObjectPlan* local = value_plan(c, field->object);
+    if (local && local->scalar_binding) {
+        String* name = ((AstIdentNode*)field->property)->name;
+        ShapeEntry* entry = typemap_hash_lookup(local->blueprint, name->chars, name->len);
+        return {NULL, {}, 1, true, 0, 0, local, entry};
+    }
     LmdValue owner = box(c, expression(c, field->object));
     LmdValue key = field->computed ? expression(c, field->property)
         : boxed(c, constant(c, s2it(((AstIdentNode*)field->property)->name)), K_STRING);
@@ -1361,13 +1418,14 @@ static LmdReference reference(LmdCompiler* c, AstNode* n) {
         name = boxed(c, constant(c, s2it(s)), K_STRING);
     } else name = canonical_key(c, key);
     MIR_reg_t slot = known ? constant(c, (uint64_t)index) : property_key(c, name);
-    LmdObjectPlan* plan = known ? object_plan(c->program, field->object) : NULL;
+    LmdObjectPlan* plan = known ? value_plan(c, field->object) : NULL;
     ShapeEntry* entry = NULL;
     String* spelling = !field->computed ? ((AstIdentNode*)field->property)->name :
         known && ((AstLiteralNode*)field->property)->literal_type == AST_LITERAL_STRING
             ? ((AstLiteralNode*)field->property)->value.string_value : NULL;
     if (plan && spelling) entry = typemap_hash_lookup(plan->blueprint, spelling->chars, spelling->len);
-    return {NULL, owner, slot, known, index, name.reg, plan, entry};
+    return {NULL, owner, slot, known, index, name.reg, plan, entry,
+        spelling ? mvp_lmd_map_method(spelling) : 0};
 }
 static void array_key_check(LmdCompiler* c, LmdReference ref, AstNode* site) {
     if (ref.key_known) { if (ref.index < -1) fail(c, LMD_MVP_CAPABILITY, site); }
@@ -1425,6 +1483,13 @@ static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
 }
 static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, bool callee = false) {
     if (!ref.key) return read_binding(c, ref.binding, site);
+    if (ref.plan && ref.plan->scalar_binding) {
+        int index = 0;
+        FOR_EACH_MAP_FIELD(ref.plan->blueprint, field) {
+            if (field == ref.field) return ref.plan->scalar_fields[index];
+            index++;
+        }
+    }
     unsigned k = semantic(ref.owner);
     if (k == K_ARRAY || k == K_STRING) {
         array_key_check(c, ref, site);
@@ -1444,6 +1509,13 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         move(c, result, reg(c, box(c, string_read(c, ref)).reg)); jump(c, done);
     }
     put_label(c, object);
+    if (callee && ref.method) {
+        MIR_label_t miss = label(c);
+        // capture the builtin before arguments run; the empty attribute shape excludes own overrides.
+        em_guard_map_shape(&c->em, ref.owner.reg, constant(c, (uint64_t)c->program->roots[1]), miss, true);
+        move(c, result, integer(c, mvp_lmd_method_token(ref.method))); jump(c, done);
+        put_label(c, miss);
+    }
     if (ref.plan && ref.field) {
         MIR_label_t miss = label(c);
         em_guard_map_shape(&c->em, ref.owner.reg, planned_shape(c, ref.plan), miss,
@@ -1539,6 +1611,36 @@ static LmdValue* call_arguments(LmdCompiler* c, AstCallNode* n, bool boxed_args)
     }
     return values;
 }
+struct LmdInlineBudget { int nodes; bool allowed; };
+static void inline_budget(AstNode* node, void* opaque) {
+    LmdInlineBudget* budget = (LmdInlineBudget*)opaque;
+    if (!budget->allowed || ++budget->nodes > 24) { budget->allowed = false; return; }
+    switch (node->node_type) {
+    case AST_NODE_IDENT: case AST_NODE_LITERAL: case AST_NODE_BINARY:
+    case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: case AST_NODE_CONDITIONAL_EXPR:
+    case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL: case AST_NODE_PROPERTY: break;
+    case AST_NODE_UNARY: {
+        Operator op = ((AstUnaryNode*)node)->op;
+        if (op == OPERATOR_JS_INCREMENT || op == OPERATOR_JS_DECREMENT || op == OPERATOR_JS_DELETE)
+            budget->allowed = false;
+        break;
+    }
+    default: budget->allowed = false; break;
+    }
+    if (budget->allowed) js_ast_visit_children(node, inline_budget, budget);
+}
+static AstNode* inline_body(LmdFunction* f) {
+    if (!f || !f->closed_calls || ast_linked_node_count(f->ast->params) > LAMBDA_MAX_FUNCTION_ARGS) return NULL;
+    AstNode* body = f->ast->body;
+    if (body->node_type == AST_NODE_BLOCK) {
+        body = ((AstBlockNode*)body)->statements;
+        if (!body || body->next || body->node_type != AST_NODE_RETURN_STAM) return NULL;
+        body = ((AstReturnNode*)body)->value;
+    }
+    if (!body) return NULL;
+    LmdInlineBudget budget = {0, true}; inline_budget(body, &budget);
+    return budget.allowed ? body : NULL;
+}
 struct LmdCallCapture { LmdValue callee; LmdValue* values; };
 static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = NULL) {
     bool member = !captured && ( n->callee->node_type == AST_NODE_MEMBER_EXPR || n->callee->node_type == AST_NODE_INDEX_EXPR);
@@ -1568,12 +1670,31 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     LmdBinding* b = n->callee->node_type == AST_NODE_IDENT
         ? identifier_binding(c->program, (AstIdentNode*)n->callee) : NULL;
     LmdFunction* direct = captured ? NULL : direct_target(c->program, n);
+    AstNode* body = inline_body(direct);
+    if (body) {
+        // snapshot all arguments, including extras, before substituting immutable parameter reads.
+        LmdValue* values = call_arguments(c, n, false);
+        int count = ast_linked_node_count(n->arguments);
+        LmdInlineFrame frame = {}; frame.parent = c->inlining;
+        AstNode* actual = n->arguments;
+        for (AstNode* formal = direct->ast->params; formal; formal = formal->next) {
+            int i = frame.count++;
+            frame.bindings[i] = binding(c->program, js_ast_parameter_binding_identifier(formal)->entry);
+            frame.values[i] = i < count ? values[i] : boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
+            frame.plans[i] = actual ? value_plan(c, actual) : NULL;
+            if (actual) actual = actual->next;
+        }
+        c->inlining = &frame;
+        LmdValue result = expression(c, body);
+        c->inlining = frame.parent; mem_free(values); return result;
+    }
     bool native = direct && direct->native;
+    bool direct_args = direct && direct->direct_args;
     LmdReference method = member ? reference(c, n->callee) : LmdReference{};
     LmdValue callee = captured ? captured->callee : member ? read_reference(c, method, (AstNode*)n, true) : direct && !b->observed ? boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED)
         : box(c, expression(c, n->callee));
     int count = ast_linked_node_count(n->arguments);
-    LmdValue* values = captured ? captured->values : call_arguments(c, n, !native);
+    LmdValue* values = captured ? captured->values : call_arguments(c, n, !direct_args);
     MIR_label_t builtin_call = member ? label(c) : NULL, call_done = member ? label(c) : NULL;
     MIR_reg_t member_result = member ? em_new_reg(&c->em, "method_result", MIR_T_I64) : 0;
     if (member) {
@@ -1596,7 +1717,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         target = em_load_at(&c->em, callee.reg, offsetof(Function, ptr), MIR_T_I64, "entry");
     }
     MIR_reg_t span = 0;
-    if (count && !native) {
+    if (count && !direct_args) {
         if (count > c->argument_count) c->argument_count = count;
         span = em_deferred_root_span_base(&c->em, &c->argument_span, &c->argument_fixup);
         for (i = 0; i < count; i++) em_store_at(&c->em, span, i * sizeof(Item), MIR_T_I64, values[i].reg);
@@ -1604,14 +1725,16 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     MIR_type_t types[LAMBDA_MAX_FUNCTION_ARGS] = {MIR_T_P, MIR_T_P, MIR_T_P, MIR_T_I64, MIR_T_I64};
     MIR_op_t args[LAMBDA_MAX_FUNCTION_ARGS] = {reg(c, c->em.frame.runtime), reg(c, c->unit), span ? reg(c, span) : integer(c, 0),
         integer(c, count), reg(c, callee.reg)};
-    MirImportEntry* entry = native ? &direct->entry : &c->program->entry;
-    int nargs = native ? direct->arity : 5;
-    AstNode* formal = native ? direct->ast->params : NULL;
-    if (native) for (i = 2; i < nargs; i++, formal = formal->next) {
+    MirImportEntry* entry = direct_args ? &direct->entry : &c->program->entry;
+    int nargs = direct_args ? direct->arity : 5;
+    AstNode* formal = direct_args ? direct->ast->params : NULL;
+    if (direct_args) for (i = 2; i < nargs; i++, formal = formal->next) {
         types[i] = direct->signature[i].type;
         LmdBinding* parameter = binding(c->program,
             js_ast_parameter_binding_identifier(formal)->entry);
-        args[i] = reg(c, scalar_reg(c, values[i - 2], parameter->kinds, parameter->integer));
+        LmdValue actual = i - 2 < count ? values[i - 2] : boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
+        args[i] = reg(c, parameter->native ? scalar_reg(c, actual, parameter->kinds, parameter->integer)
+            : box(c, actual).reg);
     }
     MIR_type_t result_type = native && direct->returns == K_NUMBER && !direct->integer ? MIR_T_D : MIR_T_I64;
     MIR_reg_t result = em_new_reg(&c->em, "call_result", result_type);
@@ -1635,7 +1758,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     MIR_reg_t address = em_materialize_frame_ref(&c->em, em_scalar_home_ref(&c->em, home));
     MIR_reg_t resolved = em_resolve_pending_pair(&c->em, result, companion, address);
     em_scalar_home_bind(&c->em, home, resolved);
-    if (count) {
+    if (count && !direct_args) {
         MIR_reg_t absent = constant(c, ITEM_JS_UNDEFINED);
         for (i = 0; i < count; i++) em_store_at(&c->em, span, i * sizeof(Item), MIR_T_I64, absent);
     }
@@ -1656,11 +1779,12 @@ static bool tail_call(LmdCompiler* c, AstNode* n) {
     if (!c->tail_entry || !n || n->node_type != AST_NODE_CALL_EXPR ||
             direct_target(c->program, (AstCallNode*)n) != c->function) return false;
     LmdValue* values = call_arguments(c, (AstCallNode*)n, false);
-    int i = 0;
+    int count = ast_linked_node_count(((AstCallNode*)n)->arguments), i = 0;
     // evaluate every argument before overwriting any parameter, including discarded extras.
     for (AstNode* a = c->function->ast->params; a; a = a->next, i++) {
         LmdBinding* b = binding(c->program, js_ast_parameter_binding_identifier(a)->entry);
-        write_binding(c, b, values[i], n, true);
+        LmdValue actual = i < count ? values[i] : boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
+        write_binding(c, b, actual, n, true);
     }
     mem_free(values); release_iterators(c); jump(c, c->tail_entry); return true;
 }
@@ -1816,18 +1940,35 @@ static LmdValue expression(LmdCompiler* c, AstNode* n) {
     }
     case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL: {
         LmdObjectPlan* plan = object_plan(c->program, n);
+        if (plan && plan->scalar_binding) {
+            int index = 0;
+            for (AstNode* e = ((AstMapNode*)n)->properties; e; e = e->next) {
+                LmdValue value = expression(c, ((AstPropertyNode*)e)->value);
+                // each initializer still runs once, in order; retain borrowed scalar storage precisely.
+                plan->scalar_fields[index++] = is_boxed(value) ? stable_item(c, value.reg) : value;
+            }
+            return boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
+        }
         MIR_reg_t shape = plan ? planned_shape(c, plan) : constant(c, (uint64_t)c->program->roots[0]);
         MIR_reg_t object = em_call_2(&c->em, "mvp_lmd_object_new", MIR_T_I64,
             MIR_T_P, reg(c, shape), MIR_T_I64, integer(c, 0), true);
         check_error(c, object); LmdValue owner = boxed(c, object, K_OBJECT);
         for (AstNode* e = ((AstMapNode*)n)->properties; e; e = e->next) {
             AstPropertyNode* prop = (AstPropertyNode*)e;
-            LmdValue key = !prop->computed && prop->key->node_type == AST_NODE_IDENT
-                ? boxed(c, constant(c, s2it(((AstIdentNode*)prop->key)->name)), K_STRING) : expression(c, prop->key);
-            LmdValue name = canonical_key(c, key), value = box(c, expression(c, prop->value));
+            String* spelling = !prop->computed && prop->key->node_type == AST_NODE_IDENT
+                ? name_pool_create_string(c->program->frontend->name_pool, ((AstIdentNode*)prop->key)->name) : NULL;
+            LmdValue name = spelling ? boxed(c, constant(c, s2it(spelling)), K_STRING)
+                : canonical_key(c, expression(c, prop->key));
+            LmdValue value = expression(c, prop->value);
+            MIR_label_t miss = label(c), done = label(c);
+            ShapeEntry* field = plan && spelling ? typemap_hash_lookup(plan->blueprint, spelling->chars, spelling->len) : NULL;
+            // the first field cannot observe this fresh owner; later fields may follow a retype fallback.
+            if (field && field_write(c, {NULL, owner, 0, true, 0, name.reg, plan, field}, value, miss,
+                    e == ((AstMapNode*)n)->properties)) jump(c, done);
+            put_label(c, miss);
             MIR_reg_t stored = em_call_3(&c->em, "mvp_lmd_property_set", MIR_T_I64,
-                MIR_T_I64, reg(c, owner.reg), MIR_T_I64, reg(c, name.reg), MIR_T_I64, reg(c, value.reg), true);
-            check_error(c, stored);
+                MIR_T_I64, reg(c, owner.reg), MIR_T_I64, reg(c, name.reg), MIR_T_I64, reg(c, box(c, value).reg), true);
+            check_error(c, stored); put_label(c, done);
         }
         return owner;
     }
@@ -1854,6 +1995,7 @@ static void scope_initialize(LmdCompiler* c, NameScope* scope) {
     for (NameEntry* e = scope ? scope->first : NULL; e; e = e->next) {
         LmdBinding* b = binding(c->program, e);
         if (!b || b->owner != c->function || e->is_parameter || b->native || b->intrinsic) continue;
+        if (b->shape_hint && b->shape_hint->scalar_binding == b) continue;
         if (e->is_function_name_binding) {
             write_binding(c, b, boxed(c, c->self, K_FUNCTION), e->node, true);
         } else if (b->target && e->node && e->node->node_type == AST_NODE_FUNC &&
@@ -2037,8 +2179,11 @@ static void statement(LmdCompiler* c, AstNode* n) {
         for (AstNode* d = ((AstVarDeclNode*)n)->declarations; d; d = d->next) {
             AstDeclaratorNode* declaration = (AstDeclaratorNode*)d;
             LmdBinding* b = binding(c->program, ((AstIdentNode*)declaration->id)->entry);
-            if (declaration->init || ((AstVarDeclNode*)n)->kind != JS_VAR_VAR)
-                write_binding(c, b, expression(c, declaration->init), d, true);
+            if (declaration->init || ((AstVarDeclNode*)n)->kind != JS_VAR_VAR) {
+                LmdValue value = expression(c, declaration->init);
+                if (!b->shape_hint || b->shape_hint->scalar_binding != b)
+                    write_binding(c, b, value, d, true);
+            }
         }
         break;
     case AST_NODE_EXPR_STMT: {
@@ -2210,7 +2355,7 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
     frame->return_lane_kind = f->native ? RETURN_LANE_ERROR : RETURN_LANE_SCALAR;
     frame->runtime = MIR_reg(p->mir, "runtime", c.em.func);
     c.unit = MIR_reg(p->mir, "unit", c.em.func);
-    if (!f->native) {
+    if (!f->direct_args) {
         c.arguments = MIR_reg(p->mir, "arguments", c.em.func);
         c.argc = MIR_reg(p->mir, "argc", c.em.func);
         c.self = MIR_reg(p->mir, "self", c.em.func);
@@ -2244,8 +2389,10 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
         for (AstNode* a = f->ast->params; a; a = a->next, i++) {
             AstIdentNode* id = js_ast_parameter_binding_identifier(a);
             LmdBinding* b = binding(p, id->entry);
-            if (f->native) {
-                write_binding(&c, b, {MIR_reg(p->mir, f->signature[i + 2].name, c.em.func), b->kinds, false, 0, b->integer, b->range}, a, true);
+            if (f->direct_args) {
+                MIR_reg_t value = MIR_reg(p->mir, f->signature[i + 2].name, c.em.func);
+                write_binding(&c, b, b->native ? LmdValue{value, b->kinds, false, 0, b->integer, b->range}
+                    : boxed(&c, value, b->kinds), a, true);
                 continue;
             }
             MIR_reg_t value = em_new_reg(&c.em, "parameter", MIR_T_I64);
@@ -2335,6 +2482,9 @@ static int admission_pass(void* opaque) {
     }
     LmdWalk gather = {p, main, NULL, false}; walk(p->frontend->ast_root, &gather);
     gather.facts = true; walk(p->frontend->ast_root, &gather);
+    for (int i = 0; i < p->bindings->length; i++) {
+        LmdBinding* b = (LmdBinding*)p->bindings->data[i]; b->seed_kinds = b->kinds;
+    }
     return !p->diagnostic[0];
 }
 static int representation_pass(void* opaque) {
@@ -2383,10 +2533,8 @@ static int representation_pass(void* opaque) {
     }
     for (int i = 1; i < p->functions->length; i++) {
         LmdFunction* f = (LmdFunction*)p->functions->data[i];
-        f->native = f->closed_calls && (f->returns == K_NUMBER || f->returns == K_BOOL) &&
-            ast_linked_node_count(f->ast->params) + 2 <= LAMBDA_MAX_FUNCTION_ARGS;
-        for (AstNode* a = f->ast->params; a; a = a->next)
-            f->native &= binding(p, js_ast_parameter_binding_identifier(a)->entry)->native;
+        f->direct_args = f->closed_calls && ast_linked_node_count(f->ast->params) + 2 <= LAMBDA_MAX_FUNCTION_ARGS;
+        f->native = f->direct_args && (f->returns == K_NUMBER || f->returns == K_BOOL);
         f->integer = f->native && f->returns == K_NUMBER && f->range.state == 1;
     }
     // keep closed native numeric regions coherent instead of converting invariant operands in a float loop.
@@ -2423,10 +2571,7 @@ static void plan_objects(AstNode* node, void* opaque) {
             TypeId tid = k == K_UNDEFINED ? LMD_TYPE_UNDEFINED : k == K_NULL ? LMD_TYPE_NULL :
                 k == K_BOOL ? LMD_TYPE_BOOL : k == K_STRING ? LMD_TYPE_STRING : k == K_ARRAY ? LMD_TYPE_ARRAY :
                 k == K_OBJECT || k == K_MAP ? LMD_TYPE_MAP : k == K_FUNCTION ? LMD_TYPE_FUNC : LMD_TYPE_ANY;
-            if (k == K_NUMBER && prop->value->node_type == AST_NODE_LITERAL) {
-                double number = ((AstLiteralNode*)prop->value)->value.number_value;
-                tid = finite_integer(number) ? LMD_TYPE_INT : LMD_TYPE_FLOAT;
-            }
+            if (k == K_NUMBER) tid = range(p, prop->value).state == 1 ? LMD_TYPE_INT : LMD_TYPE_FLOAT;
             if (tid == LMD_TYPE_ANY) { exact = false; break; }
             ShapeEntry* field = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
             if (!field) { exact = false; break; }
@@ -2447,11 +2592,97 @@ static void plan_objects(AstNode* node, void* opaque) {
     }
     js_ast_visit_children(node, plan_objects, opaque);
 }
+struct LmdShapes { MvpLmdProgram* program; LmdFunction* owner; bool changed; };
+static void shape_hint(LmdShapes* state, LmdObjectPlan** target, AstNode* value) {
+    if (*target) return;
+    *target = object_plan(state->program, value);
+    state->changed |= *target != NULL;
+}
+static void shape_walk(AstNode* node, void* opaque) {
+    LmdShapes* state = (LmdShapes*)opaque;
+    MvpLmdProgram* p = state->program;
+    LmdFunction* f = function(p, node);
+    if (f) {
+        LmdShapes inner = {p, f, false};
+        if (f->ast->body->node_type != AST_NODE_BLOCK) shape_hint(&inner, &f->shape_hint, f->ast->body);
+        js_ast_visit_children(node, shape_walk, &inner);
+        state->changed |= inner.changed; return;
+    }
+    if (node->node_type == AST_NODE_RETURN_STAM && state->owner)
+        shape_hint(state, &state->owner->shape_hint, ((AstReturnNode*)node)->value);
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        f = direct_target(p, call);
+        AstNode* actual = call->arguments;
+        for (AstNode* formal = f && f->closed_calls ? f->ast->params : NULL;
+                formal && actual; formal = formal->next, actual = actual->next) {
+            LmdBinding* b = binding(p, js_ast_parameter_binding_identifier(formal)->entry);
+            shape_hint(state, &b->shape_hint, actual);
+        }
+    }
+    if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        AstDeclaratorNode* d = (AstDeclaratorNode*)node;
+        if (d->id->node_type == AST_NODE_IDENT) {
+            LmdBinding* b = identifier_binding(p, (AstIdentNode*)d->id);
+            shape_hint(state, &b->shape_hint, d->init);
+        }
+    }
+    js_ast_visit_children(node, shape_walk, state);
+}
+static void plan_scalar_objects(MvpLmdProgram* p) {
+    const AstIndex* index = &p->frontend->ast_index;
+    for (int i = 0; i < p->bindings->length; i++) {
+        LmdBinding* b = (LmdBinding*)p->bindings->data[i];
+        LmdObjectPlan* plan = b->shape_hint;
+        if (!plan || plan->literal != b->initializer || b->external || !b->dominated ||
+                b->writes != 1 || !plan->blueprint->length || plan->blueprint->length > 4) continue;
+        bool local = true;
+        for (uint32_t id = 0; local && id < index->count; id++) {
+            AstNode* use = index->nodes[id];
+            if (use->node_type != AST_NODE_IDENT || ((AstIdentNode*)use)->entry != b->entry) continue;
+            AstNode* parent = ast_index_parent(index, use);
+            if (parent && parent->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                    ((AstDeclaratorNode*)parent)->id == use) continue;
+            // JS identity, mutation and use before initialization all require a real object.
+            if (!parent || parent->node_type != AST_NODE_MEMBER_EXPR ||
+                    ((AstFieldNode*)parent)->object != use || ((AstFieldNode*)parent)->computed ||
+                    use->source_span.start_byte < b->initializer->source_span.end_byte) { local = false; break; }
+            AstFieldNode* member = (AstFieldNode*)parent;
+            String* key = ((AstIdentNode*)member->property)->name;
+            AstNode* consumer = ast_index_parent(index, parent);
+            if (!typemap_hash_lookup(plan->blueprint, key->chars, key->len) ||
+                    (consumer && ((consumer->node_type == AST_NODE_ASSIGN && ((AstAssignNode*)consumer)->left == parent) ||
+                    (consumer->node_type == AST_NODE_UNARY &&
+                        (((AstUnaryNode*)consumer)->op == OPERATOR_JS_DELETE ||
+                         ((AstUnaryNode*)consumer)->op == OPERATOR_JS_INCREMENT ||
+                         ((AstUnaryNode*)consumer)->op == OPERATOR_JS_DECREMENT)) ||
+                    (consumer->node_type == AST_NODE_CALL_EXPR && ((AstCallNode*)consumer)->callee == parent)))) local = false;
+        }
+        if (local) {
+            plan->scalar_binding = b;
+            plan->scalar_fields = (LmdValue*)pool_calloc(p->frontend->pool, plan->blueprint->length * sizeof(LmdValue));
+            if (!plan->scalar_fields) diagnostic(p, plan->literal, "scalar field allocation");
+        }
+    }
+}
 static int lower_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
     p->objects = arraylist_new(8);
     plan_objects(p->frontend->ast_root, p);
     if (p->diagnostic[0]) return false;
+    LmdShapes shapes = {p, NULL, true};
+    while (shapes.changed) { shapes.changed = false; shape_walk(p->frontend->ast_root, &shapes); }
+    plan_scalar_objects(p);
+    // proven unobservable fields feed the existing type/range solver, including accumulator lanes.
+    for (int i = 0; i < p->bindings->length; i++) {
+        LmdBinding* b = (LmdBinding*)p->bindings->data[i];
+        b->kinds = b->seed_kinds; b->range = {}; b->range_changes = 0;
+    }
+    for (int i = 0; i < p->functions->length; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        f->returns = 0; f->range = {}; f->range_changes = 0;
+    }
+    if (!representation_pass(p) || p->diagnostic[0]) return false;
     p->import_cache = em_import_cache_new(32);
     p->mir = MIR_init(); p->module = MIR_new_module(p->mir, "js_mvp_lmd");
     MIR_type_t result_type = MIR_T_I64;
@@ -2472,18 +2703,18 @@ static int lower_pass(void* opaque) {
             f->return_abi.error_lane = FN_ERROR_LANE_CONTEXT_ITEM;
             f->return_abi.error = {LMD_TYPE_ERROR, VALUE_REP_ITEM, SCALAR_RETURN_NONE};
         }
-        if (f->native) {
+        if (f->direct_args) {
             MIR_type_t types[LAMBDA_MAX_FUNCTION_ARGS] = {MIR_T_P, MIR_T_P};
             uint64_t classes = ARG(0,RAW_PTR) | ARG(1,RAW_PTR);
             f->arity = 2;
             for (AstNode* a = f->ast->params; a; a = a->next) {
                 LmdBinding* b = binding(p, js_ast_parameter_binding_identifier(a)->entry);
-                types[f->arity] = b->kinds == K_NUMBER && !b->integer ? MIR_T_D : MIR_T_I64;
-                classes |= ARG(f->arity, SCALAR); f->arity++;
+                types[f->arity] = b->native && b->kinds == K_NUMBER && !b->integer ? MIR_T_D : MIR_T_I64;
+                classes |= b->native ? ARG(f->arity, SCALAR) : ARG(f->arity, ITEM); f->arity++;
             }
             mir_prepare_call_args(f->signature, types, f->arity);
             f->signature[0].name = "runtime"; f->signature[1].name = "unit";
-            MIR_type_t results[] = {f->returns == K_NUMBER && !f->integer ? MIR_T_D : MIR_T_I64, MIR_T_I64};
+            MIR_type_t results[] = {f->native && f->returns == K_NUMBER && !f->integer ? MIR_T_D : MIR_T_I64, MIR_T_I64};
             char name[64]; snprintf(name, sizeof(name), "%s_signature", f->name);
             f->entry.proto = MIR_new_proto_arr(p->mir, name, em_return_nres(f->return_abi.companion), results, f->arity, f->signature);
             f->entry.audit = (JitImportMetadata)AUDIT(JIT_EFFECT_MAY_GC, SCALAR, classes);

@@ -186,7 +186,7 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 - `doc/tutorial/README.md` — Ten-chapter tutorial; `make check-tutorial` replays its examples and checks their output
 - `doc/Lambda_Validator.md` — Schema-based data validation
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
-- `doc/dev/Lambda_Jube_Runtime.md` — Hosted-language (Jube) module build and packaging (Python ships; the Bash and Ruby front ends are compiled out)
+- `doc/dev/Lambda_Jube_Runtime.md` — Jube native-module build and packaging (Node compatibility and RDB modules; hosted languages removed 2026-10-07, the Bash and Ruby front ends are compiled out)
 - `doc/dev/radiant/RAD_00_Overview.md` — Radiant engine detailed design — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table/positioned), the rendering pipeline (paint IR, display list, painters, PDF/SVG), vector graphics, events, animation, editing, forms, interaction state, application shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set)
 - `doc/dev/lambda/LR_00_Overview.md` — Lambda core-runtime detailed design — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, runtime builtins, error handling, the Mark data API, the procedural runtime, and the schema validator (index to the LR_01–LR_13 set)
 - `doc/dev/js/JS_00_Overview.md` — LambdaJS runtime detailed design — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility (index to the JS_01–JS_16 set)

@@ -137,3 +137,62 @@ extracted builtin method values, `forEach`, iterator objects/IteratorClose,
 properties beyond the admitted surface are diagnosed. Namespace/NameId
 migration gaps outside the shared string encoding boundary retain their
 existing formal-spec status.
+
+## 5. Bounded tuning implementation
+
+The tuning phase in `JS_MVP_Lmd.md` keeps **D8.4.1v2** immutable guards and
+**D5.3** precise ownership. It adds no JIT runtime imports and uses the existing
+AST index, type/range solver, field emitter, direct-call metadata, scalar homes
+and shared transition storage.
+
+- Literal planning accepts inferred numeric expressions. Static identifier keys
+  are canonicalized by the shared name pool during compilation; field stores
+  reuse the guarded writer. Only the first store into a fresh owner omits its
+  shape guard.
+- Each binding/return carries one immutable shape prediction. Aliases, closed
+  parameters and recursive return/call edges propagate it to a fixed point;
+  other layouts use the existing slow path. Closed calls pass individual
+  operands independently of their result representation (**D8.4.2v2**), with
+  boxed arguments described as precise Items.
+- Scalar replacement admits at most four fields, a single dominating
+  initializer, and only static reads of existing fields. Identity uses, aliases,
+  captures, mutation, method calls and early reads retain allocation. Initializers
+  execute once in order. Their proven facts feed the existing solver again so
+  arithmetic can retain native lanes. Lambda's contract-driven record analysis
+  is not applicable to mutable JS identity; its shared AST index, shape storage
+  and MIR/rooting substrate are reused.
+- Inlining accepts a closed function with one returned expression and at most
+  24 AST nodes. Calls and writes inside that expression are excluded; arguments,
+  including discarded extras, are evaluated before parameter substitution.
+- Heap payloads remain in place for transitions whose surviving fields retain
+  their offsets/widths and whose replacement has a simple nonallocating store.
+  The complete layout is checked before publishing the new shape; repacking
+  remains the fallback (**D3.4.5–D3.4.6**). Existing add transitions already reuse
+  spare payload capacity.
+- Named Map methods use an empty-attribute-shape guard and the shared method
+  spelling classifier. Selection occurs before arguments run. Numeric hashing
+  keeps normalized NaN/zero bits; immediate entry writes use the existing array
+  store's nonallocating path. Wide numeric homes, canonical strings and live
+  iteration retain their existing ownership rules.
+
+General polymorphic guard chains, loop-body inlining and scalar replacement of
+escaping objects are outside these bounded optimizations. No new private
+allocator, mutable cache, VMap path or JS semantic feature is introduced.
+
+### 5.1 Latest validation
+
+The current sources pass MVP **30/30**, forced-GC/poison object and Map groups
+**10/10**, and the shared Lambda/input baseline **6,286/6,286**. Test262 reports
+zero semantic failures/regressions: **40,259 fully passed + 2 retry-only** Unicode
+10 identifier cases. The focused GTest configuration is `debug_native`;
+performance binaries are release builds.
+
+The final release comparison uses 15 alternating pairs, a control peer in every
+round, and Node; all **16 oracles / 960 measured outputs** pass. Numeric, array,
+call and string controls are included. High host load leaves small changes
+unresolved, including retyping; transition lookup is a remaining profiling
+target. Exact binary/source hashes, paired intervals, control/control ratios,
+and gate-log hashes are in
+[`tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/tuning_mir_20261007.json).
+Raw evidence and the frozen reproducer are under `temp/mvp_lmd_tuning/confirm/`.
+The earlier `screen/` overlapped build work and is excluded from final claims.

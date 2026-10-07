@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/view.hpp"
+#include "../radiant/layout.hpp"
+#include "../radiant/render.hpp"
 #include "../radiant/event.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
@@ -91,6 +93,48 @@ TEST_F(ViewReuseTest, CanonicalIndexReusesAnExistingExactValue) {
     EXPECT_EQ(child2->in_line, first);
     EXPECT_EQ(tree.inline_canonical_count, 1u);
     EXPECT_EQ(tree.canonical_stats.inline_hits, 1u);
+}
+
+TEST_F(ViewReuseTest, ComputedFamilyListsShareOneTreeLifetimeString) {
+    CssValue* parts[] = {
+        css_value_create_string(tree.prop_pool, "Arial"),
+        css_value_create_keyword(tree.prop_pool, "sans-serif"),
+    };
+    CssValue* list = css_value_create_list(tree.prop_pool, parts, 2);
+    ASSERT_NE(list, nullptr);
+    list->data.list.comma_separated = true;
+    LayoutContext lycon = {};
+    lycon.selected_view_tree = lam::up(&tree);
+
+    const char* first = css_select_font_family(&lycon, list);
+    ASSERT_NE(first, nullptr);
+    EXPECT_STREQ(first, "Arial, sans-serif");
+    // inherited and copied fonts borrow the family; nothing frees it per restyle
+    FontProp parent = {};
+    FontProp child = {};
+    radiant_retain_font_family(&parent, lam::PoolPtr<char>((char*)first));
+    radiant_copy_font_values(&child, &parent);
+
+    PoolStats warm = {};
+    pool_get_detailed_stats(tree.prop_pool, &warm);
+    for (int i = 0; i < 256; i++) {
+        const char* again = css_select_font_family(&lycon, list);
+        ASSERT_EQ(again, first);
+        radiant_retain_font_family(&parent, lam::PoolPtr<char>((char*)again));
+    }
+    PoolStats repeated = {};
+    pool_get_detailed_stats(tree.prop_pool, &repeated);
+    EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    EXPECT_STREQ(child.family, "Arial, sans-serif");
+
+    // equal text from a foreign, unterminated buffer reuses the canonical copy
+    char foreign[] = "Arial, sans-serif, monospace";
+    EXPECT_EQ(view_tree_canonical_font_family(&tree, foreign, 17), first);
+    const char* other = view_tree_canonical_font_family(&tree, foreign, strlen(foreign));
+    ASSERT_NE(other, nullptr);
+    EXPECT_NE(other, first);
+    EXPECT_STREQ(other, "Arial, sans-serif, monospace");
+    EXPECT_EQ(tree.canonical_stats.font_family_misses, 2u);
 }
 
 TEST_F(ViewReuseTest, CanonicalCapFallsBackToOwnedStorage) {
@@ -792,6 +836,78 @@ TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
     arena_get_stats(doc.node_arena, &after);
     EXPECT_EQ(after.fresh_growth_bytes, warm.fresh_growth_bytes);
     EXPECT_GE(after.bump_back_count - warm.bump_back_count, 10000u);
+}
+
+TEST_F(DomRetirementTest, RecycledNodesReleaseTheirRegistryRecords) {
+    DomElement* parent = root();
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.document_pool, &warm);
+    DomLifecycleStats warm_stats = {};
+    dom_lifecycle_get_stats(&doc, &warm_stats);
+    DomElement* children[64] = {};
+    DomNodeRef refs[64] = {};
+    for (int i = 0; i < 64; i++) {
+        children[i] = element("child");
+        ASSERT_NE(children[i], nullptr);
+        refs[i] = dom_node_ref(static_cast<DomNode*>(children[i]));
+        ASSERT_TRUE(attach(parent, children[i]));
+    }
+    for (int i = 0; i < 64; i++) ASSERT_TRUE(parent->remove_child(children[i]));
+    EXPECT_EQ(dom_retire_sweep(&doc), 64u);
+    // a record outlives no recycled slot; a stale ref still fails validation
+    PoolStats after = {};
+    pool_get_detailed_stats(doc.document_pool, &after);
+    EXPECT_EQ(after.live_bytes, warm.live_bytes);
+    for (int i = 0; i < 64; i++) EXPECT_EQ(dom_node_ref_validate(&doc, refs[i]), nullptr);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.recycled_nodes - warm_stats.recycled_nodes, 64u);
+    // the recycled slots are reused by the next generation of nodes
+    DomElement* next = element("child");
+    ASSERT_NE(next, nullptr);
+    EXPECT_NE(dom_node_ref_validate(&doc, dom_node_ref(static_cast<DomNode*>(next))), nullptr);
+}
+
+TEST_F(DomRetirementTest, WrapperOnlyDetachedSubtreesReportStrandedBytesForIdleCollection) {
+    DomElement* parent = root();
+    DomElement* held = element("held");
+    DomElement* held_child = element("child");
+    DomElement* observed = element("observed");
+    ASSERT_TRUE(attach(parent, held));
+    ASSERT_TRUE(attach(held, held_child));
+    ASSERT_TRUE(attach(parent, observed));
+    DomNodeRef held_ref = dom_node_ref(static_cast<DomNode*>(held));
+    DomNodeRef observed_ref = dom_node_ref(static_cast<DomNode*>(observed));
+    // a wrapper on a descendant strands the whole detached subtree; an observer
+    // pin is not a wrapper, so that subtree waits on something a GC cannot clear
+    ASSERT_TRUE(dom_node_pin(&doc, dom_node_ref(static_cast<DomNode*>(held_child)), DOM_NODE_PIN_WRAPPER));
+    ASSERT_TRUE(dom_node_pin(&doc, observed_ref, DOM_NODE_PIN_OBSERVER));
+    ASSERT_TRUE(parent->remove_child(held));
+    ASSERT_TRUE(parent->remove_child(observed));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    ASSERT_GT(stats.wrapper_stranded_bytes, 0u);
+    size_t stranded = stats.wrapper_stranded_bytes;
+    EXPECT_TRUE(dom_retire_wrapper_collection_due(&doc, stranded));
+    EXPECT_FALSE(dom_retire_wrapper_collection_due(&doc, stranded + 1));
+    // repeated sweeps charge a detachment once
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.wrapper_stranded_bytes, stranded);
+    // a collection that leaves the wrapper alive resets pacing to the survivors
+    dom_retire_wrapper_collection_done(&doc);
+    EXPECT_FALSE(dom_retire_wrapper_collection_due(&doc, 1));
+
+    // clearing the wrapper (what the collection does) retires the subtree
+    ASSERT_TRUE(dom_node_unpin(&doc, dom_node_ref(static_cast<DomNode*>(held_child)), DOM_NODE_PIN_WRAPPER));
+    EXPECT_EQ(dom_retire_sweep(&doc), 2u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, held_ref), nullptr);
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.wrapper_stranded_bytes, 0u);
+    ASSERT_TRUE(dom_node_unpin(&doc, observed_ref, DOM_NODE_PIN_OBSERVER));
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
 }
 
 TEST_F(DomRetirementTest, MoreThanMutationRecordCapRetiresAfterPinsRelease) {

@@ -510,51 +510,87 @@ computed growth, retyping, deletion churn, lookup/update, and key/value loops.
 
 ### 10.8 Latest validation and release evidence — 2026-10-07
 
-- Focused MVP suite: **30/30** groups.
-- New object/Map groups with `LAMBDA_GC_FORCE_EVERY=1` and
-  `LAMBDA_GC_POISON_FREED=1`: **10/10**.
-- Shared Lambda/input baseline: **6,286/6,286**, including **194/194** full-JS
-  script/ownership groups and the canonical-string client regression.
-- Unchanged full-JS Test262 regression gate: **exit 0, zero semantic failures
-  or regressions**. Latest rerun: **40,259 fully passed + 2 retry-only** out of
-  40,261. Unicode identifier-start cases for versions 9 and 10 remain batch
-  unstable/slow; both pass isolated retry. This is not a clean all-fully-passing
-  result. No runner, baseline, timeout, or test expectation was changed.
+The bounded tuning phase in §11 is implemented. Latest gates:
 
-Release comparison: five fresh-process samples per engine, rotating order,
-after one untimed process. Timings exclude startup, compilation, printing and
-teardown; MVP measures program entry, while full JS and Node bracket `work()`.
-Node's tiering within that call is included. All **6/6** workload oracles pass.
+- MVP: **30/30**; object/Map groups with forced GC and poisoning: **10/10**.
+- Shared Lambda/input baseline: **6,286/6,286**.
+- Full-JS Test262: **zero regressions or semantic failures**; **40,259 fully
+  passed + 2 retry-only** Unicode 10 identifier cases out of 40,261. This is
+  not an all-fully-passing result.
 
-| Workload | MVP ms | Full JS MIR ms | Node ms | MIR instructions, MVP / full JS |
+Release comparison: 15 alternating before/after pairs per workload, with a
+second control sample and Node in each round, after one discarded process per
+lane. **All 16 workload oracles and 960 measured outputs pass.** MIR is pinned;
+the table uses self-reported execution times, excluding MVP startup and
+compilation. Node's tiering during its workload is included.
+
+| Workload | Before ms | Tuned ms | Node ms | Paired speedup |
 |---|---:|---:|---:|---:|
-| Fixed fields | 3.367 | 10.074 | 1.667 | 1,047 / 894 |
-| Computed growth | 3.777 | 42.708 | 4.061 | 1,103 / 850 |
-| Retyping | 38.161 | 60.650 | 1.534 | 858 / 794 |
-| Delete/re-add | 3.159 | 96.198 | 1.115 | 1,052 / 881 |
-| Map lookup/update | 28.739 | 108.679 | 3.939 | 1,203 / 976 |
-| Map key/value loop | 1.923 | 674.256 | 3.617 | 1,358 / 1,085 |
+| larceny\_deriv | 81.871 | 54.438 | 27.544 | 1.52× |
+| larceny\_gcbench | 450.636 | 242.265 | 36.480 | 1.89× |
+| js\_micro\_lit | 79.198 | 0.152 | 4.822 | 520.46× |
+| js\_micro\_named | 36.264 | 36.074 | 7.776 | 1.00× |
+| js\_micro\_args\_ctl | 42.334 | 16.120 | 4.360 | 2.27× |
+| js\_micro\_args\_fp | 49.888 | 17.760 | 4.249 | 2.68× |
+| object\_fields | 3.951 | 3.748 | 3.573 | 1.05× |
+| object\_growth | 5.116 | 5.942 | 11.379 | 0.96× |
+| object\_retype | 61.197 | 55.000 | 2.511 | 1.05× |
+| object\_delete | 4.563 | 4.147 | 2.473 | 1.13× |
+| map\_lookup | 45.849 | 26.845 | 10.235 | 1.70× |
+| map\_iteration | 2.834 | 2.680 | 14.548 | 1.02× |
 
-MIR counts are finalized before JIT and include cold/error paths. MVP emits
-two bodies per workload; full JS emits three. MVP's emitter plans use 6–12
-root slots and 7–16 scalar homes in total across those bodies. Static MIR is
-larger than full JS in all six rows, despite fewer calls and bodies. Further
-MIR reduction and retyping/lookup performance remain tuning work. These
-cross-engine measurements do not establish a causal optimization gain.
+Speedup is the median of paired ratios; the time columns are independent
+medians. Host load was high (1-minute load **84.9 → 57.4**, eight logical CPUs).
+The clear gains are `deriv`, `gcbench`, `lit`, the two argument cases and Map
+lookup. Small changes in named fields, growth, retyping, deletion and iteration
+remain inconclusive. The four numeric/array/call/string controls also show no
+resolved change. Per-round control/control ratios and paired intervals are
+retained in the artifact; these measurements establish the bundle's gains,
+not each individual change's contribution.
 
-Separate single-process peak RSS observations, including startup and JIT:
-MVP **27.6–30.6 MiB**, full JS **31.1–150.0 MiB**, Node **45.3–47.3 MiB**.
-These are process peaks, not live container sizes or allocation counts.
+The `lit` fast path removes allocation/property calls and keeps its accumulation
+in a proven integer lane. Broader shape polymorphism and retyping performance
+remain tuning work. `gcbench` includes the final long-lived traversal in every
+lane; `named` combines its two original loops.
 
-Code cost: **20 imported MVP runtime entries**, ten added in this phase;
-**333 lines** of new object/Map runtime code including internal utilities,
-and **503 runtime C++ lines** total. The MIR compiler adds 468 net lines;
-shared substrate changes add 244/remove 33 lines. The full-JS encoding client
-fixes add 28/remove 13 lines. Counts include comments and blank lines.
+Evidence: [`tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/tuning_mir_20261007.json).
+Exact binaries, matched sources, raw output, fresh MIR and gate logs are under
+`temp/mvp_lmd_tuning/`; the latest paired run is `confirm/`.
+Release SHA-256: `d0ac0f6188f72c48f92afe5f3757583b5fa5e3b254e36dd0a2f3376174f96d46`.
+Implementation boundaries are recorded in
+[`JS_MVP_Lmd_Objects.md`](../impl/JS_MVP_Lmd_Objects.md#5-bounded-tuning-implementation).
 
-The checked sources, raw timing samples, MIR/frame metrics, RSS observations,
-gate logs and hashes are indexed in
-[`objects_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/objects_mir_20261007.json).
-Release binary SHA-256:
-`3e2cc7f7d392493c4874a182b987d0147b2f52657b7603579c895053d58678af`.
-Its exact archive and fresh MIR artifacts remain under `temp/mvp_lmd_objects/`.
+## 11. Object and Map tuning
+
+Implemented as bounded optimizations, in this order:
+
+1. Predict complete literal shapes from existing type/range facts, canonicalize
+   static keys during compilation, and initialize known fields directly.
+2. Carry bounded shape predictions through aliases and closed calls; retain
+   typed field values and pass rooted object arguments individually.
+3. Remove redundant boxing and guards where mutation and safepoint analysis
+   proves this safe.
+4. Reuse payload storage for compatible shape transitions; preserve the shared
+   rebuild path for layouts that move fields.
+5. Specialize admitted Map method calls and immediate entry updates, retaining
+   SameValueZero, identity, insertion order and live iteration.
+6. Apply bounded inlining and scalar replacement to local objects whose identity
+   and allocation cannot be observed, sharing neutral compiler machinery where
+   available.
+
+These changes use immutable shape guards (**D3.4.3v5–D3.4.6**, **D8.4.1v2**),
+the direct-call ABI (**D8.4.2v2**), and precise ownership (**D5.3**). Canonical
+UTF8/WTF8 identity remains shared with Lambda (**S8.2.2v5**, **D4.6.1v4**);
+JS Number behavior remains governed by **D2.2.5** and **S1.11**. VMap,
+`__proto__`, descriptors, accessors and proxies remain outside the phase.
+
+The current bounds are one shape prediction per binding/return, four fields
+for scalar replacement, and 24 AST nodes for expression inlining. Escaping or
+mutated objects retain allocation; loop-body inlining and general polymorphic
+guard chains remain future work.
+
+Acceptance requires the existing MVP and forced-GC cases, shared-runtime
+regression gates, and output-verified release comparisons against the archived
+binary. Pin MIR and compare self-reported workload times; use alternating
+control/candidate samples and a control/control noise check. The six newly
+enabled workloads and existing object/Map cases form the performance set.

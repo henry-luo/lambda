@@ -13113,6 +13113,43 @@ static void container_rebuild_data_install(Container* container, void** data_slo
 static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_slot,
         Container* container, TypeMap* old_map_type, TypeMap* new_type,
         ShapeEntry* changed_entry, Item new_value, int fixed_slot_count, ShapeEntry* removed_entry = NULL) {
+    // a heap-owned payload can stay in place when every surviving field keeps its lane.
+    // validate the entire layout before the no-GC value/type commit (D3.4.5, D5.3).
+    if (container->is_heap && *data_slot && !fixed_slot_count &&
+            new_type->byte_size <= *cap_slot) {
+        ShapeEntry* replacement = NULL;
+        ShapeEntry* old_field = old_map_type->shape;
+        ShapeEntry* new_field = new_type->shape;
+        bool compatible = true;
+        while (old_field || new_field) {
+            if (old_field && old_field == removed_entry) {
+                old_field = typemap_next_field(old_map_type, old_field); continue;
+            }
+            if (!old_field || !new_field || old_field->byte_offset < 0 ||
+                    old_field->byte_offset != new_field->byte_offset ||
+                    shape_entry_storage_size(old_field) != shape_entry_storage_size(new_field) ||
+                    (old_field != changed_entry && old_field->type != new_field->type)) {
+                compatible = false; break;
+            }
+            if (old_field == changed_entry) replacement = new_field;
+            old_field = typemap_next_field(old_map_type, old_field);
+            new_field = typemap_next_field(new_type, new_field);
+        }
+        TypeId storage = replacement ? shape_entry_storage_type_id(replacement) : LMD_TYPE_NULL;
+        // these simple stores neither allocate nor retain a borrowed numeric home.
+        bool immediate_store = !replacement || (replacement->type == type_info[storage].type &&
+            (storage == LMD_TYPE_INT || storage == LMD_TYPE_FLOAT || storage == LMD_TYPE_NULL ||
+             storage == LMD_TYPE_BOOL || storage == LMD_TYPE_UNDEFINED || storage == LMD_TYPE_STRING ||
+             storage == LMD_TYPE_ARRAY || storage == LMD_TYPE_MAP));
+        if (compatible && immediate_store && (!changed_entry || replacement)) {
+            uint64_t value_home = 0;
+            Item held = lambda_item_adopt_scalar_home(new_value, &value_home);
+            if (replacement && !map_field_store((char*)*data_slot + replacement->byte_offset, held, storage))
+                return false;
+            *type_slot = new_type;
+            return true;
+        }
+    }
     void* old_data = NULL;
     int64_t new_byte_size = new_type->byte_size;
     int field_index = 0;

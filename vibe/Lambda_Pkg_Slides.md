@@ -1,9 +1,10 @@
 # Lambda Slide Presentation Package — Proposal
 
-> **Status:** implementation in progress, 2026-10-06; package behavior authorized by the user.
+> **Status:** implementation in progress, 2026-10-07; package behavior authorized by the user.
 > **Implementation:** [progress and verification](impl/Lambda_Impl_Slide_Presentation.md);
-> [current public API](../doc/Lambda_Slide.md). Static/live playback and the effect
-> catalog are implemented; release profiling and native lifetime checks remain open.
+> [current public API](../doc/Lambda_Slide.md). Static/live playback, the effect
+> catalog, `.slides` decks and bounded navigation storage are implemented; the
+> frame-time budget remains open.
 > **Scope:** a presentation package written primarily in Lambda Script, with
 > slide elements lowered to HTML/CSS/SVG and playback orchestrated in Lambda.
 > PPTX import and export are explicitly outside this phase.
@@ -13,6 +14,27 @@
 > script roots), D4.6.1v3 (property identity).
 > **Authority:** this document proposes package behavior and additive host
 > mechanisms. It does not revise any formal semantics or design ruling.
+
+## 0. Rulings (user, 2026-10-07)
+
+These supersede the earlier text where they conflict (notably §5.2 and §10.1).
+
+| ID | Ruling |
+|---|---|
+| SLD1 | Slide decks are stored in `.slides` files: Mark syntax with a `<presentation>` root, read as format `slides` (D2.9.3). The file is data; code that builds a deck saves it with `output(deck, path, 'mark')`. |
+| SLD2 | `lambda view deck.slides` runs the presenter script — the `slides` document transform, `lambda.slide.present.present(deck, {source_path})` — to transform and view the deck. |
+| SLD3 | Slides render on demand. Browsing or presenting never renders all slides at once; only exports (`snapshot`, `slides`, `handout`) may. |
+| SLD4 | Back-and-forth navigation changes only state, never slide markup: a slide renders once, the first time it is shown, and stays mounted; later visits toggle layer display, transition transforms and sampled visuals. |
+| SLD5 | Existing `.ls` decks are converted to `.slides` (Northstar, the introduction and the package-content demo). |
+| SLD6 | Detached DOM held only by script wrappers is reclaimed by one collection at an idle point once enough of it is stranded, not by charging GC allocation thresholds. |
+
+Earlier designs replaced the canvas with freshly parsed `[outgoing, incoming]`
+layer markup on every slide change (§10.1). That reparsed published Mark data
+into the document's `Input` arena each time; under D4.1.2 and D4.1.4v5 it could
+never be released, so navigation storage grew without bound (17.5 KB per
+two-slide round after the other fixes). SLD3/SLD4 remove the reparse itself.
+SLD1/SLD2 are the user's choice of deck format and entry point; keeping decks
+as `.mark` files was offered and not chosen.
 
 ## 1. Purpose
 
@@ -83,13 +105,13 @@ conformance or performance measurement.
 |---|---|---|
 | Source packages | `lmd/package/`, canonical `lambda.*` imports | Use `lambda.slide` under D7.2.4. |
 | Reactive templates | `view`, instance `state`, `on` handlers, `emit`, `apply` | Reuse for the player shell and discrete controls; S12.1.3. |
-| DOM operations | Selection, attributes, events and geometry; per-property style writes exist in the catalog | Reuse `dom`; the style setter is not currently published to its realm-neutral Lambda face. |
+| DOM operations | Selection, attributes, events and geometry; per-property style writes exist in the catalog | Reuse `dom`. *Since implemented:* `style_set_property` is realm-neutral and `presentation_style_set_property` adds the retained presentation layer. |
 | Rendering | HTML/CSS, SVG, opacity, clipping and transforms | Slides need no separate renderer. |
 | Native animation | Frame clock, CSS keyframes, easing, scheduler, pause/resume | Reuse frame delivery; share lower-level consumers when needed. |
 | CSS transitions | Implemented for opacity, colors and selected dimensions | Useful, but incomplete transform/reversal support cannot own player timing. |
 | SVG animation | Document time, pause/seek and substantial SMIL support | Useful for embedded content; no need to make SMIL the deck representation. |
 | Web Animations facade | Explicit `currentTime` sampling exists | `play`/`pause` are no-ops and `reverse` does not implement playback. |
-| Lambda frame delivery | No request/cancel frame operation found in `dom_api.def` | A generic host seam is needed for the preferred live sampling path. |
+| Lambda frame delivery | No request/cancel frame operation found in `dom_api.def` | A generic host seam is needed for the preferred live sampling path. *Since implemented:* `dom.request_frame` / `dom.cancel_frame`. |
 
 The animation scheduler is a mechanism, not a presentation timeline. A deck
 needs cue boundaries, object identity, reset rules and navigation policy above it.
@@ -157,6 +179,7 @@ lmd/package/slide/
   sample.ls              deterministic track and scene sampling
   player.ls              pure command/event reducer
   live.ls                frame requests, DOM writes, templates and input policy
+  present.ls             `.slides` document transform (SLD2): deck defaults, base URI
   transitions.ls         shared slide transition sampling
   keyframes.ls           typed channel/keyframe compilation and sampling
   color.ls               accepted color forms and alpha-aware interpolation
@@ -199,14 +222,11 @@ tree is produced by another package.
 
 ### 5.2 Example deck
 
-The following illustrates the proposed package API. The package does not exist
-yet; the vocabulary uses current Lambda element/import syntax.
+A deck is a `.slides` file (SLD1): Mark data with a `<presentation>` root.
 
-```lambda no-run
-// no-run: depends on the proposed lambda.slide package.
-import slide: lambda.slide
-
-let deck = <presentation title: "Quarterly review", width: 1280.0,
+```mark
+// review.slides
+<presentation id: "review", title: "Quarterly review", width: 1280.0,
     height: 720.0, theme: 'light',
     <slide id: "opening", transition: 'fade', transition_duration: 300.0,
         <text id: "title", x: 80.0, y: 100.0, width: 1120.0, height: 100.0,
@@ -243,17 +263,17 @@ let deck = <presentation title: "Quarterly review", width: 1280.0,
         <notes "Explain the customer mix before advancing.">
     >
 >
-
-slide.page(deck)
 ```
 
-The live usage is an ordinary source file:
+The viewer presents it through the `lambda.slide.present` transform (SLD2):
 
 ```sh
-./lambda.exe view examples/review.ls
+./lambda.exe view examples/review.slides
 ```
 
-No syntax changes, generated parser edits or new built-in slide types are needed.
+A Lambda script can load the same deck with `input("review.slides", 'slides')^`
+and embed it with `slide.player`. No syntax changes, generated parser edits or
+new built-in slide types are needed.
 
 ### 5.3 Public API proposal
 
@@ -631,10 +651,14 @@ The incoming slide starts in its initial build state. Entry cues start after
 transition completion and readiness in the first version. This order prevents
 an entrance effect from finishing while its slide is still offscreen.
 
-Initially keep only the active slide and an adjacent transition partner mounted.
-Source scenes remain immutable package values. Resource caching stays with the
-engine; this package should not retain every slide DOM and animation instance
-indefinitely.
+*Superseded by SLD3/SLD4 (2026-10-07):* the first design kept only the active
+slide and its transition partner mounted and re-rendered them on every slide
+change. Now a slide renders the first time it is shown (as a fragment appended to
+the canvas) and stays mounted; layers not shown are `display: none`, the active
+one carries `data-slide-active` and sits above its transition partner, and a
+reshown layer gets its authored placement and background back after Morph.
+Source scenes remain immutable package values, and resource caching stays with
+the engine.
 
 ### 10.2 Reveals and motion paths
 
@@ -668,7 +692,8 @@ Do not treat viewport bounding boxes as untransformed object geometry.
 
 ## 11. Required and conditional Lambda/Radiant extensions
 
-All names below are proposed API sketches, not implemented operations. Add
+The names below began as API sketches; §11.1, §11.2 and the presentation-style
+channel of §13.5 are now implemented. Add
 shared operations through the existing DOM catalog/module contracts rather than
 hand-maintaining parallel Lambda and JS bindings. Preserve D7.5.3: `lambda-rt`
 must not link Radiant.
@@ -705,7 +730,8 @@ is added.
 
 ### 11.2 Required: realm-neutral property writes and correct invalidation
 
-The existing `style_set_property` catalog row has no `DOM_F_NEUTRAL` flag, and
+*Since resolved: the row is now realm-neutral.* The original finding was that
+the `style_set_property` catalog row had no `DOM_F_NEUTRAL` flag, and
 `dom_module.cpp` only publishes realm-neutral rows. Consequently this proposal
 cannot assume `dom.style_set_property` is already callable from Lambda. Extend
 the existing setter/bridge to work without a JS realm, exercise it from a
@@ -862,9 +888,17 @@ borrowed buffers through the backing accessor after compaction
 Text and comment nodes retain their own backing values after detachment; adoption
 preserves the physical GC owner across runtimes. Roots are withdrawn before
 document resource destruction can tear down an adopted source heap.
-These changes still require long-session validation alongside the
-remaining reconcile/view-pool ownership audit and measured frame-cost work.
-Ordinary published arena blocks cannot be discarded individually (D4.1.4v5).
+Ordinary published arena blocks cannot be discarded individually (D4.1.4v5);
+SLD3/SLD4 therefore remove per-navigation publication rather than reclaim it.
+
+Measured frame cost justified three further host mechanisms, none of them a
+slide model (D7.5.3). The journal records which property a presentation write
+changed, so a turn whose writes are all `opacity`, or `transform` that stays a
+transform, commits without cascade or layout (RAD_16 §8). Inline SVGs painted in
+one pass share one host style context. Inline-SVG raster layers key on content
+rather than on every DOM write or repaint request, and fold the fitted stage's
+uniform scale into the capture, so animated wrappers move cached rasters
+(RAD_14 §4.4). Timing, easing and effect policy stay in Lambda.
 
 ## 14. Validation strategy
 
@@ -888,8 +922,9 @@ require the Radiant baseline. Native layout changes also run the float/int-cast
 lint rule. Store temporary captures and probes under `./temp/`.
 
 Implementation status and measured results are recorded separately in
-[the implementation report](impl/Lambda_Impl_Slide_Presentation.md). This design
-does not establish that the frame budget or retention acceptance criteria pass.
+[the implementation report](impl/Lambda_Impl_Slide_Presentation.md). Its
+2026-10-07 acceptance round records the 60 Hz budget (16.67 ms turn + paint on an
+Apple M4, quiet machine) and the navigation retention bound on the measured decks.
 
 ## Appendix A. Implementation touchpoints
 

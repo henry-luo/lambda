@@ -1,0 +1,1129 @@
+// Northstar / Strategy 2027 — an 18-slide fictional leadership briefing (illustrative data).
+// ./lambda.exe view test/demo/slides/northstar.slides
+<presentation id: "northstar", autostart: true, title: "Northstar / Strategy 2027", width: 1280, height: 720,
+    <slide id: "opening", title: "A clearer path to durable growth", background: "#102738",
+        <shape id: "cover-accent", x: 72, y: 62, width: 42, height: 6, kind: 'rect', fill: "#7de0c0", radius: 0>
+        <text id: "cover-brand", x: 132, y: 51, width: 700, height: 35, font_size: 17, color: "#7de0c0", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY & OPERATIONS">
+        <text id: "headline", x: 72, y: 155, width: 720, height: 210, font_size: 68, color: "#ffffff", style: "font-weight:700;line-height:1.2;", "A clearer path\nto durable growth.">
+        <text id: "cover-copy", x: 76, y: 402, width: 660, height: 90, font_size: 27, color: "#bed0d5", style: "font-weight:400;line-height:1.2;", "One operating system.\nA focused plan for the next stage.">
+        <text id: "cover-date", x: 76, y: 560, width: 660, height: 35, font_size: 16, color: "#7de0c0", style: "font-weight:700;line-height:1.2;", "LEADERSHIP BRIEFING  /  2027">
+        <content id: "hero", x: 815, y: 132, width: 380, height: 430,
+            <svg width: 380, height: 430, viewBox: "0 0 380 430",
+                <circle cx: 190, cy: 210, r: 72, fill: "none", stroke: "#355160", stroke-width: 1>
+                <circle cx: 190, cy: 210, r: 122, fill: "none", stroke: "#355160", stroke-width: 1>
+                <circle cx: 190, cy: 210, r: 172, fill: "none", stroke: "#355160", stroke-width: 1>
+                <path d: "M30 348 L121 281 L190 210 L274 132 L344 56", fill: "none", stroke: "#7de0c0", stroke-width: 4>
+                <circle cx: 30, cy: 348, r: 8, fill: "#7de0c0">
+                <circle cx: 121, cy: 281, r: 8, fill: "#7de0c0">
+                <circle cx: 190, cy: 210, r: 8, fill: "#7de0c0">
+                <circle cx: 274, cy: 132, r: 8, fill: "#7de0c0">
+                <circle cx: 344, cy: 56, r: 8, fill: "#7de0c0">
+                <circle cx: 190, cy: 210, r: 30, fill: "#102738", stroke: "#7de0c0", stroke-width: 2>
+                <path d: "M190 191 L195 205 L210 210 L195 215 L190 229 L185 215 L170 210 L185 205 Z", fill: "#7de0c0">
+                <text x: 25, y: 407, fill: "#bed0d5", font-family: "Arial", font-size: 14, font-weight: 700, "FOCUS  /  MOMENTUM  /  SCALE">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#34505c", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#acc2ca", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#acc2ca", style: "font-weight:700;line-height:1.2;", "01 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fly-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'zoom-in', duration: 480, delay: 100, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "A fictional board-style briefing. All company names, metrics and forecasts are illustrative. Use Next for each build and slide.">
+    >
+    <slide id: "chapter-2", title: "Grow with focus. Scale with discipline.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "01  /  THE THESIS">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Grow with focus. Scale with discipline.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Three choices connect the customer promise to a repeatable operating model.">
+        <group id: "hero", x: 72, y: 253, width: 1136, height: 276,
+            <content id: "focus", x: 0, y: 0, width: 362, height: 276,
+                <div style: "width:100%;height:276px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "01 / WIN THE RIGHT CUSTOMER">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Focus the market">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Prioritize operations teams in complex, multi-site businesses. Build depth before expanding breadth.">
+                >
+            >
+            <content id: "value", x: 387, y: 0, width: 362, height: 276,
+                <div style: "width:100%;height:276px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "02 / PROVE THE VALUE">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Shorten time to impact">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Turn fragmented workflows into measurable outcomes in the first 30 days.">
+                >
+            >
+            <content id: "scale", x: 774, y: 0, width: 362, height: 276,
+                <div style: "width:100%;height:276px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#b86c47;margin-bottom:16px;", "03 / EARN THE RIGHT TO SCALE">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Compound the model">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Align product, distribution and service around one measurable customer journey.">
+                >
+            >
+        >
+        <content id: "decision", x: 72, y: 551, width: 1136, height: 76,
+            <div style: "width:100%;height:76px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#e0f1eb;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:21px;font-weight:700;color:#087f78;", "THE DECISION  /  Invest in activation and expansion before adding new segments.">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "02 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <cue
+            <effect target: "decision", kind: 'wipe-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+        >
+        <notes "Reveal the decision after walking through the three pillars.">
+    >
+    <slide id: "chapter-3", title: "The market is moving from tools to outcomes.", background: "#f3f6f5", transition: 'push', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "02  /  MARKET CONTEXT">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "The market is moving from tools to outcomes.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Buyers want fewer handoffs, clearer accountability and a faster return on investment.">
+        <group id: "hero", x: 72, y: 248, width: 1136, height: 358,
+            <content id: "shift-0", x: 0, y: 0, width: 1136, height: 104,
+                <div style: "width:100%;height:104px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "display:flex;align-items:center;gap:28px;",
+                        <div style: "width:45px;font-size:30px;font-weight:700;color:#087f78;", "01">
+                        <div style: "width:255px;font-size:25px;font-weight:700;", "Fragmented stacks">
+                        <div style: "width:325px;color:#617884;font-size:20px;", "A different tool for every team">
+                        <div style: "color:#087f78;font-size:25px;", ">">
+                        <div style: "width:330px;font-weight:700;font-size:20px;", "One connected execution layer">
+                    >
+                >
+            >
+            <content id: "shift-1", x: 0, y: 120, width: 1136, height: 104,
+                <div style: "width:100%;height:104px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "display:flex;align-items:center;gap:28px;",
+                        <div style: "width:45px;font-size:30px;font-weight:700;color:#356cce;", "02">
+                        <div style: "width:255px;font-size:25px;font-weight:700;", "Higher scrutiny">
+                        <div style: "width:325px;color:#617884;font-size:20px;", "Software purchased on potential">
+                        <div style: "color:#087f78;font-size:25px;", ">">
+                        <div style: "width:330px;font-weight:700;font-size:20px;", "Expansion earned through proof">
+                    >
+                >
+            >
+            <content id: "shift-2", x: 0, y: 240, width: 1136, height: 104,
+                <div style: "width:100%;height:104px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "display:flex;align-items:center;gap:28px;",
+                        <div style: "width:45px;font-size:30px;font-weight:700;color:#b86c47;", "03">
+                        <div style: "width:255px;font-size:25px;font-weight:700;", "Lean operating teams">
+                        <div style: "width:325px;color:#617884;font-size:20px;", "More dashboards and manual checks">
+                        <div style: "color:#087f78;font-size:25px;", ">">
+                        <div style: "width:330px;font-weight:700;font-size:20px;", "Actionable exceptions and automation">
+                    >
+                >
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "03 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "Position Northstar as an execution layer, with specific outcomes rather than a broad platform claim.">
+    >
+    <slide id: "chapter-4", title: "A focused entry point into a large market.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "03  /  OPPORTUNITY">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "A focused entry point into a large market.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Start where operational complexity and willingness to pay intersect.">
+        <group id: "hero", x: 72, y: 245, width: 550, height: 378,
+            <content id: "market-base", x: 0, y: 0, width: 550, height: 378,
+                <svg width: 550, height: 378, viewBox: "0 0 550 378",
+                    <rect width: 550, height: 378, rx: 14, fill: "#ffffff">
+                    <circle cx: 235, cy: 186, r: 120, fill: "none", stroke: "#e5ecec", stroke-width: 42>
+                    <text x: 164, y: 181, fill: "#183747", font-family: "Arial", font-size: 39, font-weight: 700, "$1.2bn">
+                    <text x: 169, y: 212, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 700, "SERVICEABLE">
+                    <text x: 49, y: 346, fill: "#617884", font-family: "Arial", font-size: 17, font-weight: 400, "25% of a $4.8bn illustrative addressable market">
+                >
+            >
+            <content id: "market-sector-0", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M141 0 A141 141 0 0 1 150.222 0.301892 L147.475 42.212 A99 99 0 0 0 141 42 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-1", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M150.222 0.301892 A141 141 0 0 1 159.404 1.20627 L153.922 42.847 A99 99 0 0 0 147.475 42.212 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-2", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M159.404 1.20627 A141 141 0 0 1 168.508 2.70928 L160.314 43.9023 A99 99 0 0 0 153.922 42.847 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-3", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M168.508 2.70928 A141 141 0 0 1 177.493 4.80446 L166.623 45.3733 A99 99 0 0 0 160.314 43.9023 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-4", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M177.493 4.80446 A141 141 0 0 1 186.323 7.48285 L172.823 47.2539 A99 99 0 0 0 166.623 45.3733 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-5", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M186.323 7.48285 A141 141 0 0 1 194.958 10.733 L178.886 49.5359 A99 99 0 0 0 172.823 47.2539 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-6", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M194.958 10.733 A141 141 0 0 1 203.363 14.5409 L184.787 52.2096 A99 99 0 0 0 178.886 49.5359 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-7", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M203.363 14.5409 A141 141 0 0 1 211.5 18.8904 L190.5 55.2635 A99 99 0 0 0 184.787 52.2096 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-8", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M211.5 18.8904 A141 141 0 0 1 219.335 23.7628 L196.001 58.6845 A99 99 0 0 0 190.5 55.2635 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-9", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M219.335 23.7628 A141 141 0 0 1 226.835 29.1372 L201.267 62.458 A99 99 0 0 0 196.001 58.6845 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-10", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M226.835 29.1372 A141 141 0 0 1 233.968 34.9906 L206.275 66.5679 A99 99 0 0 0 201.267 62.458 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-11", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M233.968 34.9906 A141 141 0 0 1 240.702 41.2979 L211.004 70.9964 A99 99 0 0 0 206.275 66.5679 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-12", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M240.702 41.2979 A141 141 0 0 1 247.009 48.0322 L215.432 75.7248 A99 99 0 0 0 211.004 70.9964 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-13", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M247.009 48.0322 A141 141 0 0 1 252.863 55.1646 L219.542 80.7326 A99 99 0 0 0 215.432 75.7248 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-14", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M252.863 55.1646 A141 141 0 0 1 258.237 62.6646 L223.315 85.9985 A99 99 0 0 0 219.542 80.7326 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-15", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M258.237 62.6646 A141 141 0 0 1 263.11 70.5 L226.737 91.5 A99 99 0 0 0 223.315 85.9985 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-16", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M263.11 70.5 A141 141 0 0 1 267.459 78.6373 L229.79 97.2134 A99 99 0 0 0 226.737 91.5 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-17", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M267.459 78.6373 A141 141 0 0 1 271.267 87.0416 L232.464 103.114 A99 99 0 0 0 229.79 97.2134 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-18", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M271.267 87.0416 A141 141 0 0 1 274.517 95.677 L234.746 109.177 A99 99 0 0 0 232.464 103.114 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-19", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M274.517 95.677 A141 141 0 0 1 277.196 104.507 L236.627 115.377 A99 99 0 0 0 234.746 109.177 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-20", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M277.196 104.507 A141 141 0 0 1 279.291 113.492 L238.098 121.686 A99 99 0 0 0 236.627 115.377 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-21", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M279.291 113.492 A141 141 0 0 1 280.794 122.596 L239.153 128.078 A99 99 0 0 0 238.098 121.686 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-22", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M280.794 122.596 A141 141 0 0 1 281.698 131.778 L239.788 134.525 A99 99 0 0 0 239.153 128.078 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+            <content id: "market-sector-23", x: 94, y: 45, width: 282, height: 282,
+                <svg width: 282, height: 282, viewBox: "0 0 282 282",
+                    <path d: "M281.698 131.778 A141 141 0 0 1 282 141 L240 141 A99 99 0 0 0 239.788 134.525 Z", fill: "#087f78", stroke: "#087f78", stroke-width: 0.5>
+                >
+            >
+        >
+        <content id: "market-total", x: 646, y: 245, width: 562, height: 176,
+            <div style: "width:100%;height:176px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "TOTAL ADDRESSABLE MARKET">
+                <div style: "font-size:48px;font-weight:700;line-height:1.1;color:#087f78;margin-bottom:14px;", "$4.8bn">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Global operations software in target industries">
+            >
+        >
+        <content id: "market-focus", x: 646, y: 445, width: 562, height: 178,
+            <div style: "width:100%;height:178px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "INITIAL WEDGE">
+                <div style: "font-size:34px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "2,400 accounts">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Multi-site services and logistics businesses with 200–2,000 employees.">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "04 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+                <effect target: "market-sector-0", kind: 'fade-in', duration: 90, delay: 180, easing: 'linear'>
+                <effect target: "market-sector-1", kind: 'fade-in', duration: 90, delay: 206, easing: 'linear'>
+                <effect target: "market-sector-2", kind: 'fade-in', duration: 90, delay: 232, easing: 'linear'>
+                <effect target: "market-sector-3", kind: 'fade-in', duration: 90, delay: 258, easing: 'linear'>
+                <effect target: "market-sector-4", kind: 'fade-in', duration: 90, delay: 284, easing: 'linear'>
+                <effect target: "market-sector-5", kind: 'fade-in', duration: 90, delay: 310, easing: 'linear'>
+                <effect target: "market-sector-6", kind: 'fade-in', duration: 90, delay: 336, easing: 'linear'>
+                <effect target: "market-sector-7", kind: 'fade-in', duration: 90, delay: 362, easing: 'linear'>
+                <effect target: "market-sector-8", kind: 'fade-in', duration: 90, delay: 388, easing: 'linear'>
+                <effect target: "market-sector-9", kind: 'fade-in', duration: 90, delay: 414, easing: 'linear'>
+                <effect target: "market-sector-10", kind: 'fade-in', duration: 90, delay: 440, easing: 'linear'>
+                <effect target: "market-sector-11", kind: 'fade-in', duration: 90, delay: 466, easing: 'linear'>
+                <effect target: "market-sector-12", kind: 'fade-in', duration: 90, delay: 492, easing: 'linear'>
+                <effect target: "market-sector-13", kind: 'fade-in', duration: 90, delay: 518, easing: 'linear'>
+                <effect target: "market-sector-14", kind: 'fade-in', duration: 90, delay: 544, easing: 'linear'>
+                <effect target: "market-sector-15", kind: 'fade-in', duration: 90, delay: 570, easing: 'linear'>
+                <effect target: "market-sector-16", kind: 'fade-in', duration: 90, delay: 596, easing: 'linear'>
+                <effect target: "market-sector-17", kind: 'fade-in', duration: 90, delay: 622, easing: 'linear'>
+                <effect target: "market-sector-18", kind: 'fade-in', duration: 90, delay: 648, easing: 'linear'>
+                <effect target: "market-sector-19", kind: 'fade-in', duration: 90, delay: 674, easing: 'linear'>
+                <effect target: "market-sector-20", kind: 'fade-in', duration: 90, delay: 700, easing: 'linear'>
+                <effect target: "market-sector-21", kind: 'fade-in', duration: 90, delay: 726, easing: 'linear'>
+                <effect target: "market-sector-22", kind: 'fade-in', duration: 90, delay: 752, easing: 'linear'>
+                <effect target: "market-sector-23", kind: 'fade-in', duration: 90, delay: 778, easing: 'linear'>
+            >
+        >
+        <notes "Market sizing is a scenario, not external market research. The wedge is defined by customer need and sales repeatability.">
+    >
+    <slide id: "chapter-5", title: "Momentum is improving. Quality matters more.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "04  /  TRACTION">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Momentum is improving. Quality matters more.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Illustrative revenue growth is supported by retention and faster activation.">
+        <group id: "hero", x: 72, y: 249, width: 730, height: 350,
+            <content id: "trend-axes", x: 0, y: 0, width: 730, height: 350,
+                <svg width: 730, height: 350, viewBox: "0 0 730 350",
+                    <rect width: 730, height: 350, rx: 14, fill: "#ffffff">
+                    <g
+                        <line x1: 64, x2: 690, y1: 52, y2: 52, stroke: "#dce5e5">
+                        <text x: 18, y: 58, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "12">
+                    >
+                    <g
+                        <line x1: 64, x2: 690, y1: 122, y2: 122, stroke: "#dce5e5">
+                        <text x: 18, y: 128, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "8">
+                    >
+                    <g
+                        <line x1: 64, x2: 690, y1: 192, y2: 192, stroke: "#dce5e5">
+                        <text x: 18, y: 198, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "4">
+                    >
+                    <g
+                        <line x1: 64, x2: 690, y1: 262, y2: 262, stroke: "#dce5e5">
+                        <text x: 18, y: 268, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "0">
+                    >
+                    <text x: 42, y: 301, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "Q1 25">
+                    <text x: 164, y: 301, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "Q2 25">
+                    <text x: 286, y: 301, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "Q3 25">
+                    <text x: 408, y: 301, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "Q4 25">
+                    <text x: 530, y: 301, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "Q1 26">
+                    <text x: 652, y: 301, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "Q2 26">
+                    <text x: 24, y: 331, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "Annual recurring revenue, USD millions">
+                >
+            >
+            <content id: "trend-series", x: 0, y: 0, width: 730, height: 350,
+                <svg width: 730, height: 350, viewBox: "0 0 730 350",
+                    <path d: "M64 262 L185 241 L306 209 L427 165 L548 105 L674 55 L674 262 Z", fill: "#ddf3eb">
+                    <path d: "M64 262 L185 241 L306 209 L427 165 L548 105 L674 55", fill: "none", stroke: "#087f78", stroke-width: 4>
+                    <circle cx: 64, cy: 262, r: 6, fill: "#087f78", stroke: "#ffffff", stroke-width: 3>
+                    <circle cx: 185, cy: 241, r: 6, fill: "#087f78", stroke: "#ffffff", stroke-width: 3>
+                    <circle cx: 306, cy: 209, r: 6, fill: "#087f78", stroke: "#ffffff", stroke-width: 3>
+                    <circle cx: 427, cy: 165, r: 6, fill: "#087f78", stroke: "#ffffff", stroke-width: 3>
+                    <circle cx: 548, cy: 105, r: 6, fill: "#087f78", stroke: "#ffffff", stroke-width: 3>
+                    <circle cx: 674, cy: 55, r: 6, fill: "#087f78", stroke: "#ffffff", stroke-width: 3>
+                >
+            >
+            <content id: "trend-value", x: 0, y: 0, width: 730, height: 350,
+                <svg width: 730, height: 350, viewBox: "0 0 730 350",
+                    <text x: 608, y: 34, fill: "#087f78", font-family: "Arial", font-size: 22, font-weight: 700, "$11.8m">
+                >
+            >
+        >
+        <content id: "arr", x: 828, y: 249, width: 380, height: 176,
+            <div style: "width:100%;height:176px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "ANNUAL RECURRING REVENUE">
+                <div style: "font-size:48px;font-weight:700;line-height:1.1;color:#087f78;margin-bottom:14px;", "$11.8m">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "+48% year over year">
+            >
+        >
+        <content id: "quality", x: 828, y: 446, width: 380, height: 153,
+            <div style: "width:100%;height:153px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "QUALITY OF GROWTH">
+                <div style: "font-size:35px;font-weight:700;line-height:1.1;color:#087f78;margin-bottom:14px;", "118% NRR">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "24-day median activation">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "05 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+                <effect target: "trend-series", kind: 'wipe-in', from: 'right', delay: 180, duration: 960, easing: 'ease-out-cubic'>
+                <effect target: "trend-value", kind: 'fade-in', delay: 980, duration: 200, easing: 'ease-out'>
+            >
+        >
+        <notes "The chart is a six-quarter illustrative series. ARR rises from zero to 11.8 million; NRR and activation are separate operating measures.">
+    >
+    <slide id: "chapter-6", title: "Make the first 30 days unmistakably valuable.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "05  /  CUSTOMER JOURNEY">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Make the first 30 days unmistakably valuable.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Design one journey, with a clear customer outcome and accountable owner at every step.">
+        <group id: "hero", x: 72, y: 260, width: 1136, height: 263,
+            <content id: "journey-0", x: 0, y: 0, width: 266, height: 263,
+                <div style: "width:100%;height:263px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "DAY 01">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Connect">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Import core data and map the first workflow.">
+                    <div style: "margin-top:22px;font-size:16px;font-weight:700;color:#356cce;", "Solutions">
+                >
+            >
+            <content id: "journey-1", x: 290, y: 0, width: 266, height: 263,
+                <div style: "width:100%;height:263px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "DAY 07">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Activate">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Run a real process with a named team lead.">
+                    <div style: "margin-top:22px;font-size:16px;font-weight:700;color:#356cce;", "Customer success">
+                >
+            >
+            <content id: "journey-2", x: 580, y: 0, width: 266, height: 263,
+                <div style: "width:100%;height:263px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "DAY 14">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Prove">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Baseline time saved and exceptions resolved.">
+                    <div style: "margin-top:22px;font-size:16px;font-weight:700;color:#356cce;", "Value consultant">
+                >
+            >
+            <content id: "journey-3", x: 870, y: 0, width: 266, height: 263,
+                <div style: "width:100%;height:263px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "DAY 30">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Expand">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Agree the next workflow and success plan.">
+                    <div style: "margin-top:22px;font-size:16px;font-weight:700;color:#356cce;", "Account team">
+                >
+            >
+        >
+        <content id: "promise", x: 72, y: 552, width: 1136, height: 76,
+            <div style: "width:100%;height:76px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#e0f1eb;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:21px;font-weight:700;", "CUSTOMER PROMISE  /  Your first measurable operational improvement in 30 days.">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "06 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <cue
+            <effect target: "promise", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+        >
+        <notes "Reveal the promise after the journey. Each step needs one owner and one definition of done.">
+    >
+    <slide id: "chapter-7", title: "A connected system, built around the work.", background: "#f3f6f5", transition: 'push', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "06  /  PRODUCT SYSTEM">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "A connected system, built around the work.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "A shared data model links front-line execution to management decisions.">
+        <group id: "hero", x: 72, y: 246, width: 745, height: 377,
+            <content id: "layer-0", x: 0, y: 0, width: 745, height: 117,
+                <div style: "width:100%;height:117px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#e0f1eb;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "EXPERIENCE">
+                    <div style: "font-size:23px;font-weight:700;margin-top:-8px;margin-bottom:4px;", "Workspace  /  Mobile  /  Partner portal">
+                    <div style: "font-size:17px;color:#617884;", "One task view for every role">
+                >
+            >
+            <content id: "layer-1", x: 0, y: 128, width: 745, height: 117,
+                <div style: "width:100%;height:117px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#e5edfc;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "EXECUTION">
+                    <div style: "font-size:23px;font-weight:700;margin-top:-8px;margin-bottom:4px;", "Workflows  /  Rules  /  Automation">
+                    <div style: "font-size:17px;color:#617884;", "Turn intent into repeatable action">
+                >
+            >
+            <content id: "layer-2", x: 0, y: 256, width: 745, height: 117,
+                <div style: "width:100%;height:117px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#183747;margin-bottom:16px;", "FOUNDATION">
+                    <div style: "font-size:23px;font-weight:700;margin-top:-8px;margin-bottom:4px;", "Shared data  /  Integrations  /  Trust">
+                    <div style: "font-size:17px;color:#617884;", "A reliable record of the operating business">
+                >
+            >
+        >
+        <content id: "product-principles", x: 844, y: 246, width: 364, height: 373,
+            <div style: "width:100%;height:373px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "DESIGN PRINCIPLES">
+                <div style: "font-size:31px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Built for adoption">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Clear defaults. Fewer decisions. Useful feedback.">
+                <div style: "height:24px;">
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "ENTERPRISE READY">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Role-based access, audit history and integration observability.">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "07 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "The architecture is conceptual. Each layer is ordinary Lambda-authored slide content, not a raster image.">
+    >
+    <slide id: "chapter-8", title: "Every customer outcome feeds the next.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "07  /  OPERATING MODEL">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Every customer outcome feeds the next.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "A closed learning loop compounds value across product, service and distribution.">
+        <content id: "hero", x: 72, y: 237, width: 670, height: 395,
+            <svg width: 670, height: 395, viewBox: "0 0 670 395",
+                <rect width: 670, height: 395, rx: 14, fill: "#ffffff">
+                <circle cx: 335, cy: 197, r: 133, fill: "none", stroke: "#c9e9df", stroke-width: 28>
+                <path d: "M317 46 L341 64 L317 82 M486 179 L468 203 L450 179 M353 348 L329 330 L353 312 M184 215 L202 191 L220 215", fill: "none", stroke: "#087f78", stroke-width: 5>
+                <circle cx: 335, cy: 197, r: 74, fill: "#102738">
+                <text x: 287, y: 189, fill: "#ffffff", font-family: "Arial", font-size: 20, font-weight: 700, "Customer">
+                <text x: 292, y: 218, fill: "#ffffff", font-family: "Arial", font-size: 20, font-weight: 700, "outcome">
+                <text x: 285, y: 35, fill: "#087f78", font-family: "Arial", font-size: 19, font-weight: 700, "1. Activate">
+                <text x: 495, y: 203, fill: "#087f78", font-family: "Arial", font-size: 19, font-weight: 700, "2. Learn">
+                <text x: 275, y: 381, fill: "#087f78", font-family: "Arial", font-size: 19, font-weight: 700, "3. Improve">
+                <text x: 24, y: 203, fill: "#087f78", font-family: "Arial", font-size: 19, font-weight: 700, "4. Expand">
+            >
+        >
+        <content id: "loop-one", x: 767, y: 237, width: 441, height: 180,
+            <div style: "width:100%;height:180px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "WEEKLY SIGNAL">
+                <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Listen at the edge">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Activation friction and customer exceptions become product inputs.">
+            >
+        >
+        <content id: "loop-two", x: 767, y: 441, width: 441, height: 191,
+            <div style: "width:100%;height:191px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "MONTHLY DECISION">
+                <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Close the loop">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Ship improvements, measure adoption and update the playbook.">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "08 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "The flywheel connects feedback to a decision cadence. It is an operating discipline rather than a software feature.">
+    >
+    <slide id: "chapter-9", title: "Better activation improves the whole model.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "08  /  UNIT ECONOMICS">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Better activation improves the whole model.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Invest in retention and sales efficiency while protecting the customer experience.">
+        <content id: "payback", x: 72, y: 245, width: 362, height: 176,
+            <div style: "width:100%;height:176px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "CAC PAYBACK">
+                <div style: "font-size:48px;font-weight:700;line-height:1.1;color:#087f78;margin-bottom:14px;", "14 months">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Target: 12 months">
+            >
+        >
+        <content id: "margin", x: 459, y: 245, width: 362, height: 176,
+            <div style: "width:100%;height:176px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "GROSS MARGIN">
+                <div style: "font-size:48px;font-weight:700;line-height:1.1;color:#356cce;margin-bottom:14px;", "78%">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Target: 82%">
+            >
+        >
+        <content id: "ltv", x: 846, y: 245, width: 362, height: 176,
+            <div style: "width:100%;height:176px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "LTV / CAC">
+                <div style: "font-size:48px;font-weight:700;line-height:1.1;color:#b86c47;margin-bottom:14px;", "4.2x">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Target: greater than 5.0x">
+            >
+        >
+        <group id: "hero", x: 99, y: 456, width: 1082, height: 159,
+            <content id: "progress-base", x: 0, y: 0, width: 1082, height: 159,
+                <svg width: 1082, height: 159, viewBox: "0 0 1082 159",
+                    <g
+                        <text x: 0, y: 26, fill: "#183747", font-family: "Arial", font-size: 19, font-weight: 700, "Activation rate">
+                        <rect x: 210, y: 9, width: 420, height: 26, rx: 6, fill: "#e5ecec">
+                    >
+                    <g
+                        <text x: 0, y: 78, fill: "#183747", font-family: "Arial", font-size: 19, font-weight: 700, "Gross retention">
+                        <rect x: 210, y: 61, width: 420, height: 26, rx: 6, fill: "#e5ecec">
+                    >
+                    <text x: 0, y: 140, fill: "#183747", font-family: "Arial", font-size: 20, font-weight: 400, "Levers: a repeatable launch, stronger adoption and disciplined cost-to-serve.">
+                >
+            >
+            <shape id: "progress-bar-0", x: 210, y: 9, width: 302.40000000000003, height: 26, kind: 'rect', fill: "#087f78", radius: 6>
+            <shape id: "progress-bar-1", x: 210, y: 61, width: 394.8, height: 26, kind: 'rect', fill: "#356cce", radius: 6>
+            <content id: "progress-value-0", x: 0, y: 0, width: 1082, height: 159,
+                <svg width: 1082, height: 159, viewBox: "0 0 1082 159",
+                    <text x: 653, y: 29, fill: "#087f78", font-family: "Arial", font-size: 20, font-weight: 700, "72% → 85%">
+                >
+            >
+            <content id: "progress-value-1", x: 0, y: 0, width: 1082, height: 159,
+                <svg width: 1082, height: 159, viewBox: "0 0 1082 159",
+                    <text x: 653, y: 81, fill: "#356cce", font-family: "Arial", font-size: 20, font-weight: 700, "94% → 97%">
+                >
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "09 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+                <effect target: "progress-bar-0", kind: 'wipe-in', from: 'right', delay: 160, duration: 720, easing: 'ease-out-cubic'>
+                <effect target: "progress-value-0", kind: 'fade-in', delay: 760, duration: 200, easing: 'ease-out'>
+                <effect target: "progress-bar-1", kind: 'wipe-in', from: 'right', delay: 290, duration: 720, easing: 'ease-out-cubic'>
+                <effect target: "progress-value-1", kind: 'fade-in', delay: 890, duration: 200, easing: 'ease-out'>
+            >
+        >
+        <notes "Progress bars use a zero-to-100 percent domain. LTV/CAC and payback are illustrative modeled metrics, not audited financials.">
+    >
+    <slide id: "chapter-10", title: "Build a growth engine that funds itself.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "09  /  FINANCIAL PLAN">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Build a growth engine that funds itself.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "A three-year planning scenario balances expansion with operating leverage.">
+        <group id: "hero", x: 72, y: 250, width: 740, height: 340,
+            <content id: "revenue-axes", x: 0, y: 0, width: 740, height: 340,
+                <svg width: 740, height: 340, viewBox: "0 0 740 340",
+                    <rect width: 740, height: 340, rx: 14, fill: "#ffffff">
+                    <g
+                        <line x1: 58, x2: 704, y1: 36, y2: 36, stroke: "#dce5e5">
+                        <text x: 15, y: 42, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "40">
+                    >
+                    <g
+                        <line x1: 58, x2: 704, y1: 92, y2: 92, stroke: "#dce5e5">
+                        <text x: 15, y: 98, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "30">
+                    >
+                    <g
+                        <line x1: 58, x2: 704, y1: 148, y2: 148, stroke: "#dce5e5">
+                        <text x: 15, y: 154, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "20">
+                    >
+                    <g
+                        <line x1: 58, x2: 704, y1: 204, y2: 204, stroke: "#dce5e5">
+                        <text x: 15, y: 210, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "10">
+                    >
+                    <g
+                        <line x1: 58, x2: 704, y1: 260, y2: 260, stroke: "#dce5e5">
+                        <text x: 15, y: 266, fill: "#617884", font-family: "Arial", font-size: 14, font-weight: 400, "0">
+                    >
+                    <text x: 147, y: 290, fill: "#183747", font-family: "Arial", font-size: 18, font-weight: 700, "2026">
+                    <text x: 347, y: 290, fill: "#183747", font-family: "Arial", font-size: 18, font-weight: 700, "2027">
+                    <text x: 547, y: 290, fill: "#183747", font-family: "Arial", font-size: 18, font-weight: 700, "2028">
+                    <rect x: 170, y: 316, width: 12, height: 12, fill: "#087f78">
+                    <text x: 191, y: 328, fill: "#617884", font-family: "Arial", font-size: 15, font-weight: 400, "Revenue">
+                    <rect x: 356, y: 316, width: 12, height: 12, fill: "#356cce">
+                    <text x: 377, y: 328, fill: "#617884", font-family: "Arial", font-size: 15, font-weight: 400, "Operating profit">
+                >
+            >
+            <shape id: "revenue-bar-0", x: 126, y: 159.2, width: 58, height: 100.8, kind: 'rect', fill: "#087f78", radius: 5>
+            <shape id: "revenue-bar-1", x: 192, y: 248.8, width: 58, height: 11.2, kind: 'rect', fill: "#356cce", radius: 5>
+            <shape id: "revenue-bar-2", x: 326, y: 108.80000000000001, width: 58, height: 151.2, kind: 'rect', fill: "#087f78", radius: 5>
+            <shape id: "revenue-bar-3", x: 392, y: 232, width: 58, height: 28, kind: 'rect', fill: "#356cce", radius: 5>
+            <shape id: "revenue-bar-4", x: 526, y: 41.60000000000002, width: 58, height: 218.39999999999998, kind: 'rect', fill: "#087f78", radius: 5>
+            <shape id: "revenue-bar-5", x: 592, y: 204, width: 58, height: 56, kind: 'rect', fill: "#356cce", radius: 5>
+            <content id: "revenue-values", x: 0, y: 0, width: 740, height: 340,
+                <svg width: 740, height: 340, viewBox: "0 0 740 340",
+                    <text x: 133, y: 150.2, fill: "#087f78", font-family: "Arial", font-size: 18, font-weight: 700, "$18m">
+                    <text x: 333, y: 99.80000000000001, fill: "#087f78", font-family: "Arial", font-size: 18, font-weight: 700, "$27m">
+                    <text x: 533, y: 32.60000000000002, fill: "#087f78", font-family: "Arial", font-size: 18, font-weight: 700, "$39m">
+                >
+            >
+        >
+        <content id: "financial-assumptions", x: 838, y: 250, width: 370, height: 340,
+            <div style: "width:100%;height:340px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "PLANNING ASSUMPTIONS">
+                <div style: "font-size:37px;font-weight:700;line-height:1.1;color:#087f78;margin-bottom:14px;", "50% → 44%">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Annual revenue growth across the plan.">
+                <div style: "height:24px;">
+                <div style: "font-size:37px;font-weight:700;line-height:1.1;color:#356cce;margin-bottom:14px;", "11% → 26%">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Operating margin improves as implementation and support scale.">
+            >
+        >
+        <text id: "financial-note", x: 90, y: 609, width: 1110, height: 27, font_size: 15, color: "#617884", style: "font-weight:400;line-height:1.2;", "Illustrative forecast  /  Revenue: $18m, $27m, $39m  /  Operating profit: $2m, $5m, $10m">
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "10 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+                <effect target: "revenue-bar-0", kind: 'wipe-in', from: 'top', delay: 140, duration: 680, easing: 'ease-out-cubic'>
+                <effect target: "revenue-bar-1", kind: 'wipe-in', from: 'top', delay: 195, duration: 680, easing: 'ease-out-cubic'>
+                <effect target: "revenue-bar-2", kind: 'wipe-in', from: 'top', delay: 250, duration: 680, easing: 'ease-out-cubic'>
+                <effect target: "revenue-bar-3", kind: 'wipe-in', from: 'top', delay: 305, duration: 680, easing: 'ease-out-cubic'>
+                <effect target: "revenue-bar-4", kind: 'wipe-in', from: 'top', delay: 360, duration: 680, easing: 'ease-out-cubic'>
+                <effect target: "revenue-bar-5", kind: 'wipe-in', from: 'top', delay: 415, duration: 680, easing: 'ease-out-cubic'>
+                <effect target: "revenue-values", kind: 'fade-in', delay: 980, duration: 200, easing: 'ease-out'>
+            >
+        >
+        <cue
+            <effect target: "financial-assumptions", kind: 'fly-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+        >
+        <notes "Click to reveal the planning assumptions after presenting the chart. These are scenario figures.">
+    >
+    <slide id: "chapter-11", title: "Sequence the work. Make the tradeoffs visible.", background: "#f3f6f5", transition: 'push', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "10  /  ROADMAP">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Sequence the work. Make the tradeoffs visible.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Four quarters, each with a distinct customer promise and a measurable release gate.">
+        <group id: "hero", x: 72, y: 252, width: 1136, height: 281,
+            <content id: "quarter-0", x: 0, y: 0, width: 266, height: 281,
+                <div style: "width:100%;height:281px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "Q1 / FOUNDATION">
+                    <div style: "font-size:27px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Launch reliably">
+                    <div style: "white-space:pre-line;font-size:18px;line-height:1.6;color:#617884;", "Guided setup\nData quality checks\nLaunch playbooks">
+                    <div style: "margin-top:18px;font-size:16px;font-weight:700;color:#087f78;", "Activation ≥ 78%">
+                >
+            >
+            <content id: "quarter-1", x: 290, y: 0, width: 266, height: 281,
+                <div style: "width:100%;height:281px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "Q2 / ADOPTION">
+                    <div style: "font-size:27px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Make work flow">
+                    <div style: "white-space:pre-line;font-size:18px;line-height:1.6;color:#617884;", "Mobile workspace\nRole-based templates\nUsage health">
+                    <div style: "margin-top:18px;font-size:16px;font-weight:700;color:#087f78;", "Weekly active ≥ 65%">
+                >
+            >
+            <content id: "quarter-2", x: 580, y: 0, width: 266, height: 281,
+                <div style: "width:100%;height:281px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "Q3 / EXPANSION">
+                    <div style: "font-size:27px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Connect the teams">
+                    <div style: "white-space:pre-line;font-size:18px;line-height:1.6;color:#617884;", "Cross-site reporting\nPartner integrations\nExpansion signals">
+                    <div style: "margin-top:18px;font-size:16px;font-weight:700;color:#087f78;", "NRR ≥ 120%">
+                >
+            >
+            <content id: "quarter-3", x: 870, y: 0, width: 266, height: 281,
+                <div style: "width:100%;height:281px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "Q4 / SCALE">
+                    <div style: "font-size:27px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Automate the loop">
+                    <div style: "white-space:pre-line;font-size:18px;line-height:1.6;color:#617884;", "Exception routing\nAutomation library\nSelf-serve analytics">
+                    <div style: "margin-top:18px;font-size:16px;font-weight:700;color:#087f78;", "Gross margin ≥ 80%">
+                >
+            >
+        >
+        <content id: "roadmap-gate", x: 72, y: 557, width: 1136, height: 70,
+            <div style: "width:100%;height:70px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#e0f1eb;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:20px;font-weight:700;", "RELEASE RULE  /  Validate adoption before opening the next investment gate.">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "11 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <cue
+            <effect target: "roadmap-gate", kind: 'wipe-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+        >
+        <notes "Reveal the release rule after the four quarterly themes. Gates guide resource allocation, not just release dates.">
+    >
+    <slide id: "chapter-12", title: "Win on the work that matters to the customer.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "11  /  POSITIONING">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Win on the work that matters to the customer.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "An illustrative comparison of product archetypes, rather than named competitors.">
+        <content id: "hero", x: 72, y: 245, width: 1136, height: 326,
+            <table style: "width:100%;border-collapse:collapse;background:#ffffff;",
+                <thead
+                    <tr
+                        <th style: "width:32%;padding:17px 20px;text-align:left;font-size:15px;letter-spacing:0.5px;color:#617884;background:#eaf0ef;", "BUYER PRIORITY">
+                        <th style: "width:auto;padding:17px 20px;text-align:left;font-size:15px;letter-spacing:0.5px;color:#617884;background:#eaf0ef;", "POINT TOOLS">
+                        <th style: "width:auto;padding:17px 20px;text-align:left;font-size:15px;letter-spacing:0.5px;color:#617884;background:#eaf0ef;", "BROAD SUITES">
+                        <th style: "width:auto;padding:17px 20px;text-align:left;font-size:15px;letter-spacing:0.5px;color:#617884;background:#eaf0ef;", "NORTHSTAR">
+                    >
+                >
+                <tbody
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "Fast time to first value">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Strong">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Variable">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "Core focus">
+                    >
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "Cross-team execution">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Limited">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Strong">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "Core focus">
+                    >
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "Deployment simplicity">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Strong">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Complex">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "Guided launch">
+                    >
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "Industry workflow depth">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Narrow">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Configurable">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "Purpose-built">
+                    >
+                >
+            >
+        >
+        <text id: "positioning-line", x: 91, y: 597, width: 1100, height: 36, font_size: 20, color: "#087f78", style: "font-weight:700;line-height:1.2;", "POSITIONING  /  The connected operations workspace for teams running complex, multi-site businesses.">
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "12 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "Archetypes are deliberately generic. This is a positioning exercise, not a factual assessment of specific vendors.">
+    >
+    <slide id: "chapter-13", title: "Land with a use case. Expand with evidence.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "12  /  GO TO MARKET">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Land with a use case. Expand with evidence.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "A focused funnel connects demand generation to customer-led expansion.">
+        <content id: "hero", x: 72, y: 244, width: 520, height: 380,
+            <svg width: 520, height: 380, viewBox: "0 0 520 380",
+                <path d: "M0 0 H520 L469 102 H51 Z", fill: "#102738">
+                <path d: "M51 116 H469 L418 218 H102 Z", fill: "#087f78">
+                <path d: "M102 232 H418 L367 334 H153 Z", fill: "#356cce">
+                <text x: 149, y: 45, fill: "#ffffff", font-family: "Arial", font-size: 22, font-weight: 700, "2,400 target accounts">
+                <text x: 170, y: 77, fill: "#bed0d5", font-family: "Arial", font-size: 17, font-weight: 400, "Focused reach">
+                <text x: 157, y: 162, fill: "#ffffff", font-family: "Arial", font-size: 22, font-weight: 700, "480 qualified teams">
+                <text x: 178, y: 192, fill: "#d9f3ec", font-family: "Arial", font-size: 17, font-weight: 400, "Proven use case">
+                <text x: 186, y: 277, fill: "#ffffff", font-family: "Arial", font-size: 20, font-weight: 700, "120 new customers">
+                <text x: 194, y: 307, fill: "#e5edfc", font-family: "Arial", font-size: 16, font-weight: 400, "Repeatable launch">
+                <text x: 21, y: 372, fill: "#617884", font-family: "Arial", font-size: 17, font-weight: 400, "Illustrative annual funnel  /  20% qualify  /  25% close">
+            >
+        >
+        <content id: "gtm-one", x: 618, y: 244, width: 590, height: 178,
+            <div style: "width:100%;height:178px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "ACQUIRE">
+                <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Industry expertise opens doors">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Use focused communities, partners and customer stories to reach the right operational buyer.">
+            >
+        >
+        <content id: "gtm-two", x: 618, y: 446, width: 590, height: 178,
+            <div style: "width:100%;height:178px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "EXPAND">
+                <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Measured outcomes create demand">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Use the first workflow's results to earn adjacent teams, sites and use cases.">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "13 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "The funnel describes an annual scenario. Qualification is 480 divided by 2400, and close rate is 120 divided by 480.">
+    >
+    <slide id: "chapter-14", title: "One scorecard. Clear owners. No surprises.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "13  /  SCORECARD">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "One scorecard. Clear owners. No surprises.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Pair commercial outcomes with the leading indicators that teams can act on.">
+        <content id: "hero", x: 72, y: 244, width: 1136, height: 380,
+            <table style: "width:100%;border-collapse:collapse;background:#ffffff;",
+                <thead
+                    <tr
+                        <th style: "width:34%;padding:17px 20px;text-align:left;font-size:15px;letter-spacing:0.5px;color:#617884;background:#eaf0ef;", "MEASURE">
+                        <th style: "width:auto;padding:17px 20px;text-align:left;font-size:15px;letter-spacing:0.5px;color:#617884;background:#eaf0ef;", "CURRENT">
+                        <th style: "width:auto;padding:17px 20px;text-align:left;font-size:15px;letter-spacing:0.5px;color:#617884;background:#eaf0ef;", "2027 TARGET">
+                        <th style: "width:auto;padding:17px 20px;text-align:left;font-size:15px;letter-spacing:0.5px;color:#617884;background:#eaf0ef;", "ACCOUNTABLE OWNER">
+                    >
+                >
+                <tbody
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "Annual recurring revenue">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "$18m">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "$27m">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Revenue">
+                    >
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "Net revenue retention">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "118%">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "123%">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Customer success">
+                    >
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "30-day activation">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "72%">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "85%">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Product + solutions">
+                    >
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "Gross margin">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "78%">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "82%">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Operations">
+                    >
+                    <tr
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:700;", "CAC payback">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "14 months">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#087f78;font-weight:700;", "12 months">
+                        <td style: "padding:18px 20px;border-bottom:1px solid #dce5e5;font-size:19px;line-height:1.25;color:#183747;font-weight:400;", "Growth + finance">
+                    >
+                >
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "14 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "ARR current is the 2026 year-end plan, while the earlier traction slide reports Q2 2026. Separate leading indicators from lagging outcomes.">
+    >
+    <slide id: "chapter-15", title: "Make the risks explicit. Build the response now.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "14  /  RISK & RESILIENCE">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Make the risks explicit. Build the response now.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "Prioritize the few uncertainties that could change the plan materially.">
+        <content id: "hero", x: 72, y: 244, width: 490, height: 378,
+            <svg width: 490, height: 378, viewBox: "0 0 490 378",
+                <rect x: 70, y: 12, width: 119, height: 89, rx: 4, fill: "#e0efea">
+                <rect x: 195, y: 12, width: 119, height: 89, rx: 4, fill: "#f1e7d8">
+                <rect x: 320, y: 12, width: 119, height: 89, rx: 4, fill: "#f4d8ce">
+                <rect x: 70, y: 107, width: 119, height: 89, rx: 4, fill: "#e0efea">
+                <rect x: 195, y: 107, width: 119, height: 89, rx: 4, fill: "#e0efea">
+                <rect x: 320, y: 107, width: 119, height: 89, rx: 4, fill: "#f1e7d8">
+                <rect x: 70, y: 202, width: 119, height: 89, rx: 4, fill: "#e0efea">
+                <rect x: 195, y: 202, width: 119, height: 89, rx: 4, fill: "#e0efea">
+                <rect x: 320, y: 202, width: 119, height: 89, rx: 4, fill: "#e0efea">
+                <text x: 11, y: 34, fill: "#617884", font-family: "Arial", font-size: 12, font-weight: 400, "HIGH">
+                <text x: 15, y: 225, fill: "#617884", font-family: "Arial", font-size: 12, font-weight: 400, "LOW">
+                <text x: 70, y: 327, fill: "#617884", font-family: "Arial", font-size: 13, font-weight: 400, "LOW">
+                <text x: 397, y: 327, fill: "#617884", font-family: "Arial", font-size: 13, font-weight: 400, "HIGH">
+                <text x: 146, y: 363, fill: "#617884", font-family: "Arial", font-size: 15, font-weight: 700, "BUSINESS IMPACT">
+                <circle cx: 380, cy: 59, r: 22, fill: "#102738">
+                <text x: 373, y: 66, fill: "#ffffff", font-family: "Arial", font-size: 20, font-weight: 700, "1">
+                <circle cx: 255, cy: 154, r: 22, fill: "#087f78">
+                <text x: 248, y: 161, fill: "#ffffff", font-family: "Arial", font-size: 20, font-weight: 700, "2">
+                <circle cx: 380, cy: 249, r: 22, fill: "#356cce">
+                <text x: 373, y: 256, fill: "#ffffff", font-family: "Arial", font-size: 20, font-weight: 700, "3">
+            >
+        >
+        <group id: "risk-list", x: 588, y: 244, width: 620, height: 304,
+            <content id: "risk-0", x: 0, y: 0, width: 620, height: 94,
+                <div style: "width:100%;height:94px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:22px;font-weight:700;margin-bottom:6px;", "1 / Adoption stalls">
+                    <div style: "font-size:18px;color:#617884;", "Early health signals + a guided 30-day launch.">
+                >
+            >
+            <content id: "risk-1", x: 0, y: 104, width: 620, height: 94,
+                <div style: "width:100%;height:94px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:22px;font-weight:700;margin-bottom:6px;", "2 / Sales cycles lengthen">
+                    <div style: "font-size:18px;color:#617884;", "Tighter qualification + value-based pilots.">
+                >
+            >
+            <content id: "risk-2", x: 0, y: 208, width: 620, height: 94,
+                <div style: "width:100%;height:94px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:22px;font-weight:700;margin-bottom:6px;", "3 / Integration incidents">
+                    <div style: "font-size:18px;color:#617884;", "Observability + tested recovery playbooks.">
+                >
+            >
+        >
+        <text id: "risk-response", x: 602, y: 579, width: 600, height: 48, font_size: 21, color: "#087f78", style: "font-weight:700;line-height:1.2;", "Review exposure monthly; escalate changes immediately.">
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "15 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <cue
+            <effect target: "risk-response", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+        >
+        <notes "The vertical axis indicates likelihood from low at the bottom to high at the top. Click to reveal the response cadence.">
+    >
+    <slide id: "chapter-16", title: "Fund the bottlenecks that unlock the next stage.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "15  /  RESOURCE ALLOCATION">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Fund the bottlenecks that unlock the next stage.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "An illustrative $6m incremental investment, allocated against measurable outcomes.">
+        <group id: "hero", x: 72, y: 251, width: 745, height: 366,
+            <content id: "progress-base", x: 0, y: 0, width: 745, height: 366,
+                <svg width: 745, height: 366, viewBox: "0 0 745 366",
+                    <rect width: 745, height: 366, rx: 14, fill: "#ffffff">
+                    <text x: 29, y: 49, fill: "#183747", font-family: "Arial", font-size: 30, font-weight: 700, "$6m investment envelope">
+                    <g
+                        <text x: 29, y: 110, fill: "#183747", font-family: "Arial", font-size: 19, font-weight: 700, "Product & data">
+                        <rect x: 239, y: 93, width: 420, height: 26, rx: 6, fill: "#e5ecec">
+                    >
+                    <g
+                        <text x: 29, y: 182, fill: "#183747", font-family: "Arial", font-size: 19, font-weight: 700, "Customer value">
+                        <rect x: 239, y: 165, width: 420, height: 26, rx: 6, fill: "#e5ecec">
+                    >
+                    <g
+                        <text x: 29, y: 254, fill: "#183747", font-family: "Arial", font-size: 19, font-weight: 700, "Distribution">
+                        <rect x: 239, y: 237, width: 420, height: 26, rx: 6, fill: "#e5ecec">
+                    >
+                    <text x: 29, y: 324, fill: "#617884", font-family: "Arial", font-size: 17, font-weight: 400, "Product $2.4m  /  Customer value $2.1m  /  Distribution $1.5m">
+                >
+            >
+            <shape id: "progress-bar-0", x: 239, y: 93, width: 168, height: 26, kind: 'rect', fill: "#087f78", radius: 6>
+            <shape id: "progress-bar-1", x: 239, y: 165, width: 147, height: 26, kind: 'rect', fill: "#356cce", radius: 6>
+            <shape id: "progress-bar-2", x: 239, y: 237, width: 105, height: 26, kind: 'rect', fill: "#b86c47", radius: 6>
+            <content id: "progress-value-0", x: 0, y: 0, width: 745, height: 366,
+                <svg width: 745, height: 366, viewBox: "0 0 745 366",
+                    <text x: 682, y: 113, fill: "#087f78", font-family: "Arial", font-size: 20, font-weight: 700, "40%">
+                >
+            >
+            <content id: "progress-value-1", x: 0, y: 0, width: 745, height: 366,
+                <svg width: 745, height: 366, viewBox: "0 0 745 366",
+                    <text x: 682, y: 185, fill: "#356cce", font-family: "Arial", font-size: 20, font-weight: 700, "35%">
+                >
+            >
+            <content id: "progress-value-2", x: 0, y: 0, width: 745, height: 366,
+                <svg width: 745, height: 366, viewBox: "0 0 745 366",
+                    <text x: 682, y: 257, fill: "#b86c47", font-family: "Arial", font-size: 20, font-weight: 700, "25%">
+                >
+            >
+        >
+        <content id: "allocation-rule", x: 843, y: 251, width: 365, height: 366,
+            <div style: "width:100%;height:366px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#617884;margin-bottom:16px;", "CAPITAL DISCIPLINE">
+                <div style: "font-size:33px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Release in stages">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Commit the team, instrument the outcome, then unlock the next tranche.">
+                <div style: "height:24px;">
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "REVIEW EVERY QUARTER">
+                <div style: "font-size:20px;line-height:1.4;color:#617884;", "Rebalance when evidence changes. Stop work that does not improve the scorecard.">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "16 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+                <effect target: "progress-bar-0", kind: 'wipe-in', from: 'right', delay: 160, duration: 720, easing: 'ease-out-cubic'>
+                <effect target: "progress-value-0", kind: 'fade-in', delay: 760, duration: 200, easing: 'ease-out'>
+                <effect target: "progress-bar-1", kind: 'wipe-in', from: 'right', delay: 290, duration: 720, easing: 'ease-out-cubic'>
+                <effect target: "progress-value-1", kind: 'fade-in', delay: 890, duration: 200, easing: 'ease-out'>
+                <effect target: "progress-bar-2", kind: 'wipe-in', from: 'right', delay: 420, duration: 720, easing: 'ease-out-cubic'>
+                <effect target: "progress-value-2", kind: 'fade-in', delay: 1020, duration: 200, easing: 'ease-out'>
+            >
+        >
+        <notes "Allocation bars share a zero-to-100 percent domain. Dollar amounts sum to the six-million investment envelope.">
+    >
+    <slide id: "chapter-17", title: "Turn the strategy into a management rhythm.", background: "#f3f6f5", transition: 'fade', transition_duration: 360,
+        <shape id: "accent", x: 72, y: 47, width: 34, height: 5, kind: 'rect', fill: "#087f78", radius: 0>
+        <text id: "section", x: 120, y: 39, width: 1000, height: 26, font_size: 15, color: "#087f78", style: "font-weight:700;line-height:1.2;", "16  /  EXECUTION">
+        <text id: "headline", x: 72, y: 94, width: 1136, height: 70, font_size: 44, color: "#183747", style: "font-weight:700;line-height:1.2;", "Turn the strategy into a management rhythm.">
+        <text id: "subtitle", x: 72, y: 169, width: 1136, height: 56, font_size: 21, color: "#617884", style: "font-weight:400;line-height:1.2;", "A lightweight cadence keeps teams aligned and decisions close to the evidence.">
+        <group id: "hero", x: 72, y: 247, width: 1136, height: 239,
+            <content id: "weekly", x: 0, y: 0, width: 362, height: 239,
+                <div style: "width:100%;height:239px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "WEEKLY / TEAM">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Resolve the friction">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Review activation, delivery exceptions and actions. Make one owner accountable for each next step.">
+                >
+            >
+            <content id: "monthly", x: 387, y: 0, width: 362, height: 239,
+                <div style: "width:100%;height:239px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#356cce;margin-bottom:16px;", "MONTHLY / LEADERSHIP">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Review the system">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Check the scorecard, customer health and risk exposure. Resolve tradeoffs across functions.">
+                >
+            >
+            <content id: "quarterly", x: 774, y: 0, width: 362, height: 239,
+                <div style: "width:100%;height:239px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                    <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#b86c47;margin-bottom:16px;", "QUARTERLY / BOARD">
+                    <div style: "font-size:30px;font-weight:700;line-height:1.1;color:#183747;margin-bottom:14px;", "Reallocate with intent">
+                    <div style: "font-size:20px;line-height:1.4;color:#617884;", "Review strategic assumptions and investment gates. Fund the next constraint, not last quarter's plan.">
+                >
+            >
+        >
+        <content id: "next-thirty", x: 72, y: 514, width: 1136, height: 112,
+            <div style: "width:100%;height:112px;box-sizing:border-box;padding:26px;border:1px solid #dce5e5;border-radius:14px;background:#ffffff;color:#183747;font-size:20px;line-height:1.4;",
+                <div style: "font-size:15px;font-weight:700;letter-spacing:1.5px;color:#087f78;margin-bottom:16px;", "NEXT 30 DAYS">
+                <div style: "font-size:21px;font-weight:700;", "01  Name the owners     /     02  Baseline the measures     /     03  Launch the first cohort">
+            >
+        >
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#dce5e5", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#617884", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#617884", style: "font-weight:700;line-height:1.2;", "17 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fade-in', duration: 480, delay: 80, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "Close with the operating cadence and the concrete first thirty days. The plan needs named owners before new investment begins.">
+    >
+    <slide id: "closing", title: "Focus creates momentum", background: "#102738", transition: 'fade', transition_duration: 420,
+        <shape id: "close-accent", x: 72, y: 62, width: 42, height: 6, kind: 'rect', fill: "#7de0c0", radius: 0>
+        <text id: "close-kicker", x: 132, y: 51, width: 950, height: 35, font_size: 17, color: "#7de0c0", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  THE NEXT CHAPTER">
+        <text id: "headline", x: 72, y: 144, width: 1120, height: 173, font_size: 61, color: "#ffffff", style: "font-weight:700;line-height:1.2;", "Focus creates momentum.\nDiscipline makes it durable.">
+        <group id: "hero", x: 76, y: 372, width: 1128, height: 146,
+            <group id: "close-0", x: 0, y: 0, width: 350, height: 146,
+                <text id: "close-n-0", x: 0, y: 0, width: 350, height: 65, font_size: 48, color: "#7de0c0", style: "font-weight:700;line-height:1.2;", "01">
+                <text id: "close-t-0", x: 0, y: 80, width: 350, height: 62, font_size: 25, color: "#ffffff", style: "font-weight:700;line-height:1.2;", "Win the right customer">
+            >
+            <group id: "close-1", x: 382, y: 0, width: 350, height: 146,
+                <text id: "close-n-1", x: 0, y: 0, width: 350, height: 65, font_size: 48, color: "#7de0c0", style: "font-weight:700;line-height:1.2;", "02">
+                <text id: "close-t-1", x: 0, y: 80, width: 350, height: 62, font_size: 25, color: "#ffffff", style: "font-weight:700;line-height:1.2;", "Prove the value early">
+            >
+            <group id: "close-2", x: 764, y: 0, width: 350, height: 146,
+                <text id: "close-n-2", x: 0, y: 0, width: 350, height: 65, font_size: 48, color: "#7de0c0", style: "font-weight:700;line-height:1.2;", "03">
+                <text id: "close-t-2", x: 0, y: 80, width: 350, height: 62, font_size: 25, color: "#ffffff", style: "font-weight:700;line-height:1.2;", "Scale what works">
+            >
+        >
+        <text id: "close-question", x: 76, y: 567, width: 1120, height: 42, font_size: 23, color: "#bed0d5", style: "font-weight:400;line-height:1.2;", "DISCUSSION  /  What must we stop doing to make this plan possible?">
+        <shape id: "footer-rule", x: 72, y: 654, width: 1136, height: 1, kind: 'rect', fill: "#34505c", radius: 0>
+        <text id: "brand", x: 72, y: 673, width: 650, height: 20, font_size: 12, color: "#acc2ca", style: "font-weight:700;line-height:1.2;", "NORTHSTAR  /  STRATEGY 2027  /  ILLUSTRATIVE DATA">
+        <text id: "page-number", x: 1134, y: 669, width: 74, height: 26, font_size: 16, color: "#acc2ca", style: "font-weight:700;line-height:1.2;", "18 / 18">
+        <cue start: 'entry',
+            <parallel
+                <effect target: "headline", kind: 'fade-in', duration: 480, delay: 0, easing: 'ease-out-cubic'>
+                <effect target: "hero", kind: 'fly-in', duration: 480, delay: 100, easing: 'ease-out-cubic'>
+            >
+        >
+        <notes "End with the tradeoff question. All metrics are fictional; the deck demonstrates Lambda/Radiant content, style and animation capabilities.">
+    >
+>

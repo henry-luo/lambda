@@ -3,7 +3,7 @@
 Run these commands from the repository root.
 
 ```bash
-./lambda.exe view test/demo/slides/slide_northstar.ls
+./lambda.exe view test/demo/slides/northstar.slides
 ```
 
 **Northstar / Strategy 2027** is an 18-slide fictional leadership briefing with
@@ -37,11 +37,16 @@ reduced-motion playback shows its final state immediately. The shared player too
 Next action and a separate slide-count badge.
 
 The example has no network dependencies. Typography uses Arial with the host's
-sans-serif fallback; charts and diagrams are authored SVG. The entry point is
-[slide_northstar.ls](slide_northstar.ls); [northstar_deck.ls](northstar_deck.ls)
-contains the reusable deck and shared layout, card and chart helpers. Change the
-content there to adapt the presentation. `slide.snapshot`, `slide.slides` and
-`slide.handout` accept the exported `deck` value for static views and notes.
+sans-serif fallback; charts and diagrams are authored SVG. Each deck is a
+`.slides` file — Mark data with a `<presentation>` root — that `lambda view`
+presents through `lambda.slide.present`. A slide renders the first time it is
+shown and stays mounted; navigation afterwards only changes which layer is
+displayed and its animation state. [northstar.slides](northstar.slides) was
+converted from the earlier Lambda deck script, whose layout, card and chart
+helpers generated it; edit the Mark directly to adapt it. A script reads a deck
+with `input("test/demo/slides/northstar.slides", 'slides')^`, and
+`slide.snapshot`, `slide.slides` and `slide.handout` accept that value for static
+views and notes.
 
 | Slides | Content |
 |---|---|
@@ -55,19 +60,20 @@ content there to adapt the presentation. `slide.snapshot`, `slide.slides` and
 Two smaller examples remain available:
 
 ```bash
-./lambda.exe view test/demo/slides/slide_presentation.ls
-./lambda.exe view test/demo/slides/slide_package_content.ls
+./lambda.exe view test/demo/slides/slide_presentation.slides
+./lambda.exe view test/demo/slides/slide_package_content.slides
 ```
 
-The first introduces basic builds and slide transitions. The second embeds a
-`lambda.chart` visualization and builds paragraphs. See the
+The first introduces basic builds and slide transitions. The second carries a
+`lambda.chart` visualization and paragraph builds, rendered once when the deck
+was converted. See the
 [slide package reference](../../../doc/Lambda_Slide.md) for the authoring API.
 
 The Northstar UI replay visits every slide, checks five staged reveals, pauses
 charts to inspect intermediate pixels, and verifies nested group bounds:
 
 ```bash
-./lambda.exe view test/demo/slides/slide_northstar.ls --headless \
+./lambda.exe view test/demo/slides/northstar.slides --headless \
   --event-file test/ui/slide_northstar.json \
   --event-result temp/northstar-result.json
 ```

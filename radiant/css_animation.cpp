@@ -1886,6 +1886,13 @@ static CssMotionInitialCache* css_motion_initial_cache(DomDocument* doc) {
     return cache;
 }
 
+// Restyle reads motion lists once; shorthand projections, var() substitution and
+// unit normalization allocate, so they must not land in retained view storage.
+struct MotionScratchPool {
+    Pool* pool = pool_create();
+    ~MotionScratchPool() { if (pool) pool_destroy(pool); }
+};
+
 const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode property) {
     if (!pool || (css_animation_longhand_index(property) < 0 &&
@@ -1998,14 +2005,16 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
         CSS_PROPERTY_ANIMATION_ITERATION_COUNT, CSS_PROPERTY_ANIMATION_DIRECTION,
         CSS_PROPERTY_ANIMATION_FILL_MODE, CSS_PROPERTY_ANIMATION_PLAY_STATE
     };
+    MotionScratchPool scratch;
+    if (!scratch.pool) return;
     const CssValue* values[8] = {};
     for (int i = 0; i < 8; i++) {
-        values[i] = css_motion_computed_value(lycon->pool, element, properties[i]);
+        values[i] = css_motion_computed_value(scratch.pool, element, properties[i]);
     }
     int count = values[0] ? (values[0]->type == CSS_VALUE_TYPE_LIST
         ? values[0]->data.list.count : 1) : 0;
     AnimationInstance** instances = count > 0 ? (AnimationInstance**)pool_calloc(
-        lycon->pool, sizeof(AnimationInstance*) * count) : nullptr;
+        scratch.pool, sizeof(AnimationInstance*) * count) : nullptr;
     if (count > 0 && !instances) return;
     for (AnimationInstance* instance = scheduler->first; instance; instance = instance->next) {
         if (instance->target == element && instance->type == ANIM_CSS_ANIMATION && instance->state) {
@@ -2531,8 +2540,10 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
     // Resolve the transition config. Even if no transition is declared we still
     // maintain the used-value snapshot below (so a later declaration starts from
     // a correct "from"), but we only START transitions when duration > 0.
+    MotionScratchPool scratch;
+    if (!scratch.pool) return;
     CssTransitionList list;
-    css_transition_resolve_config(element, lycon->pool, &list);
+    css_transition_resolve_config(element, scratch.pool, &list);
 
     // Lazily allocate the persistent per-element transition state (survives the
     // view-pool relayout because it lives in the doc pool, not the view pool).

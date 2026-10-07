@@ -689,24 +689,20 @@ static DomElement* radiant_dom_find_by_id(DomElement* root, const char* id) {
     return nullptr;
 }
 
-static CssSelectorGroup* radiant_dom_parse_css_selector_group(const char* sel_text, Pool* pool) {
-    if (!sel_text || !pool) return nullptr;
-    size_t sel_len = strlen(sel_text);
-    if (sel_len == 0) return nullptr;
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(sel_text, sel_len, pool, &token_count);
-    if (!tokens || token_count == 0) return nullptr;
-    int pos = 0;
-    // DOM selector APIs receive selector lists; parsing only the first selector
-    // makes editor hit-tests such as closest("td, th") miss valid cells.
-    CssSelectorGroup* group = css_parse_selector_group_from_tokens(
-        tokens, &pos, (int)token_count, pool);
-    if (!group || group->selector_count == 0 ||
-        !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count)) {
-        group = nullptr;
+static Item radiant_dom_throw_named_error(const char* name, const char* message);
+
+// Document-level selector ops use the same per-call scratch query as the
+// element rows; a false return leaves the op's early result in *out.
+static bool radiant_dom_prepare_document_query(SelectorQueryScratch* query, DomDocument* doc,
+                                               const char* sel_text, Item empty, Item* out) {
+    *out = empty;
+    if (!sel_text || !doc) return false;
+    if (!query->parse_list(sel_text)) {
+        if (query->pool) *out = radiant_dom_throw_named_error("SyntaxError", "is not a valid selector");
+        return false;
     }
-    css_token_array_release(pool, tokens, token_count);
-    return group;
+    query->matcher = (SelectorMatcher*)dom_create_selector_matcher_bridge((void*)doc, query->pool);
+    return true;
 }
 
 static DomElement* radiant_dom_selector_group_find_first(SelectorMatcher* matcher,
@@ -3050,18 +3046,10 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             return 1;
         }
         const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text || !doc || !doc->document_pool) {
-            *out = ItemNull;
-            return 1;
-        }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
-        if (!selector_group || css_selector_group_contains_generic_pseudo(selector_group)) {
-            *out = radiant_dom_throw_named_error("SyntaxError", "is not a valid selector");
-            return 1;
-        }
-        SelectorMatcher* matcher = (SelectorMatcher*)dom_create_selector_matcher_bridge((void*)doc);
+        SelectorQueryScratch query;
+        if (!radiant_dom_prepare_document_query(&query, doc, sel_text, ItemNull, out)) return 1;
         DomElement* found = radiant_dom_selector_group_find_first(
-            matcher, selector_group, root, true);
+            query.matcher, query.group, root, true);
         *out = radiant_dom_node_item((DomNode*)found);
         return 1;
     }
@@ -3072,23 +3060,19 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             return 1;
         }
         const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text || !doc || !doc->document_pool) {
-            *out = dom_static_node_list_from_array(radiant_dom_array_item());
+        SelectorQueryScratch query;
+        if (!radiant_dom_prepare_document_query(&query, doc, sel_text, ItemNull, out)) {
+            // a missing selector text still yields an empty static list
+            if (out->item == ItemNull.item) *out = dom_static_node_list_from_array(radiant_dom_array_item());
             return 1;
         }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
-        if (!selector_group || css_selector_group_contains_generic_pseudo(selector_group)) {
-            *out = radiant_dom_throw_named_error("SyntaxError", "is not a valid selector");
-            return 1;
-        }
-        SelectorMatcher* matcher = (SelectorMatcher*)dom_create_selector_matcher_bridge((void*)doc);
         ArrayList* results = arraylist_new(16);
         Item arr_item = radiant_dom_array_item();
         Array* arr = arr_item.array;
         radiant_host_api->gc->register_root(&arr_item.item);
         if (results) {
             radiant_dom_selector_group_collect_all(
-                matcher, selector_group, root, results, true);
+                query.matcher, query.group, root, results, true);
             for (int i = 0; i < results->length; i++) {
                 array_push(arr, radiant_dom_node_item((DomNode*)results->data[i]));
             }

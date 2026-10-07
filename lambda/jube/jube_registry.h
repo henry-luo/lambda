@@ -44,9 +44,6 @@ bool jube_specifier_index_names(JubeSpecifierNameCallback callback, void* user);
 // Supplies argv[0] so the registry can discover a bundle next to the unified
 // host even when the current working directory is a user project.
 void jube_set_host_executable_path(const char* executable_path);
-// Resolve and load one manifest-selected hosted language on a CLI/import
-// fallback. It performs no work for already registered languages.
-bool jube_discover_hosted_language(const char* selector);
 void jube_register_builtin_modules(void);
 // Returns whether the selected bundle profile includes the optional Node
 // compatibility descriptor. The executable owns its registration because
@@ -95,7 +92,6 @@ const JubeModuleDef* jube_find_static_module(const char* name);
 bool jube_activate_module(const JubeModuleDef* module);
 bool jube_resolve_global(const char* name, size_t name_length, Item* out_value);
 const JubeGlobalDef* jube_module_globals(const JubeModuleDef* module, int32_t* count);
-const JubeLanguageDef* jube_module_language(const JubeModuleDef* module);
 // Activates the module whose manifest provides `rdb:<name>` and returns its
 // driver table, or NULL when no installed module provides it (RDB4).
 const RdbDriver* jube_rdb_resolve_driver(const char* name);
@@ -137,14 +133,6 @@ typedef enum JubeNodeModuleStateSlot {
 // runtime_attach operation; normal module calls only resolve the chosen slot.
 LAMBDA_RT_API void* jube_node_session_module_state_get(void* session, uint32_t slot, size_t size);
 LAMBDA_RT_API void* jube_node_current_module_state(uint32_t slot);
-
-// Internal host bridge for import-time language dispatch.  The returned
-// wrapper is opaque to the language module and is always released by the
-// language registry unless its activation was retained for heap cleanup.
-void* jube_create_import_execution(void* host_context);
-void jube_destroy_import_execution(void* execution_context);
-bool jube_import_execution_is_retained(void* execution_context);
-void* jube_execution_runtime_handle(void* execution_context);
 
 // DOM3: shared per-type prototype object (lazy, GC-rooted) for types with a
 // compiled interface declaration; modules attach constructors to it so

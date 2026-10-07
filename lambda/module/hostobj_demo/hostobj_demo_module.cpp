@@ -271,7 +271,6 @@ static const JubeModuleDef s_hostobj_demo_module = {
     hostobj_demo_runtime_reset,
     NULL,
     NULL,
-    NULL,
     s_hostobj_demo_globals,
     1,
 };

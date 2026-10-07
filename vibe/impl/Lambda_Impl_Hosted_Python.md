@@ -1,5 +1,9 @@
 # Hosted Python — Detailed Implementation Plan
 
+> **Removed 2026-10-07 (USER).** `lang-python`, its tests, build targets and the host's
+> hosted-language/hosted-compiler services were deleted (Jube ABI 8, host API 5); see
+> `vibe/Lambda_Design_Jube_Lang_Hosting.md`. The plan below is the historical record.
+
 > **Status:** active implementation; product split landed, compiler boundary and
 > release acceptance incomplete
 >
