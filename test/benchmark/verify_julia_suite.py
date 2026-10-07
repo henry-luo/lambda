@@ -15,6 +15,7 @@ import run_benchmarks as registry
 import run_c2mir_benchmarks as c2mir
 import run_go_benchmarks as go
 import run_julia_benchmarks as julia
+import native_benchmark_runner as native
 
 ROOT = Path(registry.PROJECT_ROOT).resolve()
 SUITE = ROOT / "test/benchmark/julia"
@@ -103,6 +104,8 @@ def port_command(engine, name):
         return [sys.executable, str(SUITE / "python" / f"{name}.py")], {}
     if engine == "julia":
         return julia.build_command(julia.port_source("julia", name)), julia.julia_environment()
+    if engine in ("java", "erlang"):
+        return native.build_command(engine, "julia", name), native.environment()
     if engine == "c2mir":
         error = c2mir.ensure_c2m()
         if error:
@@ -122,7 +125,7 @@ def port_command(engine, name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--engines", default="mir,mir_typed,nodejs,lambdajs,quickjs,python,julia,c2mir,go")
+    parser.add_argument("--engines", default="mir,mir_typed,nodejs,lambdajs,quickjs,python,julia,c2mir,go,java,erlang")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--output", type=Path, default=ROOT / "temp/julia_suite_validation.json")
     args = parser.parse_args()
@@ -158,8 +161,14 @@ def main():
     sources = [p for p in SUITE.rglob("*") if p.suffix in (".ls", ".js", ".py", ".jl", ".c", ".h", ".json")]
     sources += list((ROOT / "test/benchmark/go/cmd/julia").rglob("*.go"))
     sources.append(ROOT / "test/benchmark/go/internal/bench/julia_micro.go")
+    for engine in ("java", "erlang"):
+        if engine in engines:
+            sources += native.source_files(engine)
     payload = {"warmup_runs": 1, "expected": expected, "records": records,
                "sources_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}}
+    for engine in ("java", "erlang"):
+        if engine in engines:
+            payload[engine] = native.runtime_metadata(engine)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2) + "\n")
     passed = sum(record["status"] == "ok" for record in records)

@@ -45,6 +45,8 @@ ENGINE_LABELS = {
     "c2mir_e2e": "C2MIR",
     "go_e2e": "Go",
     "julia_e2e": "Julia (startup + warmup)",
+    "java_e2e": "Java (startup + warmup)",
+    "erlang_e2e": "Erlang (startup + warmup)",
     "lambdajs_e2e": "LambdaJS (auto)",
     "quickjs_e2e": "QuickJS",
     "nodejs_e2e": "Node.js",
@@ -55,6 +57,8 @@ ENGINE_LABELS = {
     "nodejs": "Node.js",
     "python": "Python",
     "julia": "Julia",
+    "java": "Java",
+    "erlang": "Erlang",
 }
 
 
@@ -427,7 +431,7 @@ def write_historical_comparisons(w, metadata):
 # Set 2's engine list, in the order the report shows it. Built from what the
 # JSON actually carries so an older snapshot without e2e columns simply reports
 # part 1 alone.
-E2E_ENGINES = ["mir_auto_e2e", "mir_typed_auto_e2e", "c2mir_e2e", "julia_e2e",
+E2E_ENGINES = ["mir_auto_e2e", "mir_typed_auto_e2e", "c2mir_e2e", "julia_e2e", "java_e2e", "erlang_e2e",
                "lambdajs_e2e", "quickjs_e2e", "nodejs_e2e"]
 
 
@@ -576,6 +580,13 @@ def write_report(args, data):
         w(f"- **Julia:** {julia.get('version') or 'unrecorded'}; one thread; {warmup} full warmup run(s) with fresh inputs. "
           "Execution excludes startup and warmup; the process column includes startup, compilation and warmup. "
           "Node's timer uses the checked-in script's own warmup policy.")
+    for native_engine in ("java", "erlang"):
+        if native_engine in engines:
+            native = metadata.get(native_engine) or {}
+            version = (native.get("version") or "unrecorded").splitlines()[0]
+            w(f"- **{ENGINE_LABELS[native_engine]}:** {version}; {native.get('warmup_runs', 1)} full warmup run(s). "
+              "Generated native functions include boxed value adapters. Execution excludes startup and warmup; "
+              "process time includes VM startup and warmup; native source compilation precedes both timers.")
     if "julia" in data:
         w("- **Julia microbenchmark suite:** every language uses one complete warmup, then one measured workload; "
           "formatted-output timing includes synchronous null-sink writes.")

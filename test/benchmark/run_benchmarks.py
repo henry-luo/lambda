@@ -55,6 +55,8 @@ os.chdir(PROJECT_ROOT)
 import run_c2mir_benchmarks as c2mir_ports  # noqa: E402
 import run_go_benchmarks as go_ports  # noqa: E402
 import run_julia_benchmarks as julia_ports  # noqa: E402
+import run_java_benchmarks as java_ports  # noqa: E402
+import run_erlang_benchmarks as erlang_ports  # noqa: E402
 
 # ============================================================
 # Configuration
@@ -90,7 +92,7 @@ MIR_VS_C_CSV_PATH = "temp/mir_vs_c_bench.csv"
 
 IS_MACOS = platform.system() == "Darwin"
 
-ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "mvpjs", "quickjs", "nodejs", "python", "julia"]
+ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "mvpjs", "quickjs", "nodejs", "python", "julia", "java", "erlang"]
 
 # Native statically-typed reference ports. They are not alternative Lambda
 # execution paths — they bound what a fully typed Lambda program could reach on
@@ -113,6 +115,8 @@ ENGINE_LABELS = {
     "mir": "MIR-U", "mir_typed": "MIR-T", "c2mir": "C2MIR", "go": "Go",
     "lambdajs": "LambdaJS", "mvpjs": "JS MVP", "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
     "julia": "Julia",
+    "java": "Java",
+    "erlang": "Erlang",
 }
 
 # ============================================================
@@ -561,6 +565,8 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "node_version_pinned": expected_node_version(),
         "python_version": get_command_output([PYTHON_EXE, "--version"]),
         "julia": julia_ports.runtime_metadata() if "julia" in engines else None,
+        "java": java_ports.runtime_metadata() if "java" in engines else None,
+        "erlang": erlang_ports.runtime_metadata() if "erlang" in engines else None,
         "quickjs_version": quickjs_version,
         "quickjs_exe": quickjs_path,
         "quickjs_exe_sha256": executable_sha256(quickjs_path),
@@ -1130,7 +1136,8 @@ def go_command(suite, name):
 
 
 def reference_port_command(engine, suite, name):
-    commands = {"c2mir": c2mir_command, "go": go_command, "julia": julia_ports.shell_command}
+    commands = {"c2mir": c2mir_command, "go": go_command, "julia": julia_ports.shell_command,
+                "java": java_ports.shell_command, "erlang": erlang_ports.shell_command}
     return commands[engine](suite, name)
 
 
@@ -1146,7 +1153,7 @@ def run_native_engine(engine, suite, name, num_runs, timeout_s, results, row):
         print(f" --- ({status})")
         return
     w, e, ok, status, detail = time_run_benchmark(cmd, num_runs, timeout_s)
-    if engine == "julia" and ok and e is None:
+    if engine in ("julia", "java", "erlang") and ok and e is None:
         ok, status = False, "invalid_timing"
     # A native port pays its own process startup inside the wall figure, which
     # is exactly what set 2 compares against Lambda's auto tier.
@@ -1280,7 +1287,7 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
     # --- Standalone reference ports ---
     # `lambda.exe run --c2mir` was removed from the CLI, so the C2MIR column now
     # measures the native C ports through MIR's own C frontend (mac-deps/mir/c2m).
-    for native_engine in ("c2mir", "go", "julia"):
+    for native_engine in ("c2mir", "go", "julia", "java", "erlang"):
         if native_engine in engines and ls_path:
             run_native_engine(native_engine, suite, name, num_runs, timeout_s, results, row)
             if native_engine == "c2mir":
@@ -1630,7 +1637,7 @@ def mem_run_single(b, engines, num_runs, timeout_s, results, include_typed=False
     # frontend and MIR generator in-process; a Go binary carries its runtime and
     # GC heap; Julia includes its compiler and warmup), so these process peaks
     # bound Lambda's RSS only loosely.
-    for native_engine in ("c2mir", "go", "julia"):
+    for native_engine in ("c2mir", "go", "julia", "java", "erlang"):
         if native_engine not in engines or not ls_path:
             continue
         label = ENGINE_LABELS.get(native_engine, native_engine)
@@ -2227,6 +2234,8 @@ Examples:
         "runs": num_runs,
         "coverage_build": args.coverage,
         "julia": julia_ports.runtime_metadata() if "julia" in engines else None,
+        "java": java_ports.runtime_metadata() if "java" in engines else None,
+        "erlang": erlang_ports.runtime_metadata() if "erlang" in engines else None,
     })
 
     # Build benchmark list
