@@ -888,9 +888,17 @@ borrowed buffers through the backing accessor after compaction
 Text and comment nodes retain their own backing values after detachment; adoption
 preserves the physical GC owner across runtimes. Roots are withdrawn before
 document resource destruction can tear down an adopted source heap.
-These changes still require long-session validation alongside the
-remaining reconcile/view-pool ownership audit and measured frame-cost work.
-Ordinary published arena blocks cannot be discarded individually (D4.1.4v5).
+Ordinary published arena blocks cannot be discarded individually (D4.1.4v5);
+SLD3/SLD4 therefore remove per-navigation publication rather than reclaim it.
+
+Measured frame cost justified three further host mechanisms, none of them a
+slide model (D7.5.3). The journal records which property a presentation write
+changed, so a turn whose writes are all `opacity`, or `transform` that stays a
+transform, commits without cascade or layout (RAD_16 §8). Inline SVGs painted in
+one pass share one host style context. Inline-SVG raster layers key on content
+rather than on every DOM write or repaint request, and fold the fitted stage's
+uniform scale into the capture, so animated wrappers move cached rasters
+(RAD_14 §4.4). Timing, easing and effect policy stay in Lambda.
 
 ## 14. Validation strategy
 
@@ -914,8 +922,9 @@ require the Radiant baseline. Native layout changes also run the float/int-cast
 lint rule. Store temporary captures and probes under `./temp/`.
 
 Implementation status and measured results are recorded separately in
-[the implementation report](impl/Lambda_Impl_Slide_Presentation.md). This design
-does not establish that the frame budget or retention acceptance criteria pass.
+[the implementation report](impl/Lambda_Impl_Slide_Presentation.md). Its
+2026-10-07 acceptance round records the 60 Hz budget (16.67 ms turn + paint on an
+Apple M4, quiet machine) and the navigation retention bound on the measured decks.
 
 ## Appendix A. Implementation touchpoints
 
