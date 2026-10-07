@@ -103,6 +103,7 @@ protected:
         // Use Input's pool for all test operations
         pool = input->pool;
         ASSERT_NE(pool, nullptr);
+        ASSERT_TRUE(css_property_system_init(pool));
 
         // Create DomDocument for DOM tree
         doc = dom_document_create(input);
@@ -122,6 +123,8 @@ protected:
             dom_document_destroy(doc);
         }
         // Input cleanup handled automatically, pool is owned by Input
+        // each fixture owns the registry instead of relying on a later test to create an engine.
+        css_property_system_cleanup();
     }
 
     uint32_t* pseudo_state_for(DomElement* element) {
@@ -164,11 +167,11 @@ protected:
     // Helper: Create a test declaration
     CssDeclaration* create_declaration(CssPropertyCode prop_id, const char* value,
                                       uint8_t ids = 0, uint8_t classes = 0, uint8_t elements = 0) {
-        char* val = (char*)pool_alloc(pool, strlen(value) + 1);
-        strcpy(val, value);
-
-        CssSpecificity spec = css_specificity_create(0, ids, classes, elements, false);
-        return css_declaration_create(prop_id, val, spec, CSS_ORIGIN_AUTHOR, pool);
+        // the cascade validates typed CssValue payloads, not raw string pointers.
+        const char* name = css_property_spelling_from_code(prop_id);
+        if (!name) return nullptr;
+        char* text = pool_join3(pool, name, strlen(name), ": ", 2, value, strlen(value));
+        return text ? create_parsed_declaration(text, ids, classes, elements) : nullptr;
     }
 
     CssDeclaration* create_parsed_declaration(const char* declaration_text,
@@ -333,8 +336,8 @@ TEST_F(DomIntegrationTest, ApplyDeclaration) {
     EXPECT_TRUE(dom_element_apply_declaration(element, decl));
 
     CssDeclaration* retrieved = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
-    EXPECT_NE(retrieved, nullptr);
-    EXPECT_STREQ((char*)retrieved->value, "red");
+    ASSERT_NE(retrieved, nullptr);
+    EXPECT_STREQ(retrieved->value_text, "red");
 }
 
 TEST_F(DomIntegrationTest, StyleVersioning) {
@@ -1985,7 +1988,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_IDvsClass) {
     // ID should win (highest specificity)
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
-    EXPECT_STREQ((char*)color->value, "red");
+    EXPECT_STREQ(color->value_text, "red");
 }
 
 TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_MultipleRules) {
@@ -2014,7 +2017,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_MultipleRules) {
     // Highest specificity should win
     CssDeclaration* bg = dom_element_get_specified_value(element, CSS_PROPERTY_BACKGROUND_COLOR);
     ASSERT_NE(bg, nullptr);
-    EXPECT_STREQ((char*)bg->value, "black");
+    EXPECT_STREQ(bg->value_text, "black");
 }
 
 TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_EqualSpecificity) {
@@ -2231,11 +2234,11 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexCascade_MultipleProperties) {
     // Verify each property
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
-    EXPECT_STREQ((char*)color->value, "red");
+    EXPECT_STREQ(color->value_text, "red");
 
     CssDeclaration* bg = dom_element_get_specified_value(element, CSS_PROPERTY_BACKGROUND_COLOR);
     ASSERT_NE(bg, nullptr);
-    EXPECT_STREQ((char*)bg->value, "yellow");
+    EXPECT_STREQ(bg->value_text, "yellow");
 
     CssDeclaration* font_size = dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE);
     ASSERT_NE(font_size, nullptr);
@@ -2498,6 +2501,36 @@ TEST_F(DomIntegrationTest, AdvancedSelector_TableStructure) {
 
 // ============================================================================
 // Inline Style Tests
+
+TEST_F(DomIntegrationTest, InlineCssomSnapshotOwnsFullNamesAcrossAttributeChangesAndRetirement) {
+    DomElement* element = create_element_with_backing("div");
+    ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(element->set_attribute("data-probe", "ready"));
+    DomDocumentResource* previous_resources = doc->resources;
+    Pool* source = pool_create();
+    ASSERT_NE(source, nullptr);
+    CssDeclaration* declaration = css_parse_property_value_declaration("--name\0a", 8, "12px", 4, source);
+    ASSERT_NE(declaration, nullptr);
+    CssRule rule = {};
+    rule.pool = source;
+    rule.type = CSS_RULE_STYLE;
+    rule.data.style_rule.declarations = &declaration;
+    rule.data.style_rule.declaration_count = 1;
+    ASSERT_TRUE(dom_element_commit_inline_declarations(element, &rule, "--name\xef\xbf\xbd" "a: 12px;"));
+    pool_destroy(source);
+    ASSERT_NE(dom_element_inline_declaration_block(element), nullptr);
+    EXPECT_EQ(dom_element_lookup_own_custom_property(element, "--name"), nullptr);
+    ASSERT_NE(dom_element_lookup_own_custom_property(element, "--name\0a", 8), nullptr);
+    ASSERT_TRUE(element->set_attribute("style", "--name\xef\xbf\xbd" "a: 12px;"));
+    ASSERT_NE(dom_element_lookup_own_custom_property(element, "--name\0a", 8), nullptr);
+    ASSERT_TRUE(element->set_attribute("style", "--name\xef\xbf\xbd" "a: 13px;"));
+    EXPECT_EQ(dom_element_lookup_own_custom_property(element, "--name\0a", 8), nullptr);
+    EXPECT_NE(dom_element_lookup_own_custom_property(element, "--name\xef\xbf\xbd" "a"), nullptr);
+    dom_element_release_retired_storage(element);
+    EXPECT_EQ(dom_element_inline_declaration_block(element), nullptr);
+    DomDocumentResource* remaining_resources = doc->resources;
+    EXPECT_EQ(remaining_resources, previous_resources);
+}
 // ============================================================================
 
 TEST_F(DomIntegrationTest, DomText_Create) {

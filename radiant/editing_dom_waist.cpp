@@ -231,7 +231,10 @@ static bool editing_dom_transaction_append_notification(
     }
     // The document clock changes at the write boundary even though observers
     // are held until commit, so a nested package call cannot reuse this plan.
-    if (transaction->document) transaction->document->mutation_epoch++;
+    if (transaction->document) {
+        transaction->document->mutation_epoch++;
+        transaction->document->style_content_epoch++;
+    }
     transaction->changed = true;
     return true;
 }

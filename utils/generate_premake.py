@@ -3286,6 +3286,10 @@ class PremakeGenerator:
                 '    '
             ])
 
+        # host-resolved test DSOs need the same D7.3.6 exports under LTO/dead stripping.
+        if any(configured_targets.get(dep, {}).get('link') == 'dynamic' for dep in dependencies):
+            self.premake_content.extend(self._host_export_link_options())
+
         # Add build options based on source file type
         is_cpp_test = source.endswith('.cpp')
         base_compiler, _ = self._get_compiler_info()

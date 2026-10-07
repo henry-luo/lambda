@@ -596,43 +596,120 @@ static void svg_resource_document_destroy(SvgResourceDocument* document) {
     rdt_picture_free(document->picture); lam::free_owned(document->path);
 }
 
-static bool svg_style_init(SvgStyleContext* style, Element* root,
-                            float viewport_width, float viewport_height, DomDocument* host = nullptr,
-                            const char* source_path = nullptr, bool image_document = false) {
+static bool svg_style_begin(SvgStyleContext* style) {
     *style = {};
     style->resource_owner = style;
     style->pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.styles");
     if (!style->pool) return false;
     style->entries = SvgStyleMap::create(64);
-    if (!host && g_svg_active_rdcon && g_svg_active_rdcon->ui_context)
-        host = g_svg_active_rdcon->ui_context->document;
-    DomElement* live_root = host ? dom_find_element_for_source(host->root, root) : nullptr;
-    if (live_root) {
-        style->document = host;
-        style->engine = (CssEngine*)host->services.cached_css_engine;
-    } else {
-        // isolated image/use documents borrow the parsed SVG only for this walk;
-        // their CSS/DOM metadata has its own owner and cannot leak host selectors.
-        Input* input = Input::create(style->pool);
-        style->isolated_document = input ? dom_document_create(input) : nullptr;
-        style->document = style->isolated_document;
-        if (!style->document) { svg_style_destroy(style); return false; }
-        style->document->resource_policy = host ? host->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
-        dom_document_borrow_input_resources(style->document);
-        style->document->services.svg_image_document = image_document;
-        if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
-        style->document->root = lam::up(build_dom_tree_from_element(root, style->document, nullptr));
-        style->engine = css_engine_create(style->document->document_pool);
-        if (!style->document->root || !style->engine) { svg_style_destroy(style); return false; }
-        style->document->services.cached_css_engine = style->engine;
-        css_engine_set_viewport(style->engine, viewport_width, viewport_height);
-        svg_style_collect_sheets(style, root);
-    }
+    return true;
+}
+
+// shared tail: a matcher and the element index of the document being styled
+static bool svg_style_finish(SvgStyleContext* style, DocState* host_state) {
     style->matcher = selector_matcher_create(style->pool);
     if (!style->entries || !style->matcher) { svg_style_destroy(style); return false; }
-    if (live_root) state_configure_selector_matcher((DocState*)host->state, style->matcher);
+    if (host_state) state_configure_selector_matcher(host_state, style->matcher);
     svg_style_index_tree(style, style->document->root);
     return true;
+}
+
+// Inline SVG content is styled against its live host document.
+static bool svg_style_init_host(SvgStyleContext* style, DomDocument* host) {
+    if (!host || !host->root || !svg_style_begin(style)) return false;
+    style->document = host;
+    style->engine = (CssEngine*)host->services.cached_css_engine;
+    return svg_style_finish(style, (DocState*)host->state);
+}
+
+static bool svg_style_init(SvgStyleContext* style, Element* root,
+                            float viewport_width, float viewport_height, DomDocument* host = nullptr,
+                            const char* source_path = nullptr, bool image_document = false) {
+    if (!host && g_svg_active_rdcon && g_svg_active_rdcon->ui_context)
+        host = g_svg_active_rdcon->ui_context->document;
+    if (host && dom_find_element_for_source(host->root, root)) return svg_style_init_host(style, host);
+    if (!svg_style_begin(style)) return false;
+    // isolated image/use documents borrow the parsed SVG only for this walk;
+    // their CSS/DOM metadata has its own owner and cannot leak host selectors.
+    Input* input = Input::create(style->pool);
+    style->isolated_document = input ? dom_document_create(input) : nullptr;
+    style->document = style->isolated_document;
+    if (!style->document) { svg_style_destroy(style); return false; }
+    style->document->resource_policy = host ? host->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
+    dom_document_borrow_input_resources(style->document);
+    style->document->services.svg_image_document = image_document;
+    if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
+    style->document->root = lam::up(build_dom_tree_from_element(root, style->document, nullptr));
+    style->engine = css_engine_create(style->document->document_pool);
+    if (!style->document->root || !style->engine) { svg_style_destroy(style); return false; }
+    style->document->services.cached_css_engine = style->engine;
+    css_engine_set_viewport(style->engine, viewport_width, viewport_height);
+    svg_style_collect_sheets(style, root);
+    return svg_style_finish(style, nullptr);
+}
+
+// One paint pass reads a fixed host document, so its inline SVGs share one host
+// style context: building it per SVG walked the whole host document (index,
+// SMIL preparation, root lookups) once more for every inline SVG on the page.
+// It is rebuilt for each pass and whenever the DOM or interaction state moved.
+struct SvgPaintHostStyle : DomDocumentResourceData {
+    uint64_t pass;
+    uint64_t mutation_epoch;
+    uint64_t state_version;
+    bool valid;
+    bool animation_prepared;
+    SvgStyleContext style;
+};
+
+static uint64_t g_svg_paint_pass;
+
+void render_svg_begin_paint_pass(void) { g_svg_paint_pass++; }
+
+static void svg_paint_host_style_destroy(DomDocumentResourceData* data) {
+    auto* shared = static_cast<SvgPaintHostStyle*>(data);
+    svg_style_destroy(&shared->style);
+    mem_free(shared);
+}
+
+// The shared context for an inline SVG painted in the active pass, or null when
+// the caller must style it on its own (outside paint, or not in the host index).
+static SvgStyleContext* svg_paint_host_style(Element* svg_element) {
+    DomDocument* host = g_svg_paint_pass && g_svg_active_rdcon && g_svg_active_rdcon->ui_context
+        ? g_svg_active_rdcon->ui_context->document : nullptr;
+    if (!host || !host->root || !svg_element) return nullptr;
+    SvgPaintHostStyle* shared = nullptr;
+    for (DomDocumentResource* resource = host->resources; resource; resource = resource->next)
+        if (resource->destroy == svg_paint_host_style_destroy) {
+            shared = static_cast<SvgPaintHostStyle*>(resource->data);
+            break;
+        }
+    if (!shared) {
+        shared = (SvgPaintHostStyle*)mem_calloc(1, sizeof(SvgPaintHostStyle), MEM_CAT_RENDER);
+        if (!shared) return nullptr;
+        if (!dom_document_add_resource(host, shared, svg_paint_host_style_destroy)) {
+            mem_free(shared);
+            return nullptr;
+        }
+    }
+    uint64_t state_version = host->state ? ((DocState*)host->state)->version : 0;
+    if (!shared->valid || shared->pass != g_svg_paint_pass ||
+        shared->mutation_epoch != host->mutation_epoch || shared->state_version != state_version) {
+        svg_style_destroy(&shared->style);
+        shared->valid = svg_style_init_host(&shared->style, host);
+        shared->pass = g_svg_paint_pass;
+        shared->mutation_epoch = host->mutation_epoch;
+        shared->state_version = state_version;
+        shared->animation_prepared = false;
+        if (!shared->valid) return nullptr;
+    }
+    SvgStyleEntry query = {};
+    query.element = svg_element;
+    if (!SvgStyleMap::get(shared->style.entries, query)) return nullptr;
+    if (!shared->animation_prepared) {
+        svg_animation_prepare(host->root);
+        shared->animation_prepared = true;
+    }
+    return &shared->style;
 }
 
 bool render_svg_picture_has_animation(RdtPicture* picture) {
@@ -6929,11 +7006,15 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     ctx.viewport_height = viewport_height;
 
     // sample document values before the root viewport and its resource spaces are established.
-    SvgStyleContext style = {};
-    svg_style_init(&style, svg_element, viewport_width, viewport_height, nullptr, source_path, image_document);
+    SvgStyleContext local_style = {};
+    SvgStyleContext* shared_style = image_document ? nullptr : svg_paint_host_style(svg_element);
+    if (!shared_style) svg_style_init(&local_style, svg_element, viewport_width, viewport_height,
+        nullptr, source_path, image_document);
+    SvgStyleContext& style = shared_style ? *shared_style : local_style;
     ctx.style_context = lam::up(&style);
     SvgAnimationSourceScope animation_sources(style.document);
-    if (style.document && style.document->root) svg_animation_prepare(style.document->root);
+    // the shared host context prepares SMIL once per pass
+    if (!shared_style && style.document && style.document->root) svg_animation_prepare(style.document->root);
     if (style.isolated_document && style.document->root)
         svg_animation_set_document_time(style.document, image_time);
 
@@ -6949,7 +7030,8 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     // canvas mostly empty when SVG intrinsic size differs from the viewport).
     DomDocument* host_document = g_svg_active_rdcon && g_svg_active_rdcon->ui_context
         ? g_svg_active_rdcon->ui_context->document : nullptr;
-    bool inline_root = host_document && dom_find_element_for_source(host_document->root, svg_element);
+    // the shared host context exists only for an SVG found in the host index
+    bool inline_root = shared_style || (host_document && dom_find_element_for_source(host_document->root, svg_element));
     if (!inline_root && !vb.has_viewbox && viewport_width > 0 && viewport_height > 0) {
         const char* w_attr = get_svg_attr(svg_element, "width");
         const char* h_attr = get_svg_attr(svg_element, "height");
@@ -7017,7 +7099,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
         if (semantic_begin >= 0) dl_end_element(dl, semantic_begin);
     }
 
-    svg_style_destroy(&style);
+    if (!shared_style) svg_style_destroy(&local_style);
     if (isolated_fonts) font_context_destroy(isolated_fonts);
     scratch_restore(resource_scratch, resource_mark);
     if (pushed_source) svg_resource_stack_pop(source_path);
@@ -7697,18 +7779,21 @@ static bool svg_layer_capture(RasterRenderContext* rdcon, SvgLayerRegistry* regi
     return true;
 }
 
-// A layer is blitted by the CPU painter, which has no transform: a pure
-// translation (the common CSS drift on a decorative layer) folds into the
-// destination, anything else disqualifies the layer.
-static bool svg_layer_transform_offset(const RasterRenderContext* rdcon, float* dx, float* dy) {
+// A layer is blitted by the CPU painter, which has no transform. An
+// axis-aligned uniform scale plus translation (a CSS drift on a decorative
+// layer, a fitted presentation stage) folds into the capture resolution and
+// the destination; rotation, skew, flips and non-uniform scale disqualify it.
+static bool svg_layer_device_transform(const RasterRenderContext* rdcon, float* sx, float* dx, float* dy) {
+    *sx = 1.0f;
     *dx = 0.0f;
     *dy = 0.0f;
     if (!rdcon->has_transform) return true;
     const RdtMatrix* m = &rdcon->transform;
-    if (fabsf(m->e11 - 1.0f) > 0.0005f || fabsf(m->e22 - 1.0f) > 0.0005f ||
+    if (m->e11 <= 0.0f || fabsf(m->e11 - m->e22) > 0.0005f ||
         fabsf(m->e12) > 0.0005f || fabsf(m->e21) > 0.0005f) {
         return false;
     }
+    *sx = m->e11;
     *dx = m->e13;
     *dy = m->e23;
     return true;
@@ -7725,10 +7810,12 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     if (mode == SVG_LAYER_MODE_OFF || !rdcon->ui_context || !rdcon->ui_context->document) {
         return false;
     }
-    float offset_x, offset_y;
-    if (!svg_layer_transform_offset(rdcon, &offset_x, &offset_y)) return false;
-    int width = (int)lroundf(content_rect->width);   // INT_CAST_OK: layer pixel size
-    int height = (int)lroundf(content_rect->height); // INT_CAST_OK: layer pixel size
+    float device_scale, offset_x, offset_y;
+    if (!svg_layer_device_transform(rdcon, &device_scale, &offset_x, &offset_y)) return false;
+    // the layer is rasterised at the scale it lands on the surface
+    float layer_scale = scale * device_scale;
+    int width = (int)lroundf(content_rect->width * device_scale);   // INT_CAST_OK: layer pixel size
+    int height = (int)lroundf(content_rect->height * device_scale); // INT_CAST_OK: layer pixel size
     if (width <= 0 || height <= 0 || (size_t)width * (size_t)height * 4u > SVG_LAYER_MAX_BYTES) {
         return false;
     }
@@ -7737,9 +7824,11 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     if (!entry) return false;
 
     uint32_t generation = dom_elem->svg_layer_generation;
-    uint64_t document_epoch = rdcon->ui_context->document->mutation_epoch;
+    // presentation writes of non-inherited values elsewhere cannot change this raster
+    uint64_t document_epoch = rdcon->ui_context->document->style_content_epoch;
     DocState* state = rdcon->ui_context->document->state;
-    uint64_t interaction_generation = state ? state->version : 0;
+    // repaint/reflow bookkeeping is not an interaction change
+    uint64_t interaction_generation = doc_state_content_version(state);
     uint64_t animation_generation = svg_animation_generation(rdcon->ui_context->document);
     uint64_t font_generation = font_context_glyph_cache_generation(rdcon->ui_context->font_ctx);
     uint64_t font_resource_generation = font_context_resource_generation(rdcon->ui_context->font_ctx);
@@ -7750,7 +7839,7 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
                      entry->font_generation == font_generation &&
                      entry->font_resource_generation == font_resource_generation &&
                      entry->pixel_width == width && entry->pixel_height == height &&
-                     entry->scale == scale && svg_layer_paint_equal(&entry->paint, paint);
+                     entry->scale == layer_scale && svg_layer_paint_equal(&entry->paint, paint);
     if (!unchanged) {
         svg_layer_entry_release_surface(registry, entry);
         entry->element = dom_node_ref(dom_elem);
@@ -7763,23 +7852,24 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
         entry->image_resource_generation = image_generation;
         entry->pixel_width = width;
         entry->pixel_height = height;
-        entry->scale = scale;
+        entry->scale = layer_scale;
         entry->paint = *paint;
         if (mode != SVG_LAYER_MODE_EAGER) return false;
     }
     if (!entry->surface &&
         !svg_layer_capture(rdcon, registry, entry, svg_elem, dom_elem,
-                           viewport_width, viewport_height, scale, paint)) {
+                           viewport_width, viewport_height, layer_scale, paint)) {
         return false;
     }
     // capture can resolve a font source; key the resulting paint by that resource.
-    entry->interaction_generation = state ? state->version : 0;
+    entry->interaction_generation = doc_state_content_version(state);
     entry->font_generation = font_context_glyph_cache_generation(rdcon->ui_context->font_ctx);
     entry->font_resource_generation = font_context_resource_generation(rdcon->ui_context->font_ctx);
     entry->image_resource_generation = image_cache_resource_generation(rdcon->ui_context);
     ImageSurface* surface = entry->surface;
     // whole device pixels, so the blit copies samples instead of resampling
-    Rect dst = { roundf(content_rect->x + offset_x), roundf(content_rect->y + offset_y),
+    Rect dst = { roundf(content_rect->x * device_scale + offset_x),
+                 roundf(content_rect->y * device_scale + offset_y),
                  (float)surface->width, (float)surface->height };
     Bound clip = view_geometry_intersect_bound_rect(rdcon->block.clip, dst);
     render_painter_blit_surface_scaled(rdcon, surface, nullptr, rdcon->ui_context->surface,

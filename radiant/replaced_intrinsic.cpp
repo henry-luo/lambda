@@ -30,12 +30,18 @@ static void replaced_facts_set_pair(ReplacedIntrinsicFacts* facts,
     }
 }
 
+float layout_replaced_image_density(const DomElement* block) {
+    return block && block->embed && block->embedp()->content_image_resolution > 0.0f
+        ? block->embedp()->content_image_resolution : 1.0f;
+}
+
 void layout_replaced_image_facts(ReplacedIntrinsicFacts* facts, ImageSurface* image,
-        bool from_image) {
+        bool from_image, float density) {
     if (!facts || !image) return;
+    if (!isfinite(density) || density <= 0.0f) return;
     if (image->format == IMAGE_FORMAT_SVG) {
-        if (image->has_natural_width) replaced_facts_set_axis(facts, true, image->natural_width, true);
-        if (image->has_natural_height) replaced_facts_set_axis(facts, false, image->natural_height, true);
+        if (image->has_natural_width) replaced_facts_set_axis(facts, true, image->natural_width / density, true);
+        if (image->has_natural_height) replaced_facts_set_axis(facts, false, image->natural_height / density, true);
         if (image->has_intrinsic_aspect_ratio) {
             facts->natural_aspect_ratio = image->natural_aspect_ratio;
             facts->has_natural_aspect_ratio = image->natural_aspect_ratio > 0.0f;
@@ -48,7 +54,7 @@ void layout_replaced_image_facts(ReplacedIntrinsicFacts* facts, ImageSurface* im
     float width = from_image || image->encoded_width <= 0 ? (float)image->width : (float)image->encoded_width;
     float height = from_image || image->encoded_height <= 0 ? (float)image->height : (float)image->encoded_height;
     if (width <= 0.0f || height <= 0.0f) return;
-    if (image->has_intrinsic_size) replaced_facts_set_pair(facts, width, height, true);
+    if (image->has_intrinsic_size) replaced_facts_set_pair(facts, width / density, height / density, true);
     else if (image->has_intrinsic_aspect_ratio) {
         facts->natural_aspect_ratio = width / height; facts->has_natural_aspect_ratio = true;
     }
@@ -174,7 +180,7 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
     // interpret its image slot as intrinsic content.
     if (layout_replaced_image_surface_contributes(block) &&
         block->embed && block->embedp()->img) {
-        layout_replaced_image_facts(&facts, block->embedp()->img, true);
+        layout_replaced_image_facts(&facts, block->embedp()->img, true, layout_replaced_image_density(block));
     }
 
     if (block->tag() == MARKUP_NAME_VIDEO && block->embed && block->embedp()->video) {

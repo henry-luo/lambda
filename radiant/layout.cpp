@@ -1413,10 +1413,11 @@ bool layout_image_intrinsic_size(DomElement* element, ImageSurface* image,
                                  float* out_width, float* out_height) {
     if (!element || !image || !out_width || !out_height) return false;
     bool from_image = layout_image_orientation_uses_from_image(element);
-    float width = from_image || image->encoded_width <= 0 ? (float)image->width : (float)image->encoded_width;
-    float height = from_image || image->encoded_height <= 0 ? (float)image->height : (float)image->encoded_height;
+    float density = layout_replaced_image_density(element);
+    float width = (from_image || image->encoded_width <= 0 ? (float)image->width : (float)image->encoded_width) / density;
+    float height = (from_image || image->encoded_height <= 0 ? (float)image->height : (float)image->encoded_height) / density;
     if (image->format == IMAGE_FORMAT_SVG) {
-        ReplacedIntrinsicFacts facts = {}; layout_replaced_image_facts(&facts, image, from_image);
+        ReplacedIntrinsicFacts facts = {}; layout_replaced_image_facts(&facts, image, from_image, density);
         layout_replaced_default_object_size(&facts, 300.0f, 150.0f, &width, &height);
     }
     if (width <= 0.0f || height <= 0.0f) return false;

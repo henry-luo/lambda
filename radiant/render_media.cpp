@@ -95,7 +95,8 @@ Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* img, Rect re
     CssEnum object_fit = embed->object_fit;
     Rect img_rect = rect;  // default: fill (stretch to container)
     if (object_fit && object_fit != CSS_VALUE_FILL) {
-        ReplacedIntrinsicFacts facts = {}; layout_replaced_image_facts(&facts, img, true);
+        float density = embed->content_image_resolution > 0.0f ? embed->content_image_resolution : 1.0f;
+        ReplacedIntrinsicFacts facts = {}; layout_replaced_image_facts(&facts, img, true, density);
         float img_w, img_h;
         layout_replaced_default_object_size(&facts, rect.width / s, rect.height / s, &img_w, &img_h);
         if (img_w <= 0.0f || img_h <= 0.0f) return rect;

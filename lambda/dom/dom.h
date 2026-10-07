@@ -231,9 +231,10 @@ bool dom_option_selectedness(void* dom_elem);
 
 /**
  * Create a selector matcher configured for a DOM document's live UI state.
- * The opaque return value is a SelectorMatcher* for Radiant's native bridge.
+ * The opaque return value is a SelectorMatcher* for Radiant's native bridge,
+ * allocated in `pool` (a Pool*, normally a SelectorQueryScratch pool).
  */
-void* dom_create_selector_matcher_bridge(void* dom_doc);
+void* dom_create_selector_matcher_bridge(void* dom_doc, void* pool);
 
 /** Return the identity-preserving Document proxy that owns a DOM node. */
 Item dom_owner_document_for_node(void* node);

@@ -8005,9 +8005,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     if (elmt_name == MARKUP_NAME_IMG || is_generated_content_image || is_object_image) {
         // object data is a replaced image resource, so its natural dimensions
         // must enter the same sizing path as an image before fallback sizing.
-        if ((elmt_name == MARKUP_NAME_IMG || is_object_image) && block->is_element() &&
-            (!block->embed || !block->embedp()->img)) {
-            // Picture source selection happens before replaced sizing; otherwise
+        if ((elmt_name == MARKUP_NAME_IMG || is_object_image) && block->is_element()) {
+            // source/environment changes must reselect before intrinsic sizing, even with a warm embed.
             layout_ensure_replaced_image_surface(lycon, block, block->as_element());
         }
         if (is_generated_content_image) {
@@ -8040,14 +8039,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             float h = 0.0f;
             layout_image_intrinsic_size(block->as_element(), img, &w, &h);
             ReplacedIntrinsicFacts image_facts = {};
-            layout_replaced_image_facts(&image_facts, img, layout_image_orientation_uses_from_image(block->as_element()));
+            layout_replaced_image_facts(&image_facts, img, layout_image_orientation_uses_from_image(block->as_element()),
+                layout_replaced_image_density(block));
             bool image_has_intrinsic_ratio = image_facts.has_natural_aspect_ratio;
             bool image_has_ratio_without_natural_size =
                 !image_facts.has_natural_width && !image_facts.has_natural_height && image_has_intrinsic_ratio;
-            float image_resolution = block->embedp()->content_image_resolution > 0.0f ?
-                block->embedp()->content_image_resolution : 1.0f;
-            w /= image_resolution;
-            h /= image_resolution;
             if (img->has_intrinsic_size) {
                 layout_apply_object_view_box_intrinsic_size(
                     lycon, block->as_element(), &w, &h);

@@ -3,6 +3,8 @@
 // document-owned named frame events, shared by scripted presentation packages
 bool radiant_document_has_pending_frames(struct DomDocument* document);
 bool radiant_bind_document_script_host(struct UiContext* uicon, struct DomDocument* document);
+// idle point: one collection when wrapper-held detached DOM has piled up
+bool radiant_collect_stranded_dom(struct UiContext* uicon, struct DomDocument* document);
 
 #ifndef RADIANT_EVENT_CORE_ONLY
 #include "view.hpp"
@@ -2650,6 +2652,7 @@ typedef struct DocState {
     StateUpdateMode mode;
     DocLifecycleState lifecycle;
     uint64_t version;              // monotonically increasing version number
+    uint64_t render_flag_bumps;    // version bumps that were dirty/repaint/reflow bookkeeping
     struct DocState* prev_version;  // previous version (immutable mode only)
 
     // Active event/state log cascade. Set by state_machine.cpp while a
@@ -2822,6 +2825,12 @@ typedef struct DocState {
     bool init(Pool* pool, StateUpdateMode mode);
     void destroy();
 } DocState;
+
+// Every state change except render-request bookkeeping: interaction, view,
+// form, drag, lifecycle and scroll state. Painted-content caches key on this.
+static inline uint64_t doc_state_content_version(const DocState* state) {
+    return state ? state->version - state->render_flag_bumps : 0;
+}
 
 typedef struct ScrollInteractionState {
     bool h_hovered;

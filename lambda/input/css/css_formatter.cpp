@@ -518,7 +518,9 @@ const char* css_format_declaration_full(CssFormatter* formatter, CssDeclaration*
         property_name = "<unknown-property>";
     }
 
-    stringbuf_append_all(formatter->output, 2, property_name, ":");
+    StrView name = decl->property_name ? css_declaration_name(decl) : strview_from_cstr(property_name);
+    css_append_identifier(formatter->output, name.str, name.length);
+    stringbuf_append_str(formatter->output, ":");
     append_space(formatter);
 
     // Format value - use temporary buffer with property context

@@ -1596,6 +1596,37 @@ TEST(SvgCascadeTest, InlineDefaultVisibilityUsesVisibilityDomain) {
     EXPECT_EQ(INLINE_PROP_DEFAULT.visibility, VIS_VISIBLE);
 }
 
+TEST(BorderRadiusMath, RepeatedPaintAndResizeStartFromComputedRadii) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    CssValue* terms[] = {css_value_create_percentage(pool, 50.0),
+        css_value_create_keyword(pool, "+"), css_value_create_length(pool, 30.0, CSS_UNIT_PX)};
+    CssValue sum = {};
+    sum.type = CSS_VALUE_TYPE_LIST;
+    sum.data.list.values = terms;
+    sum.data.list.count = 3;
+    CssValue* arguments[] = {&sum};
+    CssValue* expression = css_value_create_function(pool, "calc", arguments, 1);
+    ASSERT_NE(expression, nullptr);
+    CornerExpressions source = {};
+    source.computed.top_right = source.computed.top_right_y = 80.0f;
+    source.horizontal[0] = source.vertical[0] = lam::up(expression);
+    Corner used = source.computed;
+    used.expressions = lam::up(&source);
+    for (int paint = 0; paint < 4; paint++) {
+        resolve_border_radius_percentages(&used, 100.0f, 100.0f);
+        constrain_corner_radii(&used, 100.0f, 100.0f);
+        EXPECT_FLOAT_EQ(used.top_left, 50.0f);
+        EXPECT_FLOAT_EQ(used.top_right, 50.0f);
+        EXPECT_FLOAT_EQ(used.top_left_y, 50.0f);
+    }
+    resolve_border_radius_percentages(&used, 200.0f, 100.0f);
+    constrain_corner_radii(&used, 200.0f, 100.0f);
+    EXPECT_NEAR(used.top_left, 130.0f * 200.0f / 210.0f, 0.001f);
+    EXPECT_NEAR(used.top_right, 80.0f * 200.0f / 210.0f, 0.001f);
+    EXPECT_FLOAT_EQ(source.computed.top_right, 80.0f);
+    pool_destroy(pool);
+}
+
 TEST(SvgCascadeTest, FontShorthandProjectsResetsAndPreservesDeferredVariables) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
     const char* source = "font:italic 700 24px/1.5 Missing, SVG-Ahem; font:20px SVG-Ahem; font:var(--face); font:20px";

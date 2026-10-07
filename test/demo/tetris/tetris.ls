@@ -108,7 +108,7 @@ on click(evt) {
   let command = dom.get_attribute(evt.target, "class")
   if (contains(["left", "right", "down", "cw", "ccw", "drop", "hold", "pause", "restart"], command)) {
     game = rules.action(game, command)
-    if (contains(RESET_GRAVITY, command)) falling_ms = 0
+    if (contains(RESET_GRAVITY, command)) { falling_ms = 0 }
   }
 }
 on gravity(evt) {

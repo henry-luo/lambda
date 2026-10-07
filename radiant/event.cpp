@@ -7536,6 +7536,76 @@ static bool post_html_handler_incremental_rebuild(
     return true;
 }
 
+// A presentation-channel write of opacity, or of a transform that stays a
+// transform, changes paint and hit testing but never layout: Radiant reads
+// transforms in layout only to decide containing-block establishment and
+// computes overflow without them, and stacking order is collected at paint.
+// Presentation writes also leave attributes, and so selector matching, intact.
+static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutationRecord* record) {
+    CssPropertyCode property = record->presentation_property;
+    if (property != CSS_PROPERTY_OPACITY && property != CSS_PROPERTY_TRANSFORM) return nullptr;
+    if (!record->target || !record->target->is_element() || !record->was_connected) return nullptr;
+    DomElement* element = record->target->as_element();
+    if (element->doc != doc || element->is_synthetic() || element->view_type == RDT_VIEW_NONE ||
+        !dom_is_connected(element) || dom_element_is_svg(element) ||
+        element->specified_style_shared() || !element->specified_style) return nullptr;
+    StyleTree* style = element->specified_style;
+    CssDeclaration* declaration = style_tree_get_declaration(style, property);
+    if (!declaration || !declaration->value) return nullptr;
+    // transitions and animations start or sample during style resolution
+    static const CssPropertyCode motion[] = {
+        CSS_PROPERTY_TRANSITION, CSS_PROPERTY_TRANSITION_PROPERTY,
+        CSS_PROPERTY_TRANSITION_DURATION, CSS_PROPERTY_ANIMATION, CSS_PROPERTY_ANIMATION_NAME};
+    for (CssPropertyCode code : motion) if (style_tree_get_declaration(style, code)) return nullptr;
+    if (element->web_animation_state()) return nullptr;
+    if (property == CSS_PROPERTY_OPACITY) {
+        // opacity below one flattens preserve-3d, which changes descendants' containing blocks
+        return element->transformp()->transform_style == CSS_VALUE_PRESERVE_3D ? nullptr : element;
+    }
+    const CssValue* value = declaration->value;
+    bool becomes_none = value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE;
+    return transform_has_functions(element->transform) && !becomes_none ? element : nullptr;
+}
+
+static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument* doc,
+                                               uint64_t t0, int mutations) {
+    DocState* state = (DocState*)doc->state;
+    if (!state || !doc->view_tree || !doc->root || doc->js.mutation_record_count == 0 ||
+        doc->js.mutation_record_overflow || doc->js.inline_stylesheet_mutation_count ||
+        doc->js.reflow_pending_before_batch || state->reflow_scheduler.pending) return false;
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        if (!dom_js_paint_only_target(doc, &doc->js.mutation_records[i])) return false;
+    }
+    LayoutContext lycon = {};
+    lycon.doc = lam::up(doc);
+    lycon.ui_context = lam::up(evcon->ui_context);
+    lycon.pool = lam::up(doc->view_tree->prop_pool);
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        const DomJsMutationRecord* record = &doc->js.mutation_records[i];
+        DomElement* element = record->target->as_element();
+        lycon.view = lam::up(static_cast<View*>(element));
+        // the same resolver layout uses writes the retained view prop
+        resolve_css_property(record->presentation_property,
+            style_tree_get_declaration(element->specified_style, record->presentation_property), &lycon);
+    }
+    uint64_t t1 = time_now_ns();
+    frame_profile_cascade_finished(doc);
+    // the batch's own reflow request is satisfied without layout
+    doc_state_clear_reflow(state);
+    state->dirty_tracker.full_repaint = true;
+    doc_state_mark_dirty(state);
+    doc_state_request_repaint(state);
+    evcon->need_repaint = true;
+    to_repaint();
+    uint64_t t3 = time_now_ns();
+    frame_profile_record_commit(t0, t1, t1, t3, mutations);
+    dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "paint-only",
+                            mutations, doc->js.mutation_record_count,
+                            doc->js.mutation_record_overflow,
+                            "presentation-properties", "none", "retained", 0);
+    return true;
+}
+
 static void post_html_handler_rebuild(EventContext* evcon,
                                        uint64_t t_start, uint64_t t_handler) {
     DomDocument* doc = event_context_target_document(evcon);
@@ -7556,6 +7626,10 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // deferring text-tree changes until load completion loses dynamic keyframes.
     dom_cssom_sync_mutated_inline_stylesheets(doc);
 
+    if (post_html_handler_paint_only_commit(evcon, doc, t0, mutations)) {
+        dom_js_mutation_reset_records(doc);
+        return;
+    }
     const char* fallback_reason = "none";
     if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0,
                                               mutations, &fallback_reason)) {
@@ -7720,6 +7794,34 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
     input_context = s->saved_input_ctx;
     post_html_handler_rebuild(evcon, t_start, t_handler);
     s->active = false;
+}
+
+// Primary node bytes held only by script wrappers before an idle collection;
+// the nodes' style and payload storage is several times larger.
+static const size_t RADIANT_STRANDED_DOM_COLLECT_BYTES = 64u * 1024u;
+
+// User ruling (2026-10-07): detached DOM pinned only by wrappers is reclaimed
+// by one collection at an idle point once enough of it is stranded, instead of
+// charging the GC's allocation thresholds. GC-heap allocation alone may never
+// reach them, so replaced content would otherwise accumulate.
+bool radiant_collect_stranded_dom(UiContext* uicon, DomDocument* doc) {
+    if (!uicon || !doc ||
+        !dom_retire_wrapper_collection_due(doc, RADIANT_STRANDED_DOM_COLLECT_BYTES)) return false;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    JsCtxScope scope = {};
+    // idle: no handler frame holds unrooted values while the runtime collects
+    if (!radiant_js_ctx_enter(&scope, &evcon)) return false;
+    heap_gc_collect();
+    radiant_js_ctx_exit(&scope, &evcon, time_now_ns());
+    dom_retire_sweep(doc);
+    dom_retire_wrapper_collection_done(doc);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(doc, &stats);
+    log_debug("dom-stranded-gc: collected; %zu wrapper-held bytes remain",
+              stats.wrapper_stranded_bytes);
+    return true;
 }
 
 static thread_local uint32_t js_dispatch_batch_depth = 0;
@@ -9552,13 +9654,13 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
         // after the StateStore pseudo bits have been updated.
         view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
                                     clear_cascaded_styles_visitor, nullptr);
-        SelectorMatcher* matcher = selector_matcher_create(pool);
-        if (matcher) {
-            state_configure_selector_matcher(state, matcher);
-            radiant_apply_css_stylesheets_to_tree(
-                doc, doc->root, doc->stylesheets, doc->stylesheet_count,
-                pool, css_engine, matcher);
-        }
+        // caller-owned matcher: a pointer-state change must not retain one per event
+        SelectorMatcher matcher_storage;
+        selector_matcher_init(&matcher_storage, pool);
+        state_configure_selector_matcher(state, &matcher_storage);
+        radiant_apply_css_stylesheets_to_tree(
+            doc, doc->root, doc->stylesheets, doc->stylesheet_count,
+            pool, css_engine, &matcher_storage);
     }
 }
 

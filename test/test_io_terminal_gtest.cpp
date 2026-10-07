@@ -109,6 +109,54 @@ TEST(IoTerminal, RetainedTemplateCloseDefersUntilBindingUnwinds) {
     }
 }
 
+TEST(IoTerminal, RetainedTemplateConditionalStateWrites) {
+    // S12.1.3/S16.6.1: a conditional state write executes inside its braced branch.
+    const LambdaTier tiers[] = {LAMBDA_TIER_JIT, LAMBDA_TIER_INTERP};
+    for (LambdaTier tier : tiers) {
+        TerminalTestRuntime owned(tier);
+        TemplateHostSession* mounted = template_host_session_open(
+            "view <counter> state value: 5 { <frame value: value> }\n"
+            "on reset(enabled) { if (enabled) { value = 0 } }\n"
+            "<counter>\n", "<conditional-template-state-test>");
+        ASSERT_NE(mounted, nullptr);
+        {
+            TemplateHostBinding binding(mounted);
+            ASSERT_TRUE(binding.valid());
+            RootFrame roots(1);
+            Rooted<Item> model(roots, Item{.item = template_host_session_root_word(mounted)});
+            EXPECT_EQ(it2i(item_attr(fn_apply1(model.get()), "value")), 5);
+            bool handled = false;
+            template_dispatch_event(model.get(), false, "reset", Item{.item = b2it(false)}, &handled);
+            EXPECT_TRUE(handled);
+            EXPECT_EQ(it2i(item_attr(fn_apply1(model.get()), "value")), 5);
+            template_dispatch_event(model.get(), false, "reset", Item{.item = b2it(true)}, &handled);
+            EXPECT_TRUE(handled);
+            EXPECT_EQ(it2i(item_attr(fn_apply1(model.get()), "value")), 0);
+        }
+        template_host_session_close(mounted);
+    }
+}
+
+TEST(IoTerminal, RetainedTemplateRejectsInvalidAssignmentTargets) {
+    // invalid targets must report E210 instead of disappearing during resolution.
+    const char* sources[] = {
+        "view <counter> state value: 5 { <frame value: value> }\n"
+        "on reset(enabled) { if (enabled) value = 0 }\n<counter>\n",
+        "view <counter> state value: 5 { <frame value: value> }\n"
+        "on reset(enabled) { (value + 1) = 0 }\n<counter>\n"
+    };
+    const LambdaTier tiers[] = {LAMBDA_TIER_JIT, LAMBDA_TIER_INTERP};
+    for (LambdaTier tier : tiers) {
+        TerminalTestRuntime owned(tier);
+        for (const char* source : sources) {
+            TemplateHostSession* mounted = template_host_session_open(source,
+                "<invalid-template-assignment-test>");
+            EXPECT_EQ(mounted, nullptr);
+            template_host_session_close(mounted);
+        }
+    }
+}
+
 TEST(IoTerminal, RetainedTemplateRestoresHostJsOwner) {
     TerminalTestRuntime owned(LAMBDA_TIER_INTERP);
     Input* seed = run_script_mir(&owned.runtime, "1\n",

@@ -114,12 +114,16 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
 
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, Rect rect) {
     if (!paint_list || !bound) return false;
-    if (bound->box_shadow || bound->outline) return false;
-    if (!boundary_background_simple(bound->background)) return false;
-
     float x = rect.x, y = rect.y, width = rect.width, height = rect.height;
     if (width < 0.0f || height < 0.0f) return false;
 
+    // resolve before selecting the simple or fallback SVG/PDF boundary painter.
+    if (bound->border) {
+        resolve_border_radius_percentages(&bound->border->radius, width, height);
+        constrain_corner_radii(&bound->border->radius, width, height);
+    }
+    if (bound->box_shadow || bound->outline) return false;
+    if (!boundary_background_simple(bound->background)) return false;
     float radius = 0.0f;
     if (!boundary_uniform_circular_radius(bound->border, width, height, &radius)) {
         return false;

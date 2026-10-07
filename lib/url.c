@@ -525,6 +525,14 @@ bool url_equals(const Url* a, const Url* b) {
     return strcmp(a->href->chars, b->href->chars) == 0;
 }
 
+bool url_equals_without_fragment(const Url* a, const Url* b) {
+    if (!a || !b || !a->href || !b->href) return false;
+    // serialized URLs escape component hashes; only the fragment delimiter is literal.
+    size_t length = strcspn(a->href->chars, "#");
+    return length == strcspn(b->href->chars, "#") &&
+        memcmp(a->href->chars, b->href->chars, length) == 0;
+}
+
 // Getters - return the actual string value, not the String* wrapper
 const char* url_get_href(const Url* url) {
     return (url && url->href) ? url->href->chars : NULL;

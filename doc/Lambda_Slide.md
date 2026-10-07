@@ -7,36 +7,50 @@ live templates perform DOM writes and request frames under S12.1.1v2/S12.1.3.
 
 ## Quick start
 
-```lambda
-import slide: lambda.slide
+A deck is a `.slides` file: Mark data (D2.9.3) whose root is `<presentation>`.
 
-let deck = <presentation title: "My deck", width: 1280.0, height: 720.0,
+```mark
+// hello.slides
+<presentation id: "demo", title: "My deck", width: 1280, height: 720, autostart: true,
     <slide id: "hello", layout: 'title-body',
         <text id: "title", role: 'title', "Hello, Lambda">
         <text id: "body", role: 'body', "Click Next to reveal this paragraph.">
-        <cue start: 'entry', <effect target: "title", kind: 'fade-in', duration: 400.0>>
-        <cue <effect target: "body", kind: 'fly-in', from: 'left', duration: 500.0>>
+        <cue start: 'entry', <effect target: "title", kind: 'fade-in', duration: 400>>
+        <cue <effect target: "body", kind: 'fly-in', from: 'left', duration: 500>>
         <notes "Introduce the package before revealing the paragraph.">
     >
     <slide transition: 'push', <text "The next slide">>
 >
-slide.page(deck, {instance: "demo", autostart: true})^
 ```
 
-Save it as a `.ls` script and open it with `./lambda.exe view deck.ls`.
-Runnable examples are [slide_presentation.ls](../test/demo/slides/slide_presentation.ls)
-and [slide_package_content.ls](../test/demo/slides/slide_package_content.ls). The latter
-embeds a chart produced once by `lambda.chart.chart` and builds paragraphs.
+Open it with `./lambda.exe view hello.slides`. The viewer runs the presenter
+`lambda.slide.present.present(deck, {source_path})` as a document transform:
+the deck ID names the player (default `"slides"`), `autostart`,
+`reduced_motion` and `autoplay_dwell_ms` on `<presentation>` are presenter
+defaults, and relative resources resolve against the deck's directory.
+Runnable decks are [slide_presentation.slides](../test/demo/slides/slide_presentation.slides)
+and [slide_package_content.slides](../test/demo/slides/slide_package_content.slides);
+the latter carries a chart produced by `lambda.chart.chart` and paragraph builds.
 For a larger presentation, open
-[slide_northstar.ls](../test/demo/slides/slide_northstar.ls): an 18-slide fictional
+[northstar.slides](../test/demo/slides/northstar.slides): an 18-slide fictional
 strategy briefing with charts, diagrams, a roadmap, tables and staged reveals.
 Its charts use separate slide targets for clockwise donut segments, line-series
 reveals and staggered bar fills; axes stay steady and labels appear afterward.
 See the [demo guide](../test/demo/slides/README.md) for its contents and controls.
 
+Scripts load a deck with `input("hello.slides", 'slides')^` (an explicit format,
+D2.9.2) and can embed it with `player`/`page` below; a deck built by Lambda code
+is saved for presenting with `output(deck, "hello.slides", 'mark')^`.
+
 The standalone page fits the logical canvas into the viewer, with letterboxing,
 and refits on window resize. Explicit `width`/`height` options override those
 dimensions. Authored object coordinates stay in logical slide units.
+
+A live player renders a slide the first time it is shown and keeps it mounted;
+moving between slides afterwards changes only state — which layer is displayed,
+its transition transform and the sampled object visuals — never slide markup.
+The active layer carries `data-slide-active`. Static exports (`snapshot`,
+`slides`, `handout`) render every requested slide at once.
 
 ## Public API
 
@@ -44,6 +58,7 @@ dimensions. Authored object coordinates stay in logical slide units.
 |---|---|
 | `compile(deck, options = {})^` | Validated immutable scene/cue plan. |
 | `page(deck, options = {})^` | Complete live document, stylesheet and controls. |
+| `lambda.slide.present.present(deck, options = {})^` | The `.slides` document transform: `page` with presenter defaults from the deck and `base_uri` from `options.source_path`. |
 | `player(deck, options)^` | Embedded live player; requires a unique `options.instance`. Include `lambda.slide.html.css` in the containing document. |
 | `snapshot(deck, address = {}, options = {})^` | Static HTML document at a deterministic cue/time address. |
 | `slides(deck, options = {})^` | Array of final-state stage elements; supply the shared stylesheet when embedding. |
@@ -69,7 +84,7 @@ to the same target/channel. Diagnostics name the slide/cue/source path.
 
 | Element | Attributes and behavior |
 |---|---|
-| `presentation` | `id`, `title`, `width`, `height`, `theme: 'light'/'dark'`, `base_uri`. Defaults to 1280 × 720. |
+| `presentation` | `id`, `title`, `width`, `height`, `theme: 'light'/'dark'`, `base_uri`; presenter defaults `autostart`, `reduced_motion`, `autoplay_dwell_ms`. Defaults to 1280 × 720. |
 | `slide` | `id`, `title`, `background`, `layout`, `transition`, `transition_duration`, `direction`. |
 | `text` | Rich content, `font_size`, `color`, and common object attributes. |
 | `shape` | `kind: 'rect'/'circle'/'ellipse'/'line'`, `fill`, `stroke`, `stroke_width`, `radius`; lowered to SVG. |

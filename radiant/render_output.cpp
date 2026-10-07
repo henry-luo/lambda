@@ -325,6 +325,7 @@ static bool render_export_session_begin_internal(
     int layout_height = viewport_height > 0 ? viewport_height : fallback_height;
     session->output_scale = output_scale > 0.0f ? output_scale : 1.0f;
     session->device_scale = device_scale > 0.0f ? device_scale : 1.0f;
+    environment.device_scale = session->device_scale;
     session->raster_scale = session->output_scale * session->device_scale;
     session->viewport_width = viewport_width;
     session->viewport_height = viewport_height;
@@ -556,6 +557,7 @@ static void render_output_init_context(RasterRenderContext* rdcon, UiContext* ui
     memset(rdcon, 0, sizeof(RasterRenderContext));
     rdcon->ui_context = lam::up(uicon);
     rdcon->profiler = lam::up(profiler);
+    render_svg_begin_paint_pass();
     if (uicon && uicon->document && uicon->document->state) {
         rdcon->retained_dl_cache = lam::up(uicon->document->state->retained_dl_cache);
     }

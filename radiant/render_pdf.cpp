@@ -1212,26 +1212,12 @@ static void pdf_paint_fill_rect(PdfRenderContext* ctx,
     pdf_lower_paint_list(ctx);
 }
 
-static PaintCmd* pdf_effect_fallback_latest_cmd(PdfRenderContext* ctx,
-                                                PaintList* list,
-                                                int index,
-                                                PaintOp expected_op) {
-    if (!ctx || !ctx->effect_fallback.active || !list || index < 0) return nullptr;
-    if (list->item_count() != index + 1) return nullptr;
-    PaintCmd* cmd = &list->data()[index];
-    return cmd->op == expected_op ? cmd : nullptr;
-}
-
 static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
     PaintList* list = pdf_active_paint_list(ctx);
     int index = list ? list->item_count() : -1;
     paint_fill_path(list, path, color, RDT_FILL_WINDING, nullptr);
-    bool owns_path = false;
-    PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_FILL_PATH);
-    if (cmd) {
-        cmd->fill_path.owned_path = lam::own((RdtPath*)cmd->fill_path.path);
-        owns_path = true;
-    }
+    bool owns_path = ctx->effect_fallback.active &&
+        paint_list_take_path_payload(list, index, PAINT_FILL_PATH);
     pdf_lower_paint_list(ctx);
     return owns_path;
 }
@@ -1252,12 +1238,8 @@ static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
     int index = list ? list->item_count() : -1;
     paint_stroke_path(list, path, color, width,
                       RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
-    bool owns_path = false;
-    PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_STROKE_PATH);
-    if (cmd) {
-        cmd->stroke_path.owned_path = lam::own((RdtPath*)cmd->stroke_path.path);
-        owns_path = true;
-    }
+    bool owns_path = ctx->effect_fallback.active &&
+        paint_list_take_path_payload(list, index, PAINT_STROKE_PATH);
     pdf_lower_paint_list(ctx);
     return owns_path;
 }
@@ -1273,14 +1255,8 @@ static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
                                gradient->x2, gradient->y2,
                                gradient->stops, gradient->stop_count,
                                RDT_FILL_WINDING, nullptr, nullptr);
-    bool owns_payload = false;
-    PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
-                                                   PAINT_FILL_LINEAR_GRADIENT);
-    if (cmd) {
-        cmd->fill_linear_gradient.owned_path = lam::own((RdtPath*)cmd->fill_linear_gradient.path);
-        if (stops) cmd->fill_linear_gradient.owned_stops = lam::own_arr((RdtGradientStop*)cmd->fill_linear_gradient.stops);
-        owns_payload = true;
-    }
+    bool owns_payload = ctx->effect_fallback.active &&
+        paint_list_take_path_payload(list, index, PAINT_FILL_LINEAR_GRADIENT, stops);
     pdf_lower_paint_list(ctx);
     return owns_payload;
 }
@@ -1295,14 +1271,8 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
                                gradient->cx, gradient->cy, gradient->r,
                                gradient->stops, gradient->stop_count,
                                RDT_FILL_WINDING, nullptr, nullptr);
-    bool owns_payload = false;
-    PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
-                                                   PAINT_FILL_RADIAL_GRADIENT);
-    if (cmd) {
-        cmd->fill_radial_gradient.owned_path = lam::own((RdtPath*)cmd->fill_radial_gradient.path);
-        if (stops) cmd->fill_radial_gradient.owned_stops = lam::own_arr((RdtGradientStop*)cmd->fill_radial_gradient.stops);
-        owns_payload = true;
-    }
+    bool owns_payload = ctx->effect_fallback.active &&
+        paint_list_take_path_payload(list, index, PAINT_FILL_RADIAL_GRADIENT, stops);
     pdf_lower_paint_list(ctx);
     return owns_payload;
 }

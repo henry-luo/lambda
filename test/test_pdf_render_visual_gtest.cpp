@@ -944,6 +944,7 @@ static const char* paged_preview_fixture() {
 }
 
 static void expect_preview_pixel(const ImageData& image, int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+    SCOPED_TRACE(::testing::Message() << "pixel " << x << "," << y << " in " << image.width << "x" << image.height);
     ASSERT_GE(x, 0); ASSERT_GE(y, 0); ASSERT_LT(x, image.width); ASSERT_LT(y, image.height);
     const uint8_t* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
     EXPECT_EQ(pixel[0], r); EXPECT_EQ(pixel[1], g); EXPECT_EQ(pixel[2], b);
@@ -993,6 +994,74 @@ TEST(RenderOutputParity, PagedImagesWrapIntoPhysicalSheetsAndScaledPreviewCells)
         ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
         expect_preview_pixel(image, 80, 80, expected[page][0], expected[page][1], expected[page][2]);
         image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, PagedPercentageHeightsPreserveAutoAndDefiniteContainingBlocks) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_height_percentages.html";
+    const char* pdf_path = "temp/render_output_parity/paged_height_percentages.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_height_percentages.png";
+    const char* html = "<!doctype html><style>@page{size:120px 100px;margin:10px}"
+        "html,body,div{margin:0;padding:0} .auto .child,.fixed .child{height:50%;background:blue}"
+        ".ink{height:10px;width:10px;background:green}.after{height:5px;background:red}"
+        ".fixed{height:40px;break-before:page}</style>"
+        "<div class='auto'><div class='child'><div class='ink'></div></div><div class='after'></div></div>"
+        "<div class='fixed'><div class='child'><div class='ink'></div></div></div>";
+    ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged --block-remote-resources"));
+    ASSERT_EQ(pdf_page_count(pdf_path), 2);
+    ASSERT_TRUE(render_document_fixture(html_path, preview_path, "--paged --block-remote-resources --page-grid 1x2"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    EXPECT_EQ(preview.width, 240); EXPECT_EQ(preview.height, 100);
+    expect_preview_pixel(preview, 30, 15, 0, 0, 255);
+    expect_preview_pixel(preview, 30, 22, 255, 0, 0);
+    expect_preview_pixel(preview, 30, 28, 255, 255, 255);
+    expect_preview_pixel(preview, 150, 25, 0, 0, 255);
+    expect_preview_pixel(preview, 150, 35, 255, 255, 255); image_free(preview.pixels);
+    ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
+    snprintf(pdf.base, sizeof(pdf.base), "paged_height_percentages");
+    for (int page = 1; page <= 2; page++) {
+        char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page, png, sizeof(png)));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+        expect_preview_pixel(image, image.width / 4, image.width * (page == 1 ? 15 : 25) / 120, 0, 0, 255);
+        if (page == 1) expect_preview_pixel(image, image.width / 4, image.width * 22 / 120, 255, 0, 0);
+        expect_preview_pixel(image, image.width / 4, image.width * 35 / 120, 255, 255, 255); image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, ResponsivePicturePrintSelectionRetainsDensityAndPhysicalPageGeometry) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_responsive.html";
+    const char* pdf_path = "temp/render_output_parity/paged_responsive.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_responsive.png";
+    const char* red = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='40'%20height='20'%3E%3Crect%20width='40'%20height='20'%20fill='red'/%3E%3C/svg%3E";
+    const char* blue = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='40'%20height='20'%3E%3Crect%20width='40'%20height='20'%20fill='blue'/%3E%3C/svg%3E";
+    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+    strbuf_append_str(html, "<!doctype html><style>@page{size:100px 60px;margin:10px}"
+        "html,body{margin:0} picture{display:block} picture+picture{break-before:page} img{display:block}</style>");
+    for (const char* url : {red, blue}) {
+        strbuf_append_str(html, "<picture><source type='image/avif' srcset='missing.avif'>"
+            "<source media='print' type='image/svg+xml' srcset=\"");
+        strbuf_append_str(html, url); strbuf_append_str(html, " 2x\"><img src='missing-fallback.png'></picture>");
+    }
+    bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
+    strbuf_free(html); ASSERT_TRUE(rendered); ASSERT_EQ(pdf_page_count(pdf_path), 2);
+    EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
+    ASSERT_TRUE(render_document_fixture(html_path, preview_path, "--paged --block-remote-resources --page-grid 1x2"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    EXPECT_EQ(preview.width, 200); EXPECT_EQ(preview.height, 60);
+    expect_preview_pixel(preview, 15, 15, 255, 0, 0); expect_preview_pixel(preview, 115, 15, 0, 0, 255);
+    expect_preview_pixel(preview, 35, 15, 255, 255, 255); // natural width is 40 / 2 CSS pixels.
+    image_free(preview.pixels);
+    ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
+    snprintf(pdf.base, sizeof(pdf.base), "paged_responsive");
+    for (int page = 1; page <= 2; page++) {
+        char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page, png, sizeof(png)));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+        expect_preview_pixel(image, image.width * 15 / 100, image.width * 15 / 100, page == 1 ? 255 : 0, 0, page == 2 ? 255 : 0);
+        expect_preview_pixel(image, image.width * 35 / 100, image.width * 15 / 100, 255, 255, 255); image_free(image.pixels);
     }
 }
 
@@ -2681,6 +2750,61 @@ TEST(RenderOutputParity, LogicalCornerRadiiMapAndCompeteWithPhysicalCorners) {
     // The child's logical corner maps to its physical top-right before inherit.
     EXPECT_TRUE(file_contains_text(svg_path,
         "<rect x=\"0.00\" y=\"0.00\" width=\"40.00\" height=\"20.00\" fill=\"rgb(0,0,255)\""));
+}
+
+TEST(RenderOutputParity, CornerMathUsesFinalBoxAndComputedInheritedLengths) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    struct RadiusCase { const char* name; const char* actual; const char* reference; };
+    const RadiusCase cases[] = {
+        {"corner_math_logical", "border-start-start-radius:calc(10px + 20%)", "border-start-start-radius:30px 26px"},
+        {"corner_math_quad", "border-radius:calc(10px + 20%) / calc(5px + 30%)", "border-radius:30px / 29px"},
+        {"corner_math_min", "border-radius:min(60%,2em)", "border-radius:30px"},
+        {"corner_math_clamp", "border-start-end-radius:clamp(5px,40%,35px)", "border-start-end-radius:35px 32px"},
+        {"corner_math_negative", "border-end-end-radius:calc(-10px)", "border-end-end-radius:0"},
+        {"corner_math_overlap", "border-radius:80px;border-start-start-radius:calc(50% + 30px)", "border-radius:80px;border-top-left-radius:80px 70px"},
+        {"corner_math_outline", "border-start-start-radius:calc(10px + 20%);outline:2px solid red", "border-start-start-radius:30px 26px;outline:2px solid red"},
+        {"corner_math_shadow", "border-start-start-radius:calc(10px + 20%);box-shadow:3px 3px 1px red", "border-start-start-radius:30px 26px;box-shadow:3px 3px 1px red"},
+        {"corner_math_linear_shadow", "border-radius:calc(10px + 20%);background:linear-gradient(red,blue);box-shadow:3px 3px 1px red", "border-radius:30px 30px 30px 30px / 26px 26px 26px 26px;background:linear-gradient(red,blue);box-shadow:3px 3px 1px red"},
+        {"corner_math_radial_shadow", "border-radius:calc(10px + 20%);background:radial-gradient(red,blue);box-shadow:3px 3px 1px red", "border-radius:30px 30px 30px 30px / 26px 26px 26px 26px;background:radial-gradient(red,blue);box-shadow:3px 3px 1px red"},
+        {"corner_math_rtl", "direction:rtl;border-start-start-radius:calc(10px + 20%)", "direction:rtl;border-top-right-radius:30px 26px"}
+    };
+    for (const RadiusCase& test : cases) {
+        SCOPED_TRACE(test.name);
+        char actual[1024], reference[1024];
+        const char* pattern = "<!doctype html><style>html,body{margin:0;background:white}"
+            "#box{width:100px;height:80px;background:green;font-size:15px;%s}"
+            "</style><div id='box'></div>";
+        snprintf(actual, sizeof(actual), pattern, test.actual);
+        snprintf(reference, sizeof(reference), pattern, test.reference);
+        expect_html_pair_output_parity(test.name, actual, reference);
+    }
+    EXPECT_TRUE(file_contains_text("temp/render_output_parity/corner_math_logical.svg", "L0.00,26.00"));
+    EXPECT_TRUE(file_contains_text("temp/render_output_parity/corner_math_clamp.svg", "100.00,32.00"));
+    const char* actual = "<!doctype html><style>html,body{margin:0;background:white}"
+        "#parent{width:200px;height:100px;font-size:20px;border-start-start-radius:calc(1em + 20%)}"
+        "#child{width:100px;height:50px;background:green;font-size:40px;border-start-start-radius:inherit}"
+        "</style><div id='parent'><div id='child'></div></div>";
+    const char* reference = "<!doctype html><style>html,body{margin:0;background:white}"
+        "#parent{width:200px;height:100px;font-size:20px;border-start-start-radius:60px 40px}"
+        "#child{width:100px;height:50px;background:green;font-size:40px;border-start-start-radius:40px 30px}"
+        "</style><div id='parent'><div id='child'></div></div>";
+    expect_html_pair_output_parity("corner_math_inherit", actual, reference);
+
+    // deferred effect groups must retain column stroke paths as well as rounded fills and gradients.
+    const char* styles[] = {"solid", "double", "dashed"};
+    for (const char* style : styles) {
+        char name[80], column_actual[1024], column_reference[1024];
+        snprintf(name, sizeof(name), "corner_math_columns_%s", style);
+        const char* pattern = "<!doctype html><style>html,body{margin:0;background:white}"
+            "#box{width:100px;height:80px;background:green;columns:2;column-fill:auto;column-gap:20px;"
+            "column-rule:3px %s red;box-shadow:3px 3px 1px red;border-radius:%s}"
+            "#box>div{height:80px}</style><div id='box'><div></div><div></div></div>";
+        snprintf(column_actual, sizeof(column_actual), pattern, style, "calc(10px + 20%)");
+        snprintf(column_reference, sizeof(column_reference), pattern, style, "30px / 26px");
+        expect_html_pair_output_parity(name, column_actual, column_reference);
+    }
 }
 
 TEST(RenderOutputParity, CascadeLayersShareOrderAcrossStylesheets) {

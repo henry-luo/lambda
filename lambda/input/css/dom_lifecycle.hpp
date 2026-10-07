@@ -45,6 +45,8 @@ typedef struct DomLifecycleStats {
     uint64_t recycled_nodes;
     size_t retired_primary_bytes;
     size_t pending_primary_bytes;
+    // primary bytes of detached subtrees whose only pins are script wrappers
+    size_t wrapper_stranded_bytes;
 } DomLifecycleStats;
 
 bool dom_lifecycle_init(DomDocument* doc);
@@ -77,6 +79,12 @@ size_t dom_retire_sweep(DomDocument* doc);
 // Hosted windows defer sweeps until the event loop reaches a quiescent point.
 bool dom_retire_set_deferred(bool enabled);
 bool dom_retire_idle(uint64_t budget_us);
+// Detached subtrees held only by script wrappers are released by a collection,
+// which GC-heap allocation alone may never trigger. The host collects at an
+// idle point once `threshold` more such bytes are stranded than after its last
+// collection, then reports that collection so pacing restarts from there.
+bool dom_retire_wrapper_collection_due(DomDocument* doc, size_t threshold);
+void dom_retire_wrapper_collection_done(DomDocument* doc);
 void dom_retire_begin_destroy(DomDocument* doc);
 void dom_lifecycle_release_unattached_form_props(DomDocument* doc);
 void dom_lifecycle_release_all_form_props(DomDocument* doc);

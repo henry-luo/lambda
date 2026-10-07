@@ -48752,6 +48752,8 @@ static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    // the presenter keeps playback state and handlers, so it owns a runtime per document
+    {"slides", "lambda.slide.present", "present", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, false},
     // edit mode selects the application; lambda.edit's registry selects the
     // format adapter and reads the source itself (Radiant_Design_Edit_Mode §4).
     {"edit", "lambda.edit.edit", "open_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
