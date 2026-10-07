@@ -42,9 +42,11 @@ let m3 = hl.after_steps(h.hl, h.scan, [{delta: d3, applied: a3}], a3.buf.version
 let e1 = hl.highlight(a1.buf, 0, a1.buf.count - 1, m1.scan, 'markdown');
 [show(hl.runs_for(e1.hl, a1.buf, 5)) == show(hl.runs_for(m1.hl, a1.buf, 5))]
 
+// a split leaves its new boundary unknown (kind -1) and its labels empty; a
+// merge drops the boundary inside the merged range; labels move with chunks
 "scan_after:";
-[hl.scan_after({states: [0,0,0, 1,96,3, 0,0,0, 0,0,0], valid: 4}, {chunk: 1, removed: 1, added: 2}),
- hl.scan_after({states: [0,0,0, 1,96,3, 0,0,0, 0,0,0], valid: 4}, {chunk: 0, removed: 2, added: 1})]
+let cached = {states: [0,0,0,0,0, 1,96,3,0,0, 0,0,0,2,0, 0,0,0,0,0], valid: 4, labels: [["a"], [], ["b", "c"], ["d"]]};
+[hl.scan_after(cached, {chunk: 1, removed: 1, added: 2}), hl.scan_after(cached, {chunk: 0, removed: 2, added: 1})]
 
 // inline spans inside containers map back through the column maps (CED17,
 // OQ10): list items, their continuation lines, quotes, a list inside a quote,
@@ -55,3 +57,12 @@ let nest = "- a **b** item\n  continued `c`\n\n> quoted *e*\n> - in **list**\nla
 let nb = buf.from_text(nest)
 let nh = hl.highlight(nb, 0, nb.count - 1, hl.empty_scan(), 'markdown');
 [for (l in 0 to nb.count - 1) [buf.line(nb, l), show(hl.runs_for(nh.hl, nb, l))]]
+
+// blocks nested in containers keep their own class next to the containers'
+// markers: a heading in a quote, a fence and its body in a list item, a link
+// definition in a list item, and a quote's lazy heading-like line
+"nested blocks:";
+let deep = "> # Quoted title\n> body\n\n- item\n\n  ```js\n  let y = 2;\n  ```\n\n- [r]: http://r.s\n"
+let db = buf.from_text(deep)
+let dh = hl.highlight(db, 0, db.count - 1, hl.empty_scan(), 'markdown');
+[for (l in 0 to db.count - 1) [buf.line(db, l), show(hl.runs_for(dh.hl, db, l))]]

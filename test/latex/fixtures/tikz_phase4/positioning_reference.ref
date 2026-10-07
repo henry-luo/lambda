@@ -1,0 +1,53 @@
+# Anchor positions (cm) printed by positioning_reference.tex, one per line as
+# node|anchor|x|y. Generated offline with pdfTeX 3.141592653-2.6-1.40.27
+# (TeX Live 2025) and PGF 3.1.10: pdflatex positioning_reference.tex, then the
+# REF lines of the log. Node text is \rule{1cm}{5mm} with inner/outer sep 0pt.
+a|center|0.0|0.0
+b|center|1.99998|0.0
+c|center|0.0|-2.49998
+d|center|3.99998|1.49998
+e|center|-3.0|-1.49998
+f|center|1.0|0.0
+g|center|3.7071|1.2071
+h|center|3.55894|0.0
+k|center|1.99998|0.0
+n|center|0.0|4.54999
+m1|center|0.99998|0.0
+m2|center|1.0|2.0
+m3|center|0.0|-1.0
+m4|center|0.0|0.99998
+m5|center|3.99998|0.0
+m6|center|3.99998|0.0
+m7|center|0.99998|0.25
+m8|center|0.25|-1.25
+m9|center|0.99998|1.0
+r|north|0.00006|0.70718
+r|east|0.81647|0.0
+r|30|0.61241|0.35356
+p|north|4.00005|0.87411
+p|south|4.00008|-0.70715
+p|east|4.74344|0.0
+s|north|7.99998|1.06062
+s|south|8.00002|-0.7071
+s|east|8.80707|0.00002
+el|north|0.0|-3.64644
+el|east|0.7071|-4.0
+el|north east|0.5|-3.75
+dm|north|4.0|-3.25
+dm|east|4.74998|-4.0
+dm|north east|4.375|-3.625
+da|north|8.0|-3.5
+da|east|8.99998|-4.0
+t|north|0.00006|-7.74992
+t|south|0.00006|-8.25
+t|east|0.64438|-7.99998
+t|south west|-0.24997|-8.25
+t|north west|-0.24997|-7.74995
+t2|south west|3.75002|-8.25
+t2|north west|3.75003|-7.74994
+t2|south east|4.25006|-8.25
+t2|north east|4.25008|-7.74994
+ci|east|8.55894|-8.0
+ci|north east|8.39523|-7.60477
+q|north|0.00006|-10.93915
+q|east|1.06088|-11.99995

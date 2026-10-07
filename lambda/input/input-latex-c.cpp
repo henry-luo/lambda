@@ -7,9 +7,14 @@
 #include "input-latex-scanner.h"
 #include "input-latex-tables.h"
 #include "input-parsers.h"
+#include "input-parse-options.h"
+#include "input-tex.hpp"
 #include "../io/mark_builder.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/shell.h"
+#include "../../lib/url.h"
+#include "../../lib/memtrack.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -938,14 +943,41 @@ private:
 
 };
 
+// engine diagnostics and loaded packages as Mark arrays (offsets are script ints)
+static Item tex_diagnostics_array(MarkBuilder& builder, const tex::Result& result) {
+    ArrayBuilder diagnostics = builder.array();
+    for (size_t i = 0; i < result.diagnostic_count; i++) {
+        const tex::Diagnostic& d = result.diagnostics[i];
+        MapBuilder entry = builder.map();
+        entry.put("code", d.code);
+        entry.put("message", d.message);
+        entry.put("offset", builder.createInt((int64_t)d.offset));
+        if (d.file) entry.put("file", d.file);
+        if (d.line) entry.put("line", builder.createInt((int64_t)d.line));
+        diagnostics.append(entry.final());
+    }
+    return diagnostics.final();
+}
+
+static Item tex_packages_array(MarkBuilder& builder, const tex::Result& result) {
+    ArrayBuilder packages = builder.array();
+    for (size_t i = 0; i < result.loaded_package_count; i++)
+        packages.append(builder.createStringItem(result.loaded_packages[i]));
+    return packages.final();
+}
+
 class DirectLatexParser {
 public:
-    DirectLatexParser(InputContext& context)
+    // tex_result maps reconstructed-text offsets back to the document
+    // (Lambda_Impl_Latex_Phase4: the engine hands the digester its output)
+    DirectLatexParser(InputContext& context, const tex::Result* tex_result = nullptr)
         : ctx_(context), builder_(context.builder), source_(context.source()),
-          length_(context.source_length()), position_(0), tabular_mode_(false) {}
+          length_(context.source_length()), position_(0), tabular_mode_(false),
+          tex_result_(tex_result) {}
 
     Item parse() {
         ElementBuilder root = builder_.element("latex_document");
+        if (tex_result_) attach_tex_report(root);
         parse_children(root, 0, true);
         return root.final();
     }
@@ -957,10 +989,19 @@ private:
     size_t length_;
     size_t position_;
     bool tabular_mode_;
+    const tex::Result* tex_result_;
 
     void error(const char* message) {
-        ctx_.tracker.seek(source_offset(source_ + position_));
+        ctx_.tracker.seek(raw_offset(source_ + position_));
         ctx_.addError("latex_c: %s", message);
+    }
+
+    // engine diagnostics and the beside-document packages it ran; absent
+    // when empty, so a document without either keeps its exact AST
+    void attach_tex_report(ElementBuilder& root) {
+        if (tex_result_->diagnostic_count == 0 && tex_result_->loaded_package_count == 0) return;
+        root.attr("tex_diagnostics", tex_diagnostics_array(builder_, *tex_result_));
+        root.attr("tex_packages", tex_packages_array(builder_, *tex_result_));
     }
 
     void append_text(ElementBuilder& parent, size_t begin, size_t end) {
@@ -1026,7 +1067,7 @@ private:
         size_t begin = 0, end = 0;
         if (!consume_group_span(&begin, &end)) return ItemNull;
         ElementBuilder group = builder_.element("curly_group");
-        DirectLatexParser nested(ctx_);
+        DirectLatexParser nested(ctx_, tex_result_);
         nested.source_ = source_ + begin;
         nested.length_ = end - begin;
         nested.position_ = 0;
@@ -1045,7 +1086,7 @@ private:
         size_t begin = 0, end = 0;
         if (!consume_brack_group_span(&begin, &end)) return ItemNull;
         ElementBuilder group = builder_.element("brack_group");
-        DirectLatexParser nested(ctx_);
+        DirectLatexParser nested(ctx_, tex_result_);
         nested.source_ = source_ + begin;
         nested.length_ = end - begin;
         nested.position_ = 0;
@@ -1057,7 +1098,7 @@ private:
         size_t begin = 0, end = 0;
         if (!consume_paren_group_span(&begin, &end)) return ItemNull;
         ElementBuilder group = builder_.element("paren_group");
-        DirectLatexParser nested(ctx_);
+        DirectLatexParser nested(ctx_, tex_result_);
         nested.source_ = source_ + begin;
         nested.length_ = end - begin;
         nested.position_ = 0;
@@ -1084,15 +1125,20 @@ private:
         return true;
     }
 
-    size_t source_offset(const char* cursor) const {
+    size_t raw_offset(const char* cursor) const {
         return (size_t)(cursor - ctx_.source());
+    }
+
+    size_t source_offset(const char* cursor) const {
+        size_t raw = raw_offset(cursor);
+        return tex_result_ ? tex::result_map_offset(tex_result_, raw) : raw;
     }
 
     Item make_math_element(const char* math_source, size_t math_length, bool display) {
         ElementBuilder elem = builder_.element(display ? "display_math" : "inline_math");
         elem.attr("source_offset", (int64_t)source_offset(math_source));
         elem.attr("source", builder_.createStringItem(math_source, math_length));
-        DirectMathParser math(ctx_, math_source, math_length, source_offset(math_source), false);
+        DirectMathParser math(ctx_, math_source, math_length, raw_offset(math_source), false);
         Item ast = math.parse();
         if (item_present(ast)) elem.attr("ast", ast);
         return elem.final();
@@ -1308,11 +1354,11 @@ private:
             }
             while (body_len > 0 && isspace((unsigned char)body_source[body_len - 1])) body_len--;
             elem.attr("source", builder_.createStringItem(body_source, body_len));
-            DirectMathParser math(ctx_, body_source, body_len, source_offset(body_source), false);
+            DirectMathParser math(ctx_, body_source, body_len, raw_offset(body_source), false);
             Item ast = math.parse();
             if (item_present(ast)) elem.attr("ast", ast);
         } else {
-            DirectLatexParser nested(ctx_);
+            DirectLatexParser nested(ctx_, tex_result_);
             nested.source_ = body_source;
             nested.length_ = body_len;
             nested.position_ = 0;
@@ -1335,7 +1381,7 @@ private:
         }
         skip_space_before_group('{', '{');
         if (consume_group_span(&begin, &end)) {
-            DirectLatexParser nested(ctx_);
+            DirectLatexParser nested(ctx_, tex_result_);
             nested.source_ = source_ + begin;
             nested.length_ = end - begin;
             nested.position_ = 0;
@@ -1382,8 +1428,8 @@ private:
                 position_ - command_start));
             return elem.final();
         }
-        if (strcmp(name, "directlua") == 0) {
-            ElementBuilder elem = builder_.element("directlua");
+        if (is_raw_group_command(name)) {
+            ElementBuilder elem = builder_.element(name);
             elem.attr("source_offset", (int64_t)source_offset(source_ + command_start));
             skip_space_before_group('{', '{');
             size_t begin = 0;
@@ -1445,7 +1491,7 @@ private:
             size_t begin = 0, end = 0;
             skip_space_before_group('{', '{');
             if (consume_group_span(&begin, &end)) {
-                DirectLatexParser nested(ctx_);
+                DirectLatexParser nested(ctx_, tex_result_);
                 nested.source_ = source_ + begin;
                 nested.length_ = end - begin;
                 nested.position_ = 0;
@@ -1587,6 +1633,22 @@ private:
         position_ = math_end + (found_close ? close_len : 0);
     }
 
+    // TeX tokenizes a blank line as \par, so both end a paragraph the same way;
+    // returns the position after the break, or 0
+    size_t paragraph_break_end() const {
+        if (source_[position_] == '\n')
+            return position_ + 1 < length_ && source_[position_ + 1] == '\n' ? position_ + 2 : 0;
+        if (source_[position_] != '\\') return 0;
+        char name[8];
+        char full[16];
+        size_t end = latex_scan_command(source_, length_, position_, name, sizeof(name), full, sizeof(full));
+        if (end == 0 || strcmp(name, "par") != 0) return 0;
+        // spaces and line ends after a control word are skipped; extra breaks in vertical mode are no-ops
+        while (end < length_ && (source_[end] == ' ' || source_[end] == '\t' ||
+                                 source_[end] == '\n' || source_[end] == '\r')) end++;
+        return end;
+    }
+
     bool is_block_command() const {
         char name[96];
         char full[104];
@@ -1645,6 +1707,15 @@ private:
                 text_begin = position_;
                 continue;
             }
+            size_t break_end = paragraph_break_end();
+            if (break_end) {
+                append_text(parent, text_begin, position_);
+                position_ = break_end;
+                if (stop_at_parbreak) return;
+                parent.child(builder_.createSymbolItem("parbreak"));
+                text_begin = position_;
+                continue;
+            }
             if (c == '\\') {
                 if (stop_at_block && is_block_command()) {
                     append_text(parent, text_begin, position_);
@@ -1666,14 +1737,6 @@ private:
                 text_begin = position_;
                 continue;
             }
-            if (c == '\n' && position_ + 1 < length_ && source_[position_ + 1] == '\n') {
-                append_text(parent, text_begin, position_);
-                position_ += 2;
-                if (stop_at_parbreak) return;
-                parent.child(builder_.createSymbolItem("parbreak"));
-                text_begin = position_;
-                continue;
-            }
             position_++;
         }
         append_text(parent, text_begin, position_);
@@ -1686,8 +1749,9 @@ private:
         }
         while (position_ < length_) {
             if (stop && source_[position_] == (char)stop) return;
-            if (source_[position_] == '\n' && position_ + 1 < length_ && source_[position_ + 1] == '\n') {
-                position_ += 2;
+            size_t break_end = paragraph_break_end();
+            if (break_end) {
+                position_ = break_end;
                 continue;
             }
             if (source_[position_] == '\\' && is_block_command()) {
@@ -1715,10 +1779,89 @@ extern "C" Item parse_math_direct_to_ast(Input* input, const char* math_source, 
     return result;
 }
 
+static tex::Engine* run_tex_engine(const InputParseOptions* options, const char* source,
+                                   tex::Result* result) {
+    tex::EngineOptions eo = {};
+    eo.base_path = options->tex_base;
+    eo.ini = options->tex_ini;
+    eo.adapters = options->tex_adapters;
+    eo.adapter_count = options->tex_adapter_count;
+    eo.raw_commands = options->tex_raw_commands;
+    eo.raw_command_count = options->tex_raw_command_count;
+    tex::Engine* engine = tex::engine_create(&eo);
+    if (!engine) return nullptr;
+    tex::engine_run(engine, source, strlen(source), result);
+    if (tex::engine_wants_expl3(engine)) {
+        // the document asked for expl3: run it again from the expl3 format
+        tex::engine_destroy(engine);
+        eo.expl3 = true;
+        engine = tex::engine_create(&eo);
+        if (!engine) return nullptr;
+        tex::engine_run(engine, source, strlen(source), result);
+    }
+    return engine;
+}
+
+// LAMBDA_TEX_EXPAND=1 expands every LaTeX parse (the §9.9 front-end parity run)
+static bool tex_expand_by_default() {
+#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
+    return false;
+#else
+    const char* value = shell_getenv("LAMBDA_TEX_EXPAND");
+    return value && strcmp(value, "1") == 0;
+#endif
+}
+
 void parse_latex_direct(Input* input, const char* latex_string) {
     if (!input || !latex_string) return;
+    const InputParseOptions* options = input->parse_options;
+    InputParseOptions knob_options = {};
+    char* knob_base = nullptr;
+    if (!(options && options->tex_expand) && tex_expand_by_default()) {
+        knob_options.tex_expand = true;
+        // a file input resolves beside-document files from its own location
+        if (input->url) knob_base = url_to_local_path((const Url*)input->url);
+        knob_options.tex_base = knob_base;
+        options = &knob_options;
+    }
+    if (options && options->tex_expand) {
+        // §9.2: expansion before digestion; the parser reads the engine's text
+        tex::Result result = {};
+        tex::Engine* engine = run_tex_engine(options, latex_string, &result);
+        if (engine) {
+            InputContext context(input, result.text, result.length);
+            DirectLatexParser parser(context, &result);
+            input->root = parser.parse();
+            if (context.hasErrors()) context.logErrors();
+            tex::engine_destroy(engine);
+            if (knob_base) mem_free(knob_base);
+            return;
+        }
+    }
+    if (knob_base) mem_free(knob_base);
     InputContext context(input, latex_string);
     DirectLatexParser parser(context);
     input->root = parser.parse();
     if (context.hasErrors()) context.logErrors();
+}
+
+void parse_tex_expansion(Input* input, const char* source) {
+    if (!input || !source) return;
+    InputParseOptions defaults = {};
+    const InputParseOptions* options = input->parse_options ? input->parse_options : &defaults;
+    tex::Result result = {};
+    tex::Engine* engine = run_tex_engine(options, source, &result);
+    if (!engine) return;
+    InputContext context(input);
+    MarkBuilder& builder = context.builder;
+    MapBuilder root = builder.map();
+    root.put("text", builder.createStringItem(result.text, result.length));
+    ArrayBuilder messages = builder.array();
+    for (size_t i = 0; i < result.message_count; i++)
+        messages.append(builder.createStringItem(result.messages[i]));
+    root.put("messages", messages.final());
+    root.put("diagnostics", tex_diagnostics_array(builder, result));
+    root.put("packages", tex_packages_array(builder, result));
+    input->root = root.final();
+    tex::engine_destroy(engine);
 }

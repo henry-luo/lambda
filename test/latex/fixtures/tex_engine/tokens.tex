@@ -1,0 +1,32 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\^=7
+\def\T#1{\immediate\write16{LT:#1}}
+% ^^ notation and catcode changes
+\T{^^41^^42 ^^5cstring^^5crelax}
+\def\x{^^7a}\T{\meaning\x}
+\catcode`\~=13 \def~{TILDE}\T{~ and \string~}
+\catcode`\!=11 \def\a!b{AB}\T{\a!b}\catcode`\!=12
+\catcode`\[=1 \catcode`\]=2 \def\br[bracketed]\T{\br}\catcode`\[=12 \catcode`\]=12
+% spaces after control words and symbols
+\def\space{ }\def\s{S}\T{\s   x\s\space y\s{} z}
+\T{a\space\space b}
+\T{\string\ \string\% \string\s}
+% \endlinechar and \escapechar
+\endlinechar=-1 \def\e{E%
+}\endlinechar=13 \T{\meaning\e}
+\escapechar=-1 \T{\string\x \meaning\x}\escapechar=`\\
+\escapechar=`\/ \T{\string\x}\escapechar=`\\
+% \lowercase with lccode
+\lccode`\Z=`\q \lowercase{\T{XYZ}}
+\uccode`\a=`\B \uppercase{\T{abc}}
+% \csname with odd names
+\expandafter\def\csname 1 2\endcsname{one two}\T{\csname 1 2\endcsname}
+\T{\expandafter\string\csname\endcsname}
+\expandafter\let\expandafter\r\csname relax\endcsname\T{\meaning\r}
+% \number and \romannumeral edge cases
+\T{\number -+-5 \number 2147483647 \romannumeral -5x}
+\T{\number"7FFFFFFF \number'17777777777}
+% \meaning of primitives and parameters
+\T{\meaning\count \meaning\catcode \meaning\the \meaning\if \meaning\endlinechar}
+\T{\meaning\parindent \meaning\baselineskip \meaning\everypar \meaning\fi}
+\T{\the\catcode`\^ \the\catcode`\% \the\catcode 0 \the\catcode 127}
+\end

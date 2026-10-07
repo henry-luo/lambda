@@ -212,8 +212,7 @@ Item parse_document(MarkupParser* parser) {
             if (source_positions) {
                 record_source_position(parser, block, line_before, parser->current_line);
             }
-            highlight_note_block(parser, highlight_item_kind(block.item), line_before,
-                                 parser->current_line);
+            highlight_note_item(parser, block.item, line_before);
             list_push((List*)body, block);
         }
 

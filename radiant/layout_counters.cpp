@@ -212,8 +212,8 @@ static void parse_counter_spec(const char* spec,
     }
 
     if (token_count == 0) return;
-    // Allocate arrays (max possible pairs)
-    int max_pairs = (token_count + 1) / 2;
+    // Every name may omit its integer; counting pairs as two tokens truncates valid implicit values.
+    int max_pairs = token_count;
     char** names = (char**)arena_alloc(arena, sizeof(char*) * max_pairs);
     int* values = (int*)arena_alloc(arena, sizeof(int) * max_pairs); // INT_CAST_OK: pointer cast
 
@@ -371,7 +371,9 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
         if (!cv) {
             counter_create(ctx->current_scope, parsed.names[i], increment, false);
         } else {
-            cv->value += increment;
+            // CSS counter ranges are bounded; continued page sequences must not overflow signed integers.
+            int64_t value = (int64_t)cv->value + increment;
+            cv->value = value > INT_MAX ? INT_MAX : value < INT_MIN ? INT_MIN : (int)value; // INT_CAST_OK: bounded counter value.
         }
     }
 }

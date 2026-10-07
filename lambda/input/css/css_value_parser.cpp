@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include "../../../lib/str.h"
+#include "../../../lib/string.h"
 
 // Forward declarations
 static void css_property_value_parser_set_default_env_vars(CssPropertyValueParser* parser);
@@ -103,6 +104,16 @@ void css_property_value_parser_set_math_functions_support(CssPropertyValueParser
 }
 
 // CSS Value creation utilities
+CssValue* css_value_create_token_sequence(Pool* pool, CssValue* value, StrView text) {
+    if (!pool || !value) return nullptr;
+    CssValue* sequence = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!sequence) return nullptr;
+    sequence->type = CSS_VALUE_TYPE_TOKEN_SEQUENCE;
+    sequence->data.tokens.text = string_from_strview(text, pool);
+    sequence->data.tokens.value = value;
+    return sequence->data.tokens.text ? sequence : nullptr;
+}
+
 CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
     if (!pool || !keyword) return NULL;
 

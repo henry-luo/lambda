@@ -1,0 +1,59 @@
+{
+  kinds: ["bar", "bar"],
+  x: [-0.5, 2.5],
+  y: [0, 4]
+}
+[[[0, 0, 1], [1, 0, 3], [2, 0, 2]], [[0, 0, 2], [1, 0, 1], [2, 0, 4]]]
+[[22.115, 94.482, 13.284, 31.494], [95.569, 31.494, 13.284, 94.482], [169.023, 62.988, 13.284, 62.988], [38.055, 62.988, 13.284, 62.988], [111.509, 94.482, 13.284, 31.494], [184.964, 0, 13.284, 125.976]]
+[true, true, 2]
+{
+  kinds: ["bar"],
+  x: [0, 5],
+  y: [-0.5, 1.5]
+}
+[[0, 90.497, 132.217, 7.97], [0, 27.509, 220.362, 7.97]]
+{
+  kinds: ["bar", "bar"],
+  x: [0.5, 2.5],
+  y: [0, 4]
+}
+[[[1, 0, 1], [2, 0, 3]], [[1, 1, 3], [2, 3, 4]]]
+[[48.449, 94.482, 13.284, 31.494], [158.63, 31.494, 13.284, 94.482], [48.449, 31.494, 13.284, 62.988], [158.63, 0, 13.284, 31.494]]
+{
+  kinds: ["line", "line"],
+  x: [0, 1],
+  y: [0, 2.25]
+}
+[{
+    y_dir: "both",
+    x_dir: "none",
+    y_explicit: true,
+    x_explicit: false,
+    y_fixed: null,
+    x_fixed: null,
+    mark: true
+  }, {
+    y_dir: "plus",
+    x_dir: "none",
+    y_explicit: false,
+    x_explicit: false,
+    y_fixed: 0.5,
+    x_fixed: null,
+    mark: false
+  }]
+["M0 97.9816 L0 41.9921", "M-3 97.9816 L3 97.9816", "M-3 41.9921 L3 41.9921", "M220.362 27.9948 L220.362 0", "M217.362 27.9948 L223.362 27.9948", "M217.362 0 L223.362 0", "M0 125.976 L0 97.9816", "M220.362 69.9869 L220.362 41.9921"]
+[[1, 2], [[0.5, 0], [0, 0.25]]]
+{
+  kinds: ["area", "line"],
+  x: [0, 2],
+  y: [0, 2]
+}
+["M0 62.9882 L110.181 0 L220.362 62.9882 L220.362 125.976 L0 125.976 Z"]
+[2, true]
+{
+  kinds: ["line", "line", "fill_between", "fill_between"],
+  x: [0, 2],
+  y: [0, 4]
+}
+["M0 125.976 L55.0906 110.229 L110.181 94.4823 L110.181 94.4823 L55.0906 118.103 L0 125.976 Z", "M0 125.976 L55.0906 118.103 L110.181 94.4823 L165.272 55.1147 L220.362 0 L220.362 31.4941 L0 31.4941 Z"]
+["PGFPlots axis has conflicting bar styles", "PGFPlots bars need a linear value axis", "PGFPlots error bars need explicit or fixed errors", "PGFPlots error bar direction must be none, plus, minus or both", "PGFPlots error bar key needs error bars/.cd: y dir", "unsupported PGFPlots error mark: o", "unsupported PGFPlots error bars key: z dir", "PGFPlots fill between has no path named Z", "PGFPlots fill between needs of=<first> and <second>", "PGFPlots fill between needs plotted paths", "unsupported PGFPlots soft clip: x=1", "parse: Parse errors (1 error):\n\nline 1, col 61: error: tikz: expected plot semicolon\n  \\begin{axis}\\addplot coordinates {(0,0) (1,1)} \\closedcycle\\end{axis}\n                                                              ^\n", "parse: Parse errors (1 error):\n\nline 1, col 99: error: tikz: error bar offsets require a numeric (x,y) pair\n  \\begin{axis}[ybar]\\addplot+[error bars/.cd, y dir=both, y explicit] coordinates {(0,1) +- (1,2,3)};\\end{axis}\n                                                                                                    ^\n"]

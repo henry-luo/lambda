@@ -1,0 +1,18 @@
+"engine packages:"
+["lmdexpl"]
+"diagnostics:"
+[]
+"xparse optional argument:"
+true
+"cs_new:"
+true
+"int_eval:"
+true
+"fp_eval:"
+true
+"text_uppercase:"
+true
+"seq_sort:"
+true
+"tl_const:"
+true

@@ -631,9 +631,13 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
         Item native_result = ItemNull;
         if (array_concat_native_lane(left, right, &native_result)) return native_result;
     }
+    // An N-D array's items are its leading-axis rows (S11.1.1v3), so it joins
+    // row by row; its flat leaves are storage, not items (S10.6.1).
+    bool rows = (left_type == LMD_TYPE_ARRAY_NUM && array_num_rank(left.array_num) > 1) ||
+        (right_type == LMD_TYPE_ARRAY_NUM && array_num_rank(right.array_num) > 1);
     // same-type optimization: direct memcpy of native items (not for Range)
-    bool same_lane = left_type != LMD_TYPE_ARRAY_NUM || right_type != LMD_TYPE_ARRAY_NUM ||
-        left.array_num->get_elem_type() == right.array_num->get_elem_type();
+    bool same_lane = !rows && (left_type != LMD_TYPE_ARRAY_NUM || right_type != LMD_TYPE_ARRAY_NUM ||
+        left.array_num->get_elem_type() == right.array_num->get_elem_type());
     // A native-lane operand (an admitted `T?[]`) holds lane words, not Items,
     // so it takes the element-wise path below, which decodes every slot.
     bool native_lane = left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY &&
@@ -688,17 +692,26 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
     // different types: produce generic Array, convert typed elements to Items
     int64_t left_len = fn_seq_count(left), right_len = fn_seq_count(right);
     int64_t total_len = left_len + right_len;
+    // item_at allocates (a boxed wide scalar, an N-D row view): keep the
+    // operands and the destination rooted across every read
+    RootFrame roots(3);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_right(roots, right);
     // A typed source can expose one external scalar payload per element;
     // reserve the exact worst-case tail before copy-in discovers the mix.
     Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len * 2), LMD_TYPE_ARRAY);
+    if (!result) return ItemError;
+    Rooted<Array*> rooted_result(roots, result);
     result->type_id = LMD_TYPE_ARRAY;
     result->length = total_len;
     result->capacity = total_len * 2;
     result->extra = 0;
     result->items = (Item*)(result + 1);
-    for (int64_t i = 0; i < left_len; i++) array_set(result, i, item_at(left, i));
-    for (int64_t i = 0; i < right_len; i++) array_set(result, left_len + i, item_at(right, i));
-    return {.array = result};
+    for (int64_t i = 0; i < left_len; i++)
+        array_set(rooted_result.get(), i, item_at(rooted_left.get(), i));
+    for (int64_t i = 0; i < right_len; i++)
+        array_set(rooted_result.get(), left_len + i, item_at(rooted_right.get(), i));
+    return {.array = rooted_result.get()};
 }
 
 // S10.6.1: `++` concatenates sequences and places every other value as one
@@ -5828,13 +5841,15 @@ extern "C" Input* input_from_source_with_positions(const char* source, Url* url,
 
 // ---------------------------------------------------------------------------
 // parse(src, {type: 'markdown' | 'html', sourcepos: 'spans', window: [first, last],
-// prescan: {states, valid}}) — the source editor's highlight parse
+// prescan: {states, valid, labels}}) — the source editor's highlight parse
 // (vibe/radiant/Radiant_Design_Source_Editor.md CED16v3, CED18v2). `src` is a string,
 // an array of lines, or the editor buffer's array of line chunks, read in
-// place. The result is [kinds, spans, states, restart]: span kinds as symbols,
-// spans as flat ints (kind index, block flag, line, col, end line, end col; 0-based
-// lines, code-point columns), and the restart state per chunk boundary as
-// flat ints (3 per boundary) for the next call's `prescan`.
+// place. The result is [kinds, spans, states, restart, labels]: span kinds as
+// symbols, spans as flat ints (kind index, block flag, line, col, end line, end
+// col; 0-based lines, code-point columns), the state per chunk boundary as flat
+// ints (BOUNDARY_STATE_FIELDS per boundary), and for Markdown each chunk's link
+// reference labels (an array of strings per chunk); the last three go back in
+// the next call's `prescan`.
 // ---------------------------------------------------------------------------
 
 struct HighlightLineSource {
@@ -5958,25 +5973,46 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
         first = highlight_list_int(window_item, 0);
         last = highlight_list_int(window_item, 1);
     }
-    lam::ArrayList<RestartState> cache;
+    lam::ArrayList<BoundaryState> cache;
+    HighlightLabels cached_labels;
+    cached_labels.reset();
     int64_t valid = 0;
     Item states_item = highlight_map_field(prescan_item, "states");
     if (highlight_is_list(states_item)) {
         int64_t n = fn_len(states_item);
-        for (int64_t i = 0; i + 2 < n; i += 3) {
-            cache.push_back(RestartState{(int32_t)highlight_list_int(states_item, i),      // INT_CAST_OK: state codes
-                                         (int32_t)highlight_list_int(states_item, i + 1),  // INT_CAST_OK: fence char
-                                         (int32_t)highlight_list_int(states_item, i + 2)}); // INT_CAST_OK: fence length
+        int64_t f = BOUNDARY_STATE_FIELDS;
+        for (int64_t i = 0; i + f - 1 < n; i += f) {
+            BoundaryState st;
+            st.restart = RestartState{(int32_t)highlight_list_int(states_item, i),      // INT_CAST_OK: state codes
+                                      (int32_t)highlight_list_int(states_item, i + 1),  // INT_CAST_OK: fence char
+                                      (int32_t)highlight_list_int(states_item, i + 2)}; // INT_CAST_OK: fence length
+            st.link = (int32_t)highlight_list_int(states_item, i + 3);  // INT_CAST_OK: packed pre-scan state
+            st.skip = (int32_t)highlight_list_int(states_item, i + 4);  // INT_CAST_OK: line count
+            cache.push_back(st);
         }
         valid = highlight_int(highlight_map_field(prescan_item, "valid"), (int64_t)cache.length());
+    }
+    Item labels_item = highlight_map_field(prescan_item, "labels");
+    if (get_type_id(labels_item) == LMD_TYPE_ARRAY) {
+        for (int64_t k = 0; k < labels_item.array->length; k++) {
+            Item chunk = array_get(labels_item.array, k);
+            if (get_type_id(chunk) != LMD_TYPE_ARRAY) break;
+            for (int64_t i = 0; i < chunk.array->length; i++) {
+                size_t len = 0;
+                const char* label = highlight_string_chars(array_get(chunk.array, i), &len);
+                cached_labels.add(label, len);
+            }
+            cached_labels.close_chunk();
+        }
     }
 
     HighlightLines lines = {&source, highlight_line_at, source.count,
                             source.starts.data(), (int64_t)source.starts.length()};
+    HighlightCache given = {cache.data(), (int64_t)cache.length(), valid, &cached_labels};
     HighlightResult hl;
     bool ok = html
-        ? html_highlight_window(&lines, first, last, cache.data(), (int64_t)cache.length(), valid, &hl)
-        : markdown_highlight_window(&lines, first, last, cache.data(), (int64_t)cache.length(), valid, &hl);
+        ? html_highlight_window(&lines, first, last, &given, &hl)
+        : markdown_highlight_window(&lines, first, last, &given, &hl);
     if (source.owned) mem_free(source.owned);
     if (!ok) {
         set_runtime_error(ERR_OUT_OF_MEMORY, "parse: the highlight parse could not allocate");
@@ -5985,11 +6021,14 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
 
     // Every allocation below may collect: each array is rooted, and slots are
     // reserved before a fresh symbol is pushed so the push cannot allocate.
-    RootFrame roots(4);
+    RootFrame roots(7);
     Rooted<Array*> result(roots, array_plain());
     Rooted<Array*> kinds(roots, array_plain());
     Rooted<Array*> spans(roots, array_plain());
     Rooted<Array*> states(roots, array_plain());
+    Rooted<Array*> labels(roots, array_plain());
+    Rooted<Array*> chunk_labels(roots, nullptr);
+    Rooted<Item> label_item(roots, ItemNull);
     for (size_t i = 0; i < hl.kinds.length(); i++) {
         if (!array_reserve_append_slots(kinds.get(), 1)) return ItemError;
         Symbol* sym = heap_create_symbol(hl.kinds[i].name, strlen(hl.kinds[i].name));
@@ -6005,15 +6044,58 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
         array_push(spans.get(), {.item = i2it(span.end_col)});
     }
     for (size_t i = 0; i < hl.states.length(); i++) {
-        array_push(states.get(), {.item = i2it(hl.states[i].kind)});
-        array_push(states.get(), {.item = i2it(hl.states[i].a)});
-        array_push(states.get(), {.item = i2it(hl.states[i].b)});
+        array_push(states.get(), {.item = i2it(hl.states[i].restart.kind)});
+        array_push(states.get(), {.item = i2it(hl.states[i].restart.a)});
+        array_push(states.get(), {.item = i2it(hl.states[i].restart.b)});
+        array_push(states.get(), {.item = i2it(hl.states[i].link)});
+        array_push(states.get(), {.item = i2it(hl.states[i].skip)});
+    }
+    for (int64_t k = 0; k < hl.labels.chunks(); k++) {
+        chunk_labels.set(array_plain());
+        for (int64_t i = hl.labels.first[(size_t)k]; i < hl.labels.first[(size_t)k + 1]; i++) {
+            const char* label = hl.labels.label(i);
+            label_item.set({.item = s2it(heap_strcpy(label, (int64_t)strlen(label)))});
+            array_push(chunk_labels.get(), label_item.get());
+        }
+        array_push(labels.get(), {.array = chunk_labels.get()});
     }
     array_push(result.get(), {.array = kinds.get()});
     array_push(result.get(), {.array = spans.get()});
     array_push(result.get(), {.array = states.get()});
     array_push(result.get(), {.item = i2it(hl.restart_line)});
+    array_push(result.get(), {.array = labels.get()});
     return {.array = result.get()};
+}
+
+// latex/tex options for the TeX expansion engine (Lambda_Pkg_Latex3 §9): the
+// names stay owned by the caller's map for the duration of the parse
+static void collect_names(Map* options_map, const char* key, ArrayList* names) {
+    bool is_found = false;
+    Item list = _map_get((TypeMap*)options_map->type, options_map->data, key, &is_found);
+    if (!is_found || get_type_id(list) != LMD_TYPE_ARRAY) return;
+    Array* arr = list.array;
+    for (int64_t i = 0; i < arr->length; i++) {
+        Item name = array_get(arr, i);
+        if (is_text_type_id(get_type_id(name))) arraylist_append(names, (void*)fn_string(name)->chars);
+    }
+}
+
+static bool parse_tex_options(Map* options_map, InputParseOptions* options,
+                              ArrayList* adapter_names, ArrayList* raw_names) {
+    bool is_found = false;
+    Item expand = _map_get((TypeMap*)options_map->type, options_map->data, "expand", &is_found);
+    if (is_found && get_type_id(expand) == LMD_TYPE_BOOL) options->tex_expand = it2b(expand);
+    Item ini = _map_get((TypeMap*)options_map->type, options_map->data, "ini", &is_found);
+    if (is_found && get_type_id(ini) == LMD_TYPE_BOOL) options->tex_ini = it2b(ini);
+    Item base = _map_get((TypeMap*)options_map->type, options_map->data, "base", &is_found);
+    if (is_found && is_text_type_id(get_type_id(base))) options->tex_base = fn_string(base)->chars;
+    collect_names(options_map, "packages", adapter_names);
+    options->tex_adapters = (const char* const*)adapter_names->data;
+    options->tex_adapter_count = adapter_names->length;
+    collect_names(options_map, "raw", raw_names);
+    options->tex_raw_commands = (const char* const*)raw_names->data;
+    options->tex_raw_command_count = raw_names->length;
+    return options->tex_expand || options->tex_ini || options->tex_base || options->tex_adapter_count;
 }
 
 Item fn_parse2(Item str_item, Item type) {
@@ -6023,6 +6105,10 @@ Item fn_parse2(Item str_item, Item type) {
     String* type_str = NULL;
     String* flavor_str = NULL;
     bool source_positions = false;
+    InputParseOptions parse_options = {};
+    ArrayList* adapter_names = arraylist_new(8);
+    ArrayList* raw_names = arraylist_new(8);
+    bool has_tex_options = false;
     bool highlight_spans = false;   // sourcepos: 'spans'
     Item window_item = ItemNull;
     Item prescan_item = ItemNull;
@@ -6085,6 +6171,7 @@ Item fn_parse2(Item str_item, Item type) {
                 source_positions = it2b(input_sourcepos);
             }
         }
+        has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names);
     }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH,
@@ -6126,9 +6213,12 @@ Item fn_parse2(Item str_item, Item type) {
 
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
-    Input* input = source_positions
-        ? input_from_source_with_positions(str->chars, dummy_url, type_str, flavor_str)
+    parse_options.source_positions = source_positions;
+    Input* input = (source_positions || has_tex_options)
+        ? input_from_source_with_options(str->chars, dummy_url, type_str, flavor_str, &parse_options)
         : input_from_source(str->chars, dummy_url, type_str, flavor_str);
+    arraylist_free(adapter_names);
+    arraylist_free(raw_names);
     if (!input) {
         set_runtime_error(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",
@@ -13112,29 +13202,15 @@ static void container_rebuild_data_install(Container* container, void** data_slo
 // tree target (Impl_Map_Transition_Coverage P2).
 static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_slot,
         Container* container, TypeMap* old_map_type, TypeMap* new_type,
-        ShapeEntry* changed_entry, Item new_value, int fixed_slot_count, ShapeEntry* removed_entry = NULL) {
+        ShapeEntry* changed_entry, Item new_value, int fixed_slot_count, ShapeEntry* removed_entry = NULL,
+        const TypeMapRetypePlan* plan = NULL) {
     // a heap-owned payload can stay in place when every surviving field keeps its lane.
     // validate the entire layout before the no-GC value/type commit (D3.4.5, D5.3).
     if (container->is_heap && *data_slot && !fixed_slot_count &&
             new_type->byte_size <= *cap_slot) {
-        ShapeEntry* replacement = NULL;
-        ShapeEntry* old_field = old_map_type->shape;
-        ShapeEntry* new_field = new_type->shape;
-        bool compatible = true;
-        while (old_field || new_field) {
-            if (old_field && old_field == removed_entry) {
-                old_field = typemap_next_field(old_map_type, old_field); continue;
-            }
-            if (!old_field || !new_field || old_field->byte_offset < 0 ||
-                    old_field->byte_offset != new_field->byte_offset ||
-                    shape_entry_storage_size(old_field) != shape_entry_storage_size(new_field) ||
-                    (old_field != changed_entry && old_field->type != new_field->type)) {
-                compatible = false; break;
-            }
-            if (old_field == changed_entry) replacement = new_field;
-            old_field = typemap_next_field(old_map_type, old_field);
-            new_field = typemap_next_field(new_type, new_field);
-        }
+        ShapeEntry* replacement = plan ? plan->replacement : NULL;
+        bool compatible = plan ? plan->reuse_payload :
+            typemap_payload_reusable(old_map_type, new_type, changed_entry, removed_entry, &replacement);
         TypeId storage = replacement ? shape_entry_storage_type_id(replacement) : LMD_TYPE_NULL;
         // these simple stores neither allocate nor retain a borrowed numeric home.
         bool immediate_store = !replacement || (replacement->type == type_info[storage].type &&
@@ -13391,9 +13467,10 @@ bool map_shape_set(Map* map, String* key, Item value) {
     if (field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
     Input* tree = runtime_shape_tree();
-    TypeMap* target = tree ? type_tree_retype_field(tree, type, field, tid) : NULL;
+    const TypeMapRetypePlan* plan = NULL;
+    TypeMap* target = tree ? type_tree_retype_field(tree, type, field, tid, &plan) : NULL;
     if (target) return container_move_to_type(&map->type, &map->data, &map->data_cap,
-        map, type, target, field, value, 0);
+        map, type, target, field, value, 0, NULL, plan);
     return map_rebuild_for_type_change(&map->type, &map->data, &map->data_cap,
         LMD_TYPE_MAP, map, field, type_info[tid].type, value);
 }
@@ -14645,11 +14722,12 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             if (!map_type->js_meta && map_type->type_id == map_type_id &&
                     (map_type_id != LMD_TYPE_MAP || map_item.map->map_kind == MAP_KIND_PLAIN)) {
                 Input* tree = runtime_shape_tree();
+                const TypeMapRetypePlan* plan = NULL;
                 TypeMap* target = tree
-                    ? type_tree_retype_field(tree, map_type, entry, value_type) : NULL;
+                    ? type_tree_retype_field(tree, map_type, entry, value_type, &plan) : NULL;
                 if (target) {
                     container_move_to_type(type_slot, data_slot, cap_slot, cont, map_type,
-                        target, entry, value, 0);
+                        target, entry, value, 0, NULL, plan);
                     return ItemNull;
                 }
             }

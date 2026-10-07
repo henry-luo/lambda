@@ -107,19 +107,14 @@ bool type_tree_owns(const Input* input, const TypeMap* type);
 // Impl_Map_Transition_Coverage P2: the shared type for `parent` with `field`
 // laid out for `value_type` (D3.4.5 through the tree); NULL when declined.
 TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
-                                TypeId value_type);
+                                TypeId value_type, const TypeMapRetypePlan** plan = NULL);
 // Impl_Map_Transition_Coverage P1.5: a runtime add that copied a whole shape
 // of `entries` fields onto a private type (counted under LAMBDA_SHAPE_TREE_STATS).
 void shape_tree_stats_note_private_copy(int64_t entries);
 
 #include "../io/mark_builder.hpp"
 
-// Parse options beyond type and flavor.
-typedef struct InputParseOptions {
-    bool source_positions;  // parse({sourcepos: true}): markup blocks carry their source lines
-    bool embedded_math;     // markup: attach each <math>'s parsed `ast` and list it on
-                            // Input::embedded_math, for a display that renders it directly
-} InputParseOptions;
+#include "input-parse-options.h"
 
 #ifdef __cplusplus
 extern "C" {

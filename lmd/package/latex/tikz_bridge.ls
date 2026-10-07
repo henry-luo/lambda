@@ -1,5 +1,6 @@
 // LaTeX owns figure context; the TikZ package owns picture semantics.
 import tikz: lambda.doc.tikz.tikz
+import tikz_opts: lambda.doc.tikz.options
 import util: .util
 import macros: .macros
 
@@ -35,20 +36,45 @@ fn substitute_arguments(source, values, at) {
         values[at]), values, at + 1)
 }
 
+fn handler_of(key) {
+    let found = [for (suffix in tikz_opts.STYLE_HANDLERS where ends_with(key, suffix)) suffix]
+    if (len(found) == 0) null else found[0]
+}
+
+// Preamble key handlers; other handlers (.code, .cd, .store in) program PGF
+// internals and stay diagnosed.
 fn declaration_styles(raw) any^ {
     let values = util.parse_kv_options(util.strip_tex_comments(raw))
     let invalid = [for (key, value at values
-        where not ends_with(string(key), "/.style")) string(key)]
+        where handler_of(string(key)) == null) string(key)]
     if (len(invalid) > 0)
         raise error("unsupported TikZ style declaration: " ++ invalid[0])
     else [for (key, value at values)
-        {name: slice(string(key), 0, len(string(key)) - len("/.style")),
-         source: value}]
+        (let handler = handler_of(string(key)),
+         {name: trim(slice(string(key), 0, len(string(key)) - len(handler))),
+          handler: handler, source: value})]
 }
 
 fn collect_styles(declarations) any^ {
     let groups = [for (raw in declarations) declaration_styles(raw)^];
     [for (group in groups, item in group) item]
+}
+
+// Plain styles expand textually so picture and axis options see them too.
+// Parameterized, appended or defaulted styles, inherited `every ...` styles and
+// pics are left to the TikZ parser.
+fn textual(style, styles) =>
+    style.handler == "/.style" and not contains(style.source, "#") and
+    not starts_with(style.name, "every ") and
+    not any([for (other in styles) other.name == style.name and other.handler != "/.style"])
+
+// Declaration groups the parser must define, as `\tikzset` text on one line so
+// that line numbers in picture diagnostics are unchanged.
+fn parser_preamble(declarations, styles) any^ {
+    let needed = [for (raw in declarations
+        where any([for (style in declaration_styles(raw)^) not textual(style, styles)])) raw];
+    util.str_join([for (raw in needed) "\\tikzset{" ++
+        replace(replace(util.strip_tex_comments(raw), "\r", " "), "\n", " ") ++ "}"], "")
 }
 
 fn expand_style_part(raw, styles, depth) any^ {
@@ -123,26 +149,29 @@ fn expand_fragment(source, definitions, depth, at, output) any^ {
 }
 
 fn render_expanded(island, definitions, declarations,
-                   math_declarations, custom_colors, people_active) any^ {
+                   math_declarations, custom_colors, people_active, base_uri) any^ {
     if (island.raw_source == null)
         raise error("TikZ graphics island has no preserved source")
     else {
         let expanded = expand_fragment(island.raw_source,
             definitions, 0, 0, "")^
         let styles = collect_styles(declarations)^
-        let source = expand_style_brackets(expanded, styles, 0, "")^
+        let source = expand_style_brackets(expanded,
+            [for (style in styles where textual(style, styles)) style], 0, "")^
+        let preamble = parser_preamble(declarations, styles)^
         let math_program = expand_math_declarations(math_declarations,
             definitions)^
-        tikz.render_with_program(source, math_program, custom_colors,
-            island.source_offset, people_active)^
+        // `base_uri` resolves `\addplot table {file}` beside the document.
+        tikz.render_with_program(preamble ++ source, math_program, custom_colors,
+            island.source_offset, people_active, {base_uri: base_uri})^
     }
 }
 
 pub fn render_picture(island, definitions = [], declarations = [],
                       math_declarations = [], custom_colors = [],
-                      people_active = false) {
+                      people_active = false, base_uri = null) {
     render_expanded(island, definitions, declarations,
-        math_declarations, custom_colors, people_active) ^ {
+        math_declarations, custom_colors, people_active, base_uri) ^ {
         let offset = island.source_offset;
         <div class: "latex-tikz-unsupported",
             role: "img", 'aria-label': "Unsupported TikZ picture",

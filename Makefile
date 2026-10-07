@@ -2176,6 +2176,7 @@ test-svg-smil: build
 # Layout details are retained in the parent shell because later child processes
 # reuse the shared temp directory and may remove earlier runner artifacts.
 # A crashed layout category must fail the gate instead of disappearing from its totals.
+# Raw CSS Syntax failures also fail the gate above its passing-file floor.
 run-radiant-baseline:
 	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	ui_elapsed=0; \
@@ -2400,15 +2401,16 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 WPT CSS Syntax Conformance:"; \
 	if [ -f "test/test_wpt_css_syntax_gtest.exe" ]; then \
-		run_logged "temp/_radiant_wpt_css_syntax.log" ./test/test_wpt_css_syntax_gtest.exe || true; \
+		wpt_syntax_exit=0; \
+		run_logged "temp/_radiant_wpt_css_syntax.log" ./test/test_wpt_css_syntax_gtest.exe || wpt_syntax_exit=$$?; \
 		wpt_syntax_elapsed=$$run_logged_elapsed; \
 		output=$$(cat "temp/_radiant_wpt_css_syntax.log"); \
 		echo "$$output" | grep -E "^\[  PASSED|^\[  FAILED|^\[  SKIPPED" | tail -5; \
 		wpt_syntax_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		wpt_syntax_failed=$$(echo "$$output" | grep -E "^[0-9]+ FAILED TEST" | grep -oE "^[0-9]+" || echo "0"); \
+		wpt_syntax_failed=$$(echo "$$output" | grep -E "^[[:space:]]*[0-9]+ FAILED TEST" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		wpt_syntax_passed=$${wpt_syntax_passed:-0}; wpt_syntax_failed=$${wpt_syntax_failed:-0}; \
 		wpt_syntax_baseline=25; \
-		if [ "$$wpt_syntax_passed" -ge "$$wpt_syntax_baseline" ] 2>/dev/null; then wpt_syntax_status="✅ PASS"; else wpt_syntax_status="❌ FAIL"; any_failed=1; fi; \
+		if [ $$wpt_syntax_exit -eq 0 ] && [ "$$wpt_syntax_failed" -eq 0 ] && [ "$$wpt_syntax_passed" -ge "$$wpt_syntax_baseline" ] 2>/dev/null; then wpt_syntax_status="✅ PASS"; else wpt_syntax_status="❌ FAIL"; any_failed=1; fi; \
 	else \
 		echo "   ⚠️  test/test_wpt_css_syntax_gtest.exe not found"; \
 	fi; \

@@ -1,0 +1,298 @@
+{
+  "name": "Tetris resets elapsed gravity on manual drop, hold, restart and pause",
+  "html": "test/demo/tetris/tetris.ls",
+  "viewport": {
+    "width": 900,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#overlay-action"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restart"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".down"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "1"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restart"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".hold"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restart"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".drop"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restart"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".restart"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restart"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".pause"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 32
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#overlay-action"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tetris"
+      },
+      "attribute": "data-y",
+      "equals": "1"
+    }
+  ]
+}

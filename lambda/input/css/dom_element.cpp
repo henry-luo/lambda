@@ -1912,9 +1912,12 @@ static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
 }
 
 // registered-property computation needs the same rollback winner without inherited lookup.
-const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name, size_t name_length) {
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name,
+    size_t name_length, StrView* token_text) {
     CssCustomProp* winner = element ? css_custom_property_winner(element->css_variables,
         name, nullptr, nullptr, name_length) : nullptr;
+    if (token_text) *token_text = winner
+        ? strview_init(winner->value_text, winner->value_text_len) : strview_init(nullptr, 0);
     return winner ? winner->value : nullptr;
 }
 

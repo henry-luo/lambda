@@ -126,6 +126,18 @@ TEST_F(JsMvpLmd, PrimitiveConversions) {
     numeric("+'1e-999'", 0);
     boolean("+'Infinity' === Infinity && +undefined !== +undefined");
 }
+TEST_F(JsMvpLmd, InlinedNumericRegions) {
+    // integer callees can run inside a floating caller without changing JS rounding or snapshots.
+    numeric("function quotient(x,y){let q=0;let r=x;while(r>=y){r-=y;q++}return q} "
+        "function work(){let s=0.25;for(let i=0;i<4;i++){s+=quotient(20,2)}return s} work()", 40.25);
+    numeric("function step(x){let before=x++;return before+x} "
+        "function work(){let s=0;for(let i=0;i<2;i++){s+=step(0.5)}return s} work()", 4);
+    numeric("function step(x){let before=x++;return before+x} "
+        "function work(){let s=0;for(let i=0;i<2;i++){s=step(9007199254740991)}return s} work()",
+        18014398509481984.0);
+    boolean("function step(x){let before=x++;return 1/before} "
+        "function work(){let s=0;for(let i=0;i<2;i++){s=step(-0)}return s} work()===-Infinity");
+}
 TEST_F(JsMvpLmd, BitwiseAndShifts) {
     numeric("4294967297 | 0", 1);
     numeric("-1 >>> 0", 4294967295.0);
@@ -210,6 +222,64 @@ TEST_F(JsMvpLmd, ArrayCapabilityAndRangeFailures) {
     error("var a=[]; a.length=-1", "RangeError");
     error("var a=[]; a.length=1.5", "RangeError");
     error("var a=[]; a.length=NaN", "RangeError");
+}
+TEST_F(JsMvpLmd, ClosedParameterKindsAndSnapshots) {
+    // complete parameter domains should keep array indexing off the property-name conversion path.
+    const char* sources[] = {
+        "function at(a,i){let v=a[i];return v} at([1.5,2],1)",
+        "function at(a,i){let v=a[i];return v} function work(){let a=[1.5,2];let r;"
+        "for(let i=0;i<2;i++){r=at(a,1)}return r} work()"
+    };
+    for (const char* source : sources) {
+        numeric(source, 2);
+        char* mir = dump("temp/mvp_lmd_parameter_array.mir");
+        ASSERT_NE(mir, nullptr);
+        EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_number_to_string"), nullptr);
+        EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_property_key"), nullptr);
+        mem_free(mir);
+    }
+    numeric("function at(a,i){return a[i]} at([2],0)+at({'0':3},0)", 5);
+    boolean("function at(a,i){return a[i]} at([2],5)===undefined && at('ab',1)==='b'");
+    boolean("function size(a){return a===undefined?0:a.length} size()+size([1,2])===2");
+    numeric("function at(a,i){a={'0':3};return a[i]} at([2],0)", 3);
+    numeric("function at(a){let old=a[0];a[0]=1e-323;return old} at([5e-324])", 5e-324);
+    boolean("function at(a,i){return a[i]} at([2],-0)===2");
+    error("function at(a,i){return a[i]} at([2],'-0')", "capability");
+    error("function at(a,i){return a[i]} at([2],1.5)", "capability");
+}
+TEST_F(JsMvpLmd, GenericElementCoercion) {
+    // every read stays generic: the array contains numbers and coercible non-number values.
+    numeric("function sum(a){let s=0;for(let i=0;i<6;i++){s+=+a[i]}return s} "
+        "sum([1.25,-2,true,false,null,'3.5',undefined])", 3.75);
+    boolean("let a=[-0,0,5e-324,1e-323,Infinity,-Infinity,NaN,undefined]; "
+        "1/(+a[0])===-Infinity && 1/(+a[1])===Infinity && +a[2]===5e-324 && "
+        "+a[3]===1e-323 && +a[4]===Infinity && +a[5]===-Infinity && "
+        "+a[6]!==+a[6] && +a[7]!==+a[7] && +a[20]!==+a[20]");
+    boolean("let a=[2,'3','20']; a[0]+a[1]==='23' && a[0]<a[1] && a[2]<a[1]");
+    error("let a=[{}]; +a[0]", "capability");
+    error("let a=[[]]; +a[0]", "capability");
+    error("let a=[new Map()]; +a[0]", "capability");
+}
+TEST_F(JsMvpLmd, OwnedElementSnapshots) {
+    // independent homes survive source-slot reuse, binding reassignment and array growth.
+    boolean("function work(a){let x=a[0];let y=x;a[0]=1e-323;x=a[0];"
+        "for(let i=1;i<80;i++){a[i]=[i]}return y===5e-324 && x===1e-323} work([5e-324])");
+    char* mir = dump("temp/mvp_lmd_owned_elements.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tlambda_item_adopt_scalar_home"), nullptr);
+    mem_free(mir);
+    boolean("function change(a){a[0]=1e-323;return a[0]} function work(a){"
+        "let first=a[0];let total=first+change(a);return first===5e-324 && total===1.5e-323} "
+        "work([5e-324])");
+    boolean("function work(a){let x=a[0];let y=x;x=1;return 1/y===-Infinity} work([-0])");
+    numeric("function work(a){let x=a[0];let y=x;x=2;return y} work([1e-300])", 1e-300);
+    numeric("let a=[5e-324,1e-323]; a[0]-a[1]", -5e-324);
+    numeric("function change(a){a[0]=1e-323;return a[0]} let a=[5e-324]; a[0]-change(a)", -5e-324);
+    numeric("let a=[5e-324]; a[0]-(a[0]=1e-323)", -5e-324);
+    numeric("let a=[5e-324]; a[0]-(a[1]=1e-323)", -5e-324);
+    numeric("let a=[5e-324]; function key(){a[0]=1e-323;return 0} a[0]-a[key()]", -5e-324);
+    boolean("let a=['4',true,null,undefined]; a[0]/2===2 && a[1]*3===3 && a[2]-1===-1 && "
+        "a[3]*2!==a[3]*2");
 }
 TEST_F(JsMvpLmd, StandardControlFlow) {
     numeric("let s=0; for(let i=0;i<10;i++){if(i===3)continue;if(i===8)break;s+=i} s", 25);
@@ -436,7 +506,8 @@ TEST_F(JsMvpLmd, OrderedMapPreciseEdgesAndNativeCleanup) {
     EXPECT_EQ(js_gc_callback_entries, 0);
 }
 TEST_F(JsMvpLmd, ObjectShapeGuardsAndDirectMapPairs) {
-    numeric("let o={x:1};let s=0;for(let i=0;i<100;i++){o.x++;s+=o.x}s", 5150);
+    // retain observable identity so this fixture still exercises shape guards after scalar replacement.
+    numeric("let o={x:1};let alias=o;let s=0;for(let i=0;i<100;i++){alias.x++;s+=o.x}s", 5150);
     char* mir = dump("temp/mvp_lmd_object_fields.mir");
     ASSERT_NE(mir, nullptr);
     // finalized MIR renames registers; retain the register-to-register shape guard.

@@ -1219,6 +1219,16 @@ void css_token_array_release(Pool* pool, CssToken* tokens, size_t token_count) {
     pool_free(pool, tokens);
 }
 
+size_t css_token_array_remove_comments(Pool* pool, CssToken* tokens, size_t count) {
+    size_t kept = 0;
+    for (size_t i = 0; i < count; i++) {
+        // source spans still retain interior comments for faithful serialization.
+        if (tokens[i].type == CSS_TOKEN_COMMENT) pool_free(pool, (void*)tokens[i].value);
+        else tokens[kept++] = tokens[i];
+    }
+    return kept;
+}
+
 // ============================================================================
 // Token Stream Functions (for parser support)
 // ============================================================================
