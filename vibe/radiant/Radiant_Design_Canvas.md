@@ -13,6 +13,10 @@ records both the accepted placement and the deliberately unsupported surface.
 not propose WebGL, WebGPU, browser Worker integration, or browser-complete
 Canvas conformance.
 
+Native WebGL2 and the required Three.js workload are proposed separately in
+[Radiant WebGL Design](../radaint/Radiant_Design_WebGL.md); they reuse canvas
+ownership and painting while keeping graphics-context state separate.
+
 **Formal linkage:** **D7.4.1v2** requires native resources to cross the script
 boundary as VMap projections rather than raw pointers; **D7.4.4** requires
 declared interfaces and record-owned hooks for every host object; **D7.4.2**

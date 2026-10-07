@@ -1192,7 +1192,7 @@ static const uint8_t TYPE_TREE_RETYPE_EDGE = 0x80;
 // once per parent structure and shared by every map retyped the same way;
 // its own adds then follow its edges like any node's. NULL when the tree
 // declines (an inadmissible parent, the fan-out cap, the budget).
-TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
+static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const ShapeEntry* field,
         TypeId value_type) {
     if (!input || !input->keeps_external_edges || !parent || !field ||
             !input->pool || !input->type_list) return NULL;
@@ -1284,6 +1284,40 @@ bool type_tree_owns(const Input* input, const TypeMap* type) {
         return false;
     }
     return input->type_list->data[type->type_index] == type;
+}
+
+TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
+        TypeId value_type, const TypeMapRetypePlan** out_plan) {
+    if (out_plan) *out_plan = NULL;
+    // only immutable nodes in this tree may retain field pointers or skip structural checks.
+    bool owned = parent && parent->is_transition_shared_shape && type_tree_owns(input, parent);
+    int count = 0;
+    if (owned) for (TypeMapRetypePlan* plan = parent->retype_plans; plan; plan = plan->next) {
+        count++;
+        if (plan->parent == parent && plan->source == field &&
+                plan->replacement->type == type_info[value_type].type) {
+            if (out_plan) *out_plan = plan;
+            return plan->target;
+        }
+    }
+    TypeMap* target = type_tree_retype_target(input, parent, field, value_type);
+    if (!target || !owned || count >= shape_tree_fanout_cap(parent)) return target;
+    TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
+    if (!plan) return target;
+    plan->parent = parent; plan->source = field; plan->target = target;
+    plan->reuse_payload = typemap_payload_reusable(parent, target, field, NULL, &plan->replacement);
+    // a changed width can stop the compatibility walk before it reaches the replacement.
+    if (!plan->replacement) {
+        ShapeEntry* to = target->shape;
+        FOR_EACH_MAP_FIELD(parent, from) {
+            if (from == field) { plan->replacement = to; break; }
+            to = typemap_next_field(target, to);
+        }
+    }
+    if (!plan->replacement) return target;
+    plan->next = parent->retype_plans; parent->retype_plans = plan;
+    if (out_plan) *out_plan = plan;
+    return target;
 }
 
 static ShapeEntry* map_existing_shape_entry(TypeMap* map_type, String* key) {
