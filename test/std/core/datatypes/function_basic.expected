@@ -1,0 +1,17 @@
+7
+function
+30
+25
+"Hello, Lambda"
+15
+7
+{
+  name: "Alice",
+  age: 30
+}
+"Hello, AliceHi, Alice"
+["hi", "hi", "hi"]
+["hi", "hi"]
+101
+102
+103

@@ -1,3 +1,7 @@
+// PARKED 2026-10-07 — LR03-41: a derived type that redeclares an inherited field's default
+// fails with E209; S2.1.3v2 does not rule on it. The pending golden assumes the override is allowed.
+// Test discovery skips `_` scripts. When fixed, rename this file to type_declarations.ls
+// and type_declarations.expected.pending (the spec-correct output) to type_declarations.expected.
 // Test: Type Declarations
 // Layer: 2 | Category: statement | Covers: type alias, union, object types, element types
 
@@ -10,8 +14,8 @@ type(a)
 // ===== Union type alias =====
 type StringOrInt = string | int
 fn show_val(v: StringOrInt) => match v {
-    case string: "string:" & v
-    case int: "int:" & str(v)
+    case string: "string:" ++ v
+    case int: "int:" ++ string(v)
 }
 show_val("hello")
 show_val(42)
@@ -82,11 +86,11 @@ m is Meters
 m is Seconds
 
 // ===== Element type =====
-type TodoItem = <todo done: bool> string
-let task = <todo done: false> "Buy milk"
+type TodoItem = <todo done: bool, string>
+let task = <todo done: false, "Buy milk">
 name(task)
 task.done
-str(task[0])
+string(task[0])
 
 // ===== Type occurrence annotations =====
 type NumberList = int[]

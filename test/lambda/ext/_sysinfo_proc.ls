@@ -1,4 +1,5 @@
-// Test script for sys.proc.* fields
+// Manual probe of sys.proc.* fields (machine-specific output, so no golden;
+// the `_` prefix keeps test discovery from treating it as a test)
 // Tests process information access via sys paths
 
 "=== sys.proc.self fields ==="

@@ -1,5 +1,5 @@
 // Test io.copy with remote URL source
-// Run with: ./lambda.exe run test/lambda/proc/test_io_copy_url.ls
+// Run with: ./lambda.exe run test/lambda/proc-ext/test_io_copy_url.ls (needs network: httpbin.org)
 
 pn main() {
     print("Testing io.copy with remote URL...")

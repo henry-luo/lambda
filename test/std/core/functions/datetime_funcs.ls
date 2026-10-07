@@ -1,6 +1,7 @@
 // Test: DateTime Functions
 // Layer: 2 | Category: function | Covers: datetime(), date(), time(), today(), format()
 // today() reads the clock, so it is a pn (S12.1.1v2): the script runs as a pn main
+// Mode: procedural
 
 pn show(value) {
     print(value)
@@ -9,12 +10,12 @@ pn show(value) {
 
 pn main() {
     // ===== Constructors =====
-    show(datetime(2025, 4, 26))
+    show(datetime("2025-04-26T10:30:00"))
     show(date(2025, 4, 26))
     show(time(10, 30, 45))
 
     // ===== Type checks =====
-    show(datetime(2025, 4, 26) is datetime)
+    show(datetime("2025-04-26T10:30:00") is datetime)
     show(date(2025, 4, 26) is date)
     show(time(10, 30, 45) is time)
 

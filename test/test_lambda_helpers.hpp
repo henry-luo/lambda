@@ -13,6 +13,7 @@
 #include <mutex>
 #include <unordered_map>
 #include "../lambda/runtime/compiler_timing.hpp"
+#include "test_script_discovery.hpp"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -48,6 +49,7 @@ struct LambdaTestInfo {
     std::string expected_path;
     std::string test_name;
     bool is_procedural;  // true for procedural scripts (run with "lambda.exe run")
+    bool missing_expected = false;  // discovered without its golden: the test fails
 
     // For Google Test parameterized test naming
     friend std::ostream& operator<<(std::ostream& os, const LambdaTestInfo& info) {
@@ -277,7 +279,26 @@ inline std::string get_test_name(const std::string& script_path) {
     return test_name;
 }
 
-// Discover all .ls files with matching .txt files in a directory
+// Register one discovered file. A script with a golden is always a test; one
+// without is a helper only when its name says so, otherwise it is kept with
+// missing_expected set so the runner fails it instead of dropping it silently.
+inline void add_discovered_script(std::vector<LambdaTestInfo>& tests, const char* dir_path,
+        const std::string& filename, bool is_procedural) {
+    if (filename.size() <= 3 || filename.compare(filename.size() - 3, 3, ".ls") != 0) return;
+
+    std::string script_path = std::string(dir_path) + "/" + filename;
+    LambdaTestInfo info;
+    info.script_path = script_path;
+    // .ls -> .txt, with platform override
+    info.expected_path = platform_expected_path(script_path.substr(0, script_path.size() - 3) + ".txt");
+    info.missing_expected = !file_exists(info.expected_path);
+    if (info.missing_expected && is_lambda_helper_script(filename.c_str())) return;
+    info.test_name = get_test_name(script_path);
+    info.is_procedural = is_procedural;
+    tests.push_back(info);
+}
+
+// Discover all .ls test scripts in a directory
 inline std::vector<LambdaTestInfo> discover_tests_in_directory(const char* dir_path, bool is_procedural = false) {
     std::vector<LambdaTestInfo> tests;
 
@@ -288,26 +309,7 @@ inline std::vector<LambdaTestInfo> discover_tests_in_directory(const char* dir_p
 
     if (find_handle != INVALID_HANDLE_VALUE) {
         do {
-            std::string filename = find_data.cFileName;
-            std::string script_path = std::string(dir_path) + "/" + filename;
-
-            // Build expected output path (.ls -> .txt), with platform override
-            std::string base_txt = script_path;
-            size_t dot_pos = base_txt.find_last_of('.');
-            if (dot_pos != std::string::npos) {
-                base_txt = base_txt.substr(0, dot_pos) + ".txt";
-            }
-            std::string expected_path = platform_expected_path(base_txt);
-
-            // Only add if matching .txt file exists
-            if (file_exists(expected_path)) {
-                LambdaTestInfo info;
-                info.script_path = script_path;
-                info.expected_path = expected_path;
-                info.test_name = get_test_name(script_path);
-                info.is_procedural = is_procedural;
-                tests.push_back(info);
-            }
+            add_discovered_script(tests, dir_path, find_data.cFileName, is_procedural);
         } while (FindNextFileA(find_handle, &find_data));
         FindClose(find_handle);
     }
@@ -319,30 +321,7 @@ inline std::vector<LambdaTestInfo> discover_tests_in_directory(const char* dir_p
 
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
-        std::string filename = entry->d_name;
-
-        // Check if it's a .ls file
-        if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".ls") {
-            std::string script_path = std::string(dir_path) + "/" + filename;
-
-            // Build expected output path (.ls -> .txt), with platform override
-            std::string base_txt = script_path;
-            size_t dot_pos = base_txt.find_last_of('.');
-            if (dot_pos != std::string::npos) {
-                base_txt = base_txt.substr(0, dot_pos) + ".txt";
-            }
-            std::string expected_path = platform_expected_path(base_txt);
-
-            // Only add if matching .txt file exists
-            if (file_exists(expected_path)) {
-                LambdaTestInfo info;
-                info.script_path = script_path;
-                info.expected_path = expected_path;
-                info.test_name = get_test_name(script_path);
-                info.is_procedural = is_procedural;
-                tests.push_back(info);
-            }
-        }
+        add_discovered_script(tests, dir_path, entry->d_name, is_procedural);
     }
     closedir(dir);
 #endif

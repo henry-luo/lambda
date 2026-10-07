@@ -1,0 +1,24 @@
+true
+false
+true
+false
+true
+false
+false
+true
+false
+false
+false
+"emailphonezipcodenumbertextunknown"
+["alice@test.com", "bob@domain.org"]
+[{
+    value: "123",
+    index: 12
+  }]
+"Hello World NUM Foo Bar"
+["one", "two", "", "three", "four"]
+["alice@test.com -> email", "555-123-4567 -> phone", "bob -> text", "90210 -> zipcode", "invalid email@ -> unknown", "hello -> text"]
+1
+3
+5
+5

@@ -1,0 +1,28 @@
+<item
+  "one">
+<item
+  "two">
+<item
+  "three">
+<items
+  <item
+    "first">
+  <item
+    "second">>
+<child
+  "a">
+<child
+  "b">
+<target
+  "found">
+["one", "three"]
+["Hello", "World", "More"]
+<a
+  "alpha">
+<a
+  "alpha2">
+<b
+  "beta">
+<c
+  "gamma">
+5

@@ -1,32 +1,32 @@
 // Test: Integer64 Basic
 // Layer: 1 | Category: datatype | Covers: i64 type fundamentals
 
-// ===== Int64 literals (L suffix) =====
-0L
-42L
--100L
-9999999999L
+// ===== Int64 literals (i64 suffix) =====
+0i64
+42i64;
+-100i64
+9999999999i64;
 
 // ===== Type checks =====
-(42L is i64)
-type(42L)
+(42i64 is i64)
+type(42i64)
 
 // ===== Int64 arithmetic =====
-10L + 20L
-100L - 50L
-6L * 7L
-42L / 6L
+10i64 + 20i64
+100i64 - 50i64
+6i64 * 7i64
+42i64 / 6i64
 
 // ===== Large values =====
-9999999999999L
--9999999999999L
-1000000L * 1000000L
+9999999999999i64;
+-9999999999999i64
+1000000i64 * 1000000i64
 
 // ===== Int64 conversion =====
 i64(42)
-string(42L)
+string(42i64);
 
 // ===== Int64 comparison =====
-(42L == 42L)
-(42L < 100L)
-(100L > 42L)
+(42i64 == 42i64);
+(42i64 < 100i64);
+(100i64 > 42i64)

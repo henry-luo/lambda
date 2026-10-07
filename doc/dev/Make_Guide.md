@@ -105,7 +105,7 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 
 | Target | Description |
 |--------|-------------|
-| `test` | Run ALL test suites (baseline + extended). Alias for `test-all`. |
+| `test` | Run every suite except `jube` and `test_radiant_online_view_gtest`; `test-all` runs everything. |
 | `test-all` | Run ALL test suites (baseline + extended) in parallel. |
 | `test-all-baseline` | Run ALL baseline test suites. **Must pass 100%.** |
 | `test-lambda-baseline` | Run Lambda engine baseline tests only. **Must pass 100%.** |
@@ -165,7 +165,7 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 ### Test Examples
 
 ```bash
-make test                          # run everything
+make test                          # every suite except jube and the online view test
 make test-all-baseline             # baseline only (must pass 100%)
 make test-lambda-baseline          # Lambda engine baseline
 make test-layout-baseline          # Radiant layout baseline

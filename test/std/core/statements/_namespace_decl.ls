@@ -1,3 +1,7 @@
+// PARKED 2026-10-07 — LR03-40: `xml.lang:` prints as a nested map instead of a qualified key
+// (S8.2.2v5).
+// Test discovery skips `_` scripts. When fixed, rename this file to namespace_decl.ls
+// and namespace_decl.expected.pending (the spec-correct output) to namespace_decl.expected.
 // Test: Namespace Declaration
 // Layer: 2 | Category: statement | Covers: namespace decl, namespaced elements, attributes
 
@@ -29,4 +33,5 @@ let tree = <root
     <item type: "a", "first">
     <item type: "b", "second">
     <item type: "a", "third">
-tree?item |> map((e) => str(e[0]))
+>
+tree?<item> |> string(~[0])

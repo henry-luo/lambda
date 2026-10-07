@@ -4,10 +4,10 @@
 // ===== DateTime comparison =====
 let d1 = t'2024-01-01'
 let d2 = t'2024-06-15'
-let d3 = t'2024-12-31'
-d1 < d2
-d2 < d3
-d3 > d1
+let d3 = t'2024-12-31';
+(d1 < d2);
+(d2 < d3);
+(d3 > d1)
 d1 == d1
 d1 != d2
 
@@ -29,7 +29,7 @@ d1 is int
 d1 is string
 
 // ===== DateTime to string =====
-str(d1)
+string(d1)
 
 // ===== DateTime in map =====
 let events = {
@@ -45,14 +45,14 @@ unsorted |> sort()
 
 // ===== DateTime filter =====
 let year_dates = [t'2023-06-01', t'2024-03-15', t'2024-09-01', t'2025-01-01']
-year_dates |> filter((d) => d.year == 2024)
+year_dates |: ~.year == 2024
 
 // ===== Time comparison =====
 let t1 = t'08:00:00'
 let t2 = t'12:00:00'
-let t3 = t'20:00:00'
-t1 < t2
-t2 < t3
+let t3 = t'20:00:00';
+(t1 < t2);
+(t2 < t3)
 
 // ===== DateTime in conditional =====
 let today = t'2024-06-15'

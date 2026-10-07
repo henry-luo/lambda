@@ -235,7 +235,7 @@ satisfies that intersection. Diagnostics now read
 
 Covered by `test/lambda/type_set_operators.ls` (pattern, alias, inline
 annotation and parameter positions, both tiers) and
-`test/std/negative/type_set_operator_mismatch.ls` +
+`test/lambda/negative/semantic/type_set_operator_mismatch.ls` +
 `NegativeScriptTest.TypeSetOperatorContractIsNamed`. Closes the implementation
 half of **SO9** and the `&`/`!`-unimplemented warning in the string-pattern
 design record.
@@ -1989,7 +1989,7 @@ makes optional parameters the sanctioned alternative to overloading:
 | `fn v(a, ...)` | `v()` | expects 1 or more arguments, got 0 *(unchanged)* |
 
 `build_ast.cpp` `lambda_ast_validate_call_arguments`; covered by
-`test/std/negative/wrong_arg_count_optional.ls` +
+`test/lambda/negative/semantic/wrong_arg_count_optional.ls` +
 `NegativeScriptTest.OptionalParamArityReportsARange`.
 
 
@@ -2026,7 +2026,7 @@ message covers every brace position, since `control_body_brace_is_map`
 delegates to the same probe. Verified unchanged: `{key: 1}`, `{'a-b': 2}`,
 `{a: 1, b: 2}`, `{}`, and the block forms `{ let x = 1; x }`,
 `{ "just a string" }` → `"just a string"`, `{ 1 + 2 }` → `3`. Covered by
-`test/std/negative/map_key_double_quoted.ls` +
+`test/lambda/negative/syntax/map_key_double_quoted.ls` +
 `NegativeScriptTest.DoubleQuotedMapKeyNamesTheRule`.
 
 
@@ -2138,7 +2138,7 @@ the two comma mistakes already named their rule. It now says:
 at the content-start position, where no preceding item exists. The
 attribute-bearing form `<div k: 1; "a">` was already covered by the
 boundary-comma check and is untouched. `lambda_parser.c` `parse_element`;
-covered by `test/std/negative/element_semicolon_opens_content.ls` +
+covered by `test/lambda/negative/syntax/element_semicolon_opens_content.ls` +
 `NegativeScriptTest.ElementSemicolonCannotOpenContent`.
 
 

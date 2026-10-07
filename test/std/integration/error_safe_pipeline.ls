@@ -4,18 +4,18 @@
 // ===== Define fallible functions =====
 fn parse_int(s: string) int^ {
     let n = int(s)
-    if (n is error) raise error("Cannot parse: " & s, code: "PARSE_ERR")
-    n
+    if (n is error) raise error({message: "Cannot parse: " ++ s, code: 407})
+    else n
 }
 
 fn safe_divide(a: int, b: int) int^ {
-    if (b == 0) raise error("Division by zero", code: "DIV_ZERO")
-    a / b
+    if (b == 0) raise error({message: "Division by zero", code: 304})
+    else a / b
 }
 
 fn validate_positive(n: int) int^ {
-    if (n <= 0) raise error("Must be positive: " & str(n), code: "INVALID")
-    n
+    if (n <= 0) raise error({message: "Must be positive: " ++ string(n), code: 318})
+    else n
 }
 
 // ===== Successful pipeline =====
@@ -24,9 +24,9 @@ fn process(a_str: string, b_str: string) string^ {
     let b = parse_int(b_str)^
     let result = safe_divide(a, b)^
     let valid = validate_positive(result)^
-    "Result: " & str(valid)
+    "Result: " ++ string(valid)
 }
-process("100", "5")
+process("100", "5") ^ { ^ }
 
 // ===== Error at parse stage =====
 let r1 = process("abc", "5") ^ { ^ }
@@ -57,13 +57,13 @@ safe2;
 // ===== Error chain =====
 fn wrapped_process(a: string, b: string) string^ {
     let result = process(a, b) ^ { ^ }
-    if (result) raise error("Process failed", source: result)
-    result
+    if (result is error) raise error("Process failed", source: result)
+    else result
 }
 let wr = wrapped_process("abc", "1") ^ { ^ }
 wr.message
 wr.source.message
 
 // ===== Batch processing with error handling =====
-let inputs = [("10", "2"), ("abc", "1"), ("20", "0"), ("15", "3")]
-inputs |> map((pair) => process(pair[0], pair[1]) or "ERROR")
+let inputs = [["10", "2"], ["abc", "1"], ["20", "0"], ["15", "3"]]
+inputs |> (process(~[0], ~[1]) or "ERROR")

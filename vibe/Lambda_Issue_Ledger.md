@@ -333,6 +333,10 @@ Verified on the tree merged with master: `make test-lambda-baseline` 5967/5967 (
 
 Running every Lambda snippet on the website (`site/`) against the current build found five defects: [LR01-18](<Lambda_Issue_Ledger (fixed).md#lr01-18>), [LR02-32](#lr02-32), [LR02-33](#lr02-33), [LR11-9](#lr11-9) and [LR13-16](#lr13-16). Two further findings are not defects. A constrained type used as a map field is enforced by its base only, by `is` and by `lambda validate` alike (`{age: 300} is {age: Age}` is `true`); S11.4.6 rules that interim ("enforce the base only, for now") and its status row records it. And `<body d *content(b)>` multiplies `d` by the array, because juxtaposed content continues through a binary `*`; `;` is the separator that makes the spread an item (`<body d; *content(b)>` works on both tiers), and the `error` child the product leaves is a value error flowing as data (S7.4.1).
 
+### Std test triage — 2026-10-07
+
+`test_lambda_gtest`, `test_lambda_extended_gtest` and `test_lambda_std_gtest` used to drop every `.ls` that had no golden, so 57 `test/std` scripts (added 2026-03, written against syntax that had since changed) and a few `test/lambda` scripts never ran. Discovery now fails a script without its golden unless it is named `_*`, `mod_*` or `schema_*` (`test/test_script_discovery.hpp`). Triage fixed and goldened 41 scripts, moved 12 compile-error scripts to `test/lambda/negative/` under `test_lambda_errors_gtest`, and parked nine as `_*.ls` (spec-correct output kept as `_*.expected.pending` where one exists): [LR02-32](#lr02-32) (`_query_depth`), [LR02-34](#lr02-34) (`_closures`), [LR02-35](#lr02-35) (`_undefined_function`, `_undefined_variable`), [LR03-40](#lr03-40) (`_namespace_decl`), [LR03-41](#lr03-41) (`_type_declarations`, `_object_limits`), [LR10-19](#lr10-19) (`_raise_in_pure_fn`), and the S11.4.6 base-only interim (`_object_constraint_fail`). [LR02-36](#lr02-36) was found along the way.
+
 ---
 
 
@@ -589,9 +593,19 @@ A datetime (`t'2025-01-01'`), binary (`b'\xDEAD'`), decimal (`1.5m`), suffixed (
 
 <a id="lr02-32"></a>**LR02-32 · An inline element pattern in a subscript is built as an element value, so `e[<p>]` is `null` (S8.2.4v3) · OPEN (found 2026-09-30, site snippet pass)**
 S8.2.4v3 gives `doc[<title>]` as the lone-match idiom of the type-key subscript. With `let x = <div <p "x"> <span "y">>`, `x[<p>]` and `x[<span>]` are `null` on both tiers, while `x?<p>`, `x[element]`, and `type P = <p>` then `x[P]` all answer `<p "x">`. The query forms read their operand as a type: `?` and `.?` call `parse_primary_type_slot` (`lambda/runtime/parser/lambda_parser.c:928`, used at `:1943`). A subscript parses its items as expressions (`parser_parse_postfix_delimited_into`, `:1848`), so `<p>` is an element literal and the key never reaches `fn_child_query` (`lambda/runtime/lambda-eval.cpp:4627`), which handles elements correctly. The ruling's XPath example `html[table][tr][td]` spells its keys as bare names, and `x[p]` is `null` as well because `p` is an unbound name; whether a bare tag name is a key needs a ruling. The website's query samples use `?` meanwhile (`html?<div>?<a>`).
+Parked test: `test/std/boundary/_query_depth.ls` (2026-10-07).
 
 <a id="lr02-33"></a>**LR02-33 · A system function called with an arity it lacks compiles, then fails or answers wrongly at run time · OPEN (found 2026-09-30, site snippet pass)**
 `range(0, 10)` fails on T0 with "interp: call target is not a function (type 24)" and on the JIT with E212 "fn_call2: cannot call non-function value", since `range` has only a three-argument row. `sort(1, 2, 3)` is E212 on the JIT after "mir: undefined variable 'sort'", and `len(1, 2)` answers `0` on both tiers. `--dry-run` diagnoses none of them, while a user function called with too many arguments is E206 at compile time. `get_sys_func_info` (`lambda/runtime/build_ast.cpp:459`) returns `NULL` when no `(name, arity)` row matches, and `resolve_call_body` (`:9573`) then lowers a generic call of whatever the name binds: the base type `range`, or nothing. S12.3.6 makes the registry's `(name, arity)` keying a dispatch optimization, never a language rule, and S12.3.4 reserves run-time arity checks for `call(f, args)`. No ruling names the diagnostic for a direct builtin call; E206, the user-function precedent, is the natural one.
+
+<a id="lr02-34"></a>**LR02-34 · An arrow written as a statement in a block or list is dropped, so `{ let c = 1; (x) => c }` is `null` (S2.5.3, S2.5.4v2, S16.6.7v2) · OPEN (found 2026-10-07, std test triage)**
+An arrow is an expression (S16.6.7v2), so it is the value of a block or a list item like any other expression. `is_declaration_node()` (`lambda/runtime/ast.hpp:973`) lists `AST_NODE_FUNC_EXPR` beside the declaration forms, and the block-value scan at `lambda/runtime/ast.hpp:1026` skips declarations, so the arrow is dropped on both tiers: `let f = { let c = 10; (x) => c + x }` binds `null`, and `(1, (x) => x)` prints `1`. Binding the arrow with `let` and ending the block with that name works. Parked test: `test/std/core/statements/_closures.ls`.
+
+<a id="lr02-35"></a>**LR02-35 · An unknown name compiles and evaluates to a bare `error` instead of failing to compile · OPEN, needs a ruling (found 2026-10-07, std test triage)**
+`nosuchname` (and calls to retired names such as `filter`, `map` and `str`) compiles, then evaluates to `error` (code 318, message "Error", no detail) with exit status 0 under `test-batch`; the JIT reports E212 instead. `build_identifier_syntax` types an unresolved identifier `any` (`lambda/runtime/build_ast.cpp:3463`), and nothing later rejects it. `doc/Lambda_Error_Handling.md` lists E202/E203 for undefined names, but no S# ruling covers unresolved names, so the intended behavior needs a ruling (Doc_Convention §2). Many of the triaged std scripts had silently printed `error` for months because of this. Parked tests: `test/std/negative/_undefined_function.ls`, `_undefined_variable.ls`.
+
+<a id="lr02-36"></a>**LR02-36 · A quoted-path `import` without an alias is silently ignored · OPEN (found 2026-10-07, std test triage)**
+`import './circular_import.ls'` at the top of a script neither imports nor errors: the quoted-module branch at `lambda/runtime/build_ast.cpp:13179` only acts when `node->alias` is set, so the script runs as if the line were absent (it printed `42`). S16.9.8 gives the relative form `import .circular_import`, which does detect the cycle (E217, now asserted by `NegativeScriptTest.SelfImportIsCircularE217`). The unaliased quoted form should be rejected or resolved, not dropped.
 
 ## 3. Value & type model (LR_03)
 
@@ -603,6 +617,7 @@ S8.2.2v4 makes a key's identity its resolved namespace plus its normalized chara
 4. **A qualified symbol's characters include its prefix.** `namespace_symbol_type` (build_ast.cpp) spells the symbol `prefix.field` and attaches the resolved `Target*`; under S8.2.2v4 the normalized characters are the local name and the prefix is only how the namespace was written, so two prefixes bound to one namespace must compare equal.
 
 Transition-tree edges split one spelling by name pool as well, which is D3.4.4v3's gap, planned in [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0; the four items above need their own plan (parser, builder, map face), not that one.
+Parked test: `test/std/core/statements/_namespace_decl.ls` (2026-10-07).
 
 <a id="lr03-2"></a>**LR03-2 · Hard-coded capacity caps · OPEN**
 `TYPEMAP_HASH_CAPACITY` 32 and `TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY` 32768
@@ -669,6 +684,9 @@ A sound fix types the reads before the widening assignment: either a declaration
 
 ---
 
+
+<a id="lr03-41"></a>**LR03-41 · A derived type that redeclares an inherited field fails with E209, reported at 1:1 · OPEN, needs a ruling (found 2026-10-07, std test triage)**
+`type Animal { name: string, sound: string = "..." }` then `type Dog : Animal { sound: string = "woof" }` is rejected with `error[E209]: duplicate definition of 'sound' in the same scope`, located at line 1 column 1 rather than at the redeclaration. S2.1.3v2 (and OB7) say only that attributes "merge", so whether a derived type may override an inherited field's default needs a ruling; the location is wrong either way. Parked tests: `test/std/core/statements/_type_declarations.ls`, `test/std/boundary/_object_limits.ls` (their pending goldens assume the override is allowed).
 
 ## 4. Numbers, decimal & datetime (LR_04)
 
@@ -1043,6 +1061,9 @@ A stack overflow is a fault that lands on its boundary (S7.11.1v2, S7.11.2v2), a
 
 <a id="lr10-18"></a>**LR10-18 · A one-arm handler bound from a non-suspending `pn ... T^` call yields `null` on success (S7.6.1v4, S7.6.7v4) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
 `pn p_str(x) string^ { if (x < 0) { raise error("neg") }; return "ab" }` then `let d = p_str(1) ^ { "ERR" }` binds `""` on both tiers. With `int^` and `map^` returns it binds `null`. S7.6.1v4 says a non-error operand passes through unchanged and that the binding's static type is never a lie. Propagation (`p_str(1)^`) and `fn ... T^` with a one-arm handler both give `"ab"`. S7.6.7v4 forbids value-producing handlers only over *possibly-suspending* `pn` calls. `doc/Lambda_Error_Handling.md` says more broadly that "a `pn` handler cannot be used in a binding or another value context". Whichever ruling governs, the form must either be rejected statically or yield the value. Today it compiles and silently binds a stand-in. Needs a ruling on whether non-suspending `pn` calls take value-producing handlers.
+
+<a id="lr10-19"></a>**LR10-19 · `raise` in a `T | error` function compiles, against S7.4.2 · OPEN (found 2026-10-07, std test triage)**
+S7.4.2 licenses `raise` only in `T^` / `T^E` functions and makes `raise` in a `T | error` function a compile error. `fn g(n: int) int | error { if (n > 0) { raise error("x") } else { n } }` compiles and `g(0)` prints `0`. In a plain `int` function the script is rejected, but by E208 about the `error()` call (`may return error from call to 'error'`) rather than by the raise rule. Parked test: `test/std/negative/_raise_in_pure_fn.ls`.
 
 ## 11. Mark data API (LR_11)
 

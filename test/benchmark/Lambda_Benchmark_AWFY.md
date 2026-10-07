@@ -241,7 +241,6 @@ Before benchmark implementation, the following language features must be added:
 **Directory structure**:
 ```
 test/benchmark/awfy/
-├── harness.ls          # Benchmark harness (timing, iteration, reporting)
 ├── run.ls              # Benchmark runner (selects + executes benchmarks)
 ├── som.ls              # SOM collection library (Vector, Set, Dictionary, Random)
 ├── bounce.ls           # Bounce benchmark
@@ -309,6 +308,11 @@ test/benchmark/awfy/
 ## 6. Benchmark Execution & Performance Comparison
 
 ### 6.1 Harness Design
+
+> **2026-10-07:** `test/benchmark/awfy/harness.ls` was removed. It no longer ran,
+> because the CLI takes one script and no extra arguments. Run a benchmark directly
+> (`./lambda.exe run test/benchmark/awfy/bounce.ls`) or through
+> `test/benchmark/run_benchmarks.py`. The design below is kept as the plan of record.
 
 The benchmark harness follows the AWFY convention:
 
