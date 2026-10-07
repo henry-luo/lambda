@@ -6370,6 +6370,33 @@ TEST(RenderOutputParity, CustomPropertyCommasJoinSurroundingGradientStopTokens) 
     expect_pngs_exactly_equal(literal_png, variable_png);
 }
 
+TEST(RenderOutputParity, ComputedCustomPropertyNamesReachHtmlAndSvgPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* literal_png = "temp/render_output_parity/var_name_literal.png";
+    const char* variable_png = "temp/render_output_parity/var_name_computed.png";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/var_name_literal.html", literal_png,
+        "<!doctype html><style>body{margin:0}div{width:40px;height:20px;"
+        "margin-left:6px;padding:2px;border:3px solid blue;background:red}"
+        "svg{display:block}</style><div></div><svg width='32' height='18' "
+        "xmlns='http://www.w3.org/2000/svg'><rect width='32' height='18' fill='lime'/></svg>"));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/var_name_computed.html", variable_png,
+        "<!doctype html><style>body{margin:0}div{--width:40px;--width-name:--width;"
+        "--height:20px;--height-name:--height;--color:red;--color-name:--color;"
+        "--border:3px solid blue;--border-name:--border;--space:2px;--space-name:--space;"
+        "width:var(var(--width-name));height:var(var(--height-name));"
+        "margin-left:var(var(--absent,--missing),6px);padding:var(var(--space-name));"
+        "border:var(var(--border-name));background:var(var(--color-name))}"
+        "svg{display:block}g{--paint:lime;--paint-name:--paint;--alias:var(var(--paint-name))}"
+        "rect{--paint:red;fill:var(--alias)}"
+        "</style><div></div><svg width='32' height='18' xmlns='http://www.w3.org/2000/svg'>"
+        "<g><rect width='32' height='18'/></g></svg>"));
+    // identical pixels require both shorthand/layout substitution and declaration-owner SVG lookup.
+    expect_pngs_exactly_equal(literal_png, variable_png);
+}
+
 TEST(RenderOutputParity, CustomPropertyDefaultingAndCyclesReachPaint) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

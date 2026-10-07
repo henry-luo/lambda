@@ -1688,6 +1688,50 @@ TEST(CssVariableSubstitutionTest, EmptyFallbackIsRemovedButMissingValueIsInvalid
     pool_destroy(pool);
 }
 
+TEST(CssVariableSubstitutionTest, ComputedNamesUseWholeFirstArgumentAndKeepFallbackLazy) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    const char* source = "--name:--target;--target:12px;--pointer:--name;--empty: ;"
+        "--cycle:var(--cycle);--fragment:--tar";
+    size_t count = 0;
+    CssDeclaration** declarations = css_parse_declaration_list_text(source, strlen(source), pool, &count);
+    ASSERT_EQ(count, 6u);
+    struct Lookup {CssDeclaration** declarations; size_t count;} lookup = {declarations, count};
+    auto lookup_value = [](void* context, DomElement*, const char* name,
+        DomElement** owner) -> const CssValue* {
+        *owner = nullptr;
+        Lookup* lookup = (Lookup*)context;
+        for (size_t index = 0; index < lookup->count; index++) {
+            CssDeclaration* declaration = lookup->declarations[index];
+            if (strcmp(declaration->property_name, name) == 0) return declaration->value;
+        }
+        return nullptr;
+    };
+    struct Sample {const char* source; double pixels;} samples[] = {
+        {"var(var(--name),9px)", 12},
+        {"var(var(var(--pointer)),9px)", 12},
+        {"var(var(--missing,--target),9px)", 12},
+        {"var(--target var(--empty),9px)", 12},
+        {"var(--target,var(--cycle))", 12},
+        {"var(\"--target\",9px)", 9},
+        {"var(--target --name,9px)", 9},
+        {"var(var(--empty),9px)", 9},
+        {"var(var(--cycle),9px)", 9},
+        {"var(var(--fragment)get,9px)", 9}
+    };
+    for (const Sample& sample : samples) {
+        CssDeclaration* declaration = css_parse_property_declaration("--result", 8,
+            sample.source, strlen(sample.source), pool);
+        ASSERT_NE(declaration, nullptr) << sample.source;
+        const CssValue* value = css_resolve_var_value(pool, declaration->value,
+            lookup_value, &lookup);
+        ASSERT_NE(value, nullptr) << sample.source;
+        ASSERT_EQ(value->type, CSS_VALUE_TYPE_LENGTH) << sample.source;
+        EXPECT_EQ(value->data.length.value, sample.pixels) << sample.source;
+    }
+    pool_destroy(pool);
+}
+
 TEST(SvgConditionalTest, LanguageMatchingUsesPreferencePrefixesAndRefreshesDocumentEpoch) {
     EXPECT_TRUE(dom_svg_conditions_match(nullptr, nullptr, ""));
     EXPECT_FALSE(dom_svg_conditions_match("", nullptr, "en"));

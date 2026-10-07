@@ -268,6 +268,23 @@ static bool css_append_custom_token(Pool* pool, CssCustomTextOutput* output, con
     return true;
 }
 
+static const char* css_var_name_from_text(Pool* pool, StrView source) {
+    if (!source.str) return nullptr;
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(source.str, source.length, pool, &count);
+    if (!tokens) return nullptr;
+    const char* name = nullptr;
+    for (size_t index = 0; index < count && tokens[index].type != CSS_TOKEN_EOF; index++) {
+        const CssToken& token = tokens[index];
+        if (token.type == CSS_TOKEN_WHITESPACE || token.type == CSS_TOKEN_COMMENT) continue;
+        // a computed name is one identifier token, including decoded CSS escapes.
+        if (name || token.type != CSS_TOKEN_CUSTOM_PROPERTY || !token.value ||
+            strlen(token.value) <= 2) return nullptr;
+        name = token.value;
+    }
+    return name;
+}
+
 static bool css_append_custom_text(Pool* pool, DomElement* element, StrView source,
     const CssVarStack* stack, CssCustomTextOutput* output) {
     size_t count = 0;
@@ -289,14 +306,16 @@ static bool css_append_custom_text(Pool* pool, DomElement* element, StrView sour
                 if (--depth == 0) break;
             } else if (type == CSS_TOKEN_COMMA && depth == 1 && comma == count) comma = end;
         }
-        size_t name_index = index + 1;
-        while (name_index < end && (tokens[name_index].type == CSS_TOKEN_WHITESPACE ||
-            tokens[name_index].type == CSS_TOKEN_COMMENT)) name_index++;
-        if (name_index >= end || !tokens[name_index].value) return false;
-        const char* name = tokens[name_index].value;
+        const char* begin = token.start + token.length;
+        const char* finish = comma < end ? tokens[comma].start
+            : end < count ? tokens[end].start : source.str + source.length;
+        // CSS Variables 1 §3 substitutes the complete first argument before parsing its name.
+        StrView computed_name = css_substitute_custom_text(pool, element,
+            {begin, (size_t)(finish - begin)}, stack);
+        const char* name = css_var_name_from_text(pool, computed_name);
         StrView replacement = {};
-        const CssValue* value = css_compute_custom_property(pool, element, name, stack,
-            strlen(name), &replacement);
+        const CssValue* value = name ? css_compute_custom_property(pool, element, name, stack,
+            strlen(name), &replacement) : nullptr;
         if (value) {
             if (!replacement.str) {
                 CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
@@ -334,13 +353,14 @@ static StrView css_substitute_custom_text(Pool* pool, DomElement* element,
     return result;
 }
 
-static const char* css_var_function_name(const CssFunction* func) {
-    if (!func || !func->args || func->arg_count < 1 || !func->args[0]) return nullptr;
-    CssValue* first_arg = func->args[0];
-    if (first_arg->type == CSS_VALUE_TYPE_CUSTOM) {
-        return first_arg->data.custom_property.name;
-    }
-    return first_arg->type == CSS_VALUE_TYPE_STRING ? first_arg->data.string : nullptr;
+static const char* css_var_value_name(const CssValue* value) {
+    while (value && value->type == CSS_VALUE_TYPE_LIST &&
+        !value->data.list.comma_separated && value->data.list.count == 1 && value->data.list.values)
+        value = value->data.list.values[0];
+    if (!value || value->type != CSS_VALUE_TYPE_CUSTOM) return nullptr;
+    const char* name = value->data.custom_property.name;
+    // strings and multiple component values cannot name a custom property.
+    return name && name[0] == '-' && name[1] == '-' && name[2] ? name : nullptr;
 }
 
 struct CssSubstitutedTokens {
@@ -484,7 +504,10 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
         return resolved == &fallback_tokens
             ? (pool ? css_normalize_substituted_list(pool, resolved) : nullptr) : resolved;
     };
-    const char* var_name = var_ref ? var_ref->name : css_var_function_name(func);
+    const CssValue* first_arg = func && func->arg_count > 0
+        ? resolve_var_function_inner(pool, func->args[0], context_element, lookup, lookup_context, stack)
+        : nullptr;
+    const char* var_name = var_ref ? var_ref->name : css_var_value_name(first_arg);
     if (!var_name) {
         return resolve_fallback();
     }
