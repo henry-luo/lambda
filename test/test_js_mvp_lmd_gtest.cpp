@@ -247,6 +247,40 @@ TEST_F(JsMvpLmd, ClosedParameterKindsAndSnapshots) {
     error("function at(a,i){return a[i]} at([2],'-0')", "capability");
     error("function at(a,i){return a[i]} at([2],1.5)", "capability");
 }
+TEST_F(JsMvpLmd, GenericElementCoercion) {
+    // every read stays generic: the array contains numbers and coercible non-number values.
+    numeric("function sum(a){let s=0;for(let i=0;i<6;i++){s+=+a[i]}return s} "
+        "sum([1.25,-2,true,false,null,'3.5',undefined])", 3.75);
+    boolean("let a=[-0,0,5e-324,1e-323,Infinity,-Infinity,NaN,undefined]; "
+        "1/(+a[0])===-Infinity && 1/(+a[1])===Infinity && +a[2]===5e-324 && "
+        "+a[3]===1e-323 && +a[4]===Infinity && +a[5]===-Infinity && "
+        "+a[6]!==+a[6] && +a[7]!==+a[7] && +a[20]!==+a[20]");
+    boolean("let a=[2,'3','20']; a[0]+a[1]==='23' && a[0]<a[1] && a[2]<a[1]");
+    error("let a=[{}]; +a[0]", "capability");
+    error("let a=[[]]; +a[0]", "capability");
+    error("let a=[new Map()]; +a[0]", "capability");
+}
+TEST_F(JsMvpLmd, OwnedElementSnapshots) {
+    // independent homes survive source-slot reuse, binding reassignment and array growth.
+    boolean("function work(a){let x=a[0];let y=x;a[0]=1e-323;x=a[0];"
+        "for(let i=1;i<80;i++){a[i]=[i]}return y===5e-324 && x===1e-323} work([5e-324])");
+    char* mir = dump("temp/mvp_lmd_owned_elements.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tlambda_item_adopt_scalar_home"), nullptr);
+    mem_free(mir);
+    boolean("function change(a){a[0]=1e-323;return a[0]} function work(a){"
+        "let first=a[0];let total=first+change(a);return first===5e-324 && total===1.5e-323} "
+        "work([5e-324])");
+    boolean("function work(a){let x=a[0];let y=x;x=1;return 1/y===-Infinity} work([-0])");
+    numeric("function work(a){let x=a[0];let y=x;x=2;return y} work([1e-300])", 1e-300);
+    numeric("let a=[5e-324,1e-323]; a[0]-a[1]", -5e-324);
+    numeric("function change(a){a[0]=1e-323;return a[0]} let a=[5e-324]; a[0]-change(a)", -5e-324);
+    numeric("let a=[5e-324]; a[0]-(a[0]=1e-323)", -5e-324);
+    numeric("let a=[5e-324]; a[0]-(a[1]=1e-323)", -5e-324);
+    numeric("let a=[5e-324]; function key(){a[0]=1e-323;return 0} a[0]-a[key()]", -5e-324);
+    boolean("let a=['4',true,null,undefined]; a[0]/2===2 && a[1]*3===3 && a[2]-1===-1 && "
+        "a[3]*2!==a[3]*2");
+}
 TEST_F(JsMvpLmd, StandardControlFlow) {
     numeric("let s=0; for(let i=0;i<10;i++){if(i===3)continue;if(i===8)break;s+=i} s", 25);
     numeric("let i=0; let s=0; while(i<3){s+=++i} do{s++}while(false); s", 7);

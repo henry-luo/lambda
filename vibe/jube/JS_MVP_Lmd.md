@@ -233,7 +233,8 @@ poisoning. Exercise rejection paths and lifecycle isolation too.
 
 Shared changes require the Lambda/input baseline and unchanged full-JS
 Test262 baseline. The latter checks full-JS nonregression; it does not establish
-MVP conformance. Do not alter harnesses, oracles, timeouts, or budgets to pass.
+MVP conformance. Do not alter harnesses, oracles or timeouts to pass.
+Emission-budget changes require review of the exact MIR delta (**D8.6.1**).
 Any new Lambda script regression also needs its expected result file.
 
 Compare release builds with fixed sources, inputs, and result checks. Report
@@ -510,48 +511,54 @@ computed growth, retyping, deletion churn, lookup/update, and key/value loops.
 
 ### 10.8 Latest validation and release evidence — 2026-10-07
 
-The tuning in §§11–13 is implemented. Latest gates:
+The tuning in §§11–14 is implemented. Latest gates:
 
-- MVP: **32/32**, also **32/32** with forced GC and freed-memory poisoning.
-- Shared Lambda/input baseline: **6,288/6,288**.
-- Full-JS Test262: **40,261/40,261 fully passing after existing retries**.
-  One AST Unicode-identifier batch aborted; the runner recovered 80 lost tests
-  and two individual retries. A separate replay reproduces the timeout followed
-  by an abort on both the frozen old release and the candidate. That existing
-  full-JS batch issue remains unresolved; no harness changes were made.
+- MVP: **34/34**, also **34/34** with forced GC and freed-memory poisoning.
+- Shared Lambda/input aggregate: **6,292/6,292**, including **20/20** MIR-size
+  checks. Two initial child-execution failures passed five focused replays and
+  the unchanged aggregate rerun; their initial cause remains unconfirmed.
+- Full-JS Test262: **40,259 fully passing; two retry-only; zero regressions**.
+  The two large AST Unicode-identifier cases remain marked slow/unstable by
+  the baseline. Both also pass an isolated replay on each frozen release.
+  No harness or timeout changes were made.
 
-Release comparison: **15 alternating pairs across all 30 admitted workloads**,
-with an identical-control peer and fresh LJS, Node and available untyped Lambda
-references. **All 2,475 measured outputs and 165 discarded preflight outputs
-match.** Native MIR is pinned. Times below are self-reported execution medians;
-startup/initial compilation is excluded, and Node tiering during its workload
-is included. These are not warmed steady-state V8 measurements.
+Release comparison: **15 alternating pairs over all 30 admitted workloads**,
+followed by **30 pairs on six targeted/noisy rows**, with an identical-control
+peer and old/new LJS and available untyped Lambda references. **All 4,410
+measured outputs and 252 discarded preflight outputs match.** Native MIR is
+pinned. Times are self-reported execution medians; startup/initial compilation
+is excluded, and Node tiering during the workload is included.
 
 | Workload | Before ms | Tuned ms | LJS ms | Untyped Lambda ms | Node ms | Paired speedup |
 |---|---:|---:|---:|---:|---:|---:|
-| diviter | 2728.953 | 271.369 | 624.172 | 271.065 | 479.051 | **10.02×** |
-| pnpoly | 193.978 | 30.556 | 86.656 | 13.430 | 6.428 | **6.18×** |
+| pnpoly | 28.710 | 17.069 | 76.073 | 12.476 | 5.878 | **1.68×** |
+| dense_array | 76.513 | 58.613 | 287.933 | — | 11.877 | **1.31×** |
+| diviter | 291.066 | 294.748 | 680.134 | 318.402 | 558.098 | **1.00×** |
 
-Speedup is the median of paired ratios; time columns are independent medians.
-The 95% paired-bootstrap intervals for tuned/before time are **0.0987–0.1004**
-and **0.1520–0.1652**, respectively. Their identical-control paired speedups are
-**1.000×** and **1.005×**; both gains also hold against that second control.
-The other 28 workloads have paired speedups of **0.984–1.392×**, with no material
-slowdown. The apparent `fib` gain does not hold against the identical-control
-peer and is not attributed to this change. Small movements remain inconclusive.
-One-minute host load was **49.2 → 4.7** on eight logical CPUs.
+The first two rows use the 30-pair follow-up; `diviter` uses the full-set run.
+Speedup is the median of paired ratios, while time columns are independent
+medians. The 95% paired-bootstrap intervals for tuned/before time are
+**0.592–0.600** (`pnpoly`) and **0.755–0.774** (`dense_array`); their control-peer
+speedups are **0.998×** and **1.001×**. The full set also improves `integer_dense`
+(**1.32×**) and Map iteration (**1.29×**).
 
-`diviter` now matches untyped Lambda and is about **1.77× faster than Node**.
-`pnpoly` remains **2.28× slower than untyped Lambda** and **4.75× slower than
-Node**; its remaining generic element coercion and scalar-ownership costs need
-separate profiling. The patch does not introduce numeric-array specialization.
+The initial `fib` slowdown disappears on follow-up. Object deletion remains
+noisy: **0.990×** paired speedup with a time-ratio interval of **0.964–1.147**.
+No material shared-client slowdown is confirmed. One-minute host load fell
+from **33.6 to 7.0** during the full run on eight logical CPUs; the follow-up
+retains the same binaries and sources.
 
-Evidence: [`numeric_tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/numeric_tuning_mir_20261007.json).
-Exact binaries, matched sources, finalized MIR, paired runner, raw outputs and
-gate/replay logs are in `temp/mvp_lmd_numeric_tuning/`; the final run is `confirm/`.
-Release SHA-256: `82ddfa870edc8283471cd4c0b3b40e16cae030e357cbdd4a74424ff2ce07e110`.
-Root causes and bounds are recorded in
-[JS_MVP_Lmd_Objects §7](../impl/JS_MVP_Lmd_Objects.md#7-numeric-loops-and-array-parameters).
+`pnpoly` is now **1.37× slower than untyped Lambda** and **2.90× slower than
+Node**. Generic element checks and dynamic storage remain further costs;
+this phase adds no numeric-array specialization. No compilation-time or
+allocation-count improvement is claimed.
+
+Evidence: [`element_tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/element_tuning_mir_20261007.json).
+Exact releases, sources, MIR, frame telemetry, runners, raw outputs and gate
+logs are in `temp/mvp_lmd_element_tuning/` (`confirm/` and `recheck/`).
+Release SHA-256: `3fbbefeb3521edcb95060e4bca0b2d164aca7d98d6c5ffa34b29c4135d15e6a8`.
+Ownership bounds and the reviewed MIR-budget delta are in
+[JS_MVP_Lmd_Objects §8](../impl/JS_MVP_Lmd_Objects.md#8-generic-element-coercion-and-scalar-ownership).
 
 ## 11. Object and Map tuning
 
@@ -622,9 +629,8 @@ the broader comparison:
 2. Retain complete binding-kind facts through parameter reads and inline
    snapshots, allowing known arrays to use direct index handling.
 
-Remaining work is to measure element coercion and ownership costs before
-extending numeric-array specialization. Bounds, changing element kinds,
-aliases and precise scalar homes must remain valid.
+Section 14 addresses element coercion and ownership costs. Bounds, changing
+element kinds, aliases and precise scalar homes remain valid.
 
 These are retained-analysis and representation corrections (**D8.2.4v2**,
 **D8.2.5v3**, **D8.2.6**, **D2.2.5**, **D8.4.1v2**, **D5.3**).
@@ -632,3 +638,21 @@ Use the frozen current release as control,
 pin native MIR, check outputs, and compare self-reported times with alternating
 pairs and an identical-control lane. Include scalar, object, Map and array
 controls plus the existing MVP, forced-GC, Lambda and Test262 gates.
+
+## 14. Element coercion and scalar ownership
+
+Implemented; latest evidence is in §10.8.
+
+1. Route generic numeric coercion through the shared inline-number decoder,
+   retaining JS conversion and capability errors for other values.
+2. Emit Float snapshot copies directly into their existing destination homes,
+   preserving packed values, signed zero and wide payloads. Keep independent
+   ownership across writes, calls, growth and GC.
+3. Consume simple scalar reads directly when numeric operations finish before
+   any mutation or safepoint; retain owned snapshots across effectful operands.
+4. Measure the changes against a frozen release on `pnpoly`, `diviter` and
+   the full supported workload set, including shared-emitter clients.
+
+This is representation and ownership tuning under **D2.2.5**, **D5.3.1–D5.3.4**
+and **D8.2.6**. Numeric-array promotion and new object features remain outside
+the phase. Apply §13's paired MIR measurements and correctness gates.

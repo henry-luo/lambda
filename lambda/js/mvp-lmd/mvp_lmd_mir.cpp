@@ -796,7 +796,7 @@ static LmdValue boxed(LmdCompiler* c, MIR_reg_t r, unsigned hint = K_ANY) {
 }
 static bool is_boxed(LmdValue v) { return v.kind & K_BOXED; }
 static unsigned semantic(LmdValue v) { return v.kind & K_ANY; }
-static LmdValue expression(LmdCompiler* c, AstNode* n);
+static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar = false);
 static LmdValue box(LmdCompiler* c, LmdValue value);
 static MIR_reg_t to_number(LmdCompiler* c, LmdValue value);
 static MIR_reg_t truth(LmdCompiler* c, LmdValue value);
@@ -876,25 +876,25 @@ static MIR_reg_t cold_box(void* owner, MIR_reg_t value) {
     LmdCompiler* c = (LmdCompiler*)owner;
     int id = em_scalar_home_new(&c->em);
     MIR_reg_t home = em_materialize_frame_ref(&c->em, em_scalar_home_ref(&c->em, id));
-    em_store_at(&c->em, home, 0, MIR_T_D, value);
-    MIR_reg_t r = op(c, MIR_OR, reg(c, home), integer(c, (uint64_t)LMD_TYPE_FLOAT << 56));
+    MIR_reg_t r = em_store_f64_home(&c->em, value, home);
     em_scalar_home_bind(&c->em, id, r); return r;
 }
 static MIR_reg_t cold_unbox(void* owner, MIR_reg_t item) {
     LmdCompiler* c = (LmdCompiler*)owner;
-    return em_unbox_f64_noninline_item(&c->em, c,
+    MIR_reg_t result = em_new_reg(&c->em, "numeric_item", MIR_T_D);
+    MIR_label_t floating = label(c), done = label(c);
+    MIR_reg_t type = op(c, MIR_URSH, reg(c, item), integer(c, 56));
+    // packed integers need no Float sentinel or payload-pointer checks.
+    branch(c, MIR_BNE, floating, reg(c, type), integer(c, LMD_TYPE_INT));
+    em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, result),
+        reg(c, em_unbox_finite_int_item(&c->em, item))));
+    jump(c, done); put_label(c, floating);
+    MIR_reg_t value = em_unbox_f64_noninline_item(&c->em, c,
         [](void* owner, MIR_reg_t item) -> MIR_reg_t {
             LmdCompiler* c = (LmdCompiler*)owner;
-            MIR_reg_t result = em_new_reg(&c->em, "numeric_item", MIR_T_D);
-            MIR_label_t wide = label(c), done = label(c);
-            MIR_reg_t type = op(c, MIR_URSH, reg(c, item), integer(c, 56));
-            branch(c, MIR_BNE, wide, reg(c, type), integer(c, LMD_TYPE_INT));
-            em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, result),
-                reg(c, em_unbox_finite_int_item(&c->em, item))));
-            jump(c, done); put_label(c, wide);
-            move(c, result, reg(c, em_load_at(&c->em, payload(c, item), 0, MIR_T_D, "wide_number")), true);
-            put_label(c, done); return result;
+            return em_load_at(&c->em, payload(c, item), 0, MIR_T_D, "wide_number");
         }, item);
+    move(c, result, reg(c, value), true); put_label(c, done); return result;
 }
 static LmdValue box(LmdCompiler* c, LmdValue value) {
     if (is_boxed(value)) return value;
@@ -913,6 +913,30 @@ static LmdValue box(LmdCompiler* c, LmdValue value) {
     return boxed(c, value.reg, value.kind);
 }
 
+static MIR_reg_t coerce_noninline_number(void* owner, MIR_reg_t item) {
+    LmdCompiler* c = (LmdCompiler*)owner;
+    MIR_reg_t tid = op(c, MIR_URSH, reg(c, item), integer(c, 56));
+    MIR_reg_t result = em_new_reg(&c->em, "converted_number", MIR_T_D);
+    MIR_label_t numeric = label(c), done = label(c);
+    branch(c, MIR_BEQ, numeric, reg(c, tid), integer(c, LMD_TYPE_INT));
+    branch(c, MIR_BEQ, numeric, reg(c, tid), integer(c, LMD_TYPE_FLOAT));
+    TypeId types[] = {LMD_TYPE_STRING, LMD_TYPE_BOOL, LMD_TYPE_NULL, LMD_TYPE_UNDEFINED};
+    MIR_label_t cases[4];
+    for (int i = 0; i < 4; i++) {
+        cases[i] = label(c); branch(c, MIR_BEQ, cases[i], reg(c, tid), integer(c, types[i]));
+    }
+    fail(c, LMD_MVP_CAPABILITY, NULL);
+    put_label(c, numeric); move(c, result, reg(c, cold_unbox(c, item)), true); jump(c, done);
+    for (int i = 0; i < 4; i++) {
+        put_label(c, cases[i]); MIR_reg_t r;
+        if (i == 0) r = em_call_1(&c->em, "mvp_lmd_string_to_number", MIR_T_D,
+            MIR_T_P, reg(c, payload(c, item)), true);
+        else if (i == 1) r = to_number(c, {payload(c, item), K_BOOL});
+        else r = to_number(c, number(c, i == 2 ? 0 : NAN));
+        move(c, result, reg(c, r), true); jump(c, done);
+    }
+    put_label(c, done); return result;
+}
 static MIR_reg_t to_number(LmdCompiler* c, LmdValue value) {
     if (!is_boxed(value) && value.kind == K_NUMBER && !value.integer) return value.reg;
     if (value.literal) {
@@ -929,24 +953,8 @@ static MIR_reg_t to_number(LmdCompiler* c, LmdValue value) {
     if (k == K_STRING) return em_call_1(&c->em, "mvp_lmd_string_to_number", MIR_T_D,
         MIR_T_P, reg(c, payload(c, value.reg)), true);
     if (k == K_NULL || k == K_UNDEFINED) return to_number(c, number(c, k == K_NULL ? 0 : NAN));
-    MIR_reg_t tid = tag(c, value), result = em_new_reg(&c->em, "converted_number", MIR_T_D);
-    MIR_label_t done = label(c);
-    TypeId types[] = {LMD_TYPE_FLOAT, LMD_TYPE_STRING, LMD_TYPE_BOOL, LMD_TYPE_NULL, LMD_TYPE_UNDEFINED};
-    MIR_label_t cases[5];
-    for (int i = 0; i < 5; i++) {
-        cases[i] = label(c); branch(c, MIR_BEQ, cases[i], reg(c, tid), integer(c, types[i]));
-    }
-    fail(c, LMD_MVP_CAPABILITY, NULL);
-    for (int i = 0; i < 5; i++) {
-        put_label(c, cases[i]); MIR_reg_t r;
-        if (i == 0) r = em_unbox_f64_item(&c->em, c, cold_unbox, value.reg);
-        else if (i == 1) r = em_call_1(&c->em, "mvp_lmd_string_to_number", MIR_T_D,
-            MIR_T_P, reg(c, payload(c, value.reg)), true);
-        else if (i == 2) r = to_number(c, {payload(c, value.reg), K_BOOL});
-        else r = to_number(c, number(c, i == 3 ? 0 : NAN));
-        move(c, result, reg(c, r), true); jump(c, done);
-    }
-    put_label(c, done); return result;
+    // consume the shared inline-number guard once; only other encodings need JS coercion.
+    return em_unbox_f64_item(&c->em, c, coerce_noninline_number, value.reg);
 }
 static MIR_reg_t truth(LmdCompiler* c, LmdValue v) {
     unsigned k = semantic(v);
@@ -1266,17 +1274,17 @@ static void check_tdz(LmdCompiler* c, LmdBinding* b, MIR_reg_t value, AstNode* s
         fail(c, LMD_MVP_REFERENCE, site); put_label(c, ok);
     }
 }
-static LmdValue read_local_value(LmdCompiler* c, LmdValue value);
+static LmdValue read_local_value(LmdCompiler* c, LmdValue value, bool borrow_scalar = false);
 static void scalar_field_write(LmdCompiler* c, LmdScalarField* field, LmdValue value);
 static LmdScalarField* inline_slot(LmdCompiler* c, LmdBinding* binding) {
     for (LmdInlineFrame* frame = c->inlining; frame; frame = frame->parent)
         for (int i = 0; i < frame->count; i++) if (frame->bindings[i] == binding) return &frame->slots[i];
     return NULL;
 }
-static LmdValue read_binding(LmdCompiler* c, LmdBinding* b, AstNode* site) {
+static LmdValue read_binding(LmdCompiler* c, LmdBinding* b, AstNode* site, bool borrow_scalar = false) {
     if (LmdScalarField* slot = inline_slot(c, b)) {
         if (is_boxed(slot->value)) check_tdz(c, b, slot->value.reg, site);
-        return read_local_value(c, slot->value);
+        return read_local_value(c, slot->value, borrow_scalar);
     }
     if (!b) { fail(c, LMD_MVP_REFERENCE, site); return boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED); }
     if (b->intrinsic >= 4) { fail(c, LMD_MVP_CAPABILITY, site); return boxed(c, constant(c, ITEM_JS_UNDEFINED)); }
@@ -1292,7 +1300,7 @@ static LmdValue read_binding(LmdCompiler* c, LmdBinding* b, AstNode* site) {
     bool known = b->entry->is_parameter || b->dominated || (b->target && b->target->ast->entry == b->entry &&
         b->entry->node && b->entry->node->node_type == AST_NODE_FUNC && !b->entry->is_annex_b_companion);
     if (known && !(b->kinds & K_NUMBER)) return boxed(c, copy, b->kinds);
-    LmdValue result = stable_item(c, copy);
+    LmdValue result = borrow_scalar ? boxed(c, copy) : stable_item(c, copy);
     if (known) result.kind = b->kinds | K_BOXED;
     return result;
 }
@@ -1426,8 +1434,12 @@ static LmdScalarField* scalar_reference(LmdReference ref) {
     }
     return NULL;
 }
-static LmdValue read_local_value(LmdCompiler* c, LmdValue value) {
+static LmdValue read_local_value(LmdCompiler* c, LmdValue value, bool borrow_scalar) {
     if (is_boxed(value)) {
+        if (borrow_scalar) {
+            MIR_reg_t copy = em_new_reg(&c->em, "local_borrow", MIR_T_I64);
+            move(c, copy, reg(c, value.reg)); return boxed(c, copy, semantic(value));
+        }
         LmdValue copy = stable_item(c, value.reg); copy.kind = value.kind; return copy;
     }
     bool floating = semantic(value) == K_NUMBER && !value.integer;
@@ -1571,7 +1583,7 @@ static void property_failure(LmdCompiler* c, LmdValue owner, AstNode* site) {
     fail(c, LMD_MVP_CAPABILITY, site); put_label(c, type);
     fail(c, LMD_MVP_TYPE, site);
 }
-static LmdValue array_read(LmdCompiler* c, LmdReference ref) {
+static LmdValue array_read(LmdCompiler* c, LmdReference ref, bool borrow_scalar = false) {
     MIR_reg_t size = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "array_length");
     if (ref.key_known && ref.index == -1) {
         return {size, K_NUMBER, false, 0, true, finite_range(0, UINT32_MAX)};
@@ -1581,8 +1593,9 @@ static LmdValue array_read(LmdCompiler* c, LmdReference ref) {
     if (length) branch(c, MIR_BEQ, length, reg(c, ref.key), MIR_new_int_op(c->em.ctx, -1));
     move(c, result, integer(c, ITEM_JS_UNDEFINED));
     branch(c, MIR_UBGE, done, reg(c, ref.key), reg(c, size));
-    move(c, result, reg(c, stable_item(c, em_load_at(&c->em,
-        em_array_element_address(&c->em, ref.owner.reg, ref.key, 8), 0, MIR_T_I64, "element")).reg));
+    MIR_reg_t element = em_load_at(&c->em,
+        em_array_element_address(&c->em, ref.owner.reg, ref.key, 8), 0, MIR_T_I64, "element");
+    move(c, result, reg(c, borrow_scalar ? element : stable_item(c, element).reg));
     if (length) {
         jump(c, done); put_label(c, length);
         LmdReference length_ref = ref; length_ref.key_known = true; length_ref.index = -1;
@@ -1611,14 +1624,15 @@ static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
     }
     return boxed(c, result, length ? K_ANY : K_STRING | K_UNDEFINED);
 }
-static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, bool callee = false) {
-    if (!ref.key) return read_binding(c, ref.binding, site);
+static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, bool callee = false,
+        bool borrow_scalar = false) {
+    if (!ref.key) return read_binding(c, ref.binding, site, borrow_scalar);
     if (LmdScalarField* field = scalar_reference(ref)) return read_local_value(c, field->value);
     if (ref.guarded && ref.field) return field_read(c, ref);
     unsigned k = semantic(ref.owner);
     if (k == K_ARRAY || k == K_STRING) {
         array_key_check(c, ref, site);
-        return k == K_ARRAY ? array_read(c, ref) : string_read(c, ref);
+        return k == K_ARRAY ? array_read(c, ref, borrow_scalar) : string_read(c, ref);
     }
     MIR_reg_t result = em_new_reg(&c->em, "property", MIR_T_I64);
     MIR_label_t array = label(c), string = label(c), object = label(c), done = label(c);
@@ -2041,7 +2055,21 @@ static LmdValue logical(LmdCompiler* c, Operator operation, AstNode* left, AstNo
     move(c, result, reg(c, numeric ? to_number(c, rhs) : box(c, rhs).reg), numeric);
     put_label(c, done); return numeric ? LmdValue{result, K_NUMBER} : boxed(c, result);
 }
-static LmdValue expression(LmdCompiler* c, AstNode* n) {
+// these operands cannot overwrite a scalar source or allocate on a successful evaluation.
+static bool immediate_scalar_operand(LmdCompiler* c, AstNode* n) {
+    if (n->node_type == AST_NODE_IDENT || n->node_type == AST_NODE_LITERAL) return true;
+    if (n->node_type != AST_NODE_MEMBER_EXPR && n->node_type != AST_NODE_INDEX_EXPR) return false;
+    AstFieldNode* field = (AstFieldNode*)n;
+    if (field->object->node_type != AST_NODE_IDENT) return false;
+    LmdBinding* owner = identifier_binding(c->program, (AstIdentNode*)field->object);
+    if (!owner || (!owner->entry->is_parameter && !owner->dominated) ||
+            kind(c->program, field->object, c->inlining) != K_ARRAY) return false;
+    if (!field->computed || field->property->node_type == AST_NODE_LITERAL) return true;
+    if (field->property->node_type != AST_NODE_IDENT) return false;
+    unsigned key = kind(c->program, field->property, c->inlining);
+    return key == K_NUMBER || key == K_STRING;
+}
+static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar) {
     if (!n) return boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
     switch (n->node_type) {
     case AST_NODE_LITERAL: {
@@ -2056,12 +2084,13 @@ static LmdValue expression(LmdCompiler* c, AstNode* n) {
     case AST_NODE_IDENT: {
         AstIdentNode* id = (AstIdentNode*)n;
         LmdBinding* b = identifier_binding(c->program, id);
-        return read_binding(c, b, n);
+        return read_binding(c, b, n, borrow_scalar);
     }
     case AST_NODE_FUNC_EXPR: case AST_NODE_ARROW_FUNC:
         return new_function(c, function(c->program, n));
     case AST_NODE_CALL_EXPR: return call(c, (AstCallNode*)n);
-    case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: return read_reference(c, reference(c, n), n);
+    case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR:
+        return read_reference(c, reference(c, n), n, false, borrow_scalar);
     case AST_NODE_ASSIGN: {
         AstAssignNode* a = (AstAssignNode*)n;
         if (a->op == OPERATOR_JS_AND_ASSIGN || a->op == OPERATOR_JS_OR_ASSIGN || a->op == OPERATOR_JS_NULLISH_ASSIGN)
@@ -2128,7 +2157,14 @@ static LmdValue expression(LmdCompiler* c, AstNode* n) {
         AstBinaryNode* b = (AstBinaryNode*)n;
         if (b->op == OPERATOR_AND || b->op == OPERATOR_OR || b->op == OPERATOR_JS_NULLISH_COALESCE)
             return logical(c, b->op, b->left, b->right);
-        LmdValue left = expression(c, b->left), right = expression(c, b->right);
+        MirNumericOpPlan numeric = {};
+        bool consume = em_numeric_op_plan(b->op, &numeric) && b->op != OPERATOR_ADD &&
+            b->op != OPERATOR_EQ && b->op != OPERATOR_NE &&
+            b->op != OPERATOR_JS_STRICT_EQ && b->op != OPERATOR_JS_STRICT_NE;
+        // numeric consumers finish before a safepoint; a left borrow also needs an inert RHS.
+        bool right_borrow = consume && immediate_scalar_operand(c, b->right);
+        LmdValue left = expression(c, b->left, right_borrow && immediate_scalar_operand(c, b->left));
+        LmdValue right = expression(c, b->right, right_borrow);
         if (b->op == OPERATOR_IN) {
             LmdValue name = canonical_key(c, left);
             MIR_reg_t has = em_call_3(&c->em, "mvp_lmd_property_has", MIR_T_I64,
