@@ -33,15 +33,23 @@ def executable(language, compiler=False):
 
 
 def source_files(language):
-    return sorted((BASE / language).glob('*.java' if language == 'java' else '*.erl'))
+    extension = '*.java' if language == 'java' else '*.erl'
+    files = sorted((BASE / language / 'native').rglob(extension))
+    if language == 'erlang':
+        files += sorted((BASE / language / 'native').rglob('*.hrl'))
+    if language == 'java':
+        # Compile upstream AWFY sources unchanged, alongside the direct ports.
+        files += sorted((ROOT / 'ref/are-we-fast-yet/benchmarks/Java/src').rglob('*.java'))
+    return files
 
 
 def port_source(language, suite, name):
     manifest = BASE / 'native_ports/manifest.json'
     entries = json.loads(manifest.read_text())['entries']
-    if f'{suite}/{name}' not in entries:
+    entry = entries.get(f'{suite}/{name}')
+    if not entry or language not in entry:
         return None
-    source = BASE / language / ('Ports.java' if language == 'java' else 'ports.erl')
+    source = BASE / entry[language]
     return source if source.is_file() else None
 
 
@@ -60,7 +68,8 @@ def build(language):
         raise FileNotFoundError(f'{language} toolchain is missing')
     version = toolchain_version(language)
     sources = [(p, p.read_bytes()) for p in files]
-    digest = hashlib.sha256((compiler + version).encode() + b''.join(data for _, data in sources)).hexdigest()
+    digest = hashlib.sha256((compiler + version + 'direct-native-v1-java17').encode()
+        + b''.join(str(p.relative_to(ROOT)).encode() + data for p, data in sources)).hexdigest()
     directory = ROOT / f'temp/{language}-benchmarks' / digest[:16]
     stamp = directory / 'built.json'
     if _CACHE.get(language) == directory or stamp.is_file():
@@ -73,9 +82,11 @@ def build(language):
         output = staging / 'output'
         output.mkdir()
         for source, data in sources:
-            (staging / source.name).write_bytes(data)
-        command = ([compiler, '-d', str(output)] if language == 'java' else [compiler, '-W0', '-o', str(output)])
-        proc = subprocess.run(command + [str(staging / p.name) for p in files], cwd=ROOT, capture_output=True, text=True)
+            destination = staging / source.relative_to(ROOT)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+        command = ([compiler, '--release', '17', '-d', str(output)] if language == 'java' else [compiler, '-W0', '-o', str(output)])
+        proc = subprocess.run(command + [str(staging / p.relative_to(ROOT)) for p in files if p.suffix != ".hrl"], cwd=ROOT, capture_output=True, text=True)
         if proc.returncode:
             raise RuntimeError(f'{language} compilation failed:\n{proc.stdout}\n{proc.stderr}')
         (output / 'built.json').write_text(json.dumps({'source_sha256': digest, 'command': command,
@@ -101,8 +112,8 @@ def build_command(language, suite, name, directory=None):
         _, count = registry._detect_jetstream_run_function(registry.JETSTREAM_NODE[name])
         arguments.append(str(count))
     if language == 'java':
-        return [executable(language), '-Xss16m', '-Xmx2g', '-cp', str(directory), 'Ports'] + arguments
-    return [executable(language), '+S', '1:1', '+A', '1', '-noshell', '-pa', str(directory), '-s', 'pr', 'main', '-extra'] + arguments
+        return [executable(language), '-Xss16m', '-Xmx2g', '-cp', str(directory), 'NativeBench'] + arguments
+    return [executable(language), '+S', '1:1', '+A', '1', '-noshell', '-pa', str(directory), '-s', 'native_bench', 'main', '-extra'] + arguments
 
 
 def shell_command(language, suite, name):
@@ -141,18 +152,20 @@ def runtime_metadata(language):
             build_status = 'ok'
         except (FileNotFoundError, RuntimeError):
             build_status = 'build_failed'
-    paths = source_files(language) + sorted((BASE / 'native_ports').glob('*.py')) + [BASE / 'native_ports/manifest.json', BASE / 'native_ports/parse_julia.jl',
+    paths = source_files(language) + [BASE / 'native_ports/manifest.json',
             BASE / 'native_benchmark_runner.py', BASE / f'run_{language}_benchmarks.py']
     fixtures = sorted((BASE / 'text').glob('*.json')) + sorted(p for p in (BASE / 'text/jq').iterdir() if p.suffix in ('.jq', '.bf', '.json'))
-    fixtures += [BASE / 'beng/input/fasta_1000.txt', BASE / 'julia/expected.json']
+    fixtures += sorted((BASE / 'native_ports/fixtures').iterdir())
+    fixtures += [BASE / 'beng/input/fasta_1000.txt', BASE / 'julia/expected.json', BASE / 'julia/SUITE.md']
+    fixtures += sorted((BASE / 'beng').glob('*.txt'))
     return {'executable': exe, 'version': version,
             'executable_sha256': contract.sha256(exe) if exe else None,
             'compiler': compiler, 'build_status': build_status, 'compiled_sha256': compiled,
             'flags': ['-Xss16m', '-Xmx2g'] if language == 'java' else ['+S', '1:1', '+A', '1', '-noshell'],
             'warmup_runs': int(environment()['NATIVE_BENCH_WARMUP']),
             'suite_warmup_runs': {'julia': 1},
-            'implementation': 'generated native functions with boxed value adapters',
-            'algorithm_sources_sha256': json.loads((BASE/'native_ports/manifest.json').read_text()).get('algorithm_sources_sha256', {}),
+            'implementation': 'direct native functions and data structures; no generated language adapter',
+            'reference_sources_sha256': json.loads((BASE/'native_ports/manifest.json').read_text())['reference_sources_sha256'],
             'timing': 'workload execution; excludes source compilation, process startup, warmup and verification',
             'sources_sha256': {str(p.relative_to(ROOT)): contract.sha256(p) for p in paths},
             'fixtures_sha256': {str(p.relative_to(ROOT)): contract.sha256(p) for p in fixtures}}
@@ -165,7 +178,7 @@ def main(language):
     parser.add_argument('--all', action='store_true', help='include noncanonical duplicates')
     parser.add_argument('--list', action='store_true')
     parser.add_argument('--verify-node', action='store_true')
-    parser.add_argument('--timeout', type=float, default=600)
+    parser.add_argument('--timeout', type=float, default=600, help='hard timeout in seconds for each process')
     parser.add_argument('--warmup', type=int, choices=(0, 1))
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
@@ -195,7 +208,7 @@ def main(language):
         try:
             command = build_command(language, e['suite'], e['name'], directory)
             start = time.perf_counter_ns()
-            proc = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=max(args.timeout, e.get('timeout_s') or 0))
+            proc = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=args.timeout)
             record.update(status=contract.output_status(proc), wall_ms=(time.perf_counter_ns()-start)/1e6,
                           stdout=proc.stdout, stderr=proc.stderr, command=command)
             if record['status'] == 'ok':

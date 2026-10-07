@@ -1,6 +1,6 @@
 %% Native indexed loops for the ASCII text_search.js corpus. See ../native_ports/LICENSE.md.
 -module(text_search).
--export([run/1,naive/3,kmp/3,boyer_moore/3]).
+-export([run/0,naive/3,kmp/3,boyer_moore/3]).
 
 prepare()->
     Corpus=iolist_to_binary(lists:join(<<"\n">>,
@@ -45,11 +45,9 @@ bm_offset(Text,Pattern,Position,Offset)->case binary:at(Text,Position+Offset)=:=
 workload({Text,Patterns})->lists:foldl(fun(Round,Checksum)->
     {Result,_}=lists:foldl(fun(Pattern,{Acc,Index})->Start=(Round*17+Index*13)rem 97,
         N=naive(Text,Pattern,Start),K=kmp(Text,Pattern,Start),B=boyer_moore(Text,Pattern,Start),
-        pr:check(N=:=K andalso K=:=B),{(Acc+(N+2)*(Index+3)+(Round+1)*7)rem 1000000007,Index+1}
+        native_bench:check(N=:=K andalso K=:=B),{(Acc+(N+2)*(Index+3)+(Round+1)*7)rem 1000000007,Index+1}
     end,{Checksum,0},Patterns),Result end,0,lists:seq(0,1535)).
 
-run(E)->pr:run_benchmark(E,[
-    {fn,E,fun(_,[])->prepare()end,[],0,0},
-    {fn,E,fun(_,[_,State])->workload(State)end,[<<"Any">>,<<"Any">>],2,2},
-    {fn,E,fun(_,[V])->V=:=91395120 end,[<<"Any">>],1,1},
-    {fn,E,fun(_,[V])->pr:output([<<"text_search: CHECKSUM:">>,V],true)end,[<<"Any">>],1,1}]).
+run()->State=prepare(),native_bench:run(fun()->workload(State)end,
+    fun(V)->native_bench:check(V=:=91395120)end,
+    fun(V)->io:format("text_search: CHECKSUM:~B~n",[V])end,native_bench:warmup()).

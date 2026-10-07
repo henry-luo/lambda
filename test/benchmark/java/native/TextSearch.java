@@ -1,7 +1,7 @@
 // Native indexed loops for text_search.js. Source notices: ../native_ports/LICENSE.md.
 import java.util.*;
 
-final class TextSearch extends PortRuntime {
+final class TextSearch {
     record State(int[] corpus, int[][] patterns) {}
 
     static State prepare() {
@@ -75,12 +75,9 @@ final class TextSearch extends PortRuntime {
         return checksum;
     }
 
-    static void run(Env e) {
-        runBenchmark(e, new Object[]{
-            new Fn(e, (env, args) -> prepare(), new String[]{}, 0, 0),
-            new Fn(e, (env, args) -> workload((State) args[1]), new String[]{"Any", "Any"}, 2, 2),
-            new Fn(e, (env, args) -> equal(args[0], 91395120L), new String[]{"Any"}, 1, 1),
-            new Fn(e, (env, args) -> { System.out.println("text_search: CHECKSUM:" + args[0]); return null; }, new String[]{"Any"}, 1, 1)
-        });
+    static void run() {
+        NativeBench.prepared(TextSearch::prepare, TextSearch::workload,
+            value -> NativeBench.check(value==91395120L),
+            value -> System.out.println("text_search: CHECKSUM:"+value));
     }
 }
