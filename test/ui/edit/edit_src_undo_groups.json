@@ -1,0 +1,28 @@
+{
+  "name": "typing is undone in steps: a run of word characters is one step until a pause of half a second or a caret move",
+  "command": "edit",
+  "html": "test/ui/edit/sample.txt",
+  "working_copy": "temp/edit-ui/edit_src_undo_groups.txt",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "second line"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "ab"},
+    {"type": "wait", "ms": 600},
+    {"type": "type", "text": "cd"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_undo_groups.txt", "contains": "second lineab\n"},
+    {"type": "type", "text": "ef"},
+    {"type": "key_press", "key": "ArrowLeft"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "type", "text": "gh"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_undo_groups.txt", "contains": "second lineabef\n"},
+    {"type": "type", "text": "ij"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_undo_groups.txt", "contains": "second lineabef\n"}
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "name": "Alt+Z soft-wraps long lines with their numbers aligned, the caret at the end of a line taller than the view stays visible, the wheel scrolls by rows inside that line, and Alt+Z unwraps",
+  "name": "Alt+Z soft-wraps long lines with their numbers aligned, the caret at the end of a line taller than the view stays visible, the wheel scrolls by rows inside that line, and Alt+Z unwraps with the text column scrolled sideways to the caret",
   "command": "edit",
   "source": true,
   "html": "test/ui/edit/wrap_sample.txt",
@@ -30,6 +30,6 @@
     {"type": "assert_file", "path": "temp/edit-ui/edit_src_wrap.txt", "contains": "token0499END\nafter the long line\n"},
     {"type": "key_combo", "key": "z", "mods_str": "alt"},
     {"type": "assert_count", "target": {"selector": ".src-wrap"}, "count": 0},
-    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "present": false}
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "contains": "margin-left: -"}
   ]
 }

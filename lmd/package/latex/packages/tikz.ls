@@ -41,9 +41,9 @@ pub fn math_declarations(ast) => [for (child in ast,
 
 pub fn render_picture(island, definitions = [], declarations = [],
                       math_declarations = [], custom_colors = [],
-                      people_active = false) =>
+                      people_active = false, base_uri = null) =>
     bridge.render_picture(island, definitions, declarations,
-        math_declarations, custom_colors, people_active)
+        math_declarations, custom_colors, people_active, base_uri)
 
 pub fn render_gallery(command) any^ {
     let size = util.raw_argument(command, "required", 0)

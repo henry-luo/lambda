@@ -1,0 +1,18 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\^=7
+\def\T#1{\immediate\write16{LT:#1}}
+% pdfTeX string primitives; UTF-8 text is escaped byte by byte
+\T{\pdfescapestring{a b(c)\string\\d~ é^^09}}
+\T{\pdfescapename{a b#c/d(e)<f>[g]{h}\string\%i é!~}}
+\T{\pdfescapehex{a b é}}
+\T{\pdfunescapehex{414 2zz43 4}|\pdfunescapehex{414}|\pdfunescapehex{}}
+\T{\pdfmdfivesum{abc}|\pdfmdfivesum{}|\pdfmdfivesum{é}}
+\def\x{a##b}\T{\pdfescapename{\x}}
+% a query about a missing file expands to nothing
+\T{[\pdffilesize{nosuchfile.tex}][\pdffilemoddate{nosuchfile.tex}][\pdfmdfivesum file{nosuchfile.tex}]}
+% \fontdimen grows only the font loaded last
+\font\fa=cmr10 at 1sp \font\fb=cmr10 at 2sp
+\fontdimen 100\fb=5sp
+\T{\the\fontdimen 100\fb|\the\fontdimen 7\fb|\the\fontdimen 50\fb}
+\font\fc=cmr10 at 1sp
+\T{\the\fontdimen 7\fc|\the\fontdimen 8\fa}
+\end

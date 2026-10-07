@@ -171,6 +171,10 @@ bool is_math_environment(const char* env_name) {
     return str_in_sorted_array(env_name, math_environments, n_math_environments);
 }
 
+bool is_raw_group_command(const char* cmd_name) {
+    return strcmp(cmd_name, "directlua") == 0 || strcmp(cmd_name, "luaexec") == 0;
+}
+
 bool is_raw_text_environment(const char* env_name) {
     init_common_tables();
     return str_in_sorted_array(env_name, raw_text_environments, n_raw_text_environments);

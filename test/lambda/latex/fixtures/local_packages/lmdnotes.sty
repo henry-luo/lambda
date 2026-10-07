@@ -1,0 +1,26 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{lmdnotes}[2026/10/07 Phase IV fixture package]
+\RequirePackage{xcolor}
+\newif\if@lmdnotes@draft
+\DeclareOption{draft}{\@lmdnotes@drafttrue}
+\DeclareOption{final}{\@lmdnotes@draftfalse}
+\DeclareOption*{\PackageWarning{lmdnotes}{Unknown option `\CurrentOption'}}
+\ExecuteOptions{final}
+\ProcessOptions\relax
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\vect}[1]{\mathbf{#1}}
+\newcommand{\note}[2][Note]{\textbf{#1:} #2}
+\newcounter{exercise}
+\newcommand{\exercise}{\stepcounter{exercise}\textbf{Exercise \theexercise.}}
+\if@lmdnotes@draft
+  \newcommand{\status}{DRAFT}
+\else
+  \newcommand{\status}{FINAL}
+\fi
+\@ifpackageloaded{xcolor}{\newcommand{\hl}[1]{\textcolor{red}{#1}}}{\newcommand{\hl}[1]{#1}}
+\def\lmd@pair#1,#2\@nil{(#1; #2)}
+\newcommand{\pair}[1]{\lmd@pair#1\@nil}
+\newenvironment{remark}{\par\textit{Remark.}~}{\par}
+\AtBeginDocument{\def\started{yes}}
+\endinput
+This text after endinput is never read.

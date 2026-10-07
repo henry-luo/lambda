@@ -1,0 +1,8 @@
+["table", "t u v\n0 9 1\n1 8 0.5\n", 81, ["x=t", "y=v"]]
+[[[0, 1], [1, 3], [2, 2]], [[0, 1], [1, 0.5]], [[7, 5], [10, 8]], [[1, 2], [3, 4]]]
+[[[1, 120, 4], [2, 150, 6], [3, 90, 2], [4, 180, 9]], [[3, 5], [4, 2], [1, 6]]]
+[[[0, 3], [1, 4], [2, 1]], [[0, 2], [2, 1]]]
+[true, true, 5]
+[[true, true, 12, 0], [true, true, 0, 6]]
+[true, true, true]
+["PGFPlots table file not found: missing.dat", "PGFPlots table file must be beside the document: ../tikz/cycle.tex", "PGFPlots table file must be beside the document: /etc/hosts", "PGFPlots table file needs a document base URI: sales.dat", "PGFPlots table has no column day", "PGFPlots table y index is out of range", "unsupported TikZ/PGFPlots option: x expr", "unsupported PGFPlots table col sep: pipe", "non-numeric PGFPlots coordinate needs symbolic x coords: x", "unknown symbolic x coordinate: c", "non-numeric PGFPlots coordinate needs symbolic x coords: c", "PGFPlots symbolic coordinates need a linear axis", "PGFPlots xtick=data needs symbolic x coords", false, true]

@@ -1,0 +1,47 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6 \catcode`\$=3 \catcode`\&=4
+\catcode`\^=7 \catcode`\_=8 \catcode`\~=13
+\def\T#1{\immediate\write16{LT:#1}}
+% macro parameters
+\def\a#1{[#1]}\T{\a x\a{yz}\a {w}}
+\def\b#1#2{<#2|#1>}\T{\b12\b{ab}{cd}}
+\def\c#1.#2.{(#1)(#2)}\T{\c x.y.\c {a.b}.c.}
+\def\d#1#{\e{#1}}\def\e#1#2{E[#1|#2]}\T{\d xy{z}}
+\def\f#1\end{F(#1)}\T{\f a b c\end}
+\def\g#1#2{#2#1}\T{\g{1}{2}\g34}
+\def\h{\i}\def\i{I}\T{\h\h}
+% \expandafter and \noexpand
+\def\x{X}\def\y{Y}
+\T{\expandafter\a\x}
+\edef\z{\noexpand\x\y}\T{\meaning\z}
+\T{\expandafter\expandafter\expandafter\a\expandafter\x\y}
+\edef\z{\expandafter\noexpand\csname x\endcsname}\T{\meaning\z}
+% \csname
+\expandafter\def\csname foo bar\endcsname{FB}\T{\csname foo bar\endcsname}
+\T{\expandafter\meaning\csname undefinedthing\endcsname}
+\T{\expandafter\string\csname a b\endcsname}
+% \string, \number, \romannumeral
+\T{\string\x\string\%\string~}
+\T{\number 007 \number-0012}
+\T{\romannumeral 1984 \romannumeral 0 \romannumeral 4999}
+\T{\number`\A \number`A \number"FF \number'777}
+% \edef and \the
+\count255=17 \edef\z{\the\count255 x}\T{\meaning\z}
+\toks0={\x\y}\edef\z{\the\toks0}\T{\meaning\z}
+\edef\z{\x\noexpand\y\x}\T{\meaning\z}
+% \meaning
+\T{\meaning\relax}
+\T{\meaning a\meaning 1\meaning {\meaning }\meaning #\meaning $}
+\let\q=a\T{\meaning\q}
+\chardef\cd=65 \T{\meaning\cd}
+\mathchardef\md="7161 \T{\meaning\md}
+\countdef\cn=12 \T{\meaning\cn}
+\long\def\l#1{#1}\T{\meaning\l}
+\T{\meaning\undefinedcs}
+% \uppercase and \lowercase
+\uppercase{\T{abc\x}}
+\lowercase{\T{ABC}}
+% \futurelet and \afterassignment
+\def\peek{\futurelet\next\check}\def\check{\ifx\next a\T{next is a}\else\T{next is other}\fi}
+\peek a\peek b
+\def\after{\T{after \the\count1}}\afterassignment\after\count1=5
+\end

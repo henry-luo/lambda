@@ -114,12 +114,7 @@ void shape_tree_stats_note_private_copy(int64_t entries);
 
 #include "../io/mark_builder.hpp"
 
-// Parse options beyond type and flavor.
-typedef struct InputParseOptions {
-    bool source_positions;  // parse({sourcepos: true}): markup blocks carry their source lines
-    bool embedded_math;     // markup: attach each <math>'s parsed `ast` and list it on
-                            // Input::embedded_math, for a display that renders it directly
-} InputParseOptions;
+#include "input-parse-options.h"
 
 #ifdef __cplusplus
 extern "C" {

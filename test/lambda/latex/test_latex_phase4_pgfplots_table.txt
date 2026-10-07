@@ -1,0 +1,8 @@
+"diagnostics:"
+[]
+"pictures:"
+2
+"symbolic x coords from csv:"
+true
+"legend entries:"
+true

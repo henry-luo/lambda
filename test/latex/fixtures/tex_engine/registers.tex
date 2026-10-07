@@ -1,0 +1,51 @@
+\catcode`\{=1 \catcode`\}=2 \catcode`\#=6
+\def\T#1{\immediate\write16{LT:#1}}
+\count1=10 \advance\count1 by 5 \multiply\count1 3 \divide\count1 by 4 \T{\the\count1}
+\count2=-7 \divide\count2 2 \T{\the\count2}
+\dimen0=1.5pt \advance\dimen0 by 2.25pt \T{\the\dimen0}
+\dimen1=1in \T{\the\dimen1}
+\dimen1=1cm \T{\the\dimen1}
+\dimen1=1mm \T{\the\dimen1}
+\dimen1=1bp \T{\the\dimen1}
+\dimen1=1pc \T{\the\dimen1}
+\dimen1=1dd \T{\the\dimen1}
+\dimen1=1cc \T{\the\dimen1}
+\dimen1=100sp \T{\the\dimen1}
+\dimen1=-.5pt \T{\the\dimen1}
+\dimen1=0.333333pt \T{\the\dimen1}
+\dimen1=16383.99999pt \T{\the\dimen1}
+\dimen1=3,5pt \T{\the\dimen1}
+\dimen2=2\dimen0 \T{\the\dimen2}
+\dimen2=-.5\dimen0 \T{\the\dimen2}
+\skip0=1pt plus 2fil minus 3fill \T{\the\skip0}
+\skip1=4pt plus -1fil \T{\the\skip1}
+\skip2=\skip0 \advance\skip2 by 1pt plus 1fill \T{\the\skip2}
+\skip3=1pt plus 1filll minus 2pt \T{\the\skip3}
+\muskip0=3mu plus 2fill \T{\the\muskip0}
+\toks0={a#b\x} \T{\the\toks0}
+\toks1=\toks0 \T{\the\toks1}
+{\count3=99 \global\count4=88 \T{\the\count3 \the\count4}}\T{\the\count3 \the\count4}
+{\def\l{local}\gdef\g{global}}\T{\ifdefined\l L\else nL\fi \g}
+\count5=1 {\count5=2 {\global\count5=3}\T{\the\count5}}\T{\the\count5}
+{\aftergroup\x\aftergroup\y}\def\x{X}\def\y{Y}
+\def\x{\T{x after}}\def\y{\T{y after}}{\aftergroup\x\aftergroup\y}
+\begingroup \count6=7 \endgroup \T{\the\count6}
+\catcode`\@=11 \def\a@b{AT}\T{\a@b}\catcode`\@=12
+\T{\the\catcode`\a \the\catcode`\@ \the\lccode`\A \the\uccode`\b \the\sfcode`\A}
+\T{\the\mathcode`\a \the\mathcode`\1 \the\delcode`\.}
+\escapechar=`\! \T{\string\relax}\escapechar=`\\
+\T{\the\escapechar \the\endlinechar \the\mag \the\tolerance}
+\countdef\cc=20 \cc=41 \advance\cc 1 \T{\the\cc \the\count20}
+\dimendef\dd=20 \dd=2pt \multiply\dd 3 \T{\the\dd}
+\chardef\ch=\count20 \T{\meaning\ch \number\ch}
+\T{\the\numexpr 7*(3+4)/2\relax}
+\T{\the\numexpr -7/2\relax \the\numexpr 7/-2\relax \the\numexpr 5/2\relax}
+\T{\the\numexpr 2147483647/2\relax \the\numexpr (1+2)*(3+4)\relax}
+\T{\the\dimexpr 1pt*3/2\relax \the\dimexpr (1pt+2pt)/2\relax}
+\T{\the\dimexpr 1in-1cm\relax}
+\T{\the\glueexpr 1pt plus 2fil*2\relax}
+\T{\the\gluestretch\skip0 \the\glueshrinkorder\skip0}
+\T{\the\muexpr 3mu*2\relax}
+\T{\number\dimexpr 1pt\relax}
+\T{\the\numexpr\dimexpr 1pt\relax/65536\relax}
+\end

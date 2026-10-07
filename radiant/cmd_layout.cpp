@@ -4675,6 +4675,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         // structurally corresponding descendants before retiring the old tree.
         view_state_preserve_subtree_identity(state, static_cast<DomNode*>(old_dom),
                                              static_cast<DomNode*>(new_dom));
+        radiant_frame_requests_follow_rebuild(doc, static_cast<DomNode*>(old_dom),
+                                              static_cast<DomNode*>(new_dom));
 
         if (old_dom->is_popover_open() && new_dom->has_attribute("popover")) {
             // Reconciliation replaces the DOM wrapper, but popover openness is

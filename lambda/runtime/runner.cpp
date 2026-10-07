@@ -19,6 +19,9 @@
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/thread_pool.h"
 #include "../io/mark_builder.hpp"
+#ifndef LAMBDA_NO_LATEX
+#include "../input/input-tex.hpp"
+#endif
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "lambda-stack.h"
@@ -339,6 +342,12 @@ const char* g_lambda_home = "./lmd";
 void lambda_home_init(void) {
     const char* env = shell_getenv("LAMBDA_HOME");
     if (env && env[0]) g_lambda_home = env;
+#ifndef LAMBDA_NO_LATEX
+    // the TeX engine's bundled resources ship in the package tree (Lambda_Pkg_Latex3 §9.8)
+    char* tex_dir = lambda_home_path("package/latex/tex");
+    tex::set_resource_dir(tex_dir);
+    if (tex_dir) mem_free(tex_dir);
+#endif
 }
 
 // Build a malloc'd path "<g_lambda_home>/<rel>".  Caller must free().

@@ -2933,6 +2933,13 @@ ViewState* view_state_get(DocState* state, View* view);
 // replaces a structurally corresponding DOM subtree.
 void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,
                                           DomNode* new_root);
+// Whether a rebuilt node stands for the node it replaces: the same node type
+// and, for elements, the same tag.
+bool view_state_nodes_correspond(const DomNode* old_node, const DomNode* new_node);
+// Pending Lambda frame requests owned inside a rebuilt subtree follow their
+// owners to the corresponding replacement nodes (RAD_16 §8).
+void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
+                                           DomNode* new_root);
 bool view_state_get_hovered(DocState* state, View* view);
 bool view_state_get_active(DocState* state, View* view);
 bool view_state_get_focused(DocState* state, View* view);
