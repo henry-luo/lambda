@@ -667,3 +667,113 @@ Radiant supports multiple render targets:
 3. **Log output** — check `./log.txt` for layout trace messages. Use `log_debug()` in layout code for additional instrumentation.
 4. **Compare against browser** — `make layout test=file_name` shows element-by-element position/size differences (1–2px tolerance for floating-point variations).
 5. **Debugger** — `lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- layout file.html`
+
+---
+
+## 7. Worktrees and Agent Gotchas
+
+Build, test and checkout behaviour that is easy to misread as a regression. Several agents usually share one clone, its main checkout and its git worktrees.
+
+### 7.1 Test Data
+
+External corpora live in the sibling repo `../lambda-test` (`js262`, `layout`, `markdown`, `pdf`, `render`, …) and in the git-ignored `ref/`. Wire them up once per clone:
+
+```bash
+./setup-test.sh     # needs ../lambda-test; override with LAMBDA_TEST_DIR=<dir>
+```
+
+- Clones WPT blob-less into `ref/wpt` and checks out the pinned commit (`WPT_COMMIT=<sha>` overrides). It refuses to switch commits if `ref/wpt` has local changes.
+- Links each top-level directory of `../lambda-test` as `test/<name> -> ../../lambda-test/<name>`. It skips existing paths and stops on a symlink that points somewhere else.
+- `test/jquery-ui`, `test/markdown` and `test/media` are **tracked** links. `test/js262`, `test/layout`, `test/render` and `test/pdf` are git-ignored.
+- Other reference checkouts under `ref/` (e.g. `ref/test262`) are not fetched by the script.
+
+### 7.2 Working in a Git Worktree
+
+A fresh worktree has none of the ignored directories. Worktrees that Claude Code creates (`EnterWorktree`, agent isolation) get `build_temp`, `node_modules`, `mac-deps` and `ref` linked automatically by `worktree.symlinkDirectories` in `.claude/settings.json`; for any other worktree, link them to the main checkout **before the first build**. A failed build leaves a real, empty `build_temp/`, and `ln -s` would then nest the link inside it, so `rmdir` it first.
+
+```bash
+MAIN=<main checkout>
+ln -s "$MAIN/build_temp"   build_temp     # re2_build, utf8proc, jpeg-turbo (build_lambda_config.json)
+ln -s "$MAIN/mac-deps"     mac-deps
+ln -s "$MAIN/node_modules" node_modules   # pinned tree-sitter CLI
+ln -s "$MAIN/ref"          ref
+ln -s "$MAIN/test/js262"   test/js262     # likewise test/layout, test/render, test/pdf
+```
+
+- `test/layout` holds the fonts used by the UI-automation preflight. Without the link, the UI runner fails before it runs anything.
+- `build_temp/re2_build` is shared. A fresh checkout's newer `lib/re2` mtimes make `make` re-run CMake and Ninja in the shared directory. Before the first build, backdate the worktree's copies (e.g. `find lib/re2 -type f -exec touch -t 202601010000 {} +`).
+- The links show as `??`, because `build_*/`, `mac-deps/`, `node_modules/` and `ref/` only match directories. Stage files by name, and never `git add -A`.
+- Tracked links (`test/markdown`, `test/jquery-ui`, `test/media`) point to `../../lambda-test/*`, which does not resolve under `.claude/worktrees/<name>/`. Fixtures that use them fail in a worktree. Run those fixtures from the main checkout.
+- Worktree paths contain `.claude/`, so a dot appears in every absolute path. Before calling a failure pre-existing, run the base binary **from its own checkout's cwd**.
+- **Never run `make release` in a worktree.** That includes anything that depends on it: `release-node-*`, `release-rdb-drivers` and `package-*`. Its `clean-all` runs `rm -rf build_temp/re2_build` through the link and deletes the shared RE2 build. Use `make build-release-compile` instead. Build release modules with `make -C build/premake config=release_native <project>`.
+- The stash stack (`refs/stash`) is shared by every worktree. Prefer a WIP commit. If you do stash, use `git stash push -m <tag>` and `git stash apply <sha>`, never a bare `pop`.
+
+Removing a worktree:
+
+```bash
+# inside it: drop the links (no -r, no trailing slash, which would follow the link into MAIN)
+rm build_temp mac-deps node_modules ref test/js262
+git status --porcelain --ignore-submodules=none     # must be empty
+# from the main checkout
+git worktree remove --force <path>   # an initialized test/yaml submodule needs --force;
+                                     # a locked worktree needs --force --force
+git branch -d <branch>
+```
+
+### 7.3 Build Gotchas
+
+- **macOS `/usr/bin/make` is GNU Make 3.81.** It compares mtimes in whole seconds, so `sleep 2` between before/after steps. It has no `&:` grouped targets, so the tree-sitter-lambda generate rule becomes three independent targets. `make -j generate-grammar` can run `tree-sitter generate` concurrently; run it without `-j`.
+- **Same-second source swaps.** A `cp` that lands in the same second as the last build leaves the old object linked. Delete `build/obj/<project>/native/<debug|release>/<file>.o` and rebuild. Then confirm which binary you have, with `cmp` or a probe whose output differs between the two versions.
+- **Renamed or moved sources.** Premake never deletes orphaned `.o` files and `ar` never drops members. Purge both, or the link silently uses stale code (seen as bogus "undefined symbol" errors that name the *old* object):
+  ```bash
+  find build -name "<old_stem>*.o" -delete
+  for a in $(find build -name "*.a"); do ar t "$a" | grep -q "^<old_stem>" && rm -f "$a"; done
+  ```
+  `make build` builds only the `lambda` project. Test archives under `build/lib/` (e.g. `liblambda-rt-cpp.a`) are relinked by `make build-test` or the baseline targets.
+- **Debug and release share `lambda.exe`.**
+  - `make test-lambda-baseline` runs `make debug` and always leaves a debug binary.
+  - `make build-test` rebuilds the flavour of the last top-level build (the `.lambda_release_build` marker).
+  - After `make build-release-compile`, `make build` does not relink the debug binary. Run `rm lambda.exe` first.
+  - `make release` runs `clean-all`, which deletes `test/*.exe`. Follow it with `make build-test`.
+  - Before timing, check the binary: `strings lambda.exe | grep -c 'VALIDATOR] validate_against_base_type'` prints `0` for release.
+- **Node modules are separate DSOs.** `modules/node-{core,fs,net,crypto}` compile against `JsRuntimeState` (`lambda/js/js_runtime_state.hpp`), and `make build` does not rebuild them. After a layout change they read wrong offsets, with no link error. Rebuild them with `make build-node-core build-node-fs build-node-net build-node-crypto`, on **both** sides of an A/B. A fresh checkout needs the same rebuild before `require("fs")` works.
+- **Archive relinking.** `utils/generate_premake.py` overrides premake's `ldDeps`, so every `.a` in a binary's `linkoptions` is a link prerequisite (`make test-premake-generator` checks this). If a binary seems to hold an old archive, check `grep '^ *LDDEPS' build/premake/<project>.make`.
+- **Tree-sitter CLI.** `package.json` pins `tree-sitter-cli` 0.25.10. The Lambda grammar needs 0.25+ (ABI 15), so run `npm install` in a checkout that still has an older CLI. The CLI caches compiled grammars by language name in a per-user cache. Parsing a scratch copy of the grammar can therefore swap the parser other checkouts see. Set `TREE_SITTER_LIBDIR=<own dir>` for each copy; `test/ts_s16_conformance.sh` already uses `temp/tree-sitter-lib`.
+
+### 7.4 Test Gotchas
+
+- **Baseline flakiness under load.** `make test-lambda-baseline` runs suites in parallel, and `test-batch` gives each script 60 s. Heavy scripts can time out, and the failing set changes from run to run. Rerun the test on its own before calling it a regression:
+  ```bash
+  ./test/test_lambda_gtest.exe --gtest_filter='*<name>*'
+  ```
+  Radiant layout and page suites flake the same way. `test_page_load_gtest` reports a timeout as exit code `-1`, which looks like a crash. Repeat a run 3× per configuration before you attribute a delta. Don't swap `lambda.exe` while a baseline is running.
+- **Goldens run on the `auto` tier,** so JIT-only defects pass the baseline. Sweep each tier through the real harness, which honours `.mac.txt` overrides, `run` mode and negative tests. Hand-rolled per-file sweeps report many false mismatches.
+  ```bash
+  LAMBDA_EXEC_BACKEND=jit    ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*'
+  LAMBDA_EXEC_BACKEND=interp ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*'
+  ```
+- **Slow benchmarks.** Entries in `SLOW_BENCHMARK_TESTS` (`test/test_lambda_helpers.hpp`) are dropped at discovery, so no `--gtest_filter` selects them, despite the comment there. No gate checks them; run the script directly and diff it against its `.txt`.
+- **T0 interpreter lists.** `test/lambda/interp_p0_subset.txt` and `interp_excluded.txt` together partition the corpus. Regenerate both with `make interp-sweep`, never with `tier_sweep.py` alone. `make test-lambda-interp` (`test_interp_gtest`) is in the extended suite, not the baseline.
+- **Whole-corpus compile check.** Goldens never compile package or benchmark modules that no test executes. `./lambda.exe --emit-ast-dump <file.ls>` builds and type-checks one module without running it, and exits 1 on error. To diff error codes, run it over `git ls-files '*.ls'` with a HEAD binary and with the new one. BSD `xargs -I` caps the command at 255 bytes and silently drops files, so pass the binary in an env var with `xargs -n 1`.
+- **Display-list stubs.** `test_display_list_gtest`, `test_retained_display_list_gtest` and `test_state_store_gtest` link `test/test_{display_list,retained_display_list,state_store}_stubs.cpp` instead of the ThorVG backend. A new `rdt_*` call in display-list code needs a stub in all three files. `make build` passes, and only `make build-test` fails to link.
+- **`test/mir/mir_budgets.json`** is edited by hand and holds per-profile budgets (`default`, `darwin-debug-v3`). Never `git checkout` it to undo one edit: that also reverts every other uncommitted budget change.
+- **REPL tests** expect the `λ>` prompt, which needs a UTF-8 `LANG`/`LC_ALL`. In a shell without one, three tests fail on a `>` prompt.
+- **UI simulation** failures are logged as `event_sim: <assert> FAIL …` in `./log.txt`, so run without `--no-log` when you debug one.
+- **Benchmarks.** Time mode in `test/benchmark/run_benchmarks.py` and `run_standard_benchmarks.py` requires `--typed` (untyped `<bench>.ls` plus typed `<bench>2.ls`) or `--legacy`. Status `ok` means exit 0, no `FAIL` marker and a parsed `__TIMING__`; the output is **not** diffed against goldens. Time a release binary (§7.3).
+
+### 7.5 Environment Knobs
+
+Renamed 2026-10-03. Current binaries no longer read the old names.
+
+| Variable | Values (default) | Old name |
+|----------|------------------|----------|
+| `LAMBDA_EXEC_BACKEND` | `interp` \| `auto` \| `jit` (`auto`) | `LAMBDA_TIER` |
+| `LAMBDA_FUNC_JIT_THRESHOLD` | calls before promotion (5) | `LAMBDA_JIT_THRESHOLD` |
+| `LAMBDA_LOOP_JIT_THRESHOLD` | loop back-edges before handoff (10000) | `LAMBDA_JIT_BACKEDGE` |
+| `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`) | `JS_EXECUTION_BACKEND` |
+| `JS_FUNC_JIT_THRESHOLD` | (5) | `JS_JIT_THRESHOLD` |
+| `JS_LOOP_JIT_THRESHOLD` | (10000) | `JS_JIT_BACKEDGE` |
+
+Archived binaries in the git-ignored `test/benchmark/exe/` (see its `MANIFEST.md`) read only the old names. `run_benchmarks.py` and `run_paired_benchmarks.py` set both names.
+
+Other knobs: `LAMBDA_TEST_DIR` and `WPT_COMMIT` for `setup-test.sh`, `TREE_SITTER_LIBDIR` (§7.3), and `LAMBDA_ROOT`. The Makefile sets `LAMBDA_ROOT` for the render and layout Node runners. Set it yourself when you run `test/render/test_radiant_render.js` directly, because that script resolves its root through the `test/render` symlink.
