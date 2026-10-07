@@ -12841,12 +12841,8 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
         return;
     }
     target = unwrap_primary_node(target);
-    if (!target) {
-        reject_assignment(node);
-        return;
-    }
-    if (target->node_type == AST_NODE_INDEX_EXPR ||
-            target->node_type == AST_NODE_MEMBER_EXPR) {
+    if (target && (target->node_type == AST_NODE_INDEX_EXPR ||
+            target->node_type == AST_NODE_MEMBER_EXPR)) {
         AstFieldNode* field = (AstFieldNode*)target;
         AstCompoundAssignNode* assignment = node;
         assignment->node_type = target->node_type == AST_NODE_INDEX_EXPR
@@ -12865,7 +12861,12 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
             target->node_type == AST_NODE_INDEX_EXPR ? "array element" : "map member");
         return;
     }
-    if (target->node_type != AST_NODE_IDENT) {
+    if (!target || target->node_type != AST_NODE_IDENT) {
+        // an unbraced `if (c) x = v` assigns to the whole expression (S16.6.1).
+        record_semantic_error_span(tp, span, ERR_INVALID_ASSIGNMENT,
+            target && target->node_type == AST_NODE_IF_EXPR
+                ? "conditional assignments require a braced branch: if (condition) { name = value }"
+                : "assignment target must be a mutable binding, member or subscript");
         reject_assignment(node);
         return;
     }
