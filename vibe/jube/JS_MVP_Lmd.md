@@ -3,7 +3,9 @@
 **Date:** 2026-10-07
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
-phase implemented. Current validation and measurements are recorded in §10.8.
+phase implemented. The last validated release and measurements are recorded in §10.8.
+The numeric-library phase is implemented in source (§15); its runtime and
+performance acceptance gates remain pending.
 
 **Destination:** `lambda/js/mvp-lmd/`
 
@@ -19,7 +21,10 @@ The four governing goals remain fixed (USER, 2026-10-07):
 1. **Keep emitted MIR minimal.** Use retained analysis to avoid unnecessary
    checks, conversions, roots, wrappers, and function bodies.
 2. **Keep new helpers and helper code minimal.** Reuse audited Lambda/lib
-   primitives; count internal utilities, adapters, and shared additions too.
+   primitives; prefer existing Lambda functions first. For a small semantic
+   difference, consider an explicit option on the existing function while
+   preserving its default Lambda behavior. Count internal utilities, adapters,
+   and shared additions too; notify the user before adding any new helper.
 3. **Implement exactly the admitted scope.** Section 3 describes the shipped
    subset; §10 records the object/Map extension. Excluded capabilities receive
    diagnostics, without reserved machinery for later features.
@@ -86,6 +91,8 @@ object/Map boundary and its scope decisions.
 | Operators | Arithmetic, remainder/power, bitwise/shifts, comparisons, loose/strict equality, `typeof`, `void`, short-circuiting, conditional/comma; object `in`/property `delete` | Object-to-primitive coercion; `instanceof` |
 | Variables | `var`, `let`, `const`; assignments, logical/compound assignments, updates, changing kinds | Destructuring; sloppy implicit global creation |
 | Arrays | Dense mixed/nested literals, indexed reads/writes, append at length, length reads/shrink | Holes, sparse writes, other named properties, constructors/methods, descriptors/prototypes |
+| Typed arrays | `Int32Array`, `Uint8Array`, `Float64Array`: length construction, zero initialization, indexed reads/writes, `.length`, `.fill(value, start?, end?)` (§15; validation pending) | Buffer/view constructors, other properties/methods, typed-array iteration, detachment/resizing/shared storage |
+| Math | Fixed calls to `sqrt`, `sin`, `floor`, `trunc`, `abs`, `min`, `max`, `ceil`, `cos` (§15; validation pending) | First-class Math object/methods, dynamic method names, mutation, other Math members |
 | Objects/Map | Data properties, own projections, `new Map()` and fixed collection operations (§10) | `__proto__`, descriptors/accessors, proxies, custom prototypes, iterable Map construction |
 | Control flow | Blocks, conditionals, while/do/for, direct `for-of` with simple pair binding (§10.5), switch/fallthrough, labels, break/continue, return | `for-in`, general iterators, generators, async, throw/try/catch/finally |
 | Functions | Ordinary declarations/expressions, arrows, simple parameters, recursion, function values, indirect calls, program bindings | Enclosing local captures, default/rest/spread parameters, observable `this`/`arguments`/`new.target`, constructors/methods/classes |
@@ -656,3 +663,89 @@ Implemented; latest evidence is in §10.8.
 This is representation and ownership tuning under **D2.2.5**, **D5.3.1–D5.3.4**
 and **D8.2.6**. Numeric-array promotion and new object features remain outside
 the phase. Apply §13's paired MIR measurements and correctness gates.
+
+## 15. Numeric libraries and wider benchmark coverage
+
+**Status:** IMPLEMENTED IN SOURCE, acceptance pending; 2026-10-07.
+This phase adds fixed-size typed arrays and Math
+operations on the shared Lambda substrate (**S1.11**, **D1.3v3**, **D2.2.5**,
+**D2.6.1v3**, **D5.3**, **D8.2.6**).
+
+### 15.1 Scope
+
+- `Int32Array`, `Uint8Array`, and `Float64Array`: construction by length,
+  zero initialization, indexed reads/writes, `.length`, and `.fill()`.
+  Preserve JS length validation, element conversion, out-of-bounds behavior,
+  reference aliasing, and precise storage ownership.
+- `Math.sqrt`, `sin`, `floor`, and `trunc` first; then `abs`, `min`, `max`,
+  `ceil`, and `cos`. Retain JS coercion, argument evaluation, NaN, infinities,
+  and signed zero. Intrinsic recognition must respect binding shadowing and
+  the admitted receiver/member contract.
+- Use owning, fixed-size typed storage. Buffer/view constructors, exposed
+  buffers, detachment, resizing, shared buffers, and Atomics are deferred.
+  Ordinary mixed arrays retain their existing representation; automatic
+  numeric-array promotion is a separate optimization.
+
+The first nine benchmark targets, identified from their current sources, are:
+
+| Suite | Targets |
+|---|---|
+| R7RS | `nqueens`, `fft` |
+| Larceny | `primes`, `quicksort`, `triangl`, `paraffins`, `ray` |
+| Kostya | `primes`, `matmul` |
+
+These remain kernel targets, not verified new passes. Preserve algorithms,
+inputs, iteration counts, and result checks; adapt only the host harness as
+in the existing comparisons. Node CLI/I/O compatibility is outside this phase.
+
+### 15.2 Reuse and helper disclosure
+
+For every operation, inspect existing Lambda functions, storage primitives,
+and shared MIR emitters before adding code. Reuse a matching function directly;
+for a small semantic difference, consider a narrowly scoped option that keeps
+existing callers' behavior unchanged. Keep JS coercion distinct from physical
+conversion and ownership (**S1.11**, **D2.4.3**, **D5.3.4**, **D8.2.6**).
+
+The implementation reuses Lambda's `ArrayNum` allocation, shared MIR storage
+operations, existing JS coercion lowering, and Lambda's native Math entry
+points. There are **no new native runtime helpers**. Four compiler utilities
+were disclosed before coding; the existing string-index helper gained a typed
+index option. The audited reuse choices and dependency inventory are in the
+[numeric implementation record](../impl/JS_MVP_Lmd_Numeric.md).
+Full-JS runtime helpers remain outside §1's execution boundary, including
+transitive calls.
+
+Before implementing any further new helper,
+including compiler utilities or shared additions, tell the user its proposed
+name/location, purpose, why reuse or an option is insufficient, and its
+dependencies and GC/ownership effects. Record that inventory with the eventual
+implementation evidence; do not add parallel per-element-kind implementations.
+
+### 15.3 Acceptance and following phases
+
+Release compilation and whitespace checks passed. No runtime tests or benchmark
+measurements were run for this implementation round; the gates below remain
+pending, and §10.8's results do not validate these changes.
+
+Validate numeric edges, constructor lengths, typed stores, bounds, aliases,
+shadowing, and allocation lifetimes normally and with forced GC/poisoning.
+Require the existing MVP cases, Lambda/input and full-JS Test262 gates, and
+matched outputs for each newly admitted benchmark. Compare frozen release
+binaries with pinned native MIR and self-reported execution times, alternating
+pairs, and an identical-control peer; include existing workloads and affected
+shared clients. Report actual coverage, new/extended helpers, and unresolved
+results before marking the phase implemented.
+
+Later coverage expands in this order:
+
+| Phase | Surface | Candidate workloads |
+|---|---|---|
+| Array library | `push`, `pop`, `join`, `slice`, `fill`; then `new Array(n)` with genuine hole semantics | Kostya `json_gen`/`base64`, Larceny `puzzle`, R7RS `mbrot` |
+| String library | `charCodeAt`, `charAt`, `repeat`, `slice`, `String.fromCharCode`; simple destructuring assignment | Kostya `brainfuck`/`levenshtein`, Julia string workloads |
+| Functions and classes | Captured locals, receiver calls/`this`, constructors, basic classes and inheritance | AWFY and larger JetStream workloads |
+
+Holes must remain distinguishable from present undefined values (**S1.11**).
+AWFY also needs its class/receiver behavior; array methods alone do not admit
+it. These later surfaces require their own scoped phases. `__proto__`, fancy
+descriptors, accessors, and proxies remain excluded; plain objects and Map
+continue to use ordinary Lambda storage without VMap (**D2.6.9v3**, §10).

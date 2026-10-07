@@ -134,7 +134,9 @@ extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
 }
 extern "C" Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited) {
     Map* map = object_face(owner);
-    if (!map) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    // typed arrays are JS objects, but their reflection is outside this phase.
+    if (!map) return mvp_lmd_fail(get_type_id(owner) == LMD_TYPE_ARRAY_NUM
+        ? LMD_MVP_CAPABILITY : LMD_MVP_TYPE, 0);
     String* key = name.get_string();
     if (own_field(map, key)) return Item{.item = ITEM_TRUE};
     if (inherited) {
