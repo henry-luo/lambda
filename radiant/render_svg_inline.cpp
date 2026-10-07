@@ -596,43 +596,120 @@ static void svg_resource_document_destroy(SvgResourceDocument* document) {
     rdt_picture_free(document->picture); lam::free_owned(document->path);
 }
 
-static bool svg_style_init(SvgStyleContext* style, Element* root,
-                            float viewport_width, float viewport_height, DomDocument* host = nullptr,
-                            const char* source_path = nullptr, bool image_document = false) {
+static bool svg_style_begin(SvgStyleContext* style) {
     *style = {};
     style->resource_owner = style;
     style->pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.styles");
     if (!style->pool) return false;
     style->entries = SvgStyleMap::create(64);
-    if (!host && g_svg_active_rdcon && g_svg_active_rdcon->ui_context)
-        host = g_svg_active_rdcon->ui_context->document;
-    DomElement* live_root = host ? dom_find_element_for_source(host->root, root) : nullptr;
-    if (live_root) {
-        style->document = host;
-        style->engine = (CssEngine*)host->services.cached_css_engine;
-    } else {
-        // isolated image/use documents borrow the parsed SVG only for this walk;
-        // their CSS/DOM metadata has its own owner and cannot leak host selectors.
-        Input* input = Input::create(style->pool);
-        style->isolated_document = input ? dom_document_create(input) : nullptr;
-        style->document = style->isolated_document;
-        if (!style->document) { svg_style_destroy(style); return false; }
-        style->document->resource_policy = host ? host->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
-        dom_document_borrow_input_resources(style->document);
-        style->document->services.svg_image_document = image_document;
-        if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
-        style->document->root = lam::up(build_dom_tree_from_element(root, style->document, nullptr));
-        style->engine = css_engine_create(style->document->document_pool);
-        if (!style->document->root || !style->engine) { svg_style_destroy(style); return false; }
-        style->document->services.cached_css_engine = style->engine;
-        css_engine_set_viewport(style->engine, viewport_width, viewport_height);
-        svg_style_collect_sheets(style, root);
-    }
+    return true;
+}
+
+// shared tail: a matcher and the element index of the document being styled
+static bool svg_style_finish(SvgStyleContext* style, DocState* host_state) {
     style->matcher = selector_matcher_create(style->pool);
     if (!style->entries || !style->matcher) { svg_style_destroy(style); return false; }
-    if (live_root) state_configure_selector_matcher((DocState*)host->state, style->matcher);
+    if (host_state) state_configure_selector_matcher(host_state, style->matcher);
     svg_style_index_tree(style, style->document->root);
     return true;
+}
+
+// Inline SVG content is styled against its live host document.
+static bool svg_style_init_host(SvgStyleContext* style, DomDocument* host) {
+    if (!host || !host->root || !svg_style_begin(style)) return false;
+    style->document = host;
+    style->engine = (CssEngine*)host->services.cached_css_engine;
+    return svg_style_finish(style, (DocState*)host->state);
+}
+
+static bool svg_style_init(SvgStyleContext* style, Element* root,
+                            float viewport_width, float viewport_height, DomDocument* host = nullptr,
+                            const char* source_path = nullptr, bool image_document = false) {
+    if (!host && g_svg_active_rdcon && g_svg_active_rdcon->ui_context)
+        host = g_svg_active_rdcon->ui_context->document;
+    if (host && dom_find_element_for_source(host->root, root)) return svg_style_init_host(style, host);
+    if (!svg_style_begin(style)) return false;
+    // isolated image/use documents borrow the parsed SVG only for this walk;
+    // their CSS/DOM metadata has its own owner and cannot leak host selectors.
+    Input* input = Input::create(style->pool);
+    style->isolated_document = input ? dom_document_create(input) : nullptr;
+    style->document = style->isolated_document;
+    if (!style->document) { svg_style_destroy(style); return false; }
+    style->document->resource_policy = host ? host->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
+    dom_document_borrow_input_resources(style->document);
+    style->document->services.svg_image_document = image_document;
+    if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
+    style->document->root = lam::up(build_dom_tree_from_element(root, style->document, nullptr));
+    style->engine = css_engine_create(style->document->document_pool);
+    if (!style->document->root || !style->engine) { svg_style_destroy(style); return false; }
+    style->document->services.cached_css_engine = style->engine;
+    css_engine_set_viewport(style->engine, viewport_width, viewport_height);
+    svg_style_collect_sheets(style, root);
+    return svg_style_finish(style, nullptr);
+}
+
+// One paint pass reads a fixed host document, so its inline SVGs share one host
+// style context: building it per SVG walked the whole host document (index,
+// SMIL preparation, root lookups) once more for every inline SVG on the page.
+// It is rebuilt for each pass and whenever the DOM or interaction state moved.
+struct SvgPaintHostStyle : DomDocumentResourceData {
+    uint64_t pass;
+    uint64_t mutation_epoch;
+    uint64_t state_version;
+    bool valid;
+    bool animation_prepared;
+    SvgStyleContext style;
+};
+
+static uint64_t g_svg_paint_pass;
+
+void render_svg_begin_paint_pass(void) { g_svg_paint_pass++; }
+
+static void svg_paint_host_style_destroy(DomDocumentResourceData* data) {
+    auto* shared = static_cast<SvgPaintHostStyle*>(data);
+    svg_style_destroy(&shared->style);
+    mem_free(shared);
+}
+
+// The shared context for an inline SVG painted in the active pass, or null when
+// the caller must style it on its own (outside paint, or not in the host index).
+static SvgStyleContext* svg_paint_host_style(Element* svg_element) {
+    DomDocument* host = g_svg_paint_pass && g_svg_active_rdcon && g_svg_active_rdcon->ui_context
+        ? g_svg_active_rdcon->ui_context->document : nullptr;
+    if (!host || !host->root || !svg_element) return nullptr;
+    SvgPaintHostStyle* shared = nullptr;
+    for (DomDocumentResource* resource = host->resources; resource; resource = resource->next)
+        if (resource->destroy == svg_paint_host_style_destroy) {
+            shared = static_cast<SvgPaintHostStyle*>(resource->data);
+            break;
+        }
+    if (!shared) {
+        shared = (SvgPaintHostStyle*)mem_calloc(1, sizeof(SvgPaintHostStyle), MEM_CAT_RENDER);
+        if (!shared) return nullptr;
+        if (!dom_document_add_resource(host, shared, svg_paint_host_style_destroy)) {
+            mem_free(shared);
+            return nullptr;
+        }
+    }
+    uint64_t state_version = host->state ? ((DocState*)host->state)->version : 0;
+    if (!shared->valid || shared->pass != g_svg_paint_pass ||
+        shared->mutation_epoch != host->mutation_epoch || shared->state_version != state_version) {
+        svg_style_destroy(&shared->style);
+        shared->valid = svg_style_init_host(&shared->style, host);
+        shared->pass = g_svg_paint_pass;
+        shared->mutation_epoch = host->mutation_epoch;
+        shared->state_version = state_version;
+        shared->animation_prepared = false;
+        if (!shared->valid) return nullptr;
+    }
+    SvgStyleEntry query = {};
+    query.element = svg_element;
+    if (!SvgStyleMap::get(shared->style.entries, query)) return nullptr;
+    if (!shared->animation_prepared) {
+        svg_animation_prepare(host->root);
+        shared->animation_prepared = true;
+    }
+    return &shared->style;
 }
 
 bool render_svg_picture_has_animation(RdtPicture* picture) {
@@ -6929,11 +7006,15 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     ctx.viewport_height = viewport_height;
 
     // sample document values before the root viewport and its resource spaces are established.
-    SvgStyleContext style = {};
-    svg_style_init(&style, svg_element, viewport_width, viewport_height, nullptr, source_path, image_document);
+    SvgStyleContext local_style = {};
+    SvgStyleContext* shared_style = image_document ? nullptr : svg_paint_host_style(svg_element);
+    if (!shared_style) svg_style_init(&local_style, svg_element, viewport_width, viewport_height,
+        nullptr, source_path, image_document);
+    SvgStyleContext& style = shared_style ? *shared_style : local_style;
     ctx.style_context = lam::up(&style);
     SvgAnimationSourceScope animation_sources(style.document);
-    if (style.document && style.document->root) svg_animation_prepare(style.document->root);
+    // the shared host context prepares SMIL once per pass
+    if (!shared_style && style.document && style.document->root) svg_animation_prepare(style.document->root);
     if (style.isolated_document && style.document->root)
         svg_animation_set_document_time(style.document, image_time);
 
@@ -6949,7 +7030,8 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     // canvas mostly empty when SVG intrinsic size differs from the viewport).
     DomDocument* host_document = g_svg_active_rdcon && g_svg_active_rdcon->ui_context
         ? g_svg_active_rdcon->ui_context->document : nullptr;
-    bool inline_root = host_document && dom_find_element_for_source(host_document->root, svg_element);
+    // the shared host context exists only for an SVG found in the host index
+    bool inline_root = shared_style || (host_document && dom_find_element_for_source(host_document->root, svg_element));
     if (!inline_root && !vb.has_viewbox && viewport_width > 0 && viewport_height > 0) {
         const char* w_attr = get_svg_attr(svg_element, "width");
         const char* h_attr = get_svg_attr(svg_element, "height");
@@ -7017,7 +7099,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
         if (semantic_begin >= 0) dl_end_element(dl, semantic_begin);
     }
 
-    svg_style_destroy(&style);
+    if (!shared_style) svg_style_destroy(&local_style);
     if (isolated_fonts) font_context_destroy(isolated_fonts);
     scratch_restore(resource_scratch, resource_mark);
     if (pushed_source) svg_resource_stack_pop(source_path);

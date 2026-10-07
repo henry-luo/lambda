@@ -556,6 +556,7 @@ static void render_output_init_context(RasterRenderContext* rdcon, UiContext* ui
     memset(rdcon, 0, sizeof(RasterRenderContext));
     rdcon->ui_context = lam::up(uicon);
     rdcon->profiler = lam::up(profiler);
+    render_svg_begin_paint_pass();
     if (uicon && uicon->document && uicon->document->state) {
         rdcon->retained_dl_cache = lam::up(uicon->document->state->retained_dl_cache);
     }
