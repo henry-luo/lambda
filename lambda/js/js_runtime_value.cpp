@@ -1686,10 +1686,11 @@ extern "C" Item js_strict_equal(Item left, Item right) {
         if (left.item == right.item) return (Item){.item = b2it(true)};
         String* l_str = it2s(left);
         String* r_str = it2s(right);
-        if (l_str->len != r_str->len) {
-            return (Item){.item = b2it(false)};
-        }
-        return (Item){.item = b2it(memcmp(l_str->chars, r_str->chars, l_str->len) == 0)};
+        if (l_str->len == r_str->len && !memcmp(l_str->chars, r_str->chars, l_str->len))
+            return (Item){.item = b2it(true)};
+        // S1.11: canonical names and concatenated WTF-8 can encode the same UTF-16 units.
+        return (Item){.item = b2it(utf16_compare(l_str->chars, l_str->len,
+            r_str->chars, r_str->len) == 0)};
     }
 
     default:

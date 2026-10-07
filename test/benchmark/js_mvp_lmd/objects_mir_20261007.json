@@ -1,0 +1,1515 @@
+{
+  "metadata": {
+    "started_at": "2026-10-07T13:41:19.658151+08:00",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "binary_sha256": "3e2cc7f7d392493c4874a182b987d0147b2f52657b7603579c895053d58678af",
+    "runner_sha256": "6f3b134ff371fcd0e4ea01767060057e30c48aad5b5244be30b18e9459a7f601",
+    "binary_archive": "temp/mvp_lmd_objects/lambda-map-phase.exe",
+    "production_sources": {
+      "lambda/core/name_pool.cpp": {
+        "sha256": "b864fec2d96e02f6b3d7537da1774ce7749a7a3571225e94c7caef2170fc7096",
+        "lines": 713
+      },
+      "lambda/input/input.cpp": {
+        "sha256": "14022dc3a2ee2626041f1d79d59021b4d4d84c80af25069b49fdf3aadc1d0815",
+        "lines": 2910
+      },
+      "lambda/js/js_runtime.cpp": {
+        "sha256": "71022f24668904d482aa4433340961d3499ca6d81828766963d2b1b07305de5d",
+        "lines": 34011
+      },
+      "lambda/js/js_runtime_value.cpp": {
+        "sha256": "08cc0acf319d96487d225a7248148d024e7f898720cf2c79f980aab17751381d",
+        "lines": 2109
+      },
+      "lambda/js/mvp-lmd/mvp_lmd.h": {
+        "sha256": "56b545a81cd492dbf4e98884e2bb200756a4719e296548cf57bd217b1438336a",
+        "lines": 12
+      },
+      "lambda/js/mvp-lmd/mvp_lmd_mir.cpp": {
+        "sha256": "e8f76e40b75a7a5f06f5cc53e14cb34528556b3f116024540a901acab4b99cbf",
+        "lines": 2614
+      },
+      "lambda/js/mvp-lmd/mvp_lmd_objects.cpp": {
+        "sha256": "8f6306864e1ed1abc54903dddd94261a1d673f4c93ba1f8d20703a3fb7912bfa",
+        "lines": 333
+      },
+      "lambda/js/mvp-lmd/mvp_lmd_runtime.cpp": {
+        "sha256": "e8d9b63ccd5607e0f4808f3827f7cfdfb296016201c7cbb68c11453680726349",
+        "lines": 170
+      },
+      "lambda/js/mvp-lmd/mvp_lmd_runtime.h": {
+        "sha256": "f64236d33688498a8fac82e634c8264ce1b7251c8c89dd366a1388c47b3f60cb",
+        "lines": 34
+      },
+      "lambda/lambda.h": {
+        "sha256": "26b63673d9440ff6b265d4778d5e0fbabe12b17ecd7da1b20ac4f78fb7b8f3d2",
+        "lines": 3584
+      },
+      "lambda/lambda.hpp": {
+        "sha256": "91a4ce525ee039b255ae9b6603822f299b2ad811747651d0a52946fe0f69dbe5",
+        "lines": 1296
+      },
+      "lambda/runtime/gc/gc_heap.c": {
+        "sha256": "d4d066c96525af593c4a28dcd135077c584172b8d6dd0dad99c39d9663ea990b",
+        "lines": 2840
+      },
+      "lambda/runtime/lambda-data-runtime.cpp": {
+        "sha256": "4eb42095a949c920aa928c3950316d5da96c0b9506e00a9335e0e02076d1c831",
+        "lines": 4184
+      },
+      "lambda/runtime/lambda-eval.cpp": {
+        "sha256": "65edc691e6908793e62921599c24cc7d2a1e32c185cf1f962b69cd1b3fa12b78",
+        "lines": 14715
+      },
+      "lambda/runtime/lambda-mem.cpp": {
+        "sha256": "cfe92917314f63858c7a78bdcb52cae6eb803b481618bd6eac23ee7006a1f441",
+        "lines": 1534
+      },
+      "lib/utf.c": {
+        "sha256": "6b4cb024543df0687b5cb9d6d6717dd539eca2bc67a9ac49101c1995a6e3e944",
+        "lines": 587
+      },
+      "lib/utf.h": {
+        "sha256": "6e9cbf530ca46cf69cacc24dc6b66e3e26deebabb95096b7e384c7248357bf52",
+        "lines": 197
+      }
+    },
+    "node_version": "v22.13.0",
+    "runs": 5,
+    "warmups": 1,
+    "backend_flags": {
+      "JS_EXEC_BACKEND": "mir",
+      "JS_MIR_INTERP": "0",
+      "LAMBDA_JS_LARGE_INTERP": "0"
+    },
+    "timing": "self_reported_execution_ms; startup, compilation, output and teardown excluded",
+    "boundary": "MVP times its program entry; full JS and Node time one work() call. Node tiering is included.",
+    "order": "one untimed process per engine, then rotating engine order; every sample is a fresh process",
+    "mir_definition": "finalized pre-JIT instruction counts include cold/error paths; frame slots are emitter plans, not executed operation counts",
+    "claim": "cross-engine screen, not a causal before/after optimization result",
+    "memory_boundary": "one separate process peak RSS observation, including startup, compilation and teardown; not live object bytes",
+    "finished_at": "2026-10-07T13:41:31.336271+08:00",
+    "binary_unchanged": true,
+    "sources_unchanged": true,
+    "production_unchanged": true
+  },
+  "rows": [
+    {
+      "kernel": "object_fields",
+      "source": "/Users/henryluo/Projects/Lambda/test/benchmark/js_mvp_lmd/object_fields.js",
+      "source_sha256": "3bea6d71692b8f4fcc6d59937022f41a7765b572b7c9162b0858133c6f0186bc",
+      "expected": 125000750000,
+      "samples": [
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 10.077583342790604,
+          "wall_ms": 28.281291015446186
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 1.6875410000000013,
+          "wall_ms": 44.96758399181999
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 3.367,
+          "wall_ms": 18.905875011114404
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 1.5765419999999999,
+          "wall_ms": 44.534459011629224
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 3.389,
+          "wall_ms": 19.23316699685529
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 10.034166634082794,
+          "wall_ms": 28.624541009776294
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 2.967,
+          "wall_ms": 18.56387499719858
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 10.147333323955536,
+          "wall_ms": 28.75504200346768
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 1.6673749999999998,
+          "wall_ms": 45.40216701570898
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 9.905416637659073,
+          "wall_ms": 28.51966698653996
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 1.594332999999999,
+          "wall_ms": 45.14420800842345
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 2.972,
+          "wall_ms": 18.739666003966704
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 2.3441670000000006,
+          "wall_ms": 49.96058400138281
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 3.473,
+          "wall_ms": 21.891542011871934
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 10.074375003576279,
+          "wall_ms": 44.13179200491868
+        }
+      ],
+      "mir": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_objects/object_fields_mvp_lmd.mir",
+          "sha256": "6f99830acae06e48b9a0d93de96d725a79d7afa42468966e5fd88f88270daa38",
+          "bytes": 31110,
+          "instructions": 1047,
+          "bodies": 2,
+          "calls": 40,
+          "branches": 308,
+          "numeric_conversions": 10,
+          "imports": [
+            "lambda_stack_is_exhausted",
+            "lambda_side_stack_ensure_for",
+            "lambda_item_adopt_scalar_home",
+            "mvp_lmd_object_new",
+            "mvp_lmd_property_key",
+            "mvp_lmd_property_set",
+            "mvp_lmd_fail",
+            "mvp_lmd_array_store",
+            "mvp_lmd_property_get",
+            "mvp_lmd_string_to_number",
+            "mvp_lmd_number_to_string",
+            "mvp_lmd_string_concat"
+          ],
+          "frames": [
+            {
+              "function": "mvp_lmd_program",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 65,
+              "roots": 1,
+              "root_stores": 1,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "function": "mvp_lmd_f1",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 982,
+              "roots": 5,
+              "root_stores": 39,
+              "scalar_homes": 8,
+              "number_scratch": 0,
+              "safepoints": 25
+            }
+          ]
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_objects/object_fields_lambda_js.mir",
+          "sha256": "e421e74acb28240e04fd7da4064c30c709ed613726a4aa19b4543a8aa63cc128",
+          "bytes": 33782,
+          "instructions": 894,
+          "bodies": 3,
+          "calls": 112,
+          "branches": 229,
+          "numeric_conversions": 0,
+          "imports": [
+            "js_new_literal_object_with_typemap",
+            "lambda_active_module_name_item",
+            "js_create_data_property",
+            "push_d",
+            "js_throw_value",
+            "lambda_active_module_name_id",
+            "js_set_name_id",
+            "lambda_item_adopt_scalar_home",
+            "js_get_name_id",
+            "js_add",
+            "it2d",
+            "lambda_side_stack_ensure_for",
+            "lambda_stack_overflow_error",
+            "js_evalscript_check_global_lex_decl",
+            "js_global_lexical_declare_module_slot",
+            "lambda_active_module_var_store",
+            "js_init_module_vars_undefined_bulk",
+            "js_set_strict_mode",
+            "js_new_function_mir_pending",
+            "js_finalize_function",
+            "js_define_global_property_v",
+            "lambda_unit_const_at",
+            "js_set_global_var_property_fast",
+            "js_get_global_property_reference",
+            "js_require_object_coercible",
+            "js_get_reference",
+            "js_call",
+            "lambda_stack_is_exhausted",
+            "js_throw_range_error",
+            "lambda_item_resolve_pending",
+            "lambda_active_module_var_at",
+            "js_resolve_unresolved_binding",
+            "js_check_tdz",
+            "js_subtract"
+          ],
+          "frames": [
+            {
+              "function": "_js_work_110",
+              "entry": 1,
+              "bound": 1,
+              "instructions": 462,
+              "roots": 8,
+              "root_stores": 36,
+              "scalar_homes": 5,
+              "number_scratch": 0,
+              "safepoints": 12
+            },
+            {
+              "function": "js_main",
+              "entry": 0,
+              "bound": 0,
+              "instructions": 424,
+              "roots": 7,
+              "root_stores": 40,
+              "scalar_homes": 5,
+              "number_scratch": 0,
+              "safepoints": 42
+            }
+          ]
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 3.367,
+        "lambda_js": 10.074375003576279,
+        "node": 1.6673749999999998
+      },
+      "process_peak_rss_bytes": {
+        "mvp_lmd": 30261248,
+        "lambda_js": 32669696,
+        "node": 48250880
+      }
+    },
+    {
+      "kernel": "object_growth",
+      "source": "/Users/henryluo/Projects/Lambda/test/benchmark/js_mvp_lmd/object_growth.js",
+      "source_sha256": "a6f448ae936a6eda1cf52ab5b7c068c2a8ea95af77380e98f4af960efa6f72ce",
+      "expected": 1990000,
+      "samples": [
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 43.372708320617676,
+          "wall_ms": 62.010291003389284
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 4.548041,
+          "wall_ms": 48.975415993481874
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 4.018,
+          "wall_ms": 21.486375015228987
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 3.814916,
+          "wall_ms": 53.982957993866876
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 4.068,
+          "wall_ms": 21.03108400478959
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 42.66600000858307,
+          "wall_ms": 62.24858300993219
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 3.722,
+          "wall_ms": 46.28237499855459
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 42.81374999880791,
+          "wall_ms": 61.55062498874031
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 4.15475,
+          "wall_ms": 47.729625017382205
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 42.70754164457321,
+          "wall_ms": 62.23670800682157
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 3.900958000000001,
+          "wall_ms": 47.67170801642351
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 3.777,
+          "wall_ms": 20.961040980182588
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 4.0607500000000005,
+          "wall_ms": 47.688167018350214
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 3.682,
+          "wall_ms": 20.612874999642372
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 42.222583293914795,
+          "wall_ms": 61.34829198708758
+        }
+      ],
+      "mir": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_objects/object_growth_mvp_lmd.mir",
+          "sha256": "d970335a31f77d866c8bb68a608d7b0294dea3cb6d246983c3f48b6c09df50d5",
+          "bytes": 33573,
+          "instructions": 1103,
+          "bodies": 2,
+          "calls": 47,
+          "branches": 324,
+          "numeric_conversions": 12,
+          "imports": [
+            "lambda_stack_is_exhausted",
+            "lambda_side_stack_ensure_for",
+            "lambda_item_adopt_scalar_home",
+            "mvp_lmd_object_new",
+            "mvp_lmd_fail",
+            "mvp_lmd_string_to_number",
+            "mvp_lmd_number_to_string",
+            "mvp_lmd_string_concat",
+            "mvp_lmd_property_key",
+            "mvp_lmd_string_key",
+            "mvp_lmd_array_store",
+            "mvp_lmd_property_set",
+            "mvp_lmd_object_project",
+            "mvp_lmd_map_next",
+            "mvp_lmd_map_entry"
+          ],
+          "frames": [
+            {
+              "function": "mvp_lmd_program",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 65,
+              "roots": 1,
+              "root_stores": 1,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "function": "mvp_lmd_f1",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 1038,
+              "roots": 5,
+              "root_stores": 29,
+              "scalar_homes": 10,
+              "number_scratch": 0,
+              "safepoints": 26
+            }
+          ]
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_objects/object_growth_lambda_js.mir",
+          "sha256": "466e644b55129212c3f19f47c6856e6277b43a6b482b887bf4278a007218f1ea",
+          "bytes": 33355,
+          "instructions": 850,
+          "bodies": 3,
+          "calls": 120,
+          "branches": 204,
+          "numeric_conversions": 0,
+          "imports": [
+            "js_throw_value",
+            "js_new_object",
+            "lambda_unit_const_at",
+            "push_d",
+            "js_add",
+            "lambda_item_adopt_scalar_home",
+            "js_to_property_key",
+            "js_property_lane_for_canonical_key",
+            "js_set",
+            "js_assignment_set_result",
+            "lambda_active_module_name_item",
+            "js_get_global_property_reference",
+            "js_require_object_coercible",
+            "js_get_reference",
+            "js_call",
+            "js_get_iterator",
+            "js_iterator_step",
+            "lambda_active_module_name_id",
+            "js_check_tdz",
+            "it2d",
+            "js_iterator_close",
+            "js_error_lane_payload",
+            "lambda_side_stack_ensure_for",
+            "lambda_stack_overflow_error",
+            "js_evalscript_check_global_lex_decl",
+            "js_global_lexical_declare_module_slot",
+            "lambda_active_module_var_store",
+            "js_init_module_vars_undefined_bulk",
+            "js_set_strict_mode",
+            "js_new_function_mir_pending",
+            "js_finalize_function",
+            "js_define_global_property_v",
+            "js_set_global_var_property_fast",
+            "lambda_stack_is_exhausted",
+            "js_throw_range_error",
+            "lambda_item_resolve_pending",
+            "lambda_active_module_var_at",
+            "js_resolve_unresolved_binding",
+            "js_subtract"
+          ],
+          "frames": [
+            {
+              "function": "_js_work_110",
+              "entry": 1,
+              "bound": 1,
+              "instructions": 418,
+              "roots": 8,
+              "root_stores": 24,
+              "scalar_homes": 3,
+              "number_scratch": 0,
+              "safepoints": 23
+            },
+            {
+              "function": "js_main",
+              "entry": 0,
+              "bound": 0,
+              "instructions": 424,
+              "roots": 7,
+              "root_stores": 40,
+              "scalar_homes": 5,
+              "number_scratch": 0,
+              "safepoints": 42
+            }
+          ]
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 3.777,
+        "lambda_js": 42.70754164457321,
+        "node": 4.0607500000000005
+      },
+      "process_peak_rss_bytes": {
+        "mvp_lmd": 32129024,
+        "lambda_js": 34226176,
+        "node": 49545216
+      }
+    },
+    {
+      "kernel": "object_retype",
+      "source": "/Users/henryluo/Projects/Lambda/test/benchmark/js_mvp_lmd/object_retype.js",
+      "source_sha256": "559e74bbef91e0fe9a93d127243d6d0a568ee37f17d5785d6f43ae5d4ad881e1",
+      "expected": 4999950000,
+      "samples": [
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 60.65004163980484,
+          "wall_ms": 81.9981669774279
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 1.4337079999999993,
+          "wall_ms": 44.81558399857022
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 37.4,
+          "wall_ms": 51.91254100645892
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 1.2933749999999993,
+          "wall_ms": 44.89974997704849
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 37.38,
+          "wall_ms": 52.93720800545998
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 60.42141664028168,
+          "wall_ms": 80.97474998794496
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 38.161,
+          "wall_ms": 54.02258399408311
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 60.01158332824707,
+          "wall_ms": 80.41587501065806
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 1.534374999999999,
+          "wall_ms": 45.78650000621565
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 61.26129165291786,
+          "wall_ms": 81.63170798798092
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 1.6592909999999996,
+          "wall_ms": 46.50366699206643
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 38.263,
+          "wall_ms": 54.12495799828321
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 1.5477500000000006,
+          "wall_ms": 47.66270800610073
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 47.82,
+          "wall_ms": 64.52737498329952
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 67.90129169821739,
+          "wall_ms": 89.7421249828767
+        }
+      ],
+      "mir": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_objects/object_retype_mvp_lmd.mir",
+          "sha256": "dba1f4ce87ad016015c246d31e4693ba501c81f429b426bb46ebd9a80dc1a8c1",
+          "bytes": 26132,
+          "instructions": 858,
+          "bodies": 2,
+          "calls": 41,
+          "branches": 236,
+          "numeric_conversions": 5,
+          "imports": [
+            "lambda_stack_is_exhausted",
+            "lambda_side_stack_ensure_for",
+            "lambda_item_adopt_scalar_home",
+            "mvp_lmd_object_new",
+            "mvp_lmd_property_key",
+            "mvp_lmd_property_set",
+            "mvp_lmd_fail",
+            "mvp_lmd_array_store",
+            "mvp_lmd_property_get",
+            "mvp_lmd_string_to_number",
+            "mvp_lmd_number_to_string",
+            "mvp_lmd_string_concat"
+          ],
+          "frames": [
+            {
+              "function": "mvp_lmd_program",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 65,
+              "roots": 1,
+              "root_stores": 1,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "function": "mvp_lmd_f1",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 793,
+              "roots": 5,
+              "root_stores": 33,
+              "scalar_homes": 6,
+              "number_scratch": 0,
+              "safepoints": 28
+            }
+          ]
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_objects/object_retype_lambda_js.mir",
+          "sha256": "8f4f8d6f06948f03c842a8a612b26f904970cec5bf5000dd6d5f17f70360de92",
+          "bytes": 30985,
+          "instructions": 794,
+          "bodies": 3,
+          "calls": 111,
+          "branches": 202,
+          "numeric_conversions": 0,
+          "imports": [
+            "js_object_new_from_static_properties",
+            "lambda_item_adopt_scalar_home",
+            "push_d",
+            "js_throw_value",
+            "lambda_active_module_name_id",
+            "js_set_name_id",
+            "js_get_name_id",
+            "js_add",
+            "it2d",
+            "lambda_unit_const_at",
+            "lambda_side_stack_ensure_for",
+            "lambda_stack_overflow_error",
+            "lambda_active_module_name_item",
+            "js_evalscript_check_global_lex_decl",
+            "js_global_lexical_declare_module_slot",
+            "lambda_active_module_var_store",
+            "js_init_module_vars_undefined_bulk",
+            "js_set_strict_mode",
+            "js_new_function_mir_pending",
+            "js_finalize_function",
+            "js_define_global_property_v",
+            "js_set_global_var_property_fast",
+            "js_get_global_property_reference",
+            "js_require_object_coercible",
+            "js_get_reference",
+            "js_call",
+            "lambda_stack_is_exhausted",
+            "js_throw_range_error",
+            "lambda_item_resolve_pending",
+            "lambda_active_module_var_at",
+            "js_resolve_unresolved_binding",
+            "js_check_tdz",
+            "js_subtract"
+          ],
+          "frames": [
+            {
+              "function": "_js_work_110",
+              "entry": 1,
+              "bound": 1,
+              "instructions": 362,
+              "roots": 8,
+              "root_stores": 15,
+              "scalar_homes": 6,
+              "number_scratch": 0,
+              "safepoints": 11
+            },
+            {
+              "function": "js_main",
+              "entry": 0,
+              "bound": 0,
+              "instructions": 424,
+              "roots": 7,
+              "root_stores": 40,
+              "scalar_homes": 5,
+              "number_scratch": 0,
+              "safepoints": 42
+            }
+          ]
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 38.161,
+        "lambda_js": 60.65004163980484,
+        "node": 1.534374999999999
+      },
+      "process_peak_rss_bytes": {
+        "mvp_lmd": 28950528,
+        "lambda_js": 157253632,
+        "node": 47955968
+      }
+    },
+    {
+      "kernel": "object_delete",
+      "source": "/Users/henryluo/Projects/Lambda/test/benchmark/js_mvp_lmd/object_delete.js",
+      "source_sha256": "d68167eb5365af042823836a44952a05bd2e08983ca56c3a9bbe574b2e96b2c2",
+      "expected": 200030000,
+      "samples": [
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 96.19791668653488,
+          "wall_ms": 115.1171250094194
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 1.1146659999999997,
+          "wall_ms": 43.298333999700844
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 2.884,
+          "wall_ms": 18.335625005420297
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 1.1418750000000006,
+          "wall_ms": 42.67554197576828
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 3.159,
+          "wall_ms": 18.607583013363183
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 96.09295836091042,
+          "wall_ms": 113.82387499907054
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 2.93,
+          "wall_ms": 18.287207989487797
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 95.92633336782455,
+          "wall_ms": 113.70179199730046
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 1.0996670000000002,
+          "wall_ms": 43.005584011552855
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 97.69341668486595,
+          "wall_ms": 115.33316600252874
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 1.140542,
+          "wall_ms": 42.63437498593703
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 3.166,
+          "wall_ms": 17.549166979733855
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 1.1015420000000002,
+          "wall_ms": 42.245208023814484
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 3.182,
+          "wall_ms": 17.769624973880127
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 97.75841665267944,
+          "wall_ms": 114.80008298531175
+        }
+      ],
+      "mir": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_objects/object_delete_mvp_lmd.mir",
+          "sha256": "ec883965d3e095d2bb64e26e8015d6994bb83f8de5db21fd870cd3d0c60dd5e6",
+          "bytes": 31472,
+          "instructions": 1052,
+          "bodies": 2,
+          "calls": 41,
+          "branches": 310,
+          "numeric_conversions": 10,
+          "imports": [
+            "lambda_stack_is_exhausted",
+            "lambda_side_stack_ensure_for",
+            "lambda_item_adopt_scalar_home",
+            "mvp_lmd_object_new",
+            "mvp_lmd_property_key",
+            "mvp_lmd_property_set",
+            "mvp_lmd_property_delete",
+            "mvp_lmd_fail",
+            "mvp_lmd_array_store",
+            "mvp_lmd_property_get",
+            "mvp_lmd_string_to_number",
+            "mvp_lmd_number_to_string",
+            "mvp_lmd_string_concat"
+          ],
+          "frames": [
+            {
+              "function": "mvp_lmd_program",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 65,
+              "roots": 1,
+              "root_stores": 1,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "function": "mvp_lmd_f1",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 987,
+              "roots": 5,
+              "root_stores": 33,
+              "scalar_homes": 8,
+              "number_scratch": 0,
+              "safepoints": 26
+            }
+          ]
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_objects/object_delete_lambda_js.mir",
+          "sha256": "95e695d5c157c1dc3ba5d09a7a13c53355134cee7116a13fc103b4c9da1a9548",
+          "bytes": 33705,
+          "instructions": 881,
+          "bodies": 3,
+          "calls": 112,
+          "branches": 231,
+          "numeric_conversions": 0,
+          "imports": [
+            "js_new_literal_object_with_typemap",
+            "lambda_active_module_name_item",
+            "js_create_data_property",
+            "js_delete",
+            "js_delete_reference_result",
+            "push_d",
+            "js_throw_value",
+            "js_set_name_id",
+            "lambda_item_adopt_scalar_home",
+            "js_get_name_id",
+            "js_add",
+            "it2d",
+            "lambda_side_stack_ensure_for",
+            "lambda_stack_overflow_error",
+            "js_evalscript_check_global_lex_decl",
+            "js_global_lexical_declare_module_slot",
+            "lambda_active_module_var_store",
+            "js_init_module_vars_undefined_bulk",
+            "js_set_strict_mode",
+            "js_new_function_mir_pending",
+            "js_finalize_function",
+            "js_define_global_property_v",
+            "lambda_unit_const_at",
+            "js_set_global_var_property_fast",
+            "js_get_global_property_reference",
+            "js_require_object_coercible",
+            "js_get_reference",
+            "js_call",
+            "lambda_stack_is_exhausted",
+            "js_throw_range_error",
+            "lambda_item_resolve_pending",
+            "lambda_active_module_var_at",
+            "lambda_active_module_name_id",
+            "js_resolve_unresolved_binding",
+            "js_check_tdz",
+            "js_subtract"
+          ],
+          "frames": [
+            {
+              "function": "_js_work_110",
+              "entry": 1,
+              "bound": 1,
+              "instructions": 449,
+              "roots": 5,
+              "root_stores": 24,
+              "scalar_homes": 5,
+              "number_scratch": 0,
+              "safepoints": 14
+            },
+            {
+              "function": "js_main",
+              "entry": 0,
+              "bound": 0,
+              "instructions": 424,
+              "roots": 7,
+              "root_stores": 40,
+              "scalar_homes": 5,
+              "number_scratch": 0,
+              "safepoints": 42
+            }
+          ]
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 3.159,
+        "lambda_js": 96.19791668653488,
+        "node": 1.1146659999999997
+      },
+      "process_peak_rss_bytes": {
+        "mvp_lmd": 30162944,
+        "lambda_js": 32604160,
+        "node": 48857088
+      }
+    },
+    {
+      "kernel": "map_lookup",
+      "source": "/Users/henryluo/Projects/Lambda/test/benchmark/js_mvp_lmd/map_lookup.js",
+      "source_sha256": "ebc6b0980dfdfef06a3a0abbb9f2d3bd24c9a233dad32b51b2da88d69934500d",
+      "expected": 120000000,
+      "samples": [
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 108.67912501096725,
+          "wall_ms": 127.03445900115184
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 4.134084,
+          "wall_ms": 65.75579199125059
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 28.7,
+          "wall_ms": 45.68112498964183
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 3.938625,
+          "wall_ms": 45.58137501589954
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 29.052,
+          "wall_ms": 46.02183299721219
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 110.00783333182335,
+          "wall_ms": 128.42270801775157
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 29.086,
+          "wall_ms": 46.167499996954575
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 107.7045833170414,
+          "wall_ms": 126.65820799884386
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 3.9067919999999994,
+          "wall_ms": 45.20666698226705
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 107.21354168653488,
+          "wall_ms": 124.693916994147
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 3.8858750000000004,
+          "wall_ms": 45.19333297503181
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 28.739,
+          "wall_ms": 45.288416993571445
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 4.082958,
+          "wall_ms": 45.3485420148354
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 28.46,
+          "wall_ms": 44.4156669836957
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 108.9959166944027,
+          "wall_ms": 127.10937499650754
+        }
+      ],
+      "mir": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_objects/map_lookup_mvp_lmd.mir",
+          "sha256": "974470b71b872c92093ae5233187d9a7cf6e1804778d7462e8794ccc0384c620",
+          "bytes": 36217,
+          "instructions": 1203,
+          "bodies": 2,
+          "calls": 54,
+          "branches": 352,
+          "numeric_conversions": 8,
+          "imports": [
+            "lambda_stack_is_exhausted",
+            "lambda_side_stack_ensure_for",
+            "lambda_item_adopt_scalar_home",
+            "mvp_lmd_object_new",
+            "mvp_lmd_property_get",
+            "mvp_lmd_fail",
+            "mvp_lmd_map_call",
+            "mvp_lmd_string_to_number",
+            "mvp_lmd_number_to_string",
+            "mvp_lmd_string_concat"
+          ],
+          "frames": [
+            {
+              "function": "mvp_lmd_program",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 65,
+              "roots": 1,
+              "root_stores": 1,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "function": "mvp_lmd_f1",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 1138,
+              "roots": 11,
+              "root_stores": 33,
+              "scalar_homes": 13,
+              "number_scratch": 0,
+              "safepoints": 33
+            }
+          ]
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_objects/map_lookup_lambda_js.mir",
+          "sha256": "621520aff5f079a7b388786d23e2c88111889f4519b1e505acd2474da332df18",
+          "bytes": 36524,
+          "instructions": 976,
+          "bodies": 3,
+          "calls": 128,
+          "branches": 242,
+          "numeric_conversions": 0,
+          "imports": [
+            "lambda_active_module_name_item",
+            "js_get_global_property_reference",
+            "js_construct_value",
+            "js_require_object_coercible",
+            "js_get_reference",
+            "push_d",
+            "js_throw_value",
+            "js_call",
+            "fmod",
+            "js_add",
+            "lambda_item_adopt_scalar_home",
+            "it2d",
+            "lambda_side_stack_ensure_for",
+            "lambda_stack_overflow_error",
+            "js_evalscript_check_global_lex_decl",
+            "js_global_lexical_declare_module_slot",
+            "lambda_active_module_var_store",
+            "js_init_module_vars_undefined_bulk",
+            "js_set_strict_mode",
+            "js_new_function_mir_pending",
+            "js_finalize_function",
+            "js_define_global_property_v",
+            "lambda_unit_const_at",
+            "js_set_global_var_property_fast",
+            "lambda_stack_is_exhausted",
+            "js_throw_range_error",
+            "lambda_item_resolve_pending",
+            "lambda_active_module_var_at",
+            "lambda_active_module_name_id",
+            "js_resolve_unresolved_binding",
+            "js_check_tdz",
+            "js_subtract"
+          ],
+          "frames": [
+            {
+              "function": "_js_work_110",
+              "entry": 1,
+              "bound": 1,
+              "instructions": 544,
+              "roots": 7,
+              "root_stores": 27,
+              "scalar_homes": 7,
+              "number_scratch": 0,
+              "safepoints": 27
+            },
+            {
+              "function": "js_main",
+              "entry": 0,
+              "bound": 0,
+              "instructions": 424,
+              "roots": 7,
+              "root_stores": 40,
+              "scalar_homes": 5,
+              "number_scratch": 0,
+              "safepoints": 42
+            }
+          ]
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 28.739,
+        "lambda_js": 108.67912501096725,
+        "node": 3.938625
+      },
+      "process_peak_rss_bytes": {
+        "mvp_lmd": 30801920,
+        "lambda_js": 32800768,
+        "node": 47464448
+      }
+    },
+    {
+      "kernel": "map_iteration",
+      "source": "/Users/henryluo/Projects/Lambda/test/benchmark/js_mvp_lmd/map_iteration.js",
+      "source_sha256": "5b067c327782b86cc08b938484a52c0672d3a72ce05dcb92c3f5f650953cbfb1",
+      "expected": 200000000,
+      "samples": [
+        {
+          "engine": "lambda_js",
+          "round": 1,
+          "exec_ms": 784.688416659832,
+          "wall_ms": 806.148875009967
+        },
+        {
+          "engine": "node",
+          "round": 1,
+          "exec_ms": 4.154624999999999,
+          "wall_ms": 47.452209022594616
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 1,
+          "exec_ms": 1.923,
+          "wall_ms": 19.713041983777657
+        },
+        {
+          "engine": "node",
+          "round": 2,
+          "exec_ms": 3.7116249999999997,
+          "wall_ms": 47.18762499396689
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 2,
+          "exec_ms": 1.937,
+          "wall_ms": 20.28641599463299
+        },
+        {
+          "engine": "lambda_js",
+          "round": 2,
+          "exec_ms": 674.2560000121593,
+          "wall_ms": 695.1573330152314
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 3,
+          "exec_ms": 1.94,
+          "wall_ms": 19.672041991725564
+        },
+        {
+          "engine": "lambda_js",
+          "round": 3,
+          "exec_ms": 684.974291652441,
+          "wall_ms": 705.3079579782207
+        },
+        {
+          "engine": "node",
+          "round": 3,
+          "exec_ms": 3.617459,
+          "wall_ms": 45.25183397345245
+        },
+        {
+          "engine": "lambda_js",
+          "round": 4,
+          "exec_ms": 648.8745833039284,
+          "wall_ms": 668.8859580026474
+        },
+        {
+          "engine": "node",
+          "round": 4,
+          "exec_ms": 3.545957999999999,
+          "wall_ms": 44.91641599452123
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 4,
+          "exec_ms": 1.891,
+          "wall_ms": 18.902874988270923
+        },
+        {
+          "engine": "node",
+          "round": 5,
+          "exec_ms": 3.5450420000000005,
+          "wall_ms": 44.803750002756715
+        },
+        {
+          "engine": "mvp_lmd",
+          "round": 5,
+          "exec_ms": 1.885,
+          "wall_ms": 18.634250009199604
+        },
+        {
+          "engine": "lambda_js",
+          "round": 5,
+          "exec_ms": 647.405749976635,
+          "wall_ms": 667.1247080084868
+        }
+      ],
+      "mir": {
+        "mvp_lmd": {
+          "path": "temp/mvp_lmd_objects/map_iteration_mvp_lmd.mir",
+          "sha256": "536d77727ca00c92f9345fe189ccc71f341e3b895cc6337b8772e17c5ff119a1",
+          "bytes": 40208,
+          "instructions": 1358,
+          "bodies": 2,
+          "calls": 51,
+          "branches": 399,
+          "numeric_conversions": 10,
+          "imports": [
+            "lambda_stack_is_exhausted",
+            "lambda_side_stack_ensure_for",
+            "lambda_item_adopt_scalar_home",
+            "mvp_lmd_object_new",
+            "mvp_lmd_property_get",
+            "mvp_lmd_fail",
+            "mvp_lmd_map_call",
+            "mvp_lmd_map_next",
+            "mvp_lmd_string_to_number",
+            "mvp_lmd_number_to_string",
+            "mvp_lmd_string_concat"
+          ],
+          "frames": [
+            {
+              "function": "mvp_lmd_program",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 65,
+              "roots": 1,
+              "root_stores": 1,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "function": "mvp_lmd_f1",
+              "entry": 1,
+              "bound": 0,
+              "instructions": 1293,
+              "roots": 7,
+              "root_stores": 41,
+              "scalar_homes": 15,
+              "number_scratch": 0,
+              "safepoints": 24
+            }
+          ]
+        },
+        "lambda_js": {
+          "path": "temp/mvp_lmd_objects/map_iteration_lambda_js.mir",
+          "sha256": "a7138a790824b8e4ec410df70b47578fce74112c15d010688807477cad6e6f7d",
+          "bytes": 39039,
+          "instructions": 1085,
+          "bodies": 3,
+          "calls": 129,
+          "branches": 253,
+          "numeric_conversions": 2,
+          "imports": [
+            "lambda_active_module_name_item",
+            "js_get_global_property_reference",
+            "js_construct_value",
+            "js_require_object_coercible",
+            "js_get_reference",
+            "push_d",
+            "js_throw_value",
+            "js_call",
+            "js_get_iterator",
+            "js_iterator_step",
+            "js_get_iterator_lazy",
+            "js_iterator_close",
+            "js_add",
+            "lambda_item_adopt_scalar_home",
+            "it2d",
+            "js_error_lane_payload",
+            "lambda_side_stack_ensure_for",
+            "lambda_stack_overflow_error",
+            "js_evalscript_check_global_lex_decl",
+            "js_global_lexical_declare_module_slot",
+            "lambda_active_module_var_store",
+            "js_init_module_vars_undefined_bulk",
+            "js_set_strict_mode",
+            "js_new_function_mir_pending",
+            "js_finalize_function",
+            "js_define_global_property_v",
+            "lambda_unit_const_at",
+            "js_set_global_var_property_fast",
+            "lambda_stack_is_exhausted",
+            "js_throw_range_error",
+            "lambda_item_resolve_pending",
+            "lambda_active_module_var_at",
+            "lambda_active_module_name_id",
+            "js_resolve_unresolved_binding",
+            "js_check_tdz",
+            "js_subtract"
+          ],
+          "frames": [
+            {
+              "function": "_js_work_110",
+              "entry": 1,
+              "bound": 1,
+              "instructions": 653,
+              "roots": 10,
+              "root_stores": 48,
+              "scalar_homes": 4,
+              "number_scratch": 0,
+              "safepoints": 33
+            },
+            {
+              "function": "js_main",
+              "entry": 0,
+              "bound": 0,
+              "instructions": 424,
+              "roots": 7,
+              "root_stores": 40,
+              "scalar_homes": 5,
+              "number_scratch": 0,
+              "safepoints": 42
+            }
+          ]
+        }
+      },
+      "medians_ms": {
+        "mvp_lmd": 1.923,
+        "lambda_js": 674.2560000121593,
+        "node": 3.617459
+      },
+      "process_peak_rss_bytes": {
+        "mvp_lmd": 31211520,
+        "lambda_js": 82804736,
+        "node": 49463296
+      }
+    }
+  ],
+  "validation": {
+    "lambda_baseline": {
+      "log": "temp/mvp-map-lambda-baseline-final7.log",
+      "sha256": "adc0ebba25f6a90949de4109b73ef691e6474e70cd759c2478c7f2771bb4339d",
+      "passed": 6286,
+      "total": 6286
+    },
+    "mvp_forced_gc": {
+      "log": "temp/mvp-map-forced-final3.log",
+      "sha256": "85f2a110d8d04b723d70f130f5346931b3dbb3fa6e55ce25e1ad90329fa6f04d",
+      "passed": 10,
+      "total": 10
+    },
+    "test262": {
+      "log": "temp/mvp-map-test262-baseline-final2.log",
+      "sha256": "9eb5bac957667cbbbab03f2258fe8ca642da7926803616b37d040ffe6cda4321",
+      "exit_code": 0,
+      "fully_passed": 40259,
+      "retry_only": 2,
+      "failed": 0,
+      "regressions": 0,
+      "total": 40261,
+      "retry_only_tests": [
+        "language_identifiers_start_unicode_9_0_0_js",
+        "language_identifiers_start_unicode_10_0_0_js"
+      ]
+    }
+  },
+  "code_cost": {
+    "definition": "physical source lines, including comments and blank lines; shared delta relative to task-start HEAD",
+    "imported_mvp_runtime_entries": 20,
+    "new_imported_entries": 10,
+    "new_object_runtime_cpp_lines": 333,
+    "all_mvp_runtime_cpp_lines": 503,
+    "mvp_mir_cpp_lines": 2614,
+    "mvp_mir_cpp_net_added": 468,
+    "shared_substrate_lines_added": 244,
+    "shared_substrate_lines_removed": 33,
+    "full_js_string_client_lines_added": 28,
+    "full_js_string_client_lines_removed": 13
+  }
+}

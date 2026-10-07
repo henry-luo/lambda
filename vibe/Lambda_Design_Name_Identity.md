@@ -602,6 +602,22 @@ Open issues (accepted or KIV):
   metadata, but a SectionNameId or spelling NameRef must never become its
   semantic identity.
 
+### 7.4 Canonical string-key encoding — 2026-10-07
+
+**S8.2.2v5**, **D4.6.1v4** settle the shared Lambda/JS key boundary:
+canonical UTF-8 for scalar characters and lossless WTF-8 for lone hosted JS
+UTF-16 units. Adjacent valid surrogate pairs combine into scalar UTF-8;
+lone units remain distinct. This performs no NFC/NFKC normalization,
+case folding, locale conversion, or U+FFFD replacement.
+
+NamePool creation and lookup, shape additions, and dynamic map reads/writes
+use this contract. An interned ID proves equality within its scope; differing
+IDs or pool addresses do not prove inequality across pools. Empty keys and
+embedded NUL remain length-bearing names. The new MVP uses the same rule for
+ordinary object keys and ES Map string entries; SameValueZero governs other
+ES Map keys under **S1.11**. This addition does not claim completion of the
+namespace, section/GOT, or exotic-property work described elsewhere here.
+
 ## 8. Future reconciliation with the MIR-cache design
 
 MIR-cache reconciliation is explicitly deferred. This proposal defines the
