@@ -47,6 +47,10 @@ Restart and later layout updates; value/readout assertions alone missed the bug.
 The native range thumb now uses the existing circle fill/outline helpers in
 `render_form.cpp`, preserving its size and interaction geometry (D7.5.3).
 The toolbar preview was visually checked and all 32 speed assertions still pass.
+The full Radiant baseline retains 4,031 passes / 350 partial / 4 failures; both
+HTTP setup failures pass with loopback access, leaving the existing Tetris and
+LaTeX iframe failures. Float/int-cast lint passes. Artifacts:
+`temp/slide/circle_thumb_*` and `temp/slide/northstar/circle-thumb-controls.png`.
 
 | Latest verification | Result and boundary |
 |---|---|
