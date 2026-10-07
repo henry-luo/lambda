@@ -58,8 +58,8 @@ CONVENTIONS (match the JS set exactly)
   review each draft, render diagrams, run the reflow pass, verify every embed + cross-link resolves,
   and keep terminology/cross-links consistent.
 - Cleanup (after the set is complete and verified): delete the absorbed old docs, fix any dangling
-  references to them elsewhere in the repo, and link <PREFIX>_00_Overview.md from README.md,
-  CLAUDE.md, and AGENTS.md (doc list + a Key Entry Points row).
+  references to them elsewhere in the repo, and link <PREFIX>_00_Overview.md from README.md
+  and AGENTS.md (doc list + a Key Entry Points row; CLAUDE.md imports AGENTS.md).
 
 Before starting, ask me clarifying questions — in particular confirm: (a) exact subsystem
 scope/boundaries, (b) which existing docs to absorb+delete, (c) doc granularity (how many docs),
