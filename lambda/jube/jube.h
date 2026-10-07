@@ -15,11 +15,12 @@ extern "C" {
 #define JUBE_HOST_API_VERSION 4
 #define JUBE_HOST_LANG_API_VERSION 1
 
-// The Windows loader resolves this entry by name from each Jube DLL.
+// The loader resolves this entry by name from each Jube DLL/DSO; release
+// builds compile modules with hidden default visibility (D7.3.6).
 #ifdef _WIN32
 #define JUBE_MODULE_EXPORT __declspec(dllexport)
 #else
-#define JUBE_MODULE_EXPORT
+#define JUBE_MODULE_EXPORT __attribute__((visibility("default")))
 #endif
 
 // Hosted compiler services are intentionally build-coupled while their opaque
@@ -1623,7 +1624,8 @@ struct JubeHostNodeAPI {
     const JubeHostStreamAPI* streams;
     // Additive network-policy tail consumed by node-net.
     const JubeHostNetworkAPI* network;
-    // Additive static-host codec provider consumed by node-zlib.
+    // Additive static-host codec provider; its node-zlib consumer was removed
+    // 2026-10-07, and the slot stays so the table layout is unchanged.
     const JubeHostNodeZlibAPI* zlib;
     // Additive static-host filesystem provider consumed by node-fs.
     const JubeHostFilesystemAPI* filesystem;

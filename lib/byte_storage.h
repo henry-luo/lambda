@@ -1,6 +1,7 @@
 // Shared refcounted byte storage for immutable spans and mutable buffer handles.
 #ifndef LIB_BYTE_STORAGE_H
 #define LIB_BYTE_STORAGE_H
+#include "lambda_api.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -80,13 +81,13 @@ bool byte_buffer_init_storage(ByteBufferHandle* handle, ByteStorage* storage,
     size_t storage_offset, size_t byte_length, size_t max_byte_length,
     uint32_t flags, MemCategory category);
 void byte_buffer_destroy(ByteBufferHandle* handle);
-const uint8_t* byte_buffer_data_const(const ByteBufferHandle* handle);
+LAMBDA_LIB_API const uint8_t* byte_buffer_data_const(const ByteBufferHandle* handle);
 uint8_t* byte_buffer_prepare_write(ByteBufferHandle* handle);
 bool byte_buffer_resize(ByteBufferHandle* handle, size_t new_length);
 void byte_buffer_detach(ByteBufferHandle* handle);
 bool byte_buffer_transfer(ByteBufferHandle* source, ByteBufferHandle* destination,
     size_t new_length, bool fixed_length);
-bool byte_buffer_is_detached(const ByteBufferHandle* handle);
+LAMBDA_LIB_API bool byte_buffer_is_detached(const ByteBufferHandle* handle);
 bool byte_buffer_is_resizable(const ByteBufferHandle* handle);
 bool byte_buffer_is_shared(const ByteBufferHandle* handle);
 

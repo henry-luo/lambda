@@ -1,0 +1,3 @@
+-record(n,{kind,op=0,a=nil,b=nil,c=nil,d=nil,list=[],name= <<>>,value=null,pvar=[]}).
+-record(jq_fn,{entry=0,params=0,locals=0}).
+-record(program,{code,constants,functions}).

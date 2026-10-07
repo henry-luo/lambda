@@ -1,119 +1,103 @@
-# Java and Erlang benchmark ports
+# Native Java and Erlang benchmarks
 
-Both languages provide ports for the authoritative registry's **77 entries**, or **71
-canonical workloads**, across R7RS, AWFY, BENG, Kostya, Larceny, Text, JetStream,
-and the Julia microbenchmarks. The six duplicate entries remain available with
-`--all`. Workload sizes, AWFY inner/outer counts, and JetStream repeats come from
-`run_benchmarks.py` and its checked-in Node sources.
+Handwritten Java and Erlang ports cover the registry's **77 entries / 71 canonical
+workloads** across R7RS, AWFY, BENG, Kostya, Larceny, Julia microbenchmarks,
+JetStream, and Text. The six duplicate entries remain available with `--all`.
+
+The ports use native functions, local variables, primitive arrays or tuples,
+records, maps, and host garbage collection. Java compiles the checked-in upstream
+AWFY Java sources unchanged. Erlang implements the algorithms with native BEAM
+code; private ETS tables are used where graphs require mutable object identity.
+The previous Julia-to-Java/Erlang generators and dynamic language adapters have
+been removed.
 
 ## Run
 
 From the repository root:
 
 ```sh
-python3 test/benchmark/run_java_benchmarks.py --all --warmup 0 --verify-node --timeout 7200 --output temp/java-validation.json
-python3 test/benchmark/run_erlang_benchmarks.py --all --warmup 0 --verify-node --timeout 7200 --output temp/erlang-validation.json
+python3 test/benchmark/run_java_benchmarks.py --all --warmup 1 --verify-node --timeout 180 --output temp/java-validation.json
+python3 test/benchmark/run_erlang_benchmarks.py --all --warmup 1 --verify-node --timeout 180 --output temp/erlang-validation.json
 python3 test/benchmark/run_java_benchmarks.py --suite awfy --bench cd
 python3 test/benchmark/run_erlang_benchmarks.py --list
-python3 test/benchmark/verify_julia_suite.py --engines java,erlang --timeout 600 --output temp/native-micro-oracles.json
+python3 test/benchmark/verify_julia_suite.py --engines java,erlang --timeout 180 --output temp/native-micro-oracles.json
+python3 -m unittest discover -s test/benchmark -p test_native_runner.py
 ```
 
-The full correctness commands disable the optional extra warmup and allow long
-runs for the boxed adapters. Use `--warmup 1` for the normal extra warmup.
-The four jq workloads can take tens of minutes to over an hour, particularly
-on Erlang. The normal 600-second timeout can be too short for them. Extra warmup
-roughly doubles the workload, so increase `--timeout` when enabling it.
-
-Initial Node-verified coverage is 77/77 entries for Java and 76/77 for Erlang.
-Erlang's full `jq_tree` run was cancelled at the user's request after about
-112 minutes; it has no passing result. Subsequent adapter fixes were checked
-with focused tests and bounded, reduced jq fixtures. Those diagnostic results
-do not establish a full-size `jq_tree` pass or replace its registered workload.
-
-Use JDK 17 or newer and Erlang/OTP with `erl` and `erlc`. The runners find
-Homebrew's installed JDK/Erlang on macOS, honor `JAVA_HOME`, and accept
-`JAVA_EXE`, `JAVAC_EXE`, `ERL_EXE`, and `ERLC_EXE` overrides. Compilation is cached
-under `temp/`, keyed by sources and toolchain version. Compilation completes
-before a benchmark process is timed. Erlang crash dumps and temporary files also
-stay under `temp/`.
+`--timeout` is a hard limit for each process. JDK 17+ and Erlang/OTP 27+ are
+required. The runners find Homebrew toolchains on macOS, honor `JAVA_HOME`, and
+accept `JAVA_EXE`, `JAVAC_EXE`, `ERL_EXE`, and `ERLC_EXE` overrides. Sources compile
+before execution into a source/toolchain-hashed cache under `temp/`. Each
+standalone run pins one compiled build for all entries. All temporary files and
+Erlang crash dumps stay under `temp/`.
 
 The unified runner supports `-e java,erlang` in time and memory modes:
 
 ```sh
 python3 test/benchmark/run_benchmarks.py --typed -e java,erlang,nodejs -s r7rs -n 3 --fresh --results-output temp/native-r7rs.json
-python3 test/benchmark/gen_overall_result.py --input temp/native-r7rs.json --engines java,erlang,nodejs --output temp/native-r7rs.md
 ```
 
-Execution times use `java` / `erlang`; process times use `java_e2e` /
-`erlang_e2e`. Missing toolchains, compilation failures, invalid timers, failed
-checks, and timeouts remain explicit failures. `--verify-node` compares full
-result output after removing timing markers and requires the runner's pinned
-Node version.
-The microbenchmark verifier also checks both languages against independent
-integer, summation, output-digest, and matrix-trace identities.
+## Workload and timing
 
-## Implementation and timing
+Workload sizes and iteration counts follow `run_benchmarks.py` and its registered
+Node sources. AWFY inner/outer counts and JetStream repeats are passed directly
+by the runner. `manifest.json` maps every registered entry to its native source,
+Node reference, and relevant counts. Runtime metadata hashes native sources,
+compiled artifacts, shared inputs, workload references, and the runner.
 
-`java/Ports.java` and `erlang/ports.erl` contain compiled native functions generated
-from the checked-in Julia algorithm ports. They execute in the JVM and BEAM
-respectively. `TextSearch.java` and `text_search.erl` use direct native indexed
-loops for the same Naive, KMP, and Boyer–Moore algorithms, avoiding boxed access
-in the billion character comparisons. The benchmark processes require their native toolchain and shared
-input fixtures; Julia is used only when regenerating source files. Python starts
-processes and validates outputs.
+`__TIMING__` measures workload execution. It excludes source compilation,
+process startup, preparation of external fixtures, optional warmup, and final
+verification/reporting. Checks that are part of the original algorithm's inner
+loop remain inside. Java may compile methods during the timed workload.
+Ordinary result reporting is outside these native timers; Node retains each
+checked-in script's own output/timing policy. Process time additionally includes VM startup, module loading, warmup,
+preparation, and verification. Java uses `-Xss16m -Xmx2g`; Erlang uses one scheduler
+and one async worker.
 
-The shared generation tool retains each algorithm's loops, recursion, data
-structures, and checks. Java uses boxed values, maps for lexical environments,
-and dynamic method dispatch. Erlang uses process-local mutable object handles,
-native arrays/maps, rooted call frames, and collection at loop boundaries and function returns.
-These choices preserve imperative benchmark object identity and cycles. Timings
-include these adapters and describe this generated implementation. Further
-optimization should retain the same workloads and output checks.
+Normally each process warms once using freshly prepared state and then prepares
+separate measured state. `--warmup 0` disables this optional warmup. The four
+Julia microbenchmarks **always warm once**, as required by their shared
+[workload contract](../julia/SUITE.md). They implement the scalar algorithms
+natively; no Julia data model, dispatch, indexing, or formatting machinery is
+emulated. Matrix multiplication remains scalar without BLAS or symmetry
+shortcuts. Pi summation recomputes all 500 independent sums. Formatted output
+performs all 391 synchronous open/write/close batches inside the timer.
 
-The tree investigation found substantial lexical-environment and call-frame
-overhead. The generators now resolve proven immutable scalar bindings once per
-function call, avoiding repeated constant lookup during bytecode dispatch.
-Erlang also avoids redundant argument normalization and unused lexical frames
-for expression blocks. Three interleaved pairs on each of two reduced tree
-cases showed about 17% lower execution time, with Node-verified checksums.
-The generated adapters still have substantial costs; full-size tree timing
-after these changes remains unmeasured.
+Navier–Stokes times one frame and verifies the next 14 frames and the density
+digest afterward. Splay setup remains outside timing, with full payloads,
+8,000 initial nodes, and 50 × 80 modifications. Its deterministic PRNG follows
+the existing cross-language port contract. Text workloads preserve all registered
+rounds, inputs, algorithms, and checksum checks.
 
-Each process normally performs one full warmup with freshly prepared state,
-then prepares separate measured state. `__TIMING__` covers the workload; it
-excludes native source compilation, startup, warmup, and subsequent verification.
-Java may continue JIT compilation during measurement. Process time includes VM
-startup, module/JIT loading, warmup, workload, and verification. `--warmup 0` or
-`NATIVE_BENCH_WARMUP=0` disables the extra warmup; the four Julia microbenchmarks
-always perform one warmup as required by their shared contract. Java uses
-`-Xss16m -Xmx2g`; Erlang uses one scheduler and one async worker.
+The four `jq_*` workloads execute the complete shared `.jq` filters. Their native
+recursive-descent parser and lexical compiler run before timing; the timed
+workload includes bytecode execution, forkable stacks, closures, path updates,
+and result collection. A jq interpreter is part of these particular workloads.
+It does not provide a language adapter for the other benchmarks. Arrays and
+objects copy along updated paths, preserving observable snapshots (formal
+semantics **S9.1.2**, `doc/Lambda_Formal_Semantics.md`). The implementation supports
+the benchmark subset; these checks do not establish full jq conformance.
 
-Text fixtures and jq filters compile/load before timing. The four `jq_*` ports
-execute the shared full-size `.jq` programs in a native port of Lambda's jq VM:
-recursive-descent parser, lexical bytecode compiler, forkable stacks, paths,
-closures, and compacted frame storage. Container updates copy along their paths,
-following the observable snapshot principle in **S9.1.2** of
-`doc/Lambda_Formal_Semantics.md`. This interpreter implements the benchmark
-subset. Its checks do not establish full jq conformance.
+`--verify-node` compares complete output, excluding timing markers, and requires
+the pinned Node version. The separate microbenchmark verifier checks independent
+integer, summation, byte-digest, and matrix identities. Failed checks, missing
+ports/toolchains, compilation errors, invalid timers, and timeouts stay explicit.
 
-Navier–Stokes times one frame and verifies the remaining frames and the shared
-density digest afterward. Matrix workloads retain scalar loops without BLAS.
-Formatted output opens, writes, and closes the OS null sink for every batch
-inside the timer. Other benchmark output follows the Julia ports' buffering
-policy. The algorithm ports retain the Julia reference's documented Splay PRNG
-and DeltaBlue planner choices; see `../julia/README.md`.
+The original Java/Erlang measurements imported into Result51 used generated
+adapters. They are historical measurements of that implementation and must not
+be presented as measurements of these rewritten ports. Source notices are in
+[LICENSE.md](LICENSE.md).
 
-## Regenerate and review
+## Validated native results
 
-```sh
-python3 test/benchmark/native_ports/generate.py
-python3 -m unittest discover -s test/benchmark -p test_native_runner.py
-```
+Both languages passed all **77/77 registered entries** against pinned Node.
+The independent microbenchmark verifier passed **8/8 ports**, and the native
+runner checks passed **11/11 tests**.
 
-Regeneration needs Julia on PATH to parse syntax; the Python backends emit native
-functions. They support the syntax used by these benchmark sources and fail on
-unsupported syntax. They are a benchmark maintenance tool. Edit the source
-algorithm or generator, then regenerate; retain the authoritative workload
-contract. `manifest.json` records entry mappings and exact algorithm-source
-hashes. Runner metadata also records native source, compiled artifact, generator, runtime,
-and fixture hashes. A standalone run pins one compiled build for all entries. Source notices are in [LICENSE.md](LICENSE.md).
+[Result51](../Overall_Result51.md) now uses three sequential fresh-process samples
+per canonical workload, with one full warmup and separate workload/process times.
+The [native result JSON](../benchmark_results_v51_java_erlang_native.json) retains
+the ordered samples and exact source, input, runtime, and compiled-artifact hashes.
+Its evidence archive contains the measured sources and binaries, all six raw run
+files, the Node references, and the independent verification output. The earlier
+adapter result JSON and baseline archive remain available as historical evidence.

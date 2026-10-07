@@ -5,6 +5,7 @@
  * All functions use Item (uint64_t) as the primary data type.
  */
 #pragma once
+#include "../../lib/lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,13 +40,13 @@ void js_set_document_source_load_observer(JsDocumentSourceLoadObserver observer)
 void js_map_promote_descriptor_kind(Map* m);
 
 Item js_undefined(void);
-Item make_js_undefined(void);
-Item js_make_string_len(const char* str, int len);
+LAMBDA_RT_API Item make_js_undefined(void);
+LAMBDA_RT_API Item js_make_string_len(const char* str, int len);
 // Take a StrBuf's contents as a GC string Item and free the buffer.
 Item js_strbuf_take_item(StrBuf* sb);
-Item js_make_string(const char* str);
+LAMBDA_RT_API Item js_make_string(const char* str);
 Item js_domexception_new(Item message, Item name_arg);
-bool js_string_equals(Item value, const char* expected);
+LAMBDA_RT_API bool js_string_equals(Item value, const char* expected);
 bool js_is_vm_context_error(Item value);
 // Returns ItemNull on every non-ASCII or semantically effectful case so the
 // MIR caller can preserve the ordinary capability call on that edge.
@@ -88,8 +89,8 @@ static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
 // record, or to the cached core Symbol value. Property storage converts the
 // latter only at the NameId boundary; callers otherwise retain JS identity.
 NameId js_well_known_symbol_name_id(int64_t symbol_id);
-Item js_well_known_symbol_key(int64_t symbol_id);
-bool js_is_callable(Item value);
+LAMBDA_RT_API Item js_well_known_symbol_key(int64_t symbol_id);
+LAMBDA_RT_API bool js_is_callable(Item value);
 bool js_has_call_capability(Item value);
 bool js_has_construct_capability(Item value);
 
@@ -127,12 +128,12 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_CLOSE_ABSENT_SENTI
  * Convert a JavaScript value to a primitive.
  * Follows ECMAScript ToPrimitive algorithm.
  */
-Item js_to_number(Item value);
+LAMBDA_RT_API Item js_to_number(Item value);
 // ToNumeric preserves BigInt while otherwise applying ToNumber.
 Item js_to_numeric(Item value);
 // ECMAScript ToInt32, used by bitwise operations and Web IDL integer adapters.
 int32_t js_to_int32(double value);
-Item js_to_string(Item value);
+LAMBDA_RT_API Item js_to_string(Item value);
 Item js_to_boolean(Item value);
 Item js_to_object(Item value);
 Item js_to_property_key(Item value);
@@ -140,13 +141,13 @@ Item js_to_property_key(Item value);
 /**
  * Check if a value is truthy according to JavaScript rules.
  */
-bool js_is_truthy(Item value);
+LAMBDA_RT_API bool js_is_truthy(Item value);
 // true for both physical representations of an ordinary JavaScript Array.
-bool js_is_js_array(Item value);
+LAMBDA_RT_API bool js_is_js_array(Item value);
 bool js_is_object_value(Item value);
 // Item-status helpers use the same merged lane as ordinary JS calls: a
 // boolean true is success and an ERROR-tagged Item is the complete failure.
-Item js_status_ok(void);
+LAMBDA_RT_API Item js_status_ok(void);
 #define JS_RETURN_IF_ERROR(...) do { \
     Item js_status_value = (__VA_ARGS__); \
     if (item_is_error(js_status_value)) return js_status_value; \
@@ -228,7 +229,7 @@ Item js_bitwise_and(Item left, Item right);      // &
 Item js_bitwise_or(Item left, Item right);       // |
 Item js_bitwise_xor(Item left, Item right);      // ^
 Item js_bitwise_not(Item operand);               // ~
-int64_t js_double_to_int32(double d);            // ToInt32 (safe for Infinity/NaN)
+LAMBDA_RT_API int64_t js_double_to_int32(double d);            // ToInt32 (safe for Infinity/NaN)
 Item js_left_shift(Item left, Item right);       // <<
 Item js_right_shift(Item left, Item right);      // >>
 Item js_unsigned_right_shift(Item left, Item right); // >>>
@@ -251,7 +252,7 @@ Item js_decrement_numeric(Item numeric);
 // =============================================================================
 
 struct TypeMap;
-Item js_new_object(void);
+LAMBDA_RT_API Item js_new_object(void);
 Item js_new_object_with_typemap(struct TypeMap* tm);
 Item js_new_literal_object_with_typemap(struct TypeMap* tm);
 // A compiler-owned primitive object-literal recipe.  The recipe outlives the
@@ -320,11 +321,11 @@ bool js_is_class_constructor_value(Item value);
 Item js_property_index_key(int64_t index);
 String* js_property_index_name(int64_t index);
 const char* js_property_index_chars(int64_t index, int* out_len);
-Item js_get_key_default(Item object, Item key);
-Item js_get_key_cstr(Item object, const char* key);
+LAMBDA_RT_API Item js_get_key_default(Item object, Item key);
+LAMBDA_RT_API Item js_get_key_cstr(Item object, const char* key);
 // Receiver-explicit property Get used by prototype, accessor, and Proxy paths.
 Item js_get_key_core(Item object, Item key, Item receiver);
-Item js_set_key_default(Item object, Item key, Item value);
+LAMBDA_RT_API Item js_set_key_default(Item object, Item key, Item value);
 // Receiver-explicit property Set belongs to the completion kernel.
 Item js_set_completion_with_key(Item target, Item key, Item value,
                                 Item receiver);
@@ -334,7 +335,7 @@ Item js_set_function_prototype_completion(Item target, Item value);
 Item js_set_error_property_completion(Item target, Item key, Item value);
 // Internal DefineOwn storage write; it never dispatches inherited accessors.
 Item js_define_own_key_storage(Item object, Item key, Item value);
-Item js_set_key_cstr(Item object, const char* key, Item value);
+LAMBDA_RT_API Item js_set_key_cstr(Item object, const char* key, Item value);
 Item js_using_dispose(Item resource);
 Item js_set_key_strict_policy(Item object, Item key, Item value);
 // Tune8 §2.2: dispatcher for JIT-emitted dynamic-strict property sets.
@@ -346,7 +347,7 @@ Item js_delete_reference_result(Item key, Item delete_result, int64_t strict);
 // js_private_property_set_strict removed.
 Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
 Item js_private_field_define(Item object, Item private_key, Item value);
-Item js_create_data_property(Item object, Item key, Item value);
+LAMBDA_RT_API Item js_create_data_property(Item object, Item key, Item value);
 Item js_get_reference(Item object, Item key);
 Item js_get_name_id(Item object, NameId name_id);
 Item js_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
@@ -355,7 +356,7 @@ Item js_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
 // Array Functions
 // =============================================================================
 
-Item js_array_new(int length);
+LAMBDA_RT_API Item js_array_new(int length);
 // Build a fresh dense array from compiler-owned inline Number Items. The
 // description is immutable; the returned array and its elements stay ordinary.
 Item js_array_new_from_static_items(const Item* items, int length);
@@ -369,9 +370,9 @@ bool js_array_promote_numeric(Item array);
 Item js_array_new_from_item(Item arg);
 Item js_elements_get(Item array, Item index);
 Item js_elements_set(Item array, Item index, Item value);
-Item js_elements_get_int(Item array, int64_t index);
+LAMBDA_RT_API Item js_elements_get_int(Item array, int64_t index);
 Item js_elements_get_number(Item array, double index);
-Item js_elements_set_int(Item array, int64_t index, Item value);
+LAMBDA_RT_API Item js_elements_set_int(Item array, int64_t index, Item value);
 // T12-4: physical own-element heads used before the allocating property
 // kernels. They accept only a present ordinary dense slot and cannot allocate.
 bool js_array_try_get_existing_own_dense_no_gc(Item array, int64_t index,
@@ -395,7 +396,7 @@ int64_t js_array_sparse_has_index(Item array, int64_t index);
 Item js_array_sparse_get_index(Item array, int64_t index);
 int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap);
 Item js_array_define_dense_element_direct(Item array, int64_t index, Item value);
-int64_t js_array_length(Item array);
+LAMBDA_RT_API int64_t js_array_length(Item array);
 
 // Walk a JS array's elements in index order, binding `name` to each element.
 // The index and the length are loop internals — a body that needs either one
@@ -406,7 +407,7 @@ int64_t js_array_length(Item array);
          name##__index < name##__count; name##__index++) \
         if (Item name = js_elements_get_int(array, name##__index); true)
 
-Item js_array_push(Item array, Item value);
+LAMBDA_RT_API Item js_array_push(Item array, Item value);
 void js_array_push_item_direct(Array* arr, Item value);
 double js_math_pow_d(double base, double exp);
 
@@ -455,14 +456,14 @@ Item js_new_interpreted_function(struct AstFuncNode* function,
 void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
-Item* js_alloc_env(int count);
+LAMBDA_RT_API Item* js_alloc_env(int count);
 // Allocate a closure environment and populate it in one step. A native
 // continuation's env is fixed at capture time, so the slot count and the slot
 // values are one decision; splitting them leaves a half-built env visible to
 // anything that walks the closure while the remaining stores are pending.
 Item* js_alloc_env1(Item a);
-Item* js_alloc_env2(Item a, Item b);
-Item* js_alloc_env3(Item a, Item b, Item c);
+LAMBDA_RT_API Item* js_alloc_env2(Item a, Item b);
+LAMBDA_RT_API Item* js_alloc_env3(Item a, Item b, Item c);
 
 // Unpack a native continuation's closure environment. A continuation that
 // outlives its environment has nothing left to do, which is not an error.
@@ -471,7 +472,7 @@ Item* js_alloc_env3(Item a, Item b, Item c);
     if (!name) return make_js_undefined()
 
 void js_env_rehome_scalars(Item* env);
-void js_set_function_name(Item fn_item, Item name_item);
+LAMBDA_RT_API void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source_known_code(Item fn_item, Item source_item);
 void js_set_function_source(Item fn_item, Item source_item);
 enum {
@@ -516,7 +517,7 @@ Item js_call(Item func_item, Item this_val, Item* args, int arg_count,
 // kernel's AST direct instance when the callee's facts allow, else js_call.
 Item js_call_from_ast(Item callee, Item this_val, Item* args, int arg_count,
                       uint64_t* result_home);
-Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+LAMBDA_RT_API Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_call_accessor_getter(Item getter, Item receiver);
 Item js_call_function_into(Item func_item, Item this_val, Item* args,
                            int arg_count, uint64_t* result_home);
@@ -586,7 +587,7 @@ Item js_create_regex_literal_items(Item pattern_item, Item flags_item);
 Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);
 Item js_regex_exec(Item regex, Item str);
-Item js_get_this();
+LAMBDA_RT_API Item js_get_this();
 Item js_get_lexical_this_binding(void);
 Item js_resolve_lexical_this(Item this_val);
 void js_set_this(Item this_val);
@@ -734,9 +735,9 @@ Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);
 Item js_set_collection_new_from(Item iterable);
 Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
-void js_set_prototype(Item object, Item prototype);
+LAMBDA_RT_API void js_set_prototype(Item object, Item prototype);
 void js_object_proto_setter(Item object, Item value);
-void js_mark_non_enumerable(Item object, Item name);
+LAMBDA_RT_API void js_mark_non_enumerable(Item object, Item name);
 void js_mark_non_writable(Item object, Item name);
 void js_mark_non_configurable(Item object, Item name);
 // Allocate a function's ordinary properties Map without materializing a data
@@ -808,7 +809,7 @@ Item js_array_from(Item iterable);
 Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg);
 Item js_json_parse(Item str_item);
 Item js_json_parse_full(Item str_item, Item reviver);
-Item js_json_stringify(Item value);
+LAMBDA_RT_API Item js_json_stringify(Item value);
 Item js_json_stringify_full(Item value, Item replacer, Item space);
 Item js_delete_property(Item obj, Item key);
 
@@ -825,17 +826,17 @@ void js_fetch_set_base_path(const char* dir_path);
 // =============================================================================
 
 // D8.4.3: throw returns the merged ERROR Item; routing carries that Item.
-Item js_throw_value(Item value);
+LAMBDA_RT_API Item js_throw_value(Item value);
 // Convert a routed ERROR Item to the JavaScript value observable at a catch,
 // rejection, or host boundary.  It never reads or clears ambient state.
-Item js_error_lane_payload(Item lane);
+LAMBDA_RT_API Item js_error_lane_payload(Item lane);
 // Format one routed lane for a host diagnostic without consulting ambient
 // ambient state.  `out` is caller-owned and may be empty on failure.
 void js_error_lane_format(Item lane, char* out, int out_size);
 
 /** v20: Throw a RangeError with the given message. */
-Item js_throw_range_error(const char* message);
-Item js_throw_type_error(const char* message);
+LAMBDA_RT_API Item js_throw_range_error(const char* message);
+LAMBDA_RT_API Item js_throw_type_error(const char* message);
 Item js_throw_syntax_error(Item message);
 Item js_throw_reference_error(Item message);
 // Tune8 §2.3: unified entry point for MIR-emitted throws (kind=0:SyntaxError,
@@ -843,22 +844,22 @@ Item js_throw_reference_error(Item message);
 Item js_throw_named_error(int64_t kind, Item message);
 
 /** Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE). */
-Item js_throw_type_error_code(const char* code, const char* message);
-Item js_throw_range_error_code(const char* code, const char* message);
+LAMBDA_RT_API Item js_throw_type_error_code(const char* code, const char* message);
+LAMBDA_RT_API Item js_throw_range_error_code(const char* code, const char* message);
 // printf-style variants: format into a bounded buffer and throw. They replace
 // the `char msg[N]; snprintf(...); throw(msg)` stanza at the call sites.
-Item js_throw_type_errorf(const char* format, ...);
-Item js_throw_type_error_codef(const char* code, const char* format, ...);
-Item js_throw_range_error_codef(const char* code, const char* format, ...);
-Item js_throw_error_with_code(const char* code, const char* message);
+LAMBDA_RT_API Item js_throw_type_errorf(const char* format, ...);
+LAMBDA_RT_API Item js_throw_type_error_codef(const char* code, const char* format, ...);
+LAMBDA_RT_API Item js_throw_range_error_codef(const char* code, const char* format, ...);
+LAMBDA_RT_API Item js_throw_error_with_code(const char* code, const char* message);
 
 /**
  * Node.js-style error helpers for common validation patterns.
  * Format: 'The "name" argument must be of type expected. Received type actual'
  */
-Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
-Item js_throw_invalid_arg_value(const char* name, const char* reason, Item actual);
-Item js_throw_out_of_range(const char* name, const char* range, Item actual);
+LAMBDA_RT_API Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
+LAMBDA_RT_API Item js_throw_invalid_arg_value(const char* name, const char* reason, Item actual);
+LAMBDA_RT_API Item js_throw_out_of_range(const char* name, const char* range, Item actual);
 
 /** Throw a system error (like ENOENT, EACCES) with code, errno, syscall, path. */
 
@@ -878,7 +879,7 @@ Item js_new_error_with_stack(Item message, Item stack_str);
  * v11: Create a typed Error object (TypeError, RangeError, etc.).
  * Returns a Map with {name: error_name, message: msg, stack: trace}.
  */
-Item js_new_error_with_name(Item error_name, Item message);
+LAMBDA_RT_API Item js_new_error_with_name(Item error_name, Item message);
 Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
 Item js_error_materialize_stack(Item error_obj);
 
@@ -958,8 +959,8 @@ Item js_encodeURI(Item str_item);
 Item js_decodeURI(Item str_item);
 Item js_unescape(Item str_item);
 Item js_escape(Item str_item);
-Item js_atob(Item str_item);
-Item js_btoa(Item str_item);
+LAMBDA_RT_API Item js_atob(Item str_item);
+LAMBDA_RT_API Item js_btoa(Item str_item);
 
 typedef struct JsMirPhaseTiming {
     long parse_us;
@@ -1117,7 +1118,7 @@ Item js_text_decoder_stream_new(Item encoding, Item options);
 // separate Lambda textual-symbol contract.
 
 Item js_symbol_create(Item description);
-Item js_symbol_for(Item key);
+LAMBDA_RT_API Item js_symbol_for(Item key);
 Item js_symbol_key_for(Item sym);
 Item js_symbol_to_string(Item sym);
 Item js_symbol_get_description(Item sym);
@@ -1207,9 +1208,9 @@ Item js_iterator_collect_rest(Item iterator);
 // v14: Promise Runtime
 // =============================================================================
 
-Item js_promise_create(Item executor);           // new Promise((resolve, reject) => ...)
-Item js_promise_resolve(Item value);             // Promise.resolve(value)
-Item js_promise_reject(Item reason);             // Promise.reject(reason)
+LAMBDA_RT_API Item js_promise_create(Item executor);           // new Promise((resolve, reject) => ...)
+LAMBDA_RT_API Item js_promise_resolve(Item value);             // Promise.resolve(value)
+LAMBDA_RT_API Item js_promise_reject(Item reason);             // Promise.reject(reason)
 Item js_promise_create_pending(void);
 bool js_promise_is(Item promise);
 void js_promise_fulfill_existing(Item promise, Item value);
@@ -1464,7 +1465,7 @@ void js_private_field_init_end(void);
 // Runtime entry points shared across JS translation units.
 uint64_t js_get_heap_epoch(void);
 Item js_get_typed_array_base_proto(void);
-Item js_process_emit(Item event_name, Item arg1);
+LAMBDA_RT_API Item js_process_emit(Item event_name, Item arg1);
 bool js_promise_vmap_is(Item value);
 bool js_proto_snapshot_is_valid(void);
 Item js_bigint_constructor(Item value);
@@ -1473,24 +1474,24 @@ Item js_async_hooks_get_current_resource(void);
 Item js_async_hooks_enter_resource(Item resource);
 void js_async_hooks_restore_resource(Item previous);
 void js_intrinsic_note_prototype_mutation(Item object);
-Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
-Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
+LAMBDA_RT_API Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
+LAMBDA_RT_API Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 
 #ifdef __cplusplus
 }
 
-Item js_make_number(double value);
+LAMBDA_RT_API Item js_make_number(double value);
 extern int js_dynamic_import_suppress_module_drain;
 
-Item make_string_item(const char* str, int len);
+LAMBDA_RT_API Item make_string_item(const char* str, int len);
 struct JsFunction; struct String;
-Item make_string_item(const char* str);
+LAMBDA_RT_API Item make_string_item(const char* str);
 // Interned property keys. These go through the name pool, so they keep name
 // identity and need no RootFrame — unlike make_string_item / js_get_key_cstr,
 // which heap-copy. Interning is semantics here, not style: do not "simplify"
 // a converted site onto the copying forms.
-Item js_name_item(const char* name, int len);
-Item js_name_item(const char* name);
+LAMBDA_RT_API Item js_name_item(const char* name, int len);
+LAMBDA_RT_API Item js_name_item(const char* name);
 Item js_get_name_key(Item object, const char* name, int len);
 Item js_get_name_key(Item object, const char* name);
 Item js_set_name_key(Item object, const char* name, int len, Item value);
@@ -1503,27 +1504,27 @@ Item js_set_name_key(Item object, const char* name, Item value);
     M(1) M(2) M(3) M(4) M(5) M(6) M(7) M(8)
 #define JS_NATIVE_CLOSURE_ARITIES(M) M(1) M(2) M(3) M(4) M(5)
 #define JS_DECLARE_NATIVE_FACTORY(arity) \
-    Item js_new_native_function(JsNativeP##arity target); \
-    Item js_new_native_constructor(JsNativeP##arity target); \
+    LAMBDA_RT_API Item js_new_native_function(JsNativeP##arity target); \
+    LAMBDA_RT_API Item js_new_native_constructor(JsNativeP##arity target); \
     Item js_new_distinct_native_function(JsNativeP##arity target); \
     Item js_new_distinct_native_constructor(JsNativeP##arity target);
 JS_NATIVE_FIXED_ARITIES(JS_DECLARE_NATIVE_FACTORY)
 #undef JS_DECLARE_NATIVE_FACTORY
 #define JS_DECLARE_NATIVE_ADAPTED(arity) \
-    Item js_new_native_function(JsNativeP##arity target, int adapter_arity); \
+    LAMBDA_RT_API Item js_new_native_function(JsNativeP##arity target, int adapter_arity); \
     Item js_new_native_constructor(JsNativeP##arity target, int adapter_arity);
 JS_NATIVE_FIXED_ARITIES(JS_DECLARE_NATIVE_ADAPTED)
 #undef JS_DECLARE_NATIVE_ADAPTED
 #define JS_DECLARE_NATIVE_PUBLISHER(arity) \
     void js_set_native_method(Item object, const char* name, JsNativeP##arity target); \
-    void js_set_native_key(Item object, Item key, JsNativeP##arity target);
+    LAMBDA_RT_API void js_set_native_key(Item object, Item key, JsNativeP##arity target);
 JS_NATIVE_FIXED_ARITIES(JS_DECLARE_NATIVE_PUBLISHER)
 #undef JS_DECLARE_NATIVE_PUBLISHER
 #define JS_DECLARE_NATIVE_INSTALLER(arity) \
-    Item js_install_native_method(Item object, const char* name, JsNativeP##arity target); \
-    Item js_install_native_method(Item object, const char* name, JsNativeP##arity target, int adapter_arity); \
-    Item js_install_native_constructor(Item object, const char* name, JsNativeP##arity target); \
-    Item js_install_native_constructor(Item object, const char* name, JsNativeP##arity target, int adapter_arity);
+    LAMBDA_RT_API Item js_install_native_method(Item object, const char* name, JsNativeP##arity target); \
+    LAMBDA_RT_API Item js_install_native_method(Item object, const char* name, JsNativeP##arity target, int adapter_arity); \
+    LAMBDA_RT_API Item js_install_native_constructor(Item object, const char* name, JsNativeP##arity target); \
+    LAMBDA_RT_API Item js_install_native_constructor(Item object, const char* name, JsNativeP##arity target, int adapter_arity);
 JS_NATIVE_FIXED_ARITIES(JS_DECLARE_NATIVE_INSTALLER)
 #undef JS_DECLARE_NATIVE_INSTALLER
 #define JS_DECLARE_NATIVE_REST(arity) \
@@ -1541,12 +1542,12 @@ Item js_new_native_body_constructor(JsNativeCallBody call_body,
 Item js_new_native_payload_function(JsNativeCallBody call_body,
                                     uint64_t payload, int formal_length);
 #define JS_DECLARE_NATIVE_CLOSURE(arity) \
-    Item js_new_native_closure(JsNativeP##arity target, int adapter_arity, \
+    LAMBDA_RT_API Item js_new_native_closure(JsNativeP##arity target, int adapter_arity, \
                                Item* env, int env_size);
 JS_NATIVE_CLOSURE_ARITIES(JS_DECLARE_NATIVE_CLOSURE)
 #undef JS_DECLARE_NATIVE_CLOSURE
 #define JS_DECLARE_NATIVE_ENV_SCHEDULER(arity) \
-    void js_schedule_native_env(void (*schedule)(Item), JsNativeP##arity target, \
+    LAMBDA_RT_API void js_schedule_native_env(void (*schedule)(Item), JsNativeP##arity target, \
         int adapter_arity, const Item* values, int count); \
     Item js_schedule_native_env_timeout(JsNativeP##arity target, \
         int adapter_arity, Item delay, const Item* values, int count);

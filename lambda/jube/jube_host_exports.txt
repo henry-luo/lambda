@@ -1,0 +1,512 @@
+# Lambda host export allowlist (doc/Lambda_Formal_Design.md D7.3.6).
+#
+# The host executable is compiled with hidden default visibility and links with
+# this list, so these are the only symbols a dlopen'ed Jube module can resolve
+# from it. Each entry is host-internal coupling that D7.3.3 retires in favour of
+# jube.h services; the list only grows by a reviewed, case-by-case opening:
+#   1. add the linker name below (Itanium-mangled for C++, no Mach-O "_"),
+#      followed by "# <consuming modules>";
+#   2. mark the owner declaration with its layer's LAMBDA_*_API macro
+#      (lib/lambda_api.h); vendored archives already have default visibility.
+# Drop an entry once no module imports it. `make check-host-exports` verifies
+# that the host exports every entry and that modules import nothing else.
+
+## lambda/core/lambda-data.cpp
+EmptyMap     # lang-python
+ItemError    # lang-python,node-core,node-crypto
+ItemNull     # lang-python,node-core,node-crypto,node-fs,node-net
+TYPE_ANY     # lang-python
+TYPE_BOOL    # lang-python
+TYPE_FLOAT   # lang-python
+TYPE_FUNC    # lang-python
+TYPE_INT     # lang-python
+TYPE_LIST    # lang-python
+TYPE_MAP     # lang-python
+TYPE_NULL    # lang-python
+TYPE_STRING  # lang-python
+array_set    # lang-python
+it2b         # lang-python,node-core,node-crypto
+it2d         # lang-python,node-core,node-crypto
+it2i         # lang-python,node-core,node-crypto
+it2l         # lang-python,node-core,node-crypto
+it2s         # lang-python,node-core,node-crypto
+
+## lambda/core/lambda-decimal.cpp
+_Z16decimal_take_mpdP7Decimal11DecimalKindP5mpd_t  # lang-python; decimal_take_mpd(Decimal*, DecimalKind, mpd_t*)
+_Z17decimal_to_double4Item                         # lang-python; decimal_to_double(Item)
+_Z19decimal_free_stringPc                          # lang-python; decimal_free_string(char*)
+bigint_from_int64                                  # node-core
+bigint_from_string                                 # node-crypto
+bigint_from_uint64                                 # node-core
+bigint_to_cstring_radix                            # node-core
+bigint_to_int64                                    # node-core
+
+## lambda/core/name_pool.cpp
+name_pool_create       # lang-python
+name_pool_create_len   # lang-python
+name_pool_create_name  # lang-python
+name_pool_release      # lang-python
+
+## lambda/dom/dom_clipboard.cpp
+js_blob_new  # node-core
+
+## lambda/js/js_event_loop.cpp
+js_next_tick_enqueue  # node-crypto
+
+## lambda/js/js_globals.cpp
+js_atob                   # node-core
+js_btoa                   # node-core
+js_create_data_property   # node-core
+js_json_stringify         # node-core
+js_process_emit           # node-crypto
+js_symbol_for             # node-core
+js_well_known_symbol_key  # node-core
+
+## lambda/js/js_host_hooks.cpp
+_Z37js_host_hooks_set_console_format_hookPF4ItemS_E  # node-core; js_host_hooks_set_console_format_hook(Item (*)(Item))
+
+## lambda/js/js_object_meta.cpp
+js_class_id_from_meta  # node-core
+js_object_meta         # node-core
+
+## lambda/js/js_props.cpp
+js_property_index_key  # node-core
+
+## lambda/js/js_runtime.cpp
+_Z12js_name_itemPKc                      # node-crypto; js_name_item(char const*)
+_Z12js_name_itemPKci                     # node-core,node-crypto; js_name_item(char const*, int)
+_Z17js_set_native_key4ItemS_PFS_S_E      # node-crypto; js_set_native_key(Item, Item, Item (*)(Item))
+_Z17js_set_native_key4ItemS_PFS_S_S_E    # node-crypto; js_set_native_key(Item, Item, Item (*)(Item, Item))
+_Z17js_set_native_key4ItemS_PFS_S_S_S_E  # node-crypto; js_set_native_key(Item, Item, Item (*)(Item, Item, Item))
+_Z17js_set_native_key4ItemS_PFS_vE       # node-core,node-crypto; js_set_native_key(Item, Item, Item (*)())
+js_array_length                          # node-core,node-crypto
+js_array_new                             # node-core,node-crypto
+js_array_push                            # node-core,node-crypto
+js_call_function                         # node-core,node-crypto
+js_elements_get_int                      # node-core,node-crypto
+js_elements_set_int                      # node-core
+js_get_key_cstr                          # node-core,node-crypto
+js_get_key_default                       # node-core,node-crypto
+js_is_js_array                           # node-core
+js_mark_non_enumerable                   # node-core,node-crypto
+js_new_object                            # node-core,node-crypto
+js_promise_create                        # node-core
+js_promise_reject                        # node-core
+js_promise_resolve                       # node-crypto
+js_set_key_cstr                          # node-core,node-crypto
+js_set_key_default                       # node-core,node-crypto
+js_set_prototype                         # node-core,node-crypto
+js_string_equals                         # node-crypto
+js_throw_error_with_code                 # node-crypto
+js_throw_invalid_arg_type                # node-core,node-crypto
+js_throw_invalid_arg_value               # node-crypto
+js_throw_out_of_range                    # node-crypto
+js_throw_range_error                     # node-crypto
+js_throw_range_error_code                # node-core,node-crypto
+js_throw_range_error_codef               # node-core,node-crypto
+js_throw_type_error                      # node-core,node-crypto
+js_throw_type_error_code                 # node-core,node-crypto
+js_throw_type_error_codef                # node-core,node-crypto
+js_throw_type_errorf                     # node-crypto
+
+## lambda/js/js_runtime_function.cpp
+_Z21js_new_native_closurePF4ItemS_S_EiPS_i               # node-core; js_new_native_closure(Item (*)(Item, Item), int, Item*, int)
+_Z21js_new_native_closurePF4ItemS_S_S_EiPS_i             # node-core; js_new_native_closure(Item (*)(Item, Item, Item), int, Item*, int)
+_Z22js_new_native_functionPF4ItemS_E                     # node-core,node-crypto; js_new_native_function(Item (*)(Item))
+_Z22js_new_native_functionPF4ItemS_Ei                    # node-crypto; js_new_native_function(Item (*)(Item), int)
+_Z22js_new_native_functionPF4ItemS_S_Ei                  # node-crypto; js_new_native_function(Item (*)(Item, Item), int)
+_Z22js_new_native_functionPF4ItemS_S_S_E                 # node-core; js_new_native_function(Item (*)(Item, Item, Item))
+_Z22js_new_native_functionPF4ItemS_S_S_Ei                # node-crypto; js_new_native_function(Item (*)(Item, Item, Item), int)
+_Z22js_new_native_functionPF4ItemS_S_S_S_Ei              # node-crypto; js_new_native_function(Item (*)(Item, Item, Item, Item), int)
+_Z22js_new_native_functionPF4ItemS_S_S_S_S_E             # node-crypto; js_new_native_function(Item (*)(Item, Item, Item, Item, Item))
+_Z22js_new_native_functionPF4ItemS_S_S_S_S_Ei            # node-crypto; js_new_native_function(Item (*)(Item, Item, Item, Item, Item), int)
+_Z22js_new_native_functionPF4ItemS_S_S_S_S_S_Ei          # node-crypto; js_new_native_function(Item (*)(Item, Item, Item, Item, Item, Item), int)
+_Z22js_new_native_functionPF4ItemvE                      # node-core,node-crypto; js_new_native_function(Item (*)())
+_Z22js_new_native_functionPF4ItemvEi                     # node-crypto; js_new_native_function(Item (*)(), int)
+_Z22js_schedule_native_envPFv4ItemEPFS_S_EiPKS_i         # node-crypto; js_schedule_native_env(void (*)(Item), Item (*)(Item), int, Item const*, int)
+_Z24js_install_native_method4ItemPKcPFS_S_E              # node-core; js_install_native_method(Item, char const*, Item (*)(Item))
+_Z24js_install_native_method4ItemPKcPFS_S_Ei             # node-core; js_install_native_method(Item, char const*, Item (*)(Item), int)
+_Z24js_install_native_method4ItemPKcPFS_S_S_E            # node-core; js_install_native_method(Item, char const*, Item (*)(Item, Item))
+_Z24js_install_native_method4ItemPKcPFS_S_S_Ei           # node-core; js_install_native_method(Item, char const*, Item (*)(Item, Item), int)
+_Z24js_install_native_method4ItemPKcPFS_S_S_S_Ei         # node-core; js_install_native_method(Item, char const*, Item (*)(Item, Item, Item), int)
+_Z24js_install_native_method4ItemPKcPFS_S_S_S_S_Ei       # node-core; js_install_native_method(Item, char const*, Item (*)(Item, Item, Item, Item), int)
+_Z24js_install_native_method4ItemPKcPFS_S_S_S_S_S_Ei     # node-core; js_install_native_method(Item, char const*, Item (*)(Item, Item, Item, Item, Item), int)
+_Z24js_install_native_method4ItemPKcPFS_vEi              # node-core; js_install_native_method(Item, char const*, Item (*)(), int)
+_Z25js_new_native_constructorPF4ItemS_S_E                # node-core; js_new_native_constructor(Item (*)(Item, Item))
+_Z29js_install_native_constructor4ItemPKcPFS_S_Ei        # node-crypto; js_install_native_constructor(Item, char const*, Item (*)(Item), int)
+_Z29js_install_native_constructor4ItemPKcPFS_S_S_Ei      # node-crypto; js_install_native_constructor(Item, char const*, Item (*)(Item, Item), int)
+_Z29js_install_native_constructor4ItemPKcPFS_S_S_S_Ei    # node-crypto; js_install_native_constructor(Item, char const*, Item (*)(Item, Item, Item), int)
+_Z29js_install_native_constructor4ItemPKcPFS_S_S_S_S_Ei  # node-crypto; js_install_native_constructor(Item, char const*, Item (*)(Item, Item, Item, Item), int)
+js_alloc_env                                             # node-core
+js_alloc_env2                                            # node-core
+js_alloc_env3                                            # node-core
+js_set_function_name                                     # node-core
+
+## lambda/js/js_runtime_state.cpp
+_Z23js_realm_intrinsic_slot13JsRealmSlotIdi           # node-core,node-crypto; js_realm_intrinsic_slot(JsRealmSlotId, int)
+_Z26js_realm_runtime_is_activev                       # node-crypto; js_realm_runtime_is_active()
+_Z32js_realm_intrinsic_slot_existing13JsRealmSlotIdi  # node-crypto; js_realm_intrinsic_slot_existing(JsRealmSlotId, int)
+js_error_lane_payload                                 # node-core
+js_get_current_this                                   # node-core,node-crypto
+js_get_this                                           # node-core
+js_new_error_with_name                                # node-crypto
+js_status_ok                                          # node-core,node-crypto
+js_throw_value                                        # node-crypto
+
+## lambda/js/js_runtime_value.cpp
+_Z14js_make_numberd       # node-core; js_make_number(double)
+_Z16make_string_itemPKc   # node-core,node-crypto; make_string_item(char const*)
+_Z16make_string_itemPKci  # node-core; make_string_item(char const*, int)
+js_bigint_as_int_n        # node-core
+js_bigint_as_uint_n       # node-core
+js_double_to_int32        # node-core
+js_is_callable            # node-core,node-crypto
+js_is_truthy              # node-core,node-crypto
+js_make_string            # node-core
+js_make_string_len        # node-core
+js_to_number              # node-core
+js_to_string              # node-core,node-crypto
+make_js_undefined         # node-core,node-crypto
+
+## lambda/js/js_typed_array.cpp
+js_arraybuffer_byte_length            # node-core
+js_arraybuffer_new                    # node-crypto
+js_arraybuffer_prepare_write          # node-crypto
+js_arraybuffer_wrap                   # node-core
+js_get_arraybuffer_ptr_item           # node-core,node-crypto
+js_get_dataview_ptr                   # node-core,node-crypto
+js_get_typed_array_ptr                # node-core,node-crypto
+js_is_arraybuffer                     # node-core,node-crypto
+js_is_dataview                        # node-core,node-crypto
+js_is_typed_array                     # node-core,node-crypto
+js_typed_array_byte_length            # node-core,node-crypto
+js_typed_array_current_data_ptr       # node-core,node-crypto
+js_typed_array_element_size           # node-core
+js_typed_array_from_binary            # node-core
+js_typed_array_get                    # node-core
+js_typed_array_is_integer_type        # node-crypto
+js_typed_array_is_out_of_bounds_item  # node-core
+js_typed_array_length                 # node-core
+js_typed_array_new                    # node-core,node-crypto
+js_typed_array_new_from_buffer        # node-core
+js_typed_array_prepare_write_ptr      # node-core,node-crypto
+
+## lambda/jube/jube_language.cpp
+jube_load_hosted_module    # lang-python
+jube_load_language_module  # lang-python
+
+## lambda/jube/jube_registry.cpp
+jube_modules_runtime_attach               # node-core,node-crypto
+jube_node_crypto_native_state             # node-crypto
+jube_node_current_module_state            # node-core,node-fs
+jube_node_resource_add_native             # node-crypto
+jube_node_resource_close_kind             # node-crypto
+jube_node_resource_remove_for_session     # node-crypto
+jube_node_resource_user_data_for_session  # node-crypto
+jube_node_runtime_current_session         # node-core,node-crypto
+jube_node_session_module_state_get        # node-core,node-fs
+jube_node_trace_state                     # node-core
+jube_node_trace_state_ensure              # node-core
+jube_specifier_resolve                    # node-core
+
+## lambda/module/node_core/node_events.cpp
+_Z21node_events_namespacev  # node-core; node_events_namespace()
+
+## lambda/runtime/collection_runtime.cpp
+array_push_verbatim  # lang-python
+
+## lambda/runtime/lambda-data-runtime.cpp
+_Z15_map_read_fieldP10ShapeEntryPv  # lang-python; _map_read_field(ShapeEntry*, void*)
+_Z8_map_getP7TypeMapPvPKcPb         # lang-python; _map_get(TypeMap*, void*, char const*, bool*)
+array                               # lang-python
+
+## lambda/runtime/lambda-eval-num.cpp
+fn_add    # lang-python
+fn_ceil   # lang-python
+fn_floor  # lang-python
+fn_mul    # lang-python
+fn_neg    # lang-python
+fn_pow    # lang-python
+fn_sub    # lang-python
+fn_sum    # lang-python
+
+## lambda/runtime/lambda-eval.cpp
+fn_join    # lang-python
+fn_parse2  # lang-python
+
+## lambda/runtime/lambda-mem.cpp
+_Z10heap_allocih          # lang-python,node-core; heap_alloc(int, unsigned char)
+_Z16heap_create_namePKcm  # node-crypto; heap_create_name(char const*, unsigned long)
+heap_create_name          # lang-python
+heap_strcpy               # lang-python
+push_d                    # lang-python
+
+## lambda/runtime/lambda-proc.cpp
+pn_clock  # lang-python
+
+## lambda/runtime/lambda-stack.cpp
+lambda_root_frame_overflow_error  # node-core,node-crypto
+
+## lambda/runtime/lambda-vector.cpp
+fn_math_acos   # lang-python
+fn_math_acosh  # lang-python
+fn_math_asin   # lang-python
+fn_math_asinh  # lang-python
+fn_math_atan   # lang-python
+fn_math_atan2  # lang-python
+fn_math_atanh  # lang-python
+fn_math_cbrt   # lang-python
+fn_math_cos    # lang-python
+fn_math_cosh   # lang-python
+fn_math_exp    # lang-python
+fn_math_exp2   # lang-python
+fn_math_expm1  # lang-python
+fn_math_hypot  # lang-python
+fn_math_log    # lang-python
+fn_math_log10  # lang-python
+fn_math_log1p  # lang-python
+fn_math_log2   # lang-python
+fn_math_pow    # lang-python
+fn_math_prod   # lang-python
+fn_math_sin    # lang-python
+fn_math_sinh   # lang-python
+fn_math_sqrt   # lang-python
+fn_math_tan    # lang-python
+fn_math_tanh   # lang-python
+fn_trunc       # lang-python
+
+## lambda/runtime/runtime-state.cpp
+eval_context_tls_runtime  # node-core,node-crypto
+
+## lambda/runtime/side_stack.c
+lambda_root_frame_begin      # node-core,node-crypto
+lambda_root_frame_end        # node-core,node-crypto
+lambda_root_frame_take_slot  # node-core,node-crypto
+lambda_side_stack_restore    # node-core,node-crypto
+
+## lambda/runtime/sysinfo.cpp
+sysinfo_get_argc  # lang-python
+sysinfo_get_argv  # lang-python
+
+## lib/arena.c
+arena_alloc    # lang-python
+arena_calloc   # lang-python
+arena_destroy  # lang-python
+
+## lib/arraylist.c
+arraylist_append  # node-core
+arraylist_free    # lang-python,node-core
+arraylist_new     # node-core
+arraylist_remove  # node-core
+
+## lib/base64.c
+base64_decode_variant  # node-core,node-crypto
+base64_encode          # node-core,node-crypto
+base64_encoded_len     # node-core,node-crypto
+
+## lib/byte_storage.c
+byte_buffer_data_const   # node-crypto
+byte_buffer_is_detached  # node-core,node-crypto
+
+## lib/digest.c
+digest_compute_bits       # node-crypto
+digest_hmac_compute_bits  # node-crypto
+digest_output_len_bits    # node-crypto
+digest_pbkdf2_hmac_bits   # node-crypto
+
+## lib/escape.c
+escape_append_json_string  # node-core
+escape_decode_c_char       # lang-python
+
+## lib/file.c
+file_exists    # lang-python
+file_getcwd    # lang-python,node-core
+file_is_dir    # lang-python
+file_is_file   # lang-python
+file_realpath  # lang-python,node-core
+
+## lib/file_utils.c
+dir_entry_free  # lang-python
+dir_list        # lang-python
+
+## lib/hashmap.c
+hashmap_free  # lang-python
+hashmap_get   # lang-python
+hashmap_new   # lang-python
+hashmap_set   # lang-python
+hashmap_sip   # lang-python
+
+## lib/log.c
+log_debug  # lang-python,node-crypto
+log_error  # lang-python,node-core,node-crypto
+log_info   # lang-python
+log_warn   # lang-python
+
+## lib/mem_alloc.c
+mem_dup_n_loc   # lang-python,node-core
+mem_strdup_loc  # lang-python,node-core
+
+## lib/mem_factory.c
+mem_arena_create  # lang-python
+mem_pool_create   # lang-python
+
+## lib/mempool.c
+mem_alloc_loc  # lang-python,node-core,node-crypto
+mem_free_loc   # lang-python,node-core,node-crypto
+pool_destroy   # lang-python
+
+## lib/memtrack.c
+mem_calloc_loc   # lang-python,node-core,node-crypto
+mem_realloc_loc  # node-core,node-crypto
+
+## lib/shell.c
+shell_getenv  # lang-python,node-core
+
+## lib/str.c
+str_capitalize_ascii  # lang-python
+str_cat               # lang-python
+str_copy              # lang-python,node-core,node-crypto
+str_count             # lang-python
+str_dup               # node-fs
+str_ends_with         # lang-python
+str_find              # lang-python,node-core
+str_is_ascii          # node-core
+str_replace_all       # lang-python
+str_rfind             # node-core
+str_split_init        # lang-python
+str_split_next        # lang-python
+str_starts_with       # lang-python
+str_swapcase_ascii    # lang-python
+str_to_lower          # lang-python
+str_to_upper          # lang-python
+str_trim              # lang-python
+
+## lib/strbuf.c
+strbuf_append_all             # lang-python
+strbuf_append_char            # lang-python,node-core
+strbuf_append_char_n          # lang-python
+strbuf_append_format          # lang-python
+strbuf_append_int64           # node-core
+strbuf_append_replace_char_n  # lang-python
+strbuf_append_str             # lang-python
+strbuf_append_str_n           # lang-python,node-core
+strbuf_free                   # lang-python,node-core
+strbuf_new                    # lang-python,node-core
+strbuf_reset                  # lang-python
+
+## lib/url.c
+url_decode_component      # node-core
+url_decode_lenient_write  # node-core
+
+## lib/utf.c
+utf16_encode           # node-core
+utf8_wtf8_encode       # node-core,node-crypto
+utf8_wtf8_encoded_len  # node-core,node-crypto
+
+## mbedTLS (vendored archive)
+mbedtls_cipher_finish              # node-crypto
+mbedtls_cipher_free                # node-crypto
+mbedtls_cipher_info_from_type      # node-crypto
+mbedtls_cipher_init                # node-crypto
+mbedtls_cipher_reset               # node-crypto
+mbedtls_cipher_set_iv              # node-crypto
+mbedtls_cipher_set_padding_mode    # node-crypto
+mbedtls_cipher_setkey              # node-crypto
+mbedtls_cipher_setup               # node-crypto
+mbedtls_cipher_update              # node-crypto
+mbedtls_ecp_check_privkey          # node-crypto
+mbedtls_ecp_check_pubkey           # node-crypto
+mbedtls_ecp_gen_keypair            # node-crypto
+mbedtls_ecp_group_free             # node-crypto
+mbedtls_ecp_group_init             # node-crypto
+mbedtls_ecp_group_load             # node-crypto
+mbedtls_ecp_mul                    # node-crypto
+mbedtls_ecp_point_free             # node-crypto
+mbedtls_ecp_point_init             # node-crypto
+mbedtls_ecp_point_read_binary      # node-crypto
+mbedtls_ecp_point_write_binary     # node-crypto
+mbedtls_gcm_auth_decrypt           # node-crypto
+mbedtls_gcm_crypt_and_tag          # node-crypto
+mbedtls_gcm_free                   # node-crypto
+mbedtls_gcm_init                   # node-crypto
+mbedtls_gcm_setkey                 # node-crypto
+mbedtls_md                         # node-crypto
+mbedtls_md_get_size                # node-crypto
+mbedtls_md_info_from_type          # node-crypto
+mbedtls_mpi_add_int                # node-crypto
+mbedtls_mpi_bitlen                 # node-crypto
+mbedtls_mpi_cmp_int                # node-crypto
+mbedtls_mpi_cmp_mpi                # node-crypto
+mbedtls_mpi_exp_mod                # node-crypto
+mbedtls_mpi_fill_random            # node-crypto
+mbedtls_mpi_free                   # node-crypto
+mbedtls_mpi_gen_prime              # node-crypto
+mbedtls_mpi_get_bit                # node-crypto
+mbedtls_mpi_init                   # node-crypto
+mbedtls_mpi_lset                   # node-crypto
+mbedtls_mpi_mod_mpi                # node-crypto
+mbedtls_mpi_read_binary            # node-crypto
+mbedtls_mpi_size                   # node-crypto
+mbedtls_mpi_sub_int                # node-crypto
+mbedtls_mpi_write_binary           # node-crypto
+mbedtls_mpi_write_string           # node-crypto
+mbedtls_nist_kw_free               # node-crypto
+mbedtls_nist_kw_init               # node-crypto
+mbedtls_nist_kw_setkey             # node-crypto
+mbedtls_nist_kw_unwrap             # node-crypto
+mbedtls_nist_kw_wrap               # node-crypto
+mbedtls_pk_decrypt                 # node-crypto
+mbedtls_pk_encrypt                 # node-crypto
+mbedtls_pk_free                    # node-crypto
+mbedtls_pk_get_bitlen              # node-crypto
+mbedtls_pk_get_type                # node-crypto
+mbedtls_pk_info_from_type          # node-crypto
+mbedtls_pk_init                    # node-crypto
+mbedtls_pk_parse_key               # node-crypto
+mbedtls_pk_parse_public_key        # node-crypto
+mbedtls_pk_setup                   # node-crypto
+mbedtls_pk_sign                    # node-crypto
+mbedtls_pk_verify                  # node-crypto
+mbedtls_pk_write_key_der           # node-crypto
+mbedtls_pk_write_key_pem           # node-crypto
+mbedtls_pk_write_pubkey_der        # node-crypto
+mbedtls_pk_write_pubkey_pem        # node-crypto
+mbedtls_rsa_export                 # node-crypto
+mbedtls_rsa_export_crt             # node-crypto
+mbedtls_rsa_gen_key                # node-crypto
+mbedtls_rsa_rsassa_pss_sign_ext    # node-crypto
+mbedtls_rsa_rsassa_pss_verify_ext  # node-crypto
+mbedtls_rsa_set_padding            # node-crypto
+psa_crypto_init                    # node-crypto
+psa_destroy_key                    # node-crypto
+psa_import_key                     # node-crypto
+psa_reset_key_attributes           # node-crypto
+psa_sign_message                   # node-crypto
+psa_verify_message                 # node-crypto
+
+## mpdecimal (vendored archive)
+mpd_copy         # lang-python
+mpd_del          # lang-python
+mpd_isnegative   # lang-python
+mpd_iszero       # lang-python
+mpd_maxcontext   # lang-python
+mpd_new          # lang-python
+mpd_qabs         # lang-python
+mpd_qadd         # lang-python
+mpd_qcmp         # lang-python
+mpd_qdivmod      # lang-python
+mpd_qget_ssize   # lang-python
+mpd_qminus       # lang-python
+mpd_qmul         # lang-python
+mpd_qpow         # lang-python
+mpd_qquantize    # lang-python
+mpd_qset_ssize   # lang-python
+mpd_qset_string  # lang-python
+mpd_qsub         # lang-python
+mpd_qsub_ssize   # lang-python
+mpd_to_sci       # lang-python
+
+## RE2 (vendored archive)
+_ZN3re23RE2C1ERKNS_11StringPieceE                          # lang-python; re2::RE2::RE2(re2::StringPiece const&)
+_ZN3re23RE2D1Ev                                            # lang-python; re2::RE2::~RE2()
+_ZNK3re23RE25MatchERKNS_11StringPieceEmmNS0_6AnchorEPS1_i  # lang-python; re2::RE2::Match(re2::StringPiece const&, unsigned long, unsigned long, re2::RE2::Anchor, re2::StringPiece*, int) const

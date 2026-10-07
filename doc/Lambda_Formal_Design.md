@@ -1513,6 +1513,17 @@ loosely across the corpus — context disambiguates, and we live with it.
   CI**: core = Test262; web-platform = its WPT slice; node-compat = the
   node baseline; languages = their own corpus; data packs = pack corpus +
   integrity. [JA9]
+- **D7.3.6*** **The host exports an allowlist, nothing more.** Host code
+  compiles with **hidden default visibility**, and the host executable's
+  dynamic export table is exactly the checked-in allowlist
+  `lambda/jube/jube_host_exports.txt` — the only symbols a loaded Jube module
+  can resolve from it, in every build configuration. The allowlist is the
+  bounded, reviewed record of the host-internal imports D7.3.3 retires: a
+  module that needs a further runtime symbol has it **opened case by case**
+  (a list entry naming its consumers, plus the `LAMBDA_*_API` marker on the
+  symbol's owner declaration), and an entry no module imports is dropped. A
+  host without the Jube loader exports nothing. *Exporting every global made
+  every global a dead-strip root.* [JA5.1, D7.3.3]
 
 ### D7.4 Jube modules: data and async contracts
 
@@ -2451,6 +2462,7 @@ slice; no formal semantic ruling or document semver changes.
 | D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and resolves shipped source from `<lambda-home>/package/` while exposing `lambda/{chart,dom,edit,editor,graph,latex,openapi,pdf}` and typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths. Since 2026-09-29 the source checkout and the release share one home, `./lmd/`: the package tree moved from `lambda/package/` to `lmd/package/`, and the formerly separate `input/` assets moved into their packages (validator default schemas and view stylesheets under `package/doc/`, math/KaTeX CSS and fonts under `package/math/`, LaTeX CSS and CMU fonts under `package/latex/`); regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
 | D7.2.5 | Implemented 2026-09-07. The shipped `lmd/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.2.6 | **Implemented 2026-09-29.** `lambda_resolve_import_module_path` is the one resolver (AST import, dependency prebuild, document-transform package loader); it returns NULL for a bare root other than `lambda`, and `resolve_import` reports E216 after the built-in and registered-module checks. `run_source_fixture` in `test/test_lambda_opt_gtest.cpp` runs checked-in scripts in place for the same reason the ruling states. |
+| D7.3.6 | **Implemented 2026-10-07 on macOS; Linux generated but unverified; Windows not covered.** `utils/generate_premake.py` turns the one list into `-Wl,-exported_symbols_list` (macOS) or `-Wl,--dynamic-list` (Linux) for every Jube-capable host configuration, debug included, and release compiles with `-fvisibility=hidden` again (dropped 2026-07-20 for hosted Python, with `-export_dynamic`). The initial list is the 400 symbols the built `lang-python` and `node-*` modules import: 102 from vendored mbedTLS, mpdecimal and RE2 archives, 298 Lambda-owned. Release exe size, before → after (macOS arm64, stripped ThinLTO release builds of commit `f6e11aa33` that differ only in the visibility and export flags): `lambda.exe` 21,702,952 → 19,158,984 bytes (−2,543,968 bytes, −11.7%); exported symbols 15,971 → 400. `utils/check_host_exports.py` runs after every release link (host ⊇ list: the linker silently skips a listed hidden symbol), and `make check-host-exports` also checks module imports ⊆ list. Windows hosts still link `--export-all-symbols` for the module import library. Working record: `vibe/Lambda_Design_Jube_Architecture.md` JA5.1. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol. The protocol remains unchanged; the D7.4.5v2 TypeId-order revision advances the current Jube ABI to version 6. |
@@ -2594,7 +2606,8 @@ Numbered `DO#` (design-open); each links to its record.
   carrier violations (§6.2) unfixed.
 - **DO19** Jube: `js_globals.cpp` allowlist audit; WPT harness choice
   (before `web-streams`/`web-crypto` land); data-pack design (first
-  adopter); `dynamic_lookup` retirement; the Radiant-domain host API and
+  adopter); `dynamic_lookup` retirement (bounded meanwhile by the D7.3.6
+  allowlist, which Windows hosts do not yet apply); the Radiant-domain host API and
   the Lambda↔Radiant embed contract; the IO policy model (gate taxonomy,
   realms, audit format); T2 marshaled interface + per-platform sandbox
   profiles; JS semantic-adapter items 1–8 before POC-1 step 3;
@@ -2747,7 +2760,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM16 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
-| D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
+| D7.3–D7.5 | JA1–JA16 (D7.3.6: JA5.1); Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
 | D8.1.1v17 | RI1–RI6 | `Lambda_Design_Repl_Interp.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |

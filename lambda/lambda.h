@@ -1,4 +1,5 @@
 #pragma once
+#include "../lib/lambda_api.h"
 // #include <math.h>  // MIR has problem parsing math.h
 
 // Include standard integer types from system
@@ -1474,7 +1475,7 @@ Array* array_plain();  // constructs a plain empty array (no frame management)
 #ifdef __cplusplus
 extern "C" {
 #endif
-void array_set(Array* arr, int64_t index, Item item);
+LAMBDA_CORE_API void array_set(Array* arr, int64_t index, Item item);
 void array_copy_owned_items(Array* destination, int64_t destination_index,
                             const Item* source, int64_t count);
 bool array_reserve_append_slots(Array* array, int64_t append_count);
@@ -1523,7 +1524,7 @@ Array* array_spreadable();  // constructs a spreadable empty array
 // when the array has no inferred pointer lane to widen.
 bool array_widen_inferred_pointer_lane(Array* array);
 void array_push(Array* arr, Item item);  // sequence append: splices a list (D2.6.5v3)
-void array_push_verbatim(Array* arr, Item item);  // verbatim append: one value, one item (D2.6.5v3)
+LAMBDA_RT_API void array_push_verbatim(Array* arr, Item item);  // verbatim append: one value, one item (D2.6.5v3)
 // S9.3.1 capturing append for Lambda literals/comprehensions; array_push does not capture.
 void array_push_capture(Array* arr, Item item);
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
@@ -1771,9 +1772,9 @@ void heap_gc_defer_collection_end(void);
 LambdaGcScopeCheckpoint lambda_gc_scope_checkpoint_capture(void);
 bool lambda_gc_scope_checkpoint_restore(const LambdaGcScopeCheckpoint* checkpoint);
 // String creation for name pooling
-String* heap_create_name(const char* name);
+LAMBDA_RT_API String* heap_create_name(const char* name);
 // String creation for runtime strings
-String* heap_strcpy(const char* src, int64_t len);
+LAMBDA_RT_API String* heap_strcpy(const char* src, int64_t len);
 const uint8_t* binary_data(const Binary* binary);
 uint32_t binary_length(const Binary* binary);
 bool binary_is_ascii(const Binary* binary);
@@ -2642,7 +2643,7 @@ typedef struct LambdaModuleVarRef {
 #ifdef __cplusplus
 extern "C" {
 #endif
-    Array* array();
+    LAMBDA_RT_API Array* array();
     ArrayNum* array_int();
     ArrayNum* array_int64();
     ArrayNum* array_float();
@@ -2782,7 +2783,7 @@ extern "C" {
     int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b);
     int64_t lambda_int_lane_divmod_slow(int64_t a, int64_t b, int64_t is_mod);
     Item int2it_i64(int64_t value); // same encoder, native-int64 caller
-    Item push_d(double dval);
+    LAMBDA_RT_API Item push_d(double dval);
     Item box_int64_value(int64_t lval);
     Item box_uint64_value(uint64_t uval);
     Item push_k(DateTime dtval);
@@ -2807,13 +2808,13 @@ extern "C" {
     // item unboxing
     bool item_try_to_int64(Item item, int64_t* out);
     bool item_try_to_double(Item item, double* out);
-    int64_t it2l(Item item);
+    LAMBDA_CORE_API int64_t it2l(Item item);
     uint64_t it2u(Item item);
-    double it2d(Item item);
-    bool it2b(Item item);
-    int64_t it2i(Item item);
+    LAMBDA_CORE_API double it2d(Item item);
+    LAMBDA_CORE_API bool it2b(Item item);
+    LAMBDA_CORE_API int64_t it2i(Item item);
     DateTime* it2k(Item item);
-    String* it2s(Item item);
+    LAMBDA_CORE_API String* it2s(Item item);
     Binary* it2x(Item item);
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
     Item coerce_num_sized(Item value, int64_t num_type);
@@ -2859,22 +2860,22 @@ extern "C" {
     Item fn_complex_cos(Item a);
     Item fn_complex_tan(Item a);
 
-    Item fn_add(Item a, Item b);
-    Item fn_mul(Item a, Item b);
-    Item fn_sub(Item a, Item b);
+    LAMBDA_RT_API Item fn_add(Item a, Item b);
+    LAMBDA_RT_API Item fn_mul(Item a, Item b);
+    LAMBDA_RT_API Item fn_sub(Item a, Item b);
     Item fn_div(Item a, Item b);
     Item fn_idiv(Item a, Item b);
-    Item fn_pow(Item a, Item b);
+    LAMBDA_RT_API Item fn_pow(Item a, Item b);
     Item fn_mod(Item a, Item b);
     Item fn_abs(Item a);
     Item fn_round(Item a);
-    Item fn_floor(Item a);
-    Item fn_ceil(Item a);
+    LAMBDA_RT_API Item fn_floor(Item a);
+    LAMBDA_RT_API Item fn_ceil(Item a);
     Item fn_min1(Item a);
     Item fn_min2(Item a, Item b);
     Item fn_max1(Item a);
     Item fn_max2(Item a, Item b);
-    Item fn_sum(Item a);
+    LAMBDA_RT_API Item fn_sum(Item a);
     Item fn_avg(Item a);
     Item fn_avg_skip_null(Item a, bool skip_null);
     Item fn_union(Item a, Item b);      // S10.1.1v2: `|`, `&`, `!` build a type; the value set
@@ -2888,7 +2889,7 @@ extern "C" {
     Item fn_intersect4(Item a, Item b, Item c, Item d);
     Item fn_except(Item a, Item b);
     Item fn_pos(Item a);
-    Item fn_neg(Item a);
+    LAMBDA_RT_API Item fn_neg(Item a);
 
     // truthy idioms
     Item fn_and(Item a, Item b);
@@ -3067,7 +3068,7 @@ extern "C" {
     double array_num_reduce_double(ArrayNum* arr, int op);
 
     // vector system functions (math module)
-    Item fn_math_prod(Item a);
+    LAMBDA_RT_API Item fn_math_prod(Item a);
     Item fn_math_cumsum(Item a);
     Item fn_math_cumprod(Item a);
     Item fn_argmin(Item a);
@@ -3085,36 +3086,36 @@ extern "C" {
     Item fn_math_deviation(Item a);
     Item fn_math_deviation_skip_null(Item a, bool skip_null);
     // element-wise math functions (math module)
-    Item fn_math_sqrt(Item a);
-    Item fn_math_log(Item a);
-    Item fn_math_log10(Item a);
-    Item fn_math_exp(Item a);
-    Item fn_math_sin(Item a);
-    Item fn_math_cos(Item a);
-    Item fn_math_tan(Item a);
+    LAMBDA_RT_API Item fn_math_sqrt(Item a);
+    LAMBDA_RT_API Item fn_math_log(Item a);
+    LAMBDA_RT_API Item fn_math_log10(Item a);
+    LAMBDA_RT_API Item fn_math_exp(Item a);
+    LAMBDA_RT_API Item fn_math_sin(Item a);
+    LAMBDA_RT_API Item fn_math_cos(Item a);
+    LAMBDA_RT_API Item fn_math_tan(Item a);
     // inverse trigonometric
-    Item fn_math_asin(Item a);
-    Item fn_math_acos(Item a);
-    Item fn_math_atan(Item a);
-    Item fn_math_atan2(Item a, Item b);
+    LAMBDA_RT_API Item fn_math_asin(Item a);
+    LAMBDA_RT_API Item fn_math_acos(Item a);
+    LAMBDA_RT_API Item fn_math_atan(Item a);
+    LAMBDA_RT_API Item fn_math_atan2(Item a, Item b);
     // hyperbolic
-    Item fn_math_sinh(Item a);
-    Item fn_math_cosh(Item a);
-    Item fn_math_tanh(Item a);
+    LAMBDA_RT_API Item fn_math_sinh(Item a);
+    LAMBDA_RT_API Item fn_math_cosh(Item a);
+    LAMBDA_RT_API Item fn_math_tanh(Item a);
     // inverse hyperbolic
-    Item fn_math_asinh(Item a);
-    Item fn_math_acosh(Item a);
-    Item fn_math_atanh(Item a);
+    LAMBDA_RT_API Item fn_math_asinh(Item a);
+    LAMBDA_RT_API Item fn_math_acosh(Item a);
+    LAMBDA_RT_API Item fn_math_atanh(Item a);
     // exponential/logarithmic variants
-    Item fn_math_exp2(Item a);
-    Item fn_math_expm1(Item a);
-    Item fn_math_log2(Item a);
+    LAMBDA_RT_API Item fn_math_exp2(Item a);
+    LAMBDA_RT_API Item fn_math_expm1(Item a);
+    LAMBDA_RT_API Item fn_math_log2(Item a);
     // power/root
-    Item fn_math_pow(Item a, Item b);
-    Item fn_math_cbrt(Item a);
-    Item fn_trunc(Item a);
-    Item fn_math_hypot(Item a, Item b);
-    Item fn_math_log1p(Item a);
+    LAMBDA_RT_API Item fn_math_pow(Item a, Item b);
+    LAMBDA_RT_API Item fn_math_cbrt(Item a);
+    LAMBDA_RT_API Item fn_trunc(Item a);
+    LAMBDA_RT_API Item fn_math_hypot(Item a, Item b);
+    LAMBDA_RT_API Item fn_math_log1p(Item a);
     Item fn_sign(Item a);
     // random number generation (pure functional, SplitMix64)
     Item fn_math_random(Item seed);
@@ -3270,7 +3271,7 @@ extern "C" {
     Item fn_normalize1(Item str);           // normalize with default NFC
     Item fn_substring(Item str, Item start, Item end);
     Bool fn_contains(Item str, Item substr);
-    Item fn_join(Item a, Item b);
+    LAMBDA_RT_API Item fn_join(Item a, Item b);
     Item fn_join_consume_open_array(Item left, Item right);
     Item fn_join_consume_cert_array(Item left, Item right);
     Item fn_join_consume_cert_array_item(Item left, Item element);
@@ -3379,7 +3380,7 @@ extern "C" {
     Item fn_open_begin(Item target);
     Item fn_open_end(Bool unwinding);
     Item fn_parse1(Item str);
-    Item fn_parse2(Item str, Item options);
+    LAMBDA_RT_API Item fn_parse2(Item str, Item options);
     Item fn_parse_html_fragment1(Item str);
     Item fn_format1(Item item);
     Item fn_format2(Item item, Item options);
@@ -3417,7 +3418,7 @@ extern "C" {
     DateTime pn_now();          // now() - current datetime in UTC
     DateTime pn_today();        // today() - current date in UTC
     Item pn_print(Item item);
-    double pn_clock();        // clock() - high-resolution monotonic time in seconds
+    LAMBDA_RT_API double pn_clock();        // clock() - high-resolution monotonic time in seconds
     Item pn_cmd1(Item cmd);
     Item pn_cmd2(Item cmd, Item args);
     Item pn_fetch(Item url, Item options);

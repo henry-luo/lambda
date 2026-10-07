@@ -1,5 +1,6 @@
 #ifndef LIB_DIGEST_H
 #define LIB_DIGEST_H
+#include "lambda_api.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -20,13 +21,13 @@ typedef enum {
 
 typedef struct DigestCtx DigestCtx;
 
-size_t digest_output_len_bits(int bits);
-bool digest_compute_bits(int bits, const void* data, size_t len,
+LAMBDA_LIB_API size_t digest_output_len_bits(int bits);
+LAMBDA_LIB_API bool digest_compute_bits(int bits, const void* data, size_t len,
                          uint8_t* out, size_t out_len);
-bool digest_hmac_compute_bits(int bits, const void* key, size_t key_len,
+LAMBDA_LIB_API bool digest_hmac_compute_bits(int bits, const void* key, size_t key_len,
                               const void* data, size_t len,
                               uint8_t* out, size_t out_len);
-bool digest_pbkdf2_hmac_bits(int bits, const void* password, size_t password_len,
+LAMBDA_LIB_API bool digest_pbkdf2_hmac_bits(int bits, const void* password, size_t password_len,
                              const void* salt, size_t salt_len,
                              unsigned int iterations,
                              uint8_t* out, size_t out_len);

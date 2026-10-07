@@ -13,6 +13,7 @@
 // the extended context serves inexact decimal operations, and exact +/-/*
 // operations use a local maximum-precision context.
 #pragma once
+#include "../../lib/lambda_api.h"
 
 // Forward declarations keep scalar users independent from libmpdec's context ABI.
 typedef struct mpd_context_t mpd_context_t;
@@ -98,7 +99,7 @@ Item decimal_from_double(double val);
 Item decimal_from_string(const char* str);
 
 // Free mpdecimal string (wrapper for mpd_free)
-void decimal_free_string(char* str);
+LAMBDA_CORE_API void decimal_free_string(char* str);
 
 // Deep copy a decimal Item (for arena allocation in MarkBuilder), preserving
 // its source storage kind.
@@ -139,7 +140,7 @@ void decimal_big_print(StrBuf* strbuf, Decimal* decimal);
 
 // Move an owned mpd_t allocation into Decimal's embedded payload. The source
 // header is released while its coefficient allocation becomes Decimal-owned.
-bool decimal_take_mpd(Decimal* decimal, DecimalKind storage_kind, mpd_t* mpd_val);
+LAMBDA_CORE_API bool decimal_take_mpd(Decimal* decimal, DecimalKind storage_kind, mpd_t* mpd_val);
 
 // Allocate and initialize a fixed Decimal from mpd_t* (takes ownership of mpd_val)
 Decimal* decimal_create(mpd_t* mpd_val);
@@ -275,7 +276,7 @@ bool decimal_is_any(Item item);
 bool decimal_try_to_double(Item item, double* out);
 
 // Legacy scalar conversion for callers that have already checked the source.
-double decimal_to_double(Item item);
+LAMBDA_CORE_API double decimal_to_double(Item item);
 
 // Convert decimal Item to string (caller must free with decimal_free_string)
 char* decimal_to_string(Item item);
@@ -294,13 +295,13 @@ extern "C" {
 #endif
 
 // Creation
-Item bigint_from_int64(int64_t val);
-Item bigint_from_uint64(uint64_t val);
+LAMBDA_CORE_API Item bigint_from_int64(int64_t val);
+LAMBDA_CORE_API Item bigint_from_uint64(uint64_t val);
 Item bigint_from_double(double val);          // must be exact integer, else returns ItemError
-Item bigint_from_string(const char* str, int len);  // decimal string (no "n" suffix)
+LAMBDA_CORE_API Item bigint_from_string(const char* str, int len);  // decimal string (no "n" suffix)
 
 // Extraction
-int64_t bigint_to_int64(Item bi);             // truncates if too large
+LAMBDA_CORE_API int64_t bigint_to_int64(Item bi);             // truncates if too large
 bool    bigint_to_int64_exact(Item bi, int64_t* out_value);
 double  bigint_to_double(Item bi);            // may lose precision
 bool    bigint_is_zero(Item bi);
@@ -328,7 +329,7 @@ Item bigint_left_shift(Item a, Item b);
 Item bigint_right_shift(Item a, Item b);
 
 // String conversion
-char* bigint_to_cstring_radix(Item bi, int radix);  // returns mem_alloc'd string, caller mem_free()s
+LAMBDA_CORE_API char* bigint_to_cstring_radix(Item bi, int radix);  // returns mem_alloc'd string, caller mem_free()s
 
 // Get the mpd_t* from a BigInt Item (for advanced use)
 mpd_t* bigint_get_mpd(Item bi);

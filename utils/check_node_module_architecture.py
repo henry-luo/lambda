@@ -17,7 +17,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE_ROOT = ROOT / "lambda" / "module"
-NODE_MODULE_NAMES = ("node_core", "node_zlib", "node_fs", "node_net",
+NODE_MODULE_NAMES = ("node_core", "node_fs", "node_net",
                      "node_child_process", "node_http", "node_tls", "node_crypto")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp"}
 FORBIDDEN_TOKENS = (

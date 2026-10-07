@@ -245,6 +245,8 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
     strbuf_free(sb);
     return obj_root.get();
 }
+// host export (lambda/jube/jube_host_exports.txt) with no header declaration
+extern "C" LAMBDA_RT_API Item js_blob_new(Item parts, Item options);
 JS_FORWARD_ITEM(js_blob_new, (Item parts, Item options), js_blob_new_with_class, (parts, options, JS_CLASS_BLOB))
 
 extern "C" Item js_dom_url_create_object_url(Item object) {
