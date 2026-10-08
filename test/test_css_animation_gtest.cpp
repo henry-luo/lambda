@@ -505,6 +505,23 @@ protected:
     }
 };
 
+TEST_F(MotionCascadeTest, ScrollKeepsSelectorCacheValidButHoverInvalidatesIt) {
+    ASSERT_NE(state_store_create(&doc), nullptr);
+    DocState* state = doc.state;
+    ScrollPane pane = {};
+    pane.v_max_scroll = 200.0f;
+    uint64_t content = doc_state_content_version(state);
+    uint64_t selectors = doc_state_selector_version(state);
+    scroll_state_set_position_for_view(state, static_cast<View*>(&element), &pane, 0.0f, 50.0f, false);
+    EXPECT_GT(doc_state_content_version(state), content);
+    EXPECT_EQ(doc_state_selector_version(state), selectors);
+    doc_state_request_repaint(state);
+    EXPECT_EQ(doc_state_selector_version(state), selectors);
+    doc_state_set_hover_target(state, static_cast<View*>(&element));
+    EXPECT_GT(doc_state_selector_version(state), selectors);
+    state_store_destroy(&doc);
+}
+
 TEST_F(MotionCascadeTest, AnimationShorthandProjectsWinningLonghands) {
     const char* declarations[] = {
         "animation-duration: 9s", "animation: fade 2s linear -1s 1.5 alternate both paused, grow 4s",

@@ -887,7 +887,7 @@ void dom_element_clear(DomElement* element) {
         element->mark_specified_style_owned();
     }
     // Reset version tracking
-    element->style_version++;
+    element->advance_style_version();
     element->set_needs_style_recompute(true);
 
     // Note: We don't free memory here since it's pool-allocated
@@ -960,7 +960,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         element->mark_specified_style_owned();
     }
     if (changed) {
-        element->style_version++;
+        element->advance_style_version();
         element->set_needs_style_recompute(true);
     }
 }
@@ -1300,7 +1300,7 @@ static void dom_element_attribute_did_set(DomElement* element,
         if (!(block && block->updating)) dom_element_clear_inline_declaration_block(element);
         if (value[0] != '\0') dom_element_apply_inline_style(element, value);
     }
-    element->style_version++;
+    element->advance_style_version();
     element->set_needs_style_recompute(true);
 }
 
@@ -1315,7 +1315,7 @@ static void dom_element_attribute_did_remove(DomElement* element,
         dom_element_clear_inline_style_declarations(element);
         dom_element_clear_inline_declaration_block(element);
     }
-    element->style_version++;
+    element->advance_style_version();
     element->set_needs_style_recompute(true);
 }
 
@@ -1957,7 +1957,7 @@ bool dom_element_set_presentation_style(DomElement* element, const char* propert
         css_declaration_destroy_owned(owned, element->storage_pool());
         return false;
     }
-    element->style_version++;
+    element->advance_style_version();
     element->set_needs_style_recompute(true);
     element->set_styles_resolved(false);
     if (changed) *changed = true;
@@ -1970,7 +1970,7 @@ bool dom_element_clear_presentation_style(DomElement* element) {
     bool changed = style_tree_remove_presentation_declarations(element->specified_style,
         CSS_PROPERTY_UNKNOWN);
     if (changed) {
-        element->style_version++;
+        element->advance_style_version();
         element->set_needs_style_recompute(true);
         element->set_styles_resolved(false);
     }
@@ -2048,7 +2048,7 @@ bool dom_element_remove_inline_styles(DomElement* element) {
     bool removed_decl = dom_element_clear_inline_style_declarations(element);
 
     if (removed_decl) {
-        element->style_version++;
+        element->advance_style_version();
         element->set_needs_style_recompute(true);
         element->set_styles_resolved(false);
     }
@@ -2167,7 +2167,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
         element->css_variables = lam::own(prop);
 
         // Increment style version to invalidate caches
-        element->style_version++;
+        element->advance_style_version();
         element->set_needs_style_recompute(true);
 
         return true;
@@ -2187,7 +2187,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     }
 
     // Increment style version to invalidate caches
-    element->style_version++;
+    element->advance_style_version();
     element->set_needs_style_recompute(true);
 
     return true;
@@ -2246,7 +2246,7 @@ bool dom_element_remove_property(DomElement* element, CssPropertyCode property_c
     bool removed = style_tree_remove_property(element->specified_style, property_code);
 
     if (removed) {
-        element->style_version++;
+        element->advance_style_version();
         element->set_needs_style_recompute(true);
     }
 
@@ -2329,7 +2329,7 @@ static int dom_element_apply_selection_rule(DomElement* element, CssRule* rule,
         }
     }
     if (applied_count) {
-        element->style_version++;
+        element->advance_style_version();
         element->set_needs_style_recompute(true);
     }
     return applied_count;
@@ -2414,7 +2414,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     }
 
     if (applied_count > 0) {
-        element->style_version++;
+        element->advance_style_version();
         element->set_needs_style_recompute(true);
     }
 

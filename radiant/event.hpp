@@ -2655,6 +2655,7 @@ typedef struct DocState {
     DocLifecycleState lifecycle;
     uint64_t version;              // monotonically increasing version number
     uint64_t render_flag_bumps;    // version bumps that were dirty/repaint/reflow bookkeeping
+    uint64_t scroll_position_bumps; // scrolling changes geometry, not selector state
     struct DocState* prev_version;  // previous version (immutable mode only)
 
     // Active event/state log cascade. Set by state_machine.cpp while a
@@ -2832,6 +2833,11 @@ typedef struct DocState {
 // form, drag, lifecycle and scroll state. Painted-content caches key on this.
 static inline uint64_t doc_state_content_version(const DocState* state) {
     return state ? state->version - state->render_flag_bumps : 0;
+}
+
+// computed SVG styles do not depend on scroll offsets; paint and hit coordinates do.
+static inline uint64_t doc_state_selector_version(const DocState* state) {
+    return state ? doc_state_content_version(state) - state->scroll_position_bumps : 0;
 }
 
 typedef struct ScrollInteractionState {

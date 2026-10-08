@@ -850,6 +850,11 @@ uint64_t svg_animation_generation(DomDocument* document) {
     return registry ? registry->generation : 0;
 }
 
+bool svg_animation_is_sampling(DomDocument* document) {
+    SvgAnimationRegistry* registry = svg_animation_registry(document, false);
+    return registry && registry->sampling;
+}
+
 static SvgAnimatedTarget* svg_animation_target(SvgAnimationRegistry* registry, DomElement* target) {
     SvgAnimatedTarget key = {}; key.source = dom_element_to_element(target);
     SvgAnimatedTarget* entry = SvgAnimatedTargetMap::get(registry->targets, key);

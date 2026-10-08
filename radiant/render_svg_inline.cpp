@@ -470,6 +470,8 @@ struct SvgStyleProperty {
     const char* value;
     uint64_t animation_generation;
     bool from_css;
+    bool inherits;
+    DomElement* declaring_element;
     SvgStyleProperty* next;
 };
 
@@ -480,6 +482,7 @@ struct SvgStyleEntry {
     size_t inline_count;
     bool inline_parsed;
     SvgStyleProperty* properties;
+    SvgStyleProperty* computed_properties;
 };
 
 typedef TypedHashMap<SvgStyleEntry,
@@ -648,14 +651,18 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
     return svg_style_finish(style, nullptr);
 }
 
-// One paint pass reads a fixed host document, so its inline SVGs share one host
-// style context: building it per SVG walked the whole host document (index,
-// SMIL preparation, root lookups) once more for every inline SVG on the page.
-// It is rebuilt for each pass and whenever the DOM or interaction state moved.
+// painting and DOM geometry queries share the host cascade. Rebuilding a
+// matcher and reparsing inline CSS per glyph property made SVG hit testing
+// dominate scrolling. Invalidation also covers queries between paint passes.
 struct SvgPaintHostStyle : DomDocumentResourceData {
     uint64_t pass;
     uint64_t mutation_epoch;
     uint64_t state_version;
+    uint64_t style_epoch;
+    uint64_t query_epoch;
+    uint64_t animation_generation;
+    uint64_t font_generation;
+    uint32_t layout_generation;
     bool valid;
     bool animation_prepared;
     SvgStyleContext style;
@@ -671,12 +678,8 @@ static void svg_paint_host_style_destroy(DomDocumentResourceData* data) {
     mem_free(shared);
 }
 
-// The shared context for an inline SVG painted in the active pass, or null when
-// the caller must style it on its own (outside paint, or not in the host index).
-static SvgStyleContext* svg_paint_host_style(Element* svg_element) {
-    DomDocument* host = g_svg_paint_pass && g_svg_active_rdcon && g_svg_active_rdcon->ui_context
-        ? g_svg_active_rdcon->ui_context->document : nullptr;
-    if (!host || !host->root || !svg_element) return nullptr;
+static SvgPaintHostStyle* svg_host_style(DomDocument* host) {
+    if (!host || !host->root) return nullptr;
     SvgPaintHostStyle* shared = nullptr;
     for (DomDocumentResource* resource = host->resources; resource; resource = resource->next)
         if (resource->destroy == svg_paint_host_style_destroy) {
@@ -691,17 +694,41 @@ static SvgStyleContext* svg_paint_host_style(Element* svg_element) {
             return nullptr;
         }
     }
-    uint64_t state_version = host->state ? ((DocState*)host->state)->version : 0;
-    if (!shared->valid || shared->pass != g_svg_paint_pass ||
-        shared->mutation_epoch != host->mutation_epoch || shared->state_version != state_version) {
+    uint64_t state_version = doc_state_selector_version((DocState*)host->state);
+    uint64_t animation_generation = svg_animation_generation(host);
+    UiContext* ui = (UiContext*)host->js.host_ui_context;
+    uint64_t font_generation = ui ? font_context_resource_generation(ui->font_ctx) : 0;
+    bool new_pass = shared->pass != g_svg_paint_pass;
+    uint32_t layout_generation = host->view_tree ? host->view_tree->layout_generation : 0;
+    // scroll/repaint flags do not change CSS. Animation/resource snapshots still
+    // expire at paint boundaries, before any traversal borrows their values.
+    if (!shared->valid || (new_pass && (shared->animation_generation != animation_generation ||
+        shared->font_generation != font_generation || shared->style.resources)) ||
+        shared->mutation_epoch != host->mutation_epoch || shared->state_version != state_version ||
+        shared->style_epoch != host->style_content_epoch || shared->query_epoch != host->style_query_epoch ||
+        shared->layout_generation != layout_generation) {
         svg_style_destroy(&shared->style);
         shared->valid = svg_style_init_host(&shared->style, host);
-        shared->pass = g_svg_paint_pass;
         shared->mutation_epoch = host->mutation_epoch;
         shared->state_version = state_version;
+        shared->style_epoch = host->style_content_epoch;
+        shared->query_epoch = host->style_query_epoch;
+        shared->layout_generation = layout_generation;
+        shared->animation_generation = animation_generation;
+        shared->font_generation = font_generation;
         shared->animation_prepared = false;
         if (!shared->valid) return nullptr;
     }
+    if (new_pass) shared->animation_prepared = false;
+    shared->pass = g_svg_paint_pass;
+    return shared;
+}
+
+static SvgStyleContext* svg_paint_host_style(Element* svg_element) {
+    DomDocument* host = g_svg_paint_pass && g_svg_active_rdcon && g_svg_active_rdcon->ui_context
+        ? g_svg_active_rdcon->ui_context->document : nullptr;
+    SvgPaintHostStyle* shared = svg_element ? svg_host_style(host) : nullptr;
+    if (!shared) return nullptr;
     SvgStyleEntry query = {};
     query.element = svg_element;
     if (!SvgStyleMap::get(shared->style.entries, query)) return nullptr;
@@ -990,34 +1017,23 @@ DomNode* svg_dom_style_parent(DomNode* node, const SvgDomStyleScope* scope) {
     return node ? node->parent : nullptr;
 }
 
-const char* svg_get_dom_presentation_property(DomElement* element, const char* name,
-    bool inherits, char* buffer, size_t buffer_size, bool* from_css,
-    char** owned_value, DomElement** declaring_element, const SvgDomStyleScope* scope) {
-    if (from_css) *from_css = false;
-    if (owned_value) *owned_value = nullptr;
-    if (declaring_element) *declaring_element = nullptr;
-    if (!element || !element->doc || !name || (!owned_value && (!buffer || !buffer_size))) return nullptr;
-    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.property_query");
-    if (!pool) return nullptr;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
+static const char* svg_dom_resolve_property(SvgStyleContext* query, DomElement* element,
+    const char* name, bool inherits, bool* from_css, DomElement** declaring_element,
+    const SvgDomStyleScope* scope) {
     DomDocument* doc = element->doc;
-    if (matcher) state_configure_selector_matcher((DocState*)doc->state, matcher);
-    SvgStyleContext query = {};
-    query.pool = pool; query.document = doc; query.matcher = matcher;
-    query.engine = (CssEngine*)doc->services.cached_css_engine;
-    bool found = false;
-    for (DomNode* node = element; matcher && node && node->is_element(); node = svg_dom_style_parent(node, scope)) {
+    for (DomNode* node = element; query->matcher && node && node->is_element(); node = svg_dom_style_parent(node, scope)) {
         DomElement* current = node->as_element();
-        const char* inline_text = current->get_attribute("style");
-        size_t inline_count = 0;
-        CssDeclaration** inline_declarations = inline_text
-            ? css_parse_declaration_list_text(inline_text, strlen(inline_text), pool, &inline_count)
+        SvgStyleEntry* entry = svg_style_entry(query, dom_element_to_element(current));
+        const char* inline_text = entry ? nullptr : current->get_attribute("style");
+        size_t inline_count = entry ? entry->inline_count : 0;
+        CssDeclaration** inline_declarations = entry ? entry->inline_declarations : inline_text
+            ? css_parse_declaration_list_text(inline_text, strlen(inline_text), query->pool, &inline_count)
             : nullptr;
         CssDeclaration declaration = {};
         bool selected = css_select_element_declaration((CssEngine*)doc->services.cached_css_engine,
-            matcher, current, doc->stylesheets, (size_t)doc->stylesheet_count,
+            query->matcher, current, doc->stylesheets, (size_t)doc->stylesheet_count,
             inline_declarations, inline_count, name, &declaration);
-        const char* value = selected ? svg_resolve_property_declaration(&query, current, name, &declaration, scope)
+        const char* value = selected ? svg_resolve_property_declaration(query, current, name, &declaration, scope)
             : dom_element_is_svg(current) &&
                 !css_property_is_identity_shorthand(css_property_code_from_name(name))
                 ? svg_animation_attribute(current, name) : nullptr;
@@ -1029,7 +1045,7 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
                 svg_transform_sample = strcmp(name, "transform") == 0;
             }
         }
-        if (!selected) value = svg_resolve_attribute_variables(&query, current, name, value, scope);
+        if (!selected) value = svg_resolve_attribute_variables(query, current, name, value, scope);
         bool inherit = value && (str_icmp_cstr(value, "inherit") == 0 ||
             (inherits && str_icmp_cstr(value, "unset") == 0) ||
             (strcmp(name, "color") == 0 && str_icmp_cstr(value, "currentColor") == 0));
@@ -1038,18 +1054,68 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
             if (!inherit) value = svg_property_initial(name, &property_inherits);
         }
         if (value && !inherit) {
-            if (owned_value) *owned_value = mem_strdup(value, MEM_CAT_RENDER);
-            else str_copy(buffer, buffer_size, value, strlen(value));
-            found = !owned_value || *owned_value;
             // animateTransform emits SVG transform syntax even when targeting the CSS property.
             if (from_css) *from_css = selected && !svg_transform_sample;
             if (declaring_element) *declaring_element = current;
-            break;
+            return value;
         }
         if (!inherits && !inherit) break;
     }
-    if (matcher) selector_matcher_destroy(matcher);
-    mem_pool_destroy(pool);
+    return nullptr;
+}
+
+const char* svg_get_dom_presentation_property(DomElement* element, const char* name,
+    bool inherits, char* buffer, size_t buffer_size, bool* from_css,
+    char** owned_value, DomElement** declaring_element, const SvgDomStyleScope* scope) {
+    if (from_css) *from_css = false;
+    if (owned_value) *owned_value = nullptr;
+    if (declaring_element) *declaring_element = nullptr;
+    if (!element || !element->doc || !name || (!owned_value && (!buffer || !buffer_size))) return nullptr;
+    // use instances have a different inheritance chain; do not retain their computed values.
+    SvgPaintHostStyle* shared = !scope ? svg_host_style(element->doc) : nullptr;
+    SvgStyleContext local = {};
+    SvgStyleContext* query = shared ? &shared->style : &local;
+    if (!shared) {
+        if (!svg_style_begin(query)) return nullptr;
+        query->document = element->doc;
+        query->engine = (CssEngine*)element->doc->services.cached_css_engine;
+        query->matcher = selector_matcher_create(query->pool);
+        if (query->matcher) state_configure_selector_matcher((DocState*)element->doc->state, query->matcher);
+    }
+    // SMIL queries base values while assembling a sample; they must neither
+    // read nor populate the cache of completed animated presentation values.
+    SvgStyleEntry* entry = shared && !svg_animation_is_sampling(element->doc)
+        ? svg_style_entry(query, dom_element_to_element(element)) : nullptr;
+    uint64_t generation = svg_animation_source_generation(element->doc, dom_element_to_element(element), element);
+    SvgStyleProperty* property = entry ? entry->computed_properties : nullptr;
+    while (property && (property->inherits != inherits || property->animation_generation != generation ||
+        strcmp(property->name, name) != 0)) property = property->next;
+    bool css = false;
+    DomElement* owner = nullptr;
+    const char* value = property ? property->value
+        : svg_dom_resolve_property(query, element, name, inherits, &css, &owner, scope);
+    if (!property && entry) {
+        property = (SvgStyleProperty*)pool_calloc(query->pool, sizeof(SvgStyleProperty));
+        if (property) {
+            property->name = pool_strdup(query->pool, name);
+            // animation samples are borrowed from a pool that can change between queries.
+            property->value = value ? pool_strdup(query->pool, value) : nullptr;
+            property->animation_generation = generation;
+            property->inherits = inherits;
+            property->from_css = css;
+            property->declaring_element = owner;
+            property->next = entry->computed_properties;
+            entry->computed_properties = property;
+        }
+    }
+    if (from_css) *from_css = property ? property->from_css : css;
+    if (declaring_element) *declaring_element = property ? property->declaring_element : owner;
+    bool found = value != nullptr;
+    if (value) {
+        if (owned_value) { *owned_value = mem_strdup(value, MEM_CAT_RENDER); found = *owned_value != nullptr; }
+        else str_copy(buffer, buffer_size, value, strlen(value));
+    }
+    if (!shared) svg_style_destroy(&local);
     return found ? owned_value ? *owned_value : buffer : nullptr;
 }
 
@@ -2092,8 +2158,9 @@ RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
     const char* origin, const Bound* reference_box, const SvgLengthContext* lengths) {
     RdtMatrix result = rdt_matrix_identity();
     if (!value || !reference_box || !lengths) return result;
-    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.transform");
-    if (!pool) return result;
+    // SVG transform attributes parse directly; only CSS syntax/origins need a parser pool.
+    Pool* pool = from_css || origin ? mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.transform") : nullptr;
+    if ((from_css || origin) && !pool) return result;
     TransformProp transform = {};
     if (origin) {
         // a supplied origin's omitted axis is center; SVG's unsupplied origin is zero.
@@ -2133,7 +2200,7 @@ RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
             result = rdt_matrix_multiply(&result, &from);
         }
     }
-    mem_pool_destroy(pool);
+    if (pool) mem_pool_destroy(pool);
     return result;
 }
 
@@ -8063,9 +8130,14 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
                  roundf(content_rect->y * device_scale + offset_y),
                  (float)surface->width, (float)surface->height };
     Bound clip = view_geometry_intersect_bound_rect(rdcon->block.clip, dst);
+    // the cached layer already includes the device transform; vector-backed
+    // blits must not apply the ancestor translation/scale a second time.
+    bool saved_has_transform = rdcon->has_transform;
+    rdcon->has_transform = false;
     render_painter_blit_surface_scaled(rdcon, surface, nullptr, rdcon->ui_context->surface,
                                        &dst, &clip, SCALE_MODE_NEAREST, rdcon->clip_shapes,
                                        rdcon->clip_shape_depth, 255);
+    rdcon->has_transform = saved_has_transform;
     return true;
 }
 

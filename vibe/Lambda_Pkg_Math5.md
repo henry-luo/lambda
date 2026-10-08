@@ -588,6 +588,34 @@ zero tier mismatches and three timeouts. Only retired fixture entries are
 removed from the committed lists; unrelated reclassifications from the shared
 checkout are not part of this change.
 
+### Phase 13 — Keep Outlined Math Responsive While Scrolling
+
+Implemented (2026-10-09): release profiling of `math_comprehensive.md` traced
+most scrolling time to SVG hit testing: repeated CSS parsing, inherited font
+contexts, ancestor transforms and unused stroke geometry. Scroll-position
+updates also invalidated otherwise unchanged SVG style caches.
+
+Radiant now retains the document's SVG cascade across scrolling, invalidating
+it for native style writes, DOM changes, selector state, layout and resource
+changes. SMIL base-value queries remain separate from completed animation
+samples. A synchronous hit walk shares font/transform results, skips stroke
+work when pointer-events only needs filled geometry, and rejects fill misses
+using contour bounds. Plain SVG transforms no longer allocate a CSS parser
+pool. Cached SVG layers apply their device transform once, including when a
+vector-backed blit is required. Visible overflow and precise stroke/clip
+targeting remain supported. This stays within the existing package/native
+boundary (**D7.1.1 / D7.1.2v2**); math layout and font selection remain in the
+Lambda package.
+
+Release validation: 30 headless wheel events at 1000×800 improved from about
+5.4 seconds to 21 milliseconds per event including repaint; after the first
+two events, the average is 15 milliseconds. The new scrolling/style-mutation
+fixture, SVG animation/interaction fixtures, and native vector/CSS suites
+cover cache invalidation and geometry preservation. Validation passes 394 UI
+baseline checks, 128 SVG fixtures, 96 native vector checks and 81 CSS checks.
+The broader visual gate retains the unchanged `pp_btn_shapes_01` threshold
+mismatch; its earlier and updated renderings are pixel-identical.
+
 ## 7. Risk Register
 
 | ID | Severity | Risk | Mitigation |

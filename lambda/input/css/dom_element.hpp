@@ -488,6 +488,8 @@ struct DomDocument : DomDocumentResourceData {
     // style nor selector matching. Content caches outside the written subtree
     // (inline SVG layers) key on this instead of every DOM write.
     uint64_t style_content_epoch;
+    // native attribute/style setters also invalidate computed queries before a DOM commit.
+    uint64_t style_query_epoch;
 
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
@@ -520,7 +522,7 @@ struct DomDocument : DomDocumentResourceData {
                     pending_scroll_into_view_block(DOM_SCROLL_ALIGN_START),
                     pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST),
                     pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO),
-                    loader_runtime(nullptr), style_content_epoch(0) {}
+                    loader_runtime(nullptr), style_content_epoch(0), style_query_epoch(0) {}
 
     bool init(Input* input);
     void destroy();
@@ -911,6 +913,10 @@ struct DomElement : DomNode {
     uint32_t elmt_flags;         // compact element state; use the accessors below
     // document reference (provides Arena and Input*)
     lam::Up<DomDocument> doc;    // Parent document (provides arena and input)
+    void advance_style_version() {
+        style_version++;
+        if (doc) doc->style_query_epoch++;
+    }
     DomDocument* storage_owner() const {
         return ext && ext->storage_document ? ext->storage_document.get() : doc.get();
     }
