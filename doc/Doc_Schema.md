@@ -4,7 +4,7 @@ This document describes the unified element vocabulary — the **Mark Doc schema
 
 > **Where it lives.** The schema is `lmd/package/doc/doc_schema.ls`, shipped with the runtime and used as the default validator schema for the formats above (`lambda validate README.md`). See [Markup_Formats_Support.md](Markup_Formats_Support.md) for what each parser emits and [Lambda_Validator.md](Lambda_Validator.md) for running the validator.
 >
-> **What the parsers emit today.** The tree is `<doc version: "1.0", <body …>>`. A `<meta>` element is part of the schema but not yet produced — Markdown front matter currently parses as a thematic break and a heading. Inline runs inside `<p>` are wrapped in a `<span>`; headings carry `level` as a string (`level: "1"`); code carries `type: "inline"` or `type: "block"` and math `type: "inline"` or `type: "block"`; strikethrough is `<del>`; footnotes are `<footnote-ref ref: "1">` at the reference and a `<footnote>` block for the text; citations are `<citation key: …>`. The sample and element list below show the schema's target shape, and note these differences where they matter.
+> **What the parsers emit today.** The tree is `<doc version: "1.0", <body …>>`. A `<meta>` element is part of the schema but not yet produced — Markdown front matter currently parses as a thematic break and a heading. Inline runs inside `<p>` are wrapped in a `<span>`; headings carry `level` as a string (`level: "1"`); code carries `type: "inline"` or `type: "block"` and math `type: "inline"` or `type: "block"`; strikethrough is `<del>`; Markdown footnotes use `<footnote-ref ref: "label", number: "1">` with a `<sup><a href="#fn-1">1</a></sup>` child, and definitions are collected in a `<footnotes>` section of `<footnote label: "label", id: "fn-1", number: "1">` blocks; citations are `<citation key: …>`. The sample and element list below show the schema's target shape, and note these differences where they matter. See [Markdown dialect](../vibe/input/Input_Markdown.md) for resolution and formatting behavior.
 
 ## Mark Schema
 
@@ -492,9 +492,13 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Attributes**: None.
   - **Purpose**: Figure caption.
   - **Content**: Inline elements.
+- **`<footnotes>`**
+  - **Attributes**: `class: "footnotes"`.
+  - **Purpose**: Generated Markdown notes section, in first-reference order followed by unused definitions.
+  - **Content**: `<footnote>` elements.
 - **`<footnote>`**
-  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
-  - **Purpose**: Footnote content, referenced from the text by `<footnote-ref ref: id>`. (The schema file still names this element `note`.)
+  - **Attributes**: Markdown emits `label`, `id`, and `number` as strings.
+  - **Purpose**: Footnote content, matched by label from `<footnote-ref>`. The `id` is the generated link target. (The schema file still names its target element `note`.)
   - **Content**: Block elements.
 - **`<math>`**
   - **Attributes**:
@@ -571,9 +575,9 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Purpose**: Hyperlink.
   - **Content**: Inline elements.
 - **`<footnote-ref>`**
-  - **Attributes**: `ref`: String, required, the id of the `<footnote>` holding the text.
+  - **Attributes**: `ref`: String, required, the original definition label; `number`: String, the resolved display number in Markdown.
   - **Purpose**: The in-text reference to a footnote (`[^1]` in Markdown).
-  - **Content**: None (empty element).
+  - **Content**: Markdown adds a superscript link to the definition. Undefined Markdown references remain literal text. Other markup flavors may still emit an empty reference element.
 - **`<br>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Line break.
@@ -601,7 +605,7 @@ The Mark schema is designed to represent document structures from Markdown, wiki
 - **Example**: The schema includes citations for "smith2020" (NormalCitation) and "jones2021" (AuthorInText), demonstrating varied usage with references stored as objects in the metadata.
 
 ### Emoji Shortcodes
-A GitHub-style shortcode such as `:smile:` is recognized by the Markdown parser and currently emitted as a bare symbol (`'smile'`) in the inline run; it is not converted to the Unicode character and there is no `<emoji>` element in the schema.
+A Unicode shortcode such as `:smile:` is emitted as a bare symbol (`'smile'`) in the inline run, preserving its name for Markdown formatting. HTML formatting and Radiant resolve the symbol through the shared emoji catalog. GitHub-specific image emoji such as `:octocat:` produce `<img>` nodes with `data-emoji`, `src`, `alt`, and inline sizing attributes; Markdown formatting writes them back as the original shortcode. There is no `<emoji>` element in the current schema. All 1,936 aliases in the versioned GitHub catalog are supported; see [Markdown emoji coverage](../vibe/input/Input_Markdown.md#emoji-implementation-audit).
 
 ### Usage
 - **Transformation**: Facilitates conversion between formats (e.g., Markdown to LaTeX) by preserving semantic structure.

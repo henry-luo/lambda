@@ -1,5 +1,7 @@
 // chart/parse.ls — Parse and validate <chart> element tree
 // Extracts structured spec from the chart element tree into a normalized map.
+import expr: .expression
+import util: .util
 
 // ============================================================
 // Parse a <chart> element into a normalized spec
@@ -60,11 +62,15 @@ pub fn parse_chart(chart_el) {
     {
         width: width,
         height: height,
+        _width_specified: chart_el.width != null,
+        _height_specified: chart_el.height != null,
+        aspect_ratio: chart_el.aspect_ratio,
         padding: padding,
         title: title,
         data: data,
         data_source: attributes(data_el),
         datasets: chart_el.datasets,
+        projection: chart_el.projection,
         resolve: chart_el.resolve,
         clip: chart_el.clip,
         mark: mark,
@@ -108,41 +114,11 @@ pub fn parse_mark(mark_el) {
 // ============================================================
 
 fn parse_encoding(encoding_el) {
-    // look up known channel names directly
     let count = len(content(encoding_el));
-    // build result map from found channels
-    let x_el = find_child(encoding_el, 'x', count);
-    let y_el = find_child(encoding_el, 'y', count);
-    let color_el = find_child(encoding_el, 'color', count);
-    let size_el = find_child(encoding_el, 'size', count);
-    let opacity_el = find_child(encoding_el, 'opacity', count);
-    let theta_el = find_child(encoding_el, 'theta', count);
-    let text_el = find_child(encoding_el, 'text', count);
-    let stroke_el = find_child(encoding_el, 'stroke', count);
-    let x_offset_el = find_child(encoding_el, 'x_offset', count);
-    let x2_el = find_child(encoding_el, 'x2', count);
-    let y2_el = find_child(encoding_el, 'y2', count);
-    let detail_el = find_child(encoding_el, 'detail', count);
-    let tooltip_el = find_child(encoding_el, 'tooltip', count);
-    let shape_el = find_child(encoding_el, 'shape', count);
-    let order_el = find_child(encoding_el, 'order', count);
-    {
-        x: if (x_el) parse_channel(x_el) else null,
-        y: if (y_el) parse_channel(y_el) else null,
-        color: if (color_el) parse_channel(color_el) else null,
-        size: if (size_el) parse_channel(size_el) else null,
-        opacity: if (opacity_el) parse_channel(opacity_el) else null,
-        theta: if (theta_el) parse_channel(theta_el) else null,
-        text: if (text_el) parse_channel(text_el) else null,
-        stroke: if (stroke_el) parse_channel(stroke_el) else null,
-        x_offset: if (x_offset_el) parse_channel(x_offset_el) else null,
-        x2: if (x2_el) parse_channel(x2_el) else null,
-        y2: if (y2_el) parse_channel(y2_el) else null,
-        detail: if (detail_el) parse_channel(detail_el) else null,
-        tooltip: if (tooltip_el) parse_channel(tooltip_el) else null,
-        shape: if (shape_el) parse_channel(shape_el) else null,
-        order: if (order_el) parse_channel(order_el) else null
-    }
+    map([for (key in ["x", "y", "color", "size", "opacity", "theta", "text", "stroke", "x_offset",
+        "x2", "y2", "detail", "tooltip", "shape", "order", "url", "theta2", "radius", "radius2", "longitude", "latitude"],
+        let child = find_child(encoding_el, symbol(key), count))
+        for (part in [key, if (child != null) parse_channel(child) else null]) part])
 }
 
 pub fn parse_channel(ch_el) {
@@ -190,7 +166,8 @@ pub fn get_channel(encoding, channel_name: string) {
 
 pub fn channel_value(channel, row, fallback = null) {
     let resolved = channel_definition(channel, row);
-    if (resolved and resolved.value != null) resolved.value
+    if (resolved is error) resolved
+    else if (resolved and resolved.value != null) resolved.value
     else if (resolved and resolved.datum != null) resolved.datum
     else if (resolved and resolved.field) row[resolved.field]
     else fallback
@@ -200,12 +177,18 @@ pub fn channel_value(channel, row, fallback = null) {
 pub fn test_predicate(predicate, row) {
     if (predicate is fn) predicate(row)
     else if (predicate is bool) predicate
+    else if (predicate is error) predicate
+    else if (predicate is string) test_predicate(prepare_predicate(predicate), row)
+    else if (predicate._expression != null) expr.test(predicate._expression, row)
     else if (predicate.test != null) test_predicate(predicate.test, row)
     else if (predicate['and'] != null)
-        len([for (part in predicate['and'] where not test_predicate(part, row)) true]) == 0
+        test_parts(predicate['and'], row, 0, true)
     else if (predicate['or'] != null)
-        len([for (part in predicate['or'] where test_predicate(part, row)) true]) > 0
-    else if (predicate['not'] != null) not test_predicate(predicate['not'], row)
+        test_parts(predicate['or'], row, 0, false)
+    else if (predicate['not'] != null) {
+        let result = test_predicate(predicate['not'], row);
+        if (result is error) result else not result
+    }
     else if (predicate.field != null) {
         let actual = row[predicate.field];
         let op = predicate.op;
@@ -230,8 +213,67 @@ pub fn test_predicate(predicate, row) {
 
 pub fn channel_definition(channel, row) {
     let conditions = if (channel.condition is array) channel.condition else [channel.condition];
-    let matches = [for (condition in conditions where condition != null and test_predicate(condition, row)) condition];
-    if (len(matches) > 0) matches[0] else channel
+    first_condition(conditions, row, 0, channel)
+}
+
+fn first_condition(conditions, row, index, fallback) {
+    if (index >= len(conditions)) fallback else {
+        let condition = conditions[index];
+        let passed = if (condition == null) false else test_predicate(condition, row);
+        if (passed is error) passed else if (passed) condition else first_condition(conditions, row, index + 1, fallback)
+    }
+}
+
+fn test_parts(parts, row, index, conjunction) {
+    if (index >= len(parts)) conjunction else {
+        let passed = test_predicate(parts[index], row);
+        if (passed is error) passed else if (passed != conjunction) passed
+        else test_parts(parts, row, index + 1, conjunction)
+    }
+}
+
+// Compile all branches even for empty data; malformed input is a value error (S7.4.1).
+pub fn prepare_predicate(predicate) {
+    if (predicate is string) {
+        let compiled = expr.compile(predicate);
+        if (compiled is error) compiled else {_expression: compiled}
+    } else if (predicate.test != null) {
+        let test = prepare_predicate(predicate.test);
+        if (test is error) test else {*:attributes(predicate), test: test}
+    } else if (predicate['not'] != null) {
+        let test = prepare_predicate(predicate['not']);
+        if (test is error) test else {*:attributes(predicate), 'not': test}
+    } else if (predicate['and'] != null or predicate['or'] != null) {
+        let key = if (predicate['and'] != null) "and" else "or";
+        let parts = [for (part in predicate[key]) prepare_predicate(part)];
+        let failure = util.first_error(parts);
+        if (failure is error) failure else {*:attributes(predicate), *:map([key, parts])}
+    } else predicate
+}
+
+fn prepare_channel(channel) {
+    if (channel is array) {
+        let prepared = [for (item in channel) prepare_channel(item)];
+        let failure = util.first_error(prepared);
+        if (failure is error) failure else prepared
+    } else if (channel.condition == null) channel else {
+        let conditions = if (channel.condition is array) channel.condition else [channel.condition];
+        let prepared = [for (condition in conditions) prepare_predicate(condition)];
+        let failure = util.first_error(prepared);
+        if (failure is error) failure else {*:attributes(channel), condition: prepared}
+    }
+}
+
+pub fn prepare_channels(encoding) {
+    let entries = [for (key, channel in encoding) {key: string(key), value: prepare_channel(channel)}];
+    let failure = util.first_error(entries |> ~.value);
+    if (failure is error) failure else map([for (entry in entries) for (item in [entry.key, entry.value]) item])
+}
+
+pub fn validate_conditions(encoding, data) {
+    util.first_error([for (key, channel in encoding)
+        for (entry in (if (channel is array) channel else [channel]) where entry.condition != null)
+            for (row in data) channel_definition(entry, row)])
 }
 
 // check if encoding has a specific channel
@@ -249,8 +291,10 @@ pub fn parse_concat(concat_el) {
     let count = len(content(concat_el));
     let children = [for (i in 0 to (count - 1),
                          let child = concat_el[i]
-                         where child != null) parse_top(child)];
+                         where child != null and name(child) in ['chart', 'hconcat', 'vconcat', 'repeat', 'svg'])
+                         if (name(child) == 'svg') child else parse_top(child)];
     {
+        *:parse_chart(concat_el),
         concat: direction,
         spacing: spacing,
         children: children
@@ -273,6 +317,7 @@ pub fn parse_repeat(repeat_el) {
     let template = [for (c in children where name(c) == 'chart') c];
     let tmpl = if (len(template) > 0) parse_chart(template[0]) else null;
     {
+        *:parse_chart(repeat_el),
         repeat_row: row_fields,
         repeat_column: col_fields,
         template: tmpl

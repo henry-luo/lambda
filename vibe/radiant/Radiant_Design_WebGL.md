@@ -905,7 +905,8 @@ corpus, not Three.js execution.
   join either phase's required workload set.
 - Phase III's selected animation binding/interpolation manifest, shared SVG
   engine extraction, rich-scene API/shader expansion and frame-pacing evidence
-  are specified in §8; their implementation and validation remain pending.
+  are specified in §8; implementation, validation and measured limits are
+  recorded in [the Phase III evidence](../impl/Radiant_WebGL_Phase3.md).
 - GPU-process containment and any expansion of existing headless profiles.
 
 These follow-on decisions do not change the formal specification. Phase I
@@ -916,7 +917,8 @@ evidence covers the named macOS driver; other desktops remain unverified.
 Detailed Phase I implementation and validation are recorded in
 [`vibe/impl/Radiant_Scene3d_Phase1.md`](../impl/Radiant_Scene3d_Phase1.md).
 The following table records Phase I/II seams and the selected Phase III
-extensions; Phase III and export remain pending as indicated.
+extensions; selected macOS Phase III evidence is recorded
+[separately](../impl/Radiant_WebGL_Phase3.md), and export remains follow-on work.
 
 | Location | Responsibility |
 |---|---|

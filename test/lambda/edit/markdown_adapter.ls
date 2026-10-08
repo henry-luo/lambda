@@ -97,8 +97,7 @@ let edited = node('doc', [node('p', [text("Changed intro.")]), *drop(kept.doc.co
 "edited export:"; [md.export_text(edited, kept.envelope)]
 
 // inline raw HTML is one tag per atom: a lone tag or a comment shows nothing
-// on its own, so the surface shows its source; a void tag has a view; math
-// shows its TeX source
+// on its own, so the surface shows its source; void tags and math have views
 let atoms = md.import_text("Press <kbd>K</kbd>, <br> a <!-- c --> and $x$.\n")^.doc.content[0].content;
 "inline atom views:"; [for (a in atoms where a.kind == 'node') [a.tag, len(attr_get(a, view_attr))]]
 "declined commands:"; md.unsupported_input_types

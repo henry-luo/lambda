@@ -180,6 +180,22 @@ to the editor.
   block, and a viewport-tall body carried both bars away past the first
   screen; the body now grows with the document (`min-height`). Regressions:
   `test/ui/sticky_scroll_follow.json`, `test/ui/edit/edit_md_scroll_chrome.json`.
+* **Math changed width during editor refresh.** Intrinsic table measurement
+  reused the page width for cyclic percentages inside formula cells. Fraction
+  bars then widened their formulas and pushed later paragraphs down despite an
+  unchanged scroll offset. The table query now supplies an indefinite inline
+  basis, which percentage constraints honor during intrinsic measurement.
+  Regression: `test/ui/edit/edit_md_math_scroll.json` checks geometry and scroll
+  across selection, typing, Enter, undo and Save.
+* **Retained math disappeared after typing.** Rebuilding fat DOM elements and
+  strings left the old parent's child link attached to their reused storage.
+  Retiring that parent could retire a child already in the new tree. Rebuild
+  now unlinks a retained child before reparenting it, preserving the ownership
+  required by D4.5.1v4. The same math regression checks both formulas survive.
+* **View-only caret boundaries.** Collapsed whitespace can be a DOM text node
+  without a text view. Caret geometry now checks the view discriminator before
+  accessing text rectangles. Editing policy remains in Lambda (D7.2.5);
+  `edit_md_view_only_keys.json` covers deletion and undo of a retained block.
 * **In-flow positioned boxes painted and hit-tested in tree order.** A relative
   or sticky box (`z-index` auto/0) was painted among its siblings in tree
   order, so one pulled over a later sibling went under it, while hit-testing
@@ -288,13 +304,12 @@ to the editor.
   writer builds HTML text and parses it back. A view that shows nothing (no
   text, no replaced element) is empty, and the surface shows the part's
   source instead.
-* Math shows its TeX source, not a rendering (open item E-9). The edit
-  application runs on MIR (the toolbar's `on` handlers are not interpretable,
-  and a MIR parent demotes its whole import cone), and compiling the math
-  package's `metrics_data.ls` on MIR costs about 22 s and 4.7 GB in a debug
-  build (0.02 s interpreted). `lambda view` renders Markdown math by running
-  the package in a separate interpreted runtime, which the edit surface has
-  no hook for. The native MathML formatter is disabled.
+* Inline and display math use `lambda.doc.math` and its shipped font and layout
+  stylesheets. Metrics are loaded from `metrics_data.mark`, so the old MIR
+  compilation blocker no longer applies (E-9 resolved). Formula views are
+  computed at import, remain non-editable atoms, and retain their TeX for Save.
+  A failed rendering falls back to source. `test/lambda/edit/view_only.ls`
+  checks inline, display and retained-block projections and source round trips.
 * Markdown keeps a top-level block as an atomic `md_source` node holding its
   source lines verbatim (§2.5) and its view when the block holds a construct
   outside the profile (footnote references, say), is one the editor only
@@ -307,8 +322,8 @@ to the editor.
   and sanitizes the whole block, so inline raw HTML tags — one token each —
   pair up as the source pairs them.
 * Inline raw HTML and math inside editable blocks, and nested HTML blocks or
-  display math, stay atoms saved through the formatter; raw HTML carries a
-  view too. A lone inline tag or a comment shows its source.
+  display math, stay atoms saved through the formatter and carry their rendered
+  views. A lone inline tag or a comment shows its source.
 * HTML `raw_html`/`html_block` nodes carry the sanitized view of their parsed
   subtree; a named anchor or an empty icon element shows its source label.
 * The surface wraps every kept part in a `contenteditable=false` element with
@@ -325,6 +340,15 @@ to the editor.
   commands, including the Link and Image dialogs, apply the same check to
   the model selection. `lambda.editor` gained `edit_action_selection` and
   `edit_action_family` for this.
+
+### 3.4 Toolbar
+
+The shared toolbar separates the filename and document actions from grouped
+formatting controls. Stroke icons, consistent button sizes, restrained active
+states and a fixed-width dirty indicator keep it stable while editing. Buttons
+retain document focus on mouse-down and emit the existing command descriptors;
+editing policy stays in Lambda (D7.2.5). Source mode uses one compact row, and
+formatting groups wrap together in narrower windows.
 
 ## 4. Progress
 
@@ -353,6 +377,6 @@ to the editor.
 | E-6 | HTML `<b>`/`<i>` stay their own marks; the Bold/Italic buttons reflect `strong`/`em` only. |
 | E-7 | The XML reader does not honor `xml:space="preserve"` for text-only elements. |
 | E-8 | Drawing: no pan tool (the canvas scrolls), no path-node editing, connectors, or layers (proposal §10 choice 2). |
-| E-9 | View-only math shows TeX source (§3.3): rendering it needs the math package, whose `metrics_data.ls` costs ~22 s / 4.7 GB to compile on MIR (debug build). Fix the MIR cost, or give the edit surface a hook to render math in a separate interpreted runtime as `lambda view` does. |
+| E-9 | Resolved 2026-10-08: inline and display math render through the math package; source is retained for saving (§3.3). |
 | E-10 | A click in a view-only part does not select it (the native caret stays outside the non-editable element), so the part shows no selection highlight; typing is declined and Delete removes the part (§3.3). |
 | E-11 | The Markdown reader has no footnote-definition syntax: `[^1]: word` parses as a link reference definition and `[^1]: two words` as a paragraph holding a footnote reference. Both are kept as written. |

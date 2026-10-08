@@ -1,8 +1,8 @@
 # Lambda Chart Package — Design
 
 **Status:** Consolidated working design, 2026-10-08. Captures the current chart
-and wordcloud contracts; incomplete capabilities and proposed extensions are
-identified in the final section.
+and wordcloud contracts, including specialized extensions. Optional
+compatibility expansion and scope boundaries are identified in the final section.
 
 **Scope:** Declarative statistical charts, chart composition, and weighted
 word/tag clouds producing SVG. This document replaces the separate chart
@@ -207,8 +207,8 @@ Its primary interfaces are:
 
 | Interface | Contract |
 |---|---|
-| `lambda.chart.chart` → `render(chart_el)` | Render a native `<chart>`, `<hconcat>`, `<vconcat>`, or `<repeat>` specification to an SVG element |
-| `lambda.chart.chart` → `render_spec(spec)` | Render a specification map; native elements are also accepted |
+| `lambda.chart.chart` → `render(chart_el, viewport = null)` | Render a native `<chart>`, `<hconcat>`, `<vconcat>`, or `<repeat>` specification to an SVG element; optional viewport supplies container dimensions |
+| `lambda.chart.chart` → `render_spec(spec, viewport = null)` | Render a specification map; native elements and the same optional viewport are accepted |
 | `lambda.chart.vega` → `convert(vl)` | Adapt a parsed Vega-Lite map to a chart specification map |
 | `lambda.chart.wordcloud` → `layout(words, opts = null)` | Return resolved cloud options, placed words, and unplaced words; raised-error return `map^` |
 | `lambda.chart.wordcloud` → `render(words, opts = null)` | Return a cloud SVG element; raised-error return `element^` |
@@ -274,12 +274,11 @@ caller with `input`. It adapts inline, named, and file/URL data; marks and
 encoding channels; layers, facets, concatenations, and repeats; configuration;
 and the supported transform vocabulary.
 
-The adapter remains experimental. Field predicates, aggregation, binning,
-folding, and flattening are converted and applied. Static Lambda callbacks
-can express calculations when constructing a specification as Lambda values.
-Vega expression strings and unknown transforms produce a diagnostic rather
-than silently changing the meaning of a chart. Full Vega-Lite compatibility
-remains outside the contract (§10).
+The adapter remains experimental. Field predicates, static expression strings,
+and the transform vocabulary below are converted and applied. Pure Lambda
+callbacks can also express calculations. Unknown expressions, functions, and
+transforms produce value-error diagnostics (S7.4.1). Full Vega-Lite
+compatibility remains outside the contract (§10).
 
 ## 4. Marks and chart families
 
@@ -292,7 +291,7 @@ mark, a mark with particular encodings, or a composition of marks.
 | `line` | Connect ordered observations; color or `detail` distinguishes series; optional points, step interpolation, or smooth cardinal curves |
 | `area` | Fill under a series, between y/y2 endpoints, or between stacked boundaries; uses the line interpolation vocabulary |
 | `point` | Scatter and bubble plots; circle, square, diamond, triangle-up, triangle-down, and cross symbols |
-| `arc` | Pie slices proportional to `theta`; `inner_radius` produces a donut |
+| `arc` | Pie slices proportional to `theta`, or intervals between `theta`/`theta2`; `radius`/`radius2` can specify outer/inner bounds |
 | `rect` | Heatmap cells or rectangular ranges defined by x/x2 and y/y2, typically colored by a quantity |
 | `text` | Labels positioned by x/y, with content from the `text` channel |
 | `rule` | Horizontal or vertical reference lines and segments between x/y and x2/y2 endpoints |
@@ -301,6 +300,15 @@ mark, a mark with particular encodings, or a composition of marks.
 | `errorbar` | Capped interval between supplied y/y2 bounds |
 | `errorband` | Filled interval between supplied y/y2 curves |
 | `wordcloud` | Weighted words with measured text layout; `text`, `size`, and optional `color` encodings; see §9 |
+| `violin` | Mirrored category densities, estimated from measurements or supplied through `density_field`; vertical and horizontal forms |
+| `slope` | Entity-grouped lines between two comparison positions, including reversed ranking scales |
+| `trail` | Linear paths with widths interpolated between observations, with round joins and caps |
+| `image` | URL-backed images positioned by x/y, with optional x2/y2 bounds |
+| `radar` | Closed series on categorical angular axes and a quantitative radial scale, with optional fill and radial guides |
+| `parallel` | One polyline per record across independently normalized quantitative axes |
+| `treemap` | Hierarchical weights represented by proportional nested rectangles |
+| `sunburst` | Hierarchical weights represented by concentric angular partitions |
+| `geoshape` | GeoJSON points, lines, and polygon regions with a projection and ordinary color encodings; `geo` is an alias |
 | Histogram | Bin a quantitative x field and count observations per bin, displayed as bars |
 | Candlestick/OHLC | Layer a high–low rule with an open–close bar; color can distinguish rising and falling values |
 
@@ -308,7 +316,7 @@ Point size represents area in square pixels. Mark appearance includes color,
 opacity, stroke, stroke width, and mark-specific properties such as bar width
 and corner radius, line points, arc radii and padding, and text font size.
 Encoding values refine the corresponding default appearance. Support is
-mark-specific; the remaining styling and channel gaps are recorded in §10.
+mark-specific; compatibility boundaries are recorded in §10.
 
 Mark `fill`, `stroke`, and `color` accept solid colors, linear/radial gradients,
 and hatch patterns. Color encodings can supply the same paints as constants,
@@ -317,17 +325,143 @@ Legend symbols retain their palette paint. Line colors apply to strokes and
 optional point overlays; wordcloud colors apply to text. See §8 for the paint
 vocabulary.
 
+### Distribution, comparison, and image marks
+
+A violin uses a categorical band axis and a quantitative measurement axis.
+`steps`, `bandwidth`, and `extent` control automatic density estimates;
+`density_field` instead uses supplied nonnegative densities. `width` is the
+full maximum width in pixels, defaulting to the category band. Densities are
+normalized independently per category/series by default;
+`density_resolve: "shared"` gives them one common density-to-width mapping.
+Color and detail distinguish overlaid distributions within a category.
+
+A slope uses exactly two x comparison positions and one observation per
+entity at each position. `detail`, or color when detail is absent, identifies
+entities. Endpoints follow their displayed x order. Ordinary y scale controls,
+including reversal for ranks, apply.
+
+A trail's `size` channel measures width in pixels, with a default scaled range
+of `[1, 10]`; a constant mark `size` defaults to two pixels. Widths taper
+linearly between observations, and joins and caps are round. One series paints
+with one style, using its first observation as ordinary lines do. Size legends
+show line widths. Point-area and trail-width scales require independent size
+resolution when combined. Trail interpolation is currently linear.
+
+An image gets its URL from the `url` channel, mark `url`, or the row's `url`
+field. Without range endpoints, `width`/`height` default to 20 pixels and the
+image is centered on x/y. `align` selects `left`, `center`, or `right`;
+`baseline` selects `top`, `middle`, or `bottom`. Range endpoints define the
+image rectangle regardless of direction. `preserve_aspect_ratio` defaults to
+`"xMidYMid meet"`; `aspect: false` stretches to the rectangle. The renderer
+emits the URL into SVG; it does not load the image during chart generation.
+These marks retain ordinary appearance, tooltips, clipping, and composition.
+Invalid dimensions, densities, widths, or incomplete slope pairs return
+value errors (S7.4.1).
+
+### Radial and multi-axis charts
+
+A radar requires a nominal/ordinal `theta` field with at least three categories
+and a quantitative `radius` field. Each color/detail series supplies exactly
+one finite observation per category. Angular domain/sort/reversal and radial
+domain/range/reversal apply. Series close back to the first category;
+`filled: true` adds polygon fill, with `fill_opacity` defaulting to 0.2.
+`labels`, `grid`, and `tick_count` control measured category labels and radial
+guides. Empty data is valid; missing/duplicate categories return value errors
+(S7.4.1).
+
+A parallel mark declares `fields: ["a", "b", ...]`, with at least two axes.
+An entry may instead be `{field, title, scale, axis, format, zero}`. Each field
+has its own quantitative scale, excluding zero by default. Rows missing any
+finite axis value are omitted before deriving domains. `axes: false` and
+`labels: false` hide guides and field headings. Color, opacity, tooltips, and
+line interpolation retain their ordinary meanings.
+
+An arc with `theta2` uses start/end angles instead of pie shares. Numeric
+angular scales default to `[0, 2π]`; categorical angular scales space their
+domain uniformly. A disabled scale uses radians directly. `radius` and
+`radius2` select outer and inner radii; a disabled radial scale uses pixels.
+Angles must be finite and ordered, and radii satisfy `0 <= inner <= outer`.
+Absent radial channels use mark `outer_radius`/`inner_radius`, with the outer
+radius defaulting to half the smaller plot dimension. Authored radii are
+preserved. Full circles and annuli are valid, including inside layers.
+
+### Hierarchical charts
+
+Treemaps and sunbursts consume flat records. `node_field`, `parent_field`, and
+`value_field` default to `"id"`, `"parent"`, and `"value"`; a size encoding's
+field supplies the weight field when `value_field` is absent. Node IDs are
+unique strings, symbols, or finite numbers. A null/missing parent identifies
+a root; multiple roots form a forest. Every non-null parent must identify a
+node, and parent cycles are invalid.
+
+Leaf weights are finite and nonnegative, defaulting to one when absent.
+Internal weights are the sum of children, without counting the internal
+record's own value again. Zero-weight branches have no visible geometry.
+Treemaps place larger siblings first and preserve their area proportions;
+`node_padding` defaults to one pixel and `header_height` to zero. Sunbursts
+preserve sibling input order, divide angles in proportion to weight, and use
+equal radial bands for hierarchy levels. `inner_radius` defaults to zero;
+`outer_radius` defaults to half the smaller plot dimension.
+
+Original rows supply color and tooltip encodings. Without a color encoding,
+each root and its descendants share a palette color. `label_field` defaults
+to the node field. `labels: false` hides labels; otherwise measured labels
+are truncated for their available width and omitted when they do not fit
+their rectangle or radial partition. Treemap headings appear when a positive
+`header_height` is supplied. Invalid hierarchies or geometry return value
+errors (S7.4.1).
+
+### Geographic charts
+
+`geoshape` accepts GeoJSON FeatureCollections, Features, geometries, or arrays
+of records containing a `geometry` field. `geometry_field` changes that field;
+`shape: {field, dtype: "geojson"}` is another explicit selection. Feature
+properties are directly available to color and tooltip encodings, with
+GeoJSON metadata taking precedence on name collisions. Null geometry and
+empty coordinate arrays produce no marks. Longitude/latitude channels can
+instead construct point geometry from records.
+
+Supported geometry types are Point, MultiPoint, LineString, MultiLineString,
+Polygon, MultiPolygon, and GeometryCollection. Positions use finite
+longitude/latitude in degrees within ±180/±90; altitude is ignored. Polygon
+rings are closed and simple, with exterior first and holes afterward.
+Holes are retained regardless of ring winding. Edges interpolate in
+longitude/latitude as specified by [RFC 7946 §3.1.1](https://www.rfc-editor.org/rfc/rfc7946#section-3.1.1).
+Data crossing the antimeridian should use the split geometry described by
+[RFC 7946 §3.1.9](https://www.rfc-editor.org/rfc/rfc7946#section-3.1.9).
+
+The mark or chart `projection` accepts a name or an options map. Supported
+names are `"mercator"` (default), `"equirectangular"`, `"albers"`,
+`"orthographic"`, and `"natural_earth"` (`"naturalEarth1"` is an alias).
+Options include `center: [longitude, latitude]`, positive pixel `scale`,
+`translate: [x, y]`, `padding`, positive pixel `precision` (default 0.75), and
+Albers `parallels` (default `[29.5, 45.5]`). Defaults fit the world extent to
+the plot. An explicit center places that geographic location at the plot
+center unless translation is supplied. Orthographic shows the visible
+hemisphere; Mercator clips to the conventional square world extent,
+approximately ±85.05° latitude. The five families follow their standard
+[projection definitions](https://d3js.org/d3-geo/projection).
+
+Geographic paths retain projection-boundary clipping and curved outlines.
+Point sizes represent area in square pixels, as for ordinary points. Color
+scales provide choropleths; source boundaries support strokes, and opacity,
+tooltips, clipping, and composition remain available. Invalid geometry and
+projection options return value errors (S7.4.1). TopoJSON, inverse projection,
+map tiles, and interactive navigation are outside this contract.
+
 ### Stacking and grouping
 
 Bar and area charts with a color grouping default to zero-based stacking,
 unless `x_offset` requests grouped bars or stacking is explicitly disabled.
-The y channel selects the stack mode:
+The quantitative channel (y for area/vertical bars, x for horizontal bars)
+selects the stack mode:
 
 | `stack` setting | Meaning |
 |---|---|
 | `"zero"` | Accumulate each group from a zero baseline |
 | `"normalize"` | Express each stack as proportions totaling one |
 | `"center"` | Center each stack around its midpoint |
+| `"wiggle"` | Shift an area stack's baseline to minimize weighted layer movement |
 | `false` or `"none"` | Disable stacking |
 
 An omitted setting permits automatic stacking; `null` is not an explicit
@@ -339,13 +473,41 @@ sides of zero; normalization divides by the total absolute contribution.
 The `order` encoding controls record/drawing order; an explicit color-domain
 or color-sort array controls series order within a stack.
 
+`stack_order` on the quantitative channel overrides that series order. It
+accepts an array of series values, `"none"` for first appearance, `"reverse"`,
+`"ascending"` or `"descending"` by total value, and `"inside_out"`. An array
+may be partial: unlisted observed series follow in first-appearance order;
+duplicate and unobserved entries do not add series. Ascending totals and
+peak-position ties are stable; descending totals reverse the complete
+ascending order, including ties (S6.2.3). These controls preserve color and
+legend assignments.
+
+Wiggle stacks require area marks with x, quantitative y, and color-group
+fields, and finite nonnegative values. Their default order is inside-out
+unless an explicit color-domain or color-sort array supplies the order.
+Inside-out balances early-peaking series near the center and later-peaking
+series toward the outside, following the
+[D3 streamgraph model](https://d3js.org/d3-shape/stack#stackOrderInsideOut).
+An explicit `stack_order` takes precedence. The initial baseline is zero;
+later baselines follow the weighted change rather than centering every
+column independently.
+
+Numeric and temporal samples follow ascending x; categorical samples follow
+their scale domain or sort order. Each color series shares the observed x
+grid. Missing samples have zero thickness, and duplicate series/x samples
+add their values while retaining the first record's other attributes.
+All-zero columns keep the previous baseline. The y scale covers the resulting
+stack endpoints, including negative baseline positions. Layers, facets, and
+repeats apply the same stack contract. Invalid modes, orders, or wiggle data
+return chart value errors (S7.4.1).
+
 ## 5. Encodings, scales, and color
 
 An encoding binds a field and its data classification to a visual channel.
 Its design vocabulary also includes constant `value`, literal `datum`, title,
 format, sort order, scale, guide settings, aggregation, binning, stacking, and
-conditions. Parsing a setting does not guarantee full rendering support;
-§10 identifies incomplete parts of this vocabulary.
+conditions. Each setting follows its documented mark and scale contract;
+§10 records compatibility boundaries beyond this vocabulary.
 
 | Channel | Meaning |
 |---|---|
@@ -353,13 +515,17 @@ conditions. Parsing a setting does not guarantee full rendering support;
 | `x2`, `y2` | Secondary endpoints for ranged geometry |
 | `x_offset` | Subgroup position within a categorical x band |
 | `color` | Categorical or quantitative color; also distinguishes series |
-| `size` | Quantitative symbol area |
+| `size` | Quantitative symbol area, trail width, or hierarchy weight |
 | `opacity` | Quantitative transparency |
 | `stroke` | Stroke-color encoding |
-| `shape` | Point-symbol shape |
+| `shape` | Point-symbol shape, or a GeoJSON field with `dtype: "geojson"` |
 | `order` | Record and drawing order, also supplying stack series order |
-| `theta` | Angular share for arc marks |
+| `theta` | Arc share/start angle, or radar category |
+| `theta2` | Arc end angle |
+| `radius`, `radius2` | Outer/inner radial positions |
+| `longitude`, `latitude` | Geographic point coordinates in degrees |
 | `text` | Label content |
+| `url` | Image resource URL |
 | `detail` | Series grouping without assigning a visual appearance |
 | `tooltip` | Hover-title content |
 
@@ -397,10 +563,20 @@ can remove the sort field.
 
 Temporal scales use calendar-aligned millisecond, second, minute, hour, day,
 week, month, or year ticks. Month and year boundaries follow the calendar,
-including leap years. `scale.timezone` is a fixed UTC offset in minutes,
-defaulting to zero; `scale.type: "utc"` denotes UTC. Input timestamps with
-offsets are placed by their instant. Named time zones and daylight-saving
-transitions remain outside this contract (§10).
+including leap years. `scale.timezone` accepts a fixed UTC offset in minutes
+or an IANA zone name such as `"America/New_York"`, defaulting to zero;
+`scale.type: "utc"` denotes UTC. Input timestamps with offsets are placed by
+their instant (S6.1.1). Zone rules use the pinned IANA 2026e release rather
+than the machine's local time-zone setting (S12.1.1v2).
+
+Calendar ticks follow local boundaries: days can span 23 or 25 hours,
+nonexistent subday boundaries are omitted, and repeated subday boundaries
+appear as distinct instants. A skipped midnight starts its calendar day at
+the first valid local time; wholly skipped dates contribute no extra tick.
+Grouping resolves ambiguous local times to their earlier occurrence and
+shifts nonexistent local times forward by the actual clock change. `Z` and
+`ZZ` label tokens show the instant's real offset, including historical
+second offsets when needed. Unknown zones return value errors (S7.4.1).
 
 ### Color
 
@@ -428,7 +604,28 @@ condition may supply a field predicate or a pure Lambda `test` callback
 `range`, `oneOf`, and `valid`, with `and`, `or`, and `not` composition.
 An array of conditions selects the first matching case. Conditions can
 supply constants or field values for position, color, opacity, size,
-stroke, and shape. General Vega expression strings remain outstanding (§10).
+stroke, and shape. `test` also accepts a static Vega expression string.
+
+Static expressions bind `datum` to the current record. They support nested
+dot/bracket field access, number/string/boolean/null/array/object literals,
+arithmetic, comparison, bitwise and logical operators, and conditional
+`test ? yes : no` or `if(test, yes, no)` expressions. Logical and conditional
+branches short-circuit. Missing fields remain distinct from explicit null
+within an expression, including `isDefined` and strict comparisons.
+
+Supported helpers cover type checks and conversions; common mathematical
+functions such as `abs`, `sqrt`, `pow`, `log`, `min`, `max`, and `clamp`;
+string operations such as `lower`, `upper`, `trim`, `slice`, `split`, and
+`replace`; and array/object operations such as `length`, `extent`, `inrange`,
+`join`, `reverse`, `pluck`, and `merge`. `format` uses the numeric-format
+contract shared with guides. This is a deterministic, datum-scoped subset of
+the [Vega expression language](https://vega.github.io/vega/docs/expressions/),
+with no assignments, method calls, ambient globals, or signals. String
+operations use Unicode character boundaries (S2.5.8). Container equality
+uses Lambda value equality (S5.4.1). Invalid syntax and unknown
+helpers are diagnosed even with empty data; evaluation failures stop the
+chart with a value error (S7.4.1). Pure Lambda callbacks retain Lambda's
+ordinary semantics (S12.1.1v2).
 
 ## 6. Data transformations
 
@@ -441,16 +638,21 @@ question from filtering the aggregate result.
 | `filter` | `field`, `op`, `value`, or a `test` using the condition predicate vocabulary; retain matching rows |
 | `sort` | `field`, `order`, each a scalar or parallel array, or `sort: [{field, order}, ...]`; stable ordering with mixed directions |
 | `aggregate` | `<group field: ...>` and `<agg op: ..., field: ..., as: ...>` children; produce grouped summaries |
-| `calculate` | `as`, `op`, `field`, optional `field2`, or a pure `expression` callback; copy, convert, or combine fields |
+| `calculate` | `as`, `op`, `field`, optional `field2`, or `expression` as a static Vega string or pure Lambda callback; copy, convert, or combine fields |
 | `bin` | `field`, optional `as`, `maxbins`, `step`; discretize a continuous field into intervals |
 | `fold` | `fields`, optional `as`; turn wide records into key/value records, defaulting to `key` and `value` |
 | `flatten` | `fields`, optional `as`; zip array-valued fields into rows, extending to the longest array and padding shorter fields with null |
 | `window` | `groupby`, `sort`, `frame`, `ignore_peers`; `<agg op, field, as, param>` children add ordered calculations while preserving source row order |
+| `joinaggregate` | `groupby`, `joinaggregate: [{op, field, as}, ...]` or `<agg>` children; attach whole-partition summaries to every source row |
+| `pivot` | `pivot` (or `field`), `value`, optional `groupby`, `op`, `limit`; turn unique field values into aggregate columns |
+| `impute` | `impute` (or `field`), `key`, optional `groupby`, `keyvals`, `method`, `value`, `frame`; fill null values and missing group/key combinations |
+| `stack` | `stack` (or `field`), `groupby`, optional `sort`, `offset`, `as`; attach ordered stack start/end fields without replacing source records |
+| `quantile` | `quantile` (or `field`), optional `groupby`, `probs`, `step`, `as`; emit empirical probability/value pairs |
 | `lookup` | `field` (or `lookup`), `from: {data, key, fields}`, optional `as` and `default`; extend each primary record with matching foreign fields |
 | `density` | `field`, optional `groupby`, `bandwidth`, `extent`, `steps`, `as`, `counts`, `cumulative`, `resolve`; emit sampled Gaussian density or cumulative probability records |
 | `regression` | `x`, `y`, optional `groupby`, `method`, `order`, `extent`, `steps`, `as`, `params`; emit fitted trend records or model parameters |
 | `loess` | `x`, `y`, optional `groupby`, `bandwidth`, `as`; emit a locally weighted trend at each distinct observed predictor value |
-| `timeunit` | `field`, `unit`, `as`, optional fixed-offset `timezone`; add a calendar-grouping field while retaining the source field |
+| `timeunit` | `field`, `unit`, `as`, optional offset or IANA `timezone`; add a calendar-grouping field while retaining the source field |
 
 Aggregate operations are `count`, `sum`, `mean`/`average`, `median`, `min`,
 `max`, `distinct`, `q1`, `q3`, `stdev`, `variance`, `valid`, and `missing`.
@@ -459,6 +661,28 @@ Numeric summaries ignore null, nonnumeric, NaN, and infinite observations;
 which is zero. Calculate operations
 include `+`, `-`, `*`, `/`, `copy`, `string`, `float`, and `int`; arbitrary
 computations can instead be written as Lambda expressions before rendering.
+
+Join aggregates preserve source order and fields. Pivot columns use ascending
+names; `limit: 0` retains all columns, and `op` defaults to `sum`. Missing
+cells follow the aggregate's empty-input contract.
+
+Imputation uses all observed keys plus optional `keyvals`, supplied as an
+array or an exclusive-stop `{start, stop, step}` sequence. It preserves source
+order and attributes, then appends missing records containing the grouping
+and key fields. `method` is `value` (default, with default value zero),
+`mean`, `median`, `min`, or `max`. Statistical methods use an inclusive
+row-offset `frame` over keys in ascending order, defaulting to the whole
+partition. Without grouping, explicit `keyvals` are required to add records.
+
+The stack transform supports `zero`, `center`, and `normalize` offsets,
+defaults to `zero`, and preserves source order after sorting the stack
+contributions. `as` is two names, or one name plus its `_end` companion;
+the default names are `y0`/`y1`. Positive and negative contributions stack
+on separate sides of zero. Quantiles ignore nonfinite/nonnumeric values,
+retain grouping fields, and default to `prob`/`value` names. Explicit `probs`
+lie in `(0,1)`; otherwise `step` (default 0.01) samples from half a step up
+to one, excluding one. Invalid transform options return value errors
+(S7.4.1).
 
 The histogram shorthand is `bin: true` on x and `aggregate: "count"` on y.
 Encoding-level binning accepts `true` or a map with `step`/`maxbins`.
@@ -472,7 +696,7 @@ Chronological units include `year`, `yearquarter`, `yearmonth`, and
 Cyclic units include `quarter`, `month`, `monthdate`, `date`, `day`/`weekday`,
 `hours`, `minutes`, and `seconds`, and supported adjacent time combinations.
 Cyclic units use a canonical leap year; weekdays run Sunday through Saturday.
-An `utc` prefix selects UTC; a map `{unit, timezone}` selects a fixed offset.
+An `utc` prefix selects UTC; a map `{unit, timezone}` selects an offset or IANA zone.
 Group keys are timestamps, and default labels describe the selected unit.
 Unsupported units and invalid offsets return value errors (S7.4.1).
 
@@ -552,8 +776,8 @@ Repeated predictor values share one fitted output. Regression and loess
 default to the input `x`/`y` field names; `as` supplies two alternatives.
 All three transforms retain grouping fields, ignore nonfinite/nonnumeric
 observations, and return an empty array for empty valid input. They feed
-ordinary line/area encodings; a dedicated mirrored violin layout remains
-outstanding (§10).
+ordinary line/area encodings; violin marks also accept precomputed density
+curves.
 
 ## 7. Chart composition
 
@@ -575,8 +799,21 @@ color, size, and shape can likewise be independent. Independent position
 scales have separate axes, alternating sides by default; explicit axis
 orientation is honored. Repeated axes on one side receive separate space.
 `resolve.axis` and `resolve.legend` can request independent guides while
-retaining shared scales. Full resolution across nested view boundaries remains
-outstanding (§10).
+retaining shared scales. Resolution applies across nested layers, facets,
+concatenations, and repeats, after each view's transforms and encoding
+aggregation. Shared position domains include range and stack endpoints;
+shared color, size, shape, stroke, and opacity domains include participating
+views' values. The first participating channel supplies the group's scale
+policy, including any explicit domain. Incompatible channel types return a
+value error (S7.4.1). Constants and disabled scales do not contribute domains.
+
+An explicit `shared` request reaches descendant views; an inner `independent`
+request starts separate groups at that boundary. Independent scales always
+have independent guides. Shared guides appear once, in the first eligible
+view with that guide enabled; disabled guides and wordclouds do not consume a
+legend's place. Multi-view axes and legends remain per view by default;
+layers merge them by default. Explicit guide orientation and formatting
+come from the representative channel.
 
 For a facet, the chart's width and height describe each cell. The outer view
 includes the cell grid, headers, and spacing. The intended comparison model
@@ -584,19 +821,65 @@ uses common x/y and color domains across cells. A chart may request an
 independent channel with `resolve: {scale: {y: "independent"}}` (or another
 channel name). Facet partitions are retained during aggregation.
 
-Concatenated charts keep their own data, scales, and guides. Nested horizontal
-and vertical concatenations build dashboard layouts.
+Concatenated charts keep separate scales and guides by default; explicit
+resolution requests share them. Nested horizontal and vertical
+concatenations build dashboard layouts.
 
 A native repeat has `<row [fields]>` and/or `<column [fields]>` children plus a
 `<chart>` template. Its channel fields use `{repeat: "row"}` or
 `{repeat: "column"}`. Each row/column combination becomes a view. Color domains are shared across repeated views, and substitution applies to
 every channel in the chart template, including wordcloud text and size.
 Substitution also reaches nested layer encodings, conditional fields, and
-tooltip arrays. Parent transforms run before child transforms; nested layers
-inherit data, encoding channels, datasets, and configuration before drawing
-their leaves in the shared plot.
+tooltip arrays. All composition forms inherit data, encoding channels,
+datasets, and configuration. Parent transforms run once before child
+transforms on inherited records; an explicit child source starts its own
+dataflow. Child configuration overrides inherited settings recursively,
+preserving explicit zero and false values. Layers draw their prepared leaves
+in one plot.
 
 ## 8. Presentation, guides, annotations, and output
+
+### Sizing and available space
+
+Numeric `width` and `height` specify the overall SVG viewport. Both rendering
+interfaces accept an optional `{width, height}` viewport input. A dimension
+set to `"container"` uses the corresponding supplied dimension; without one,
+it falls back to 400 by 300. Omitted dimensions also use supplied space,
+while explicitly numeric dimensions retain their requested size.
+
+`"auto"` uses available container space when supplied. Otherwise a discrete
+position channel receives 20 pixels per category, configurable with
+`config.view.step`; a continuous channel uses the 400/300 default.
+`{step: number}` requests that many plot pixels per category explicitly.
+Cardinality follows transformed data and explicit scale domains. Measured
+axes, legends, titles, and padding are added around a step-sized plot.
+An `aspect_ratio` derives an automatic or omitted dimension from the other
+dimension, after guide space is included. Two explicitly numeric dimensions
+take precedence; two explicit discrete-step constraints cannot also impose
+an aspect ratio.
+
+Container dimensions trigger fresh mark, scale, guide, label-collision, and
+wordcloud layout. A caller supplies updated dimensions when the surrounding
+layout changes; the renderer remains a pure function of its inputs
+(S12.1.1v2). The returned SVG has the resolved numeric dimensions and `viewBox`.
+
+Concatenations share their available main-axis space among flexible children
+after spacing and fixed children are accounted for. Nested concatenations
+apply the same rule. Repeat grids divide supplied space into cells.
+Facet dimensions describe each cell; the grid reserves the largest rendered
+cell extent, including automatically sized guides. Discrete-step requests on
+a concat or repeat supply defaults to its cells. Invalid dimensions, steps,
+padding, ratios, or impossible container budgets return value errors
+(S7.4.1).
+
+```lambda
+chart.render_spec({
+    width: "container", height: "auto", aspect_ratio: 2,
+    data: [{x: 0, y: 1}, {x: 1, y: 3}], mark: {kind: "line"},
+    encoding: {x: {field: "x", dtype: "quantitative"},
+        y: {field: "y", dtype: "quantitative"}}
+}, {width: 640})
+```
 
 Axes provide a domain line, ticks, labels, and optional field titles.
 Per-channel `axis` settings control orientation, domain/tick/label visibility,
@@ -860,7 +1143,7 @@ cloud.render([
 })^
 ```
 
-## 10. Outstanding design capabilities — not yet fully implemented
+## 10. Outstanding capabilities and scope boundaries
 
 As of 2026-10-08, wordcloud markup integration, position-scale controls,
 encoding aggregation/binning, multi-field flattening, horizontal and ranged
@@ -875,34 +1158,30 @@ clipping are also supported. Font-based guide measurement, pixel-width label
 limits, truncation at grapheme boundaries, and label collision checks across
 guides and annotations are supported. Mark gradients, radial gradients, hatch
 patterns, and their composition/legend integration are also supported.
-The following gaps remain. These are
-feature contracts and proposal boundaries, not an
-implementation roadmap.
+Wiggle baselines and inside-out streamgraph ordering are supported.
+Static expression-string filters, calculations, and highlight conditions,
+plus join aggregates, pivots, imputation, explicit stacks, and quantiles,
+are supported.
+Container input, automatic/discrete-step dimensions, aspect ratios, and
+multi-view size allocation are supported.
+Named time zones and daylight-saving-aware calendar ticks, grouping, and
+labels are supported.
+Scale, guide, dataflow, and configuration resolution across nested views are
+supported.
+Violin densities, slope comparisons, variable-width trails, and positioned
+images are supported.
+Radar, parallel coordinates, treemaps, sunbursts, ranged radial arcs, and
+GeoJSON charts with all five adopted projections are supported.
+No adopted chart capability remains unimplemented. Compatibility may be
+broadened beyond the explicitly documented static subset:
 
-### Completion of the existing chart design
+### Optional compatibility expansion
 
 | Area | Remaining capability |
 |---|---|
-| Vega-Lite compatibility | Vega expression-string evaluation, fuller condition/transform conversion, and complete inheritance and resolution controls across nested compositions; full Vega-Lite conformance is not promised |
-| Temporal analysis | Named time zones and daylight-saving-aware calendar intervals |
-| Stack control | Richer stream-graph presentation beyond centered stacks |
-| Composition | Full scale/guide/config resolution across nested view boundaries |
-| Highlighting | Vega expression-string conditions |
-| Responsive sizing | Container-driven or automatic dimensions and aspect-ratio sizing beyond scaling a fixed SVG `viewBox` |
+| Vega-Lite compatibility | Additional expression helpers and transform options beyond the documented static subset; full Vega-Lite conformance is not promised |
 
-### Proposed specialized extensions
-
-| Extension | Intended design |
-|---|---|
-| Violin charts | Mirrored per-category density layouts; density curve data is available through the density transform |
-| Radar charts | Categorical angular axes and quantitative radius, with closed series, radial guides, and optional filled polygons |
-| Treemaps and sunbursts | Hierarchical records identified by node/parent/value fields, shown as proportional nested rectangles or concentric angular partitions; requires hierarchy layout and additional range/radial channels |
-| Slope charts | Entity/detail-grouped lines between two comparison positions, including reversed ranking scales |
-| Parallel coordinates | One record per polyline across multiple independently normalized quantitative axes, with optional color grouping |
-| Trail and image marks | Variable-width paths and positioned images |
-| Geographic charts | GeoJSON shapes, projections, and choropleth color encoding; proposed projections include Mercator, equirectangular, Albers, orthographic, and Natural Earth |
-
-These extensions retain declarative input and SVG output. Event-driven
+These charts retain declarative input and SVG output. Event-driven
 selections, a Vega signal runtime, force simulation, and Voronoi/contour
 transforms were not adopted into the present chart scope and are not implied
 by this list.

@@ -7,15 +7,11 @@
 // reaches the page, no link navigates, no control acts — and is never read
 // back: a save writes the part's source.
 //
-// Math shows its TeX source. The edit application runs on the MIR tier (its
-// templates handle events), so every module it imports is compiled, and
-// compiling the math package's metrics data costs seconds and gigabytes; a
-// math view waits for that cost to go.
-//
 // Element literals need a static tag, so the writers below build HTML text
 // and parse it back into elements for the surface.
 
 import .model
+import math: lambda.doc.math.math
 
 // ---------------------------------------------------------------------------
 // HTML: a sanitizing writer
@@ -102,6 +98,26 @@ pub fn html_view(source) {
   if (shows_something(items)) items else []
 }
 
+// Typeset once on import; the model keeps this projection separate from TeX.
+// A parse/render failure leaves the source visible through the usual fallback.
+pub fn math_view(source, display) {
+  let ast = parse(source, {type: "math", flavor: "latex"}) ^ { null }
+  let rendered = if (ast == null) null else math.render_math(ast, {display: display}) ^ { null }
+  if (rendered == null) []
+  else if (display) [<div class: "edit-math-display", rendered>]
+  else [rendered]
+}
+
+fn math_html(item) {
+  let display = item.type == "block"
+  let source = plain_text(item)
+  let shown = math_view(source, display)
+  let tag = if (display) "div" else "span"
+  let fence = if (display) "$$" else "$"
+  if (len(shown) > 0) format(shown, 'html')
+  else "<" ++ tag ++ " class=\"edit-view-source\">" ++ fence ++ escape_text(source) ++ fence ++ "</" ++ tag ++ ">"
+}
+
 // ---------------------------------------------------------------------------
 // Markdown: the parser's vocabulary as HTML
 // ---------------------------------------------------------------------------
@@ -122,8 +138,7 @@ fn md_children(item) => join([for (c in content(item)) md_html(c)], "")
 
 fn md_html(item) {
   if (type(item) == string) { escape_text(item) }
-  // the parser keeps a :name: emoji shortcode as a bare symbol
-  else if (type(item) == symbol) { escape_text(":" ++ string(item) ++ ":") }
+  else if (type(item) == symbol) { format([item], 'html') }
   else if (type(item) != element) { "" }
   else {
     let tag = string(name(item))
@@ -133,17 +148,14 @@ fn md_html(item) {
     else if (tag == "hr") { "<hr>" }
     else if (tag == "code" and item.type == "block") { "<pre><code>" ++ escape_text(plain_text(item)) ++ "</code></pre>" }
     else if (tag == "code") { "<code>" ++ escape_text(plain_text(item)) ++ "</code>" }
-    // math reads as its TeX source (see the header)
-    else if (tag == "math" and item.type == "block") {
-      "<div class=\"edit-view-source\">$$" ++ escape_text(plain_text(item)) ++ "$$</div>"
-    }
-    else if (tag == "math") { "<span class=\"edit-view-source\">$" ++ escape_text(plain_text(item)) ++ "$</span>" }
+    else if (tag == "math") { math_html(item) }
     // written as read: markdown_view sanitizes the whole block
     else if (tag == "raw-html" or tag == "html-block") { plain_text(item) }
     else if (tag == "footnote-ref") { "<sup class=\"edit-view-note\">[" ++ escape_text(string(item.ref)) ++ "]</sup>" }
     else if (tag == "a") { "<a" ++ attr_html("title", string(item.href or "")) ++ ">" ++ md_children(item) ++ "</a>" }
     else if (tag == "img") {
-      "<img" ++ attr_html("src", string(item.src or "")) ++ attr_html("alt", string(item.alt or "")) ++ ">"
+      "<img" ++ attr_html("src", string(item.src or "")) ++ attr_html("alt", string(item.alt or "")) ++
+        (if (item.style == null) "" else attr_html("style", string(item.style))) ++ ">"
     }
     else if (tag == "input") {
       "<input type=\"checkbox\" disabled=\"disabled\"" ++ (if (item.checked != null) " checked=\"checked\"" else "") ++ ">"
@@ -157,5 +169,4 @@ fn md_html(item) {
 // The view of one parsed Markdown block. Its raw HTML tags are single
 // tokens, so the block is sanitized whole: a tag it opens around Markdown
 // text closes as the source closes it.
-// A block that is only math has no view: its source lines show as written.
-pub fn markdown_view(item) => if (name(item) == 'math') [] else html_view(md_html(item))
+pub fn markdown_view(item) => html_view(md_html(item))

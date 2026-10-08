@@ -14,6 +14,7 @@
 #include "format-markup.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/emoji_shortcodes.h"
 #include "../../lib/log.h"
 #include <string.h>
 #include <ctype.h>
@@ -154,6 +155,11 @@ void markdown_escape_text(StringBuf* sb, const char* s, size_t len) {
         }
         if (line_start && md_escape_line_start(sb, s, len, &i)) continue;
         switch (c) {
+        case ':':
+            // only symbols and custom image nodes may emit an active shortcode.
+            if (emoji_shortcode_match(s + i, len - i, nullptr)) stringbuf_append_char(sb, '\\');
+            stringbuf_append_char(sb, c);
+            break;
         case '\\': case '`': case '*': case '_': case '[': case ']': case '~': case '$': case '^':
             stringbuf_append_char(sb, '\\');
             stringbuf_append_char(sb, c);
@@ -197,6 +203,7 @@ enum MdBlockKind {
     MD_TABLE,
     MD_HTML_BLOCK,
     MD_MATH_BLOCK,
+    MD_FOOTNOTE,
 };
 
 static bool md_is_code_block(const ElementReader& elem) {
@@ -220,7 +227,8 @@ static MdBlockKind md_block_kind(const ElementReader& elem) {
         md_tag_is(tag, "html") || md_tag_is(tag, "div") || md_tag_is(tag, "section") ||
         md_tag_is(tag, "article") || md_tag_is(tag, "main") || md_tag_is(tag, "header") ||
         md_tag_is(tag, "footer") || md_tag_is(tag, "nav") || md_tag_is(tag, "aside") ||
-        md_tag_is(tag, "figure") || md_tag_is(tag, "li") || md_tag_is(tag, "list_item")) {
+        md_tag_is(tag, "figure") || md_tag_is(tag, "li") || md_tag_is(tag, "list_item") ||
+        md_tag_is(tag, "footnotes")) {
         return MD_CONTAINER;
     }
     if (md_tag_is(tag, "p") || md_tag_is(tag, "paragraph") || md_tag_is(tag, "figcaption")) {
@@ -233,6 +241,7 @@ static MdBlockKind md_block_kind(const ElementReader& elem) {
     if (md_tag_is(tag, "hr")) return MD_HR;
     if (md_tag_is(tag, "table")) return MD_TABLE;
     if (md_tag_is(tag, "html-block")) return MD_HTML_BLOCK;
+    if (md_tag_is(tag, "footnote")) return MD_FOOTNOTE;
     if (md_tag_is(tag, "math") && md_attr_is(elem, "type", "block")) return MD_MATH_BLOCK;
     return MD_INLINE;
 }
@@ -311,11 +320,13 @@ static void md_emit_blocks(MarkupEmitter* em, const ElementReader& container, bo
 
 // Write `body` after `marker`, indenting continuation lines by the marker
 // width so they stay inside the list item. Blank lines stay empty.
-static void md_append_list_item(StringBuf* sb, const char* marker, const StringBuf* body) {
-    size_t indent = strlen(marker);
+static void md_append_list_item(StringBuf* sb, const char* marker, const StringBuf* body,
+                                size_t indent = 0) {
+    size_t marker_length = strlen(marker);
+    if (!indent) indent = marker_length;
     if (body->length == 0) {
         // an empty item is its marker alone
-        stringbuf_append_str_n(sb, marker, indent > 0 ? indent - 1 : 0);
+        stringbuf_append_str_n(sb, marker, marker_length > 0 ? marker_length - 1 : 0);
         return;
     }
     stringbuf_append_str(sb, marker);
@@ -484,13 +495,27 @@ static void md_emit_heading(MarkupEmitter* em, const ElementReader& elem) {
     }
 }
 
-static void md_emit_blockquote(MarkupEmitter* em, const ElementReader& elem) {
+static StringBuf* md_render_blocks(MarkupEmitter* em, const ElementReader& elem) {
     StringBuf* body = md_new_buffer(em);
-    MarkupEmitter quote_emitter(em->rules(), em->pool(), body);
-    quote_emitter.block_nesting = em->block_nesting;
-    md_emit_blocks(&quote_emitter, elem, false);
+    MarkupEmitter child_emitter(em->rules(), em->pool(), body);
+    child_emitter.block_nesting = em->block_nesting;
+    md_emit_blocks(&child_emitter, elem, false);
     md_trim_trailing_blanks(body, 0);
-    md_append_quoted(em->output(), body);
+    return body;
+}
+
+static void md_emit_blockquote(MarkupEmitter* em, const ElementReader& elem) {
+    md_append_quoted(em->output(), md_render_blocks(em, elem));
+}
+
+static void md_emit_footnote(MarkupEmitter* em, const ElementReader& elem) {
+    StringBuf* marker = md_new_buffer(em);
+    stringbuf_append_str(marker, "[^");
+    const char* label = elem.get_attr_string("label");
+    if (label) stringbuf_append_str(marker, label);
+    stringbuf_append_str(marker, "]: ");
+    // Footnote continuation indentation is four columns, independent of label length.
+    md_append_list_item(em->output(), md_chars(marker), md_render_blocks(em, elem), 4);
 }
 
 static const char* md_code_language(const ElementReader& elem) {
@@ -636,6 +661,7 @@ static void md_emit_block(MarkupEmitter* em, const ElementReader& elem, MdBlockK
     case MD_TABLE: md_emit_table(em, elem); break;
     case MD_HTML_BLOCK: md_emit_raw(sb, elem); break;
     case MD_MATH_BLOCK: md_emit_math_block(em, elem); break;
+    case MD_FOOTNOTE: md_emit_footnote(em, elem); break;
     default: break;
     }
 }
@@ -701,6 +727,15 @@ static void md_emit_link(MarkupEmitter* em, const ElementReader& elem) {
 
 static void md_emit_image(MarkupEmitter* em, const ElementReader& elem) {
     StringBuf* sb = em->output();
+    const char* alias = elem.get_attr_string("data-emoji");
+    const EmojiShortcode* emoji = alias ? emoji_shortcode_find(alias, strlen(alias)) : nullptr;
+    if (emoji && emoji->image_url && md_attr_is(elem, "src", emoji->image_url)) {
+        // custom emoji images save as the original shortcode, rather than an image link.
+        stringbuf_append_char(sb, ':');
+        stringbuf_append_str(sb, alias);
+        stringbuf_append_char(sb, ':');
+        return;
+    }
     stringbuf_append_str(sb, "![");
     const char* alt = elem.get_attr_string("alt");
     if (alt) markdown_escape_text(sb, alt, strlen(alt));

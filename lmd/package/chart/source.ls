@@ -9,7 +9,7 @@ pub fn resolve(data, source = null, datasets = null) {
         else if (dataset.values != null) dataset.values else dataset)
     else if (source.url != null) (
         // Convert the input effect into the chart API's value diagnostic (S7.4.1–S7.4.2).
-        if (source.format != null) input(source.url, source.format) ^ { ~ }
+        if (source.format != null) input(source.url, if (source.format == "geojson") "json" else source.format) ^ { ~ }
         else input(source.url) ^ { ~ })
     else []
 }

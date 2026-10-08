@@ -60,10 +60,23 @@ bool MarkupEmitter::is_skip_tag(const char* tag) const {
 // ==============================================================================
 
 void MarkupEmitter::format_children(const ElementReader& elem) {
-    auto it = elem.children();
-    ItemReader child;
-    while (it.next(&child)) {
-        format_item(child);
+    for (int64_t i = 0; i < elem.childCount(); i++) {
+        ItemReader child = elem.childAt(i);
+        if (rules_->emoji_shortcodes && child.isString() && i + 1 < elem.childCount() &&
+            elem.childAt(i + 1).isString()) {
+            // a literal shortcode can span parser text nodes; escape the entire text run.
+            StringBuf* text = stringbuf_new(pool());
+            do {
+                String* str = elem.childAt(i).asString();
+                if (str) stringbuf_append_str_n(text, str->chars, str->len);
+                i++;
+            } while (i < elem.childCount() && elem.childAt(i).isString());
+            format_text(stringbuf_to_string(text));
+            stringbuf_free(text);
+            i--;
+        } else {
+            format_item(child);
+        }
     }
 }
 

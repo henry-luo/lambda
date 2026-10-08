@@ -205,7 +205,7 @@ pub fn configured_scale(values, rlo, rhi, default_kind, options = null, include_
         timezone: zone,
         exponent: if (options and options.exponent != null) options.exponent else 1.0};
     if (domain is error) domain
-    else if (kind == "temporal" and not calendar.valid_offset(zone)) error("chart: invalid temporal timezone; use UTC offset minutes")
+    else if (kind == "temporal" and not calendar.valid_offset(zone)) error("chart: invalid temporal timezone; use UTC offset minutes or an IANA zone name")
     else if (kind == "band" or kind == "point") {
         let configured_padding = options and (options.padding != null or options.padding_inner != null or options.padding_outer != null);
         if (not configured_padding) {
@@ -239,7 +239,7 @@ pub fn position_scale(channel, data, rlo, rhi, mark_type, is_x, secondary = null
             where value != null) value] else values;
         let default_kind = if (channel.dtype == "quantitative" or (channel.dtype == null and (channel.datum is int or channel.datum is float))) "linear"
             else if (channel.dtype == "temporal") "temporal"
-            else if (mark_type == "bar" or mark_type == "rect" or (mark_type == "boxplot" and is_x)) "band"
+            else if (mark_type == "bar" or mark_type == "rect" or mark_type == "violin" or (mark_type == "boxplot" and is_x)) "band"
             else "point";
         let sorted_values = if (channel.sort != null and channel.field != null)
             records.categories(data, channel.field, channel.sort) else all_values;
@@ -256,7 +256,7 @@ pub fn infer_scale(channel, data, rlo, rhi) {
 pub fn infer_color_scale(channel, data) {
     let field_name = channel.field;
     let data_type = channel.dtype;
-    let values = data |> ~[field_name];
+    let values = channel_values(channel, data);
     let scheme_name = if (channel.scale and channel.scale.scheme) channel.scale.scheme
         else null;
     let explicit_domain = if (channel.scale and channel.scale.domain) channel.scale.domain
@@ -278,8 +278,81 @@ pub fn infer_color_scale(channel, data) {
         else {kind: if (mid != null) "diverging-color" else "sequential-color",
             domain: if (mid != null) [lo, mid, hi] else [lo, hi], scheme: scheme, reverse: channel.scale.reverse})
     else
-        (let cats = if (explicit_domain != null) explicit_domain else records.categories(data, field_name, channel.sort),
+        (let cats = if (explicit_domain != null) explicit_domain else if (field_name != null) records.categories(data, field_name, channel.sort)
+            else util.unique_vals(values),
         let scheme = if (scheme_name) color.get_scheme(scheme_name) else color.category10,
         let palette = if (explicit_range != null) explicit_range else scheme,
         ordinal_scale(cats, if (channel.scale.reverse) reverse(palette) else palette))
+}
+
+// Shared view mappings use the same policies as individual mark contexts.
+pub fn shared_position(layers, channel_name, rlo, rhi) {
+    let candidates = [for (layer in layers,
+        let channel = layer.encoding[channel_name]
+        where channel != null and (channel.field != null or channel.datum != null))
+        {channel: channel, mark: layer.mark, data: layer.data}];
+    if (len(candidates) == 0) null
+    else {
+        let first = candidates[0];
+        let channel = first.channel;
+        let initial = position_scale(channel, first.data, rlo, rhi, first.mark.kind, channel_name == "x");
+        let values = [for (layer in layers where not (layer.data is error))
+            for (key in (if (layer.stack_mode != null and layer.stack_axis == channel_name) ["_y0", "_y1"] else [channel_name, channel_name ++ "2"]),
+                let current = layer.encoding[key]
+                where (current != null and current.value == null) or key == "_y0" or key == "_y1")
+                for (row in layer.data,
+                    let value = if (key == "_y0" or key == "_y1") row[key] else parse.channel_value(current, row)
+                    where value != null) value];
+        let has_ranges = len([for (layer in layers where layer.encoding[channel_name ++ "2"] != null) true]) > 0;
+        let zero = if (channel.zero != null) channel.zero
+            else not has_ranges and len([for (candidate in candidates where candidate.mark.kind == "bar") true]) > 0;
+        // Rebuilding a shared domain must preserve the channel's resolved categorical order.
+        let ordered = if (channel.sort != null and contains(["band", "point", "ordinal"], initial.kind))
+            records.categories([for (value in values) {value: value}], "value", channel.sort) else values;
+        if (initial is error) initial
+        else if (initial.kind == "identity") initial
+        else configured_scale(ordered, rlo, rhi, initial.kind, channel.scale, zero)
+    }
+}
+
+pub fn shape_scale(channel, data) {
+    if (channel.field == null and channel.datum == null) null
+    else if (channel.dtype == "geojson") {kind: "identity"}
+    else if (not parse.option_enabled(channel, "scale")) {kind: "identity"}
+    else configured_scale(channel_values(channel, data), 0, 1, "ordinal",
+        {*:parse.attributes(channel.scale), range: if (channel.scale.range != null) channel.scale.range
+            else ["circle", "square", "diamond", "triangle-up", "cross", "triangle-down"]})
+}
+
+pub fn visual_scale(channel, data, rlo, rhi) {
+    if (channel == null or (channel.field == null and channel.datum == null)) null
+    else if (not parse.option_enabled(channel, "scale")) {kind: "identity"}
+    else configured_scale(channel_values(channel, data), rlo, rhi, "linear", channel.scale)
+}
+
+pub fn channel_values(channel, data) => if (channel.field != null) data |> ~[channel.field] else [channel.datum]
+
+fn polar_values(channel, data, secondary) => [
+    for (value in channel_values(channel, data) where value != null) value,
+    for (row in (if (secondary != null and secondary.value == null) data else []),
+        let value = parse.channel_value(secondary, row) where value != null) value]
+
+pub fn radius_scale(channel, data, rlo = 0.0, rhi = 1.0, secondary = null) {
+    if (channel == null) null
+    else if (not parse.option_enabled(channel, "scale")) {kind: "identity", domain: [], range: []}
+    else configured_scale(polar_values(channel, data, secondary),
+        rlo, rhi, "linear", channel.scale, true)
+}
+
+pub fn angular_scale(channel, data, secondary = null) {
+    if (channel == null) null
+    else if (not parse.option_enabled(channel, "scale")) {kind: "identity", domain: [], range: []}
+    else if (channel.dtype == "nominal" or channel.dtype == "ordinal") {
+        let domain = if (channel.scale.domain != null) channel.scale.domain else records.categories(data, channel.field, channel.sort);
+        let angles = if (channel.scale.range != null) channel.scale.range else [for (index in 0 to (len(domain) - 1)) float(index) * util.TAU / float(len(domain))];
+        if (not (angles is array) or len(angles) < len(domain) or len([for (angle in angles where not util.finite_number(angle)) angle]) > 0)
+            error("chart: angular range requires a finite angle for each category")
+        else ordinal_scale(domain, if (channel.scale.reverse) reverse(angles) else angles)
+    } else configured_scale(polar_values(channel, data, secondary),
+        0.0, util.TAU, "linear", {*:parse.attributes(channel.scale), nice: if (channel.scale.nice != null) channel.scale.nice else false})
 }

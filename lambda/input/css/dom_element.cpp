@@ -3851,6 +3851,23 @@ struct DomBuildDepthGuard {
     ~DomBuildDepthGuard() { g_dom_build_depth--; }
 };
 
+static void dom_detach_rebuilt_child(DomNode* node, DomElement* parent) {
+    // retained fat nodes move to the new tree; the old parent must not retire them.
+    if (node && parent && node->parent && node->parent != parent) {
+        node->parent->remove_child(node);
+    }
+}
+
+static DomText* dom_rebuild_text_node(DomDocument* doc, DomElement* parent,
+                                    String* text, bool ui_mode) {
+    // only arena strings with a proven DOM prefix can retain their text view.
+    DomText* retained = ui_mode ? dom_text_from_fat_string(doc, text) : nullptr;
+    if (!retained) return DomText::create(text, parent);
+    dom_detach_rebuilt_child(retained, parent);
+    retained->parent = lam::up(parent);
+    return retained;
+}
+
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent) {
     if (!elem || !doc) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
@@ -3888,8 +3905,11 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // is an embedded DOM allocation; reverse-casting a parsed Element corrupts
     // the preceding allocation and loses its future DOM wrapper.
     bool ui_mode = doc->input && doc->input->ui_mode;
-    DomElement* dom_elem = ui_mode && dom_element_has_embedded_ui_storage(doc, elem)
-        ? DomElement::create_in(element_to_dom_element(elem), doc, tag_name, elem)
+    DomElement* retained = ui_mode && dom_element_has_embedded_ui_storage(doc, elem)
+        ? element_to_dom_element(elem) : nullptr;
+    dom_detach_rebuilt_child(retained, parent);
+    DomElement* dom_elem = retained
+        ? DomElement::create_in(retained, doc, tag_name, elem)
         : DomElement::create(doc, tag_name, elem);
     if (!dom_elem) return nullptr;
 
@@ -4082,23 +4102,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             // Text node - create DomText that references Lambda String
             String* text_str = child_item.get_string();
             if (text_str && text_str->len > 0) {
-                DomText* text_node;
-                if (ui_mode) {
-                    // UI mode: check if String was allocated with DomText prefix on arena
-                    // (done by ui_copy_string_to_arena / MarkBuilder). Non-arena strings
-                    // (GC heap, const pool) do NOT have this prefix — using string_to_dom_text
-                    // on them would produce a bogus pointer that corrupts adjacent memory.
-                    DomText* candidate = dom_text_from_fat_string(doc, text_str);
-                    if (candidate) {
-                        text_node = candidate;
-                        text_node->parent = lam::up(dom_elem);
-                    } else {
-                        text_node = DomText::create(text_str, dom_elem);
-                    }
-                } else {
-                    // Create text node (preserves Lambda String reference)
-                    text_node = DomText::create(text_str, dom_elem);
-                }
+                DomText* text_node = dom_rebuild_text_node(doc, dom_elem, text_str, ui_mode);
                 if (text_node) {
                     // Add text node to DOM sibling chain
                     dom_append_to_sibling_chain(dom_elem, text_node);
@@ -4135,18 +4139,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     } else if (arr_item_type == LMD_TYPE_STRING) {
                         String* text_str = arr_item.get_string();
                         if (text_str && text_str->len > 0) {
-                            DomText* text_node;
-                            if (ui_mode) {
-                                DomText* candidate = dom_text_from_fat_string(doc, text_str);
-                                if (candidate) {
-                                    text_node = candidate;
-                                    text_node->parent = lam::up(dom_elem);
-                                } else {
-                                    text_node = DomText::create(text_str, dom_elem);
-                                }
-                            } else {
-                                text_node = DomText::create(text_str, dom_elem);
-                            }
+                            DomText* text_node = dom_rebuild_text_node(doc, dom_elem, text_str, ui_mode);
                             if (text_node) {
                                 dom_append_to_sibling_chain(dom_elem, text_node);
                             }
@@ -4171,18 +4164,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                 } else if (nested_type == LMD_TYPE_STRING) {
                                     String* s = nested_item.get_string();
                                     if (s && s->len > 0) {
-                                        DomText* tn;
-                                        if (ui_mode) {
-                                            DomText* candidate = dom_text_from_fat_string(doc, s);
-                                            if (candidate) {
-                                                tn = candidate;
-                                                tn->parent = lam::up(dom_elem);
-                                            } else {
-                                                tn = DomText::create(s, dom_elem);
-                                            }
-                                        } else {
-                                            tn = DomText::create(s, dom_elem);
-                                        }
+                                        DomText* tn = dom_rebuild_text_node(doc, dom_elem, s, ui_mode);
                                         if (tn) dom_append_to_sibling_chain(dom_elem, tn);
                                     }
                                 } else if (nested_type == LMD_TYPE_SYMBOL) {

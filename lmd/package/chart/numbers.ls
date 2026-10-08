@@ -1,5 +1,8 @@
 // Shared numeric labels for axes, legends, text, and hover titles.
 
+pub fn finite_number(value) => value is number and
+    not (value is nan) and value != inf and value != -inf
+
 fn fixed(value, digits) {
     // Large integral floats cannot pass through i64; expand their decimal exponent instead.
     if (value >= 9223372036854775808.0) {

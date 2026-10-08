@@ -3368,15 +3368,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->available_space.width.value <= 0.0f &&
         (width_is_percentage || max_width_is_percentage) &&
         !parent_has_auto_inline_width;
+    bool intrinsic_width_context = lycon->available_space.width.is_intrinsic() ||
+        intrinsic_percentage_width_is_indefinite(lycon) ||
+        parent_has_intrinsic_width || parent_has_auto_inline_width;
     bool percentage_width_is_intrinsic_auto = width_is_percentage &&
-        (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
-         parent_has_auto_inline_width);
+        intrinsic_width_context;
     bool percentage_size_is_intrinsic_auto =
         (width_is_percentage || max_width_is_percentage) &&
-        (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
-         parent_has_auto_inline_width);
-    bool intrinsic_width_context = lycon->available_space.width.is_intrinsic() ||
-        parent_has_intrinsic_width || parent_has_auto_inline_width;
+        intrinsic_width_context;
     bool percentage_replaced_size_is_intrinsic_auto = max_width_is_percentage &&
         layout_element_is_replaced(element) &&
         ((has_definite_width && intrinsic_width_context) ||
@@ -3398,8 +3397,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool percentage_min_width_intrinsic_zero = min_width_declaration &&
         min_width_declaration->value &&
         layout_css_value_has_nonzero_percentage(min_width_declaration->value) &&
-        (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
-         parent_has_auto_inline_width) &&
+        intrinsic_width_context &&
         (!layout_block_inline_axis_is_vertical(resolved_width_view) ||
          parent_has_auto_inline_width);
     auto intrinsic_apply_definite_width_constraints = [&](float border_width) {
@@ -4006,6 +4004,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (!is_table_element && element->tag() == MARKUP_NAME_TABLE) is_table_element = true;
 
         if (is_table_element) {
+            // cell percentages are cyclic until the table's intrinsic tracks are sized.
+            LayoutContainingBlockScope table_intrinsic_scope(lycon, LAYOUT_AXIS_X, -1.0f);
             // Intrinsic sizing can run before normal table-tree construction;
             // refresh retained fixups here so generated cells inherit the
             // authored table font before their contributions are measured.

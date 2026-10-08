@@ -15,3 +15,9 @@ pub fn to_html(source, options) {
     graph_transform.to_html(source, options)
   }
 }
+
+// Markdown fences and standalone Mermaid previews share the native graph pipeline.
+pub fn from_mermaid(source, options = null) {
+  let graph = parse(source, {type:"graph", flavor:"mermaid"})^
+  to_html(graph, options)
+}

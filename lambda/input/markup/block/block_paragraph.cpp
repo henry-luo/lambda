@@ -296,6 +296,9 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             break;
         }
 
+        if (parser->config.format == Format::MARKDOWN &&
+            parser->config.flavor != Flavor::COMMONMARK && is_footnote_definition(current)) break;
+
         // Check if current line is a setext underline
         // BUT: lazy continuation lines should NOT be treated as setext underlines
         // (they were collected from outside the container and are just paragraph text)

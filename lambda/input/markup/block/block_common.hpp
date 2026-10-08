@@ -184,6 +184,7 @@ bool is_link_definition_start(const char* line);
  * Returns true if successfully parsed, false otherwise
  */
 bool parse_link_definition(MarkupParser* parser, const char* line);
+bool parse_definition_block(MarkupParser* parser, const char* line);
 
 /**
  * Check if a line starts an HTML block that can interrupt a paragraph

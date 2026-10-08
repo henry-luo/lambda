@@ -36,13 +36,16 @@ fn symbol_geometry(values, mapping, kind, title, config) {
         let options = prepare(values, title, config);
         let columns = max([1, min([len(values), if (options.columns != null) int(options.columns)
             else if (options.direction == "horizontal") len(values) else 1])]);
-        let symbol_extent = if (kind == "size") max([options.symbol_size,
-            for (value in values) 2.0 * math.sqrt(max([0.0, scale.scale_apply(mapping, value)]) / util.PI)])
+        let width_unit = kind == "size" and options._size_unit == "width";
+        let symbol_height = if (kind == "size") max([options.symbol_size,
+            for (value in values) if (width_unit) max([0.0, scale.scale_apply(mapping, value)])
+                else 2.0 * math.sqrt(max([0.0, scale.scale_apply(mapping, value)]) / util.PI)])
             else options.symbol_size;
+        let symbol_extent = if (width_unit) options.symbol_size * 2.0 else symbol_height;
         let label_width = max([0.0, for (label in options.labels) text.span(label.metric)]);
         let column_width = symbol_extent + options.symbol_padding + label_width +
             (if (options.column_padding != null) options.column_padding else 10.0);
-        let row_height = max([options.row_height, symbol_extent + 4.0,
+        let row_height = max([options.row_height, symbol_height + 4.0,
             for (label in options.labels) label.metric.height + 4.0]);
         {*:options, columns: columns, symbol_extent: symbol_extent, column_width: column_width,
             row_height: row_height, width: max([columns * column_width, options.title_width]),
@@ -65,7 +68,11 @@ pub fn symbol_legend(values, mapping, kind, title, config) {
                 else if (kind == "color") scale.scale_apply(mapping, value) else "#4e79a7",
             let label = geo.labels[index])
             <g class: "legend-entry", transform: svg.translate(x, y),
-                svg.symbol_mark(shape, geo.symbol_extent / 2.0, geo.row_height / 2.0, area,
+                if (kind == "size" and geo._size_unit == "width")
+                    <line x1: 0, y1: geo.row_height / 2.0, x2: geo.symbol_extent, y2: geo.row_height / 2.0,
+                        stroke: paint.value(if (geo.symbol_stroke_color != null) geo.symbol_stroke_color else fill, geo._paints),
+                        'stroke-width': area, *:cfg.settings({opacity: geo.symbol_opacity})>
+                else svg.symbol_mark(shape, geo.symbol_extent / 2.0, geo.row_height / 2.0, area,
                     cfg.settings({fill: paint.value(fill, geo._paints), stroke: paint.value(geo.symbol_stroke_color, geo._paints),
                         'stroke-width': geo.symbol_stroke_width, opacity: geo.symbol_opacity}));
                 <text x: geo.symbol_extent + geo.symbol_padding - label.metric.left,
@@ -136,7 +143,8 @@ pub fn plans(encoding, mappings, theme) {
                 (~ >= min(mapping.domain) and ~ <= max(mapping.domain)) else mapping.domain,
         let title = if (not options.title_enabled) null else if (options.title != null) options.title
             else if (channel.title != null) channel.title else channel.field,
-        let configured = {*:options, format: if (options.format != null) options.format else channel.format},
+        let configured = {*:options, _size_unit: channel._size_unit,
+            format: if (options.format != null) options.format else channel.format},
         let geometry = if (continuous) gradient_geometry(mapping, title, configured)
             else symbol_geometry(values, mapping, kind, title, configured),
         {kind: kind, mapping: mapping, values: values, title: title, config: {*:configured, _geometry: geometry},

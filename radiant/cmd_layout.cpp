@@ -2239,17 +2239,21 @@ static void run_html_document_scripts(DomDocument* dom_doc, Pool* pool,
     if (post_script_ns) *post_script_ns = t_post_script;
 }
 
+static void complete_document_scripts(DomDocument* doc, Pool* pool) {
+    uint64_t script_start_ns = time_now_ns();
+    run_html_document_scripts(doc, pool, nullptr, nullptr,
+                              false, 0, 0, script_start_ns, nullptr);
+    populate_layout_document(doc, doc->root, doc->html_root,
+                             (HtmlVersion)doc->html_version, doc->url, doc->lambda_runtime);
+    extract_body_transform_scale(doc->root, doc);
+    dom_js_mutation_records_reset(doc);
+}
+
 void complete_deferred_html_scripts(DomDocument* doc) {
     if (!doc || !doc->html_scripts_deferred || !doc->html_root ||
         !doc->document_pool || !doc->services.cached_css_engine) return;
     doc->html_scripts_deferred = false;
-    uint64_t script_start_ns = time_now_ns();
-    run_html_document_scripts(doc, doc->document_pool, nullptr, nullptr,
-                              false, 0, 0, script_start_ns, nullptr);
-    populate_layout_document(doc, doc->root, doc->html_root,
-                             (HtmlVersion)doc->html_version, doc->url, nullptr);
-    extract_body_transform_scale(doc->root, doc);
-    dom_js_mutation_records_reset(doc);
+    complete_document_scripts(doc, doc->document_pool);
 }
 
 static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css_filename,
@@ -2774,7 +2778,8 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               int width, int height, Pool* pool,
                                               bool include_text,
                                               bool* handled,
-                                              const DocumentJsHostConfig* host_config = nullptr) {
+                                              const DocumentJsHostConfig* host_config = nullptr,
+                                              bool defer_html_scripts = false) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
     // legacy format loaders inherit one request-scoped admission context.
@@ -2798,7 +2803,14 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
         if (text_route && !include_text) return nullptr;
         if (handled) *handled = true;
         log_info("[Layout] Detected %s file, using format loader", ext);
-        return route->loader(url, width, height, pool);
+        DomDocument* document = route->loader(url, width, height, pool);
+        if (document && document->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
+            // generated HTML needs the same script lifecycle, after its host is bound.
+            document_apply_js_host_config(document, host_config);
+            if (defer_html_scripts) document->html_scripts_deferred = true;
+            else complete_document_scripts(document, pool);
+        }
+        return document;
     }
     return nullptr;
 }
@@ -2844,7 +2856,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     bool handled = false;
     // Use the parsed pathname so a query does not hide the file extension.
     doc = load_layout_special_file(full_url, url_get_pathname(full_url),
-                                   viewport_width, viewport_height, pool, true, &handled, js_host_config);
+                                   viewport_width, viewport_height, pool, true, &handled, js_host_config,
+                                   defer_html_scripts);
     // non-HTML documents still dispatch callbacks through their owning viewer.
     if (handled) document_apply_js_host_config(doc, js_host_config);
     if (!handled) {
@@ -3489,98 +3502,101 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
     log_info("[TIMING] Step 1 - Parse markdown: %.1fms",
         time_elapsed_ms_f(step1_start, step1_end));
 
-    Runtime* markdown_math_runtime = nullptr;  // document-owned, outside a window
-    Runtime* shared_math_runtime = nullptr;
-
-    // A document without math keeps the plain path: no runtime, no package.
-    Array* embedded_math = input->embedded_math;
-    if (embedded_math && embedded_math->length > 0) {
-        auto math_start = time_now_ns();
-        log_info("[Lambda Markdown] Rendering %lld math elements via math package",
-                 (long long)embedded_math->length);
-
-        // In a window the math renders on the window's shared loader runtime.
-        // Elsewhere a math runtime starts only when the document has math, and
-        // one runtime renders all of its formulas.
-        shared_math_runtime = layout_loader_runtime();
-        Runtime* math_runtime = shared_math_runtime;
-        if (!math_runtime) {
-            math_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
-            if (!math_runtime) {
-                log_error("[Lambda Markdown] Failed to allocate math runtime");
+    Runtime* markdown_runtime = nullptr;  // document-owned, outside a window
+    Runtime* shared_runtime = nullptr;
+    Array* embedded_nodes[] = {input->embedded_math, input->embedded_diagrams};
+    bool has_embedded = (embedded_nodes[0] && embedded_nodes[0]->length) ||
+                        (embedded_nodes[1] && embedded_nodes[1]->length);
+    // Plain Markdown keeps its runtime-free path; math and diagrams share one loader.
+    if (has_embedded) {
+        auto embedded_start = time_now_ns();
+        shared_runtime = layout_loader_runtime();
+        Runtime* render_runtime = shared_runtime;
+        if (!render_runtime) {
+            render_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+            if (!render_runtime) {
+                log_error("[Lambda Markdown] Failed to allocate embedded-content runtime");
                 return nullptr;
             }
-            runtime_init(math_runtime);
+            runtime_init(render_runtime);
         }
-        EvalContext* math_context = runtime_get_eval_context(math_runtime);
-        // Like any document loader, take the thread only from a quiescent
-        // evaluator (D5.4.1).
-        bool math_bound = math_context && !(context && context->execution_depth != 0) &&
-            radiant_eval_context_switch(math_context);
-        runtime_bind_ui_result_input(math_runtime, input);
-        const LambdaDocumentTransformConfig* transform =
-            lambda_document_transform_for_input_type("math");
-        Script* math_package = nullptr;
-        Input* package_result = transform && math_bound
-            ? run_lambda_package_module(math_runtime, transform->package_module, &math_package)
-            : nullptr;
-        int replace_count = 0;
-        if (package_result && math_package) {
-            RuntimeExecutionScope execution_scope(math_context);
-            RootFrame roots(3);
+        EvalContext* render_context = runtime_get_eval_context(render_runtime);
+        // D5.4.1: bind a loader only from a quiescent evaluator.
+        bool render_bound = render_context && !(context && context->execution_depth != 0) &&
+            radiant_eval_context_switch(render_context);
+        runtime_bind_ui_result_input(render_runtime, input);
+        unsigned replace_count = 0;
+        for (unsigned kind = 0; render_bound && kind < 2; kind++) {
+            Array* nodes = embedded_nodes[kind];
+            if (!nodes || !nodes->length) continue;
+            const LambdaDocumentTransformConfig* transform =
+                lambda_document_transform_for_input_type(kind == 0 ? "math" : "graph");
+            Script* package = nullptr;
+            Input* package_result = transform
+                ? run_lambda_package_module(render_runtime, transform->package_module, &package)
+                : nullptr;
+            if (!package_result || !package) {
+                log_error("[Lambda Markdown] Embedded %s package initialization failed",
+                          kind == 0 ? "math" : "Mermaid");
+                continue;
+            }
+            RuntimeExecutionScope execution_scope(render_context);
+            RootFrame roots(4);
             Rooted<Item> options(roots, ItemNull);
             Rooted<Item> option_name(roots, (Item){.item = s2it(heap_strcpy("display", 7))});
+            Rooted<Item> argument(roots, ItemNull);
             Rooted<Item> rendered(roots, ItemNull);
-            for (int64_t i = 0; i < embedded_math->length; i++) {
-                Element* math_elem = embedded_math->items[i].element;
-                ConstItem ast_attr = math_elem->get_attr("ast");
-                Item ast = *(Item*)&ast_attr;
-                if (get_type_id(ast) == LMD_TYPE_NULL) continue;  // unparsed: keep the source
-                ConstItem type_attr = math_elem->get_attr("type");
-                String* type_str_val = type_attr.string();
-                bool is_display = type_str_val && strcmp(type_str_val->chars, "block") == 0;
-                options.set(vmap_new());
-                if (get_type_id(options.get()) != LMD_TYPE_VMAP ||
+            for (int64_t i = 0; i < nodes->length; i++) {
+                Element* node = nodes->items[i].element;
+                bool display = false;
+                options.set(ItemNull);
+                if (kind == 0) {
+                    ConstItem ast = node->get_attr("ast");
+                    argument.set(*(Item*)&ast);
+                    if (get_type_id(argument.get()) == LMD_TYPE_NULL) continue;
+                    String* type = node->get_attr("type").string();
+                    display = type && strcmp(type->chars, "block") == 0;
+                    options.set(vmap_new());
+                    if (get_type_id(options.get()) != LMD_TYPE_VMAP ||
                         item_is_error(vmap_set(options.get(), option_name.get(),
-                            (Item){.item = b2it(is_display ? 1 : 0)}))) {
-                    log_error("[Lambda Markdown] Failed to construct math render options");
-                    break;
+                            (Item){.item = b2it(display ? 1 : 0)}))) {
+                        log_error("[Lambda Markdown] Failed to construct math render options");
+                        break;
+                    }
+                } else {
+                    if (!node->length) continue;
+                    argument.set(node->items[0]);
                 }
-                Item args[2] = {ast, options.get()};
-                rendered.set(interp_call_module_export(math_runtime, math_package,
-                    transform->function_name, args, 2));
-                if (get_type_id(rendered.get()) != LMD_TYPE_ELEMENT) continue;
+                Item args[2] = {argument.get(), options.get()};
+                rendered.set(interp_call_module_export(render_runtime, package,
+                    kind == 0 ? transform->function_name : "from_mermaid", args, 2));
+                if (get_type_id(rendered.get()) != LMD_TYPE_ELEMENT) {
+                    log_error("[Lambda Markdown] Embedded %s rendering failed; retaining source",
+                              kind == 0 ? "math" : "Mermaid");
+                    continue;
+                }
                 Item rendered_item = rendered.get();
-                if (is_display) {
+                if (display) {
                     MarkBuilder builder(input);
-                    ElementBuilder display = builder.element("div");
-                    display.attr("class", "math-display-container");
-                    display.child(rendered_item);
-                    rendered_item = display.final();
+                    ElementBuilder wrapper = builder.element("div");
+                    wrapper.attr("class", "math-display-container");
+                    wrapper.child(rendered_item);
+                    rendered_item = wrapper.final();
                 }
-                // Replace the <math> element in place: its storage takes the
-                // rendered element's content, so its parent needs no update and
-                // no parent has to be found. The DOM build initializes the node
-                // from this content as for any element.
-                *math_elem = *rendered_item.element;
+                // Preserve each parent's pointer while replacing its embedded source node.
+                *node = *rendered_item.element;
                 replace_count++;
             }
-            log_info("[Lambda Markdown] Replaced %d/%lld math elements with rendered HTML",
-                replace_count, (long long)embedded_math->length);
-        } else {
-            log_error("[Lambda Markdown] Math package initialization failed");
         }
         input_context = nullptr;
-        // the rendered elements' types belong to the math package's Script
-        if (!shared_math_runtime && replace_count > 0) {
-            markdown_math_runtime = math_runtime;
-            math_runtime = nullptr;
+        // Rendered shapes belong to the loaded packages, so retain their runtime.
+        if (!shared_runtime && replace_count > 0) {
+            markdown_runtime = render_runtime;
+            render_runtime = nullptr;
         }
-        if (!shared_math_runtime) release_layout_runtime(math_runtime);
-
-        auto math_end = time_now_ns();
-        log_info("[TIMING] Step 1.5 - Math rendering: %.1fms",
-            time_elapsed_ms_f(math_start, math_end));
+        if (!shared_runtime) release_layout_runtime(render_runtime);
+        log_info("[TIMING] Markdown embedded rendering: %.1fms",
+                 time_elapsed_ms_f(embedded_start, time_now_ns()));
     }
 
     // Step 2: Create DomDocument, CSS engine, and build the DOM tree.
@@ -3589,13 +3605,13 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
     CssEngine* css_engine = nullptr;
     DomDocument* dom_doc = create_layout_css_document(
         input, markdown_root, "markdown", DOM_PAGE_KIND_GENERATED,
-        markdown_math_runtime,
+        markdown_runtime,
         viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) {
-        if (shared_math_runtime) loader_runtime_finish_document(nullptr, shared_math_runtime);
+        if (shared_runtime) loader_runtime_finish_document(nullptr, shared_runtime);
         return nullptr;
     }
-    if (shared_math_runtime) layout_adopt_loader_runtime(dom_doc, shared_math_runtime);
+    if (shared_runtime) layout_adopt_loader_runtime(dom_doc, shared_runtime);
 
     auto step2_end = time_now_ns();
     log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
@@ -3637,7 +3653,7 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
 
     // Step 6: Populate DomDocument structure
     populate_layout_document(dom_doc, dom_root, markdown_root, HTML5,
-                             markdown_url, markdown_math_runtime);
+                             markdown_url, markdown_runtime);
 
     store_document_stylesheets(dom_doc, markdown_stylesheets, 3, nullptr, 0, pool);
 
@@ -4163,8 +4179,8 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     if (dom_doc->stylesheet_count > 0) {
         dom_doc->cached_inline_sheets = lam::own_arr(inline_stylesheets);
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
-        dom_doc->services.cached_css_engine = css_engine;
     }
+    dom_doc->services.cached_css_engine = css_engine;
 
     if (!stateless) {
         Item html_item_root = {.element = html_elem};

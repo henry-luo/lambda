@@ -2,8 +2,7 @@
 
 #include <stddef.h>
 
-// Symbol lookup belongs to the content layer; radiant may register richer
-// decoding without exposing its view-owned SymbolResolution representation.
+// symbol lookup belongs to the content layer and works without UI initialization.
 typedef enum CssSymbolKind {
     CSS_SYMBOL_UNKNOWN,
     CSS_SYMBOL_EMOJI,
@@ -15,7 +14,4 @@ typedef struct CssSymbolResolution {
     const char* utf8;
 } CssSymbolResolution;
 
-typedef CssSymbolResolution (*CssSymbolResolveFn)(const char* name, size_t length);
-
-void css_symbol_resolve_register(CssSymbolResolveFn resolver);
 CssSymbolResolution css_symbol_resolve(const char* name, size_t length);

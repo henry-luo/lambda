@@ -225,16 +225,6 @@ fn text_dialog_for(doc, index) =>
 fn format_groups(session) =>
   if (is_drawing(session)) tools.drawing_groups() else tools.rich_text_groups(session.format.underline == true)
 
-// The file name, the shared file group, then the format's groups; a drawing
-// also shows its zoom.
-fn toolbar_children(session, editor, dirty, ds) {
-  let drawing = if (is_drawing(session)) ds else null;
-  [files.file_label(session, dirty), tools.group(tools.file_group, editor, dirty, drawing),
-   *[for (g in format_groups(session)) tools.group(g, editor, dirty, drawing)],
-   tools.group(tools.source_view_group, editor, dirty, drawing),
-   *(if (drawing == null) [] else [<span class: "edit-zoom", dr.fmt(ds.zoom * 100.0) ++ "%">])]
-}
-
 fn surface_of(session, editor, ds) any =>
   if (is_drawing(session)) dr.surface(editor.doc, ds) else rich.surface(editor, "edit-" ++ string(session.format.id))
 
@@ -242,9 +232,8 @@ edit <edit_app> state editor: ~.editor, session: ~.session, status: ~.status, di
                       ds: dr.new_state() {
   let dirty = sess.is_dirty(session, editor.doc);
   <body class: "edit-app edit-format-" ++ string(session.format.id),
-    <div class: "edit-toolbar", role: "toolbar", ["aria-label"]: "Document",
-      *toolbar_children(session, editor, dirty, ds)
-    >
+    tools.toolbar(files.file_label(session, dirty), editor, dirty,
+                  if (is_drawing(session)) ds else null, format_groups(session), tools.source_view_group);
     <div class: "edit-main", surface_of(session, editor, ds)>
     <div class: "edit-status", role: "status", status>
     dialog_view(dialog, session)

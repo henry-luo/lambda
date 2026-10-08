@@ -13,6 +13,14 @@ fn operations(step) {
 
 fn valid_offset(value) => value == null or (util.finite_number(value) and floor(value) == value)
 
+pub fn valid_frame(frame) => frame is array and len(frame) == 2 and
+    valid_offset(frame[0]) and valid_offset(frame[1]) and
+    (frame[0] == null or frame[1] == null or frame[0] <= frame[1])
+
+pub fn frame_bounds(frame, index, count) => [
+    if (frame[0] == null) 0 else max([0, index + int(frame[0])]),
+    if (frame[1] == null) count - 1 else min([count - 1, index + int(frame[1])])]
+
 fn validate_operation(entry) {
     let op = entry.op;
     if (not contains(["row_number", "rank", "dense_rank", "percent_rank", "cume_dist", "ntile",
@@ -35,9 +43,7 @@ pub fn evaluate(data, step) {
     let definitions = records.sort_definitions(step.sort);
     let failure = util.first_error([for (op in ops) validate_operation(op)]);
     if (failure is error) failure
-    else if (not (groups is array) or not (frame is array) or len(frame) != 2 or
-        not valid_offset(frame[0]) or not valid_offset(frame[1]) or
-        (frame[0] != null and frame[1] != null and frame[0] > frame[1]))
+    else if (not (groups is array) or not valid_frame(frame))
         error("chart: invalid window groupby or frame")
     else {
         // Wrappers avoid overwriting user fields and restore order across interleaved partitions.
@@ -51,9 +57,8 @@ pub fn evaluate(data, step) {
                 let ties = if (len(definitions) == 0) [index]
                     else [for (i, candidate in ordered
                         where i == index or records.sort_key(candidate.row, definitions) == records.sort_key(item.row, definitions)) i],
-                let start = if (frame[0] == null) 0 else max([0, index + int(frame[0])]),
-                let end = if (frame[1] == null) len(ordered) - 1 else min([len(ordered) - 1, index + int(frame[1])]),
-                let bounds = expand_frame(ordered, definitions, start, end, step.ignore_peers == true),
+                let frame_range = frame_bounds(frame, index, len(ordered)),
+                let bounds = expand_frame(ordered, definitions, frame_range[0], frame_range[1], step.ignore_peers == true),
                 let rows = [for (i in bounds[0] to bounds[1] where i >= 0 and i < len(ordered)) ordered[i].row])
                 {index: item.index, row: add_results(item.row, ordered, index, ties, rows, definitions, ops, 0)}];
         records.sort_rows(calculated, {field: "index"}) |> ~.row

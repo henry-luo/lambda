@@ -263,7 +263,40 @@ TEST_F(MarkdownEmojiParsingTest, SharedLookupRetainsLegacyAliases) {
     EXPECT_STREQ(emoji_shortcode_lookup("clock", 5), "🕐");
     EXPECT_STREQ(emoji_shortcode_lookup("info", 4), "ℹ️");
     EXPECT_STREQ(emoji_shortcode_lookup("fearful", 7), "😨");
-    EXPECT_EQ(emoji_shortcode_lookup("octocat", 7), nullptr);
+    EXPECT_STREQ(emoji_shortcode_lookup("-1", 2), "👎");
+    EXPECT_STREQ(emoji_shortcode_lookup("woman_technologist", 18), "👩‍💻");
+    EXPECT_STREQ(emoji_shortcode_lookup("calendar", 8), "📆");
+    const EmojiShortcode* custom = emoji_shortcode_find("octocat", 7);
+    ASSERT_NE(custom, nullptr);
+    EXPECT_EQ(custom->utf8, nullptr);
+    EXPECT_STREQ(custom->image_url, "https://github.githubassets.com/images/icons/emoji/octocat.png?v8");
+}
+
+TEST_F(MarkdownEmojiParsingTest, ShortcodeMatchHonorsLengthAndCase) {
+    size_t consumed = 99;
+    const char bounded[] = {':', 's', 'm', 'i', 'l', 'e'};
+    EXPECT_EQ(emoji_shortcode_match(bounded, sizeof(bounded), &consumed), nullptr);
+    EXPECT_EQ(consumed, 0u);
+    EXPECT_EQ(emoji_shortcode_match(":SMILE:", 7, &consumed), nullptr);
+    EXPECT_EQ(emoji_shortcode_match(":unknown:", 9, &consumed), nullptr);
+    EXPECT_EQ(emoji_shortcode_match("::", 2, &consumed), nullptr);
+    ASSERT_NE(emoji_shortcode_match(":smile::heart:", 14, &consumed), nullptr);
+    EXPECT_EQ(consumed, 7u);
+    ASSERT_NE(emoji_shortcode_match(":octocat:", 9, &consumed), nullptr);
+    EXPECT_EQ(consumed, 9u);
+}
+
+TEST_F(MarkdownEmojiParsingTest, HtmlFormattingWorksWithoutUi) {
+    Input* input = parseMarkdown(":smile: :woman_technologist: :calendar: :octocat:");
+    ASSERT_NE(input, nullptr);
+    String* output = format_data(input->root, create_test_string("html"), nullptr, input->pool);
+    ASSERT_NE(output, nullptr);
+    EXPECT_NE(strstr(output->chars, "😄"), nullptr);
+    EXPECT_NE(strstr(output->chars, "👩‍💻"), nullptr);
+    EXPECT_NE(strstr(output->chars, "📆"), nullptr);
+    EXPECT_EQ(strstr(output->chars, ":smile:"), nullptr);
+    EXPECT_NE(strstr(output->chars, "data-emoji=\"octocat\""), nullptr);
+    EXPECT_NE(strstr(output->chars, "octocat.png?v8"), nullptr);
 }
 
 TEST_F(MarkdownEmojiParsingTest, EmojiShortcodeParsesAsSymbol) {
@@ -273,7 +306,7 @@ TEST_F(MarkdownEmojiParsingTest, EmojiShortcodeParsesAsSymbol) {
 
     // The parsed result should contain a Symbol for "smile"
     ItemReader reader(input->root.to_const());
-    EXPECT_TRUE(reader.isElement() || reader.isArray());
+    EXPECT_EQ(count_shortcode_symbols(reader, "smile"), 1);
 }
 
 TEST_F(MarkdownEmojiParsingTest, MultipleEmojis) {
@@ -282,7 +315,8 @@ TEST_F(MarkdownEmojiParsingTest, MultipleEmojis) {
     ASSERT_NE(input, nullptr);
 
     ItemReader reader(input->root.to_const());
-    EXPECT_TRUE(reader.isElement() || reader.isArray());
+    EXPECT_EQ(count_shortcode_symbols(reader, "heart"), 1);
+    EXPECT_EQ(count_shortcode_symbols(reader, "rocket"), 1);
 }
 
 TEST_F(MarkdownEmojiParsingTest, UnknownEmojiPreservedAsText) {
@@ -361,12 +395,10 @@ TEST_F(MarkdownFormatterEmojiTest, EmojiRoundtrip) {
     String* output = formatMarkdown(input);
     ASSERT_NE(output, nullptr);
 
-    // Output should contain :smile:
-    if (output->len > 0) {
-        printf("Markdown roundtrip output: %s\n", output->chars);
-        // Note: exact matching depends on paragraph wrapping etc.
-        EXPECT_GT(output->len, 0);
-    }
+    EXPECT_STREQ(output->chars, "Hello :smile: World\n");
+    Input* reparsed = parseMarkdown(output->chars);
+    ASSERT_NE(reparsed, nullptr);
+    EXPECT_EQ(count_shortcode_symbols(ItemReader(reparsed->root.to_const()), "smile"), 1);
 }
 
 // ==== ItemReader Symbol API Tests ====

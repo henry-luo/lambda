@@ -12210,8 +12210,8 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
 
     float caret_x = 0, caret_y = 0, caret_height = 16;
 
-    // Handle different view types
-    if (view->is_text()) {
+    // collapsed DOM whitespace may own a selection boundary without a text view.
+    if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require_text(view);
         if (!text->rect) {
             log_debug("[CARET-VISUAL] Text view has no rect");

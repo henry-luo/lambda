@@ -353,6 +353,7 @@ fn wrap_standalone(html, info, options) {
             if (meta.author != null) { <meta name: "author", content: meta.author> }
             if (meta.subject != null) { <meta name: "description", content: meta.subject> }
             if (meta.keywords != null) { <meta name: "keywords", content: meta.keywords> }
+            for (sheet in math_css.font_stylesheets()) { sheet }
             <style stylesheet>
             <style math_stylesheet>
             <style package_stylesheet(info)>
