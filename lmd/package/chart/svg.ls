@@ -7,8 +7,8 @@ import util: .util
 // SVG root element
 // ============================================================
 
-pub fn svg_root(width: int, height: int, children) {
-    <svg xmlns: "http://www.w3.org/2000/svg",
+pub fn svg_root(width, height, children, attrs = {}) {
+    <svg *:attrs, xmlns: "http://www.w3.org/2000/svg",
          width: width, height: height,
          viewBox: "0 0 " ++ (width) ++ " " ++ (height),
         for (child in children) child
@@ -25,6 +25,32 @@ pub fn rect(x, y, w, h, fill) {
 
 pub fn circle(cx, cy, r, fill) {
     <circle cx: cx, cy: cy, r: r, fill: fill>
+}
+
+// Symbol dimensions preserve encoded area instead of treating size as a radius.
+pub fn symbol_mark(shape, x, y, area, attrs = {}, children = []) {
+    let size = max([0.0, float(area)]);
+    if (shape == "square") {
+        let side = math.sqrt(size);
+        <rect x: x - side / 2.0, y: y - side / 2.0, width: side, height: side, *:attrs,
+            for (child in children) child>
+    } else if (shape == "diamond" or shape == "triangle-up" or shape == "triangle-down" or shape == "cross") {
+        let points = if (shape == "diamond") (
+            let radius = math.sqrt(size / 2.0),
+            [[x, y - radius], [x + radius, y], [x, y + radius], [x - radius, y]])
+        else if (shape == "cross") (
+            let unit = math.sqrt(size / 5.0) / 2.0,
+            [for (p in [[-1,-3],[1,-3],[1,-1],[3,-1],[3,1],[1,1],[1,3],[-1,3],[-1,1],[-3,1],[-3,-1],[-1,-1]])
+                [x + p[0] * unit, y + p[1] * unit]])
+        else (
+            let side = math.sqrt(4.0 * size / math.sqrt(3.0)),
+            let height = side * math.sqrt(3.0) / 2.0,
+            let sign = if (shape == "triangle-down") -1.0 else 1.0,
+            [[x, y - sign * height * 2.0 / 3.0], [x + side / 2.0, y + sign * height / 3.0],
+                [x - side / 2.0, y + sign * height / 3.0]]);
+        <path d: line_path(points) ++ " Z", *:attrs, for (child in children) child>
+    } else <circle cx: x, cy: y, r: math.sqrt(size / util.PI), *:attrs,
+        for (child in children) child>
 }
 
 pub fn line(x1, y1, x2, y2, stroke, stroke_width) {
@@ -81,13 +107,26 @@ pub fn A(rx, ry, rotation, large_arc, sweep, x, y) string {
 }
 
 // build a path string from a list of points using line segments
-pub fn line_path(points) string {
+pub fn line_path(points, interpolate = null) string {
     if len(points) == 0 { "" }
     else {
         let first = points[0];
         let start = M(first[0], first[1]);
-        let segments = [for (i in 1 to (len(points) - 1))
-            L(points[i][0], points[i][1])];
+        let segments = [for (i in 1 to (len(points) - 1)) (
+            let previous = points[i - 1],
+            let current = points[i],
+            if (interpolate == "step-before") L(previous[0], current[1]) ++ " " ++ L(current[0], current[1])
+            else if (interpolate == "step-after") L(current[0], previous[1]) ++ " " ++ L(current[0], current[1])
+            else if (interpolate == "step") (
+                let middle = (previous[0] + current[0]) / 2.0,
+                L(middle, previous[1]) ++ " " ++ L(middle, current[1]) ++ " " ++ L(current[0], current[1]))
+            else if (interpolate == "cardinal" or interpolate == "catmull-rom") (
+                let before = points[max([0, i - 2])],
+                let after = points[min([len(points) - 1, i + 1])],
+                C(previous[0] + (current[0] - before[0]) / 6.0, previous[1] + (current[1] - before[1]) / 6.0,
+                    current[0] - (after[0] - previous[0]) / 6.0, current[1] - (after[1] - previous[1]) / 6.0,
+                    current[0], current[1]))
+            else L(current[0], current[1]))];
         start ++ " " ++ (segments |> join(" "))
     }
 }
@@ -108,19 +147,12 @@ pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false) {
 }
 
 // build a closed area path: line along top, then line back along bottom
-pub fn area_path(top_points, bottom_points) string {
+pub fn area_path(top_points, bottom_points, interpolate = null) string {
     if len(top_points) == 0 { "" }
     else {
-        let first = top_points[0];
         let bottom_rev = reverse(bottom_points);
-
-        let d1 = M(first[0], first[1]);
-        let top_segs = [for (i in 1 to (len(top_points) - 1))
-            L(top_points[i][0], top_points[i][1])];
-        let d2 = d1 ++ " " ++ (top_segs |> join(" "));
-        let bottom_segs = [for (bp in bottom_rev) L(bp[0], bp[1])];
-        let d3 = d2 ++ " " ++ (bottom_segs |> join(" "));
-        d3 ++ " " ++ Z_cmd()
+        let bottom_path = trim(line_path(bottom_rev, interpolate));
+        line_path(top_points, interpolate) ++ " L" ++ slice(bottom_path, 1, len(bottom_path)) ++ " Z"
     }
 }
 

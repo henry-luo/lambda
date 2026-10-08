@@ -97,8 +97,8 @@ pub fn gradient_legend(sc, title_text, config) {
     let n_steps = 20;
     let step_h = float(bar_h) / float(n_steps);
     let gradient_rects = [for (i in 0 to (n_steps - 1))
-        (let t = 1.0 - float(i) / float(n_steps),
-        let c = if (sc.scheme) (let idx = int(t * float(len(sc.scheme) - 1)), sc.scheme[idx]) else "#ccc",
+        (let t = 1.0 - float(i) / float(n_steps - 1),
+        let c = scale.scale_apply(sc, util.lerp(sc.domain[0], sc.domain[len(sc.domain) - 1], t)),
         <rect x: 0, y: y_start + float(i) * step_h,
               width: bar_w, height: step_h + 1.0,
               fill: c, stroke: "none">)
@@ -133,7 +133,7 @@ pub fn legend_width(categories, config) {
     let max_len = if (len(categories) > 0)
         max(categories |> len(string(~)))
     else 5;
-    float(cfg.symbol_size) + cfg.symbol_padding + float(max_len) * 7.0 + 10.0
+    float(cfg.symbol_size) + cfg.symbol_padding + float(max_len) * 7.0 * float(cfg.label_font_size) / 11.0 + 10.0
 }
 
 pub fn legend_height(categories, config, has_title: bool) {

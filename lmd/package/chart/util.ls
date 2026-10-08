@@ -36,7 +36,8 @@ pub fn nice_num(val, rounding) {
 // generate nice tick values for a given domain [lo, hi]
 pub fn nice_ticks(dlo, dhi, count: int) {
     let range_span = float(dhi) - float(dlo);
-    if range_span == 0.0 { [float(dlo)] }
+    if (range_span < 0.0) reverse(nice_ticks(dhi, dlo, count))
+    else if range_span == 0.0 { [float(dlo)] }
     else {
         let rough_step = range_span / float(if (count > 1) count - 1 else 1);
         let step = nice_num(rough_step, true);
@@ -54,7 +55,8 @@ pub fn nice_domain(dlo, dhi) {
     let lo_f = float(dlo);
     let hi_f = float(dhi);
     let range_span = hi_f - lo_f;
-    if range_span == 0.0 {
+    if (range_span < 0.0) reverse(nice_domain(dhi, dlo))
+    else if range_span == 0.0 {
         if lo_f == 0.0 { [0.0, 1.0] }
         else {
             let abs_lo = abs(lo_f);
@@ -111,6 +113,23 @@ pub fn fmt_num(value) string {
     else string(round(float(value) * 1000000.0) / 1000000.0)
 }
 
+// Small fixed-point/percentage formats cover native guide, text, and tooltip labels.
+pub fn format_value(value, pattern = null, dtype = null) {
+    if (pattern == null) string(value)
+    else if (dtype == "temporal") datetime(value).format(pattern)
+    else if (starts_with(pattern, ".") and (ends_with(pattern, "f") or ends_with(pattern, "%"))) {
+        let digits = int(slice(pattern, 1, len(pattern) - 1));
+        let percentage = ends_with(pattern, "%");
+        let factor = 10.0 ** float(digits);
+        let rounded = round(abs(float(value)) * (if (percentage) 100.0 else 1.0) * factor);
+        let whole = int(floor(rounded / factor));
+        let remainder = string(int(rounded - float(whole) * factor));
+        let zeros = join([for (i in 0 to (digits - len(remainder) - 1)) "0"], "");
+        (if (value < 0) "-" else "") ++ string(whole) ++
+            (if (digits > 0) "." ++ zeros ++ remainder else "") ++ (if (percentage) "%" else "")
+    } else string(value)
+}
+
 // ============================================================
 // Collection helpers
 // ============================================================
@@ -132,6 +151,17 @@ fn unique_build(arr, i, result) {
 // replacement for builtin unique() which is broken for strings
 pub fn unique_vals(arr) {
     unique_build(arr, 0, [])
+}
+
+// Shared categorical lookup keeps band, point, ordinal, grouping, and stacking consistent.
+pub fn find_index(values, value) {
+    let matches = [for (index, candidate in values where candidate == value) index];
+    if (len(matches) > 0) matches[0] else 0
+}
+
+pub fn first_error(values) {
+    let failures = [for (value in values where value is error) value];
+    if (len(failures) > 0) failures[0] else null
 }
 
 // extract unique values from an array by a key function
