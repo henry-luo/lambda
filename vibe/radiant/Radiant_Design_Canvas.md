@@ -13,7 +13,8 @@ records both the accepted placement and the deliberately unsupported surface.
 not propose WebGL, WebGPU, browser Worker integration, or browser-complete
 Canvas conformance.
 
-Native WebGL2 and the required Three.js workload are proposed separately in
+Native Lambda 3D scenes over desktop OpenGL, followed by a JS WebGL adapter
+and Three.js in Phase II, are proposed separately in
 [Radiant WebGL Design](../radaint/Radiant_Design_WebGL.md); they reuse canvas
 ownership and painting while keeping graphics-context state separate.
 
