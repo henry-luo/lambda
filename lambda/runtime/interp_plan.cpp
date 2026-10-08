@@ -1793,6 +1793,8 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
             pc.failed = true;
             break;
         }
+        // defaults execute in this activation and may create closures with their own frames.
+        plan_walk((AstNode*)p, &pc);
         uint32_t parameter_need = plan_need((AstNode*)p);
         if (parameter_need > pc.max_scratch) pc.max_scratch = parameter_need;
         param_index++;

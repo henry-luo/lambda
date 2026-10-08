@@ -6,6 +6,7 @@ import mark: .mark
 import parse: .parse
 import util: .util
 import color: .color
+import primitive: .primitive
 
 fn position_error(points) null | error => if (not (points is array) or
     len([for (point in points where not projection.valid_position(point)) true]) > 0)
@@ -130,7 +131,7 @@ fn shape_elements(shape, row, model, ctx, options) {
 }
 
 pub fn render(data, ctx, options) {
-    let settings = if (options.projection != null) options.projection else ctx._projection;
+    let settings = if (ctx._navigation == true) ctx._projection else if (options.projection != null) options.projection else ctx._projection;
     let model = projection.configure(ctx.plot_w, ctx.plot_h, settings);
     let field = if (options.geometry_field != null) options.geometry_field else if (ctx.encoding.shape.field != null) ctx.encoding.shape.field else "geometry";
     let shapes = [for (row in data) if (row[field] != null) row[field]
@@ -143,4 +144,24 @@ pub fn render(data, ctx, options) {
         let invalid = util.first_error(items);
         if (invalid is error) invalid else svg.group_class("marks geoshape", items)
     }
+}
+
+// Scientific vectors express direction in radians and magnitude in longitude/latitude units.
+pub fn vectors(data,ctx,options) {
+    let settings=if (ctx._navigation==true) ctx._projection else if (options.projection!=null) options.projection else ctx._projection;
+    let model=projection.configure(ctx.plot_w,ctx.plot_h,settings);
+    let items=[for (row in data,
+        let origin=[parse.channel_value(ctx.encoding.longitude,row),parse.channel_value(ctx.encoding.latitude,row)],
+        let direction=parse.channel_value(ctx.encoding.direction,row,row[if (options.direction_field!=null) options.direction_field else "direction"]),
+        let magnitude=parse.channel_value(ctx.encoding.magnitude,row,row[if (options.magnitude_field!=null) options.magnitude_field else "magnitude"]),
+        let destination=primitive.vector_endpoint(origin,direction,magnitude,1.0),
+        let a=projection.project(origin,model),let b=projection.project(destination,model),
+        let appearance=mark.style(ctx,row,options,{fill:"none",stroke:color.default_color,'stroke-width':1.5,opacity:1.0},true))
+        if (not projection.valid_position(origin) or not projection.valid_position(destination) or
+            not util.finite_number(direction) or not util.finite_number(magnitude)) error("chart: geographic vector requires finite valid endpoints")
+        else <g class:"geo-vector",<path d:line_path([origin,destination],model),*:appearance,mark.tooltip(ctx,row)>;
+            if (a!=null and b!=null) svg.arrow_head(a[0],a[1],b[0],b[1],appearance.stroke,
+                if (options.arrow_size!=null) options.arrow_size else 8.0)>];
+    let failure=util.first_error([model,*items]);
+    if (failure is error) failure else svg.group_class("marks vector",items)
 }

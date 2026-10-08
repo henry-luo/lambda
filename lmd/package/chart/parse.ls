@@ -68,11 +68,17 @@ pub fn parse_chart(chart_el) {
         padding: padding,
         title: title,
         id: chart_el.id,
-        coordinate: if (chart_el.coordinate != null) chart_el.coordinate else attributes(find_child(chart_el, 'coordinate', children_count)),
-        interaction: chart_el.interaction,
+        coordinate: if (chart_el.coordinate != null) chart_el.coordinate else (
+            let coordinate = find_child(chart_el, 'coordinate', children_count),
+            if (coordinate != null) attributes(coordinate) else null),
+        interaction: if (chart_el.interaction != null) chart_el.interaction else (
+            let node = find_child(chart_el, 'interaction', children_count),
+            map([for (child in content(node)) for (part in [string(name(child)), if (child.enabled == false) false else attributes(child)]) part])),
         state: chart_el.state,
         animate: chart_el.animate,
-        timeline: chart_el.timeline,
+        timeline: if (chart_el.timeline != null) chart_el.timeline else (
+            let node = find_child(chart_el, 'timeline', children_count),
+            if (node == null) null else {*:attributes(node), keyframes: [for (child in content(node) where name(child) == 'keyframe') attributes(child)]}),
         data: data,
         data_source: attributes(data_el),
         datasets: chart_el.datasets,
@@ -343,4 +349,13 @@ pub fn parse_top(el) {
     if (tag == 'hconcat' or tag == 'vconcat') parse_concat(el)
     else if (tag == 'repeat') parse_repeat(el)
     else parse_chart(el)
+}
+
+// Repeat substitution reaches every field-bearing option, including nested conditions.
+pub fn substitute(value, row_field, column_field) {
+    if (value is array) [for (entry in value) substitute(entry, row_field, column_field)]
+    else if (value is map) map([for (key, entry in value) for (part in [string(key),
+        if (string(key) == "field" and entry.repeat != null) (if (entry.repeat == "column") column_field else row_field)
+        else substitute(entry, row_field, column_field)]) part])
+    else value
 }

@@ -212,8 +212,9 @@ svg.width                // 400, the default width
 |----------|-------------|
 | `chart.render(chart_el)` | Renders a `<chart>`, `<hconcat>`, `<vconcat>` or `<repeat>` element as an `<svg>` element |
 | `chart.render_spec(spec, viewport = null, st = null)` | Renders a specification map or native element; optional parameter-state snapshot derives an interactive SVG presentation |
-| `chart.model(spec, viewport = null)` | Creates a chart source element; retain and `apply` it to preserve chart state across parent rerenders |
-| `chart.interactive(spec, viewport = null)` | Applies a Lambda view template with independent interaction state, SVG, and bound input controls |
+| `chart.model(spec, viewport = null, options = {})` | Creates a chart source element; retain and `apply` it to preserve chart state across parent rerenders |
+| `chart.interactive(spec, viewport = null, options = {})` | Applies a Lambda view template with independent interaction state, SVG, and bound input controls |
+| `chart.render_frame(spec, frame, viewport = null, st = null)` | Samples SVG at an explicit `time_ms`; a `previous` specification or SVG supplies the source of an update transition (S12.1.1v2) |
 | `vega.convert(vl)` | Converts a parsed Vega-Lite document (a map) into a specification map for `render_spec` |
 
 ### 4.3 Specification elements
@@ -222,8 +223,11 @@ svg.width                // 400, the default width
 |---------|-------------------------|
 | `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, `clip`, `projection`, and the children below |
 | `<data>` | Inline `values: [...]` or row children; `name` selects the chart's `datasets` map; `url` and optional `format` use Lambda input loading |
-| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`, `violin`, `slope`, `trail`, `image`, `radar`, `parallel`, `treemap`, `sunburst`, `geoshape` (`geo`); an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
-| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<theta2>`, `<radius>`, `<radius2>`, `<longitude>`, `<latitude>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`, `<url>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`; `geojson` for a shape field), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `stack_order`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`, `violin`, `slope`, `trail`, `image`, `radar`, `parallel`, `treemap`, `sunburst`, `geoshape` (`geo`), `link`, `polygon`, `path`, `vector`, `sankey`, `chord`, `tree`, `pack`, `force_graph`, `funnel`, `gauge`, `liquid`, `density`; `point` also supports `beeswarm: true`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
+| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<theta2>`, `<radius>`, `<radius2>`, `<longitude>`, `<latitude>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`, `<url>`, `<position>`, `<key>`, `<group_key>`, `<path>`, `<direction>`, `<magnitude>`, and phase timing channels such as `<update_duration>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`; `geojson` for a shape field), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `stack_order`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<coordinate>` | `type`: `cartesian`, `polar`, `theta`, `radial`, `parallel`, `radar`, `helix`, or `geo`; normalized radii, angular bounds, and an ordered `transform` array |
+| `<interaction>` | Named behavior children such as `<element_select param: "picked">`; false disables inherited behaviors |
+| `<timeline>` | `<keyframe at: ..., spec: ...>` children; `autoplay`, `duration`, `repeat`, `direction`, and `fill` |
 | `<params>` | `<param name: ...>` declarations, or supply a chart `params` array; variables, point/interval selections, and bindings |
 | `<transform>` | Ordered `filter`, `sort`, `aggregate`, `joinaggregate`, `calculate`, `bin`, `timeunit`, `fold`, `flatten`, `pivot`, `impute`, `stack`, `quantile`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
 | `<config>` | `theme`: `light`, `dark`, `minimal`, `presentation`, or a custom map; nested `mark`/mark-type/`axis`/`legend` settings or equivalent prefixed attributes; `font`; `axis_grid: true` for horizontal grids |
@@ -232,6 +236,27 @@ svg.width                // 400, the default width
 | `<annotation>` | `<text_note x, y, text, color, font_size, anchor, dx, dy>`, `<rule_note x or y, color, stroke_width, stroke_dash>`, and `<region_note x, x2, y, y2, color, opacity, text>` children |
 | `<hconcat>`, `<vconcat>` | `spacing` (default 20); `<chart>` children placed side by side or stacked |
 | `<repeat>` | A `<row [fields]>` and/or `<column [fields]>` child plus one `<chart>` template whose channels say `field: {repeat: "row"}` or `field: {repeat: "column"}` |
+
+The native map grammar additionally accepts `mark: {kind: "composite", expand:
+factory, parts: {...}}`. A pure factory returns a finite layer composition;
+named parts share encodings, visual states, behaviors, and animation.
+`interaction` presets compile into ordinary chart parameters. `state` supplies
+default, active/inactive, and selected/unselected styles. `animate` supplies
+keyed enter/update/exit transitions and ordered group timing. `timeline`
+provides keyframe views with play, pause, resume, seek, reverse, and cancel
+commands. Live clocks and selection stores belong to the chart view template;
+handlers receive `chart_interaction`, `chart_change`, and `chart_animation`
+notifications (S9.1.4, S12.1.3). Pass `{reduced_motion: true}` as the third
+argument of `model`/`interactive` for immediate target presentation.
+
+See the [consolidated chart design](../vibe/Lambda_Pkg_Chart.md) for graph input,
+coordinate compatibility, behavior options, derived density records, and
+animation identity/fallback contracts. The
+[chart dashboard](../test/lambda/chart/chart_dashboard.ls) showcases the chart
+families, coordinate modes, wordcloud, visual states, and frozen transitions.
+The [live gallery](../test/lambda/chart/_interactive_gallery.ls) demonstrates
+related graph selection, polar/field-axis brushing, geographic navigation,
+and chart-local playback controls.
 
 A `violin` mark mirrors a category's estimated density; `density_field`
 accepts precomputed densities. A `slope` mark connects each detail entity's

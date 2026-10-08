@@ -124,6 +124,18 @@ while a handler is still running cannot run the callback and logs
 
 ---
 
+Reactive reconciliation captures a focused element's `data-focus-key` before
+retiring its DOM node and searches within the corresponding replacement
+template result before structural fallback. Keyed chart elements therefore
+retain focus when an earlier sibling disappears or the mark family changes.
+The key is copied across retirement and released after restoration; no retired
+DOM pointer becomes the owner of the new focus (D4.5.1v4).
+
+Lambda `dom.dispatch` descriptors with an explicit `detail` field create a
+rooted custom event, preserving that value through nested dispatch. Ordinary
+nested descriptors retain their name-based author-event routing. Event
+observers and procedural handlers remain the mutation boundary (S12.1.3).
+
 ## 6. Keyboard, IME, and text input
 
 `RDT_EVENT_KEY_DOWN` constructs a shared keyboard record before the package's

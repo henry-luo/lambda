@@ -1,6 +1,6 @@
 {
   "title": "Lambda Chart Dashboard",
-  "subtitle": "Cartesian, statistical, radial, hierarchical and geographic charts, plus wordcloud",
+  "subtitle": "Statistical, network, flow, hierarchy, geographic and wordcloud charts; reusable coordinates, visual states and frozen animation samples",
   "columns": 3,
   "charts": [
     {
@@ -2559,6 +2559,1762 @@
           }
         }
       }
+    },
+    {
+      "label": "Endpoint links",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Endpoint links",
+        "data": [
+          {
+            "id": "a",
+            "x": 1,
+            "y": 1,
+            "x2": 3,
+            "y2": 4,
+            "width": 2
+          },
+          {
+            "id": "b",
+            "x": 2,
+            "y": 5,
+            "x2": 5,
+            "y2": 2,
+            "width": 4
+          }
+        ],
+        "mark": {
+          "kind": "link",
+          "curve": "curve",
+          "arrow": true
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          },
+          "x2": {
+            "field": "x2",
+            "dtype": "quantitative"
+          },
+          "y2": {
+            "field": "y2",
+            "dtype": "quantitative"
+          },
+          "size": {
+            "field": "width",
+            "dtype": "quantitative"
+          }
+        }
+      }
+    },
+    {
+      "label": "Ordered polygon",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Ordered polygon",
+        "data": [
+          {
+            "x": 1,
+            "y": 1
+          },
+          {
+            "x": 4,
+            "y": 1
+          },
+          {
+            "x": 5,
+            "y": 3
+          },
+          {
+            "x": 3,
+            "y": 5
+          },
+          {
+            "x": 1,
+            "y": 3
+          }
+        ],
+        "mark": {
+          "kind": "polygon",
+          "fill": "#76b7b2",
+          "stroke": "#246a65"
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          }
+        }
+      }
+    },
+    {
+      "label": "Authored SVG paths",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Authored SVG paths",
+        "data": [
+          {
+            "id": "curve",
+            "path": "M10 160 C40 20 170 20 220 160"
+          },
+          {
+            "id": "arc",
+            "path": "M20 160 A90 70 0 0 1 200 160"
+          }
+        ],
+        "mark": {
+          "kind": "path",
+          "stroke": "#b07aa1",
+          "width": 3
+        },
+        "encoding": {
+          "path": {
+            "field": "path",
+            "dtype": "nominal"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        }
+      }
+    },
+    {
+      "label": "Scientific vector field",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Scientific vector field",
+        "data": [
+          {
+            "id": "0",
+            "x": 0,
+            "y": 0,
+            "direction": 0.2,
+            "magnitude": 18
+          },
+          {
+            "id": "1",
+            "x": 1,
+            "y": 0,
+            "direction": 0.45,
+            "magnitude": 18
+          },
+          {
+            "id": "2",
+            "x": 2,
+            "y": 0,
+            "direction": 0.7,
+            "magnitude": 18
+          },
+          {
+            "id": "3",
+            "x": 3,
+            "y": 0,
+            "direction": 0.95,
+            "magnitude": 18
+          },
+          {
+            "id": "4",
+            "x": 0,
+            "y": 1,
+            "direction": 1.2,
+            "magnitude": 18
+          },
+          {
+            "id": "5",
+            "x": 1,
+            "y": 1,
+            "direction": 1.45,
+            "magnitude": 18
+          },
+          {
+            "id": "6",
+            "x": 2,
+            "y": 1,
+            "direction": 1.7,
+            "magnitude": 18
+          },
+          {
+            "id": "7",
+            "x": 3,
+            "y": 1,
+            "direction": 1.95,
+            "magnitude": 18
+          },
+          {
+            "id": "8",
+            "x": 0,
+            "y": 2,
+            "direction": 2.2,
+            "magnitude": 18
+          },
+          {
+            "id": "9",
+            "x": 1,
+            "y": 2,
+            "direction": 2.45,
+            "magnitude": 18
+          },
+          {
+            "id": "10",
+            "x": 2,
+            "y": 2,
+            "direction": 2.7,
+            "magnitude": 18
+          },
+          {
+            "id": "11",
+            "x": 3,
+            "y": 2,
+            "direction": 2.95,
+            "magnitude": 18
+          }
+        ],
+        "mark": {
+          "kind": "vector"
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          },
+          "direction": {
+            "field": "direction",
+            "dtype": "quantitative"
+          },
+          "magnitude": {
+            "field": "magnitude",
+            "dtype": "quantitative"
+          }
+        }
+      }
+    },
+    {
+      "label": "Sankey flow",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Sankey flow",
+        "data": {
+          "nodes": [
+            {
+              "id": "Sources"
+            },
+            {
+              "id": "Storage"
+            },
+            {
+              "id": "Processing"
+            },
+            {
+              "id": "Reports"
+            }
+          ],
+          "links": [
+            {
+              "id": "a",
+              "source": "Sources",
+              "target": "Storage",
+              "value": 8
+            },
+            {
+              "id": "b",
+              "source": "Sources",
+              "target": "Processing",
+              "value": 4
+            },
+            {
+              "id": "c",
+              "source": "Storage",
+              "target": "Processing",
+              "value": 6
+            },
+            {
+              "id": "d",
+              "source": "Processing",
+              "target": "Reports",
+              "value": 10
+            }
+          ]
+        },
+        "mark": {
+          "kind": "sankey",
+          "node_width": 12
+        },
+        "encoding": {
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        }
+      }
+    },
+    {
+      "label": "Chord relationships",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Chord relationships",
+        "data": {
+          "nodes": [
+            {
+              "id": "Sources"
+            },
+            {
+              "id": "Storage"
+            },
+            {
+              "id": "Processing"
+            },
+            {
+              "id": "Reports"
+            }
+          ],
+          "links": [
+            {
+              "id": "a",
+              "source": "Sources",
+              "target": "Storage",
+              "value": 8
+            },
+            {
+              "id": "b",
+              "source": "Sources",
+              "target": "Processing",
+              "value": 4
+            },
+            {
+              "id": "c",
+              "source": "Storage",
+              "target": "Processing",
+              "value": 6
+            },
+            {
+              "id": "d",
+              "source": "Processing",
+              "target": "Reports",
+              "value": 10
+            }
+          ]
+        },
+        "mark": {
+          "kind": "chord",
+          "labels": false
+        },
+        "encoding": {
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        }
+      }
+    },
+    {
+      "label": "Seeded force graph",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Seeded force graph",
+        "data": {
+          "nodes": [
+            {
+              "id": "Sources"
+            },
+            {
+              "id": "Storage"
+            },
+            {
+              "id": "Processing"
+            },
+            {
+              "id": "Reports"
+            }
+          ],
+          "links": [
+            {
+              "id": "a",
+              "source": "Sources",
+              "target": "Storage",
+              "value": 8
+            },
+            {
+              "id": "b",
+              "source": "Sources",
+              "target": "Processing",
+              "value": 4
+            },
+            {
+              "id": "c",
+              "source": "Storage",
+              "target": "Processing",
+              "value": 6
+            },
+            {
+              "id": "d",
+              "source": "Processing",
+              "target": "Reports",
+              "value": 10
+            }
+          ]
+        },
+        "mark": {
+          "kind": "force_graph",
+          "iterations": 80,
+          "seed": 42
+        },
+        "encoding": {
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        }
+      }
+    },
+    {
+      "label": "Hierarchy tree",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Hierarchy tree",
+        "data": [
+          {
+            "id": "Root"
+          },
+          {
+            "id": "A",
+            "parent": "Root",
+            "value": 3
+          },
+          {
+            "id": "B",
+            "parent": "Root",
+            "value": 2
+          },
+          {
+            "id": "A1",
+            "parent": "A",
+            "value": 2
+          },
+          {
+            "id": "A2",
+            "parent": "A",
+            "value": 1
+          }
+        ],
+        "mark": {
+          "kind": "tree",
+          "orientation": "horizontal",
+          "link": "orthogonal"
+        },
+        "encoding": {
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        }
+      }
+    },
+    {
+      "label": "Radial hierarchy",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Radial hierarchy",
+        "data": [
+          {
+            "id": "Root"
+          },
+          {
+            "id": "A",
+            "parent": "Root",
+            "value": 3
+          },
+          {
+            "id": "B",
+            "parent": "Root",
+            "value": 2
+          },
+          {
+            "id": "A1",
+            "parent": "A",
+            "value": 2
+          },
+          {
+            "id": "A2",
+            "parent": "A",
+            "value": 1
+          }
+        ],
+        "mark": {
+          "kind": "tree"
+        },
+        "encoding": {
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "polar",
+          "inner_radius": 0.05,
+          "outer_radius": 0.8
+        }
+      }
+    },
+    {
+      "label": "Nested circle packing",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Nested circle packing",
+        "data": [
+          {
+            "id": "Root"
+          },
+          {
+            "id": "A",
+            "parent": "Root",
+            "value": 3
+          },
+          {
+            "id": "B",
+            "parent": "Root",
+            "value": 2
+          },
+          {
+            "id": "A1",
+            "parent": "A",
+            "value": 2
+          },
+          {
+            "id": "A2",
+            "parent": "A",
+            "value": 1
+          }
+        ],
+        "mark": {
+          "kind": "pack"
+        },
+        "encoding": {
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        }
+      }
+    },
+    {
+      "label": "Funnel stages",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Funnel stages",
+        "data": [
+          {
+            "stage": "Visits",
+            "value": 100
+          },
+          {
+            "stage": "Signups",
+            "value": 65
+          },
+          {
+            "stage": "Trials",
+            "value": 42
+          },
+          {
+            "stage": "Customers",
+            "value": 25
+          }
+        ],
+        "mark": {
+          "kind": "funnel"
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "label": "Target gauge",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Target gauge",
+        "data": [
+          {
+            "value": 72
+          }
+        ],
+        "mark": {
+          "kind": "gauge",
+          "domain": [
+            0,
+            100
+          ],
+          "target": 80,
+          "thresholds": [
+            {
+              "value": 0,
+              "color": "#e15759"
+            },
+            {
+              "value": 50,
+              "color": "#f28e2b"
+            },
+            {
+              "value": 75,
+              "color": "#59a14f"
+            }
+          ]
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "label": "Linear gauge",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Linear gauge",
+        "data": [
+          {
+            "value": 64
+          }
+        ],
+        "mark": {
+          "kind": "gauge",
+          "domain": [
+            0,
+            100
+          ],
+          "shape": "linear",
+          "target": 80
+        },
+        "encoding": {}
+      }
+    },
+    {
+      "label": "Liquid level",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Liquid level",
+        "data": [
+          {
+            "value": 63
+          }
+        ],
+        "mark": {
+          "kind": "liquid",
+          "domain": [
+            0,
+            100
+          ]
+        },
+        "encoding": {}
+      },
+      "sample_time": 800
+    },
+    {
+      "label": "Beeswarm distribution",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Beeswarm distribution",
+        "data": [
+          {
+            "group": "A",
+            "value": 4,
+            "id": "A0"
+          },
+          {
+            "group": "A",
+            "value": 4,
+            "id": "A1"
+          },
+          {
+            "group": "A",
+            "value": 4.1,
+            "id": "A2"
+          },
+          {
+            "group": "A",
+            "value": 4.2,
+            "id": "A3"
+          },
+          {
+            "group": "A",
+            "value": 5,
+            "id": "A4"
+          },
+          {
+            "group": "A",
+            "value": 6,
+            "id": "A5"
+          },
+          {
+            "group": "B",
+            "value": 3,
+            "id": "B0"
+          },
+          {
+            "group": "B",
+            "value": 3,
+            "id": "B1"
+          },
+          {
+            "group": "B",
+            "value": 3.1,
+            "id": "B2"
+          },
+          {
+            "group": "B",
+            "value": 4,
+            "id": "B3"
+          },
+          {
+            "group": "B",
+            "value": 5,
+            "id": "B4"
+          },
+          {
+            "group": "B",
+            "value": 5,
+            "id": "B5"
+          }
+        ],
+        "mark": {
+          "kind": "point",
+          "beeswarm": true,
+          "size": 45
+        },
+        "encoding": {
+          "x": {
+            "field": "group",
+            "dtype": "nominal"
+          },
+          "y": {
+            "field": "value",
+            "dtype": "quantitative"
+          },
+          "color": {
+            "field": "group",
+            "dtype": "nominal"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        }
+      }
+    },
+    {
+      "label": "Density cells",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Density cells",
+        "data": [
+          {
+            "x": 1,
+            "y": 1
+          },
+          {
+            "x": 1.5,
+            "y": 1.2
+          },
+          {
+            "x": 2,
+            "y": 1.5
+          },
+          {
+            "x": 2.2,
+            "y": 2
+          },
+          {
+            "x": 3,
+            "y": 3
+          },
+          {
+            "x": 3.3,
+            "y": 3.2
+          },
+          {
+            "x": 4,
+            "y": 3.4
+          },
+          {
+            "x": 3.8,
+            "y": 4
+          },
+          {
+            "x": 4.2,
+            "y": 4
+          }
+        ],
+        "mark": {
+          "kind": "density",
+          "resolution": 10,
+          "bandwidth": 0.7
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          }
+        }
+      }
+    },
+    {
+      "label": "Density contours",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Density contours",
+        "data": [
+          {
+            "x": 1,
+            "y": 1
+          },
+          {
+            "x": 1.5,
+            "y": 1.2
+          },
+          {
+            "x": 2,
+            "y": 1.5
+          },
+          {
+            "x": 2.2,
+            "y": 2
+          },
+          {
+            "x": 3,
+            "y": 3
+          },
+          {
+            "x": 3.3,
+            "y": 3.2
+          },
+          {
+            "x": 4,
+            "y": 3.4
+          },
+          {
+            "x": 3.8,
+            "y": 4
+          },
+          {
+            "x": 4.2,
+            "y": 4
+          }
+        ],
+        "mark": {
+          "kind": "density",
+          "resolution": 10,
+          "bandwidth": 0.7,
+          "contours": true,
+          "levels": [
+            0.02,
+            0.04,
+            0.06,
+            0.08
+          ]
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          }
+        }
+      }
+    },
+    {
+      "label": "Polar bars",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Polar bars",
+        "data": [
+          {
+            "category": "A",
+            "value": 3,
+            "id": "A"
+          },
+          {
+            "category": "B",
+            "value": 6,
+            "id": "B"
+          },
+          {
+            "category": "C",
+            "value": 4,
+            "id": "C"
+          },
+          {
+            "category": "D",
+            "value": 5,
+            "id": "D"
+          },
+          {
+            "category": "E",
+            "value": 2,
+            "id": "E"
+          }
+        ],
+        "mark": {
+          "kind": "bar"
+        },
+        "encoding": {
+          "x": {
+            "field": "category",
+            "dtype": "nominal"
+          },
+          "y": {
+            "field": "value",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "polar",
+          "inner_radius": 0.15
+        }
+      }
+    },
+    {
+      "label": "Theta intervals",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Theta intervals",
+        "data": [
+          {
+            "category": "A",
+            "value": 3,
+            "id": "A"
+          },
+          {
+            "category": "B",
+            "value": 6,
+            "id": "B"
+          },
+          {
+            "category": "C",
+            "value": 4,
+            "id": "C"
+          },
+          {
+            "category": "D",
+            "value": 5,
+            "id": "D"
+          },
+          {
+            "category": "E",
+            "value": 2,
+            "id": "E"
+          }
+        ],
+        "mark": {
+          "kind": "arc"
+        },
+        "encoding": {
+          "theta": {
+            "field": "value",
+            "dtype": "quantitative"
+          },
+          "color": {
+            "field": "category",
+            "dtype": "nominal"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "theta",
+          "inner_radius": 0.4
+        }
+      }
+    },
+    {
+      "label": "Radial coordinate",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Radial coordinate",
+        "data": [
+          {
+            "category": "A",
+            "value": 3,
+            "id": "A"
+          },
+          {
+            "category": "B",
+            "value": 6,
+            "id": "B"
+          },
+          {
+            "category": "C",
+            "value": 4,
+            "id": "C"
+          },
+          {
+            "category": "D",
+            "value": 5,
+            "id": "D"
+          },
+          {
+            "category": "E",
+            "value": 2,
+            "id": "E"
+          }
+        ],
+        "mark": {
+          "kind": "bar"
+        },
+        "encoding": {
+          "x": {
+            "field": "value",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "category",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "radial",
+          "inner_radius": 0.15
+        }
+      }
+    },
+    {
+      "label": "Helix coordinate",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Helix coordinate",
+        "data": [
+          {
+            "id": "0",
+            "x": 1,
+            "y": 2
+          },
+          {
+            "id": "1",
+            "x": 2,
+            "y": 4
+          },
+          {
+            "id": "2",
+            "x": 3,
+            "y": 3
+          },
+          {
+            "id": "3",
+            "x": 4,
+            "y": 6
+          },
+          {
+            "id": "4",
+            "x": 5,
+            "y": 5
+          }
+        ],
+        "mark": {
+          "kind": "line"
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "helix",
+          "turns": [
+            0,
+            2
+          ],
+          "inner_radius": 0.1,
+          "track_width": 0.12
+        }
+      }
+    },
+    {
+      "label": "Parallel field axes",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Parallel field axes",
+        "data": [
+          {
+            "id": "A",
+            "speed": 4,
+            "quality": 7,
+            "cost": 2
+          },
+          {
+            "id": "B",
+            "speed": 7,
+            "quality": 4,
+            "cost": 6
+          },
+          {
+            "id": "C",
+            "speed": 5,
+            "quality": 6,
+            "cost": 4
+          }
+        ],
+        "mark": {
+          "kind": "line",
+          "filled": false
+        },
+        "encoding": {
+          "position": [
+            {
+              "field": "speed",
+              "dtype": "quantitative"
+            },
+            {
+              "field": "quality",
+              "dtype": "quantitative"
+            },
+            {
+              "field": "cost",
+              "dtype": "quantitative"
+            }
+          ],
+          "color": {
+            "field": "id",
+            "dtype": "nominal"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "parallel"
+        }
+      }
+    },
+    {
+      "label": "Radar field axes",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Radar field axes",
+        "data": [
+          {
+            "id": "A",
+            "speed": 4,
+            "quality": 7,
+            "cost": 2
+          },
+          {
+            "id": "B",
+            "speed": 7,
+            "quality": 4,
+            "cost": 6
+          },
+          {
+            "id": "C",
+            "speed": 5,
+            "quality": 6,
+            "cost": 4
+          }
+        ],
+        "mark": {
+          "kind": "line",
+          "filled": true
+        },
+        "encoding": {
+          "position": [
+            {
+              "field": "speed",
+              "dtype": "quantitative"
+            },
+            {
+              "field": "quality",
+              "dtype": "quantitative"
+            },
+            {
+              "field": "cost",
+              "dtype": "quantitative"
+            }
+          ],
+          "color": {
+            "field": "id",
+            "dtype": "nominal"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "radar"
+        }
+      }
+    },
+    {
+      "label": "Transposed Cartesian bars",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Transposed Cartesian bars",
+        "data": [
+          {
+            "category": "A",
+            "value": 3,
+            "id": "A"
+          },
+          {
+            "category": "B",
+            "value": 6,
+            "id": "B"
+          },
+          {
+            "category": "C",
+            "value": 4,
+            "id": "C"
+          },
+          {
+            "category": "D",
+            "value": 5,
+            "id": "D"
+          },
+          {
+            "category": "E",
+            "value": 2,
+            "id": "E"
+          }
+        ],
+        "mark": {
+          "kind": "bar"
+        },
+        "encoding": {
+          "x": {
+            "field": "category",
+            "dtype": "nominal"
+          },
+          "y": {
+            "field": "value",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "cartesian",
+          "transform": [
+            {
+              "type": "transpose"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "label": "Fisheye coordinate",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Fisheye coordinate",
+        "data": [
+          {
+            "id": "0",
+            "x": 1,
+            "y": 2
+          },
+          {
+            "id": "1",
+            "x": 2,
+            "y": 4
+          },
+          {
+            "id": "2",
+            "x": 3,
+            "y": 3
+          },
+          {
+            "id": "3",
+            "x": 4,
+            "y": 6
+          },
+          {
+            "id": "4",
+            "x": 5,
+            "y": 5
+          }
+        ],
+        "mark": {
+          "kind": "line"
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "cartesian",
+          "transform": [
+            {
+              "type": "fisheye",
+              "focus": [
+                0.4,
+                0.6
+              ],
+              "distortion": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "label": "Projected vectors",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Projected vectors",
+        "data": [
+          {
+            "id": "west",
+            "lon": -55,
+            "lat": 10,
+            "direction": 0.5,
+            "magnitude": 18
+          },
+          {
+            "id": "east",
+            "lon": 35,
+            "lat": -15,
+            "direction": 1,
+            "magnitude": 20
+          }
+        ],
+        "mark": {
+          "kind": "vector"
+        },
+        "encoding": {
+          "longitude": {
+            "field": "lon",
+            "dtype": "quantitative"
+          },
+          "latitude": {
+            "field": "lat",
+            "dtype": "quantitative"
+          },
+          "direction": {
+            "field": "direction",
+            "dtype": "quantitative"
+          },
+          "magnitude": {
+            "field": "magnitude",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "coordinate": {
+          "type": "geo",
+          "projection": {
+            "type": "equirectangular"
+          }
+        }
+      }
+    },
+    {
+      "label": "Selection visual states",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Selection visual states",
+        "data": [
+          {
+            "id": "0",
+            "x": 1,
+            "y": 2
+          },
+          {
+            "id": "1",
+            "x": 2,
+            "y": 4
+          },
+          {
+            "id": "2",
+            "x": 3,
+            "y": 3
+          },
+          {
+            "id": "3",
+            "x": 4,
+            "y": 6
+          },
+          {
+            "id": "4",
+            "x": 5,
+            "y": 5
+          }
+        ],
+        "mark": {
+          "kind": "point"
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "params": [
+          {
+            "name": "picked",
+            "select": {
+              "type": "point",
+              "fields": [
+                "id"
+              ]
+            },
+            "value": [
+              {
+                "id": "2"
+              }
+            ]
+          }
+        ],
+        "interaction": {
+          "element_select": {
+            "param": "picked"
+          }
+        },
+        "state": {
+          "selected": {
+            "fill": "#e15759",
+            "stroke": "#222",
+            "stroke_width": 2
+          },
+          "unselected": {
+            "opacity": 0.25
+          }
+        }
+      }
+    },
+    {
+      "label": "Keyed transition sample",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Keyed transition sample",
+        "data": [
+          {
+            "id": "0",
+            "x": 1,
+            "y": 2
+          },
+          {
+            "id": "1",
+            "x": 2,
+            "y": 4
+          },
+          {
+            "id": "2",
+            "x": 3,
+            "y": 3
+          },
+          {
+            "id": "3",
+            "x": 4,
+            "y": 6
+          },
+          {
+            "id": "4",
+            "x": 5,
+            "y": 5
+          }
+        ],
+        "mark": {
+          "kind": "point",
+          "size": 90
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "animate": {
+          "update": {
+            "type": "morph",
+            "duration": 1000
+          }
+        }
+      },
+      "sample_time": 500,
+      "previous": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Keyed transition sample",
+        "data": [
+          {
+            "id": "0",
+            "x": 1,
+            "y": 0.6
+          },
+          {
+            "id": "1",
+            "x": 2,
+            "y": 1.2
+          },
+          {
+            "id": "2",
+            "x": 3,
+            "y": 0.8999999999999999
+          },
+          {
+            "id": "3",
+            "x": 4,
+            "y": 1.7999999999999998
+          },
+          {
+            "id": "4",
+            "x": 5,
+            "y": 1.5
+          }
+        ],
+        "mark": {
+          "kind": "point",
+          "size": 90
+        },
+        "encoding": {
+          "x": {
+            "field": "x",
+            "dtype": "quantitative"
+          },
+          "y": {
+            "field": "y",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "animate": {
+          "update": {
+            "type": "morph",
+            "duration": 1000
+          }
+        }
+      }
+    },
+    {
+      "label": "Keyframe morph sample",
+      "native": true,
+      "spec": {
+        "width": 300,
+        "height": 270,
+        "padding": 20,
+        "title": "Keyframe morph sample",
+        "data": [
+          {
+            "category": "A",
+            "value": 3,
+            "id": "A"
+          },
+          {
+            "category": "B",
+            "value": 6,
+            "id": "B"
+          },
+          {
+            "category": "C",
+            "value": 4,
+            "id": "C"
+          },
+          {
+            "category": "D",
+            "value": 5,
+            "id": "D"
+          },
+          {
+            "category": "E",
+            "value": 2,
+            "id": "E"
+          }
+        ],
+        "mark": {
+          "kind": "bar"
+        },
+        "encoding": {
+          "x": {
+            "field": "category",
+            "dtype": "nominal"
+          },
+          "y": {
+            "field": "value",
+            "dtype": "quantitative"
+          },
+          "key": {
+            "field": "id",
+            "dtype": "nominal"
+          }
+        },
+        "timeline": {
+          "keyframes": [
+            {
+              "at": 0,
+              "spec": {
+                "mark": {
+                  "kind": "bar"
+                }
+              }
+            },
+            {
+              "at": 1000,
+              "spec": {
+                "mark": {
+                  "kind": "point",
+                  "size": 100
+                }
+              }
+            }
+          ]
+        }
+      },
+      "sample_time": 500
     }
   ]
 }

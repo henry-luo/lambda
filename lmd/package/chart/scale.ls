@@ -9,6 +9,16 @@ import parse: .parse
 import records: .records
 import calendar: .calendar
 
+// shared visual channels use the same constructors for views and named composite parts.
+pub fn visual_mapping(key, channel, data) {
+    if (channel == null or not parse.option_enabled(channel, "scale") or channel.value != null) null
+    else if (key == "color" or key == "stroke") infer_color_scale(channel, data)
+    else if (key == "shape") shape_scale(channel, data)
+    else if (key == "theta") angular_scale(channel, data)
+    else if (key == "radius") radius_scale(channel, data)
+    else visual_scale(channel, data, if (key == "opacity") 0.2 else 20.0, if (key == "opacity") 1.0 else 200.0)
+}
+
 // ============================================================
 // Scale constructors (return pure data maps)
 // ============================================================

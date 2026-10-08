@@ -1,7 +1,6 @@
 // Resolve dataflow and scale/guide ownership before any view is measured or drawn.
 import parse: .parse
 import cfg: .config
-import source: .source
 import transform: .transform
 import scale: .scale
 import sizing: .sizing
@@ -9,6 +8,10 @@ import util: .util
 import geometry: .geometry
 import parameter: .parameter
 import composite: .composite
+import coordinate: .coordinate
+import behavior: .behavior
+import animation: .animation
+import dataflow:.dataflow
 
 let channels = ["x", "y", "color", "stroke", "size", "shape", "opacity", "theta", "radius"]
 
@@ -16,25 +19,30 @@ fn kind(spec) => if (spec.concat != null) "concat" else if (spec.repeat_row != n
     else if (spec.facet != null) "facet" else if (spec.layer != null) "layer" else "unit"
 
 fn inherit_view(spec, parent) {
-    let definitions = if (parent == null and spec._parameters != null) spec._parameters else
-        [*(if (parent._parameters != null) parent._parameters else []), *(if (spec.params != null) spec.params else [])];
+    let definitions = behavior.definitions(spec, if (spec._parameters != null) spec._parameters
+        else if (parent._parameters != null) parent._parameters else spec.params);
     let st = if (spec._parameter_state != null) spec._parameter_state else parent._parameter_state;
     let values = if (spec._parameter_values != null) spec._parameter_values else parent._parameter_values;
     let interactive = spec._interactive == true or parent._interactive == true;
-    let datasets = {*:parse.attributes(parent.datasets), *:parse.attributes(spec.datasets)};
-    let own_data = spec.data != null or spec.data_source.values != null or spec.data_source.name != null or spec.data_source.url != null;
-    let resolved = if (parent == null or own_data) source.resolve(spec.data, spec.data_source, datasets) else parent.data;
-    let graph = if (resolved.nodes != null) resolved else parent._graph;
-    let raw = if (resolved is error) resolved else if (resolved.nodes != null) resolved.nodes else if (spec.mark.kind == "geoshape" or spec.mark.kind == "geo" or
-        resolved.type == "FeatureCollection" or resolved.type == "Feature") geometry.records(resolved) else resolved;
-    let data = if (raw is error) raw else if (not (raw is array)) error("chart: data must be an array")
-        else transform.apply_transforms(raw, parameter.transforms(spec.transform, values), datasets);
+    let resolved=dataflow.resolve(spec,parent,values);
     let padding = sizing.normalize_padding(spec.padding);
-    {*:spec, data: if (data is error) data else if (padding is error) padding else data, transform: null,
-        padding: padding, datasets: datasets, config: cfg.inherit(parent.config, spec.config), _graph: graph,
+    {*:spec, *:resolved, data: if (resolved.data is error) resolved.data else if (padding is error) padding else resolved.data, transform: null,
+        padding: padding, config: cfg.inherit(parent.config, spec.config),
+        coordinate: if (coordinate.enabled(spec.coordinate)) spec.coordinate else if (coordinate.enabled(spec.mark.coordinate)) spec.mark.coordinate else parent.coordinate,
+        _partition:if (spec._partition!=null) spec._partition else parent._partition,
+        _qualified_id:if (spec.id!=null and (spec._partition!=null or parent._partition!=null)) spec.id++"["++
+            format((if (spec._partition!=null) spec._partition else parent._partition).key,{type:"json",compact:true})++"]"
+            else if (spec._qualified_id!=null) spec._qualified_id else parent._qualified_id,
+        projection:behavior.camera_options({*:spec,_parameter_state:st},parent.projection),
+        _all_behaviors: if (spec._all_behaviors != null) spec._all_behaviors else parent._all_behaviors,
+        state: behavior.merge(parent.state, spec.state),
+        animate: animation.merge(animation.merge(parent.animate, spec.animate), spec.mark.animate),
+        _time: if (spec._time != null) spec._time else parent._time,
+        _requires_key:spec._requires_key==true or parent._requires_key==true,
+        _timing_values: if (spec._timing_values != null) spec._timing_values else parent._timing_values,
         _parameters: definitions, _parameter_state: st, _parameter_values: values, _interactive: interactive,
         encoding: (let encoding = {*:cfg.settings(parent.encoding), *:cfg.settings(spec.encoding)},
-            parameter.encoding(encoding, values, definitions, st, spec._view_path, interactive))}
+            behavior.bind_guides(parameter.encoding(encoding, values, definitions, st, spec._view_path, interactive),spec))}
 }
 
 fn child_bindings(spec, inherited, path, form) {
@@ -57,28 +65,6 @@ fn leaf_groups(bindings, path) {
             (if (bindings[guide][key] != null) bindings[guide][key] else path ++ ":" ++ guide ++ ":" ++ key) ++ ":" ++ scales[key]]) item])]) part])}
 }
 
-fn facet_plan(spec) {
-    let facet = spec.facet;
-    let row_field = if (facet.row is string) facet.row else facet.row.field;
-    let column_field = if (facet.column is string) facet.column else facet.column.field;
-    let grid = row_field != null or column_field != null;
-    let rows = if (row_field != null) util.unique_vals(spec.data |> ~[row_field]) else [null];
-    let columns = if (column_field != null) util.unique_vals(spec.data |> ~[column_field]) else [null];
-    let keys = if (grid) [for (row in rows) for (column in columns) [row, column]] else util.unique_vals(spec.data |> ~[facet.field]);
-    {columns: if (grid) max([1, len(columns)]) else if (facet.columns != null) facet.columns else 3,
-        headers: [for (key in keys) if (grid) join([for (value in key where value != null) string(value)], " / ") else string(key)],
-        data: [for (key in keys) if (grid) (spec.data |: (row_field == null or ~[row_field] == key[0]) and
-            (column_field == null or ~[column_field] == key[1])) else (spec.data |: ~[facet.field] == key)]}
-}
-
-// Repeat substitution reaches every field-bearing option, including nested views and conditions.
-fn substitute(value, row_field, column_field) {
-    if (value is array) [for (entry in value) substitute(entry, row_field, column_field)]
-    else if (value is map) map([for (key, entry in value) for (part in [string(key),
-        if (string(key) == "field" and entry.repeat != null) (if (entry.repeat == "column") column_field else row_field)
-        else substitute(entry, row_field, column_field)]) part])
-    else value
-}
 
 pub fn prepare(raw_spec, prepare_mark, path = "chart", parent = null, bindings = null) {
     if (raw_spec is error) raw_spec
@@ -87,7 +73,7 @@ pub fn prepare(raw_spec, prepare_mark, path = "chart", parent = null, bindings =
     else {
         let parsed = if (raw_spec is element) parse.parse_top(raw_spec) else raw_spec;
         let inherited = {*:inherit_view({*:parsed, _view_path: path}, parent), _view_path: path};
-        let spec = composite.expand(inherited);
+        let spec = if (inherited.facet!=null) inherited else composite.expand(inherited);
         let form = kind(spec);
         let children = child_bindings(spec, bindings, path, form);
         let resolution_error = util.first_error([for (section in ["scale", "axis", "legend"]) for (key, policy in spec.resolve[section]
@@ -107,29 +93,42 @@ pub fn prepare(raw_spec, prepare_mark, path = "chart", parent = null, bindings =
             if (not (rows is array) or not (columns is array) or len(rows) == 0 or len(columns) == 0 or not (template is map))
                 {*:spec, _preparation_error: error("chart: repeat requires nonempty field arrays and a chart template")}
             else {*:spec, _views: [for (ri, row_field in rows) for (ci, column_field in columns)
-                prepare(sizing.inherit_requests(spec, substitute(template, row_field, column_field)), prepare_mark,
-                    path ++ "-r" ++ string(ri * len(columns) + ci), spec, children)]}
+                prepare({*:sizing.inherit_requests(spec, if (spec._factory_catalogue!=null) spec._factory_catalogue[ri*len(columns)+ci]
+                        else parse.substitute(template, row_field, column_field)),_partition:{key:[row_field,column_field]}},prepare_mark,
+                    path++"-r"++util.binding_key([row_field,column_field]),spec,children)]}
         } else if (form == "facet") {
-            let plan = facet_plan(spec);
+            let plan = dataflow.facet_plan(spec);
             if (not util.finite_number(plan.columns) or plan.columns < 1 or floor(plan.columns) != plan.columns or
                 (spec.facet.spacing != null and (not util.finite_number(spec.facet.spacing) or spec.facet.spacing < 0)))
                 {*:spec, _preparation_error: error("chart: facet requires positive integer columns and nonnegative spacing")}
             else {*:spec, _facet_plan: plan, _views: [for (index, rows in plan.data)
-                prepare({*:spec, data: rows, facet: null, title: null}, prepare_mark, path ++ "-f" ++ string(index), null, children)]}
+                prepare({*:if (spec._factory_catalogue!=null) spec._factory_catalogue[index] else {*:spec,data:rows}, facet:null,title:null,
+                    _factory_catalogue:null,_partition:{key:plan.keys[index]},_qualified_id:(if (spec.id!=null) spec.id else path)++"["++format(plan.keys[index],{type:"json",compact:true})++"]"},
+                    prepare_mark,path++"-f"++util.binding_key(plan.keys[index]),spec,children)]}
         } else if (form == "layer") {
-            let views = [for (index, child in spec.layer) prepare(child, prepare_mark, path ++ "-l" ++ string(index), spec, children)];
+            let coordinates = [for (child in spec.layer, let parsed = if (child is element) parse.parse_top(child) else child,
+                let options = if (coordinate.enabled(parsed.coordinate)) parsed.coordinate else parsed.mark.coordinate
+                where coordinate.enabled(options)) options];
+            let options = if (coordinate.enabled(spec.coordinate)) spec.coordinate else coordinates[0];
+            let models = [for (options in [options, *coordinates] where coordinate.enabled(options)) coordinate.configure(options, 1, 1)];
+            let failure = util.first_error(models);
+            let views = [for (index, child in spec.layer) prepare(child, prepare_mark, path ++ "-l" ++ string(index), {*:spec, coordinate: options}, children)];
             let invalid = [for (child in views where kind(child) != "unit" and kind(child) != "layer") child];
-            {*:spec, _views: views, _preparation_error: if (len(invalid) > 0) error("chart: layer children must share one plot") else null}
+            {*:spec, coordinate: options, _views: views, _preparation_error: if (failure is error) failure
+                else if (len(util.unique_vals(models)) > 1) error("chart: layered marks require one compatible coordinate")
+                else if (len(invalid) > 0) error("chart: layer children must share one plot") else null}
         } else {
-            let defaults = if (spec.mark.kind != "trail" or spec.encoding.size.field == null or
+            let width_mark=contains(["trail","link","vector","path"],spec.mark.kind);
+            let defaults = if (not width_mark or spec.encoding.size.field == null or
                 not parse.option_enabled(spec.encoding.size, "scale") or spec.encoding.size.scale.range != null) spec.encoding
                 else {*:spec.encoding, size: {*:spec.encoding.size, scale: {*:parse.attributes(spec.encoding.size.scale), range: [1, 10]}}};
-            let encoding = if (spec.mark.kind == "trail" and defaults.size != null)
+            let encoding = if (width_mark and defaults.size != null)
                 {*:defaults, size: {*:defaults.size, _size_unit: "width"}} else defaults;
             let encoded = transform.prepare_encoding(spec.data, encoding);
-            let prepared = if (encoded.data is error) {*:spec, data: encoded.data} else prepare_mark({*:spec, *:encoded});
-            {*:prepared, _groups: leaf_groups(bindings, path), _mark_prepared: true,
-                _preparation_error: if (prepared.data is error) prepared.data else null}
+            let filtered = if (encoded.data is error) encoded.data else behavior.filter_data(spec, encoded.data);
+            let prepared = if (filtered is error) {*:spec, data: filtered} else prepare_mark({*:spec, *:encoded, data: filtered});
+            {*:prepared, _domain_data: if (behavior.retain_domains(spec)) encoded.data else prepared._domain_data, _groups: leaf_groups(bindings, path), _mark_prepared: true,
+                _preparation_error: if (prepared.data is error) prepared.data else animation.validate(prepared)}
         }
     }
 }
@@ -150,17 +149,13 @@ pub fn visual_mapping(views, key) {
     let first_view = candidates[0];
     let channel = first_view.encoding[key];
     // conditional literal styling must not replace field values in the scale/legend domain.
-    let rows = [for (leaf in candidates) for (value in scale.channel_values(leaf.encoding[key], leaf.data)) {value: value}];
+    let rows = [for (leaf in candidates) for (value in scale.channel_values(leaf.encoding[key], if (leaf._domain_data != null) leaf._domain_data else leaf.data)) {value: value}];
     let endpoints = [for (leaf in (if (key == "theta" or key == "radius") candidates else []),
         let secondary = leaf.encoding[key ++ "2"] where secondary != null and secondary.value == null)
-        for (value in scale.channel_values(secondary, leaf.data)) {value: value}];
+        for (value in scale.channel_values(secondary, if (leaf._domain_data != null) leaf._domain_data else leaf.data)) {value: value}];
     let normalized = {*:parse.attributes(channel), field: "value"};
     if (len(candidates) == 0) null
-    else if (key == "color" or key == "stroke") scale.infer_color_scale(normalized, rows)
-    else if (key == "shape") scale.shape_scale(normalized, rows)
-    else if (key == "theta") scale.angular_scale(normalized, [*rows, *endpoints])
-    else if (key == "radius") scale.radius_scale(normalized, [*rows, *endpoints])
-    else scale.visual_scale(normalized, rows, if (key == "opacity") 0.2 else 20.0, if (key == "opacity") 1.0 else 200.0)
+    else scale.visual_mapping(key, normalized, [*rows, *endpoints])
 }
 
 fn mapping_groups(views) {
@@ -172,7 +167,7 @@ fn mapping_groups(views) {
         let units = if (key == "size") util.unique_vals([for (leaf in members)
             if (leaf.encoding.size._size_unit != null) leaf.encoding.size._size_unit else "area"]) else [],
         let mapping = if (len(types) > 1 or len(units) > 1) error("chart: shared scales require compatible channel types and units")
-            else if (len(members) == 0) null else if (key == "x" or key == "y") scale.shared_position(members, key, 0.0, 1.0) else visual_mapping(members, key))
+            else if (len(members) == 0) null else if (key == "x" or key == "y") scale.shared_position([for (leaf in members) if (leaf._domain_data != null) {*:leaf, data: leaf._domain_data} else leaf], key, 0.0, 1.0) else visual_mapping(members, key))
         {key: key, group: group, mapping: mapping, options: members[0].encoding[key].scale}]
 }
 

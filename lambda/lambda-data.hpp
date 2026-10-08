@@ -1378,9 +1378,13 @@ static inline Type* lambda_member_test_type_domain(const Type* type) {
 }
 
 // S11.1.5: `function` is the compact TYPE_FUNC singleton — the signature-less
-// union of `fn` and `pn`. Every other LMD_TYPE_FUNC type is a full TypeFunc,
-// so a caller that needs a signature must ask here rather than cast on the id.
+// union of `fn` and `pn`. Parameter carriers retain only its Type prefix;
+// resolve their full contract before reading any TypeFunc fields.
 static inline TypeFunc* lambda_type_func_signature(Type* type) {
+    if (type && type->type_id == LMD_TYPE_FUNC && type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        type = parameter->full_type;
+    }
     return type && type->type_id == LMD_TYPE_FUNC && type != &TYPE_FUNC
         ? (TypeFunc*)type : NULL;
 }

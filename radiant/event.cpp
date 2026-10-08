@@ -10569,6 +10569,56 @@ extern "C" bool dom_engine_frame_cancel(void* owner, uint64_t token) {
     return false;
 }
 
+void radiant_queue_template_render_events(DomDocument* doc, DomNode* root) {
+    // Plain HTML has no evaluator; its load phase must not read a context-owned
+    // template registry. Template callers enter their document scope first.
+    if (!doc || !root || !context || !g_template_registry ||
+        !template_registry_may_have_author_handler(g_template_registry, "render")) return;
+    RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
+    DomNode* node = root;
+    while (node) {
+        if (node->is_element() && !node->as_element()->is_synthetic()) {
+            DomElement* element = node->as_element();
+            Item result = {.element = dom_element_render_source(element)};
+            bool handles_render = false;
+            for (RenderOwners owners(result); owners.valid(); owners.next()) {
+                RenderMapLookup lookup = owners.lookup;
+                TemplateEntry* entry = template_registry_find_ref(g_template_registry, lookup.template_ref);
+                // descendant reverse mappings must not schedule another clock for the same component.
+                if (entry && !entry->is_behavior && template_entry_find_handler(entry, "render") &&
+                    render_map_get_result(lookup.source_item, lookup.template_ref).item == result.item) {
+                    handles_render = true;
+                    break;
+                }
+            }
+            if (handles_render) {
+                DomNodeRef owner = dom_node_ref(element);
+                bool pending = false;
+                for (RadiantFrameRequest* request = queue ? queue->requests : nullptr;
+                        request; request = request->next) {
+                    if (request->pending && request->owner.address == owner.address &&
+                        request->owner.expected_id == owner.expected_id &&
+                        strcmp(request->name->str, "render") == 0) {
+                        pending = true;
+                        break;
+                    }
+                }
+                if (!pending) {
+                    dom_engine_frame_request(element, "render");
+                    queue = frame_queue_for_document(doc, false);
+                }
+            }
+        }
+        if (node->is_element() && node->as_element()->first_child) {
+            node = node->as_element()->first_child;
+        } else {
+            while (node != root && !node->next_sibling) node = node->parent;
+            if (node == root) break;
+            node = node->next_sibling;
+        }
+    }
+}
+
 // The nesting a frame owner may have below a rebuilt template result.
 static const int FRAME_OWNER_MAX_DEPTH = 256;
 
@@ -12429,18 +12479,23 @@ struct EventDocumentScope {
 };
 
 void radiant_dispatch_lambda_body_load(UiContext* uicon, DomDocument* doc) {
-    if (!uicon || !doc || doc->page_kind != DOM_PAGE_KIND_LAMBDA_SCRIPT ||
-        dom_document_has_js_realm(doc)) return;
-    DomElement* body = radiant_document_body_element(doc);
-    if (!body) return;
+    if (!uicon || !doc) return;
     EventDocumentScope scope(uicon, doc);
     if (!scope.active) return;
+    if (doc->page_kind != DOM_PAGE_KIND_LAMBDA_SCRIPT || dom_document_has_js_realm(doc)) {
+        // mixed-script documents still start template-owned presentation clocks.
+        radiant_queue_template_render_events(doc, doc->root);
+        return;
+    }
+    DomElement* body = radiant_document_body_element(doc);
+    if (!body) return;
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
     evcon.target = static_cast<View*>(body);
     dispatch_lambda_handler(&evcon, static_cast<View*>(body), "load",
                             nullptr, nullptr, false);
+    radiant_queue_template_render_events(doc, doc->root);
 }
 
 void rdt_event_set_mouse_position(RdtEvent* event, EventType type,

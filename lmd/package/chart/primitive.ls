@@ -4,6 +4,7 @@ import svg: .svg
 import util: .util
 import parse: .parse
 import color: .color
+import paths: .path_geometry
 
 pub fn link_path(a, b, options = {}) {
     let horizontal = options.orientation != "vertical";
@@ -16,13 +17,19 @@ pub fn link_path(a, b, options = {}) {
     else svg.line_path([a, b])
 }
 
+pub fn vector_endpoint(a, direction, magnitude, y_sign = -1.0) =>
+    [a[0]+magnitude*math.cos(direction),a[1]+y_sign*magnitude*math.sin(direction)]
+
 pub fn render(data, ctx, options) {
     let kind = options.kind;
     let items = if (kind == "polygon") [for (group in mark.series(data, ctx, color.default_color),
         let points = [for (row in group.items) [mark.center_coordinate(ctx, "x", row), mark.center_coordinate(ctx, "y", row)]],
         let holes = group.items[0][if (options.holes_field != null) options.holes_field else "holes"],
-        let valid = all([for (point in points) all(point |> util.finite_number(~))]))
-        if (not valid or len(points) < 3) error("chart: polygon requires at least three finite vertices")
+        let valid = all([for (point in points) all(point |> util.finite_number(~))]),
+        let holes_valid=holes==null or holes is array and all([for (ring in holes) ring is array and len(ring)>=3 and
+            all([for (point in ring) point is array and len(point)==2 and all(point |> util.finite_number(~))])]))
+        if (not holes_valid) error("chart: polygon holes require at least three finite vertices")
+        else if (not valid or len(points) < 3) error("chart: polygon requires at least three finite vertices")
         else <path class: "polygon", d: svg.line_path(points) ++ " Z" ++ join([for (ring in holes) " " ++ svg.line_path(ring) ++ " Z"], ""),
             'fill-rule': "evenodd", *:mark.style(ctx, group.items[0], options,
                 {fill: group.color, stroke: "none", 'stroke-width': 1, opacity: 1.0}), mark.tooltip(ctx, group.items[0])>]
@@ -30,13 +37,14 @@ pub fn render(data, ctx, options) {
         let a = [mark.center_coordinate(ctx, "x", row), mark.center_coordinate(ctx, "y", row)],
         let direction = parse.channel_value(ctx.encoding.direction, row, row[if (options.direction_field != null) options.direction_field else "direction"]),
         let magnitude = parse.channel_value(ctx.encoding.magnitude, row, row[if (options.magnitude_field != null) options.magnitude_field else "magnitude"]),
-        let b = if (kind == "vector") [a[0] + magnitude * math.cos(direction), a[1] - magnitude * math.sin(direction)]
+        let b = if (kind == "vector") vector_endpoint(a,direction,magnitude)
             else [mark.coordinate(ctx, "x2", row), mark.coordinate(ctx, "y2", row)],
         let d = if (kind == "path") parse.channel_value(ctx.encoding.path, row,
             if (options.d != null) options.d else row[if (options.path_field != null) options.path_field else "path"]) else link_path(a, b, options),
         let appearance = mark.style(ctx, row, options, {fill: "none", stroke: color.default_color,
             'stroke-width': if (options.width != null) options.width else mark.appearance(ctx, "size", row, 1.5), opacity: 1.0}, true),
         if (kind == "path" and not (d is string)) error("chart: authored path requires SVG path text")
+        else if (kind=="path" and paths.sample(d) is error) error("chart: invalid authored SVG path geometry")
         else if (kind != "path" and (not all(a |> util.finite_number(~)) or not all(b |> util.finite_number(~))))
             error("chart: link/vector requires finite endpoint positions")
         else <g class: kind, <path d: d, *:appearance, mark.tooltip(ctx, row)>

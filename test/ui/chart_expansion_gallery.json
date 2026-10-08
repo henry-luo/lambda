@@ -1,0 +1,130 @@
+{
+  "name": "Chart named-part keyboard selection and player detach",
+  "html": "test/lambda/chart/_interactive_gallery.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 850
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".lambda-chart"
+      },
+      "count": 5
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#flow [data-chart-part=\"node\"]",
+        "index": 0
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#flow [data-chart-part=\"node\"]"
+      },
+      "attribute": "fill",
+      "equals": "#e15759"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#flow [data-chart-part=\"link\"]"
+      },
+      "attribute": "stroke",
+      "equals": "#e15759"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#interaction-phase"
+      },
+      "equals": "element_select:update"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pause"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#playback .lambda-chart"
+      },
+      "attribute": "data-chart-playback",
+      "equals": "paused"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seek"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#animation-phase"
+      },
+      "equals": "seek"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resume"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#playback .lambda-chart"
+      },
+      "attribute": "data-chart-playback",
+      "equals": "playing"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#mount"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#playback .lambda-chart"
+      },
+      "count": 0
+    },
+    {
+      "type": "advance_time",
+      "ms": 2500,
+      "steps": 5
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#animation-phase"
+      },
+      "equals": "resume"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#mount"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#playback .lambda-chart"
+      },
+      "count": 1
+    }
+  ]
+}

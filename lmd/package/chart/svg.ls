@@ -235,3 +235,27 @@ pub fn clip_path_el(id: string, children) {
         for (child in children) child
     >
 }
+
+// One reconstruction seam keeps immutable SVG projections independent of literal tag syntax.
+pub fn rebuild(tag, attrs, children) {
+    if (tag == 'g') <g *:attrs, *children>
+    else if (tag == 'svg') <svg *:attrs, *children>
+    else if (tag == 'path') <path *:attrs, *children>
+    else if (tag == 'rect') <rect *:attrs, *children>
+    else if (tag == 'circle') <circle *:attrs, *children>
+    else if (tag == 'ellipse') <ellipse *:attrs, *children>
+    else if (tag == 'line') <line *:attrs, *children>
+    else if (tag == 'text') <text *:attrs, *children>
+    else if (tag == 'tspan') <tspan *:attrs, *children>
+    else if (tag == 'image') <image *:attrs, *children>
+    else if (tag == 'title') <title *:attrs, *children>
+    else if (tag == 'defs') <defs *:attrs, *children>
+    else if (tag == 'clipPath') <clipPath *:attrs, *children>
+    else if (tag == 'linearGradient') <linearGradient *:attrs, *children>
+    else if (tag == 'radialGradient') <radialGradient *:attrs, *children>
+    else if (tag == 'stop') <stop *:attrs, *children>
+    else if (tag == 'pattern') <pattern *:attrs, *children>
+    else if (tag == 'polygon') <polygon *:attrs, *children>
+    else if (tag == 'polyline') <polyline *:attrs, *children>
+    else error("chart: unsupported SVG reconstruction tag " ++ string(tag))
+}

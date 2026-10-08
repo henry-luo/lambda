@@ -4286,6 +4286,7 @@ struct LambdaFocusRestore {
     // copied: the rebuild retires the old DOM that owns the string.
     const char* focus_tag;
     char focus_id[128];
+    char* focus_key;
 };
 
 static bool find_child_element_index(DomElement* parent, DomElement* child,
@@ -4344,6 +4345,8 @@ static bool capture_lambda_focus_restore(DocState* state,
     View* focused = focus_get(state);
     if (!focused || !focused->is_element()) return false;
     DomElement* focused_elem = lam::dom_require_element(focused);
+    const char* focus_key = focused_elem->get_attribute("data-focus-key");
+    if (focus_key) out->focus_key = strdup(focus_key);
     if (focused_elem->form_control() &&
         focused_elem->form->control_type == FORM_CONTROL_TEXT) {
         out->fallback_tag = focused_elem->tag_name;
@@ -4423,6 +4426,23 @@ static View* resolve_lambda_focus_restore(DomDocument* doc,
 
     DomElement* elem = element_dom_map_lookup(doc->element_dom_map,
                                               result.element);
+    if (elem && restore->focus_key) {
+        // keyed descendants may reorder or change tag while their template owner survives.
+        DomNode* root = elem;
+        DomNode* node = root;
+        while (node) {
+            if (node->is_element()) {
+                DomElement* candidate = node->as_element();
+                const char* key = candidate->get_attribute("data-focus-key");
+                if (key && strcmp(key, restore->focus_key) == 0) return static_cast<View*>(candidate);
+                if (candidate->first_child) { node = candidate->first_child; continue; }
+            }
+            while (node != root && !node->next_sibling) node = node->parent;
+            if (node == root) break;
+            node = node->next_sibling;
+        }
+        return nullptr;
+    }
     for (int i = 0; elem && i < restore->path_len; i++) {
         int wanted = restore->path[i];
         int index = 0;
@@ -4449,6 +4469,10 @@ static View* resolve_lambda_focus_restore(DomDocument* doc,
 static bool focus_restore_matches(View* view, const LambdaFocusRestore* restore) {
     if (!view || !view->is_element() || !restore->focus_tag) return false;
     DomElement* elem = lam::dom_require_element(view);
+    if (restore->focus_key) {
+        const char* key = elem->get_attribute("data-focus-key");
+        return key && strcmp(key, restore->focus_key) == 0;
+    }
     if (!elem->tag_name || strcmp(elem->tag_name, restore->focus_tag) != 0) return false;
     const char* id = elem->id ? elem->id : "";
     return strcmp(id, restore->focus_id) == 0;
@@ -4456,7 +4480,10 @@ static bool focus_restore_matches(View* view, const LambdaFocusRestore* restore)
 
 static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_focus,
                                   const LambdaFocusRestore* restore) {
-    if (!had_focus || !state || !doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
+    if (!had_focus || !state || !doc || !doc->view_tree || !doc->view_tree->root) {
+        free(restore->focus_key);
+        return nullptr;
+    }
     View* focused = resolve_lambda_focus_restore(doc, restore);
     if (focused && (!doc->root || !view_tree_contains_view(
                         static_cast<DomNode*>(doc->root), focused))) {
@@ -4500,6 +4527,7 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
     } else if (focus_has_current(state)) {
         focus_clear(state);
     }
+    free(restore->focus_key);
     return focused;
 }
 
@@ -4579,6 +4607,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     auto t_layout = time_now_ns();
 
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
+    radiant_queue_template_render_events(doc, doc->root);
 
     if (state && !focus_has_current(state) && doc->view_tree && doc->view_tree->root) {
         radiant_run_autofocus(doc);
@@ -4659,7 +4688,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
 
     struct { float x, y, w, h; } old_bounds[16] = {};
-    DomElement* new_doms[16] = {};
     for (int i = 0; i < result_count && i < 16; i++) {
         Element* old_elem = results[i].old_result.element;
         DomElement* old_dom = element_dom_map_lookup(doc->element_dom_map, old_elem);
@@ -4741,7 +4769,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             doc->root = lam::up(new_dom);
             doc->input->root = {.element = html_elem};
         }
-        if (i < 16) new_doms[i] = new_dom;
 
         set_layout_dirty_subtree(static_cast<DomNode*>(new_dom), true);
 
@@ -4761,6 +4788,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
 
         apply_inline_styles_to_tree(new_dom, doc->document_pool);
+        // each committed subtree owns its next frame; unrelated components stay idle.
+        radiant_queue_template_render_events(doc, new_dom);
     }
     auto t_dom_css = time_now_ns();
 

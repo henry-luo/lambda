@@ -32,22 +32,34 @@ fn segment(command, values, current, start, previous) {
         large: if (kind == "A") values[3] else null, sweep: if (kind == "A") values[4] else null}
 }
 
-fn segments(tokens, index = 0, command = null, current = [0.0, 0.0], start = null, result = []) {
-    if (index >= len(tokens)) result else {
-        let explicit = tokens[index] is string;
-        let cmd = if (explicit) tokens[index] else command;
+fn command_token(value) => value is string and len(value)==1 and value is \(a)
+fn operands(tokens,count,arc,index=0,result=[]) {
+    if (index>=count) {values:result,rest:tokens} else if (len(tokens)==0 or command_token(tokens[0])) error("chart: missing SVG path operand")
+    else {
+        let text=tokens[0];let flag=arc and contains([3,4],index);
+        let value=if (flag) float(slice(text,0,1)) else float(text);
+        let remaining=if (flag and len(text)>1) [slice(text,1,len(text)),*slice(tokens,1,len(tokens))] else slice(tokens,1,len(tokens));
+        if (not util.finite_number(value) or flag and not contains([0,1],value)) error("chart: invalid SVG path operand or arc flag")
+        else operands(remaining,count,arc,index+1,[*result,value])
+    }
+}
+fn segments(tokens, command = null, current = [0.0, 0.0], start = null, result = []) {
+    if (len(tokens)==0) result else {
+        let explicit = command_token(tokens[0]);
+        let cmd = if (explicit) tokens[0] else command;
         let kind = upper(cmd);
         let count = sizes[kind];
-        let begin = index + (if (explicit) 1 else 0);
-        let values = slice(tokens, begin, begin + (if (count != null) count else 0));
+        let rest=if (explicit) slice(tokens,1,len(tokens)) else tokens;
+        let parsed=if (count!=null) operands(rest,count,kind=="A") else null;
+        let values=parsed.values;
         if (cmd == null or count == null or (len(result) == 0 and kind != "M") or
-            (kind == "Z" and not explicit) or len(values) != count or not all(values |> util.finite_number(~)))
+            (kind == "Z" and not explicit) or parsed is error or len(values) != count)
             error("chart: invalid SVG path command or operands")
         else if (kind == "A" and (not contains([0, 1], values[3]) or not contains([0, 1], values[4])))
             error("chart: SVG arc flags must be zero or one")
         else {
             let entry = segment(cmd, values, current, start, result[len(result) - 1]);
-            segments(tokens, begin + count, if (kind == "Z") null else if (cmd == "M") "L" else if (cmd == "m") "l" else cmd,
+            segments(parsed.rest, if (kind == "Z") null else if (cmd == "M") "L" else if (cmd == "m") "l" else cmd,
                 entry.end, if (kind == "M") entry.end else start, [*result, entry])
         }
     }
@@ -56,7 +68,7 @@ fn segments(tokens, index = 0, command = null, current = [0.0, 0.0], start = nul
 pub fn parse(source) {
     if (not (source is string)) error("chart: SVG path must be a string")
     else if (not (replace(source, token, "") is separator)) error("chart: invalid character in SVG path")
-    else segments([for (hit in find(source, token)) if (len(hit.value) == 1 and hit.value is \(a)) hit.value else float(hit.value)])
+    else segments(find(source,token) |> ~.value)
 }
 
 // SVG 2 Appendix B.2 endpoint-to-center conversion, including radius correction.
@@ -100,8 +112,13 @@ pub fn distance(a, b) => math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
 
 fn subdivide(curve, begin, end, precision, remaining) {
     let a = curve(begin); let b = curve(end);
-    let errors = [for (t in [0.25, 0.5, 0.75]) distance(curve(util.lerp(begin, end, t)), geometry.interpolate(a, b, t))];
-    if (max(errors) <= precision) [a, b]
+    let samples = [for (t in [0.25, 0.5, 0.75]) curve(util.lerp(begin, end, t))];
+    let invalid = util.first_error([a, b, *samples]);
+    let errors = [for (i, t in [0.25, 0.5, 0.75]) distance(samples[i], geometry.interpolate(a, b, t))];
+    if (invalid is error) invalid
+    else if (not all([for (point in [a, b, *samples]) point is array and len(point) >= 2 and all(point |> util.finite_number(~))]))
+        error("chart: projected curve must have finite coordinates")
+    else if (max(errors) <= precision) [a, b]
     else if (remaining <= 0) error("chart: curve exceeds projection precision")
     else {
         let mid = (begin + end) / 2.0;
@@ -129,7 +146,8 @@ fn polylines(segments, project, precision, intervals, index = 0, result = []) {
             else sample_curve((t) => project(point(segment, t)), precision, intervals);
         if (points is error) points else {
             let previous = result[len(result) - 1];
-            let next = if (segment.kind == "M") [*result, {points: points, closed: false}]
+            let next = if (segment.kind == "M" or previous.closed==true) [*result, {points: if (segment.kind=="M") points else
+                [project(segment.begin),*slice(points,1,len(points))], closed: segment.kind=="Z"}]
                 else [*slice(result, 0, len(result) - 1), {*:previous,
                     points: [*previous.points, *slice(points, 1, len(points))], closed: segment.kind == "Z"}];
             polylines(segments, project, precision, intervals, index + 1, next)

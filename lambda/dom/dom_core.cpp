@@ -450,6 +450,10 @@ extern "C" Item radiant_dom_event_create(const char* type, bool bubbles,
                                          bool cancelable, bool composed, int class_id);
 
 extern "C" Item dom_core_dispatch(Item n, Item event) {
+    RootFrame roots(3);
+    Rooted<Item> node_root(roots, n);
+    Rooted<Item> descriptor_root(roots, event);
+    Rooted<Item> built_root(roots, ItemNull);
     // A live event goes straight through: it already carries the propagation
     // state a listener mutates, and dom_dispatch_event's F19/ES25 bridge enters
     // the engine's cascade with it.
@@ -469,7 +473,8 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
     // case work for the first time. The factory is native (a VMap over a
     // RadiantDomEventRecord), so no realm is needed to build or read one.
     const char* type = nullptr;
-    bool bubbles = true, cancelable = false;
+    bool bubbles = true, cancelable = false, composed = false, has_detail = false;
+    Item detail = ItemNull;
     if (get_type_id(event) == LMD_TYPE_STRING) {
         type = fn_to_cstr(event);
     } else {
@@ -478,8 +483,18 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
         type = fn_to_cstr(type_item);
         bubbles = dom_event_flag(event, "bubbles", true);
         cancelable = dom_event_flag(event, "cancelable", false);
+        composed = dom_event_flag(event, "composed", false);
+        if (get_type_id(event) == LMD_TYPE_MAP && event.map) {
+            has_detail = descriptor_root.get().map->has_field("detail");
+            detail = dom_map_field(descriptor_root.get(), "detail");
+        }
     }
     if (!type || !type[0]) return ItemNull;
+    if (has_detail) {
+        // custom descriptors must retain their payload when joining an active cascade.
+        built_root.set(js_create_custom_event_init(type, bubbles, cancelable, composed, detail));
+        return dom_absent_to_null(dom_dispatch_event_bridge(node_root.get(), built_root.get()));
+    }
     if (dom_engine_event_cascade_active()) {
         // Inside a handler the engine's entry is the right implementation: it
         // continues the cascade in progress, so an `input` raised while handling
@@ -490,9 +505,9 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
         Item b = { .item = b2it(bubbles) }, c = { .item = b2it(cancelable) };
         return dom_engine_dispatch_event(n, type_item, b, c);
     }
-    Item built = radiant_dom_event_create(type, bubbles, cancelable, false, 0);
-    if (get_type_id(built) != LMD_TYPE_VMAP) return ItemNull;
-    return dom_absent_to_null(dom_dispatch_event_bridge(n, built));
+    built_root.set(radiant_dom_event_create(type, bubbles, cancelable, composed, 0));
+    if (get_type_id(built_root.get()) != LMD_TYPE_VMAP) return ItemNull;
+    return dom_absent_to_null(dom_dispatch_event_bridge(node_root.get(), built_root.get()));
 }
 
 

@@ -122,8 +122,18 @@ The contract is simple and strict: **the native frame clock only wakes the loop;
 
 ## 8. Lambda document frame events
 
-> **This section verified:** 2026-10-07. D7.5.3 shared host boundary;
+> **This section verified:** 2026-10-09. D7.5.3 shared host boundary;
 > D4.5.1v4 document ownership; D5.3.3 precise script roots.
+
+Presentation commits also coalesce a `render` event for each owning Lambda
+view template that declares an `on render` handler. Initial document layout
+and full or incremental reconciliation use the same queue, including mixed
+script documents. Descendant reverse mappings do not create extra clocks for
+their parent component. A handler that makes no state change schedules no
+further presentation work; a state change produces the next commit and frame.
+This lets chart playback keep its clock and visible snapshot in template state
+while pure rendering samples explicit time (S12.1.1v2, S12.1.3). Detaching a
+component invalidates its queued owner reference.
 
 The realm-neutral DOM catalog includes `request_frame(owner, event_name)` and
 `cancel_frame(owner, token)`. A request delivers one custom event to its connected

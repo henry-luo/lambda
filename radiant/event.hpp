@@ -2948,6 +2948,8 @@ bool view_state_nodes_correspond(const DomNode* old_node, const DomNode* new_nod
 // owners to the corresponding replacement nodes (RAD_16 §8).
 void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                            DomNode* new_root);
+// queue one deferred render event per template root after a presentation commit.
+void radiant_queue_template_render_events(DomDocument* doc, DomNode* root);
 bool view_state_get_hovered(DocState* state, View* view);
 bool view_state_get_active(DocState* state, View* view);
 bool view_state_get_focused(DocState* state, View* view);

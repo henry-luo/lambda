@@ -5,7 +5,7 @@ import parse: .parse
 
 let kinds = ["click", "dblclick", "pointerdown", "pointermove", "pointerup", "pointercancel",
     "pointerover", "pointerout", "pointerenter", "pointerleave", "mousedown", "mousemove", "mouseup",
-    "mouseover", "mouseout", "mouseenter", "mouseleave", "wheel", "keydown", "keyup", "input", "change"]
+    "mouseover", "mouseout", "mouseenter", "mouseleave", "wheel", "keydown", "keyup", "input", "change", "focusin", "focusout"]
 
 fn split_parts(text, separator = ",", index = 0, begin = 0, depth = 0, quote = null, parts = []) {
     let ch = slice(text, index, index + 1);
@@ -18,7 +18,11 @@ fn split_parts(text, separator = ",", index = 0, begin = 0, depth = 0, quote = n
 }
 
 pub fn lifecycle(stream) {
-    if (stream is map and stream.between != null)
+    if (stream is array) {
+        let lifecycles=[for (part in stream) lifecycle(part)];
+        let failure=util.first_error(lifecycles);
+        if (failure is error) failure else {start:lifecycles |> ~.start,end:lifecycles |> ~.end,move:lifecycles |> ~.move}
+    } else if (stream is map and stream.between != null)
         if (len(stream.between) != 2) error("chart: interval between requires start and end streams")
         else {start: stream.between[0], end: stream.between[1], move: stream}
     else if (stream is string and starts_with(trim(stream), "[")) {
