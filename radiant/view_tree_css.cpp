@@ -464,8 +464,13 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     }
     style->text_align = view_css_keyword(tree, style, "text-align", CSS_VALUE_START,
         parent ? parent->text_align : CSS_VALUE_START, true);
+    // the HTML caption UA alignment is overridden by any authored text-align declaration.
+    if (!pseudo_element && element->tag_id == MARKUP_NAME_CAPTION && !view_css_property(tree, style, "text-align"))
+        style->text_align = CSS_VALUE_CENTER;
     style->white_space = view_css_keyword(tree, style, "white-space", CSS_VALUE_NORMAL,
         parent ? parent->white_space : CSS_VALUE_NORMAL, true);
+    style->caption_side = view_css_keyword(tree, style, "caption-side", CSS_VALUE_TOP,
+        parent ? parent->caption_side : CSS_VALUE_TOP, true);
     style->list_style_type = parent ? parent->list_style_type : CSS_VALUE_DISC;
     style->list_style_string = parent ? parent->list_style_string : nullptr;
     if (!pseudo_element && element->tag_id == MARKUP_NAME_OL) {
