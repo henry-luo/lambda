@@ -1181,6 +1181,41 @@ TEST(RenderOutputParity, PagedRowSpansMatchExplicitStackedCellsAcrossRepeatedFur
     }
 }
 
+TEST(RenderOutputParity, PagedMissingCellsMatchExplicitEmptyCellsAcrossSpansAndContinuations) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* stems[] = {"paged_missing_cells", "paged_empty_cell_reference"};
+    for (bool automatic : {false, true}) {
+        SCOPED_TRACE(automatic ? "automatic layout" : "fixed layout");
+        char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+        for (size_t variant = 0; variant < 2; variant++) {
+            StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+            strbuf_append_format(html, "<!doctype html><style>@page{size:160px 150px;margin:10px}"
+                "@page :left{size:140px 150px}html,body{margin:0;font:10px/12px Arial}"
+                "table{table-layout:%s;width:100%%;border-spacing:4px 2px;background:magenta}"
+                "caption{padding:0;text-align:left}col{width:20px;background:cyan}"
+                "col:last-child{background:blue}td,th{padding:0;vertical-align:top;white-space:pre;orphans:1;widows:1}"
+                "thead{background:#cce0ff}tfoot{background:#ddffdd}.cluster tr{height:20px}"
+                ".cluster tr:first-child{background:lime}.cluster tr:last-child{background:yellow}"
+                ".span{background:pink}.empty{background:magenta}</style><table><caption>Missing cells</caption>"
+                "<colgroup><col><col><col><col></colgroup><thead><tr><th>H</th><th>H</th>%s</tr></thead>"
+                "<tfoot><tr><td>F</td>%s</tr></tfoot><tbody class='cluster'>"
+                "<tr><td>A</td><td rowspan='3' class='span'>S</td><td>B</td>%s</tr>"
+                "<tr><td rowspan='2' class='span'>C</td>%s</tr><tr>%s</tr></tbody>"
+                "<tbody><tr><td colspan='2'>A\nB\nC\nD\nE\nF\nG\nH\nI\nJ</td>%s</tr></tbody></table>",
+                // an opaque table-colored reference reproduces the missing cells' suppressed background layers.
+                automatic ? "auto" : "fixed", variant ? "<th class='empty'></th><th class='empty'></th>" : "",
+                variant ? "<td class='empty'></td><td class='empty'></td><td class='empty'></td>" : "",
+                variant ? "<td class='empty'></td>" : "", variant ? "<td class='empty'></td><td class='empty'></td>" : "",
+                variant ? "<td class='empty'></td><td class='empty'></td>" : "",
+                variant ? "<td class='empty'></td><td class='empty'></td>" : "");
+            bool rendered = render_paged_parity_variant(stems[variant], html->str, previews[variant], &pdfs[variant]);
+            strbuf_free(html); ASSERT_TRUE(rendered);
+        }
+        expect_paged_pair_output_parity(previews, pdfs, 2, 4);
+    }
+}
+
 TEST(RenderOutputParity, PagedTableGroupBreaksAndAvoidanceMatchExplicitRowBoundaries) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));

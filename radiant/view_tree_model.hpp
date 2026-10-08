@@ -59,7 +59,7 @@ enum ViewFragmentRole : uint8_t {
     VIEW_FRAGMENT_BODY, VIEW_FRAGMENT_MARGIN, VIEW_FRAGMENT_NOTE, VIEW_FRAGMENT_FLOAT,
     VIEW_FRAGMENT_RUNNING, VIEW_FRAGMENT_REPEATED_TABLE,
 };
-struct ViewTableRange { size_t column, span; };
+struct ViewTableRange { size_t column, span; bool missing; };
 struct LayoutViewNode {
     LayoutViewRef ref;
     LayoutViewKind kind;

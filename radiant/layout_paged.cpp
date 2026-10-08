@@ -1341,16 +1341,17 @@ static TypesetStatus paged_table_collect(ViewTree* tree, PagedComposition* compo
     return TYPESET_OK;
 }
 
-static TypesetStatus paged_table_grid(PagedComposition* composition, PagedFlowNode* table) {
+static TypesetStatus paged_table_grid(ViewTree* tree, PagedComposition* composition, PagedFlowNode* table) {
     size_t capacity = 0, work = 0;
     for (PagedFlowNode* row = table->first_child; row; row = row->next) {
         if (row->columns > composition->options.max_items - capacity)
             return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, row->source, 0, "table grid exceeds its track budget");
         capacity += row->columns;
     }
+    if (table->declared_columns > capacity) capacity = table->declared_columns;
     if (table->row_count > composition->options.max_items)
         return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, table->source, 0, "table grid exceeds its row budget");
-    if (!capacity)
+    if (!capacity || !table->row_count)
         return paged_failure(composition, TYPESET_INVALID, table->source, 0, "empty table grids require explicit track sizing");
     Pool* pool = composition->pool;
     table->table_rows = (PagedFlowNode**)pool_calloc(pool, table->row_count * sizeof(PagedFlowNode*));
@@ -1390,10 +1391,35 @@ static TypesetStatus paged_table_grid(PagedComposition* composition, PagedFlowNo
             }
         }
     }
-    for (size_t row = 0; status == TYPESET_OK && row < table->row_count; row++)
-        if (covered[row] != table->columns)
-            status = paged_failure(composition, TYPESET_INVALID, table->table_rows[row]->source, 0,
-                "unequal table row grids require anonymous cell completion");
+    if (table->declared_columns > table->columns) table->columns = table->declared_columns;
+    if (status == TYPESET_OK && table->columns > composition->options.max_items / table->row_count)
+        status = paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, table->source, 0,
+            "completed table coverage exceeds its grid budget");
+    // replay occupied columns after the final track count is known; gaps may precede later rowspan origins.
+    memset(ends, 0, capacity * sizeof(size_t));
+    for (size_t r = 0; status == TYPESET_OK && r < table->row_count; r++) {
+        PagedFlowNode* row = table->table_rows[r];
+        for (PagedFlowNode* cell = row->first_child; cell; cell = cell->next)
+            for (size_t c = cell->column; c < cell->column + cell->column_span; c++) ends[c] = r + cell->row_span;
+        if (covered[r] == table->columns) continue;
+        if (table->columns - covered[r] > composition->options.max_nodes - composition->nodes) {
+            status = paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, row->source, 0,
+                "anonymous table cells exceed node budget");
+            break;
+        }
+        ViewCssStyle* style = view_css_anonymous_style(tree, row->style, {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_CELL});
+        if (!style) { status = TYPESET_OUT_OF_MEMORY; break; }
+        for (size_t c = 0; c < table->columns; c++) {
+            if (ends[c] > r) continue;
+            PagedFlowNode* cell = paged_flow_new(composition, PAGED_FLOW_BLOCK, nullptr, style);
+            if (!cell) {
+                status = composition->diagnostic.status == TYPESET_OK ? TYPESET_OUT_OF_MEMORY : composition->diagnostic.status;
+                break;
+            }
+            cell->table_cell = true; cell->column = c; cell->column_span = cell->row_span = 1;
+            paged_flow_link(row, cell); row->cell_count++;
+        }
+    }
     pool_free(pool, ends); pool_free(pool, covered);
     // a connected span cluster has no independent row boundary until cell continuations exist.
     for (size_t first = 0; status == TYPESET_OK && first < table->row_count;) {
@@ -1468,11 +1494,8 @@ static TypesetStatus paged_table_build(ViewTree* tree, PagedComposition* composi
     if (!style->counters) return TYPESET_OUT_OF_MEMORY;
     TypesetStatus status = paged_table_collect(tree, composition, table, table->source, nullptr, PAGED_TABLE_BODY, depth + 1);
     if (status != TYPESET_OK) return status;
-    status = paged_table_grid(composition, table);
+    status = paged_table_grid(tree, composition, table);
     if (status != TYPESET_OK) return status;
-    if (table->declared_columns > table->columns)
-        return paged_failure(composition, TYPESET_INVALID, table->source, 0,
-            "columns beyond the row grid require anonymous cell completion");
     for (PagedFlowNode* row = table->first_child; row; row = row->next)
         if (row->table_group == PAGED_TABLE_BODY) return paged_table_wrap(composition, table);
     return paged_failure(composition, TYPESET_INVALID, table->source, 0, "header-only tables require an atomic table producer");
@@ -1737,7 +1760,7 @@ static TypesetStatus paged_frame_open(PagedComposer* composer, size_t index, boo
     frame->fragment->first_fragment = first;
     frame->fragment->paint_box = frame->flow->kind != PAGED_FLOW_TABLE_WRAPPER;
     frame->fragment->role = composer->role;
-    frame->fragment->generated = composer->role != VIEW_FRAGMENT_BODY;
+    frame->fragment->generated = !frame->flow->source || composer->role != VIEW_FRAGMENT_BODY;
     frame->fragment->computed_style = lam::up(style);
     frame->occurrence++;
     if (first || style->decoration_clone) composer->y += frame->box.edges[0];
@@ -2185,7 +2208,7 @@ static TypesetStatus paged_mark_group(PagedComposer* composer, PagedMarkSource* 
 }
 
 static TypesetStatus paged_mark_enter(PagedComposer* composer, DomNode* source, size_t depth = 0) {
-    if (!composer->page) return TYPESET_OK;
+    if (!composer->page || !source) return TYPESET_OK;
     if (depth > composer->composition->options.max_depth) return TYPESET_BUDGET_EXHAUSTED;
     if (source->parent) {
         TypesetStatus status = paged_mark_enter(composer, source->parent, depth + 1);
@@ -3240,7 +3263,7 @@ static bool paged_is_column_box(LayoutViewNode* node) {
 static TypesetStatus paged_table_range_publish(ViewTree* tree, LayoutViewNode* node, PagedFlowNode* source) {
     ViewTableRange* range = (ViewTableRange*)arena_alloc(tree->model->arena, sizeof(ViewTableRange));
     if (!range) return TYPESET_OUT_OF_MEMORY;
-    *range = {source->column, source->column_span}; node->table_range = lam::up(range);
+    *range = {source->column, source->column_span, source->table_cell && !source->source}; node->table_range = lam::up(range);
     return TYPESET_OK;
 }
 
@@ -3506,7 +3529,7 @@ static TypesetStatus paged_table_row_emit(PagedComposer* composer, PagedFrame* f
                     }
                 }
                 occurrence->rect.height = cell_height;
-                if (frame->flow->column_sources) status = paged_table_range_publish(composer->tree, occurrence, cell);
+                if (!cell->source || frame->flow->column_sources) status = paged_table_range_publish(composer->tree, occurrence, cell);
                 float offset = paged_table_cell_offset(cell, cell_height, natural_height, row_baseline, cell_baseline);
                 if (status == TYPESET_OK && offset != 0.0f) status = paged_fragments_translate(composer->tree, occurrence->first_child, offset, false);
             }
@@ -3676,10 +3699,12 @@ static TypesetStatus paged_table_slice_emit(PagedComposer* composer, PagedFrame*
             {x, composer->y, part.frame.width, height});
         if (!cell) return TYPESET_OUT_OF_MEMORY;
         cell->computed_style = lam::up(part.cell->style); cell->paint_box = true;
+        cell->generated = !part.cell->source;
         cell->first_fragment = first; cell->last_fragment = complete;
         bool clone = part.cell->style->decoration_clone;
         status = paged_boundary_publish(composer->tree, cell, part.frame.box, first || clone, complete || clone);
-        if (status == TYPESET_OK && frame->flow->column_sources) status = paged_table_range_publish(composer->tree, cell, part.cell);
+        if (status == TYPESET_OK && (!part.cell->source || frame->flow->column_sources))
+            status = paged_table_range_publish(composer->tree, cell, part.cell);
         PagedComposer nested = {}; nested.tree = composer->tree; nested.composition = composer->composition;
         nested.page = composer->page; nested.page_style = composer->page_style;
         nested.role = VIEW_FRAGMENT_BODY; nested.atomic_fragment = true;
@@ -4722,6 +4747,8 @@ static void paged_paint_table_background(LayoutViewNode* node, PaintList* paint,
         if (child->computed_style->display.inner == CSS_VALUE_TABLE_CELL) {
             // grid identity survives subpixel tracks, float rounding and retained-source mutations.
             const ViewTableRange* cell = child->table_range;
+            // missing-cell fixup suppresses every cell background layer (CSS Tables 3 §5.3.2).
+            if (cell && cell->missing) continue;
             if (!columns || (cell && cell->column >= columns->column && cell->column - columns->column < columns->span))
                 paint_fill_rect(paint, child->rect.x, child->rect.y, child->rect.width, child->rect.height, color);
         } else if (child->computed_style->display.inner == CSS_VALUE_TABLE_ROW ||
@@ -4740,6 +4767,7 @@ static void paged_paint_column_backgrounds(LayoutViewNode* table, LayoutViewNode
 }
 
 static bool paged_paint_node(LayoutViewNode* node, PaintList* paint) {
+    if (node->table_range && node->table_range->missing) return true;
     if (node->clip_content) {
         RdtPath* clip = rdt_path_new();
         if (!clip) return false;
