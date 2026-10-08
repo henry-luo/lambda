@@ -127,16 +127,13 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     return Item{.item = ITEM_JS_UNDEFINED};
 }
 extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
-    RootFrame roots(3);
-    if (!roots.valid()) return ItemError;
-    uint64_t home = 0;
-    Rooted<Item> object(roots, owner), key(roots, name), held(roots, lambda_item_adopt_scalar_home(value, &home));
-    Map* map = object_face(object.get());
+    // audited MIR callers retain all arguments and scalar homes across this non-reentrant helper.
+    Map* map = object_face(owner);
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    if (map->map_kind == MAP_KIND_ORDERED && !own_field(map, key.get().get_string()) &&
-            (text_is(key.get().get_string(), "size") || mvp_lmd_builtin_method(key.get().get_string())))
+    if (map->map_kind == MAP_KIND_ORDERED && !own_field(map, name.get_string()) &&
+            (text_is(name.get_string(), "size") || mvp_lmd_builtin_method(name.get_string())))
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    return map_shape_set(map, key.get().get_string(), held.get()) ? held.get() : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    return map_shape_set(map, name.get_string(), value) ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
     if (get_type_id(owner) == LMD_TYPE_ARRAY) {
@@ -145,12 +142,10 @@ extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
         if (index < owner.array->length) owner.array->items[index].item = ITEM_JS_DELETED_SENTINEL;
         return Item{.item = ITEM_TRUE};
     }
-    RootFrame roots(2);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> object(roots, owner), key(roots, name);
-    Map* map = object_face(object.get());
+    // the MIR caller (including class dispatch) owns the roots throughout shared shape deletion.
+    Map* map = object_face(owner);
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    return map_shape_delete(map, key.get().get_string()) ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    return map_shape_delete(map, name.get_string()) ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 extern "C" Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited) {
     if (get_type_id(owner) == LMD_TYPE_ARRAY) {

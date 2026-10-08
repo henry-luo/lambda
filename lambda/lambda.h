@@ -87,7 +87,7 @@ void lambda_root_frame_overflow_error(void);
 enum EnumTypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
-    // JavaScript-specific scalar sentinel, distinct from Lambda null.
+    // JavaScript-specific scalar value, distinct from Lambda null.
     LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
 
     // scalar types
@@ -130,8 +130,12 @@ enum EnumTypeId {
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
 
-    LMD_TYPE_COUNT,  // number of type IDs — must be last before HEAP_START
+    LMD_TYPE_COUNT,  // number of semantic type IDs; reserved tags below are excluded
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
+
+    // D2.1.4/D2.1.6: register occupied Item tags without admitting language types.
+    LMD_TYPE_PENDING = 0x1E,   // unresolved scalar return; payload kind selects its lane
+    LMD_TYPE_SENTINEL = 0x1F,  // internal JS hole/iterator markers; payload selects the marker
 };
 typedef uint8_t TypeId;
 
@@ -1825,11 +1829,9 @@ Symbol* name_key_symbol(const char* name, size_t len);
 // Internal call-ABI marker.  It never reaches a Lambda binding: public MIR
 // wrappers replace it with an optional null or evaluate the declared default.
 #define ITEM_MISSING_ARGUMENT ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 3)
-// Reserved non-type tag byte for internal Item sentinels that must not collide
-// with any value. It sits above every TypeId, so `type_id()` can never produce
-// it, and below 0x80, because the 0x80-0x9F octant is reserved for the rotated
-// inline-int encoding (`Lambda_Type_Int_Boxing.md` §3) rather than for tags.
-#define ITEM_SENTINEL_TAG   UINT64_C(0x1F)
+// reserved Item tag, recorded in EnumTypeId but outside its semantic type range.
+// the payload distinguishes internal markers; no language value carries this tag.
+#define ITEM_SENTINEL_TAG   ((uint64_t)LMD_TYPE_SENTINEL)
 #define ITEM_JS_DELETED_SENTINEL   ((ITEM_SENTINEL_TAG << 56) | UINT64_C(0x00DEAD00DEAD00))
 #define ITEM_JS_ITER_DONE_SENTINEL ((ITEM_SENTINEL_TAG << 56) | UINT64_C(0x00DEAD00000000))
 // Internal-only AsyncIteratorClose marker. It never crosses the protocol
@@ -1860,9 +1862,8 @@ Symbol* name_key_symbol(const char* name, size_t len);
 // exhausts the octant; the next tag-byte consumer must take the reserved
 // 0x80-0x9F headroom (`Lambda_Type_Double_Boxing.md` Part 8).
 //
-// The tag sits above every TypeId, so a leaked pending Item indexes outside
-// the valid TypeId range and dies loudly at the first per-tag table bound —
-// this is a guard property, not an accident.
+// the tag is outside the semantic TypeId range. Per-tag tables reserve its
+// slot, but it carries no value type and must be resolved before semantic use.
 //
 // Return-value convention v3 is the only generated-function ABI. Shape-2
 // payloads use a MIR pair or Context::mir_companion_slot; side-number-stack
@@ -1870,7 +1871,7 @@ Symbol* name_key_symbol(const char* name, size_t len);
 // (D5.2.1v3, D5.2.2v3). The fixed revision rejects stale cached modules.
 #define LAMBDA_RETURN_CONVENTION_REVISION 3
 
-#define ITEM_PENDING_TAG    UINT64_C(0x1E)
+#define ITEM_PENDING_TAG    ((uint64_t)LMD_TYPE_PENDING)
 #define ITEM_PENDING        (ITEM_PENDING_TAG << 56)
 // Payload kind lives in the low bits of lane 1; lane 2 holds the raw bits.
 // Kind 3 stays reserved: RV8 rules DTIME in-band (pointer Item, GC-managed),
@@ -2036,10 +2037,12 @@ LAMBDA_STATIC_ASSERT((ITEM_FLOAT_P0 & ITEM_DBL_MASK) == 0, "packed +0 must be ou
 LAMBDA_STATIC_ASSERT((ITEM_FLOAT_N0 & ITEM_DBL_MASK) == 0, "packed -0 must be outside double space");
 LAMBDA_STATIC_ASSERT((uint8_t)(ITEM_FLOAT_P0 >> 56) == LMD_TYPE_FLOAT, "packed +0 must carry float tag");
 LAMBDA_STATIC_ASSERT((uint8_t)(ITEM_FLOAT_N0 >> 56) == LMD_TYPE_FLOAT, "packed -0 must carry float tag");
-// The reserved sentinel tag must stay unreachable from `type_id()` (above every
-// TypeId) and out of the inline-int octant, or a sentinel would decode as a value.
-LAMBDA_STATIC_ASSERT(ITEM_SENTINEL_TAG >= LMD_CONTAINER_HEAP_START,
-                     "sentinel tag must sit above every TypeId");
+// reserved enum members stay outside semantic types and retain their Item ABI.
+LAMBDA_STATIC_ASSERT(LMD_TYPE_PENDING == 0x1E && LMD_TYPE_SENTINEL == 0x1F,
+                     "reserved Item tag bytes must retain their ABI values");
+LAMBDA_STATIC_ASSERT(ITEM_SENTINEL_TAG > LMD_CONTAINER_HEAP_START &&
+                     ITEM_SENTINEL_TAG < LAMBDA_TAG_SPACE_SIZE,
+                     "sentinel tag must be reserved within the Item tag space");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NOT_INLINE_INT((uint8_t)ITEM_SENTINEL_TAG),
                      "sentinel tag must stay out of the inline-int octant");
 LAMBDA_STATIC_ASSERT(ITEM_JS_DELETED_SENTINEL != ITEM_JS_ITER_DONE_SENTINEL &&
@@ -2054,8 +2057,8 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)ITEM_PENDING_TAG),
                      "pending tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NOT_INLINE_INT((uint8_t)ITEM_PENDING_TAG),
                      "pending tag must stay out of the inline-int octant");
-LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG >= LMD_CONTAINER_HEAP_START,
-                     "pending tag must sit above every TypeId");
+LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG > LMD_CONTAINER_HEAP_START,
+                     "pending tag must sit above every semantic TypeId and heap marker");
 LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG < LAMBDA_TAG_SPACE_SIZE,
                      "pending tag must stay inside the 000 octant tag space");
 LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG != ITEM_SENTINEL_TAG,
