@@ -1,0 +1,9 @@
+"Result: 20Cannot parse: abc"
+407
+"Division by zero"
+304
+"Must be positive: -10Result: 5fallback"
+false
+true
+"Process failedCannot parse: abc"
+["Result: 5", "ERROR", "ERROR", "Result: 5"]

@@ -1,4 +1,5 @@
-// Test sys.* path resolution - functional approach
+// Manual probe of sys.* path resolution (machine-specific output, so no golden;
+// the `_` prefix keeps test discovery from treating it as a test)
 // Returns a map with test results
 
 {

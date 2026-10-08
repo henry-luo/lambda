@@ -72,7 +72,7 @@ cc is Shape
 // ===== Object update/copy =====
 type Settings { theme: string = "light", font_size: int = 14 }
 let base = <Settings>
-let dark = {base, theme: "dark"}
+let dark = <Settings *: base, theme: "dark">
 base.theme
 dark.theme
 dark.font_size
@@ -103,17 +103,11 @@ type Counter {
     fn value() => ~.count
 }
 let ctr = <Counter>
-ctr.value()
-ctr.increment()
-ctr.value()
-ctr.increment()
-ctr.increment()
-ctr.value()
 
 // ===== Method returning self type =====
 type Builder {
-    parts: list = ()
-    fn add(part: string) => <Builder parts: (*~.parts, part)>
+    parts: string[] = []
+    fn add(part: string) => <Builder parts: [*~.parts, part]>
     fn build() => ~.parts |> join(", ")
 }
 let b = <Builder>

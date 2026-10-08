@@ -30,25 +30,25 @@ let operations = [
     <SquareOp value: 6>,
     <AddOp a: 10, b: 20>
 ]
-let results = operations |> map(evaluate)
+let results = operations |> evaluate(~)
 results
 
 // ===== Accumulate results =====
 results |> sum()
 
 // ===== Filter by type =====
-operations |> filter((op) => op is AddOp) |> map(evaluate)
-operations |> filter((op) => op is MulOp) |> map(evaluate)
+operations |: ~ is AddOp |> evaluate(~)
+operations |: ~ is MulOp |> evaluate(~)
 
 // ===== Chain operations =====
-fn chain_ops(value: int, ops: lst) {
-    ops |> reduce(fn(acc, op) => match op {
+fn chain_ops(value: int, ops: list) {
+    reduce([value] ++ ops, (acc, op) => match op {
         case 'add': acc + 1
         case 'double': acc * 2
         case 'negate': -acc
         case 'square': acc * acc
         default: acc
-    }, value)
+    })
 }
 chain_ops(3, ('double', 'add', 'square'))
 chain_ops(5, ('negate', 'double', 'add'))
@@ -72,11 +72,11 @@ classify_number(-3)
 
 // ===== Dispatch table =====
 let handlers = {
-    greet: fn(name) => "Hello, " & name,
-    farewell: fn(name) => "Goodbye, " & name,
-    shout: fn(name) => upper(name) & "!"
+    greet: (name) => "Hello, " ++ name,
+    farewell: (name) => "Goodbye, " ++ name,
+    shout: (name) => upper(name) ++ "!"
 }
-fn dispatch(action: string, arg: string) => handlers.(action)(arg)
+fn dispatch(action: string, arg: string) => handlers[action](arg)
 dispatch("greet", "Alice")
 dispatch("farewell", "Bob")
 dispatch("shout", "Charlie")

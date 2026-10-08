@@ -29,7 +29,7 @@ pn main() {
     // ===== While with break =====
     var j = 0
     while (true) {
-        if (j >= 3) break
+        if (j >= 3) { break }
         j = j + 1
     }
     print(j)
@@ -39,7 +39,7 @@ pn main() {
     var even_sum = 0
     while (k < 10) {
         k = k + 1
-        if (k % 2 != 0) continue
+        if (k % 2 != 0) { continue }
         even_sum = even_sum + k
     }
     print(even_sum)
@@ -50,7 +50,7 @@ pn main() {
     while (m <= 3) {
         var n = 1
         while (n <= 3) {
-            if (m == n) product = product + 1
+            if (m == n) { product = product + 1 }
             n = n + 1
         }
         m = m + 1
@@ -69,6 +69,6 @@ pn main() {
 }
 
 pn early_return(x: int) int {
-    if (x < 0) return -1
+    if (x < 0) { return -1 }
     return x * 2
 }

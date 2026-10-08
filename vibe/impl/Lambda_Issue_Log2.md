@@ -18,9 +18,9 @@ All issues below were first recorded on 2026-09-25.
 ## IL2-I1 — `sys.proc.self.argv` retains a null after `--no-log`
 
 - **Area:** CLI / standard library.
-- **Reproduction:** `./lambda.exe --no-log test/lambda/ext/test_sysinfo_proc.ls`.
+- **Reproduction:** `./lambda.exe --no-log test/lambda/ext/_sysinfo_proc.ls`.
 - **Observed / expected:** the argument-vector field printed
-  `["./lambda.exe", "test/lambda/ext/test_sysinfo_proc.ls", null]`; the
+  `["./lambda.exe", "test/lambda/ext/_sysinfo_proc.ls", null]`; the
   trailing `null` comes from the sysinfo argv setter keeping the pre-filter `argc`
   after `--no-log` is removed from `argv`. It should expose only live argument
   strings. The same mismatch can follow removal of `--mem-dump`.

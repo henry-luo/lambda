@@ -4,7 +4,7 @@
 // ===== Function as argument =====
 fn apply_fn(f, x) => f(x)
 apply_fn((x) => x * 2, 5)
-apply_fn((x) => x & "!", "hello")
+apply_fn((x) => x ++ "!", "hello")
 
 // ===== Function returning function =====
 fn make_pow(exp: int) => (base: int) => base ** exp
@@ -17,7 +17,7 @@ cube(3)
 fn apply_twice(f, x) => f(f(x))
 apply_twice((x) => x + 1, 0)
 apply_twice((x) => x * 2, 3)
-apply_twice((s) => s & s, "ab")
+apply_twice((s) => s ++ s, "ab")
 
 // ===== Compose functions =====
 fn compose(f, g) => (x) => f(g(x))
@@ -26,23 +26,23 @@ double_inc(5)
 double_inc(10)
 
 // ===== Pipeline of functions =====
-fn pipeline(fns: lst, value) {
-    fns |> reduce((acc, f) => f(acc), value)
+fn pipeline(fns: array, value) {
+    reduce([value, *fns], (acc, f) => f(acc))
 }
 pipeline([(x) => x + 1, (x) => x * 2, (x) => x - 3], 5)
 
 // ===== Map with function =====
-fn transform_all(items, f) => items |> map(f)
+fn transform_all(items, f) => items |> f(~)
 transform_all([1, 2, 3], (x) => x * 10)
-transform_all(["a", "b", "c"], (s) => s & s)
+transform_all(["a", "b", "c"], (s) => s ++ s)
 
 // ===== Filter with predicate =====
-fn select_where(items, predicate) => items |> filter(predicate)
+fn select_where(items, predicate) => items |: predicate(~)
 select_where([1, 2, 3, 4, 5, 6], (x) => x > 3)
 select_where(["hello", "hi", "hey", "h"], (s) => len(s) > 2)
 
 // ===== Fold/reduce with custom function =====
-fn fold(items, f, init) => items |> reduce(f, init)
+fn fold(items, f, init) => reduce([init, *items], f)
 fold([1, 2, 3, 4], (acc, x) => acc + x, 0)
 fold([1, 2, 3, 4], (acc, x) => acc * x, 1)
 

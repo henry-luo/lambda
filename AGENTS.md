@@ -125,11 +125,13 @@ make clean-all          # Clean all build artifacts
 ### Testing
 ```bash
 make build-test               # Build all test executables
-make test                     # Run ALL tests (baseline + extended)
+make test                     # Every suite except jube and the online view test (make test-all runs everything)
 make test-lambda-baseline     # Lambda core functionalities (must pass 100%, when changes maked to Lambda engine)
 make test-radiant-baseline    # Radiant core functionalities (must pass 100%, when changes maked to Radiant engine)
 ```
 **Test data**: run `./setup-test.sh` once per checkout — it links `test/<corpus>` to the sibling `../lambda-test` repo and fetches the pinned WPT into `ref/wpt`; suites using those corpora fail without it. All make targets: `make help` and [`doc/dev/Make_Guide.md`](doc/dev/Make_Guide.md).
+
+**Test map**: [`test/README.md`](test/README.md) — which gate covers which source area, every harness with its fixture dirs and golden convention, and single-test commands. Every `.ls` in a golden-driven test directory needs its golden; name helper, module and playground scripts `_*` or `mod_*`.
 
 **Before building or testing in a worktree, or when a failure looks environmental** (stale objects, flaky baseline, debug vs release exe, renamed env knobs): read [`doc/dev/Developer_Guide.md` §7](doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas). Never run `make release` in a worktree.
 

@@ -4,18 +4,18 @@
 // ===== Basic error return type =====
 fn safe_divide(a: int, b: int) int^ {
     if (b == 0) raise error("Division by zero")
-    a / b
+    else a / b
 }
-safe_divide(10, 2)
-safe_divide(10, 0)
+safe_divide(10, 2) ^ { ^ }
+safe_divide(10, 0) ^ { ^ }
 
 // ===== Error propagation with ^ =====
 fn double_divide(a: int, b: int) int^ {
     let r = safe_divide(a, b)^
     r * 2
 }
-double_divide(10, 2)
-double_divide(10, 0)
+double_divide(10, 2) ^ { ^ }
+double_divide(10, 0) ^ { ^ }
 
 // ===== Braced handler recovery =====
 let result = safe_divide(10, 0) ^ { ^ }
@@ -27,11 +27,11 @@ good
 
 // ===== Error with code =====
 fn validate_age(age: int) int^ {
-    if (age < 0) raise error("Age cannot be negative", code: "INVALID_AGE")
-    if (age > 150) raise error("Age too large", code: "OUT_OF_RANGE")
-    age
+    if (age < 0) raise error("Age cannot be negative")
+    else if (age > 150) raise error("Age too large")
+    else age
 }
-validate_age(25)
+validate_age(25) ^ { ^ }
 let v = validate_age(-5) ^ { ^ }
 v.message
 v.code
@@ -39,11 +39,10 @@ v.code
 // ===== Chained errors =====
 fn process_input(s: string) int^ {
     if (s == "") raise error("Empty input")
-    let n = int(s)
-    safe_divide(100, n)^
+    else safe_divide(100, int(s))^
 }
-process_input("5")
-process_input("0")
+process_input("5") ^ { ^ }
+process_input("0") ^ { ^ }
 
 // ===== Error is falsy =====
 let e = error("test error")
@@ -68,4 +67,4 @@ fn parse_and_divide(a_str: string, b_str: string) int^ {
     let b = int(b_str)
     safe_divide(a, b)^
 }
-parse_and_divide("10", "2")
+parse_and_divide("10", "2") ^ { ^ }

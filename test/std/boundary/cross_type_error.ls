@@ -34,7 +34,7 @@ e.message
 e.code
 
 // ===== Error with code =====
-let coded = error("bad", code: "E001")
+let coded = error({message: "bad", code: 304})
 coded.message
 coded.code
 coded is error
@@ -64,4 +64,4 @@ m.ok
 m.fail is error;
 
 // ===== Filter out errors =====
-[1, error("a"), 2, error("b"), 3] |> filter((x) => x is int)
+[1, error("a"), 2, error("b"), 3] |: ~ is int

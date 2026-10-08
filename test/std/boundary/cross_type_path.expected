@@ -1,0 +1,21 @@
+true
+false
+true
+true
+false
+false
+4
+/.a
+/.d
+/.index
+/.api.v1
+"/.hello.world"
+error
+error
+[/.api.users, /.api.posts]
+/.about.us
+/.users
+/.users.123
+/.users.123.profile
+true
+"http.'example.com'.api"
