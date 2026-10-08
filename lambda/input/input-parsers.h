@@ -17,6 +17,9 @@
 void parse_json(Input* input, const char* json_string);
 Item parse_json_to_item(Input* input, const char* json_string);
 Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok);
+// length-aware textual model dispatcher; returns false for unrelated formats.
+bool input_parse_model(Input* input, const char* source, size_t length, const char* type);
+void input_scene3d_asset(Input* input, const char* source, size_t length, const char* flavor);
 void parse_csv(Input* input, const char* csv_string);
 void parse_tsv(Input* input, const char* tsv_string);
 void parse_ini(Input* input, const char* ini_string);

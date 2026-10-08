@@ -19,9 +19,10 @@ pub fn valid_track(n) bool {
         (values is array) and components >= 1 and components <= 16 and floor(components) == components and len(values) == len(times) * components and
         all([for (v in values) if (kind == 'bool') v is bool else if (kind == 'string') (v is string) and len(v) < 256 else transforms.numeric(v)]) and
         (kind != 'quaternion' or all([for (i in 0 to (len(times) - 1)) sum([for (j in 0 to 3) values[i * 4 + j] ** 2]) > 0])) and
-        (if (kind == 'quaternion') contains(['discrete', 'linear'], interpolation)
+        (if (kind == 'quaternion') contains(['discrete', 'linear', 'hermite'], interpolation)
          else if (kind == 'bool' or kind == 'string') interpolation == 'discrete'
-         else contains(['discrete', 'linear', 'smooth', 'bezier'], interpolation)) and
+         else contains(['discrete', 'linear', 'smooth', 'bezier', 'hermite'], interpolation)) and
+        (interpolation != 'hermite' or (n["in-tangents"] != null and n["out-tangents"] != null)) and
         all([for (key in ["in-tangents", "out-tangents"] where n[key] != null)
-            (n[key] is array) and len(n[key]) == len(values) * 2 and all([for (v in n[key]) transforms.numeric(v)])])
+            (n[key] is array) and len(n[key]) == len(values) * (if (interpolation == 'hermite') 1 else 2) and all([for (v in n[key]) transforms.numeric(v)])])
 }

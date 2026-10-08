@@ -36,6 +36,25 @@ static Item mvp_lmd_inherited_member(Item owner, const char* key, size_t length,
 }
 const TypeNominalExtension mvp_lmd_class_extension = {mvp_lmd_inherited_member};
 
+static void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
+        ShapeEntry* field, Item inherited, bool writable) {
+    MvpLmdPropertyCacheEntry* entry = NULL;
+    for (int i = 0; i < MVP_LMD_PROPERTY_CACHE_SIZE; i++)
+        if (cache->entries[i].shape == shape) { entry = &cache->entries[i]; break; }
+    if (!entry) entry = &cache->entries[cache->next++ % MVP_LMD_PROPERTY_CACHE_SIZE];
+    entry->shape = shape; entry->field = field;
+    entry->inherited = field ? ItemNull : inherited; entry->writable = writable;
+    // only ordinary packed fields use the inline cache lane; shared readers own optional layouts.
+    entry->offset = field ? field->byte_offset : 0;
+    entry->storage = field && field->name && field->byte_offset >= 0 &&
+        !(field->flags & JSPD_IS_ACCESSOR) && !shape_entry_uses_native_lane(field, NULL)
+        ? shape_entry_storage_type_id(field) : LMD_TYPE_ANY;
+    TypeId type = entry->storage;
+    entry->pointer_lane = type == LMD_TYPE_STRING ? 1 : type == LMD_TYPE_FUNC ||
+        type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY_NUM ? 2 : 0;
+    entry->pointer_tag = type == LMD_TYPE_FUNC || type == LMD_TYPE_STRING ? (uint64_t)type << 56 : 0;
+}
+
 extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache) {
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
@@ -64,8 +83,7 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
             if (cache && !constructor && found &&
                     (typemap_is_shared_shape(shape) || shape == &cls->shape) &&
                     (field || get_type_id(result) == LMD_TYPE_FUNC)) {
-                cache->shape = shape; cache->field = field;
-                cache->inherited = field ? ItemNull : result; cache->writable = !metadata;
+                mvp_lmd_cache_property(cache, shape, field, result, !metadata);
             }
             if (operation == LMD_PROP_OWN) return Item{.item = b2it(found)};
             if (found) return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : result;
@@ -73,8 +91,7 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
         if (cache && operation == LMD_PROP_SET && !metadata && typemap_is_shared_shape((TypeMap*)map->type)) {
             ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, name.get_string()->chars, name.get_string()->len);
             if (field) {
-                cache->shape = (TypeMap*)map->type; cache->field = field;
-                cache->inherited = ItemNull; cache->writable = true;
+                mvp_lmd_cache_property(cache, (TypeMap*)map->type, field, ItemNull, true);
             }
         }
         owner = Item{.map = map};
@@ -116,6 +133,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, callee), self(roots, receiver), target(roots, new_target);
+    MvpLmdClass* reusable = NULL;
     if (fn->constructor) {
         if (new_target.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         MvpLmdClass* cls = fn->home;
@@ -128,7 +146,9 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         if (cls->nominal.base) {
             self.set(Item{.item = ITEM_JS_TDZ});
         } else {
-            self.set(mvp_lmd_object_new(&actual->shape, 0));
+            if (actual == cls && cls->reusable_layout) reusable = cls;
+            self.set(mvp_lmd_object_new(reusable && reusable->allocation_shape
+                ? reusable->allocation_shape : &actual->shape, 0));
             if (item_is_error(self.get()) || cls->constructor_id < 0) return self.get();
         }
     } else if (new_target.item != ITEM_JS_UNDEFINED) {
@@ -140,6 +160,10 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
     typedef Item (*Entry)(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
     Item result = ((Entry)fn->ptr)(context, fn->program, arguments, (uint64_t)argc,
         held.get(), self.get(), target.get());
+    // admitted initializers cannot observe these fields until every store has completed.
+    if (reusable && result.item == self.get().item && get_type_id(result) == LMD_TYPE_MAP &&
+            typemap_is_shared_shape((TypeMap*)result.map->type))
+        reusable->allocation_shape = (TypeMap*)result.map->type;
     return result;
 }
 extern "C" Item mvp_lmd_instanceof(Item value, Item constructor) {

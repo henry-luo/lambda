@@ -94,6 +94,13 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         value->numbers[0]=vector.x;value->numbers[1]=vector.y;value->numbers[2]=vector.z;return true;
     }
     if(!strcmp(property,"quaternion")) {
+        float quaternion[4];bool authored;
+        if(!scene3d_components(node,"quaternion",quaternion,4,&authored)) return false;
+        if(authored) {
+            value->type=ANIMATION_QUATERNION;value->count=4;
+            for(unsigned i=0;i<4;i++) value->numbers[i]=quaternion[i];
+            return animation_quaternion_normalize(value->numbers);
+        }
         Scene3dVec rotation;if(!scene3d_vector(node,"rotation",{},&rotation)) return false;
         double cx=cos(rotation.x*.5),sx=sin(rotation.x*.5),cy=cos(rotation.y*.5),sy=sin(rotation.y*.5),cz=cos(rotation.z*.5),sz=sin(rotation.z*.5);
         value->type=ANIMATION_QUATERNION;value->count=4;
@@ -205,7 +212,7 @@ static bool scene3d_animation_track(Scene3dAnimationState* state,DomElement* roo
     const char* interpolation=scene3d_text(node,"interpolation");
     track.interpolation=!interpolation||!strcmp(interpolation,"linear")?ANIMATION_LINEAR:
         !strcmp(interpolation,"discrete")?ANIMATION_DISCRETE:!strcmp(interpolation,"smooth")?ANIMATION_SMOOTH:
-        !strcmp(interpolation,"bezier")?ANIMATION_BEZIER:(AnimationInterpolation)99;
+        !strcmp(interpolation,"bezier")?ANIMATION_BEZIER:!strcmp(interpolation,"hermite")?ANIMATION_HERMITE:(AnimationInterpolation)99;
     if((track.type==ANIMATION_BOOLEAN||track.type==ANIMATION_STRING)&&!interpolation) track.interpolation=ANIMATION_DISCRETE;
     unsigned values=0,incoming=0,outgoing=0;
     if(!scene3d_animation_numbers(state,node,"times",&track.times,&track.keys)||!track.keys) return false;
@@ -214,7 +221,8 @@ static bool scene3d_animation_track(Scene3dAnimationState* state,DomElement* roo
     if(!scene3d_animation_numbers(state,node,"values",&track.values,&values)||values!=track.keys*track.components||
         !scene3d_animation_numbers(state,node,"in-tangents",&track.in_tangents,&incoming)||
         !scene3d_animation_numbers(state,node,"out-tangents",&track.out_tangents,&outgoing)) return false;
-    if((incoming&&incoming!=values*2)||(outgoing&&outgoing!=values*2)) return false;
+    unsigned tangent_values=values*(track.interpolation==ANIMATION_HERMITE?1:2);
+    if((incoming&&incoming!=tangent_values)||(outgoing&&outgoing!=tangent_values)) return false;
     return animation_track_validate(track);
 }
 static void scene3d_animation_event(void* owner,uint64_t identity,const char* type,double detail) {

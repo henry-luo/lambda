@@ -1,0 +1,18 @@
+{
+  "asset": {"version": "2.0", "generator": "Lambda parser fixture"},
+  "buffers": [{"uri": "animation.bin", "byteLength": 80}],
+  "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": 16}, {"buffer": 0, "byteOffset": 16, "byteLength": 64}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 4, "type": "SCALAR", "min": [0], "max": [3]},
+    {"bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC4"}
+  ],
+  "nodes": [{"name": "Globe", "rotation": [0, 0, 0, 1]}],
+  "animations": [{
+    "name": "Spin",
+    "samplers": [{"input": 0, "output": 1, "interpolation": "LINEAR"}],
+    "channels": [{"sampler": 0, "target": {"node": 0, "path": "rotation"}}]
+  }],
+  "scenes": [{"nodes": [0]}],
+  "scene": 0,
+  "extras": {"note": "External buffer is intentionally unresolved during parsing"}
+}

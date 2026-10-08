@@ -643,6 +643,15 @@ TEST_F(JsMvpLmd, MapKeysAndMutation) {
     boolean("let m=new Map();m.set('\\uD83D'+'\\uDE00',3);m.set('😀',4);m.size===1 && m.get('😀')===4");
     boolean("let m=new Map();m.x=9;m.set('x',1);Object.keys(m)[0]==='x' && m.x===9 && m.get('x')===1 && m.delete('x') && !m.delete('x') && m.x===9 && m.size===0");
     boolean("let m=new Map();m.set('x',5e-324);let old=m.get('x');m.set('x',2);old===5e-324 && m.get('x')===2 && m.clear()===undefined && m.size===0");
+    boolean("let m=new Map();m.set(1,5e-324);m.get(1);let old=m.get(1);m.set(1,1e-323);"
+        "let ok=old===5e-324 && m.get(1)===1e-323 && m.has(1);m.delete(1);"
+        "ok=ok && !m.has(1) && m.get(1)===undefined;m.set(1,3);m.get(1);m.clear();"
+        "ok && m.get(1)===undefined && !m.has(1)");
+    boolean("let m=new Map();m.set(undefined,2);m.get();let ok=m.get()===2 && m.has();"
+        "m.set(-0,3);m.get(0);ok=ok && m.get(-0)===3;m.set(NaN,4);m.get(NaN);"
+        "ok && m.get(0/0)===4 && m.has(NaN)");
+    boolean("let m=new Map();m.set(1,2);m.get(1);function clear(){m.clear();return 1}"
+        "m.get(clear())===undefined");
 }
 TEST_F(JsMvpLmd, LiveMapIteration) {
     numeric("let m=new Map();m.set('a',1).set('b',2);let sum=0;for(let [k,v] of m){sum+=v}sum", 3);
@@ -847,6 +856,46 @@ TEST_F(JsMvpLmd, ClassAncestryAndReflection) {
         "b.x===3 && !(b instanceof A) && !(b instanceof B)");
     error("class A{}class B extends A{constructor(){return 3}}new B()", "TypeError");
     error("class A{}class B extends A{constructor(){}}new B()", "ReferenceError");
+}
+TEST_F(JsMvpLmd, ClassCachedScalarLanesAndRetyping) {
+    boolean("class A{constructor(x){this.x=x}get(){return this.x}set(x){this.x=x;return this.x}}"
+        "class B extends A{}let a=new B(1);let ok=true;"
+        "for(let v of [1,2,1.5,2.5,true,false,'s',null,undefined,5e-324,1e-323,-0,Infinity,-Infinity]){"
+        "a.set(v);a.set(v);ok=ok && a.get()===v && a.get()===v}"
+        "a.set(NaN);ok=ok && a.get()!==a.get();delete a.x;ok=ok && a.get()===undefined;"
+        "a.set(4);ok && a.get()===4 && a instanceof A");
+    numeric("class A{constructor(){this.x=5e-324}get(){return this.x}set(x){this.x=x}}"
+        "let a=new A();a.get();let x=a.get();a.set(1e-323);a.set(5e-324);a.set(1e-323);x", 5e-324);
+    boolean("class A{constructor(){this.x=0}get(){return this.x}set(x){this.x=x}}"
+        "let a=new A();a.set(-0);a.set(-0);a.get();1/a.get()===-Infinity");
+    numeric("class A{f(){return this.x}}let a=new A();a.x=1;let s=0;"
+        "for(let i=0;i<4;i++){s+=a.f();if(i===1)a.f=()=>10}delete a.f;s+a.f()", 23);
+    numeric("class A{constructor(){this.x=5e-324}get(){return this.x}}"
+        "let a=new A();function mutate(){a.x=1e-323;return 0}a.x-mutate()-a.x", -5e-324);
+    boolean("class A{constructor(){this.x=1}f(){return this.x}}class B extends A{f(){return 10}}"
+        "function call(a){return a.f()}let a=new A();let b=new B();"
+        "call(a)===1 && call(b)===10 && call(a)===1 && a.f(a.f=()=>7)===1 && call(a)===7");
+    boolean("class A{f(){return this.x}target(){return new.target}}let a=new A();a.x=3;"
+        "let b={x:8,f:a.f};b.f()===8 && a.target()===undefined");
+    numeric("class A{constructor(x){this.x=x}}let a=new A('2');let s=0;"
+        "for(let v of ['2',3,1.5,true,null]){a.x=v;s+=a.x*2} s", 15);
+    boolean("class A{constructor(x){this.x=x}get(){return this.x}set(x){this.x=x}}"
+        "let a=new A([]);let ok=true;for(let v of [[],{n:1},()=>3,'s']){"
+        "a.set(v);a.set(v);ok=ok && a.get()===v && a.get()===v}ok");
+}
+TEST_F(JsMvpLmd, ConstructorLayoutReuseAndObservation) {
+    boolean("class A{constructor(x,y){this.x=x;this.y=y;this.z=null}}let ok=true;"
+        "for(let v of [1,2,1.5,'s',true,null,5e-324,{n:1}]){let a=new A(v,[v]);"
+        "ok=ok && a.x===v && a.y[0]===v && a.z===null && Object.keys(a).join(',')==='x,y,z'}ok");
+    boolean("let seen='';function observe(a){seen+=Object.keys(a).join(',')+';';return 2}"
+        "class A{constructor(){this.x=1;this.y=observe(this)}}new A();new A();seen==='x;x;'");
+    boolean("class A{constructor(){this.x=Object.keys(this).length;this.y=1}}"
+        "new A().x===0 && new A().x===0");
+    boolean("class A{constructor(){this.x=1;this.y=2}}class B extends A{constructor(){super();this.z=3}}"
+        "new A();let b=new B();Object.keys(b).join(',')==='x,y,z' && b instanceof A && b instanceof B");
+    boolean("class A{constructor(x){this.x=x;if(x)this.y=2}}new A(true);"
+        "Object.keys(new A(false)).join(',')==='x'");
+    boolean("class A{constructor(){this.x='y' in this;this.y=1}}new A().x===false && new A().x===false");
 }
 TEST_F(JsMvpLmd, ClosureEnvironmentUsesSharedTracing) {
     Item result = run("function f(){let value=[5e-324,'alive'];return ()=>value}f()");

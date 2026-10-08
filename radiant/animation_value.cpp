@@ -87,11 +87,12 @@ bool animation_value_mix(AnimationValueType type, double* result, const double* 
 
 bool animation_track_validate(const AnimationTrackView& track) {
     if (!track.times || !track.keys || track.keys > 1048576 || !track.components || track.components > 2048 ||
-        (unsigned)track.type > ANIMATION_STRING || (unsigned)track.interpolation > ANIMATION_BEZIER) return false;
+        (unsigned)track.type > ANIMATION_STRING || (unsigned)track.interpolation > ANIMATION_HERMITE) return false;
     if (track.type == ANIMATION_STRING ? !track.strings : !track.values) return false;
-    if (track.type == ANIMATION_QUATERNION && (track.components != 4 || track.interpolation > ANIMATION_LINEAR)) return false;
+    if (track.type == ANIMATION_QUATERNION && (track.components != 4 || (track.interpolation > ANIMATION_LINEAR && track.interpolation != ANIMATION_HERMITE))) return false;
     if ((track.type == ANIMATION_BOOLEAN || track.type == ANIMATION_STRING) &&
         (track.components != 1 || track.interpolation != ANIMATION_DISCRETE)) return false;
+    if (track.interpolation == ANIMATION_HERMITE && (!track.in_tangents || !track.out_tangents)) return false;
     for (unsigned i = 0; i < track.keys; i++) {
         if (!isfinite(track.times[i]) || (i && track.times[i] < track.times[i - 1])) return false;
         for (unsigned c = 0; c < track.components; c++) {
@@ -99,6 +100,8 @@ bool animation_track_validate(const AnimationTrackView& track) {
             if (track.type == ANIMATION_STRING) { if (!track.strings[offset]) return false; }
             else if (!isfinite(track.values[offset])) return false;
             else if(track.type==ANIMATION_BOOLEAN&&track.values[offset]!=0&&track.values[offset]!=1) return false;
+            if (track.interpolation == ANIMATION_HERMITE &&
+                (!isfinite(track.in_tangents[offset]) || !isfinite(track.out_tangents[offset]))) return false;
             if (track.interpolation == ANIMATION_BEZIER && track.in_tangents && track.out_tangents) for (unsigned pair = 0; pair < 2; pair++)
                 if (!isfinite(track.in_tangents[offset * 2 + pair]) || !isfinite(track.out_tangents[offset * 2 + pair])) return false;
         }
@@ -130,6 +133,17 @@ bool animation_track_sample(const AnimationTrackView& track, double time, double
     if (!(duration > 0)) return false;
     double t = (time - start) / duration;
     const double* b = a + track.components;
+    if (track.interpolation == ANIMATION_HERMITE) {
+        if (!track.in_tangents || !track.out_tangents) return false;
+        double t2=t*t,t3=t2*t;size_t offset=(size_t)key*track.components;
+        // glTF tangents are derivatives: scale them by this segment's duration.
+        for(unsigned c=0;c<track.components;c++) {
+            result[c]=(2*t3-3*t2+1)*a[c]+(t3-2*t2+t)*duration*track.out_tangents[offset+c]+
+                (-2*t3+3*t2)*b[c]+(t3-t2)*duration*track.in_tangents[offset+track.components+c];
+            if(!isfinite(result[c])) return false;
+        }
+        return track.type!=ANIMATION_QUATERNION||animation_quaternion_normalize(result);
+    }
     if (track.type == ANIMATION_QUATERNION) return animation_quaternion_slerp(a, b, t, result);
     memcpy(result, a, track.components * sizeof(double));
     if (track.interpolation == ANIMATION_LINEAR || (track.interpolation == ANIMATION_BEZIER &&

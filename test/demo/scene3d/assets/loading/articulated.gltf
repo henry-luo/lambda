@@ -1,0 +1,450 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Lambda CC0 asset fixture"
+  },
+  "extensionsUsed": [
+    "KHR_materials_unlit"
+  ],
+  "extensionsRequired": [
+    "KHR_materials_unlit"
+  ],
+  "buffers": [
+    {
+      "uri": "articulated.bin",
+      "byteLength": 922
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 128,
+      "byteStride": 16
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 128,
+      "byteLength": 96
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 224,
+      "byteLength": 64
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 288,
+      "byteLength": 32
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 320,
+      "byteLength": 32
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 352,
+      "byteLength": 24
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 376,
+      "byteLength": 24
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 400,
+      "byteLength": 128
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 528,
+      "byteLength": 1
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 532,
+      "byteLength": 12
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 544,
+      "byteLength": 96
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 640,
+      "byteLength": 12
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 652,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 700,
+      "byteLength": 8
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 708,
+      "byteLength": 72
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 780,
+      "byteLength": 24
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 804,
+      "byteLength": 36
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 840,
+      "byteLength": 82
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC3",
+      "min": [
+        -0.8,
+        -0.8,
+        0
+      ],
+      "max": [
+        0.1,
+        0.8,
+        0
+      ]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5121,
+      "count": 8,
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5121,
+      "count": 8,
+      "type": "VEC4",
+      "normalized": true
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5123,
+      "count": 12,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 6,
+      "componentType": 5121,
+      "count": 8,
+      "type": "VEC3",
+      "normalized": true
+    },
+    {
+      "bufferView": 7,
+      "componentType": 5126,
+      "count": 2,
+      "type": "MAT4"
+    },
+    {
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC3",
+      "sparse": {
+        "count": 1,
+        "indices": {
+          "bufferView": 8,
+          "componentType": 5121
+        },
+        "values": {
+          "bufferView": 9
+        }
+      }
+    },
+    {
+      "bufferView": 10,
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 11,
+      "componentType": 5126,
+      "count": 3,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 12,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 13,
+      "componentType": 5126,
+      "count": 2,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 14,
+      "componentType": 5126,
+      "count": 6,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 15,
+      "componentType": 5126,
+      "count": 6,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 16,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3",
+      "min": [
+        -0.2,
+        -0.2,
+        0
+      ],
+      "max": [
+        0.2,
+        0.2,
+        0
+      ]
+    }
+  ],
+  "images": [
+    {
+      "bufferView": 17,
+      "mimeType": "image/png"
+    }
+  ],
+  "textures": [
+    {
+      "source": 0
+    }
+  ],
+  "materials": [
+    {
+      "extensions": {
+        "KHR_materials_unlit": {}
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        }
+      },
+      "doubleSided": true
+    },
+    {
+      "extensions": {
+        "KHR_materials_unlit": {}
+      },
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.05,
+          0.8,
+          0.3,
+          1
+        ]
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "weights": [
+        0,
+        0
+      ],
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2,
+            "JOINTS_0": 3,
+            "WEIGHTS_0": 4,
+            "COLOR_0": 6
+          },
+          "indices": 5,
+          "material": 0,
+          "targets": [
+            {
+              "POSITION": 8
+            },
+            {
+              "POSITION": 9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 15
+          },
+          "material": 1
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "Base",
+      "translation": [
+        0.2,
+        0,
+        0
+      ],
+      "children": [
+        1
+      ]
+    },
+    {
+      "name": "Tip",
+      "translation": [
+        0,
+        0.3,
+        0
+      ]
+    },
+    {
+      "name": "Cloth",
+      "mesh": 0,
+      "skin": 0,
+      "translation": [
+        0.4,
+        -0.2,
+        0
+      ]
+    },
+    {
+      "name": "Matrix marker",
+      "mesh": 1,
+      "matrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0.8,
+        0.65,
+        0,
+        1
+      ]
+    },
+    {
+      "name": "Quaternion marker",
+      "mesh": 1,
+      "translation": [
+        0.8,
+        -0.65,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0.34289780745545134,
+        0.9393727128473789
+      ]
+    }
+  ],
+  "skins": [
+    {
+      "joints": [
+        1,
+        0
+      ],
+      "inverseBindMatrices": 7
+    }
+  ],
+  "animations": [
+    {
+      "name": "Wave",
+      "samplers": [
+        {
+          "input": 10,
+          "output": 11,
+          "interpolation": "LINEAR"
+        },
+        {
+          "input": 12,
+          "output": 13,
+          "interpolation": "CUBICSPLINE"
+        },
+        {
+          "input": 10,
+          "output": 14,
+          "interpolation": "STEP"
+        }
+      ],
+      "channels": [
+        {
+          "sampler": 0,
+          "target": {
+            "node": 0,
+            "path": "rotation"
+          }
+        },
+        {
+          "sampler": 1,
+          "target": {
+            "node": 1,
+            "path": "translation"
+          }
+        },
+        {
+          "sampler": 2,
+          "target": {
+            "node": 2,
+            "path": "weights"
+          }
+        }
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "nodes": [
+        0,
+        2,
+        3,
+        4
+      ]
+    }
+  ],
+  "scene": 0
+}

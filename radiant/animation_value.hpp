@@ -5,13 +5,13 @@
 enum AnimationValueType { ANIMATION_NUMBER, ANIMATION_VECTOR, ANIMATION_COLOR,
     ANIMATION_QUATERNION, ANIMATION_BOOLEAN, ANIMATION_STRING };
 enum AnimationInterpolation { ANIMATION_DISCRETE, ANIMATION_LINEAR,
-    ANIMATION_SMOOTH, ANIMATION_BEZIER };
+    ANIMATION_SMOOTH, ANIMATION_BEZIER, ANIMATION_HERMITE };
 enum AnimationEnding { ANIMATION_ZERO_CURVATURE, ANIMATION_ZERO_SLOPE, ANIMATION_WRAP };
 struct AnimationTrackView {
     const double* times;
     const double* values;
     const char* const* strings;
-    const double* in_tangents; // absolute time/value control-point pairs per component
+    const double* in_tangents; // Bezier: time/value pairs; Hermite: derivatives per second
     const double* out_tangents;
     unsigned keys, components;
     AnimationValueType type;

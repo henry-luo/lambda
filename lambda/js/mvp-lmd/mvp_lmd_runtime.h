@@ -14,6 +14,8 @@ struct MvpLmdClass {
     Item* values;                // constructor, prototype, statics; rooted program slots
     uint32_t slot;
     int64_t constructor_id;
+    TypeMap* allocation_shape;
+    bool reusable_layout;
 };
 // extended only for receiver-aware units; existing MVP function allocation stays unchanged.
 struct MvpLmdCallable : Function {
@@ -24,11 +26,20 @@ struct MvpLmdCallable : Function {
 };
 extern const TypeNominalExtension mvp_lmd_class_extension;
 MvpLmdClass* mvp_lmd_class_record(Item owner);
-struct MvpLmdPropertyCache {
+struct MvpLmdPropertyCacheEntry {
     TypeMap* shape;
     ShapeEntry* field;
     Item inherited;
+    int64_t offset;
+    uint64_t pointer_tag;
+    TypeId storage;
+    uint8_t pointer_lane;
     bool writable;
+};
+enum { MVP_LMD_PROPERTY_CACHE_SIZE = 4 };
+struct MvpLmdPropertyCache {
+    MvpLmdPropertyCacheEntry entries[MVP_LMD_PROPERTY_CACHE_SIZE];
+    uint8_t next;
 };
 enum MvpLmdFailure { LMD_MVP_CAPABILITY, LMD_MVP_REFERENCE, LMD_MVP_TYPE,
     LMD_MVP_RANGE, LMD_MVP_MEMORY };

@@ -1,0 +1,29 @@
+3dmodel 1.0
+Animated triangle
+CC0
+Lambda
+Geometry and bone action fixture
+
+Vertex
+0 0 0 1 #FFFFFFFF 0
+1 0 0 1
+0 1 0 1
+0 0 0 1
+
+Bones
+0 3 root
+
+Material copper
+Kd #FFB87333
+
+Mesh triangle
+use copper
+0 1 2
+
+Action 1000 nod
+frame 0
+0 0 3
+frame 1000
+0 1 3
+
+End
