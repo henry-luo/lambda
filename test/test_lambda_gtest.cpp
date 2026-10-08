@@ -274,9 +274,11 @@ struct TierParityFixture {
 };
 static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/zip_input.ls", "test/lambda/zip_input.txt"},
+    {"test/lambda/zip_jar.ls", "test/lambda/zip_jar.txt"},
     {"test/lambda/zip_errors.ls", "test/lambda/zip_errors.txt"},
     {"test/lambda/zip_retained_member.ls", "test/lambda/zip_retained_member.txt"},
     {"test/lambda/proc/zip_output.ls", "test/lambda/proc/zip_output.txt"},
+    {"test/lambda/proc/zip_jar_output.ls", "test/lambda/proc/zip_jar_output.txt"},
     {"test/lambda/map_virtual_admission.ls", "test/lambda/map_virtual_admission.txt"},
     {"test/lambda/map_virtual_equality.ls", "test/lambda/map_virtual_equality.txt"},
     {"test/lambda/proc/cow_var_typed_rebind.ls", "test/lambda/proc/cow_var_typed_rebind.txt"},

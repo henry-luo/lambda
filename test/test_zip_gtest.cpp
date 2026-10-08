@@ -42,6 +42,36 @@ TEST_F(ZipTest, CapturesIndexesAndLazilyDecodesOneMember) {
     zip_archive_release(archive);
 }
 
+TEST_F(ZipTest, JavaJarKeepsClassAndManifestReadsLazy) {
+    ZipArchive* archive = open("test/input/zip/sample.jar");
+    ASSERT_NE(archive, nullptr) << error.message;
+    EXPECT_EQ(zip_archive_entry(archive, 0)->child_count, 4u);
+    uint32_t compiled = find(archive, "example/Hello.class");
+    uint32_t manifest = find(archive, "META-INF/MANIFEST.MF");
+    ASSERT_NE(compiled, UINT32_MAX); ASSERT_NE(manifest, UINT32_MAX);
+    EXPECT_EQ(zip_archive_entry(archive, compiled)->method, 8u);
+    EXPECT_NE(zip_archive_entry(archive, compiled)->flags & 8, 0);
+    EXPECT_EQ(archive->decompressions, 0u);
+    ByteSpan bytes = {};
+    ASSERT_TRUE(zip_entry_bytes(archive, compiled, &bytes, &error)) << error.message;
+    const uint8_t java8[] = {0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 52};
+    ASSERT_GE(bytes.length, sizeof(java8));
+    EXPECT_EQ(memcmp(byte_span_data(&bytes), java8, sizeof(java8)), 0);
+    EXPECT_EQ(archive->decompressions, 1u);
+    ASSERT_TRUE(zip_entry_bytes(archive, manifest, &bytes, &error)) << error.message;
+    const char expected[] = "Manifest-Version: 1.0\r\nMain-Class: example.Hello\r\nCreated-By: Lambda ZIP fixture\r\n\r\n";
+    ASSERT_EQ(bytes.length, sizeof(expected) - 1);
+    EXPECT_EQ(memcmp(byte_span_data(&bytes), expected, sizeof(expected) - 1), 0);
+    ASSERT_TRUE(zip_entry_bytes(archive, compiled, &bytes, &error));
+    EXPECT_EQ(archive->decompressions, 2u);
+    ASSERT_TRUE(zip_entry_bytes(archive, find(archive, "resources/opaque.bin"), &bytes, &error));
+    const uint8_t opaque[] = {0, 255, 'P', 'K', 0};
+    ASSERT_EQ(bytes.length, sizeof(opaque));
+    EXPECT_EQ(memcmp(byte_span_data(&bytes), opaque, sizeof(opaque)), 0);
+    EXPECT_EQ(archive->decompressions, 3u);
+    zip_archive_release(archive);
+}
+
 TEST_F(ZipTest, Zip64AndBothDescriptors) {
     const char* names[] = {"test/input/zip/wide.zip", "test/input/zip/descriptor.zip", "test/input/zip/descriptor-signed.zip",
         "test/input/zip/descriptor64.zip", "test/input/zip/descriptor64-signed.zip"};

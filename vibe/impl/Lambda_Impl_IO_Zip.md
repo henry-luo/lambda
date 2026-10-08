@@ -112,3 +112,29 @@ memory-kind node fields. No ZIP or checked-length finding remains.
 its overall ratchet remains failing on existing deferred RT-to-Radiant imports
 (260 against baseline 165). Neither unrelated ratchet was relaxed. Logs and
 manual validation scripts are retained under `temp/`.
+
+## JAR regression coverage (2026-10-08)
+
+Added `test/input/zip/sample.jar`, compiled from the checked-in `Hello.java`
+with OpenJDK's `javac --release 8` and packaged by its `jar` tool. The fixture
+has a runnable `Main-Class` manifest, DEFLATE class/resource entries with data
+descriptors, the JAR extra field, JSON/text/binary resources, an empty file and
+a Unicode filename. `generate_jar.py` reproduces it using a JDK, with all
+scratch files under `temp/`; ordinary regression runs need no Java install.
+
+The native regression verifies zero decodes while indexing/reading metadata,
+individual member decoding and cached class reads
+(**S12.4.1v2/S14.3.1v2**). Two new goldens cover automatic/explicit ZIP input,
+filesystem navigation, manifest text, class-file bytes, resources and explicit
+ZIP output to a `.jar` target. Both join the existing tier-parity gate.
+
+- Native ZIP suite: **14/14 passed**.
+- Six ZIP goldens across interp/auto/jit, with ordinary and forced/poisoned
+  GC: **36/36 passed**.
+- Independent Python reader: CRCs and all 11 original/output entries match.
+- OpenJDK 25.0.2 runs both the original JAR and Lambda's rebuilt JAR, printing
+  `Hello from JAR!`; the application also checks its binary resource bytes.
+- Repeated fixture generation with the same JDK produces identical bytes.
+
+No runtime change was needed for JAR support. Reproduction commands and fixture
+contents are documented in `test/input/zip/README.md`.
