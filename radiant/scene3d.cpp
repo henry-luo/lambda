@@ -494,11 +494,14 @@ void scene3d_collect(DomDocument* document) {
     }
 }
 void scene3d_release_subtree(DomNode* root) {
-    if (!root || !root->doc) return;
-    Scene3dRegistry* registry=scene3d_registry(root->doc,false); if (!registry) return;
+    // only elements can contain scene instances and carry document ownership.
+    if (!root || !root->is_element()) return;
+    DomDocument* doc = root->as_element()->doc;
+    if (!doc) return;
+    Scene3dRegistry* registry=scene3d_registry(doc,false); if (!registry) return;
     Scene3dEntry** link=&registry->entries;
     while (*link) {
-        Scene3dEntry* entry=*link;DomNode* node=dom_node_ref_validate(root->doc,entry->root);bool contained=false;
+        Scene3dEntry* entry=*link;DomNode* node=dom_node_ref_validate(doc,entry->root);bool contained=false;
         for (DomNode* parent=node;parent;parent=parent->parent) if (parent==root) { contained=true;break; }
         if (contained) { *link=entry->next;scene3d_entry_destroy(entry);registry->count--; }
         else link=&entry->next;

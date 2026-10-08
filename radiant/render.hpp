@@ -389,6 +389,18 @@ bool svg_normalize_length_value(CssValue* value, const SvgLengthContext* context
     SvgLengthAxis axis, bool preserve_percentages = false,
     CssMathLeafResolver resolve_leaf = nullptr, void* leaf_context = nullptr);
 
+// scalar text metrics are copied before the transient font/document owners expire.
+struct SvgTextMeasurement {
+    bool valid;
+    float advance;
+    Bound logical;
+    Bound ink;
+    bool has_logical;
+    bool has_ink;
+};
+bool svg_text_measure_batch(DomElement* svg, const SvgLengthContext* lengths,
+    SvgTextMeasurement* measurements, size_t count);
+
 // caller-owned character-cell geometry shares the painter's positioned layout.
 RdtPath* svg_text_geometry_path(DomElement* element, const SvgLengthContext* lengths,
     FontContext* font_context);

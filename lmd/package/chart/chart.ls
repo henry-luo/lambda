@@ -17,27 +17,33 @@ import ann: .annotation
 import cloud: .wordcloud
 import source: .source
 import records: .records
+import text: .text
+import paint: .paint
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
 // ============================================================
 
-pub fn render(chart_el) {
+pub fn render(chart_el) => render_scoped(chart_el, "chart")
+
+fn render_scoped(chart_el, scope) {
     let tag = name(chart_el);
     if (tag == 'hconcat' or tag == 'vconcat')
-        render_concat(parse.parse_concat(chart_el))
+        render_concat(parse.parse_concat(chart_el), scope)
     else if (tag == 'repeat')
-        render_repeat(parse.parse_repeat(chart_el))
+        render_repeat(parse.parse_repeat(chart_el), scope)
     else
-        dispatch(parse.parse_chart(chart_el))
+        dispatch(parse.parse_chart(chart_el), scope)
 }
 
 // render from a pre-parsed spec map (no element tree needed)
-pub fn render_spec(spec) {
-    if (spec is element) render(spec)
-    else if (spec.concat) render_concat(spec)
-    else if (spec.repeat_row or spec.repeat_column) render_repeat(spec)
-    else dispatch(spec)
+pub fn render_spec(spec) => render_spec_scoped(spec, "chart")
+
+fn render_spec_scoped(spec, scope) {
+    if (spec is element) render_scoped(spec, scope)
+    else if (spec.concat) render_concat(spec, scope)
+    else if (spec.repeat_row or spec.repeat_column) render_repeat(spec, scope)
+    else dispatch(spec, scope)
 }
 
 fn resolve_data(spec) {
@@ -58,7 +64,7 @@ fn prepare_spec(spec) {
     {*:spec, data: prepared.data, encoding: prepared.encoding, transform: null}
 }
 
-fn dispatch(spec) => dispatch_prepared(prepare_spec(spec))
+fn dispatch(spec, scope = "chart") => dispatch_prepared({*:prepare_spec(spec), _paint_scope: scope})
 
 fn dispatch_prepared(resolved_spec) {
     let mapping_error = if (resolved_spec.data is array and resolved_spec.layer == null)
@@ -67,9 +73,15 @@ fn dispatch_prepared(resolved_spec) {
     else if (mapping_error is error) mapping_error
     else if (resolved_spec.facet) render_faceted(resolved_spec)
     else if (resolved_spec.layer) render_layered(resolved_spec)
-    else if (resolved_spec.mark and resolved_spec.mark.kind == "arc") render_arc(resolved_spec)
-    else if (resolved_spec.mark and resolved_spec.mark.kind == "wordcloud") render_wordcloud(resolved_spec)
-    else render_single(resolved_spec)
+    else {
+        let paints = paint.plan(view_paints(resolved_spec), resolved_spec._paint_scope);
+        let spec = {*:resolved_spec, _paints: paints};
+        // reject invalid paints before measuring guides or laying out marks (S7.4.1).
+        if (paints._error is error) paints._error
+        else if (spec.mark and spec.mark.kind == "arc") render_arc(spec)
+        else if (spec.mark and spec.mark.kind == "wordcloud") render_wordcloud(spec)
+        else render_single(spec)
+    }
 }
 
 fn mapping_error(spec) {
@@ -79,8 +91,23 @@ fn mapping_error(spec) {
         scale.position_scale(spec.encoding.y, spec.data, 1.0, 0.0, spec.mark.kind, false, spec.encoding.y2)])
 }
 
+// resolve paint values after transforms, including conditional/identity colors and unused legend entries.
+fn view_paints(spec) {
+    let theme = cfg.resolve_theme(spec.config);
+    let options = cfg.mark_config(theme, spec.mark);
+    let context = mark_context(spec.data, spec.encoding, null, null, {}, null);
+    [options.fill, options.color, options.stroke, theme.background, theme.title_color,
+        for (row in spec.data) for (key in ["color", "stroke"]) mark.appearance(context, key, row,
+            if (options.kind == "wordcloud" and key == "color") row.color else null),
+        for (value in context.color_scale.range) value,
+        for (key in ["color", "size", "shape"], let guide = cfg.legend_config(theme, spec.encoding[key]))
+            for (value in [guide.symbol_fill_color, guide.symbol_stroke_color]) value,
+        for (note in (if (spec.annotation != null) content(spec.annotation) else []))
+            for (value in [note.color, note.stroke]) value]
+}
+
 // Word clouds share chart data/composition while retaining their measured layout contract.
-fn cloud_marks(data, encoding, options, width, height, visual = null) {
+fn cloud_marks(data, encoding, options, width, height, visual = null, paints = null) {
     let text_ch = parse.get_channel(encoding, "text");
     let size_ch = parse.get_channel(encoding, "size");
     let color_ch = parse.get_channel(encoding, "color");
@@ -92,8 +119,8 @@ fn cloud_marks(data, encoding, options, width, height, visual = null) {
             {*:row,
                 text: parse.channel_value(text_ch, row, row.text),
                 weight: parse.channel_value(size_ch, row, row.weight),
-                color: mark.appearance({encoding: encoding, color_scale: color_scale}, "color", row,
-                    if (row.color != null) row.color else options.color),
+                color: paint.value(mark.appearance({encoding: encoding, color_scale: color_scale}, "color", row,
+                    if (row.color != null) row.color else options.color), paints),
                 font_size: if (row.font_size != null) row.font_size else options.font_size
             })
         else record];
@@ -103,14 +130,16 @@ fn cloud_marks(data, encoding, options, width, height, visual = null) {
 }
 
 fn render_wordcloud(spec) {
-    let theme = cfg.resolve_theme(spec.config);
+    let paints = spec._paints;
+    let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
     let data = transform.apply_transforms(if (spec.data) spec.data else [], spec.transform);
     let lay = layout.compute_layout(spec, null, null, false, null);
-    let image = cloud_marks(data, spec.encoding, cfg.mark_config(theme, spec.mark), lay.plot_w, lay.plot_h);
+    let image = if (paints._error is error) paints._error else
+        cloud_marks(data, spec.encoding, cfg.mark_config(theme, spec.mark), lay.plot_w, lay.plot_h, null, paints);
     if (image is error) image
     else {
         let result = assemble_svg(spec, lay, image, null, null, null, null, theme);
-        <svg *:map(result), role: "img",
+        if (result is error) result else <svg *:map(result), role: "img",
             'aria-label': if (spec.title) spec.title else "Word cloud",
             'data-unplaced': image["data-unplaced"],
             for (child in content(result)) child>
@@ -123,7 +152,8 @@ fn render_wordcloud(spec) {
 
 fn render_single(spec) {
     // resolve theme
-    let theme = cfg.resolve_theme(spec.config);
+    let paints = spec._paints;
+    let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
     let axis_cfg = cfg.axis_config(theme);
     let legend_cfg = cfg.legend_config(theme);
 
@@ -196,16 +226,8 @@ fn render_single(spec) {
     else build_position_scale_y2(y_ch, data, lay.plot_h, 0.0, mark_type, y2_ch);
 
     // The same context resolves every visual encoding in single and layered views.
-    let mark_ctx = mark_context(data, enc, x_scale, y_scale, lay, stack_mode);
+    let mark_ctx = {*:mark_context(data, enc, x_scale, y_scale, lay, stack_mode), _paints: paints};
     let marks_el = render_mark(mark_type, data, mark_ctx, mark_spec);
-
-    // render annotations
-    let annotation_el = if (spec.annotation)
-        ann.render_annotations(spec.annotation, x_scale, y_scale, lay.plot_w, lay.plot_h, theme)
-    else null;
-    let marks_with_ann = if (annotation_el)
-        svg.group_class("plot-content", [marks_el, annotation_el])
-    else marks_el;
 
     // render axes
     let x_title = if (x_ch and x_ch.title) x_ch.title
@@ -213,8 +235,18 @@ fn render_single(spec) {
     let y_title = if (y_ch and y_ch.title) y_ch.title
         else if (y_field) y_field else null;
 
-    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, cfg.axis_config(theme, x_ch), x_title) else null;
-    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, cfg.axis_config(theme, y_ch), y_title) else null;
+    let notes = if (spec.annotation != null) [ann.prepare(spec.annotation, x_scale, y_scale,
+        lay.plot_w, lay.plot_h, theme, spec.clip or theme.view_clip)] else [];
+    let guide_layout = layout.resolve_labels([
+        if (x_scale != null) {key: "x", mapping: x_scale, config: lay.x_axis_config, title: x_title},
+        if (y_scale != null) {key: "y", mapping: y_scale, config: lay.y_axis_config, title: y_title}] |: ~ != null, notes, lay);
+    let x_plan = (guide_layout.axes |: ~.key == "x")[0];
+    let y_plan = (guide_layout.axes |: ~.key == "y")[0];
+    let x_axis_el = if (x_scale) render_layer_axis(x_plan, lay) else null;
+    let y_axis_el = if (y_scale) render_layer_axis(y_plan, lay) else null;
+    let annotation_el = if (len(notes) > 0) ann.render_plan(guide_layout.annotations[0]) else null;
+    let marks_with_ann = if (marks_el is error) marks_el else if (annotation_el is error) annotation_el
+        else if (annotation_el != null) svg.group_class("plot-content", [marks_el, annotation_el]) else marks_el;
 
     let x_guide = cfg.axis_config(theme, x_ch);
     let y_guide = cfg.axis_config(theme, y_ch);
@@ -235,38 +267,45 @@ fn render_single(spec) {
 // ============================================================
 
 fn render_layered(spec) {
-    let theme = cfg.resolve_theme(spec.config);
     let prepared = prepare_layers(spec.layer, spec);
     let data_error = util.first_error([for (layer in prepared)
         if (layer.data is error) layer.data else mapping_error(layer)]);
     if (data_error is error) data_error else {
         let layers = [for (layer in prepared) prepare_mark_data(layer)];
+        let paints = paint.plan([*view_paints(spec), for (layer in layers) for (value in view_paints(layer)) value], spec._paint_scope);
+        if (paints._error is error) paints._error else {
+        let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
         let shared_visual = layer_visual_scales(layers);
-        let guide_plans = layer_guide_plans(layers, shared_visual, spec.resolve);
+        let guide_plans = layer_guide_plans(layers, shared_visual, spec.resolve, paints);
         let view_spec = {*:spec, encoding: if (len(layers) > 0) layers[0].encoding else {}};
         let rough = layer_scales(layers, spec.resolve, float(spec.width), float(spec.height));
         let rough_axes = layer_axes(layers, rough, spec.resolve);
         let lay = layout.compute_layout(view_spec, rough[0].x, rough[0].y, false, null, guide_plans, rough_axes);
         let mappings = layer_scales(layers, spec.resolve, lay.plot_w, lay.plot_h);
-        let axes = layer_axes(layers, mappings, spec.resolve);
+        let axes = [for (guide in rough_axes) {*:guide, mapping: mappings[guide.index][guide.key]}];
+        let note_plans = [for (index, layer in layers) {*:ann.prepare(layer.annotation,
+            mappings[index].x, mappings[index].y, lay.plot_w, lay.plot_h,
+            {*:cfg.resolve_theme(layer.config), _paints: paints}, spec.clip or theme.view_clip)},
+            {*:ann.prepare(spec.annotation, mappings[0].x, mappings[0].y, lay.plot_w, lay.plot_h,
+                theme, spec.clip or theme.view_clip)}];
+        let guide_layout = layout.resolve_labels(axes, note_plans, lay);
         let marks = [for (index, layer in layers) (
             let options = cfg.mark_config(cfg.resolve_theme(layer.config), layer.mark),
             let base = mark_context(layer.data, layer.encoding, mappings[index].x, mappings[index].y, lay, layer.stack_mode),
-            let context = resolved_visual_context(base, shared_visual, spec.resolve),
-            let image = if (options.kind == "wordcloud") cloud_marks(layer.data, layer.encoding, options, lay.plot_w, lay.plot_h, context)
+            let context = {*:resolved_visual_context(base, shared_visual, spec.resolve), _paints: paints},
+            let image = if (options.kind == "wordcloud") cloud_marks(layer.data, layer.encoding, options, lay.plot_w, lay.plot_h, context, paints)
                 else render_mark(options.kind, layer.data, context, options),
             // Preserve leaf diagnostics before annotations wrap the rendered value (S7.4.1).
             if (image is error) image
+            else if (guide_layout.annotations[index]._error is error) guide_layout.annotations[index]._error
             else if (layer.annotation != null) svg.group_class("layer-content", [image,
-                ann.render_annotations(layer.annotation, mappings[index].x, mappings[index].y,
-                    lay.plot_w, lay.plot_h, cfg.resolve_theme(layer.config))]) else image)];
-        let failure = util.first_error(marks);
-        let axis_elements = [for (guide in axes) render_layer_axis(guide, lay)];
+                ann.render_plan(guide_layout.annotations[index])]) else image)];
+        let failure = util.first_error([*marks, guide_layout.annotations[len(layers)]._error]);
+        let axis_elements = [for (guide in guide_layout.axes) render_layer_axis(guide, lay)];
         let grids = [for (guide in axes where guide.config.grid)
             if (guide.key == "x") axis.x_axis_grid(guide.mapping, lay.plot_w, lay.plot_h, guide.config)
             else axis.y_axis_grid(guide.mapping, lay.plot_w, lay.plot_h, guide.config)];
-        let notes = if (spec.annotation != null) ann.render_annotations(spec.annotation,
-            mappings[0].x, mappings[0].y, lay.plot_w, lay.plot_h, theme) else null;
+        let notes = if (spec.annotation != null) ann.render_plan(guide_layout.annotations[len(layers)]) else null;
         let all_marks = svg.group_class("marks layers", [*marks, if (notes != null) notes]);
         if (failure is error) failure
         else assemble_svg(view_spec, lay, all_marks,
@@ -274,6 +313,7 @@ fn render_layered(spec) {
             if (len(axis_elements) == 2) axis_elements[1]
             else if (len(axis_elements) > 2) svg.group_class("axes", slice(axis_elements, 1)) else null,
             if (len(grids) > 0) svg.group_class("grids", grids) else null, leg.render_plans(guide_plans, lay), theme)
+        }
     }
 }
 
@@ -295,15 +335,16 @@ fn layer_axes(layers, mappings, resolve) {
         let selected = if (independent) candidates else slice(candidates, 0, 1))
         for (ordinal, candidate in selected,
             let channel = candidate.layer.encoding[key],
-            let options = cfg.axis_config(cfg.resolve_theme(candidate.layer.config), channel),
+            let own_options = cfg.axis_config(cfg.resolve_theme(candidate.layer.config), channel),
             let mapping = mappings[candidate.index][key]
-            where options.enabled and mapping.kind != "identity") (
-            let orient = if (options.orient != null) options.orient else if (key == "x")
-                (if (ordinal % 2 == 0) "bottom" else "top") else if (ordinal % 2 == 0) "left" else "right",
+            where own_options.enabled and mapping.kind != "identity") (
             let title = if (channel.title != null) channel.title else channel.field,
-            let space = if (key == "x") axis.estimate_x_axis_height(options, title != null and options.title_enabled, mapping)
-                else axis.estimate_y_axis_width(mapping, options),
-            {key: key, mapping: mapping, title: title, orient: orient,
+            let orient = if (own_options.orient != null) own_options.orient else if (key == "x")
+                (if (ordinal % 2 == 0) "bottom" else "top") else if (ordinal % 2 == 0) "left" else "right",
+            let options = axis.prepare(mapping, {*:own_options, orient: orient}, title),
+            let space = if (key == "x") axis.estimate_x_axis_height(options, title != null and options.title_enabled, mapping, title)
+                else axis.estimate_y_axis_width(mapping, options, title),
+            {key: key, index: candidate.index, mapping: mapping, title: title, orient: orient,
                 config: {*:options, orient: orient}, space: space + abs(if (options.offset != null) options.offset else 0.0)})];
     [for (index, guide in guides) (
         let previous = sum([for (prior in slice(guides, 0, index) where prior.orient == guide.orient) prior.space]),
@@ -336,7 +377,7 @@ fn resolved_visual_context(context, shared, resolve) {
         for (part in [key ++ "_scale", shared[key ++ "_scale"]]) part])}
 }
 
-fn layer_guide_plans(layers, shared, resolve) {
+fn layer_guide_plans(layers, shared, resolve, paints) {
     [for (key in ["color", "size", "shape"],
         // Word sizes use measured font layout, so symbol-area guides belong to Cartesian leaves.
         let candidates = [for (layer in layers where layer.encoding[key].field != null and layer.mark.kind != "wordcloud") layer],
@@ -345,7 +386,8 @@ fn layer_guide_plans(layers, shared, resolve) {
         for (layer in selected,
             let context = mark_context(layer.data, layer.encoding, null, null, {}, layer.stack_mode),
             let mappings = resolved_visual_context(context, shared, resolve))
-            for (plan in leg.plans(map([key, layer.encoding[key]]), mappings, cfg.resolve_theme(layer.config))) plan]
+            for (plan in leg.plans(map([key, layer.encoding[key]]), mappings,
+                {*:cfg.resolve_theme(layer.config), _paints: paints})) plan]
 }
 
 // Resolve dataflow at each layer boundary before flattening leaves into the shared plot.
@@ -373,7 +415,8 @@ fn prepare_layers(layers, parent) {
 // ============================================================
 
 fn render_arc(spec) {
-    let theme = cfg.resolve_theme(spec.config);
+    let paints = spec._paints;
+    let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
     let legend_cfg = cfg.legend_config(theme);
     let raw_data = if (spec.data) spec.data else [];
     let data = transform.apply_transforms(raw_data, spec.transform);
@@ -402,6 +445,7 @@ fn render_arc(spec) {
 
     // render arcs
     let arc_ctx = {
+        _paints: paints,
         encoding: enc,
         theta_field: theta_field,
         color_scale: color_scale, color_field: color_field,
@@ -416,17 +460,14 @@ fn render_arc(spec) {
     // assemble
     let width = lay.total_w;
     let height = lay.total_h;
-    let bg = <rect width: width, height: height, fill: theme.background>;
+    let bg = <rect width: width, height: height, fill: paint.value(theme.background, paints)>;
 
-    let children0 = [bg, arcs_el];
+    let children0 = [paint.definitions(paints), bg, arcs_el];
 
     // title
     let children1 = if (spec.title)
         [*children0,
-         <text x: lay.total_w / 2.0, y: lay.title_y,
-               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color,
-             spec.title
-         >]
+         layout.title_element(spec.title, lay, theme)]
     else children0;
 
     // legend
@@ -435,7 +476,8 @@ fn render_arc(spec) {
          if (legend_el.class == "legends") legend_el else <g transform: svg.translate(lay.legend_x, lay.legend_y), legend_el>]
     else children1;
 
-    svg.svg_root(width, height, children, cfg.svg_attributes(theme))
+    let failure = util.first_error([paints._error, lay._error, arcs_el, legend_el]);
+    if (failure is error) failure else svg.svg_root(width, height, children, cfg.svg_attributes(theme))
 }
 
 // ============================================================
@@ -604,12 +646,14 @@ fn render_mark_raw(mark_type, data, ctx, mark_spec) {
 // ============================================================
 
 fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, theme) {
+    let failure = util.first_error([theme._paints._error, lay._error, marks_el, x_axis_el, y_axis_el, legend_el]);
+    if (failure is error) failure else {
     // Preserve fractional dimensions for measured marks and SVG viewports.
     let width = lay.total_w;
     let height = lay.total_h;
 
     // background
-    let bg = <rect width: width, height: height, fill: theme.background>;
+    let bg = <rect width: width, height: height, fill: paint.value(theme.background, theme._paints)>;
 
     // plot group contents
     let plot_children0 = [if (spec.clip or theme.view_clip) clip_marks(marks_el, lay.plot_w, lay.plot_h) else marks_el];
@@ -620,15 +664,12 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
     // plot group (translated by margins)
     let plot_group = svg.group(svg.translate(lay.plot_x, lay.plot_y), plot_children);
 
-    let children0 = [bg, plot_group];
+    let children0 = [paint.definitions(theme._paints), bg, plot_group];
 
     // title
     let children1 = if (spec.title)
         [*children0,
-         <text x: lay.total_w / 2.0, y: lay.title_y,
-               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color,
-             spec.title
-         >]
+         layout.title_element(spec.title, lay, theme)]
     else children0;
 
     // legend
@@ -638,6 +679,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
     else children1;
 
     svg.svg_root(width, height, children, cfg.svg_attributes(theme))
+    }
 }
 
 // ============================================================
@@ -645,7 +687,9 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
 // ============================================================
 
 fn render_faceted(spec) {
-    let theme = cfg.resolve_theme(spec.config);
+    let base_theme = cfg.resolve_theme(spec.config);
+    let paints = paint.plan([base_theme.background, base_theme.title_color], spec._paint_scope);
+    let theme = {*:base_theme, _paints: paints};
     let raw_data = if (spec.data) spec.data else [];
     let data = transform.apply_transforms(raw_data, spec.transform);
     let facet = spec.facet;
@@ -662,34 +706,34 @@ fn render_faceted(spec) {
     let sub_w = float(spec.width);
     let sub_h = float(spec.height);
     let spacing = if (facet.spacing != null) facet.spacing else 20;
-    let flay = layout.compute_facet_layout(n, columns, sub_w, sub_h, spacing, spec.title, spec.padding);
+    let headers = [for (key in facet_keys) if (two_fields)
+        join([for (value in key where value != null) string(value)], " / ") else string(key)];
+    let flay = layout.compute_facet_layout(n, columns, sub_w, sub_h, spacing, spec.title, spec.padding, theme, headers);
     let encoding = shared_encoding(spec.encoding, data, spec.mark.kind, spec.resolve);
-    let images = [for (key in facet_keys) (
+    let images = [for (index, key in facet_keys) (
         let cell_data = if (two_fields) (data |: (row_field == null or ~[row_field] == key[0]) and
             (column_field == null or ~[column_field] == key[1])) else (data |: ~[facet.field] == key),
-        dispatch({*:spec, data: cell_data, facet: null, title: null, encoding: encoding}))];
-    let failure = util.first_error(images);
+        dispatch({*:spec, data: cell_data, facet: null, title: null, encoding: encoding},
+            spec._paint_scope ++ "-f" ++ string(index)))];
+    let failure = util.first_error([paints._error, flay._error, *images]);
     if (failure is error) failure else {
     let cells = [for (i in 0 to (n - 1),
         let key = facet_keys[i], let pos = layout.facet_cell_pos(flay, i))
         <g transform: svg.translate(pos.x, pos.y + flay.header_h),
-            <text x: sub_w / 2.0, y: -4.0, 'text-anchor': "middle", 'font-size': 12, 'font-weight': "bold", fill: theme.title_color,
-                if (two_fields) join([for (value in key where value != null) string(value)], " / ") else string(key)>
+            <text x: sub_w / 2.0, y: 0.0 - flay.headers[i].bottom - 4.0, 'text-anchor': "middle",
+                *:text.attributes(flay.header_font), fill: paint.value(theme.title_color, paints), headers[i]>
             images[i]>
     ];
 
     // background + title + cells
-    let bg = <rect width: flay.total_w, height: flay.total_h, fill: theme.background>;
-    let children0 = [bg, *cells];
+    let bg = <rect width: flay.total_w, height: flay.total_h, fill: paint.value(theme.background, paints)>;
+    let children0 = [paint.definitions(paints), bg, *cells];
     let children = if (spec.title)
         [*children0,
-         <text x: flay.total_w / 2.0, y: float(spec.padding.top) + 16.0,
-               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color,
-             spec.title
-         >]
+         layout.title_element(spec.title, flay, theme)]
     else children0;
 
-    svg.svg_root(flay.total_w, flay.total_h, children)
+    svg.svg_root(flay.total_w, flay.total_h, children, cfg.svg_attributes(theme))
     }
 }
 
@@ -697,16 +741,16 @@ fn render_faceted(spec) {
 // Concat composition (hconcat / vconcat)
 // ============================================================
 
-fn render_concat(spec) {
+fn render_concat(spec, scope) {
     let direction = spec.concat;
     let spacing = float(spec.spacing);
     let subs = spec.children;
     let n = len(subs);
 
     // render each child chart independently (skip if already SVG)
-    let sub_svgs = [for (s in subs)
+    let sub_svgs = [for (index, s in subs)
         if (s is element and name(s) == 'svg') s
-        else render_spec(s)];
+        else render_spec_scoped(s, scope ++ "-c" ++ string(index))];
 
     let failure = util.first_error(sub_svgs);
     if (failure is error) failure else {
@@ -761,7 +805,7 @@ fn position_subs(sizes, is_h, spacing, idx, offset, acc) {
 // Repeat composition (parameterized chart grid)
 // ============================================================
 
-fn render_repeat(spec) {
+fn render_repeat(spec, scope) {
     let row_fields = if (spec.repeat_row) spec.repeat_row else [""];
     let col_fields = if (spec.repeat_column) spec.repeat_column else [""];
     let tmpl = spec.template;
@@ -776,25 +820,25 @@ fn render_repeat(spec) {
                           let ci = i % n_cols,
                           let rf = row_fields[ri],
                           let cf = col_fields[ci])
-        substitute_and_render(tmpl, rf, cf)];
+        substitute_and_render(tmpl, rf, cf, scope ++ "-r" ++ string(i))];
 
     // build each row as an hconcat of its column charts
     let rows_svgs = [for (ri in 0 to (n_rows - 1),
                          let row_charts = [for (ci in 0 to (n_cols - 1)) sub_charts[ri * n_cols + ci]],
                          let row_spec = {concat: "horizontal", spacing: 10.0, children: row_charts})
-        render_concat(row_spec)];
+        render_concat(row_spec, scope ++ "-row" ++ string(ri))];
 
     if (n_rows == 1) rows_svgs[0]
-    else render_concat({concat: "vertical", spacing: 10.0, children: rows_svgs})
+    else render_concat({concat: "vertical", spacing: 10.0, children: rows_svgs}, scope)
 }
 
 // substitute {repeat: "row"} and {repeat: "column"} in template and render
-fn substitute_and_render(tmpl, row_field, col_field) {
+fn substitute_and_render(tmpl, row_field, col_field, scope) {
     let spec = if (tmpl is element) parse.parse_chart(tmpl) else tmpl;
     let prepared = prepare_spec(substitute_spec(spec, row_field, col_field));
     // Derived color fields need their transformed values before repeat domains are fixed.
     if (prepared.data is error) prepared.data
-    else dispatch_prepared({*:prepared, encoding: shared_encoding(prepared.encoding, prepared.data, spec.mark.kind,
+    else dispatch_prepared({*:prepared, _paint_scope: scope, encoding: shared_encoding(prepared.encoding, prepared.data, spec.mark.kind,
         {scale: {x: "independent", y: "independent"}})})
 }
 

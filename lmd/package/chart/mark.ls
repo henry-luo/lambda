@@ -9,6 +9,7 @@ import scale: .scale
 import parse: .parse
 import cfg: .config
 import records: .records
+import paint: .paint
 
 fn coordinate(ctx, channel_name, row, fallback = null) float | null | error {
     let channel = parse.channel_definition(parse.get_channel(ctx.encoding, channel_name), row);
@@ -53,9 +54,9 @@ fn style(ctx, row, options, defaults, linear = false) {
     let stroke_fallback = if (options.stroke != null) options.stroke
         else if (linear) appearance(ctx, "color", row, if (options.color != null) options.color else defaults.stroke)
         else defaults.stroke;
-    cfg.settings({*:defaults, fill: fill,
+    cfg.settings({*:defaults, fill: paint.value(fill, ctx._paints),
         opacity: appearance(ctx, "opacity", row, if (options.opacity != null) options.opacity else defaults.opacity),
-        stroke: appearance(ctx, "stroke", row, stroke_fallback),
+        stroke: paint.value(appearance(ctx, "stroke", row, stroke_fallback), ctx._paints),
         'stroke-width': if (options.stroke_width != null) options.stroke_width else defaults["stroke-width"],
         'stroke-dasharray': if (options.stroke_dash != null) options.stroke_dash else defaults["stroke-dasharray"]})
 }
@@ -182,7 +183,7 @@ pub fn line_mark(data, ctx, mark_config) {
             {fill: "none", stroke: s.color, 'stroke-width': stroke_w, opacity: opacity}, true), tooltip(ctx, s.items[0])>,
         let point_els = if (show_points)
             [for (index, p in points)
-                <circle cx: p[0], cy: p[1], r: 3, fill: s.color,
+                <circle cx: p[0], cy: p[1], r: 3, fill: paint.value(s.color, ctx._paints),
                         stroke: "white", 'stroke-width': 1, tooltip(ctx, s.items[index])>]
         else [],
         [line_el, *point_els]

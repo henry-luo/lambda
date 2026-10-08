@@ -310,6 +310,13 @@ and corner radius, line points, arc radii and padding, and text font size.
 Encoding values refine the corresponding default appearance. Support is
 mark-specific; the remaining styling and channel gaps are recorded in §10.
 
+Mark `fill`, `stroke`, and `color` accept solid colors, linear/radial gradients,
+and hatch patterns. Color encodings can supply the same paints as constants,
+conditional values, identity-scale field values, or categorical palette entries.
+Legend symbols retain their palette paint. Line colors apply to strokes and
+optional point overlays; wordcloud colors apply to text. See §8 for the paint
+vocabulary.
+
 ### Stacking and grouping
 
 Bar and area charts with a color grouping default to zero-based stacking,
@@ -595,8 +602,25 @@ Axes provide a domain line, ticks, labels, and optional field titles.
 Per-channel `axis` settings control orientation, domain/tick/label visibility,
 explicit `values`, `tick_count`, label angle/limit/overlap, formatting,
 typography, and title. `axis: null` or `false` suppresses the guide. Rotated
-labels contribute their estimated bounds to the axis margins. Temporal labels
-accept datetime format strings; `hh`/`h` use 24-hour time and `HH` uses
+labels contribute their measured, rotated bounds to the axis margins. Guide
+labels use the resolved font family, size, weight, style, and spacing; emitted
+SVG text carries the same settings. `label_limit` fits a label and its ellipsis
+into a pixel width, preserving whole grapheme clusters. Combining marks,
+emoji sequences, and regional-indicator flag pairs stay together. A limit too
+small for the ellipsis produces an empty label. `label_overlap: "hide"` (or
+`true`) culls labels using their measured bounds at the actual tick positions,
+for horizontal and vertical axes and reversed scales. It retains both endpoint
+labels when they fit; `label_separation` sets the minimum gap in CSS pixels.
+Within a view, the same overlap policy also checks labels against other axes,
+guide titles, legends, the chart title, and text annotations. Independent-axis
+offsets and text rotation contribute to these comparisons. Titles, legends,
+and labels whose overlap policy is disabled retain their authored content.
+Optional annotations take priority over optional axis labels; within each
+kind, earlier annotations or guides take priority. Tick marks remain when
+their labels are culled. Plot clipping excludes invisible annotation bounds
+from collision checks.
+
+Temporal labels accept datetime format strings; `hh`/`h` use 24-hour time and `HH` uses
 12-hour time, following the [datetime contract](Lambda_Type_Datetime.md#formatting).
 `tick_count: {interval: "month", step: 1}` requests an explicit calendar interval.
 
@@ -620,6 +644,22 @@ reserve separate space. Symbol legends accept `direction`, `columns`,
 fill/stroke colors, stroke width, and opacity. Continuous legends support
 horizontal or vertical direction, `gradient_length`, and `gradient_thickness`.
 
+Axis labels and titles, legend labels and titles, chart titles, and facet
+headings reserve space from actual font metrics and visible glyph bounds,
+including italic overhangs and fallback glyphs. Legend rows grow to accommodate
+large fonts and symbols. The chart's default font is `"Arial"`; `font` changes
+the inherited family. Guide `label_font_family`, `label_font_size`,
+`label_font_weight`, and `label_font_style` settings override it; the equivalent
+`title_font_*` settings control guide titles. `label_letter_spacing` and
+`label_word_spacing` are measured and emitted together.
+
+Measurement follows Radiant's SVG text capabilities. General complex-script
+shaping remains a font-engine limitation. Available fonts affect chart geometry;
+viewing SVG with a different resolved font can change text extents. The same
+font resources are needed for reproducible output. Host measurement is a
+read-only function under **D7.4.6** and **S12.1.1v2**; a measurement failure
+returns a chart diagnostic under **S7.4.1**.
+
 Configuration supplies background, typography, mark, axis, grid, legend,
 and title defaults. Presets are `light`, `dark`, `minimal`, and `presentation`;
 `theme` may also be a custom map. The cascade is theme, chart configuration,
@@ -633,7 +673,10 @@ Annotations add explanation in data coordinates without adding a data series.
 The current native form is `<annotation>` containing:
 
 - `<text_note>` with `x`/`y` or plot-local `px`/`py`, `text`, and optional color,
-  font size, anchor, and `dx`/`dy` offsets.
+  font family/size/weight/style, letter/word spacing, anchor, and `dx`/`dy`
+  offsets. Text uses measured bounds with the emitted font. Authored notes
+  retain their positions; `label_overlap: "hide"` or `true` permits culling
+  against fixed guides and other notes, with `label_separation` setting the gap.
 - `<rule_note>` with `x` or `y`, color, stroke width, and optional dash pattern.
 - `<region_note>` with optional `x`/`x2` and `y`/`y2` bounds, color, opacity,
   stroke, and hover-title `text`. Omitted bounds extend to the plot edges.
@@ -660,6 +703,41 @@ charting runtime is required. Callers serialize standalone SVG with
 `format(result, 'xml')`, embed the element in a document, or use `lambda view`
 and `lambda render` on a script returning it. File writes remain procedural
 (S12.1.1v2).
+
+### Gradient and hatch paints
+
+A gradient uses the [Vega-Lite gradient vocabulary](https://vega.github.io/vega-lite/docs/gradient.html):
+`{gradient: "linear" | "radial", stops: [{offset, color, opacity?}, ...]}`.
+Stops require nonempty color strings and nondecreasing offsets in `[0, 1]`;
+equal offsets give a sharp transition. Optional stop opacity also lies in
+`[0, 1]`, with zero preserving transparency.
+
+Linear `x1`, `y1`, `x2`, and `y2` default to `0`, `0`, `1`, and `0`.
+Radial paints use the first point and `r1` for the inner circle and the second
+point and `r2` for the outer circle; both centers default to `(0.5, 0.5)`,
+and the radii to `0` and `0.5`. Radii must be nonnegative with `r1 <= r2`.
+Coordinates are relative to each painted shape's bounding box, following
+[SVG paint-server coordinates](https://www.w3.org/TR/SVG2/pservers.html).
+The optional `spread` is `"pad"` (default), `"repeat"`, or `"reflect"`.
+
+A hatch uses `{pattern: "hatch", color, background?, spacing, angle,
+stroke_width, opacity, cross}`. Defaults are gray stripes, a transparent
+background, 8 CSS pixels of spacing, a 45-degree rotation of vertical stripes,
+1-pixel strokes, full stripe opacity, and `cross: false`. `cross: true` adds
+perpendicular stripes. Spacing is positive; stroke width is nonnegative.
+Mark opacity applies to the complete painted mark, while hatch opacity applies
+only to its stripes. Invalid paint options return a value error (S7.4.1).
+
+```lambda
+<mark type: "bar", fill: {gradient: "linear", x1: 0, y1: 1, x2: 0, y2: 0,
+    stops: [{offset: 0, color: "#deebf7"}, {offset: 1, color: "#3182bd"}]}>
+```
+
+Paints also work for annotation colors/strokes, chart backgrounds and titles,
+and explicit legend symbol fills/strokes. They retain their appearance in
+layers, facets, repeats, and nested concatenations. Gradient fills are distinct
+from the continuous-color legend bar and do not change the scale's mapping.
+
 
 ## 9. Word and tag clouds
 
@@ -793,8 +871,13 @@ waterfall composition are implemented. Independent layer scales, layered
 stack extents, size/shape legends, arc-legend placement, aggregate categorical
 sorting, broader numeric formats, midpoint-aware color, calendar ticks,
 time-unit grouping, composite styles/tooltips, shaded regions, and plot
-clipping are also supported. The following gaps remain. These are feature
-contracts and proposal boundaries, not an implementation roadmap.
+clipping are also supported. Font-based guide measurement, pixel-width label
+limits, truncation at grapheme boundaries, and label collision checks across
+guides and annotations are supported. Mark gradients, radial gradients, hatch
+patterns, and their composition/legend integration are also supported.
+The following gaps remain. These are
+feature contracts and proposal boundaries, not an
+implementation roadmap.
 
 ### Completion of the existing chart design
 
@@ -804,9 +887,7 @@ contracts and proposal boundaries, not an implementation roadmap.
 | Temporal analysis | Named time zones and daylight-saving-aware calendar intervals |
 | Stack control | Richer stream-graph presentation beyond centered stacks |
 | Composition | Full scale/guide/config resolution across nested view boundaries |
-| Guides | Comprehensive label collision handling and font-accurate label measurement |
 | Highlighting | Vega expression-string conditions |
-| SVG presentation | Integrated gradient fills, radial gradients, and hatch patterns; continuous-color legend bars do not imply this broader fill contract |
 | Responsive sizing | Container-driven or automatic dimensions and aspect-ratio sizing beyond scaling a fixed SVG `viewBox` |
 
 ### Proposed specialized extensions

@@ -28,6 +28,7 @@ fn chart_settings(value) {
 
 pub let light_theme = {
     background: "white",
+    font: "Arial",
     title_color: "#333",
     title_font_size: 16,
     axis_domain_color: "#888",
@@ -85,7 +86,7 @@ pub fn svg_attributes(theme) => if (theme.font != null) {'font-family': theme.fo
 // ============================================================
 
 pub fn axis_config(theme, channel = null) {
-    {*:prefixed(theme, "axis_"), *:settings(channel.axis),
+    {font_family: theme.font, *:prefixed(theme, "axis_"), *:settings(channel.axis),
         format: if (channel.axis and channel.axis.format != null) channel.axis.format else channel.format,
         dtype: if (channel._temporal) "temporal" else channel.dtype,
         timezone: channel.scale.timezone,
@@ -98,7 +99,7 @@ pub fn axis_config(theme, channel = null) {
 // ============================================================
 
 pub fn legend_config(theme, channel = null) {
-    {*:prefixed(theme, "legend_"), *:settings(channel.legend),
+    {font_family: theme.font, _paints: theme._paints, *:prefixed(theme, "legend_"), *:settings(channel.legend),
         title_enabled: not parse.has_attribute(channel.legend, "title") or channel.legend.title != null,
         enabled: channel == null or parse.option_enabled(channel, "legend")}
 }
