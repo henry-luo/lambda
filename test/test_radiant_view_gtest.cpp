@@ -1405,6 +1405,34 @@ TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {
     EXPECT_TRUE(test_radiant_view_profile_has_intrinsic_measurement(view_log));
 }
 
+TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
+    const char* paths[] = {"test/input/zip", "test/input/zip/wide.zip",
+        "test/input/zip/viewer.zip", "test/input/zip/empty.zip", "test/input/zip/renamed.dat", "test/input/zip/extensionless",
+        "test/input/zip/office.docx", "test/input/zip/sample.jar"};
+    const char* view_log = "./temp/test_radiant_view_archive_tree.log";
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "INFO"}, {NULL, NULL},
+    };
+    test_radiant_view_ensure_temp_dir();
+    for (const char* path : paths) {
+        SCOPED_TRACE(path);
+        remove(view_log);
+        ShellResult result = test_radiant_view_run_logged_headless(path, nullptr, env);
+        EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        EXPECT_TRUE(test_radiant_view_file_contains(view_log, "VIEW_FILE_TREE:"));
+        shell_result_free(&result);
+    }
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, RejectsUnsafeArchiveBeforeOpeningTree) {
+    ASSERT_TRUE(test_radiant_view_file_readable("./lambda.exe"));
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/input/zip/traversal.zip", nullptr, nullptr);
+    EXPECT_NE(result.exit_code, 0);
+    shell_result_free(&result);
+}
+
 TEST(RadiantViewTest, ReusesCleanRowsAfterDirectoryClose) {
     const char* page = "lmd/package/doc/doc_viewer.ls";
     const char* events = "test/ui/doc_viewer_layout_shift.json";

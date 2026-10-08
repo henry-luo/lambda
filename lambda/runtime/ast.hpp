@@ -1329,4 +1329,3 @@ void print_root_item(StrBuf *strbuf, Item item, const char* indent="  ");
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, const char* indent);
 
 // for debugging onnly
-void log_item(Item item, const char* msg="");

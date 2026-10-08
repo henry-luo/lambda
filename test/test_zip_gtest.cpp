@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "../lambda/io/zip_archive.hpp"
 #include "../lambda/io/fs_node.hpp"
+#include "../lambda/core/print.h"
 #include "../lambda/input/input.hpp"
 #include "../lib/file.h"
 #include "../lib/endian.h"
@@ -236,6 +237,28 @@ TEST_F(ZipTest, NestedLimitsShareDeclaredAndActualExpansion) {
     outer->budget->limits.nesting_depth = 0;
     EXPECT_EQ(zip_archive_open(byte_span_data(&nested), nested.length, nullptr, outer->budget, 1, &error), nullptr);
     zip_archive_release(outer);
+}
+
+TEST_F(ZipTest, DiagnosticLoggingDoesNotDecodeArchiveViews) {
+    char* bytes = nullptr; size_t length = 0;
+    ASSERT_TRUE(file_read_all("test/input/zip/sample.docx", MEM_CAT_TEMP, &bytes, &length));
+    Input* input = input_from_source_n(bytes, length, nullptr, nullptr, nullptr);
+    mem_free(bytes);
+    ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed);
+    ZipArchive* archive = fs_node_archive(input->root);
+    ASSERT_NE(archive, nullptr);
+    Item children = fs_node_content(input->root);
+    MarkBuilder builder(input);
+    Item row = builder.element("tree_entry").attr("source", input->root).attr("children", children).final();
+    int previous_level = log_default_category->level;
+    log_set_level(log_default_category, LOG_LEVEL_DEBUG);
+    log_item(row, "ZIP_DIAGNOSTIC_TEST");
+    log_set_level(log_default_category, previous_level);
+    EXPECT_EQ(archive->decompressions, 0u);
+    StrBuf* rendered = strbuf_new();
+    print_item(rendered, varray_get(children.varray, 1));
+    EXPECT_EQ(archive->decompressions, 1u);
+    strbuf_free(rendered);
 }
 
 TEST_F(ZipTest, InputNodesUseSharedContentAndRetainRawBytesAfterParseFailure) {

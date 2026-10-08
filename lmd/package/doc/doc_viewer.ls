@@ -1,7 +1,7 @@
 // doc_viewer.ls — bundled lambda.doc document viewer (D7.2.4)
 //
 // A read-only project browser built with Lambda's reactive UI. The left
-// panel is rooted at the current working directory; directories load on demand.
+// panel browses local directories or captured ZIP trees; children load on demand.
 //
 // Run: ./lambda.exe view
 // With the startup splash: ./lambda.exe demo
@@ -23,18 +23,25 @@ let PROJECT_ROOT = "."
 // Filesystem and selection helpers
 // --------------------------------------------------------------------------
 
-fn directory_entries(path) {
-  let entries = input(path, 'dir') ^ { [] };
+fn archive_extension(extension) => contains(
+  ["zip", "docx", "xlsx", "pptx", "epub", "jar", "war", "odt", "ods", "odp"], lower(extension)) or false
+fn entry_is_container(entry) => entry.is_dir == true or (archive_extension(entry.extension) or false)
+fn directory_entries(source) {
+  let loaded = if (type(source) == element) {
+    if (source.is_dir or source.format == 'zip') source else input(source, 'zip')^
+  } else { input(source)^ }
+  let entries = if (type(loaded) == array) loaded else content(loaded)^;
   // The directory reader sorts names; keep that order within each group.
-  [for (entry in entries where entry.is_dir) entry] ++
-    [for (entry in entries where not entry.is_dir) entry]
+  [for (entry in entries where entry_is_container(entry)) entry] ++
+    [for (entry in entries where not entry_is_container(entry)) entry]
 }
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
-fn absolute_file_path(path) => sys.proc.self.cwd# ++ "/" ++ path
+fn absolute_file_path(path) => if (starts_with(path, "/") or path[1] == ":") path
+  else sys.proc.self.cwd# ++ "/" ++ path
 
 // Keep the root list identity stable so document selection does not recreate
 // the mounted directory-row components.
-let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT)
+let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT) ^ { [] }
 
 fn path_is_open(open_paths, path) => contains(open_paths, path) or false
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
@@ -105,24 +112,28 @@ fn erase_forwards(value, evt) {
 }
 
 fn entry_is_visible(entry, parent_path) {
-  let entry_name = lower(entry["name"])
-  // Hide implementation artefacts without preventing normal source browsing:
-  // dot entries, build/release output directories, and *.exe binaries.
-  not starts_with(entry_name, ".") and
-    // The shipped POSIX executable has no extension, and browsing the viewer's
-    // own UI sources recursively creates another viewer inside this preview.
-    not (parent_path == "." and entry_name == "lambda") and
-    not (parent_path == "./test" and entry_name == "ui") and
-    (not entry["is_dir"] or
-      (not starts_with(entry_name, "build") and not starts_with(entry_name, "release"))) and
-    (entry["is_dir"] or not ends_with(entry_name, ".exe"))
+  // archive members retain dotfiles and build-like names as part of the package.
+  if (type(entry) == element) { true }
+  else {
+    let entry_name = lower(entry["name"])
+    // Hide implementation artefacts without preventing normal source browsing:
+    // dot entries, build/release output directories, and *.exe binaries.
+    not starts_with(entry_name, ".") and
+      // The shipped POSIX executable has no extension, and browsing the viewer's
+      // own UI sources recursively creates another viewer inside this preview.
+      not (parent_path == "." and entry_name == "lambda") and
+      not (parent_path == "./test" and entry_name == "ui") and
+      (not entry["is_dir"] or
+        (not starts_with(entry_name, "build") and not starts_with(entry_name, "release"))) and
+      (entry["is_dir"] or not ends_with(entry_name, ".exe"))
+  }
 }
 
 fn entry_matches_filter(entry, parent_path, filter_text) {
   // Directories remain visible so a search result can be reached by expanding
   // its ancestry; the filter itself applies to file names.
   entry_is_visible(entry, parent_path) and
-    (entry["is_dir"] or filter_text == "" or contains(lower(entry["name"]), lower(filter_text)))
+    (entry_is_container(entry) or filter_text == "" or contains(lower(entry["name"]), lower(filter_text)))
 }
 
 fn document_format(extension) {
@@ -266,8 +277,23 @@ fn file_icon_color(icon) {
 fn selected_source(file) {
   if (file == null) { "" }
   else {
-    let selected_path = file["file_path"];
-    input(selected_path, 'text') ^ { "Unable to read selected file" }
+    let source = file["source"]
+    let parsed = if (type(source) == element) input(source) ^ { null } else null;
+    if (type(parsed) == binary) string(parsed)
+    else input(source, 'text') ^ { "Unable to read selected file: " ++ ^.message }
+  }
+}
+
+fn selected_image_source(file) {
+  if (type(file["source"]) != element) { absolute_file_path(file["file_path"]) }
+  else {
+    let extension = lower(file["extension"])
+    let mime = if (extension == "svg") "image/svg+xml"
+      else if (contains(["jpg", "jpeg"], extension)) "image/jpeg"
+      else "image/" ++ extension
+    // JSON's binary representation reuses the shared base64 encoder.
+    let encoded = format(input(file["source"], 'binary')^, 'json')^;
+    "data:" ++ mime ++ ";base64," ++ slice(encoded, 1, len(encoded) - 1)
   }
 }
 
@@ -284,11 +310,11 @@ fn xml_has_stylesheet(parsed) {
 fn selected_preview(file) {
   if (file == null) { null }
   else {
-    let selected_path = file["file_path"]
+    let selected_path = file["source"]
     let format = document_format(file["extension"])
     let flavor = graph_flavor(file["extension"])
     if (is_image_document(file["extension"])) {
-      <img src:absolute_file_path(selected_path), alt:file["name"]>
+      <img src:selected_image_source(file), alt:file["name"]>
     }
     else if (is_pdf_document(file["extension"])) {
       // Render in this document's runtime; a nested PDF iframe cannot start another runtime.
@@ -300,7 +326,7 @@ fn selected_preview(file) {
       // Pass the selected file's path so local bibliography and image resources resolve.
       let parsed = input(selected_path, 'latex') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
-      else { latex.render(parsed, {source_path:absolute_file_path(selected_path)}) ^ {
+      else { latex.render(parsed, {source_path:absolute_file_path(file["file_path"])}) ^ {
         <p class:"preview-error", "Unable to render selected LaTeX"> } }
     }
     else if (is_pgf_document(file["extension"])) {
@@ -762,8 +788,9 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
     hit_class ++ " tree-row"
   }
   let matching_children = if (~.is_dir and is_open) {
-    let current_children = if (children == null) { directory_entries(entry_path) } else { children };
-    [for (child in current_children where entry_matches_filter(child, entry_path, ~.filter_text)) child]
+    let current_children = if (children == null) { directory_entries(~.source) ^ { [] } } else { children };
+    if (type(current_children) != array) [] else
+      [for (child in current_children where entry_matches_filter(child, entry_path, ~.filter_text)) child]
   } else { [] };
 
   <div class:"tree-entry", 'data-tree-path':entry_path,
@@ -788,7 +815,8 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
             parent_path:child_path(~.parent_path, ~.name),
             name:child.name,
             extension:child.extension,
-            is_dir:child.is_dir,
+            is_dir:entry_is_container(child),
+            source:child,
             depth:(~.depth + 1),
             initial_open:path_is_open(~.open_paths,
                                       child_path(entry_path, child.name)),
@@ -797,6 +825,7 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
             filter_text:~.filter_text
           >)
       >
+      if (type(children) == string) { <p class:"tree-load-error", children> }
     }
   >
 }
@@ -806,11 +835,11 @@ on click(evt) {
   let hits_this_row = event_hits_row(evt, hit_class)
   if (~.is_dir and hits_this_row) {
     // A directory changes only its own subtree on a toggle.
-    if (not is_open and children == null) { children = directory_entries(entry_path) }
+    if (not is_open and children == null) { children = directory_entries(~.source) ^ { ^.message } }
     is_open = not is_open
   } else if (not ~.is_dir) {
     if (~.selected_path != entry_path) { reset_document_scroll(evt.target) }
-    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension,
+    emit("file_select", {file_path:entry_path, source:~.source, name:~.name, extension:~.extension,
       target:evt.target,
       text_width_px:(if (is_pgf_document(~.extension)) pgf_text_width_px(evt.target) else null)})
   }
@@ -864,8 +893,12 @@ view <document_pane> {
             apply(preview)>
         } else if (document_format(~.file["extension"]) == "html") {
           // defer optional document transforms until their file is selected.
-          <iframe id:"html-preview", class:"document-preview",
-            src:absolute_file_path(~.file["file_path"])>
+          if (type(~.file["source"]) == element) {
+            <iframe id:"html-preview", class:"document-preview", srcdoc:selected_source(~.file)>
+          } else {
+            <iframe id:"html-preview", class:"document-preview",
+              src:absolute_file_path(~.file["file_path"])>
+          }
         } else {
           let preview = selected_preview(~.file);
           <section id:"rendered-preview", class:"rendered-preview",
@@ -912,7 +945,7 @@ on click(evt) {
 // --------------------------------------------------------------------------
 
 edit <project_tree> state root_open: true, open_paths: [], filter_text: "", selected_path: "" {
-  let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, PROJECT_ROOT, filter_text)) entry];
+  let matching_root_entries = [for (entry in ~.entries where entry_matches_filter(entry, ~.root_path, filter_text)) entry];
 
   <aside class:"file-panel"
     , <div class:"file-panel-header"
@@ -933,19 +966,20 @@ edit <project_tree> state root_open: true, open_paths: [], filter_text: "", sele
         , <button class:"root-toggle",
             if (root_open) "▾" else "▸">
           <span class:"tree-icon folder-icon", "▣">
-          <span class:"tree-label", "project root">
+          <span class:"tree-label", ~.root_name>
         >
         if (root_open) {
           <div class:"tree-children"
           , for (entry in matching_root_entries)
               apply(<tree_entry
-                parent_path:PROJECT_ROOT,
+                parent_path:~.root_path,
                 name:entry.name,
                 extension:entry.extension,
-                is_dir:entry.is_dir,
+                is_dir:entry_is_container(entry),
+                source:entry,
                 depth:1,
                 initial_open:path_is_open(open_paths,
-                                          child_path(PROJECT_ROOT, entry.name)),
+                                          child_path(~.root_path, entry.name)),
                 open_paths:open_paths,
                 selected_path:selected_path,
                 filter_text:filter_text
@@ -953,7 +987,7 @@ edit <project_tree> state root_open: true, open_paths: [], filter_text: "", sele
           >
         }
       >
-    <div class:"file-panel-footer", if (filter_text == "") "Project root: ." else "Filtering file names">
+    <div class:"file-panel-footer", if (filter_text == "") ~.root_path else "Filtering file names">
   >
 }
 on click(evt) {
@@ -999,11 +1033,11 @@ on file_select(entry) {
 }
 
 // The stable model keeps the tree's state when document controls update.
-let PROJECT_TREE_MODEL = <project_tree>
+let PROJECT_TREE_MODEL = <project_tree root_path:PROJECT_ROOT, root_name:"project root", entries:PROJECT_ENTRIES>
 
 edit <doc_editor_app> state selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null {
   <div class:"doc-editor"
-  , apply(PROJECT_TREE_MODEL, {mode: "edit"})
+  , apply(~.tree_model, {mode: "edit"})
   apply(<document_pane file:selected_file, preview_mode:preview_mode,
     property_filter:property_filter, property_data:property_data,
     property_open_paths:property_open_paths, property_closed_paths:property_closed_paths,
@@ -1046,14 +1080,14 @@ on keydown(evt) {
 on document_select(entry) {
   let format = property_format(entry["extension"])
   // Retain the parsed tree while the user edits the filter or expands nodes.
-  let parsed = if (format == null) null else input(entry["file_path"], format) ^ { null }
-  selected_file = {file_path: entry["file_path"], name: entry["name"],
+  let parsed = if (format == null) null else input(entry["source"], format) ^ { null }
+  selected_file = {file_path: entry["file_path"], source:entry["source"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"],
-    xml_stylesheet: (if (format == "xml") xml_has_stylesheet(parsed) else false)}
+    xml_stylesheet: (if (format == "xml" and type(entry.source) != element) xml_has_stylesheet(parsed) else false)}
   property_data = if (format == "properties") properties_tree(parsed) else parsed
-  eml_data = if (is_eml_document(entry["extension"])) input(entry["file_path"], 'eml') ^ { null } else null
+  eml_data = if (is_eml_document(entry["extension"])) input(entry["source"], 'eml') ^ { null } else null
   csv_data = if (is_table_document(entry["extension"]))
-    input(entry["file_path"], lower(entry["extension"])) ^ { null } else null
+    input(entry["source"], lower(entry["extension"])) ^ { null } else null
   csv_widths = [for (column in csv_columns(csv_data)) CSV_DEFAULT_WIDTH]
   csv_visible_rows = CSV_PAGE_SIZE
   csv_resize = null
@@ -1096,12 +1130,13 @@ on mouseup(evt) {
 // Page shell
 // --------------------------------------------------------------------------
 
+fn viewer_document(tree_model) {
 <html lang:"en",
   <head
     <meta charset:"UTF-8">
     <title "Lambda Document Viewer">
-    // the math stylesheet selects KaTeX symbol fonts; register their bundled faces.
-    <link rel:"stylesheet", href:"../math/katex.css">
+    // resolve bundled fonts independently of the browsed directory/archive base URL (D7.2.4).
+    <link rel:"stylesheet", href:absolute_file_path(sys.lambda.home# ++ "/package/math/katex.css")>
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
     <style math_css.get_stylesheet(null)>
@@ -1152,6 +1187,7 @@ on mouseup(evt) {
       /* Hit-tested text spans need their own cursor value in the file tree. */
       .tree-label, .tree-icon, .tree-spacer { cursor: pointer; }
       .tree-label { white-space: nowrap; font-size: 13px; }
+      .tree-load-error { margin: 5px 16px; color: #ffb4a8; font-size: 12px; }
       .file-panel-footer { padding: 10px 14px; border-top: 1px solid #343c4d; color: #99a5b7;
                            font-size: 11px; }
 
@@ -1301,6 +1337,17 @@ on mouseup(evt) {
     ">
   >
   <body
-    apply(<doc_editor_app>, {mode: "edit"})
+    apply(<doc_editor_app tree_model:tree_model>, {mode: "edit"})
   >
 >
+}
+
+pub pn open_browser(source, options) {
+  // capture once; member nodes retain this snapshot throughout the UI session (S12.4.1v2).
+  let entries = directory_entries(source)^
+  let segments = [for (part in split(replace(source, "\\", "/"), "/") where part != "") part]
+  let root_name = if (len(segments) == 0) source else segments[len(segments) - 1];
+  viewer_document(<project_tree root_path:source, root_name:root_name, entries:entries>)
+}
+
+viewer_document(PROJECT_TREE_MODEL)
