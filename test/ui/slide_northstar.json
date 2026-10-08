@@ -3,7 +3,7 @@
   "html": "test/demo/slides/northstar.slides",
   "viewport": {
     "width": 1280,
-    "height": 800
+    "height": 900
   },
   "events": [
     {"type": "advance_time", "ms": 1800, "steps": 18},

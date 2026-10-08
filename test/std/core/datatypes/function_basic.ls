@@ -36,7 +36,7 @@ fn create(name: string, age: int) => {name: name, age: age}
 create(name: "Alice", age: 30)
 
 // ===== Optional parameter =====
-fn greet2(name: string, prefix: string?) => (prefix or "Hello") ++ ", " ++ name
+fn greet2(name: string, prefix?: string) => (prefix or "Hello") ++ ", " ++ name
 greet2("Alice")
 greet2("Alice", "Hi")
 

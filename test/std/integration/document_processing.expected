@@ -1,0 +1,20 @@
+4
+3
+["/home", "/about", "/contact"]
+2
+["Article 1", "Article 2"]
+3
+["header", "content", "footer"]
+3
+5
+[{
+    url: "/home",
+    text: "Home"
+  }, {
+    url: "/about",
+    text: "About"
+  }, {
+    url: "/contact",
+    text: "Contact"
+  }]
+"utf-8"

@@ -3899,7 +3899,7 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
 const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
     const CssValue* value, CssPropertyCode property = CSS_PROPERTY_UNKNOWN);
 const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
-    const char* name, size_t name_length = (size_t)-1);
+    const char* name, size_t name_length = (size_t)-1, bool preserve_tokens = false);
 const CssValue* css_compute_element_custom_property_text(Pool* pool, DomElement* element,
     const char* name, size_t name_length, StrView* text);
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size);

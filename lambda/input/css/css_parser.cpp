@@ -1075,7 +1075,7 @@ const CssValue* css_motion_shorthand_longhand(const CssValue* value,
 // Returns a CssValue of type CSS_VALUE_TYPE_FUNCTION
 // *pos should point to the CSS_TOKEN_FUNCTION token; on return, *pos points past the closing paren
 // CSS function arguments are comma-separated; each argument may contain multiple space-separated tokens
-static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
+CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
     // depth guard for nested functions (calc(calc(...))); thread_local keeps it
     // reentrant-safe without threading a counter through the signature.
     static thread_local int css_func_depth = 0;

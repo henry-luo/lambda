@@ -470,7 +470,8 @@ static bool css_value_contains(CssValueSearch search, const CssValue* value,
     CssUnit first = CSS_UNIT_PX, CssUnit second = CSS_UNIT_PX) {
     if (!value) return false;
     if (css_value_matches_search(value, search, first, second)) return true;
-    if (value->type != CSS_VALUE_TYPE_LIST && value->type != CSS_VALUE_TYPE_FUNCTION) return false;
+    if (value->type != CSS_VALUE_TYPE_LIST && value->type != CSS_VALUE_TYPE_FUNCTION &&
+        value->type != CSS_VALUE_TYPE_TOKEN_SEQUENCE) return false;
     ArrayList* pending = arraylist_new(8);
     if (!pending) return true;  // inability to exclude a dependency must still enter its validation path
     bool found = !arraylist_append(pending, (void*)value);
@@ -483,6 +484,9 @@ static bool css_value_contains(CssValueSearch search, const CssValue* value,
             children = current->data.list.values; count = current->data.list.count;
         } else if (current->type == CSS_VALUE_TYPE_FUNCTION && current->data.function) {
             children = current->data.function->args; count = current->data.function->arg_count;
+        } else if (current->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE) {
+            // owned spelling wraps the same dependency tree used by typed consumers.
+            children = &current->data.tokens.value; count = 1;
         }
         for (int index = 0; children && index < count; index++) {
             if (children[index] && !arraylist_append(pending, (void*)children[index])) { found = true; break; }

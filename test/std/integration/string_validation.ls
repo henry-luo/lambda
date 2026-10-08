@@ -43,7 +43,7 @@ classify_input("hello world 123")
 
 // ===== Batch validation =====
 let inputs = ["alice@test.com", "not-email", "bob@domain.org", "555-999-1234", "invalid"]
-let valid_emails = inputs |> filter((s) => s is email_pat)
+let valid_emails = inputs |: ~ is email_pat
 valid_emails
 
 // ===== String transformations =====
@@ -60,11 +60,11 @@ text |> replace(\(d+), "NUM")
 
 // ===== Combined pipeline =====
 let raw_data = ["alice@test.com", "555-123-4567", "bob", "90210", "invalid email@", "hello"]
-let classified = raw_data |> map((s) => {
-    input: s,
-    type: classify_input(s)
-})
-classified |> map((c) => c.input & " -> " & c.type)
+let classified = raw_data |> {
+    input: ~,
+    type: classify_input(~)
+}
+classified |> ~.input ++ " -> " ++ ~.type
 
 // ===== Password strength =====
 type has_upper = \(... ("A" to "Z") ...)
@@ -80,7 +80,7 @@ fn password_strength(pw: string) {
         pw is has_special,
         len(pw) >= 8
     ]
-    checks |> filter((c) => c == true) |> len()
+    checks |: ~ == true |> len()
 }
 password_strength("abc")
 password_strength("Abc123")

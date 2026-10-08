@@ -32,13 +32,13 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 
 | Package | Import path | Status | What it does | Used by the CLI |
 |---------|-------------|--------|--------------|-----------------|
-| `chart` | `lambda.chart.chart`, `lambda.chart.vega` | Library | Declarative charts in the style of Vega-Lite, rendered as SVG elements | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
+| `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative charts and weighted word clouds, rendered as SVG elements | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
-| `slide` | `lambda.slide` | Library, experimental | Slide elements, deterministic cues/effects, live playback, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.ls` |
+| `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor` | `lambda.editor.mod_editor` | Engine internal | The editing model: documents, selections, transactions, history | `lambda edit`, through `edit` |
 | `dom` | `lambda.dom.dom` | Engine internal | Browser behaviour for HTML: form controls, links, focus, `<details>`, editing | `lambda view` on interactive pages |
@@ -230,6 +230,95 @@ svg.width                // 400, the default width
 | `<repeat>` | A `<row [fields]>` and/or `<column [fields]>` child plus one `<chart>` template whose channels say `field: {repeat: "row"}` or `field: {repeat: "column"}` |
 
 A pie or donut chart is an `arc` mark with a `theta` channel, plus `inner_radius` for a donut; grouped bars use an `x_offset` channel. Aggregate operations are `count`, `sum`, `mean` (or `average`), `median`, `min`, `max`, `distinct`, `q1`, `q3`, `stdev` and `variance`. A colour channel picks a palette with `scale: {scheme: "set1"}`: `category10` is the default for categories and `blues` for quantities, and `category20`, `set1`, `pastel1`, `dark2`, `greens`, `reds`, `oranges`, `purples`, `greys`, `red_blue` and `spectral` are also available. `scale: {domain: [...], range: [...]}` assigns colours explicitly.
+
+### 4.4 Word and tag clouds
+
+`lambda.chart.wordcloud` lays out weighted words and renders an SVG element.
+It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4).
+Each input record has a nonempty, single-line `text`, a finite positive
+`weight` (`int`, `i64` or `float`), and an optional `color` string. Phrases and
+Unicode text are supported. Records can also override `font_size`,
+`font_family`, `font_weight` and `rotation`; other record fields are retained
+as metadata. An explicit positive `font_size` overrides weight-based sizing,
+including the global font-size range.
+
+```lambda
+import cloud: lambda.chart.wordcloud
+
+cloud.render([
+    {text: "Lambda", weight: 40},
+    {text: "Documents", weight: 25},
+    {text: "Charts", weight: 15}
+], {width: 600, height: 400})^
+```
+
+Save the example as `words.ls`; `lambda render words.ls -o words.png` or
+`lambda view words.ls` displays the result. The raised-error return requires
+`^` propagation or a handler (S7.4.2).
+
+| Function | Result |
+|----------|--------|
+| `cloud.layout(words, opts = null)` | A map containing resolved options, placed `words` and `unplaced` words |
+| `cloud.render(words, opts = null)` | An SVG element; `data-unplaced` records the number of words that could not fit |
+
+The layout sorts by descending weight, retaining source order among ties
+(S6.2.3), and defaults to square-root size scaling. Linear and logarithmic
+scales are also available. Equal weights use `max_font_size`. Word colours
+and default rotations follow source indices. Placement follows a deterministic
+spiral and checks measured, oriented text rectangles with padding. Angled
+words can have overlapping axis-aligned bounds while their text rectangles
+remain separate. Results repeat for the same inputs, options and available
+fonts; fonts can differ across machines.
+
+Placed records retain `text`, `weight`, `color` and source `index`, and add
+`font_size`, `font_family`, `font_weight`, `rotation`, center coordinates
+`x`/`y`, axis-aligned bounds `width`/`height` of the rotated rectangle,
+unrotated `text_width`/`text_height` and a text `baseline`. Unplaced records
+carry a `reason`: `"too_large"` for a rectangle that cannot fit the selected shape, or
+`"no_space"` when the bounded search finds no placement. Empty input is valid.
+Invalid data or options raise an error (S7.4.2). Fields starting with `_` are
+internal geometry data and should not be used by callers.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `width`, `height` | `600`, `400` | Positive viewport dimensions; fractional dimensions are preserved |
+| `margin` | `8` | Empty space inside the viewport edges |
+| `padding` | `2` | Minimum gap between word boxes |
+| `min_font_size`, `max_font_size` | `12`, `64` | Font-size range in CSS pixels |
+| `size_scale` | `"sqrt"` | `"sqrt"`, `"linear"` or `"log"` weight-to-size mapping |
+| `font_family` | `"sans-serif"` | CSS font family or family list |
+| `font_weight` | `400` | Integer CSS weight from 100 to 900 |
+| `colors` | Tableau 10 | Nonempty array of colour strings; a record's `color` overrides it |
+| `rotations` | `[0]` | Nonempty array of finite angles from −180 to 180 degrees; cycles by source index |
+| `shape` | `"rectangle"` | `"rectangle"`, `"ellipse"`, `"circle"` or `"diamond"` boundary |
+| `spiral` | `"archimedean"` | `"archimedean"` or `"rectangular"` candidate path |
+| `seed` | `0` | Integer from 0 to 2147483646; changes each word's spiral phase without global randomness; zero retains the original path |
+| `step` | `4` | Distance between Archimedean turns or rectangular grid points in CSS pixels |
+| `max_steps` | `4000` | Positive integer candidate limit per word |
+
+Text is measured in one headless Radiant pass through the reusable
+`radiant.measure_html(html, width, height)` function. It returns copied
+`width`, `height` and `baseline` metrics for each direct body element, in order
+(`null` for an element without a layout box), then releases the temporary
+document. The package uses each word's actual font family, weight and size in
+its SVG. Shape containment checks all four corners of each rotated rectangle;
+circle diameter uses the smaller available viewport dimension. Collision
+detection uses padded text rectangles, rather than glyph masks.
+
+```lambda
+import cloud: lambda.chart.wordcloud
+
+cloud.render([
+    {text: "Lambda", weight: 40, font_weight: 700, rotation: -15},
+    {text: "Documents", weight: 25},
+    {text: "Charts", weight: 15}
+], {width: 600, height: 400, shape: "ellipse", rotations: [-30, 0, 30],
+    size_scale: "log", seed: 17})^
+```
+
+The viewable gallery at `test/demo/wordcloud.ls` compares four configurations:
+`./lambda.exe view test/demo/wordcloud.ls`. Export it with
+`./lambda.exe render test/demo/wordcloud.ls -o temp/wordcloud_gallery.png`.
 
 ---
 

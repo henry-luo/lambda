@@ -1,180 +1,158 @@
-# Lambda WASM Test Suite
+# Lambda Test Map
 
-This directory contains test scripts, demo files, and verification utilities for the Lambda WASM compilation and JavaScript interface.
+Where every test lives, which gate covers which change, and how to run or add one test.
+Written for coding agents; build and Make details live in [`doc/dev/Make_Guide.md`](../doc/dev/Make_Guide.md).
 
-## 📁 Test Files
+Last verified against tree: 2026-10-07
 
-### Verification Scripts
-- **`verify-wasm-setup.sh`** - Comprehensive setup verification script
-- **`test-wasm.sh`** - Basic WASM compilation test script
-- **`wasm-js-summary.sh`** - Summary of the complete JavaScript interface
+## Ground rules
 
-### Demo & Examples
-- **`lambda-wasm-demo.html`** - Interactive browser demo with GUI
-- **`build_lambda_wasm_minimal_config.json`** - Minimal WASM build configuration for testing
-- **`build_lambda_core_wasm_config.json`** - Core-only WASM build configuration
+- Run everything from the repo root. Harnesses use repo-relative paths (`./lambda.exe`, `test/...`).
+- `make build-test` builds every `test/*.exe` listed in `build_lambda_config.json` → `test.test_suites`.
+  To add a gtest binary, add an entry there (`binary`, `source`, `libraries`, optional `category`/`parallel`) and rebuild; never edit the generated premake `.lua` files.
+- `make test-library`, `test-input`, `test-validator`, `test-lambda` and `test-std` depend only on `build`. Run `make build-test` first.
+- `test`, `test-all`, `test-all-baseline` and `test-lambda-baseline` switch `lambda.exe` to the debug build (`make debug`).
+- Per-binary results go to `test_output/<name>_results.json`; Radiant baseline logs go to `temp/_radiant_*.log`.
+- Never update a golden to make a failure go away (AGENTS.md rule 1). Never weaken `test_js_test262_gtest` (rule 18).
+- Every `.ls` in a golden-driven directory is a test and needs its golden (rule 8); a script without one fails the run. Name helpers, imported modules and manual playground scripts `_*` or `mod_*` instead.
+- A test blocked by an open bug or a missing ruling is **parked**: renamed `_<name>.ls` with a `// PARKED <date> — <ledger ID or S#>` header, and its spec-correct golden kept as `_<name>.expected.pending`. Un-park it in the change that fixes the issue. Parked tests are listed in `vibe/Lambda_Issue_Ledger.md` ("Std test triage — 2026-10-07").
+- Worktree, flaky-baseline and debug-vs-release gotchas: [`doc/dev/Developer_Guide.md` §7](../doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas).
 
-## 🧪 Running Tests
+## 1. Which gate do I run?
 
-### Quick Verification
+**Bold** gates must pass 100% (AGENTS.md). `make test-all-baseline` is the widest baseline gate. Run it before a merge that touches more than one area.
+
+| Change area | Must-pass gate | Quick targeted check |
+|---|---|---|
+| Lambda core: `lambda/runtime/`, `lambda/core/`, parser, MIR JIT | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*<name>*'`; `./test/test_mir_emission_gtest.exe --gtest_filter='Fixtures/*<name>*'`; `./test/test_lambda_errors_gtest.exe --gtest_filter='NegativeScriptTest.*'` |
+| Lambda packages: `lmd/package/**/*.ls` | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*chart_*'` (also `latex_`, `math_`, `mermaid_`, `graphviz_`, `structurizr_`, `slide_`, `editor_`, `edit_`); `make test-mathlive` |
+| Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make test-input-baseline` (5 corpora, also run by test-lambda-baseline) + `make test-input` (70-binary input suite) | `./test/test_markdown_gtest.exe --baseline`; `./test/test_input_roundtrip_gtest.exe --gtest_filter='JsonTests.*'`; `./test/test_html_gtest.exe` |
+| CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
+| Radiant layout / render / events: `radiant/` | **`make test-radiant-baseline`** + `node test/test_run.js --target=radiant --category=baseline` (the gate does not run the radiant suite's own gtests) | `make layout test=baseline_301_simple_margin`; `make layout suite=<dir>`; `./test/test_ui_automation_gtest.exe --suite baseline --test <id>`; `make test-render test=<name>` |
+| LambdaJS: `lambda/js/` | **`make test-lambda-baseline`** + `make test262-baseline` | `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/*<name>*'`; `make test-js262-prelim`; `make test-js-parity` |
+| DOM: `lambda/dom/` | **`make test-radiant-baseline`** (DOM UI fixtures, WPT input-events) + **`make test-lambda-baseline`** (JS DOM fixtures) | `make dom-ui test=<id>`; `./test/test_lambda_domnode_gtest.exe`; `./test/test_dom_range_gtest.exe`; `./test/test_wpt_dom_nodes_gtest.exe` (extended) |
+| Validator: `lambda/validator/` | `make test-validator` (validator suite, part of test-all-baseline) | `./test/test_validator_gtest.exe --gtest_filter='ValidatorTest.*'`; `./test/test_validator_input_gtest.exe` |
+| `lib/` utilities | `make test-library` (library suite, part of test-all-baseline) | `./test/test_str_gtest.exe`, `./test/test_arena_gtest.exe`, … (source `test/lib/test_<name>_gtest.cpp`) |
+| Jube / Node modules: `lambda/jube/`, `lambda/module/node_*` | **`make test-lambda-baseline`** (builds node-core/node-fs) + `make node-regression-gate` | `make node-baseline`; `make test-jube-module-integrity`; `make check-host-exports` |
+| Release-only checks (perf, JIT timing) | n/a | `make release` first (rule 10). Never run it in a worktree. |
+
+## 2. Suites (`build_lambda_config.json` → `test.test_suites`)
+
+`node test/test_run.js` runs these. Flags: `--target=<suite>`, `--exclude-target=<suite>`, `--category=baseline|extended`,
+`--exclude-test=<name>[,<name>]`, `--raw`, `--sequential`. Env: `LAMBDA_TEST_BIN_DIR`, `LAMBDA_TEST_IDLE_TIMEOUT` (s), `LAMBDA_TEST_MAX_CONCURRENT`, `LAMBDA_TEST_HEAVY_LOAD=1`, `LAMBDA_UI_TEST_JOBS`.
+A test is killed only after it produces no output for the idle timeout. With `--category=baseline` the runner passes `--baseline` to `test_js_gtest`, `test_wpt_html_parser_gtest` and `test_markdown_gtest`.
+
+| `--target` | Category | Binaries | Notable members |
+|---|---|---|---|
+| `library` | baseline | 52 | `test/lib/test_*` (str, arena, gc_heap, mempool, url, font…), `test_rdb_gtest`, `test_serve_gtest`, `test_avl_tree_perf` |
+| `radiant` | 13 baseline, 15 extended | 28 | baseline: `test_display_list_gtest`, `test_retained_display_list_gtest`, `test_rdt_vector_gtest`, `test_view_reuse_gtest`, `test_layout_custom_gtest`, `test_css_cascade_memory_gtest`, animation/media players. Extended: WPT runners (sources `test/wpt/test_wpt_*_gtest.cpp`), `test_chromium_contenteditable_gtest` |
+| `input` | baseline | 70 | mark builder/reader/editor, HTML, markdown, YAML, `test/css/*`, graph parsers, `test_validator_input_gtest`, `test_lambda_domnode_gtest`, `test_dom_range_gtest` |
+| `validator` | baseline | 3 | `test_validator_gtest`, `test_ast_validator_gtest`, `test_validator_path_reporting` |
+| `lambda` | 30 baseline, 2 extended, +2 scripts | 32 | `test_lambda_gtest`, `_std`, `_errors`, `_proc`, `_repl`, `_concurrency`, MIR emission/ratchet/gc-stress, `test_js_gtest`, `test_ts_gtest`, `test_js_test262_gtest --prelim` (runs as `test_js_test262_prelim_gtest`). Scripts: `test/lambda/mathlive/run_lambda_mathlive_markup.mjs` (baseline), `test/run_js_parity.mjs` (extended) |
+| `extended` | extended | 11 | `test_interp_gtest`, `test_lambda_extended_gtest`, `test_ui_automation_gtest`, `test_page_load_gtest`, `test_radiant_view_gtest`, `test_layout_fuzzy_gtest`, `test_math_gtest`, `test_http_gtest`, `test_radiant_online_view_gtest` |
+| `jube` | 3 baseline, 2 extended | 5 | `test_rb_gtest`, `test_bash_official_gtest`, `test_bash_run_gtest` (no build compiles these front ends, see `doc/dev/Lambda_Jube_Runtime.md`), `test_js_test262_gtest` (full), `test_node_gtest` |
+
+## 3. Aggregate make targets
+
+| Target | Runs |
+|---|---|
+| `make test` | every suite except `jube`, and minus `test_radiant_online_view_gtest`. This is not `test-all`, despite what `make help` says |
+| `make test-all` / `test-all-baseline` / `test-extended` | all suites / `--category=baseline` / `--category=extended`. `test-extended` also runs `dom-ui-run`. |
+| `make test-lambda-baseline` | `test-input-baseline`, then `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`), one merged report |
+| `make test-lambda-full` | the above plus concurrency, `test_lambda_extended_gtest`, `test_lambda_domnode_gtest`, `test_validator_input_gtest` |
+| `make test-input-baseline` | `test_wpt_html_parser_gtest --baseline`, `test_markdown_gtest --baseline`, `test_yaml_suite_gtest`, `test_math_ascii_gtest`, `test_math_gtest` |
+| `make test-radiant-baseline` | filtered `test_view_reuse_gtest`, then `run-radiant-baseline`: layout baselines (`LAYOUT_BASELINE_SUITES` in the Makefile), page-suite snapshot, UI automation `--suite baseline` and `--suite view`, `test_radiant_view_gtest`, `test_rdt_vector_gtest`, `test_page_load_gtest`, `test_css_cascade_memory_gtest`, `test_layout_fuzzy_gtest`, render visual `--baseline`, `dom-ui-run`, WPT css-syntax and input-events |
+| `make run-radiant-baseline` | the same Radiant checks with no rebuild |
+| `make test-layout-baseline` | layout baseline suites only |
+
+Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~240):
+
+- **Layout and render:** `layout` / `test-layout` (`test=`, `suite=`, `pattern=`, `update=1`), `layout-snapshot-check suite=page`, `capture-layout test=`, `test-render` (`test=`, `suite=`, `pattern=`, `update=1`), `capture-render`.
+- **UI and DOM:** `test-ui-automation` (`ARGS=`), `dom-ui test=`, `test-page-load`, `test-reactive-ui`, `test-editable`, `test-wpt-contenteditable`, `test-css-cascade-memory`, `test-pdf-render`, `test-svg-export`, `test-svg-paint`, `test-svg-smil`.
+- **Lambda tiers and GC:** `test-lambda-interp`, `interp-sweep`, `test-gc-rooting`, `test-mir-gc-stress`, `check-error-recovery`, `test-grammar-s16`.
+- **JS and Node:** `test-js262-prelim`, `test262-baseline` (`VERBOSE=1`), `test262-full`, `test262-update-baseline`, `test-js-parity` (`SUITE=js|test262`, `MODE=mir|ast`), `test-js-opt`, `test-js-parser-diff`, `node-baseline`, `node-regression-gate`, `node-full`, `node-update-baseline`.
+- **Packages and data:** `test-math-baseline`, `test-mathlive`, `test-graph-mermaid`, `test-graph-graphviz`, `test-graph-structurizr`, `test-rdb-drivers-local`.
+- **Other:** `test-wasm`, `test-coverage`, `lint`, `check-tutorial`, `check-doc-code`.
+
+## 4. Script-driven harnesses
+
+| Harness | Fixture dirs | Discovery | Expected output | Adding a test |
+|---|---|---|---|---|
+| `test_lambda_gtest` | Functional (`lambda.exe <f>`): `test/lambda`, `test/lambda/{chart,latex,math,editor,editing,edit,slide}`, `test/lambda/graph/{mermaid,graphviz,structurizr}`. Procedural (`lambda.exe run <f>`): `test/lambda/{proc,conc,pdf}`, `test/benchmark/{awfy,r7rs,beng,kostya,larceny}` | Non-recursive. Every `*.ls` is a case; one without its golden **fails** ("No expected output") unless named `_*`, `mod_*` or `schema_*` (helper / module / playground, see `test/test_script_discovery.hpp`). Name is `<parentdir>_<stem>`, with no prefix in `test/lambda` itself. `SLOW_BENCHMARK_TESTS` in `test_lambda_helpers.hpp` are never instantiated. | Sibling `<stem>.txt`. `<stem>.mac.txt` / `.linux.txt` / `.win.txt` wins on that OS. Compared after the `##### Script` marker, with trailing whitespace and `__TIMING__:` lines stripped. | Add `foo.ls` + `foo.txt` in a listed dir (rule 8). A new dir goes into `FUNCTIONAL_`/`PROCEDURAL_TEST_DIRECTORIES` at the top of `test/test_lambda_gtest.cpp`. That file also holds hand-written `TEST`s: tier parity over interp/jit/auto, typed paths on `test/mir/lambda/*.ls` + `.txt`, and error-without-crash checks. |
+| `test_lambda_extended_gtest` | `test/lambda/ext`, `test/lambda/proc-ext` (procedural) | Same helper. Names are `ext_<stem>` and `proc_ext_<stem>`. | `.txt` (+ platform override) | Same as above |
+| `test_lambda_std_gtest` | `test/std/**` (recursive) | Every `*.ls`; one without its `.expected` fails unless named `_*`/`mod_*`/`schema_*`. `// Mode: procedural` in the first 5 lines means `run`. Name is the relative path with `/` → `_`. | `<stem>.expected` (+ `.mac/.linux/.win.expected`) | Write the `.expected` by hand. `bash test/std/generate_expected.sh` rewrites every passing file, so review the diff. |
+| `test_lambda_errors_gtest` | `test/lambda/negative/{syntax,semantic,runtime,io,fuzzy_crashes}` | None. Each script has an explicit `TEST_F(NegativeScriptTest, …)`. | C++ assertions: non-zero exit plus a message substring (`ExpectErrorMessage`, `ExpectRuntimeErrorMessage`, `ExpectRejectedOnEveryTier`). No harness reads the `.txt` files in `negative/`. | Add the `.ls` plus a `TEST_F` |
+| `test_mir_emission_gtest`, `test_js_mir_emission_gtest` | `test/mir/lambda/*.ls`, `test/mir/js/*.js` | Non-recursive; every script must have a sidecar | `<stem>.mir-check` JSON (`checks[]` with `in_func` + `expect`/`forbid`, optional `args`, `expect_exit_code`) | See `vibe/Lambda_Design_MIR_Emission_Test.md`. The same corpus feeds `test_mir_gc_stress_gtest` (stressed vs unstressed output, no goldens) and `test_mir_ratchet_gtest` (budgets in `test/mir/mir_budgets.json`, 0% slack). |
+| `test_interp_gtest` | Scripts listed in `test/lambda/interp_p0_subset.txt` | List-driven | Sibling `.txt`, with zero T0 fallbacks | `make interp-sweep` regenerates `interp_p0_subset.txt` and `interp_excluded.txt` together. Never hand-edit one. |
+| `test_js_gtest` | `test/js`, `test/js/props` | Non-recursive `foo.js` + `foo.txt`. `foo.html` or `// @document <file>` makes it a DOM test. Header directives `// @test-permission` and `// @test-module-path`. | `.txt` | Mixed mode is the default: names in `test/js/mir_list.txt` run on MIR, the rest on AST. Override with `--full-mir`, `--full-ast`, or `JS_GTEST_MODE=ast` / `JS_GTEST_MODE=mir`. `--baseline` drops the `lib_codemirror`/`lib_tabulator`/`lib_tom_select` probes. |
+| `test_ts_gtest` | `test/ts` | `*.ts` + `.txt` | `.txt` | Add the pair |
+| `test_js_test262_gtest` | `test/js262` (stripped copies) + `ref/test262/harness` | `test/js262/test262_baseline.txt`, `skip_list.txt`, `t262_slow.txt`, `mir_list.txt` | Test262 metadata | `make test262-update-baseline` (rule 18) |
+| `test_node_gtest` | `ref/node/test/parallel` | `test/node/official_{baseline,skip_list,serial_list,slow_list}.txt` | Exit 0 and no `Uncaught` | `make node-update-baseline` |
+| `test_wpt_*_gtest` (sources in `test/wpt/`) | `ref/wpt/<area>`; `test_wpt_html_parser_gtest` reads `test/html/wpt/` | Per-runner | Most runners use a `test/wpt/wpt_<area>_baseline.txt` passing list | `WPT_<AREA>_UPDATE_BASELINE=1` (env name defined at the top of each runner) |
+| `test_validator_gtest` | `test/lambda/validator` (`schema_*.ls` + `.json/.xml/.yaml/.md/.html/...` data) | None. Explicit `TEST_F(ValidatorTest, …)` per (data, schema) pair. | Assertions on `ValidationResult` | Add files plus a `TEST_F` |
+| `test_ui_automation_gtest` | `test/ui/**`, `test/view/*.json`. Suites `baseline`, `dom`, `editor`, `hit-test`, `edit`, `view`, `native-gui` are defined by globs in `test/ui/ui_test_manifest.json`. | Manifest globs. The id is the path under `test/ui/` or `test/view/` with `/ - .` → `_`. | JSON `{name, html, events:[click, assert_text, wait, …]}` | Add the `.json` (+ `.html`). Check that the baseline suite's `exclude` list doesn't drop it. |
+| `test_page_load_gtest`, `test_layout_fuzzy_gtest` | `test/layout/data/{page,markdown}`, `test/layout/data/fuzzy` | Every `*.html` (non-recursive) | Loads without crash | Drop in an `.html` file |
+| `test/layout/test_radiant_layout.js` (`make layout`) | `test/layout/data/<suite>/` | Per-suite `baseline.txt` lists the files that must pass | Browser reference JSON in `test/layout/reference/` (flat; nested fixtures are keyed `dir__name`) | `make capture-layout test=<name>` |
+| `test/render/test_radiant_render.js` (`make test-render`) | `test/render` | Script-defined | Reference PNGs | `make capture-render test=<name>` |
+
+## 5. External test data
+
+Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides `../lambda-test`). It clones `ref/wpt` at a pinned commit and links each top-level dir of `../lambda-test` as `test/<name>`.
+
+| Path | Source | In git? | Used by |
+|---|---|---|---|
+| `test/js262` | `../lambda-test/js262` | ignored link | `test_js_test262_gtest` |
+| `test/layout` | `../lambda-test/layout` | ignored link | `make layout`, page-load, fuzzy, radiant-view, UI fonts (`test/layout/data/font`) |
+| `test/render`, `test/pdf` | `../lambda-test/{render,pdf}` | ignored links | `make test-render`, `test_pdf_render_visual_gtest` |
+| `test/markdown`, `test/media`, `test/jquery-ui` | `../lambda-test/*` | **tracked** links | source-pos tests, `test_video_gtest`, UI `dom` fixtures |
+| `../lambda-test/editing` | read directly | not linked (`test/editing` is a tracked dir) | `test_chromium_contenteditable_gtest` |
+| `ref/wpt` | WPT clone at the commit pinned in `setup-test.sh` | ignored | WPT runners |
+| `ref/test262`, `ref/node` | manual checkout (`setup-test.sh` does not fetch them) | ignored | Test262, Node official tests (`make node-shim`) |
+| `test/yaml` | git submodule | submodule | `test_yaml_suite_gtest` (`ensure-yaml-submodule` inits it) |
+
+## 6. Updating goldens and baselines
+
+Update one only when the behavior change is intended, and cite the `S#`/`D#` ruling in the commit (AGENTS.md rule 17).
+
+| Artifact | How |
+|---|---|
+| Lambda `.txt` / std `.expected` | Write it from `./lambda.exe [run] <file>` output (the text after `##### Script`). Add a `.mac.txt` (or `.linux.txt`/`.win.txt`) only for real platform differences. |
+| `.mir-check` sidecars | Edit by hand. Assert names and instruction shapes, never raw immediates. |
+| `test/mir/mir_budgets.json` | Raise a threshold by hand in the same commit as the reviewed growth. The ratchet never edits it. |
+| Interp subset lists | `make interp-sweep` |
+| Layout suite `baseline.txt` | `make layout suite=<dir> update=1` |
+| Layout page snapshot | `make layout-snapshot suite=page` (check with `layout-snapshot-check`) |
+| Render baseline | `make test-render suite=<suite> update=1` |
+| Test262 / Node official | `make test262-update-baseline` / `make node-update-baseline` |
+| WPT runners | `WPT_<AREA>_UPDATE_BASELINE=1 ./test/test_wpt_<area>_gtest.exe` |
+
+Debugging: `./log.txt` holds the runtime trace, debug builds dump JIT'd MIR to `temp/mir_dump.txt`, and `node test/test_run.js --raw` shows unformatted output.
+
+## 7. Common single-test commands
+
 ```bash
-# Run complete setup verification
-./test/verify-wasm-setup.sh
+# Lambda script golden (full name: AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/<name>)
+./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*proc_array_view_admission'
+LAMBDA_EXEC_BACKEND=jit ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*'   # pin a tier
+./lambda.exe run test/lambda/proc/array_view_admission.ls      # reproduce by hand; diff against the .txt
 
-# Test basic WASM compilation
-./test/test-wasm.sh
-
-# Show interface summary
-./test/wasm-js-summary.sh
+./test/test_lambda_extended_gtest.exe --gtest_filter='AutoDiscovered/*ext_*'
+./test/test_lambda_std_gtest.exe --gtest_filter='Std/*core_datatypes_integer_basic'
+./test/test_lambda_errors_gtest.exe --gtest_filter='NegativeScriptTest.*Counted*'
+./test/test_mir_emission_gtest.exe --gtest_filter='Fixtures/*action_c_async_boundary'
+./test/test_interp_gtest.exe --gtest_filter='P0Subset/*'
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/*advanced_features'
+./test/test_ts_gtest.exe --gtest_filter='TypeScript/*arrays'
+./test/test_js_test262_gtest.exe --prelim                      # bounded preflight
+./test/test_ui_automation_gtest.exe --suite baseline --test test_click_elements
+make layout test=baseline_301_simple_margin                    # one layout file vs browser reference
+make layout suite=wpt-css-box                                  # one layout suite
+node test/test_run.js --target=lambda --category=baseline --exclude-test=test_js_gtest
 ```
 
-### Browser Demo
-```bash
-# Start local server
-python3 -m http.server 8080
+Gotchas:
+- In `test_lambda_gtest`, the gtest filter also chooses which scripts the batch runs, so a narrow filter is fast. `test_lambda_std_gtest` always batches all of `test/std`.
+- The display-list, state-store, DOM-range and media-player tests link against `test/*_stubs.cpp`. A new `radiant/` symbol that code calls needs a stub there, and only `make build-test` catches a missing one.
+- The `LAMBDA_BASELINE_TEST_PROJECTS`, `RADIANT_BASELINE_TEST_PROJECTS` and `INPUT_BASELINE_TEST_PROJECTS` lists at the top of the Makefile must match what the gates run. Update them when you add a baseline binary.
 
-# Open demo in browser
-open http://localhost:8080/test/lambda-wasm-demo.html
-```
-
-### Minimal Build Test
-```bash
-# Test with minimal configuration
-cp test/build_lambda_wasm_minimal_config.json build_lambda_wasm_config.json
-./compile-wasm.sh --force
-```
-
-## 🔧 Test Configurations
-
-### Minimal Config (`build_lambda_wasm_minimal_config.json`)
-- Limited source files for quick testing
-- Basic functionality verification
-- Faster compilation for development
-
-### Core Config (`build_lambda_core_wasm_config.json`)
-- Input and format modules only
-- Excludes complex validator dependencies
-- Good for core functionality testing
-
-## 📊 Expected Test Results
-
-### `verify-wasm-setup.sh` Output:
-```
-=== WASM Compilation Setup Verification ===
-1. WASI SDK Installation: ✓
-2. WASM Dependencies Stub Libraries Created: ✓
-3. Testing Basic File Compilation: ✓
-4. WASM Compilation Configuration: ✓
-5. Usage Instructions: ✓
-=== Setup Complete! ===
-```
-
-### `test-wasm.sh` Output:
-```
-Creating build directory...
-Testing single file compilation...
-Single file compilation successful!
-Testing input file compilation...
-Input file compilation successful!
-All tests passed!
-```
-
-## 🐛 Troubleshooting Tests
-
-### Common Test Issues
-
-**WASI SDK not found:**
-```bash
-# Install WASI SDK first
-curl -L -O https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/wasi-sdk-24.0-arm64-macos.tar.gz
-tar -xzf wasi-sdk-24.0-arm64-macos.tar.gz
-sudo mv wasi-sdk-24.0-arm64-macos /opt/wasi-sdk
-```
-
-**Browser demo not loading:**
-- Ensure you're serving from HTTP, not file:// protocol
-- Check that lambda-wasm-example.js is in the parent directory
-- Verify lambda.wasm exists in the project root
-
-**Test compilation failures:**
-- Check that all stub dependencies are in wasm-deps/include/
-- Verify source files exist in lambda/ directories
-- Run with `--debug` flag for verbose output
-
-## 🎯 Test Coverage
-
-### What Tests Cover:
-✅ WASI SDK installation and configuration  
-✅ Stub library creation for missing dependencies  
-✅ Basic C file compilation to WASM  
-✅ JavaScript interface loading  
-✅ HTML demo functionality  
-✅ CLI tool operation  
-✅ Multiple build configurations  
-
-### What Tests Don't Cover:
-❌ Full end-to-end WASM execution (requires working C functions)  
-❌ Complex validator module compilation  
-❌ Performance benchmarking  
-❌ Cross-browser compatibility  
-❌ Memory leak detection  
-
-## 📈 Adding New Tests
-
-### Test Script Template:
-```bash
-#!/bin/bash
-echo "🧪 Testing [Feature Name]..."
-
-# Setup
-setup_test() {
-    # Preparation code
-}
-
-# Test implementation
-run_test() {
-    # Test logic
-    if [[ test_condition ]]; then
-        echo "✅ Test passed"
-        return 0
-    else
-        echo "❌ Test failed"
-        return 1
-    fi
-}
-
-# Cleanup
-cleanup_test() {
-    # Cleanup code
-}
-
-# Main execution
-setup_test
-run_test
-cleanup_test
-```
-
-### Integration with Main Build:
-Add new tests to the main verification script and update documentation accordingly.
-
-## 🔄 Continuous Testing
-
-For development workflows:
-```bash
-# Watch for changes and run tests
-watch -n 10 './test/verify-wasm-setup.sh'
-
-# Quick compilation test loop
-while true; do ./test/test-wasm.sh && break; sleep 5; done
-```
-
-## 📝 Test Documentation
-
-Each test script includes:
-- Purpose and scope description
-- Expected inputs and outputs
-- Error handling and fallback behavior
-- Integration points with main build system
-- Troubleshooting guidance for common failures
-
-The test suite is designed to provide confidence in the WASM compilation pipeline and JavaScript interface functionality while being easy to run and understand.
+WebAssembly build and tests: `make build-wasm`, `make test-wasm`, and [`doc/dev/Lambda_WASM_Build.md`](../doc/dev/Lambda_WASM_Build.md).

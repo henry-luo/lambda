@@ -645,7 +645,8 @@ DomElement* dom_parent_element(DomElement* element);
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
     const char* name, size_t name_length = (size_t)-1);
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element,
-    const char* name, size_t name_length = (size_t)-1);
+    const char* name, size_t name_length = (size_t)-1,
+    StrView* token_text = nullptr);
 const CssValue* dom_element_lookup_custom_property(DomElement* element,
     const char* name, DomElement** owner);
 

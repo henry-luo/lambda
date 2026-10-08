@@ -29,6 +29,7 @@ CssFormatter* css_formatter_create(Pool* pool, CssFormatStyle style) {
     formatter->options.quote_urls = false;
     formatter->options.sort_properties = false;
     formatter->options.computed_colors = false;
+    formatter->options.preserve_tokens = false;
 
     return formatter;
 }
@@ -243,6 +244,14 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
 // Internal implementation with property context
 static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyCode property_code) {
     if (!formatter || !value) return;
+
+    if (value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE) {
+        if (formatter->options.preserve_tokens) {
+            const String* text = value->data.tokens.text;
+            stringbuf_append_str_n(formatter->output, text->chars, text->len);
+        } else css_format_value_with_property(formatter, value->data.tokens.value, property_code);
+        return;
+    }
 
     if (formatter->options.computed_colors && format_computed_color(formatter, value)) return;
 
@@ -1096,6 +1105,7 @@ CssFormatOptions css_get_default_format_options(CssFormatStyle style) {
     CssFormatOptions options;
     options.style = style;
     options.computed_colors = false;
+    options.preserve_tokens = false;
 
     switch (style) {
         case CSS_FORMAT_COMPACT:

@@ -1,0 +1,29 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{lmdkeys}[2026/10/07 Phase IV bundled-package fixture]
+\RequirePackage{kvoptions}
+\SetupKeyvalOptions{family=lmdk,prefix=lmdk@}
+\DeclareStringOption[blue]{shade}
+\DeclareBoolOption{bold}
+\ProcessKeyvalOptions*
+\RequirePackage{etoolbox}
+\RequirePackage{ifthen}
+\RequirePackage{xkeyval}
+\RequirePackage{calc}
+\newcommand{\shaded}[1]{\iflmdk@bold\textbf{#1}\else#1\fi{} in \lmdk@shade}
+\newcommand{\pick}[1]{\ifthenelse{\equal{#1}{a}}{alpha}{other}}
+\newcommand{\same}[1]{\ifstrequal{#1}{x}{is-x}{not-x}}
+\csdef{lmd@stored}{stored value}
+\newcommand{\stored}{\csuse{lmd@stored}}
+\newcommand{\greeting}{Hello}
+\appto\greeting{, world}
+\define@key{lmd}{size}{\def\lmd@size{#1}}
+\define@key{lmd}{unit}[pt]{\def\lmd@unit{#1}}
+\newcommand{\sized}[1][]{\setkeys{lmd}{size=0,unit,#1}\lmd@size\lmd@unit}
+\define@cmdkey{lmdx}[lx@]{tone}{}
+\newcommand{\toned}[1]{\setkeys{lmdx}{#1}tone=\lx@tone}
+\newlength{\lmdwidth}
+\setlength{\lmdwidth}{2cm+1cm}
+\newcounter{lmdcount}
+\setcounter{lmdcount}{3*4}
+\newcommand{\measured}{\the\lmdwidth/\thelmdcount}
+\newcommand{\loopout}{\whiledo{\value{lmdcount}>10}{\addtocounter{lmdcount}{-1}}\thelmdcount}

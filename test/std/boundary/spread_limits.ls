@@ -8,19 +8,19 @@ len(a)
 
 // ===== Spread empty list =====
 let b = (*())
-b
+b;
 
 // ===== Spread single element =====
 [*[42]]
 
 // ===== Spread into array =====
 let xs = [1, 2, 3]
-let ys = [4, 5, 6]
+let ys = [4, 5, 6];
 [*xs, *ys]
 
 // ===== Spread into list =====
 let la = (1, 2, 3)
-let lb = (4, 5, 6)
+let lb = (4, 5, 6);
 (*la, *lb)
 
 // ===== Spread into map =====

@@ -6,7 +6,7 @@ let COLOR_NAMES = ["black", "blue", "red", "green", "darkgreen", "orange",
     "purple", "gray", "white", "yellow", "lightgray", "Silver", "Goldenrod",
     "Blue", "Red", "RoyalBlue", "VioletRed", "LightGrey"]
 
-fn normalize_key(key) {
+pub fn normalize_key(key) {
     let spaces = replace(replace(replace(key, "\n", " "), "\t", " "),
         "\r", " ")
     latex_util.str_join([for (part in split(spaces, " ") where part != "")
@@ -55,27 +55,57 @@ pub fn check(node, keys, custom_colors = null) bool^ {
     else true
 }
 
-fn allowed(key, keys, custom_colors) bool^ {
-    len([for (candidate in keys where candidate == key) candidate]) > 0 or
-        color_key(key, custom_colors) == true or key == "-{Stealth}" or
-        (starts_with(key, "-{Stealth[") and ends_with(key, "]}")^)
+// Key handlers the TikZ parser expands; other PGF handlers (.code, .cd, .store in,
+// ...) program PGF internals and are diagnosed.
+pub let STYLE_HANDLERS = ["/.style", "/.style 2 args", "/.append style", "/.default", "/.pic"]
+
+// Handler keys on a node, after rejecting handlers outside STYLE_HANDLERS.
+pub fn handler_keys(node) any^ {
+    let handlers = [for (child in node where child is element and
+        string(name(child)) == "option" and contains(child.key, "/.")) child.key]
+    let unsupported = [for (key in handlers where not any([for (suffix in STYLE_HANDLERS)
+        ends_with(key, suffix)])) key]
+    if (len(unsupported) > 0) raise error("unsupported PGF key handler: " ++ unsupported[0])
+    else handlers
 }
 
-pub fn stealth_length(node) float^ {
-    let keys = [for (child in node where child is element and
-        string(name(child)) == "option" and
-        (child.key == "-{Stealth}" or
-         (starts_with(child.key, "-{Stealth[") and
-          ends_with(child.key, "]}")))) child.key]
-    if (len(keys) == 0) 0.0
-    else if (len(keys) != 1) raise error("duplicate Stealth arrow tip")
-    else if (keys[0] == "-{Stealth}") 8.0
-    else {
-        let inner = slice(keys[0], len("-{Stealth["), len(keys[0]) - 2)
-        if (not starts_with(inner, "length="))
-            raise error("unsupported Stealth arrow tip option")
-        else dimension_px(trim(slice(inner, len("length="), len(inner))))^
-    }
+// A picture-level \tikzset may only define handlers: a plain key such as `>=Stealth`
+// would change defaults the profile does not track, so it is diagnosed, not dropped.
+pub fn check_tikzset(setting) any^ {
+    let plain = [for (child in setting where child is element and
+        string(name(child)) == "option" and not contains(child.key, "/.")) child.key]
+    if (len(plain) > 0) raise error("unsupported TikZ \\tikzset key: " ++ plain[0])
+    else handler_keys(setting)^
+}
+
+fn allowed(key, keys, custom_colors) bool^ {
+    len([for (candidate in keys where candidate == key) candidate]) > 0 or
+        color_key(key, custom_colors) == true
+}
+
+// Stroke width in CSS px from TikZ line-width keys; `fallback` is the inherited width.
+pub fn stroke_width(node, fallback) float^ {
+    let explicit = value(node, "line width", null)
+    if (explicit != null) dimension_px(explicit)^
+    else if (has(node, "ultra thick")) 2.2
+    else if (has(node, "very thick")) 1.7
+    else if (has(node, "thick")) 1.1
+    else if (has(node, "thin")) 0.53
+    else fallback
+}
+
+// SVG dash array from `dashed`, `dotted` or `dash pattern=on a off b`.
+pub fn dash_array(node) any^ {
+    let custom = value(node, "dash pattern", null)
+    if (custom != null) {
+        let words = [for (part in split(trim(custom), " ") where trim(part) != "")
+            trim(part)]
+        if (len(words) != 4 or words[0] != "on" or words[2] != "off")
+            raise error("unsupported TikZ dash pattern: " ++ custom)
+        else string(dimension_px(words[1])^) ++ " " ++ string(dimension_px(words[3])^)
+    } else if (has(node, "dashed")) "4 4"
+    else if (has(node, "dotted")) "1 2"
+    else null
 }
 
 pub fn numeric_value(source) float^ {

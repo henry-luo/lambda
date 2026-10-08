@@ -545,6 +545,19 @@ TEST(TypesetTest, CounterSnapshotsOutliveMutableScopesAndKeepLongNestedValues) {
     ASSERT_TRUE(counter_snapshot_append(snapshot, "Missing", nullptr, CSS_VALUE_DECIMAL, text)); EXPECT_STREQ(text->str, "0");
     strbuf_free(text); mem_pool_destroy(pool);
 }
+TEST(TypesetTest, CounterListsKeepEveryImplicitValue) {
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.implicit"); ASSERT_NE(arena, nullptr);
+    CounterContext* counters = counter_context_create(arena); ASSERT_NE(counters, nullptr);
+    counter_reset(counters, "A 4 B 5 C 6");
+    counter_reset(counters, "A B C");
+    for (const char* name : {"A", "B", "C"}) EXPECT_EQ(counter_get_value(counters, name), 0);
+    counter_increment(counters, "A B C");
+    for (const char* name : {"A", "B", "C"}) EXPECT_EQ(counter_get_value(counters, name), 1);
+    counter_set(counters, "A B C");
+    for (const char* name : {"A", "B", "C"}) EXPECT_EQ(counter_get_value(counters, name), 0);
+    counter_context_destroy(counters); mem_arena_destroy(arena);
+}
+
 static TypesetStatus advance_flow(void*, const TypesetResume* cursor,
         TypesetContribution* contribution, TypesetResume* next) {
     *next = *cursor; next->serial++; contribution->kind = TYPESET_CONTRIBUTION_INSERTION; return TYPESET_OK;
@@ -834,7 +847,7 @@ protected:
         return fixture->note && (!floating || fixture->floating) &&
             block(nullptr, floating ? "padding-bottom: 16px" : "padding-bottom: 20px", "div", fixture->moved);
     }
-    void reference_width_boundary(size_t chapters);
+    void reference_width_boundary(size_t chapters, size_t label_offset = 0);
 };
 static LayoutViewNode* source_fragment(ViewTree* tree, DomNode* source, ViewFragmentRole role, bool box, bool last = false);
 static uint32_t occurrence_page(LayoutViewNode* occurrence);
@@ -2048,9 +2061,11 @@ TEST_F(SecondaryViewTest, ForwardAndBackwardTargetsSettleCounterTextAndPageBindi
     EXPECT_TRUE(tree->model->committed); EXPECT_TRUE(other->model->committed);
 }
 
-void SecondaryViewTest::reference_width_boundary(size_t chapters) {
-    stylesheet("@page { margin: 0 } p, div { margin: 0; font-size: 8px; line-height: 12px; font-family: monospace; orphans: 1; widows: 1 } "
-        ".entry::before { content: 'AAAAAAAAAAAAA ' target-counter('#end', page) }");
+void SecondaryViewTest::reference_width_boundary(size_t chapters, size_t label_offset) {
+    char rules[512]; snprintf(rules, sizeof(rules), "@page { margin: 0 } @page:first { counter-reset: page %zu } "
+        "p, div { margin: 0; font-size: 8px; line-height: 12px; font-family: monospace; orphans: 1; widows: 1 } "
+        ".entry::before { content: 'AAAAAAAAAAAAA ' target-counter('#end', page) }", label_offset);
+    stylesheet(rules);
     DomElement* entry = block(""); ASSERT_NE(entry, nullptr); ASSERT_TRUE(entry->set_attribute("class", "entry"));
     ASSERT_NE(block("x\nx\nx\nx\nx", "white-space: pre-wrap"), nullptr);
     DomElement* near = nullptr;
@@ -2063,7 +2078,7 @@ void SecondaryViewTest::reference_width_boundary(size_t chapters) {
     ViewTree* tree = view_tree_secondary_create(&doc, &environment); ASSERT_NE(tree, nullptr);
     ViewCssStyle* style = view_css_resolve(tree, source); ASSERT_NE(style, nullptr);
     float glyph = font_measure_char(style->font.font_handle, '0');
-    float digits = chapters < 10 ? 1.0f : 2.0f;
+    float digits = chapters + label_offset < 10 ? 1.0f : 2.0f;
     tree->model->environment.page_width = (14.0f + digits) * glyph + 0.1f;
     tree->model->environment.page_height = 72.0f;
     PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
@@ -2077,12 +2092,13 @@ void SecondaryViewTest::reference_width_boundary(size_t chapters) {
     StrBuf* text = strbuf_new(); StrBuf* expected = strbuf_create("AAAAAAAAAAAAA"); ASSERT_NE(text, nullptr); ASSERT_NE(expected, nullptr);
     for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence)
         if (node->glyph_run) append_fragment_text(node, text);
-    strbuf_append_uint64(expected, chapters + 2);
+    strbuf_append_uint64(expected, chapters + 2 + label_offset);
     EXPECT_STREQ(text->str, expected->str); strbuf_free(text); strbuf_free(expected);
 }
 
 TEST_F(SecondaryViewTest, ReferenceRepaginationMovesATargetFromNineToTen) { reference_width_boundary(9); }
 TEST_F(SecondaryViewTest, ReferenceRepaginationMovesATargetFromNinetyNineToOneHundred) { reference_width_boundary(99); }
+TEST_F(SecondaryViewTest, LogicalLabelWidthRepaginatesWithoutChangingPhysicalTargetIdentity) { reference_width_boundary(9, 90); }
 
 TEST_F(SecondaryViewTest, TargetUrlsDecodeUnicodeFragmentsAndResolveOnlyTheSameDocument) {
     ASSERT_TRUE(create_dir("temp/paged-media-responsive"));
@@ -3032,6 +3048,103 @@ TEST_F(SecondaryViewTest, MarginBoxesRenderPageTotalsInTheirOwnViewFragments) {
     EXPECT_EQ(source->first_child->next_sibling->next_sibling, nullptr);
     EXPECT_FLOAT_EQ(source->width, 640.0f);
     ASSERT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/margin-boxes.pdf"));
+}
+
+TEST_F(SecondaryViewTest, LogicalPageCountersIncludeBlankSheetsAndIsolateMarginScopes) {
+    stylesheet("@page { size: 240px 120px; margin: 20px; counter-increment: page 2 Chapter; "
+        "counter-set: pages -9; @bottom-center { content: counter(page) '/' counter(pages) '|' counter(Chapter,upper-roman); font-size: 8px } "
+        "@top-left { counter-increment: page; content: counter(page); font-size: 8px } } "
+        "@page:first { counter-reset: page 0 Chapter 0 pages 17; @top-left { counter-reset: page 98 } } "
+        "@page chapter { counter-reset: page 8; counter-increment: page 0 Chapter } "
+        "@page chapter:blank { counter-reset: none; counter-increment: page 2 Chapter } "
+        "p, div { margin: 0; font-size: 10px; line-height: 12px } p { counter-reset: Chapter 90 }");
+    ASSERT_NE(block("Opening"), nullptr);
+    ASSERT_NE(block("Chapter", "page: chapter; break-before: right"), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default();
+    PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    const char* footers[] = {"2/3|I", "4/3|II", "8/3|III"};
+    const char* headers[] = {"99", "100", "101"};
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+    for (size_t i = 0; i < 3; i++) {
+        const ViewPageBox* page = tree->model->pages.get()[i];
+        EXPECT_EQ(page->page_number, i + 1); EXPECT_EQ(page->blank, i == 1);
+        ASSERT_NE(page->margin_boxes[CSS_PAGE_BOTTOM_CENTER], nullptr);
+        strbuf_reset(text); append_fragment_text(page->margin_boxes[CSS_PAGE_BOTTOM_CENTER], text);
+        EXPECT_STREQ(text->str, footers[i]);
+        ASSERT_NE(page->margin_boxes[CSS_PAGE_TOP_LEFT], nullptr);
+        strbuf_reset(text); append_fragment_text(page->margin_boxes[CSS_PAGE_TOP_LEFT], text);
+        EXPECT_STREQ(text->str, headers[i]);
+    }
+    strbuf_free(text);
+}
+
+TEST_F(SecondaryViewTest, MarginCounterDeclarationsAdvanceBeforeContentIsGenerated) {
+    stylesheet("@page { size:240px 120px; margin:20px; @top-left { counter-increment: Seq Other } } "
+        "@page:first { @top-left { counter-reset: Seq 10 Other 20 } } "
+        "@page later { @top-left { content: counter(Seq) '/' counter(Other); font-size:8px } } "
+        "p,div { margin:0; font-size:10px; line-height:12px } div + div { break-before:page; page:later }");
+    ASSERT_NE(block("First"), nullptr); ASSERT_NE(block("Second"), nullptr); ASSERT_NE(block("Third"), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    EXPECT_EQ(tree->model->pages.get()[0]->margin_boxes[CSS_PAGE_TOP_LEFT], nullptr);
+    for (size_t i = 1; i < 3; i++) {
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        ASSERT_NE(tree->model->pages.get()[i]->margin_boxes[CSS_PAGE_TOP_LEFT], nullptr);
+        append_fragment_text(tree->model->pages.get()[i]->margin_boxes[CSS_PAGE_TOP_LEFT], text);
+        EXPECT_STREQ(text->str, i == 1 ? "12/22" : "13/23"); strbuf_free(text);
+    }
+}
+
+TEST_F(SecondaryViewTest, PageCounterSetZeroAndBoundedIncrementsKeepReadOnlyTotals) {
+    stylesheet("@page { size:240px 120px; margin:20px; counter-increment:none; "
+        "@bottom-center { content: counter(page) '/' counter(pages); font-size:8px } } "
+        "@page:first { counter-reset:page 2147483647 } "
+        "@page negative { counter-set:page -2 pages 99 } "
+        "@page zero { counter-reset:page 0; counter-increment:page 0 } "
+        "p,div { margin:0; font-size:10px; line-height:12px } div + div { break-before:page }");
+    ASSERT_NE(block("Maximum"), nullptr); ASSERT_NE(block("Still maximum"), nullptr);
+    ASSERT_NE(block("Negative", "page:negative"), nullptr); ASSERT_NE(block("Zero", "page:zero"), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 4u);
+    const char* expected[] = {"2147483647/4", "2147483647/4", "-2/4", "0/4"};
+    for (size_t i = 0; i < 4; i++) {
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        ASSERT_NE(tree->model->pages.get()[i]->margin_boxes[CSS_PAGE_BOTTOM_CENTER], nullptr);
+        append_fragment_text(tree->model->pages.get()[i]->margin_boxes[CSS_PAGE_BOTTOM_CENTER], text);
+        EXPECT_STREQ(text->str, expected[i]); strbuf_free(text);
+    }
+}
+
+TEST_F(SecondaryViewTest, TargetPageCountersRetainLogicalLabelsAndPhysicalIdentity) {
+    stylesheet("@page { size: 240px 120px; margin: 20px; counter-increment: page -1 } "
+        "@page:first { counter-reset: page 11 } "
+        "@media (max-width: 200px) { @page:first { counter-reset: page 21 } } "
+        "p, div, a { margin: 0; font-size: 10px; line-height: 12px } a { display: block } "
+        "a::after { content: target-counter(attr(href),page) '/' target-counters(attr(href),page,'.',upper-roman) }");
+    DomElement* link = block("", nullptr, "a"); ASSERT_NE(link, nullptr);
+    ASSERT_TRUE(link->set_attribute("href", "#target"));
+    DomElement* target = block("Target", "break-before: page"); ASSERT_NE(target, nullptr);
+    ASSERT_TRUE(target->set_attribute("id", "target"));
+    ViewTree* first = secondary(); PagedLayoutOptions options = paged_layout_options_default();
+    PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(first, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED); environment.viewport_width = 180.0f;
+    ViewTree* second = view_tree_secondary_create(&doc, &environment); ASSERT_NE(second, nullptr);
+    ASSERT_EQ(layout_secondary_view(second, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    for (ViewTree* tree : {first, second}) {
+        ASSERT_EQ(tree->model->page_count, 2u);
+        ASSERT_NE(layout_secondary_target(tree, "target"), nullptr);
+        EXPECT_EQ(layout_secondary_target(tree, "target")->page_number, 2u);
+        ViewNodeState* state = view_tree_node_state(tree, link, false); ASSERT_NE(state, nullptr);
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence)
+            if (node->glyph_run) append_fragment_text(node, text);
+        EXPECT_STREQ(text->str, tree == first ? "9/IX" : "19/XIX"); strbuf_free(text);
+    }
 }
 
 TEST_F(SecondaryViewTest, NamedStringsUsePhysicalPageSnapshotsAndSurviveBlankPages) {

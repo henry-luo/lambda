@@ -10,7 +10,7 @@ pn main() {
         total = total + i
         i = i + 1
     }
-    print("Sum 1-100: " & str(total))
+    print("Sum 1-100: " ++ string(total))
 
     // ===== Build array iteratively =====
     var fibonacci = [1, 1]
@@ -18,8 +18,8 @@ pn main() {
         let n = len(fibonacci)
         fibonacci = [*fibonacci, fibonacci[n - 1] + fibonacci[n - 2]]
     }
-    print("Fibonacci length: " & str(len(fibonacci)))
-    print("Fibonacci[19]: " & str(fibonacci[19]))
+    print("Fibonacci length: " ++ string(len(fibonacci)))
+    print("Fibonacci[19]: " ++ string(fibonacci[19]))
 
     // ===== Map building =====
     var counts = {}
@@ -27,13 +27,13 @@ pn main() {
     var w = 0
     while (w < len(words)) {
         let word = words[w]
-        let current = counts.(word) or 0
-        counts.(word) = current + 1
+        let current = counts[word] or 0
+        counts[word] = current + 1
         w = w + 1
     }
-    print("apple count: " & str(counts.apple))
-    print("banana count: " & str(counts.banana))
-    print("cherry count: " & str(counts.cherry))
+    print("apple count: " ++ string(counts.apple))
+    print("banana count: " ++ string(counts.banana))
+    print("cherry count: " ++ string(counts.cherry))
 
     // ===== Nested loops =====
     var matrix = []
@@ -48,30 +48,30 @@ pn main() {
         matrix = [*matrix, row]
         r = r + 1
     }
-    print("Matrix[0]: " & str(matrix[0]))
-    print("Matrix[2]: " & str(matrix[2]))
+    print("Matrix[0]: " ++ string(matrix[0]))
+    print("Matrix[2]: " ++ string(matrix[2]))
 
     // ===== Early return with condition =====
-    print("Is prime 7: " & str(is_prime(7)))
-    print("Is prime 10: " & str(is_prime(10)))
-    print("Is prime 97: " & str(is_prime(97)))
+    print("Is prime 7: " ++ string(is_prime(7)))
+    print("Is prime 10: " ++ string(is_prime(10)))
+    print("Is prime 97: " ++ string(is_prime(97)))
 
     // ===== String building =====
     var result = ""
     var k = 0
     while (k < 5) {
-        if (k > 0) result = result & ", "
-        result = result & str(k * k)
+        if (k > 0) { result = result ++ ", " }
+        result = result ++ string(k * k)
         k = k + 1
     }
-    print("Squares: " & result)
+    print("Squares: " ++ result)
 }
 
 pn is_prime(n: int) bool {
-    if (n < 2) return false
+    if (n < 2) { return false }
     var i = 2
     while (i * i <= n) {
-        if (n % i == 0) return false
+        if (n % i == 0) { return false }
         i = i + 1
     }
     return true

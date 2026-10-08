@@ -1,0 +1,43 @@
+// Manual probe of sys.proc.* fields (machine-specific output, so no golden;
+// the `_` prefix keeps test discovery from treating it as a test)
+// Tests process information access via sys paths
+
+"=== sys.proc.self fields ==="
+
+"Process ID (pid):"
+sys.proc.self.pid
+
+"Current working directory (cwd):"
+sys.proc.self.cwd
+
+"Command line arguments (argv):"
+sys.proc.self.argv
+
+"Argv count:"
+len(sys.proc.self.argv)
+
+"=== sys.proc structure ==="
+"sys.proc:"
+sys.proc
+
+"sys.proc.self:"
+sys.proc.self
+
+"=== Environment variables (sample) ==="
+"HOME:"
+sys.proc.self.env.HOME
+
+"USER:"
+sys.proc.self.env.USER
+
+"PATH (truncated):"
+sys.proc.self.env.PATH
+
+"SHELL:"
+sys.proc.self.env.SHELL
+
+"PWD:"
+sys.proc.self.env.PWD
+
+"=== Full environment map ==="
+sys.proc.self.env

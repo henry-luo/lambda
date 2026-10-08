@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make help)",
+      "Bash(make build *)",
+      "Bash(make build-test *)",
+      "Bash(make build-release-compile *)",
+      "Bash(make test-lambda-baseline *)",
+      "Bash(make test-radiant-baseline *)",
+      "Bash(make test-all-baseline *)",
+      "Bash(make layout *)",
+      "Bash(make lint *)",
+      "Bash(make generate-grammar *)",
+      "Bash(make check-tutorial *)",
+      "Bash(make check-formal-index *)",
+      "Bash(make interp-sweep *)",
+      "Bash(./lambda.exe *)",
+      "Bash(./test/test_*.exe *)",
+      "Bash(python3 utils/formal_index.py *)"
+    ]
+  },
+  "worktree": {
+    "symlinkDirectories": ["build_temp", "node_modules", "mac-deps", "ref"]
+  }
+}

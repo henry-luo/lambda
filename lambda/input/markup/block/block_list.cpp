@@ -709,6 +709,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
             if (parse_link_definition(parser, content_line)) {
                 // Link definition was successfully parsed - skip it
                 log_debug("list: link definition parsed, skipping");
+                highlight_note_block(parser, "link_def", saved, parser->current_line + 1);
                 parser->current_line++;
                 continue;
             }
@@ -717,9 +718,12 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
         }
 
         // Detect block type of the stripped content
+        int line_before = parser->current_line;
         Item block_item = parse_list_block_item(parser, content_line);
 
         if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
+            // a nested block's own class (a fence in a list item), through the column map
+            highlight_note_item(parser, block_item.item, line_before);
             list_push((List*)content_container, block_item);
         } else if (parser->current_line < parser->line_count) {
             parser->current_line++;  // Prevent infinite loop
@@ -1148,6 +1152,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             if (parse_link_definition(parser, content_line)) {
                                 // Link definition was successfully parsed - skip it
                                 log_debug("list structure: parse_link_definition returned true, skipping");
+                                highlight_note_block(parser, "link_def", saved, parser->current_line + 1);
                                 parser->current_line++;
                                 continue;
                             }
@@ -1155,9 +1160,11 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             parser->current_line = saved;
                         }
 
+                        int line_before = parser->current_line;
                         Item block_item = parse_list_block_item(parser, content_line);
 
                         if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
+                            highlight_note_item(parser, block_item.item, line_before);
                             // Check if we had a blank line between this and the previous direct block
                             if (had_blank_before_block && direct_block_count > 0) {
                                 found_blank_between_direct_blocks = true;

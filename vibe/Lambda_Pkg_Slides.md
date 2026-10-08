@@ -27,6 +27,7 @@ These supersede the earlier text where they conflict (notably §5.2 and §10.1).
 | SLD4 | Back-and-forth navigation changes only state, never slide markup: a slide renders once, the first time it is shown, and stays mounted; later visits toggle layer display, transition transforms and sampled visuals. |
 | SLD5 | Existing `.ls` decks are converted to `.slides` (Northstar, the introduction and the package-content demo). |
 | SLD6 | Detached DOM held only by script wrappers is reclaimed by one collection at an idle point once enough of it is stranded, not by charging GC allocation thresholds. |
+| SLD7 | Add a presenter console with notes/next-slide preview/timer; overview, slide picker, toolbar hiding, blackout and pointer; reusable themes/layouts and master slides. These are source-package features under D7.2.4/D7.5.3 and S12.1.3; SLD3/SLD4 still govern rendering. |
 
 Earlier designs replaced the canvas with freshly parsed `[outgoing, incoming]`
 layer markup on every slide change (§10.1). That reparsed published Mark data
@@ -35,6 +36,26 @@ never be released, so navigation storage grew without bound (17.5 KB per
 two-slide round after the other fixes). SLD3/SLD4 remove the reparse itself.
 SLD1/SLD2 are the user's choice of deck format and entry point; keeping decks
 as `.mark` files was offered and not chosen.
+
+### Presenter and composition delivery — 2026-10-07
+
+SLD7 is implemented in the source package. The console docks in the same viewer
+and stacks below narrow canvases; an independent second-display speaker window
+is outside this delivery. Its wall-clock timer has pause/resume/reset and does
+not follow animation speed. Hidden consoles stop requesting timer frames while
+preserving elapsed time. Notes and final-state next-slide previews mount on
+first use and stay cached separately from audience layers. Overview uses title
+cards, preserving SLD3/SLD4 without eagerly rendering thumbnails. Blackout and
+overview make audience content inert, and previews never accept input.
+
+Themes resolve named palettes or authored maps into scene colors and typography.
+Named placeholder layouts provide bounds; explicit coordinates win. Masters
+inherit attributes and objects with cycle validation, and local explicit IDs
+replace inherited top-level slots. Composition precedes scene/cue compilation,
+so cues can address inherited objects and theme typography participates in
+Morph compatibility. These choices add package behavior without revising a
+formal ruling. See [the public reference](../doc/Lambda_Slide.md) and
+[implementation evidence](impl/Lambda_Impl_Slide_Presentation.md).
 
 ## 1. Purpose
 

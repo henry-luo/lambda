@@ -16,6 +16,7 @@ import tools: lambda.edit.toolbar
 import files: lambda.edit.files
 import buf: lambda.edit.source_buffer
 import syn: lambda.edit.source_highlight
+import units: lambda.edit.source_units
 import lambda.editor.mod_doc
 import lambda.editor.mod_source_pos
 import lambda.editor.mod_editor
@@ -49,7 +50,9 @@ pub let descriptor = {
 // `top` is the first rendered line and `row` how many of its wrapped rows lie
 // above the surface (design §6.4); `rows` is the rendered row count (the
 // viewport's rows plus OVERSCAN) and `cols` the text width in characters.
-// Without `wrap` every line is one row and `row` stays 0.
+// Without `wrap` every line is one row and `row` stays 0, and `left` columns
+// are scrolled out of view to the left (design §6.2); `char_w` is the
+// measured advance of one column.
 // ---------------------------------------------------------------------------
 
 let LINE_H = 20.0
@@ -64,7 +67,7 @@ let MEASURE_TEXT = "00000000000000000000"
 // the text column's horizontal padding (.src-text) and a caret's width
 let TEXT_PAD = 14.0
 
-fn new_view() => {handle: null, top: 0, row: 0, rows: DEFAULT_ROWS, cols: 0, wrap: false}
+fn new_view() => {handle: null, top: 0, row: 0, rows: DEFAULT_ROWS, cols: 0, wrap: false, left: 0, char_w: 0.0}
 
 // Rendered rows for a surface `height` pixels tall.
 fn rows_for(height) => max(1, int(height / LINE_H) + OVERSCAN)
@@ -138,7 +141,9 @@ fn rows_through(b, vw, line, r) =>
 
 // The view that keeps position `p` visible: unchanged when it already is,
 // else scrolled just enough, as the caret moves in every editor.
-fn follow(b, vw, p) {
+fn follow(b, vw, p) => follow_left(b, follow_rows(b, vw, p), p)
+
+fn follow_rows(b, vw, p) {
   let r = pos_row(b, vw, p)
   if (p.line < vw.top or (p.line == vw.top and r < vw.row)) {*: vw, top: p.line, row: r}
   else if (p.line - vw.top < visible(vw) and rows_through(b, vw, p.line, r) <= visible(vw)) vw
@@ -148,29 +153,51 @@ fn follow(b, vw, p) {
   }
 }
 
+// The display column (tabs expanded) of code-point column `col` of a line.
+fn display_col(text, col) => display_len(slice(text, 0, col))
+
+// The code-point column at display column `d`: a column inside a tab's
+// expansion lands before the tab, one past the end at the end.
+fn col_at_display(parts, i, d, at, col) {
+  let n = len(parts[i])
+  if (d <= at + n or i == len(parts) - 1) col + min(max(d - at, 0), n)
+  else {
+    let stop = ((at + n) div TAB + 1) * TAB
+    if (d < stop) col + n else col_at_display(parts, i + 1, d, stop, col + n + 1)
+  }
+}
+
+fn col_of_display(text, d) =>
+  if (contains(text, "\t")) col_at_display(split(text, "\t"), 0, d, 0, 0) else min(max(d, 0), len(text))
+
+// Unwrapped, the text column scrolls sideways to keep `p` in view, with a
+// few columns of context; wrapped lines never need it.
+fn follow_left(b, vw, p) {
+  if (wrapping(vw) or vw.cols <= 0) (if (vw.left == 0) vw else {*: vw, left: 0})
+  else {
+    let x = display_col(buf.line(b, p.line), p.col)
+    let context = min(8, vw.cols div 4)
+    if (x < vw.left) {*: vw, left: max(0, x - context)}
+    else if (x >= vw.left + vw.cols - 1) {*: vw, left: x - vw.cols + 1 + context}
+    else vw
+  }
+}
+
+// The farthest the text column scrolls: the widest rendered line's end, in view.
+fn max_left(b, vw) {
+  let widths = [for (l in vw.top to vw.top + window_count(b, vw) - 1) display_len(buf.line(b, l))]
+  max(0, (if (len(widths) == 0) 0 else max(widths)) - vw.cols + 2)
+}
+
+// The view scrolled sideways by `n` columns.
+fn scrolled_left(b, vw, n) =>
+  if (wrapping(vw)) vw else {*: vw, left: min(max(0, vw.left + n), max(vw.left, max_left(b, vw)))}
+
 // Wheel motion arrives in pixels; whole lines move the window and the
 // remainder carries to the next event, so slow trackpad motion still scrolls.
 fn wheel_step(px) {
   let lines = int(px / LINE_H)
   {lines: lines, rest: px - float(lines) * LINE_H}
-}
-
-// ---------------------------------------------------------------------------
-// Columns ↔ UTF-8 bytes (CED21): the bridge counts bytes, the model code points
-// ---------------------------------------------------------------------------
-
-fn utf8_width(ch) {
-  let cp = ord(ch)
-  if (cp < 128) 1 else if (cp < 2048) 2 else if (cp < 65536) 3 else 4
-}
-
-fn bytes_before(text, col) int => sum([for (ch in slice(text, 0, col)) utf8_width(ch)])
-
-fn col_at_byte(text, offset) {
-  let widths = [for (ch in text) utf8_width(ch)]
-  let ends = [for (i in 0 to len(widths) - 1) sum(take(widths, i + 1))]
-  let inside = [for (i in 0 to len(ends) - 1 where ends[i] > offset) i]
-  if (len(inside) == 0) len(text) else inside[0]
 }
 
 // ---------------------------------------------------------------------------
@@ -213,11 +240,21 @@ fn window_doc(b, vw, hs) =>
 // text and the gutter up together.
 fn shift_style(vw) => if (vw.row > 0) "margin-top: " ++ string(0.0 - float(vw.row) * LINE_H) ++ "px" else null
 
+fn left_px(vw) => float(vw.left) * vw.char_w
+
+// The text column scrolled sideways slides under the gutter, which paints
+// above it; a negative margin widens it by as much, so its right edge stays.
+fn surface_style(vw) =>
+  if (vw.row > 0) shift_style(vw)
+  else if (vw.left > 0 and vw.char_w > 0.0) "margin-left: " ++ string(0.0 - left_px(vw)) ++ "px"
+  else null
+
 // A wrapped line's number keeps the height of all its rows.
 fn line_number(b, vw, l) {
   let n = line_rows(b, vw, l)
-  if (n == 1) <div class: "src-num", string(l + 1)>
-  else <div class: "src-num", style: "height: " ++ string(float(n) * LINE_H) ++ "px", string(l + 1)>
+  if (n == 1) <div class: "src-num", ["data-line"]: string(l), string(l + 1)>
+  else <div class: "src-num", ["data-line"]: string(l), style: "height: " ++ string(float(n) * LINE_H) ++ "px",
+            string(l + 1)>
 }
 
 fn gutter(b, vw) =>
@@ -245,7 +282,7 @@ fn leaf_index(leaves, col) => max(0, len([for (lf in leaves where lf.start <= co
 fn row_pos(b, hs, row, line, col) {
   let leaves = row_leaves(b, hs, line)
   let j = leaf_index(leaves, col)
-  pos([row, j], bytes_before(leaves[j].text, col - leaves[j].start))
+  pos([row, j], units.bytes_before(leaves[j].text, col - leaves[j].start))
 }
 
 // A model position as a source position in the rendered window, clamped to it.
@@ -272,7 +309,7 @@ fn from_source(b, top, hs, sp) {
     let leaves = row_leaves(b, hs, l)
     if (len(path) == 1) buf.loc(l, if (sp.offset < len(leaves)) leaves[sp.offset].start else buf.line_len(b, l))
     else if (path[1] >= len(leaves)) buf.loc(l, buf.line_len(b, l))
-    else buf.loc(l, leaves[path[1]].start + col_at_byte(leaves[path[1]].text, sp.offset))
+    else buf.loc(l, leaves[path[1]].start + units.col_at_byte(leaves[path[1]].text, sp.offset))
   }
 }
 
@@ -371,6 +408,27 @@ fn vertical(b, sel, dl, extend) {
   {anchor: if (extend) sel.anchor else head, head: head, goal: goal}
 }
 
+// With soft wrap, Up and Down step by rows (design §6.4) and `goal` is the x
+// the motion started from, in display columns within a row; on a row other
+// than its line's last, the caret stops before the wrap point.
+fn vertical_rows(b, vw, sel, n, extend) {
+  let r = pos_row(b, vw, sel.head)
+  let goal = if (sel.goal != null) sel.goal else display_col(buf.line(b, sel.head.line), sel.head.col) - r * vw.cols
+  let to = row_step(b, vw, sel.head.line, r, n)
+  let stuck = to.line == sel.head.line and to.row == r
+  let last_row = to.row >= line_rows(b, vw, to.line) - 1
+  let d = to.row * vw.cols + (if (last_row) goal else min(goal, vw.cols - 1))
+  // a step that cannot move goes to the document's end, as Up and Down do unwrapped
+  let head = if (stuck and n < 0) buf.loc(0, 0)
+             else if (stuck and n > 0) buf.doc_end(b)
+             else buf.loc(to.line, col_of_display(buf.line(b, to.line), d))
+  {anchor: if (extend) sel.anchor else head, head: head, goal: goal}
+}
+
+// Up, Down and paging: by rows when wrapping, else by lines.
+fn vertical_by(b, vw, sel, n, extend) =>
+  if (wrapping(vw)) vertical_rows(b, vw, sel, n, extend) else vertical(b, sel, n, extend)
+
 fn moved(sel, head, extend) => {anchor: if (extend) sel.anchor else head, head: head, goal: null}
 
 // A collapsing arrow lands on the selection's edge, as in every editor.
@@ -397,10 +455,10 @@ fn navigate(b, sel, vw, evt) {
   else if (key == "ArrowDown" and primary) moved(sel, buf.doc_end(b), extend)
   else if (key == "ArrowLeft") horizontal(b, sel, false, word or evt.ctrlKey == true, extend)
   else if (key == "ArrowRight") horizontal(b, sel, true, word or evt.ctrlKey == true, extend)
-  else if (key == "ArrowUp") vertical(b, sel, -1, extend)
-  else if (key == "ArrowDown") vertical(b, sel, 1, extend)
-  else if (key == "PageUp") vertical(b, sel, 0 - page, extend)
-  else if (key == "PageDown") vertical(b, sel, page, extend)
+  else if (key == "ArrowUp") vertical_by(b, vw, sel, -1, extend)
+  else if (key == "ArrowDown") vertical_by(b, vw, sel, 1, extend)
+  else if (key == "PageUp") vertical_by(b, vw, sel, 0 - page, extend)
+  else if (key == "PageDown") vertical_by(b, vw, sel, page, extend)
   else if (key == "Home" and primary) moved(sel, buf.loc(0, 0), extend)
   else if (key == "End" and primary) moved(sel, buf.doc_end(b), extend)
   else if (key == "Home") moved(sel, buf.loc(sel.head.line, home_col(b, sel.head)), extend)
@@ -451,16 +509,28 @@ fn intent_edit(b, sel, input_type, data) {
   else null
 }
 
-// Typing one character next to the previous one extends its undo step; the
-// first character may replace a selection, so typing over it undoes at once.
+// A pause this long between two keystrokes starts a new undo step.
+let TYPING_GAP_MS = 500.0
+
+// Typing one character next to the previous one extends its undo step until a
+// word boundary, a pause or a caret move (design §5.2); the first character
+// may replace a selection, so typing over it undoes at once.
 fn typed_char(d) => len(d.insert) == 1 and len(d.insert[0]) == 1
 
-fn joins_last(hist, d) {
+fn joins_last(hist, d, now) {
   if (len(hist.undo) == 0 or not typed_char(d) or buf.pos_cmp(d.from, d.to) != 0) false
   else {
     let prev = hist.undo[len(hist.undo) - 1]
-    prev.typing and buf.pos_cmp(prev.after.head, d.from) == 0 and is_word_char(d.insert[0])
+    prev.typing and buf.pos_cmp(prev.after.head, d.from) == 0 and is_word_char(d.insert[0]) and
+      now != null and prev.at != null and now - prev.at < TYPING_GAP_MS
   }
+}
+
+// The history after the caret moved on its own: the last typing step is over.
+fn closed(hist) {
+  let n = len(hist.undo)
+  if (n == 0 or not hist.undo[n - 1].typing) hist
+  else {*: hist, undo: [*take(hist.undo, n - 1), {*: hist.undo[n - 1], typing: false}]}
 }
 
 // Apply one delta: the new buffer, selection, and history.
@@ -468,11 +538,11 @@ fn edit_step(st, d) {
   let r = buf.apply_delta(st.b, d)
   let head = buf.insert_end(d.from, d.insert)
   let after = caret(head)
-  let entry = {inverses: [r.inverse], before: st.sel, after: after, typing: typed_char(d)}
-  let undo = if (joins_last(st.hist, d)) {
+  let entry = {inverses: [r.inverse], before: st.sel, after: after, typing: typed_char(d), at: st.now}
+  let undo = if (joins_last(st.hist, d, st.now)) {
                let prev = st.hist.undo[len(st.hist.undo) - 1];
                [*take(st.hist.undo, len(st.hist.undo) - 1),
-                {*: prev, inverses: [*prev.inverses, r.inverse], after: after}]
+                {*: prev, inverses: [*prev.inverses, r.inverse], after: after, at: st.now}]
              }
              else [*st.hist.undo, entry]
   {b: r.buf, sel: after, hist: {undo: undo, redo: []}, steps: [{delta: d, applied: r}]}
@@ -516,7 +586,7 @@ fn composition_step(st, comp, input_type, data) {
     {b: st.b, sel: st.sel, hist: st.hist, steps: [],
      comp: {base: st.b, base_sel: st.sel, base_hist: st.hist, from: sel_from(st.sel), to: sel_to(st.sel)}}
   else if (input_type == "insertFromComposition") {
-    let base = if (comp == null) st else {b: rebased(comp.base, st.b), sel: comp.base_sel, hist: comp.base_hist}
+    let base = if (comp == null) st else {b: rebased(comp.base, st.b), sel: comp.base_sel, hist: comp.base_hist, now: st.now}
     let committed = edit_step(base, buf.delta(sel_from(base.sel), sel_to(base.sel), buf.text_lines(string(data or ""))));
     // the commit applies to the pre-composition buffer: drop the mapped runs
     {*: committed, steps: null}
@@ -575,9 +645,10 @@ fn reindent_step(st, unit, indent) {
 }
 
 // ---------------------------------------------------------------------------
-// Highlighting (CED14v2): pass 1 maps the runs through an edit, pass 2 makes
-// the window exact. Pass 2 belongs on the next frame; until the DOM layer
-// offers a frame request, `settle` runs it before the handler returns.
+// Highlighting (CED14v2): pass 1 maps the runs through an edit while the
+// handler runs; pass 2 makes the window exact on the next frame (OQ16), so
+// the parser is never on the keystroke path. One frame request is outstanding
+// at a time (`frame` holds its token), so a burst of keys costs one parse.
 // ---------------------------------------------------------------------------
 
 // Rows parsed beyond the visible window, so ordinary scrolling stays inside it.
@@ -585,22 +656,35 @@ fn highlight_pad(rows) => 2 * rows
 
 fn new_highlight(path) => {lang: syn.language_of(path), hl: null, scan: syn.empty_scan(), find: null}
 
-// `steps` are the edits applied since the last settle ([] for none, null when
-// the runs no longer describe the buffer).
-fn settle(hs, steps, b, vw) {
-  let top = vw.top
-  let rows = vw.rows
-  let edited = not (steps != null and len(steps) == 0)
-  let mapped = if (not edited) hs
-               else {*: hs, *: syn.after_steps(hs.hl, hs.scan, steps, b.version),
-                     // an edit leaves a caret, which is no match: recount only
-                     find: if (hs.find == null) null else find_state(b, caret(buf.loc(0, 0)), hs.find.query)}
-  if (mapped.lang == null or syn.covers(mapped.hl, b, top, top + rows - 1)) mapped
+// Pass 1. `steps` are the edits applied since the last settle ([] for none,
+// null when the runs no longer describe the buffer).
+fn settle(hs, steps, b) =>
+  if (steps != null and len(steps) == 0) hs
+  else {*: hs, *: syn.after_steps(hs.hl, hs.scan, steps, b.version),
+        // an edit leaves a caret, which is no match: recount only
+        find: if (hs.find == null) null else find_state(b, caret(buf.loc(0, 0)), hs.find.query)}
+
+// Whether the rendered window has rows that are plain or provisional.
+fn needs_exact(hs, b, vw) => hs.lang != null and not syn.covers(hs.hl, b, vw.top, vw.top + vw.rows - 1)
+
+// Pass 2: parse the window with its padding and swap the exact runs in.
+fn exact(hs, b, vw) {
+  if (not needs_exact(hs, b, vw)) hs
   else {
-    let pad = highlight_pad(rows)
-    let r = syn.highlight(b, top - pad, top + rows + pad, mapped.scan, mapped.lang)
-    if (r == null) mapped else {*: mapped, hl: r.hl, scan: r.scan}
+    let pad = highlight_pad(vw.rows)
+    let r = syn.highlight(b, vw.top - pad, vw.top + vw.rows + pad, hs.scan, hs.lang)
+    if (r == null) hs else {*: hs, hl: r.hl, scan: r.scan}
   }
+}
+
+// Ask for pass 2 on the next frame, unless one is already asked for or the
+// window is exact; returns the outstanding request's token (0 for none). The
+// frame event targets the body, the element this template renders.
+pn request_exact(node, hs, b, vw, token) {
+  if (token != 0 or not needs_exact(hs, b, vw)) { return token }
+  let body = dom.query_selector(dom.root_node(node), "body")
+  if (body == null) { return 0 }
+  dom.request_frame(body, "source_frame")
 }
 
 // ---------------------------------------------------------------------------
@@ -676,7 +760,7 @@ fn find_moved(b, vw, hs, q, forward, from) {
   if (found == null) null
   else {
     let v = follow(b, vw, found.head)
-    {sel: found, vw: v, hs: settle({*: hs, find: find_state(b, found, q)}, [], b, v)}
+    {sel: found, vw: v, hs: {*: hs, find: find_state(b, found, q)}}
   }
 }
 
@@ -701,9 +785,32 @@ fn find_bar(f) =>
 // The application template
 // ---------------------------------------------------------------------------
 
-fn status_line(sel, status) {
+// The selection's size: characters within a line, lines across several (a
+// character count would walk every selected line on each render).
+fn selection_label(sel) {
+  let from = sel_from(sel)
+  let to = sel_to(sel)
+  // a selection that ends at a line's start does not include that line
+  let lines = to.line - from.line + (if (to.col == 0) 0 else 1);
+  if (collapsed(sel)) null
+  else if (from.line == to.line) string(to.col - from.col) ++ " selected"
+  else if (lines == 1) "1 line selected"
+  else string(lines) ++ " lines selected"
+}
+
+fn language_label(lang) => if (lang == 'markdown') "Markdown" else if (lang == 'html') "HTML" else "Plain Text"
+
+// Design §10: the caret, the selection's size and the last message on the
+// left; the language, line ends and dirty state on the right.
+fn status_line(b, sel, hs, status, dirty) {
   let where = "Ln " ++ string(sel.head.line + 1) ++ ", Col " ++ string(sel.head.col + 1)
-  if (status == "") where else where ++ "  ·  " ++ status
+  let left = [for (part in [where, selection_label(sel), status] where part != null and part != "") part]
+  let right = [for (part in [language_label(hs.lang), if (b.eol == "\r\n") "CRLF" else "LF",
+                             if (dirty) "Unsaved" else null] where part != null) part];
+  <div class: "edit-status", role: "status",
+    <span class: "src-status-left", join(left, "  ·  ")>
+    <span class: "src-status-right", join(right, "  ·  ")>
+  >
 }
 
 // The toolbar's history buttons query this record instead of a rich editor.
@@ -715,13 +822,17 @@ let source_css = "
   body.edit-format-source { margin: 0; height: 100vh; overflow: hidden; display: flex;
                             flex-direction: column;
                             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  .edit-format-source .edit-status { flex: none; padding: 4px 12px; font-size: 12px; color: #57606a;
+  .edit-format-source .edit-status { flex: none; display: flex; justify-content: space-between; gap: 12px;
+                                     padding: 4px 12px; font-size: 12px; color: #57606a;
                                      background: #f6f8fa; border-top: 1px solid #d0d7de; }
+  .src-status-left { white-space: pre; overflow: hidden; }
+  .src-status-right { flex: none; white-space: pre; }
   .src-main { flex: 1; min-height: 0; display: flex; overflow: hidden;
               font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 13px;
               background: #ffffff; color: #1f2328; }
   .src-gutter { flex: none; padding: 4px 10px 0 12px; text-align: right; color: #8c959f;
-                background: #f6f8fa; border-right: 1px solid #d8dee4; user-select: none; }
+                background: #f6f8fa; border-right: 1px solid #d8dee4; user-select: none;
+                position: relative; z-index: 1; cursor: default; }
   .src-num { height: 20px; line-height: 20px; }
   .src-text { flex: 1; min-width: 0; padding: 4px 0 0 10px; outline: none; overflow: hidden;
               white-space: pre; }
@@ -752,10 +863,12 @@ let source_css = "
 // The surface's own stylesheet; the edit application adds the shared ones.
 pub let surface_css = source_css ++ syn.css
 
-// The source surface as the edit application's body.
+// The source surface as the edit application's body. Opening highlights the
+// first window at once: at the top of the file the parse starts at line 0 with
+// no restart scan, so it costs one pass 2 whatever the file's size.
 pub fn app(session, b, status) =>
   apply(<source_app session: session, buf: b, status: status,
-                    hs: settle(new_highlight(session.path), [], b, new_view())>, {mode: "edit"})
+                    hs: exact(new_highlight(session.path), b, new_view())>, {mode: "edit"})
 
 // ---------------------------------------------------------------------------
 // Switching views (OQ7, CED20): the application shows the rich surface or
@@ -794,20 +907,27 @@ pn rich_view(session, b) {
   {mode: 'rich', session: s, doc: edit_open(loaded.doc, format.schema, null), status: ""}
 }
 
-// Bind the surface once and measure it: its rows, and its width in
-// characters from the measuring span's advance (soft wrap).
+// The surface's rows, and its width in characters from the measuring span's
+// advance (soft wrap): on mount and whenever the window resizes.
+pn measured(vw, root) {
+  let surface = dom.get_element_by_id(root, "edit-surface")
+  let r = if (surface == null) null else dom.bounding_box(surface)
+  let probe = dom.get_element_by_id(root, "src-measure")
+  let m = if (probe == null) null else dom.bounding_box(probe)
+  let char_w = if (m != null and m.width > 0) m.width / float(MEASURE_CHARS) else 0.0
+  // a column scrolled out to the left widens the surface's box by as much
+  {*: vw, rows: if (r != null and r.height > 0) rows_for(r.height) else vw.rows,
+   cols: if (r != null and char_w > 0.0) int((r.width - TEXT_PAD - left_px(vw)) / char_w) else vw.cols,
+   char_w: if (char_w > 0.0) char_w else vw.char_w}
+}
+
+// Bind the surface once and measure it.
 pn mounted(vw, node, rev) {
   if (vw.handle != null) { return vw }
   let root = dom.root_node(node)
   let surface = dom.get_element_by_id(root, "edit-surface")
   if (surface == null) { return vw }
-  let r = dom.bounding_box(surface)
-  let probe = dom.get_element_by_id(root, "src-measure")
-  let m = if (probe == null) null else dom.bounding_box(probe)
-  let char_w = if (m != null and m.width > 0) m.width / float(MEASURE_CHARS) else 0.0
-  {*: vw, handle: dom.bind_model_edit_surface(surface, rev),
-   rows: if (r != null and r.height > 0) rows_for(r.height) else vw.rows,
-   cols: if (r != null and char_w > 0.0) int((r.width - TEXT_PAD) / char_w) else 0}
+  {*: measured(vw, root), handle: dom.bind_model_edit_surface(surface, rev)}
 }
 
 // Put the native selection where the model has it once this render lands;
@@ -826,7 +946,8 @@ fn typed_step(st, text) => edit_step(st, buf.delta(sel_from(st.sel), sel_to(st.s
 
 edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: caret(buf.loc(0, 0)),
                          vw: new_view(), hist: {undo: [], redo: []},
-                         rev: 0, comp: null, hs: ~.hs, wheel_px: 0.0, drag: null, dialog: null, after_save: null {
+                         rev: 0, comp: null, hs: ~.hs, frame: 0, wheel_px: 0.0, wheel_dx: 0.0, drag: null, dialog: null,
+                         after_save: null {
   let dirty = sess.is_dirty(session, b);
   <body class: "edit-app edit-format-source",
     <div class: "edit-toolbar", role: "toolbar", ["aria-label"]: "Document",
@@ -837,12 +958,12 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
     <div class: "src-main",
       gutter(b, vw);
       <div id: "edit-surface", class: if (vw.wrap) "src-text src-wrap" else "src-text", contenteditable: "true",
-           spellcheck: "false", tabindex: "0", style: shift_style(vw), apply(window_doc(b, vw, hs))>
+           spellcheck: "false", tabindex: "0", style: surface_style(vw), apply(window_doc(b, vw, hs))>
       scrollbar(b, vw);
       <span id: "src-measure", class: "src-measure", ["aria-hidden"]: "true", MEASURE_TEXT>
       if (hs.find != null) find_bar(hs.find) else null
     >
-    <div class: "edit-status", role: "status", status_line(sel, status)>
+    status_line(b, sel, hs, status, dirty)
     files.dialog_view(dialog, session)
   >
 }
@@ -862,7 +983,7 @@ on editaction(evt) {
   }
   let history = input_type == "historyUndo" or input_type == "historyRedo"
   let composing = contains(composition_types, input_type)
-  let st = {b: b, sel: target, hist: hist}
+  let st = {b: b, sel: target, hist: hist, now: evt.time_stamp}
   let next = if (composing) composition_step(st, comp, input_type, evt.data)
              else if (history) history_step(st, input_type == "historyUndo")
              else {
@@ -879,7 +1000,8 @@ on editaction(evt) {
   hist = next.hist
   comp = next.comp
   vw = follow(b, vw, sel.head)
-  hs = settle(hs, next.steps, b, vw)
+  hs = settle(hs, next.steps, b)
+  frame = request_exact(evt.target, hs, b, vw, frame)
   rev = rev + 1
   status = ""
   files.sync_window(evt.target, session, b)
@@ -889,7 +1011,12 @@ on editaction(evt) {
 on selectionchange(evt) {
   let picked = model_selection(b, vw.top, hs, evt.source_selection)
   // the selection the surface itself projected keeps the model's own
-  if (picked != null and evt.source_selection != source_selection_of(b, vw, hs, sel)) { sel = picked }
+  if (picked != null and evt.source_selection != source_selection_of(b, vw, hs, sel)) {
+    sel = picked
+    hist = closed(hist)
+    // the status redraw replaces the rows the native caret is in
+    rev = project(vw, b, hs, sel, rev)
+  }
 }
 on edit_cmd(req) {
   vw = mounted(vw, req.node, rev)
@@ -918,7 +1045,8 @@ on edit_cmd(req) {
       sel = next.sel
       hist = next.hist
       vw = follow(b, vw, sel.head)
-      hs = settle(hs, next.steps, b, vw)
+      hs = settle(hs, next.steps, b)
+      frame = request_exact(req.node, hs, b, vw, frame)
       files.sync_window(req.node, session, b)
     }
     files.focus_surface(req.node)
@@ -937,7 +1065,8 @@ on edit_dialog(req) {
     sel = caret(buf.loc(0, 0))
     vw = {*: vw, top: 0, row: 0}
     hist = {undo: [], redo: []}
-    hs = settle(new_highlight(session.path), [], b, vw)
+    hs = new_highlight(session.path)
+    frame = request_exact(req.node, hs, b, vw, frame)
   }
   if (dialog == null) {
     files.focus_surface(req.node)
@@ -992,6 +1121,7 @@ on keydown(evt) {
       sel = moved.sel
       vw = moved.vw
       hs = moved.hs
+      frame = request_exact(evt.target, hs, b, vw, frame)
       rev = project(vw, b, hs, sel, rev)
     }
     return 'prevent-default'
@@ -1000,9 +1130,10 @@ on keydown(evt) {
   let adopted = action_selection(b, vw, hs, sel, evt)
   // Alt+Z toggles soft wrap (as in VS Code), keeping the caret in view
   if (evt.altKey == true and not primary and lower(string(evt.key)) == "z") {
-    sel = adopted
+    // a vertical motion's goal is a column unwrapped and an x within a row wrapped
+    sel = {*: adopted, goal: null}
     vw = follow(b, {*: vw, wrap: not vw.wrap, row: 0}, adopted.head)
-    hs = settle(hs, [], b, vw)
+    frame = request_exact(evt.target, hs, b, vw, frame)
     rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
@@ -1025,11 +1156,12 @@ on keydown(evt) {
     if (moved != null) {
       vw = moved.vw
       hs = moved.hs
+      frame = request_exact(evt.target, hs, b, vw, frame)
     }
     rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
-  let st = {b: b, sel: adopted, hist: hist}
+  let st = {b: b, sel: adopted, hist: hist, now: evt.time_stamp}
   let undo_key = primary and lower(string(evt.key)) == "z"
   let next = if (undo_key) history_step(st, evt.shiftKey != true)
              else if (evt.key == "Tab" and evt.shiftKey == true) reindent_step(st, indent_unit(b), false)
@@ -1054,9 +1186,13 @@ on keydown(evt) {
     hist = next.hist
     files.sync_window(evt.target, session, b)
   }
-  else { sel = moved_sel }
+  else {
+    sel = moved_sel
+    hist = closed(hist)
+  }
   vw = follow(b, vw, sel.head)
-  hs = settle(hs, if (next == null) [] else next.steps, b, vw)
+  hs = settle(hs, if (next == null) [] else next.steps, b)
+  frame = request_exact(evt.target, hs, b, vw, frame)
   rev = project(vw, b, hs, sel, rev)
   'prevent-default'
 }
@@ -1067,10 +1203,14 @@ on wheel(evt) {
   vw = mounted(vw, evt.target, rev)
   let step = wheel_step(wheel_px + float(evt.deltaY or 0))
   wheel_px = step.rest
-  let next = scrolled(b, vw, step.lines)
-  if (next.top != vw.top or next.row != vw.row) {
+  // sideways motion moves whole columns; the remainder carries like lines
+  let dx = wheel_dx + float(evt.deltaX or 0)
+  let cols = if (vw.char_w > 0.0) int(dx / vw.char_w) else 0
+  wheel_dx = dx - float(cols) * vw.char_w
+  let next = scrolled_left(b, scrolled(b, vw, step.lines), cols)
+  if (next.top != vw.top or next.row != vw.row or next.left != vw.left) {
     vw = next
-    hs = settle(hs, [], b, vw)
+    frame = request_exact(evt.target, hs, b, vw, frame)
     rev = project(vw, b, hs, sel, rev)
   }
   'prevent-default'
@@ -1079,10 +1219,29 @@ on wheel(evt) {
 // Shift+press extends the model selection: its anchor may lie outside the
 // window, where the clamped DOM selection cannot extend from it.
 on mousedown(evt) {
+  // A press on a line number selects the line, as in every editor; Shift
+  // extends the selection to it (design §6.3).
+  let num = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
+  if (dialog == null and num != null and dom.node_type(num) == 1 and dom.matches(num, ".src-num")) {
+    vw = mounted(vw, evt.target, rev)
+    let l = int(dom.get_attribute(num, "data-line"))
+    let start = buf.loc(l, 0)
+    let stop = if (l + 1 < b.count) buf.loc(l + 1, 0) else buf.loc(l, buf.line_len(b, l))
+    sel = if (evt.shiftKey != true) {anchor: start, head: stop, goal: null}
+          else {anchor: sel.anchor, head: if (buf.pos_cmp(start, sel.anchor) < 0) start else stop, goal: null}
+    hist = closed(hist)
+    vw = follow(b, vw, sel.head)
+    frame = request_exact(evt.target, hs, b, vw, frame)
+    files.focus_surface(evt.target)
+    rev = project(vw, b, hs, sel, rev)
+    return 'prevent-default'
+  }
   if (evt.shiftKey == true and evt.source_pos != null and dialog == null) {
     vw = mounted(vw, evt.target, rev)
     sel = {anchor: sel.anchor, head: from_source(b, vw.top, hs, evt.source_pos), goal: null}
+    hist = closed(hist)
     vw = follow(b, vw, sel.head)
+    frame = request_exact(evt.target, hs, b, vw, frame)
     rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
@@ -1096,7 +1255,7 @@ on mousedown(evt) {
     let thumb_y = r.top + r.height * float(vw.top) / float(max(1, b.count))
     let page = max(1, visible(vw) - 1)
     vw = scrolled(b, vw, if (evt.y < thumb_y) 0 - page else page)
-    hs = settle(hs, [], b, vw)
+    frame = request_exact(evt.target, hs, b, vw, frame)
   }
   'prevent-default'
 }
@@ -1107,7 +1266,7 @@ on mousemove(evt) {
   let next = scrolled_to(b, vw, drag.top + lines)
   if (next.top != vw.top or next.row != vw.row) {
     vw = next
-    hs = settle(hs, [], b, vw)
+    frame = request_exact(evt.target, hs, b, vw, frame)
   }
   'prevent-default'
 }
@@ -1128,6 +1287,7 @@ on input(evt) {
     sel = moved.sel
     vw = moved.vw
     hs = moved.hs
+    frame = request_exact(evt.target, hs, b, vw, frame)
   }
   rev = project(vw, b, hs, sel, rev)
 }
@@ -1146,9 +1306,33 @@ on click(evt) {
     sel = moved.sel
     vw = moved.vw
     hs = moved.hs
+    frame = request_exact(evt.target, hs, b, vw, frame)
     rev = project(vw, b, hs, sel, rev)
   }
   'prevent-default'
+}
+// Pass 2 (CED14v2, OQ16): the exact runs for the window swap in with one
+// assignment, so no frame mixes rows from before and after the parse. A
+// composing row is not re-rendered until its commit, which asks again.
+on source_frame(evt) {
+  if (evt.detail != frame) { return 'pass' }
+  frame = 0
+  if (comp != null or not needs_exact(hs, b, vw)) { return 'handled' }
+  hs = exact(hs, b, vw)
+  rev = project(vw, b, hs, sel, rev)
+  'handled'
+}
+// Measure the surface as soon as it is laid out, and again whenever the
+// window resizes: the rendered rows and the wrap width follow it.
+on load(evt) {
+  vw = mounted(vw, evt.target, rev)
+  frame = request_exact(evt.target, hs, b, vw, frame)
+}
+on resize(evt) {
+  if (vw.handle == null) { return }
+  vw = follow(b, measured(vw, dom.root_node(evt.target)), sel.head)
+  frame = request_exact(evt.target, hs, b, vw, frame)
+  rev = project(vw, b, hs, sel, rev)
 }
 on closerequest(evt) {
   if (not sess.is_dirty(session, b)) {

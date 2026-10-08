@@ -1953,8 +1953,11 @@ const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* el
         name, nullptr, nullptr, name_length) : nullptr;
 }
 
-const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name, size_t name_length) {
+const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name,
+    size_t name_length, StrView* token_text) {
     const CssCustomProp* winner = dom_element_lookup_own_custom_property_entry(element, name, name_length);
+    if (token_text) *token_text = winner
+        ? strview_init(winner->value_text, winner->value_text_len) : strview_init(nullptr, 0);
     return winner ? winner->value : nullptr;
 }
 

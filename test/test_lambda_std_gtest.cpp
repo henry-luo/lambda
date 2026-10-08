@@ -17,6 +17,7 @@
 #include <atomic>
 #include <mutex>
 #include "test_process.h"
+#include "test_script_discovery.hpp"
 
 extern "C" {
 #include "../lib/shell.h"
@@ -55,6 +56,7 @@ struct StdTestInfo {
     std::string script_path;    // e.g. "test/std/core/datatypes/integer_basic.ls"
     std::string expected_path;  // e.g. "test/std/core/datatypes/integer_basic.expected"
     std::string test_name;      // e.g. "core_datatypes_integer_basic"
+    bool missing_expected = false;  // discovered without its golden: the test fails
 
     friend std::ostream& operator<<(std::ostream& os, const StdTestInfo& info) {
         return os << info.test_name;
@@ -161,6 +163,20 @@ static char* read_file_contents(const char* path) {
 // Recursive Directory Scanning
 //==============================================================================
 
+// A script with a .expected golden is always a test; one without is a helper only
+// when its name says so, otherwise it is kept with missing_expected set so the
+// test fails instead of being dropped silently.
+static void add_std_script(std::vector<StdTestInfo>& tests, const std::string& full_path,
+        const std::string& name) {
+    StdTestInfo info;
+    info.script_path = full_path;
+    info.expected_path = platform_expected(full_path.substr(0, full_path.size() - 3) + ".expected");
+    info.missing_expected = !file_exists(info.expected_path);
+    if (info.missing_expected && is_lambda_helper_script(name.c_str())) return;
+    info.test_name = make_test_name(full_path);
+    tests.push_back(info);
+}
+
 static void discover_tests_recursive(const char* dir_path, std::vector<StdTestInfo>& tests) {
 #ifdef _WIN32
     // Windows: use FindFirstFile/FindNextFile
@@ -178,15 +194,7 @@ static void discover_tests_recursive(const char* dir_path, std::vector<StdTestIn
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             discover_tests_recursive(full_path.c_str(), tests);
         } else if (name.size() > 3 && name.substr(name.size() - 3) == ".ls") {
-            std::string expected = full_path.substr(0, full_path.size() - 3) + ".expected";
-            expected = platform_expected(expected);
-            if (file_exists(expected)) {
-                StdTestInfo info;
-                info.script_path = full_path;
-                info.expected_path = expected;
-                info.test_name = make_test_name(full_path);
-                tests.push_back(info);
-            }
+            add_std_script(tests, full_path, name);
         }
     } while (FindNextFileA(hFind, &fd));
     FindClose(hFind);
@@ -208,15 +216,7 @@ static void discover_tests_recursive(const char* dir_path, std::vector<StdTestIn
         if (S_ISDIR(st.st_mode)) {
             discover_tests_recursive(full_path.c_str(), tests);
         } else if (name.size() > 3 && name.substr(name.size() - 3) == ".ls") {
-            std::string expected = full_path.substr(0, full_path.size() - 3) + ".expected";
-            expected = platform_expected(expected);
-            if (file_exists(expected)) {
-                StdTestInfo info;
-                info.script_path = full_path;
-                info.expected_path = expected;
-                info.test_name = make_test_name(full_path);
-                tests.push_back(info);
-            }
+            add_std_script(tests, full_path, name);
         }
     }
     closedir(dir);
@@ -385,7 +385,12 @@ public:
 
     static void SetUpTestSuite() {
         if (batch_executed) return;
-        batch_results = execute_std_batch(g_std_tests);
+        // scripts without a golden fail in their test body without running
+        std::vector<StdTestInfo> runnable;
+        for (const auto& test : g_std_tests) {
+            if (!test.missing_expected) runnable.push_back(test);
+        }
+        batch_results = execute_std_batch(runnable);
         batch_executed = true;
     }
 };
@@ -395,6 +400,8 @@ bool LambdaStdTest::batch_executed = false;
 
 TEST_P(LambdaStdTest, ExecuteAndCompare) {
     const StdTestInfo& info = GetParam();
+    ASSERT_FALSE(info.missing_expected) << "No expected output " << info.expected_path
+        << " for " << info.script_path << ": " LAMBDA_MISSING_GOLDEN_HINT;
 
     auto it = batch_results.find(info.script_path);
     ASSERT_TRUE(it != batch_results.end())

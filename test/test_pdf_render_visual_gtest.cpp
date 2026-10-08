@@ -833,6 +833,42 @@ TEST(RenderOutputParity, PagedPdfUsesCssSheetsAndA4FallbackWithoutRasterScaling)
     EXPECT_EQ(pdf_page_count(continuous), 1);
 }
 
+TEST(RenderOutputParity, LogicalPageLabelsMatchAuthoredTextInPhysicalPdfAndFilteredPreview) {
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    const char* rules[] = {
+        "@page { counter-increment: page 2; @bottom-center { content: counter(page) '/' counter(pages) } }"
+        "@page:first { counter-reset: page 0 } @page chapter { counter-reset: page 8; counter-increment: page 0 }"
+        "a::after { content: target-counter('#target',page) '/' target-counters('#target',page,'.',upper-roman) }",
+        "@page { @bottom-center { content: '4/3' } } @page:first { @bottom-center { content: '2/3' } }"
+        "@page chapter { @bottom-center { content: '8/3' } } a::after { content: '8/VIII' }"
+    };
+    char previews[2][PATH_MAX];
+    PdfFileInfo pdfs[2] = {};
+    for (size_t i = 0; i < 2; i++) {
+        char html[4096], html_path[PATH_MAX];
+        snprintf(html, sizeof(html), "<!doctype html><html><head><style>"
+            "@page { size:240px 120px; margin:20px; @bottom-center { font:10px Arial } }"
+            "html,body { margin:0; font:10px/12px Arial } section + section { break-before:page }"
+            "section:last-child { page:chapter } %s</style></head><body>"
+            "<section><a>See</a></section><section>Middle</section><section id='target'>Final</section></body></html>", rules[i]);
+        snprintf(html_path, sizeof(html_path), "temp/render_output_parity/page_labels_%zu.html", i);
+        snprintf(pdfs[i].path, sizeof(pdfs[i].path), "temp/render_output_parity/page_labels_%zu.pdf", i);
+        snprintf(pdfs[i].base, sizeof(pdfs[i].base), "page_labels_%zu", i);
+        ASSERT_TRUE(render_html_fixture(html_path, pdfs[i].path, html, "--paged"));
+        ASSERT_EQ(pdf_page_count(pdfs[i].path), 3);
+        snprintf(previews[i], sizeof(previews[i]), "temp/render_output_parity/page_labels_%zu.png", i);
+        ASSERT_TRUE(render_document_fixture(html_path, previews[i], "--paged --pages 3,1 --page-grid 2x2 --page-scale .75"));
+    }
+    expect_pngs_exactly_equal(previews[1], previews[0]);
+    for (int page = 1; page <= 3; page++) {
+        char pngs[2][PATH_MAX];
+        for (size_t i = 0; i < 2; i++)
+            ASSERT_TRUE(render_reference_page(&pdfs[i], page, pngs[i], sizeof(pngs[i])));
+        expect_pngs_exactly_equal(pngs[1], pngs[0]);
+    }
+}
+
 TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndRejectsUnimplementedContexts) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/paged_settled.html";

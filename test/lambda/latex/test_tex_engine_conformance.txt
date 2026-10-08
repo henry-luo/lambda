@@ -1,0 +1,157 @@
+"== expansion ==
+LT:[x][yz][w]
+LT:<2|1><cd|ab>
+LT:(x)(y)(a.b)(c)
+LT:E[xy|z]
+LT:F(a b c)
+LT:2143
+LT:II
+LT:[X]
+LT:macro:->\x Y
+LT:[X]Y
+LT:macro:->\x 
+LT:FB
+LT:\relax
+LT:\a b
+LT:\x\%~
+LT:7-12
+LT:mcmlxxxivmmmmcmxcix
+LT:6565255511
+LT:macro:->17x
+LT:macro:->\x \y 
+LT:macro:->X\y X
+LT:\relax
+LT:the letter athe character 1begin-group character {end-group character }macro parameter character #math shift character $
+LT:the letter a
+LT:\char"41
+LT:\mathchar"7161
+LT:\count12
+LT:\long macro:#1->#1
+LT:undefined
+LT:ABCX
+LT:abc
+LT:next is a
+LT:next is other
+LT:after 5
+== conditionals ==
+LT:abc
+LT:dfh
+LT:two
+LT:otherneg
+LT:samediff AnB
+LT: 13 47
+LT:TF
+LT:DU
+LT:CN
+LT:uw
+LT:bc
+LT:y
+LT:c
+LT:big
+LT:samenR
+LT:78
+LT:gteq
+LT:void
+LT:\currentiflevel 1
+== registers ==
+LT:11
+LT:-3
+LT:3.75pt
+LT:72.26999pt
+LT:28.45274pt
+LT:2.84526pt
+LT:1.00374pt
+LT:12.0pt
+LT:1.07pt
+LT:12.8401pt
+LT:0.00153pt
+LT:-0.5pt
+LT:0.33333pt
+LT:16383.99998pt
+LT:3.5pt
+LT:7.5pt
+LT:-1.875pt
+LT:1.0pt plus 2.0fil minus 3.0fill
+LT:4.0pt plus -1.0fil
+LT:2.0pt plus 1.0fill minus 3.0fill
+LT:1.0pt plus 1.0filll minus 2.0pt
+LT:3.0mu plus 2.0fill
+LT:a##b\x 
+LT:a##b\x 
+LT:9988
+LT:088
+LT:nLglobal
+LT:3
+LT:3
+LT:x after
+LT:y after
+LT:0
+LT:AT
+LT:11129766999
+LT:29025287210
+LT:!relax
+LT:9213100010000
+LT:4242
+LT:6.0pt
+LT:\char"2A42
+LT:25
+LT:-4-43
+LT:107374182421
+LT:1.5pt1.5pt
+LT:43.81725pt
+LT:2.0pt plus 4.0fil
+LT:2.0pt2
+LT:6.0mu
+LT:65536
+LT:1
+== etex ==
+LT:\x a##b {c}
+LT:\x \y 
+LT:macro:->\x Y
+LT:macro:->\p X
+LT:\protected macro:->P
+LT:XY
+LT:macro:->XY
+LT:-110
+LT:.62
+LT:macro:->X
+LT:macro:->X
+LT:yes
+LT:0{0}
+LT:10
+LT:(\x )
+LT:the character x
+LT:X\y 
+LT:macro:->X\y \x 
+== tokens ==
+LT:AB \relax
+LT:macro:->z
+LT:TILDE and ~
+LT:AB
+LT:bracketed
+LT:SxS yS{} z
+LT:a  b
+LT:\ \% \s
+LT:macro:->E
+LT:xmacro:->z
+LT:/x
+LT:xyq
+LT:BBC
+LT:one two
+LT:\csname\endcsname
+LT:\relax
+LT:52147483647x
+LT:21474836472147483647
+LT:\count\catcode\the\if\endlinechar
+LT:\parindent\baselineskip\everypar\fi
+LT:714915
+== pdfstrings ==
+LT:a\040b\(c\)\\\\d~\040\303\251\011
+LT:a#20b#23#23c#2Fd#28e#29#3Cf#3E#5Bg#5D#7Bh#7D\#25i#20#C3#A9!~
+LT:61206220C3A9
+LT:ABC@|A@|
+LT:900150983CD24FB0D6963F7D28E17F72|D41D8CD98F00B204E9800998ECF8427E|66DDCD97CFDEABB2F6FB8A999B4BC76F
+LT:a#23#23b
+LT:[][][]
+LT:0.00008pt|0.0pt|0.0pt
+LT:0.0pt|0.0pt"

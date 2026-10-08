@@ -47,3 +47,20 @@ let carried = syn.scan_after(warm.scan, a)
 let fresh = syn.highlight(a.buf, 900, 929, syn.empty_scan(), 'markdown')
 let reused = syn.highlight(a.buf, 900, 929, carried, 'markdown');
 [same(fresh.hl, a.buf, reused.hl, a.buf, 900, 929), key(syn.runs_for(reused.hl, a.buf, 905))]
+
+// reference links whose definitions lie outside the window, below it (the
+// usual place) and above it, resolve as in the full parse: the labels each
+// chunk defines travel with the cache, also after an edit adds a definition
+"reference links defined outside the window:";
+let refs = join([for (i in 0 to 299) "See [doc " ++ string(i) ++ "][d" ++ string(i % 3) ++ "] and [top].\n\n"], "") ++
+           "[d0]: http://d0\n[d1]: http://d1\n"
+let rtext = "[top]: http://top\n\n" ++ refs
+let rb = buf.from_text(rtext)
+let rfull = syn.highlight(rb, 0, rb.count - 1, syn.empty_scan(), 'markdown')
+let rwin = syn.highlight(rb, 300, 329, syn.empty_scan(), 'markdown')
+let radd = buf.apply_delta(rb, buf.delta(buf.loc(rb.count - 1, 0), buf.loc(rb.count - 1, 0), ["[d2]: http://d2", ""]))
+let rcarried = syn.highlight(radd.buf, 300, 329, syn.scan_after(rwin.scan, radd), 'markdown')
+let rafter = syn.highlight(radd.buf, 0, radd.buf.count - 1, syn.empty_scan(), 'markdown');
+// line 306 cites [d2], which only the edit defines
+[same(rwin.hl, rb, rfull.hl, rb, 300, 329), key(syn.runs_for(rwin.hl, rb, 302)), key(syn.runs_for(rwin.hl, rb, 306)),
+ same(rcarried.hl, radd.buf, rafter.hl, radd.buf, 300, 329), key(syn.runs_for(rcarried.hl, radd.buf, 306))]

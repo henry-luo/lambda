@@ -1,0 +1,1 @@
+Testing io.copy with remote URL...1. Testing io.copy(url, local_file)...   Copied from: https://httpbin.org/json   To: ./test_output/copied_from_url.json   File exists: true2. Testing io.fetch...   Fetch returned data: true3. Cleaning up...   Deleted: ./test_output/copied_from_url.jsonio.copy URL tests completed!

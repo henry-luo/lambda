@@ -1,0 +1,15 @@
+{
+  "name": "a root with an explicit height (html { height: 100% }) whose content overflows scrolls the viewport by the wheel, and hit-testing follows the scroll and the sticky boxes",
+  "html": "test/ui/scroll_root_explicit_height.html",
+  "viewport": {"width": 800, "height": 600},
+  "events": [
+    {"type": "assert_hit_test", "x": 400, "y": 20, "expected_selector": "#header"},
+    {"type": "assert_hit_test", "x": 400, "y": 590, "expected_selector": "#footer"},
+    {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -10},
+    {"type": "assert_scroll", "x": 0, "y": 0, "negate": true},
+    {"type": "assert_hit_test", "x": 400, "y": 20, "expected_selector": "#header"},
+    {"type": "assert_hit_test", "x": 400, "y": 590, "expected_selector": "#footer"},
+    {"type": "assert_hit_test", "x": 400, "y": 300, "expected_tag": "p"},
+    {"type": "assert_rect", "target": {"selector": "#header"}, "y": 0, "tolerance": 1}
+  ]
+}

@@ -26,11 +26,11 @@ y2000.day
 let eoy = t'2024-12-31'
 eoy.month
 eoy.day
-eoy.day_of_year
+eoy.yearday
 
 // ===== Start of year =====
 let soy = t'2024-01-01'
-soy.day_of_year
+soy.yearday
 
 // ===== Midnight vs noon =====
 let midnight = t'2024-01-01T00:00:00'
@@ -49,9 +49,9 @@ eod.second
 
 // ===== DateTime comparison =====
 let earlier = t'2024-01-01'
-let later = t'2024-12-31'
-earlier < later
-later > earlier
+let later = t'2024-12-31';
+(earlier < later);
+(later > earlier)
 earlier == earlier
 
 // ===== Weekday boundary =====

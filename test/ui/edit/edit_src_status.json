@@ -1,0 +1,23 @@
+{
+  "name": "the status line shows the caret, the selection's size in characters or lines, the language, the line ends and the unsaved state",
+  "command": "edit",
+  "html": "test/ui/edit/sample.txt",
+  "working_copy": "temp/edit-ui/edit_src_status.txt",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".src-status-right"}, "equals": "Plain Text  ·  LF"},
+    {"type": "click", "target": {"text": "second line"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_combo", "key": "End", "mods_str": "shift"},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Ln 2, Col 12  ·  11 selected"},
+    {"type": "key_combo", "key": "ArrowDown", "mods_str": "shift"},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "2 lines selected"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "not_contains": "selected"},
+    {"type": "type", "text": "!"},
+    {"type": "assert_text", "target": {"selector": ".src-status-right"}, "equals": "Plain Text  ·  LF  ·  Unsaved"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".src-status-right"}, "equals": "Plain Text  ·  LF"},
+    {"type": "assert_text", "target": {"selector": ".src-status-left"}, "contains": "Saved edit_src_status.txt"}
+  ]
+}

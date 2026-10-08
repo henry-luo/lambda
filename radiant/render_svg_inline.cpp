@@ -4565,8 +4565,19 @@ static void svg_text_style_apply(SvgInlineRenderContext* ctx, Element* elem, Svg
 }
 
 static SvgTextPositionList svg_text_position_list(SvgTextLayout* layout,
-    const char* value, const SvgLengthContext* lengths, SvgLengthAxis axis, bool angle) {
+    Element* element, const char* name, const SvgLengthContext* lengths, SvgLengthAxis axis, bool angle) {
     SvgTextPositionList list = {};
+    const char* value = get_svg_attr(element, name);
+    if (!value) {
+        // Lambda-built SVGs retain numeric Items; a scalar is a one-entry position list.
+        float number = 0.0f;
+        if (!read_svg_number_attr(element, name, &number, lengths, axis)) return list;
+        list.values = (float*)scratch_alloc(layout->ctx->resource_scratch, sizeof(float));
+        if (!list.values) return {};
+        list.values[0] = number;
+        list.count = 1;
+        return list;
+    }
     int capacity = 0;
     const char* cursor = value;
     while (cursor && *cursor) {
@@ -4601,7 +4612,7 @@ static void svg_text_position_scope(SvgTextLayout* layout, Element* element,
     SvgLengthContext lengths = svg_text_length_context(layout->ctx, style);
     const char* names[] = {"x", "y", "dx", "dy", "rotate"};
     for (int i = 0; i < 5; i++) scope->lists[i] = svg_text_position_list(layout,
-        get_svg_attr(element, names[i]), &lengths,
+        element, names[i], &lengths,
         i == 1 || i == 3 ? SVG_LENGTH_Y : SVG_LENGTH_X, i == 4);
     layout->positions = scope;
 }

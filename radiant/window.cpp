@@ -1426,6 +1426,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                         log_error("document-transform: could not transfer loader pool to document");
                         free_document(doc);
                         doc = nullptr;
+                    } else {
+                        // a transformed document (lambda edit) is driven by this viewer like
+                        // any other: work outside native input, such as a frame request,
+                        // re-renders through its UI context
+                        document_apply_js_host_config(doc, &js_host_config);
                     }
                 }
             } else {

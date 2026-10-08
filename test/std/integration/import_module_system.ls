@@ -9,10 +9,10 @@ let MathModule = {
     E: 2.71828182845905,
     TAU: 3.14159265358979 * 2,
 
-    circle_area: fn(r: float) => 3.14159265358979 * r * r,
-    circle_circumference: fn(r: float) => 2.0 * 3.14159265358979 * r,
-    degrees_to_radians: fn(deg: float) => deg * 3.14159265358979 / 180.0,
-    radians_to_degrees: fn(rad: float) => rad * 180.0 / 3.14159265358979
+    circle_area: (r: float) => 3.14159265358979 * r * r,
+    circle_circumference: (r: float) => 2.0 * 3.14159265358979 * r,
+    degrees_to_radians: (deg: float) => deg * 3.14159265358979 / 180.0,
+    radians_to_degrees: (rad: float) => rad * 180.0 / 3.14159265358979
 }
 
 MathModule.PI
@@ -23,13 +23,12 @@ MathModule.radians_to_degrees(MathModule.PI)
 
 // "String utils module"
 let StringUtils = {
-    capitalize: fn(s: string) => upper(s |> slice(0, 1)) & (s |> slice(1)),
-    repeat_str: fn(s: string, n: int) {
-        for (i in 1 to n) s
-        |> join("")
-    },
-    is_blank: fn(s: string) => s == "" or s == null,
-    word_count: fn(s: string) => len(s |> split(" "))
+    capitalize: (s: string) => upper(s |> slice(0, 1)) ++ (s |> slice(1)),
+    repeat_str: (s: string, n: int) =>
+        [for (i in 1 to n) s]
+        |> join(""),
+    is_blank: (s: string) => s == "" or s == null,
+    word_count: (s: string) => len(s |> split(" "))
 }
 StringUtils.capitalize("hello")
 StringUtils.repeat_str("ab", 3)
@@ -39,16 +38,13 @@ StringUtils.word_count("the quick brown fox")
 
 // "Collection utils module"
 let CollectionUtils = {
-    chunk: fn(arr, size: int) {
-        for (i in 0 to len(arr) - 1 where i % size == 0)
-            arr |> slice(i, min(i + size, len(arr)))
-    },
-    zip: fn(a, b) {
-        for (i in 0 to min(len(a), len(b)) - 1) [a[i], b[i]]
-    },
-    flatten: fn(nested) {
-        for (sub in nested, item in sub) item
-    }
+    chunk: (arr, size: int) =>
+        [for (i in 0 to len(arr) - 1 where i % size == 0)
+            arr |> slice(i, min(i + size, len(arr)))],
+    zip: (a, b) =>
+        [for (i in 0 to min(len(a), len(b)) - 1) [a[i], b[i]]],
+    flatten: (nested) =>
+        [for (sub in nested, item in sub) item]
 }
 
 CollectionUtils.chunk([1, 2, 3, 4, 5, 6], 2)
@@ -57,8 +53,8 @@ CollectionUtils.flatten([[1, 2], [3, 4], [5, 6]])
 
 // ===== Type definitions shared across "modules" =====
 type Result {
-    value: int
-    status: string
+    value: int,
+    status: string,
     fn is_ok() => ~.status == "ok"
 }
 

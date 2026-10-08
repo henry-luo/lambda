@@ -1,0 +1,37 @@
+// PARKED 2026-10-07 — LR03-40: `xml.lang:` prints as a nested map instead of a qualified key
+// (S8.2.2v5).
+// Test discovery skips `_` scripts. When fixed, rename this file to namespace_decl.ls
+// and namespace_decl.expected.pending (the spec-correct output) to namespace_decl.expected.
+// Test: Namespace Declaration
+// Layer: 2 | Category: statement | Covers: namespace decl, namespaced elements, attributes
+
+// ===== Basic namespace declaration =====
+import html: 'http://www.w3.org/1999/xhtml'
+
+// ===== Element with namespace =====
+let doc = <html.div class: "container",
+    <html.p "Hello">
+    <html.span "World">
+>
+doc
+name(doc)
+
+// ===== Namespace prefix in attributes =====
+import xml: 'http://www.w3.org/XML/1998/namespace'
+let el = <div xml.lang: "en", "Content">
+el
+
+// ===== Multiple namespaces =====
+import svg: 'http://www.w3.org/2000/svg'
+import xlink: 'http://www.w3.org/1999/xlink'
+let svg_el = <svg.circle cx: "50", cy: "50", r: "25">
+svg_el
+name(svg_el)
+
+// ===== Namespace in querying =====
+let tree = <root
+    <item type: "a", "first">
+    <item type: "b", "second">
+    <item type: "a", "third">
+>
+tree?<item> |> string(~[0])

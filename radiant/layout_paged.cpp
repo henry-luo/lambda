@@ -65,6 +65,7 @@ struct PagedMarkSource {
 struct PagedTargetValue : TypesetRecord {
     DomNodeRef source;
     CounterSnapshot* counters;
+    CounterSnapshot* page_counters;
     const char* text;
     const char* before;
     const char* after;
@@ -338,6 +339,29 @@ static bool paged_list_counter_visible(void* context, DomElement* source) {
     return style && style->display.outer != CSS_VALUE_NONE;
 }
 
+static TypesetStatus paged_counter_property(ViewTree* tree, PagedComposition* owner,
+        ViewCssStyle* style, CounterContext* counters, const CssValue* value, size_t operation,
+        bool page_context = false) {
+    if (!value || css_value_is_none(value)) return TYPESET_OK;
+    for (int j = 0; j < css_value_count(value, 0); j++) {
+        const CssValue* item = css_value_at(value, j);
+        const char* name = item ? layout_css_counter_name(item, true) : nullptr;
+        if (!page_context && name && (strcmp(name, "page") == 0 || strcmp(name, "pages") == 0 || strcmp(name, "footnote") == 0))
+            return paged_failure(owner, TYPESET_INVALID, style->source, 0, "paged counter declarations require composition checkpoints");
+        if (item && item->type == CSS_VALUE_TYPE_FUNCTION && css_function_name_is(item->data.function, "reversed"))
+            return paged_failure(owner, TYPESET_INVALID, style->source, 0, "reversed counters require settled list scopes");
+    }
+    const char* names[] = {"counter-reset", "counter-increment", "counter-set"};
+    void (*apply[])(CounterContext*, const char*) = {counter_reset, counter_increment, counter_set};
+    LayoutContext context = {}; context.doc = tree->model->document;
+    context.pool = lam::up(tree->model->css->pool.get()); context.selected_view_tree = lam::up(tree);
+    char* specification = nullptr;
+    resolve_counter_property(&context, value, &specification, names[operation], false);
+    if (!specification) return TYPESET_OUT_OF_MEMORY;
+    apply[operation](counters, specification);
+    return TYPESET_OK;
+}
+
 struct PagedCounterScope {
     PagedComposition* composition;
     bool pushed, preserve_reset_scope;
@@ -348,8 +372,6 @@ struct PagedCounterScope {
         counter_push_scope(owner->counters, pseudo);
         pushed = owner->counters->current_scope != previous;
         if (!pushed) { status = TYPESET_OUT_OF_MEMORY; return; }
-        LayoutContext context = {}; context.doc = tree->model->document;
-        context.pool = lam::up(tree->model->css->pool.get()); context.selected_view_tree = lam::up(tree);
         int named_value = 0;
         DomElement* source = style->source;
         if (!pseudo && layout_is_html_list_container_tag(source->tag_id) && !style->counter_reset) {
@@ -372,28 +394,12 @@ struct PagedCounterScope {
         }
         // CSS Lists 3 section 4 applies increment before an explicit set on the same element.
         const CssValue* values[] = {style->counter_reset, style->counter_increment, style->counter_set};
-        const char* names[] = {"counter-reset", "counter-increment", "counter-set"};
-        void (*apply[])(CounterContext*, const char*) = {counter_reset, counter_increment, counter_set};
         for (size_t i = 0; i < 3; i++) {
             if (i == 1 && !pseudo && style->display.list_item &&
                 !layout_counter_named_value(style->counter_increment, "list-item", 1, &named_value))
                 counter_increment(owner->counters, style->list_reversed ? "list-item -1" : "list-item 1");
-            if (!values[i] || css_value_is_none(values[i])) continue;
-            for (int j = 0; j < css_value_count(values[i], 0); j++) {
-                const CssValue* item = css_value_at(values[i], j);
-                const char* name = item ? layout_css_counter_name(item, true) : nullptr;
-                if (name && (strcmp(name, "page") == 0 || strcmp(name, "pages") == 0 || strcmp(name, "footnote") == 0)) {
-                    status = paged_failure(owner, TYPESET_INVALID, style->source, 0, "paged counter declarations require composition checkpoints");
-                    return;
-                }
-                if (item && item->type == CSS_VALUE_TYPE_FUNCTION && css_function_name_is(item->data.function, "reversed")) {
-                    status = paged_failure(owner, TYPESET_INVALID, style->source, 0, "reversed source counters require settled list scopes");
-                    return;
-                }
-            }
-            char* specification = nullptr;
-            resolve_counter_property(&context, values[i], &specification, names[i], false);
-            if (specification) apply[i](owner->counters, specification);
+            status = paged_counter_property(tree, owner, style, owner->counters, values[i], i);
+            if (status != TYPESET_OK) return;
         }
         if (!pseudo && style->display.list_item && source->tag_id == MARKUP_NAME_LI && !style->counter_set) {
             int64_t value = 0;
@@ -1401,6 +1407,22 @@ struct PagedContentBinding {
     PagedFlowNode* paragraph;
     size_t flushed;
 };
+static bool paged_counter_contains(const CounterSnapshot* snapshot, const char* name) {
+    if (snapshot) for (size_t i = 0; i < snapshot->count; i++)
+        if (strcmp(snapshot->entries[i].name, name) == 0) return true;
+    return false;
+}
+static const CounterSnapshot* paged_content_counters(const PagedContentBinding* binding, const char* name) {
+    ViewCssStyle* style = binding->style;
+    // Page/margin bindings shadow the complete document counter stack of the same name.
+    while (style && style->page_context) {
+        if (paged_counter_contains(style->counters, name)) return style->counters;
+        style = style->parent;
+    }
+    if (strcmp(name, "page") == 0 && binding->page && binding->page->style)
+        return binding->page->style->computed_style->counters;
+    return style ? style->counters.get() : nullptr;
+}
 static void paged_source_text(DomElement* root, StrBuf* text) {
     bool whitespace = false;
     DomNode* node = root->first_child;
@@ -1520,7 +1542,12 @@ static bool paged_content_target_function(PagedContentBinding* binding, const Cs
                 "target page reference has no placed content box");
             return false;
         }
-        size_t number = strcmp(name, "page") == 0 ? target->page_number : binding->composition->references->page_count;
+        if (strcmp(name, "page") == 0) {
+            // Reference passes retain the target's label snapshot independently of its physical index.
+            return value->page_counters ? counter_snapshot_append(value->page_counters, name, separator, style, text) :
+                counter_value_append(0, style, text);
+        }
+        size_t number = binding->composition->references->page_count;
         if (number > INT_MAX) return false;
         return counter_value_append((int)number, style, text); // INT_CAST_OK: bounded target counter value.
     }
@@ -1646,9 +1673,8 @@ static bool paged_content_function(void* context, const CssFunction* function, S
         style = function->args[format]->data.keyword;
     }
     uint64_t value = strcmp(name, "footnote") == 0 && binding->footnote ? binding->footnote :
-        strcmp(name, "page") == 0 && binding->page ? binding->page->page_number :
         strcmp(name, "pages") == 0 && binding->page ? binding->tree->model->page_count : UINT64_MAX;
-    if (value == UINT64_MAX) return counter_snapshot_append(binding->style->counters, name, separator, style, text);
+    if (value == UINT64_MAX) return counter_snapshot_append(paged_content_counters(binding, name), name, separator, style, text);
     if (value > INT_MAX) return false;
     return counter_value_append((int)value, style, text); // INT_CAST_OK: bounded publishing counter, not a dimension.
 }
@@ -3076,6 +3102,39 @@ static TypesetStatus paged_margin_layout(PagedComposer* composer, ViewPageBox* p
     return TYPESET_OK;
 }
 
+static TypesetStatus paged_page_counters(ViewTree* tree, PagedComposition* composition) {
+    struct Contexts {
+        CounterContext* entries[1 + CSS_PAGE_MARGIN_BOX_COUNT] = {};
+        ~Contexts() { for (CounterContext* context : entries) counter_context_destroy(context); }
+    } contexts;
+    if (tree->model->page_count > INT_MAX) return TYPESET_BUDGET_EXHAUSTED;
+    char total[64]; snprintf(total, sizeof(total), "pages %zu", tree->model->page_count);
+    // Evaluate only finalized sheets: speculative page creation/restyling cannot advance these scopes.
+    for (size_t page_index = 0; page_index < tree->model->page_count; page_index++) {
+        ViewPageStyle* page = tree->model->pages.get()[page_index]->style;
+        for (size_t i = 0; i < 1 + CSS_PAGE_MARGIN_BOX_COUNT; i++) {
+            ViewCssStyle* style = i ? page->margin_style[i - 1].get() : page->computed_style.get();
+            if (!style) continue;
+            CounterContext*& context = contexts.entries[i];
+            if (!context) context = counter_context_create(tree->layout_pass_arena);
+            if (!context) return TYPESET_OUT_OF_MEMORY;
+            const CssValue* values[] = {style->counter_reset, style->counter_increment, style->counter_set};
+            for (size_t operation = 0; operation < 3; operation++) {
+                int increment = 0;
+                if (!i && operation == 1 && !layout_counter_named_value(values[operation], "page", 1, &increment))
+                    counter_increment(context, "page");
+                TypesetStatus status = paged_counter_property(tree, composition, style, context, values[operation], operation, true);
+                if (status != TYPESET_OK) return status;
+            }
+            // CSS Paged Media 3 section 6.1 makes pages read-only, including in margin scopes.
+            counter_set(context, total);
+            style->counters = lam::up(counter_snapshot_create(context, tree->model->css->pool));
+            if (!style->counters) return TYPESET_OUT_OF_MEMORY;
+        }
+    }
+    return TYPESET_OK;
+}
+
 static TypesetStatus paged_layout_pass(ViewTree* tree, const PagedLayoutOptions* options,
                                      PagedReferenceSession* references) {
     PagedComposition* composition = (PagedComposition*)pool_calloc(tree->prop_pool, sizeof(PagedComposition));
@@ -3115,6 +3174,7 @@ static TypesetStatus paged_layout_pass(ViewTree* tree, const PagedLayoutOptions*
         if (status == TYPESET_OK) status = paged_regions_close(&composer);
     }
     for (size_t i = 0; i < PAGED_REGION_COUNT; i++) typeset_region_plan_dispose(&composer.regions[i].plan);
+    if (status == TYPESET_OK) status = paged_page_counters(tree, composition);
     for (size_t i = 0; status == TYPESET_OK && i < tree->model->page_count; i++)
         status = paged_margin_layout(&composer, tree->model->pages.get()[i]);
     if (status == TYPESET_OK) {
@@ -3172,6 +3232,9 @@ static TypesetStatus paged_targets_capture(ViewTree* tree, PagedReferenceSession
         TypesetTarget target = {previous.name, {tree->model->tree_id, tree->layout_generation,
             value->source.expected_id, TYPESET_PROVIDER_OFFSETS, nullptr}, paged_target_page(tree, source),
             lam::up((const TypesetRecord*)value)};
+        const ViewPageBox* page = target.page_number ? tree->model->pages.get()[target.page_number - 1] : nullptr;
+        value->page_counters = counter_snapshot_copy(page ? page->style->computed_style->counters.get() : nullptr, session->pool);
+        if (!value->page_counters) { status = TYPESET_OUT_OF_MEMORY; break; }
         status = typeset_target_append(&next, &target);
     }
     if (status == TYPESET_OK) {
@@ -3196,6 +3259,13 @@ static void paged_signature_rect(StrBuf* signature, RdtLogicalRect rect) {
     paged_signature_value(signature, rect.x); paged_signature_value(signature, rect.y);
     paged_signature_value(signature, rect.width); paged_signature_value(signature, rect.height);
 }
+static void paged_signature_counters(StrBuf* signature, const CounterSnapshot* snapshot) {
+    paged_signature_value(signature, snapshot ? snapshot->count : 0);
+    if (snapshot) for (size_t i = 0; i < snapshot->count; i++) {
+        paged_signature_text(signature, snapshot->entries[i].name);
+        paged_signature_value(signature, snapshot->entries[i].value);
+    }
+}
 static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSession* session, bool* settled) {
     StrBuf* signature = strbuf_new();
     if (!signature) return TYPESET_OUT_OF_MEMORY;
@@ -3205,6 +3275,7 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
         paged_signature_rect(signature, page->content_rect);
         paged_signature_value(signature, page->side); paged_signature_value(signature, page->blank);
         paged_signature_text(signature, page->name);
+        paged_signature_counters(signature, page->style->computed_style->counters);
     }
     paged_signature_value(signature, tree->model->node_count);
     for (size_t i = 0; i < tree->model->node_id_count; i++) {
@@ -3228,11 +3299,9 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
         const PagedTargetValue* value = (const PagedTargetValue*)target.value.get();
         paged_signature_text(signature, target.name); paged_signature_value(signature, target.page_number);
         paged_signature_text(signature, value->text); paged_signature_text(signature, value->before);
-        paged_signature_text(signature, value->after); paged_signature_value(signature, value->counters->count);
-        for (size_t j = 0; j < value->counters->count; j++) {
-            paged_signature_text(signature, value->counters->entries[j].name);
-            paged_signature_value(signature, value->counters->entries[j].value);
-        }
+        paged_signature_text(signature, value->after);
+        paged_signature_counters(signature, value->counters);
+        paged_signature_counters(signature, value->page_counters);
     }
     TypesetStatus status = typeset_convergence_observe(&session->convergence, signature->str, signature->length, settled);
     strbuf_free(signature);

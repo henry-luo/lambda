@@ -8,6 +8,7 @@
 #include "../lib/font/font_internal.h"
 #endif
 #include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/dom/dom.h"
@@ -1787,6 +1788,12 @@ TEST(CssVariableSubstitutionTest, DocumentLimitsBoundBytesTokensAndAuthoredText)
                 declaration->value, nullptr, nullptr, node);
             EXPECT_EQ(substituted != nullptr, sample.valid) << sample.text;
         }
+        // owned token values must obey the same document budgets as typed custom properties.
+        CssValue* owned = css_value_create_token_sequence(doc.document_pool, declaration->value,
+            strview_from_cstr(sample.text));
+        ASSERT_NE(owned, nullptr);
+        const CssValue* substituted = css_resolve_var_value(doc.document_pool, owned, nullptr, nullptr, node);
+        EXPECT_EQ(substituted != nullptr, sample.valid) << sample.text;
     }
     css_engine_set_substitution_limits(engine, 0, 0);
     EXPECT_EQ(engine->limits.max_substitution_bytes, CSS_SUBSTITUTION_DEFAULT_MAX_BYTES);
@@ -1818,15 +1825,92 @@ TEST(CssVariableSubstitutionTest, RepeatedEmptyDependenciesAreMemoizedWithinEach
     CssDeclaration* declaration = css_parse_property_declaration("--result", 8,
         "var(--empty31)", 14, pool);
     ASSERT_NE(declaration, nullptr);
-    for (int call = 0; call < 2; call++) {
-        lookup.calls = 0;
-        const CssValue* value = css_resolve_var_value(pool, declaration->value, lookup_value, &lookup);
-        ASSERT_NE(value, nullptr);
-        ASSERT_EQ(value->type, CSS_VALUE_TYPE_LIST);
-        EXPECT_EQ(value->data.list.count, 0);
-        // repeated paths collapse to the 32 distinct dependencies; the next call recomputes.
-        EXPECT_GT(lookup.calls, 32u);
-        EXPECT_LE(lookup.calls, 64u);
+    for (bool owned : {false, true}) {
+        if (owned) {
+            for (CssDeclaration* node : lookup.nodes) {
+                node->value = css_value_create_token_sequence(pool, node->value,
+                    strview_init(node->value_text, node->value_text_len));
+                ASSERT_NE(node->value, nullptr);
+            }
+        }
+        for (int call = 0; call < 2; call++) {
+            lookup.calls = 0;
+            const CssValue* value = css_resolve_var_value(pool, declaration->value, lookup_value, &lookup);
+            ASSERT_NE(value, nullptr);
+            ASSERT_EQ(value->type, CSS_VALUE_TYPE_LIST);
+            EXPECT_EQ(value->data.list.count, 0);
+            // repeated paths collapse to the 32 distinct dependencies in either representation.
+            EXPECT_GT(lookup.calls, 32u);
+            EXPECT_LE(lookup.calls, 64u);
+        }
+    }
+}
+
+static const CssValue* css_token_test_lookup(void* context, DomElement*, const char* name,
+                                            DomElement** owner) {
+    if (owner) *owner = nullptr;
+    return strcmp(name, "--t1") == 0 ? (const CssValue*)context : nullptr;
+}
+
+TEST(CssVariableSubstitutionTest, OwnedTokenSpellingSurvivesSubstitutionBoundaries) {
+    struct Case {const char* variable; const char* expression; const char* expected;};
+    const Case cases[] = {
+        {"a", "var(--t1)b", "a/**/b"},
+        {"foo", "var(--t1)()", "foo/**/()"},
+        {"a/* edge */", "var(--t1)b", "a/**/b"},
+        {"b", "a/* edge */var(--t1)", "a/**/b"},
+        {"unused", "a/* interior */b", "a/* interior */b"},
+        {"'a/* unfinished '", "var(--t1)b", "'a/* unfinished 'b"},
+        {"'a \" '/* edge */", "var(--t1)b", "'a \" 'b"},
+        {"1e2", "var(--t1)%", "1e2/**/%"},
+        {"REd", "var(--t1)", "REd"},
+        {"a", "var(--t1)var(--missing,)b", "a/**/b"},
+        {"a", "var(--missing, 'Q',var(--t1))", " 'Q',a"},
+        {"a", "fn(var(--t1),  01.00)", "fn(a,  01.00)"},
+        {"a", "var(--t1) b", "a b"},
+        {"a", "var(--missing,  x )b", "  x b"},
+        {"\\61", "var(--t1)b", "\\61/**/b"},
+        {"a", "var(--missing,/**/)b", "b"},
+    };
+    for (const Case& test : cases) {
+        SCOPED_TRACE(test.expression);
+        Pool* source = pool_create();
+        Pool* owned = pool_create();
+        ASSERT_NE(source, nullptr); ASSERT_NE(owned, nullptr);
+        auto parse = [&](const char* text) {
+            StringBuf* declaration = stringbuf_new(source);
+            stringbuf_append_all(declaration, 2, "--value:", text);
+            CssDeclaration* parsed = css_parse_declaration_text(declaration->str->chars, declaration->length, source);
+            if (parsed) parsed->value = css_value_create_token_sequence(source, parsed->value, strview_from_cstr(text));
+            return parsed;
+        };
+        CssDeclaration* variable = parse(test.variable);
+        CssDeclaration* expression = parse(test.expression);
+        ASSERT_NE(variable, nullptr); ASSERT_NE(expression, nullptr);
+        CssValue* retained_variable = css_value_clone_owned(variable->value, owned);
+        CssValue* retained_expression = css_value_clone_owned(expression->value, owned);
+        ASSERT_NE(retained_variable, nullptr); ASSERT_NE(retained_expression, nullptr);
+        pool_destroy(source);
+        EXPECT_EQ(css_value_contains_var_reference(retained_expression),
+            strstr(test.expression, "var(") != nullptr);
+        const CssValue* result = css_resolve_var_value(owned, retained_expression,
+            css_token_test_lookup, retained_variable, nullptr, true);
+        ASSERT_NE(result, nullptr);
+        if (strcmp(test.expected, "a/**/b") == 0) {
+            const CssValue* typed = css_value_unwrap(result);
+            ASSERT_EQ(typed->type, CSS_VALUE_TYPE_LIST);
+            EXPECT_EQ(typed->data.list.count, 2);
+        }
+        CssFormatter* formatter = css_formatter_create(owned, CSS_FORMAT_COMPACT);
+        ASSERT_NE(formatter, nullptr);
+        formatter->options.preserve_tokens = true;
+        css_format_value(formatter, (CssValue*)result);
+        EXPECT_EQ(formatter->output->length, strlen(test.expected));
+        EXPECT_STREQ(formatter->output->str->chars, test.expected);
+        css_formatter_destroy(formatter);
+        css_value_destroy_owned(retained_variable, owned);
+        css_value_destroy_owned(retained_expression, owned);
+        pool_destroy(owned);
     }
 }
 

@@ -1,11 +1,11 @@
 # JS MVP Lambda objects and Map — implementation record
 
 **Date:** 2026-10-07  
-**Status:** implemented; MVP 30/30, forced-GC object/Map groups 10/10, and
-Lambda/input baseline 6,286/6,286. Full-JS Test262 has zero semantic regressions
-with two retry-only Unicode cases; this is not an all-fully-passing result.
-Six checked release workloads and the remaining MIR/performance limits are
-recorded in [JS_MVP_Lmd §10.8](../jube/JS_MVP_Lmd.md#108-latest-validation-and-release-evidence--2026-10-07).  
+**Status:** object/Map support, bounded tuning, and numeric-loop/array-parameter
+lowering corrections are implemented.
+Latest gate counts, release measurements and limitations are in
+[JS_MVP_Lmd §10.8](../jube/JS_MVP_Lmd.md#108-latest-validation-and-release-evidence--2026-10-07).
+
 **Scope authority:** [JS_MVP_Lmd §10](../jube/JS_MVP_Lmd.md#10-map-and-plain-object-phase),
 **S1.11**, **S8.2.2v5**, **D1.3v3**, **D2.6.6v3**, **D2.6.9v3**,
 **D3.4.3v5–D3.4.6**, **D4.6.1v4**, **D5.3**.
@@ -120,7 +120,10 @@ LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 make test-lambda-baseline
 make test262-baseline
 # Test262's target builds the release lambda.exe used for measurements.
-python3 test/benchmark/js_mvp_lmd/objects.py --runs 5
+python3 temp/mvp_lmd_numeric_tuning/paired.py \
+  --control temp/mvp_lmd_numeric_tuning/control.exe \
+  --candidate temp/mvp_lmd_numeric_tuning/candidate.exe \
+  --runs 15 --references --output temp/mvp_lmd_numeric_tuning/replay
 ```
 
 The latest counts, release binary/source hashes, MIR counts and timings belong
@@ -138,61 +141,216 @@ properties beyond the admitted surface are diagnosed. Namespace/NameId
 migration gaps outside the shared string encoding boundary retain their
 existing formal-spec status.
 
-## 5. Bounded tuning implementation
+## 6. Bounded tuning implementation
 
-The tuning phase in `JS_MVP_Lmd.md` keeps **D8.4.1v2** immutable guards and
-**D5.3** precise ownership. It adds no JIT runtime imports and uses the existing
-AST index, type/range solver, field emitter, direct-call metadata, scalar homes
-and shared transition storage.
+The tuning phases in `JS_MVP_Lmd.md` preserve immutable generated code and
+shape guards (**D8.4.1v2**), the direct-call ABI (**D8.4.2v2**), and precise
+ownership (**D5.3**). There are still 20 MVP runtime imports; this round adds
+none and retains one standalone MIR body per function.
 
-- Literal planning accepts inferred numeric expressions. Static identifier keys
-  are canonicalized by the shared name pool during compilation; field stores
-  reuse the guarded writer. Only the first store into a fresh owner omits its
-  shape guard.
-- Each binding/return carries one immutable shape prediction. Aliases, closed
-  parameters and recursive return/call edges propagate it to a fixed point;
-  other layouts use the existing slow path. Closed calls pass individual
-  operands independently of their result representation (**D8.4.2v2**), with
-  boxed arguments described as precise Items.
-- Scalar replacement admits at most four fields, a single dominating
-  initializer, and only static reads of existing fields. Identity uses, aliases,
-  captures, mutation, method calls and early reads retain allocation. Initializers
-  execute once in order. Their proven facts feed the existing solver again so
-  arithmetic can retain native lanes. Lambda's contract-driven record analysis
-  is not applicable to mutable JS identity; its shared AST index, shape storage
-  and MIR/rooting substrate are reused.
-- Inlining accepts a closed function with one returned expression and at most
-  24 AST nodes. Calls and writes inside that expression are excluded; arguments,
-  including discarded extras, are evaluated before parameter substitution.
-- Heap payloads remain in place for transitions whose surviving fields retain
-  their offsets/widths and whose replacement has a simple nonallocating store.
-  The complete layout is checked before publishing the new shape; repacking
-  remains the fallback (**D3.4.5–D3.4.6**). Existing add transitions already reuse
-  spare payload capacity.
-- Named Map methods use an empty-attribute-shape guard and the shared method
-  spelling classifier. Selection occurs before arguments run. Numeric hashing
-  keeps normalized NaN/zero bits; immediate entry writes use the existing array
-  store's nonallocating path. Wide numeric homes, canonical strings and live
-  iteration retain their existing ownership rules.
+- Literal plans use inferred lanes and canonical static names. Bindings and
+  returns now carry up to four predictions, propagated through assignments,
+  closed calls and literal child fields to a fixed point. Predictions only
+  select guards; misses retain generic behavior. Recursive leaf/branch shapes
+  can therefore share the same bounded field-read chain.
+- Scalar replacement admits up to four existing fields on an unaliased local
+  object with one dominating initializer. Static assignments and updates use
+  per-field registers across branches and loops. The existing kind solver
+  unions every written type; heterogeneous fields use owned Item homes.
+  Identity, aliases, captures, computed keys, deletion, method calls and early
+  reads retain the object. Initializers and RHS expressions keep their order.
+- Inlining admits a 24-node return expression or a 64-node statement body
+  with a terminal return and at most 32 parameter/local bindings, at call sites
+  inside loops. One-off calls retain their original body to avoid doubling
+  cold MIR without an execution benefit. Statement
+  bodies can contain loops and local assignments; nested calls, object
+  construction, property writes, captures, duplicate formal names and early returns are excluded.
+  Each region has separate locals and scalar homes, preserves strictness and
+  range proofs, and snapshots all arguments including extras exactly once.
+- For eligible statement inlining, immutable object-argument guards precede
+  the body. The effect restrictions and unmodified parameter prove its shape
+  stable through the region. Field reads stay native, and the same type solver
+  refines local lanes using those guarded facts. A miss calls the original
+  function with the original argument snapshots. Payload pointers are loaded
+  anew at each field access; none are held across allocation.
+- A tree-owned immutable shape keeps bounded retype plans with its source
+  field, target, replacement offset and payload compatibility. A warm edge
+  skips structural fingerprinting and repeated layout scans. External parents
+  still use the structural table and full contract checks. Reuse commits the
+  value and exact shape without GC; incompatible layouts retain repacking
+  (**D3.4.3v5**, **D3.4.5–D3.4.6**).
+- Canonical-key Map reads, membership, deletion and immediate updates avoid
+  root-frame setup. Canonicalization, wide scalar stores, compaction and growth
+  retain precise roots. Lookup returns the collision-chain head for insertion;
+  it is recomputed only if compaction changed entry ordinals. SameValueZero,
+  signed-zero normalization, insertion order and live cursors are unchanged.
 
-General polymorphic guard chains, loop-body inlining and scalar replacement of
-escaping objects are outside these bounded optimizations. No new private
-allocator, mutable cache, VMap path or JS semantic feature is introduced.
+The existing MIR shape-guard fixture now keeps an alias: its object must remain
+observable so it continues exercising guards after mutable scalar replacement.
 
-### 5.1 Latest validation
+### 6.1 Helper and dependency inventory
 
-The current sources pass MVP **30/30**, forced-GC/poison object and Map groups
-**10/10**, and the shared Lambda/input baseline **6,286/6,286**. Test262 reports
-zero semantic failures/regressions: **40,259 fully passed + 2 retry-only** Unicode
-10 identifier cases. The focused GTest configuration is `debug_native`;
-performance binaries are release builds.
+`typemap_payload_reusable` extracts the existing full-layout comparison into
+shared data code. It uses bounded field traversal and storage descriptors;
+`type_tree_retype_field` wraps the existing structural transition builder and
+allocates plans in the same tree arena. Neither reaches JS runtime policy.
 
-The final release comparison uses 15 alternating pairs, a control peer in every
-round, and Node; all **16 oracles / 960 measured outputs** pass. Numeric, array,
-call and string controls are included. High host load leaves small changes
-unresolved, including retyping; transition lookup is a remaining profiling
-target. Exact binary/source hashes, paired intervals, control/control ratios,
-and gate-log hashes are in
-[`tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/tuning_mir_20261007.json).
-Raw evidence and the frozen reproducer are under `temp/mvp_lmd_tuning/confirm/`.
-The earlier `screen/` overlapped build work and is excluded from final claims.
+New compiler utilities (`shape_union`, `object_shapes`, `scalar_field`,
+`scalar_reference`, `read_local_value`, `scalar_field_write`, `inline_slot`,
+`enclosing_loop`)
+use retained AST/binding facts, existing type/range analysis, shared field
+metadata and the audited MIR/scalar-home emitter. They are compilation work,
+not new JIT imports. Map changes reuse the existing Array, UTF and hash-table
+primitives from §2. No private allocator, VMap or mutable per-site cache is added.
+
+### 6.2 Remaining tuning boundaries
+
+Escaping-object scalar replacement, guards across effectful calls, larger
+inlined bodies and reuse of tested child values across branches are not
+implemented. Shape sets remain predictions rather than complete type proofs.
+String Map keys still scan canonical bytes and hash on each independent call.
+Allocation and numeric-array improvements require separate profiling.
+
+### 6.3 Latest validation
+
+See [JS_MVP_Lmd §10.8](../jube/JS_MVP_Lmd.md#108-latest-validation-and-release-evidence--2026-10-07)
+for the latest gates and release comparison. The earlier object/Map tuning
+artifacts remain under `temp/mvp_lmd_tuning2/`; the numeric-loop/array-parameter
+round is recorded in §7. Early diagnostic runs that overlap compilation are
+excluded from performance claims.
+
+## 7. Numeric loops and array parameters
+
+The broader admitted-workload comparison exposed two retained-fact losses in
+`mvp_lmd_mir.cpp` (**D8.2.4v2**, **D8.2.5v3**, **D8.2.6**):
+
+- `diviter`: literal lowering used the enclosing caller's numeric region
+  during inlining. An integer callee's `q++` consequently converted i64 to
+  double, added a floating one, then converted back on every iteration.
+  The inline frame now records its callee, and literal lowering uses that
+  function's existing integer/float decision. Range proofs, binary64
+  rounding and signed-zero rules remain those of **D2.2.5**.
+- `pnpoly`: parameter reads discarded the solver's complete kind domain;
+  boxed inline parameters and owned snapshots discarded it again. Known
+  Array parameters therefore fell through computed-property conversion.
+  These boundaries now retain the existing facts. Closed-call domains union
+  every argument, missing argument and assignment; open domains remain
+  unknown. Array bounds and capability checks use the existing lowering.
+
+Owned snapshots still adopt scalar homes and retain their precise roots
+(**D5.3**). There are no additional runtime imports, mutable caches, inferred
+array element types or ArrayNum promotion (**D8.4.1v2**). Generic element
+coercion and scalar ownership remain the next `pnpoly` costs to investigate.
+
+`InlinedNumericRegions` covers integer callees inside floating callers,
+fractional updates, the int53 rounding boundary and negative zero.
+`ClosedParameterKindsAndSnapshots` covers direct/inlined indexing, absence of
+property-key conversion in MIR, mixed parameter kinds, missing arguments,
+reassignment, out-of-bounds reads and scalar snapshots across an array write.
+Both are in `test/test_js_mvp_lmd_gtest.cpp`.
+
+Evidence for this round is retained under `temp/mvp_lmd_numeric_tuning/`:
+the pre-change source, frozen release control, gate logs, paired runner,
+matched sources, MIR and raw process outputs. The short screen is diagnostic;
+§10.8 of the working design records only the final paired comparison.
+
+Finalized MIR instruction counts fall from **204 to 201** for `diviter` and
+**3,539 to 2,926** for `pnpoly`. Final measurements run after all builds and
+correctness gates. The JSON retains every process time, matched-output check,
+control-peer comparison, paired interval, input hash and exact binary hash.
+No separate compilation-time improvement is claimed.
+
+The Test262 baseline reaches 40,261/40,261 through its existing recovery path.
+Its full-JS AST Unicode batch first loses 80 tests after an abort. An unchanged
+600-test manifest replay under `--timeout=5` aborts on both frozen releases:
+the Unicode-identifier test times out, signal recovery then faults, and the
+process exits with SIGABRT. This is outside MVP lowering; the shared runtime's
+timeout/recovery defect remains open. `batch-replay.json` and both raw streams
+preserve the evidence without changing the Test262 harness or timeout policy.
+
+## 8. Generic element coercion and scalar ownership
+
+This round implements §14 of the working design (**D2.2.5**, **D5.3**,
+**D8.2.6**):
+
+- Generic numeric coercion enters `em_unbox_f64_item` directly. Its inline
+  IEEE branch supplies the number; only the other encodings enter the JS
+  primitive conversion dispatch. Packed integers are decoded before Float
+  zero-sentinel checks. Strings, booleans, null, undefined and capability
+  errors retain their existing meanings.
+- Shared `em_adopt_scalar_item_value` copies a Float payload into its existing
+  destination home in generated MIR. Shared boxing preserves canonical inline
+  values and signed zero even for noncanonical pointer Floats. Other scalar
+  return classes retain the native adopter. The Float tag already excludes
+  inline doubles, so its two zero sentinels need one unsigned comparison.
+  `em_store_f64_home` is shared with MVP's existing cold boxer; no runtime
+  import is added. Shared packing accepts payload bits directly, avoiding a
+  bits-to-double-to-bits round trip when copying an existing Float home.
+- Numeric binary consumers may borrow a scalar read until coercion completes.
+  Admission is bounded to identifiers, literals and known Array reads with
+  simple numeric/string keys. A left borrow additionally requires an admitted
+  right operand. Calls, assignments, effectful indexes and generic property
+  reads retain owned snapshots; addition and equality keep their existing
+  paths. Both operands still evaluate before conversion. Successful consumers
+  and their conversion leaves are NO_GC; capability failures exit the function.
+
+These borrows do not cross mutation, safepoints, argument publication or value
+escape. Array bounds, length, aliases and mixed element types remain dynamic.
+The changes add no array element-type inference, ArrayNum promotion, mutable
+cache or new object surface. Destination homes remain independent wherever a
+value can survive a source overwrite (**D5.3.1–D5.3.4**).
+
+`GenericElementCoercion` covers mixed primitives, signed zero, subnormals,
+nonfinite values, absent elements, string addition/comparison and excluded
+object coercion. `OwnedElementSnapshots` covers writes, aliasing, local
+reassignment, array growth, calls and effectful indexes, and checks that MIR
+does not import the scalar-adoption helper. Both join the forced-GC gate.
+
+Frozen releases, source snapshots, paired runner and raw evidence are under
+`temp/mvp_lmd_element_tuning/`. The comparison also pairs old/new LJS and
+untyped Lambda because scalar adoption belongs to the shared emitter.
+
+The reviewed `js_hoisted_modvar_write_through` emission delta is six extra
+instructions in the coercing helper, replacing its native scalar-copy call.
+Its function/frame budgets are unchanged; debug module budgets record the
+delta (**D8.6.1**). Darwin is measured; Linux/Windows need native confirmation.
+The release-profile `js_main` and `lambda_cow_nested_store` budget failures
+also reproduce with identical counts on the frozen control and are unchanged.
+The final debug baseline is the required aggregate gate.
+
+Final release evidence is in
+[`element_tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/element_tuning_mir_20261007.json).
+All 30 workloads have 15 paired rounds; six receive a 30-pair follow-up. The
+follow-up confirms 1.68× for `pnpoly` and 1.31× for `dense_array`, while
+`diviter` is unchanged. All 4,410 measured and 252 preflight outputs match.
+Object deletion's first-run slowdown does not persist in its paired median;
+the follow-up interval remains wide and is retained as inconclusive.
+
+`pnpoly` MIR shrinks from 2,926 to 2,817 instructions, calls from 113 to 90,
+and its polygon function's scalar homes from 14 to 11. Roots, root stores and
+safepoints are unchanged. `dense_array` trades 39 extra MIR instructions for
+eight fewer calls; its frame sizes are unchanged. Neither imports the scalar
+adopter. `diviter` retains the same 201 instructions and two calls. These are
+emission/frame measurements, not allocation counts or compile-time results.
+
+The final aggregate passes 6,292/6,292 and MVP passes 34/34 normally and under
+forced GC with poisoning. Two first-run child failures pass five focused
+replays and the unchanged aggregate; their initial cause is unconfirmed.
+Test262 reports zero regressions, 40,259 fully passing and two retry-only AST
+Unicode cases. An isolated replay of both cases succeeds on both releases;
+the baseline's slow/unstable classification remains visible. No harness,
+oracle or timeout changes are part of this patch.
+
+Reproduce the paired run from the retained workspace artifacts:
+
+```sh
+python3 temp/mvp_lmd_element_tuning/paired.py \
+  --control temp/mvp_lmd_element_tuning/control.exe \
+  --candidate temp/mvp_lmd_element_tuning/candidate4.exe \
+  --output temp/mvp_lmd_element_tuning/reproduce \
+  --runs 15 --references --baseline-references
+```
+
+Remaining costs include repeated generic element guards, mixed arithmetic and
+dynamic container storage. Numeric-array promotion remains a separate phase;
+any broader borrow must prove that no mutation or safepoint intervenes.

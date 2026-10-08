@@ -6,6 +6,7 @@
 #include "input-parsers.h"
 #include "../io/mark_builder.hpp"
 #include "../../lib/str.h"
+#include "../../lib/strbuf.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
@@ -25,10 +26,11 @@ static void report_tikz_error(InputContext& ctx, size_t offset, const char* mess
 
 class PlotExpressionParser {
 public:
+    // An anchored parser reads substituted pic text and reports at `source_offset` only.
     PlotExpressionParser(InputContext& context, const char* source, size_t length,
-                         size_t source_offset)
+                         size_t source_offset, bool anchored = false)
         : ctx_(context), builder_(context.builder), source_(source), length_(length),
-          offset_(source_offset), position_(0), nodes_(0) {}
+          offset_(source_offset), position_(0), nodes_(0), anchored_(anchored) {}
 
     Item parse() {
         if (length_ > 4096) { error("plot expression exceeds 4096 bytes"); return ItemNull; }
@@ -47,9 +49,10 @@ private:
     size_t offset_;
     size_t position_;
     size_t nodes_;
+    bool anchored_;
 
     void error(const char* message) {
-        report_tikz_error(ctx_, offset_ + position_, message);
+        report_tikz_error(ctx_, anchored_ ? offset_ : offset_ + position_, message);
     }
 
     void skip_space() {
@@ -227,15 +230,30 @@ private:
     size_t position_;
     size_t commands_;
     size_t points_;
-    struct OptionSpan { size_t begin, end; };
+    struct OptionSpan { const char* text; size_t begin, end; };
     OptionSpan axis_defaults_[16];
     size_t axis_default_count_ = 0;
-    struct StyleSpan { size_t name_begin, name_end, value_begin, value_end; };
-    StyleSpan styles_[32];
+    // Key handlers retained as source spans; expansion substitutes #1/#2 into
+    // scratch text, so each span records the buffer it indexes.
+    enum StyleKind { STYLE_ONE_ARG, STYLE_TWO_ARGS, STYLE_APPEND, STYLE_DEFAULT, STYLE_PIC };
+    struct StyleSpan {
+        const char* text;
+        size_t name_begin, name_end, value_begin, value_end;
+        StyleKind kind;
+    };
+    struct TextSpan { const char* text; size_t begin, end; };
+    StyleSpan styles_[64];
     size_t style_count_ = 0;
+    // Pic bodies parse from substituted scratch text; diagnostics point at the \pic command.
+    size_t error_anchor_ = SIZE_MAX;
+    bool group_ended_ = false;
+
+    size_t located(size_t offset) const {
+        return error_anchor_ != SIZE_MAX ? error_anchor_ : offset;
+    }
 
     void error(const char* message) {
-        report_tikz_error(ctx_, position_, message);
+        report_tikz_error(ctx_, located(position_), message);
     }
 
     static bool space(char c) { return isspace((unsigned char)c) != 0; }
@@ -269,6 +287,10 @@ private:
 
     Item source_item(size_t begin, size_t end) {
         return builder_.createStringItem(source_ + begin, end - begin);
+    }
+
+    Item text_item(const char* text, size_t begin, size_t end) {
+        return builder_.createStringItem(text + begin, end - begin);
     }
 
     bool group(char open, char close, size_t* begin, size_t* end) {
@@ -306,30 +328,146 @@ private:
         return true;
     }
 
-    bool expand_style(ElementBuilder& parent, size_t key_begin, size_t key_end,
-                      size_t depth) {
-        if (depth > 8) { error("TikZ style expansion exceeds 8 levels"); return false; }
-        for (size_t i = style_count_; i > 0; i--) {
-            const StyleSpan& style = styles_[i - 1];
-            size_t name_length = style.name_end - style.name_begin;
-            if (name_length == key_end - key_begin &&
-                    memcmp(source_ + style.name_begin, source_ + key_begin, name_length) == 0)
-                return append_options(parent, style.value_begin, style.value_end,
-                                      false, false, true, depth + 1);
-        }
-        return false;
+    static bool span_equals(const char* a, size_t a_begin, size_t a_end,
+                            const char* b, size_t b_begin, size_t b_end) {
+        return a_end - a_begin == b_end - b_begin &&
+            memcmp(a + a_begin, b + b_begin, a_end - a_begin) == 0;
     }
 
-    bool append_options(ElementBuilder& parent, size_t begin, size_t end,
+    bool style_named(const StyleSpan& style, const char* text, size_t begin, size_t end) const {
+        return span_equals(style.text, style.name_begin, style.name_end, text, begin, end);
+    }
+
+    // Newest handler of `kind` for a name, or SIZE_MAX.
+    size_t find_handler(const char* text, size_t begin, size_t end, StyleKind kind) const {
+        for (size_t i = style_count_; i > 0; i--) {
+            if (styles_[i - 1].kind == kind && style_named(styles_[i - 1], text, begin, end))
+                return i - 1;
+        }
+        return SIZE_MAX;
+    }
+
+    bool is_style(const char* text, size_t begin, size_t end) const {
+        return find_handler(text, begin, end, STYLE_ONE_ARG) != SIZE_MAX ||
+            find_handler(text, begin, end, STYLE_TWO_ARGS) != SIZE_MAX ||
+            find_handler(text, begin, end, STYLE_APPEND) != SIZE_MAX;
+    }
+
+    // Record a /.style, /.style 2 args, /.append style, /.default or /.pic key.
+    bool define_handler(const char* text, size_t key_begin, size_t key_end,
+                        size_t value_begin, size_t value_end) {
+        static const struct { const char* suffix; StyleKind kind; } handlers[] = {
+            {"/.style 2 args", STYLE_TWO_ARGS}, {"/.append style", STYLE_APPEND},
+            {"/.style", STYLE_ONE_ARG}, {"/.default", STYLE_DEFAULT}, {"/.pic", STYLE_PIC}};
+        for (const auto& handler : handlers) {
+            size_t n = strlen(handler.suffix);
+            if (key_end - key_begin <= n ||
+                    memcmp(text + key_end - n, handler.suffix, n) != 0) continue;
+            size_t name_end = key_end - n;
+            while (name_end > key_begin && space(text[name_end - 1])) name_end--;
+            if (name_end == key_begin) return true;
+            if (style_count_ == sizeof(styles_) / sizeof(styles_[0])) {
+                error("too many TikZ styles"); return false;
+            }
+            styles_[style_count_++] = {text, key_begin, name_end, value_begin, value_end,
+                                       handler.kind};
+            return true;
+        }
+        return true;
+    }
+
+    // TeX parameter substitution for a handler body; ## stays a literal #.
+    bool substitute_parameters(const char* text, size_t begin, size_t end,
+                               const TextSpan* args, int count, int arity, StrBuf* out) {
+        for (size_t i = begin; i < end; i++) {
+            char c = text[i];
+            if (c == '#' && i + 1 < end && text[i + 1] == '#') {
+                strbuf_append_char(out, '#');
+                i++;
+            } else if (c == '#' && i + 1 < end && text[i + 1] >= '1' && text[i + 1] <= '9') {
+                int index = text[i + 1] - '1';
+                if (index >= arity) {
+                    error("TikZ style parameter exceeds its argument count"); return false;
+                }
+                if (index < count)
+                    strbuf_append_str_n(out, args[index].text + args[index].begin,
+                                        args[index].end - args[index].begin);
+                i++;
+            } else {
+                strbuf_append_char(out, c);
+            }
+        }
+        return true;
+    }
+
+    // Split a two-argument style value `{first}{second}`.
+    bool two_arguments(const TextSpan& value, TextSpan* args) {
+        size_t at = value.begin;
+        for (int index = 0; index < 2; index++) {
+            while (at < value.end && space(value.text[at])) at++;
+            size_t begin = 0, end = 0;
+            size_t after = latex_scan_group_end(value.text, value.end, at, '{', '}',
+                                                &begin, &end);
+            if (!after) { error("two-argument TikZ style needs {first}{second}"); return false; }
+            args[index] = {value.text, begin, end};
+            at = after;
+        }
+        while (at < value.end && space(value.text[at])) at++;
+        if (at != value.end) { error("two-argument TikZ style needs {first}{second}"); return false; }
+        return true;
+    }
+
+    // Expand a style use in key order: the newest base definition, then its later appends.
+    bool expand_style(ElementBuilder& parent, const char* text, size_t name_begin,
+                      size_t name_end, const TextSpan* value, size_t depth) {
+        if (depth > 8) { error("TikZ style expansion exceeds 8 levels"); return false; }
+        size_t one = find_handler(text, name_begin, name_end, STYLE_ONE_ARG);
+        size_t two = find_handler(text, name_begin, name_end, STYLE_TWO_ARGS);
+        size_t base = one == SIZE_MAX ? two : two == SIZE_MAX ? one : (one > two ? one : two);
+        int arity = base != SIZE_MAX && styles_[base].kind == STYLE_TWO_ARGS ? 2 : 1;
+        TextSpan given = {nullptr, 0, 0};
+        if (value) given = *value;
+        else {
+            size_t fallback = find_handler(text, name_begin, name_end, STYLE_DEFAULT);
+            if (fallback != SIZE_MAX)
+                given = {styles_[fallback].text, styles_[fallback].value_begin,
+                         styles_[fallback].value_end};
+        }
+        TextSpan args[2];
+        int count = 0;
+        if (arity == 2) {
+            if (!given.text) { error("two-argument TikZ style needs {first}{second}"); return false; }
+            if (!two_arguments(given, args)) return false;
+            count = 2;
+        } else if (given.text) {
+            args[0] = given;
+            count = 1;
+        }
+        for (size_t i = base == SIZE_MAX ? 0 : base; i < style_count_; i++) {
+            const StyleSpan& style = styles_[i];
+            if (i != base && (style.kind != STYLE_APPEND ||
+                    !style_named(style, text, name_begin, name_end))) continue;
+            StrBuf* body = strbuf_new();
+            bool ok = substitute_parameters(style.text, style.value_begin, style.value_end,
+                                            args, count, arity, body) &&
+                append_options(parent, body->str ? body->str : "", 0, body->length,
+                               false, false, true, depth + 1);
+            strbuf_free(body);
+            if (!ok) return false;
+        }
+        return true;
+    }
+
+    bool append_options(ElementBuilder& parent, const char* text, size_t begin, size_t end,
                         bool pgfplots_defaults = false, bool define_styles = false,
                         bool use_styles = false, size_t style_depth = 0) {
         size_t item_begin = begin;
         size_t depth = 0;
         for (size_t cursor = begin; cursor <= end; cursor++) {
-            char c = cursor < end ? source_[cursor] : ',';
+            char c = cursor < end ? text[cursor] : ',';
             if (c == '\\' && cursor + 1 < end) { cursor++; continue; }
             if (c == '%') {
-                while (cursor < end && source_[cursor] != '\n' && source_[cursor] != '\r')
+                while (cursor < end && text[cursor] != '\n' && text[cursor] != '\r')
                     cursor++;
                 continue;
             }
@@ -339,63 +477,63 @@ private:
             size_t key_begin = item_begin, key_end = cursor;
             size_t value_begin = cursor, value_end = cursor;
             size_t nested = 0;
+            bool has_value = false;
             for (size_t i = item_begin; i < cursor; i++) {
-                if (source_[i] == '%') {
-                    while (i < cursor && source_[i] != '\n' && source_[i] != '\r') i++;
+                if (text[i] == '%') {
+                    while (i < cursor && text[i] != '\n' && text[i] != '\r') i++;
                     continue;
                 }
-                if (source_[i] == '{' || source_[i] == '[' || source_[i] == '(') nested++;
-                else if ((source_[i] == '}' || source_[i] == ']' || source_[i] == ')') && nested > 0) nested--;
-                else if (source_[i] == '=' && nested == 0) {
+                if (text[i] == '{' || text[i] == '[' || text[i] == '(') nested++;
+                else if ((text[i] == '}' || text[i] == ']' || text[i] == ')') && nested > 0) nested--;
+                else if (text[i] == '=' && nested == 0) {
                     key_end = i;
                     value_begin = i + 1;
                     value_end = cursor;
+                    has_value = true;
                     break;
                 }
             }
-            trim_option_span(source_, &key_begin, &key_end);
-            trim_option_span(source_, &value_begin, &value_end);
-            if (value_end > value_begin && source_[value_begin] == '{' &&
-                    source_[value_end - 1] == '}') {
-                value_begin++;
-                value_end--;
+            trim_option_span(text, &key_begin, &key_end);
+            trim_option_span(text, &value_begin, &value_end);
+            // Unwrap one brace group only when it spans the whole value, so
+            // `{a}{b}` (two-argument style values) keeps both groups.
+            size_t group_begin = 0, group_end = 0;
+            if (value_end > value_begin && text[value_begin] == '{' &&
+                    latex_scan_group_end(text, value_end, value_begin, '{', '}',
+                                         &group_begin, &group_end) == value_end) {
+                value_begin = group_begin;
+                value_end = group_end;
             }
             if (key_end > key_begin) {
                 size_t key_length = key_end - key_begin;
-                if (define_styles && key_length > 7 &&
-                        memcmp(source_ + key_end - 7, "/.style", 7) == 0) {
-                    if (style_count_ == 32) { error("too many TikZ styles"); return false; }
-                    styles_[style_count_++] = {key_begin, key_end - 7,
-                                               value_begin, value_end};
-                    // Retain declarations so script can validate style effects.
-                }
-                if (use_styles && (value_begin == value_end ||
-                        (key_length == 5 &&
-                         memcmp(source_ + key_begin, "style", 5) == 0))) {
-                    size_t style_begin = value_begin == value_end ? key_begin : value_begin;
-                    size_t style_end = value_begin == value_end ? key_end : value_end;
-                    bool matched = false;
-                    for (size_t i = style_count_; i > 0; i--) {
-                        const StyleSpan& style = styles_[i - 1];
-                        if (style.name_end - style.name_begin == style_end - style_begin &&
-                                memcmp(source_ + style.name_begin,
-                                       source_ + style_begin,
-                                       style_end - style_begin) == 0) {
-                            matched = true;
-                            break;
-                        }
+                // Retain declarations as options too, so script can validate handlers.
+                if (define_styles &&
+                        !define_handler(text, key_begin, key_end, value_begin, value_end))
+                    return false;
+                if (use_styles) {
+                    bool style_key = key_length == 5 && memcmp(text + key_begin, "style", 5) == 0;
+                    if (style_key && value_end > value_begin &&
+                            is_style(text, value_begin, value_end)) {
+                        // `style=name` uses a style without an argument.
+                        if (!expand_style(parent, text, value_begin, value_end, nullptr,
+                                          style_depth)) return false;
+                        item_begin = cursor + 1;
+                        continue;
                     }
-                    if (matched) {
-                        if (!expand_style(parent, style_begin, style_end, style_depth)) return false;
+                    if (!style_key && is_style(text, key_begin, key_end)) {
+                        TextSpan argument = {text, value_begin, value_end};
+                        if (!expand_style(parent, text, key_begin, key_end,
+                                          has_value ? &argument : nullptr, style_depth))
+                            return false;
                         item_begin = cursor + 1;
                         continue;
                     }
                 }
                 if (pgfplots_defaults) {
                     bool append_axis_style = key_length == strlen("every axis/.append style") &&
-                        memcmp(source_ + key_begin, "every axis/.append style", key_length) == 0;
+                        memcmp(text + key_begin, "every axis/.append style", key_length) == 0;
                     bool replace_axis_style = key_length == strlen("every axis/.style") &&
-                        memcmp(source_ + key_begin, "every axis/.style", key_length) == 0;
+                        memcmp(text + key_begin, "every axis/.style", key_length) == 0;
                     if (!append_axis_style && !replace_axis_style) {
                         error("unsupported pgfplotsset key"); return false;
                     }
@@ -405,11 +543,11 @@ private:
                         error("too many PGFPlots axis style declarations"); return false;
                     }
                     // Inherited options precede local axis options in TikZ key order.
-                    axis_defaults_[axis_default_count_++] = {value_begin, value_end};
+                    axis_defaults_[axis_default_count_++] = {text, value_begin, value_end};
                 }
                 ElementBuilder option = builder_.element("option");
-                option.attr("key", source_item(key_begin, key_end));
-                option.attr("value", source_item(value_begin, value_end));
+                option.attr("key", text_item(text, key_begin, key_end));
+                option.attr("value", text_item(text, value_begin, value_end));
                 parent.child(option.final());
             }
             item_begin = cursor + 1;
@@ -418,25 +556,19 @@ private:
     }
 
     bool options(ElementBuilder& parent, bool define_styles = false,
-                 bool use_styles = false) {
+                 bool use_styles = false, bool record_source = true) {
         skip_space_comments();
         if (position_ >= length_ || source_[position_] != '[') return true;
         size_t begin = 0, end = 0;
         if (!group('[', ']', &begin, &end)) return false;
-        parent.attr("options_source", source_item(begin, end));
-        return append_options(parent, begin, end, false, define_styles, use_styles);
+        if (record_source) parent.attr("options_source", source_item(begin, end));
+        return append_options(parent, source_, begin, end, false, define_styles, use_styles);
     }
 
     bool inherited_style(ElementBuilder& parent, const char* name) {
-        for (size_t i = style_count_; i > 0; i--) {
-            const StyleSpan& style = styles_[i - 1];
-            size_t length = style.name_end - style.name_begin;
-            if (length == strlen(name) &&
-                    memcmp(source_ + style.name_begin, name, length) == 0)
-                return append_options(parent, style.value_begin, style.value_end,
-                                      false, false, true);
-        }
-        return true;
+        size_t length = strlen(name);
+        if (!is_style(name, 0, length)) return true;
+        return expand_style(parent, name, 0, length, nullptr, 0);
     }
 
     static void skip_inner_space(const char* source, size_t* at, size_t end) {
@@ -515,36 +647,115 @@ private:
         return coordinate(at, end, true, x, y);
     }
 
-    bool positioned_coordinate(size_t* at, size_t end, double* x, double* y,
-                               const char** system) {
+    // Parse `axis cs:x,y` or `axis description cs:x,y` from a coordinate body.
+    bool axis_coordinate(size_t begin, size_t finish, double* x, double* y,
+                         const char** system) {
+        static const char* const prefixes[][2] = {
+            {"axis description cs:", "axis-description"}, {"axis cs:", "axis"}};
+        trim_span(source_, &begin, &finish);
+        for (const auto& prefix : prefixes) {
+            size_t n = strlen(prefix[0]);
+            if (finish - begin <= n || memcmp(source_ + begin, prefix[0], n) != 0) continue;
+            size_t at = begin + n;
+            if (!number(&at, finish, false, x)) return false;
+            skip_inner_space(source_, &at, finish);
+            if (at >= finish || source_[at++] != ',' || !number(&at, finish, false, y))
+                return false;
+            skip_inner_space(source_, &at, finish);
+            if (at != finish) return false;
+            *system = prefix[1];
+            return true;
+        }
+        return false;
+    }
+
+    // Attributes for a non-literal coordinate body: calc `$...$`, polar `a:r`,
+    // computed `x,y` sources, or a node name with an optional `.anchor`.
+    // Node and pic `at` targets use `at_` names; path points keep `ref`/`calc`.
+    bool coordinate_form(ElementBuilder& el, size_t begin, size_t finish, bool node_at) {
+        trim_span(source_, &begin, &finish);
+        if (begin == finish) return false;
+        if (finish - begin >= 2 && source_[begin] == '$' && source_[finish - 1] == '$') {
+            size_t calc_begin = begin + 1, calc_end = finish - 1;
+            trim_span(source_, &calc_begin, &calc_end);
+            if (calc_begin == calc_end) return false;
+            el.attr(node_at ? "at_calc" : "calc", source_item(calc_begin, calc_end));
+            return true;
+        }
+        size_t polar_at = begin;
+        double angle = 0.0, radius = 0.0;
+        bool radius_explicit = false;
+        if (number(&polar_at, finish, false, &angle)) {
+            skip_inner_space(source_, &polar_at, finish);
+            if (polar_at < finish && source_[polar_at++] == ':' &&
+                    number(&polar_at, finish, true, &radius, &radius_explicit)) {
+                skip_inner_space(source_, &polar_at, finish);
+                if (polar_at == finish && radius >= 0.0) {
+                    el.attr("polar_angle", angle).attr("polar_radius", radius)
+                        .attr("radius_explicit", radius_explicit);
+                    return true;
+                }
+            }
+        }
+        size_t comma = begin;
+        size_t braces = 0, parens = 0;
+        for (; comma < finish; comma++) {
+            char c = source_[comma];
+            if (c == '{') braces++;
+            else if (c == '}' && braces > 0) braces--;
+            else if (c == '(') parens++;
+            else if (c == ')' && parens > 0) parens--;
+            else if (c == ',' && braces == 0 && parens == 0) break;
+        }
+        if (comma < finish) {
+            size_t x_begin = begin, x_end = comma;
+            size_t y_begin = comma + 1, y_end = finish;
+            trim_span(source_, &x_begin, &x_end);
+            trim_span(source_, &y_begin, &y_end);
+            if (x_begin == x_end || y_begin == y_end) return false;
+            // Retain computed coordinates for bounded PGF math evaluation in script.
+            el.attr("x_source", source_item(x_begin, x_end))
+                .attr("y_source", source_item(y_begin, y_end));
+            return true;
+        }
+        size_t dot = begin;
+        while (dot < finish && source_[dot] != '.') dot++;
+        size_t name_end = dot, anchor_begin = dot < finish ? dot + 1 : finish;
+        size_t anchor_end = finish;
+        trim_span(source_, &begin, &name_end);
+        trim_span(source_, &anchor_begin, &anchor_end);
+        if (!identifier(begin, name_end) || (dot < finish && anchor_begin == anchor_end))
+            return false;
+        el.attr(node_at ? "at_ref" : "ref", source_item(begin, name_end));
+        // Anchor names are validated by the script anchor table.
+        if (dot < finish)
+            el.attr(node_at ? "at_anchor" : "anchor", source_item(anchor_begin, anchor_end));
+        return true;
+    }
+
+    // A node, coordinate or pic `at (...)`: literal Cartesian and axis
+    // coordinates return their numbers; other forms become `at_` attributes.
+    bool at_coordinate(ElementBuilder& el, size_t* at, size_t end, double* x, double* y,
+                       const char** system, bool* literal) {
         skip_inner_space(source_, at, end);
         if (*at >= end || source_[*at] != '(') return false;
-        size_t start = *at + 1;
-        skip_inner_space(source_, &start, end);
-        const char* prefix = nullptr;
-        const char* kind = "cartesian";
-        if (start + strlen("axis description cs:") <= end &&
-                memcmp(source_ + start, "axis description cs:",
-                       strlen("axis description cs:")) == 0) {
-            prefix = "axis description cs:";
-            kind = "axis-description";
-        } else if (start + strlen("axis cs:") <= end &&
-                   memcmp(source_ + start, "axis cs:", strlen("axis cs:")) == 0) {
-            prefix = "axis cs:";
-            kind = "axis";
+        size_t probe = *at;
+        if (coordinate(&probe, end, true, x, y)) {
+            *at = probe;
+            *system = "cartesian";
+            *literal = true;
+            return true;
         }
-        if (!prefix) {
-            if (!coordinate(at, end, true, x, y)) return false;
+        size_t begin = 0, finish = 0;
+        size_t after = latex_scan_group_end(source_, end, *at, '(', ')', &begin, &finish);
+        if (!after) return false;
+        if (axis_coordinate(begin, finish, x, y, system)) {
+            *literal = true;
         } else {
-            *at = start + strlen(prefix);
-            if (!number(at, end, false, x)) return false;
-            skip_inner_space(source_, at, end);
-            if (*at >= end || source_[(*at)++] != ',' ||
-                    !number(at, end, false, y)) return false;
-            skip_inner_space(source_, at, end);
-            if (*at >= end || source_[(*at)++] != ')') return false;
+            if (!coordinate_form(el, begin, finish, true)) return false;
+            *literal = false;
         }
-        *system = kind;
+        *at = after;
         return true;
     }
 
@@ -559,75 +770,40 @@ private:
     }
 
     bool append_path_point(ElementBuilder& parent, size_t* at, size_t end,
-                           bool move = false) {
+                           bool move = false, const char* via = nullptr) {
         double x = 0.0, y = 0.0;
         size_t start = *at;
         bool x_explicit = false, y_explicit = false;
         if (coordinate(at, end, true, &x, &y, &x_explicit, &y_explicit)) {
-            parent.child(builder_.element("point").attr("x", x).attr("y", y)
-                .attr("x_explicit", x_explicit).attr("y_explicit", y_explicit)
-                .attr("move", move).final());
+            ElementBuilder literal = builder_.element("point");
+            literal.attr("x", x).attr("y", y).attr("x_explicit", x_explicit)
+                .attr("y_explicit", y_explicit).attr("move", move);
+            // `via` records a -| or |- connector into this vertex.
+            if (via) literal.attr("via", via);
+            parent.child(literal.final());
             return true;
         }
         size_t begin = 0, finish = 0;
         size_t after = latex_scan_group_end(source_, end, start, '(', ')', &begin, &finish);
-        trim_span(source_, &begin, &finish);
-        size_t polar_at = begin;
-        double angle = 0.0, radius = 0.0;
-        bool radius_explicit = false;
-        if (after && number(&polar_at, finish, false, &angle)) {
-            skip_inner_space(source_, &polar_at, finish);
-            if (polar_at < finish && source_[polar_at++] == ':' &&
-                    number(&polar_at, finish, true, &radius,
-                           &radius_explicit)) {
-                skip_inner_space(source_, &polar_at, finish);
-                if (polar_at == finish && radius >= 0.0) {
-                    *at = after;
-                    parent.child(builder_.element("point")
-                        .attr("polar_angle", angle).attr("polar_radius", radius)
-                        .attr("radius_explicit", radius_explicit)
-                        .attr("move", move).final());
-                    return true;
-                }
-            }
+        ElementBuilder point = builder_.element("point");
+        const char* system = nullptr;
+        bool parsed = false;
+        if (after && axis_coordinate(begin, finish, &x, &y, &system)) {
+            point.attr("x", x).attr("y", y).attr("coord_system", system);
+            parsed = true;
+        } else if (after) {
+            parsed = coordinate_form(point, begin, finish, false);
         }
-        if (after) {
-            size_t comma = begin;
-            size_t braces = 0, parens = 0;
-            for (; comma < finish; comma++) {
-                char c = source_[comma];
-                if (c == '{') braces++;
-                else if (c == '}' && braces > 0) braces--;
-                else if (c == '(') parens++;
-                else if (c == ')' && parens > 0) parens--;
-                else if (c == ',' && braces == 0 && parens == 0) break;
-            }
-            if (comma < finish) {
-                size_t x_begin = begin, x_end = comma;
-                size_t y_begin = comma + 1, y_end = finish;
-                trim_span(source_, &x_begin, &x_end);
-                trim_span(source_, &y_begin, &y_end);
-                if (x_begin < x_end && y_begin < y_end) {
-                    // Retain computed coordinates for bounded PGF math evaluation in script.
-                    *at = after;
-                    parent.child(builder_.element("point")
-                        .attr("x_source", source_item(x_begin, x_end))
-                        .attr("y_source", source_item(y_begin, y_end))
-                        .attr("move", move).final());
-                    return true;
-                }
-            }
-        }
-        if (!after || !identifier(begin, finish)) {
+        if (!parsed) {
             error("expected finite Cartesian coordinate or named node");
             return false;
         }
         *at = after;
-        parent.child(builder_.element("point").attr("ref", source_item(begin, finish))
-            .attr("move", move).final());
+        point.attr("move", move);
+        if (via) point.attr("via", via);
+        parent.child(point.final());
         return true;
     }
-
     bool path_word(size_t* at, size_t end, const char* expected) {
         skip_inner_space(source_, at, end);
         size_t n = strlen(expected);
@@ -639,30 +815,33 @@ private:
 
     bool append_point(ElementBuilder& parent, double x, double y,
                       bool x_explicit = false, bool y_explicit = false,
-                      bool move = false) {
+                      bool move = false, const char* via = nullptr) {
         if (++points_ > 10000) { error("picture exceeds the 10000 point limit"); return false; }
-        parent.child(builder_.element("point").attr("x", x).attr("y", y)
-            .attr("x_explicit", x_explicit).attr("y_explicit", y_explicit)
-            .attr("move", move).final());
+        ElementBuilder point = builder_.element("point");
+        point.attr("x", x).attr("y", y).attr("x_explicit", x_explicit)
+            .attr("y_explicit", y_explicit).attr("move", move);
+        if (via) point.attr("via", via);
+        parent.child(point.final());
         return true;
     }
 
     bool append_path_vertex(ElementBuilder& parent, size_t* at, size_t end,
                             double base_x, double base_y,
                             double* x, double* y, bool* cartesian,
-                            bool* updates_reference, bool move = false) {
+                            bool* updates_reference, bool move = false,
+                            const char* via = nullptr) {
         skip_inner_space(source_, at, end);
         size_t start = *at;
         bool x_explicit = false, y_explicit = false;
         if (path_coordinate(at, end, base_x, base_y, x, y,
                             updates_reference, &x_explicit, &y_explicit)) {
-            if (!append_point(parent, *x, *y, x_explicit, y_explicit, move)) return false;
+            if (!append_point(parent, *x, *y, x_explicit, y_explicit, move, via)) return false;
             *cartesian = true;
             return true;
         }
         *at = start;
         if (++points_ > 10000) { error("picture exceeds the 10000 point limit"); return false; }
-        if (!append_path_point(parent, at, end, move)) return false;
+        if (!append_path_point(parent, at, end, move, via)) return false;
         *cartesian = false;
         *updates_reference = true;
         return true;
@@ -708,10 +887,14 @@ private:
         return true;
     }
 
-    bool append_inline_node(ElementBuilder& parent, size_t* at, size_t end) {
+    // `on_segment` marks a node written between a connector and its target,
+    // which TikZ places along that segment rather than at the current point.
+    bool append_inline_node(ElementBuilder& parent, size_t* at, size_t end,
+                            bool on_segment = false) {
         if (!path_word(at, end, "node")) return false;
         ElementBuilder el = builder_.element("node");
         el.attr("inline", true);
+        if (on_segment) el.attr("segment", true);
         if (!inherited_style(el, "every node")) return false;
         skip_inner_space(source_, at, end);
         if (*at < end && source_[*at] == '[') {
@@ -719,7 +902,7 @@ private:
             size_t after = latex_scan_group_end(source_, end, *at, '[', ']',
                                                  &begin, &finish);
             if (!after) { error("unclosed inline node options"); return false; }
-            if (!append_options(el, begin, finish, false, false, true)) return false;
+            if (!append_options(el, source_, begin, finish, false, false, true)) return false;
             *at = after;
         }
         skip_inner_space(source_, at, end);
@@ -823,19 +1006,21 @@ private:
                        (memcmp(source_ + at, "--", 2) == 0 ||
                         memcmp(source_ + at, "-|", 2) == 0 ||
                         memcmp(source_ + at, "|-", 2) == 0)) {
+                const char* via = source_[at] != '-' ? "|-" :
+                    source_[at + 1] != '-' ? "-|" : nullptr;
                 if (source_[at] != '-') parent.attr("line_mode", "vertical-horizontal");
                 else if (source_[at + 1] != '-')
                     parent.attr("line_mode", "horizontal-vertical");
                 at += 2;
                 skip_inner_space(source_, &at, end);
                 if (at + 4 <= end && memcmp(source_ + at, "node", 4) == 0 &&
-                        !append_inline_node(parent, &at, end)) return false;
+                        !append_inline_node(parent, &at, end, true)) return false;
                 double x2 = 0.0, y2 = 0.0;
                 bool next_cartesian = false;
                 bool advance = true;
                 if (!append_path_vertex(parent, &at, end,
                         reference_x, reference_y, &x2, &y2,
-                        &next_cartesian, &advance)) {
+                        &next_cartesian, &advance, false, via)) {
                     error("line segment requires a second coordinate"); return false;
                 }
                 x = x2; y = y2; cartesian = next_cartesian;
@@ -874,19 +1059,66 @@ private:
         }
     }
 
-    bool append_points(ElementBuilder& parent, size_t begin, size_t end, bool physical) {
+    // Split a parenthesized `x,y` body at its top-level comma.
+    bool pair_sources(size_t begin, size_t finish, size_t* x_begin, size_t* x_end,
+                      size_t* y_begin, size_t* y_end) {
+        size_t comma = begin, nested = 0;
+        for (; comma < finish; comma++) {
+            char c = source_[comma];
+            if (c == '{' || c == '(') nested++;
+            else if ((c == '}' || c == ')') && nested > 0) nested--;
+            else if (c == ',' && nested == 0) break;
+        }
+        if (comma == finish) return false;
+        *x_begin = begin; *x_end = comma; *y_begin = comma + 1; *y_end = finish;
+        trim_span(source_, x_begin, x_end);
+        trim_span(source_, y_begin, y_end);
+        return *x_begin < *x_end && *y_begin < *y_end;
+    }
+
+    // PGFPlots coordinate lists: numeric pairs, retained sources for
+    // `symbolic x/y coords`, and explicit error offsets after +-, += or -=.
+    bool append_points(ElementBuilder& parent, size_t begin, size_t end) {
         size_t at = begin;
         size_t count = 0;
         while (at < end) {
             skip_inner_space(source_, &at, end);
             if (at == end) break;
             if (++points_ > 10000) { error("picture exceeds the 10000 point limit"); return false; }
+            ElementBuilder point = builder_.element("point");
             double x = 0.0, y = 0.0;
-            if (!coordinate(&at, end, physical, &x, &y)) {
-                error("expected finite Cartesian coordinate");
-                return false;
+            size_t probe = at;
+            if (coordinate(&probe, end, false, &x, &y)) {
+                point.attr("x", x).attr("y", y);
+                at = probe;
+            } else {
+                size_t body_begin = 0, body_end = 0;
+                size_t x_begin = 0, x_end = 0, y_begin = 0, y_end = 0;
+                size_t after = latex_scan_group_end(source_, end, at, '(', ')',
+                                                     &body_begin, &body_end);
+                if (!after || !pair_sources(body_begin, body_end, &x_begin, &x_end,
+                                            &y_begin, &y_end)) {
+                    error("expected finite Cartesian coordinate");
+                    return false;
+                }
+                point.attr("x_source", source_item(x_begin, x_end))
+                    .attr("y_source", source_item(y_begin, y_end));
+                at = after;
             }
-            parent.child(builder_.element("point").attr("x", x).attr("y", y).final());
+            skip_inner_space(source_, &at, end);
+            bool both = at + 2 <= end && source_[at] == '+' && source_[at + 1] == '-';
+            bool plus = at + 2 <= end && source_[at] == '+' && source_[at + 1] == '=';
+            bool minus = at + 2 <= end && source_[at] == '-' && source_[at + 1] == '=';
+            if (both || plus || minus) {
+                at += 2;
+                double ex = 0.0, ey = 0.0;
+                if (!coordinate(&at, end, false, &ex, &ey)) {
+                    error("error bar offsets require a numeric (x,y) pair"); return false;
+                }
+                if (both || plus) point.attr("error_plus_x", ex).attr("error_plus_y", ey);
+                if (both || minus) point.attr("error_minus_x", ex).attr("error_minus_y", ey);
+            }
+            parent.child(point.final());
             count++;
         }
         if (!count) { error("empty coordinate list"); return false; }
@@ -925,7 +1157,31 @@ private:
         if (word("coordinates")) {
             node.attr("input_kind", "coordinates");
             if (!group('{', '}', &begin, &end)) return false;
-            if (!append_points(node, begin, end, false)) return false;
+            if (!append_points(node, begin, end)) return false;
+        } else if (word("table")) {
+            // Table text or file name stays raw; script selects columns and resolves files.
+            node.attr("input_kind", "table");
+            ElementBuilder table = builder_.element("table_options");
+            skip_space_comments();
+            if (position_ < length_ && source_[position_] == '[') {
+                if (!group('[', ']', &begin, &end) ||
+                        !append_options(table, source_, begin, end)) return false;
+            }
+            if (!group('{', '}', &begin, &end)) return false;
+            node.attr("table_source", source_item(begin, end));
+            node.attr("table_offset", (int64_t)located(begin));
+            node.child(table.final());
+        } else if (word("fill")) {
+            // fillbetween: `fill between[of=A and B]` names two earlier paths.
+            if (!word("between")) { error("expected fill between"); return false; }
+            node.attr("input_kind", "fill_between");
+            ElementBuilder fill = builder_.element("fill_between");
+            skip_space_comments();
+            if (position_ < length_ && source_[position_] == '[') {
+                if (!group('[', ']', &begin, &end) ||
+                        !append_options(fill, source_, begin, end)) return false;
+            }
+            node.child(fill.final());
         } else if (position_ < length_ && source_[position_] == '(') {
             // A PGFPlots parametric pair has two independently sampled expressions.
             node.attr("input_kind", "parametric");
@@ -947,7 +1203,9 @@ private:
                     starts[part]++; ends[part]--;
                 }
                 PlotExpressionParser expression(ctx_, source_ + starts[part],
-                                                ends[part] - starts[part], starts[part]);
+                                                ends[part] - starts[part],
+                                                located(starts[part]),
+                                                error_anchor_ != SIZE_MAX);
                 Item tree = expression.parse();
                 if (tree.item == ITEM_NULL) return false;
                 node.child(builder_.element(part == 0 ? "x_expression" : "y_expression")
@@ -956,7 +1214,8 @@ private:
         } else {
             node.attr("input_kind", "expression");
             if (!group('{', '}', &begin, &end)) return false;
-            PlotExpressionParser expression(ctx_, source_ + begin, end - begin, begin);
+            PlotExpressionParser expression(ctx_, source_ + begin, end - begin,
+                                            located(begin), error_anchor_ != SIZE_MAX);
             Item tree = expression.parse();
             if (tree.item == ITEM_NULL) return false;
             node.child(tree);
@@ -967,6 +1226,13 @@ private:
             size_t at = position_;
             if (!append_inline_node(node, &at, length_)) return false;
             position_ = at;
+            skip_space_comments();
+        }
+        // \closedcycle closes an area plot down to the zero line.
+        if (latex_scan_starts_with(source_, length_, position_, "\\closedcycle") &&
+                (position_ + 12 >= length_ || !isalpha((unsigned char)source_[position_ + 12]))) {
+            position_ += 12;
+            node.attr("closed_cycle", true);
             skip_space_comments();
         }
         if (position_ >= length_ || source_[position_++] != ';') {
@@ -1075,21 +1341,24 @@ private:
                 error("invalid node name"); return false;
             }
             el.attr("id", source_item(begin, end));
+            // TikZ also accepts options after the name, e.g. `(b) [right=of a]`.
+            if (!options(el, false, true, false)) return false;
         }
         // A standalone TikZ node without `at` uses the current point (the origin here).
         double x = 0.0, y = 0.0;
         const char* system = nullptr;
+        bool literal = true;
         if (word("at")) {
             size_t at = position_;
-            if (!positioned_coordinate(&at, length_, &x, &y, &system)) {
+            if (!at_coordinate(el, &at, length_, &x, &y, &system, &literal)) {
                 error("expected node coordinate"); return false;
             }
             position_ = at;
         }
         size_t begin = 0, end = 0;
         if (!group('{', '}', &begin, &end)) return false;
-        el.attr("x", x).attr("y", y).attr("coord_system", system)
-            .attr("source", source_item(begin, end));
+        if (literal) el.attr("x", x).attr("y", y).attr("coord_system", system);
+        el.attr("source", source_item(begin, end));
         skip_space_comments();
         if (position_ >= length_ || source_[position_++] != ';') {
             error("expected node semicolon"); return false;
@@ -1110,7 +1379,8 @@ private:
         size_t at = position_;
         double x = 0.0, y = 0.0;
         const char* system = nullptr;
-        if (!positioned_coordinate(&at, length_, &x, &y, &system)) {
+        bool literal = true;
+        if (!at_coordinate(coordinate_node, &at, length_, &x, &y, &system, &literal)) {
             error("expected named coordinate position"); return false;
         }
         position_ = at;
@@ -1118,8 +1388,78 @@ private:
         if (position_ >= length_ || source_[position_++] != ';') {
             error("expected coordinate semicolon"); return false;
         }
-        parent.child(coordinate_node.attr("id", source_item(begin, end))
-            .attr("x", x).attr("y", y).attr("coord_system", system).final());
+        coordinate_node.attr("id", source_item(begin, end));
+        if (literal) coordinate_node.attr("x", x).attr("y", y).attr("coord_system", system);
+        parent.child(coordinate_node.final());
+        return true;
+    }
+
+    // \pic[options] (name) at (coordinate) {pic=argument};  The pic body is
+    // parsed from its `/.pic` handler with #1 substituted, inside its own style group.
+    bool pic(ElementBuilder& parent, size_t depth, size_t command_at) {
+        ElementBuilder el = builder_.element("pic");
+        if (!options(el, false, true)) return false;
+        skip_space_comments();
+        if (position_ < length_ && source_[position_] == '(') {
+            size_t begin = 0, end = 0;
+            if (!group('(', ')', &begin, &end)) return false;
+            trim_span(source_, &begin, &end);
+            if (!identifier(begin, end)) { error("invalid pic name"); return false; }
+            el.attr("id", source_item(begin, end));
+        }
+        double x = 0.0, y = 0.0;
+        const char* system = nullptr;
+        bool literal = true;
+        if (word("at")) {
+            size_t at = position_;
+            if (!at_coordinate(el, &at, length_, &x, &y, &system, &literal)) {
+                error("expected pic coordinate"); return false;
+            }
+            position_ = at;
+        }
+        if (literal) el.attr("x", x).attr("y", y).attr("coord_system", system);
+        size_t begin = 0, end = 0;
+        if (!group('{', '}', &begin, &end)) return false;
+        size_t name_end = begin;
+        while (name_end < end && source_[name_end] != '=') name_end++;
+        size_t name_begin = begin, argument_begin = name_end < end ? name_end + 1 : end;
+        size_t argument_end = end;
+        size_t trimmed_end = name_end;
+        trim_span(source_, &name_begin, &trimmed_end);
+        trim_span(source_, &argument_begin, &argument_end);
+        size_t definition = find_handler(source_, name_begin, trimmed_end, STYLE_PIC);
+        if (definition == SIZE_MAX) { error("unknown TikZ pic"); return false; }
+        el.attr("name", source_item(name_begin, trimmed_end));
+        if (name_end < end) el.attr("argument", source_item(argument_begin, argument_end));
+        skip_space_comments();
+        if (position_ >= length_ || source_[position_++] != ';') {
+            error("expected pic semicolon"); return false;
+        }
+        TextSpan argument = {source_, argument_begin, argument_end};
+        StrBuf* body = strbuf_new();
+        const StyleSpan& pic_style = styles_[definition];
+        bool ok = substitute_parameters(pic_style.text, pic_style.value_begin,
+                                        pic_style.value_end, &argument,
+                                        name_end < end ? 1 : 0, 1, body);
+        if (ok) {
+            const char* saved_source = source_;
+            size_t saved_length = length_, saved_position = position_;
+            size_t saved_anchor = error_anchor_, saved_styles = style_count_;
+            source_ = body->str ? body->str : "";
+            length_ = body->length;
+            position_ = 0;
+            if (error_anchor_ == SIZE_MAX) error_anchor_ = command_at;
+            ok = parse_children(el, nullptr, depth + 1);
+            source_ = saved_source;
+            length_ = saved_length;
+            position_ = saved_position;
+            error_anchor_ = saved_anchor;
+            // Styles defined in the body index the scratch text and end with the pic.
+            style_count_ = saved_styles;
+        }
+        strbuf_free(body);
+        if (!ok) return false;
+        parent.child(el.final());
         return true;
     }
 
@@ -1209,37 +1549,91 @@ private:
         return true;
     }
 
+    static bool axis_environment(const char* name) {
+        return strcmp(name, "axis") == 0 || strcmp(name, "semilogxaxis") == 0 ||
+            strcmp(name, "semilogyaxis") == 0 || strcmp(name, "loglogaxis") == 0 ||
+            strcmp(name, "polaraxis") == 0;
+    }
+
+    bool axis_default_options(ElementBuilder& el) {
+        for (size_t i = 0; i < axis_default_count_; i++) {
+            if (!append_options(el, axis_defaults_[i].text, axis_defaults_[i].begin,
+                                axis_defaults_[i].end))
+                return false;
+        }
+        return true;
+    }
+
+    // groupplot: each \nextgroupplot starts an axis carrying the inherited axis
+    // defaults, the groupplot options and its own options, in that key order.
+    bool group_plot(ElementBuilder& parent, size_t depth) {
+        ElementBuilder plots = builder_.element("groupplot");
+        size_t saved_styles = style_count_;
+        size_t options_begin = 0, options_end = 0;
+        bool has_options = false;
+        skip_space_comments();
+        if (position_ < length_ && source_[position_] == '[') {
+            if (!group('[', ']', &options_begin, &options_end)) return false;
+            has_options = true;
+            plots.attr("options_source", source_item(options_begin, options_end));
+            if (!append_options(plots, source_, options_begin, options_end)) return false;
+        }
+        skip_space_comments();
+        char name[96];
+        size_t count = 0;
+        group_ended_ = false;
+        while (!group_ended_) {
+            skip_space_comments();
+            size_t member_at = position_;
+            if (position_ >= length_ || source_[position_] != '\\' ||
+                    !command(name, sizeof(name)) || strcmp(name, "nextgroupplot") != 0) {
+                // Report at the offending command, not after its name.
+                position_ = member_at;
+                error("groupplot requires \\nextgroupplot before its plots"); return false;
+            }
+            if (++count > 64) { error("groupplot exceeds 64 plots"); return false; }
+            ElementBuilder axis = builder_.element("axis");
+            if (!axis_default_options(axis)) return false;
+            if (has_options && !append_options(axis, source_, options_begin, options_end))
+                return false;
+            if (!options(axis, false, false)) return false;
+            if (!parse_children(axis, "groupplot", depth + 1, true)) return false;
+            plots.child(axis.final());
+        }
+        style_count_ = saved_styles;
+        parent.child(plots.final());
+        return true;
+    }
+
     bool environment(ElementBuilder& parent, const char* name, size_t depth) {
-        if (strcmp(name, "tikzpicture") != 0 && strcmp(name, "scope") != 0 &&
-                strcmp(name, "axis") != 0 && strcmp(name, "semilogxaxis") != 0 &&
-                strcmp(name, "semilogyaxis") != 0 && strcmp(name, "loglogaxis") != 0 &&
-                strcmp(name, "polaraxis") != 0) {
+        if (strcmp(name, "groupplot") == 0) return group_plot(parent, depth);
+        bool axis = axis_environment(name);
+        if (strcmp(name, "tikzpicture") != 0 && strcmp(name, "scope") != 0 && !axis) {
             error("unsupported environment"); return false;
         }
         ElementBuilder el = builder_.element(name);
         size_t saved_styles = style_count_;
-        if (strcmp(name, "axis") == 0 || strcmp(name, "semilogxaxis") == 0 ||
-                strcmp(name, "semilogyaxis") == 0 || strcmp(name, "loglogaxis") == 0 ||
-                strcmp(name, "polaraxis") == 0) {
-            for (size_t i = 0; i < axis_default_count_; i++) {
-                if (!append_options(el, axis_defaults_[i].begin, axis_defaults_[i].end))
-                    return false;
-            }
-        }
-        if (!options(el, strcmp(name, "tikzpicture") == 0, false)) return false;
+        if (axis && !axis_default_options(el)) return false;
+        // Pictures and scopes are TeX groups: their style definitions end with them.
+        bool drawing_group = !axis;
+        if (!options(el, drawing_group, strcmp(name, "scope") == 0)) return false;
         if (!parse_children(el, name, depth + 1)) return false;
         style_count_ = saved_styles;
         parent.child(el.final());
         return true;
     }
 
-    bool parse_children(ElementBuilder& parent, const char* closing, size_t depth) {
+    bool parse_children(ElementBuilder& parent, const char* closing, size_t depth,
+                        bool group_axis = false) {
         if (depth > 64) { error("picture nesting exceeds 64 scopes"); return false; }
+        // Commands that retain spans across commands must index the document source.
+        bool document_text = error_anchor_ == SIZE_MAX;
         while (position_ < length_) {
             skip_space_comments();
             if (position_ == length_) break;
             if (++commands_ > 8192) { error("picture exceeds the 8192 command limit"); return false; }
             if (source_[position_] != '\\') { error("expected TikZ command"); return false; }
+            size_t command_start = position_;
             char name[96];
             if (!command(name, sizeof(name))) return false;
             if (strcmp(name, "begin") == 0 || strcmp(name, "end") == 0) {
@@ -1253,9 +1647,14 @@ private:
                     if (!closing || strcmp(closing, env) != 0) {
                         error("mismatched environment end"); return false;
                     }
+                    if (group_axis) group_ended_ = true;
                     return true;
                 }
                 if (!environment(parent, env, depth)) return false;
+            } else if (group_axis && strcmp(name, "nextgroupplot") == 0) {
+                // The next group member starts here; the group loop re-reads it.
+                position_ = command_start;
+                return true;
             } else if (strcmp(name, "addplot") == 0) {
                 if (!plot(parent)) return false;
             } else if (strcmp(name, "addlegendentry") == 0) {
@@ -1270,6 +1669,17 @@ private:
                 if (!node(parent)) return false;
             } else if (strcmp(name, "coordinate") == 0) {
                 if (!named_coordinate(parent)) return false;
+            } else if (strcmp(name, "pic") == 0) {
+                if (!pic(parent, depth, command_start)) return false;
+            } else if (strcmp(name, "tikzset") == 0) {
+                // Definitions are retained as options and scoped like TeX groups.
+                size_t begin = 0, end = 0;
+                if (!group('{', '}', &begin, &end)) return false;
+                ElementBuilder setting = builder_.element("tikzset");
+                setting.attr("source", source_item(begin, end));
+                if (!append_options(setting, source_, begin, end, false, true, false))
+                    return false;
+                parent.child(setting.final());
             } else if (strcmp(name, "foreach") == 0) {
                 if (!foreach_command(parent)) return false;
             } else if (strcmp(name, "def") == 0 || strcmp(name, "xdef") == 0) {
@@ -1283,16 +1693,16 @@ private:
                     .attr("source", source_item(begin, end)).final());
             } else if (strcmp(name, "pgfplotsinvokeforeach") == 0) {
                 if (!pgfplots_foreach(parent)) return false;
-            } else if (!closing && strcmp(name, "usepgfplotslibrary") == 0) {
+            } else if (!closing && document_text && strcmp(name, "usepgfplotslibrary") == 0) {
                 size_t begin = 0, end = 0;
                 if (!group('{', '}', &begin, &end)) return false;
                 parent.child(builder_.element("pgfplots_library")
                     .attr("source", source_item(begin, end)).final());
-            } else if (!closing && strcmp(name, "pgfplotsset") == 0) {
+            } else if (!closing && document_text && strcmp(name, "pgfplotsset") == 0) {
                 size_t begin = 0, end = 0;
                 if (!group('{', '}', &begin, &end)) return false;
                 ElementBuilder setting = builder_.element("pgfplots_setting");
-                if (!append_options(setting, begin, end, true)) return false;
+                if (!append_options(setting, source_, begin, end, true)) return false;
                 parent.child(setting.final());
             } else {
                 error("unsupported TikZ command"); return false;

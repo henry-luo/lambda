@@ -44,6 +44,6 @@ pn main() {
         symbol_hex: symbol_hex == (chr(945) ++ chr(946)),
         render_count: len(r.texts),
         render_mac: has(xml0, ">fifl</text>"),
-        render_symbol: has(xml1, "&#xce;&#xb1;&#xce;&#xb2;")
+        render_symbol: has(xml1, chr(945) ++ chr(946))
     })
 }

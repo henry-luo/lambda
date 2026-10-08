@@ -1,0 +1,23 @@
+\documentclass{article}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\begin{document}
+Units sold per month, read from \texttt{sales.dat} beside this document.
+
+\begin{tikzpicture}
+  \begin{axis}[xlabel={Month}, ylabel={Units}, ymin=0]
+    \addplot+[error bars/.cd, y dir=both, y explicit]
+      table[x=month, y=units, y error=returns] {sales.dat};
+    \addlegendentry{Units}
+  \end{axis}
+\end{tikzpicture}
+
+\begin{tikzpicture}
+  \begin{axis}[ybar, symbolic x coords={north,south,west}, xtick=data,
+      enlarge x limits=0.25]
+    \addplot table[col sep=comma, x=region, y=q1] {regions.csv};
+    \addplot table[col sep=comma, x index=0, y index=2] {regions.csv};
+    \legend{Q1,Q2}
+  \end{axis}
+\end{tikzpicture}
+\end{document}

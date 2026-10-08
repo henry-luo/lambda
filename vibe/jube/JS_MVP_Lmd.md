@@ -3,7 +3,9 @@
 **Date:** 2026-10-07
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
-phase implemented. Current validation and measurements are recorded in §10.8.
+phase implemented. The last validated release and measurements are recorded in §10.8.
+The numeric-library phase is implemented in source (§15); its runtime and
+performance acceptance gates remain pending.
 
 **Destination:** `lambda/js/mvp-lmd/`
 
@@ -19,7 +21,10 @@ The four governing goals remain fixed (USER, 2026-10-07):
 1. **Keep emitted MIR minimal.** Use retained analysis to avoid unnecessary
    checks, conversions, roots, wrappers, and function bodies.
 2. **Keep new helpers and helper code minimal.** Reuse audited Lambda/lib
-   primitives; count internal utilities, adapters, and shared additions too.
+   primitives; prefer existing Lambda functions first. For a small semantic
+   difference, consider an explicit option on the existing function while
+   preserving its default Lambda behavior. Count internal utilities, adapters,
+   and shared additions too; notify the user before adding any new helper.
 3. **Implement exactly the admitted scope.** Section 3 describes the shipped
    subset; §10 records the object/Map extension. Excluded capabilities receive
    diagnostics, without reserved machinery for later features.
@@ -86,6 +91,8 @@ object/Map boundary and its scope decisions.
 | Operators | Arithmetic, remainder/power, bitwise/shifts, comparisons, loose/strict equality, `typeof`, `void`, short-circuiting, conditional/comma; object `in`/property `delete` | Object-to-primitive coercion; `instanceof` |
 | Variables | `var`, `let`, `const`; assignments, logical/compound assignments, updates, changing kinds | Destructuring; sloppy implicit global creation |
 | Arrays | Dense mixed/nested literals, indexed reads/writes, append at length, length reads/shrink | Holes, sparse writes, other named properties, constructors/methods, descriptors/prototypes |
+| Typed arrays | `Int32Array`, `Uint8Array`, `Float64Array`: length construction, zero initialization, indexed reads/writes, `.length`, `.fill(value, start?, end?)` (§15; validation pending) | Buffer/view constructors, other properties/methods, typed-array iteration, detachment/resizing/shared storage |
+| Math | Fixed calls to `sqrt`, `sin`, `floor`, `trunc`, `abs`, `min`, `max`, `ceil`, `cos` (§15; validation pending) | First-class Math object/methods, dynamic method names, mutation, other Math members |
 | Objects/Map | Data properties, own projections, `new Map()` and fixed collection operations (§10) | `__proto__`, descriptors/accessors, proxies, custom prototypes, iterable Map construction |
 | Control flow | Blocks, conditionals, while/do/for, direct `for-of` with simple pair binding (§10.5), switch/fallthrough, labels, break/continue, return | `for-in`, general iterators, generators, async, throw/try/catch/finally |
 | Functions | Ordinary declarations/expressions, arrows, simple parameters, recursion, function values, indirect calls, program bindings | Enclosing local captures, default/rest/spread parameters, observable `this`/`arguments`/`new.target`, constructors/methods/classes |
@@ -233,7 +240,8 @@ poisoning. Exercise rejection paths and lifecycle isolation too.
 
 Shared changes require the Lambda/input baseline and unchanged full-JS
 Test262 baseline. The latter checks full-JS nonregression; it does not establish
-MVP conformance. Do not alter harnesses, oracles, timeouts, or budgets to pass.
+MVP conformance. Do not alter harnesses, oracles or timeouts to pass.
+Emission-budget changes require review of the exact MIR delta (**D8.6.1**).
 Any new Lambda script regression also needs its expected result file.
 
 Compare release builds with fixed sources, inputs, and result checks. Report
@@ -510,55 +518,54 @@ computed growth, retyping, deletion churn, lookup/update, and key/value loops.
 
 ### 10.8 Latest validation and release evidence — 2026-10-07
 
-The bounded tuning phase in §11 is implemented. Latest gates:
+The tuning in §§11–14 is implemented. Latest gates:
 
-- MVP: **30/30**; object/Map groups with forced GC and poisoning: **10/10**.
-- Shared Lambda/input baseline: **6,286/6,286**.
-- Full-JS Test262: **zero regressions or semantic failures**; **40,259 fully
-  passed + 2 retry-only** Unicode 10 identifier cases out of 40,261. This is
-  not an all-fully-passing result.
+- MVP: **34/34**, also **34/34** with forced GC and freed-memory poisoning.
+- Shared Lambda/input aggregate: **6,292/6,292**, including **20/20** MIR-size
+  checks. Two initial child-execution failures passed five focused replays and
+  the unchanged aggregate rerun; their initial cause remains unconfirmed.
+- Full-JS Test262: **40,259 fully passing; two retry-only; zero regressions**.
+  The two large AST Unicode-identifier cases remain marked slow/unstable by
+  the baseline. Both also pass an isolated replay on each frozen release.
+  No harness or timeout changes were made.
 
-Release comparison: 15 alternating before/after pairs per workload, with a
-second control sample and Node in each round, after one discarded process per
-lane. **All 16 workload oracles and 960 measured outputs pass.** MIR is pinned;
-the table uses self-reported execution times, excluding MVP startup and
-compilation. Node's tiering during its workload is included.
+Release comparison: **15 alternating pairs over all 30 admitted workloads**,
+followed by **30 pairs on six targeted/noisy rows**, with an identical-control
+peer and old/new LJS and available untyped Lambda references. **All 4,410
+measured outputs and 252 discarded preflight outputs match.** Native MIR is
+pinned. Times are self-reported execution medians; startup/initial compilation
+is excluded, and Node tiering during the workload is included.
 
-| Workload | Before ms | Tuned ms | Node ms | Paired speedup |
-|---|---:|---:|---:|---:|
-| larceny\_deriv | 81.871 | 54.438 | 27.544 | 1.52× |
-| larceny\_gcbench | 450.636 | 242.265 | 36.480 | 1.89× |
-| js\_micro\_lit | 79.198 | 0.152 | 4.822 | 520.46× |
-| js\_micro\_named | 36.264 | 36.074 | 7.776 | 1.00× |
-| js\_micro\_args\_ctl | 42.334 | 16.120 | 4.360 | 2.27× |
-| js\_micro\_args\_fp | 49.888 | 17.760 | 4.249 | 2.68× |
-| object\_fields | 3.951 | 3.748 | 3.573 | 1.05× |
-| object\_growth | 5.116 | 5.942 | 11.379 | 0.96× |
-| object\_retype | 61.197 | 55.000 | 2.511 | 1.05× |
-| object\_delete | 4.563 | 4.147 | 2.473 | 1.13× |
-| map\_lookup | 45.849 | 26.845 | 10.235 | 1.70× |
-| map\_iteration | 2.834 | 2.680 | 14.548 | 1.02× |
+| Workload | Before ms | Tuned ms | LJS ms | Untyped Lambda ms | Node ms | Paired speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| pnpoly | 28.710 | 17.069 | 76.073 | 12.476 | 5.878 | **1.68×** |
+| dense_array | 76.513 | 58.613 | 287.933 | — | 11.877 | **1.31×** |
+| diviter | 291.066 | 294.748 | 680.134 | 318.402 | 558.098 | **1.00×** |
 
-Speedup is the median of paired ratios; the time columns are independent
-medians. Host load was high (1-minute load **84.9 → 57.4**, eight logical CPUs).
-The clear gains are `deriv`, `gcbench`, `lit`, the two argument cases and Map
-lookup. Small changes in named fields, growth, retyping, deletion and iteration
-remain inconclusive. The four numeric/array/call/string controls also show no
-resolved change. Per-round control/control ratios and paired intervals are
-retained in the artifact; these measurements establish the bundle's gains,
-not each individual change's contribution.
+The first two rows use the 30-pair follow-up; `diviter` uses the full-set run.
+Speedup is the median of paired ratios, while time columns are independent
+medians. The 95% paired-bootstrap intervals for tuned/before time are
+**0.592–0.600** (`pnpoly`) and **0.755–0.774** (`dense_array`); their control-peer
+speedups are **0.998×** and **1.001×**. The full set also improves `integer_dense`
+(**1.32×**) and Map iteration (**1.29×**).
 
-The `lit` fast path removes allocation/property calls and keeps its accumulation
-in a proven integer lane. Broader shape polymorphism and retyping performance
-remain tuning work. `gcbench` includes the final long-lived traversal in every
-lane; `named` combines its two original loops.
+The initial `fib` slowdown disappears on follow-up. Object deletion remains
+noisy: **0.990×** paired speedup with a time-ratio interval of **0.964–1.147**.
+No material shared-client slowdown is confirmed. One-minute host load fell
+from **33.6 to 7.0** during the full run on eight logical CPUs; the follow-up
+retains the same binaries and sources.
 
-Evidence: [`tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/tuning_mir_20261007.json).
-Exact binaries, matched sources, raw output, fresh MIR and gate logs are under
-`temp/mvp_lmd_tuning/`; the latest paired run is `confirm/`.
-Release SHA-256: `d0ac0f6188f72c48f92afe5f3757583b5fa5e3b254e36dd0a2f3376174f96d46`.
-Implementation boundaries are recorded in
-[`JS_MVP_Lmd_Objects.md`](../impl/JS_MVP_Lmd_Objects.md#5-bounded-tuning-implementation).
+`pnpoly` is now **1.37× slower than untyped Lambda** and **2.90× slower than
+Node**. Generic element checks and dynamic storage remain further costs;
+this phase adds no numeric-array specialization. No compilation-time or
+allocation-count improvement is claimed.
+
+Evidence: [`element_tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/element_tuning_mir_20261007.json).
+Exact releases, sources, MIR, frame telemetry, runners, raw outputs and gate
+logs are in `temp/mvp_lmd_element_tuning/` (`confirm/` and `recheck/`).
+Release SHA-256: `3fbbefeb3521edcb95060e4bca0b2d164aca7d98d6c5ffa34b29c4135d15e6a8`.
+Ownership bounds and the reviewed MIR-budget delta are in
+[JS_MVP_Lmd_Objects §8](../impl/JS_MVP_Lmd_Objects.md#8-generic-element-coercion-and-scalar-ownership).
 
 ## 11. Object and Map tuning
 
@@ -584,13 +591,161 @@ UTF8/WTF8 identity remains shared with Lambda (**S8.2.2v5**, **D4.6.1v4**);
 JS Number behavior remains governed by **D2.2.5** and **S1.11**. VMap,
 `__proto__`, descriptors, accessors and proxies remain outside the phase.
 
-The current bounds are one shape prediction per binding/return, four fields
-for scalar replacement, and 24 AST nodes for expression inlining. Escaping or
-mutated objects retain allocation; loop-body inlining and general polymorphic
-guard chains remain future work.
+The bounds and remaining tuning opportunities are recorded in the
+[implementation record](../impl/JS_MVP_Lmd_Objects.md#6-bounded-tuning-implementation).
+Section 12 extends these optimizations.
 
 Acceptance requires the existing MVP and forced-GC cases, shared-runtime
 regression gates, and output-verified release comparisons against the archived
 binary. Pin MIR and compare self-reported workload times; use alternating
 control/candidate samples and a control/control noise check. The six newly
 enabled workloads and existing object/Map cases form the performance set.
+
+## 12. Further object and Map tuning
+
+Implemented the following bounded extensions:
+
+1. Reuse shared retype plans, including destination offsets and payload reuse
+   eligibility, to avoid repeating structural work on established transitions.
+2. Preserve native field values through numeric operations and stores, with
+   guarded fallback for changing field types. Hoist guards only when effects
+   prove the shape stable.
+3. Track small immutable shape sets, including recursive child fields, to
+   handle common leaf/branch layouts without generic property lookup.
+4. Extend bounded inlining to small statement/loop bodies at loop call sites,
+   and scalar replacement to local objects with static writes, preserving
+   evaluation order and identity.
+5. Separate nonallocating Map operations from allocation/error paths and reuse
+   lookup information during insertion.
+
+Shared immutable shapes and bounded guards follow **D3.4.3v5–D3.4.6** and
+**D8.4.1v2**; native values and calls follow **D2.2.5** and **D8.4.2v2**.
+Precise roots and payload reloads across safepoints remain required (**D5.3**).
+Canonical UTF8/WTF8 identity, SameValueZero, order and live iteration retain
+their existing contracts (**S8.2.2v5**, **S1.11**). The feature exclusions in
+§10.7 remain. Apply §11's correctness and paired release measurement gates;
+report each implemented bound and any unresolved performance result.
+
+## 13. Numeric loops and array parameters
+
+Implemented two corrections for the `diviter` and `pnpoly` gaps found by
+the broader comparison:
+
+1. Preserve the callee's numeric region during inlining so proven integer
+   arithmetic does not acquire conversions from its caller.
+2. Retain complete binding-kind facts through parameter reads and inline
+   snapshots, allowing known arrays to use direct index handling.
+
+Section 14 addresses element coercion and ownership costs. Bounds, changing
+element kinds, aliases and precise scalar homes remain valid.
+
+These are retained-analysis and representation corrections (**D8.2.4v2**,
+**D8.2.5v3**, **D8.2.6**, **D2.2.5**, **D8.4.1v2**, **D5.3**).
+Use the frozen current release as control,
+pin native MIR, check outputs, and compare self-reported times with alternating
+pairs and an identical-control lane. Include scalar, object, Map and array
+controls plus the existing MVP, forced-GC, Lambda and Test262 gates.
+
+## 14. Element coercion and scalar ownership
+
+Implemented; latest evidence is in §10.8.
+
+1. Route generic numeric coercion through the shared inline-number decoder,
+   retaining JS conversion and capability errors for other values.
+2. Emit Float snapshot copies directly into their existing destination homes,
+   preserving packed values, signed zero and wide payloads. Keep independent
+   ownership across writes, calls, growth and GC.
+3. Consume simple scalar reads directly when numeric operations finish before
+   any mutation or safepoint; retain owned snapshots across effectful operands.
+4. Measure the changes against a frozen release on `pnpoly`, `diviter` and
+   the full supported workload set, including shared-emitter clients.
+
+This is representation and ownership tuning under **D2.2.5**, **D5.3.1–D5.3.4**
+and **D8.2.6**. Numeric-array promotion and new object features remain outside
+the phase. Apply §13's paired MIR measurements and correctness gates.
+
+## 15. Numeric libraries and wider benchmark coverage
+
+**Status:** IMPLEMENTED IN SOURCE, acceptance pending; 2026-10-07.
+This phase adds fixed-size typed arrays and Math
+operations on the shared Lambda substrate (**S1.11**, **D1.3v3**, **D2.2.5**,
+**D2.6.1v3**, **D5.3**, **D8.2.6**).
+
+### 15.1 Scope
+
+- `Int32Array`, `Uint8Array`, and `Float64Array`: construction by length,
+  zero initialization, indexed reads/writes, `.length`, and `.fill()`.
+  Preserve JS length validation, element conversion, out-of-bounds behavior,
+  reference aliasing, and precise storage ownership.
+- `Math.sqrt`, `sin`, `floor`, and `trunc` first; then `abs`, `min`, `max`,
+  `ceil`, and `cos`. Retain JS coercion, argument evaluation, NaN, infinities,
+  and signed zero. Intrinsic recognition must respect binding shadowing and
+  the admitted receiver/member contract.
+- Use owning, fixed-size typed storage. Buffer/view constructors, exposed
+  buffers, detachment, resizing, shared buffers, and Atomics are deferred.
+  Ordinary mixed arrays retain their existing representation; automatic
+  numeric-array promotion is a separate optimization.
+
+The first nine benchmark targets, identified from their current sources, are:
+
+| Suite | Targets |
+|---|---|
+| R7RS | `nqueens`, `fft` |
+| Larceny | `primes`, `quicksort`, `triangl`, `paraffins`, `ray` |
+| Kostya | `primes`, `matmul` |
+
+These remain kernel targets, not verified new passes. Preserve algorithms,
+inputs, iteration counts, and result checks; adapt only the host harness as
+in the existing comparisons. Node CLI/I/O compatibility is outside this phase.
+
+### 15.2 Reuse and helper disclosure
+
+For every operation, inspect existing Lambda functions, storage primitives,
+and shared MIR emitters before adding code. Reuse a matching function directly;
+for a small semantic difference, consider a narrowly scoped option that keeps
+existing callers' behavior unchanged. Keep JS coercion distinct from physical
+conversion and ownership (**S1.11**, **D2.4.3**, **D5.3.4**, **D8.2.6**).
+
+The implementation reuses Lambda's `ArrayNum` allocation, shared MIR storage
+operations, existing JS coercion lowering, and Lambda's native Math entry
+points. There are **no new native runtime helpers**. Four compiler utilities
+were disclosed before coding; the existing string-index helper gained a typed
+index option. The audited reuse choices and dependency inventory are in the
+[numeric implementation record](../impl/JS_MVP_Lmd_Numeric.md).
+Full-JS runtime helpers remain outside §1's execution boundary, including
+transitive calls.
+
+Before implementing any further new helper,
+including compiler utilities or shared additions, tell the user its proposed
+name/location, purpose, why reuse or an option is insufficient, and its
+dependencies and GC/ownership effects. Record that inventory with the eventual
+implementation evidence; do not add parallel per-element-kind implementations.
+
+### 15.3 Acceptance and following phases
+
+Release compilation and whitespace checks passed. No runtime tests or benchmark
+measurements were run for this implementation round; the gates below remain
+pending, and §10.8's results do not validate these changes.
+
+Validate numeric edges, constructor lengths, typed stores, bounds, aliases,
+shadowing, and allocation lifetimes normally and with forced GC/poisoning.
+Require the existing MVP cases, Lambda/input and full-JS Test262 gates, and
+matched outputs for each newly admitted benchmark. Compare frozen release
+binaries with pinned native MIR and self-reported execution times, alternating
+pairs, and an identical-control peer; include existing workloads and affected
+shared clients. Report actual coverage, new/extended helpers, and unresolved
+results before marking the phase implemented.
+
+Later coverage expands in this order:
+
+| Phase | Surface | Candidate workloads |
+|---|---|---|
+| Array library | `push`, `pop`, `join`, `slice`, `fill`; then `new Array(n)` with genuine hole semantics | Kostya `json_gen`/`base64`, Larceny `puzzle`, R7RS `mbrot` |
+| String library | `charCodeAt`, `charAt`, `repeat`, `slice`, `String.fromCharCode`; simple destructuring assignment | Kostya `brainfuck`/`levenshtein`, Julia string workloads |
+| Functions and classes | Captured locals, receiver calls/`this`, constructors, basic classes and inheritance | AWFY and larger JetStream workloads |
+
+Holes must remain distinguishable from present undefined values (**S1.11**).
+AWFY also needs its class/receiver behavior; array methods alone do not admit
+it. These later surfaces require their own scoped phases. `__proto__`, fancy
+descriptors, accessors, and proxies remain excluded; plain objects and Map
+continue to use ordinary Lambda storage without VMap (**D2.6.9v3**, §10).

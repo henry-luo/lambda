@@ -61,10 +61,10 @@ unsorted |> sort()
 ia |> reverse()
 
 // ===== Typed array filter (returns regular array) =====
-ia |> filter((x) => x > 2)
+ia |: ~ > 2
 
 // ===== Typed array map =====
-ia |> map((x) => x * x)
+ia |> ~ * ~
 
 // ===== Empty typed array =====
 let empty_ia: int[] = []

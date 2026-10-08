@@ -16,7 +16,7 @@ let avg = big |> avg()
 avg
 
 // ===== Vector arithmetic on large =====
-let doubled = big |> map((x) => x * 2)
+let doubled = big |> ~ * 2
 doubled[0]
 doubled[999]
 
@@ -35,10 +35,10 @@ rev[0]
 rev[999]
 
 // ===== Filter large vector =====
-let evens = big |> filter((x) => x % 2 == 0)
+let evens = big |: ~ % 2 == 0
 len(evens)
 evens[0]
-evens |> last()
+evens[last]
 
 // ===== Reduce large vector =====
 big |> reduce((acc, x) => acc + x)

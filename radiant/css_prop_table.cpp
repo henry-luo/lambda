@@ -1576,10 +1576,11 @@ String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
     StrView text = {};
     const CssValue* value = css_compute_element_custom_property_text(scratch, element, name, name_length, &text);
     const CssPropertySyntaxComponent* matched = registration
-        ? css_match_property_syntax(registration, value) : nullptr;
+        ? css_match_property_syntax(registration, css_value_unwrap(value)) : nullptr;
     CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
     if (!formatter) {pool_destroy(scratch); return nullptr;}
     formatter->options.computed_colors = matched && matched->type == CSS_SYNTAX_COLOR;
+    formatter->options.preserve_tokens = !registration || registration->universal;
     if (value && text.str) {
         // authored custom tokens preserve spelling; typed registrations use computed serialization.
         stringbuf_append_str_n(formatter->output, text.str, text.length);

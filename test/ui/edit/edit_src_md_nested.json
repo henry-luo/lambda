@@ -1,0 +1,29 @@
+{
+  "name": "Markdown blocks nested in containers keep their own colors next to the containers' markers, reference links resolve against definitions far below the window, and a line over 10,000 characters stays plain",
+  "command": "edit",
+  "source": true,
+  "html": "test/ui/edit/nested_refs.md",
+  "working_copy": "temp/edit-ui/edit_src_md_nested.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".tok-heading", "index": 1}, "equals": "# Quoted title"},
+    {"type": "assert_text", "target": {"selector": ".tok-quote"}, "equals": ">"},
+    {"type": "assert_count", "target": {"selector": ".tok-fence"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".tok-fence"}, "equals": "```js"},
+    {"type": "assert_text", "target": {"selector": ".tok-code"}, "equals": "let y = 2;"},
+    {"type": "assert_text", "target": {"selector": ".tok-ref"}, "equals": "[local]:"},
+    {"type": "assert_count", "target": {"selector": ".tok-link"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".tok-link"}, "equals": "[the docs][d1]"},
+    {"type": "assert_text", "target": {"selector": ".tok-link", "index": 1}, "equals": "[the spec][d2]"},
+    {"type": "assert_count", "target": {"selector": ".tok-strong"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-status-right"}, "contains": "Markdown"},
+    {"type": "click", "target": {"text": "[plain]"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "type", "text": "Also "},
+    {"type": "assert_count", "target": {"selector": ".tok-link"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".tok-link"}, "equals": "[the docs][d1]"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_md_nested.md", "contains": "Also See [the docs][d1]"},
+    {"type": "render", "file": "temp/edit-ui/edit_src_md_nested.png"}
+  ]
+}
