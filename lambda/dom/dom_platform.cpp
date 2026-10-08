@@ -259,11 +259,13 @@ static int storage_find(JsStorageState* storage, const char* key) {
 
 static Item js_storage_length(void) {
     JsStorageState* storage = storage_from_this();
+    if (!storage) return dom_realm_throw_type_error("Illegal Storage receiver");
     return (Item){.item = i2it(storage_entry_count(storage))};
 }
 
 static Item js_storage_key(Item index_item) {
     JsStorageState* storage = storage_from_this();
+    if (!storage) return dom_realm_throw_type_error("Illegal Storage receiver");
     int index = (int)it2d(js_to_number(index_item));
     JsStorageEntry* entry = storage_entry_at(storage, index);
     return entry && entry->key ? js_make_string(entry->key) : ItemNull;
@@ -271,6 +273,7 @@ static Item js_storage_key(Item index_item) {
 
 static Item js_storage_get_item(Item key_item) {
     JsStorageState* storage = storage_from_this();
+    if (!storage) return dom_realm_throw_type_error("Illegal Storage receiver");
     const char* key = platform_string(key_item);
     int index = storage_find(storage, key);
     JsStorageEntry* entry = storage_entry_at(storage, index);
@@ -279,7 +282,7 @@ static Item js_storage_get_item(Item key_item) {
 
 static Item js_storage_set_item(Item key_item, Item value_item) {
     JsStorageState* storage = storage_from_this();
-    if (!storage) return make_js_undefined();
+    if (!storage) return dom_realm_throw_type_error("Illegal Storage receiver");
     const char* key = platform_string(key_item);
     char* stable_key = mem_strdup(key ? key : "", MEM_CAT_JS_RUNTIME);
     const char* value = platform_string(value_item);
@@ -346,6 +349,7 @@ static Item js_storage_set_item(Item key_item, Item value_item) {
 
 static Item js_storage_remove_item(Item key_item) {
     JsStorageState* storage = storage_from_this();
+    if (!storage) return dom_realm_throw_type_error("Illegal Storage receiver");
     const char* key = platform_string(key_item);
     int index = storage_find(storage, key);
     if (!storage || index < 0) return make_js_undefined();
@@ -368,7 +372,7 @@ static Item js_storage_remove_item(Item key_item) {
 
 static Item js_storage_clear(void) {
     JsStorageState* storage = storage_from_this();
-    if (!storage) return make_js_undefined();
+    if (!storage) return dom_realm_throw_type_error("Illegal Storage receiver");
     RadiantStateStore* store = nullptr;
     const char* context_id = nullptr;
     const char* origin = nullptr;
@@ -391,24 +395,21 @@ static Item storage_object(JsStorageState* storage) {
     if (!dom_platform_ensure_roots()) return ItemError;
     Item object = js_new_object();
     storage->object = object;
-
-    RootFrame roots(1);
-    Rooted<Item> descriptor_root(roots, ItemNull);
-    dom_realm_install_method(object, "key", js_storage_key, 1);
-    dom_realm_install_method(object, "getItem", js_storage_get_item, 1);
-    dom_realm_install_method(object, "setItem", js_storage_set_item, 2);
-    dom_realm_install_method(object, "removeItem", js_storage_remove_item, 1);
-    dom_realm_install_method(object, "clear", js_storage_clear, 0);
-
-    Item descriptor = js_new_object();
-    descriptor_root.set(descriptor);
-    dom_realm_install_method(descriptor, "get", js_storage_length, 0);
-    dom_realm_set(descriptor, js_make_string("enumerable"),
-        (Item){.item = ITEM_TRUE});
-    dom_realm_set(descriptor, js_make_string("configurable"),
-        (Item){.item = ITEM_TRUE});
-    dom_realm_define_property(object, js_make_string("length"), descriptor);
     return object;
+}
+
+extern "C" void dom_storage_install_interface(Item prototype) {
+    // Both storage areas expose the same native operations through WebIDL's prototype.
+    RootFrame roots(2);
+    Rooted<Item> prototype_root(roots, prototype);
+    dom_realm_install_method(prototype_root.get(), "key", js_storage_key, 1);
+    dom_realm_install_method(prototype_root.get(), "getItem", js_storage_get_item, 1);
+    dom_realm_install_method(prototype_root.get(), "setItem", js_storage_set_item, 2);
+    dom_realm_install_method(prototype_root.get(), "removeItem", js_storage_remove_item, 1);
+    dom_realm_install_method(prototype_root.get(), "clear", js_storage_clear, 0);
+    Rooted<Item> getter_root(roots, dom_realm_new_function(js_storage_length));
+    dom_realm_install_accessor(prototype_root.get(), js_name_item("length"),
+        getter_root.get(), ItemNull, 0);
 }
 JS_FORWARD_ITEM(dom_storage_local_object, (void), storage_object, (&dom_local_storage))
 JS_FORWARD_ITEM(dom_storage_session_object, (void), storage_object, (&dom_session_storage))

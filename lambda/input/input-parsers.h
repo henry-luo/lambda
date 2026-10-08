@@ -40,6 +40,8 @@ const char* rdb_detect_format(const char* pathname, const char* type);
 Element* html5_parse(Input* input, const char* html);
 
 struct Html5ParseOptions;
+Element* html5_parse_n(Input* input, const char* html, size_t length,
+                        Html5ParseOptions* opts);
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
 Element* parse_svg_document(Input* input, const char* svg_source);
 

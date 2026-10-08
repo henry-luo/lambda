@@ -16,6 +16,7 @@
 
 #include "radiant.hpp"
 #include "script_timeout.hpp"
+#include <assert.h>
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/dom/dom.h"
@@ -90,51 +91,51 @@ static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
 static volatile sig_atomic_t js_event_loop_cleanup_unsafe = 0;
 
 #ifndef _WIN32
-static sigjmp_buf js_exec_jmpbuf;
-static volatile sig_atomic_t js_exec_guarded = 0;
-static struct sigaction js_exec_old_segv, js_exec_old_bus;
-static volatile sig_atomic_t js_exec_timed_out = 0;
-static volatile sig_atomic_t js_exec_watchdog_started = 0;
-static size_t js_exec_watchdog_source_len = 0;
-static volatile sig_atomic_t js_exec_watchdog_budget_seconds = 0;
-
-// Per-document script timeout: covers parse/transpile plus execution.  An
-// interval timer may deliver SIGPROF to any process thread, while recovery
-// must run on the document thread that owns js_exec_jmpbuf.
-static struct sigaction js_exec_old_prof;
-static pthread_t js_exec_watchdog_thread;
-static pthread_t js_exec_watchdog_owner;
-static bool js_exec_watchdog_thread_active = false;
-static bool js_exec_watchdog_handler_installed = false;
-static volatile sig_atomic_t js_exec_watchdog_running = 0;
+// nested iframe scripts need their own recovery destination and native owners;
+// a child must not overwrite the outer document's guard or watchdog thread.
+struct JsExecGuard {
+    JsExecGuard* previous;
+    sigjmp_buf jmpbuf;
+    struct sigaction old_segv, old_bus, old_prof;
+    volatile sig_atomic_t guarded, timed_out, started, budget_seconds, running;
+    size_t source_len;
+    pthread_t watchdog_thread, owner;
+    bool thread_active, handler_installed;
+    uint64_t elapsed_cpu_us, arm_cpu_us;
+};
+static __thread JsExecGuard* js_exec_current = nullptr;
 
 static void js_exec_timeout_handler(int sig) {
     (void)sig;
-    if (js_exec_guarded) {
-        js_exec_timed_out = 1;
-        const char* msg = "execute_document_scripts: JS execution timed out by watchdog\n";
-        write(STDERR_FILENO, msg, strlen(msg));
-        js_exec_guarded = 0;
-        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
-        sigaction(SIGBUS, &js_exec_old_bus, NULL);
-        siglongjmp(js_exec_jmpbuf, 2);
+    JsExecGuard* guard = js_exec_current;
+    if (guard && guard->guarded) {
+        guard->timed_out = 1;
+        // D8.4.3v2: the next guest boundary returns an error on its own stack.
     }
 }
 
+static bool js_exec_watchdog_expired(void) {
+    return js_exec_current && js_exec_current->guarded && js_exec_current->timed_out;
+}
+
 static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
-    if (js_exec_guarded) {
+    JsExecGuard* guard = js_exec_current;
+    if (guard && guard->guarded) {
         // async-signal-safe: use write() instead of log_error()
         const char* msg = (sig == SIGBUS)
             ? "execute_document_scripts: caught SIGBUS during JS execution\n"
             : "execute_document_scripts: caught SIGSEGV during JS execution\n";
         write(STDERR_FILENO, msg, strlen(msg));
-        js_exec_guarded = 0;
-        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
-        sigaction(SIGBUS, &js_exec_old_bus, NULL);
-        siglongjmp(js_exec_jmpbuf, 1);
+        guard->guarded = 0;
+        sigaction(SIGSEGV, &guard->old_segv, NULL);
+        sigaction(SIGBUS, &guard->old_bus, NULL);
+        siglongjmp(guard->jmpbuf, 1);
     }
     // not guarded — forward to previous handler
-    struct sigaction* old = (sig == SIGSEGV) ? &js_exec_old_segv : &js_exec_old_bus;
+    // a nested guard may have saved this dispatcher as its previous handler.
+    while (guard && guard->previous) guard = guard->previous;
+    if (!guard) { signal(sig, SIG_DFL); raise(sig); return; }
+    struct sigaction* old = (sig == SIGSEGV) ? &guard->old_segv : &guard->old_bus;
     if (old->sa_flags & SA_SIGINFO) {
         old->sa_sigaction(sig, info, ctx);
     } else if (old->sa_handler != SIG_DFL && old->sa_handler != SIG_IGN) {
@@ -156,27 +157,22 @@ static bool js_exec_watchdog_process_cpu_us(uint64_t* out_cpu_us) {
     return true;
 }
 
-static void* js_exec_watchdog_main(void* unused) {
-    (void)unused;
-    uint64_t start_cpu_us = 0;
-    if (!js_exec_watchdog_process_cpu_us(&start_cpu_us)) {
-        log_error("script_runner_timeout: unable to read process CPU time");
-        return NULL;
-    }
+static void* js_exec_watchdog_main(void* arg) {
+    JsExecGuard* guard = (JsExecGuard*)arg;
     const struct timespec poll_interval = {0, 10000000L};
-    while (js_exec_watchdog_running) {
+    while (guard->running) {
         uint64_t current_cpu_us = 0;
         if (!js_exec_watchdog_process_cpu_us(&current_cpu_us)) {
             log_error("script_runner_timeout: process CPU clock became unavailable");
             return NULL;
         }
         uint64_t budget_cpu_us =
-            (uint64_t)js_exec_watchdog_budget_seconds * 1000000ULL;
-        if (current_cpu_us >= start_cpu_us &&
-                current_cpu_us - start_cpu_us >= budget_cpu_us) {
+            (uint64_t)guard->budget_seconds * 1000000ULL;
+        if (current_cpu_us >= guard->arm_cpu_us &&
+                guard->elapsed_cpu_us + current_cpu_us - guard->arm_cpu_us >= budget_cpu_us) {
             // Targeting the owner preserves the sigsetjmp/siglongjmp thread
             // pairing; process-directed SIGPROF can instead hit a compiler worker.
-            int signal_status = pthread_kill(js_exec_watchdog_owner, SIGPROF);
+            int signal_status = pthread_kill(guard->owner, SIGPROF);
             if (signal_status != 0) {
                 log_error("script_runner_timeout: failed to signal watchdog owner (%d)",
                           signal_status);
@@ -189,79 +185,119 @@ static void* js_exec_watchdog_main(void* unused) {
 }
 
 static bool js_exec_watchdog_arm(int timeout_seconds) {
-    if (timeout_seconds <= 0) return false;
+    JsExecGuard* guard = js_exec_current;
+    if (!guard || timeout_seconds <= 0 || guard->thread_active) return false;
+    if (!js_exec_watchdog_process_cpu_us(&guard->arm_cpu_us)) return false;
     struct sigaction timeout_action;
     memset(&timeout_action, 0, sizeof(timeout_action));
     timeout_action.sa_handler = js_exec_timeout_handler;
-    if (sigaction(SIGPROF, &timeout_action, &js_exec_old_prof) != 0) {
+    if (sigaction(SIGPROF, &timeout_action, &guard->old_prof) != 0) {
         log_error("script_runner_timeout: failed to install SIGPROF handler");
         return false;
     }
-    js_exec_watchdog_handler_installed = true;
-    js_exec_watchdog_owner = pthread_self();
-    js_exec_watchdog_budget_seconds = timeout_seconds;
-    js_exec_watchdog_running = 1;
-    int create_status = pthread_create(&js_exec_watchdog_thread, NULL,
-                                       js_exec_watchdog_main, NULL);
+    guard->handler_installed = true;
+    guard->owner = pthread_self();
+    guard->budget_seconds = timeout_seconds;
+    guard->running = 1;
+    int create_status = pthread_create(&guard->watchdog_thread, NULL,
+                                       js_exec_watchdog_main, guard);
     if (create_status != 0) {
-        js_exec_watchdog_running = 0;
-        sigaction(SIGPROF, &js_exec_old_prof, NULL);
-        js_exec_watchdog_handler_installed = false;
+        guard->running = 0;
+        sigaction(SIGPROF, &guard->old_prof, NULL);
+        guard->handler_installed = false;
         log_error("script_runner_timeout: failed to create CPU watchdog thread (%d)",
                   create_status);
         return false;
     }
-    js_exec_watchdog_thread_active = true;
+    guard->thread_active = true;
     return true;
 }
 
-static void js_exec_watchdog_disarm(void) {
+static void js_exec_watchdog_disarm(JsExecGuard* guard = js_exec_current) {
+    if (!guard) return;
     // Joining the sender closes the signal-delivery race before the previous
     // action is restored, so a completed document cannot die from late SIGPROF.
-    js_exec_watchdog_running = 0;
-    if (js_exec_watchdog_thread_active) {
-        pthread_join(js_exec_watchdog_thread, NULL);
-        js_exec_watchdog_thread_active = false;
+    guard->running = 0;
+    if (guard->thread_active) {
+        pthread_join(guard->watchdog_thread, NULL);
+        uint64_t now = 0;
+        if (js_exec_watchdog_process_cpu_us(&now) && now >= guard->arm_cpu_us) {
+            guard->elapsed_cpu_us += now - guard->arm_cpu_us;
+        }
+        guard->thread_active = false;
     }
-    if (js_exec_watchdog_handler_installed) {
-        sigaction(SIGPROF, &js_exec_old_prof, NULL);
-        js_exec_watchdog_handler_installed = false;
+    if (guard->handler_installed) {
+        sigaction(SIGPROF, &guard->old_prof, NULL);
+        guard->handler_installed = false;
     }
 }
 
 static void js_exec_watchdog_add_module_source(size_t source_length) {
-    if (!js_exec_guarded || source_length == 0) return;
-    if (source_length > SIZE_MAX - js_exec_watchdog_source_len) {
-        js_exec_watchdog_source_len = SIZE_MAX;
+    JsExecGuard* guard = js_exec_current;
+    if (!guard || !guard->guarded || source_length == 0) return;
+    if (source_length > SIZE_MAX - guard->source_len) {
+        guard->source_len = SIZE_MAX;
     } else {
-        js_exec_watchdog_source_len += source_length;
+        guard->source_len += source_length;
     }
-    if (!js_exec_watchdog_started) return;
+    if (!guard->started) return;
     int expanded_budget = radiant_script_exec_timeout_seconds(
-        js_exec_watchdog_source_len);
-    if (expanded_budget <= js_exec_watchdog_budget_seconds) return;
+        guard->source_len);
+    if (expanded_budget <= guard->budget_seconds) return;
 
-    js_exec_watchdog_budget_seconds = expanded_budget;
+    guard->budget_seconds = expanded_budget;
     log_info("script_runner_timeout: module graph %zu bytes gets %ds watchdog",
-        js_exec_watchdog_source_len, expanded_budget);
+        guard->source_len, expanded_budget);
 }
 
 static void js_exec_watchdog_begin_user_code(void) {
-    js_exec_watchdog_started = js_exec_watchdog_arm(js_exec_watchdog_budget_seconds);
+    if (js_exec_current) {
+        js_exec_current->started = js_exec_watchdog_arm(js_exec_current->budget_seconds);
+    }
 }
+
+class JsExecGuardScope {
+    // recovery changes fields after sigsetjmp; heap storage keeps them defined
+    // after the jump and gives the watchdog thread a stable owner.
+    lam::Temp<JsExecGuard> guard;
+public:
+    JsExecGuardScope() : guard((JsExecGuard*)mem_calloc(1, sizeof(JsExecGuard), MEM_CAT_EVAL)) {
+        if (!guard) return;
+        guard->previous = js_exec_current;
+        js_exec_watchdog_disarm(guard->previous);
+        js_exec_current = guard.get();
+        js_set_execution_interrupt_check(js_exec_watchdog_expired);
+    }
+    ~JsExecGuardScope() {
+        if (!guard) return;
+        js_exec_watchdog_disarm(guard.get());
+        js_exec_current = guard->previous;
+        js_set_execution_interrupt_check(js_exec_current ? js_exec_watchdog_expired : nullptr);
+        js_set_document_source_load_observer(js_exec_current && js_exec_current->guarded
+            ? js_exec_watchdog_add_module_source : nullptr);
+        if (js_exec_current && js_exec_current->guarded &&
+                js_exec_current->started && !js_exec_current->timed_out) {
+            js_exec_watchdog_begin_user_code();
+        }
+    }
+    bool valid() const { return (bool)guard; }
+    JsExecGuardScope(const JsExecGuardScope&) = delete;
+    JsExecGuardScope& operator=(const JsExecGuardScope&) = delete;
+};
 #endif  // !_WIN32
 
 extern "C" void script_runner_suspend_js_watchdog(void) {
 #ifndef _WIN32
-    if (!js_exec_guarded || !js_exec_watchdog_started) return;
-    js_exec_watchdog_started = 0;
+    if (!js_exec_current || !js_exec_current->guarded || !js_exec_current->started) return;
+    js_exec_current->started = 0;
     js_exec_watchdog_disarm();
 #endif
 }
 
 extern "C" void script_runner_resume_js_watchdog(void) {
 #ifndef _WIN32
-    if (!js_exec_guarded || js_exec_timed_out || js_exec_watchdog_started) return;
+    if (!js_exec_current || !js_exec_current->guarded || js_exec_current->timed_out ||
+            js_exec_current->started) return;
     js_exec_watchdog_begin_user_code();
 #endif
 }
@@ -1817,6 +1853,7 @@ static const char LIFECYCLE_WINDOW_PAGE_SHOW_FILENAME[] = "<window-pageshow>";
 
 static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preamble,
                                       const char* source, const char* filename) {
+    if (item_is_error(js_execution_interrupt_status())) return false;
     Item result;
     uint64_t result_home = 0;
     // Lifecycle dispatch targets the current document's listener graph; keep
@@ -1942,6 +1979,7 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
     size_t accepted_source_bytes = 0;
     size_t total_compile_limit = script_total_compile_limit_bytes();
     for (int i = 0; i < queue->length; i++) {
+        if (item_is_error(js_execution_interrupt_status())) return false;
         JsScriptTask* task = (JsScriptTask*)arraylist_get(queue, i);
         if (!script_task_is_executable(task)) continue;
 
@@ -2409,6 +2447,15 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         return;
     }
 
+#ifndef _WIN32
+    JsExecGuardScope exec_guard_scope;
+    if (!exec_guard_scope.valid()) {
+        log_error("script_runner_timeout: failed to allocate execution guard");
+        script_task_collection_free(&script_tasks);
+        return;
+    }
+#endif
+
 #ifndef NDEBUG
     log_info("execute_document_scripts: executing JS with tasks-postdom pipeline (%zu source bytes)",
         watchdog_source_len);
@@ -2513,15 +2560,15 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = js_exec_crash_handler;
     sa.sa_flags = SA_SIGINFO;
-    sigaction(SIGSEGV, &sa, &js_exec_old_segv);
-    sigaction(SIGBUS, &sa, &js_exec_old_bus);
+    sigaction(SIGSEGV, &sa, &js_exec_current->old_segv);
+    sigaction(SIGBUS, &sa, &js_exec_current->old_bus);
 
-    js_exec_timed_out = 0;
-    js_exec_watchdog_started = 0;
-    js_exec_guarded = 1;
+    js_exec_current->timed_out = 0;
+    js_exec_current->started = 0;
+    js_exec_current->guarded = 1;
     int timeout_seconds = radiant_script_exec_timeout_seconds(watchdog_source_len);
-    js_exec_watchdog_source_len = watchdog_source_len;
-    js_exec_watchdog_budget_seconds = timeout_seconds;
+    js_exec_current->source_len = watchdog_source_len;
+    js_exec_current->budget_seconds = timeout_seconds;
     js_set_document_source_load_observer(js_exec_watchdog_add_module_source);
     if (timeout_seconds > RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS) {
         log_info("script_runner_timeout: source %zu bytes gets %ds watchdog",
@@ -2537,7 +2584,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     JsPreambleState* volatile preamble = nullptr;
 #ifndef _WIN32
     LambdaRecoveryCheckpoint recovery_checkpoint = lambda_recovery_checkpoint_capture();
-    int jmp_val = sigsetjmp(js_exec_jmpbuf, 1);
+    int jmp_val = sigsetjmp(js_exec_current->jmpbuf, 1);
     if (jmp_val == 0) {
 #else
     {
@@ -2552,40 +2599,16 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         if (timing) timing->runtime_setup_us += time_now_us() - phase_start_us;
         phase_start_us = timing ? time_now_us() : 0;
         result = execute_document_script_tasks_postdom(runtime, &script_tasks, preamble, timing);
+#ifndef _WIN32
+        if (js_exec_current->timed_out) {
+            log_error("execute_document_scripts: JS execution timed out after %ds",
+                js_exec_current->budget_seconds);
+            result = ItemError;
+        }
+#endif
         if (timing) timing->postdom_total_us += time_now_us() - phase_start_us;
         log_mem_stage("js: after transpile/exec");
 #ifndef _WIN32
-        js_exec_guarded = 0;
-        js_exec_watchdog_started = 0;
-        js_exec_watchdog_disarm();
-
-        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
-        sigaction(SIGBUS, &js_exec_old_bus, NULL);
-	        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
-	    } else if (jmp_val == 2) {
-	        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
-	        log_error("execute_document_scripts: JS execution timed out after %ds",
-                js_exec_watchdog_budget_seconds);
-	        result = ItemError;
-	        js_batch_cleanup_unsafe = 1;
-	        // siglongjmp skips the normal guarded-execution epilogue; restore
-	        // handlers here so teardown does not run under the JS crash guard.
-	        js_exec_guarded = 0;
-	        js_exec_watchdog_started = 0;
-	        js_exec_watchdog_disarm();
-        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
-        sigaction(SIGBUS, &js_exec_old_bus, NULL);
-		        // siglongjmp skips MIR/transpiler destructors; clean the active stack
-		        // before releasing the wrapper so large code pages are not orphaned.
-		        jm_cleanup_active_mir();
-	        jm_cleanup_deferred_mir();
-	        if (preamble) {
-	            // siglongjmp can land after MIR preamble ownership was transferred;
-	            // use the normal destroyer so source_buffer/MIR/pools are released.
-	            preamble_state_destroy(preamble);
-	            mem_free(preamble);
-	            preamble = nullptr;
-	        }
 	    } else {
 	        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
 	        log_error("execute_document_scripts: recovered from crash in JS JIT code");
@@ -2596,11 +2619,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	        js_event_loop_cleanup_unsafe = 1;
 	        // siglongjmp skips the normal guarded-execution epilogue; restore
 	        // handlers here so teardown does not run under the JS crash guard.
-	        js_exec_guarded = 0;
-	        js_exec_watchdog_started = 0;
+	        js_exec_current->guarded = 0;
+	        js_exec_current->started = 0;
 	        js_exec_watchdog_disarm();
-        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
-        sigaction(SIGBUS, &js_exec_old_bus, NULL);
+        sigaction(SIGSEGV, &js_exec_current->old_segv, NULL);
+        sigaction(SIGBUS, &js_exec_current->old_bus, NULL);
 		        // the native signal may have interrupted MIR/JIT state in-place;
 		        // abandon active MIR contexts instead of finalizing corrupted lists.
 		        jm_abandon_active_mir_after_signal();
@@ -2616,8 +2639,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 #else
     }
 #endif
-    js_set_document_source_load_observer(NULL);
-
     // A signal watchdog bypasses C++ scope destructors. Never let an aborted
     // task expose a stale currentScript during later lifecycle callbacks.
     dom_document_swap_current_script(dom_doc, nullptr);
@@ -2660,6 +2681,24 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             log_info("execute_document_scripts: timer queue drained");
         }
     }
+#ifndef _WIN32
+    if (jmp_val == 0) {
+        // queued load-time callbacks share the document's CPU budget and the
+        // D8.4.3v2 cooperative error path used by its synchronous scripts.
+        if (js_exec_current->timed_out && get_type_id(result) != LMD_TYPE_ERROR) {
+            log_error("execute_document_scripts: JS execution timed out after %ds",
+                js_exec_current->budget_seconds);
+            result = ItemError;
+        }
+        js_exec_current->guarded = 0;
+        js_exec_current->started = 0;
+        js_exec_watchdog_disarm();
+        sigaction(SIGSEGV, &js_exec_current->old_segv, NULL);
+        sigaction(SIGBUS, &js_exec_current->old_bus, NULL);
+        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
+    }
+#endif
+    js_set_document_source_load_observer(NULL);
     if (timing) timing->event_loop_us += time_now_us() - phase_start_us;
 
     if (script_state_batch) {

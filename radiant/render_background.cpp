@@ -304,25 +304,8 @@ static void render_linear_gradient_tile(RasterRenderContext* rdcon, ViewBlock* v
         rdt_path_free(p);
         return;
     }
-    for (int i = 0; i < gradient->stop_count; i++) {
-        GradientStop* gs = &gradient->stops[i];
-        stops[i].offset = gs->position >= 0 ? gs->position : (float)i / (gradient->stop_count - 1);
-        stops[i].r = gs->color.r;
-        stops[i].g = gs->color.g;
-        stops[i].b = gs->color.b;
-        stops[i].a = gs->color.a;
-    }
-
-    if (gradient->stops_in_px) {
-        float grad_len = sqrtf((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
-        if (grad_len > 0.0f) {
-            for (int i = 0; i < stop_count; i++) {
-                if (gradient->stops[i].position >= 0.0f) {
-                    stops[i].offset = gradient->stops[i].position / grad_len;
-                }
-            }
-        }
-    }
+    render_copy_gradient_stops(gradient->stops, gradient->stop_count,
+        hypotf(x2 - x1, y2 - y1), stops, stop_count, nullptr);
 
     // Handle repeating-linear-gradient: convert px positions and replicate stops
     RdtGradientStop* final_stops = stops;
@@ -444,14 +427,8 @@ static void render_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view, 
         rdt_path_free(p);
         return;
     }
-    for (int i = 0; i < gradient->stop_count; i++) {
-        GradientStop* gs = &gradient->stops[i];
-        stops[i].offset = gs->position;
-        stops[i].r = gs->color.r;
-        stops[i].g = gs->color.g;
-        stops[i].b = gs->color.b;
-        stops[i].a = gs->color.a;
-    }
+    render_copy_gradient_stops(gradient->stops, gradient->stop_count,
+        radius, stops, gradient->stop_count, nullptr);
 
     RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
@@ -1215,11 +1192,11 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         float s_blur     = s->blur_radius * sc;
         float s_spread   = s->spread_radius * sc;
 
-        // Calculate shadow rectangle
-        float shadow_x = rect.x + s_offset_x - s_spread;
-        float shadow_y = rect.y + s_offset_y - s_spread;
-        float shadow_w = rect.width + 2 * s_spread;
-        float shadow_h = rect.height + 2 * s_spread;
+        Rect shadow_rect = render_geometry_outer_shadow_rect(
+            rect, s_offset_x, s_offset_y, s_spread);
+        if (shadow_rect.width <= 0.0f || shadow_rect.height <= 0.0f) continue;
+        float shadow_x = shadow_rect.x, shadow_y = shadow_rect.y;
+        float shadow_w = shadow_rect.width, shadow_h = shadow_rect.height;
 
         // Adjust border radius for spread
         float spread_factor = (s_spread >= 0) ? 1.0f : 1.0f;

@@ -80,6 +80,15 @@ struct FontHandle {
     FontMetrics metrics;
     bool        metrics_ready;
 
+    // Platform line metrics share the selected face, metric alias and CSS size.
+    const char* cached_platform_metric_family;
+    void*       cached_platform_metric_ref;
+    float       cached_platform_metric_size;
+    float       cached_platform_ascent;
+    float       cached_platform_descent;
+    float       cached_platform_line_height;
+    bool        cached_platform_metrics_ready;
+
     // cached rendering ascender (from platform font, lazily computed)
     float       cached_rendering_ascender;
     bool        cached_rendering_ascender_ready;

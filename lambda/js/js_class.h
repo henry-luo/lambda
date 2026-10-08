@@ -129,6 +129,10 @@ enum JsClass : uint8_t {
     JS_CLASS_CSS_NAMESPACE,
     JS_CLASS_CSSOM,
     JS_CLASS_WEB_API_RESOURCE,
+    JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY,
+    JS_CLASS_COUNT_QUEUING_STRATEGY,
+    JS_CLASS_HEADERS,
+    JS_CLASS_HEADERS_ITERATOR,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -177,6 +181,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "Duplex", 6)) return JS_CLASS_DUPLEX;
             break;
         case 7:
+            if (!strncmp(nm, "Headers", 7)) return JS_CLASS_HEADERS;
             if (!strncmp(nm, "Boolean", 7)) return JS_CLASS_BOOLEAN;
             if (!strncmp(nm, "Promise", 7)) return JS_CLASS_PROMISE;
             if (!strncmp(nm, "Timeout", 7)) return JS_CLASS_TIMEOUT;
@@ -278,6 +283,10 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             break;
         case 20:
             if (!strncmp(nm, "FinalizationRegistry", 20)) return JS_CLASS_FINALIZATION_REGISTRY;
+            if (!strncmp(nm, "CountQueuingStrategy", 20)) return JS_CLASS_COUNT_QUEUING_STRATEGY;
+            break;
+        case 25:
+            if (!strncmp(nm, "ByteLengthQueuingStrategy", 25)) return JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY;
             break;
     }
     return JS_CLASS_NONE;
@@ -355,6 +364,10 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_CLIPBOARD_ITEM: return "ClipboardItem";
         case JS_CLASS_RAW_JSON: return "RawJSON";
         case JS_CLASS_FINALIZATION_REGISTRY: return "FinalizationRegistry";
+        case JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY: return "ByteLengthQueuingStrategy";
+        case JS_CLASS_COUNT_QUEUING_STRATEGY: return "CountQueuingStrategy";
+        case JS_CLASS_HEADERS: return "Headers";
+        case JS_CLASS_HEADERS_ITERATOR: return "Headers Iterator";
         case JS_CLASS_TYPE_ERROR: return "TypeError";
         case JS_CLASS_RANGE_ERROR: return "RangeError";
         case JS_CLASS_SYNTAX_ERROR: return "SyntaxError";

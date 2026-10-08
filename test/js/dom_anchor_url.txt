@@ -6,4 +6,8 @@ example.com
 #part
 https://example.com:8443
 https://example.com:8443/docs/page?q=one#part
+true
+true
+true
+true
 ANCHOR_URL_DONE

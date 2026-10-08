@@ -920,6 +920,54 @@ TEST(ArenaCornerTest, AllocAfterMultipleClearCycles) {
 // arena_owns() Tests
 // ============================================================================
 
+TEST(ArenaOwnershipTest, IndexedChunksTrackLiveBoundsAcrossRewindResetAndClear) {
+    Arena* arena = arena_create(256, 256);
+    Arena* other = arena_create(256, 256);
+    ASSERT_NE(arena, nullptr);
+    ASSERT_NE(other, nullptr);
+    void* owned[256];
+    void* foreign[256];
+    for (size_t i = 0; i < 256; i++) {
+        // Interleaved owners prevent address order from implying ownership.
+        owned[i] = arena_alloc(arena, 256);
+        foreign[i] = arena_alloc(other, 256);
+        ASSERT_NE(owned[i], nullptr);
+        ASSERT_NE(foreign[i], nullptr);
+    }
+    for (size_t i = 0; i < 256; i++) {
+        size_t slot = (i * 73) % 256;
+        EXPECT_TRUE(arena_owns(arena, owned[slot]));
+        EXPECT_TRUE(arena_owns(arena, (char*)owned[slot] + 255));
+        EXPECT_FALSE(arena_owns(arena, (char*)owned[slot] + 256));
+        EXPECT_FALSE(arena_owns(arena, (char*)owned[slot] - 1));
+        EXPECT_FALSE(arena_owns(arena, foreign[slot]));
+    }
+    ArenaMark mark = arena_mark(arena);
+    void* tail = arena_alloc(arena, 256);
+    ASSERT_NE(tail, nullptr);
+    EXPECT_TRUE(arena_owns(arena, tail));
+    arena_rewind(arena, mark);
+    EXPECT_FALSE(arena_owns(arena, tail));
+    EXPECT_TRUE(arena_owns(arena, owned[128]));
+    EXPECT_EQ(arena_alloc(arena, 256), tail);
+    EXPECT_TRUE(arena_owns(arena, tail));
+    arena_reset(arena);
+    for (void* pointer : owned) EXPECT_FALSE(arena_owns(arena, pointer));
+    EXPECT_FALSE(arena_owns(arena, tail));
+    EXPECT_EQ(arena_alloc(arena, 256), owned[0]);
+    EXPECT_TRUE(arena_owns(arena, owned[0]));
+    arena_clear(arena);
+    EXPECT_FALSE(arena_owns(arena, owned[0]));
+    for (size_t i = 0; i < 256; i++) {
+        void* pointer = arena_alloc(arena, 256);
+        ASSERT_NE(pointer, nullptr);
+        EXPECT_TRUE(arena_owns(arena, pointer));
+        EXPECT_FALSE(arena_owns(arena, foreign[i]));
+    }
+    arena_destroy(arena);
+    arena_destroy(other);
+}
+
 TEST(ArenaOwnershipTest, OwnsPointerInFirstChunk) {
     Pool* pool = pool_create();
     Arena* arena = arena_create_default();

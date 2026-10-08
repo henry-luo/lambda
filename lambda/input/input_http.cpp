@@ -364,7 +364,9 @@ Input* input_from_http_with_name_parent(const char* url, const char* type,
 
     // Download content (with caching)
     char* cache_path = NULL;
-    char* content = download_to_cache(url, effective_cache_dir, &cache_path);
+    size_t content_size = 0;
+    char* content = download_http_content_with_enhanced_cache(url, &content_size,
+        effective_cache_dir, &cache_path, true);
 
     if (!content) {
         return NULL;
@@ -391,7 +393,7 @@ Input* input_from_http_with_name_parent(const char* url, const char* type,
     }
 
     // Parse content using existing input system
-    Input* input = input_from_source_with_name_parent(content, abs_url,
+    Input* input = input_from_source_n_with_name_parent(content, content_size, abs_url,
         type_str, flavor_str, name_parent);
 
     // Cleanup

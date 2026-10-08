@@ -232,17 +232,6 @@ extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
 
-extern "C" Item dom_element_prototype_operation_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)result_home;
-    JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
-        ? (JsFunction*)callee.function : NULL;
-    JubeDomElementOperation operation = fn
-        ? (JubeDomElementOperation)js_fn_native(fn)->target.bits
-        : (JubeDomElementOperation)0;
-    return radiant_dom_element_operation(this_value, operation, args, argc);
-}
-
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 void dom_register_named_elements(DomElement* root);
 static bool dom_node_is_connected(DomNode* node);
@@ -2252,12 +2241,14 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"button", "HTMLButtonElement"},
     {"canvas", "HTMLCanvasElement"},
     {"form", "HTMLFormElement"},
+    {"iframe", "HTMLIFrameElement"},
     {"img", "HTMLImageElement"},
     {"input", "HTMLInputElement"},
     {"link", "HTMLLinkElement"},
     {"option", "HTMLOptionElement"},
     {"select", "HTMLSelectElement"},
     {"script", "HTMLScriptElement"},
+    {"style", "HTMLStyleElement"},
     {"textarea", "HTMLTextAreaElement"},
     {"video", "HTMLVideoElement"},
 };
@@ -3641,18 +3632,8 @@ static Item dom_owner_document_from_node(DomNode* node) {
     return js_get_document_object_value();
 }
 
-static DomNode* dom_script_visible_parent(DomNode* node) {
-    DomNode* parent = node ? node->parent : nullptr;
-    // CSS Tables fixup boxes participate in layout but are not DOM ancestors.
-    // Script-visible parent traversal must continue at the authored table node.
-    while (parent && parent->is_element() && parent->as_element()->is_table_fixup()) {
-        parent = parent->parent;
-    }
-    return parent;
-}
-
 static Item dom_parent_element_or_null(DomNode* node) {
-    DomNode* parent = dom_script_visible_parent(node);
+    DomNode* parent = dom_source_parent(node);
     if (parent && parent->is_element()) {
         DomElement* elem = parent->as_element();
         // Document and fragment nodes reuse DomElement storage but cannot be
@@ -3669,7 +3650,7 @@ static Item doc_to_proxy_item(DomDocument* doc);
 extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value);
 
 static Item dom_parent_node_or_null(DomNode* node) {
-    DomNode* parent = dom_script_visible_parent(node);
+    DomNode* parent = dom_source_parent(node);
     if (parent) return dom_wrap_element((void*)parent);
     // The document element has no DomNode parent, but per DOM 4.4 its parent is
     // the Document. Answer the document node, so a walk upward terminates at the

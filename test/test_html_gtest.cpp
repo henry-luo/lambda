@@ -298,6 +298,43 @@ TEST_F(HtmlParserTest, BasicParsingSimpleDiv) {
     EXPECT_TRUE(strview_equal(&type->name, "div"));
 }
 
+TEST_F(HtmlParserTest, ExplicitLengthPreservesScriptsAndMarkupAfterNullBytes) {
+    const char source[] = "<!doctype html><script>const route='a\0b';</script>"
+        "<p>tail</p><script>console.log('after')</script>";
+    Input* input = input_from_source_n(source, sizeof(source) - 1, NULL, html_type, NULL);
+    ASSERT_NE(input, nullptr);
+    Element* script = findElementByTagAllSlots(input->root, "script");
+    ASSERT_NE(script, nullptr);
+    ElementReader reader(script);
+    ASSERT_EQ(reader.childCount(), 1);
+    String* text = reader.childAt(0).asString();
+    ASSERT_NE(text, nullptr);
+    EXPECT_STREQ(text->chars, "const route='a\xEF\xBF\xBD" "b';");
+    ASSERT_NE(findElementByTagAllSlots(input->root, "p"), nullptr);
+    Element* head = findElementByTagAllSlots(input->root, "head");
+    ASSERT_NE(head, nullptr);
+    Element* body = findElementByTagAllSlots(input->root, "body");
+    ASSERT_NE(body, nullptr);
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(head, "script"), 1);
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(body, "script"), 1);
+}
+
+TEST_F(HtmlParserTest, FinalNullInTextIsReplacedBeforeEndOfInput) {
+    const char source[] = "<!doctype html><textarea>x\0";
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    Html5ParseOptions options = {.track_source_lines = true};
+    Element* document = html5_parse_n(input, source, sizeof(source) - 1, &options);
+    ASSERT_NE(document, nullptr);
+    Element* textarea = findElementByTagAllSlots((Item){.element = document}, "textarea");
+    ASSERT_NE(textarea, nullptr);
+    ElementReader reader(textarea);
+    ASSERT_EQ(reader.childCount(), 1);
+    String* text = reader.childAt(0).asString();
+    ASSERT_NE(text, nullptr);
+    EXPECT_STREQ(text->chars, "x\xEF\xBF\xBD");
+}
+
 TEST_F(HtmlParserTest, UiModeKeepsDenseRegistryMarkupStorageBounded) {
     const int registry_rows = 768;
     const size_t max_parser_pool_bytes = 64u * 1024u * 1024u;
@@ -359,6 +396,41 @@ TEST_F(HtmlParserTest, MismatchedHeadingEndTagClosesOpenHeading) {
     EXPECT_EQ(countDirectElementChildrenByTagAllSlots(div, "h2"), 1);
     EXPECT_EQ(countDirectElementChildrenByTagAllSlots(div, "p"), 1);
     EXPECT_EQ(countDirectElementChildrenByTagAllSlots(h2, "p"), 0);
+}
+
+TEST_F(HtmlParserTest, AfterAfterFramesetPreservesWhitespaceCommentsAndNoframes) {
+    Item result = parseHtml5Document("<!doctype html><html><head></head>"
+        "<frameset><frame src='about:blank'></frameset></html>\n"
+        "<!--tail--><html data-tail='kept'><noframes>fallback</noframes><p>ignored</p>");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ELEMENT);
+    Element* document = result.element;
+    ASSERT_EQ(countDirectElementChildrenByTagAllSlots(document, "#comment"), 1);
+    Element* html = findElementByTagAllSlots(result, "html");
+    ASSERT_NE(html, nullptr);
+    EXPECT_STREQ(ElementReader(html).get_attr_string("data-tail"), "kept");
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(html, "#comment"), 0);
+    ASSERT_GT(html->length, 2);
+    ASSERT_EQ(get_type_id(html->items[2]), LMD_TYPE_STRING);
+    EXPECT_STREQ(html->items[2].get_string()->chars, "\n");
+    Element* noframes = findElementByTagAllSlots(result, "noframes");
+    ASSERT_NE(noframes, nullptr);
+    ASSERT_EQ(noframes->length, 1);
+    ASSERT_EQ(get_type_id(noframes->items[0]), LMD_TYPE_STRING);
+    EXPECT_STREQ(noframes->items[0].get_string()->chars, "fallback");
+    EXPECT_EQ(findElementByTagAllSlots(result, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, AfterAfterBodyKeepsDocumentCommentsAndReprocessesContent) {
+    Item result = parseHtml5Document("<!doctype html><html><body>first</body></html>"
+        "<!--tail--><p>second</p>");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(result.element, "#comment"), 1);
+    Element* html = findElementByTagAllSlots(result, "html");
+    ASSERT_NE(html, nullptr);
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(html, "#comment"), 0);
+    Element* body = findElementByTagAllSlots(result, "body");
+    ASSERT_NE(body, nullptr);
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(body, "p"), 1);
 }
 
 // ============================================================================

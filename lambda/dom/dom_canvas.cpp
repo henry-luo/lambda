@@ -27,6 +27,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
+#include "../../lib/strbuf.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -566,6 +567,25 @@ static Item js_canvas_get_context(Item callee, Item this_value,
     return js_canvas_2d_context_for(canvas_root.get());
 }
 
+static Item js_canvas_to_data_url(Item callee, Item this_value,
+                                  Item* args, int argc, uint64_t* result_home) {
+    (void)callee; (void)result_home;
+    RootFrame roots(2);
+    Rooted<Item> canvas_root(roots, this_value);
+    if (!dom_is_html_canvas_element(canvas_root.get())) {
+        return dom_realm_throw_type_error("Illegal invocation");
+    }
+    Rooted<Item> type_root(roots, argc > 0 && args
+        ? js_to_string(args[0]) : js_name_item("image/png"));
+    if (item_is_error(type_root.get())) return type_root.get();
+    // HTML serialization falls back to PNG for unsupported MIME types.
+    StrBuf* bytes = radiant_canvas_to_data_url(dom_unwrap_element(canvas_root.get()));
+    if (!bytes) return make_string_item("data:,");
+    Item result = make_string_item(bytes->str, (int)bytes->length);
+    strbuf_free(bytes);
+    return result;
+}
+
 static FontContext* canvas_get_font_context() {
     JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
     if (!state) return nullptr;
@@ -758,11 +778,14 @@ extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
 
 extern "C" void dom_canvas_install_html_interface(Item html_canvas_prototype) {
     if (get_type_id(html_canvas_prototype) != LMD_TYPE_MAP) return;
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Item> prototype_root(roots, html_canvas_prototype);
     Rooted<Item> method_root(roots, js_new_native_payload_function(
         js_canvas_get_context, 0, 1));
     dom_realm_set_name(prototype_root.get(), "getContext", method_root.get());
+    Rooted<Item> data_url_root(roots, js_new_native_payload_function(
+        js_canvas_to_data_url, 0, 0));
+    dom_realm_set_name(prototype_root.get(), "toDataURL", data_url_root.get());
 }
 
 extern "C" void js_canvas_install_offscreen_canvas_interface(Item constructor) {

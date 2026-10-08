@@ -18,36 +18,51 @@ static inline ViewBlock* table_array_view_block(ArrayList* list, int index) {
     return lam::view_require_block(view);
 }
 
-static bool table_view_can_contain_flattened_rows(View* view) {
-    return view && (view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
-                    (view->view_type == RDT_VIEW_INLINE &&
-                     view->as_element()->display.outer == CSS_VALUE_CONTENTS));
+static bool table_view_can_contain_flattened_items(View* view, int item_type) {
+    if (!view) return false;
+    if (item_type == RDT_VIEW_TABLE_ROW) {
+        return view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+            (view->view_type == RDT_VIEW_INLINE &&
+             view->as_element()->display.outer == CSS_VALUE_CONTENTS);
+    }
+    return view->is_element() &&
+        resolve_display_value((void*)view).outer == CSS_VALUE_CONTENTS;
 }
 
-static ViewTableRow* table_find_flattened_row(View* first, View* after,
-                                              bool* after_seen) {
+static View* table_find_flattened_item(View* first, int item_type) {
     for (View* child = first; child;
          child = static_cast<View*>(child->next_sibling)) {
-        if (child == after) {
-            *after_seen = true;
-            continue;
-        }
-        if (*after_seen && child->view_type == RDT_VIEW_TABLE_ROW) {
-            return lam::view_require<RDT_VIEW_TABLE_ROW>(child);
-        }
-        if (table_view_can_contain_flattened_rows(child)) {
-            ViewTableRow* row = table_find_flattened_row(
-                static_cast<View*>(child->as_element()->first_child), after, after_seen);
-            if (row) return row;
+        if (child->view_type == item_type) return child;
+        if (table_view_can_contain_flattened_items(child, item_type)) {
+            View* item = table_find_flattened_item(
+                static_cast<View*>(child->as_element()->first_child), item_type);
+            if (item) return item;
         }
     }
     return nullptr;
 }
 
+static View* table_next_flattened_item(View* owner, View* current, int item_type) {
+    if (!current) return nullptr;
+    View* ancestor = static_cast<View*>(current->parent);
+    while (ancestor != owner) {
+        if (!table_view_can_contain_flattened_items(ancestor, item_type)) return nullptr;
+        ancestor = static_cast<View*>(ancestor->parent);
+    }
+    // Resume at the current item instead of rescanning every preceding row
+    // or cell on each step; transparent wrappers retain their tree order.
+    for (View* item = current; item != owner;
+         item = static_cast<View*>(item->parent)) {
+        View* next = table_find_flattened_item(
+            static_cast<View*>(item->next_sibling), item_type);
+        if (next) return next;
+    }
+    return nullptr;
+}
+
 ViewTableRow* ViewTable::first_row() {
-    bool after_seen = true;
-    return table_find_flattened_row(static_cast<View*>(first_child), nullptr,
-                                    &after_seen);
+    return static_cast<ViewTableRow*>(table_find_flattened_item(
+        static_cast<View*>(first_child), RDT_VIEW_TABLE_ROW));
 }
 
 ViewBlock* ViewTable::first_row_group() {
@@ -58,10 +73,8 @@ ViewBlock* ViewTable::first_row_group() {
 }
 
 ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
-    if (!current) return nullptr;
-    bool after_seen = false;
-    return table_find_flattened_row(static_cast<View*>(first_child),
-                                    static_cast<View*>(current), &after_seen);
+    return static_cast<ViewTableRow*>(table_next_flattened_item(
+        this, current, RDT_VIEW_TABLE_ROW));
 }
 
 TableSectionType ViewTableRowGroup::get_section_type() const {
@@ -80,50 +93,23 @@ TableSectionType ViewTableRowGroup::get_section_type() const {
 }
 
 ViewTableRow* ViewTableRowGroup::first_row() {
-    bool after_seen = true;
-    return table_find_flattened_row(static_cast<View*>(first_child), nullptr,
-                                    &after_seen);
+    return static_cast<ViewTableRow*>(table_find_flattened_item(
+        static_cast<View*>(first_child), RDT_VIEW_TABLE_ROW));
 }
 
 ViewTableRow* ViewTableRowGroup::next_row(ViewTableRow* current) {
-    if (!current) return nullptr;
-    bool after_seen = false;
-    return table_find_flattened_row(static_cast<View*>(first_child),
-                                    static_cast<View*>(current), &after_seen);
-}
-
-static ViewTableCell* table_row_find_cell(View* first, View* after,
-                                          bool* after_seen) {
-    for (View* child = first; child; child = static_cast<View*>(child->next_sibling)) {
-        if (child == after) {
-            *after_seen = true;
-            continue;
-        }
-        if (*after_seen && child->view_type == RDT_VIEW_TABLE_CELL) {
-            return lam::view_require<RDT_VIEW_TABLE_CELL>(child);
-        }
-        if (child->is_element()) {
-            DisplayValue display = resolve_display_value((void*)child);
-            if (display.outer == CSS_VALUE_CONTENTS) {
-                ViewTableCell* cell = table_row_find_cell(
-                    static_cast<View*>(child->as_element()->first_child), after, after_seen);
-                if (cell) return cell;
-            }
-        }
-    }
-    return nullptr;
+    return static_cast<ViewTableRow*>(table_next_flattened_item(
+        this, current, RDT_VIEW_TABLE_ROW));
 }
 
 ViewTableCell* ViewTableRow::first_cell() {
-    bool after_seen = true;
-    return table_row_find_cell(static_cast<View*>(first_child), nullptr, &after_seen);
+    return static_cast<ViewTableCell*>(table_find_flattened_item(
+        static_cast<View*>(first_child), RDT_VIEW_TABLE_CELL));
 }
 
 ViewTableCell* ViewTableRow::next_cell(ViewTableCell* current) {
-    if (!current) return nullptr;
-    bool after_seen = false;
-    return table_row_find_cell(static_cast<View*>(first_child),
-                               static_cast<View*>(current), &after_seen);
+    return static_cast<ViewTableCell*>(table_next_flattened_item(
+        this, current, RDT_VIEW_TABLE_CELL));
 }
 
 static float table_row_collapsed_vertical_border_contribution(ViewTableRow* row,
@@ -3795,6 +3781,8 @@ static void inherit_anonymous_table_block_props(LayoutContext* lycon, DomElement
         anon->blk->direction = parent->blk->direction;
         anon->blk->text_transform = parent->blk->text_transform;
         anon->blk->line_height = parent->blk->line_height;
+        // D4.5.1v4: retained fixup boxes own leading independently of the source block.
+        radiant_compute_stored_line_height(lycon, anon);
         anon->blk->text_indent = parent->blk->text_indent;
         anon->blk->text_indent_percent = parent->blk->text_indent_percent;
         anon->blk->text_indent_calc = parent->blk->text_indent_calc;

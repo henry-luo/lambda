@@ -975,8 +975,8 @@ static Html5Token* html5_finish_comment(Html5Parser* parser, const char* error) 
     return token;
 }
 
-static Html5Token* html5_emit_null_character(Html5Parser* parser, const char* error) {
-    if (html5_is_eof(parser)) return html5_token_create_eof(parser->token_arena);
+static Html5Token* html5_emit_null_character(Html5Parser* parser, const char* error, bool is_eof) {
+    if (is_eof) return html5_token_create_eof(parser->token_arena);
     log_error("html5: %s", error);
     return html5_token_create_character_string(parser->token_arena,
         HTML5_REPLACEMENT_CHAR_UTF8, 3);
@@ -1042,6 +1042,8 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             }
         }
 
+        // a final NUL byte still emits U+FFFD; only the following read is EOF.
+        bool is_eof = html5_is_eof(parser);
         char c = html5_consume_next_char(parser);
 
         switch (parser->tokenizer_state) {
@@ -1060,7 +1062,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '<') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_TAG_OPEN);
                 } else if (c == '\0') {
-                    return html5_emit_null_character(parser, "unexpected null character in data state");
+                    return html5_emit_null_character(parser, "unexpected null character in data state", is_eof);
                 } else {
                     // Single character (non-ASCII or after batch scan)
                     return html5_token_create_character(parser->token_arena, c);
@@ -1083,7 +1085,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '<') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA_LESS_THAN_SIGN);
                 } else if (c == '\0') {
-                    return html5_emit_null_character(parser, "unexpected null in RCDATA");
+                    return html5_emit_null_character(parser, "unexpected null in RCDATA", is_eof);
                 } else {
                     return html5_token_create_character(parser->token_arena, c);
                 }
@@ -1167,7 +1169,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '<') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT_LESS_THAN_SIGN);
                 } else if (c == '\0') {
-                    return html5_emit_null_character(parser, "unexpected null in RAWTEXT");
+                    return html5_emit_null_character(parser, "unexpected null in RAWTEXT", is_eof);
                 } else {
                     return html5_token_create_character(parser->token_arena, c);
                 }
@@ -1241,7 +1243,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 // PLAINTEXT state - everything is literal text, no end tag recognized
                 // Per WHATWG: keep emitting characters until EOF
                 if (c == '\0') {
-                    return html5_emit_null_character(parser, "unexpected null in PLAINTEXT");
+                    return html5_emit_null_character(parser, "unexpected null in PLAINTEXT", is_eof);
                 } else {
                     return html5_token_create_character(parser->token_arena, c);
                 }
@@ -1577,7 +1579,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == ']') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_CDATA_SECTION_BRACKET);
                 } else if (c == '\0') {
-                    return html5_emit_null_character(parser, "unexpected null in CDATA section");
+                    return html5_emit_null_character(parser, "unexpected null in CDATA section", is_eof);
                 } else {
                     return html5_token_create_character(parser->token_arena, c);
                 }

@@ -301,7 +301,8 @@ static bool test_radiant_view_profile_shifted_reuse_at(const char* path,
 static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* event_path,
                                                          const ShellEnvEntry* env,
-                                                         const char* optimization = nullptr) {
+                                                         const char* optimization = nullptr,
+                                                         int timeout_ms = 0) {
     const char* args[8] = {};
     int arg_count = 0;
     args[arg_count++] = "./lambda.exe";
@@ -317,6 +318,7 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
     ShellOptions options = {0};
     options.env = env;
     options.merge_stderr = true;
+    options.timeout_ms = timeout_ms;
     return shell_exec("./lambda.exe", args, &options);
 }
 
@@ -634,6 +636,54 @@ TEST(RadiantViewTest, LaysOutInlineFlexWithInlineSiblingAndAbsoluteChild) {
     remove(page);
 }
 
+TEST(RadiantViewTest, RejectedFontFacesReleaseExtractionAndDescriptorAllocations) {
+    const char* page = "./temp/test_radiant_view_rejected_font_faces.html";
+    const char* view_log = "./temp/test_radiant_view_rejected_font_faces.log";
+    test_radiant_view_ensure_temp_dir();
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><style>@font-face{font-weight:400}"
+        "@font-face{src:url(missing.woff2) format('woff2');unicode-range:U+0-FF}"
+        "</style><body>rejected fonts</body>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"MEMTRACK_MODE", "DEBUG"},
+        {"VIEW_MEM_STAGES", "1"},
+        {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf,
+        "[MEMTRACK_LIVE] bytes=0 count=0") : nullptr, nullptr)
+        << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, RadialGradientPixelStopsReleasePaintResources) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "./temp/test_radiant_view_radial_pixel_stops.html";
+    const char* document = "<!doctype html><div style='width:200px;height:200px;"
+        "background:radial-gradient(circle,#c8cbd1 15.5px,transparent 16px)'></div>";
+    ASSERT_EQ(write_binary_file(page, document, strlen(document)), 0);
+    const ShellEnvEntry env[] = {
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf,
+        "[MEMTRACK_LIVE] bytes=0 count=0") : nullptr, nullptr);
+    shell_result_free(&result);
+    remove(page);
+}
+
 TEST(RadiantViewTest, RestoresDocumentRealmAfterScriptException) {
     const char* page = "./temp/test_radiant_view_script_fault_recovery.html";
     const char* view_log = "./temp/test_radiant_view_script_fault_recovery.log";
@@ -864,6 +914,7 @@ TEST(RadiantViewTest, UsesPlaceholderForUnsupportedHttpImage) {
         view_log, "image: unsupported HTTP image, using placeholder"));
     EXPECT_FALSE(test_radiant_view_file_contains(
         view_log, "Unsupported or unrecognized image format in memory buffer"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log, "Error opening file: http://"));
     remove(view_log);
 #endif
 }
@@ -1333,6 +1384,71 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
     remove(view_log);
 }
 
+static void test_radiant_view_check_timeout_cleanup(const char* label,
+                                                   const char* script) {
+#ifdef _WIN32
+    GTEST_SKIP() << "page script watchdog uses POSIX signals";
+#else
+    test_radiant_view_ensure_temp_dir();
+    char page[256], view_log[256];
+    snprintf(page, sizeof(page), "./temp/test_radiant_view_%s_timeout.html", label);
+    snprintf(view_log, sizeof(view_log), "./temp/test_radiant_view_%s_timeout.log", label);
+    FILE* file = fopen(page, "wb");
+    ASSERT_NE(file, nullptr);
+    ASSERT_GE(fputs("<!doctype html><div id=box style='width:101px'>", file), 0);
+    for (size_t row = 0; row < 300; row++) {
+        ASSERT_GE(fputs("<div>layout counter lifetime</div>", file), 0);
+    }
+    ASSERT_GE(fputs("</div>", file), 0);
+    ASSERT_GE(fputs(script, file), 0);
+    ASSERT_EQ(fclose(file), 0);
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_JS_EXEC_TIMEOUT_SECONDS", "1"}, {"MEMTRACK_MODE", "STATS"},
+        {"VIEW_MEM_STATS", "1"}, {"VIEW_MEM_STAGES", "1"},
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"}, {NULL, NULL},
+    };
+    // fail a missing guest timeout instead of leaving the regression runner hung.
+    ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, env,
+        nullptr, 10000);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_TRUE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: JS execution timed out"));
+    EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf,
+        "[MEMTRACK_LIVE] bytes=0 count=0") : nullptr, nullptr)
+        << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    remove(page);
+    remove(view_log);
+#endif
+}
+
+TEST(RadiantViewTest, ScriptTimeoutDuringReflowReleasesLayoutPassResources) {
+    test_radiant_view_check_timeout_cleanup("reflow",
+        "<script>var box=document.getElementById('box');"
+        "box.getBoundingClientRect();var iteration=0;while(true){"
+        "box.style.width=(++iteration%2?'101px':'102px');"
+        "box.getBoundingClientRect();}</script>");
+}
+
+TEST(RadiantViewTest, ScriptTimeoutUnwindsAsyncModuleAndNestedAsyncCall) {
+    test_radiant_view_check_timeout_cleanup("async_module",
+        "<script type=module>await Promise.resolve();"
+        "async function spin(){var box=document.getElementById('box');"
+        "var iteration=0;while(true){"
+        "box.style.width=(++iteration%2?'101px':'102px');"
+        "box.getBoundingClientRect();}} await spin();</script>");
+}
+
+TEST(RadiantViewTest, ScriptTimeoutDuringPostLoadTimerReleasesLayoutPassResources) {
+    test_radiant_view_check_timeout_cleanup("post_load_timer",
+        "<script>setTimeout(function(){var box=document.getElementById('box');"
+        "var iteration=0;while(true){"
+        "box.style.width=(++iteration%2?'101px':'102px');"
+        "box.getBoundingClientRect();}},0);</script>");
+}
+
 TEST(RadiantViewTest, TetrisClosesAfterSustainedReactiveRedraws) {
     test_radiant_view_ensure_temp_dir();
     const char* result_path = "./temp/test_radiant_view_tetris_close.json";
@@ -1581,6 +1697,82 @@ TEST(RadiantViewTest, ReportsViewCompletionAtNoticeLevel) {
 
     EXPECT_TRUE(test_radiant_view_file_contains(
         view_log, "view command completed with result: 0"));
+}
+
+TEST(RadiantViewTest, CollapsedNegativeSpreadShadowsKeepRasterDisplayListsValid) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "./temp/test_radiant_view_collapsed_shadow.html";
+    const char* view_log = "./temp/test_radiant_view_collapsed_shadow.log";
+    FILE* file = fopen(page, "wb");
+    ASSERT_NE(file, nullptr);
+    fputs("<!doctype html><style>div{width:10px;height:10px;background:red;}"
+        ".collapsed{box-shadow:0 0 4px -8px black;}"
+        ".transformed{transform:translateX(20px);}"
+        ".visible{box-shadow:0 0 4px -2px black,0 0 2px 1px blue;}"
+        "</style><div class=collapsed></div><div class='collapsed transformed'></div>"
+        "<div class=visible></div>", file);
+    ASSERT_EQ(fclose(file), 0);
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"MEMTRACK_MODE", "STATS"},
+        {"VIEW_MEM_STAGES", "1"},
+        {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr);
+    EXPECT_TRUE(test_radiant_view_file_contains(view_log, "view: render complete"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log, "[DL_VALIDATE]"));
+    shell_result_free(&result);
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, PreservesScriptAndDocumentTailAfterNullBytesInFileAndHttpHtml) {
+    test_radiant_view_ensure_temp_dir();
+    const char source[] = "<!doctype html><script>const route='a\0b';</script>"
+        "<p id=tail>after</p><script>"
+        "if(route.length!==3||route.charCodeAt(1)!==65533||"
+        "document.getElementById('tail').textContent!=='after')throw Error('NUL recovery');"
+        "console.log('NULL_SOURCE_TAIL_EXECUTED');</script>";
+    const char* page = "./temp/test_radiant_view_null_source.html";
+    const char* view_log = "./temp/test_radiant_view_null_source.log";
+    ASSERT_EQ(write_binary_file(page, source, sizeof(source) - 1), 0);
+    const char* sources[2] = {page, nullptr};
+    size_t source_count = 1;
+#ifndef _WIN32
+    const RadiantViewHttpResource resources[] = {
+        {"GET /page.html ", "text/html", source, sizeof(source) - 1},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources, 1));
+    struct ServerScope {
+        pid_t pid;
+        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
+    } server_scope = {server.pid};
+    char remote[128];
+    ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/page.html", server.port), 0);
+    sources[source_count++] = remote;
+#endif
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {NULL, NULL},
+    };
+    for (size_t index = 0; index < source_count; index++) {
+        SCOPED_TRACE(sources[index]);
+        ShellResult result = test_radiant_view_run_logged_headless(sources[index], nullptr, env);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "NULL_SOURCE_TAIL_EXECUTED"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        EXPECT_FALSE(test_radiant_view_file_contains(view_log, "post-dom exception"));
+        EXPECT_FALSE(test_radiant_view_file_contains(view_log, "unexpected EOF in text mode"));
+        shell_result_free(&result);
+    }
+    remove(page);
+    remove(view_log);
 }
 
 TEST(RadiantViewTest, InitializesScriptScreenFromHostViewport) {

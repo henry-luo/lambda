@@ -494,6 +494,9 @@ static void activation_thunk(void* arg) {
             LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
         slots[ACTIVATION_SLOT_TRANSFER] = err2it(&activation->fault.error).item;
     } else {
+        // D5.4.1: fresh activation stacks start at depth zero, but their guest
+        // frames must block evaluator handoff until they park or return.
+        RuntimeExecutionScope execution_scope;
         Item result = activation->entry(activation,
             (Item){.item = slots[ACTIVATION_SLOT_ARG]});
         lambda_recovery_frame_end(frame);

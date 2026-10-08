@@ -994,7 +994,32 @@ CssDeclaration* style_tree_get_component_declaration(StyleTree* style_tree,
     return style_tree_best_property_candidate(style_tree, sources, source_count, NULL, NULL);
 }
 
-static CssDeclaration* style_tree_lookup_declaration(StyleTree* style_tree,
+// a conservative filter rejects absent properties in immutable canonical trees;
+// collisions fall through to the full cascade, so no winner can be suppressed
+struct StyleDeclarationCache {
+    uint64_t present;
+};
+
+void style_tree_init_declaration_cache(StyleTree* tree) {
+    if (!tree || tree->declaration_cache) return;
+    tree->declaration_cache = (StyleDeclarationCache*)pool_calloc(
+        tree->pool, sizeof(StyleDeclarationCache));
+    if (!tree->declaration_cache) return;
+    if (avl_tree_search(tree->tree, CSS_PROPERTY_ALL)) {
+        tree->declaration_cache->present = UINT64_MAX;
+        return;
+    }
+    for (int property = 1; property < CSS_PROPERTY_COUNT; property++) {
+        CssPropertyCode code = (CssPropertyCode)property;
+        CssPropertyCode shorthand = css_property_cascade_shorthand(code);
+        if (avl_tree_search(tree->tree, code) ||
+                (shorthand && avl_tree_search(tree->tree, shorthand))) {
+            tree->declaration_cache->present |= UINT64_C(1) << (property % 64);
+        }
+    }
+}
+
+static CssDeclaration* style_tree_lookup_declaration_uncached(StyleTree* style_tree,
         CssPropertyCode property_code, bool authored) {
     if (!style_tree || !style_tree->tree) return NULL;
 
@@ -1016,6 +1041,18 @@ static CssDeclaration* style_tree_lookup_declaration(StyleTree* style_tree,
     const CssPropertyCode sources[] = {property_code, CSS_PROPERTY_ALL, shorthand};
     return style_tree_best_property_candidate(style_tree, sources,
         sizeof(sources) / sizeof(sources[0]), NULL, NULL, authored);
+}
+
+static CssDeclaration* style_tree_lookup_declaration(StyleTree* tree,
+        CssPropertyCode property, bool authored) {
+    if (!tree || !tree->canonical_owner || property <= 0 || property >= CSS_PROPERTY_COUNT) {
+        return style_tree_lookup_declaration_uncached(tree, property, authored);
+    }
+    StyleDeclarationCache* cache = tree->declaration_cache;
+    if (!cache) return style_tree_lookup_declaration_uncached(tree, property, authored);
+    uint64_t bit = UINT64_C(1) << ((size_t)property % 64);
+    if (!(cache->present & bit)) return NULL;
+    return style_tree_lookup_declaration_uncached(tree, property, authored);
 }
 
 CssDeclaration* style_tree_get_declaration(StyleTree* tree, CssPropertyCode property) {
@@ -1600,6 +1637,7 @@ void style_tree_destroy_owned(StyleTree* style_tree) {
     assert(style_tree->canonical_owner == NULL);
     assert(style_tree->borrow_ref_count == 0);
     Pool* pool = style_tree->pool;
+    if (style_tree->declaration_cache) pool_free(pool, style_tree->declaration_cache);
     if (style_tree->tree) {
         style_tree_reclaim_branch(style_tree->tree->root, pool);
         pool_free(pool, style_tree->tree);

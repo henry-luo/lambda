@@ -642,6 +642,7 @@ bool css_custom_property_name_matches(const char* stored_name,
     const char* lookup_name, size_t stored_length = (size_t)-1,
     size_t lookup_length = (size_t)-1);
 DomElement* dom_parent_element(DomElement* element);
+DomNode* dom_source_parent(DomNode* node);
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
     const char* name, size_t name_length = (size_t)-1);
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element,

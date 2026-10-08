@@ -271,9 +271,23 @@ TEST_F(UrlExtraTest, EmptyFragmentPreservesDelimiter) {
     Url* resolved = url_resolve_relative("#", base);
     ASSERT_NE(resolved, nullptr);
     EXPECT_STREQ(url_get_href(resolved), "https://example.com/page.html#");
+    EXPECT_STREQ(url_get_hash(resolved), "");
 
     url_destroy(resolved);
     url_destroy(base);
+}
+
+TEST_F(UrlExtraTest, EmptyQueryAndFragmentGettersKeepHrefDelimiters) {
+    Url* url = url_parse("https://example.com/page?#");
+    ASSERT_NE(url, nullptr);
+    EXPECT_STREQ(url_get_href(url), "https://example.com/page?#");
+    EXPECT_STREQ(url_get_search(url), "");
+    EXPECT_STREQ(url_get_hash(url), "");
+    EXPECT_EQ(url_set_search(url, "?q=value"), URL_OK);
+    EXPECT_EQ(url_set_hash(url, "#section"), URL_OK);
+    EXPECT_STREQ(url_get_search(url), "?q=value");
+    EXPECT_STREQ(url_get_hash(url), "#section");
+    url_destroy(url);
 }
 
 // Missing test 4: Query only relative
