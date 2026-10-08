@@ -4,6 +4,12 @@
 standard library. `sample.jar` is built separately with the JDK's `javac` and
 `jar` tools. Lambda tests consume the checked-in archive without requiring Java.
 
+`viewer.zip` contains an HTML page, Markdown and SVG for `lambda view` preview
+regressions. UI fixtures also browse `office.docx` and `sample.jar`, expand
+archives from a host directory and exercise deferred CRC failures. The viewer
+retains the captured member nodes and reads selected content without extraction
+(**S12.4.1v2/S14.3.1v2**).
+
 The executable JAR contains a Java 8 class compiled from
 [`jar-src/example/Hello.java`](jar-src/example/Hello.java), a `Main-Class`
 manifest, JSON/text resources, an empty file, a Unicode filename and a binary

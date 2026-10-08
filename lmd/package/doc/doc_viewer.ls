@@ -287,9 +287,10 @@ fn selected_source(file) {
 fn selected_image_source(file) {
   if (type(file["source"]) != element) { absolute_file_path(file["file_path"]) }
   else {
-    let mime = if (file["extension"] == "svg") "image/svg+xml"
-      else if (contains(["jpg", "jpeg"], file["extension"])) "image/jpeg"
-      else "image/" ++ lower(file["extension"])
+    let extension = lower(file["extension"])
+    let mime = if (extension == "svg") "image/svg+xml"
+      else if (contains(["jpg", "jpeg"], extension)) "image/jpeg"
+      else "image/" ++ extension
     // JSON's binary representation reuses the shared base64 encoder.
     let encoded = format(input(file["source"], 'binary')^, 'json')^;
     "data:" ++ mime ++ ";base64," ++ slice(encoded, 1, len(encoded) - 1)
@@ -1134,8 +1135,8 @@ fn viewer_document(tree_model) {
   <head
     <meta charset:"UTF-8">
     <title "Lambda Document Viewer">
-    // the math stylesheet selects KaTeX symbol fonts; register their bundled faces.
-    <link rel:"stylesheet", href:"../math/katex.css">
+    // resolve bundled fonts independently of the browsed directory/archive base URL (D7.2.4).
+    <link rel:"stylesheet", href:absolute_file_path(sys.lambda.home# ++ "/package/math/katex.css")>
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
     <style math_css.get_stylesheet(null)>

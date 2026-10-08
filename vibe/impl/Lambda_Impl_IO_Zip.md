@@ -138,3 +138,42 @@ ZIP output to a `.jar` target. Both join the existing tier-parity gate.
 
 No runtime change was needed for JAR support. Reproduction commands and fixture
 contents are documented in `test/input/zip/README.md`.
+
+## Interactive archive browsing (2026-10-08)
+
+`lambda view <path>` routes directories and ZIP32/ZIP64 archives through the
+bundled `lambda.doc.doc_viewer.open_browser` path transform (**D7.2.4**).
+Routing uses the shared extension/signature detector; `input()` still performs
+validation and immutable capture (**S12.4.1v2**). DOCX, JAR, renamed and
+extensionless archives open the same tree. The existing HTTP probe recognizes
+ZIP bytes before staging its local input.
+
+Tree rows retain the actual host Path or archive `fs` node, with display paths
+kept separately. Expanding directories enumerates child metadata; selecting a
+member requests its content (**S14.3.1v2/D7.4.5v2**). Nested archive rows open
+explicitly as ZIP. Member dotfiles remain visible, parse errors preserve raw
+source access, and deferred CRC failures appear at the affected row/preview.
+Images use existing binary-to-base64 formatting for data URLs; HTML previews
+use `srcdoc`. Bundled math assets resolve from Lambda home independently of
+the selected archive. Relative links between archive members are not mounted
+as filesystem resources or a new URL scheme.
+
+Debug element logging previously traversed embedded virtual nodes and decoded
+unopened members while building tree rows. Diagnostic printing now describes
+virtual carriers without invoking callbacks, preserving laziness and expansion
+budgets (**S14.3.1v2**); explicit value printing still accesses content. A
+native regression verifies both behaviors.
+
+Validation:
+
+| Check | Result |
+|---|---|
+| `make build` | Passed. |
+| `make test-lambda-baseline` | **6401/6401**, input 2104/2104 and Lambda 4297/4297. |
+| Native ZIP suite | **15/15**, including diagnostic laziness. |
+| Viewer CLI regressions | **2/2**, covering directories, ZIP64, empty/renamed/extensionless archives, DOCX/JAR and unsafe archive rejection. |
+| Document viewer UI fixtures | **17/17**, including five new archive fixtures with **39/39** assertions for tree navigation, previews, binary source, parse recovery and CRC errors. |
+| Archive UI fixtures under forced/poisoned GC | **5/5**, **39/39** assertions. |
+| Loopback HTTP DOCX viewer | Passed Office MIME acquisition, ZIP tree dispatch and **9/9** member preview assertions. |
+
+Commands, event fixtures and logs are retained under `test/ui/` and `temp/`.
