@@ -79,13 +79,14 @@ extern "C" bool runtime_job_queue_push(RuntimeJobQueue* queue,
     return true;
 }
 
-extern "C" bool runtime_job_queue_pop(RuntimeJobQueue* queue,
-        RuntimeJob* job) {
+static bool runtime_job_queue_pop_internal(RuntimeJobQueue* queue,
+        RuntimeJob* job, const int64_t* limit) {
     if (!queue || !queue->storage_owner || !job) return false;
     Array* array_ptr = runtime_job_queue_storage(queue);
     while (array_ptr && queue->head + RUNTIME_JOB_ITEM_COUNT <= array_ptr->length) {
         Item* slots = array_ptr->items + queue->head;
         RuntimeJobKind kind = runtime_job_decode(slots, job);
+        if (kind != RUNTIME_JOB_NONE && limit && job->id >= *limit) return false;
         for (int i = 0; i < RUNTIME_JOB_ITEM_COUNT; i++) slots[i] = ItemNull;
         queue->head += RUNTIME_JOB_ITEM_COUNT;
         if (kind != RUNTIME_JOB_NONE) {
@@ -103,6 +104,15 @@ extern "C" bool runtime_job_queue_pop(RuntimeJobQueue* queue,
         }
     }
     return false;
+}
+
+extern "C" bool runtime_job_queue_pop(RuntimeJobQueue* queue, RuntimeJob* job) {
+    return runtime_job_queue_pop_internal(queue, job, nullptr);
+}
+
+extern "C" bool runtime_job_queue_pop_before_id(RuntimeJobQueue* queue,
+        RuntimeJob* job, int64_t limit) {
+    return runtime_job_queue_pop_internal(queue, job, &limit);
 }
 
 extern "C" bool runtime_job_queue_cancel(RuntimeJobQueue* queue, int64_t id) {

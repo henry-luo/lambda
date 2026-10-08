@@ -1,10 +1,12 @@
 """Shared construction rules for frozen JS benchmark source contracts."""
 
 import hashlib
+import json
 import os
 
 
 MVP_V1_PROFILE = "mvp_v1"
+MVP_LMD_V1_PROFILE = "mvp_lmd_v1"
 TUNE14_V1_PROFILE = "tune14_v1"
 FASTA_INPUT = "test/benchmark/beng/input/fasta_1000.txt"
 PRETTIER_INPUT = "test/benchmark/text/prettier_ast.json"
@@ -86,6 +88,13 @@ def correctness_oracle_for(runner, row, profile):
 
 
 def build_workloads(runner, rows, profile):
+    if profile != MVP_LMD_V1_PROFILE:
+        # historical profiles retain their frozen population as the standard inventory grows.
+        path = os.path.join(os.path.dirname(__file__), "js_mvp_manifest_v1.json")
+        with open(path, encoding="utf-8") as stream:
+            identifiers = [entry["id"] for entry in json.load(stream)["workloads"]]
+        current = {row["suite"] + "/" + row["name"]: row for row in rows}
+        rows = [current[identifier] for identifier in identifiers]
     workloads = []
     for row in rows:
         source = selected_source(row)

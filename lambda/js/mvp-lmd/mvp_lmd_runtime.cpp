@@ -102,12 +102,10 @@ extern "C" Item mvp_lmd_number_to_string(double value) {
 }
 
 extern "C" Item mvp_lmd_string_concat(Item left, Item right) {
-    RootFrame roots(2);
-    if (!roots.valid()) return Item{.item = ITEM_ERROR};
-    Rooted<Item> l(roots, left), r(roots, right);
+    // audited MIR callers precisely root both arguments across the shared join's allocation.
     // strings are immutable; the shared buffer join may reuse only exclusive buffers.
-    String* joined = fn_strcat(fn_string_freeze(l.get().get_string()),
-        fn_string_freeze(r.get().get_string()));
+    String* joined = fn_strcat(fn_string_freeze(left.get_string()),
+        fn_string_freeze(right.get_string()));
     if (!joined || joined == &STR_ERROR) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     return Item{.item = s2it(fn_string_freeze(joined))};
 }
@@ -161,6 +159,22 @@ extern "C" Item mvp_lmd_array_new(int64_t length) {
     result.get()->length = length;
     return Item{.array = result.get()};
 }
+extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
+    if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, owner);
+    int64_t old_length = owner.array->length;
+    if (length > old_length) {
+        if (!array_reserve_append_slots(held.get().array, length - old_length))
+            return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        // shrinking then regrowing must never resurrect removed elements or scalar homes.
+        for (int64_t i = old_length; i < length; i++)
+            held.get().array->items[i].item = ITEM_JS_DELETED_SENTINEL;
+    }
+    held.get().array->length = length;
+    return held.get();
+}
 
 extern "C" double mvp_lmd_number_pow(double base, double exponent) {
     if (exponent == 0) return 1;
@@ -206,17 +220,18 @@ extern "C" Item mvp_lmd_array_store(Item owner, uint32_t index, Item value) {
     if (!roots.valid()) return Item{.item = ITEM_ERROR};
     Rooted<Item> a(roots, owner), v(roots, value);
     Array* array = (Array*)a.get().item;
-    if (index > (uint64_t)array->length) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     // a slot's tail home is reusable across overwrites; growth rebases it through shared storage.
     bool wide = lambda_item_uses_scalar_home(value);
     int64_t extra = wide && index >= array->extra ? (int64_t)index + 1 : array->extra;
-    if (!array_reserve_append_slots(array, extra - array->extra + (index == array->length)))
+    int64_t growth = index >= (uint64_t)array->length ? (int64_t)index + 1 - array->length : 0;
+    if (!array_reserve_append_slots(array, extra - array->extra + growth))
         return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     array = (Array*)a.get().item;
+    for (int64_t i = array->length; i < index; i++) array->items[i].item = ITEM_JS_DELETED_SENTINEL;
     array->extra = extra;
     Item stored = wide ? lambda_item_adopt_scalar_home(v.get(),
         (uint64_t*)&array->items[array->capacity - index - 1]) : v.get();
     array->items[index] = stored;
-    if (index == array->length) array->length++;
+    if (index >= array->length) array->length = (int64_t)index + 1;
     return v.get();
 }

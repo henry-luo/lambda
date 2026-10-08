@@ -1041,6 +1041,110 @@ TEST(RenderOutputParity, PagedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
     }
 }
 
+TEST(RenderOutputParity, PagedCaptionsMatchBlockWrappersAcrossTableAndCaptionContinuations) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* stems[] = {"paged_captions", "paged_caption_block_reference"};
+    for (bool automatic : {false, true}) for (bool long_caption : {false, true}) {
+        SCOPED_TRACE(automatic ? "automatic layout" : "fixed layout");
+        SCOPED_TRACE(long_caption ? "caption continuations" : "table continuations");
+        char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+        for (size_t variant = 0; variant < 2; variant++) {
+            char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s.html", stems[variant]);
+            snprintf(previews[variant], sizeof(previews[variant]), "temp/render_output_parity/%s.png", stems[variant]);
+            snprintf(pdfs[variant].path, sizeof(pdfs[variant].path), "temp/render_output_parity/%s.pdf", stems[variant]);
+            snprintf(pdfs[variant].base, sizeof(pdfs[variant].base), "%s", stems[variant]);
+            StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+            strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
+                "@page :left{size:140px 112px}html,body{margin:0;font:10px/12px Arial}"
+                "table{table-layout:%s;width:100%%;box-sizing:border-box;border:2px solid blue;"
+                "padding:1px;border-spacing:0;background:magenta}"
+                "caption,.cap{padding:1px;border:1px solid red;background:yellow;text-align:center;"
+                "white-space:pre;orphans:1;widows:1;box-decoration-break:clone}"
+                ".bottom{caption-side:bottom;background:lime}td,th{padding:0;vertical-align:top}"
+                "thead{background:#cce0ff}tfoot{background:#ddffdd}col:first-child{width:40px;background:cyan}"
+                "</style>", automatic ? "auto" : "fixed");
+            const char* top = long_caption ? "A\nB\nC\nD\nE\nF\nG\nH\nI\nJ\nK\nL" : "Top caption";
+            const char* bottom = long_caption ? "M\nN\nO\nP\nQ\nR\nS\nT\nU\nV\nW\nX" : "Bottom caption";
+            if (variant) strbuf_append_format(html, "<div><div class='cap'>%s</div>", top);
+            strbuf_append_str(html, "<table><colgroup><col><col></colgroup>");
+            if (!variant) strbuf_append_format(html, "<caption class='bottom'>%s</caption>", bottom);
+            if (!long_caption) strbuf_append_str(html,
+                "<thead><tr><th>Head A</th><th>Head B</th></tr></thead>"
+                "<tfoot><tr><td>Foot A</td><td>Foot B</td></tr></tfoot>");
+            strbuf_append_str(html, "<tbody>");
+            for (size_t row = 0; row < (long_caption ? 1u : 10u); row++)
+                strbuf_append_str(html, "<tr><td>Body A</td><td>Body B</td></tr>");
+            strbuf_append_str(html, "</tbody>");
+            if (!variant) strbuf_append_format(html, "<caption>%s</caption>", top);
+            strbuf_append_str(html, "</table>");
+            if (variant) strbuf_append_format(html, "<div class='cap bottom'>%s</div></div>", bottom);
+            bool rendered = render_html_fixture(path, pdfs[variant].path, html->str, "--paged --block-remote-resources");
+            strbuf_free(html); ASSERT_TRUE(rendered);
+            ASSERT_TRUE(render_document_fixture(path, previews[variant], "--paged --block-remote-resources --page-grid 1x6"));
+        }
+        int count = pdf_page_count(pdfs[0].path); ASSERT_GE(count, 2); ASSERT_LE(count, 6);
+        ASSERT_EQ(pdf_page_count(pdfs[1].path), count);
+        expect_pngs_exactly_equal(previews[1], previews[0]);
+        for (int page = 1; page <= count; page++) {
+            char pngs[2][PATH_MAX];
+            for (size_t variant = 0; variant < 2; variant++)
+                ASSERT_TRUE(render_reference_page(&pdfs[variant], page, pngs[variant], sizeof(pngs[variant])));
+            expect_pngs_exactly_equal(pngs[1], pngs[0]);
+        }
+    }
+}
+
+TEST(RenderOutputParity, PagedColumnLayersAndWidthsMatchExplicitCellsAcrossContinuations) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* stems[] = {"paged_column_boxes", "paged_column_cell_reference"};
+    for (bool automatic : {false, true}) {
+        SCOPED_TRACE(automatic ? "automatic layout" : "fixed layout");
+        char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+        for (size_t variant = 0; variant < 2; variant++) {
+            char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s.html", stems[variant]);
+            snprintf(previews[variant], sizeof(previews[variant]), "temp/render_output_parity/%s.png", stems[variant]);
+            snprintf(pdfs[variant].path, sizeof(pdfs[variant].path), "temp/render_output_parity/%s.pdf", stems[variant]);
+            snprintf(pdfs[variant].base, sizeof(pdfs[variant].base), "%s", stems[variant]);
+            StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+            strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
+                "html,body{margin:0;font:10px/12px Arial}table{table-layout:%s;width:100%%;border-spacing:4px 2px;background:magenta}"
+                "td,th{padding:0;white-space:pre-wrap;orphans:1;widows:1}", automatic ? "auto" : "fixed");
+            strbuf_append_str(html, variant ?
+                "thead th:nth-child(-n+2){width:30px}thead th:first-child,tfoot td:first-child{background:red}"
+                "thead th:nth-child(2),tfoot td:nth-child(2){background:yellow}thead th:last-child,tfoot td:last-child{background:blue}"
+                "tbody:first-of-type td:first-child{background:red}tbody:first-of-type td:last-child{background:blue}" :
+                "colgroup{background:yellow}col:first-child{width:30px;background:red}col:nth-child(2){width:30px}col:last-child{background:blue}");
+            strbuf_append_str(html, "#override{background:cyan}#override td:first-child{background:lime}</style><table>");
+            if (!variant) strbuf_append_str(html, "<colgroup span='999'><col><col><col></colgroup>");
+            strbuf_append_str(html, "<thead><tr><th>H</th><th>H</th><th>H</th></tr></thead>"
+                "<tfoot><tr><td>F</td><td>F</td><td>F</td></tr></tfoot>"
+                "<tbody><tr><td colspan='2'>A\nB\nC\nD\nE\nF\nG\nH\nI\nJ</td><td>Z</td></tr></tbody>"
+                "<tbody><tr id='override'><td>U</td><td>V</td><td>W</td></tr></tbody></table>");
+            bool rendered = render_html_fixture(path, pdfs[variant].path, html->str, "--paged --block-remote-resources");
+            strbuf_free(html); ASSERT_TRUE(rendered); ASSERT_EQ(pdf_page_count(pdfs[variant].path), 3);
+            ASSERT_TRUE(render_document_fixture(path, previews[variant], "--paged --block-remote-resources --page-grid 1x3"));
+        }
+        expect_pngs_exactly_equal(previews[1], previews[0]);
+        ImageData preview = {}; ASSERT_TRUE(load_png_rgba(previews[0], &preview));
+        EXPECT_EQ(preview.width, 480); EXPECT_EQ(preview.height, 112);
+        for (int page = 0; page < 3; page++) {
+            expect_preview_pixel(preview, page * 160 + 36, 15, 255, 0, 0);
+            expect_preview_pixel(preview, page * 160 + 70, 15, 255, 255, 0);
+            expect_preview_pixel(preview, page * 160 + 132, 15, 0, 0, 255);
+            expect_preview_pixel(preview, page * 160 + 46, 15, 255, 0, 255);
+            expect_preview_pixel(preview, page * 160 + 70, 25, 255, 0, 255);
+            expect_preview_pixel(preview, page * 160 + 70, 30, page == 2 ? 0 : 255, page == 2 ? 255 : 0, page == 2 ? 255 : 0);
+            char pngs[2][PATH_MAX];
+            for (size_t variant = 0; variant < 2; variant++)
+                ASSERT_TRUE(render_reference_page(&pdfs[variant], page + 1, pngs[variant], sizeof(pngs[variant])));
+            expect_pngs_exactly_equal(pngs[1], pngs[0]);
+        }
+        image_free(preview.pixels);
+    }
+}
+
 TEST(RenderOutputParity, PagedTableGroupBreaksAndAvoidanceMatchExplicitRowBoundaries) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
