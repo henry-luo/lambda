@@ -3,6 +3,7 @@
 #include "../radiant/render.hpp"
 #include "../radiant/event.hpp"
 #include "../radiant/svg_animation.hpp"
+#include "../radiant/radiant.hpp"
 #ifdef __APPLE__
 #include "../lib/font/font_internal.h"
 #endif
@@ -1689,6 +1690,162 @@ TEST(CssVariableSubstitutionTest, EmptyFallbackIsRemovedButMissingValueIsInvalid
     pool_destroy(pool);
 }
 
+TEST(CssVariableSubstitutionTest, ComputedNamesUseWholeFirstArgumentAndKeepFallbackLazy) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    const char* source = "--name:--target;--target:12px;--pointer:--name;--empty: ;"
+        "--cycle:var(--cycle);--fragment:--tar";
+    size_t count = 0;
+    CssDeclaration** declarations = css_parse_declaration_list_text(source, strlen(source), pool, &count);
+    ASSERT_EQ(count, 6u);
+    struct Lookup {CssDeclaration** declarations; size_t count;} lookup = {declarations, count};
+    auto lookup_value = [](void* context, DomElement*, const char* name,
+        DomElement** owner) -> const CssValue* {
+        *owner = nullptr;
+        Lookup* lookup = (Lookup*)context;
+        for (size_t index = 0; index < lookup->count; index++) {
+            CssDeclaration* declaration = lookup->declarations[index];
+            if (strcmp(declaration->property_name, name) == 0) return declaration->value;
+        }
+        return nullptr;
+    };
+    struct Sample {const char* source; double pixels;} samples[] = {
+        {"var(var(--name),9px)", 12},
+        {"var(var(var(--pointer)),9px)", 12},
+        {"var(var(--missing,--target),9px)", 12},
+        {"var(--target var(--empty),9px)", 12},
+        {"var(--target,var(--cycle))", 12},
+        {"var(\"--target\",9px)", 9},
+        {"var(--target --name,9px)", 9},
+        {"var(var(--empty),9px)", 9},
+        {"var(var(--cycle),9px)", 9},
+        {"var(var(--fragment)get,9px)", 9}
+    };
+    for (const Sample& sample : samples) {
+        CssDeclaration* declaration = css_parse_property_declaration("--result", 8,
+            sample.source, strlen(sample.source), pool);
+        ASSERT_NE(declaration, nullptr) << sample.source;
+        const CssValue* value = css_resolve_var_value(pool, declaration->value,
+            lookup_value, &lookup);
+        ASSERT_NE(value, nullptr) << sample.source;
+        ASSERT_EQ(value->type, CSS_VALUE_TYPE_LENGTH) << sample.source;
+        EXPECT_EQ(value->data.length.value, sample.pixels) << sample.source;
+    }
+    pool_destroy(pool);
+}
+
+TEST(CssVariableSubstitutionTest, DocumentLimitsBoundBytesTokensAndAuthoredText) {
+    Input input = {};
+    DomDocument doc = {};
+    ASSERT_TRUE(doc.init(&input));
+    struct Cleanup {
+        DomDocument* doc;
+        CssEngine* engine = nullptr;
+        ~Cleanup() {
+            if (engine) css_engine_destroy(engine);
+            doc->services.cached_css_engine = nullptr;
+            css_property_system_cleanup();
+            doc->destroy();
+        }
+    } cleanup = {&doc};
+    DomElement* node = DomElement::create(&doc, "div", nullptr);
+    ASSERT_NE(node, nullptr);
+    doc.root = lam::up(node);
+    CssEngine* engine = css_engine_create(doc.document_pool);
+    ASSERT_NE(engine, nullptr);
+    cleanup.engine = engine;
+    doc.services.cached_css_engine = engine;
+    EXPECT_EQ(engine->limits.max_substitution_bytes, CSS_SUBSTITUTION_DEFAULT_MAX_BYTES);
+    EXPECT_EQ(engine->limits.max_substitution_tokens, CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS);
+    struct Sample {const char* text; size_t bytes, tokens; bool valid;} samples[] = {
+        {"abcdefghijklmnop", 16, 4, true}, {"abcdefghijklmnopq", 16, 4, false},
+        {"éééééééé", 16, 4, true}, {"ééééééééé", 16, 4, false},
+        {"a b c d", 16, 4, true}, {"a b c d e", 16, 4, false},
+        {"f(a,b)", 16, 5, true}, {"f(a,b)", 16, 4, false},
+        {"/*123456789*/ x", 16, 4, true}, {"/*123456789012*/ x", 16, 4, false},
+        {"var(--missing,abcdefghijklmnop)", 16, 4, true},
+        {"var(--missing,abcdefghijklmnopq)", 16, 4, false}
+    };
+    for (const Sample& sample : samples) {
+        css_engine_set_substitution_limits(engine, sample.bytes, sample.tokens);
+        CssDeclaration* declaration = css_parse_property_declaration("--value", 7,
+            sample.text, strlen(sample.text), doc.document_pool);
+        ASSERT_NE(declaration, nullptr) << sample.text;
+        CssCustomProp entry = {};
+        entry.name = lam::up(declaration->property_name);
+        entry.value = lam::up(declaration->value);
+        entry.value_text = lam::up(declaration->value_text);
+        entry.value_text_len = declaration->value_text_len;
+        // the entry borrows stack storage only for this resolver call (D4.5.1v4).
+        node->css_variables = lam::own(&entry);
+        StrView text = {};
+        const CssValue* value = css_compute_element_custom_property_text(doc.document_pool,
+            node, "--value", 7, &text);
+        EXPECT_EQ(value != nullptr, sample.valid) << sample.text;
+        node->css_variables = nullptr;
+        if (css_value_contains_var_reference(declaration->value)) {
+            const CssValue* substituted = css_resolve_var_value(doc.document_pool,
+                declaration->value, nullptr, nullptr, node);
+            EXPECT_EQ(substituted != nullptr, sample.valid) << sample.text;
+        }
+        // owned token values must obey the same document budgets as typed custom properties.
+        CssValue* owned = css_value_create_token_sequence(doc.document_pool, declaration->value,
+            strview_from_cstr(sample.text));
+        ASSERT_NE(owned, nullptr);
+        const CssValue* substituted = css_resolve_var_value(doc.document_pool, owned, nullptr, nullptr, node);
+        EXPECT_EQ(substituted != nullptr, sample.valid) << sample.text;
+    }
+    css_engine_set_substitution_limits(engine, 0, 0);
+    EXPECT_EQ(engine->limits.max_substitution_bytes, CSS_SUBSTITUTION_DEFAULT_MAX_BYTES);
+    EXPECT_EQ(engine->limits.max_substitution_tokens, CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS);
+}
+
+TEST(CssVariableSubstitutionTest, RepeatedEmptyDependenciesAreMemoizedWithinEachCall) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    struct Cleanup {Pool* pool; ~Cleanup() {pool_destroy(pool);}} cleanup = {pool};
+    struct Lookup {CssDeclaration* nodes[32]; unsigned calls;} lookup = {};
+    for (int index = 0; index < 32; index++) {
+        char name[24], value[80];
+        snprintf(name, sizeof(name), "--empty%d", index);
+        if (index) snprintf(value, sizeof(value), "var(--empty%d)var(--empty%d)", index - 1, index - 1);
+        else snprintf(value, sizeof(value), "var(--missing,)");
+        lookup.nodes[index] = css_parse_property_declaration(name, strlen(name), value, strlen(value), pool);
+        ASSERT_NE(lookup.nodes[index], nullptr);
+    }
+    auto lookup_value = [](void* context, DomElement*, const char* name,
+        DomElement** owner) -> const CssValue* {
+        *owner = nullptr;
+        Lookup* lookup = (Lookup*)context;
+        lookup->calls++;
+        for (CssDeclaration* node : lookup->nodes)
+            if (strcmp(node->property_name, name) == 0) return node->value;
+        return nullptr;
+    };
+    CssDeclaration* declaration = css_parse_property_declaration("--result", 8,
+        "var(--empty31)", 14, pool);
+    ASSERT_NE(declaration, nullptr);
+    for (bool owned : {false, true}) {
+        if (owned) {
+            for (CssDeclaration* node : lookup.nodes) {
+                node->value = css_value_create_token_sequence(pool, node->value,
+                    strview_init(node->value_text, node->value_text_len));
+                ASSERT_NE(node->value, nullptr);
+            }
+        }
+        for (int call = 0; call < 2; call++) {
+            lookup.calls = 0;
+            const CssValue* value = css_resolve_var_value(pool, declaration->value, lookup_value, &lookup);
+            ASSERT_NE(value, nullptr);
+            ASSERT_EQ(value->type, CSS_VALUE_TYPE_LIST);
+            EXPECT_EQ(value->data.list.count, 0);
+            // repeated paths collapse to the 32 distinct dependencies in either representation.
+            EXPECT_GT(lookup.calls, 32u);
+            EXPECT_LE(lookup.calls, 64u);
+        }
+    }
+}
+
 static const CssValue* css_token_test_lookup(void* context, DomElement*, const char* name,
                                             DomElement** owner) {
     if (owner) *owner = nullptr;
@@ -1734,6 +1891,8 @@ TEST(CssVariableSubstitutionTest, OwnedTokenSpellingSurvivesSubstitutionBoundari
         CssValue* retained_expression = css_value_clone_owned(expression->value, owned);
         ASSERT_NE(retained_variable, nullptr); ASSERT_NE(retained_expression, nullptr);
         pool_destroy(source);
+        EXPECT_EQ(css_value_contains_var_reference(retained_expression),
+            strstr(test.expression, "var(") != nullptr);
         const CssValue* result = css_resolve_var_value(owned, retained_expression,
             css_token_test_lookup, retained_variable, nullptr, true);
         ASSERT_NE(result, nullptr);
@@ -1860,6 +2019,113 @@ TEST(SvgCascadeTest, InvalidPaintDoesNotDisplaceValidDeclaration) {
     pool_destroy(pool);
 }
 
+TEST_F(SvgAnimationLifetimeTest, ComputedPaintOwnsOutputAndRejectsShortDestination) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* group = element("g", svg); ASSERT_NE(group, nullptr);
+    DomElement* child = element("rect", group); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(group->set_attribute("fill", "currentColor"));
+    ASSERT_TRUE(group->set_attribute("color", "red"));
+    ASSERT_TRUE(group->set_attribute("stroke-width", "3em"));
+    ASSERT_TRUE(group->set_attribute("font-size", "20"));
+    ASSERT_TRUE(child->set_attribute("color", "blue"));
+    ASSERT_TRUE(child->set_attribute("font-size", "10"));
+    Pool* output = mem_pool_create(nullptr, MEM_ROLE_CSS, "test.svg.computed_output");
+    ASSERT_NE(output, nullptr);
+    String* color = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_FILL, 0);
+    ASSERT_NE(color, nullptr); EXPECT_STREQ(color->chars, "rgb(0, 0, 255)");
+    String* width = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_STROKE_WIDTH, 0);
+    ASSERT_NE(width, nullptr); EXPECT_STREQ(width->chars, "60px");
+    bool changed = false;
+    ASSERT_TRUE(dom_element_set_presentation_style(child, "fill", "purple", &changed));
+    ASSERT_TRUE(changed);
+    String* presented = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_FILL, 0);
+    ASSERT_NE(presented, nullptr); EXPECT_STREQ(presented->chars, "rgb(128, 0, 128)");
+    ASSERT_TRUE(dom_element_clear_presentation_style(child));
+    char small[4] = "x";
+    EXPECT_FALSE(css_prop_serialize_computed(child, CSS_PROPERTY_FILL, 0, small, sizeof(small)));
+    EXPECT_STREQ(small, "");
+    ASSERT_TRUE(child->set_attribute("style", "fill:red;fill:var(--bad);--bad:url(#p) potato"));
+    String* invalid = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_FILL, 0);
+    ASSERT_NE(invalid, nullptr); EXPECT_STREQ(invalid->chars, "rgb(0, 0, 255)");
+    // output belongs to the caller's pool after style mutation and element removal.
+    ASSERT_TRUE(group->remove_child(child));
+    EXPECT_STREQ(color->chars, "rgb(0, 0, 255)"); EXPECT_STREQ(width->chars, "60px");
+    mem_pool_destroy(output);
+}
+
+TEST_F(SvgAnimationLifetimeTest, SvgPresentationListsOwnUnboundedComputedOutput) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* group = element("g", svg); ASSERT_NE(group, nullptr);
+    DomElement* child = element("rect", group); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(group->set_attribute("font-size", "20"));
+    ASSERT_TRUE(group->set_attribute("stroke-dasharray", "3 2em 10%"));
+    ASSERT_TRUE(child->set_attribute("font-size", "10"));
+    Pool* output = mem_pool_create(nullptr, MEM_ROLE_CSS, "test.svg.presentation_output");
+    ASSERT_NE(output, nullptr);
+    String* inherited = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_STROKE_DASHARRAY, 0);
+    ASSERT_NE(inherited, nullptr); EXPECT_STREQ(inherited->chars, "3px, 40px, 10%");
+    StrBuf* list = strbuf_new(); ASSERT_NE(list, nullptr);
+    for (int index = 0; index < 250; index++) strbuf_append_str(list, index ? " 1" : "1");
+    ASSERT_TRUE(child->set_attribute("stroke-dasharray", list->str));
+    strbuf_free(list);
+    String* full = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_STROKE_DASHARRAY, 0);
+    ASSERT_NE(full, nullptr); EXPECT_EQ(full->len, 1248u);
+    char small[512] = {};
+    EXPECT_FALSE(css_prop_serialize_computed(child, CSS_PROPERTY_STROKE_DASHARRAY, 0, small, sizeof(small)));
+    EXPECT_STREQ(small, "");
+    ASSERT_TRUE(group->remove_child(child));
+    EXPECT_STREQ(inherited->chars, "3px, 40px, 10%"); EXPECT_EQ(full->len, 1248u);
+    mem_pool_destroy(output);
+}
+
+TEST_F(SvgAnimationLifetimeTest, SvgMarkerProjectionOwnsOutputAcrossMutationAndRemoval) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* group = element("g", svg); ASSERT_NE(group, nullptr);
+    DomElement* child = element("path", group); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(group->set_attribute("style", "marker:url(#inherited);text-anchor:END"));
+    ASSERT_TRUE(child->set_attribute("marker", "url(#ignored)"));
+    ASSERT_TRUE(child->set_attribute("style", "marker:url(#losing);marker:var(--bad);--bad:url(#m) red"));
+    Pool* output = mem_pool_create(nullptr, MEM_ROLE_CSS, "test.svg.marker_output");
+    ASSERT_NE(output, nullptr);
+    String* inherited = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_MARKER, 0);
+    ASSERT_NE(inherited, nullptr); EXPECT_STREQ(inherited->chars, "url(\"#inherited\")");
+    ASSERT_TRUE(child->set_attribute("style", "marker:url(#m);marker-end:url(#n)"));
+    String* mixed = css_prop_serialize_computed_value(output, child, CSS_PROPERTY_MARKER, 0);
+    ASSERT_NE(mixed, nullptr); EXPECT_STREQ(mixed->chars, "");
+    char small[4] = "x";
+    EXPECT_FALSE(css_prop_serialize_computed(child, CSS_PROPERTY_MARKER_START, 0, small, sizeof(small)));
+    EXPECT_STREQ(small, "");
+    ASSERT_TRUE(group->remove_child(child));
+    EXPECT_STREQ(inherited->chars, "url(\"#inherited\")"); EXPECT_STREQ(mixed->chars, "");
+    mem_pool_destroy(output);
+}
+
+TEST(SvgCascadeTest, SharedCssUrlResolutionKeepsLocalAndEmptyReferences) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    Url* base = url_parse("https://example.test/styles/main.css"); ASSERT_NE(base, nullptr);
+    EXPECT_STREQ(radiant_resolve_css_url(pool, "#paint", base), "#paint");
+    EXPECT_STREQ(radiant_resolve_css_url(pool, "", base), "");
+    EXPECT_STREQ(radiant_resolve_css_url(pool, "assets/paint.svg#g", base),
+        "https://example.test/styles/assets/paint.svg#g");
+    EXPECT_STREQ(radiant_resolve_css_url(pool, "https://cdn.test/paint.svg#g", base),
+        "https://cdn.test/paint.svg#g");
+    url_destroy(base); pool_destroy(pool);
+}
+
+TEST_F(SvgAnimationLifetimeTest, EmptyNonPaintSubstitutionDoesNotReadPaintListHead) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* text = element("text", svg); ASSERT_NE(text, nullptr);
+    ASSERT_TRUE(text->set_attribute("style", "--empty: ;font-size:var(--empty)"));
+    char value[32] = {};
+    // empty custom tokens are valid input to substitution, even when the consuming property defaults.
+    const char* result = svg_get_dom_presentation_property(text, "font-size", true, value, sizeof(value));
+    EXPECT_TRUE(!result || !*result);
+}
+
 TEST(SvgCascadeTest, FontDescriptorChangesAdvancePaintResourceGeneration) {
     FontContext* context = font_context_create(nullptr);
     ASSERT_NE(context, nullptr);
@@ -1937,6 +2203,8 @@ TEST(SvgLengthTest, AnglesShareCssUnitConversionAndRejectInvalidSuffixes) {
 
 TEST(SvgLengthTest, CssMathUsesSvgViewportAndMeasuredFontBases) {
     SvgLengthContext lengths = {200.0f, 100.0f, 30.0f, 17.0f};
+    EXPECT_FLOAT_EQ(svg_resolve_length("calc(2 * 3)", &lengths, SVG_LENGTH_DIAGONAL, -1.0f), 6.0f);
+    EXPECT_FLOAT_EQ(svg_resolve_length("calc(2px - 4px)", &lengths, SVG_LENGTH_X, 99.0f), -2.0f);
     EXPECT_FLOAT_EQ(svg_resolve_length("calc(50% + 2ex)", &lengths, SVG_LENGTH_X, -1.0f), 134.0f);
     EXPECT_FLOAT_EQ(svg_resolve_length("calc(50% + 2ex)", &lengths, SVG_LENGTH_Y, -1.0f), 84.0f);
     EXPECT_FLOAT_EQ(svg_resolve_length("min(2em, 50%)", &lengths, SVG_LENGTH_Y, -1.0f), 50.0f);
@@ -1962,6 +2230,21 @@ TEST(SvgLengthTest, DashZerosOddListsAndInvalidLists) {
     float long_dashes[42];
     ASSERT_EQ(svg_resolve_dash_array(long_list, &lengths, long_dashes, 42), 42);
     EXPECT_FLOAT_EQ(long_dashes[20], 21.0f); EXPECT_FLOAT_EQ(long_dashes[41], 21.0f);
+}
+
+TEST(SvgLengthTest, DashMathComputesWithoutTruncatingFunctions) {
+    SvgLengthContext lengths = {200.0f, 100.0f, 30.0f, 17.0f};
+    float dashes[6];
+    ASSERT_EQ(svg_resolve_dash_array("calc(2 * 3), min(2em, 50%), calc(2px - 4px)", &lengths, dashes, 6), 6);
+    EXPECT_FLOAT_EQ(dashes[0], 6.0f);
+    EXPECT_FLOAT_EQ(dashes[1], 60.0f);
+    EXPECT_FLOAT_EQ(dashes[2], 0.0f);
+    EXPECT_FLOAT_EQ(dashes[3], 6.0f);
+    EXPECT_EQ(svg_resolve_dash_array("calc(2px + 3), 4", &lengths, dashes, 6), 0);
+    const char* long_function = "calc(1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px + 1px) 2";
+    ASSERT_EQ(svg_resolve_dash_array(long_function, &lengths, dashes, 6), 2);
+    EXPECT_FLOAT_EQ(dashes[0], 20.0f);
+    EXPECT_FLOAT_EQ(dashes[1], 2.0f);
 }
 
 struct SvgPathTrace {

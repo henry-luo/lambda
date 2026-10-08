@@ -1,0 +1,36 @@
+<!doctype html>
+<style>
+@property --registered { syntax:"*"; inherits:false; initial-value:safe; }
+@property --inherited { syntax:"*"; inherits:true; initial-value:safe; }
+#parent {--inherited:parent;--alias:var(--small);--small:parent}
+#child {--small:child}
+</style>
+<button id="check">check</button><button id="verify">verify layout</button><div id="report"></div>
+<div id="target"></div><div id="consumer"></div><div id="parent"><span id="child"></span></div>
+<svg width="20" height="10"><rect id="paint" width="20" height="10" /></svg>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var el=document.getElementById('target'),s=el.style,c=getComputedStyle(el),report=document.getElementById('report');
+function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+var max=1048576,large='x'.repeat(max),huge=large+'x';
+check('byte-boundary',function(){s.setProperty('--limit',large);return c.getPropertyValue('--limit').length===max;});
+check('byte-overflow',function(){s.setProperty('--large',huge);return c.getPropertyValue('--large')==='';});
+check('utf8-byte-budget',function(){s.setProperty('--utf8','é'.repeat(max/2)+'é');return s.getPropertyValue('--utf8').length===max/2+1&&c.getPropertyValue('--utf8')==='';});
+check('consumer-fallback',function(){s.setProperty('--result','var(--large,safe)');return c.getPropertyValue('--result')==='safe';});
+check('authored-retained',function(){return s.getPropertyValue('--large').length===max+1;});
+check('comments-count-bytes',function(){s.setProperty('--comment','/*'+large+'*/ x');return c.getPropertyValue('--comment')==='';});
+check('token-boundary',function(){s.setProperty('--tokens','x '.repeat(65535)+'x');return c.getPropertyValue('--tokens').length===131071;});
+check('token-overflow',function(){s.setProperty('--tokens','x '.repeat(65536)+'x');return c.getPropertyValue('--tokens')==='';});
+check('unused-large-fallback',function(){s.setProperty('--small','ready');s.setProperty('--result','var(--small,var(--large))');return c.getPropertyValue('--result')==='ready';});
+check('registered-default',function(){s.setProperty('--registered','var(--limit)var(--limit)');return c.getPropertyValue('--registered')==='safe';});
+check('registered-inheritance',function(){var child=document.getElementById('child');child.style.setProperty('--inherited',huge);return getComputedStyle(child).getPropertyValue('--inherited')==='parent';});
+check('owner-inheritance',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--alias')==='parent';});
+check('live-budget-recompute',function(){s.setProperty('--large','restored');return c.getPropertyValue('--result')==='ready'&&c.getPropertyValue('--large')==='restored';});
+check('empty-dag',function(){s.setProperty('--empty0','var(--absent,)');for(var i=1;i<=31;i++)s.setProperty('--empty'+i,'var(--empty'+(i-1)+')var(--empty'+(i-1)+')');s.setProperty('--empty-proof','a var(--empty31,wrong) b');return c.getPropertyValue('--empty31')===''&&c.getPropertyValue('--empty-proof')==='a  b';});
+check('empty-live-recompute',function(){s.setProperty('--empty0','x');var invalid=c.getPropertyValue('--empty31')==='';s.setProperty('--empty0','var(--absent,)');return invalid&&c.getPropertyValue('--empty-proof')==='a  b';});
+// force HTML and SVG consumers to use defaults after a winning declaration overflows.
+var consumer=document.getElementById('consumer');consumer.style.cssText='width:var(--large,55px);height:10px;padding:4px;padding:var(--large);background:red';consumer.style.setProperty('--large',huge);
+var paint=document.getElementById('paint');paint.style.setProperty('--large',huge);paint.style.setProperty('fill','var(--large,lime)');
+});
+document.getElementById('verify').addEventListener('click',function(){var c=getComputedStyle(document.getElementById('consumer')),r=document.getElementById('report'),width=c.width,padding=c.paddingTop;r.setAttribute('data-used-fallback-width',String(width==='55px'));r.setAttribute('data-used-invalid-padding',String(padding==='0px'));});
+</script>

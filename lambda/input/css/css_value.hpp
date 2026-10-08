@@ -68,6 +68,7 @@ typedef enum CssEnumGroup {
     CSS_VALUE_GROUP_RUBY_POSITION,       // alternate, over, under, inter-character
     CSS_VALUE_GROUP_MISC,                // other values that don't fit clear categories
     CSS_VALUE_GROUP_RADINT,              // Radiant specific values
+    CSS_VALUE_GROUP_SVG_PAINT,
 } CssEnumGroup;
 
 typedef enum CssEnum : int16_t {
@@ -598,6 +599,16 @@ typedef enum CssEnum : int16_t {
     // resize cursors must retain typed computed values rather than raw identifiers.
     CSS_VALUE_COL_RESIZE,
     CSS_VALUE_ROW_RESIZE,
+    CSS_VALUE_NONZERO,
+    CSS_VALUE_EVENODD,
+    CSS_VALUE_BUTT,
+    CSS_VALUE_MITER,
+    CSS_VALUE_BEVEL,
+    CSS_VALUE_STROKE,
+    CSS_VALUE_MARKERS,
+    CSS_VALUE_NON_SCALING_STROKE,
+    CSS_VALUE_SRGB,
+    CSS_VALUE_LINEARRGB,
     CSS_VALUE__LAST_ENTRY
 } CssEnum;
 

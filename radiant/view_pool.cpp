@@ -1315,8 +1315,8 @@ static void subtract_block_scroll(ViewBlock* block, float* x, float* y) {
  * @param out_dy Output: vertical translation offset
  * @return true if a transform offset was calculated, false otherwise
  */
-static void calculate_absolute_position(View* view, TextRect* rect, float* out_x, float* out_y,
-                                        View* boundary = nullptr) {
+void view_get_layout_position(View* view, TextRect* rect, float* out_x, float* out_y,
+                              View* boundary) {
     if (view == boundary) { *out_x = *out_y = 0.0f; return; }
     float abs_x = rect ? rect->x : view->x;
     float abs_y = rect ? rect->y : view->y;
@@ -1346,7 +1346,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         if (cb) {
             float cb_abs_x = 0.0f;
             float cb_abs_y = 0.0f;
-            calculate_absolute_position(
+            view_get_layout_position(
                 static_cast<View*>(cb), nullptr, &cb_abs_x, &cb_abs_y, boundary);
             float cb_x = cb->x;
             float cb_y = cb->y;
@@ -1394,7 +1394,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                     float parent_abs_y = 0.0f;
                     // an in-flow descendant inherits an absolute ancestor's
                     // containing-block coordinate, not that ancestor's local y.
-                    calculate_absolute_position(
+                    view_get_layout_position(
                         static_cast<View*>(parent_block), nullptr,
                         &parent_abs_x, &parent_abs_y, boundary);
                     abs_x += parent_abs_x;
@@ -1429,7 +1429,7 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, Vie
     if (!transform_has_functions(block->transform)) return false;
 
     float abs_x = 0.0f, abs_y = 0.0f;
-    calculate_absolute_position(view, nullptr, &abs_x, &abs_y, boundary);
+    view_get_layout_position(view, nullptr, &abs_x, &abs_y, boundary);
     RdtLogicalPoint origin = radiant::transform_origin(
         block->transformp(), abs_x, abs_y, block->width, block->height);
 
@@ -1515,7 +1515,7 @@ static RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
             if (transform && transform->perspective > 0.0f) {
                 float parent_x = 0.0f;
                 float parent_y = 0.0f;
-                calculate_absolute_position(
+                view_get_layout_position(
                     static_cast<View*>(block), nullptr, &parent_x, &parent_y);
                 float origin_x = parent_x + radiant::transform_perspective_origin_offset(
                     transform, block->width, true);
@@ -1542,7 +1542,7 @@ static RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
         if (transform_has_functions(transform)) {
             float block_x = 0.0f;
             float block_y = 0.0f;
-            calculate_absolute_position(
+            view_get_layout_position(
                 static_cast<View*>(block), nullptr, &block_x, &block_y);
             float origin_x = block_x + (transform->origin_x_percent
                 ? block->width * transform->origin_x / 100.0f
@@ -1652,7 +1652,7 @@ bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool incl
     float values[6];
     if (!foreign || !dom_svg_foreign_object_client_transform(foreign, values)) return false;
     float x, y;
-    calculate_absolute_position(view, nullptr, &x, &y, static_cast<View*>(foreign));
+    view_get_layout_position(view, nullptr, &x, &y, static_cast<View*>(foreign));
     RdtMatrix frame = {values[0], values[1], values[2], values[3], values[4], values[5], 0, 0, 1};
     while (count) {
         RdtMatrix local;
@@ -1707,7 +1707,7 @@ void view_get_visual_bounds(View* view, float* out_x, float* out_y,
         if (out_height) *out_height = height;
         return;
     }
-    calculate_absolute_position(view, nullptr, &x, &y);
+    view_get_layout_position(view, nullptr, &x, &y);
     width = view->width;
     height = view->height;
     if (view_chain_has_3d_transform(view)) {
@@ -1750,7 +1750,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
 
     // Output dimensions directly (already in CSS logical pixels)
     float abs_x = 0.0f, abs_y = 0.0f;
-    calculate_absolute_position(view, rect, &abs_x, &abs_y);
+    view_get_layout_position(view, rect, &abs_x, &abs_y);
     float css_x = abs_x;
     float css_y = abs_y;
     float css_width = rect ? rect->width : view->width;
@@ -2054,7 +2054,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
             // local parents; normalize them before taking the union.
             float rect_x = 0.0f;
             float rect_y = 0.0f;
-            calculate_absolute_position(static_cast<View*>(text), rect,
+            view_get_layout_position(static_cast<View*>(text), rect,
                                         &rect_x, &rect_y);
             float rect_right = rect_x + rect->width;
             float rect_bottom = rect_y + rect->height;

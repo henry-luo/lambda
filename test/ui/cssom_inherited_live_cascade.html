@@ -1,0 +1,53 @@
+<!doctype html><meta charset="utf-8">
+<style>
+#parent:lang(en) { color:red; font-size:10px; --tone:red; fill:red }
+#parent:lang(fr) { color:blue; font-size:20px; --tone:blue; fill:blue }
+#parent.changed { color:green; background-color:yellow; visibility:hidden; cursor:crosshair }
+#parent[data-mode="changed"] { color:purple }
+#alternate { color:purple }
+</style>
+<button id="check">Check inherited computed values</button>
+<div id="parent" lang="en"><span id="child"><span id="leaf">inherited text</span></span><svg width="10" height="10"><rect id="rect" width="10" height="10"/></svg></div>
+<div id="alternate"></div><output id="report"></output>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var parent=document.getElementById('parent'),child=document.getElementById('child'),leaf=document.getElementById('leaf'),rect=document.getElementById('rect'),alternate=document.getElementById('alternate'),report=document.getElementById('report');
+var live=getComputedStyle(child);
+function check(name,fn){
+parent.appendChild(child);parent.lang='en';parent.className='';parent.removeAttribute('data-mode');parent.style.cssText='';child.style.cssText='';rect.style.cssText='';
+try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}
+}
+check('language-child-first',function(){parent.lang='fr';return live.color==='rgb(0, 0, 255)';});
+check('language-grandchild-first',function(){parent.lang='fr';return getComputedStyle(leaf).color==='rgb(0, 0, 255)';});
+check('language-retained-object',function(){var before=live.color;parent.lang='fr';return before==='rgb(255, 0, 0)'&&live.color==='rgb(0, 0, 255)';});
+check('language-repeated-writes',function(){parent.lang='fr';var first=live.color;parent.lang='en';return first==='rgb(0, 0, 255)'&&live.color==='rgb(255, 0, 0)';});
+check('class-child-first',function(){parent.className='changed';return live.color==='rgb(0, 128, 0)';});
+check('attribute-child-first',function(){parent.setAttribute('data-mode','changed');return live.color==='rgb(128, 0, 128)';});
+check('inline-child-first',function(){parent.style.color='orange';return live.color==='rgb(255, 165, 0)';});
+check('inline-grandchild-first',function(){parent.style.color='orange';return getComputedStyle(leaf).color==='rgb(255, 165, 0)';});
+check('inline-removal',function(){parent.style.color='orange';var before=live.color;parent.style.removeProperty('color');parent.lang='fr';return before==='rgb(255, 165, 0)'&&live.color==='rgb(0, 0, 255)';});
+check('explicit-inherit',function(){child.style.color='inherit';parent.lang='fr';return live.color==='rgb(0, 0, 255)';});
+check('inherited-unset',function(){child.style.color='unset';parent.lang='fr';return live.color==='rgb(0, 0, 255)';});
+check('invalid-substitution-fallback',function(){child.style.color='var(--missing)';parent.lang='fr';return live.color==='rgb(0, 0, 255)';});
+check('non-inherited-explicit-inherit',function(){child.style.backgroundColor='inherit';parent.className='changed';return live.backgroundColor==='rgb(255, 255, 0)';});
+check('background-shorthand-inherit',function(){child.style.background='inherit';parent.className='changed';return live.backgroundColor==='rgb(255, 255, 0)';});
+check('background-variable-inherit',function(){child.style.backgroundColor='var(--absent,inherit)';parent.className='changed';return live.backgroundColor==='rgb(255, 255, 0)';});
+check('background-invalid-substitution',function(){child.style.backgroundColor='var(--absent)';parent.className='changed';return live.backgroundColor==='rgba(0, 0, 0, 0)';});
+check('color-initial',function(){child.style.color='initial';parent.lang='fr';return live.color==='rgb(0, 0, 0)';});
+check('inherited-visibility',function(){parent.className='changed';return live.visibility==='hidden';});
+check('inherited-cursor',function(){parent.className='changed';return live.cursor==='crosshair';});
+check('inherited-direction',function(){parent.style.direction='rtl';return live.direction==='rtl';});
+check('custom-property-selector-source',function(){parent.lang='fr';return live.getPropertyValue('--tone').trim()==='blue';});
+check('custom-property-descendant-consumer',function(){child.style.color='var(--tone)';parent.lang='fr';return live.color==='rgb(0, 0, 255)';});
+check('custom-property-declaration-owner',function(){parent.style.setProperty('--dependent','var(--tone)');child.style.setProperty('--tone','green');parent.lang='fr';return live.getPropertyValue('--dependent').trim()==='blue';});
+check('font-relative-parent-source',function(){child.style.fontSize='2em';parent.lang='fr';return live.fontSize==='40px';});
+check('font-relative-repeated-source',function(){child.style.fontSize='150%';parent.lang='fr';var first=live.fontSize;parent.lang='en';return first==='30px'&&live.fontSize==='15px';});
+check('stylesheet-declaration-write',function(){var rule=document.styleSheets[0].cssRules[0];var previous=rule.style.color;rule.style.color='teal';var result=live.color==='rgb(0, 128, 128)';rule.style.color=previous;return result;});
+check('stylesheet-rule-insert-delete',function(){var sheet=document.styleSheets[0];var at=sheet.cssRules.length;sheet.insertRule('#parent { color: teal !important }',at);var inserted=live.color;sheet.deleteRule(at);parent.lang='fr';return inserted==='rgb(0, 128, 128)'&&live.color==='rgb(0, 0, 255)';});
+check('stylesheet-disable-enable',function(){var sheet=document.styleSheets[0];sheet.disabled=true;var disabled=live.color;sheet.disabled=false;parent.lang='fr';return disabled==='rgb(0, 0, 0)'&&live.color==='rgb(0, 0, 255)';});
+check('reparent-inherited-source',function(){alternate.appendChild(child);var moved=live.color;parent.appendChild(child);parent.lang='fr';return moved==='rgb(128, 0, 128)'&&live.color==='rgb(0, 0, 255)';});
+check('svg-inherited-paint',function(){parent.lang='fr';return getComputedStyle(rect).fill==='rgb(0, 0, 255)';});
+check('svg-current-color',function(){rect.style.fill='currentColor';parent.lang='fr';return getComputedStyle(rect).fill==='rgb(0, 0, 255)';});
+parent.lang='fr';
+});
+</script>

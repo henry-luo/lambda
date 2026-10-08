@@ -1,0 +1,77 @@
+<!doctype html>
+<style>#sheet{marker-end:url(#m)}#sheet.changed{marker-end:url(#n)}</style>
+<button id="check">check</button><div id="report"></div><div id="html" marker-start="url(#n)" marker="url(#n)"></div>
+<svg width="200" height="100"><defs><marker id="m"/><marker id="n"/></defs>
+<path id="target"/><path id="ruleTarget"/><path id="sheet"/><path id="plain"/><path id="attr" marker="url(#m)"/><path id="attrLong" marker-end="url(#n)"/>
+<g style="marker:url(#m);color-interpolation:linearRGB;color-interpolation-filters:sRGB;text-anchor:end;vector-effect:non-scaling-stroke"><path id="child"/></g></svg>
+<svg id="hitSurface" style="position:absolute;left:230px;top:60px" width="150" height="60" viewBox="0 0 75 30"><path id="probe" d="M5 10H60" fill="none" stroke="black" stroke-width="10" style="vector-effect:NoN-ScAlInG-StRoKe"/></svg>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var target=document.getElementById('target'),s=target.style,c=getComputedStyle(target),child=document.getElementById('child'),report=document.getElementById('report');
+function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+check("default-marker-start",function(){return c.getPropertyValue("marker-start");});
+check("default-marker-mid",function(){return c.getPropertyValue("marker-mid");});
+check("default-marker-end",function(){return c.getPropertyValue("marker-end");});
+check("default-marker",function(){return c.getPropertyValue("marker");});
+check("default-vector-effect",function(){return c.getPropertyValue("vector-effect");});
+check("default-color-interpolation",function(){return c.getPropertyValue("color-interpolation");});
+check("default-color-interpolation-filters",function(){return c.getPropertyValue("color-interpolation-filters");});
+check("default-text-anchor",function(){return c.getPropertyValue("text-anchor");});
+check("aliases",function(){return ['marker','markerStart','markerMid','markerEnd','vectorEffect','colorInterpolation','colorInterpolationFilters','textAnchor'].every(function(p){return typeof s[p]==='string'&&typeof c[p]==='string';});});
+check("marker-shorthand-start",function(){s.marker='url(#m)';return c.markerStart;});
+check("marker-shorthand-mid",function(){s.marker='url(#m)';return c.markerMid;});
+check("marker-shorthand-end",function(){s.marker='url(#m)';return c.markerEnd;});
+check("marker-shorthand-computed",function(){return c.marker;});
+check("marker-longhand-override",function(){s.markerEnd='url(#n)';return c.markerEnd;});
+check("marker-mixed-computed",function(){return c.marker;});
+check("marker-later-shorthand",function(){s.cssText='marker-start:url(#n);marker:url(#m)';return c.markerStart;});
+check("marker-important-shorthand",function(){s.cssText='marker:url(#m)!important;marker-start:url(#n)';return c.markerStart;});
+check("marker-important-longhand",function(){s.cssText='marker:url(#m)!important;marker-start:url(#n)!important';return c.markerStart;});
+check("marker-invalid-fallback",function(){s.cssText='marker:url(#m)';s.marker='url(#n) red';return c.markerEnd;});
+check("marker-invalid-pair",function(){s.marker='url(#m) url(#n)';return c.markerMid;});
+check("marker-none-case",function(){s.marker='NoNe';return c.marker;});
+check("marker-inherit",function(){return getComputedStyle(document.getElementById('child')).markerStart;});
+check("marker-invalid-var-inherits",function(){child.style.cssText='marker:url(#n);marker:var(--bad);--bad:url(#n) red';return getComputedStyle(child).markerEnd;});
+check("marker-all-initial",function(){child.style.cssText='all:initial';return getComputedStyle(child).marker;});
+check("marker-all-unset",function(){child.style.cssText='all:unset';return getComputedStyle(child).marker;});
+check("marker-attribute-ignored",function(){return getComputedStyle(document.getElementById('attr')).markerStart;});
+check("marker-longhand-attribute",function(){return getComputedStyle(document.getElementById('attrLong')).markerEnd;});
+check("marker-html-inherit",function(){document.body.style.marker='url(#m)';return getComputedStyle(document.getElementById('plain')).markerEnd;});
+check("marker-html-attribute-ignored",function(){return getComputedStyle(document.getElementById('html')).markerStart;});
+check("color-linear-case",function(){s.colorInterpolation='LiNeArRgB';return c.colorInterpolation;});
+check("color-srgb-case",function(){s.colorInterpolation='sRGB';return c.colorInterpolation;});
+check("color-invalid-keeps",function(){s.colorInterpolation='red';return c.colorInterpolation;});
+check("filter-srgb-case",function(){s.colorInterpolationFilters='SrGb';return c.colorInterpolationFilters;});
+check("filter-auto",function(){s.colorInterpolationFilters='auto';return c.colorInterpolationFilters;});
+check("filter-invalid-keeps",function(){s.colorInterpolationFilters='2';return c.colorInterpolationFilters;});
+check("color-inheritance",function(){return getComputedStyle(child).colorInterpolation;});
+check("filter-inheritance",function(){return getComputedStyle(child).colorInterpolationFilters;});
+check("anchor-case",function(){s.textAnchor='MiDdLe';return c.textAnchor;});
+check("anchor-invalid-keeps",function(){s.textAnchor='center';return c.textAnchor;});
+check("anchor-inherited",function(){return getComputedStyle(child).textAnchor;});
+check("vector-case",function(){s.vectorEffect='NoN-ScAlInG-StRoKe';return c.vectorEffect;});
+check("vector-invalid-keeps",function(){s.vectorEffect='potato';return c.vectorEffect;});
+check("vector-noninherited",function(){return getComputedStyle(child).vectorEffect;});
+check("vector-explicit-inherit",function(){child.style.vectorEffect='inherit';return getComputedStyle(child).vectorEffect;});
+check("vector-invalid-var-defaults",function(){child.style.cssText='vector-effect:non-scaling-stroke;vector-effect:var(--bad);--bad:red';return getComputedStyle(child).vectorEffect;});
+check("sheet",function(){return getComputedStyle(document.getElementById('sheet')).markerEnd;});
+check("sheet-live",function(){document.getElementById('sheet').setAttribute('class','changed');return getComputedStyle(document.getElementById('sheet')).markerEnd;});
+check("inline-projection",function(){s.cssText='marker:url(#m)';return s.markerStart;});
+check("inline-mixed-shorthand",function(){s.markerEnd='url(#n)';return s.marker;});
+check("inline-remove-shorthand",function(){s.removeProperty('marker');return s.markerStart+':'+s.markerEnd;});
+check('inline-important-member-replacement',function(){s.cssText='marker:url(#m)!important';s.markerEnd='url(#n)';return c.markerStart+':'+c.markerEnd;});
+check('inline-mixed-priority',function(){return s.getPropertyPriority('marker');});
+check('inline-remove-longhand',function(){s.removeProperty('marker-start');return s.markerStart+':'+s.markerMid+':'+s.markerEnd;});
+check('inline-pending-projection',function(){s.cssText='marker:var(--ref);--ref:url(#m)';return s.markerStart+':'+s.marker+':'+c.markerMid;});
+check('inline-pending-member-mutation',function(){s.markerEnd='none';return s.markerStart+':'+s.markerEnd+':'+s.marker+':'+c.markerMid;});
+check('inline-pending-remove-member',function(){s.removeProperty('marker-mid');return s.markerStart+':'+s.markerMid+':'+s.markerEnd+':'+c.markerStart;});
+check('inline-shorthand-replaces-members',function(){s.marker='url(#n)';return s.markerStart+':'+s.markerMid+':'+s.markerEnd;});
+check('rule-projection',function(){var sheet=document.styleSheets[0];sheet.insertRule('#ruleTarget{marker:url(#m)!important}',sheet.cssRules.length);return sheet.cssRules[sheet.cssRules.length-1].style.markerEnd;});
+check('rule-member-replacement',function(){var sheet=document.styleSheets[0],r=sheet.cssRules[sheet.cssRules.length-1];r.style.markerEnd='url(#n)';return getComputedStyle(document.getElementById('ruleTarget')).markerEnd+':'+r.style.marker;});
+check('vector-hit-non-scaling',function(){return document.elementFromPoint(280,86).id==='probe';});
+check('vector-hit-normal',function(){document.getElementById('probe').style.vectorEffect='none';return document.elementFromPoint(280,86).id==='probe';});
+check('vector-hit-invalid-var',function(){document.getElementById('probe').style.cssText='vector-effect:non-scaling-stroke;vector-effect:var(--bad);--bad:red';return document.elementFromPoint(280,86).id==='probe';});
+check('vector-hit-live',function(){document.getElementById('probe').style.vectorEffect='NoN-ScAlInG-StRoKe';return document.elementFromPoint(280,86).id==='probe';});
+check('vector-positioned-ctm',function(){var m=document.getElementById('probe').getScreenCTM();return m.a+':'+m.d+':'+m.e+':'+m.f;});
+});
+</script>

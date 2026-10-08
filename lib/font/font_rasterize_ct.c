@@ -195,6 +195,9 @@ bool font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
     CGSize advance = {0, 0};
     CTFontGetAdvancesForGlyphs(font, kCTFontOrientationHorizontal,
                                 &glyph_id, &advance, 1);
+    CGSize vertical_advance = {0, 0};
+    CTFontGetAdvancesForGlyphs(font, kCTFontOrientationVertical,
+                                &glyph_id, &vertical_advance, 1);
 
     // get bounding rect
     CGRect bbox;
@@ -203,7 +206,8 @@ bool font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
 
     out->id        = (uint32_t)glyph_id;
     out->advance_x = (float)advance.width * bitmap_scale;
-    out->advance_y = 0;  // horizontal text only
+    // CoreText returns the advance in width for either orientation, including synthesized metrics.
+    out->advance_y = fabsf((float)vertical_advance.width) * bitmap_scale;
     out->bearing_x = (float)bbox.origin.x * bitmap_scale;
     out->bearing_y = (float)(bbox.origin.y + bbox.size.height) * bitmap_scale;
     out->width     = (int)ceilf((float)bbox.size.width * bitmap_scale);

@@ -222,51 +222,86 @@ bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
     return false;
 }
 
+static CssEnum dom_html_direction_state(DomElement* element) {
+    if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml"))
+        return CSS_VALUE__UNDEF;
+    const char* value = element->get_attribute("dir");
+    if (!value) return CSS_VALUE__UNDEF;
+    if (str_ieq_cstr(value, "ltr")) return CSS_VALUE_LTR;
+    if (str_ieq_cstr(value, "rtl")) return CSS_VALUE_RTL;
+    return str_ieq_cstr(value, "auto") ? CSS_VALUE_AUTO : CSS_VALUE__UNDEF;
+}
+
+bool dom_element_has_directionality_hint(DomElement* element) {
+    if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml")) return false;
+    return dom_html_direction_state(element) != CSS_VALUE__UNDEF ||
+        (element->tag_name && str_ieq_cstr(element->tag_name, "bdi")) ||
+        (element->tag_id == MARKUP_NAME_INPUT &&
+         form_input_kind(element->get_attribute("type")) == FORM_INPUT_KIND_TEL);
+}
+
 int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir,
-                              bool first) {
+                              bool first, bool raw_content) {
     if (!node) return 0;
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (!text->text || text->length == 0) return 0;
-        int last_strong = 0;
-        const char* cursor = text->text;
-        const char* end = cursor + text->length;
-        while (cursor < end) {
-            uint32_t codepoint = 0;
-            int consumed = utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
-            if (consumed <= 0) {
-                cursor++;
-                continue;
-            }
-            cursor += consumed;
-            int strong_class = utf_bidi_strong_class(codepoint);
-            if (strong_class != 0) {
-                if (first) return strong_class;
-                last_strong = strong_class;
-            }
-        }
-        return last_strong;
+        return utf8_bidi_strong_direction(text->text, text->length, first);
     }
     if (!node->is_element()) return 0;
     DomElement* element = node->as_element();
-    if (element->tag_id == MARKUP_NAME_SCRIPT ||
+    if ((raw_content || skip_explicit_dir) && element->is_synthetic()) return 0;
+    if (!raw_content && (element->tag_id == MARKUP_NAME_SCRIPT ||
         element->tag_id == MARKUP_NAME_STYLE ||
         (element->tag_name && strcmp(element->tag_name, "::marker") == 0) ||
         element->tag_id == MARKUP_NAME_TEXTAREA ||
-        (skip_explicit_dir && element->get_attribute("dir"))) {
+        (skip_explicit_dir && (dom_html_direction_state(element) != CSS_VALUE__UNDEF ||
+            (strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") == 0 &&
+             element->tag_name && str_ieq_cstr(element->tag_name, "bdi")))))) {
         return 0;
     }
     int last_strong = 0;
     for (DomNode* child = element->first_child; child;
          child = child->next_sibling) {
         int strong_class = dom_find_strong_direction(
-            child, skip_explicit_dir, first);
+            child, skip_explicit_dir, first, raw_content);
         if (strong_class != 0) {
             if (first) return strong_class;
             last_strong = strong_class;
         }
     }
     return last_strong;
+}
+
+int dom_element_directionality(DomElement* element,
+        DomDirectionValueResolver resolve_value, void* context) {
+    for (DomElement* current = element; current; current = current->parent_element()) {
+        CssEnum state = dom_html_direction_state(current);
+        if (state == CSS_VALUE_LTR) return -1;
+        if (state == CSS_VALUE_RTL) return 1;
+        bool html = strcmp(dom_element_namespace_uri(current), "http://www.w3.org/1999/xhtml") == 0;
+        bool input = html && current->tag_id == MARKUP_NAME_INPUT;
+        bool textarea = html && current->tag_id == MARKUP_NAME_TEXTAREA;
+        bool bdi = html && current->tag_name && str_ieq_cstr(current->tag_name, "bdi");
+        if (state == CSS_VALUE_AUTO || bdi) {
+            bool control = textarea || (input && html_input_has_auto_direction_value(current->get_attribute("type")));
+            const char* value = control && resolve_value ? resolve_value(current, context) : nullptr;
+            if (!value && control && input) {
+                value = current->get_attribute("value");
+                if (!value) value = ""; // void input descendants never contribute to its value.
+            }
+            if (value) return utf8_bidi_strong_direction(value, strlen(value), true) > 0 ? 1 : -1;
+            // raw textarea value includes every text descendant; isolated subtrees are excluded elsewhere.
+            for (DomNode* child = current->first_child; child; child = child->next_sibling) {
+                int strong = dom_find_strong_direction(child, !control, true, control);
+                if (strong) return strong;
+            }
+            return -1;
+        }
+        // telephone controls default to LTR even when their parent is RTL.
+        if (input && form_input_kind(current->get_attribute("type")) == FORM_INPUT_KIND_TEL) return -1;
+    }
+    return -1;
 }
 
 static void dom_option_collect_normalized_text(DomNode* node, StrBuf* out,
@@ -1911,11 +1946,16 @@ static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
     return winner;
 }
 
-// registered-property computation needs the same rollback winner without inherited lookup.
+// typed computation and authored serialization use the same rollback winner.
+const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
+    const char* name, size_t name_length) {
+    return element ? css_custom_property_winner(element->css_variables,
+        name, nullptr, nullptr, name_length) : nullptr;
+}
+
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name,
     size_t name_length, StrView* token_text) {
-    CssCustomProp* winner = element ? css_custom_property_winner(element->css_variables,
-        name, nullptr, nullptr, name_length) : nullptr;
+    const CssCustomProp* winner = dom_element_lookup_own_custom_property_entry(element, name, name_length);
     if (token_text) *token_text = winner
         ? strview_init(winner->value_text, winner->value_text_len) : strview_init(nullptr, 0);
     return winner ? winner->value : nullptr;

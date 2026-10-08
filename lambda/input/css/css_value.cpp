@@ -13,10 +13,27 @@ extern "C" {
 
 #include "../../../lib/color.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/arraylist.h"
 #include <math.h>
 
 static double css_color_clamp(double value, double maximum = 1.0) {
     return isnan(value) ? 0.0 : fmax(0.0, fmin(maximum, value));
+}
+
+static bool css_visit_list_items(const CssValue* value, CssListItemVisitor visitor,
+    void* context, int depth) {
+    if (!value || depth > 32) return false;
+    if (value->type != CSS_VALUE_TYPE_LIST) return visitor(value, context);
+    const auto& list = value->data.list;
+    if (!list.values || list.count <= 0) return false;
+    // comma and whitespace groups flatten alike; functions remain atomic component values.
+    for (int index = 0; index < list.count; index++)
+        if (!css_visit_list_items(list.values[index], visitor, context, depth + 1)) return false;
+    return true;
+}
+
+bool css_value_visit_list_items(const CssValue* value, CssListItemVisitor visitor, void* context) {
+    return visitor && css_visit_list_items(value, visitor, context, 0);
 }
 
 static bool css_color_component(const CssValue* value, bool hue, bool percentage_only,
@@ -434,37 +451,61 @@ const char* css_math_token_name(const CssValue* value) {
     return NULL;
 }
 
-static bool css_value_contains_var_reference_inner(const CssValue* value,
-                                                   int depth, bool include_pending) {
-    if (!value || depth > 32) return false;
+enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT};
+
+static bool css_value_matches_search(const CssValue* value, CssValueSearch search,
+    CssUnit first, CssUnit second) {
+    if (!value) return false;
+    if (search == CSS_SEARCH_LENGTH_UNIT)
+        return value->type == CSS_VALUE_TYPE_LENGTH &&
+            (value->data.length.unit == first || value->data.length.unit == second);
     if (value->type == CSS_VALUE_TYPE_VAR) return true;
-    if (include_pending && (value->type == CSS_VALUE_TYPE_ENV || value->type == CSS_VALUE_TYPE_ATTR)) return true;
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        if (!value->data.list.values) return false;
-        for (int i = 0; i < value->data.list.count; i++) {
-            if (css_value_contains_var_reference_inner(
-                    value->data.list.values[i], depth + 1, include_pending)) return true;
+    if (search == CSS_SEARCH_PENDING && (value->type == CSS_VALUE_TYPE_ENV || value->type == CSS_VALUE_TYPE_ATTR)) return true;
+    const CssFunction* function = value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    return function && function->name && (strcmp(function->name, "var") == 0 ||
+        (search == CSS_SEARCH_PENDING && (strcmp(function->name, "env") == 0 || strcmp(function->name, "attr") == 0)));
+}
+
+static bool css_value_contains(CssValueSearch search, const CssValue* value,
+    CssUnit first = CSS_UNIT_PX, CssUnit second = CSS_UNIT_PX) {
+    if (!value) return false;
+    if (css_value_matches_search(value, search, first, second)) return true;
+    if (value->type != CSS_VALUE_TYPE_LIST && value->type != CSS_VALUE_TYPE_FUNCTION &&
+        value->type != CSS_VALUE_TYPE_TOKEN_SEQUENCE) return false;
+    ArrayList* pending = arraylist_new(8);
+    if (!pending) return true;  // inability to exclude a dependency must still enter its validation path
+    bool found = !arraylist_append(pending, (void*)value);
+    while (!found && pending->length > 0) {
+        const CssValue* current = (const CssValue*)pending->data[--pending->length];
+        if (css_value_matches_search(current, search, first, second)) { found = true; break; }
+        const CssValue* const* children = nullptr;
+        int count = 0;
+        if (current->type == CSS_VALUE_TYPE_LIST) {
+            children = current->data.list.values; count = current->data.list.count;
+        } else if (current->type == CSS_VALUE_TYPE_FUNCTION && current->data.function) {
+            children = current->data.function->args; count = current->data.function->arg_count;
+        } else if (current->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE) {
+            // owned spelling wraps the same dependency tree used by typed consumers.
+            children = &current->data.tokens.value; count = 1;
         }
-    } else if (value->type == CSS_VALUE_TYPE_FUNCTION &&
-               value->data.function && value->data.function->name) {
-        if (strcmp(value->data.function->name, "var") == 0) return true;
-        if (include_pending && (strcmp(value->data.function->name, "env") == 0 ||
-            strcmp(value->data.function->name, "attr") == 0)) return true;
-        for (int i = 0; value->data.function->args &&
-             i < value->data.function->arg_count; i++) {
-            if (css_value_contains_var_reference_inner(
-                    value->data.function->args[i], depth + 1, include_pending)) return true;
+        for (int index = 0; children && index < count; index++) {
+            if (children[index] && !arraylist_append(pending, (void*)children[index])) { found = true; break; }
         }
     }
-    return false;
+    arraylist_free(pending);
+    return found;
 }
 
 bool css_value_contains_var_reference(const CssValue* value) {
-    return css_value_contains_var_reference_inner(value, 0, false);
+    return css_value_contains(CSS_SEARCH_VAR, value);
 }
 
 bool css_value_contains_pending_substitution(const CssValue* value) {
-    return css_value_contains_var_reference_inner(value, 0, true);
+    return css_value_contains(CSS_SEARCH_PENDING, value);
+}
+
+bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second) {
+    return css_value_contains(CSS_SEARCH_LENGTH_UNIT, value, first, second);
 }
 
 float css_font_size_keyword_px(CssEnum keyword) {
@@ -998,6 +1039,16 @@ static const CssEnumInfo css_value_definitions[] = {
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
     {"col-resize", 10, CSS_VALUE_COL_RESIZE, CSS_VALUE_GROUP_CURSOR},
     {"row-resize", 10, CSS_VALUE_ROW_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"nonzero", 7, CSS_VALUE_NONZERO, CSS_VALUE_GROUP_SVG_PAINT},
+    {"evenodd", 7, CSS_VALUE_EVENODD, CSS_VALUE_GROUP_SVG_PAINT},
+    {"butt", 4, CSS_VALUE_BUTT, CSS_VALUE_GROUP_SVG_PAINT},
+    {"miter", 5, CSS_VALUE_MITER, CSS_VALUE_GROUP_SVG_PAINT},
+    {"bevel", 5, CSS_VALUE_BEVEL, CSS_VALUE_GROUP_SVG_PAINT},
+    {"stroke", 6, CSS_VALUE_STROKE, CSS_VALUE_GROUP_SVG_PAINT},
+    {"markers", 7, CSS_VALUE_MARKERS, CSS_VALUE_GROUP_SVG_PAINT},
+    {"non-scaling-stroke", 18, CSS_VALUE_NON_SCALING_STROKE, CSS_VALUE_GROUP_SVG_PAINT},
+    {"srgb", 4, CSS_VALUE_SRGB, CSS_VALUE_GROUP_SVG_PAINT},
+    {"linearrgb", 9, CSS_VALUE_LINEARRGB, CSS_VALUE_GROUP_SVG_PAINT},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);

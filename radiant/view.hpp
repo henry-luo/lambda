@@ -85,6 +85,10 @@ const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
+String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
+    CssPropertyCode id, int pseudo_type);
+String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
+    CssPropertyCode id, const CssValue* value);
 String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length);
 
@@ -111,6 +115,11 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
                                            CssStylesheet** stylesheets, int count,
                                            Pool* pool, CssEngine* engine,
                                            SelectorMatcher* matcher = nullptr);
+
+struct TextRect;
+// layout position follows containing blocks and scrolling, before CSS transforms.
+void view_get_layout_position(View* view, TextRect* rect, float* out_x, float* out_y,
+                              View* boundary = nullptr);
 
 // Return a committed view's visual CSS-pixel bounds, including transforms on
 // the view and its ancestors. Geometry consumers must share this with painting
@@ -783,6 +792,12 @@ struct FontProp {
 };
 
 size_t font_text_decoration_names(const FontProp* font, char* out, size_t capacity);
+
+// convert measured font units to computed CSS pixels before raster scale or zoom.
+bool css_font_metric_unit_px(FontHandle* handle, const FontStyleDesc* style,
+    CssUnit unit, float computed_size, bool upright, float* pixels);
+bool css_font_line_height_px(FontContext* fonts, const FontStyleDesc* style,
+    const CssValue* line_height, float* pixels);
 
 inline float font_prop_used_size(const FontProp* fp) {
     if (!fp) return 0.0f;
@@ -3220,31 +3235,6 @@ enum FormControlType {
 // Input keywords share a coarse FormControlType for rendering, but their
 // mechanical capabilities are not identical (for example, color is not a
 // text-editing surface). Keep this descriptor separate from live form state.
-enum FormInputKind {
-    FORM_INPUT_KIND_TEXT = 0,
-    FORM_INPUT_KIND_PASSWORD,
-    FORM_INPUT_KIND_EMAIL,
-    FORM_INPUT_KIND_URL,
-    FORM_INPUT_KIND_SEARCH,
-    FORM_INPUT_KIND_TEL,
-    FORM_INPUT_KIND_NUMBER,
-    FORM_INPUT_KIND_CHECKBOX,
-    FORM_INPUT_KIND_RADIO,
-    FORM_INPUT_KIND_BUTTON,
-    FORM_INPUT_KIND_SUBMIT,
-    FORM_INPUT_KIND_RESET,
-    FORM_INPUT_KIND_IMAGE,
-    FORM_INPUT_KIND_HIDDEN,
-    FORM_INPUT_KIND_RANGE,
-    FORM_INPUT_KIND_FILE,
-    FORM_INPUT_KIND_DATE,
-    FORM_INPUT_KIND_TIME,
-    FORM_INPUT_KIND_DATETIME_LOCAL,
-    FORM_INPUT_KIND_MONTH,
-    FORM_INPUT_KIND_WEEK,
-    FORM_INPUT_KIND_COLOR,
-};
-
 enum FormInputCapability {
     FORM_INPUT_CAP_TEXT_CONTROL = 1u << 0,
     FORM_INPUT_CAP_SINGLE_LINE = 1u << 1,
@@ -3269,7 +3259,6 @@ struct FormInputDescriptor {
 // Static input-type metadata is shared by style, layout, event, editing, and
 // rendering callers. The returned descriptor is immutable and process-owned.
 const FormInputDescriptor* form_input_descriptor(const char* type);
-FormInputKind form_input_kind(const char* type);
 FormControlType form_input_control_type(const char* type);
 bool form_input_has_capability(const char* type, uint32_t capability);
 bool form_input_kind_is(const char* type, FormInputKind kind);
@@ -3911,6 +3900,8 @@ const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
     const CssValue* value, CssPropertyCode property = CSS_PROPERTY_UNKNOWN);
 const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length = (size_t)-1, bool preserve_tokens = false);
+const CssValue* css_compute_element_custom_property_text(Pool* pool, DomElement* element,
+    const char* name, size_t name_length, StrView* text);
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);

@@ -1,0 +1,68 @@
+<!doctype html>
+<style>#sheet {stroke-dasharray:2 6} #sheet.changed {stroke-dasharray:4 8}</style>
+<button id="check">check</button><div id="report"></div><div id="html" fill-opacity=".7"></div>
+<svg width="200" height="100" viewBox="0 0 200 100">
+ <rect id="target"/><rect id="sheet"/><rect id="plain"/>
+ <g style="font-size:20px;stroke-dasharray:3 2em 10%;stroke-dashoffset:2em;fill-opacity:.5;stop-color:red"><rect id="child" font-size="10"/></g>
+</svg>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var target=document.getElementById('target'),s=target.style,c=getComputedStyle(target),report=document.getElementById('report');
+function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+check("default-fill-opacity",function(){return c.getPropertyValue("fill-opacity");});
+check("default-stroke-opacity",function(){return c.getPropertyValue("stroke-opacity");});
+check("default-stroke-dasharray",function(){return c.getPropertyValue("stroke-dasharray");});
+check("default-stroke-dashoffset",function(){return c.getPropertyValue("stroke-dashoffset");});
+check("default-stroke-linecap",function(){return c.getPropertyValue("stroke-linecap");});
+check("default-stroke-linejoin",function(){return c.getPropertyValue("stroke-linejoin");});
+check("default-stroke-miterlimit",function(){return c.getPropertyValue("stroke-miterlimit");});
+check("default-fill-rule",function(){return c.getPropertyValue("fill-rule");});
+check("default-clip-rule",function(){return c.getPropertyValue("clip-rule");});
+check("default-paint-order",function(){return c.getPropertyValue("paint-order");});
+check("default-stop-color",function(){return c.getPropertyValue("stop-color");});
+check("default-stop-opacity",function(){return c.getPropertyValue("stop-opacity");});
+check("default-flood-color",function(){return c.getPropertyValue("flood-color");});
+check("default-flood-opacity",function(){return c.getPropertyValue("flood-opacity");});
+check("default-lighting-color",function(){return c.getPropertyValue("lighting-color");});
+check("aliases",function(){return typeof s.strokeDasharray==='string'&&typeof c.fillOpacity==='string';});
+check("dash-literals",function(){return (s.strokeDasharray='3 4, 5%',c.strokeDasharray);});
+check("dash-math",function(){return (s.strokeDasharray='calc(1px + 2px) min(4px, 5px)',c.strokeDasharray);});
+check("dash-invalid-keeps",function(){return (s.strokeDasharray='2 4',s.strokeDasharray='2 -4',c.strokeDasharray);});
+check("dash-comma-invalid-keeps",function(){return (s.strokeDasharray='2,,4',c.strokeDasharray);});
+check("dash-zero",function(){return (s.strokeDasharray='0 0',c.strokeDasharray);});
+check("dash-long",function(){return (s.strokeDasharray=Array(250).fill('1').join(' '),c.strokeDasharray===Array(250).fill('1px').join(', '));});
+check("offset-number",function(){return (s.strokeDashoffset='-3',c.strokeDashoffset);});
+check("offset-math",function(){return (s.fontSize='12px',s.strokeDashoffset='calc(-2em + 3px)',c.strokeDashoffset);});
+check("offset-percent",function(){return (s.strokeDashoffset='10%',c.strokeDashoffset);});
+check("fill-opacity-percent",function(){return (s.fillOpacity='25%',c.fillOpacity);});
+check("fill-opacity-math",function(){return (s.fillOpacity='calc(25% + 25%)',c.fillOpacity);});
+check("opacity-high-clamp",function(){return (s.fillOpacity='2',c.fillOpacity);});
+check("opacity-low-clamp",function(){return (s.fillOpacity='-2',c.fillOpacity);});
+check("opacity-invalid-keeps",function(){return (s.fillOpacity='.4',s.fillOpacity='4px',c.fillOpacity);});
+check("cap-case",function(){return (s.strokeLinecap='RoUnD',c.strokeLinecap);});
+check("join-case",function(){return (s.strokeLinejoin='BeVeL',c.strokeLinejoin);});
+check("cap-invalid-keeps",function(){return (s.strokeLinecap='potato',c.strokeLinecap);});
+check("miter-zero",function(){return (s.strokeMiterlimit='0',c.strokeMiterlimit);});
+check("miter-math",function(){return (s.strokeMiterlimit='calc(2 * 3)',c.strokeMiterlimit);});
+check("miter-invalid-keeps",function(){return (s.strokeMiterlimit='-1',c.strokeMiterlimit);});
+check("rule-case",function(){return (s.fillRule='EvEnOdD',s.clipRule='EvEnOdD',c.fillRule==='evenodd'&&c.clipRule==='evenodd');});
+check("paint-order",function(){return (s.paintOrder='StRoKe',c.paintOrder);});
+check("paint-order-invalid-keeps",function(){return (s.paintOrder='fill fill',c.paintOrder);});
+check("stop-current-color",function(){return (s.color='blue',s.stopColor='currentColor',c.stopColor);});
+check("stop-opacity-math",function(){return (s.stopOpacity='calc(25% + 50%)',c.stopOpacity);});
+check("flood-color",function(){return (s.floodColor='rgb(1, 2, 3)',c.floodColor);});
+check("flood-opacity",function(){return (s.floodOpacity='50%',c.floodOpacity);});
+check("lighting-color",function(){return (s.lightingColor='red',c.lightingColor);});
+check("inherit-dashes-font",function(){return getComputedStyle(document.getElementById('child')).strokeDasharray;});
+check("inherit-offset-font",function(){return getComputedStyle(document.getElementById('child')).strokeDashoffset;});
+check("inherit-opacity",function(){return getComputedStyle(document.getElementById('child')).fillOpacity;});
+check("invalid-var-inherits",function(){return (document.getElementById('child').style.cssText='stroke-dasharray:1 1;stroke-dasharray:var(--bad);--bad:2 -4',getComputedStyle(document.getElementById('child')).strokeDasharray);});
+check("invalid-color-preserves",function(){return (s.stopColor='green',s.stopColor='url(#p)',c.stopColor);});
+check("noninherit-stop",function(){return getComputedStyle(document.getElementById('child')).stopColor;});
+check("explicit-inherit-stop",function(){return (document.getElementById('child').style.stopColor='inherit',getComputedStyle(document.getElementById('child')).stopColor);});
+check("sheet-dashes",function(){return getComputedStyle(document.getElementById('sheet')).strokeDasharray;});
+check("live-sheet-dashes",function(){return (document.getElementById('sheet').setAttribute('class','changed'),getComputedStyle(document.getElementById('sheet')).strokeDasharray);});
+check("html-inherited",function(){return (document.body.style.fillOpacity='.3',getComputedStyle(document.getElementById('plain')).fillOpacity);});
+check("html-attribute-ignored",function(){return getComputedStyle(document.getElementById('html')).fillOpacity;});
+});
+</script>

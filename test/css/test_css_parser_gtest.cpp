@@ -32,6 +32,57 @@ protected:
     }
 };
 
+TEST_F(CssParserTest, ValueDependencySearchVisitsCompleteMixedTrees) {
+    CssValue* leading = css_value_create_length(pool, 2.0, CSS_UNIT_LH);
+    CssValue* pending = css_value_create_function(pool, "var", nullptr, 0);
+    CssValue* environmental = css_value_create_function(pool, "env", nullptr, 0);
+    ASSERT_NE(leading, nullptr); ASSERT_NE(pending, nullptr); ASSERT_NE(environmental, nullptr);
+    CssValue* nodes[] = {leading, pending, environmental};
+    for (size_t depth = 0; depth < 128; depth++) {
+        for (size_t index = 0; index < 3; index++) {
+            CssValue** children = (CssValue**)pool_alloc(pool, 2 * sizeof(CssValue*));
+            ASSERT_NE(children, nullptr);
+            children[0] = nodes[index];
+            children[1] = css_value_create_length(pool, 1.0, CSS_UNIT_PX);
+            nodes[index] = depth % 2 ? css_value_create_list(pool, children, 2)
+                : css_value_create_function(pool, "calc", children, 2);
+            ASSERT_NE(nodes[index], nullptr);
+        }
+    }
+    // dependency discovery must not misclassify a nested font basis or pending substitution as independent.
+    EXPECT_TRUE(css_value_contains_length_unit(nodes[0], CSS_UNIT_LH, CSS_UNIT_RLH));
+    EXPECT_FALSE(css_value_contains_length_unit(nodes[0], CSS_UNIT_EX, CSS_UNIT_CH));
+    EXPECT_FALSE(css_value_contains_var_reference(nodes[0]));
+    EXPECT_FALSE(css_value_contains_pending_substitution(nodes[0]));
+    EXPECT_TRUE(css_value_contains_var_reference(nodes[1]));
+    EXPECT_TRUE(css_value_contains_pending_substitution(nodes[1]));
+    EXPECT_FALSE(css_value_contains_var_reference(nodes[2]));
+    EXPECT_TRUE(css_value_contains_pending_substitution(nodes[2]));
+    EXPECT_FALSE(css_value_contains_length_unit(nodes[2], CSS_UNIT_LH, CSS_UNIT_RLH));
+}
+
+TEST_F(CssParserTest, LinguisticFunctionsValidateTokensBeforeDecoding) {
+    const char* valid[] = {":lang(en)", ":lang( en, 'de-*-DE' )", ":lang(\"*\")",
+        ":lang(\\65 n)", ":lang(en/**/,fr)", ":lang(\"\")", ":lang(en", ":dir(sideways)",
+        ":dir( RTL )", ":dir(\\72 tl)"};
+    for (const char* text : valid) {
+        EXPECT_NE(css_parse_selector_group_text(text, strlen(text), pool), nullptr) << text;
+    }
+    const char* invalid[] = {":lang()", ":lang(/**/)", ":lang(en de)", ":lang(en,)",
+        ":lang(,en)", ":lang(en,,de)", ":lang(*)", ":lang(en-*-DE)", ":lang(123)",
+        ":lang(en/**/de)", ":dir()", ":dir(/**/)", ":dir(r tl)",
+        ":dir(r/**/tl)", ":dir('rtl')", ":dir(rtl,ltr)"};
+    for (const char* text : invalid) {
+        EXPECT_EQ(css_parse_selector_group_text(text, strlen(text), pool), nullptr) << text;
+    }
+    const char* text = ":is(:lang(en,), .valid)";
+    CssSelectorGroup* forgiving = css_parse_selector_group_text(text, strlen(text), pool);
+    ASSERT_NE(forgiving, nullptr);
+    EXPECT_EQ(forgiving->selectors[0]->compound_selectors[0]->simple_selectors[0]->function_selector_count, 1u);
+    text = ":not(:lang(en,), .valid)";
+    EXPECT_EQ(css_parse_selector_group_text(text, strlen(text), pool), nullptr);
+}
+
 // Test basic CSS parsing components
 TEST_F(CssParserTest, ParseEmptyStylesheet) {
     const char* css = "";
@@ -180,6 +231,108 @@ TEST_F(CssEngineParserTest, PhysicalSideLengthsValidateWholeValues) {
         EXPECT_NE(css_parse_declaration_text(value, strlen(value), pool), nullptr) << value;
     for (const char* value : invalid)
         EXPECT_EQ(css_parse_declaration_text(value, strlen(value), pool), nullptr) << value;
+}
+
+TEST_F(CssEngineParserTest, LineHeightValidatesNumericTypesBeforeCascade) {
+    const char* valid[] = {
+        "line-height:2", "line-height:150%", "line-height:1.5em", "line-height:0",
+        "line-height:normal", "line-height:inherit", "line-height:initial", "line-height:unset",
+        "line-height:calc(2)", "line-height:calc(2 * 1em)", "line-height:calc(50% + 5px)",
+        "line-height:calc(-2)", "line-height:calc(-1em)", "line-height:calc(0 / 0)",
+        "line-height:sin(90deg)", "line-height:sqrt(4)", "line-height:round(up, 1.2, 1)",
+        "line-height:mod(5, 2)", "line-height:var(--leading)",
+        "line-height:calc(1px + var(--leading))"
+    };
+    const char* invalid[] = {
+        "line-height:-1", "line-height:-10%", "line-height:-1px", "line-height:1s",
+        "line-height:1foo", "line-height:none", "line-height:calc(1px + 1)",
+        "line-height:calc(1s)", "line-height:calc(1deg)", "line-height:min(2, 3px)",
+        "line-height:calc(1em * 1em)", "line-height:asin(1)",
+        "line-height:clamp(1, 2)", "line-height:sin(1px)", "line-height:wobble(2)"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, SvgPaintAndStrokeWidthUseCompleteGrammar) {
+    const char* valid[] = {"fill:red", "fill:CURRENTCOLOR", "fill:none", "stroke:context-fill",
+        "fill:context-stroke", "fill:url(#paint)", "fill:url(#paint) blue",
+        "stroke:url(\"paint.svg\") none", "fill:url(#paint) currentColor", "fill:var(--paint)",
+        "stroke-width:5", "stroke-width:2em", "stroke-width:3%", "stroke-width:calc(2 * 3)",
+        "stroke-width:calc(2em + 10%)", "stroke-width:calc(2px - 4px)", "stroke-width:var(--width)"};
+    const char* invalid[] = {"fill:potato", "fill:\"red\"", "fill:3", "fill:red blue",
+        "fill:url(#paint) potato", "fill:url(#paint) context-fill", "fill:url(#paint) initial",
+        "fill:url(#paint) url(#other)", "fill:url(#paint), red", "stroke-width:-1",
+        "stroke-width:-2px", "stroke-width:-3%", "stroke-width:1deg", "stroke-width:auto",
+        "stroke-width:calc(2px + 3)", "stroke-width:4px 2px"};
+    for (const char* source : valid)
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+}
+
+TEST_F(CssEngineParserTest, SvgPresentationFamiliesValidateWholeDeclaration) {
+    const char* valid[] = {"fill-opacity:25%", "stroke-opacity:calc(25% + 50%)",
+        "stop-opacity:2", "flood-opacity:-1", "stroke-dasharray:3 4, 5%",
+        "stroke-dasharray:calc(2 * 3) min(4px, 5px)", "stroke-dasharray:none",
+        "stroke-dashoffset:-2em", "stroke-dashoffset:calc(2px - 4px)",
+        "stroke-linecap:RoUnD", "stroke-linejoin:BeVeL", "stroke-miterlimit:0",
+        "stroke-miterlimit:calc(2 * 3)", "fill-rule:EvEnOdD", "clip-rule:nonzero",
+        "paint-order:markers stroke fill", "paint-order:stroke", "paint-order:normal",
+        "stop-color:currentColor", "flood-color:rgb(1, 2, 3)", "lighting-color:red",
+        "stroke-dasharray:var(--dashes)", "fill-rule:inherit"};
+    const char* invalid[] = {"fill-opacity:4px", "stroke-opacity:1 2", "stop-opacity:red",
+        "flood-opacity:calc(2px + 3px)", "stroke-dasharray:2 -3", "stroke-dasharray:2,,3",
+        "stroke-dasharray:2,", "stroke-dasharray:round", "stroke-dasharray:inherit 2",
+        "stroke-dashoffset:2deg", "stroke-linecap:bevel", "stroke-linejoin:square",
+        "stroke-miterlimit:-1", "stroke-miterlimit:20%", "stroke-miterlimit:calc(2px * 3)",
+        "fill-rule:round", "clip-rule:evenodd nonzero", "paint-order:fill fill",
+        "paint-order:fill, stroke", "paint-order:normal fill", "stop-color:url(#paint)",
+        "flood-color:red blue", "lighting-color:2"};
+    for (const char* source : valid)
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+}
+
+TEST_F(CssEngineParserTest, PropertyDispatchMetadataResetsWithItsRegistryOwner) {
+    auto check = [](const CssProperty* property, void*) -> bool {
+        EXPECT_EQ(css_property_get_by_code(property->code), property) << property->name;
+        EXPECT_EQ(css_property_get_by_name(property->name), property);
+        EXPECT_EQ(css_property_code_from_name_id(property->name_id), property->code);
+        return true;
+    };
+    EXPECT_EQ(css_property_foreach(check, nullptr), css_property_get_count());
+    css_property_system_cleanup();
+    EXPECT_EQ(css_property_get_by_code(CSS_PROPERTY_MARKER), nullptr);
+    EXPECT_EQ(css_property_get_by_code(CSS_PROPERTY_UNKNOWN), nullptr);
+    ASSERT_TRUE(css_property_system_init(pool));
+    EXPECT_EQ(css_property_foreach(check, nullptr), css_property_get_count());
+}
+
+TEST_F(CssEngineParserTest, SvgReferencesAndKeywordFamiliesRejectForeignGrammar) {
+    const char* valid[] = {"marker:url(#m)", "marker-start:none", "marker-mid:inherit",
+        "marker-end:var(--reference)", "marker:env(reference, url(#m))",
+        "vector-effect:NoN-ScAlInG-StRoKe", "vector-effect:none", "vector-effect:unset",
+        "color-interpolation:LiNeArRgB", "color-interpolation:sRGB", "color-interpolation:auto",
+        "color-interpolation-filters:SrGb", "color-interpolation-filters:linearRGB",
+        "text-anchor:MiDdLe", "text-anchor:start", "text-anchor:end"};
+    const char* invalid[] = {"marker:red", "marker:url(#m) red", "marker-start:url(#m),url(#n)",
+        "marker-mid:url(#m) url(#n)", "marker-end:context-fill", "marker:\"url(#m)\"",
+        "vector-effect:non-scaling-size", "vector-effect:potato", "vector-effect:none none",
+        "color-interpolation:red", "color-interpolation-filters:2", "color-interpolation:auto sRGB",
+        "text-anchor:center", "text-anchor:middle end"};
+    for (const char* source : valid)
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    const CssProperty* marker = css_property_get_by_code(CSS_PROPERTY_MARKER);
+    ASSERT_NE(marker, nullptr);
+    EXPECT_TRUE(marker->identity_shorthand);
+    EXPECT_EQ(marker->longhand_count, 3);
+    EXPECT_FALSE(css_property_is_animatable(CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS));
 }
 
 TEST_F(CssEngineParserTest, ImportantMarkerRequiresTrailingCaseInsensitiveTokens) {
@@ -1771,8 +1924,8 @@ TEST_F(CssEngineParserTest, RegistrationInitialParsingChecksCompleteNestedTokens
     const Case cases[] = {
         {"red;", false, nullptr}, {"!", false, nullptr}, {"red !other", false, nullptr},
         {"nested([)]", false, nullptr}, {"nested(\"a\nb\")", false, nullptr},
-        {"nested(; !)", true, "nested(; !)"}, {" /*comment*/ ", true, ""},
-        {" /**/ red/**/ ", true, "red"}, {"foo(", true, "foo("},
+        {"nested(; !)", true, "nested(; !)"}, {" /*comment*/ ", true, "/*comment*/"},
+        {" /**/ red/**/ ", true, "/**/ red/**/"}, {"foo(", true, "foo("},
         {"\"initial\"", true, "\"initial\""}, {"{color:red;}", true, "{color:red;}"}
     };
     for (const Case& entry : cases) {
@@ -1786,8 +1939,67 @@ TEST_F(CssEngineParserTest, RegistrationInitialParsingChecksCompleteNestedTokens
     CssPropertyRegistration registration = {};
     ASSERT_TRUE(css_parse_property_syntax("*", pool, &registration));
     ASSERT_TRUE(css_parse_property_initial_value(&registration, raw, sizeof(raw) - 1, pool));
-    EXPECT_EQ(registration.initial_text_length, 3u);
-    EXPECT_EQ(memcmp(registration.initial_text, "a\0b", 3), 0);
+    const char expected[] = "/**/ a\0b/**/";
+    EXPECT_EQ(registration.initial_text_length, sizeof(expected) - 1);
+    EXPECT_EQ(memcmp(registration.initial_text, expected, sizeof(expected) - 1), 0);
+}
+
+TEST_F(CssEngineParserTest, AuthoredCustomCommentsAreNotSemanticFunctionArguments) {
+    const char* source = "/* lead */ var(/* name */ --ref /* tail */, /* empty fallback */)";
+    CssDeclaration* declaration = css_parse_property_value_declaration(
+        "--tokens", 8, source, strlen(source), pool);
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_STREQ(css_serialize_declaration_value(declaration, pool), source);
+    ASSERT_NE(declaration->value, nullptr);
+    ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_FUNCTION);
+    CssFunction* function = declaration->value->data.function;
+    ASSERT_NE(function, nullptr);
+    ASSERT_EQ(function->arg_count, 2);
+    ASSERT_EQ(function->args[0]->type, CSS_VALUE_TYPE_CUSTOM);
+    EXPECT_STREQ(function->args[0]->data.custom_property.name, "--ref");
+    ASSERT_EQ(function->args[1]->type, CSS_VALUE_TYPE_LIST);
+    EXPECT_EQ(function->args[1]->data.list.count, 0);
+
+    const char* opacity = ".5/**/";
+    declaration = css_parse_property_declaration("opacity", 7, opacity, strlen(opacity), pool);
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_EQ(declaration->value->type, CSS_VALUE_TYPE_NUMBER);
+    EXPECT_STREQ(css_serialize_declaration_value(declaration, pool), "0.5");
+
+    source = "Foo(/* no arguments */) bar";
+    declaration = css_parse_property_value_declaration("--tokens", 8, source, strlen(source), pool);
+    ASSERT_NE(declaration, nullptr);
+    ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_LIST);
+    ASSERT_EQ(declaration->value->data.list.count, 2);
+    ASSERT_NE(declaration->value->data.list.values[0], nullptr);
+    ASSERT_EQ(declaration->value->data.list.values[0]->type, CSS_VALUE_TYPE_FUNCTION);
+    ASSERT_NE(declaration->value->data.list.values[1], nullptr);
+    ASSERT_EQ(declaration->value->data.list.values[1]->type, CSS_VALUE_TYPE_KEYWORD);
+    EXPECT_EQ(declaration->value->data.list.values[0]->data.function->arg_count, 0);
+    EXPECT_EQ(declaration->value->data.list.values[1]->data.keyword, CSS_VALUE_BAR);
+}
+
+TEST_F(CssEngineParserTest, CustomTokenSourceRetainsSpellingAndRepairsPrimitiveEofRecovery) {
+    struct Case {const char* source; const char* expected;};
+    const Case cases[] = {
+        {"/* keep */ +001.2 \\66 oo\\", "/* keep */ +001.2 \\66 oo\xef\xbf\xbd"},
+        {"1foo\\", "1foo\xef\xbf\xbd"}, {"url(foo\\", "url(foo\xef\xbf\xbd)"},
+        {"'foo\\", "'foo'"}, {"'foo\\'", "'foo\\''"},
+        {"'foo\\\\", "'foo\\\\'"}, {"/* unclosed", "/* unclosed*/"},
+        {"'keep' /* comment */ \\66 oo", "'keep' /* comment */ \\66 oo"},
+        {"Foo([\"x", "Foo([\"x\"])"}
+    };
+    for (const Case& entry : cases) {
+        CssDeclaration* declaration = css_parse_property_value_declaration(
+            "--tokens", 8, entry.source, strlen(entry.source), pool);
+        ASSERT_NE(declaration, nullptr) << entry.source;
+        EXPECT_STREQ(declaration->value_text, entry.expected) << entry.source;
+        EXPECT_STREQ(css_serialize_declaration_value(declaration, pool), entry.expected) << entry.source;
+        CssDeclaration* reparsed = css_parse_property_value_declaration(
+            "--tokens", 8, entry.expected, strlen(entry.expected), pool);
+        ASSERT_NE(reparsed, nullptr) << entry.expected;
+        EXPECT_STREQ(reparsed->value_text, entry.expected) << entry.expected;
+    }
 }
 
 TEST_F(CssEngineParserTest, SharedMathComputationKeepsCanonicalUnitsAndPercentageTerms) {
@@ -1838,6 +2050,39 @@ static bool css_test_math_leaf(void* data, const CssValue* value, double* result
     if (value->type != CSS_VALUE_TYPE_PERCENTAGE) return false;
     *result = value->data.percentage.value * *(double*)data / 100.0;
     return true;
+}
+
+TEST_F(CssEngineParserTest, ComputedLineHeightKeepsNumbersAndResolvesLengthBases) {
+    struct Case {const char* value; CssValueType type; double result;};
+    const Case cases[] = {
+        {"2", CSS_VALUE_TYPE_NUMBER, 2}, {"150%", CSS_VALUE_TYPE_LENGTH, 30},
+        {"calc(50% + 5px)", CSS_VALUE_TYPE_LENGTH, 15},
+        {"calc(-2)", CSS_VALUE_TYPE_NUMBER, 0}, {"calc(-5px)", CSS_VALUE_TYPE_LENGTH, 0},
+        {"calc(0 / 0)", CSS_VALUE_TYPE_NUMBER, 0}, {"sqrt(4)", CSS_VALUE_TYPE_NUMBER, 2}
+    };
+    double basis = 20;
+    CssMathEvaluationContext context = {css_test_math_leaf, &basis, 1.0, false};
+    for (const Case& entry : cases) {
+        CssDeclaration* declaration = css_parse_property_declaration(
+            "line-height", 11, entry.value, strlen(entry.value), pool);
+        ASSERT_NE(declaration, nullptr) << entry.value;
+        CssValue computed = {};
+        ASSERT_TRUE(css_compute_line_height_value(declaration->value, &context, &computed)) << entry.value;
+        EXPECT_EQ(computed.type, entry.type) << entry.value;
+        double actual = computed.type == CSS_VALUE_TYPE_NUMBER
+            ? computed.data.number.value : computed.data.length.value;
+        EXPECT_DOUBLE_EQ(actual, entry.result) << entry.value;
+        if (computed.type == CSS_VALUE_TYPE_LENGTH) EXPECT_EQ(computed.data.length.unit, CSS_UNIT_PX);
+    }
+    const char* text = "--test:calc(1s)";
+    CssDeclaration* invalid = css_parse_declaration_text(text, strlen(text), pool);
+    ASSERT_NE(invalid, nullptr);
+    CssValue unchanged = {};
+    unchanged.type = CSS_VALUE_TYPE_NUMBER;
+    unchanged.data.number.value = 7;
+    EXPECT_FALSE(css_compute_line_height_value(invalid->value, &context, &unchanged));
+    EXPECT_EQ(unchanged.type, CSS_VALUE_TYPE_NUMBER);
+    EXPECT_DOUBLE_EQ(unchanged.data.number.value, 7);
 }
 
 TEST_F(CssEngineParserTest, SharedMathDefersMixedComparisonsUntilTheConsumerSuppliesABasis) {

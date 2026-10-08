@@ -8,6 +8,7 @@
 
 #include "utf.h"
 #include <string.h>
+#include "utf_bidi_data.h"
 
 bool utf8_key_is_canonical(const char* chars, size_t length) {
     for (size_t i = 0; i + 5 < length; i++) {
@@ -439,34 +440,35 @@ bool utf_is_cursive_script(uint32_t cp) {
 }
 
 int utf_bidi_strong_class(uint32_t cp) {
-    /* Keep bidi classification in the Unicode module so DOM-only users do
-     * not acquire a link dependency on the HTML style resolver. */
-    if (cp == 0x200E) return -1; /* LRM */
-    if (cp == 0x200F) return 1;  /* RLM */
-    if (cp == 0x061C) return 1;  /* ALM */
-    if (cp >= 0x0590 && cp <= 0x05FF) return 1;
-    if (cp >= 0x0600 && cp <= 0x07BF) return 1;
-    if (cp >= 0x0860 && cp <= 0x089F) return 1;
-    if (cp >= 0xFB50 && cp <= 0xFDFF) return 1;
-    if (cp >= 0xFE70 && cp <= 0xFEFF) return 1;
-    if (cp >= 0x07C0 && cp <= 0x07FF) return 1;
-    if (cp >= 0x0700 && cp <= 0x074F) return 1;
-    if (cp >= 0x0800 && cp <= 0x085F) return 1;
+    if (cp > 0x10FFFF) return 0;
+    // block membership cannot distinguish strong letters from digits or combining marks.
+    size_t first = 0;
+    size_t end = sizeof(utf_bidi_non_ltr_ranges) / sizeof(*utf_bidi_non_ltr_ranges);
+    while (first < end) {
+        size_t middle = first + (end - first) / 2;
+        const UtfBidiStrongRange* range = &utf_bidi_non_ltr_ranges[middle];
+        if (cp < range->first) end = middle;
+        else if (cp > range->last) first = middle + 1;
+        else return range->strong;
+    }
+    return -1;
+}
 
-    if ((cp >= 0x0041 && cp <= 0x005A) ||
-        (cp >= 0x0061 && cp <= 0x007A)) return -1;
-    if (cp >= 0x00C0 && cp <= 0x02AF) return -1;
-    if (cp >= 0x0370 && cp <= 0x03FF) return -1;
-    if (cp >= 0x0400 && cp <= 0x052F) return -1;
-    if (cp >= 0x4E00 && cp <= 0x9FFF) return -1;
-    if (cp >= 0xAC00 && cp <= 0xD7AF) return -1;
-    if (cp >= 0x3040 && cp <= 0x30FF) return -1;
-    if (cp >= 0x0E01 && cp <= 0x0E5B) return -1;
-    if (cp >= 0x0E81 && cp <= 0x0EDF) return -1;
-    if (cp >= 0x10A0 && cp <= 0x10FF) return -1;
-    if (cp >= 0x1100 && cp <= 0x11FF) return -1;
-    if (cp >= 0x0900 && cp <= 0x0DFF) return -1;
-    return 0;
+int utf8_bidi_strong_direction(const char* text, size_t length, bool first) {
+    if (!text) return 0;
+    int last = 0;
+    const char* end = text + length;
+    while (text < end) {
+        uint32_t cp = 0;
+        int consumed = utf8_decode(text, (size_t)(end - text), &cp);
+        text += consumed > 0 ? consumed : 1;
+        if (consumed <= 0) continue;
+        int strong = utf_bidi_strong_class(cp);
+        if (!strong) continue;
+        if (first) return strong;
+        last = strong;
+    }
+    return last;
 }
 
 bool utf_is_emoji_for_zwj(uint32_t cp) {

@@ -4615,12 +4615,13 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
         return js_name_item("");
     }
 
-    char computed[512];
-    if (css_prop_serialize_computed(elem, prop_id, pseudo_type,
-                                    computed, sizeof(computed))) {
-        return js_name_item(computed);
-    }
-    return js_name_item("");
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_value");
+    if (!pool) return js_name_item("");
+    String* computed = css_prop_serialize_computed_value(pool, elem, prop_id, pseudo_type);
+    // the JS string copies caller-owned output before the native scratch pool ends.
+    Item result = computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
+    mem_pool_destroy(pool);
+    return result;
 }
 
 // ============================================================================
@@ -5399,12 +5400,13 @@ static float dom_inline_css_dimension(DomElement* elem,
 
 static float dom_computed_css_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0.0f;
-    char value[64];
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_dimension");
+    if (!pool) return 0.0f;
     CssPropertyCode property = width_axis ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
-    if (!css_prop_serialize_computed(elem, property, 0, value, sizeof(value))) {
-        return 0.0f;
-    }
-    return dom_parse_positive_css_dimension(value);
+    String* value = css_prop_serialize_computed_value(pool, elem, property, 0);
+    float result = value ? dom_parse_positive_css_dimension(value->chars) : 0.0f;
+    mem_pool_destroy(pool);
+    return result;
 }
 
 static int64_t dom_headless_dimension(DomElement* elem, bool width_axis) {
@@ -7498,7 +7500,7 @@ static bool _elem_is_barred(DomElement* elem) {
 }
 
 // Get the current value of a form element as a C-string (UTF-8).
-static const char* _elem_current_value(DomElement* elem) {
+extern "C" const char* dom_form_control_current_value(DomElement* elem) {
     if (!elem || !elem->tag_name) return "";
     const char* tag = elem->tag_name;
     if (str_icmp_cstr(tag, "input") == 0) {
@@ -7543,7 +7545,7 @@ extern "C" int dom_css_element_placeholder_shown(void* element_ptr) {
     if (!element || !tc_is_text_control(element)) return 0;
     const char* placeholder = element->get_attribute("placeholder");
     return placeholder && *placeholder &&
-        dom_element_value_is_empty(element, _elem_current_value(element));
+        dom_element_value_is_empty(element, dom_form_control_current_value(element));
 }
 
 extern "C" bool dom_css_element_matches_range(void* element_ptr,
@@ -7561,7 +7563,7 @@ extern "C" bool dom_css_element_matches_range(void* element_ptr,
         (min_value && dom_engine_input_value_as_number(type, min_value, &parsed_bound)) ||
         (max_value && dom_engine_input_value_as_number(type, max_value, &parsed_bound));
     if (!has_limit) return false;
-    const char* value = _elem_current_value(element);
+    const char* value = dom_form_control_current_value(element);
     RadiantInputValidity validity = {};
     dom_engine_input_value_validate(type, value ? value : "",
         min_value, max_value, element->get_attribute("step"), &validity);
@@ -8681,7 +8683,7 @@ static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
         }
 
         const char* tag = elem->tag_name ? elem->tag_name : "";
-        const char* val = _elem_current_value(elem);
+        const char* val = dom_form_control_current_value(elem);
         bool val_empty = dom_element_value_is_empty(elem, val);
 
         // Typed value setters already sanitize through the module codec. Keeping
@@ -9186,6 +9188,7 @@ typedef enum JsDomReflectKind {
     X("href", "href", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK | DOM_TAG_BASE) \
     X("alt", "alt", STR, 0, DOM_TAG_IMG) \
     X("dir", "dir", STR, 0, DOM_TAG_ANY) \
+    X("lang", "lang", STR, 0, DOM_TAG_ANY) \
     X("width", "width", STR, 0, DOM_TAG_IFRAME) \
     X("height", "height", STR, 0, DOM_TAG_IFRAME) \
     X("acceptCharset", "accept-charset", STR, 0, DOM_TAG_FORM) \
@@ -11869,7 +11872,10 @@ static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
 
 static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
                                                    const char* interface_name) {
-    Item result = js_new_object();
+    // keep the matrix rooted while installing methods (D5.3.3).
+    RootFrame roots(1);
+    Rooted<Item> result_root(roots, js_new_object());
+    Item result = result_root.get();
     dom_set_number_property(result, "a", matrix.e11);
     dom_set_number_property(result, "b", matrix.e21);
     dom_set_number_property(result, "c", matrix.e12);

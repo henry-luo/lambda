@@ -144,6 +144,17 @@ char* radiant_resolve_resource_url(const char* href, Url* base_url,
     return mem_strdup(href, category);
 }
 
+const char* radiant_resolve_css_url(Pool* pool, const char* value, const Url* base_url) {
+    // CSS Values 4 local fragments and empty invalid-resource URLs never acquire a document address.
+    if (!value || !*value || *value == '#' || !pool || !base_url || url_is_absolute_url(value)) return value;
+    Url* resolved = url_parse_with_base(value, base_url);
+    if (!resolved) return value;
+    const char* href = url_get_href(resolved);
+    const char* result = href ? pool_strdup(pool, href) : value;
+    url_destroy(resolved);
+    return result;
+}
+
 char* radiant_resolve_resource_path(const char* href, const char* base_path,
                                     bool allow_fixture_root, MemCategory category) {
     if (!href || !*href) return nullptr;
