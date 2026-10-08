@@ -35,5 +35,11 @@ async function exerciseHeaders() {
         throw new Error('missing getter exception');
     } catch (error) { check(error === sentinel, 'getter exception identity'); }
     console.log('fetch header validation rejection passed');
+
+    let invalidUrlRejected = false;
+    try { await fetch('http://['); }
+    catch (error) { invalidUrlRejected = error instanceof TypeError; }
+    check(invalidUrlRejected, 'invalid URLs retain TypeError identity');
+    console.log('fetch invalid URL rejection passed');
 }
 exerciseHeaders().catch(error => { console.log('FAIL ' + error.message); });

@@ -43,6 +43,20 @@ Unlike GIF, each `lottie_animation_tick` (`lottie_player.cpp:17`) genuinely re-r
 
 ### 2.3 Video — mac AVFoundation, STUB elsewhere
 
+`HTMLMediaElement.prototype.canPlayType` is shared by audio and video elements.
+The JS realm adapter validates the native element identity (D7.4.5v2), converts
+the required DOMString argument, and calls `dom_platform_can_play_type`.
+`rdt_video_can_play_type` parses MIME essence and codec parameters using
+[MIME Sniffing §4.4](https://mimesniff.spec.whatwg.org/#parsing-a-mime-type).
+On macOS it checks AVFoundation's supported MIME types and
+`AVURLAsset.isPlayableExtendedMIMEType`; a supported container without codec
+information yields `"maybe"`, supported explicit codecs yield `"probably"`,
+and unsupported types/codecs yield `""`, following
+[HTML §4.8.11.3](https://html.spec.whatwg.org/multipage/media.html#dom-navigator-canplaytype).
+Stub backends and realms built without Radiant return `""` because they have
+no decoder. Capability queries describe decoding support; source loading
+below accepts local files.
+
 Video hides behind the platform-agnostic C API `rdt_video.h`. **Only macOS has a real backend** (`rdt_video_avf.mm`); Linux (FFmpeg) and Windows (Media Foundation) are declared in the header comment (`rdt_video.h:8-10`) but **not implemented** — `rdt_video_stub.cpp` provides no-op stubs that leave state stuck at `RDT_VIDEO_STATE_IDLE` and return 0/`false`/`-1` from every getter (`rdt_video_stub.cpp:54-92`). On those platforms the renderer degrades to a play-button overlay ([§4](#4-render-split-placeholder-then-post-composite-blit)).
 
 The macOS backend (`struct RdtVideo`, `rdt_video_avf.mm:27`) is a no-ARC Objective-C++ struct. `rdt_video_open_file` (`rdt_video_avf.mm:243`) builds an `AVURLAsset`/`AVPlayerItem`/`AVPlayer` for local files only (the header is explicit: web URLs deferred, `rdt_video.h:55-56`), and — critically — uses an `AVAssetImageGenerator` for frames rather than an `AVPlayerItemVideoOutput`. The comment at `rdt_video_avf.mm:265-267` records why: `AVPlayerItemVideoOutput` makes otherwise-playable items fail with `AVFoundationErrorDomain -11821` in headless/test environments, so `AVPlayer` is kept only for timing/audio and frames are pulled on demand. `rdt_video_get_frame` (`rdt_video_avf.mm:434`) lazily `copyCGImageAtTime`s into a `CGBitmapContext` RGBA buffer, caching by `last_generated_frame_ms` so repeated pulls of the same time are cheap.

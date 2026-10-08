@@ -884,6 +884,7 @@ Item js_new_error_with_stack(Item message, Item stack_str);
  * Returns a Map with {name: error_name, message: msg, stack: trace}.
  */
 LAMBDA_RT_API Item js_new_error_with_name(Item error_name, Item message);
+LAMBDA_RT_API Item js_new_error_with_name_cstr(const char* error_name, const char* message);
 Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
 Item js_error_materialize_stack(Item error_obj);
 

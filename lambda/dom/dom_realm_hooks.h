@@ -50,6 +50,7 @@ extern "C" Item dom_element_animate(Item keyframes_item, Item options_item);
  */
 extern "C" int dom_html_interface_count(void);
 extern "C" const char* dom_html_interface_ctor_name(int index);
+extern "C" const char* dom_html_interface_name(void* element);
 
 /** window.prompt() — dequeues a harness-seeded answer; core behaviour. */
 extern "C" Item dom_window_prompt(Item message_item, Item default_item);

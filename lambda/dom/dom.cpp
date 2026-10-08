@@ -2262,7 +2262,8 @@ extern "C" const char* dom_html_interface_ctor_name(int index) {
     return s_dom_html_interfaces[index].constructor_name;
 }
 
-static const char* dom_html_interface_name(DomElement* elem) {
+extern "C" const char* dom_html_interface_name(void* element) {
+    DomElement* elem = (DomElement*)element;
     if (!elem || !elem->tag_name || elem->tag_name[0] == '#') return nullptr;
     int count = (int)(sizeof(s_dom_html_interfaces) /
         sizeof(s_dom_html_interfaces[0]));

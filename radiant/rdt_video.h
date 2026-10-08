@@ -15,6 +15,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifndef RADIANT_RDT_VIDEO_API
 #define RADIANT_RDT_VIDEO_API
@@ -62,6 +63,9 @@ void            rdt_video_destroy(RdtVideo* video);
 // ---------------------------------------------------------------------------
 
 int             rdt_video_open_file(RdtVideo* video, const char* file_path);
+
+// report HTML media capability using the active decoder's MIME/codec support.
+const char*     rdt_video_can_play_type(const char* mime_type, size_t length);
 
 // ---------------------------------------------------------------------------
 // Layout rect — decode resolution capped to this size to limit memory.

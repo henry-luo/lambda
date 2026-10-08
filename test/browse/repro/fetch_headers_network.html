@@ -19,6 +19,10 @@ async function exerciseHeaders() {
     try { response.headers.set('x-repeat', 'changed'); } catch (error) { immutable = error instanceof TypeError; }
     check(immutable, 'response guard');
     check(await response.text() === 'header fixture body', 'body retained');
+    let rejected = false;
+    try { await fetch('fetch_transport_error'); }
+    catch (error) { rejected = error instanceof TypeError; }
+    check(rejected, 'native transport failures retain TypeError identity');
     console.log('FETCH_HEADERS_NETWORK_PASS');
 }
 exerciseHeaders().catch(error => { console.log('FETCH_HEADERS_NETWORK_FAIL ' + error.message); });

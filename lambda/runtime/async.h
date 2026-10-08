@@ -133,6 +133,8 @@ typedef struct EvalContext EvalContext;
 void runtime_job_queue_init(RuntimeJobQueue* queue, Item* storage_owner);
 bool runtime_job_queue_push(RuntimeJobQueue* queue, const RuntimeJob* job);
 bool runtime_job_queue_pop(RuntimeJobQueue* queue, RuntimeJob* job);
+// stop before a live job at or beyond the exclusive ID boundary; cancelled jobs are skipped.
+bool runtime_job_queue_pop_before_id(RuntimeJobQueue* queue, RuntimeJob* job, int64_t limit);
 int64_t runtime_job_queue_size(const RuntimeJobQueue* queue);
 bool runtime_job_queue_cancel(RuntimeJobQueue* queue, int64_t id);
 void runtime_job_queue_clear(RuntimeJobQueue* queue);

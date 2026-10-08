@@ -1,2 +1,3 @@
 fetch native response headers and immutable guard passed
 fetch header validation rejection passed
+fetch invalid URL rejection passed

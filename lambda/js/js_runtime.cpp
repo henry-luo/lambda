@@ -1359,19 +1359,11 @@ static Item js_proxy_get_trap(JsProxyData* pd, const char* trap_name, int trap_l
 
 extern "C" Item js_proxy_new(Item target, Item handler) {
     // ES2020 §26.2.1.1: both target and handler must be objects
-    TypeId tt = get_type_id(target);
-    // Ordinary packed numeric arrays use ArrayNum storage but remain ordinary
-    // JavaScript objects; rejecting that representation here made Proxy
-    // construction disagree with every other object admission path (D4.6.1v2).
-    if (tt != LMD_TYPE_MAP && tt != LMD_TYPE_VMAP &&
-            !js_is_ordinary_numeric_array(target) &&
-            tt != LMD_TYPE_ARRAY && tt != LMD_TYPE_FUNC && tt != LMD_TYPE_ELEMENT) {
+    // native nodes and collections are object values through their virtual carriers (D7.4.5v2).
+    if (!js_is_object_value(target)) {
         return js_throw_type_error("Cannot create proxy with a non-object as target");
     }
-    TypeId ht = get_type_id(handler);
-    if (ht != LMD_TYPE_MAP && ht != LMD_TYPE_VMAP &&
-            !js_is_ordinary_numeric_array(handler) &&
-            ht != LMD_TYPE_ARRAY && ht != LMD_TYPE_FUNC && ht != LMD_TYPE_ELEMENT) {
+    if (!js_is_object_value(handler)) {
         return js_throw_type_error("Cannot create proxy with a non-object as handler");
     }
 

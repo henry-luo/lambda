@@ -16,3 +16,5 @@ true
 test-class
 test-class
 dynamic-el
+TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError
+5px

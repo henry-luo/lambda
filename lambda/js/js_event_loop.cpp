@@ -232,14 +232,10 @@ static bool raf_push(Item cb, int64_t id) {
     return runtime_job_queue_push(&animation_frame_queue, &job);
 }
 
-static Item raf_pop(int64_t* out_id) {
+static Item raf_pop(int64_t frame_limit) {
     RuntimeJob job = {};
-    if (!runtime_job_queue_pop(&animation_frame_queue, &job)) {
-        if (out_id) *out_id = -1;
-        return ItemNull;
-    }
-    if (out_id) *out_id = job.id;
-    return job.callback;
+    return runtime_job_queue_pop_before_id(&animation_frame_queue, &job, frame_limit)
+        ? job.callback : ItemNull;
 }
 
 extern "C" Item js_requestAnimationFrame(Item callback) {
@@ -279,9 +275,10 @@ static void js_event_loop_render_checkpoint(void) {
 }
 
 extern "C" int js_animation_frame_flush(double timestamp_ms) {
-    int pending = (int)runtime_job_queue_size(&animation_frame_queue);
     int called = 0;
-    if (pending <= 0) return 0;
+    if (runtime_job_queue_size(&animation_frame_queue) <= 0) return 0;
+    // snapshot handles per HTML §8.12; cancellations cannot admit newly scheduled callbacks into this frame.
+    const int64_t frame_limit = next_raf_id;
     // The frame clock supplies absolute monotonic time; DOMHighResTimeStamp is
     // relative to the same document origin as performance.now().
     RootFrame roots(2);
@@ -294,15 +291,16 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
     js_performance_frame_clock_begin(timestamp_ms);
     dom_engine_animation_frame_prepare(dom_get_document(),timestamp_ms);
 
-    for (int i = 0; i < pending; i++) {
-        int64_t id = -1;
-        callback_root.set(raf_pop(&id));
-        (void)id;
+    for (;;) {
+        callback_root.set(raf_pop(frame_limit));
+        if (callback_root.get().item == ITEM_NULL) break;
         if (js_is_callable(callback_root.get())) {
             JsEventLoopCallbackScope callback_scope;
             Item timestamp = timestamp_root.get();
             js_call_function(callback_root.get(), ItemNull, &timestamp, 1);
             called++;
+            // callback cleanup runs microtasks before the next handle, allowing its cancellation.
+            js_microtask_flush();
         }
     }
     js_performance_frame_clock_end();

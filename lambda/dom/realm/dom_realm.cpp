@@ -35,6 +35,7 @@ Item dom_realm_throw(Item v) { return js_throw_value(v); }
 Item dom_realm_throw_type_error(const char* m) { return js_throw_type_error(m); }
 Item dom_realm_new_error(Item m) { return js_new_error(m); }
 Item dom_realm_new_error_named(Item name, Item m) { return js_new_error_with_name(name, m); }
+Item dom_realm_new_error_named_cstr(const char* name, const char* m) { return js_new_error_with_name_cstr(name, m); }
 Item dom_realm_new_dom_exception(Item name, Item message) { return js_domexception_new(message, name); }
 
 Item dom_realm_new_object_of_class(int c) { return js_new_object_with_class(c); }

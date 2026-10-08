@@ -479,6 +479,30 @@ static bool _document_receiver(Item receiver) {
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 9;
 }
 
+static Item _media_can_play_type(Item /*callee*/, Item receiver, Item* args,
+        int argc, uint64_t* /*result_home*/) {
+    void* element = _element_receiver(receiver) ? dom_unwrap_element(receiver) : nullptr;
+    const char* name = element ? dom_html_interface_name(element) : nullptr;
+    const char* namespace_uri = element ? dom_element_namespace_uri(element) : nullptr;
+    if (!name || !namespace_uri || strcmp(namespace_uri, "http://www.w3.org/1999/xhtml") ||
+            (strcmp(name, "HTMLVideoElement") && strcmp(name, "HTMLAudioElement")))
+        return js_throw_type_error("Illegal HTMLMediaElement receiver");
+    if (!argc) return js_throw_type_error("canPlayType requires a MIME type");
+    RootFrame roots(1);
+    Rooted<Item> type_root(roots, js_to_string(args[0]));
+    JS_RETURN_IF_ERROR(type_root.get());
+    String* type = it2s(type_root.get());
+    return make_string_item(dom_platform_can_play_type(type->chars, type->len));
+}
+
+static void _install_media_interface(Item global) {
+    RootFrame roots(2);
+    Rooted<Item> prototype_root(roots, _iface_proto(global, "HTMLMediaElement"));
+    Rooted<Item> method_root(roots, js_new_native_payload_function(_media_can_play_type, 0, 1));
+    js_set_function_name(method_root.get(), js_name_item("canPlayType"));
+    js_set_key_cstr(prototype_root.get(), "canPlayType", method_root.get());
+}
+
 static void _install_node_interface_members(Item global) {
     static const char* const node_members[] = {
         "nodeName", "nodeType", "parentNode", "parentElement", "isConnected",
@@ -571,6 +595,7 @@ extern "C" void dom_install_collection_globals(void) {
     dom_install_value_constructor(global, "DOMPoint", dom_point_constructor, true);
     _install_iface(global, "HTMLMediaElement");
     _link_iface_proto(global, "HTMLMediaElement", "HTMLElement");
+    _install_media_interface(global);
     int html_interface_count = dom_html_interface_count();
     for (int i = 0; i < html_interface_count; i++) {
         // Specialized HTML wrappers retain their browser prototype chain for
@@ -702,9 +727,13 @@ extern "C" void dom_install_image_constructor(void) {
 // Window-level publications
 // ---------------------------------------------------------------------------
 
-JS_FORWARD_STATIC_ITEM(js_window_get_computed_style,
-    (Item elem_item, Item pseudo_item), dom_get_computed_style,
-    (elem_item, pseudo_item))
+static Item js_window_get_computed_style(Item elem_item, Item pseudo_item) {
+    // WebIDL requires a native Element before entering the realm-neutral core.
+    if (!_element_receiver(elem_item)) {
+        return js_throw_type_error("getComputedStyle: argument must be an Element");
+    }
+    return dom_get_computed_style(elem_item, pseudo_item);
+}
 
 extern "C" void dom_install_window_computed_style_global(void) {
     Item global = js_get_global_this();

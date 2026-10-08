@@ -18,8 +18,92 @@
 
 #include <math.h>
 #include <stdatomic.h>
+#include <string.h>
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
+static bool media_mime_token(unichar ch) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+        (ch >= '0' && ch <= '9') ||
+        (ch && ch < 128 && strchr("!#$%&'*+-.^_`|~", ch));
+}
+
+extern "C" const char* rdt_video_can_play_type(const char* mime_type, size_t length) {
+    if (!mime_type || !length) return "";
+    @autoreleasepool {
+        NSString* input = [[[NSString alloc] initWithBytes:mime_type length:length
+            encoding:NSUTF8StringEncoding] autorelease];
+        if (!input) return "";
+        NSCharacterSet* whitespace = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n"];
+        input = [input stringByTrimmingCharactersInSet:whitespace];
+        NSUInteger position = 0, count = input.length;
+        while (position < count && [input characterAtIndex:position] != '/') {
+            if (!media_mime_token([input characterAtIndex:position])) return "";
+            position++;
+        }
+        if (!position || position == count) return "";
+        NSUInteger subtype_start = ++position;
+        while (position < count && [input characterAtIndex:position] != ';') position++;
+        NSUInteger essence_end = position;
+        while (essence_end > subtype_start &&
+                [whitespace characterIsMember:[input characterAtIndex:essence_end - 1]]) essence_end--;
+        if (essence_end == subtype_start) return "";
+        for (NSUInteger index = subtype_start; index < essence_end; index++)
+            if (!media_mime_token([input characterAtIndex:index])) return "";
+        NSString* essence = [[input substringToIndex:essence_end] lowercaseString];
+        if (![[AVURLAsset audiovisualMIMETypes] containsObject:essence]) return "";
+
+        // parse MIME parameters with §4.4's quoted escapes, invalid-parameter skipping, and first-codecs rule.
+        NSString* codecs = nil;
+        while (position < count) {
+            position++;
+            while (position < count && [whitespace characterIsMember:[input characterAtIndex:position]]) position++;
+            NSUInteger name_start = position;
+            bool name_valid = true;
+            while (position < count) {
+                unichar ch = [input characterAtIndex:position];
+                if (ch == ';' || ch == '=') break;
+                name_valid &= media_mime_token(ch);
+                position++;
+            }
+            NSString* name = [[input substringWithRange:NSMakeRange(name_start, position - name_start)] lowercaseString];
+            if (position == count) break;
+            if ([input characterAtIndex:position] == ';') continue;
+            if (++position == count) break;
+            NSMutableString* value = [NSMutableString string];
+            if ([input characterAtIndex:position] == '"') {
+                position++;
+                while (position < count) {
+                    unichar ch = [input characterAtIndex:position++];
+                    if (ch == '"') break;
+                    if (ch == '\\' && position < count) ch = [input characterAtIndex:position++];
+                    [value appendString:[NSString stringWithCharacters:&ch length:1]];
+                }
+                while (position < count && [input characterAtIndex:position] != ';') position++;
+            } else {
+                NSUInteger value_start = position;
+                while (position < count && [input characterAtIndex:position] != ';') position++;
+                NSUInteger value_end = position;
+                while (value_end > value_start &&
+                        [whitespace characterIsMember:[input characterAtIndex:value_end - 1]]) value_end--;
+                if (value_end == value_start) continue;
+                [value appendString:[input substringWithRange:NSMakeRange(value_start, value_end - value_start)]];
+            }
+            bool value_valid = true;
+            for (NSUInteger index = 0; index < value.length; index++) {
+                unichar ch = [value characterAtIndex:index];
+                value_valid &= ch == '\t' || (ch >= 32 && ch <= 126) || (ch >= 128 && ch <= 255);
+            }
+            if (!codecs && name_valid && value_valid && [name isEqualToString:@"codecs"]) codecs = value;
+        }
+        if (!codecs || !codecs.length) return "maybe";
+        NSString* escaped = [[codecs stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+            stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+        NSString* extended = [NSString stringWithFormat:@"%@; codecs=\"%@\"", essence, escaped];
+        // query the same decoder used for playback; unsupported codecs must not select that source.
+        return [AVURLAsset isPlayableExtendedMIMEType:extended] ? "probably" : "";
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Internal struct

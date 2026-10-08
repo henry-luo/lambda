@@ -65,6 +65,7 @@ Item dom_realm_throw(Item value);
 Item dom_realm_throw_type_error(const char* message);
 Item dom_realm_new_error(Item message);
 Item dom_realm_new_error_named(Item error_name, Item message);
+Item dom_realm_new_error_named_cstr(const char* error_name, const char* message);
 Item dom_realm_new_dom_exception(Item error_name, Item message);
 
 // --- the script object model --------------------------------------------
