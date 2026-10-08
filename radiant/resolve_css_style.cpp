@@ -3346,7 +3346,7 @@ DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node
     if (tag_id == MARKUP_NAME_HR) return {CSS_VALUE_BLOCK, RDT_DISPLAY_REPLACED};
     if (tag_id == MARKUP_NAME_RUBY) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
     if (tag_id == MARKUP_NAME_RT) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT};
-    if (tag_id == MARKUP_NAME_SVG) return {CSS_VALUE_INLINE, RDT_DISPLAY_REPLACED};
+    if (layout_is_svg_viewport(tag_id)) return {CSS_VALUE_INLINE, RDT_DISPLAY_REPLACED};
     if (tag_id == MARKUP_NAME_TABLE) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE};
     if (tag_id == MARKUP_NAME_THEAD || tag_id == MARKUP_NAME_TBODY ||
         tag_id == MARKUP_NAME_TFOOT) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW_GROUP};

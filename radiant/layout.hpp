@@ -19,6 +19,12 @@
 
 typedef struct LayoutContext LayoutContext;
 
+// native scene viewports share SVG intrinsic sizing without adopting its DOM namespace.
+inline bool layout_is_svg_viewport(NameId tag) {
+    return tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_SCENE3D;
+}
+
+
 // HTML noscript text remains script-visible, but with scripting enabled the
 // element represents nothing and therefore must not create a CSS text box.
 inline bool layout_noscript_content_suppressed(const DomElement* element) {

@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "layout.hpp"
+#include "scene3d.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -78,6 +79,9 @@ static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* 
     if (block->form_control()) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_block_view for form control");
         render_block_view(rdcon, block);
+    }
+    else if (block->tag_id == MARKUP_NAME_SCENE3D) {
+        render_raster_retained_media(rdcon, block, render_scene3d_content);
     }
     else if (block->tag_id == MARKUP_NAME_CANVAS) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_canvas_content for <canvas>");

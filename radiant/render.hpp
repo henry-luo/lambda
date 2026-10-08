@@ -3942,6 +3942,7 @@ bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* 
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
                                         int target_height);
 void render_image_view(struct RasterRenderContext* rdcon, ViewBlock* view);
+void render_surface_content(struct RasterRenderContext* rdcon, ViewBlock* view, ImageSurface* surface);
 void render_canvas_content(struct RasterRenderContext* rdcon, ViewBlock* view);
 void render_video_content(struct RasterRenderContext* rdcon, ViewBlock* view);
 bool render_media_is_webview_layer(ViewBlock* view);

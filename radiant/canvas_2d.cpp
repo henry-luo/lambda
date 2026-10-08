@@ -875,13 +875,18 @@ void render_canvas_content(RasterRenderContext* rdcon, ViewBlock* view) {
     CanvasEntry* entry = canvas_entry_for_element(element, false);
     if (!entry || !entry->surface) return;
 
+    render_surface_content(rdcon, view, entry->surface);
+}
+
+void render_surface_content(RasterRenderContext* rdcon, ViewBlock* view, ImageSurface* surface) {
+    if (!rdcon || !view || !surface) return;
     Rect rect = render_geometry_block_content_rect(&rdcon->block, view,
                                                    rdcon->raster_scale);
     if (rect.width <= 0.0f || rect.height <= 0.0f) return;
     Bound clip = rdcon->has_transform
         ? rdcon->block.clip
         : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
-    render_painter_blit_surface_scaled(rdcon, entry->surface, nullptr,
+    render_painter_blit_surface_scaled(rdcon, surface, nullptr,
                                        rdcon->ui_context->surface, &rect, &clip,
                                        SCALE_MODE_LINEAR, rdcon->clip_shapes,
                                        rdcon->clip_shape_depth, 255);

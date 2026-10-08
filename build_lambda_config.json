@@ -3423,6 +3423,43 @@
             "icon": "\ud83e\uddfe"
           },
           {
+            "source": "test/test_scene3d_gtest.cpp",
+            "name": "Native Scene3D Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "Security",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "binary": "test_scene3d_gtest.exe",
+            "icon": "\ud83c\udfa8",
+            "parallel": false
+          },
+          {
             "source": "test/test_rdt_vector_gtest.cpp",
             "name": "Vector Backend Tests",
             "dependencies": [

@@ -1082,7 +1082,11 @@ SvgViewBox svg_parse_viewbox(const char* viewbox_attr) {
     if (!viewbox_attr || !*viewbox_attr) return vb;
 
     float values[4];
-    if (str_parse_float_list(viewbox_attr, ", \t\n\r\f\v", values, 4, nullptr) == 4) {
+    const char* end = nullptr;
+    // reject malformed and negative extents; zero remains a valid disabled viewport.
+    if (str_parse_float_list(viewbox_attr, ", \t\n\r\f\v", values, 4, &end) == 4 &&
+        end && !*str_skip_ascii_space(end) && isfinite(values[0]) && isfinite(values[1]) &&
+        isfinite(values[2]) && isfinite(values[3]) && values[2] >= 0 && values[3] >= 0) {
         vb.min_x = values[0];
         vb.min_y = values[1];
         vb.width = values[2];

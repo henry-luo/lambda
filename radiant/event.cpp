@@ -1,3 +1,4 @@
+#include "scene3d.hpp"
 #include "event.hpp"
 #include "../lib/queue.h"
 #include "layout.hpp"
@@ -7735,6 +7736,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc) {
     if (!uicon || !doc || doc->js.mutation_count == 0) return;
+    scene3d_collect(doc);
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
