@@ -23,6 +23,20 @@ inline Scene3dMatrix scene3d_multiply(const Scene3dMatrix& a, const Scene3dMatri
         for (unsigned k = 0; k < 4; k++) m.v[c*4+r] += a.v[k*4+r] * b.v[c*4+k];
     return m;
 }
+inline bool scene3d_inverse_affine(const Scene3dMatrix& matrix,Scene3dMatrix* inverse) {
+    if(matrix.v[3]!=0||matrix.v[7]!=0||matrix.v[11]!=0||matrix.v[15]!=1) return false;
+    Scene3dVec columns[3];
+    for(unsigned c=0;c<3;c++) columns[c]={matrix.v[c*4],matrix.v[c*4+1],matrix.v[c*4+2]};
+    Scene3dVec cofactors[3]={scene3d_cross(columns[1],columns[2]),scene3d_cross(columns[2],columns[0]),scene3d_cross(columns[0],columns[1])};
+    float determinant=scene3d_dot(columns[0],cofactors[0]);if(!isfinite(determinant)||fabsf(determinant)<1e-10f) return false;
+    *inverse=scene3d_identity();
+    for(unsigned r=0;r<3;r++) {
+        inverse->v[r]=cofactors[r].x/determinant;inverse->v[4+r]=cofactors[r].y/determinant;inverse->v[8+r]=cofactors[r].z/determinant;
+        inverse->v[12+r]=-(inverse->v[r]*matrix.v[12]+inverse->v[4+r]*matrix.v[13]+inverse->v[8+r]*matrix.v[14]);
+    }
+    for(float component:inverse->v) if(!isfinite(component)) return false;
+    return true;
+}
 inline Scene3dVec scene3d_point(const Scene3dMatrix& m, Scene3dVec p, float w = 1) {
     return {m.v[0]*p.x+m.v[4]*p.y+m.v[8]*p.z+m.v[12]*w,
         m.v[1]*p.x+m.v[5]*p.y+m.v[9]*p.z+m.v[13]*w,

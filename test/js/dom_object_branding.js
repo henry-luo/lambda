@@ -13,6 +13,17 @@ console.log(Object.prototype.toString.call(link));
 console.log(link instanceof HTMLElement);
 console.log(link instanceof HTMLLinkElement);
 
+// stylesheet owners must expose the specialized HTML interface as well.
+var style = document.createElement('style');
+console.log(Object.prototype.toString.call(style));
+console.log(style instanceof HTMLElement);
+console.log(style instanceof HTMLStyleElement);
+
+var iframe = document.createElement('iframe');
+console.log(Object.prototype.toString.call(iframe));
+console.log(iframe instanceof HTMLElement);
+console.log(iframe instanceof HTMLIFrameElement);
+
 var comment = new Comment('brand');
 console.log(comment instanceof Comment);
 console.log(comment instanceof CharacterData);

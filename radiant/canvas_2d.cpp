@@ -394,6 +394,13 @@ extern "C" bool radiant_canvas_ensure(void* canvas_element) {
     entry->mode=1;return true;
 }
 
+extern "C" StrBuf* radiant_canvas_to_data_url(void* canvas_element) {
+    CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
+    if (!entry) return nullptr;
+    if (!entry->surface) return strbuf_create("data:,");
+    return render_encode_surface_data_uri(entry->surface);
+}
+
 extern "C" bool radiant_canvas_set_dimension(void* canvas_element,
                                                 bool is_width, uint32_t value) {
     DomElement* element = (DomElement*)canvas_element;
@@ -944,6 +951,9 @@ static CanvasEntry* webgl_canvas(uint64_t id) {
         if (entry->webgl_id==id) return entry;
     return nullptr;
 }
+extern "C" bool radiant_webgl_extension_supported(uint64_t canvas,const char* name) {
+    CanvasEntry* entry=webgl_canvas(canvas);return entry&&native_gl_extension_supported(entry->graphics,name);
+}
 extern "C" void radiant_webgl_error(uint64_t canvas,unsigned error) {
     CanvasEntry* entry=webgl_canvas(canvas);if (entry) native_gl_webgl_error(entry->graphics,error);
 }
@@ -959,6 +969,64 @@ extern "C" bool radiant_webgl_call(uint64_t canvas,const WebGlCommand* command,W
         default:break;
     }
     return success;
+}
+extern "C" bool radiant_webgl_image(uint64_t canvas,const WebGlCommand* command,void* source,WebGlReply* reply) {
+    CanvasEntry* destination=webgl_canvas(canvas);
+    DomElement* element=(DomElement*)source;
+    if(!destination||!command||!element||!reply) return false;
+    ImageSurfaceReadScope read_scope;
+    ImageSurface* image=nullptr;bool owned=false;
+    if(element->tag()==MARKUP_NAME_CANVAS) {
+        CanvasEntry* entry=canvas_entry_for_element(element,true);
+        if(entry&&entry->mode==2) { image=native_gl_webgl_snapshot(entry->graphics);owned=true; }
+        else if(entry) image=entry->surface;
+    } else if(element->tag()==MARKUP_NAME_IMG) {
+        image=image_element_surface(element);
+        if(image&&image->format!=IMAGE_FORMAT_SVG) image_surface_ensure_decoded(image,image->width,image->height);
+    }
+    bool valid=image&&image->pixels&&image->width>0&&image->height>0&&image->width<=4096&&image->height<=4096;
+    if(!valid) { if(owned) image_surface_destroy(image);radiant_webgl_error(canvas,0x0501);return true; }
+    unsigned format=command->n[6],type=command->n[7];
+    unsigned components=format==0x1908?4:format==0x1907?3:format==0x1903?1:format==0x8227?2:0;
+    if(!components||type!=0x1401) {
+        if(owned) image_surface_destroy(image);radiant_webgl_error(canvas,0x0500);return true;
+    }
+    unsigned width=image->decoded_width>0?image->decoded_width:image->width;
+    unsigned height=image->decoded_height>0?image->decoded_height:image->height;
+    bool sub=command->op==WEBGL_texSubImage2D;
+    unsigned skip[2]={};
+    for(unsigned i=0;i<2;i++) {
+        WebGlCommand query={};query.op=WEBGL_getParameter;query.n[0]=i?0x0CF3:0x0CF4;
+        WebGlReply parameter={};native_gl_webgl_call(destination->graphics,&query,&parameter);skip[i]=parameter.n[0];
+    }
+    unsigned source_width=width,source_height=height;
+    if(command->source_dimensions) {
+        double w=command->n[sub?4:3],h=command->n[sub?5:4];
+        if(w<0||h<0||w>4096||h>4096) {
+            if(owned) image_surface_destroy(image);radiant_webgl_error(canvas,0x0501);return true;
+        }
+        width=w;height=h;
+    }
+    // WebGL image uploads ignore row alignment/length but select the source rectangle using skips.
+    if(skip[0]>source_width||width>source_width-skip[0]||skip[1]>source_height||height>source_height-skip[1]) {
+        if(owned) image_surface_destroy(image);radiant_webgl_error(canvas,0x0502);return true;
+    }
+    size_t bytes=(size_t)width*height*components;
+    auto* pixels=(uint8_t*)mem_alloc(bytes,MEM_CAT_RENDER);
+    if(!pixels) { if(owned) image_surface_destroy(image);radiant_webgl_error(canvas,0x0505);return true; }
+    for(unsigned y=0;y<height;y++) for(unsigned x=0;x<width;x++) {
+        const uint8_t* pixel=(const uint8_t*)image->pixels+(y+skip[1])*image->pitch+(x+skip[0])*4;
+        for(unsigned c=0;c<components;c++) {
+            unsigned channel=pixel[c];
+            if(c<3&&image->alpha_mode==IMAGE_ALPHA_PREMULTIPLIED)
+                channel=pixel[3]?((channel*255+pixel[3]/2)/pixel[3]):0;
+            pixels[((size_t)y*width+x)*components+c]=channel>255?255:channel;
+        }
+    }
+    WebGlCommand upload=*command;upload.data=pixels;upload.bytes=bytes;upload.compact_pixels=true;
+    upload.n[sub?4:3]=width;upload.n[sub?5:4]=height;
+    bool handled=native_gl_webgl_call(destination->graphics,&upload,reply);
+    mem_free(pixels);if(owned) image_surface_destroy(image);return handled;
 }
 void radiant_canvas_prepare_document(DomDocument* document) {
     for (CanvasEntry* entry=webgl_canvases;entry;entry=entry->graphics_next) if (entry->element->doc==document) {

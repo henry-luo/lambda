@@ -53,6 +53,7 @@ extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
 extern "C" Item js_data_transfer_new_read_only_with_strings(const char* text_plain,
                                                               const char* text_html);
 extern Item js_make_number(double value);
+#include "../lambda/dom/realm/dom_realm.h"
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include "../lib/time_util.h"
@@ -7120,16 +7121,35 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
     return true;
 }
 
+static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
+    return view_geometry_dom_is_descendant(node, ancestor);
+}
+
+static void dom_js_add_subtree_root(DomElement* candidate,
+                                    DomElement** roots, int* count) {
+    for (int i = 0; i < *count; i++) {
+        if (dom_js_node_contains(roots[i], candidate)) return;
+    }
+    for (int i = 0; i < *count;) {
+        if (dom_js_node_contains(candidate, roots[i])) roots[i] = roots[--*count];
+        else i++;
+    }
+    roots[(*count)++] = candidate;
+}
+
+static bool dom_js_mutation_needs_subtree_cascade(DomJsMutationKind kind) {
+    return kind != DOM_JS_MUTATION_CONTROL_VALUE &&
+        kind != DOM_JS_MUTATION_STYLE && kind != DOM_JS_MUTATION_INLINE_STYLE &&
+        kind != DOM_JS_MUTATION_STYLE_REPAINT && kind != DOM_JS_MUTATION_TEXT;
+}
+
 static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
                                      DomJsMutationKind kind,
                                      SelectorMatcher* matcher) {
     if (!doc || !root) return;
 
     if (kind == DOM_JS_MUTATION_CONTROL_VALUE) return;
-    if (kind == DOM_JS_MUTATION_STYLE ||
-        kind == DOM_JS_MUTATION_INLINE_STYLE ||
-        kind == DOM_JS_MUTATION_STYLE_REPAINT ||
-        kind == DOM_JS_MUTATION_TEXT) {
+    if (!dom_js_mutation_needs_subtree_cascade(kind)) {
         root->set_styles_resolved(false);
         return;
     }
@@ -7142,6 +7162,31 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
     radiant_apply_css_stylesheets_to_tree(
         doc, root, doc->stylesheets, doc->stylesheet_count,
         pool, css_engine, matcher);
+}
+
+static bool dom_js_recascade_mutations(DomDocument* doc, SelectorMatcher* matcher) {
+    DomElement** roots = (DomElement**)mem_alloc(
+        sizeof(DomElement*) * doc->js.mutation_record_count, MEM_CAT_LAYOUT);
+    if (!roots) return false;
+    int count = 0;
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
+        if (!dom_js_record_has_connected_endpoint(doc, record)) continue;
+        DomElement* root = dom_js_record_cascade_root(doc, record);
+        if (!root) continue;
+        if (dom_js_mutation_needs_subtree_cascade(record->kind)) {
+            // All edits are already applied: overlapping roots need one pass
+            // over the final DOM, rather than one full cascade per journal entry.
+            dom_js_add_subtree_root(root, roots, &count);
+        } else {
+            dom_js_recascade_subtree(doc, root, record->kind, matcher);
+        }
+    }
+    for (int i = 0; i < count; i++) {
+        dom_js_recascade_subtree(doc, roots[i], DOM_JS_MUTATION_ATTRIBUTE, matcher);
+    }
+    mem_free(roots);
+    return true;
 }
 
 bool radiant_apply_load_mutation_cascade(DomDocument* doc,
@@ -7158,18 +7203,12 @@ bool radiant_apply_load_mutation_cascade(DomDocument* doc,
     SelectorMatcher* matcher = &matcher_storage;
     state_configure_selector_matcher((DocState*)doc->state, matcher);
 
-    for (int i = 0; i < doc->js.mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js.mutation_records[i];
-        if (!dom_js_record_has_connected_endpoint(doc, record)) continue;
-        DomElement* root = dom_js_record_cascade_root(doc, record);
-        if (root) dom_js_recascade_subtree(doc, root, record->kind, matcher);
+    if (!dom_js_recascade_mutations(doc, matcher)) {
+        if (fallback_reason) *fallback_reason = "cascade-root-allocation";
+        return false;
     }
     if (fallback_reason) *fallback_reason = "eligible";
     return true;
-}
-
-static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
-    return view_geometry_dom_is_descendant(node, ancestor);
 }
 
 static bool dom_js_node_has_table_fixup_context(DomNode* node) {
@@ -7267,25 +7306,7 @@ static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
             continue;
         }
 
-        bool covered = false;
-        for (int j = 0; j < root_count; j++) {
-            if (dom_js_node_contains(static_cast<DomNode*>(roots[j]),
-                                     static_cast<DomNode*>(candidate))) {
-                covered = true;
-                break;
-            }
-        }
-        if (covered) continue;
-
-        for (int j = 0; j < root_count;) {
-            if (dom_js_node_contains(static_cast<DomNode*>(candidate),
-                                     static_cast<DomNode*>(roots[j]))) {
-                roots[j] = roots[--root_count];
-            } else {
-                j++;
-            }
-        }
-        roots[root_count++] = candidate;
+        dom_js_add_subtree_root(candidate, roots, &root_count);
     }
 
     for (int i = 0; i < root_count; i++) {
@@ -7462,15 +7483,9 @@ static bool post_html_handler_incremental_rebuild(
         return false;
     }
 
-    for (int i = 0; i < doc->js.mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js.mutation_records[i];
-        if (!dom_js_record_has_connected_endpoint(doc, record)) {
-            continue;
-        }
-        DomElement* root = dom_js_record_cascade_root(doc, record);
-        if (root) {
-            dom_js_recascade_subtree(doc, root, record->kind, matcher);
-        }
+    if (!dom_js_recascade_mutations(doc, matcher)) {
+        if (fallback_reason_out) *fallback_reason_out = "cascade-root-allocation";
+        return false;
     }
 
     uint64_t t1 = time_now_ns();
@@ -8361,6 +8376,7 @@ struct RadiantTimingEventData {
     const char* value;
     double seconds;
     double detail;
+    uint64_t action;
 };
 
 static Item radiant_build_css_timing_event(void* userdata) {
@@ -8371,6 +8387,21 @@ static Item radiant_build_css_timing_event(void* userdata) {
 static Item radiant_build_svg_timing_event(void* userdata) {
     RadiantTimingEventData* data = (RadiantTimingEventData*)userdata;
     return js_create_native_svg_time_event(data->type, data->detail, data->seconds);
+}
+
+static Item radiant_build_scene_timing_event(void* userdata) {
+    auto* data=(RadiantTimingEventData*)userdata;
+    RootFrame roots(2);Rooted<Item> event(roots,js_create_event(data->type,false,false));
+    Rooted<Item> value(roots,make_string_item(data->name));
+    dom_realm_set_name(event.get(),"clip",value.get());
+    value.set(js_make_number(data->action));dom_realm_set_name(event.get(),"action",value.get());
+    value.set(js_make_number(data->detail));dom_realm_set_name(event.get(),!strcmp(data->type,"loop")?"loopDelta":"direction",value.get());
+    value.set(js_make_number(data->seconds));dom_realm_set_name(event.get(),"time",value.get());return event.get();
+}
+void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,const char* type,
+        const char* clip,uint64_t action,double detail,double seconds) {
+    RadiantTimingEventData data={type,clip,nullptr,seconds,detail,action};
+    radiant_queue_timing_event(uicon,target,radiant_build_scene_timing_event,&data);
 }
 
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
@@ -8547,6 +8578,52 @@ static Item build_pointer_event_item(void* userdata) {
         args->meta, args->pointer_type, 1, true);
 }
 
+struct NativePointerCapture : DomDocumentResourceData {
+    NativePointerCapture* next;
+    DomDocument* document;
+    DomNodeRef current,pending;
+    int buttons;
+    bool active;
+};
+static NativePointerCapture* native_pointer_captures;
+static void native_pointer_capture_destroy(DomDocumentResourceData* data) {
+    auto* capture=(NativePointerCapture*)data;auto** link=&native_pointer_captures;
+    while(*link&&*link!=capture) link=&(*link)->next;
+    if(*link) *link=capture->next;mem_free(capture);
+}
+static NativePointerCapture* native_pointer_capture(DomDocument* doc,bool create) {
+    for(auto* capture=native_pointer_captures;capture;capture=capture->next) if(capture->document==doc) return capture;
+    if(!doc||!create) return nullptr;
+    auto* capture=(NativePointerCapture*)mem_calloc(1,sizeof(NativePointerCapture),MEM_CAT_RENDER);if(!capture) return nullptr;
+    capture->document=doc;
+    if(!dom_document_add_resource(doc,capture,native_pointer_capture_destroy)) {mem_free(capture);return nullptr;}
+    capture->next=native_pointer_captures;native_pointer_captures=capture;return capture;
+}
+extern "C" int dom_engine_pointer_capture(DomElement* element,int32_t id,unsigned operation) {
+    auto* capture=element?native_pointer_capture(element->doc,false):nullptr;
+    if(operation==2) return capture&&id==1&&dom_node_ref_validate(element->doc,capture->pending)==element;
+    if(!capture||id!=1||!capture->active) return -1;
+    if(operation==0) {
+        if(!dom_is_connected(element)) return -2;
+        if(capture->buttons) capture->pending=dom_node_ref(element);
+    } else if(dom_node_ref_validate(element->doc,capture->pending)==element) capture->pending={};
+    return 1;
+}
+static void native_pointer_process_capture(EventContext* evcon,NativePointerCapture* capture,PointerEventBuildArgs* args) {
+    DomNode* pending=dom_node_ref_validate(capture->document,capture->pending);
+    if(pending&&!dom_is_connected(pending)) pending=nullptr;
+    DomNode* current=dom_node_ref_validate(capture->document,capture->current);
+    if(current==pending) return;
+    DomNodeRef next=dom_node_ref(pending);
+    const char* original=args->type;
+    // Pointer Events 3 §4.1.3.2: process pending capture before routing the next pointer event.
+    if(current) {args->type="lostpointercapture";radiant_dispatch_built_event(evcon,(View*)current,build_pointer_event_item,args,true,nullptr,true,args->type);}
+    pending=dom_node_ref_validate(capture->document,next);
+    if(pending&&dom_is_connected(pending)) {args->type="gotpointercapture";radiant_dispatch_built_event(evcon,(View*)pending,build_pointer_event_item,args,true,nullptr,true,args->type);}
+    else next={};
+    capture->current=next;args->type=original;
+}
+
 static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
                                            const char* type, double client_x,
                                            double client_y, int button, int buttons,
@@ -8557,8 +8634,20 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
         type, client_x, client_y, button, buttons,
         ctrl, shift, alt, meta, pointer_type ? pointer_type : "mouse"
     };
-    return radiant_dispatch_built_event(evcon, target, build_pointer_event_item,
-        &args, true, dispatched, true, type);
+    NativePointerCapture* capture=native_pointer_capture(event_context_target_document(evcon),true);
+    if(capture) {
+        if(!strcmp(type,"pointerdown")) capture->active=true;
+        capture->buttons=buttons;
+        native_pointer_process_capture(evcon,capture,&args);
+        DomNode* captured=dom_node_ref_validate(capture->document,capture->current);
+        if(captured) target=(View*)captured;
+    }
+    bool prevented=radiant_dispatch_built_event(evcon,target,build_pointer_event_item,&args,true,dispatched,true,type);
+    if(capture&&(!strcmp(type,"pointerup")||!strcmp(type,"pointercancel"))) {
+        capture->pending={};native_pointer_process_capture(evcon,capture,&args);
+        if(!strcmp(type,"pointercancel")) capture->active=false;
+    }
+    return prevented;
 }
 
 static bool radiant_dispatch_button_mouse_event(
@@ -12224,6 +12313,11 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target) {
     if (context == target) return true;
     if (context) {
         EvalContext* prev = context;
+        if (prev->execution_depth != 0) {
+            // D5.4.1: releasing a live guest owner invalidates its open frames.
+            log_error("eval-switch: outgoing context is executing");
+            return false;
+        }
         // EO2: the JS cache is released with the binding it derives from
         if (js_runtime_state_thread_matches(prev)) js_runtime_state_shutdown(prev);
         if (!eval_context_shutdown(prev)) {

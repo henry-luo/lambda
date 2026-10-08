@@ -2,6 +2,34 @@
 #include "../../lambda-data.hpp"
 
 struct MvpLmdProgram;
+struct AstClassNode;
+struct MvpLmdClass {
+    TypeNominal nominal;
+    TypeNominal prototype_nominal;
+    TypeMap shape;
+    TypeMap prototype_shape;
+    TypeMap static_shape;
+    MvpLmdProgram* program;
+    AstClassNode* ast;
+    Item* values;                // constructor, prototype, statics; rooted program slots
+    uint32_t slot;
+    int64_t constructor_id;
+};
+// extended only for receiver-aware units; existing MVP function allocation stays unchanged.
+struct MvpLmdCallable : Function {
+    MvpLmdProgram* program;
+    MvpLmdClass* home;
+    bool constructor;
+    bool static_method;
+};
+extern const TypeNominalExtension mvp_lmd_class_extension;
+MvpLmdClass* mvp_lmd_class_record(Item owner);
+struct MvpLmdPropertyCache {
+    TypeMap* shape;
+    ShapeEntry* field;
+    Item inherited;
+    bool writable;
+};
 enum MvpLmdFailure { LMD_MVP_CAPABILITY, LMD_MVP_REFERENCE, LMD_MVP_TYPE,
     LMD_MVP_RANGE, LMD_MVP_MEMORY };
 
@@ -14,6 +42,8 @@ static inline uint64_t mvp_lmd_method_token(int64_t method) {
 enum MvpLmdMethod { LMD_METHOD_FILL = 9, LMD_METHOD_PUSH, LMD_METHOD_POP,
     LMD_METHOD_JOIN, LMD_METHOD_CHAR_AT, LMD_METHOD_CODE_AT, LMD_METHOD_REPEAT };
 enum MvpLmdStringRead { LMD_STRING_INDEX, LMD_STRING_CHAR, LMD_STRING_CODE, LMD_STRING_FROM_CODE };
+enum MvpLmdProperty { LMD_PROP_GET, LMD_PROP_CALLEE, LMD_PROP_SET, LMD_PROP_DELETE,
+    LMD_PROP_OWN, LMD_PROP_HAS, LMD_PROP_KEYS, LMD_PROP_VALUES, LMD_PROP_ENTRIES };
 int mvp_lmd_builtin_method(String* key, TypeId owner = LMD_TYPE_MAP);
 
 extern "C" {
@@ -30,6 +60,7 @@ Item mvp_lmd_array_new(int64_t length);
 Item mvp_lmd_property_key(Item string);
 Item mvp_lmd_object_new(TypeMap* shape, int64_t collection);
 Item mvp_lmd_property_get(Item owner, Item name, int64_t callee);
+// mutation helpers borrow caller-rooted Items and stable scalar homes through the complete call.
 Item mvp_lmd_property_set(Item owner, Item name, Item value);
 Item mvp_lmd_property_delete(Item owner, Item name);
 Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited);
@@ -38,4 +69,12 @@ Item mvp_lmd_map_call(Item owner, Item method, Item key, Item value);
 int64_t mvp_lmd_map_next(Item owner, int64_t cursor);
 Item mvp_lmd_map_entry(Item owner, int64_t cursor, int64_t projection);
 Item mvp_lmd_function_new(uint64_t code_id, MvpLmdProgram* program);
+Item mvp_lmd_class_new(MvpLmdClass* plan, Item base);
+Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments, int64_t argc, Item new_target);
+Item mvp_lmd_class_super(Item function, int64_t constructor);
+Item mvp_lmd_constructor_result(Item value, Item receiver, int64_t derived);
+Item mvp_lmd_instanceof(Item value, Item constructor);
+Item mvp_lmd_throw(Item value, int64_t error_constructor);
+Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
+    MvpLmdPropertyCache* cache);
 }

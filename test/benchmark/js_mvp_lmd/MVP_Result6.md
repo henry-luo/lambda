@@ -2,7 +2,7 @@
 
 **Ordinary arrays, core string methods and subsequent tuning** — [MVP §§18–20](../../../vibe/jube/JS_MVP_Lmd.md#18-ordinary-arrays-and-core-string-methods).
 
-[Series index and comparison](README.md) · [Raw JSON](MVP_Result6.json) · [Previous phase](MVP_Result5.md)
+[Series index and comparison](README.md) · [Raw JSON](MVP_Result6.json) · [Previous phase](MVP_Result5.md) · [Next phase](MVP_Result7.md)
 
 Updated to the final **2026-10-08T14:26:48.615198+08:00** capture on `macOS-26.5.2-arm64-arm-64bit-Mach-O`. All **48 MVP workloads** use the corrected final release: **31 standard kernels and 17 microbenchmarks**. The initial Result6 snapshot and report remain embedded in the JSON as `previous_round` and `previous_round_report`.
 

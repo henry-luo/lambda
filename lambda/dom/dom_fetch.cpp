@@ -6,6 +6,7 @@
  * Returns a Promise<Response> matching the web fetch() API.
  */
 #include "../js/js_runtime.h"
+#include "../js/js_headers.h"
 #include "dom.h"
 #include "dom_xhr.h"
 #include "realm/dom_realm.h"
@@ -25,6 +26,7 @@
 #include "../../lib/url.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/byte_builder.h"
+#include "../../lib/utf.h"
 
 #include <curl/curl.h>
 #include "../network/curl_trust.h"
@@ -252,6 +254,11 @@ static void fetch_work_destroy(JsFetchWork* fw) {
     mem_free(fw);
 }
 
+struct FetchWorkOwner {
+    JsFetchWork* work;
+    ~FetchWorkOwner() { fetch_work_destroy(work); }
+};
+
 static void fetch_resource_close(void* user) {
     JsFetchWork* fw = (JsFetchWork*)user;
     if (!fw) return;
@@ -436,19 +443,23 @@ static Item js_response_blob() {
 }
 
 static Item build_response_object(JsFetchWork* fw) {
-    Item resp = js_new_object();
+    RootFrame roots(2);
+    // Response construction allocates keys and methods; retain the object
+    // and create each key only after its value is rooted (D5.3.3).
+    Rooted<Item> response(roots, js_new_object());
+    Rooted<Item> headers(roots, js_headers_create_http(fw->response_headers, fw->response_header_count));
+    JS_RETURN_IF_ERROR(headers.get());
+    Item resp = response.get();
+    dom_realm_set_cstr(resp, "headers", headers.get());
 
     // status
-    Item status_key = make_string_item("status");
-    dom_realm_set(resp, status_key, (Item){.item = i2it(fw->status_code)});
+    dom_realm_set_cstr(resp, "status", (Item){.item = i2it(fw->status_code)});
 
     // ok (200-299)
-    Item ok_key = make_string_item("ok");
     bool ok = fw->status_code >= 200 && fw->status_code <= 299;
-    dom_realm_set(resp, ok_key, (Item){.item = b2it(ok)});
+    dom_realm_set_cstr(resp, "ok", (Item){.item = b2it(ok)});
 
     // statusText
-    Item st_key = make_string_item("statusText");
     const char* st = (fw->status_code == 200) ? "OK" :
                      (fw->status_code == 201) ? "Created" :
                      (fw->status_code == 204) ? "No Content" :
@@ -461,11 +472,10 @@ static Item build_response_object(JsFetchWork* fw) {
                      (fw->status_code == 404) ? "Not Found" :
                      (fw->status_code == 500) ? "Internal Server Error" :
                      "";
-    dom_realm_set(resp, st_key, make_string_item(st));
+    dom_realm_set_cstr(resp, "statusText", make_string_item(st));
 
     // url
-    Item url_key = make_string_item("url");
-    dom_realm_set(resp, url_key, make_string_item(fw->url));
+    dom_realm_set_cstr(resp, "url", make_string_item(fw->url));
 
     // store body for text()/json()/blob() methods
     int body_idx = -1;
@@ -478,8 +488,7 @@ static Item build_response_object(JsFetchWork* fw) {
         response_types[body_idx] = mem_strdup(mime_from_url(fw->url), MEM_CAT_JS_RUNTIME);
     }
 
-    Item body_idx_key = make_string_item("__body_idx");
-    dom_realm_set(resp, body_idx_key, (Item){.item = i2it(body_idx)});
+    dom_realm_set_cstr(resp, "__body_idx", (Item){.item = i2it(body_idx)});
 
     // XMLHttpRequest reuses fetch's worker transport. Preserve the response
     // headers in its response handoff without exposing another curl path.
@@ -503,19 +512,16 @@ static Item build_response_object(JsFetchWork* fw) {
     }
 
     // text() method
-    Item text_key = make_string_item("text");
     Item text_fn = dom_realm_new_function(js_response_text);
-    dom_realm_set(resp, text_key, text_fn);
+    dom_realm_set_cstr(resp, "text", text_fn);
 
     // json() method
-    Item json_key = make_string_item("json");
     Item json_fn = dom_realm_new_function(js_response_json);
-    dom_realm_set(resp, json_key, json_fn);
+    dom_realm_set_cstr(resp, "json", json_fn);
 
     // `arrayBuffer()` preserves binary response bodies for WASM and media loaders.
-    Item array_buffer_key = make_string_item("arrayBuffer");
     Item array_buffer_fn = dom_realm_new_function(js_response_array_buffer);
-    dom_realm_set(resp, array_buffer_key, array_buffer_fn);
+    dom_realm_set_cstr(resp, "arrayBuffer", array_buffer_fn);
 
     // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
     dom_realm_set_native(resp, make_string_item("blob"), js_response_blob);
@@ -570,8 +576,8 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
     } else {
         // success — build Response object and resolve
         Item response = build_response_object(fw);
-        Item args[1] = {response};
-        dom_realm_call(resolve_root.get(), ItemNull, args, 1);
+        Item args[1] = {item_is_error(response) ? js_error_lane_payload(response) : response};
+        dom_realm_call(item_is_error(response) ? reject_root.get() : resolve_root.get(), ItemNull, args, 1);
     }
 
     // flush microtasks after resolving the promise
@@ -588,50 +594,57 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
 // Parse fetch options: { method, headers, body }
 // =============================================================================
 
-static void fetch_apply_options(JsFetchWork* fw, Item options) {
-    if (get_type_id(options) != LMD_TYPE_MAP) return;
+static Item fetch_apply_options(JsFetchWork* fw, Item options) {
+    if (js_is_nullish(options)) return js_status_ok();
+    if (!js_is_object_value(options)) return js_throw_type_error("Invalid fetch options");
+    RootFrame roots(5);
+    Rooted<Item> source(roots, options), value(roots, ItemNull), entries(roots, ItemNull);
+    Rooted<Item> key(roots, ItemNull), pair(roots, ItemNull);
 
-    // method
-    Item method_key = make_string_item("method");
-    Item method_val = dom_realm_get(options, method_key);
-    if (get_type_id(method_val) == LMD_TYPE_STRING) {
-        String* ms = it2s(method_val);
-        fw->method = mem_dup_n(ms->chars, ms->len, MEM_CAT_JS_RUNTIME);
+    value.set(dom_realm_get_cstr(source.get(), "body"));
+    JS_RETURN_IF_ERROR(value.get());
+    if (get_type_id(value.get()) == LMD_TYPE_STRING) {
+        String* body = it2s(value.get());
+        fw->body = mem_dup_n(body->chars, body->len, MEM_CAT_JS_RUNTIME);
+        fw->body_len = body->len;
+        if (!fw->body) return ItemError;
     }
 
-    // body
-    Item body_key = make_string_item("body");
-    Item body_val = dom_realm_get(options, body_key);
-    if (get_type_id(body_val) == LMD_TYPE_STRING) {
-        String* bs = it2s(body_val);
-        fw->body = mem_dup_n(bs->chars, bs->len, MEM_CAT_JS_RUNTIME);
-        fw->body_len = bs->len;
+    value.set(dom_realm_get_cstr(source.get(), "headers"));
+    JS_RETURN_IF_ERROR(value.get());
+    entries.set(js_headers_list_from_init(value.get(), true));
+    JS_RETURN_IF_ERROR(entries.get());
+    for (int64_t i = 0, count = js_array_length(entries.get()); i < count; i++) {
+        pair.set(js_elements_get_int(entries.get(), i));
+        key.set(js_elements_get_int(pair.get(), 0));
+        value.set(js_elements_get_int(pair.get(), 1));
+        String* name = it2s(key.get());
+        String* text = it2s(value.get());
+        char* line = (char*)mem_alloc(name->len + text->len + 3, MEM_CAT_JS_RUNTIME);
+        if (!line) return ItemError;
+        memcpy(line, name->chars, name->len);
+        size_t written = name->len;
+        // libcurl uses "Name;" to send an empty value; "Name:" removes it.
+        line[written++] = text->len ? ':' : ';';
+        if (text->len) line[written++] = ' ';
+        Utf16Iterator iterator = {(const unsigned char*)text->chars, (int64_t)text->len, 0, -1};
+        uint16_t unit;
+        while (utf16_iterator_next(&iterator, &unit)) line[written++] = (char)unit;
+        line[written] = '\0';
+        curl_slist* headers = curl_slist_append(fw->req_headers, line);
+        mem_free(line);
+        if (!headers) return ItemError;
+        fw->req_headers = headers;
     }
 
-    // headers (map of key→value strings)
-    Item headers_key = make_string_item("headers");
-    Item headers_val = dom_realm_get(options, headers_key);
-    if (get_type_id(headers_val) == LMD_TYPE_MAP) {
-        Item keys = js_object_keys(headers_val);
-        if (get_type_id(keys) == LMD_TYPE_ARRAY) {
-            int len = (int)keys.array->length;
-            for (int i = 0; i < len; i++) {
-                Item idx = {.item = i2it(i)};
-                Item hkey = js_elements_get(keys, idx);
-                Item hval = dom_realm_get(headers_val, hkey);
-                if (get_type_id(hkey) == LMD_TYPE_STRING && get_type_id(hval) == LMD_TYPE_STRING) {
-                    String* ks = it2s(hkey);
-                    String* vs = it2s(hval);
-                    // "Header-Name: value"
-                    size_t total = ks->len + 2 + vs->len + 1;
-                    char* line = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
-                    snprintf(line, total, "%.*s: %.*s", (int)ks->len, ks->chars, (int)vs->len, vs->chars);
-                    fw->req_headers = curl_slist_append(fw->req_headers, line);
-                    mem_free(line);
-                }
-            }
-        }
+    value.set(dom_realm_get_cstr(source.get(), "method"));
+    JS_RETURN_IF_ERROR(value.get());
+    if (get_type_id(value.get()) == LMD_TYPE_STRING) {
+        String* method = it2s(value.get());
+        fw->method = mem_dup_n(method->chars, method->len, MEM_CAT_JS_RUNTIME);
+        if (!fw->method) return ItemError;
     }
+    return js_status_ok();
 }
 
 // =============================================================================
@@ -654,12 +667,14 @@ static Item fetch_executor(Item resolve_fn, Item reject_fn) {
 // =============================================================================
 
 extern "C" Item js_fetch(Item url_item, Item options_item) {
+    RootFrame argument_roots(2);
+    Rooted<Item> url_root(argument_roots, url_item), options_root(argument_roots, options_item);
     if (!js_fetch_runtime_state_ensure()) {
         return dom_realm_promise_reject(dom_realm_new_error(make_string_item(
             "fetch: no active execution context")));
     }
     char url_buf[2048];
-    const char* url = js_item_to_cstr(url_item, url_buf, sizeof(url_buf));
+    const char* url = js_item_to_cstr(url_root.get(), url_buf, sizeof(url_buf));
     if (!url) {
         return dom_realm_promise_reject(dom_realm_new_error_named(make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
     }
@@ -687,6 +702,13 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         return dom_realm_promise_reject(dom_realm_new_error_named(
             make_string_item("TypeError"), make_string_item("fetch: resource blocked by document policy")));
     }
+
+    JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
+    if (!fw) return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
+    FetchWorkOwner work_owner = {fw};
+    Item options_status = fetch_apply_options(fw, options_root.get());
+    if (item_is_error(options_status))
+        return dom_realm_promise_reject(js_error_lane_payload(options_status));
 
     // ---- Local-file fast path -------------------------------------------------
     // For relative URLs (no scheme) or explicit `file://` URLs, resolve against
@@ -767,25 +789,15 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         fclose(f);
 
         // Build a synthetic JsFetchWork so build_response_object can be reused.
-        JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
-        if (!fw) {
-            byte_builder_destroy(&response);
-            return dom_realm_promise_reject(
-                dom_realm_new_error(make_string_item("fetch: allocation failed")));
-        }
         snprintf(fw->url, sizeof(fw->url), "%s", url);
         fw->status_code = 200;
         fw->response = response;
 
         Item resp = build_response_object(fw);
 
-        // build_response_object transferred ownership of response bytes;
-        // free the fw struct (curl handle, headers etc. are NULL here).
-        if (fw->method) mem_free(fw->method);
-        if (fw->body) mem_free(fw->body);
-        mem_free(fw);
-
-        return dom_realm_promise_resolve(resp);
+        return item_is_error(resp)
+            ? dom_realm_promise_reject(js_error_lane_payload(resp))
+            : dom_realm_promise_resolve(resp);
     }
     // ---------------------------------------------------------------------------
 
@@ -803,13 +815,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: event loop not initialized")));
     }
 
-    // allocate work context
-    JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
-    if (!fw) {
-        return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
-    }
     if (!byte_builder_init(&fw->response, 0, MEM_CAT_JS_RUNTIME, true)) {
-        mem_free(fw);
         return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
     }
 
@@ -819,11 +825,6 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         fw->cookie_jar = NULL;
     }
     fw->work.data = fw;
-
-    // parse options (method, headers, body)
-    if (get_type_id(options_item) == LMD_TYPE_MAP) {
-        fetch_apply_options(fw, options_item);
-    }
 
     // create promise — executor captures resolve/reject into fw
     pending_fetch_work = fw;
@@ -849,7 +850,6 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         Item args[1] = {dom_realm_new_error(make_string_item(
             "fetch: failed to retain request callbacks"))};
         dom_realm_call(reject_root.get(), ItemNull, args, 1);
-        fetch_work_destroy(fw);
         return promise_root.get();
     }
     fw->resolve_fn = ItemNull;
@@ -864,9 +864,10 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         fw->resource_id = 0;
         runtime_resource_table_remove_owned(js_runtime_resource_table(),
             fw->owner_context, resource_id);
-        fetch_work_destroy(fw);
     } else {
         fw->queued = true;
+        // The registered request and libuv callback now own the native tail.
+        work_owner.work = nullptr;
     }
 
     return promise_root.get();

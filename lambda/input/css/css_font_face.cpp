@@ -633,10 +633,8 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
     if (!descriptor->family_name) {
         log_warn("[CSS FontFace] Incomplete @font-face: missing font-family");
         if (!pool) {
-            if (descriptor->src_url) mem_free(descriptor->src_url);
-            if (descriptor->src_local) mem_free(descriptor->src_local);
-            if (descriptor->src_urls) mem_free(descriptor->src_urls);
-            mem_free(descriptor);
+            // rejected descriptors still own source strings, formats and unicode ranges.
+            css_font_face_descriptor_free(descriptor);
         }
         return nullptr;
     }

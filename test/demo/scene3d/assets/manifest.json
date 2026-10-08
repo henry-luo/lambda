@@ -1,0 +1,9 @@
+{
+  "license": "CC0-1.0",
+  "author": "Lambda project",
+  "generator": "generate.py; Pillow; deterministic procedural pixels",
+  "files": {
+    "stone.jpg": "7ddf1724353d0ab4925a5799bc401eee8d8ecfbfd14d5f90468a24a2554c9452",
+    "brushed-normal.png": "4e5ea4af77cd370c314eed5f7d110aede8a60864f3496e1982497bed564f0022"
+  }
+}

@@ -2275,14 +2275,15 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Step 1: Parse HTML with Lambda parser
     // If html_source is provided, use it directly; otherwise read from file or download
     char* html_content = nullptr;
+    size_t html_length = 0;
     bool html_content_owned = false;
     if (html_source) {
         html_content = const_cast<char*>(html_source);
+        html_length = strlen(html_source);
     } else if (html_url->scheme == URL_SCHEME_HTTP || html_url->scheme == URL_SCHEME_HTTPS) {
         const char* url_str = url_get_href(html_url);
-        size_t content_size = 0;
         char* eff_url = nullptr;
-        html_content = download_http_content_with_cookie_jar(url_str, &content_size,
+        html_content = download_http_content_with_cookie_jar(url_str, &html_length,
             top_level_cookie_jar, &eff_url);
         // Update document URL if redirected (e.g. google.com → www.google.com)
         if (eff_url) {
@@ -2308,11 +2309,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                 "The requested page could not be loaded. The server may be unreachable, "
                 "the URL may be incorrect, or there may be a network connectivity issue.");
             if (!html_content) return nullptr;
+            html_length = strlen(html_content);
         }
         html_content_owned = true;
     } else {
-        html_content = read_text_file(html_filepath);
-        if (!html_content) {
+        if (!file_read_all(html_filepath, MEM_CAT_TEMP, &html_content, &html_length)) {
             log_error("Failed to read HTML file: %s", html_filepath);
             mem_free(html_filepath);
             return nullptr;
@@ -2323,13 +2324,13 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Detect non-UTF-8 charset and convert if needed
     const char* detected_charset = nullptr;
     if (html_content && html_content_owned) {
-        size_t html_len = strlen(html_content);
-        detected_charset = detect_html_charset(html_content, html_len);
+        detected_charset = detect_html_charset(html_content, html_length);
         if (detected_charset) {
-            char* utf8_content = convert_charset_to_utf8(html_content, html_len, detected_charset);
+            char* utf8_content = convert_charset_to_utf8(html_content, html_length, detected_charset);
             if (utf8_content) {
                 mem_free(html_content);
                 html_content = utf8_content;
+                html_length = strlen(utf8_content);
             }
             // if conversion fails, proceed with original content (best effort)
         }
@@ -2348,7 +2349,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         if (input) {
             input->ui_mode = true;
             Html5ParseOptions parse_opts = { .track_source_lines = true };
-            Element* doc = html5_parse_ex(input, html_content, &parse_opts);
+            Element* doc = html5_parse_n(input, html_content, html_length, &parse_opts);
             if (doc) {
                 input->root = (Item){.element = doc};
             }
@@ -2358,7 +2359,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         input = Input::create(pool, html_url);
         if (input) {
             input->ui_mode = true;
-            Element* doc = html5_parse(input, html_content);
+            Element* doc = html5_parse_n(input, html_content, html_length, nullptr);
             if (doc) {
                 input->root = (Item){.element = doc};
             }
@@ -3113,8 +3114,8 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
     doc->html_root = lam::up(html_root);
     doc->html_version = version;
     doc->url = lam::own(url);
+    // load-time scripts may already own document timelines; replacing view geometry must preserve their state.
     // Load-time geometry reads may already have committed a ViewTree.
-    doc->state = nullptr;
     if (doc->page_kind == DOM_PAGE_KIND_HTML && doc->view_tree && doc->view_tree->root) {
         // The snapshot used pre-script styles; retained used values such as
         // collapsed zoomed margins cannot seed the post-script layout epoch.

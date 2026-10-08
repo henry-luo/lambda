@@ -42,6 +42,7 @@ struct RadiantGradientLine {
     float y2;
 };
 
+
 inline float radiant_linear_gradient_used_angle(const LinearGradient* gradient,
                                                 Rect rect) {
     if (!gradient) return 0.0f;
@@ -140,6 +141,10 @@ typedef struct {
     float offset;          // 0.0 – 1.0
     uint8_t r, g, b, a;
 } RdtGradientStop;
+
+bool render_copy_gradient_stops(const GradientStop* source, int source_count,
+                                float gradient_length, RdtGradientStop* stops,
+                                int stop_capacity, int* out_count);
 
 typedef enum {
     RDT_GRADIENT_PAD,
@@ -485,7 +490,7 @@ void rdt_clip_restore_depth(int saved_depth);
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
                     uint8_t opacity, const RdtMatrix* transform,
-                    uint64_t resource_generation = 0, bool straight_alpha = false);
+                    uint64_t resource_generation = 0, bool straight_alpha = false, uint64_t resource_identity = 0);
 
 // ---------------------------------------------------------------------------
 // SVG picture (load from file/data, render at given rect)
@@ -2168,6 +2173,8 @@ Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
                                         float scale);
 float render_geometry_filter_effect_expand(const FilterProp* filter);
 float render_geometry_block_visual_overflow(const ViewBlock* block);
+Rect render_geometry_outer_shadow_rect(Rect border_box, float offset_x,
+                                       float offset_y, float spread);
 bool render_geometry_transform_matrix(const TransformProp* transform,
                                       float x, float y, float width, float height,
                                       RdtMatrix* out_matrix);

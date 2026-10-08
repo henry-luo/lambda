@@ -1,0 +1,25 @@
+<!doctype html><html><body><script>
+function check(condition, message) {
+    if (!condition) throw new Error(message);
+}
+async function exerciseHeaders() {
+    const headers = new Headers([['X-Merge', 'first'], ['x-merge', 'second'],
+        ['X-Latin', '\u00e9\u00ff'], ['X-Empty', ''], ['Cookie', 'script-cookie=hidden'],
+        ['Sec-Script', 'hidden'], ['X-HTTP-Method-Override', 'TRACE']]);
+    const response = await fetch('fetch_headers_redirect', {headers});
+    check(response.headers instanceof Headers, 'native Headers response');
+    check(response.headers.get('x-request-merge') === 'first, second', 'combined request headers');
+    check(response.headers.get('x-request-latin') === '\u00e9\u00ff', 'Latin1 transport round trip');
+    check(response.headers.get('x-request-empty') === 'present', 'empty request header retained');
+    check(response.headers.get('x-forbidden-request') === 'absent', 'request guard');
+    check(response.headers.get('x-repeat') === 'one, two', 'combined response headers');
+    check(response.headers.get('x-old-response') === null, 'redirect headers discarded');
+    check(response.headers.get('set-cookie') === null && response.headers.getSetCookie().length === 0, 'response cookies filtered');
+    let immutable = false;
+    try { response.headers.set('x-repeat', 'changed'); } catch (error) { immutable = error instanceof TypeError; }
+    check(immutable, 'response guard');
+    check(await response.text() === 'header fixture body', 'body retained');
+    console.log('FETCH_HEADERS_NETWORK_PASS');
+}
+exerciseHeaders().catch(error => { console.log('FETCH_HEADERS_NETWORK_FAIL ' + error.message); });
+</script></body></html>

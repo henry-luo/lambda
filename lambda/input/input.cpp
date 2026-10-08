@@ -340,13 +340,12 @@ static ShapeEntry* clone_shape_chain_for_transition(TypeAlloc alloc, TypeMap* pa
 // generic map writers append ShapeEntry nodes, so detach before mutating a
 // shared shape; otherwise one object can leak fields or slot metadata into
 // sibling objects and cause order-dependent Node baseline regressions.
-static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
-    if (!mp || !input || !input->pool) return NULL;
+TypeMap* map_clone_typemap_for_mutation(Map* mp, Pool* pool) {
+    if (!mp || !pool) return NULL;
     TypeMap* tm = (TypeMap*)mp->type;
     if (!tm) return NULL;
     if (tm->is_private_clone) return tm;
 
-    Pool* pool = input->pool;
     TypeMap* clone = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!clone) return NULL;
     clone->length = tm->length;
@@ -354,6 +353,9 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     clone->type_index = tm->type_index;
     clone->has_spread = tm->has_spread;  // cloned chain keeps any nameless spread slot
     clone->has_named_shape = tm->has_named_shape;
+    // native detachment preserves the nominal record too (D2.6.9v3).
+    clone->nominal = tm->nominal;
+    clone->is_nominal = tm->is_nominal;
     clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
     clone->is_private_clone = true;
@@ -1295,8 +1297,8 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     int count = 0;
     if (owned) for (TypeMapRetypePlan* plan = parent->retype_plans; plan; plan = plan->next) {
         count++;
-        if (plan->parent == parent && plan->source == field &&
-                plan->replacement->type == type_info[value_type].type) {
+        if (plan->parent == parent && plan->source == field && plan->replacement &&
+                plan->value_type == value_type) {
             if (out_plan) *out_plan = plan;
             return plan->target;
         }
@@ -1306,6 +1308,7 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
     if (!plan) return target;
     plan->parent = parent; plan->source = field; plan->target = target;
+    plan->value_type = value_type;
     plan->reuse_payload = typemap_payload_reusable(parent, target, field, NULL, &plan->replacement);
     // a changed width can stop the compatibility walk before it reaches the replacement.
     if (!plan->replacement) {
@@ -1316,6 +1319,37 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
         }
     }
     if (!plan->replacement) return target;
+    plan->storage_type = shape_entry_storage_type_id(plan->replacement);
+    plan->next = parent->retype_plans; parent->retype_plans = plan;
+    if (out_plan) *out_plan = plan;
+    return target;
+}
+
+TypeMap* type_tree_delete_field(Input* input, Map* container, const ShapeEntry* field,
+        const TypeMapRetypePlan** out_plan) {
+    if (out_plan) *out_plan = NULL;
+    TypeMap* parent = container ? (TypeMap*)container->type : NULL;
+    if (!input || !parent || !field) return NULL;
+    bool owned = parent->is_transition_shared_shape && type_tree_owns(input, parent);
+    int count = 0;
+    if (owned) for (TypeMapRetypePlan* plan = parent->retype_plans; plan; plan = plan->next) {
+        count++;
+        if (plan->parent == parent && plan->source == field && !plan->replacement) {
+            if (out_plan) *out_plan = plan;
+            return plan->target;
+        }
+    }
+    TypeMap* target = type_tree_root_like(input, container);
+    FOR_EACH_MAP_FIELD(parent, entry) {
+        if (entry != field && target) target = type_tree_add_map_field_chars(input, target,
+            entry->name->str, entry->name->length, entry->type->type_id, NULL);
+    }
+    if (!target || !owned || count >= shape_tree_fanout_cap(parent)) return target;
+    TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
+    if (!plan) return target;
+    // a null replacement distinguishes deletion; shared nodes make the cached migration immutable.
+    plan->parent = parent; plan->source = field; plan->target = target;
+    plan->reuse_payload = typemap_payload_reusable(parent, target, NULL, field, &plan->replacement);
     plan->next = parent->retype_plans; parent->retype_plans = plan;
     if (out_plan) *out_plan = plan;
     return target;
@@ -1413,7 +1447,7 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         if (ShapeTreeStats* stats = shape_tree_stats_for(input)) {
             shape_tree_stat_add(&stats->private_types, 1);
         }
-        TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
+        TypeMap* clone = map_clone_typemap_for_mutation(mp, input->pool);
         if (clone) map_type = clone;
     }
 
@@ -1497,7 +1531,7 @@ bool map_put_undefined_unique_absent_bulk_with_data_growth(Map* mp,
     if (typemap_is_shared_shape(map_type)) {
         // bulk appends still mutate the shape chain, so they need the same
         // detach behavior as single-property map_put.
-        TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
+        TypeMap* clone = map_clone_typemap_for_mutation(mp, input->pool);
         if (clone) map_type = clone;
     }
 
@@ -1811,11 +1845,6 @@ static void parse_textile_input(Input* input, const char* source) {
     input->root = input_markup_modular(input, source);
 }
 
-static void parse_html_input(Input* input, const char* source) {
-    Element* doc = html5_parse(input, source);
-    input->root = (Item){.element = doc};
-}
-
 #ifndef LAMBDA_NO_LATEX
 static void parse_latex_input(Input* input, const char* source) {
     parse_latex_direct(input, source);
@@ -1895,8 +1924,6 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"xml", parse_xml},
     {"markdown", parse_markdown_input},
     {"rst", parse_rst_input},
-    {"html", parse_html_input},
-    {"html5", parse_html_input},
 #ifndef LAMBDA_NO_LATEX
     {"latex", parse_latex_input},
     {"latex-ts", parse_latex_input},
@@ -1985,7 +2012,8 @@ const char* input_detect_graph_flavor(const char* pathname,
 bool graph_path_is_graph(const char* graph_file) {
     if (!graph_file) return false;
     if (input_detect_graph_flavor(graph_file, NULL, 0)) return true;
-    // extension-less sources are recognized by content sniffing
+    // only ambiguous .dsl inputs need content; other paths (including URLs) cannot be graphs.
+    if (!str_iends_with_const(graph_file, strlen(graph_file), ".dsl")) return false;
     char* source = read_text_file(graph_file);
     if (!source) return false;
     bool is_graph = input_detect_graph_flavor(graph_file, source, strlen(source)) != NULL;
@@ -2048,7 +2076,7 @@ static const char* mime_to_parser_type(const char* mime_type) {
     return "text";
 }
 
-Input* input_from_source_n_with_name_parent(const char* source,
+extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         size_t source_len, Url* abs_url, String* type, String* flavor,
         NamePool* name_parent, const InputParseOptions* options) {
     log_debug("input_from_source_n: ENTRY type='%s', flavor='%s', len=%zu",
@@ -2147,6 +2175,10 @@ Input* input_from_source_n_with_name_parent(const char* source,
                 input->root = input_markup_modular(input, source);
             }
         }
+        else if (strcmp(effective_type, "html") == 0 || strcmp(effective_type, "html5") == 0) {
+            // HTML NULs are tokenizer input, so preserve the transport's byte count.
+            input->root = (Item){.element = html5_parse_n(input, source, source_len, NULL)};
+        }
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}
 #ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "pdf") == 0) {
@@ -2219,10 +2251,7 @@ extern "C" Input* input_from_source_with_options(const char* source,
         source ? strlen(source) : 0, abs_url, type, flavor, NULL, options);
 }
 
-// Read a local file and parse it via input_from_source_n. Detects binary
-// formats (currently PDF) and reads them with read_binary_file so that null
-// bytes in the payload are preserved and the parser receives an accurate
-// byte length instead of strlen() which would truncate at the first null.
+// preserve the byte count for length-aware parsers, including HTML and PDF.
 static Input* input_from_local_path(const char* pathname, Url* abs_url,
         String* type, String* flavor, NamePool* name_parent = NULL) {
     size_t src_len = 0;

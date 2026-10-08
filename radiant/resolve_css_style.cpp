@@ -1806,7 +1806,7 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
     return true;
 }
 
-static float css_gradient_stop_position(const CssValue* value, bool* is_px,
+static float css_gradient_stop_position(LayoutContext* lycon, const CssValue* value, bool* is_px,
                                         bool angular) {
     if (!value) return NAN;
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -1822,7 +1822,7 @@ static float css_gradient_stop_position(const CssValue* value, bool* is_px,
     }
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
         if (is_px) *is_px = true;
-        return (float)value->data.length.value;
+        return resolve_length_value(lycon, CSS_PROPERTY_BACKGROUND, value);
     }
     return NAN;
 }
@@ -1850,16 +1850,19 @@ static int resolve_gradient_stops(LayoutContext* lycon, CssFunction* func,
         }
 
         stops[stop_count].color = resolve_color_value(lycon, color);
-        stops[stop_count].position = css_gradient_stop_position(position, stops_in_px,
-                                                               angular);
+        bool is_px = false;
+        stops[stop_count].position = css_gradient_stop_position(lycon, position, &is_px, angular);
+        stops[stop_count].position_is_px = is_px;
+        if (is_px && stops_in_px) *stops_in_px = true;
         stop_count++;
         if (allow_second_position && arg->type == CSS_VALUE_TYPE_LIST &&
             arg->data.list.count >= 3 && stop_count < capacity) {
             bool second_is_px = false;
-            float second_position = css_gradient_stop_position(
+            float second_position = css_gradient_stop_position(lycon,
                 arg->data.list.values[2], &second_is_px, angular);
             stops[stop_count].color = stops[stop_count - 1].color;
             stops[stop_count].position = second_position;
+            stops[stop_count].position_is_px = second_is_px;
             if (second_is_px && stops_in_px) *stops_in_px = true;
             stop_count++;
         }
@@ -3434,6 +3437,9 @@ static DisplayValue resolve_display_value_raw(void* child,
     if (node && node->is_element()) {
         // resolve display from CSS if available
         DomElement* dom_elem = node->as_element();
+        // anonymous table roles survive used-size invalidation; they have no
+        // authored display declaration or HTML default to recompute.
+        if (dom_elem->is_table_fixup()) return dom_elem->display;
         NameId tag_id = dom_elem ? dom_elem->tag_id : NAME_ID_NONE;
         bool is_mathml = css_is_mathml_element(dom_elem);
 
@@ -3573,7 +3579,7 @@ static DisplayValue resolve_display_value_raw(void* child,
                         } else if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
                                    decl->value->data.keyword == CSS_VALUE_INHERIT) {
                             // CSS 2.1 §9.2.4: inherit from the parent's computed display.
-                            DomElement* parent_elem = dom_elem->parent_element();
+                            DomElement* parent_elem = dom_parent_element(dom_elem);
                             if (parent_elem) {
                                 DisplayValue parent_display = resolve_display_value((void*)parent_elem);
                                 return needs_blockify ? blockify_display(parent_display) : parent_display;
@@ -3941,7 +3947,15 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
         }
         break;
     }
+    case CSS_VALUE_TYPE_VAR:
     case CSS_VALUE_TYPE_FUNCTION: {
+        // substitute before math dispatch: its deferred-leaf callback re-enters this resolver.
+        if (css_value_contains_pending_substitution(value)) {
+            const CssValue* substituted = resolve_var_function(lycon, value);
+            result = substituted && substituted != value
+                ? resolve_length_value_mode(lycon, property, substituted, computed_units) : NAN;
+            break;
+        }
         // handle calc() and other CSS functions that return length values
         CssFunction* func = value->data.function;
         if (!func || !func->name) {
@@ -3957,12 +3971,6 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
         if (math.type != CSS_MATH_INVALID && math.type != CSS_MATH_DEFERRED) {
             // Layout supplies the used percentage basis; parsing and computation share the same grammar.
             result = math.resolved ? (isnan(math.value) ? 0.0 : math.value) : NAN;
-        } else if (strcmp(func->name, "var") == 0) {
-            // Use the same cycle, fallback and declaration-owner resolution
-            // as non-length properties; missing substitutions compute invalid.
-            const CssValue* substituted = resolve_var_function(lycon, value);
-            result = substituted && substituted != value
-                ? resolve_length_value_mode(lycon, property, substituted, computed_units) : NAN;
         } else {
             log_warn("unknown CSS function: %s()", func->name);
             result = NAN;
@@ -3993,12 +4001,6 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
             result = NAN;
         }
         break;
-    case CSS_VALUE_TYPE_VAR: {
-        const CssValue* substituted = resolve_var_function(lycon, value);
-        result = substituted && substituted != value
-            ? resolve_length_value_mode(lycon, property, substituted, computed_units) : NAN;
-        break;
-    }
     default:
         log_warn("unknown length value type: %d", value->type);
         result = NAN;  // Use NAN instead of 0 to indicate unresolvable value
@@ -4020,27 +4022,35 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
     return result;
 }
 
-static void compute_stored_line_height(LayoutContext* lycon, ViewSpan* span) {
+void radiant_compute_stored_line_height(LayoutContext* lycon, DomElement* span) {
     const CssValue* value = span && span->blk ? span->block()->line_height : nullptr;
-    if (!value || value->type == CSS_VALUE_TYPE_NUMBER ||
-        value->type == CSS_VALUE_TYPE_KEYWORD ||
-        (value->type == CSS_VALUE_TYPE_LENGTH && value->data.length.unit == CSS_UNIT_PX)) return;
-    FontBox saved_font = lycon->font;
-    if (span->font && span->font->font_size >= 0.0f) {
-        lycon->font.style = lam::up(span->font);
-        lycon->font.current_font_size = span->font->font_size;
-    }
-    CssLayoutMathContext leaves = {lycon, (uintptr_t)(-(intptr_t)CSS_PROPERTY_LINE_HEIGHT), true};
-    CssMathEvaluationContext context = {css_layout_math_leaf, &leaves, 1.0, false};
+    if (!value) return;
     CssValue computed = {};
-    bool resolved = css_compute_line_height_value(value, &context, &computed);
-    lycon->font = saved_font;
-    if (!resolved) return;
-    // computed lengths inherit before zoom; numbers keep their multiplier for each descendant font.
-    CssValue* retained = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
-    if (!retained) return;
-    *retained = computed;
-    span->blk->line_height = lam::shared(retained);
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        computed.type = value->type;
+        computed.data.number = value->data.number;
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        computed.type = value->type;
+        computed.data.keyword = value->data.keyword;
+    } else if (value->type == CSS_VALUE_TYPE_LENGTH && value->data.length.unit == CSS_UNIT_PX) {
+        computed.type = value->type;
+        computed.data.length = value->data.length;
+    } else {
+        FontBox saved_font = lycon->font;
+        if (span->font && span->font->font_size >= 0.0f) {
+            lycon->font.style = lam::up(span->font);
+            lycon->font.current_font_size = span->font->font_size;
+        }
+        CssLayoutMathContext leaves = {lycon, (uintptr_t)(-(intptr_t)CSS_PROPERTY_LINE_HEIGHT), true};
+        CssMathEvaluationContext context = {css_layout_math_leaf, &leaves, 1.0, false};
+        bool resolved = css_compute_line_height_value(value, &context, &computed);
+        lycon->font = saved_font;
+        if (!resolved) return;
+    }
+    // D4.5.1v4: inline CSSOM writes can release declarations without relayout;
+    // each retained block owns its computed scalar instead of borrowing that graph.
+    span->blk->computed_line_height = computed;
+    span->blk->line_height = lam::shared(&span->blk->computed_line_height);
 }
 
 static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
@@ -5772,6 +5782,15 @@ static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
 
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
+    // rebuild retained leading before shorthand/inheritance resolution, while
+    // preserving the UA normal value installed by HTML control defaults.
+    {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->blk &&
+                span->block()->line_height.get() != css_line_height_normal_value()) {
+            span->blk->line_height = nullptr;
+        }
+    }
     // iterate through specified_style AVL tree
     StyleTree* style_tree = dom_elem->specified_style;
     if (!style_tree || !style_tree->tree) {
@@ -6184,7 +6203,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
         }
     }
-    compute_stored_line_height(lycon, lam::view_require_element(lycon->view));
+    radiant_compute_stored_line_height(lycon, lam::view_require_element(lycon->view));
     resolve_text_align_longhands(dom_elem, lycon);
     resolve_overflow_axes(dom_elem, lycon);
     resolve_overscroll_axes(dom_elem, lycon);

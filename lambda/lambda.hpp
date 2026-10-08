@@ -435,6 +435,7 @@ struct OrderedMap : Map {
     struct hashmap* index;
     int64_t size;
     int64_t cursors;
+    int64_t last_entry;  // cached ordinal plus one; zero means no previous hit
 };
 
 // `Array` is a typedef of List (lambda.h). Extending Map costs every array a
@@ -798,6 +799,7 @@ static_assert(offsetof(Map, type) == LAMBDA_GC_OFF_MAP_TYPE &&
               "Map must match the GC ABI");
 static_assert(sizeof(OrderedMap) == sizeof(LambdaGcOrderedMapLayout) &&
               offsetof(OrderedMap, entries) == offsetof(LambdaGcOrderedMapLayout, entries) &&
+              offsetof(OrderedMap, last_entry) == offsetof(LambdaGcOrderedMapLayout, last_entry) &&
               offsetof(OrderedMap, index) == offsetof(LambdaGcOrderedMapLayout, index),
               "OrderedMap must match the GC ABI");
 static_assert(offsetof(List, type) == LAMBDA_GC_OFF_MAP_TYPE &&

@@ -37,6 +37,9 @@ static uint64_t key_hash(Item key) {
     return hashmap_sip(&key.item, sizeof(key.item), 2, 0);
 }
 static bool key_equal(Item a, Item b) {
+    if (a.item == b.item) return true;
+    // distinct packed integers need no double conversion for SameValueZero.
+    if (get_type_id(a) == LMD_TYPE_INT && get_type_id(b) == LMD_TYPE_INT) return false;
     if (is_number(a) && is_number(b)) {
         double x = it2d(a), y = it2d(b);
         return x == y || (isnan(x) && isnan(y));
@@ -127,16 +130,13 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     return Item{.item = ITEM_JS_UNDEFINED};
 }
 extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
-    RootFrame roots(3);
-    if (!roots.valid()) return ItemError;
-    uint64_t home = 0;
-    Rooted<Item> object(roots, owner), key(roots, name), held(roots, lambda_item_adopt_scalar_home(value, &home));
-    Map* map = object_face(object.get());
+    // audited MIR callers retain all arguments and scalar homes across this non-reentrant helper.
+    Map* map = object_face(owner);
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    if (map->map_kind == MAP_KIND_ORDERED && !own_field(map, key.get().get_string()) &&
-            (text_is(key.get().get_string(), "size") || mvp_lmd_builtin_method(key.get().get_string())))
+    if (map->map_kind == MAP_KIND_ORDERED && !own_field(map, name.get_string()) &&
+            (text_is(name.get_string(), "size") || mvp_lmd_builtin_method(name.get_string())))
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    return map_shape_set(map, key.get().get_string(), held.get()) ? held.get() : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    return map_shape_set(map, name.get_string(), value) ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
     if (get_type_id(owner) == LMD_TYPE_ARRAY) {
@@ -145,12 +145,10 @@ extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
         if (index < owner.array->length) owner.array->items[index].item = ITEM_JS_DELETED_SENTINEL;
         return Item{.item = ITEM_TRUE};
     }
-    RootFrame roots(2);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> object(roots, owner), key(roots, name);
-    Map* map = object_face(object.get());
+    // the MIR caller (including class dispatch) owns the roots throughout shared shape deletion.
+    Map* map = object_face(owner);
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    return map_shape_delete(map, key.get().get_string()) ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    return map_shape_delete(map, name.get_string()) ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 extern "C" Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited) {
     if (get_type_id(owner) == LMD_TYPE_ARRAY) {
@@ -253,8 +251,16 @@ extern "C" Item mvp_lmd_map_call(Item owner, Item method_item, Item key, Item va
         if (get_type_id(canonical) == LMD_TYPE_ERROR) return canonical;
         return mvp_lmd_map_call(object.get(), method_item, canonical, held.get());
     }
-    uint64_t hash = key_hash(key);
-    int64_t previous, head, slot = entry_find(map, key, hash, &previous, &head);
+    uint64_t hash = 0;
+    int64_t previous = -1, head = -1, slot = map->last_entry - 1;
+    // ordinals retain no GC edges; validate the live key after deletion, clear or compaction.
+    // deletion still walks the bucket because it needs the predecessor link.
+    if (method == 4 || slot < 0 || slot >= map->entries->length ||
+            map->entries->items[slot + 3].item != ITEM_TRUE || !key_equal(map->entries->items[slot], key)) {
+        hash = key_hash(key);
+        slot = entry_find(map, key, hash, &previous, &head);
+        map->last_entry = slot + 1;
+    }
     if (method == 1) return slot < 0 ? Item{.item = ITEM_JS_UNDEFINED} : map->entries->items[slot + 1];
     if (method == 3) return slot < 0 ? Item{.item = ITEM_FALSE} : Item{.item = ITEM_TRUE};
     if (method == 4) {
@@ -307,6 +313,7 @@ extern "C" Item mvp_lmd_map_call(Item owner, Item method_item, Item key, Item va
         for (int i = 0; i < 4; i++) map->entries->items[slot + i] = ItemNull;
         map->entries->length = slot; return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
+    // learn only existing-entry hits: unique insertions do not benefit from a last-key probe.
     map->size++; return object.get();
 }
 extern "C" int64_t mvp_lmd_map_next(Item owner, int64_t cursor) {

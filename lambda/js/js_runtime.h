@@ -36,6 +36,10 @@ typedef void (*JsDocumentSourceLoadObserver)(size_t source_length);
 // Radiant registers this only while a document watchdog is active. Module
 // loading reports recursively acquired source so its budget covers the graph.
 void js_set_document_source_load_observer(JsDocumentSourceLoadObserver observer);
+// Host cancellation is checked at guest boundaries and returned in the Item lane.
+typedef bool (*JsExecutionInterruptCheck)(void);
+void js_set_execution_interrupt_check(JsExecutionInterruptCheck check);
+LAMBDA_RT_API Item js_execution_interrupt_status(void);
 
 void js_map_promote_descriptor_kind(Map* m);
 
@@ -1202,6 +1206,7 @@ Item js_iterator_result_value(Item result);
 Item js_async_iterator_close_result(Item iterator);
 bool js_async_iterator_close_needs_await(Item result);
 Item js_iterator_close(Item iterator);
+Item js_get_iterator_proto();
 Item js_iterator_collect_rest(Item iterator);
 
 // =============================================================================
@@ -1539,6 +1544,8 @@ Item js_new_native_this_span_function(JsNativeThisSpan target);
 Item js_new_native_body_constructor(JsNativeCallBody call_body,
                                      JsNativeConstructBody construct_body,
                                      int formal_length);
+Item js_new_native_body_constructor_closure(JsNativeCallBody call_body,
+    JsNativeConstructBody construct_body, int formal_length, Item* env, int env_size);
 Item js_new_native_payload_function(JsNativeCallBody call_body,
                                     uint64_t payload, int formal_length);
 #define JS_DECLARE_NATIVE_CLOSURE(arity) \

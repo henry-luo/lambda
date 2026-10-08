@@ -2459,11 +2459,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
     float span_resolved_line_height = lycon->block.line_height;
-    InlineProp* span_inline_prop = span->in_line
-        ? span->ensure_inline(lycon) : nullptr;
-    if (span_inline_prop) {
+    if (InlineProp* inline_prop = span->in_line ? span->ensure_inline(lycon) : nullptr) {
         // A retained view recomputes this for each layout pass.
-        span_inline_prop->content_strut_establishes_line = false;
+        inline_prop->content_strut_establishes_line = false;
     }
     // line.max_ascender and max_descender to be changed only when there's output from the span
 
@@ -2933,11 +2931,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         float max_ascender_before = lycon->line.max_ascender;
         float max_descender_before = lycon->line.max_descender;
         contribute_inline_strut(lycon, elmt, span);
-        if (span_inline_prop && !lycon->block.line_height_is_normal &&
+        if (span->in_line && !lycon->block.line_height_is_normal &&
             (lycon->line.max_ascender > max_ascender_before + 0.01f ||
              lycon->line.max_descender > max_descender_before + 0.01f)) {
-            // The line baseline came from this explicit content-area strut.
-            span_inline_prop->content_strut_establishes_line = true;
+            // descendant layout can promote and free our private inline prop;
+            // reacquire its writable binding before recording this strut.
+            if (InlineProp* inline_prop = span->ensure_inline(lycon)) {
+                inline_prop->content_strut_establishes_line = true;
+            }
         }
     } else if (span->in_line && span->inl()->vertical_align &&
                span->inl()->vertical_align != CSS_VALUE_BASELINE &&

@@ -67,7 +67,7 @@ A test is killed only after it produces no output for the idle timeout. With `--
 
 Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~240):
 
-- **Native scenes:** `make test-scene3d` or `./test/test_scene3d_gtest.exe` (full macOS host with desktop graphics access). The runner explicitly enables hidden GLFW contexts; missing graphics fails rendered tests. Package goldens live in `test/lambda/scene3d/`; page, sizing and texture fixtures live in `test/scene3d/`. Phase II adds [selected WebGL2/Three.js fixtures](webgl/README.md) in `test/webgl/` and the pinned gallery under `test/demo/scene3d/`.
+- **Native scenes:** `make test-scene3d` or `./test/test_scene3d_gtest.exe` (full macOS host with desktop graphics access). The runner explicitly enables hidden GLFW contexts; missing graphics fails rendered tests. Package goldens live in `test/lambda/scene3d/`; page, sizing and texture fixtures live in `test/scene3d/`. Phases II/III add [selected WebGL2/Three.js and shared animation fixtures](webgl/README.md) in `test/webgl/` and the pinned gallery under `test/demo/scene3d/`.
 - **Layout and render:** `layout` / `test-layout` (`test=`, `suite=`, `pattern=`, `update=1`), `layout-snapshot-check suite=page`, `capture-layout test=`, `test-render` (`test=`, `suite=`, `pattern=`, `update=1`), `capture-render`.
 - **UI and DOM:** `test-ui-automation` (`ARGS=`), `dom-ui test=`, `test-page-load`, `test-reactive-ui`, `test-editable`, `test-wpt-contenteditable`, `test-css-cascade-memory`, `test-pdf-render`, `test-svg-export`, `test-svg-paint`, `test-svg-smil`.
 - **Lambda tiers and GC:** `test-lambda-interp`, `interp-sweep`, `test-gc-rooting`, `test-mir-gc-stress`, `check-error-recovery`, `test-grammar-s16`.

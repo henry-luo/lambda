@@ -151,7 +151,7 @@ static pthread_mutex_t g_paint_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct RdtImagePaintCacheEntry {
     const uint32_t* pixels;
-    uint64_t generation;
+    uint64_t generation, identity;
     int src_w;
     int src_h;
     int src_stride;
@@ -840,11 +840,11 @@ static void paint_cache_clear_all() {
 }
 
 static Tvg_Paint image_paint_cache_dup_locked(const uint32_t* pixels, int src_w, int src_h,
-                                              int src_stride, uint64_t generation, bool straight_alpha) {
+                                              int src_stride, uint64_t generation, bool straight_alpha, uint64_t identity) {
     if (!g_image_paint_cache) return nullptr;
     RdtImagePaintCacheEntry query = {};
     query.pixels = pixels;
-    query.generation = generation;
+    query.generation = generation;query.identity=identity;
     query.src_w = src_w;
     query.src_h = src_h;
     query.src_stride = src_stride;
@@ -861,6 +861,7 @@ static uint64_t image_paint_cache_hash(const void* item, uint64_t s0, uint64_t s
     const RdtImagePaintCacheEntry* e = (const RdtImagePaintCacheEntry*)item;
     uint64_t h = hashmap_hash_bytes(&e->pixels, sizeof(e->pixels), s0, s1);
     h ^= hashmap_hash_bytes(&e->generation, sizeof(e->generation), s0, s1);
+    h ^= hashmap_hash_bytes(&e->identity,sizeof(e->identity),s0,s1);
     h ^= hashmap_hash_bytes(&e->src_w, sizeof(e->src_w), s0, s1);
     h ^= hashmap_hash_bytes(&e->src_h, sizeof(e->src_h), s0, s1);
     h ^= hashmap_hash_bytes(&e->src_stride, sizeof(e->src_stride), s0, s1);
@@ -873,6 +874,7 @@ static int image_paint_cache_cmp(const void* a, const void* b, void* udata) {
     const RdtImagePaintCacheEntry* ea = (const RdtImagePaintCacheEntry*)a;
     const RdtImagePaintCacheEntry* eb = (const RdtImagePaintCacheEntry*)b;
     if (ea->pixels != eb->pixels) return ea->pixels < eb->pixels ? -1 : 1;
+    if(ea->identity!=eb->identity) return ea->identity<eb->identity?-1:1;
     if (ea->generation != eb->generation) return ea->generation < eb->generation ? -1 : 1;
     if (ea->src_w != eb->src_w) return ea->src_w < eb->src_w ? -1 : 1;
     if (ea->src_h != eb->src_h) return ea->src_h < eb->src_h ? -1 : 1;
@@ -890,9 +892,9 @@ static bool image_paint_cache_ensure_locked() {
 }
 
 static Tvg_Paint image_paint_cache_store(const uint32_t* pixels, int src_w, int src_h,
-                                         int src_stride, uint64_t generation, bool straight_alpha, Tvg_Paint paint) {
+                                         int src_stride, uint64_t generation, bool straight_alpha, uint64_t identity, Tvg_Paint paint) {
     pthread_mutex_lock(&g_image_paint_cache_mutex);
-    Tvg_Paint existing = image_paint_cache_dup_locked(pixels, src_w, src_h, src_stride, generation, straight_alpha);
+    Tvg_Paint existing = image_paint_cache_dup_locked(pixels, src_w, src_h, src_stride, generation, straight_alpha, identity);
     if (existing) {
         tvg_paint_unref(paint, true);
         pthread_mutex_unlock(&g_image_paint_cache_mutex);
@@ -917,7 +919,7 @@ static Tvg_Paint image_paint_cache_store(const uint32_t* pixels, int src_w, int 
 
     RdtImagePaintCacheEntry e = {};
     e.pixels = pixels;
-    e.generation = generation;
+    e.generation = generation;e.identity=identity;
     e.src_w = src_w;
     e.src_h = src_h;
     e.src_stride = src_stride;
@@ -1927,7 +1929,7 @@ static void apply_raster_image_placement(Tvg_Paint picture, int source_width, in
 
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha) {
+                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha, uint64_t resource_identity) {
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* impl = vec->impl;
     if (src_w <= 0 || src_h <= 0 || src_w > INT_MAX / 4 || src_stride < src_w || src_stride > INT_MAX / 4 ||
@@ -1940,7 +1942,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
     if (resource_generation != 0) {
         pthread_mutex_lock(&g_image_paint_cache_mutex);
         Tvg_Paint cached = image_paint_cache_dup_locked(pixels, src_w, src_h, src_stride,
-                                                        resource_generation, straight_alpha);
+                                                        resource_generation, straight_alpha, resource_identity);
         pthread_mutex_unlock(&g_image_paint_cache_mutex);
         if (cached) {
             apply_raster_image_placement(cached, src_w, src_h, dst_x, dst_y, dst_w, dst_h, transform);
@@ -1990,7 +1992,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
 
     if (resource_generation != 0) {
         Tvg_Paint draw = image_paint_cache_store(pixels, src_w, src_h, src_stride,
-                                                 resource_generation, straight_alpha, pic);
+                                                 resource_generation, straight_alpha, resource_identity, pic);
         if (draw) {
             pic = draw;
         }

@@ -157,6 +157,32 @@ TEST(GifDetection, StaticGifReturnsNull) {
     EXPECT_EQ(frames, nullptr);
 }
 
+TEST(GifDecode, TransparentFrameWithoutPalette) {
+    // palette-free lazy-loading placeholders still define transparent pixel indices.
+    unsigned char gif[] = {
+        'G', 'I', 'F', '8', '9', 'a',
+        0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x21, 0xf9, 0x04, 0x01, 0x0a, 0x00, 0x01, 0x00,
+        0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+        0x02, 0x02, 0x4c, 0x01, 0x00, 0x3b
+    };
+    int width = 0, height = 0, channels = 0;
+    unsigned char* pixels = image_load_from_memory(gif, sizeof(gif),
+                                                   &width, &height, &channels);
+    ASSERT_NE(nullptr, pixels);
+    EXPECT_EQ(1, width);
+    EXPECT_EQ(1, height);
+    EXPECT_EQ(4, channels);
+    EXPECT_EQ(0, pixels[3]);
+    image_free(pixels);
+
+    // removing transparency must still reject an opaque pixel without a palette.
+    gif[16] = 0x00;
+    pixels = image_load_from_memory(gif, sizeof(gif), &width, &height, &channels);
+    EXPECT_EQ(nullptr, pixels);
+    if (pixels) image_free(pixels);
+}
+
 TEST(GifDetection, AnimatedGifReturnsFrames) {
     GifFrames* frames = gif_detect_animated_from_memory(ANIM_GIF_2FRAME, ANIM_GIF_2FRAME_LEN);
     ASSERT_NE(frames, nullptr);

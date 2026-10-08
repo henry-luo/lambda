@@ -1,0 +1,105 @@
+{
+  "date": "2026-10-08",
+  "base_revision": "3a1a4d3c7",
+  "branch": "codex/webgl-phase3",
+  "profile": "selected native macOS Phase III; not full WebGL/Three.js conformance",
+  "hardware": {
+    "cpu_gpu": "Apple M4",
+    "architecture": "arm64",
+    "macos": "26.3",
+    "opengl": "4.1 Metal - 90.5",
+    "glsl": "4.10"
+  },
+  "gates": {
+    "native_scene_webgl": {
+      "passed": 42,
+      "failed": 0
+    },
+    "vector": {
+      "passed": 96,
+      "failed": 0
+    },
+    "view_resources": {
+      "passed": 192,
+      "failed": 0
+    },
+    "svg_smil_ui": {
+      "fixtures": 32,
+      "runs": 128,
+      "assertions": 3864,
+      "failed": 0,
+      "densities": [
+        1,
+        2
+      ],
+      "cache_modes": [
+        "off",
+        "eager"
+      ]
+    },
+    "lambda_input_js_baseline": {
+      "passed": 6419,
+      "failed": 0
+    },
+    "test262_baseline": {
+      "passed": 40261,
+      "regressions": 0
+    },
+    "jube_loader_matrix": "passed with CPLUS_INCLUDE_PATH=/opt/homebrew/opt/mpdecimal/include",
+    "radiant_baseline": {
+      "passed": 4094,
+      "partially_passing": 350,
+      "failed": 1,
+      "exception": "CSS-role memory budgets on jqueryui/linuxmint/bschool reproduce on clean base; jqueryui is exactly 380794 bytes from the same working directory versus budget 373940; no thresholds changed"
+    },
+    "radiant_dimension_lint": "passed",
+    "pinned_typed_track_oracles": 22,
+    "pinned_mixer_scenarios": 6,
+    "release_pbr_gc_recovery": "3/3 passed; includes final overlapping-binding and morph-alias ownership checks"
+  },
+  "release_measurement": {
+    "method": "144 post-initialization frames at 800x500, native mixer update(1/60), unmodified Three.js composer, native snapshot readback and full page composition; callback compiled once, no per-frame eval parsing; CLOCK_MONOTONIC frame timing, performance.now sampling including JS binding callbacks; no display/vsync pacing",
+    "owned_memory_scope": "Native GL service CPU/upload shadows and GPU resources; driver-private allocations and process RSS are not measured. Vector cache bytes are metadata only, excluding ThorVG image payloads.",
+    "properties": {
+      "pbr_draws": "66",
+      "pbr_gpu_bytes": "46927896",
+      "pbr_cpu_bytes": "2962416",
+      "pbr_measured_frames": "144",
+      "pbr_frame_p50_ms": "307.676000",
+      "pbr_frame_p95_ms": "342.583000",
+      "pbr_sampling_p50_ms": "3.392542",
+      "pbr_sampling_p95_ms": "3.875833",
+      "vector_cache_entries_before": "7",
+      "vector_cache_entries_after": "130",
+      "vector_cache_metadata_bytes_before": "656",
+      "vector_cache_metadata_bytes_after": "6560",
+      "pbr_final_cpu_bytes": "2962416",
+      "pbr_final_gpu_bytes": "46927896"
+    },
+    "cache_bound": "Image paint cache admits at most 128 entries. Capture crosses capacity; combined vector-cache counts also include static paths."
+  },
+  "recovery": {
+    "method": "three controlled full-context restorations during a warped crossfade; pose/time retained; independent second PBR canvas resizes at 1x/2x; full factory disposal",
+    "properties": {
+      "initial_cpu_bytes": "2962416",
+      "initial_gpu_bytes": "46927896",
+      "initial_resources": "70",
+      "restored_cpu_bytes": "2962416",
+      "restored_gpu_bytes": "46927896",
+      "restored_resources": "70",
+      "disposed_cpu_bytes": "2821864",
+      "disposed_gpu_bytes": "0",
+      "disposed_resources": "0"
+    }
+  },
+  "browser_comparison": {
+    "reference_manifest": "manifest.json",
+    "comparison": "pixel-comparison.json",
+    "minimum_fraction": 0.99,
+    "channel_tolerance": 8,
+    "actual_minimum_fraction": 0.9983666666666666,
+    "selected_gl_calls": 94,
+    "shader_sources": 30
+  },
+  "host_sha256": "9e1e2b8446242c911fc5cd5644bb26c375b17ae8fdc5da02b700c40f5be96553"
+}

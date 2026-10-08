@@ -114,6 +114,7 @@ extern "C" bool path_is_absolute(Path* path);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
+extern bool js_realm_runtime_has_input(void);
 
 // External typeset function
 
@@ -6782,6 +6783,9 @@ extern "C" Item lambda_object_member(Item self, const char* key) {
     bool is_found = false;
     Item field_val = _map_get((TypeMap*)obj->type, obj->data, (char*)key, &is_found);
     if (is_found) return field_val;
+    const TypeNominal* nominal = ((TypeMap*)obj->type)->nominal;
+    if (nominal && nominal->extension && nominal->extension->member)
+        return nominal->extension->member(self, key, strlen(key), &is_found);
     const TypeMethod* method = lambda_object_find_method((TypeObject*)obj->type, key);
     if (!method) return ItemNull;
     // OB6 rules a bare `pn` method reference a compile error, but the rejection
@@ -13317,7 +13321,8 @@ static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_
         ShapeEntry* replacement = plan ? plan->replacement : NULL;
         bool compatible = plan ? plan->reuse_payload :
             typemap_payload_reusable(old_map_type, new_type, changed_entry, removed_entry, &replacement);
-        TypeId storage = replacement ? shape_entry_storage_type_id(replacement) : LMD_TYPE_NULL;
+        // the immutable plan already classified this lane with the shared storage resolver.
+        TypeId storage = replacement ? (plan ? plan->storage_type : shape_entry_storage_type_id(replacement)) : LMD_TYPE_NULL;
         // these simple stores neither allocate nor retain a borrowed numeric home.
         bool immediate_store = !replacement || (replacement->type == type_info[storage].type &&
             (storage == LMD_TYPE_INT || storage == LMD_TYPE_FLOAT || storage == LMD_TYPE_NULL ||
@@ -13595,11 +13600,8 @@ bool map_shape_delete(Map* map, String* key) {
     ShapeEntry* removed = typemap_hash_lookup(old, key->chars, (int)key->len);
     if (!removed) return true;
     Input* tree = runtime_shape_tree();
-    TypeMap* target = tree ? type_tree_root_like(tree, map) : NULL;
-    FOR_EACH_MAP_FIELD(old, field) {
-        if (field != removed && target) target = type_tree_add_map_field_chars(tree, target,
-            field->name->str, field->name->length, field->type->type_id, NULL);
-    }
+    const TypeMapRetypePlan* plan = NULL;
+    TypeMap* target = tree ? type_tree_delete_field(tree, map, removed, &plan) : NULL;
     if (!target) {
         // the bounded tree declined: retain family identity in a private filtered chain.
         target = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
@@ -13625,7 +13627,7 @@ bool map_shape_delete(Map* map, String* key) {
         return true;
     }
     return container_move_to_type(&map->type, &map->data, &map->data_cap,
-        map, old, target, NULL, ItemNull, 0, removed);
+        map, old, target, NULL, ItemNull, 0, removed, plan);
 }
 
 // map/element field assignment: obj.field = val
@@ -14495,14 +14497,19 @@ static ShapeEntry* map_resolve_entry_in_shape(TypeMap* shape, NameRef key_ref,
 static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
         TypeMap** map_type_slot, void** type_slot, const char* key_cstr,
         size_t key_len, NameRef key_ref, ShapeEntry* entry, TypeId value_type) {
+    // constructor pre-shapes and their JS transitions belong to Map storage.
+    if (get_type_id(map_item) != LMD_TYPE_MAP) return entry;
     if (!map_type_slot || !*map_type_slot || !entry || !entry->type) return entry;
     TypeId field_type = entry->type->type_id;
     if (!map_shared_ctor_shape_should_detach_for_type(*map_type_slot, field_type, value_type)) {
         return entry;
     }
     NameId operation_name_id = key_ref ? property_key_id(key_ref) : NAME_ID_NONE;
-    TypeMap* transition = js_typemap_transition_for_type(map_item, entry,
-        operation_name_id, value_type);
+    bool js_active = js_realm_runtime_has_input();
+    // a Lambda context may have a JS capsule before its Input exists; use
+    // the Lambda pool until that realm can own transitions (D5.4.1).
+    TypeMap* transition = js_active ? js_typemap_transition_for_type(map_item, entry,
+        operation_name_id, value_type) : NULL;
     if (transition) {
         *map_type_slot = transition;
         if (type_slot) *type_slot = transition;
@@ -14510,8 +14517,9 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
             key_cstr, key_len);
         if (refreshed) return refreshed;
     }
-    TypeMap* clone = js_typemap_clone_for_mutation_pub(map_item);
-    if (!clone) return entry;
+    TypeMap* clone = js_active ? js_typemap_clone_for_mutation_pub(map_item)
+        : map_clone_typemap_for_mutation(map_item.map, context->pool);
+    if (!clone) return NULL;
     *map_type_slot = clone;
     if (type_slot) *type_slot = clone;
     // Ordinary Input and runtime strings use the id-less byte seam; identity

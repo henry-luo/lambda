@@ -24,6 +24,8 @@ struct WebGlCommand {
     const void* data;
     size_t bytes;
     const char* text;
+    bool compact_pixels; // host image sources use tightly packed rows, independently of client-view unpack state
+    bool source_dimensions; // DOM-source overload supplies an explicit upload rectangle
 };
 enum WebGlReplyKind { WEBGL_VOID, WEBGL_NUMBER, WEBGL_BOOLEAN, WEBGL_STRING,
     WEBGL_NUMBERS, WEBGL_RESOURCE, WEBGL_LOCATION, WEBGL_ACTIVE_INFO, WEBGL_PRECISION };
@@ -39,6 +41,8 @@ struct WebGlOptions { bool alpha, depth, stencil, antialias, premultiplied_alpha
 extern "C" {
 uint64_t radiant_webgl_create(void* canvas, const WebGlOptions* options);
 bool radiant_webgl_call(uint64_t canvas, const WebGlCommand* command, WebGlReply* reply);
+bool radiant_webgl_image(uint64_t canvas, const WebGlCommand* command, void* source, WebGlReply* reply);
+bool radiant_webgl_extension_supported(uint64_t canvas, const char* name);
 void radiant_webgl_error(uint64_t canvas, unsigned error);
 bool radiant_webgl_resize(void* canvas, unsigned width, unsigned height);
 bool radiant_webgl_has_context(void* canvas);

@@ -942,6 +942,11 @@ bool js_realm_runtime_is_active(void) {
     return js_active_runtime_state != NULL;
 }
 
+bool js_realm_runtime_has_input(void) {
+    return js_active_runtime_state && js_active_runtime_state->input &&
+        js_active_runtime_state->input->pool;
+}
+
 bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
         Item** values, int count, bool reserve) {
     if (!slots || !slot_ids || !values || count < 0) return false;

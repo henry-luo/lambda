@@ -86,6 +86,9 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id,
 ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
                                  ShapeEntry* prev_entry);
 
+// D3.4.3v5: detach a shared shape into its explicit mutation owner's pool.
+TypeMap* map_clone_typemap_for_mutation(Map* map, Pool* pool);
+
 // A new entry with `like`'s identity (name, id, key kind, namespace) at a new
 // value type, linked after `prev_entry`; the name is shared, not copied, so
 // both must live in the same Input. Its byte_offset is the caller's to set.
@@ -108,6 +111,8 @@ bool type_tree_owns(const Input* input, const TypeMap* type);
 // laid out for `value_type` (D3.4.5 through the tree); NULL when declined.
 TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
                                 TypeId value_type, const TypeMapRetypePlan** plan = NULL);
+TypeMap* type_tree_delete_field(Input* input, Map* container, const ShapeEntry* field,
+                                const TypeMapRetypePlan** plan = NULL);
 // Impl_Map_Transition_Coverage P1.5: a runtime add that copied a whole shape
 // of `entries` fields onto a private type (counted under LAMBDA_SHAPE_TREE_STATS).
 void shape_tree_stats_note_private_copy(int64_t entries);
@@ -119,9 +124,6 @@ void shape_tree_stats_note_private_copy(int64_t entries);
 #ifdef __cplusplus
 extern "C" {
 #endif
-Input* input_from_source_n(const char* source, size_t length, Url* url,
-    String* type, String* flavor);
-
 // Shared input utility functions (most declarations in input-utils.h)
 #include "input-utils.h"
 
@@ -131,11 +133,13 @@ void skip_whitespace(const char** text);
 void skip_tab_pace(const char** text);
 
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
+Input* input_from_source_n(const char* source, size_t source_len, Url* url,
+    String* type, String* flavor);
+Input* input_from_source_n_with_name_parent(const char* source, size_t source_len,
+    Url* url, String* type, String* flavor, NamePool* name_parent,
+    const InputParseOptions* options = NULL);
 Input* input_from_source_with_name_parent(const char* source, Url* url,
     String* type, String* flavor, NamePool* name_parent);
-Input* input_from_source_n_with_name_parent(const char* source, size_t length,
-    Url* url, String* type, String* flavor, NamePool* name_parent,
-    const InputParseOptions* options = nullptr);
 // parse({sourcepos: true}): markup parsers tag each top-level block with the
 // source lines it spans (`sourcepos`, as in cmark)
 Input* input_from_source_with_positions(const char* source, Url* url,

@@ -276,6 +276,44 @@ TEST_F(NetworkLayoutTest, ViewAsyncXhrDoesNotBlockEventLoop) {
     shell_result_free(&result);
 }
 
+TEST_F(NetworkLayoutTest, ViewFetchHeadersPreserveBytesAndGuards) {
+    ShellResult result = headless_view_with_memtrack("fetch_headers_network.html");
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_NE(strstr(output, "FETCH_HEADERS_NETWORK_PASS"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "FETCH_HEADERS_NETWORK_FAIL"), nullptr) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+    shell_result_free(&result);
+}
+
+TEST_F(NetworkLayoutTest, LayoutAwaitsNativeRequestsWithoutAdvancingCaptureClock) {
+    char url[256];
+    snprintf(url, sizeof(url), "http://localhost:%d/fetch_async_snapshot.html", server_port);
+    const char* args[] = {"./lambda.exe", "layout", url, "--auto-close",
+        "--post-load-settle-ms", "20", "--no-log", nullptr};
+    ShellOptions options = {};
+    options.merge_stderr = true;
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_NE(strstr(output, "FETCH_ASYNC_SNAPSHOT_PASS"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "FETCH_ASYNC_SNAPSHOT_FAIL"), nullptr) << output;
+    shell_result_free(&result);
+}
+
+TEST_F(NetworkLayoutTest, ViewSnapshotNativeRequestDrainRemainsBounded) {
+    uint64_t start_ns = time_now_ns();
+    ShellResult result = headless_view_with_memtrack("fetch_async_timeout.html");
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_LT(time_elapsed_ms_f(start_ns, time_now_ns()), 10000.0) << output;
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_EQ(strstr(output, "FETCH_ASYNC_UNEXPECTED_COMPLETION"), nullptr) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+    shell_result_free(&result);
+}
+
 TEST_F(NetworkLayoutTest, ViewCancelsInflightXhrWhenScriptWatchdogTearsDownRuntime) {
     uint64_t start_ns = time_now_ns();
     ShellResult result = headless_view_with_memtrack("xhr_async_cancel.html");

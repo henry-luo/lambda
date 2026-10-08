@@ -69,6 +69,7 @@ typedef struct StyleTree {
     int next_source_order;           // Next source order counter
     uint32_t compute_version;        // Global compute version for cache invalidation
     void* canonical_owner;           // StyleCanonicalEntry for epoch-owned immutable trees
+    struct StyleDeclarationCache* declaration_cache; // possible properties of immutable canonical cascades
     uint32_t borrow_ref_count;       // Generated pseudo boxes borrowing this tree
     bool retired_borrow_source;      // Detached pseudo tree pending its last borrower
 } StyleTree;
@@ -83,6 +84,9 @@ typedef struct StyleTree {
  * @return New style tree or NULL on failure
  */
 StyleTree* style_tree_create(Pool* pool);
+
+// initialize before freezing so the epoch accounts for the cache's owned bytes
+void style_tree_init_declaration_cache(StyleTree* tree);
 
 /**
  * Destroy a style tree

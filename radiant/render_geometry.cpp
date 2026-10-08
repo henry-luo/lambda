@@ -78,6 +78,16 @@ static float render_geometry_absf(float value) {
     return value < 0.0f ? -value : value;
 }
 
+Rect render_geometry_outer_shadow_rect(Rect border_box, float offset_x,
+                                       float offset_y, float spread) {
+    // CSS Backgrounds 3 §6.1.1: negative spread contracts the perimeter,
+    // flooring its dimensions at zero before blur or display-list recording.
+    return {border_box.x + offset_x - spread,
+            border_box.y + offset_y - spread,
+            max(0.0f, border_box.width + 2.0f * spread),
+            max(0.0f, border_box.height + 2.0f * spread)};
+}
+
 float render_geometry_filter_effect_expand(const FilterProp* filter) {
     if (!filter || !filter->functions) return 0.0f;
     float expand = 0.0f;

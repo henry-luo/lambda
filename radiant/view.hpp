@@ -143,6 +143,7 @@ typedef enum AnimationType {
     ANIM_GIF,
     ANIM_LOTTIE,
     ANIM_SVG,
+    ANIM_TIMELINE,
 } AnimationType;
 
 typedef enum AnimationDirection {
@@ -239,6 +240,8 @@ struct AnimationInstance {
     bool sampled;
     bool layout_changed;
     bool retain_after_finish;   // CSS name reconciliation keeps an inactive timeline until removal
+    bool scheduler_removed, sampling;
+    AnimationInstance* retired_next;
 
     float bounds[4];
     double pause_time;
@@ -255,6 +258,8 @@ typedef struct AnimationScheduler {
     bool has_active_animations;
     bool host_time_anchored;
     bool needs_layout;
+    unsigned sampling_depth;
+    AnimationInstance* retired;
 
     Pool* pool;
 } AnimationScheduler;
@@ -263,7 +268,7 @@ AnimationScheduler* animation_scheduler_create(Pool* pool);
 void animation_scheduler_destroy(AnimationScheduler* scheduler);
 bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
                               DirtyTracker* dirty_tracker, bool force_css_sample = false,
-                              AnimationInstance* only = nullptr);
+                              AnimationInstance* only = nullptr, bool timelines_only = false);
 void animation_scheduler_anchor_host_time(AnimationScheduler* scheduler, double now);
 void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_move_before(AnimationScheduler* scheduler,
@@ -277,6 +282,9 @@ void animation_scheduler_remove_views(AnimationScheduler* scheduler);
 void animation_scheduler_prune_disconnected_css_views(AnimationScheduler* scheduler,
                                                        DomDocument* document);
 AnimationInstance* animation_instance_create(AnimationScheduler* scheduler);
+AnimationInstance* animation_clock_driver_start(AnimationScheduler* scheduler, AnimationType type,
+    void* target, AnimTickFn tick, AnimFinishFn released);
+double animation_clock_time(const AnimationScheduler* scheduler, const AnimationInstance* driver, double origin);
 void animation_instance_pause(AnimationInstance* anim, double now);
 void animation_instance_sample(AnimationInstance* anim, double now);
 void animation_instance_resume(AnimationInstance* anim, double now);
@@ -1352,6 +1360,7 @@ inline void radiant_border_side_set(RadiantBorderSide side, float width,
 typedef struct {
     Color color;
     float position;  // normalized stop coordinate (or CSS pixels); NaN for auto
+    bool position_is_px;  // each stop retains its unit until the gradient line is known
 } GradientStop;
 
 // Linear gradient data
@@ -2099,6 +2108,7 @@ typedef struct BlockProp {
     float zoom;  // CSS Viewport 1: local zoom factor; effective zoom multiplies ancestors
     CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
     lam::Shared<const CssValue> line_height;
+    CssValue computed_line_height;  // retained leading owns its scalar after the cascade returns
     float text_indent;  // can be negative
     float text_indent_percent;  // NaN if not percentage, else raw percentage value for deferred resolution
     lam::Up<const CssValue> text_indent_calc;  // non-null if text-indent is calc() with percentage, deferred to layout
@@ -3911,6 +3921,7 @@ const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value
 const char* css_font_family_name_from_value(const CssValue* value);
 // Immutable `normal` keyword shared by UA and font-shorthand line-height resets.
 const CssValue* css_line_height_normal_value();
+void radiant_compute_stored_line_height(LayoutContext* lycon, DomElement* span);
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
 const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              const CssValue* shorthand_value,
@@ -4257,6 +4268,7 @@ extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 bool document_dependency_admits(const DomDocument* document, const char* source);
 ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source);
+ImageSurface* image_element_surface(DomElement* element);
 ImageSurface* load_document_image_resource(DomDocument* document, lam::Own<struct hashmap>* cache,
     const char* source);
 void image_resource_cache_cleanup(lam::Own<struct hashmap>* cache, UiContext* animation_ui = nullptr);

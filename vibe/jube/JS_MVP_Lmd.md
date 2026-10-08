@@ -7,8 +7,10 @@ phase implemented. Ordinary arrays and core strings are implemented (§18);
 the latest tuning measurements and validation status are recorded in §20.
 The numeric-library phase is implemented in source (§15); its full feature
 edge matrix remains pending. §§16–17 record the subsequent tuning.
+Basic classes and single inheritance are implemented in source (§21);
+class-phase validation and performance evidence are tracked separately there.
 
-**Performance history:** [MVP_Result2–6](../../test/benchmark/js_mvp_lmd/README.md)
+**Performance history:** [MVP_Result3–7](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
 
 **Destination:** `lambda/js/mvp-lmd/`
@@ -78,6 +80,8 @@ flowchart TD
 Reuse physical allocation, field storage, shape transitions, scalar ownership,
 and control-flow emission. JS owns coercion, equality, reference mutation,
 property behavior, and completion semantics (**S1.11**, **D1.3v3**).
+Class inheritance must align with Lambda's nominal inheritance model
+for deep interoperability; §21 records this requirement.
 
 Unknown or changing values use `Item`; proven scalar regions use native
 registers. An inferred kind selects a representation without restricting
@@ -92,19 +96,20 @@ object/Map boundary and its scope decisions.
 | Area | Implemented | Excluded from the implemented phase |
 |---|---|---|
 | Scalars | Undefined, null, Boolean, Number, String; NaN, infinities, signed zero | BigInt, Symbol, boxed primitive objects |
-| Operators | Arithmetic, remainder/power, bitwise/shifts, comparisons, loose/strict equality, `typeof`, `void`, short-circuiting, conditional/comma; object `in`/property `delete` | Object-to-primitive coercion; `instanceof` |
+| Operators | Arithmetic, remainder/power, bitwise/shifts, comparisons, loose/strict equality, `typeof`, `void`, short-circuiting, conditional/comma; object `in`/property `delete`; fixed-class `instanceof` (§21) | Object-to-primitive coercion; general prototype/`instanceof` customization |
 | Variables | `var`, `let`, `const`; assignments, logical/compound assignments, updates, changing kinds; simple array destructuring assignment (§18; validation in §19) | Binding/nested/rest/default patterns; sloppy implicit global creation |
 | Arrays | Dense mixed/nested literals, indexed reads/writes, append at length, length reads/shrink; constructors, `fill`/`push`/`pop`/`join`, constructor/deletion holes and own projections (§18; validation in §19) | Hole literals, sparse writes, other named properties, first-class intrinsic methods, descriptors/prototypes |
 | Typed arrays | `Int32Array`, `Uint8Array`, `Float64Array`: length construction, zero initialization, indexed reads/writes, `.length`, `.fill(value, start?, end?)` (§15; validation pending) | Buffer/view constructors, other properties/methods, typed-array iteration, detachment/resizing/shared storage |
 | Math | Fixed calls to `sqrt`, `sin`, `floor`, `trunc`, `abs`, `min`, `max`, `ceil`, `cos` (§15; validation pending) | First-class Math object/methods, dynamic method names, mutation, other Math members |
-| Objects/Map | Data properties, own projections, `new Map()` and fixed collection operations (§10) | `__proto__`, descriptors/accessors, proxies, custom prototypes, iterable Map construction |
-| Control flow | Blocks, conditionals, while/do/for, direct `for-of` with simple pair binding (§10.5), switch/fallthrough, labels, break/continue, return | `for-in`, general iterators, generators, async, throw/try/catch/finally |
-| Functions | Ordinary declarations/expressions, arrows, simple parameters, recursion, function values, indirect calls, program bindings | Enclosing local captures, default/rest/spread parameters, observable `this`/`arguments`/`new.target`, constructors/methods/classes |
+| Objects/Map | Data properties, own projections, `new Map()` and fixed collection operations (§10); class-created inheritance links (§21) | `__proto__`, descriptors/accessors, proxies, arbitrary/mutable prototypes, iterable Map construction |
+| Control flow | Blocks, conditionals, while/do/for, direct `for-of` with simple pair binding (§10.5), switch/fallthrough, labels, break/continue, return; uncaught `throw` (§21) | `for-in`, general iterators, generators, async, try/catch/finally |
+| Functions/classes | Ordinary declarations/expressions, arrows, simple parameters, recursion, function values, indirect calls, program bindings; named top-level classes, constructors, instance/static methods, single inheritance, class `this`/`new.target` and `super` (§21) | Enclosing local captures, default/rest/spread parameters, observable ordinary-function `this`/`arguments`, class expressions/nested classes, field initializers, private/accessor members, ordinary-function construction |
 | Program | One script with execution-owned bindings and retained early-error/strictness rules | Modules, eval, Function constructor, with, DOM/Node APIs, general global object |
 
 Strings preserve Unicode, including lone surrogates, with UTF-16 length and
 indexed code-unit reads. §18 adds `charAt`, `charCodeAt`, `repeat`, and
 `String.fromCharCode` (validation in §19); other methods remain excluded.
+Primitive template interpolation is admitted with §21.
 
 Unsupported syntax is diagnosed throughout the unit, including unexecuted
 functions, before execution. Runtime-dependent unsupported operations return
@@ -800,7 +805,7 @@ UTF-16 utilities, with precise roots (**D2.6.1v3**, **D5.3.1–D5.3.4**).
 Plain objects retain Map/shape transitions (**D3.4.3v5**); VMap, `__proto__`,
 descriptors/accessors and proxies remain excluded. Follow §15.2's helper
 disclosure and §15.3's acceptance requirements. Constructors/classes and
-receivers, including the error statements in AWFY bundles, are a later phase;
+receivers, including the error statements in AWFY bundles, are covered in §21;
 captured mutable locals follow for workloads such as Navier–Stokes.
 
 The [implementation record](../impl/JS_MVP_Lmd_Array_String.md) lists shared
@@ -881,3 +886,112 @@ Checks pass: **44/44 MVP tests** normally and with forced GC/poisoning,
 **6,408/6,408 Lambda/input**, and **40,261/40,261 Test262** with zero retries.
 Exact provenance, helper inventory, uncertainty and baseline status:
 [implementation record](../impl/JS_MVP_Lmd_Array_String.md#further-collatzbase64-tuning-and-regression-diagnosis).
+
+## 21. Classes and inheritance aligned with Lambda
+
+**Status:** basic class phase IMPLEMENTED IN SOURCE, 2026-10-08.
+The interoperability requirement remains governing (USER, 2026-10-08);
+script-level cross-language call/subclass adapters remain future work.
+
+JS/MVP class inheritance must share Lambda's foundation so instances and
+class relationships can interoperate deeply in both languages. JS may extend
+that foundation with additional capabilities, provided the extensions preserve
+the shared runtime contracts (**D2.6.6v3**, **D2.6.9v3**).
+
+- **Shared identity and ancestry.** Build on `TypeNominal` and its single-base
+  relationship. Class-created prototype and constructor inheritance must agree
+  with that ancestry. Preserve nominal identity across shape transitions;
+  different instance shapes still belong to the same class (**S2.1.4**,
+  **S11.3.1v2**).
+- **Shared storage.** Reuse Lambda Map/array storage, canonical name identity,
+  inherited field-layout contracts, and shape transitions. JS property changes
+  must respect any inherited Lambda field contracts and keep the shape's
+  description of stored bytes accurate (**S2.1.3v2**, **D3.4.3v5–D3.4.5**).
+  Plain instances continue to use ordinary containers without VMap.
+- **Explicit JS extensions.** Prototype properties, receiver calls, constructors,
+  `super`, and `newTarget` extend the shared model through language-specific
+  metadata and call entries. Preserve Lambda's bound-method behavior and JS's
+  explicit receiver behavior at their respective language boundaries. JS
+  extensions must never invalidate Lambda's sealed-type/field assumptions or
+  reuse their optimizations without valid guards (**S1.11**, **D2.6.7**,
+  **D2.6.9v3–D2.6.10**, **D6.2.2v2**).
+- **Interop is an acceptance requirement.** Specify and validate instance
+  passage in both directions, preserved identity/ancestry, field access,
+  inherited/overridden method calls, and precise ownership. Before admitting
+  cross-language subclassing, resolve constructor and inherited-field contracts
+  in both directions. Unsupported combinations receive explicit diagnostics
+  (**D1.2v2**, **D1.5v2**).
+
+Reuse existing Lambda functions first; consider a small explicit option for a
+semantic difference and disclose any new helper before implementation (§15.2).
+`__proto__`, user prototype mutation, descriptor APIs, accessors, and proxies
+remain outside the planned basic class phase. This section records the design
+constraint; §3 continues to describe the implemented admission boundary.
+
+
+### 21.1 Initial class phase and performance boundary
+
+Admit named top-level class declarations, simple constructors, instance/static
+methods, single inheritance, default derived constructors, `super()` and
+`super.method()`, class `this`/`new.target`, and fixed-chain `instanceof`.
+Instance fields use ordinary assignments and retain class identity through
+addition, retyping and deletion. Own reflection omits nonenumerable class
+methods; inherited lookup follows the shared nominal base chain.
+
+Uncaught `throw`, direct `throw new Error(message)`, and primitive template
+interpolation cover the AWFY diagnostic paths. First-class Error objects,
+handlers, class expressions/nested classes, field initializers, captured locals,
+ordinary-function construction, Error options, computed `super` keys, and
+writes/deletes through `super` remain excluded. Class prototype and constructor
+properties are readable; their
+mutation remains excluded (**S1.11**, **D2.6.9v3**, **D6.2.2v2**).
+
+Receiver-aware calls and class property dispatch are selected only for units
+that admit classes. Existing units retain their prior call ABI and property
+helpers. Compare all 48 previous workloads against the frozen release using
+pinned native MIR, alternating self-reported times and an identical-control
+peer. The six coverage targets are AWFY sieve, permute, queens, towers, list,
+and mandelbrot. Shared nominal identity, ancestry, layouts and guest member
+resolution establish the runtime interop foundation; cross-language callable
+adaptation and subclass construction remain explicit unsupported boundaries.
+
+Latest benchmark evidence is recorded in §21.2. Class semantic/forced-GC and
+broad baseline suites have not been run for this phase; §20's totals belong to
+its prior binary.
+
+The [class implementation record](../impl/JS_MVP_Lmd_Classes.md) records helper
+reuse, benchmark evidence, regression analysis and outstanding validation.
+
+### 21.2 Class workload tuning
+
+Tune numeric indexing without intermediate string keys, fixed-name property
+lookup with immutable-shape guards, and ordinary receiver calls through the
+existing MIR entry ABI. Retain own-field overrides, shape-change fallbacks,
+constructor validation and caller-owned scalar/root lifetimes (**D3.4.3v5–D3.4.5**,
+**D5.2.1v3**, **D6.2.2v2**). Reuse shared field readers/writers and shape transitions;
+extend existing helpers before introducing new runtime entry points.
+
+Deletion reuses a bounded plan on immutable tree-owned shapes; repeated Map
+get/set/has operations reuse a checked entry ordinal. Both retain shared
+canonical-key equality and existing mutation fallbacks (**D3.4.4v4**, **D3.4.5**).
+
+Measure sieve, permute, queens, towers and list against frozen releases and
+untyped Lambda. Confirm deletion and Map lookup regressions separately, then
+check all prior workloads using alternating release runs, pinned native MIR,
+self-reported time, output oracles and an identical-control noise lane.
+
+**Latest results:** all **54 workloads** pass output checks. Against the fresh
+pre-tuning release, sieve is **6.45× faster**, permute **3.96×**, queens **3.55×**,
+towers **2.66×**, and list **2.03×**; list is now **26% faster than untyped Lambda**.
+Sieve, permute, queens and towers remain **2.47–3.44× slower** than their Lambda
+ports (including the Towers storage/validation differences).
+
+The 48 prior workloads have **3.23% lower geometric-mean time**. Sixty-pair
+confirmations resolve the original deletion and Map lookup regressions:
+**49.5%** and **36.4% lower time** than the pre-class release; JSON generation
+is neutral. Follow-up checks find no confirmed new slowdown, including escaped
+retyping, gcbench and binarytrees. Small effects remain limited by measurement
+noise. All 54 timings and separate regression confirmations are recorded in
+[MVP_Result7](../../test/benchmark/js_mvp_lmd/MVP_Result7.md).
+Exact binaries, uncertainty and remaining validation are also documented in the
+[implementation record](../impl/JS_MVP_Lmd_Classes.md#class-and-regression-tuning-2026-10-08).

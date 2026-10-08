@@ -23,13 +23,17 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../dom/dom.h"
+#include "../dom/dom_core.h"
+#include "../dom/dom_engine.h"
 #include "../dom/dom_canvas.h"
+#include "../dom/dom_platform.h"
 #include "../dom/dom_cssom.h"
 #include "../dom/dom_realm_hooks.h"
 #include "../dom/realm/dom_realm.h"
 #include "js_runtime.h"
 #include "js_function.hpp"
 #include "js_props.h"
+#include "js_property_attrs.h"
 #include "../dom/dom_ops.h"
 #include "../input/css/css_style.hpp"
 #include "js_runtime_state.hpp"
@@ -131,6 +135,29 @@ static Item _iface_proto(Item global, const char* name) {
     if (!js_is_callable(ctor)) return ItemNull;
     Item proto = js_get_key_cstr(ctor, "prototype");
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+}
+
+extern "C" void dom_install_storage_globals(Item global) {
+    RootFrame roots(6);
+    Rooted<Item> global_root(roots, global);
+    _install_iface(global_root.get(), "Storage");
+    Rooted<Item> prototype_root(roots, _iface_proto(global_root.get(), "Storage"));
+    dom_storage_install_interface(prototype_root.get());
+    static const char* methods[] = {"key", "getItem", "setItem", "removeItem", "clear"};
+    for (const char* method : methods) {
+        js_shape_entry_update_flags(prototype_root.get(), method, strlen(method),
+            0, JSPD_NON_ENUMERABLE);
+    }
+    Rooted<Item> local_root(roots, dom_storage_local_object());
+    Rooted<Item> session_root(roots, dom_storage_session_object());
+    js_set_prototype(local_root.get(), prototype_root.get());
+    js_set_prototype(session_root.get(), prototype_root.get());
+    Rooted<Item> local_getter_root(roots, js_new_native_function(dom_storage_local_object));
+    Rooted<Item> session_getter_root(roots, js_new_native_function(dom_storage_session_object));
+    js_install_native_accessor(global_root.get(), js_name_item("localStorage"),
+        local_getter_root.get(), ItemNull, 0);
+    js_install_native_accessor(global_root.get(), js_name_item("sessionStorage"),
+        session_getter_root.get(), ItemNull, 0);
 }
 
 static Item dom_collection_iterator(void) {
@@ -431,6 +458,79 @@ static void _install_node_iface(Item global) {
     js_set_key_cstr(global_root.get(), "Node", ctor_root.get());
 }
 
+static bool _node_receiver(Item receiver) {
+    return get_type_id(dom_core_node_type(receiver)) == LMD_TYPE_INT;
+}
+
+static bool _element_receiver(Item receiver) {
+    Item kind = dom_core_node_type(receiver);
+    return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 1;
+}
+
+static bool _parent_node_receiver(Item receiver) {
+    Item kind = dom_core_node_type(receiver);
+    if (get_type_id(kind) != LMD_TYPE_INT) return false;
+    int type = it2i(kind);
+    return type == 1 || type == 9 || type == 11;
+}
+
+static bool _document_receiver(Item receiver) {
+    Item kind = dom_core_node_type(receiver);
+    return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 9;
+}
+
+static void _install_node_interface_members(Item global) {
+    static const char* const node_members[] = {
+        "nodeName", "nodeType", "parentNode", "parentElement", "isConnected",
+        "ownerDocument", "firstChild", "lastChild", "nextSibling", "previousSibling",
+        "childNodes", "contains", "isEqualNode", "isSameNode", "compareDocumentPosition",
+        "getRootNode", "hasChildNodes", "cloneNode", NULL};
+    static const char* const node_mutators[] = {
+        "appendChild", "removeChild", "insertBefore", "replaceChild", "normalize", NULL};
+    static const char* const element_members[] = {
+        "tagName", "localName", "namespaceURI", "prefix", "attributes",
+        "nextElementSibling", "previousElementSibling", "getAttribute", "setAttribute",
+        "removeAttribute", "toggleAttribute", "hasAttribute", "getAttributeNames",
+        "getAttributeNS", "setAttributeNS", "removeAttributeNS", "matches", "closest",
+        "getElementsByTagName", "getElementsByClassName", "getBoundingClientRect",
+        "getClientRects", "attachShadow", NULL};
+    static const char* const parent_node_members[] = {
+        "children", "childElementCount", "firstElementChild", "lastElementChild",
+        "querySelector", "querySelectorAll", NULL};
+    static const char* const document_members[] = {
+        "createElement", "createElementNS", "createTextNode", "createDocumentFragment",
+        "createComment", "importNode", "adoptNode", "createRange", "createTreeWalker",
+        "getElementById", "getElementsByTagName", "getElementsByClassName",
+        "getElementsByName", "querySelector", "querySelectorAll", NULL};
+    static const struct {
+        const char* interface_name;
+        const char* host_name;
+        bool (*receiver)(Item);
+        const char* const* members;
+    } interfaces[] = {
+        {"Node", "dom_node", _node_receiver, node_members},
+        {"Node", "html_element", _node_receiver, node_mutators},
+        {"Element", "html_element", _element_receiver, element_members},
+        {"Element", "html_element", _parent_node_receiver, parent_node_members},
+        {"DocumentFragment", "html_element", _parent_node_receiver, parent_node_members},
+        {"Document", "document", _document_receiver, document_members},
+    };
+    RootFrame roots(1);
+    Rooted<Item> prototype_root(roots, ItemNull);
+    for (const auto& interface : interfaces) {
+        prototype_root.set(_iface_proto(global, interface.interface_name));
+        const JubeTypeDef* type = jube_iface_type_by_name(interface.host_name,
+            strlen(interface.host_name));
+        for (const char* const* member = interface.members; *member; ++member) {
+            if (!jube_publish_prototype_member(type, prototype_root.get(), *member,
+                    interface.receiver)) {
+                log_error("dom-interface-publication: missing %s.%s binding",
+                    interface.interface_name, *member);
+            }
+        }
+    }
+}
+
 extern "C" void dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     _install_iface(global, "Window");
@@ -491,23 +591,11 @@ extern "C" void dom_install_collection_globals(void) {
     _link_iface_proto(global, "ShadowRoot", "DocumentFragment");
     Item element_proto = _iface_proto(global, "Element");
     if (get_type_id(element_proto) == LMD_TYPE_MAP) {
-        // Bootstrap deliberately calls these WebIDL methods through
-        // Element.prototype.querySelector(All).call(element, selector).
-        RootFrame method_roots(2);
-        Rooted<Item> element_proto_root(method_roots, element_proto);
-        Rooted<Item> method_root(method_roots,
-            js_new_native_payload_function(dom_element_prototype_operation_body,
-                (uint64_t)JUBE_DOM_QUERY_SELECTOR, 1));
-        // Bootstrap needs these WebIDL prototype aliases before any instance
-        // exists. Each carries its direct operation payload; populating every
-        // Jube prototype here would mutate the sealed NameId module table.
-        js_set_key_cstr(element_proto_root.get(), "querySelector", method_root.get());
-        method_root.set(js_new_native_payload_function(
-            dom_element_prototype_operation_body,
-            (uint64_t)JUBE_DOM_QUERY_SELECTOR_ALL, 1));
-        js_set_key_cstr(element_proto_root.get(), "querySelectorAll", method_root.get());
-        js_set_native_key(element_proto_root.get(), js_name_item("animate"), dom_element_animate);
+        js_set_native_key(element_proto, js_name_item("animate"), dom_element_animate);
     }
+    // Publish the module's canonical members before scripts inspect bare IDL
+    // prototypes, and route instance reads through those same descriptors.
+    _install_node_interface_members(global);
     static const char* collection_ifaces[] = {
         "Range", "Selection", "HTMLCollection", "HTMLFormControlsCollection",
         "HTMLOptionsCollection", "NodeList", "NamedNodeMap", "DOMTokenList",
@@ -767,6 +855,7 @@ extern "C" void dom_selection_install_globals(void) {
     // Range.prototype / Selection.prototype (IDL shape, .length probes) before
     // any script can read them.
     dom_webgl_install_globals();
+    dom_engine_install_animation_globals();
     jube_type_prototype((const JubeTypeDef*)radiant_dom_range_host_type());
     jube_type_prototype((const JubeTypeDef*)radiant_dom_selection_host_type());
 

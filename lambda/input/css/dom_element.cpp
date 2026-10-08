@@ -27,9 +27,18 @@
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
 
+DomNode* dom_source_parent(DomNode* node) {
+    DomNode* parent = node ? node->parent : nullptr;
+    // generated table boxes participate in layout, never CSS or DOM ancestry.
+    while (parent && parent->is_element() && parent->as_element()->is_table_fixup()) {
+        parent = parent->parent;
+    }
+    return parent;
+}
+
 DomElement* dom_parent_element(DomElement* element) {
-    if (!element || !element->parent) return nullptr;
-    DomElement* parent = element->parent->as_element();
+    DomNode* parent_node = dom_source_parent(element);
+    DomElement* parent = parent_node ? parent_node->as_element() : nullptr;
     if (parent && parent->tag_name &&
         strcmp(parent->tag_name, "#document-fragment") == 0 &&
         parent->shadow_host_element()) {

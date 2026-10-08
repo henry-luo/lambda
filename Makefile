@@ -2552,14 +2552,16 @@ test-css-cascade-memory: build-radiant-baseline
 
 test-radiant-online:
 	@$(MAKE) --no-print-directory release
-	@$(MAKE) --no-print-directory build-test
+	# The standalone launcher has no runtime archive or hosted-module dependencies.
+	$(call run_make_with_error_summary,radiant-online,debug_native,,test_radiant_online_view_gtest)
 	# Keep the debug gtest launcher, but time the packaged release renderer.
+	# Release tracking is off by default; enable counters for the shutdown leak check.
 	@echo "Running Radiant online URL smoke test suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_radiant_online_view_gtest.exe" ]; then \
-		LAMBDA_RADIANT_ONLINE_VIEW_EXE=./release/lambda ./test/test_radiant_online_view_gtest.exe; \
+		MEMTRACK_MODE=$${MEMTRACK_MODE:-STATS} LAMBDA_RADIANT_ONLINE_VIEW_EXE=./release/lambda ./test/test_radiant_online_view_gtest.exe; \
 	else \
-		echo "Error: test/test_radiant_online_view_gtest.exe not found - run 'make build-test' first"; \
+		echo "Error: test/test_radiant_online_view_gtest.exe not found after the online launcher build"; \
 		exit 1; \
 	fi
 

@@ -4,6 +4,8 @@ const path = require('path');
 const puppeteer = require('puppeteer');
 const crypto = require('crypto');
 const output = process.argv[2] || 'temp/webgl2/browser';
+const phase3 = process.argv.includes('--phase3');
+const galleryName = phase3 ? 'observatory' : 'three-gallery';
 fs.mkdirSync(output,{recursive:true});
 (async () => {
  const root=process.cwd();
@@ -32,13 +34,20 @@ fs.mkdirSync(output,{recursive:true});
    Object.defineProperty(prototype[name],'length',{value:original.length});
   }
  });
- await page.goto('http://127.0.0.1:'+server.address().port+'/test/demo/scene3d/three-gallery.html');
- await page.waitForFunction('globalThis.threeGalleryReady === true',{timeout:30000});
- await page.screenshot({path:path.join(output,'three-gallery-chromium.png')});
+ await page.goto('http://127.0.0.1:'+server.address().port+'/test/demo/scene3d/'+galleryName+'.html');
+ await page.waitForFunction(phase3 ? 'globalThis.observatoryReady === true' : 'globalThis.threeGalleryReady === true',{timeout:30000});
+ await page.screenshot({path:path.join(output,galleryName+'-chromium.png')});
+ if(phase3) {
+  for(const time of [1.25,3.5]) {await page.evaluate(time=>observatory.sample(time),time);await page.screenshot({path:path.join(output,'observatory-'+time+'-chromium.png')});}
+  await page.evaluate(()=>{observatory.setShadows(false);});
+  await page.screenshot({path:path.join(output,'observatory-no-shadow-chromium.png')});
+  await page.evaluate(()=>{observatory.composer.passes[1].enabled=false;observatory.render();});
+  await page.screenshot({path:path.join(output,'observatory-no-fxaa-chromium.png')});
+ }
  const gallery=await page.evaluate(()=>webglAudit);
- const canvasRect=await page.$eval('#garden',canvas=>{const rect=canvas.getBoundingClientRect();return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};});
+ const canvasRect=await page.$eval(phase3 ? '#observatory' : '#garden',canvas=>{const rect=canvas.getBoundingClientRect();return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};});
  const results=[];
- for(const fixture of ['api','khronos-selected','loss','three-lifecycle']) {
+ for(const fixture of ['api','khronos-selected','loss','three-lifecycle',...(phase3 ? ['images','formats'] : [])]) {
   await page.goto('http://127.0.0.1:'+server.address().port+'/test/webgl/'+fixture+'.html');
   await page.waitForFunction('document.getElementById("result").hasAttribute("data-result") && document.getElementById("result").getAttribute("data-result") !== "pending"',{timeout:30000});
   const result=await page.evaluate(()=>({result:document.getElementById('result').getAttribute('data-result'),checks:document.getElementById('result').getAttribute('data-checks'),audit:webglAudit}));

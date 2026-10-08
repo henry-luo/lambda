@@ -1,9 +1,17 @@
 #include <gtest/gtest.h>
 #include "../radiant/scene3d.hpp"
 #include "../radiant/scene3d_math.hpp"
+#include "../radiant/animation_mixer.hpp"
+#include "../radiant/scene3d_animation.hpp"
+#include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/render.hpp"
+#include "../radiant/event.hpp"
+#include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_event_loop.h"
+#include "../lambda/dom/realm/dom_realm.h"
+#include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/core/mark_reader.hpp"
@@ -15,7 +23,148 @@
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"
 #include "../lambda/module/radiant/radiant_webgl_bridge.hpp"
 #include "../lib/mem.h"
+#include "../lib/mem_context.h"
 #include "../lib/log.h"
+#include "../lib/strbuf.h"
+#include "../lib/image.h"
+#include <time.h>
+
+struct AnimationOracleTrack {
+    const char* name;
+    double times[5], values[20], incoming[40], outgoing[40];
+    unsigned keys, components, type, interpolation, ending;
+    bool tangents;
+    double times_to_sample[12], expected[48];
+    unsigned samples;
+};
+struct AnimationOracleStep {
+    unsigned op, action;
+    double a, b, c, values[5], time;
+    const char* events;
+};
+struct AnimationOracleScenario {
+    const char* name;
+    bool additive;
+    const AnimationOracleStep* steps;
+    unsigned count;
+};
+#include "webgl/animation-oracle.inc"
+
+TEST(AnimationCore, PinnedThreeTypedInterpolationOracle) {
+    for (const auto& fixture : animation_oracle_tracks) {
+        SCOPED_TRACE(fixture.name);
+        AnimationTrackView track = {fixture.times, fixture.values, nullptr,
+            fixture.tangents ? fixture.incoming : nullptr, fixture.tangents ? fixture.outgoing : nullptr,
+            fixture.keys, fixture.components, (AnimationValueType)fixture.type, (AnimationInterpolation)fixture.interpolation,
+            (AnimationEnding)fixture.ending, (AnimationEnding)fixture.ending};
+        ASSERT_TRUE(animation_track_validate(track));
+        for (unsigned sample = 0; sample < fixture.samples; sample++) {
+            double value[4] = {};
+            ASSERT_TRUE(animation_track_sample(track, fixture.times_to_sample[sample], value));
+            for (unsigned c = 0; c < fixture.components; c++)
+                EXPECT_NEAR(value[c], fixture.expected[sample * fixture.components + c], 2e-7)
+                    << "at " << fixture.times_to_sample[sample] << " component " << c;
+        }
+    }
+}
+
+struct AnimationTestBinding {
+    AnimationValue values[2];
+    StrBuf* events;
+    unsigned writes;
+    static bool read(void* owner, uint64_t property, AnimationValue* value) {
+        auto* state = (AnimationTestBinding*)owner;
+        if (property >= 2) return false;
+        *value = state->values[property]; return true;
+    }
+    static bool write(void* owner, uint64_t property, const AnimationValue* value) {
+        auto* state = (AnimationTestBinding*)owner;
+        if (property >= 2) return false;
+        state->values[property] = *value; state->writes++; return true;
+    }
+    static void event(void* owner, uint64_t action, const char* type, double detail) {
+        auto* state = (AnimationTestBinding*)owner;
+        strbuf_append_format(state->events, "%s:%llu:%.0f;", type, (unsigned long long)(action - 1), detail);
+    }
+};
+
+TEST(AnimationCore, PinnedThreeActionsMixingAndEventsOracle) {
+    const double times[2][3] = {{0,1,2},{0,.5,1}};
+    const double numbers[2][3] = {{2,10,4},{-3,5,9}};
+    const double half = sqrt(.5);
+    const double quaternions[2][12] = {{0,0,0,1,0,half,0,half,0,1,0,0},{0,0,0,1,half,0,0,half,1,0,0,0}};
+    for (const auto& fixture : animation_oracle_scenarios) {
+        SCOPED_TRACE(fixture.name);
+        AnimationTestBinding binding = {};
+        binding.events = strbuf_new();
+        binding.values[0].type = ANIMATION_NUMBER; binding.values[0].count = 1; binding.values[0].numbers[0] = 7;
+        binding.values[1].type = ANIMATION_QUATERNION; binding.values[1].count = 4;
+        binding.values[1].numbers[2] = sin(.25); binding.values[1].numbers[3] = cos(.25);
+        auto* mixer = animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write, AnimationTestBinding::event});
+        ASSERT_NE(mixer, nullptr);
+        AnimationChannelView channels[2][2] = {};
+        AnimationActionState* actions[2] = {};
+        for (unsigned i = 0; i < 2; i++) {
+            channels[i][0] = {{times[i],numbers[i],nullptr,nullptr,nullptr,3,1,ANIMATION_NUMBER,ANIMATION_LINEAR},0};
+            channels[i][1] = {{times[i],quaternions[i],nullptr,nullptr,nullptr,3,4,ANIMATION_QUATERNION,ANIMATION_LINEAR},1};
+            AnimationClipView clip = {i+1,i ? 1.0 : 2.0,channels[i],2,i && fixture.additive};
+            actions[i] = animation_mixer_action(mixer, clip); ASSERT_NE(actions[i], nullptr);
+            EXPECT_EQ(animation_mixer_action(mixer, clip), actions[i]);
+        }
+        for (unsigned index = 0; index < fixture.count; index++) {
+            const auto& step = fixture.steps[index]; auto* action = actions[step.action];
+            SCOPED_TRACE(index); strbuf_reset(binding.events);
+            switch (step.op) {
+                case 0: ASSERT_TRUE(animation_mixer_update(mixer,step.a)); break;
+                case 1: ASSERT_TRUE(animation_mixer_set_time(mixer,step.a)); break;
+                case 2: ASSERT_TRUE(animation_action_play(action)); break;
+                case 3: ASSERT_TRUE(animation_action_stop(action)); break;
+                case 4: animation_action_reset(action); break;
+                case 5: action->weight=step.a; break;
+                case 6: action->time_scale=step.a; break;
+                case 7: action->loop=(AnimationLoopMode)(unsigned)step.a; action->repetitions=step.b; break;
+                case 8: action->clamp=step.a; break;
+                case 9: action->paused=step.a; break;
+                case 10: action->enabled=step.a; break;
+                case 11: ASSERT_TRUE(animation_action_fade(action,step.a,step.b)); break;
+                case 12: ASSERT_TRUE(animation_action_crossfade(action,actions[(unsigned)step.a],step.b,step.c)); break;
+                case 13: ASSERT_TRUE(animation_action_warp(action,step.a,step.b,step.c)); break;
+                case 14: action->scheduled=true; action->scheduled_start=step.a; break;
+                case 15: ASSERT_TRUE(animation_mixer_time_scale(mixer,step.a)); break;
+                case 16: ASSERT_TRUE(animation_mixer_uncache(mixer,action)); actions[step.action]=nullptr; break;
+                default: FAIL();
+            }
+            EXPECT_NEAR(animation_mixer_time(mixer),step.time,1e-12);
+            EXPECT_NEAR(binding.values[0].numbers[0],step.values[0],2e-6);
+            for (unsigned c=0;c<4;c++) EXPECT_NEAR(binding.values[1].numbers[c],step.values[c+1],2e-6) << "component " << c;
+            EXPECT_STREQ(binding.events->str,step.events);
+        }
+        animation_mixer_destroy(mixer);
+        EXPECT_DOUBLE_EQ(binding.values[0].numbers[0],7);
+        strbuf_free(binding.events);
+    }
+}
+
+TEST(AnimationCore, RejectsMalformedTracksAndInvalidBindingsBeforePlayback) {
+    double times[] = {0,1,2}, values[] = {0,1,0};
+    AnimationTrackView track = {times,values,nullptr,nullptr,nullptr,3,1,ANIMATION_NUMBER,ANIMATION_LINEAR};
+    ASSERT_TRUE(animation_track_validate(track));
+    times[1] = -1; EXPECT_FALSE(animation_track_validate(track)); times[1]=1;
+    values[1] = NAN; EXPECT_FALSE(animation_track_validate(track)); values[1]=1;
+    track.type=ANIMATION_QUATERNION; EXPECT_FALSE(animation_track_validate(track)); track.type=ANIMATION_NUMBER;
+    AnimationTestBinding binding = {}; binding.values[0].type=ANIMATION_NUMBER;binding.values[0].count=1;
+    auto* mixer = animation_mixer_create(&binding,{AnimationTestBinding::read,AnimationTestBinding::write,nullptr}); ASSERT_NE(mixer,nullptr);
+    AnimationChannelView channels[] = {{track,0},{track,9}};
+    EXPECT_EQ(animation_mixer_action(mixer,{1,2,channels,2,false}),nullptr);
+    auto* action = animation_mixer_action(mixer,{1,2,channels,1,false}); ASSERT_NE(action,nullptr);
+    ASSERT_TRUE(animation_action_play(action)); EXPECT_TRUE(animation_mixer_active(mixer));
+    action->paused=true; EXPECT_FALSE(animation_mixer_active(mixer));
+    ASSERT_TRUE(animation_action_fade(action,1,false)); EXPECT_TRUE(animation_mixer_active(mixer));
+    EXPECT_FALSE(animation_mixer_update(mixer,INFINITY));
+    ASSERT_TRUE(animation_mixer_uncache(mixer,action)); EXPECT_FALSE(animation_mixer_active(mixer));
+    EXPECT_EQ(binding.writes,1u);
+    animation_mixer_destroy(mixer);
+}
 
 class Scene3dTest : public ::testing::Test {
 protected:
@@ -62,6 +211,18 @@ protected:
         ui.document=lam::up(page);ui.viewport_width=width;ui.viewport_height=height;ui.window_width=width;ui.window_height=height;ui.create_surface(width,height);
         layout_html_doc(&ui,page,false);return page;
     }
+    void pump_js() {
+        for(unsigned turn=0;turn<8;turn++) {
+            if(js_event_loop_virtual_clock_enabled()) js_event_loop_advance_virtual_time(1,0);
+            else js_event_loop_pump_wait(1);
+        }
+    }
+    Item run_js(const char* source) {
+        Runtime* runtime=dom_document_script_runtime(page);
+        if(!runtime||!radiant_eval_context_switch(runtime_get_eval_context(runtime))||
+           !runtime_context_bind_retained(runtime,runtime_get_eval_context(runtime))||!radiant_bind_document_script_host(&ui,page)) return ItemError;
+        RootFrame roots(1);Rooted<Item> code(roots,make_string_item(source));return js_builtin_eval(code.get(),1);
+    }
     ImageSurface* snapshot(float width=128,float height=128,float scale=1) {
         ImageSurface* image=scene3d_snapshot(root,&ui,width,height,scale);
         EXPECT_NE(image,nullptr)<<scene3d_diagnostic(root);return image;
@@ -90,6 +251,99 @@ TEST_F(Scene3dTest, IndexedCubeRendersRealPixelsAndCachesUnchangedFrame) {
     EXPECT_EQ(first.snapshot_generation,second.snapshot_generation);EXPECT_EQ(second.graphics.frames,1u);
     EXPECT_GT(second.graphics.draws,0u);EXPECT_GT(second.graphics.resources,0u);EXPECT_NE(second.graphics.driver[0],0);
     RecordProperty("renderer",second.graphics.driver);RecordProperty("OpenGL",second.graphics.version);RecordProperty("GLSL",second.graphics.shading_language);
+}
+TEST_F(Scene3dTest, NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry) {
+    DomElement* object=mesh("plane");attr(object,"id","moving");
+    DomElement* material=object->last_child->as_element();attr(material,"id","paint");
+    DomElement* clip=element("animation-clip",root);attr(clip,"id","travel");attr(clip,"duration","2");
+    DomElement* position=element("keyframe-track",clip);attr(position,"path","moving.position");
+    attr(position,"times","0 1 2");attr(position,"values","-1.5 0 0  1.5 0 0  -1.5 0 0");
+    DomElement* color=element("keyframe-track",clip);attr(color,"path","moving.material.color");
+    attr(color,"times","0 1 2");attr(color,"values","1 0 0  0 1 0  1 0 0");
+    ASSERT_NE(snapshot(),nullptr);
+    auto* animation=scene3d_animations(root);ASSERT_NE(animation,nullptr);
+    auto* action=scene3d_animation_action(animation,"travel");ASSERT_NE(action,nullptr);
+    ASSERT_TRUE(animation_action_play(action));ASSERT_TRUE(scene3d_animation_seek(animation,0));
+    pixel(snapshot(),40,64,255,0,0);pixel(snapshot(),88,64,0,0,0,0);
+    Scene3dStats before{},after{};ASSERT_TRUE(scene3d_stats(root,&before));
+    ASSERT_TRUE(scene3d_animation_seek(animation,1));pixel(snapshot(),88,64,0,255,0);pixel(snapshot(),40,64,0,0,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(before.projection_generation,after.projection_generation);
+    EXPECT_EQ(before.graphics.allocated_bytes,after.graphics.allocated_bytes);
+    EXPECT_GT(after.snapshot_generation,before.snapshot_generation);
+    EXPECT_STREQ(object->get_attribute("position"),nullptr);EXPECT_STREQ(material->get_attribute("color"),"#ff0000");
+    scene3d_context_lost(root);pixel(snapshot(),88,64,0,255,0);
+    EXPECT_EQ(scene3d_animation_action(scene3d_animations(root),"travel"),action);
+    ASSERT_TRUE(animation_action_stop(action));pixel(snapshot(),64,64,255,0,0);
+    attr(material,"color","#0000ff");pixel(snapshot(),64,64,0,0,255);
+    ASSERT_TRUE(animation_action_play(action));ASSERT_TRUE(scene3d_animation_seek(animation,.5));
+    ASSERT_TRUE(animation_action_stop(action));pixel(snapshot(),64,64,0,0,255);
+}
+TEST_F(Scene3dTest, NativeClipUsesDocumentSchedulerAndParksAfterClampedFinish) {
+    DomElement* object=mesh("plane");attr(object,"id","moving");
+    DomElement* clip=element("animation-clip",root);attr(clip,"id","travel");
+    DomElement* track=element("keyframe-track",clip);attr(track,"path","moving.position");
+    attr(track,"times","0 1");attr(track,"values","0 0 0  1.5 0 0");
+    ASSERT_NE(snapshot(),nullptr);auto* animation=scene3d_animations(root);ASSERT_NE(animation,nullptr);
+    auto* action=scene3d_animation_action(animation,"travel");ASSERT_NE(action,nullptr);
+    action->loop=ANIMATION_LOOP_ONCE;action->clamp=true;ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_automatic(animation,true));
+    EXPECT_FALSE(scene3d_animation_update(animation,.5));
+    ASSERT_NE(doc.state,nullptr);auto* scheduler=doc.state->animation_scheduler;ASSERT_NE(scheduler,nullptr);
+    double now=scheduler->current_time;
+    EXPECT_TRUE(animation_scheduler_tick(scheduler,now+.5,nullptr));pixel(snapshot(),76,64,255,0,0);
+    EXPECT_FALSE(animation_scheduler_tick(scheduler,now+1,nullptr));pixel(snapshot(),88,64,255,0,0);
+    EXPECT_EQ(scheduler->count,0);EXPECT_FALSE(animation_mixer_active(action->mixer));
+}
+TEST_F(Scene3dTest, NativeBoneAndMorphPoseChangePixelsWithoutReallocatingGeometry) {
+    ASSERT_NE(load_page("test/demo/scene3d/shared-animation.html",500,560),nullptr);
+    DomElement* scene=dom_find_element_by_id(page->root->as_element(),"deformation");ASSERT_NE(scene,nullptr);
+    ASSERT_NE(scene3d_snapshot(scene,&ui,400,260,1),nullptr)<<scene3d_diagnostic(scene);
+    auto* animation=scene3d_animations(scene);ASSERT_NE(animation,nullptr);
+    ASSERT_TRUE(scene3d_animation_seek(animation,0));
+    ImageSurface* first=scene3d_snapshot(scene,&ui,400,260,1);ASSERT_NE(first,nullptr)<<scene3d_diagnostic(scene);
+    // retain the immutable first pose while a second generation is published.
+    image_surface_snapshot_retain(first);
+    Scene3dStats before{},after{};ASSERT_TRUE(scene3d_stats(scene,&before));
+    ASSERT_TRUE(scene3d_animation_seek(animation,1));
+    ImageSurface* second=scene3d_snapshot(scene,&ui,400,260,1);ASSERT_NE(second,nullptr)<<scene3d_diagnostic(scene);
+    unsigned changed[2]={};
+    for(unsigned y=0;y<260;y++) for(unsigned x=0;x<400;x++)
+        if(memcmp((uint8_t*)first->pixels+y*first->pitch+x*4,(uint8_t*)second->pixels+y*second->pitch+x*4,3)) changed[x/200]++;
+    EXPECT_GT(changed[0],600u);EXPECT_GT(changed[1],600u);ASSERT_TRUE(scene3d_stats(scene,&after));
+    EXPECT_EQ(before.projection_generation,after.projection_generation);
+    EXPECT_EQ(before.graphics.allocated_bytes,after.graphics.allocated_bytes);
+    EXPECT_EQ(before.graphics.resources,after.graphics.resources);
+    image_surface_snapshot_release(first);
+    scene3d_context_lost(scene);ASSERT_NE(scene3d_snapshot(scene,&ui,400,260,1),nullptr)<<scene3d_diagnostic(scene);
+    EXPECT_EQ(scene3d_animations(scene),animation);
+}
+TEST_F(Scene3dTest, MixedSvgAndNativeTimelinesPauseAndSeekIndependently) {
+    ASSERT_NE(load_page("test/demo/scene3d/shared-animation.html",500,720),nullptr);
+    DomElement* scene=dom_find_element_by_id(page->root->as_element(),"deformation");ASSERT_NE(scene,nullptr);
+    DomElement* wave=dom_find_element_by_id(page->root->as_element(),"wave");ASSERT_NE(wave,nullptr);
+    ASSERT_NE(scene3d_snapshot(scene,&ui,400,260,1),nullptr);
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('native-pause').click();document.getElementById('svg-pause').click()")));
+    ASSERT_TRUE(svg_animation_paused(wave));
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('native-seek').click();document.getElementById('svg-seek').click()")));
+    auto* animation=scene3d_animations(scene);ASSERT_NE(animation,nullptr);
+    auto* action=scene3d_animation_action(animation,"bend");ASSERT_NE(action,nullptr);
+    EXPECT_NEAR(action->time,1,1e-9);EXPECT_NEAR(svg_animation_current_time(wave),.5,1e-9);
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('native-play').click()")));
+    auto* scheduler=page->state->animation_scheduler;ASSERT_NE(scheduler,nullptr);
+    animation_scheduler_tick(scheduler,scheduler->current_time+.25,nullptr);
+    EXPECT_NEAR(action->time,1.25,1e-6);EXPECT_NEAR(svg_animation_current_time(wave),.5,1e-9);
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('native-pause').click();document.getElementById('svg-play').click()")));
+    animation_scheduler_tick(scheduler,scheduler->current_time+.25,nullptr);
+    EXPECT_NEAR(action->time,1.25,1e-6);EXPECT_NEAR(svg_animation_current_time(wave),.75,1e-6);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        document.getElementById('native-pause').click();
+        document.getElementById('deformation').addEventListener('finished',event=>
+            document.getElementById('deformation').setAttribute('data-finished',event.clip+':'+event.direction));
+    )JS")));
+    action->loop=ANIMATION_LOOP_ONCE;action->clamp=true;
+    ASSERT_TRUE(scene3d_animation_update(animation,1));pump_js();
+    EXPECT_STREQ(scene->get_attribute("data-finished"),"bend:1");
 }
 TEST_F(Scene3dTest, ParentTransformAndVisibilityUpdatePixels) {
     DomElement* group=element("group",root);DomElement* object=mesh("plane","#00ff00","basic",group);
@@ -408,6 +662,237 @@ TEST_F(Scene3dTest, PinnedUnmodifiedThreeRendererAndAddonProduceRealPixels) {
     EXPECT_EQ(stats.draws,4u);EXPECT_EQ(stats.shader_normalize_calls,8u);
     RecordProperty("three_shader_normalize_us",(int64_t)stats.shader_normalize_us);
     RecordProperty("three_gpu_bytes",(int64_t)stats.gpu_bytes);RecordProperty("three_core_cpu_bytes",(int64_t)stats.cpu_bytes);
+}
+TEST_F(Scene3dTest, FloatTargetsDepthTexturesAndFloatLinearFiltering) {
+    ASSERT_NE(load_page("test/webgl/formats.html"),nullptr);
+    DomElement* result=dom_find_element_by_id(page->root->as_element(),"result");ASSERT_NE(result,nullptr);
+    EXPECT_STREQ(result->get_attribute("data-result"),"passed");
+    EXPECT_STREQ(result->get_attribute("data-checks"),"11");
+}
+TEST_F(Scene3dTest, ThreeTextureLoaderAndCanvasImageOverloads) {
+    ASSERT_NE(load_page("test/webgl/images.html"),nullptr);
+    DomElement* result=dom_find_element_by_id(page->root->as_element(),"result");ASSERT_NE(result,nullptr);
+    EXPECT_STREQ(result->get_attribute("data-result"),"passed");
+    EXPECT_GE(strtol(result->get_attribute("data-checks"),nullptr,10),35);
+}
+TEST_F(Scene3dTest, ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels) {
+    ASSERT_NE(load_page("test/demo/scene3d/observatory.html",848,650),nullptr);
+    DomElement* status=dom_find_element_by_id(page->root->as_element(),"status");ASSERT_NE(status,nullptr);
+    ASSERT_STREQ(status->get_attribute("data-ready"),"true")<<status->get_attribute("data-error");
+    RenderOutputTarget target={};target.kind=RENDER_OUTPUT_SCREEN;
+    ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+    unsigned colored=0;
+    for(unsigned y=160;y<570;y++) for(unsigned x=160;x<680;x++) {
+        const uint8_t* pixel=(const uint8_t*)ui.surface->pixels+y*ui.surface->pitch+x*4;
+        if(pixel[0]>65&&pixel[1]>65&&pixel[2]>35) colored++;
+    }
+    EXPECT_GT(colored,15000u);
+    NativeGlStats stats={};ASSERT_TRUE(radiant_webgl_stats(dom_find_element_by_id(page->root->as_element(),"observatory"),&stats));
+    EXPECT_GT(stats.draws,30u);EXPECT_GT(stats.shader_normalize_calls,12u);
+    RecordProperty("pbr_draws",(int64_t)stats.draws);
+    RecordProperty("pbr_gpu_bytes",(int64_t)stats.gpu_bytes);
+    RecordProperty("pbr_cpu_bytes",(int64_t)stats.cpu_bytes);
+    auto capture=[&](const char* name) {
+        const char* directory=getenv("LAMBDA_SCENE3D_CAPTURE_DIR");if(!directory) return;
+        StrBuf* path=strbuf_new();strbuf_append_format(path,"%s/%s-native.png",directory,name);
+        EXPECT_EQ(image_save_png(path->str,(const unsigned char*)ui.surface->pixels,ui.surface->width,ui.surface->height,4),1);
+        strbuf_free(path);
+    };
+    capture("observatory");
+    for(const char* sample:{"observatory.sample(1.25)","observatory.sample(3.5)"}) {
+        ASSERT_FALSE(item_is_error(run_js(sample)));
+        ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+        capture(strstr(sample,"1.25")?"observatory-1.25":"observatory-3.5");
+    }
+    size_t bytes=ui.surface->pitch*ui.surface->height;
+    auto* baseline=(uint8_t*)mem_alloc(bytes,MEM_CAT_RENDER);ASSERT_NE(baseline,nullptr);memcpy(baseline,ui.surface->pixels,bytes);
+    ASSERT_FALSE(item_is_error(run_js("observatory.setShadows(false)")));
+    ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+    unsigned shadow_changes=0;
+    for(unsigned y=400;y<580;y++) for(unsigned x=120;x<720;x++)
+        if(memcmp(baseline+y*ui.surface->pitch+x*4,(uint8_t*)ui.surface->pixels+y*ui.surface->pitch+x*4,3)) shadow_changes++;
+    EXPECT_GT(shadow_changes,100u);capture("observatory-no-shadow");
+    memcpy(baseline,ui.surface->pixels,bytes);
+    ASSERT_FALSE(item_is_error(run_js("observatory.composer.passes[1].enabled=false;observatory.render()")));
+    ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+    unsigned pass_changes=0;
+    for(size_t offset=0;offset<bytes;offset+=4)
+        if(memcmp(baseline+offset,(uint8_t*)ui.surface->pixels+offset,3)) pass_changes++;
+    EXPECT_GT(pass_changes,100u);capture("observatory-no-fxaa");mem_free(baseline);
+    if(getenv("LAMBDA_SCENE3D_MEASURE_FRAMES")) {
+#ifndef NDEBUG
+        FAIL()<<"Frame-pacing measurements require the release runner";
+#else
+        ASSERT_FALSE(item_is_error(run_js("observatory.setShadows(true);observatory.composer.passes[1].enabled=true")));
+        auto cache_counts=[](uint64_t* entries,uint64_t* bytes) {
+            MemSnapshot* snapshot=mem_snapshot_capture(nullptr);
+            if(snapshot) for(uint32_t i=0;i<snapshot->count;i++) if(!strcmp(snapshot->samples[i].label,"rdt.vector.caches")) {
+                *entries=snapshot->samples[i].alloc_count;*bytes=snapshot->samples[i].bytes_in_use;
+            }
+            mem_snapshot_free(snapshot);
+        };
+        uint64_t cache_entries_before=0,cache_bytes_before=0,cache_entries_after=0,cache_bytes_after=0;
+        cache_counts(&cache_entries_before,&cache_bytes_before);
+        ASSERT_FALSE(item_is_error(run_js("globalThis.measureFrame=()=>{const begin=performance.now();observatory.mixer.update(1/60);globalThis.sampleMs=performance.now()-begin;observatory.render()}")));
+        RootFrame roots(3);Rooted<Item> global(roots,dom_realm_global());
+        Rooted<Item> callback(roots,dom_realm_get_name(global.get(),"measureFrame")),sample(roots,ItemNull);
+        // cross the 128-entry image cache capacity to measure its steady-state bound.
+        constexpr unsigned frame_count=144;
+        double frames[frame_count],sampling[frame_count];
+        for(unsigned i=0;i<frame_count;i++) {
+            struct timespec start,end;clock_gettime(CLOCK_MONOTONIC,&start);
+            ASSERT_FALSE(item_is_error(dom_realm_call(callback.get(),ItemNull,nullptr,0)));
+            sample.set(dom_realm_get_name(global.get(),"sampleMs"));ASSERT_TRUE(item_try_to_double(sample.get(),&sampling[i]));
+            ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+            clock_gettime(CLOCK_MONOTONIC,&end);frames[i]=(end.tv_sec-start.tv_sec)*1000.+(end.tv_nsec-start.tv_nsec)/1000000.;
+        }
+        auto compare=[](const void* a,const void* b)->int {return (*(const double*)a>*(const double*)b)-(*(const double*)a<*(const double*)b);};
+        qsort(frames,frame_count,sizeof(double),compare);qsort(sampling,frame_count,sizeof(double),compare);
+        // GTest's numeric overload is integral; retain sub-millisecond sampling measurements as text.
+        auto record_ms=[](const char* key,double milliseconds) {
+            char value[64];str_fmt(value,sizeof(value),"%.6f",milliseconds);RecordProperty(key,value);
+        };
+        RecordProperty("pbr_measured_frames",frame_count);
+        record_ms("pbr_frame_p50_ms",frames[frame_count/2]);record_ms("pbr_frame_p95_ms",frames[frame_count*95/100]);
+        record_ms("pbr_sampling_p50_ms",sampling[frame_count/2]);record_ms("pbr_sampling_p95_ms",sampling[frame_count*95/100]);
+        cache_counts(&cache_entries_after,&cache_bytes_after);
+        RecordProperty("vector_cache_entries_before",(int64_t)cache_entries_before);
+        RecordProperty("vector_cache_entries_after",(int64_t)cache_entries_after);
+        RecordProperty("vector_cache_metadata_bytes_before",(int64_t)cache_bytes_before);
+        RecordProperty("vector_cache_metadata_bytes_after",(int64_t)cache_bytes_after);
+        EXPECT_LE(cache_entries_after,cache_entries_before+128);
+        NativeGlStats final_stats{};ASSERT_TRUE(radiant_webgl_stats(dom_find_element_by_id(page->root->as_element(),"observatory"),&final_stats));
+        RecordProperty("pbr_final_cpu_bytes",(int64_t)final_stats.cpu_bytes);
+        RecordProperty("pbr_final_gpu_bytes",(int64_t)final_stats.gpu_bytes);
+        EXPECT_LE(final_stats.cpu_bytes,stats.cpu_bytes+1024*1024);
+        EXPECT_LE(final_stats.gpu_bytes,stats.gpu_bytes+1024*1024);
+#endif
+    }
+}
+TEST_F(Scene3dTest, OrbitControlsRealInputCaptureCancellationAndRaycastAtCssDensity) {
+    ASSERT_NE(load_page("test/demo/scene3d/observatory.html",848,650),nullptr);
+    DomElement* canvas=dom_find_element_by_id(page->root->as_element(),"observatory");ASSERT_NE(canvas,nullptr);
+    DomElement* status=dom_find_element_by_id(page->root->as_element(),"status");ASSERT_NE(status,nullptr);
+    ASSERT_STREQ(status->get_attribute("data-ready"),"true");
+    ASSERT_FALSE(item_is_error(run_js("globalThis.cameraBefore=observatory.camera.position.clone()")));
+    auto button=[&](EventType type,float x,float y) {
+        RdtEvent event={};event.type=type;event.mouse_button.x=x;event.mouse_button.y=y;
+        event.mouse_button.button=0;event.mouse_button.clicks=1;handle_event(&ui,page,&event);
+    };
+    button(RDT_EVENT_MOUSE_DOWN,350,300);
+    RdtEvent move={};move.type=RDT_EVENT_MOUSE_MOVE;move.mouse_position.x=410;move.mouse_position.y=320;handle_event(&ui,page,&move);
+    button(RDT_EVENT_MOUSE_UP,410,320);
+    ASSERT_FALSE(item_is_error(run_js("if(observatory.camera.position.distanceTo(cameraBefore)<.1)throw new Error('drag did not orbit')")));
+    EXPECT_STREQ(status->get_attribute("data-gotpointercapture"),"true");
+    EXPECT_STREQ(status->get_attribute("data-lostpointercapture"),"true");
+    ASSERT_FALSE(item_is_error(run_js("globalThis.zoomBefore=observatory.camera.position.distanceTo(observatory.controls.target)")));
+    RdtEvent scroll={};scroll.type=RDT_EVENT_SCROLL;scroll.scroll.x=350;scroll.scroll.y=300;scroll.scroll.yoffset=1;handle_event(&ui,page,&scroll);
+    ASSERT_FALSE(item_is_error(run_js("if(Math.abs(observatory.camera.position.distanceTo(observatory.controls.target)-zoomBefore)<.01)throw new Error('wheel did not zoom')")));
+    radiant_dispatch_event_sim_pointer(&ui,(View*)canvas,"pointerdown",350,300,0,1,0,"mouse");
+    radiant_dispatch_event_sim_pointer(&ui,(View*)canvas,"pointercancel",350,300,0,0,0,"mouse");
+    EXPECT_STREQ(status->get_attribute("data-pointercancel"),"true");
+    for(unsigned density=1;density<=2;density++) {
+        if(density==2) {
+            ASSERT_FALSE(item_is_error(run_js(R"JS(
+                observatory.resize(400,250,2);
+                observatory.renderer.domElement.style.width='400px';observatory.renderer.domElement.style.height='250px';
+                observatory.renderer.domElement.style.transformOrigin='0 0';
+                observatory.renderer.domElement.style.transform='translate(20px,10px) scale(0.8)';
+            )JS")));
+            layout_html_doc(&ui,page,false);
+        }
+        ASSERT_FALSE(item_is_error(run_js(R"JS(
+            observatory.sample(.75);
+            const satellite=observatory.satellites[1];
+            const point=satellite.position.clone().applyMatrix4(satellite.parent.matrixWorld).project(observatory.camera);
+            const rect=observatory.renderer.domElement.getBoundingClientRect();
+            document.getElementById('status').setAttribute('data-pick-x',rect.left+(point.x+1)*rect.width/2);
+            document.getElementById('status').setAttribute('data-pick-y',rect.top+(1-point.y)*rect.height/2);
+        )JS")));
+        float x=strtof(status->get_attribute("data-pick-x"),nullptr),y=strtof(status->get_attribute("data-pick-y"),nullptr);
+        button(RDT_EVENT_MOUSE_DOWN,x,y);button(RDT_EVENT_MOUSE_UP,x,y);
+        EXPECT_STREQ(status->get_attribute("data-selection"),"Satellite 2")<<"density "<<density;
+    }
+}
+TEST_F(Scene3dTest, RichThreeSceneRecoversDuringCrossfadeWithBoundedResources) {
+    ASSERT_NE(load_page("test/demo/scene3d/observatory.html",848,650),nullptr);
+    DomElement* status=dom_find_element_by_id(page->root->as_element(),"status");ASSERT_NE(status,nullptr);
+    ASSERT_STREQ(status->get_attribute("data-ready"),"true");
+    DomElement* canvas=dom_find_element_by_id(page->root->as_element(),"observatory");ASSERT_NE(canvas,nullptr);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        const audit=observatory;
+        const alternate=audit.clip.clone();alternate.name='crossfade';alternate.duration=4;
+        audit.sample(1.25);
+        audit.mixer.clipAction(alternate).play().crossFadeFrom(audit.mixer.clipAction(audit.clip),.6,true);
+        audit.mixer.update(.3);audit.render();
+        globalThis.recoveryTime=audit.mixer.time;
+        globalThis.recoveryPose=audit.scene.getObjectByName('outer').quaternion.toArray().join();
+        const extension=audit.renderer.getContext().getExtension('WEBGL_lose_context');
+        audit.renderer.domElement.addEventListener('webglcontextlost',event=> {
+            event.preventDefault();setTimeout(()=>extension.restoreContext(),0);
+        });
+        globalThis.beginRecovery=()=>extension.loseContext();
+        globalThis.checkRecovery=()=> {
+            if(audit.mixer.time!==recoveryTime||audit.scene.getObjectByName('outer').quaternion.toArray().join()!==recoveryPose)
+                throw new Error('restoration advanced or reset CPU playback');
+            audit.render();if(audit.renderer.getContext().getError())throw new Error('restored PBR GL error');
+            const previous=audit.composer.readBuffer.clone();audit.renderer.setRenderTarget(previous);
+            audit.composer.render(0);
+            if(audit.renderer.getRenderTarget()!==previous)throw new Error('composer did not restore application target');
+            audit.renderer.setRenderTarget(null);previous.dispose();
+        };
+    )JS")));
+    NativeGlStats first{},current{};ASSERT_TRUE(radiant_webgl_stats(canvas,&first));
+    RecordProperty("initial_cpu_bytes",(int64_t)first.cpu_bytes);
+    RecordProperty("initial_gpu_bytes",(int64_t)first.gpu_bytes);
+    RecordProperty("initial_resources",(int64_t)first.resources);
+    for(unsigned i=0;i<3;i++) {
+        ASSERT_FALSE(item_is_error(run_js("beginRecovery()")));
+        pump_js();
+        ASSERT_STREQ(status->get_attribute("data-restored"),i==0?"1":i==1?"2":"3");
+        ASSERT_FALSE(item_is_error(run_js("checkRecovery()")));
+        ASSERT_TRUE(radiant_webgl_stats(canvas,&current));
+        EXPECT_LE(current.resources,first.resources+12);EXPECT_LE(current.gpu_bytes,first.gpu_bytes+1024*1024);
+        EXPECT_LE(current.cpu_bytes,first.cpu_bytes+1024*1024);
+    }
+    RecordProperty("restored_cpu_bytes",(int64_t)current.cpu_bytes);
+    RecordProperty("restored_gpu_bytes",(int64_t)current.gpu_bytes);
+    RecordProperty("restored_resources",(int64_t)current.resources);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        const second=document.createElement('canvas');document.body.appendChild(second);
+        const secondStatus=document.createElement('span');document.body.appendChild(secondStatus);
+        globalThis.secondObservatory=createObservatory(second,secondStatus,document.createElement('button'));
+        globalThis.secondCanvas=second;globalThis.secondStatus=secondStatus;
+    )JS")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        if(secondStatus.getAttribute('data-ready')!=='true')throw new Error('second PBR scene did not load');
+        if(secondObservatory.renderer.getContext()===observatory.renderer.getContext())throw new Error('shared contexts');
+        for(let i=0;i<4;i++) {secondObservatory.resize(400,250,i%2+1);secondObservatory.sample(i*.2);}
+        secondObservatory.dispose();observatory.dispose();
+    )JS")));
+    ASSERT_TRUE(radiant_webgl_stats(canvas,&current));
+    EXPECT_LE(current.resources,8u);EXPECT_LE(current.gpu_bytes,1024u);
+    RecordProperty("disposed_cpu_bytes",(int64_t)current.cpu_bytes);
+    RecordProperty("disposed_gpu_bytes",(int64_t)current.gpu_bytes);
+    RecordProperty("disposed_resources",(int64_t)current.resources);
+}
+TEST_F(Scene3dTest, DeclaredNativeAnimationBridgeMatchesPinnedMixerAndReleasesActions) {
+    ASSERT_NE(load_page("test/webgl/native-animation.html"),nullptr);
+    DomElement* result=dom_find_element_by_id(page->root->as_element(),"result");ASSERT_NE(result,nullptr);
+    ASSERT_STREQ(result->get_attribute("data-result"),"ready-for-gc");
+    ASSERT_NE(page->state,nullptr);ASSERT_NE(page->state->animation_scheduler,nullptr);
+    ASSERT_FALSE(item_is_error(run_js("animationFrameProbe()")));
+    for(double time:{1000.,1250.,1500.}) ASSERT_EQ(js_animation_frame_flush(time),1);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        if(autoSamples.length!==3||Math.abs(autoSamples[1][1]-.25)>1e-9||Math.abs(autoSamples[2][1]-.5)>1e-9||
+           Math.abs(autoSamples[2][2])>2e-6)throw new Error('native sampling must precede rAF exactly once');
+    )JS")));
+    Runtime* runtime=dom_document_script_runtime(page);ASSERT_NE(runtime,nullptr);
+    for(unsigned i=0;i<3;i++) gc_collect(runtime_heap(runtime)->gc,nullptr,0);
+    EXPECT_FALSE(item_is_error(run_js("animationLifetimeCheck()")));
+    EXPECT_STREQ(result->get_attribute("data-result"),"passed");
+    EXPECT_GE(strtol(result->get_attribute("data-checks"),nullptr,10),43);
 }
 TEST_F(Scene3dTest, WebGlContextLossRestoresNewResourcesAndRejectsStaleWrappers) {
     ASSERT_NE(load_page("test/webgl/loss.html"),nullptr);

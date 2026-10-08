@@ -46,12 +46,47 @@ chosen output directory. The checked-in reference is under
 
 The partial API is declared in `lambda/module/radiant/webgl_methods.def`;
 `webgl_constants.def` and `webgl_parameters.def` define constants and query
-result shapes. Only `WEBGL_lose_context` is advertised. The current upload
-surface uses numeric ArrayBufferView data; DOM image/video/canvas overloads,
-PBO-offset overloads, packed/compressed formats and advanced WebGL2 APIs are
-outside this initial profile. Unsupported methods/extensions are not stubs.
+result shapes. The advertised extensions are `WEBGL_lose_context`, and, after actual float-target capability probes,
+`EXT_color_buffer_float` and `OES_texture_float_linear`. Phase III adds local
+HTML image and canvas sources for 6/7/9-argument texture uploads, including source
+rectangles, skip/flip/premultiply state and tightly packed copies. Video,
+PBO-offset uploads, compressed formats and advanced WebGL2 APIs remain outside
+the selected profile. Unsupported methods/extensions are not stubs.
 
 The native fixture additionally verifies default-FBO resolve state,
 immutable snapshot lifetime, lazy drawing-buffer discard and ES100/300 shader
 adaptation. CPU/GPU-accounting and normalization timings are GTest XML
 properties in a release run; debug runs are correctness checks only.
+
+Phase III adds `images.html` (PNG quadrants, dynamic CanvasTexture, alpha,
+unpack preservation, source rectangles, detached dimensions, 24 queued images
+and replacement failure), `formats.html` (half-float target/readback, sampled
+depth texture and float linear filtering) and `native-animation.html` (the
+native bridge versus the pinned mixer, scheduling, GC and lifecycle). The native
+runner also covers OrbitControls input/capture/cancel, CSS-scaled raycasts at
+1x/2x, native bone/morph deformation, independently controlled SVG/native
+playback, PBR loss during crossfade, resize and two complete contexts.
+
+```sh
+CHROME_HEADLESS_SHELL=/path/to/chrome-headless-shell \
+  node test/webgl/capture-browser.cjs temp/webgl3/browser --phase3
+LAMBDA_SCENE3D_CAPTURE_DIR=temp/webgl3 ./test/test_scene3d_gtest.exe \
+  --gtest_filter=Scene3dTest.ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels
+node test/webgl/animation-oracle.mjs
+```
+
+The last command regenerates C++ fixed-time expected values from the unmodified
+pin. Reproduce the 144-frame release measurement with:
+
+```sh
+make build-release-compile
+make -C build/premake config=release_native test_scene3d_gtest
+LAMBDA_SCENE3D_MEASURE_FRAMES=1 ./test/test_scene3d_gtest.exe \
+  --gtest_filter=Scene3dTest.ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels \
+  --gtest_output=xml:temp/webgl3/release.xml
+```
+
+Debug measurements are rejected. Never run `make release` in a worktree.
+[Validation and raw metrics](../demo/scene3d/reference/phase3/validation.json)
+record the current cost and bounded owned storage; the rich PBR demo currently
+runs at about 3 FPS on the measured M4.

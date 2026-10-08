@@ -3,19 +3,46 @@
 
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 import sys
 import time
 
 
 class FixtureHandler(SimpleHTTPRequestHandler):
+    def reply_fixture(self, body, content_type, status=200, headers=()):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        for name, value in headers:
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
+        endpoint = self.path.split("?", 1)[0]
+        if endpoint in ("/fetch_headers_network.html", "/fetch_async_snapshot.html",
+                        "/fetch_async_timeout.html"):
+            fixture = Path(__file__).parent / "browse/repro" / endpoint[1:]
+            self.reply_fixture(fixture.read_bytes(), "text/html")
+            return
+        if endpoint == "/fetch_headers_redirect":
+            self.reply_fixture(b"", "text/plain", 302, (
+                ("Location", "/fetch_headers_echo"), ("X-Old-Response", "discarded")))
+            return
+        if endpoint == "/fetch_headers_echo":
+            forbidden = any(self.headers.get(name) is not None for name in
+                            ("Cookie", "Sec-Script", "X-HTTP-Method-Override"))
+            self.reply_fixture(b"header fixture body", "text/plain", headers=(
+                ("X-Request-Merge", self.headers.get("X-Merge", "missing")),
+                ("X-Request-Latin", self.headers.get("X-Latin", "missing")),
+                ("X-Request-Empty", "present" if "X-Empty" in self.headers else "missing"),
+                ("X-Forbidden-Request", "present" if forbidden else "absent"),
+                ("X-Repeat", "one"), ("X-Repeat", "two"),
+                ("Set-Cookie", "fixture-cookie=hidden; Path=/")))
+            return
         if self.path.split("?", 1)[0] == "/":
             body = b"network fixture ready\n"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self.reply_fixture(body, "text/plain")
             return
         if self.path.split("?", 1)[0] == "/xhr_async_transport.html":
             body = b'''<!doctype html><html><body data-xhr-state="waiting"><script>
@@ -38,7 +65,7 @@ setTimeout(function () {
             self.end_headers()
             self.wfile.write(body)
             return
-        if self.path.split("?", 1)[0] == "/xhr_async_transport_delay.json":
+        if endpoint == "/xhr_async_transport_delay.json":
             time.sleep(0.4)
             body = b'{"transport":"libuv"}\n'
             self.send_response(200)

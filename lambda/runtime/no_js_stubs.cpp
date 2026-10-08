@@ -101,6 +101,7 @@ Item binary_from_dataview(JsDataView* dv) { (void)dv; return no_js_unavailable("
 
 // Shape detach needs the realm's Input pool; with no realm the real functions
 // also return NULL and the caller keeps its existing rebuild path.
+bool js_realm_runtime_has_input(void) { return false; }
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj) { (void)obj; return NULL; }
 TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
         NameId operation_name_id, TypeId value_type) {
@@ -170,6 +171,10 @@ void jube_notify_heap_cleanup(void* heap) { (void)heap; }
 int jube_member_get(Item receiver, Item key, Item* out) { (void)receiver; (void)key; (void)out; return 0; }
 int jube_member_get_js(Item target, Item key, Item receiver, Item* out) { (void)target; (void)receiver; (void)key; (void)out; return 0; }
 int jube_member_projected_get(Item receiver, Item key, Item* out) {
+    (void)receiver; (void)key; (void)out;
+    return 0;
+}
+int jube_member_native_own_get(Item receiver, Item key, Item* out) {
     (void)receiver; (void)key; (void)out;
     return 0;
 }

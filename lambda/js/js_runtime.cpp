@@ -47,6 +47,21 @@ extern "C" Item js_interp_async_body(Activation* self, Item unused);
 extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
 extern "C" Item js_mir_module_async_body(Activation* self, Item unused);
 
+static thread_local JsExecutionInterruptCheck js_execution_interrupt_check = NULL;
+
+extern "C" void js_set_execution_interrupt_check(JsExecutionInterruptCheck check) {
+    js_execution_interrupt_check = check;
+}
+
+extern "C" Item js_execution_interrupt_status(void) {
+    // D8.4.3v2: unwind guest frames normally, including suspended-stack owners.
+    if (js_execution_interrupt_check && js_execution_interrupt_check()) {
+        return js_throw_error_with_code("ERR_SCRIPT_EXECUTION_TIMEOUT",
+            "Script execution timed out");
+    }
+    return js_status_ok();
+}
+
 // Shared formatting buffer for the throw-with-format helpers. JS error
 // messages are bounded by construction; truncation is preferable to a heap
 // allocation on a path that is already unwinding.
@@ -10384,7 +10399,7 @@ JS_CONSOLE_SPAN_ADAPTER(js_console_debug_span, js_console_debug_multi)
 
 // Built-in registry tables and installers live in js_runtime_builtin_registry.cpp.
 
-static Item js_get_iterator_proto();
+extern "C" Item js_get_iterator_proto();
 static bool js_iterator_state_ensure_roots(void);
 static Item js_get_array_iterator_proto();
 static Item js_get_string_iterator_proto();
@@ -15048,6 +15063,7 @@ extern "C" Item js_call_from_ast(Item callee, Item this_val, Item* args,
 // (D6.2.2v2); they qualify the call, they do not select a different kernel.
 extern "C" Item js_call(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
+    JS_RETURN_IF_ERROR(js_execution_interrupt_status());
     if (get_type_id(func_item) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)func_item.function;
         // The shared module registry publishes Lambda exports as Core Function
@@ -29383,7 +29399,7 @@ static Item js_make_iterator_proto(Item* cache, JsBuiltinOwner next_owner,
     return proto_root.get();
 }
 
-static Item js_get_iterator_proto() {
+extern "C" Item js_get_iterator_proto() {
     if (!js_iterator_state_ensure_roots()) return ItemNull;
     if (js_iterator_proto_cache.item != 0 &&
         get_type_id(js_iterator_proto_cache) == LMD_TYPE_MAP) {

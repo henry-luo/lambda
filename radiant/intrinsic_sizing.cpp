@@ -485,8 +485,11 @@ static int intrinsic_grid_template_column_count(DomElement* element, ViewBlock* 
                                                 int fallback_count) {
     int column_count = fallback_count;
     GridProp* grid_prop = (view && view->embed) ? view->embedp()->grid : nullptr;
-    if (grid_prop && grid_prop->grid_template_columns) {
-        column_count = grid_prop->grid_template_columns->track_count;
+    if (grid_prop && grid_prop->grid_template_columns &&
+            grid_prop->grid_template_columns->track_count > 0) {
+        // resolved tracks already account for line names and repeat expansion;
+        // counting authored tokens can exceed this array's actual length.
+        return grid_prop->grid_template_columns->track_count;
     }
 
     int unresolved_threshold = fallback_count > 0 ? fallback_count : 0;
@@ -4796,7 +4799,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (child_sizes.max_content > col_max[col]) col_max[col] = child_sizes.max_content;
 
                 // Check for explicit fixed-width track
-                if (grid_prop && grid_prop->grid_template_columns && col < col_count) {
+                if (grid_prop && grid_prop->grid_template_columns &&
+                        col < grid_prop->grid_template_columns->track_count) {
                     GridTrackSize* track = grid_prop->grid_template_columns->tracks[col];
                     if (track && track->type == GRID_TRACK_SIZE_LENGTH && track->value > 0) {
                         // Fixed length track: the column size is the fixed value, not the content
@@ -4814,7 +4818,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Check if track sizes are fixed-length (from CSS)
             // For fixed tracks, use fixed value regardless of content
             if (grid_prop && grid_prop->grid_template_columns) {
-                for (int c = 0; c < col_count; c++) {
+                int explicit_count = min(col_count, grid_prop->grid_template_columns->track_count);
+                for (int c = 0; c < explicit_count; c++) {
                     GridTrackSize* track = grid_prop->grid_template_columns->tracks[c];
                     if (track && track->type == GRID_TRACK_SIZE_LENGTH && !track->is_percentage && track->value > 0) {
                         col_max[c] = (float)track->value;

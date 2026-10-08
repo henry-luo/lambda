@@ -15,7 +15,8 @@ bounded native 3D mapping below.
 On 2026-10-08 the user selected Phase III: richer interactive Three.js scenes
 and Three.js-style animation evaluated by an extension of the existing SVG
 animation engine, with OpenGL responsible for 3D rendering. Phase III is
-specified in §8 and is not yet implemented.
+implemented for the selected macOS profile in §8; validation, performance
+and binding limits are recorded in [the Phase III evidence](../impl/Radiant_WebGL_Phase3.md).
 
 **Date:** 2026-10-08
 
@@ -621,7 +622,7 @@ existing engine gaps.
 
 ### Phase III — richer interactive scenes and shared SVG/3D animation
 
-**Selected scope (USER, 2026-10-08; not yet implemented):** deliver the richer
+**Selected scope (USER, 2026-10-08; implementation and evidence in [Phase III record](../impl/Radiant_WebGL_Phase3.md)):** deliver the richer
 Three.js scene features below and animation based on Three.js's definitions.
 The animation engine must reuse and extend Radiant's existing SVG animation
 engine; the 3D rendering stage uses the native OpenGL path. Reusing only the
@@ -904,7 +905,8 @@ corpus, not Three.js execution.
   join either phase's required workload set.
 - Phase III's selected animation binding/interpolation manifest, shared SVG
   engine extraction, rich-scene API/shader expansion and frame-pacing evidence
-  are specified in §8; their implementation and validation remain pending.
+  are specified in §8; implementation, validation and measured limits are
+  recorded in [the Phase III evidence](../impl/Radiant_WebGL_Phase3.md).
 - GPU-process containment and any expansion of existing headless profiles.
 
 These follow-on decisions do not change the formal specification. Phase I
@@ -915,7 +917,8 @@ evidence covers the named macOS driver; other desktops remain unverified.
 Detailed Phase I implementation and validation are recorded in
 [`vibe/impl/Radiant_Scene3d_Phase1.md`](../impl/Radiant_Scene3d_Phase1.md).
 The following table records Phase I/II seams and the selected Phase III
-extensions; Phase III and export remain pending as indicated.
+extensions; selected macOS Phase III evidence is recorded
+[separately](../impl/Radiant_WebGL_Phase3.md), and export remains follow-on work.
 
 | Location | Responsibility |
 |---|---|

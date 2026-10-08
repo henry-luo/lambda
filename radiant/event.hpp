@@ -67,6 +67,8 @@ void* radiant_subtree_element_from_point(DomElement* root, float x, float y);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
+void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,const char* type,
+    const char* clip,uint64_t action,double detail,double seconds);
 void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
     const char* type, double detail, double seconds);
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,

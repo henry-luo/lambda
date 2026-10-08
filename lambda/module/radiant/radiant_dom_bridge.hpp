@@ -10,6 +10,7 @@
 #endif
 
 struct DomDocument;
+struct StrBuf;
 
 // Canvas owns document-lifetime pixels in Radiant.  DOM bindings pass only a
 // native DOM-node handle through this waist; the backing surface never crosses
@@ -31,6 +32,8 @@ typedef struct RadiantCanvasStateSnapshot {
 } RadiantCanvasStateSnapshot;
 
 RADIANT_C_API bool radiant_canvas_ensure(void* canvas_element);
+// caller releases the encoded bytes with strbuf_free; no surface escapes the waist.
+RADIANT_C_API struct StrBuf* radiant_canvas_to_data_url(void* canvas_element);
 RADIANT_C_API bool radiant_canvas_set_dimension(void* canvas_element,
                                                 bool is_width,
                                                 uint32_t value);

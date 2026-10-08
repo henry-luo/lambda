@@ -28,3 +28,6 @@ void scene3d_context_lost(DomElement* root);
 void render_scene3d_content(RasterRenderContext* context, ViewBlock* view);
 
 void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster_scale);
+struct Scene3dAnimationState;
+// document-owned playback is separate from authored scene values and disposable GPU projections.
+Scene3dAnimationState* scene3d_animations(DomElement* root);

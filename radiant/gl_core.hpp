@@ -34,6 +34,7 @@ void native_gl_destroy(NativeGlContext* context);
 void native_gl_lose(NativeGlContext* context);
 bool native_gl_stats(NativeGlContext* context, NativeGlStats* stats);
 const char* native_gl_diagnostic(NativeGlContext* context);
+bool native_gl_extension_supported(NativeGlContext* context, const char* name);
 bool native_gl_valid(NativeGlContext* context, NativeGlResource resource, NativeGlKind kind);
 void native_gl_release(NativeGlContext* context, NativeGlResource resource);
 NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes);
