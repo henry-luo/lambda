@@ -14,6 +14,7 @@ h2 { font-size: 20px; line-height: 26px; color: #165bb8; }
 p { margin: 12px 0; }
 .chapter { break-before: page; }
 table { table-layout: auto; width: 100%; border-collapse: separate; border-spacing: 4px 3px; }
+col:first-child { width: 38%; background: #f1f6ff; }
 th, td { padding: 6px; border: 1px solid #cbd5e1; vertical-align: top; }
 th { background: #e0ecff; }
 .alignment { height: 96px; }
@@ -34,6 +35,7 @@ th { background: #e0ecff; }
 <h2 class="chapter">Tables across pages</h2>
 <p>The header repeats when this automatically sized table continues onto another sheet. Cell spacing and column spans are preserved across page breaks. The final row group stays together and begins on a new sheet.</p>
 <table>
+  <colgroup><col><col></colgroup>
   <thead><tr><th>Feature</th><th>Example</th></tr></thead>
   <tbody>
     <tr><td>Paper geometry</td><td>400 by 560 CSS pixels</td></tr>

@@ -59,6 +59,7 @@ enum ViewFragmentRole : uint8_t {
     VIEW_FRAGMENT_BODY, VIEW_FRAGMENT_MARGIN, VIEW_FRAGMENT_NOTE, VIEW_FRAGMENT_FLOAT,
     VIEW_FRAGMENT_RUNNING, VIEW_FRAGMENT_REPEATED_TABLE,
 };
+struct ViewTableRange { size_t column, span; };
 struct LayoutViewNode {
     LayoutViewRef ref;
     LayoutViewKind kind;
@@ -75,6 +76,7 @@ struct LayoutViewNode {
     lam::Up<PaintImageBox> image_box;
     lam::Up<ViewCssStyle> computed_style;
     lam::Up<BoundaryProp> computed_boundary;
+    lam::Up<const ViewTableRange> table_range;
     ViewFragmentRole role;
     bool generated;
     bool clip_content;
