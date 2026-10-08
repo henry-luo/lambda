@@ -29,10 +29,9 @@ pub let empty_metric = {width: 0.0, height: 0.0, baseline: 0.0,
 pub fn measure_requests(requests) {
     if (len(requests) == 0) []
     else {
-        let source = <html <body <svg xmlns: "http://www.w3.org/2000/svg",
-            for (request in requests) <text *:attributes(request.font), request.label>>>>;
-        let metrics = radiant.measure_svg_text(format(source, 'html'), 1, 1);
-        if (metrics == null or len(metrics) != len(requests)) error("chart: SVG text measurement failed")
+        let metrics = radiant.measure_text(
+            [for (request in requests) {text: request.label, font: request.font}], null);
+        if (metrics == null or len(metrics) != len(requests)) error("chart: text measurement failed")
         else metrics
     }
 }
@@ -61,7 +60,8 @@ fn fit_round(states, font, limit) {
 
 pub fn fit(labels, font, limit = null) {
     if (len(labels) == 0) [] else {
-    let metrics = measure([*labels, if (limit != null) "…"], font);
+    // an absent ellipsis is not a text request; native batches reject null labels.
+    let metrics = measure([*labels, *(if (limit != null) ["…"] else [])], font);
     if (metrics is error) metrics
     else if (limit == null) [for (index, label in labels) {text: label, metric: metrics[index]}]
     else {

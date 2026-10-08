@@ -21,9 +21,23 @@
 
 #include "font_internal.h"
 #include "font_gpos.h"
+#include "font_math.h"
 
 #include <math.h>
 #include <stdlib.h>
+
+bool font_get_math_table(FontHandle* handle, FontMathTable* math) {
+    return handle && !handle->resources_destroyed && font_math_open(handle->tables, math);
+}
+
+float font_get_glyph_advance_by_index(FontHandle* handle, uint32_t glyph) {
+    if (!handle || handle->resources_destroyed || !handle->tables) return -1.0f;
+    HeadTable* head = font_tables_get_head(handle->tables);
+    MaxpTable* maxp = font_tables_get_maxp(handle->tables);
+    HmtxTable* hmtx = font_tables_get_hmtx(handle->tables);
+    if (!head || !head->units_per_em || !maxp || glyph >= maxp->num_glyphs || !hmtx) return -1.0f;
+    return hmtx_get_advance(hmtx, (uint16_t)glyph) * handle->size_px / head->units_per_em;
+}
 
 // ============================================================================
 // Helpers
@@ -202,6 +216,8 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     Os2Table* os2t = ft ? font_tables_get_os2(ft) : NULL;
 
     if (os2t) {
+        m->subscript_y_offset = os2t->y_subscript_y_offset * scale;
+        m->superscript_y_offset = os2t->y_superscript_y_offset * scale;
         m->typo_ascender  =  os2t->s_typo_ascender  * scale;
         m->typo_descender = -os2t->s_typo_descender  * scale; // make positive
         m->typo_line_gap  = (os2t->s_typo_line_gap > 0) ? (os2t->s_typo_line_gap * scale) : 0.0f;

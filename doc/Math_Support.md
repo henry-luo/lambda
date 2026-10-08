@@ -70,7 +70,10 @@ The `math-typst` and `math-mathml` targets are accepted by the command line but 
 
 ## 2. Rendering Math to HTML
 
-Math is rendered to HTML using the `lambda.doc.math` package. The package converts the parsed AST into a MathLive-compatible `<span>` element tree, which can be serialised with `format(result, 'html')`.
+Math is rendered by `lambda.doc.math.math` as inline SVG with the selected
+font's glyph outlines. Lambda owns layout; `lib/font` reads OpenType MATH and
+Radiant exposes copied font facts (**D7.1.1, D4.2.2v2**). Serialize the result
+with `format(result, 'html')`.
 
 ### 2.1 Lambda API
 
@@ -81,7 +84,7 @@ import math: lambda.doc.math.math
 let ast     = parse("\\sum_{k=1}^{n} k^2", 'math')^
 let inline  = math.render_inline(ast)        // inline (text) style
 let display = math.render_display(ast)       // display (block) style
-let alone   = math.render_standalone(ast)    // display + embedded CSS
+let alone   = math.render_standalone(ast)    // self-contained display SVG
 
 // Lower-level: pass options explicitly
 let html_el = math.render_math(ast, {display: true, standalone: false, color: "navy"})
@@ -89,29 +92,64 @@ let html_el = math.render_math(ast, {display: true, standalone: false, color: "n
 // Serialise
 let html_str = format(html_el, 'html')
 
-// Get the CSS stylesheet string separately
-let css = math.stylesheet()
+// Ordinary installed fonts work without OpenType MATH or bundled font files.
+let ordinary = math.render_math(ast, {font_family: "sans-serif"})
+
+// From a source checkout, use the second-font test fixture.
+let sans = math.render_math(ast, {display: true, font_family: "FormulaSans",
+    fonts: [{font_family: "FormulaSans",
+        data: input("test/lambda/math/fonts/NotoSansMath-Regular.ttf", 'binary')^}]})
 ```
 
 | Function               | Description                                    |
 |------------------------|------------------------------------------------|
 | `render_inline(ast)`   | Renders in text (inline) style                 |
 | `render_display(ast)`  | Renders in display (block) style               |
-| `render_standalone(ast)` | Display mode + wraps with `<style>` block    |
+| `render_standalone(ast)` | Self-contained display SVG                  |
 | `render_math(ast, opts)` | Full control via options map                 |
-| `stylesheet()`         | Returns standalone CSS string                  |
+| `render_box(ast, opts)` | Returns element and width/height/depth in em   |
+| `stylesheet()`         | Returns `""`; no external math CSS is needed   |
 
 ### 2.2 Render Options
 
 | Option       | Type    | Default | Description                        |
 |--------------|---------|---------|------------------------------------|
 | `display`    | bool    | `false` | Display (block) vs inline style    |
-| `standalone` | bool    | `false` | Embed CSS `<style>` in output      |
+| `standalone` | bool    | `false` | Retained option; SVG is always self-contained |
 | `color`      | string  | inherit | Override foreground color          |
+| `font_family` | string | `Computer Modern Serif` | Select the primary face |
+| `fonts` | array | existing CMU/KaTeX faces | Binary face records `{font_family, data, font_weight?, font_style?}` |
+| `font_size` | number | inherit | Set emitted CSS pixel size; box dimensions remain em |
 
 ### 2.3 Output Format
 
-The output HTML is a tree of `<span>` elements carrying Lambda's own `lm_*` class names (`lm_frac`, `lm_sqrt`, …), styled by the package's own stylesheet. The default fonts are Computer Modern / Latin Modern with the KaTeX fonts as fallbacks; `math.stylesheet({font: "katex"})` — or `--font-option katex` on the `lambda convert` command line — selects KaTeX-only fonts. The stylesheet must be loaded on the page for correct rendering; `render_standalone` embeds it automatically.
+The output is an `<svg class="lambda-math" role="math">` whose viewBox and
+baseline alignment derive from the measured box. Paths include glyph variants
+and connector-based assemblies; a `<title>` retains canonical LaTeX for
+accessibility. Painting needs no installed copy of the font. The default
+reuses the existing CMU Serif faces and small KaTeX symbol and alphabet fonts.
+No additional production font is bundled. Noto Sans Math is a test fixture
+under `test/lambda/math/fonts`, with its own SIL OFL notice.
+
+OpenType MATH is optional. Without it, layout uses measured advances/outlines,
+x-height, underline thickness and OS/2 script offsets, with shared
+[MathML Core fallback constants](https://w3c.github.io/mathml-core/#layout-constants-mathconstants).
+Ordinary italic/bold faces provide letters when the Unicode math alphabet is
+absent. Missing symbols use normal font fallback with that glyph's own metrics
+and outline; an unresolvable glyph or invalid font remains an error (**S7.4.1**).
+When an ordinary font has no stretch construction, SVG scales the measured
+outline and box together; zero-advance accents use their ink bounds. Stroke
+weights can differ from a designed assembly.
+MATH fonts retain their supplied variants and assemblies. An explicit
+`font_family` without `fonts` resolves installed fonts without loading the
+default bundle. Text placement follows Radiant's existing SVG support,
+without adding complex-script shaping. For absolute TeX lengths, pass
+`font_size` to provide the CSS-pixel/em conversion; otherwise that conversion
+uses 16px. Resource acquisition stays in Lambda IO (**D7.1.2v2**).
+
+The previous MathLive-compatible spans and stylesheet are available through
+the explicit `lambda.doc.math.mathlive` import. Its fixed font tables serve
+compatibility fixtures and are not imported by the default renderer.
 
 ---
 

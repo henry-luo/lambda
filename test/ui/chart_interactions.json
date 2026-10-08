@@ -1,0 +1,121 @@
+{
+  "name": "Chart template point and interval selections",
+  "html": "test/lambda/ui/_chart_interactions.ls",
+  "viewport": {
+    "width": 650,
+    "height": 350
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".points circle"
+      },
+      "count": 6
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-chart-view='chart-c0']"
+      },
+      "attribute": "fill",
+      "equals": "grey"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-chart-view='chart-c0']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-chart-view='chart-c0']"
+      },
+      "attribute": "fill",
+      "equals": "red"
+    },
+    {
+      "type": "mouse_down",
+      "x": 50,
+      "y": 60
+    },
+    {
+      "type": "mouse_move",
+      "x": 140,
+      "y": 100
+    },
+    {
+      "type": "mouse_up",
+      "x": 140,
+      "y": 100
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-brush"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-chart-view='chart-c1']"
+      },
+      "count": 2
+    },
+    {
+      "type": "dblclick",
+      "x": 100,
+      "y": 60
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-chart-view='chart-c1']"
+      },
+      "count": 3
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "[data-chart-input=\"threshold\"]"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-chart-input=\"threshold\"]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "[data-chart-input=\"threshold\"]"
+      },
+      "equals": "10"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-chart-view=\"chart-c1\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-chart-view=\"chart-c1\"]"
+      },
+      "count": 3
+    }
+  ]
+}

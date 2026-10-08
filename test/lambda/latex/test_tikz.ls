@@ -52,9 +52,10 @@ let escaped_percent_doc = parse(escaped_percent_tex, {type: "latex"})^;
     parsed[0][0][2].y == 1.0,
     contains(drawn, "<path"),
     contains(drawn, "tikz-label"),
-    contains(drawn, "lm_latex"),
+    contains(drawn, "lambda-math"),
     contains(plot_xml, "tikz-axis"),
-    len(split(plot_xml, "<svg")) == 2,
+    // the plot has one SVG root plus a math SVG for its axis label and legend.
+    len(split(plot_xml, "<svg")) == 4,
     contains(plot_xml, "x-axis"),
     contains(plot_xml, "x-grid"),
     contains(plot_xml, "tikz-legend-entry"),

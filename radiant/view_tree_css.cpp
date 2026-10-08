@@ -83,6 +83,8 @@ void view_css_context_destroy(ViewTree* tree) {
 static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* name,
                             CssDeclaration* result) {
     if (style->page_context) return view_css_select_page(tree, style->page_context, name, result);
+    // anonymous boxes inherit computed values but never match element selectors.
+    if (!style->source) return false;
     ViewCssContext* css = tree->model->css;
     return css_select_element_declaration(css->engine, css->matcher, style->source,
         css->stylesheets, css->stylesheet_count,
@@ -409,8 +411,8 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     style->parent = lam::up(parent);
     style->next = css->styles;
     css->styles = lam::up(style);
-    const char* inline_text = pseudo_element ? nullptr : dom_element_get_inline_style(element);
-    CssRule* authored = pseudo_element ? nullptr : dom_element_inline_declaration_block(element);
+    const char* inline_text = pseudo_element || !element ? nullptr : dom_element_get_inline_style(element);
+    CssRule* authored = pseudo_element || !element ? nullptr : dom_element_inline_declaration_block(element);
     if (authored) {
         size_t count = authored->data.style_rule.declaration_count;
         CssDeclaration** declarations = (CssDeclaration**)pool_calloc(css->pool, count * sizeof(CssDeclaration*));
@@ -425,7 +427,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         style->inline_declarations = lam::up(css_parse_declaration_list_text(inline_text,
             strlen(inline_text), css->pool, &style->inline_count));
     }
-    style->display = pseudo_element ? DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW} : css_default_display_for_element(element, element);
+    style->display = pseudo_element || !element ? DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW} : css_default_display_for_element(element, element);
     const CssValue* value = view_css_property(tree, style, "display");
     if (value) {
         if (css_value_is_inherit(value) && parent) style->display = parent->display;
@@ -454,7 +456,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         style->border_color[i] = style->color;
     }
     size_t list_level = 0;
-    if (!pseudo_element && layout_is_html_list_container_tag(element->tag_id)) {
+    if (element && !pseudo_element && layout_is_html_list_container_tag(element->tag_id)) {
         if (!style->padding[3]) style->padding[3] = lam::up(css_value_create_length(css->pool, 40.0, CSS_UNIT_PX));
         bool nested = false;
         for (DomElement* ancestor = element->parent_element(); ancestor; ancestor = ancestor->parent_element())
@@ -465,7 +467,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     style->text_align = view_css_keyword(tree, style, "text-align", CSS_VALUE_START,
         parent ? parent->text_align : CSS_VALUE_START, true);
     // the HTML caption UA alignment is overridden by any authored text-align declaration.
-    if (!pseudo_element && element->tag_id == MARKUP_NAME_CAPTION && !view_css_property(tree, style, "text-align"))
+    if (element && !pseudo_element && element->tag_id == MARKUP_NAME_CAPTION && !view_css_property(tree, style, "text-align"))
         style->text_align = CSS_VALUE_CENTER;
     style->white_space = view_css_keyword(tree, style, "white-space", CSS_VALUE_NORMAL,
         parent ? parent->white_space : CSS_VALUE_NORMAL, true);
@@ -473,9 +475,9 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         parent ? parent->caption_side : CSS_VALUE_TOP, true);
     style->list_style_type = parent ? parent->list_style_type : CSS_VALUE_DISC;
     style->list_style_string = parent ? parent->list_style_string : nullptr;
-    if (!pseudo_element && element->tag_id == MARKUP_NAME_OL) {
+    if (element && !pseudo_element && element->tag_id == MARKUP_NAME_OL) {
         style->list_style_type = CSS_VALUE_DECIMAL; style->list_style_string = nullptr;
-    } else if (!pseudo_element && layout_is_html_list_container_tag(element->tag_id)) {
+    } else if (element && !pseudo_element && layout_is_html_list_container_tag(element->tag_id)) {
         style->list_style_type = list_level == 0 ? CSS_VALUE_DISC : list_level == 1 ? CSS_VALUE_CIRCLE : CSS_VALUE_SQUARE;
         style->list_style_string = nullptr;
     }
@@ -527,12 +529,20 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
     view_css_counter_style(tree, style, parent);
     style->list_reversed = parent && parent->list_reversed;
-    if (!pseudo_element && layout_is_html_list_container_tag(element->tag_id))
+    if (element && !pseudo_element && layout_is_html_list_container_tag(element->tag_id))
         style->list_reversed = element->tag_id == MARKUP_NAME_OL && element->has_attribute("reversed") && !style->counter_reset;
     else { int ignored = 0; if (layout_counter_named_value(style->counter_reset, "list-item", 0, &ignored)) style->list_reversed = false; }
     style->float_reference = lam::up(view_css_property(tree, style, "float-reference"));
     style->float_defer = lam::up(view_css_property(tree, style, "float-defer"));
     style->footnote_policy = lam::up(view_css_property(tree, style, "footnote-policy"));
+    return style;
+}
+
+ViewCssStyle* view_css_anonymous_style(ViewTree* tree, ViewCssStyle* parent, DisplayValue display) {
+    if (!parent || !view_css_context_begin(tree)) return nullptr;
+    // use the ordinary initial/inherited computation without a synthetic DOM node (CSS 2.2 §17.2.1).
+    ViewCssStyle* style = view_css_build_style(tree, nullptr, parent, PSEUDO_ELEMENT_NONE);
+    if (style) { style->display = display; style->counters = parent->counters; }
     return style;
 }
 

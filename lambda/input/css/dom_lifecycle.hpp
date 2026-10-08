@@ -8,6 +8,7 @@ struct DomDocument;
 struct DomNode;
 struct Element;
 struct Item;
+struct Pool;
 
 typedef enum DomNodePinReason : uint8_t {
     DOM_NODE_PIN_WRAPPER = 0,
@@ -61,6 +62,8 @@ void dom_node_registry_set_backing_source(DomDocument* doc, DomNode* node,
 void dom_node_registry_set_backing_value(DomDocument* doc, DomNode* node,
                                          Item backing_value);
 Element* dom_node_registry_backing_source(DomDocument* doc, DomNode* node);
+Pool* dom_node_registry_owned_string_pool(DomDocument* doc, DomNode* node);
+void dom_node_registry_set_owned_string_pool(DomDocument* doc, DomNode* node, Pool* pool);
 void dom_node_registry_refresh_backing(DomDocument* doc, DomNode* node);
 DomNodeRef dom_node_ref(DomNode* node);
 DomNode* dom_node_ref_validate(DomDocument* doc, DomNodeRef ref);

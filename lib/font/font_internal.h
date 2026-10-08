@@ -253,10 +253,7 @@ typedef struct FontFaceEntry {
     FontSlant   slant;
 
     // sources array (pool-allocated)
-    struct FontFaceEntrySrc {
-        char* path;                     // arena_strdup'd
-        char* format;                   // arena_strdup'd, or NULL
-    } *sources;
+    FontFaceSource* sources;            // strings and font bytes copied into the arena
     int source_count;
 
     FontFaceUnicodeRange* unicode_ranges;

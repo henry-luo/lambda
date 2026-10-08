@@ -279,7 +279,7 @@ function buildLambdaScript(cases) {
   const formulaList = cases.map((testCase) =>
     `    {formula: ${lambdaString(testCase.formula)}, display: ${testCase.display ? 'true' : 'false'}}`
   ).join(',\n');
-  return `import math_pkg: lambda.doc.math.math
+  return `import math_pkg: lambda.doc.math.mathlive
 import html_ser: lambda.latex.to_html
 
 let cases = [

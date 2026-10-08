@@ -803,6 +803,8 @@ enum class DomViewSlot {
 
 // tier-1: doc-pool, survives relayout
 struct DomElementExt {
+    // adoption changes ownerDocument, not the pool owning reclaimable metadata (D4.5.1v4).
+    lam::Up<DomDocument> storage_document;
     NameId name_id;
     FragmentUnion frags[FRAGMENT_UNION_COUNT];
     uint8_t fragment_presence_mask;
@@ -909,6 +911,19 @@ struct DomElement : DomNode {
     uint32_t elmt_flags;         // compact element state; use the accessors below
     // document reference (provides Arena and Input*)
     lam::Up<DomDocument> doc;    // Parent document (provides arena and input)
+    DomDocument* storage_owner() const {
+        return ext && ext->storage_document ? ext->storage_document.get() : doc.get();
+    }
+    Pool* storage_pool() const {
+        DomDocument* owner = storage_owner();
+        return owner ? owner->document_pool.get() : nullptr;
+    }
+    bool preserve_storage_owner() {
+        DomElementExt* data = ensure_ext();
+        if (!data) return false;
+        if (!data->storage_document) data->storage_document = doc;
+        return true;
+    }
 
     // CSS custom properties (CSS variables)
     lam::Own<struct CssCustomProp> css_variables;  // list of --var-name: value
@@ -1185,8 +1200,8 @@ struct DomElement : DomNode {
     DomComment* append_comment(const char* comment_content);
 
     DomElementExt* ensure_ext() {
-        if (!ext && doc && doc->document_pool) {
-            ext = lam::own((DomElementExt*)pool_calloc(doc->document_pool, sizeof(DomElementExt)));
+        if (!ext && doc && storage_pool()) {
+            ext = lam::own((DomElementExt*)pool_calloc(storage_pool(), sizeof(DomElementExt)));
             if (ext) doc->services.ext_allocations++;
         }
         return ext;

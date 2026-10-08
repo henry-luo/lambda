@@ -1,0 +1,91 @@
+{
+  "name": "Chart generated input controls",
+  "html": "test/lambda/ui/_chart_input_controls.ls",
+  "viewport": {
+    "width": 500,
+    "height": 400
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".points circle"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-chart-input=\"enabled\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".points circle"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-chart-input=\"enabled\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".points circle"
+      },
+      "count": 2
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "[data-chart-input=\"amount\"]"
+      },
+      "value": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#amount"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-chart-input=\"mode\"][value=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#mode"
+      },
+      "equals": "true"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "[data-chart-input=\"label\"]"
+      },
+      "text": "hello",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#label"
+      },
+      "equals": "hello"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-chart-input=\"label\"]"
+      }
+    }
+  ]
+}

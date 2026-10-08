@@ -4371,9 +4371,21 @@ static bool capture_lambda_focus_restore(DocState* state,
                 Item item = {.element = dom_element_render_source(elem)};
                 RenderMapLookup lookup;
                 if (render_map_reverse_lookup(item, &lookup)) {
+                    // reverse ownership covers descendants too. Anchor the path
+                    // at the component root, not at the focused descendant.
+                    DomElement* component_root = elem;
+                    for (DomNode* parent = elem->parent; parent && parent->is_element(); parent = parent->parent) {
+                        DomElement* ancestor = parent->as_element();
+                        if (ancestor->is_synthetic()) continue;
+                        RenderMapLookup owner;
+                        Item source = {.element = dom_element_render_source(ancestor)};
+                        if (!render_map_reverse_lookup(source, &owner)) continue;
+                        if (owner.source_item.item != lookup.source_item.item || owner.template_ref != lookup.template_ref) break;
+                        component_root = ancestor;
+                    }
                     out->lookup = lookup;
                     out->valid = build_focus_path_from_template_root(
-                        elem, focused_elem, out);
+                        component_root, focused_elem, out);
                     return true;
                 }
             }

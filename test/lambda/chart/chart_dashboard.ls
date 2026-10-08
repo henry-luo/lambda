@@ -5,7 +5,9 @@
 //   ./lambda.exe      test/lambda/chart/chart_dashboard.ls     # print HTML to stdout
 //
 // The dashboard layout and all chart specs are defined in dashboard_data.json
-// (Vega-Lite compatible JSON). Each chart entry may contain:
+// (Vega-Lite compatible JSON, including Lambda's specialized mark extensions).
+// The showcase includes statistical, radial, hierarchical, geographic and
+// wordcloud charts. Each chart entry may contain:
 //   label   — title text shown above the card in the HTML page
 //   title   — chart title rendered inside the SVG
 //   width / height — SVG dimensions
@@ -36,6 +38,7 @@ fn make_card(c) {
 // ── Dashboard meta ──────────────────────────────────────────────────────────
 let title    = if (dashboard.title)    dashboard.title    else "Chart Dashboard"
 let subtitle = if (dashboard.subtitle) dashboard.subtitle else ""
+let examples = string(len(dashboard.charts)) ++ " chart examples"
 let cols     = if (dashboard.columns)  string(int(dashboard.columns)) else "3"
 
 // ── Render all charts ───────────────────────────────────────────────────────
@@ -50,14 +53,14 @@ let css =
     "header h1{font-size:28px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px}" ++
     "header p{font-size:14px;opacity:.6;font-weight:400}" ++
     "main{padding:28px 32px;max-width:1440px;margin:0 auto}" ++
-    ".grid{display:grid;grid-template-columns:repeat(" ++ cols ++ ",1fr);gap:22px}" ++
+    ".grid{display:grid;grid-template-columns:repeat(" ++ cols ++ ",minmax(0,1fr));gap:22px}" ++
     ".card{background:#fff;border-radius:12px;" ++
         "box-shadow:0 1px 4px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.07);" ++
         "padding:18px 14px 14px}" ++
     ".card-label{font-size:10px;font-weight:700;text-transform:uppercase;" ++
         "letter-spacing:1.2px;color:#999;margin-bottom:10px;padding-left:2px}" ++
-    "svg{display:block;margin:0 auto}" ++
-    "@media(max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}}" ++
+    "svg{display:block;max-width:100%;height:auto;margin:0 auto}" ++
+    "@media(max-width:1100px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}" ++
     "@media(max-width:700px){.grid{grid-template-columns:1fr}}"
 
 // ── Assemble HTML page ──────────────────────────────────────────────────────
@@ -70,6 +73,6 @@ let css =
 "<style>" ++ css ++ "</style>" ++
 "</head>" ++
 "<body>" ++
-"<header><h1>" ++ title ++ "</h1><p>" ++ subtitle ++ "</p></header>" ++
+"<header><h1>" ++ title ++ "</h1><p>" ++ examples ++ " · " ++ subtitle ++ "</p></header>" ++
 "<main><div class=\"grid\">" ++ cards_html ++ "</div></main>" ++
 "</body></html>"

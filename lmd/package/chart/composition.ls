@@ -7,6 +7,8 @@ import scale: .scale
 import sizing: .sizing
 import util: .util
 import geometry: .geometry
+import parameter: .parameter
+import composite: .composite
 
 let channels = ["x", "y", "color", "stroke", "size", "shape", "opacity", "theta", "radius"]
 
@@ -14,17 +16,25 @@ fn kind(spec) => if (spec.concat != null) "concat" else if (spec.repeat_row != n
     else if (spec.facet != null) "facet" else if (spec.layer != null) "layer" else "unit"
 
 fn inherit_view(spec, parent) {
+    let definitions = if (parent == null and spec._parameters != null) spec._parameters else
+        [*(if (parent._parameters != null) parent._parameters else []), *(if (spec.params != null) spec.params else [])];
+    let st = if (spec._parameter_state != null) spec._parameter_state else parent._parameter_state;
+    let values = if (spec._parameter_values != null) spec._parameter_values else parent._parameter_values;
+    let interactive = spec._interactive == true or parent._interactive == true;
     let datasets = {*:parse.attributes(parent.datasets), *:parse.attributes(spec.datasets)};
     let own_data = spec.data != null or spec.data_source.values != null or spec.data_source.name != null or spec.data_source.url != null;
     let resolved = if (parent == null or own_data) source.resolve(spec.data, spec.data_source, datasets) else parent.data;
-    let raw = if (resolved is error) resolved else if (spec.mark.kind == "geoshape" or spec.mark.kind == "geo" or
+    let graph = if (resolved.nodes != null) resolved else parent._graph;
+    let raw = if (resolved is error) resolved else if (resolved.nodes != null) resolved.nodes else if (spec.mark.kind == "geoshape" or spec.mark.kind == "geo" or
         resolved.type == "FeatureCollection" or resolved.type == "Feature") geometry.records(resolved) else resolved;
     let data = if (raw is error) raw else if (not (raw is array)) error("chart: data must be an array")
-        else transform.apply_transforms(raw, spec.transform, datasets);
+        else transform.apply_transforms(raw, parameter.transforms(spec.transform, values), datasets);
     let padding = sizing.normalize_padding(spec.padding);
     {*:spec, data: if (data is error) data else if (padding is error) padding else data, transform: null,
-        padding: padding, datasets: datasets, config: cfg.inherit(parent.config, spec.config),
-        encoding: {*:cfg.settings(parent.encoding), *:cfg.settings(spec.encoding)}}
+        padding: padding, datasets: datasets, config: cfg.inherit(parent.config, spec.config), _graph: graph,
+        _parameters: definitions, _parameter_state: st, _parameter_values: values, _interactive: interactive,
+        encoding: (let encoding = {*:cfg.settings(parent.encoding), *:cfg.settings(spec.encoding)},
+            parameter.encoding(encoding, values, definitions, st, spec._view_path, interactive))}
 }
 
 fn child_bindings(spec, inherited, path, form) {
@@ -76,14 +86,16 @@ pub fn prepare(raw_spec, prepare_mark, path = "chart", parent = null, bindings =
     else if (raw_spec is element and name(raw_spec) == 'svg') raw_spec
     else {
         let parsed = if (raw_spec is element) parse.parse_top(raw_spec) else raw_spec;
-        let spec = {*:inherit_view(parsed, parent), _view_path: path};
+        let inherited = {*:inherit_view({*:parsed, _view_path: path}, parent), _view_path: path};
+        let spec = composite.expand(inherited);
         let form = kind(spec);
         let children = child_bindings(spec, bindings, path, form);
         let resolution_error = util.first_error([for (section in ["scale", "axis", "legend"]) for (key, policy in spec.resolve[section]
             where not contains(if (section == "axis") ["x", "y"] else if (section == "legend") ["color", "size", "shape"] else channels, string(key)) or
                 (policy != "shared" and policy != "independent"))
             error("chart: resolution requires a supported channel and shared or independent")]);
-        if (spec.data is error) {*:spec, _preparation_error: spec.data}
+        if (spec is error) {_preparation_error: spec}
+        else if (spec.data is error) {*:spec, _preparation_error: spec.data}
         else if (resolution_error is error) {*:spec, _preparation_error: resolution_error}
         else if (form == "concat") {*:spec, children: [for (index, child in spec.children)
             if (child is element and name(child) == 'svg') child
@@ -137,10 +149,11 @@ pub fn visual_mapping(views, key) {
         (key != "size" or leaf.mark.kind != "wordcloud")) leaf];
     let first_view = candidates[0];
     let channel = first_view.encoding[key];
-    let rows = [for (leaf in candidates) for (row in leaf.data) {value: parse.channel_value(leaf.encoding[key], row)}];
+    // conditional literal styling must not replace field values in the scale/legend domain.
+    let rows = [for (leaf in candidates) for (value in scale.channel_values(leaf.encoding[key], leaf.data)) {value: value}];
     let endpoints = [for (leaf in (if (key == "theta" or key == "radius") candidates else []),
         let secondary = leaf.encoding[key ++ "2"] where secondary != null and secondary.value == null)
-        for (row in leaf.data) {value: parse.channel_value(secondary, row)}];
+        for (value in scale.channel_values(secondary, leaf.data)) {value: value}];
     let normalized = {*:parse.attributes(channel), field: "value"};
     if (len(candidates) == 0) null
     else if (key == "color" or key == "stroke") scale.infer_color_scale(normalized, rows)

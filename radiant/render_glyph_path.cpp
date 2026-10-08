@@ -41,6 +41,13 @@ bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t cod
     return font_visit_bitmap_contours(bitmap, pixel_to_css, render_font_path_command, &writer, arena);
 }
 
+bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32_t glyph,
+    float x, float y, float scale_x, Arena* arena) {
+    if (!path || !font || !arena) return false;
+    RenderGlyphPathWriter writer = {path, x, y, scale_x};
+    return font_visit_glyph_index_path(font, glyph, render_font_path_command, &writer, arena);
+}
+
 RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run) {
     if (!run || !run->font || !run->glyph_ids || !run->xs || !run->ys || run->count <= 0) return nullptr;
     FontHandle* font = font_box_handle(run->font);
@@ -49,8 +56,8 @@ RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run) {
     Arena* scratch = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.glyph_run.outline");
     bool ok = path && scratch;
     for (int i = 0; ok && i < run->count; i++) {
-        RenderGlyphPathWriter writer = {path, run->x + run->xs.get()[i], run->baseline_y + run->ys.get()[i], 1.0f};
-        ok = font_visit_glyph_index_path(font, run->glyph_ids.get()[i], render_font_path_command, &writer, scratch);
+        ok = render_path_append_font_glyph_index(path, font, run->glyph_ids.get()[i],
+            run->x + run->xs.get()[i], run->baseline_y + run->ys.get()[i], 1.0f, scratch);
         arena_reset(scratch);
     }
     if (scratch) mem_arena_destroy(scratch);

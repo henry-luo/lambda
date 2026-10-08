@@ -1,0 +1,22 @@
+3
+6
+true
+true
+true
+false
+true
+false
+true
+true
+false
+true
+[2, 7]
+true
+false
+true
+2
+["red", "grey"]
+[2, 7]
+true
+true
+true
