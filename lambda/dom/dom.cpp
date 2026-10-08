@@ -410,6 +410,7 @@ static DomDocument* dom_registry_owner_for_detached_node(DomNode* node);
 
 static DomDocument* dom_node_owner_document(DomNode* node) {
     if (node) {
+        if (DomAttr* attribute = node->as_attribute()) return attribute->doc;
         if (node->is_element()) {
             DomElement* elem = node->as_element();
             if (elem && elem->doc) return elem->doc;
@@ -2403,6 +2404,7 @@ static const char* dom_svg_interface_name(DomElement* elem) {
 extern "C" Item dom_get_prototype_value(Item obj) {
     DomNode* node = (DomNode*)dom_unwrap_element(obj);
     const char* ctor_name = "Node";
+    if (node && node->as_attribute()) ctor_name = "Attr";
     if (node && node->is_comment()) {
         ctor_name = "Comment";
     }
@@ -2668,18 +2670,10 @@ static int64_t dom_collection_attribute_count(DomElement* owner) {
 
 static Item dom_collection_attribute_item(DomElement* owner, const char* name) {
     if (!owner || !name || dom_is_internal_attr(name)) return ItemNull;
-    const char* value = owner->get_attribute(name);
-    RootFrame roots(3);
-    Rooted<Item> result(roots, js_new_object());
-    Rooted<Item> name_item(roots, js_name_item(name));
-    Rooted<Item> value_item(roots, js_name_item(value ? value : ""));
-    // Attr identity is not implemented yet; this record preserves the current
-    // entry surface while NamedNodeMap membership itself stays virtual.
-    dom_realm_set_cstr(result.get(), "nodeName", name_item.get());
-    dom_realm_set_cstr(result.get(), "nodeValue", value_item.get());
-    dom_realm_set_cstr(result.get(), "name", name_item.get());
-    dom_realm_set_cstr(result.get(), "value", value_item.get());
-    return result.get();
+    DomAttr* attribute = dom_element_attribute_node(owner, name);
+    if (!attribute) return ItemNull;
+    attribute->owner_changed = dom_attribute_node_owner_changed;
+    return dom_wrap_element(attribute);
 }
 
 static DomElement* dom_collection_direct_rows_at(DomElement* parent,
@@ -2794,7 +2788,8 @@ static VirtualOpStatus dom_collection_varray_get(void* data, int64_t index,
         const char* name = dom_collection_attribute_name_at(owner, index);
         if (!name) return VIRTUAL_OP_MISSING;
         *out = dom_collection_attribute_item(owner, name);
-        return get_type_id(*out) == LMD_TYPE_MAP
+        // attribute entries now carry native Attr identity, including indexed reads.
+        return get_type_id(*out) == LMD_TYPE_VELMT
             ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
     }
     if (collection && (collection->kind == DOM_VARRAY_CLASS_LIST ||
@@ -3538,10 +3533,20 @@ static bool dom_rebind_subtree_document(DomNode* node,
     }
     node->id = destination_id;
     node->view_state_ref = nullptr;
+    if (DomAttr* attribute = node->as_attribute()) {
+        attribute->doc = lam::up(destination);
+        if (attribute->owner_changed) attribute->owner_changed(attribute);
+        return true;
+    }
     if (!node->is_element()) return true;
 
     DomElement* elem = node->as_element();
     elem->doc = lam::up(destination);
+    for (DomAttr* attribute = elem->ext ? elem->ext->attribute_nodes.get() : nullptr;
+         attribute; attribute = attribute->attribute_next) {
+        if (!dom_rebind_subtree_document(attribute, source, destination)) return false;
+        if (attribute->owner_changed) attribute->owner_changed(attribute);
+    }
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         if (!dom_rebind_subtree_document(child, source, destination)) return false;
     }
@@ -3857,6 +3862,7 @@ static Item dom_parser_parse_xml(const char* source) {
 
     DomDocument* xml_document = dom_document_create(xml_input);
     if (!xml_document) return ItemNull;
+    xml_document->xml_document = true;
     DomElement* dom_root = build_dom_tree_from_element(xml_root, xml_document, nullptr);
     if (!dom_root) {
         free_document(xml_document);
@@ -4300,6 +4306,7 @@ extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
     dom_document_borrow_input_resources(fd);
     // createDocument() starts empty; only HTML documents synthesize a doctype.
     fd->js.implicit_doctype = false;
+    fd->xml_document = true;
     if (qualified_name && *qualified_name) {
         MarkBuilder builder(input);
         Item item = builder.element(qualified_name).final();
@@ -9519,6 +9526,7 @@ extern "C" Item dom_core_node_type(Item n) {
 extern "C" Item dom_core_node_name(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (!node) return ItemNull;
+    if (DomAttr* attribute = node->as_attribute()) return js_name_item(attribute->qualified_name);
     if (node->is_text()) return js_name_item("#text");
     if (!node->is_element()) return js_name_item("#comment");
     DomElement* elem = node->as_element();
@@ -9532,6 +9540,7 @@ extern "C" Item dom_core_node_name(Item n) {
 extern "C" Item dom_core_node_value(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (!node) return ItemNull;
+    if (DomAttr* attribute = node->as_attribute()) return js_name_item(attribute->value);
     if (node->is_text()) {
         const char* text = node->as_text()->text;
         return js_name_item(text ? text : "");
@@ -9649,6 +9658,7 @@ static Item dom_serialized_item(StrBuf* sb) {
 extern "C" Item dom_fp_text_content(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (!node) return ItemNull;
+    if (DomAttr* attribute = node->as_attribute()) return js_name_item(attribute->value);
     // CharacterData.textContent is its own data verbatim -- including for a
     // generated pseudo node, which the descendant walk below skips.
     if (node->is_text()) {
@@ -9772,6 +9782,26 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     if (!prop) return ItemNull;
+
+    if (DomAttr* attribute = node->as_attribute()) {
+        if (strcmp(prop, "name") == 0 || prop_id == JS_DOM_PROP_NODE_NAME)
+            return js_name_item(attribute->qualified_name);
+        if (prop_id == JS_DOM_PROP_LOCAL_NAME) return js_name_item(attribute->local_name);
+        if (prop_id == JS_DOM_PROP_NAMESPACE_URI)
+            return *attribute->namespace_uri ? js_name_item(attribute->namespace_uri) : ItemNull;
+        if (prop_id == JS_DOM_PROP_PREFIX)
+            return attribute->prefix ? js_name_item(attribute->prefix) : ItemNull;
+        if (prop_id == JS_DOM_PROP_VALUE || prop_id == JS_DOM_PROP_NODE_VALUE ||
+            prop_id == JS_DOM_PROP_TEXT_CONTENT) return js_name_item(attribute->value);
+        if (strcmp(prop, "ownerElement") == 0) return dom_node_link_item(attribute->owner_element);
+        if (strcmp(prop, "specified") == 0) return (Item){.item = ITEM_TRUE};
+        Item result = ItemNull;
+        if (strcmp(prop, "data") != 0 && strcmp(prop, "length") != 0 &&
+            dom_get_textlike_property(node, elem_item, prop_name, prop,
+                attribute->value, 0, DOM_NODE_ATTRIBUTE, attribute->qualified_name, false, &result))
+            return result;
+        return make_js_undefined();
+    }
 
     // F-5: HTMLSelectElement indexed property access (numeric key).
     // `select[i]` returns options[i] or undefined for out-of-range.
@@ -10906,6 +10936,29 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     JsDomPropId prop_id = dom_prop_id(prop);
     if (!prop) return ItemNull;
 
+    if (DomAttr* attribute = node->as_attribute()) {
+        if (prop_id == JS_DOM_PROP_VALUE || prop_id == JS_DOM_PROP_NODE_VALUE ||
+            prop_id == JS_DOM_PROP_TEXT_CONTENT) {
+            RootFrame roots(3);
+            Rooted<Item> value_root(roots, js_to_string(
+                prop_id != JS_DOM_PROP_VALUE && value.item == ITEM_NULL ? js_name_item("") : value));
+            JS_RETURN_IF_ERROR(value_root.get());
+            Rooted<Item> name_root(roots, js_name_item(attribute->qualified_name));
+            Rooted<Item> namespace_root(roots, js_name_item(attribute->namespace_uri));
+            const char* next_value = fn_to_cstr(value_root.get());
+            if (attribute->owner_element) {
+                // Attr.value shares ordinary mutation notification and reflected-attribute behavior.
+                if (*attribute->namespace_uri) return dom_core_set_attribute_ns(
+                    dom_wrap_element(attribute->owner_element), namespace_root.get(), name_root.get(), value_root.get());
+                return dom_core_set_attribute(dom_wrap_element(attribute->owner_element),
+                    name_root.get(), value_root.get());
+            }
+            return dom_attribute_node_set_value(attribute, next_value) ? value_root.get() : ItemError;
+        }
+        expando_set_property(node, prop_name, value);
+        return value;
+    }
+
     // text node CharacterData aliases
     if (node->is_text() &&
         (prop_id == JS_DOM_PROP_DATA ||
@@ -11266,9 +11319,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     if (prop_id == JS_DOM_PROP_ID) {
         const char* id_str = dom_to_attr_cstr(value);
         if (elem->doc && elem->doc->document_pool) {
-            size_t len = strlen(id_str);
-            char* id_copy = pool_dup_n(elem->doc->document_pool, id_str, len);
-            elem->id = lam::up(id_copy);
+            // the attribute setter owns cache replacement, including adopted-node provenance.
             elem->set_attribute("id", id_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("dom_set_property: set id='%s' on <%s>",
@@ -14331,7 +14382,7 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
     // The verified backing child is linked through the DOM chain below.
     if (text->native_string != inserted_string) {
         if (text->owns_native_string()) {
-            pool_free(parent->doc->document_pool, text->native_string);
+            dom_text_release_retired_storage(parent->doc, text);
         }
         text->native_string = lam::up(inserted_string);
         text->text = lam::up(inserted_string->chars);
@@ -14662,6 +14713,7 @@ static void dom_document_refresh_root(DomElement* parent) {
 }
 
 static bool dom_document_can_append(DomElement* parent, DomNode* child) {
+    if (child && child->as_attribute()) return false;
     if (!parent || !parent->doc || parent->doc->js.doc_node != parent) return true;
     DomNode* current_element = nullptr;
     DomNode* current_doctype = nullptr;
@@ -14868,6 +14920,12 @@ extern "C" Item dom_remove_bridge(void* node_ptr) {
 extern "C" Item dom_adopt_node_bridge(Item node_arg) {
     DomNode* node = (DomNode*)dom_unwrap_element(node_arg);
     if (!node) return ItemNull;
+    if (DomAttr* attribute = node->as_attribute()) {
+        if (attribute->owner_element) dom_core_remove_attribute_node(
+            dom_wrap_element(attribute->owner_element), node_arg);
+        DomElement* document_node = (DomElement*)dom_get_or_create_doc_node(_js_current_document);
+        return dom_prepare_cross_document_insertion(node, document_node) ? node_arg : ItemError;
+    }
     // adoptNode detaches through remove() bookkeeping so live ranges/focus see the original parent.
     dom_remove_bridge((void*)node);
     return node_arg;
@@ -15037,6 +15095,7 @@ extern "C" Item dom_clone_document_bridge(Item document_item, Item deep_arg) {
     if (!clone) return ItemNull;
     // The clone owns its DOM nodes but borrows the parser Input that backs them.
     dom_document_borrow_input_resources(clone);
+    clone->xml_document = source->xml_document;
     bool deep = js_is_truthy(deep_arg);
     // A shallow Document clone has no children, including the implicit doctype.
     clone->js.implicit_doctype = deep && source->js.implicit_doctype;
@@ -15579,6 +15638,13 @@ extern "C" Item dom_core_replace_child(Item parent, Item new_node, Item old_node
 }
 
 extern "C" Item dom_core_clone_node(Item n, Item deep) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (DomAttr* attribute = node ? node->as_attribute() : nullptr) {
+        DomAttr* clone = dom_attribute_node_create(attribute->doc, attribute->namespace_uri,
+            attribute->qualified_name, attribute->value);
+        if (clone) clone->owner_changed = dom_attribute_node_owner_changed;
+        return clone ? dom_wrap_element(clone) : ItemNull;
+    }
     DomElement* elem = dom_op_element(n);
     // The row always carries a `deep` argument, so the bridge's "was it
     // supplied" flag is unconditionally true here -- matching what the ordinal
@@ -15644,20 +15710,8 @@ extern "C" Item dom_core_get_attribute(Item n, Item name) {
     return ItemNull;
 }
 
-extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
-    DomElement* elem = dom_op_element(n);
-    if (!elem) return ItemNull;
-    const char* attr_name = fn_to_cstr(name);
-    const char* attr_val = dom_to_attr_cstr(value);
-    if (!attr_name || !attr_val) return ItemNull;
-    if (dom_is_internal_attr(attr_name)) return ItemNull;
-    const char* old_value = elem->get_attribute(attr_name);
-    if (!elem->set_attribute(attr_name, attr_val)) return ItemNull;
-    if (strchr(attr_name, ':')) {
-        // setAttribute creates a null-namespace attribute even when its name
-        // contains a colon; a prefix in the spelling does not bind a URI.
-        dom_element_record_namespaced_attribute(elem, "", attr_name, attr_val);
-    }
+static void dom_attribute_value_did_set(DomElement* elem, const char* attr_name,
+        const char* attr_val, const char* old_value) {
     dom_aria_clear_direct_ref(elem, attr_name);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
@@ -15668,6 +15722,22 @@ extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
     _after_image_src_set(elem, attr_name, attr_val);
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                            elem->parent, attr_name, old_value);
+}
+
+extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
+    DomElement* elem = dom_op_element(n);
+    if (!elem) return ItemNull;
+    const char* attr_name = fn_to_cstr(name);
+    const char* attr_val = dom_to_attr_cstr(value);
+    if (!attr_name || !attr_val || dom_is_internal_attr(attr_name)) return ItemNull;
+    const char* old_value = elem->get_attribute(attr_name);
+    const char* local = nullptr;
+    const char* uri = old_value ? dom_element_attribute_namespace_uri(elem, attr_name, &local) : "";
+    if (!elem->set_attribute(attr_name, attr_val)) return ItemNull;
+    // an ordinary write changes an existing Attr's value without changing its namespace.
+    if ((uri && *uri) || strchr(attr_name, ':'))
+        dom_element_record_namespaced_attribute(elem, uri ? uri : "", attr_name, attr_val);
+    dom_attribute_value_did_set(elem, attr_name, attr_val, old_value);
     return ItemNull;
 }
 
@@ -15911,22 +15981,170 @@ extern "C" Item dom_core_get_attribute_ns(Item n, Item ns, Item local) {
     return value ? js_name_item(value) : ItemNull;
 }
 
-extern "C" Item dom_core_set_attribute_ns(Item n, Item ns, Item qname, Item value_arg) {
+static DomAttr* dom_attribute_from_item(Item item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(item);
+    return node ? node->as_attribute() : nullptr;
+}
+
+static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_arg, const char* replaced_value);
+
+extern "C" Item dom_core_get_attribute_node(Item n, Item name) {
+    DomElement* element = dom_op_element(n);
+    if (!element) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> name_root(roots, js_to_string(name));
+    JS_RETURN_IF_ERROR(name_root.get());
+    return dom_collection_attribute_item(element, fn_to_cstr(name_root.get()));
+}
+
+extern "C" Item dom_core_get_attribute_node_ns(Item n, Item ns, Item name) {
+    DomElement* element = dom_op_element(n);
+    if (!element) return ItemNull;
+    RootFrame roots(3);
+    Rooted<Item> name_root(roots, name), namespace_root(roots, ns);
+    if (ns.item != ITEM_NULL && !is_js_undefined(ns)) {
+        namespace_root.set(js_to_string(ns));
+        JS_RETURN_IF_ERROR(namespace_root.get());
+    }
+    name_root.set(js_to_string(name_root.get()));
+    JS_RETURN_IF_ERROR(name_root.get());
+    const char* uri = fn_to_cstr(namespace_root.get());
+    const char* qualified = dom_find_qualified_attribute(element, uri ? uri : "", fn_to_cstr(name_root.get()));
+    return qualified ? dom_collection_attribute_item(element, qualified) : ItemNull;
+}
+
+extern "C" Item dom_core_set_attribute_node(Item n, Item attr_item) {
+    DomElement* element = dom_op_element(n);
+    DomAttr* attribute = dom_attribute_from_item(attr_item);
+    if (!element || !attribute) return dom_raise_type_error("An Attr node is required");
+    if (attribute->owner_element && attribute->owner_element != element)
+        return dom_raise_exception("InUseAttributeError", "The attribute already belongs to another element");
+    RootFrame roots(5);
+    Rooted<Item> namespace_root(roots, js_name_item(attribute->namespace_uri));
+    Rooted<Item> local_root(roots, js_name_item(attribute->local_name));
+    Rooted<Item> previous_root(roots, dom_core_get_attribute_node_ns(n, namespace_root.get(), local_root.get()));
+    DomAttr* previous = dom_attribute_from_item(previous_root.get());
+    if (previous == attribute) return attr_item;
+    if (!dom_prepare_cross_document_insertion(attribute, element)) return ItemError;
+    Rooted<Item> name_root(roots, js_name_item(attribute->qualified_name));
+    Rooted<Item> value_root(roots, js_name_item(attribute->value));
+    // detach before writing so the replaced Attr keeps its original value and identity.
+    if (previous) dom_attribute_node_detach(previous);
+    if (previous && strcmp(previous->qualified_name, attribute->qualified_name) != 0) {
+        element->remove_attribute(previous->qualified_name);
+        dom_element_remove_namespaced_attribute(element, previous->namespace_uri, previous->local_name);
+    }
+    dom_set_attribute_ns_value(n, namespace_root.get(), name_root.get(), value_root.get(), previous ? previous->value.get() : nullptr);
+    attribute->owner_changed = dom_attribute_node_owner_changed;
+    dom_attribute_node_attach(element, attribute);
+    return previous_root.get();
+}
+
+extern "C" Item dom_core_remove_attribute_node(Item n, Item attr_item) {
+    DomElement* element = dom_op_element(n);
+    DomAttr* attribute = dom_attribute_from_item(attr_item);
+    if (!element || !attribute) return dom_raise_type_error("An Attr node is required");
+    if (attribute->owner_element != element)
+        return dom_raise_exception("NotFoundError", "The attribute does not belong to this element");
+    RootFrame roots(2);
+    Rooted<Item> name_root(roots, js_name_item(*attribute->namespace_uri ? attribute->local_name : attribute->qualified_name));
+    Rooted<Item> namespace_root(roots, js_name_item(attribute->namespace_uri));
+    if (*attribute->namespace_uri) dom_core_remove_attribute_ns(n, namespace_root.get(), name_root.get());
+    else dom_core_remove_attribute(n, name_root.get());
+    return attr_item;
+}
+
+static bool dom_attribute_name_valid(const char* name, size_t length, bool prefix) {
+    if (!length) return false;
+    for (size_t i = 0; i < length; i++) {
+        char ch = name[i];
+        if (!ch || dom_token_list_is_ascii_whitespace(ch) || ch == '/' || ch == '>' || (!prefix && ch == '=')) return false;
+    }
+    return true;
+}
+
+extern "C" Item dom_core_create_attribute(Item document_item, Item namespace_item, Item name, Item namespaced) {
+    DomDocument* document = (DomDocument*)dom_document_from_item(document_item);
+    if (!document) return dom_raise_type_error("A Document receiver is required");
+    RootFrame roots(2);
+    Rooted<Item> name_root(roots, name), namespace_root(roots, namespace_item);
+    if (namespace_item.item != ITEM_NULL && !is_js_undefined(namespace_item)) {
+        namespace_root.set(js_to_string(namespace_item));
+        JS_RETURN_IF_ERROR(namespace_root.get());
+    }
+    name_root.set(js_to_string(name_root.get()));
+    JS_RETURN_IF_ERROR(name_root.get());
+    String* text = it2s(name_root.get());
+    const char* uri = fn_to_cstr(namespace_root.get());
+    if (!uri) uri = "";
+    bool with_namespace = js_is_truthy(namespaced);
+    const char* colon = with_namespace ? (const char*)memchr(text->chars, ':', text->len) : nullptr;
+    size_t prefix_length = colon ? (size_t)(colon - text->chars) : 0;
+    size_t local_start = colon ? prefix_length + 1 : 0;
+    if ((colon && !dom_attribute_name_valid(text->chars, prefix_length, true)) ||
+        !dom_attribute_name_valid(text->chars + local_start, text->len - local_start, false))
+        return dom_raise_exception("InvalidCharacterError", "Invalid attribute name");
+    if (with_namespace && ((colon && !*uri) ||
+        (colon && prefix_length == 3 && !memcmp(text->chars, "xml", 3) && strcmp(uri, "http://www.w3.org/XML/1998/namespace")) ||
+        (((colon && prefix_length == 5 && !memcmp(text->chars, "xmlns", 5)) || !strcmp(text->chars, "xmlns")) && strcmp(uri, "http://www.w3.org/2000/xmlns/")) ||
+        (!strcmp(uri, "http://www.w3.org/2000/xmlns/") && strcmp(text->chars, "xmlns") &&
+            !(colon && prefix_length == 5 && !memcmp(text->chars, "xmlns", 5)))))
+        return dom_raise_exception("NamespaceError", "The attribute prefix and namespace do not match");
+    DomAttr* attribute = dom_attribute_node_create(document, with_namespace ? uri : "", text->chars, "");
+    if (!attribute) return ItemError;
+    if (!with_namespace && !document->xml_document) {
+        const char* fields[] = {attribute->qualified_name.get(), attribute->local_name.get()};
+        for (const char* field : fields) {
+            char* chars = const_cast<char*>(field);
+            for (; *chars; chars++) if (*chars >= 'A' && *chars <= 'Z') *chars += 'a' - 'A';
+        }
+    }
+    attribute->owner_changed = dom_attribute_node_owner_changed;
+    return dom_wrap_element(attribute);
+}
+
+extern "C" Item dom_core_attribute_collection_owner(Item attributes) {
+    if (get_type_id(attributes) != LMD_TYPE_VARRAY || !attributes.varray ||
+        attributes.varray->vtable != &dom_child_collection_varray_vtable)
+        return dom_raise_type_error("A NamedNodeMap receiver is required");
+    DomCollectionVArray* collection = (DomCollectionVArray*)attributes.varray->data;
+    return collection && collection->kind == DOM_VARRAY_ATTRIBUTES
+        ? collection->owner : dom_raise_type_error("A NamedNodeMap receiver is required");
+}
+
+extern "C" Item dom_core_remove_named_attribute(Item n, Item ns, Item name, Item namespaced) {
+    RootFrame roots(1);
+    Rooted<Item> attribute(roots, js_is_truthy(namespaced)
+        ? dom_core_get_attribute_node_ns(n, ns, name) : dom_core_get_attribute_node(n, name));
+    JS_RETURN_IF_ERROR(attribute.get());
+    if (attribute.get().item == ITEM_NULL)
+        return dom_raise_exception("NotFoundError", "The named attribute does not exist");
+    return dom_core_remove_attribute_node(n, attribute.get());
+}
+
+static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_arg, const char* replaced_value) {
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
     const char* namespace_uri = fn_to_cstr(ns);
     const char* qualified_name = fn_to_cstr(qname);
     const char* value = dom_to_attr_cstr(value_arg);
     if (!qualified_name || !value) return ItemNull;
-    const char* stored_name = qualified_name;
-    const char* old_value = elem->get_attribute(stored_name);
-    if (!elem->set_attribute(stored_name, value)) return ItemNull;
-    if (namespace_uri && *namespace_uri &&
-        !dom_element_record_namespaced_attribute(
-            elem, namespace_uri, qualified_name, value)) return ItemNull;
-    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
-                           elem->parent, stored_name, old_value);
+    if (!namespace_uri) namespace_uri = "";
+    const char* colon = *namespace_uri ? strchr(qualified_name, ':') : nullptr;
+    const char* stored_name = dom_find_qualified_attribute(elem, namespace_uri, colon ? colon + 1 : qualified_name);
+    // setAttributeNS preserves the existing Attr's prefix and identity for an expanded name.
+    if (!stored_name) stored_name = qualified_name;
+    const char* old_value = replaced_value ? replaced_value : elem->get_attribute(stored_name);
+    if (!elem->set_attribute(stored_name, value, true) ||
+        !dom_element_record_namespaced_attribute(elem, namespace_uri, stored_name, value)) return ItemNull;
+    if (!*namespace_uri) dom_attribute_value_did_set(elem, stored_name, value, old_value);
+    else dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+        elem->parent, stored_name, old_value);
     return ItemNull;
+}
+
+extern "C" Item dom_core_set_attribute_ns(Item n, Item ns, Item qname, Item value_arg) {
+    return dom_set_attribute_ns_value(n, ns, qname, value_arg, nullptr);
 }
 
 extern "C" Item dom_core_remove_attribute_ns(Item n, Item ns, Item local) {
@@ -17222,6 +17440,13 @@ static bool dom_equal_children(DomElement* left, DomElement* right);
 static bool dom_nodes_are_equal(DomNode* left, DomNode* right) {
     if (left == right) return true;
     if (!left || !right || left->node_type != right->node_type) return false;
+
+    if (DomAttr* attribute = left->as_attribute()) {
+        DomAttr* other = right->as_attribute();
+        return dom_equal_cstr(attribute->namespace_uri, other->namespace_uri) &&
+            dom_equal_cstr(attribute->local_name, other->local_name) &&
+            dom_equal_cstr(attribute->value, other->value);
+    }
 
     if (left->is_text()) {
         DomText* left_text = left->as_text();

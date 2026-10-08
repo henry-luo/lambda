@@ -15,6 +15,7 @@
 typedef struct DomNodeRecord {
     DomNode* address;
     Arena* primary_arena;
+    Pool* owned_string_pool;  // physical string owner survives document adoption (D4.5.1v4)
     uint32_t id;
     DomNodeType type;
     DomNodeLifeState state;
@@ -257,6 +258,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
         memset(record->pins, 0, sizeof(record->pins));
         record->id = id;
         record->primary_arena = primary_arena;
+        record->owned_string_pool = nullptr;
         record->type = type;
         record->state = DOM_NODE_LIVE;
         record->recyclable = recyclable;
@@ -313,6 +315,7 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
         return false;
     }
     // adoption changes document ownership, never the physical source heap.
+    if (node->is_element() && !node->as_element()->preserve_storage_owner()) return false;
     dom_node_registry_refresh_backing(source, node);
     DomNodeRecord* destination_record = dom_record_find(dom_registry(destination), node);
     if (destination_record && destination_record->state != DOM_NODE_RETIRED) {
@@ -343,6 +346,8 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
                    source_record->backing_root, source_record->backing_gc)) {
         return false;
     }
+    destination_record = dom_record_find(dom_registry(destination), node);
+    destination_record->owned_string_pool = source_record->owned_string_pool;
     // The source registry may still own wrapper/expando pins that must unpin
     // normally, but its detached candidate must never recycle adopted storage.
     dom_record_end_candidacy(dom_registry(source), source_record);
@@ -375,6 +380,22 @@ Element* dom_node_registry_backing_source(DomDocument* doc, DomNode* node) {
         return nullptr;
     }
     return record->backing_source;
+}
+
+Pool* dom_node_registry_owned_string_pool(DomDocument* doc, DomNode* node) {
+    DomNodeRecord* record = dom_record_find(dom_registry(doc), node);
+    if (!record || !node || record->state == DOM_NODE_RETIRED || record->id != node->id)
+        return nullptr;
+    return record->owned_string_pool;
+}
+
+void dom_node_registry_set_owned_string_pool(DomDocument* doc, DomNode* node, Pool* pool) {
+    DomNodeRecord* record = dom_record_find(dom_registry(doc), node);
+    if (!record || !node || record->state == DOM_NODE_RETIRED || record->id != node->id) {
+        dom_lifecycle_fail("set-owned-string-pool-stale", dom_node_ref(node), DOM_NODE_PIN_EXTERNAL);
+        return;
+    }
+    record->owned_string_pool = pool;
 }
 
 void dom_node_registry_refresh_backing(DomDocument* doc, DomNode* node) {
@@ -543,6 +564,10 @@ static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
     }
     if (bytes) *bytes += record->primary_size;
     if (node->is_element()) {
+        for (DomAttr* attribute = node->as_element()->ext ? node->as_element()->ext->attribute_nodes.get() : nullptr;
+             attribute; attribute = attribute->attribute_next) {
+            if (!dom_subtree_can_retire(doc, attribute, blocked, allowed_pins, bytes)) return false;
+        }
         for (DomNode* child = node->as_element()->first_child; child;
              child = child->next_sibling) {
             if (!dom_subtree_can_retire(doc, child, blocked, allowed_pins, bytes)) return false;
@@ -617,6 +642,11 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
     if (result.item != ItemNull.item) dom_retire_release_render_result(doc, result);
     size_t retired = 0;
     if (node->is_element()) {
+        while (node->as_element()->ext && node->as_element()->ext->attribute_nodes) {
+            DomAttr* attribute = node->as_element()->ext->attribute_nodes;
+            dom_attribute_node_detach(attribute);
+            retired += dom_retire_subtree(doc, attribute, pending);
+        }
         DomNode* child = node->as_element()->first_child;
         while (child) {
             DomNode* next = child->next_sibling;
@@ -626,6 +656,8 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
         dom_element_release_retired_storage(node->as_element());
     } else if (node->is_text()) {
         dom_text_release_retired_storage(doc, node->as_text());
+    } else if (DomAttr* attribute = node->as_attribute()) {
+        dom_attribute_node_release_retired_storage(attribute);
     }
 
     size_t primary_size = record->primary_size;

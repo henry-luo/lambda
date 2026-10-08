@@ -69,6 +69,8 @@ bool DomNode::has_attribute(const char* attr_name) const {
 const char* DomNode::node_name() const {
     // Dispatch based on node type
     switch (node_type) {
+        case DOM_NODE_ATTRIBUTE:
+            return static_cast<const DomAttr*>(this)->qualified_name;
         case DOM_NODE_ELEMENT: {
             const DomElement* elem = static_cast<const DomElement*>(this);
             return elem->tag_name ? elem->tag_name : "#unnamed";

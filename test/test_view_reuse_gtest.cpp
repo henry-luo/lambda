@@ -624,6 +624,71 @@ TEST_F(DomGcBackingTest, SameHeapAdoptionRefreshesBorrowedPointers) {
     check_adoption(false);
 }
 
+TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
+    Pool* input_pool = pool_create();
+    ASSERT_NE(input_pool, nullptr);
+    Input* input = Input::create(input_pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    DomDocument doc;
+    DomDocument target_doc;
+    ASSERT_TRUE(doc.init(input));
+    ASSERT_TRUE(target_doc.init(input));
+    MarkBuilder builder(input);
+    DomElement* child = DomElement::create(&doc, "span", builder.element("span").final().element);
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("id", "source-id"));
+    ASSERT_TRUE(child->set_attribute("class", "source-class"));
+    ASSERT_TRUE(child->set_attribute("data-storage", "source"));
+    uint32_t id = dom_document_alloc_node_id(&target_doc);
+    ASSERT_TRUE(dom_node_registry_transfer(&doc, &target_doc, child, &id));
+    static_cast<DomNode*>(child)->id = id;
+    child->doc = lam::up(&target_doc);
+    EXPECT_EQ(child->storage_owner(), &doc);
+    EXPECT_TRUE(pool_owns(doc.document_pool, child->tag_name));
+    ASSERT_TRUE(child->set_attribute("id", "destination-id"));
+    ASSERT_TRUE(child->set_attribute("class", "destination-class"));
+    ASSERT_TRUE(child->set_attribute("data-storage", "destination"));
+    const char* tag = child->tag_name;
+    const char* cached_id = child->id;
+    const char* cached_class = child->class_names[0];
+    DomElementExt* extension = child->ext;
+    EXPECT_TRUE(pool_owns(doc.document_pool, cached_id));
+    EXPECT_TRUE(pool_owns(doc.document_pool, cached_class));
+    dom_node_schedule_detached(&target_doc, child);
+    EXPECT_EQ(dom_retire_sweep(&target_doc), 1u);
+    EXPECT_FALSE(pool_owns(doc.document_pool, tag));
+    EXPECT_FALSE(pool_owns(doc.document_pool, cached_id));
+    EXPECT_FALSE(pool_owns(doc.document_pool, cached_class));
+    EXPECT_FALSE(pool_owns(doc.document_pool, extension));
+    target_doc.destroy();
+    doc.destroy();
+    pool_destroy(input_pool);
+}
+
+TEST_F(DomGcBackingTest, AdoptedOwnedTextTracksReplacementAndReturnPools) {
+    init_adoption_target(true);
+    DomText* text = DomText::create_detached_copy(&doc, "inline", 6);
+    ASSERT_NE(text, nullptr);
+    String* original = dom_document_create_string(&doc, "source", 6);
+    ASSERT_TRUE(dom_text_adopt_document_string(text, &doc, original));
+    uint32_t id = dom_document_alloc_node_id(&target_doc);
+    ASSERT_TRUE(dom_node_registry_transfer(&doc, &target_doc, text, &id));
+    text->id = id;
+    ASSERT_TRUE(dom_text_adopt_document_string(text, &target_doc, original));
+    EXPECT_EQ(dom_node_registry_owned_string_pool(&target_doc, text), doc.document_pool);
+    String* replacement = dom_document_create_string(&target_doc, "destination", 11);
+    ASSERT_TRUE(dom_text_adopt_document_string(text, &target_doc, replacement));
+    EXPECT_FALSE(pool_owns(doc.document_pool, original));
+    EXPECT_TRUE(pool_owns(target_doc.document_pool, replacement));
+    id = dom_document_alloc_node_id(&doc);
+    ASSERT_TRUE(dom_node_registry_transfer(&target_doc, &doc, text, &id));
+    text->id = id;
+    EXPECT_EQ(dom_node_registry_owned_string_pool(&doc, text), target_doc.document_pool);
+    dom_node_schedule_detached(&doc, text);
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_FALSE(pool_owns(target_doc.document_pool, replacement));
+}
+
 struct BackingRootTeardownProbe : DomDocumentResourceData {
     gc_heap_t* gc;
     bool called;
@@ -743,6 +808,42 @@ TEST_F(DomRetirementTest, UnpinnedDetachedNodeRetiresAndRejectsStaleRef) {
     EXPECT_EQ(stats.retired_nodes, 1u);
     EXPECT_EQ(stats.retired_primary_bytes, sizeof(DomElement));
     EXPECT_EQ(stats.stale_ref_rejections, 1u);
+}
+
+TEST_F(DomRetirementTest, AttributePinKeepsDetachedOwnerAndRetiresTogether) {
+    DomElement* parent = root();
+    DomElement* owner = element("owner");
+    ASSERT_TRUE(attach(parent, owner));
+    DomAttr* attribute = dom_attribute_node_create(&doc, "", "data-retained", "value");
+    ASSERT_NE(attribute, nullptr);
+    DomNodeRef ref = dom_node_ref(attribute);
+    dom_attribute_node_attach(owner, attribute);
+    ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_WRAPPER));
+    ASSERT_TRUE(parent->remove_child(owner));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    EXPECT_EQ(attribute->owner_element.get(), owner);
+    EXPECT_STREQ(attribute->value, "value");
+    ASSERT_TRUE(dom_node_unpin(&doc, ref, DOM_NODE_PIN_WRAPPER));
+    EXPECT_EQ(dom_retire_sweep(&doc), 2u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
+}
+
+TEST_F(DomRetirementTest, AttributeArenaGrowthPlateausAcrossTenThousandRemovals) {
+    DomElement* owner = root();
+    ArenaStats warm = {};
+    for (int i = 0; i < 10128; i++) {
+        DomAttr* attribute = dom_attribute_node_create(&doc, "urn:test", "a:value", "initial");
+        ASSERT_NE(attribute, nullptr);
+        dom_attribute_node_attach(owner, attribute);
+        ASSERT_TRUE(dom_attribute_node_set_value(attribute, "changed"));
+        dom_attribute_node_detach(attribute);
+        ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+        if (i == 127) arena_get_stats(doc.node_arena, &warm);
+    }
+    ArenaStats after = {};
+    arena_get_stats(doc.node_arena, &after);
+    EXPECT_EQ(after.fresh_growth_bytes, warm.fresh_growth_bytes);
+    EXPECT_GE(after.bump_back_count - warm.bump_back_count, 10000u);
 }
 
 TEST_F(DomRetirementTest, PinBlocksRetirementUntilReleased) {
@@ -1988,6 +2089,23 @@ TEST(ViewTreeOwnershipTest, AllocatorsRegisterUnderTheOwnerContext) {
 }
 
 #ifdef __APPLE__
+TEST(FontMetricTest, PlatformLookupDoesNotActivateDownloadableFonts) {
+    // downloadable family names from web fonts must not open FontRegistry UI during layout.
+    const int weights[] = {400, 600};
+    for (int weight : weights) {
+        void* font = font_platform_create_ct_font("NanumPenScript-Regular", "Nanum Pen Script",
+            16.0f, weight, FONT_SLANT_NORMAL);
+        ASSERT_NE(font, nullptr);
+        float ascent = 0.0f, descent = 0.0f, height = 0.0f;
+        EXPECT_TRUE(font_platform_get_metrics_from_ref(font, &ascent, &descent, &height));
+        EXPECT_GT(height, 0.0f);
+        font_platform_destroy_ct_font(font);
+    }
+    float ascent = 0.0f, descent = 0.0f, height = 0.0f;
+    ASSERT_TRUE(get_font_metrics_platform("Nanum Pen Script", 16.0f, &ascent, &descent, &height));
+    EXPECT_GT(height, 0.0f);
+}
+
 TEST(FontMetricTest, NormalMetricsTrackPlatformFamilyAliasAndCssSize) {
     FontTables tables = {};
     Os2Table os2 = {};

@@ -2197,6 +2197,9 @@
         "lambda/input/input-latex-tables.cpp",
         "lambda/input/input-mark.cpp",
         "lambda/input/input-mdx.cpp",
+        "lambda/input/input-model.cpp",
+        "lambda/input/input-scene3d.cpp",
+        "lambda/input/input-scene3d-gltf.cpp",
         "lambda/input/input-rtf.cpp",
         "lambda/input/input-toml.cpp",
         "lambda/input/input-utils.cpp",
@@ -4217,6 +4220,19 @@
             ],
             "binary": "test_entity_emoji_gtest.exe",
             "icon": "\ud83c\udf10"
+          },
+          {
+            "source": "test_input_model_gtest.cpp",
+            "name": "Textual 3D Model Input Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_input_model_gtest.exe",
+            "icon": "\ud83d\udce6"
           },
           {
             "source": "test_input_roundtrip_gtest.cpp",

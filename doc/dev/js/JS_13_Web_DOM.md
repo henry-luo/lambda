@@ -30,9 +30,11 @@ The DOM/CSSOM layers are **views over Radiant's structures**: a wrapper Map neve
 
 <img alt="DOM bridge & lazy layout" src="diagram/d13_dom_bridge.svg" width="720">
 
-**Native VMap wrapping.** `dom_wrap_element` returns a branded native VMap whose `host_type` identifies the Radiant DOM-node carrier and whose `host_data` points at the `DomNode`. `dom_unwrap_element` and `js_is_dom_node` test the VMap host brand through the Radiant bridge, while property lookup, enumeration, descriptors, prototype behavior, and expandos enter the shared host `JsPropertyOps` bridge.
+**Native node wrapping.** `dom_wrap_element` returns a branded native VELMT whose `host_type` identifies the Radiant DOM-node interface and whose `host_data` points at the `DomNode` (D7.4.5v2). `dom_unwrap_element` tests this native brand through the Radiant bridge; property lookup, enumeration, descriptors, prototypes, and expandos enter the shared property protocol.
 
-**Identity cache.** So that `el === el` holds across repeated wraps, `cache_dom_wrapper`/`lookup_dom_wrapper` (`:846`,`:820`) keep a thread-local linked list of `DomWrapperCacheChunk` (4096 entries each, `:807`); each cached `Item` is registered as a GC root (`:856`) and torn down by `reset_dom_wrapper_cache` (`:859`) between documents. Lookup is a **linear scan over all chunks** — see [Known Issues](#known-issues--future-improvements). A `DomNode` that is the document stub is re-wrapped as the document proxy instead, so `range.startContainer === document` works (`:885`).
+**Identity cache.** `dom_cached_node_wrapper` / `dom_cache_node_wrapper` in `dom_cssom.cpp` use a realm-owned hash index and collector-registered weak slots. Entries lease native node generations through the document registry, preserving repeated wrapper identity without rooting unreachable wrappers (D4.5.1v4). The document stub uses the Document interface, so `range.startContainer === document` holds.
+
+**Attribute nodes.** `DomAttr` is a document-owned node with independent namespace/name/value storage, an optional owner element, and a Node-derived `Attr` interface. `getAttributeNode`, `NamedNodeMap`, and attribute-node mutation methods share canonical native identity. Replacement detaches the old Attr without changing its value; attached `value` writes use ordinary mutation handling. A live Attr wrapper leases its owner, and adoption transfers registry leases while retaining the physical source pool. Removed attributes and their strings recycle through native retirement (D4.5.1v4); temporary MutationRecord fields use precise roots until the observer's pending list owns them (D5.3.3).
 
 **Document proxy & foreign docs.** Bare `document` resolves to a singleton branded VMap whose `host_data` is the active browsing-context `DomDocument*`. The Radiant declared interface publishes document operations as concrete callable properties; properties use `js_document_proxy_get_property`. `document.implementation.createHTMLDocument`/`createDocument` build branded foreign-document VMaps whose bridge swaps the active document around the same declared operations when needed.
 
@@ -56,6 +58,8 @@ receiver/name call routes.
 - **classList / dataset / style.** Declared interface records publish direct operations for token-list and CSS methods; property hooks handle `length`/`value`, camelCase ↔ `data-kebab-case`, and camelCase ↔ hyphenated CSS conversion.
 
 Document declared operations cover `getElementById`, `getElementsByClassName`/`TagName`/`Name`, `querySelector`/`All`, `createElement`/`createTextNode`, and `createRange`/`getSelection` (forwarded to `dom_selection`).
+
+The native interface tables also publish `Document.cookie`, `Document.write`, and `Element.innerHTML` on their canonical prototypes. Libraries can inspect and wrap the same accessors and methods used by instance reads, rather than encountering an absent descriptor.
 
 ---
 

@@ -467,6 +467,11 @@ static bool _element_receiver(Item receiver) {
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 1;
 }
 
+static bool _attribute_receiver(Item receiver) {
+    Item kind = dom_core_node_type(receiver);
+    return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 2;
+}
+
 static bool _parent_node_receiver(Item receiver) {
     Item kind = dom_core_node_type(receiver);
     if (get_type_id(kind) != LMD_TYPE_INT) return false;
@@ -512,18 +517,25 @@ static void _install_node_interface_members(Item global) {
     static const char* const node_mutators[] = {
         "appendChild", "removeChild", "insertBefore", "replaceChild", "normalize", NULL};
     static const char* const element_members[] = {
-        "tagName", "localName", "namespaceURI", "prefix", "attributes",
+        "tagName", "localName", "namespaceURI", "prefix", "attributes", "innerHTML",
         "nextElementSibling", "previousElementSibling", "getAttribute", "setAttribute",
         "removeAttribute", "toggleAttribute", "hasAttribute", "getAttributeNames",
         "getAttributeNS", "setAttributeNS", "removeAttributeNS", "matches", "closest",
         "getElementsByTagName", "getElementsByClassName", "getBoundingClientRect",
         "getClientRects", "attachShadow", NULL};
+    static const char* const attribute_node_members[] = {
+        "getAttributeNode", "getAttributeNodeNS", "setAttributeNode", "setAttributeNodeNS",
+        "removeAttributeNode", NULL};
+    static const char* const attr_members[] = {
+        "name", "localName", "namespaceURI", "prefix", "ownerElement", "specified",
+        "value", "nodeValue", "textContent", NULL};
     static const char* const parent_node_members[] = {
         "children", "childElementCount", "firstElementChild", "lastElementChild",
         "querySelector", "querySelectorAll", NULL};
     static const char* const document_members[] = {
+        "cookie", "write", "writeln",
         "createElement", "createElementNS", "createTextNode", "createDocumentFragment",
-        "createComment", "importNode", "adoptNode", "createRange", "createTreeWalker",
+        "createComment", "createAttribute", "createAttributeNS", "importNode", "adoptNode", "createRange", "createTreeWalker",
         "getElementById", "getElementsByTagName", "getElementsByClassName",
         "getElementsByName", "querySelector", "querySelectorAll", NULL};
     static const struct {
@@ -535,6 +547,8 @@ static void _install_node_interface_members(Item global) {
         {"Node", "dom_node", _node_receiver, node_members},
         {"Node", "html_element", _node_receiver, node_mutators},
         {"Element", "html_element", _element_receiver, element_members},
+        {"Element", "html_element", _element_receiver, attribute_node_members},
+        {"Attr", "attr", _attribute_receiver, attr_members},
         {"Element", "html_element", _parent_node_receiver, parent_node_members},
         {"DocumentFragment", "html_element", _parent_node_receiver, parent_node_members},
         {"Document", "document", _document_receiver, document_members},
@@ -574,6 +588,7 @@ extern "C" void dom_install_collection_globals(void) {
     // Document wrappers are module-owned, but bare WebIDL constructor lookup
     // must still succeed before libraries inspect static Document features.
     static const char* iface_links[][2] = {
+        {"Attr", "Node"},
         {"Document", "Node"}, {"HTMLDocument", "Document"},
         {"Element", "Node"}, {"HTMLElement", "Element"},
         {"SVGElement", "Element"}, {"SVGGraphicsElement", "SVGElement"},

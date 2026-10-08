@@ -736,6 +736,15 @@ DOM_OP(CORE, viewport_size, geometry, 1, "fn(n: any) -> map|null", dom_engine_vi
 DOM_OP(CORE, presentation_style_set_property, style, 3, "pn(n: any, prop: string, value: string) -> bool", dom_presentation_style_set_property, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, presentation_style_clear, style, 1, "pn(n: any) -> bool", dom_presentation_style_clear, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
+// attribute-node rows append to preserve existing host catalog offsets.
+DOM_OP(CORE, get_attribute_node, attr, 2, "fn(n: any, name: string) -> any", dom_core_get_attribute_node, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, get_attribute_node_ns, attr, 3, "fn(n: any, ns: any, name: string) -> any", dom_core_get_attribute_node_ns, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, set_attribute_node, attr, 2, "pn(n: any, attribute: any) -> any", dom_core_set_attribute_node, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, remove_attribute_node, attr, 2, "pn(n: any, attribute: any) -> any", dom_core_remove_attribute_node, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, create_attribute, attr, 4, "pn(document: any, namespace: any, name: string, namespaced: bool) -> any", dom_core_create_attribute, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, attribute_collection_owner, attr, 1, "fn(attributes: any) -> any", dom_core_attribute_collection_owner, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, remove_named_attribute, attr, 4, "pn(n: any, namespace: any, name: string, namespaced: bool) -> any", dom_core_remove_named_attribute, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

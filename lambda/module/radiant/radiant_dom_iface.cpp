@@ -148,6 +148,7 @@ const char radiant_dom_interface_decl[] =
     "    tag_name: string, local_name: string, namespace_uri: string, prefix: any,\n"
     "    id: string, class_name: string, child_element_count: int, children: any,\n"
     "    attributes: any, first_element_child: dom_node, last_element_child: dom_node,\n"
+    "    inner_html: string,\n"
     "    next_element_sibling: dom_node, previous_element_sibling: dom_node,\n"
     "    disabled: bool, required: bool,\n"
     "    no_validate: bool, form_no_validate: bool, open: bool, autofocus: bool,\n"
@@ -158,6 +159,9 @@ const char radiant_dom_interface_decl[] =
     "    accept_charset: string, form_target: string, input_mode: string,\n"
     "    enter_key_hint: string, content_editable: string, is_content_editable: bool,\n"
     "    get_attribute: fn(a0: any) any, set_attribute: fn(a0: any, a1: any) any,\n"
+    "    get_attribute_node: fn(name: any) any, get_attribute_node_ns: fn(ns: any, name: any) any,\n"
+    "    set_attribute_node: fn(attr: any) any, set_attribute_node_ns: fn(attr: any) any,\n"
+    "    remove_attribute_node: fn(attr: any) any,\n"
     "    set_attribute_ns: fn(a0: any, a1: any, a2: any) any,\n"
     "    get_attribute_ns: fn(a0: any, a1: any) any,\n"
     "    remove_attribute_ns: fn(a0: any, a1: any) any, remove_attribute: fn(a0: any) any,\n"
@@ -199,6 +203,10 @@ const char radiant_dom_interface_decl[] =
     "    insert_data: fn(a0: any, a1: any) any, append_data: fn(a0: any) any,\n"
     "    delete_data: fn(a0: any, a1: any) any, substring_data: fn(a0: any, a1: any) any,\n"
     "    split_text: fn(a0: any) any\n"
+    "}\n"
+    "type attr : dom_node {\n"
+    "    name: string, local_name: string, namespace_uri: any, prefix: any,\n"
+    "    owner_element: any, specified: bool, value: string, node_value: string, text_content: string\n"
     "}\n"
     "type svg_element : html_element {\n"
     "    create_svg_point: fn() any, create_svg_matrix: fn() any,\n"
@@ -260,6 +268,7 @@ const char radiant_dom_interface_decl[] =
     "    body: dom_node,\n"
     "    head: dom_node,\n"
     "    title: string,\n"
+    "    cookie: string,\n"
     "    url: string,\n"
     "    href: string,\n"
     "    protocol: string,\n"
@@ -311,6 +320,7 @@ const char radiant_dom_interface_decl[] =
     "    query_selector_all: fn(a0: any) any,\n"
     "    create_element: fn(a0: any) dom_node,\n"
     "    create_element_ns: fn(a0: any, a1: any) any,\n"
+    "    create_attribute: fn(name: any) any, create_attribute_ns: fn(ns: any, name: any) any,\n"
     "    create_text_node: fn(a0: any) dom_node,\n"
     "    create_document_fragment: fn() dom_node,\n"
     "    create_comment: fn(a0: any) dom_node,\n"
@@ -394,7 +404,9 @@ const char radiant_dom_interface_decl[] =
     "type named_node_map {\n"
     "    length: int,\n"
     "    item: fn(index: int) any,\n"
-    "    get_named_item: fn(name: string) any\n"
+    "    get_named_item: fn(name: string) any, get_named_item_ns: fn(ns: any, name: string) any,\n"
+    "    set_named_item: fn(attr: any) any, set_named_item_ns: fn(attr: any) any,\n"
+    "    remove_named_item: fn(name: string) any, remove_named_item_ns: fn(ns: any, name: string) any\n"
     "}\n"
     "type dom_token_list {\n"
     "    length: int, value: string,\n"
@@ -1018,6 +1030,23 @@ extern "C" int radiant_dom_m4c_get_form(Item r, Item* out);
     {n, js, get, set, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
 #define BIND_CALL(n, fn) \
     {n, NULL, NULL, NULL, fn, NULL, 0}
+
+static int radiant_node_property(Item receiver, const char* name, Item* out) {
+    *out = radiant_host_api->dom_catalog->get_property(receiver, (Item){.item = s2it(heap_create_name(name))});
+    return 1;
+}
+
+static int radiant_node_property_set(Item receiver, const char* name, Item value, Item* out) {
+    *out = radiant_host_api->dom_catalog->set_property(receiver, (Item){.item = s2it(heap_create_name(name))}, value);
+    return 1;
+}
+
+#define NATIVE_PROPERTY_GET(fn, name) \
+    static int fn(Item receiver, Item* out) { return radiant_node_property(receiver, name, out); }
+#define NATIVE_PROPERTY_SET(fn, name) \
+    static int fn(Item receiver, Item value, Item* out) { return radiant_node_property_set(receiver, name, value, out); }
+NATIVE_PROPERTY_GET(radiant_element_inner_html, "innerHTML")
+NATIVE_PROPERTY_SET(radiant_element_inner_html_set, "innerHTML")
 // ---------------------------------------------------------------------------
 // DS1: member binds are generated from dom_api.def, not written here. A row
 // whose `iface` names this table expands to a BIND_ROW; every other row expands
@@ -1158,6 +1187,15 @@ static const JubeMemberBind radiant_dom_node_members[] = {
 };
 
 static const JubeMemberBind radiant_dom_html_element_members[] = {
+    // both namespace variants use the same DOM attachment algorithm.
+#define ATTR_ROW(name, js, row, count) \
+    {name, js, NULL, NULL, NULL, NULL, JUBE_MEMBER_REQUIRED_ARGS(count - 1), JUBE_DOM_ROW_##row, count}
+    ATTR_ROW("get_attribute_node", "getAttributeNode", get_attribute_node, 2),
+    ATTR_ROW("get_attribute_node_ns", "getAttributeNodeNS", get_attribute_node_ns, 3),
+    ATTR_ROW("set_attribute_node", "setAttributeNode", set_attribute_node, 2),
+    ATTR_ROW("set_attribute_node_ns", "setAttributeNodeNS", set_attribute_node, 2),
+    ATTR_ROW("remove_attribute_node", "removeAttributeNode", remove_attribute_node, 2),
+#undef ATTR_ROW
     // DS1: rows whose iface is `html_element` land here, generated from dom_api.def.
 #define DOM_ROW_BIND_html_element(name, argc, member, js) DOM_ROW_MEMBER(name, argc, member, js)
 #define DOM_ROW_BIND_none(name, argc, member, js)
@@ -1180,6 +1218,7 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_FIELD("child_element_count", radiant_dom_member_child_element_count),
     BIND_FIELD("children", radiant_dom_member_children),
     BIND_FIELD("attributes", radiant_dom_member_attributes),
+    BIND_FIELD_SET_JS("inner_html", "innerHTML", radiant_element_inner_html, radiant_element_inner_html_set),
     BIND_FIELD("first_element_child", radiant_dom_member_first_element_child),
     BIND_FIELD("last_element_child", radiant_dom_member_last_element_child),
     BIND_FIELD("next_element_sibling", radiant_dom_member_next_element_sibling),
@@ -1377,6 +1416,8 @@ RADIANT_DOC_GET_FN(radiant_doc_get_document_element, "documentElement")
 RADIANT_DOC_GET_FN(radiant_doc_get_body, "body")
 RADIANT_DOC_GET_FN(radiant_doc_get_head, "head")
 RADIANT_DOC_GET_FN(radiant_doc_get_title, "title")
+RADIANT_DOC_GET_FN(radiant_doc_get_cookie, "cookie")
+RADIANT_DOC_SET_FN(radiant_doc_set_cookie, "cookie")
 RADIANT_DOC_GET_FN(radiant_doc_get_url, "URL")
 RADIANT_DOC_GET_FN(radiant_doc_get_href, "href")
 RADIANT_DOC_GET_FN(radiant_doc_get_protocol, "protocol")
@@ -1436,6 +1477,20 @@ RADIANT_DOC_CALL_FN(radiant_doc_call_query_selector, RADIANT_DOCUMENT_QUERY_SELE
 RADIANT_DOC_CALL_FN(radiant_doc_call_query_selector_all, RADIANT_DOCUMENT_QUERY_SELECTOR_ALL)
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_element, RADIANT_DOCUMENT_CREATE_ELEMENT)
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_element_ns, RADIANT_DOCUMENT_CREATE_ELEMENT_NS)
+
+static int radiant_doc_create_attribute(Item receiver, Item* args, int argc, Item* out, bool namespaced) {
+    *out = radiant_host_api->dom_catalog->create_attribute(receiver,
+        namespaced ? radiant_iface_arg(args, argc, 0) : ItemNull,
+        radiant_iface_arg(args, argc, namespaced ? 1 : 0), (Item){.item = b2it(namespaced)});
+    return 1;
+}
+#define ATTRIBUTE_FACTORY(fn, ns) \
+    static int fn(Item receiver, Item* args, int argc, Item* out) { \
+        return radiant_doc_create_attribute(receiver, args, argc, out, ns); \
+    }
+ATTRIBUTE_FACTORY(radiant_doc_call_create_attribute, false)
+ATTRIBUTE_FACTORY(radiant_doc_call_create_attribute_ns, true)
+#undef ATTRIBUTE_FACTORY
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_text_node, RADIANT_DOCUMENT_CREATE_TEXT_NODE)
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_document_fragment, RADIANT_DOCUMENT_CREATE_DOCUMENT_FRAGMENT)
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_comment, RADIANT_DOCUMENT_CREATE_COMMENT)
@@ -1471,6 +1526,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_FIELD("body", NULL, radiant_doc_get_body),
     DOC_FIELD("head", NULL, radiant_doc_get_head),
     DOC_FIELD("title", NULL, radiant_doc_get_title),
+    {"cookie", NULL, radiant_doc_get_cookie, radiant_doc_set_cookie, NULL, NULL, 0},
     DOC_FIELD("url", "URL", radiant_doc_get_url),
     DOC_FIELD("href", NULL, radiant_doc_get_href),
     DOC_FIELD("protocol", NULL, radiant_doc_get_protocol),
@@ -1523,6 +1579,8 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("query_selector_all", "querySelectorAll", radiant_doc_call_query_selector_all),
     DOC_METHOD("create_element", "createElement", radiant_doc_call_create_element),
     DOC_METHOD("create_element_ns", "createElementNS", radiant_doc_call_create_element_ns),
+    {"create_attribute", "createAttribute", NULL, NULL, radiant_doc_call_create_attribute, NULL, JUBE_MEMBER_REQUIRED_ARGS(1)},
+    {"create_attribute_ns", "createAttributeNS", NULL, NULL, radiant_doc_call_create_attribute_ns, NULL, JUBE_MEMBER_REQUIRED_ARGS(2)},
     DOC_METHOD("create_text_node", "createTextNode", radiant_doc_call_create_text_node),
     DOC_METHOD("create_document_fragment", "createDocumentFragment", radiant_doc_call_create_document_fragment),
     DOC_METHOD("create_comment", "createComment", radiant_doc_call_create_comment),
@@ -1765,12 +1823,72 @@ static const JubeMemberBind radiant_html_options_collection_members[] = {
     BIND_CALL("add", radiant_options_add),
 };
 
+NATIVE_PROPERTY_GET(radiant_attr_name, "name")
+NATIVE_PROPERTY_GET(radiant_attr_local_name, "localName")
+NATIVE_PROPERTY_GET(radiant_attr_namespace_uri, "namespaceURI")
+NATIVE_PROPERTY_GET(radiant_attr_prefix, "prefix")
+NATIVE_PROPERTY_GET(radiant_attr_owner_element, "ownerElement")
+NATIVE_PROPERTY_GET(radiant_attr_specified, "specified")
+NATIVE_PROPERTY_GET(radiant_attr_value, "value")
+NATIVE_PROPERTY_GET(radiant_attr_node_value, "nodeValue")
+NATIVE_PROPERTY_GET(radiant_attr_text_content, "textContent")
+NATIVE_PROPERTY_SET(radiant_attr_value_set, "value")
+NATIVE_PROPERTY_SET(radiant_attr_node_value_set, "nodeValue")
+NATIVE_PROPERTY_SET(radiant_attr_text_content_set, "textContent")
+#undef NATIVE_PROPERTY_GET
+#undef NATIVE_PROPERTY_SET
+
+static const JubeMemberBind radiant_attr_members[] = {
+    BIND_FIELD("name", radiant_attr_name),
+    BIND_FIELD_JS("local_name", "localName", radiant_attr_local_name),
+    BIND_FIELD_JS("namespace_uri", "namespaceURI", radiant_attr_namespace_uri),
+    BIND_FIELD("prefix", radiant_attr_prefix),
+    BIND_FIELD_JS("owner_element", "ownerElement", radiant_attr_owner_element),
+    BIND_FIELD("specified", radiant_attr_specified),
+    BIND_FIELD_SET("value", radiant_attr_value, radiant_attr_value_set),
+    BIND_FIELD_SET_JS("node_value", "nodeValue", radiant_attr_node_value, radiant_attr_node_value_set),
+    BIND_FIELD_SET_JS("text_content", "textContent", radiant_attr_text_content, radiant_attr_text_content_set),
+};
+
+enum RadiantAttributeMapOperation { ATTRIBUTE_MAP_GET, ATTRIBUTE_MAP_SET, ATTRIBUTE_MAP_REMOVE };
+static int radiant_attribute_map_operation(Item receiver, Item* args, int argc, Item* out,
+        RadiantAttributeMapOperation operation, bool namespaced) {
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, radiant_host_api->dom_catalog->attribute_collection_owner(receiver));
+    if (item_is_error(owner.get())) { *out = owner.get(); return 1; }
+    Item ns = namespaced ? radiant_iface_arg(args, argc, 0) : ItemNull;
+    Item name = radiant_iface_arg(args, argc, namespaced ? 1 : 0);
+    if (operation == ATTRIBUTE_MAP_SET) {
+        *out = radiant_host_api->dom_catalog->set_attribute_node(owner.get(), radiant_iface_arg(args, argc, 0));
+    } else if (operation == ATTRIBUTE_MAP_REMOVE) {
+        *out = radiant_host_api->dom_catalog->remove_named_attribute(owner.get(), ns, name, (Item){.item = b2it(namespaced)});
+    } else {
+        *out = namespaced ? radiant_host_api->dom_catalog->get_attribute_node_ns(owner.get(), ns, name)
+            : radiant_host_api->dom_catalog->get_attribute_node(owner.get(), name);
+    }
+    return 1;
+}
+#define ATTRIBUTE_MAP_METHOD(fn, operation, ns) \
+    static int fn(Item receiver, Item* args, int argc, Item* out) { \
+        return radiant_attribute_map_operation(receiver, args, argc, out, operation, ns); \
+    }
+ATTRIBUTE_MAP_METHOD(radiant_attribute_map_get, ATTRIBUTE_MAP_GET, false)
+ATTRIBUTE_MAP_METHOD(radiant_attribute_map_get_ns, ATTRIBUTE_MAP_GET, true)
+ATTRIBUTE_MAP_METHOD(radiant_attribute_map_set, ATTRIBUTE_MAP_SET, false)
+ATTRIBUTE_MAP_METHOD(radiant_attribute_map_remove, ATTRIBUTE_MAP_REMOVE, false)
+ATTRIBUTE_MAP_METHOD(radiant_attribute_map_remove_ns, ATTRIBUTE_MAP_REMOVE, true)
+#undef ATTRIBUTE_MAP_METHOD
+
 static const JubeMemberBind radiant_named_node_map_members[] = {
     BIND_FIELD("length", radiant_collection_length_get),
     {"item", NULL, NULL, NULL, radiant_collection_item, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
-    {"get_named_item", "getNamedItem", NULL, NULL, radiant_collection_named_item, NULL,
-     JUBE_MEMBER_NON_ENUMERABLE},
+    {"get_named_item", "getNamedItem", NULL, NULL, radiant_attribute_map_get, NULL, JUBE_MEMBER_REQUIRED_ARGS(1)},
+    {"get_named_item_ns", "getNamedItemNS", NULL, NULL, radiant_attribute_map_get_ns, NULL, JUBE_MEMBER_REQUIRED_ARGS(2)},
+    {"set_named_item", "setNamedItem", NULL, NULL, radiant_attribute_map_set, NULL, JUBE_MEMBER_REQUIRED_ARGS(1)},
+    {"set_named_item_ns", "setNamedItemNS", NULL, NULL, radiant_attribute_map_set, NULL, JUBE_MEMBER_REQUIRED_ARGS(1)},
+    {"remove_named_item", "removeNamedItem", NULL, NULL, radiant_attribute_map_remove, NULL, JUBE_MEMBER_REQUIRED_ARGS(1)},
+    {"remove_named_item_ns", "removeNamedItemNS", NULL, NULL, radiant_attribute_map_remove_ns, NULL, JUBE_MEMBER_REQUIRED_ARGS(2)},
 };
 
 static const JubeMemberBind radiant_dom_token_list_members[] = {
@@ -1855,6 +1973,12 @@ extern const JubeTypeBinding radiant_dom_type_bindings[] = {
      (int32_t)(sizeof(radiant_dom_html_element_members) / sizeof(radiant_dom_html_element_members[0])),
      radiant_dom_node_named_get, radiant_dom_node_named_set, NULL, NULL, NULL, NULL,
      NULL, radiant_dom_host_has_property, radiant_dom_host_delete_property,
+     radiant_dom_host_own_property_descriptor, radiant_dom_host_own_property_names,
+     radiant_dom_node_prototype},
+    {"attr", NULL, radiant_attr_members,
+     (int32_t)(sizeof(radiant_attr_members) / sizeof(radiant_attr_members[0])),
+     radiant_dom_node_named_get, radiant_dom_node_named_set, NULL, NULL, NULL,
+     NULL, NULL, radiant_dom_host_has_property, radiant_dom_host_delete_property,
      radiant_dom_host_own_property_descriptor, radiant_dom_host_own_property_names,
      radiant_dom_node_prototype},
     {"character_data", NULL, radiant_dom_character_data_members,

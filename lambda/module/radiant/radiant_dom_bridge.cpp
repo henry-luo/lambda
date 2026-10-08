@@ -187,6 +187,7 @@ static bool radiant_dom_is_node_host_type(const void* host_type) {
     return host_type == (const void*)&s_radiant_dom_vmap_type_marker ||
         host_type == radiant_dom_document_host_type() ||
         host_type == radiant_dom_node_host_type() ||
+        host_type == radiant_dom_attr_host_type() ||
         host_type == radiant_dom_html_element_host_type() ||
         host_type == radiant_dom_character_data_host_type() ||
         host_type == radiant_dom_svg_element_host_type() ||
@@ -198,6 +199,7 @@ static bool radiant_dom_is_node_host_type(const void* host_type) {
 
 static const void* radiant_dom_host_type_for_node(DomNode* node) {
     if (!node) return radiant_dom_node_host_type();
+    if (node->as_attribute()) return radiant_dom_attr_host_type();
     // ESO102: the #document stub is a DomElement, so the element mapping below
     // would hand it the Element interface and `document.createRange` would not
     // exist. It is a Document, and `document` is this wrapper now.
@@ -2446,6 +2448,9 @@ RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
                                                   Item* args, int argc) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
     if (!node) return ItemNull;
+    if (operation == JUBE_DOM_CLONE_NODE && node->as_attribute()) {
+        return radiant_host_api->dom_catalog->clone_node(elem_item, argc > 0 ? args[0] : ItemNull);
+    }
     if (operation == JUBE_DOM_CLONE_NODE && !node->is_element()) {
         // Text nodes are valid Node receivers; the element-only clone bridge
         // passed them a null DomElement and made jQuery clone cleanup crash.

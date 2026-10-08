@@ -95,6 +95,7 @@ RADIANT_C_API bool radiant_canvas_fill_text(void* canvas_element, void* font_han
 
 // Shared structural backend for every DOM Node-family Jube brand.
 RADIANT_C_API const VelmtVtable radiant_dom_node_velmt_vtable;
+RADIANT_C_API const void* radiant_dom_attr_host_type(void);
 // Node.childNodes and Element.children share one filtered native VArray backend.
 RADIANT_C_API const VArrayVtable dom_child_collection_varray_vtable;
 // Creation-time DOM collection results retain a traced materialized member list.

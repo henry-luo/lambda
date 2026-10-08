@@ -1,0 +1,24 @@
+['obj', ["front", "visible"], [0, 0, 0]]
+[{
+    v: -3,
+    vt: 1,
+    vn: 1
+  }, {
+    v: -2,
+    vn: 1
+  }, {
+    v: -1,
+    vn: 1
+  }]
+["copper", "textures/copper.png"]
+["2.0", "animation.bin", "rotation"]
+['a3d', "Animated triangle", "nod", 1000]
+<frame time_ms: 1000,
+  {
+    bone: 0,
+    position: 1,
+    orientation: 3
+  }>
+'obj'
+'mtl'
+"2.0"

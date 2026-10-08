@@ -338,6 +338,7 @@ struct DomDocument : DomDocumentResourceData {
     lam::Up<DomElement> root;       // Root element of DOM tree (optional); owned by the node chain
     int html_version;            // Detected HTML version - maps to HtmlVersion enum
     bool html_scripting_enabled; // HTML parser scripting mode for special elements
+    bool xml_document;          // document factories preserve case in XML documents.
     uint32_t next_node_id;        // next DomNode id for event/state logs (0 reserved)
 
     // CSS stylesheets (for @font-face processing after UiContext init)
@@ -777,6 +778,14 @@ void dom_element_remove_namespaced_attribute(DomElement* element,
 const char* dom_element_get_namespaced_attribute(DomElement* element,
     const char* namespace_uri, const char* local_name);
 
+DomAttr* dom_attribute_node_create(DomDocument* document, const char* namespace_uri,
+    const char* qualified_name, const char* value);
+DomAttr* dom_element_attribute_node(DomElement* element, const char* name);
+bool dom_attribute_node_set_value(DomAttr* attribute, const char* value);
+void dom_attribute_node_attach(DomElement* element, DomAttr* attribute);
+void dom_attribute_node_detach(DomAttr* attribute);
+void dom_attribute_node_release_retired_storage(DomAttr* attribute);
+
 // An element's pointers into its document's view tree (props, item props,
 // layout caches and fragments), as lam::ViewProp / lam::ViewRef fields on the
 // element or its extension. A field can name only a listed slot, and the
@@ -794,6 +803,8 @@ enum class DomViewSlot {
 
 // tier-1: doc-pool, survives relayout
 struct DomElementExt {
+    // adoption changes ownerDocument, not the pool owning reclaimable metadata (D4.5.1v4).
+    lam::Up<DomDocument> storage_document;
     NameId name_id;
     FragmentUnion frags[FRAGMENT_UNION_COUNT];
     uint8_t fragment_presence_mask;
@@ -824,6 +835,7 @@ struct DomElementExt {
     int synthetic_attribute_count;
     int synthetic_attribute_capacity;
     lam::Own<DomNamespacedAttribute> namespaced_attributes;
+    lam::Up<DomAttr> attribute_nodes;
     lam::Up<struct DomInlineDeclarations> inline_declarations; // document resource; authored CSSOM block
     // Layout-only ruby column geometry. This lives outside InlineProp because
     // computed inline styles may be absent or canonicalized across elements.
@@ -899,6 +911,19 @@ struct DomElement : DomNode {
     uint32_t elmt_flags;         // compact element state; use the accessors below
     // document reference (provides Arena and Input*)
     lam::Up<DomDocument> doc;    // Parent document (provides arena and input)
+    DomDocument* storage_owner() const {
+        return ext && ext->storage_document ? ext->storage_document.get() : doc.get();
+    }
+    Pool* storage_pool() const {
+        DomDocument* owner = storage_owner();
+        return owner ? owner->document_pool.get() : nullptr;
+    }
+    bool preserve_storage_owner() {
+        DomElementExt* data = ensure_ext();
+        if (!data) return false;
+        if (!data->storage_document) data->storage_document = doc;
+        return true;
+    }
 
     // CSS custom properties (CSS variables)
     lam::Own<struct CssCustomProp> css_variables;  // list of --var-name: value
@@ -1138,7 +1163,7 @@ struct DomElement : DomNode {
     FilterProp* ensure_filter(LayoutContext* lycon);
     MultiColumnProp* ensure_multicol(LayoutContext* lycon);
 
-    bool set_attribute(const char* name, const char* value);
+    bool set_attribute(const char* name, const char* value, bool preserve_case = false);
     bool set_attribute(NameId name_id, const char* value);
     const char* get_attribute(const char* name);
     const char* get_attribute(NameId name_id);
@@ -1175,8 +1200,8 @@ struct DomElement : DomNode {
     DomComment* append_comment(const char* comment_content);
 
     DomElementExt* ensure_ext() {
-        if (!ext && doc && doc->document_pool) {
-            ext = lam::own((DomElementExt*)pool_calloc(doc->document_pool, sizeof(DomElementExt)));
+        if (!ext && doc && storage_pool()) {
+            ext = lam::own((DomElementExt*)pool_calloc(storage_pool(), sizeof(DomElementExt)));
             if (ext) doc->services.ext_allocations++;
         }
         return ext;

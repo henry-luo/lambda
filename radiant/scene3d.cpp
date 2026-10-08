@@ -34,7 +34,7 @@ struct Scene3dMaterial {
     DomNodeRef source;
     float color[4];
     bool source_transparent;
-    bool lambert, transparent;
+    bool lambert, transparent, force_opaque;
     int side;
     NativeGlResource texture;
 };
@@ -53,6 +53,7 @@ struct Scene3dMesh {
     unsigned order;
     DomNodeRef bones[16];
     Scene3dMatrix inverse_bind[16], bone_matrices[16], bind_matrix;
+    bool authored_bind[16];
     unsigned bone_count;
     float morph_weights[2], morph_base_weights[2];
 };
@@ -183,40 +184,36 @@ bool scene3d_numbers(DomElement* node, const char* key, Pool* pool,
     }
     if (!length) return true;
     float* data = (float*)pool_alloc(pool, length * sizeof(float)); if (!data) return false;
-    if (text) {
-        const char* cursor = text;
-        for (unsigned i = 0; i < length; i++) {
-            cursor += strspn(cursor, " ,\t\r\n[]"); char* end; data[i] = strtof(cursor, &end); cursor = end;
-        }
-    } else {
-        ArrayReader array = value.asArray();
-        for (unsigned i = 0; i < length; i++) {
-            if (!scene3d_scalar(array.get(i),&data[i])) {pool_free(pool,data);return false;}
-        }
-    }
+    bool present;
+    if(!scene3d_components(node,key,data,length,&present)) {pool_free(pool,data);return false;}
     *values = data; *count = length; return true;
 }
-bool scene3d_vector(DomElement* node, const char* key, Scene3dVec fallback, Scene3dVec* result) {
-    // vectors have a fixed bounded stack copy; no script array is retained.
-    const char* text = node->get_attribute(key); ItemReader value = scene3d_value(node, key);
-    if (!text && value.isNull()) { *result = fallback; return true; }
-    float data[3];
-    if (text) {
-        const char* cursor = text;
-        for (unsigned i = 0; i < 3; i++) {
-            cursor += strspn(cursor, " ,\t\r\n["); char* end; data[i] = strtof(cursor, &end);
-            if (end == cursor || !isfinite(data[i])) return false; cursor = end;
+bool scene3d_components(DomElement* node,const char* key,float* data,unsigned count,bool* present) {
+    const char* text=node->get_attribute(key);ItemReader value=scene3d_value(node,key);
+    *present=text||!value.isNull();if(!*present) return true;
+    if(text) {
+        const char* cursor=text;
+        for(unsigned i=0;i<count;i++) {
+            cursor+=strspn(cursor," ,\t\r\n[");char* end;data[i]=strtof(cursor,&end);
+            if(end==cursor||!isfinite(data[i])) return false;cursor=end;
         }
-        if (*str_skip_ascii_space(cursor + strspn(cursor," ]\t\r\n"))) return false;
-    } else {
-        if (!value.isArray() || value.asArray().length() != 3) return false;
-        for (unsigned i = 0; i < 3; i++) {
-            if (!scene3d_scalar(value.asArray().get(i),&data[i])) return false;
-        }
+        return !*str_skip_ascii_space(cursor+strspn(cursor," ]\t\r\n"));
     }
-    *result = {data[0], data[1], data[2]}; return true;
+    if(!value.isArray()||value.asArray().length()!=count) return false;
+    for(unsigned i=0;i<count;i++) if(!scene3d_scalar(value.asArray().get(i),&data[i])) return false;
+    return true;
+}
+bool scene3d_vector(DomElement* node,const char* key,Scene3dVec fallback,Scene3dVec* result) {
+    float data[3];bool present;if(!scene3d_components(node,key,data,3,&present)) return false;
+    *result=present?Scene3dVec{data[0],data[1],data[2]}:fallback;return true;
 }
 static bool scene3d_local(DomElement* node, Scene3dMatrix* matrix, Scene3dAnimationState* animation=nullptr) {
+    bool authored_matrix;
+    if(!scene3d_components(node,"matrix",matrix->v,16,&authored_matrix)) return false;
+    if(authored_matrix) {
+        if(node->has_attribute("position")||node->has_attribute("rotation")||node->has_attribute("quaternion")||node->has_attribute("scale")) return false;
+        Scene3dMatrix inverse;return scene3d_inverse_affine(*matrix,&inverse);
+    }
     Scene3dVec position, rotation, scale;
     if (!scene3d_vector(node,"position",{},&position) || !scene3d_vector(node,"rotation",{},&rotation) ||
         !scene3d_vector(node,"scale",{1,1,1},&scale) || scale.x == 0 || scale.y == 0 || scale.z == 0) return false;
@@ -224,7 +221,10 @@ static bool scene3d_local(DomElement* node, Scene3dMatrix* matrix, Scene3dAnimat
     if(scene3d_animation_value(animation,node,"position",&value)) position={(float)value.numbers[0],(float)value.numbers[1],(float)value.numbers[2]};
     if(scene3d_animation_value(animation,node,"scale",&value)) scale={(float)value.numbers[0],(float)value.numbers[1],(float)value.numbers[2]};
     if(scale.x==0||scale.y==0||scale.z==0) return false;
-    if(scene3d_animation_value(animation,node,"quaternion",&value)) {
+    bool quaternion;float q[4];if(!scene3d_components(node,"quaternion",q,4,&quaternion)) return false;
+    bool animated_quaternion=scene3d_animation_value(animation,node,"quaternion",&value);
+    if(quaternion||animated_quaternion) {
+        if(!animated_quaternion) for(unsigned i=0;i<4;i++) value.numbers[i]=q[i];
         double rotation_matrix[16];if(!animation_quaternion_matrix(value.numbers,rotation_matrix)) return false;
         *matrix=scene3d_identity();const float scales[]={scale.x,scale.y,scale.z};
         for(unsigned column=0;column<3;column++) for(unsigned row=0;row<3;row++)
@@ -439,7 +439,14 @@ static NativeGlResource scene3d_texture(Scene3dBuild* build, Scene3dDefinition* 
     if (!image || !image->pixels || image->format==IMAGE_FORMAT_SVG || image->alpha_mode!=IMAGE_ALPHA_STRAIGHT) {
         scene3d_fail(build->entry,"texture acquisition or format failed"); return {};
     }
-    NativeGlResource texture=native_gl_texture(build->entry->graphics,image);
+    NativeGlSampler sampler;unsigned* fields[]={&sampler.wrap_s,&sampler.wrap_t,&sampler.min_filter,&sampler.mag_filter};
+    const char* keys[]={"wrap-s","wrap-t","min-filter","mag-filter"};
+    for(unsigned i=0;i<4;i++) {
+        float value;if(!scene3d_number(definition->source,keys[i],*fields[i],&value)||value<0||value>65535||floorf(value)!=value) {
+            scene3d_fail(build->entry,"invalid texture sampler");return {};
+        }*fields[i]=(unsigned)value;
+    }
+    NativeGlResource texture=native_gl_texture(build->entry->graphics,image,sampler);
     if (!scene3d_resource(build,texture)) return {};
     for (unsigned y=0;y<(unsigned)image->height && !definition->texture_alpha;y++)
         for (unsigned x=0;x<(unsigned)image->width;x++)
@@ -460,7 +467,13 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
         !scene3d_flag(node,"transparent",false,&material->transparent)) {
         scene3d_fail(build->entry,"invalid material color or opacity"); return nullptr;
     }
-    material->source_transparent=material->transparent;
+    const char* alpha_mode=scene3d_text(node,"alpha-mode");
+    if(alpha_mode&&strcmp(alpha_mode,"opaque")&&strcmp(alpha_mode,"blend")) {
+        scene3d_fail(build->entry,"invalid material alpha mode");return nullptr;
+    }
+    material->force_opaque=alpha_mode&&!strcmp(alpha_mode,"opaque");
+    material->source_transparent=material->transparent||(alpha_mode&&!strcmp(alpha_mode,"blend"));
+    material->transparent=material->source_transparent;
     material->color[3]*=opacity; material->transparent=material->transparent || material->color[3]<1;
     const char* side=scene3d_text(node,"side");
     if (side && strcmp(side,"front") && strcmp(side,"back") && strcmp(side,"double")) {
@@ -479,6 +492,8 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
         material->transparent=material->transparent || texture_definition->texture_alpha;
         material->source_transparent=material->source_transparent||texture_definition->texture_alpha;
     }
+    // glTF OPAQUE ignores alpha from both factors and textures and writes opaque depth.
+    if(material->force_opaque) material->transparent=false;
     definition->material=material; return material;
 }
 
@@ -490,7 +505,10 @@ static bool scene3d_collect_bones(Scene3dBuild* build,Scene3dMesh* mesh,DomEleme
     for(DomNode* child=node->first_child;child;child=child->next_sibling) if(child->is_element()) {
         DomElement* bone=child->as_element();if(!scene3d_tag(bone,"bone")||mesh->bone_count>=16) return false;
         Scene3dMatrix world;bool visible;unsigned index=mesh->bone_count++;
-        if(!scene3d_world(build->entry,bone,&world,&visible,true)||!scene3d_inverse_affine(world,&mesh->inverse_bind[index])) return false;
+        if(!scene3d_components(bone,"inverse-bind-matrix",mesh->inverse_bind[index].v,16,&mesh->authored_bind[index])) return false;
+        if(mesh->authored_bind[index]) {
+            Scene3dMatrix inverse;if(!scene3d_inverse_affine(mesh->inverse_bind[index],&inverse)) return false;
+        } else if(!scene3d_world(build->entry,bone,&world,&visible,true)||!scene3d_inverse_affine(world,&mesh->inverse_bind[index])) return false;
         mesh->bones[index]=dom_node_ref(bone);
         if(!scene3d_collect_bones(build,mesh,bone,depth+1)) return false;
     }
@@ -723,7 +741,7 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
                 if(!source||!source->is_element()||!scene3d_world(entry,source->as_element(),&bone_world,&visible)) return false;
                 // attached skinning converts the current bone world pose back into this mesh's local frame.
                 mesh->bone_matrices[bone]=scene3d_multiply(scene3d_multiply(inverse_mesh,bone_world),
-                    scene3d_multiply(mesh->inverse_bind[bone],mesh->bind_matrix));
+                    mesh->authored_bind[bone]?mesh->inverse_bind[bone]:scene3d_multiply(mesh->inverse_bind[bone],mesh->bind_matrix));
             }
         }
         if(mesh->geometry->morph_count) {
@@ -738,7 +756,7 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
         auto* material=mesh->material;DomNode* source=dom_node_ref_validate(root->doc,material->source);float opacity;
         if(!source||!source->is_element()||!scene3d_animated_color(entry,source->as_element(),material->color)||
             !scene3d_animated_number(entry,source->as_element(),"opacity",1,&opacity)||opacity<0||opacity>1) return false;
-        material->color[3]*=opacity;material->transparent=material->source_transparent||material->color[3]<1;
+        material->color[3]*=opacity;material->transparent=!material->force_opaque&&(material->source_transparent||material->color[3]<1);
     }
     memset(p->ambient,0,sizeof(p->ambient));p->light_count=0;p->camera_found=false;
     Scene3dBuild build={};build.entry=entry;build.root=root;build.camera=scene3d_text(root,"camera");
@@ -867,13 +885,14 @@ static const char* scene3d_fragment_shader = R"GLSL(#version 330 core
 in vec3 world_normal, vertex_color;
 in vec2 texture_uv;
 uniform vec4 material;
-uniform float lambert, textured, light_count;
+uniform float lambert, textured, opaque, light_count;
 uniform vec3 ambient, directions[8], lights[8];
 uniform sampler2D image;
 out vec4 fragment;
 void main() {
     vec4 base = material * vec4(vertex_color,1.0);
     if (textured > 0.5) base *= texture(image,texture_uv);
+    if (opaque > 0.5) base.a = 1.0;
     vec3 irradiance = vec3(1.0);
     if (lambert > 0.5) {
         vec3 n = normalize(world_normal) * (gl_FrontFacing ? 1.0 : -1.0);
@@ -974,9 +993,10 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     for (int i=0;rendered && i<p->mesh_count;i++) {
         Scene3dMesh* mesh=p->meshes[i];Scene3dMaterial* material=mesh->material;
         if(!mesh->visible) continue;
-        float lambert=material->lambert?1:0,textured=material->texture.id?1:0;
+        float lambert=material->lambert?1:0,textured=material->texture.id?1:0,opaque=material->force_opaque?1:0;
         rendered=scene3d_uniform(entry,"model",mesh->world.v,16) && scene3d_uniform(entry,"material",material->color,4) &&
-            scene3d_uniform(entry,"lambert",&lambert,1) && scene3d_uniform(entry,"textured",&textured,1);
+            scene3d_uniform(entry,"lambert",&lambert,1) && scene3d_uniform(entry,"textured",&textured,1) &&
+            scene3d_uniform(entry,"opaque",&opaque,1);
         float skinned=mesh->bone_count?1:0;
         rendered=rendered&&scene3d_uniform(entry,"skinned",&skinned,1)&&scene3d_uniform(entry,"morph_weights",mesh->morph_weights,2);
         if(mesh->bone_count) rendered=rendered&&scene3d_uniform(entry,"bones[0]",mesh->bone_matrices[0].v,16,mesh->bone_count);

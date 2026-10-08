@@ -1,0 +1,4 @@
+newmtl copper
+Kd 0.8 0.4 0.2
+Pr 0.3
+map_Kd -s 2 2 2 textures/copper.png

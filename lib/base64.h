@@ -35,7 +35,7 @@ LAMBDA_LIB_API size_t base64_encoded_len(size_t in_len, Base64Variant variant);
 LAMBDA_LIB_API size_t base64_encode(const void* data, size_t len, char* out, Base64Variant variant);
 
 /**
- * Convenience: malloc + encode. Caller must free() the returned buffer.
+ * Convenience: mem_alloc + encode. Caller must mem_free() the returned buffer.
  * @return Newly allocated NUL-terminated string, or NULL on allocation failure.
  */
 char* base64_encode_alloc(const void* data, size_t len, Base64Variant variant);
@@ -47,7 +47,7 @@ char* base64_encode_alloc(const void* data, size_t len, Base64Variant variant);
  * @param input_len Length of input string (or 0 to auto-detect from null terminator)
  * @param output_len Output parameter to receive decoded data length
  * @return Newly allocated buffer containing decoded data, or NULL on error
- *         Caller must free() the returned buffer
+ *         Caller must mem_free() the returned buffer
  */
 uint8_t* base64_decode(const char* input, size_t input_len, size_t* output_len);
 
@@ -76,7 +76,7 @@ bool is_data_uri(const char* uri);
  * @param mime_type_size Size of mime_type buffer
  * @param output_len Output parameter to receive decoded data length
  * @return Newly allocated buffer containing decoded data, or NULL on error
- *         Caller must free() the returned buffer
+ *         Caller must mem_free() the returned buffer
  */
 uint8_t* parse_data_uri(const char* uri, char* mime_type, size_t mime_type_size, size_t* output_len);
 

@@ -49,6 +49,8 @@ DomElement* dom_parent_element(DomElement* element) {
     return parent;
 }
 
+static const char* dom_element_stored_attribute(DomElement* element, const char* key);
+
 const char* dom_element_lookup_namespace_uri(DomElement* element, const char* prefix) {
     if (!element) return nullptr;
     if (prefix && strcmp(prefix, "xml") == 0) return "http://www.w3.org/XML/1998/namespace";
@@ -64,7 +66,7 @@ const char* dom_element_lookup_namespace_uri(DomElement* element, const char* pr
     // XML namespace declarations inherit independently of HTML integration points.
     for (DomNode* node = element; node; node = node->parent) {
         if (!node->is_element()) continue;
-        const char* uri = node->as_element()->get_attribute(declaration);
+        const char* uri = dom_element_stored_attribute(node->as_element(), declaration);
         if (uri) return *uri ? uri : nullptr;
     }
     return nullptr;
@@ -72,7 +74,7 @@ const char* dom_element_lookup_namespace_uri(DomElement* element, const char* pr
 
 const char* dom_element_namespace_uri(DomElement* element) {
     if (!element || !element->tag_name) return "";
-    const char* uri = element->get_attribute("__lambda_ns_uri");
+    const char* uri = dom_element_stored_attribute(element, "__lambda_ns_uri");
     if (uri) return uri;
     const char* colon = strchr(element->tag_name, ':');
     char prefix[128] = {};
@@ -114,7 +116,7 @@ bool dom_element_record_namespaced_attribute(DomElement* element,
         ? colon + 1 : qualified_name;
     DomElementExt* ext = element->ensure_ext();
     if (!ext) return false;
-    Pool* pool = element->doc->document_pool;
+    Pool* pool = element->storage_pool();
     for (DomNamespacedAttribute* attr = ext->namespaced_attributes;
          attr; attr = attr->next) {
         if (strcmp(attr->namespace_uri, namespace_uri) == 0 &&
@@ -682,19 +684,19 @@ uint32_t dom_document_alloc_node_id(DomDocument* doc) {
 
 static void dom_element_release_cached_id(DomElement* element) {
     if (!element || !element->id) return;
-    if (element->doc && element->doc->document_pool) {
-        pool_free(element->doc->document_pool, (void*)element->id);
+    if (element->doc && element->storage_pool()) {
+        pool_free(element->storage_pool(), (void*)element->id);
     }
     dom_element_clear_id(element);
 }
 
 static void dom_element_release_cached_classes(DomElement* element) {
     if (!element || !element->class_names) return;
-    if (element->doc && element->doc->document_pool) {
+    if (element->doc && element->storage_pool()) {
         for (int i = 0; i < element->class_count; i++) {
-            pool_free(element->doc->document_pool, (void*)element->class_names[i]);
+            pool_free(element->storage_pool(), (void*)element->class_names[i]);
         }
-        pool_free(element->doc->document_pool, (void*)element->class_names);
+        pool_free(element->storage_pool(), (void*)element->class_names);
     }
     element->class_count = 0;
     dom_element_clear_class_names(element);
@@ -731,6 +733,8 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
     if (!element || !doc || !tag_name) return nullptr;
 
     bool reinitializing = element->doc != nullptr;
+    if (reinitializing && element->doc != doc && !element->preserve_storage_owner())
+        return nullptr;
     uint32_t retained_id = reinitializing && element->doc == doc
         ? static_cast<DomNode*>(element)->id : 0;
     if (reinitializing) {
@@ -744,7 +748,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         dom_element_release_cached_id(element);
         dom_element_release_cached_classes(element);
         dom_element_clear_synthetic_attributes(element);
-        if (element->tag_name) pool_free(element->doc->document_pool, (void*)element->tag_name);
+        if (element->tag_name) pool_free(element->storage_pool(), (void*)element->tag_name);
         element->tag_name = nullptr;
         if (element->specified_style_shared()) {
             style_epoch_unbind_element(element);
@@ -782,7 +786,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
 
     // Mutable DOM metadata is individually reclaimable document-pool storage;
     // keeping it in the node arena would defeat detached-node retirement.
-    lam::PoolPtr<char> tag_copy = lam::promote_to_pool(doc->document_pool, tag_name);
+    lam::PoolPtr<char> tag_copy = lam::promote_to_pool(element->storage_pool(), tag_name);
     if (!tag_copy) {
         return nullptr;
     }
@@ -792,7 +796,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
     element->tag_id = DomNode::tag_name_to_id(tag_name);
 
     // Create style trees (still use pool for AVL nodes)
-    element->specified_style = lam::shared(style_tree_create(doc->document_pool));
+    element->specified_style = lam::shared(style_tree_create(element->storage_pool()));
     if (!element->specified_style) {
         return nullptr;
     }
@@ -808,7 +812,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         // authoritative source for selector caches during DOM reconstruction.
         const char* id_attr = extract_element_attribute(native_element, "id", nullptr);
         if (id_attr) {
-            dom_element_retain_id(element, lam::promote_to_pool(doc->document_pool, id_attr));
+            dom_element_retain_id(element, lam::promote_to_pool(element->storage_pool(), id_attr));
         }
 
         // Parse class attribute into array
@@ -821,25 +825,25 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
             }
 
             const char** class_names = (const char**)pool_calloc(
-                doc->document_pool, count * sizeof(const char*));
+                element->storage_pool(), count * sizeof(const char*));
             if (class_names) {
                 dom_element_retain_class_names(element, lam::PoolPtr<const char*>(class_names));
                 // Parse classes - make a copy for strtok
-                char* class_copy = pool_strdup(doc->document_pool, class_str);
+                char* class_copy = pool_strdup(element->storage_pool(), class_str);
                 if (class_copy) {
                     int index = 0;
                     char* token = strtok(class_copy, " \t\n\r");
                     while (token && index < count) {
                         // Allocate permanent copy of each class from arena
                         size_t token_len = strlen(token);
-                        char* class_perm = pool_dup_n(doc->document_pool, token, token_len);
+                        char* class_perm = pool_dup_n(element->storage_pool(), token, token_len);
                         if (class_perm) {
                             class_names[index++] = class_perm;
                         }
                         token = strtok(NULL, " \t\n\r");
                     }
                     element->class_count = index;
-                    pool_free(doc->document_pool, class_copy);
+                    pool_free(element->storage_pool(), class_copy);
                 }
             }
         }
@@ -866,20 +870,20 @@ void dom_element_clear(DomElement* element) {
 
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
-        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
+        element->specified_style = lam::shared(style_tree_create(element->storage_pool()));
         element->mark_specified_style_owned();
     } else if (element->specified_style_borrowed()) {
         // A generated pseudo box may discard its view of the source tree, but
         // it must never clear declarations owned by the originating element.
         style_tree_release_borrow(element->specified_style);
-        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
+        element->specified_style = lam::shared(style_tree_create(element->storage_pool()));
         element->mark_specified_style_owned();
     } else if (element->specified_style) {
         // Recascade runs inside the document pool's active lifetime; returning
         // its live style allocations here corrupts subsequent CSS allocations.
         style_tree_clear(element->specified_style);
     } else {
-        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
+        element->specified_style = lam::shared(style_tree_create(element->storage_pool()));
         element->mark_specified_style_owned();
     }
     // Reset version tracking
@@ -906,8 +910,8 @@ static bool dom_element_clear_custom_properties(DomElement* element,
         *slot = prop->next;
         if (prop->declaration && prop->declaration->tree_owned_record)
             css_declaration_destroy_owned(prop->declaration,
-                                           element->doc->document_pool);
-        pool_free(element->doc->document_pool, prop);
+                                           element->storage_pool());
+        pool_free(element->storage_pool(), prop);
         removed = true;
     }
     return removed;
@@ -927,7 +931,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         // Canonical trees never contain inline declarations, so detaching is
         // sufficient and avoids materializing declarations that are discarded.
         style_epoch_unbind_element(element);
-        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
+        element->specified_style = lam::shared(style_tree_create(element->storage_pool()));
         element->mark_specified_style_owned();
         changed = true;
     } else if (element->specified_style_borrowed()) {
@@ -944,7 +948,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
             // The principal specified tree has no registered borrowers. Replace
             // it as one exclusive owner so a full recascade cannot retain the
             // discarded declaration graph until document teardown.
-            StyleTree* replacement = style_tree_create(element->doc->document_pool);
+            StyleTree* replacement = style_tree_create(element->storage_pool());
             if (!replacement) return;
             style_tree_destroy_owned(element->specified_style);
             element->specified_style = lam::shared(replacement);
@@ -952,7 +956,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
             changed = true;
         }
     } else {
-        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
+        element->specified_style = lam::shared(style_tree_create(element->storage_pool()));
         element->mark_specified_style_owned();
     }
     if (changed) {
@@ -1057,11 +1061,11 @@ bool dom_element_commit_inline_declarations(DomElement* element, CssRule* rule, 
     if (!ext) return false;
     DomInlineDeclarations* block = ext->inline_declarations;
     if (!block) {
-        block = (DomInlineDeclarations*)pool_calloc(element->doc->document_pool, sizeof(DomInlineDeclarations));
+        block = (DomInlineDeclarations*)pool_calloc(element->storage_pool(), sizeof(DomInlineDeclarations));
         if (!block) return false;
-        block->owner_pool = element->doc->document_pool;
-        if (!dom_document_add_resource(element->doc, block, dom_inline_declarations_destroy)) {
-            pool_free(element->doc->document_pool, block);
+        block->owner_pool = element->storage_pool();
+        if (!dom_document_add_resource(element->storage_owner(), block, dom_inline_declarations_destroy)) {
+            pool_free(element->storage_pool(), block);
             return false;
         }
         ext->inline_declarations = lam::up(block);
@@ -1100,6 +1104,9 @@ bool dom_element_commit_inline_declarations(DomElement* element, CssRule* rule, 
 
 void dom_element_release_retired_storage(DomElement* element) {
     if (!element || !element->doc) return;
+    // no live Attr wrapper can reach an owner selected for retirement; keep detached values intact.
+    while (element->ext && element->ext->attribute_nodes)
+        dom_attribute_node_detach(element->ext->attribute_nodes);
     Element* backing_source = dom_node_registry_backing_source(
         element->doc, static_cast<DomNode*>(element));
     if (element->doc->element_dom_map && backing_source) {
@@ -1119,7 +1126,7 @@ void dom_element_release_retired_storage(DomElement* element) {
         element->specified_style = nullptr;
     }
     if (element->tag_name) {
-        pool_free(element->doc->document_pool, (void*)element->tag_name);
+        pool_free(element->storage_pool(), (void*)element->tag_name);
         element->tag_name = nullptr;
     }
     dom_element_release_cached_id(element);
@@ -1130,13 +1137,13 @@ void dom_element_release_retired_storage(DomElement* element) {
     style_epoch_selection_clear_element(element);
     // retirement releases both the authored pool and its document resource registration (D4.5.1v4).
     if (element->ext && element->ext->inline_declarations)
-        dom_document_release_resource(element->doc, element->ext->inline_declarations);
+        dom_document_release_resource(element->storage_owner(), element->ext->inline_declarations);
     if (element->ext) {
         // the snapshot and its dynamic tracks survive relayout, then retire together.
         CssTransitionElemState* transition = element->transition_state_prop();
         if (transition) {
             pool_free(transition->pool, transition->tracks);
-            pool_free(element->doc->document_pool, transition);
+            pool_free(transition->pool, transition);
         }
         element->set_transition_state_prop(nullptr);
         for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
@@ -1145,9 +1152,9 @@ void dom_element_release_retired_storage(DomElement* element) {
                 element->ext->pseudo_styles[kind] = nullptr;
             }
         }
-        pool_free(element->doc->document_pool,
+        pool_free(element->storage_pool(),
                   (void*)element->ext->attribute_names_cache);
-        pool_free(element->doc->document_pool, element->ext);
+        pool_free(element->storage_pool(), element->ext);
         element->ext = nullptr;
     }
 }
@@ -1168,17 +1175,17 @@ static const char* lowercase_attr_name(const char* name, char* buf, size_t buf_s
 
 static void dom_element_clear_synthetic_attributes(DomElement* element) {
     if (!element || !element->ext || !element->doc ||
-        !element->doc->document_pool) {
+        !element->storage_pool()) {
         return;
     }
     DomElementExt* data = element->ext;
     for (int i = 0; i < data->synthetic_attribute_count; i++) {
-        pool_free(element->doc->document_pool,
+        pool_free(element->storage_pool(),
                   (void*)data->synthetic_attributes[i].name);
-        pool_free(element->doc->document_pool,
+        pool_free(element->storage_pool(),
                   (void*)data->synthetic_attributes[i].value);
     }
-    pool_free(element->doc->document_pool, data->synthetic_attributes);
+    pool_free(element->storage_pool(), data->synthetic_attributes);
     data->synthetic_attributes = nullptr;
     data->synthetic_attribute_count = 0;
     data->synthetic_attribute_capacity = 0;
@@ -1198,7 +1205,7 @@ static int dom_element_find_synthetic_attribute(DomElement* element,
 static bool dom_element_set_synthetic_attribute(DomElement* element,
                                                 const char* lower_name,
                                                 const char* value) {
-    if (!element || !element->doc || !element->doc->document_pool ||
+    if (!element || !element->doc || !element->storage_pool() ||
         !lower_name || !value) {
         return false;
     }
@@ -1206,24 +1213,24 @@ static bool dom_element_set_synthetic_attribute(DomElement* element,
     if (!data) return false;
     int index = dom_element_find_synthetic_attribute(element, lower_name);
     if (index >= 0) {
-        char* next_value = pool_strdup(element->doc->document_pool, value);
+        char* next_value = pool_strdup(element->storage_pool(), value);
         if (!next_value) return false;
-        pool_free(element->doc->document_pool,
+        pool_free(element->storage_pool(),
                   (void*)data->synthetic_attributes[index].value);
         data->synthetic_attributes[index].value = lam::own((const char*)next_value);
         return true;
     }
     if (data->synthetic_attribute_count == data->synthetic_attribute_capacity) {
-        if (!lam::pool_grow_array(element->doc->document_pool,
+        if (!lam::pool_grow_array(element->storage_pool(),
                                   &data->synthetic_attributes,
                                   &data->synthetic_attribute_capacity,
                                   data->synthetic_attribute_count + 1, 4)) return false;
     }
-    char* name_copy = pool_strdup(element->doc->document_pool, lower_name);
-    char* value_copy = pool_strdup(element->doc->document_pool, value);
+    char* name_copy = pool_strdup(element->storage_pool(), lower_name);
+    char* value_copy = pool_strdup(element->storage_pool(), value);
     if (!name_copy || !value_copy) {
-        pool_free(element->doc->document_pool, name_copy);
-        pool_free(element->doc->document_pool, value_copy);
+        pool_free(element->storage_pool(), name_copy);
+        pool_free(element->storage_pool(), value_copy);
         return false;
     }
     data->synthetic_attributes[data->synthetic_attribute_count++] = {
@@ -1236,13 +1243,13 @@ static bool dom_element_remove_synthetic_attribute(DomElement* element,
                                                    const char* lower_name) {
     int index = dom_element_find_synthetic_attribute(element, lower_name);
     if (index < 0 || !element || !element->ext || !element->doc ||
-        !element->doc->document_pool) {
+        !element->storage_pool()) {
         return false;
     }
     DomElementExt* data = element->ext;
-    pool_free(element->doc->document_pool,
+    pool_free(element->storage_pool(),
               (void*)data->synthetic_attributes[index].name);
-    pool_free(element->doc->document_pool,
+    pool_free(element->storage_pool(),
               (void*)data->synthetic_attributes[index].value);
     for (int i = index + 1; i < data->synthetic_attribute_count; i++) {
         data->synthetic_attributes[i - 1] = data->synthetic_attributes[i];
@@ -1269,12 +1276,12 @@ static void dom_element_attribute_did_set(DomElement* element,
         const char* id_attr = element->get_attribute("id");
         if (id_attr) {
             dom_element_retain_id(element, lam::promote_to_pool(
-                element->doc->document_pool, id_attr));
+                element->storage_pool(), id_attr));
         }
     } else if (strcmp(lower_name, "class") == 0) {
         dom_element_release_cached_classes(element);
         if (value[0] != '\0') {
-            char* class_copy = pool_strdup(element->doc->document_pool, value);
+            char* class_copy = pool_strdup(element->storage_pool(), value);
             if (class_copy) {
                 char* token = strtok(class_copy, " \t\n\r");
                 while (token) {
@@ -1283,7 +1290,7 @@ static void dom_element_attribute_did_set(DomElement* element,
                     }
                     token = strtok(nullptr, " \t\n\r");
                 }
-                pool_free(element->doc->document_pool, class_copy);
+                pool_free(element->storage_pool(), class_copy);
             }
         }
     } else if (strcmp(lower_name, "style") == 0) {
@@ -1317,9 +1324,21 @@ static void dom_element_attribute_did_remove(DomElement* element,
 // SVG and other foreign content keep their case (`viewBox`, `gradientUnits`,
 // as the parser and Lambda templates spell them), and DOM §4.9 lowercases a
 // queried name only for HTML elements, so a name stored exactly as asked wins.
+static const char* dom_element_stored_attribute(DomElement* element, const char* key) {
+    if (!element->is_synthetic()) {
+        ElementReader reader(dom_element_to_element(element));
+        const char* value = reader.get_attr_string(key);
+        if (value) return value;
+    }
+    int index = dom_element_find_synthetic_attribute(element, key);
+    return index >= 0 ? element->ext->synthetic_attributes[index].value.get() : nullptr;
+}
+
 static const char* dom_element_attr_key(DomElement* element, const char* name,
                                         char* lower, size_t lower_size) {
     lowercase_attr_name(name, lower, lower_size);
+    if ((element->doc && element->doc->xml_document) ||
+        strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") != 0) return name;
     if (strcmp(lower, name) == 0) return lower;
     bool stored_exact = element->is_synthetic()
         ? dom_element_find_synthetic_attribute(element, name) >= 0
@@ -1329,6 +1348,119 @@ static const char* dom_element_attr_key(DomElement* element, const char* name,
 
 static bool dom_attribute_name_present(const char* name) {
     return name && name[0] != '\0';
+}
+
+bool dom_attribute_node_set_value(DomAttr* attribute, const char* value) {
+    if (!attribute || !attribute->doc || !value) return false;
+    if (attribute->value && strcmp(attribute->value, value) == 0) return true;
+    Pool* pool = attribute->storage_pool;
+    char* copy = pool_strdup(pool, value);
+    if (!copy) return false;
+    if (attribute->value) pool_free(pool, (void*)attribute->value.get());
+    attribute->value = lam::own(copy);
+    return true;
+}
+
+DomAttr* dom_attribute_node_create(DomDocument* document, const char* namespace_uri,
+    const char* qualified_name, const char* value) {
+    if (!document || !document->node_arena || !qualified_name || !value) return nullptr;
+    DomAttr* attribute = (DomAttr*)arena_calloc(document->node_arena, sizeof(DomAttr));
+    if (!attribute) return nullptr;
+    attribute->node_type = DOM_NODE_ATTRIBUTE;
+    attribute->id = dom_document_alloc_node_id(document);
+    attribute->doc = lam::up(document);
+    attribute->storage_document = lam::up(document);
+    Pool* pool = document->document_pool;
+    attribute->storage_pool = pool;
+    const char* uri = namespace_uri ? namespace_uri : "";
+    const char* colon = *uri ? strchr(qualified_name, ':') : nullptr;
+    attribute->namespace_uri = lam::own(pool_strdup(pool, uri));
+    attribute->qualified_name = lam::own(pool_strdup(pool, qualified_name));
+    attribute->local_name = lam::own(pool_strdup(pool, colon ? colon + 1 : qualified_name));
+    if (colon) {
+        char* prefix = pool_strdup(pool, qualified_name);
+        if (prefix) prefix[colon - qualified_name] = '\0';
+        attribute->prefix = lam::own(prefix);
+    }
+    if (!attribute->namespace_uri || !attribute->qualified_name || !attribute->local_name ||
+        (colon && !attribute->prefix) || !dom_attribute_node_set_value(attribute, value)) return nullptr;
+    return dom_node_registry_register(document, attribute, sizeof(DomAttr), true) ? attribute : nullptr;
+}
+
+void dom_attribute_node_detach(DomAttr* attribute) {
+    DomElement* owner = attribute ? attribute->owner_element.get() : nullptr;
+    if (!owner) return;
+    DomAttr* previous = nullptr;
+    for (DomAttr* current = owner->ext ? owner->ext->attribute_nodes.get() : nullptr;
+         current; current = current->attribute_next) {
+        if (current == attribute) {
+            if (previous) previous->attribute_next = attribute->attribute_next;
+            else owner->ext->attribute_nodes = attribute->attribute_next;
+            break;
+        }
+        previous = current;
+    }
+    attribute->owner_element = nullptr;
+    attribute->attribute_next = nullptr;
+    if (attribute->owner_changed) attribute->owner_changed(attribute);
+    dom_node_schedule_detached(attribute->doc, attribute);
+}
+
+void dom_attribute_node_release_retired_storage(DomAttr* attribute) {
+    // values and names belong to the physical source pool even after adoption (D4.5.1v4).
+    const char* fields[] = {attribute->namespace_uri.get(), attribute->qualified_name.get(),
+        attribute->local_name.get(), attribute->prefix.get(), attribute->value.get()};
+    for (const char* field : fields) if (field) pool_free(attribute->storage_pool, (void*)field);
+    attribute->namespace_uri = nullptr;
+    attribute->qualified_name = nullptr;
+    attribute->local_name = nullptr;
+    attribute->prefix = nullptr;
+    attribute->value = nullptr;
+}
+
+void dom_attribute_node_attach(DomElement* element, DomAttr* attribute) {
+    if (!element || !attribute || attribute->owner_element == element) return;
+    DomElementExt* extension = element->ensure_ext();
+    if (!extension) return;
+    dom_attribute_node_detach(attribute);
+    attribute->owner_element = lam::up(element);
+    attribute->attribute_next = extension->attribute_nodes;
+    extension->attribute_nodes = lam::up(attribute);
+    dom_node_cancel_detached(attribute->doc, attribute);
+    if (attribute->owner_changed) attribute->owner_changed(attribute);
+}
+
+DomAttr* dom_element_attribute_node(DomElement* element, const char* name) {
+    if (!element || !name) return nullptr;
+    char lower[128];
+    const char* key = dom_element_attr_key(element, name, lower, sizeof(lower));
+    const char* value = element->get_attribute(key);
+    // parsed valueless attributes have a null Mark value but still own an Attr.
+    if (!value && !element->has_attribute(key)) return nullptr;
+    for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr;
+         attribute; attribute = attribute->attribute_next) {
+        if (strcmp(attribute->qualified_name, key) == 0) return attribute;
+    }
+    const char* local_name = nullptr;
+    const char* uri = dom_element_attribute_namespace_uri(element, key, &local_name);
+    DomAttr* attribute = dom_attribute_node_create(element->doc, uri, key, value ? value : "");
+    if (attribute) dom_attribute_node_attach(element, attribute);
+    return attribute;
+}
+
+static void dom_attribute_nodes_did_set(DomElement* element, const char* key, const char* value) {
+    for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr;
+         attribute; attribute = attribute->attribute_next) {
+        if (strcmp(attribute->qualified_name, key) == 0) dom_attribute_node_set_value(attribute, value);
+    }
+}
+
+static void dom_attribute_nodes_did_remove(DomElement* element, const char* key) {
+    for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr; attribute;) {
+        DomAttr* next = attribute->attribute_next;
+        if (strcmp(attribute->qualified_name, key) == 0) dom_attribute_node_detach(attribute);
+        attribute = next;
+    }
 }
 
 struct DomAttributeValueEntry {
@@ -1378,7 +1510,7 @@ static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder,
     return cache->values.oom() ? nullptr : string;
 }
 
-bool DomElement::set_attribute(const char* name, const char* value) {
+bool DomElement::set_attribute(const char* name, const char* value, bool preserve_case) {
     DomElement* element = this;
     if (!dom_attribute_name_present(name) || !value) {
         log_debug("dom_element_set_attribute: invalid parameters");
@@ -1389,6 +1521,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
     // attribute already stored in its own case is updated in place
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
+    if (preserve_case) key = name;
 
     const char* previous_value = strcmp(lower_name, "style") == 0 ? element->get_attribute(key) : nullptr;
     bool same_value = previous_value && strcmp(previous_value, value) == 0;
@@ -1420,6 +1553,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
                 return false;
             }
 
+            dom_attribute_nodes_did_set(element, key, value);
             dom_element_attribute_did_set(element, lower_name, value, same_value);
             return true;
         }
@@ -1430,6 +1564,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
 
     if (element->is_synthetic() &&
         dom_element_set_synthetic_attribute(element, key, value)) {
+        dom_attribute_nodes_did_set(element, key, value);
         dom_element_attribute_did_set(element, lower_name, value, same_value);
         return true;
     }
@@ -1462,22 +1597,8 @@ const char* DomElement::get_attribute(const char* name) {
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
-    // Use ElementReader for read-only access
-    if (!element->is_synthetic()) {
-        Element* backing = dom_element_to_element(element);
-        // get_attr_string answers for statically typed and run-time string
-        // fields alike (state-bound template attributes are the latter).
-        ElementReader reader(backing);
-        const char* result = reader.get_attr_string(key);
-        if (result) return result;
-    }
-
-    int synthetic_index = dom_element_find_synthetic_attribute(element, key);
-    if (synthetic_index >= 0) {
-        return element->ext->synthetic_attributes[synthetic_index].value;
-    }
-
-    return nullptr;
+    // namespace resolution reads stored keys directly, avoiding recursive case normalization.
+    return dom_element_stored_attribute(element, key);
 }
 
 const char* DomElement::get_attribute(NameId name_id) {
@@ -1511,6 +1632,7 @@ bool DomElement::remove_attribute(const char* name) {
                 return false;
             }
 
+            dom_attribute_nodes_did_remove(element, key);
             dom_element_attribute_did_remove(element, lower_name);
             return true;
         }
@@ -1518,6 +1640,7 @@ bool DomElement::remove_attribute(const char* name) {
 
     if (element->is_synthetic() &&
         dom_element_remove_synthetic_attribute(element, key)) {
+        dom_attribute_nodes_did_remove(element, key);
         dom_element_attribute_did_remove(element, lower_name);
         return true;
     }
@@ -1564,7 +1687,7 @@ const char** DomElement::attribute_names(int* count) {
         DomElementExt* data = element->ext;
         int attr_count = data ? data->synthetic_attribute_count : 0;
         if (attr_count == 0) return nullptr;
-        if (!lam::pool_grow_array(element->doc->document_pool,
+        if (!lam::pool_grow_array(element->storage_pool(),
                 &data->attribute_names_cache,
                 &data->attribute_names_capacity, attr_count, 16)) {
             return nullptr;
@@ -1583,7 +1706,7 @@ const char** DomElement::attribute_names(int* count) {
 
     DomElementExt* data = element->ensure_ext();
     if (!data) return nullptr;
-    if (!lam::pool_grow_array(element->doc->document_pool,
+    if (!lam::pool_grow_array(element->storage_pool(),
             &data->attribute_names_cache, &data->attribute_names_capacity,
             attr_count, 16)) return nullptr;
     const char** names = data->attribute_names_cache;
@@ -1629,7 +1752,7 @@ static bool dom_element_add_cached_class(DomElement* element, const char* class_
     // Add new class
     int new_count = element->class_count + 1;
     const char** new_classes = (const char**)pool_calloc(
-        element->doc->document_pool, new_count * sizeof(char*));
+        element->storage_pool(), new_count * sizeof(char*));
     if (!new_classes) {
         return false;
     }
@@ -1641,9 +1764,9 @@ static bool dom_element_add_cached_class(DomElement* element, const char* class_
 
     // Add new class
     size_t class_len = strlen(class_name);
-    char* class_copy = pool_dup_n(element->doc->document_pool, class_name, class_len);
+    char* class_copy = pool_dup_n(element->storage_pool(), class_name, class_len);
     if (!class_copy) {
-        pool_free(element->doc->document_pool, (void*)new_classes);
+        pool_free(element->storage_pool(), (void*)new_classes);
         return false;
     }
 
@@ -1651,7 +1774,7 @@ static bool dom_element_add_cached_class(DomElement* element, const char* class_
     const char** old_classes = element->class_names;
     dom_element_retain_class_names(element, lam::PoolPtr<const char*>(new_classes));
     element->class_count = new_count;
-    pool_free(element->doc->document_pool, (void*)old_classes);
+    pool_free(element->storage_pool(), (void*)old_classes);
 
     return true;
 }
@@ -1663,7 +1786,7 @@ static bool dom_element_remove_cached_class(DomElement* element, const char* cla
 
     for (int i = 0; i < element->class_count; i++) {
         if (strcmp(element->class_names[i], class_name) == 0) {
-            pool_free(element->doc->document_pool, (void*)element->class_names[i]);
+            pool_free(element->storage_pool(), (void*)element->class_names[i]);
             // Found the class - shift remaining classes down
             if (i < element->class_count - 1) {
                 memmove((void*)&element->class_names[i],
@@ -1820,18 +1943,18 @@ bool dom_element_set_presentation_style(DomElement* element, const char* propert
         css_property_validate_value(code, parsed->value) &&
         css_declaration_can_clone_owned(parsed);
     CssDeclaration* owned = accepted ? css_declaration_clone_owned(parsed, {},
-        CSS_ORIGIN_ANIMATION, element->doc->document_pool) : nullptr;
+        CSS_ORIGIN_ANIMATION, element->storage_pool()) : nullptr;
     mem_pool_destroy(scratch);
     if (!owned) return false;
     if (!style_epoch_ensure_owned(element)) {
-        css_declaration_destroy_owned(owned, element->doc->document_pool);
+        css_declaration_destroy_owned(owned, element->storage_pool());
         return false;
     }
     owned->presentation_value = true;
     // A sample replaces its own layer without discarding authored fallbacks.
     style_tree_remove_presentation_declarations(element->specified_style, code);
     if (!style_tree_apply_declaration(element->specified_style, owned)) {
-        css_declaration_destroy_owned(owned, element->doc->document_pool);
+        css_declaration_destroy_owned(owned, element->storage_pool());
         return false;
     }
     element->style_version++;
@@ -1856,13 +1979,13 @@ bool dom_element_clear_presentation_style(DomElement* element) {
 
 #ifndef LAMBDA_NO_CSS_INPUT
 static bool dom_element_apply_inline_declaration(DomElement* element, const CssDeclaration* parsed) {
-    CssDeclaration* declaration = css_declaration_snapshot(parsed, element->doc->document_pool);
+    CssDeclaration* declaration = css_declaration_snapshot(parsed, element->storage_pool());
     if (!declaration) return false;
     declaration->origin = CSS_ORIGIN_AUTHOR;
     declaration->specificity = {1, 0, 0, 0, declaration->important};
     bool applied = dom_element_apply_declaration(element, declaration);
     if (!applied && declaration->tree_owned_record)
-        css_declaration_destroy_owned(declaration, element->doc->document_pool);
+        css_declaration_destroy_owned(declaration, element->storage_pool());
     return applied;
 }
 #endif
@@ -2029,7 +2152,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
         // Custom property - store in linked list
         log_info("[CSS] Storing custom property: %s", declaration->property_name);
 
-        CssCustomProp* prop = (CssCustomProp*)pool_calloc(element->doc->document_pool, sizeof(CssCustomProp));
+        CssCustomProp* prop = (CssCustomProp*)pool_calloc(element->storage_pool(), sizeof(CssCustomProp));
         if (!prop) {
             log_error("[CSS] Failed to allocate CssCustomProp");
             return false;
@@ -2090,14 +2213,14 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
             CssDeclaration* decl = rule->data.style_rule.declarations[i];
             if (decl) {
                 CssDeclaration* element_decl = css_declaration_clone_for_cascade(
-                    decl, specificity, rule->origin, element->doc->document_pool);
+                    decl, specificity, rule->origin, element->storage_pool());
                 if (element_decl) element_decl->scope_proximity = scope_proximity;
                 if (element_decl && dom_element_apply_declaration(element, element_decl)) {
                     applied_count++;
                 } else if (element_decl) {
                     // rejected cascade copies never enter an owned style tree
                     css_declaration_destroy_owned(element_decl,
-                        element->doc->document_pool);
+                        element->storage_pool());
                 }
             }
         }
@@ -2141,7 +2264,7 @@ bool dom_element_clear_pseudo_styles(DomElement* element) {
         lam::Own<StyleTree>* slot = &element->ext->pseudo_styles[kind];
         StyleTree* style = *slot;
         if (!style) continue;
-        StyleTree* replacement = style_tree_create(element->doc->document_pool);
+        StyleTree* replacement = style_tree_create(element->storage_pool());
         if (!replacement) {
             // Preserve the old in-place reset only when publication of a new
             // tree fails; generated boxes must still see valid declarations.
@@ -2261,7 +2384,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
 
     // Create style tree if needed
     if (!*target_style) {
-        *target_style = lam::own(style_tree_create(element->doc->document_pool));
+        *target_style = lam::own(style_tree_create(element->storage_pool()));
         if (!*target_style) {
             log_error("[CSS] Failed to create style tree for %s", pseudo_name);
             return 0;
@@ -2276,7 +2399,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
             CssDeclaration* decl = rule->data.style_rule.declarations[i];
             if (decl) {
                 CssDeclaration* element_decl = css_declaration_clone_for_cascade(
-                    decl, specificity, rule->origin, element->doc->document_pool);
+                    decl, specificity, rule->origin, element->storage_pool());
                 if (!element_decl) continue;
                 element_decl->scope_proximity = scope_proximity;
 
@@ -3068,8 +3191,10 @@ bool dom_text_adopt_document_string(DomText* text_node, DomDocument* doc,
     if (text_node->owns_native_string() && text_node->native_string != string) {
         // Generated and mutation strings have single-node ownership; replacing
         // one must reclaim it immediately instead of waiting for document exit.
-        pool_free(doc->document_pool, text_node->native_string);
+        pool_free(dom_node_registry_owned_string_pool(doc, text_node), text_node->native_string);
     }
+    if (!text_node->owns_native_string() || text_node->native_string != string)
+        dom_node_registry_set_owned_string_pool(doc, text_node, doc->document_pool);
     text_node->native_string = lam::up(string);
     text_node->text = lam::up(string->chars);
     text_node->length = string->len;
@@ -3081,7 +3206,8 @@ bool dom_text_adopt_document_string(DomText* text_node, DomDocument* doc,
 void dom_text_release_retired_storage(DomDocument* doc, DomText* text_node) {
     if (!doc || !doc->document_pool || !text_node ||
         !text_node->owns_native_string()) return;
-    pool_free(doc->document_pool, text_node->native_string);
+    pool_free(dom_node_registry_owned_string_pool(doc, text_node), text_node->native_string);
+    dom_node_registry_set_owned_string_pool(doc, text_node, nullptr);
     text_node->native_string = nullptr;
     text_node->text = nullptr;
     text_node->length = 0;

@@ -2,6 +2,7 @@
 import model: lambda.scene3d.model
 import transforms: lambda.scene3d.transform
 import clips: lambda.scene3d.animation
+import assets: lambda.scene3d.asset
 
 pub type Vector3 = [number, number, number]
 pub type Matrix4 = number[]
@@ -21,6 +22,7 @@ pub fn mesh(geometry, material, options = {}) element => <mesh *: options, *[geo
 pub fn resources(children) element => <resources *children>
 pub fn clip(label, tracks, options = {}) element => clips.clip(label, tracks, options)
 pub fn track(path, times, values, kind = 'number', options = {}) element => clips.track(path, times, values, kind, options)
+pub fn load(source, options = {}) element^ => assets.load(source, options)^
 pub fn normalize(scene) element^ => model.normalize(scene)^
 pub fn validate(scene) bool^ { let checked = model.normalize(scene)^; true }
 pub fn transform(position = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0]) array^ =>

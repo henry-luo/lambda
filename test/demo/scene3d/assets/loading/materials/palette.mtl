@@ -1,0 +1,4 @@
+newmtl painted
+Kd 1 1 1
+d 1
+map_Kd ../textures/checker.png

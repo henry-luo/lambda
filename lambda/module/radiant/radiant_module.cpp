@@ -4148,11 +4148,17 @@ static const JubeTypeDef radiant_types[] = {
     {#host, RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
 #include "../../input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
+    {"attr", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
 };
 #undef RADIANT_READONLY_INDEXED
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
     return &radiant_types[0];
+}
+
+RADIANT_C_API const void* radiant_dom_attr_host_type(void) {
+    return &radiant_types[sizeof(radiant_types) / sizeof(radiant_types[0]) - 1];
 }
 
 RADIANT_C_API const void* radiant_dom_range_host_type(void) {

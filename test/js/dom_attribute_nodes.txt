@@ -1,0 +1,65 @@
+true true 2 data-value
+data-value data-value null null true
+true true null false
+true true
+true 0 null true
+true true
+true true true
+changed changed changed
+ordinary true
+true true
+text text
+function function true true
+true true true null text
+data-value true
+null text true true
+true
+InUseAttributeError
+true null replacement
+NotFoundError
+null detached
+null true
+true null
+NotFoundError
+true detached
+a:Flag Flag a urn:attribute
+null true
+true namespace
+updated true
+true null
+null true
+a:Flag namespace-write true
+urn:attribute ordinary-write ordinary-write
+null ordinary-write
+null true true
+true
+true true detached
+TypeError
+TypeError
+TypeError
+InvalidCharacterError
+InvalidCharacterError
+InvalidCharacterError
+InvalidCharacterError
+InvalidCharacterError
+InvalidCharacterError
+NamespaceError
+NamespaceError
+NamespaceError
+NamespaceError
+TypeError
+TypeError
+TypeError
+TypeError
+TypeError
+TypeError
+coerced
+MixedCase MixedCase
+function function true true
+true
+TypeError
+function function true true
+<b data-value="markup">Text</b> B
+TypeError
+2 data-observed initial first
+ARTICLE after-collection

@@ -118,15 +118,17 @@ def copy_runtime_module(bundle_root: Path, module_dir: Path, copy_library: bool)
     return manifest, library
 
 
-def copy_dependencies(bundle_root: Path, dependencies: list) -> None:
+def copy_dependencies(bundle_root: Path, dependencies: list,
+                      module_root: Path = ROOT / "modules") -> None:
     for dependency_name in dependencies:
         if not isinstance(dependency_name, str) or not dependency_name:
             fail("runtime module dependency name is invalid")
-        copy_runtime_module(bundle_root, ROOT / "modules" / dependency_name, True)
+        copy_runtime_module(bundle_root, module_root / dependency_name, True)
 
 
 def run_require(bundle_root: Path, isolated_host: Path, specifier: str,
-                extra_environment: dict | None = None) -> subprocess.CompletedProcess:
+                extra_environment: dict | None = None,
+                working_directory: Path = TEST_ROOT) -> subprocess.CompletedProcess:
     environment = dict(os.environ)
     environment["JUBE_MODULE_PATH"] = str(bundle_root)
     environment.update(extra_environment or {})
@@ -136,7 +138,7 @@ def run_require(bundle_root: Path, isolated_host: Path, specifier: str,
          "catch (error) { console.log(error.code); }"],
         # Run outside the repository root so the normal development bundle
         # cannot mask a rejection from this deliberately isolated bundle.
-        cwd=TEST_ROOT,
+        cwd=working_directory,
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -157,6 +159,49 @@ def expect_rejection(case_name: str, bundle_root: Path, isolated_host: Path,
         fail(f"{case_name} rejection did not identify {module_name} in the host log")
 
 
+def test_search_priority(module_dir: Path, specifier: str) -> None:
+    # D7.3.4: catalog metadata selects the image before descriptor validation.
+    # An incompatible lower-priority copy must never displace that selection.
+    for case_name, locations, accepted in (
+            ("configured-first", ("configured", "second"), True),
+            ("configured-invalid-first", ("configured", "second"), False),
+            ("configured-over-bundled", ("configured", "bundled"), True),
+            ("bundled-over-working", ("bundled", "working"), True),
+            ("conflicting-provider", ("configured", "second"), False)):
+        case_root = TEST_ROOT / case_name
+        host_root = case_root / "host"
+        working_directory = case_root / "working"
+        host_root.mkdir(parents=True)
+        working_directory.mkdir(parents=True)
+        isolated_host = host_root / "lambda.exe"
+        shutil.copy2(HOST, isolated_host)
+        roots = {"configured": case_root / "configured", "second": case_root / "second",
+                 "bundled": host_root / "modules", "working": working_directory / "modules"}
+        for index, location in enumerate(locations):
+            manifest, _ = copy_runtime_module(roots[location], module_dir, True)
+            copy_dependencies(roots[location], manifest.get("dependencies", []), module_dir.parent)
+            if case_name == "conflicting-provider" and index == 1:
+                original_name = manifest["name"]
+                manifest["name"] = "jube-test-conflicting-provider"
+                (roots[location] / original_name / "module.json").write_bytes(manifest_bytes_of(manifest))
+            elif case_name != "conflicting-provider" and (index == 0) != accepted:
+                manifest["base_abi_version"] += 1
+                (roots[location] / manifest["name"] / "module.json").write_bytes(
+                    manifest_bytes_of(manifest))
+        configured = os.pathsep.join(str(roots[name]) for name in locations
+                                     if name in ("configured", "second"))
+        completed = run_require(roots[locations[0]], isolated_host, specifier,
+                                {"JUBE_MODULE_PATH": configured}, working_directory)
+        successful = "unexpected-success" in completed.stdout
+        if completed.returncode != 0 or successful != accepted:
+            fail(f"{case_name} selected the wrong module: {completed.stdout} {completed.stderr}")
+        if not accepted and "MODULE_NOT_FOUND" not in completed.stdout:
+            fail(f"{case_name} did not report the selected module's rejection")
+        if case_name == "conflicting-provider" and "duplicate provider" not in completed.stderr:
+            fail("conflicting providers were not rejected during catalog discovery")
+    print("JUBE_LOADER_NEGATIVE: search priority passed")
+
+
 def run_runtime_module_negative(module_dir: Path, specifier: str) -> int:
     if not HOST.is_file():
         fail("lambda.exe is missing; build the host first")
@@ -165,19 +210,20 @@ def run_runtime_module_negative(module_dir: Path, specifier: str) -> int:
     TEST_ROOT.mkdir(parents=True)
     isolated_host = TEST_ROOT / "lambda.exe"
     shutil.copy2(HOST, isolated_host)
+    test_search_priority(module_dir, specifier)
 
     manifest, library = copy_runtime_module(TEST_ROOT / "missing-library", module_dir, False)
     module_name = manifest["name"]
     dependencies = manifest.get("dependencies", [])
     if not isinstance(dependencies, list):
         fail("runtime module dependencies must be an array")
-    copy_dependencies(TEST_ROOT / "missing-library", dependencies)
+    copy_dependencies(TEST_ROOT / "missing-library", dependencies, module_dir.parent)
     expect_rejection("missing-library", TEST_ROOT / "missing-library", isolated_host,
                      specifier, module_name)
 
     tampered_root = TEST_ROOT / "checksum-mismatch"
     copy_runtime_module(tampered_root, module_dir, True)
-    copy_dependencies(tampered_root, dependencies)
+    copy_dependencies(tampered_root, dependencies, module_dir.parent)
     checksum_library = tampered_root / module_name / library.name
     with checksum_library.open("r+b") as file:
         first_byte = file.read(1)
@@ -189,7 +235,7 @@ def run_runtime_module_negative(module_dir: Path, specifier: str) -> int:
 
     wrong_abi_root = TEST_ROOT / "wrong-base-abi"
     manifest, library = copy_runtime_module(wrong_abi_root, module_dir, True)
-    copy_dependencies(wrong_abi_root, dependencies)
+    copy_dependencies(wrong_abi_root, dependencies, module_dir.parent)
     wrong_abi = dict(manifest)
     wrong_abi["base_abi_version"] = int(manifest["base_abi_version"]) + 1
     (wrong_abi_root / module_name / "module.json").write_bytes(manifest_bytes_of(wrong_abi))
@@ -226,6 +272,7 @@ def main() -> int:
     TEST_ROOT.mkdir(parents=True)
     isolated_host = TEST_ROOT / "lambda.exe"
     shutil.copy2(HOST, isolated_host)
+    test_search_priority(SUBJECT_DIR, SUBJECT_SPECIFIER)
 
     def write_bundle(case_name: str, bundle_manifest: dict | bytes | None, copy_library: bool,
                      bundle_library: Path, directory_name: str = subject_name) -> Path:

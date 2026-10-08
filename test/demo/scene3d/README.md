@@ -3,6 +3,7 @@
 From the worktree root:
 
 ```sh
+./lambda.exe view test/demo/scene3d/asset-gallery.ls
 ./lambda.exe view test/demo/scene3d/observatory.html
 ./lambda.exe view test/demo/scene3d/shared-animation.html
 ./lambda.exe view test/demo/scene3d/three-gallery.html
@@ -61,3 +62,11 @@ The generated original assets and provenance are in `assets/`; the generator
 needs Python Pillow. Phase III fixed-time references and API/shader audit live
 under `reference/phase3/`. See the [implementation record](../../../vibe/impl/Radiant_WebGL_Phase3.md)
 for the declared playback/binding profile, validation and measurements.
+
+`asset-gallery.ls` loads a textured concave OBJ arrow, an animated glTF pennant
+with skinning and morph targets, and an A3D skeletal pennant through
+`lambda.scene3d.load()`. The generated CC0 inputs, binary buffer dependencies and
+images live in `assets/loading/`; run its `_generate.py` with Python 3 to rebuild
+them. glTF animation uses the shared SVG/native engine, including cubic tracks.
+See [the asset-loading design](../../../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes)
+for supported profiles, API options and explicit limitations.
