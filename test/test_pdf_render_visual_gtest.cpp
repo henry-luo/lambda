@@ -3299,6 +3299,34 @@ TEST(RenderOutputParity, InsetShadowUsesConstrainedCornerRadii) {
     }
 }
 
+TEST(RenderOutputParity, ClippedInsetShadowMatchesFullViewportPixels) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/inset_viewport.html";
+    const char* full_path = "temp/render_output_parity/inset_viewport_full.png";
+    const char* clipped_path = "temp/render_output_parity/inset_viewport_clipped.png";
+    const char* html =
+        "<!doctype html><style>html,body{margin:0;width:128px;height:64px;overflow:hidden}"
+        "div{margin:8px;width:100px;height:40px;border-radius:50px;"
+        "background:linear-gradient(90deg,red,blue);"
+        "box-shadow:inset 3px 5px 15px rgba(0,0,0,.6)}</style><div></div>";
+    ASSERT_TRUE(render_html_fixture(html_path, full_path, html, "-vw 128 -vh 64"));
+    ASSERT_TRUE(render_document_fixture(html_path, clipped_path, "-vw 64 -vh 32"));
+    ImageData full = {}, clipped = {};
+    ASSERT_TRUE(load_png_rgba(full_path, &full));
+    ASSERT_TRUE(load_png_rgba(clipped_path, &clipped));
+    ASSERT_EQ(full.width, 128); ASSERT_EQ(full.height, 64);
+    ASSERT_EQ(clipped.width, 64); ASSERT_EQ(clipped.height, 32);
+    for (int row = 0; row < clipped.height; row++) {
+        EXPECT_EQ(memcmp(full.pixels + (size_t)row * (size_t)full.width * 4,
+            clipped.pixels + (size_t)row * (size_t)clipped.width * 4,
+            (size_t)clipped.width * 4), 0) << "clipped shadow differs on row " << row;
+    }
+    image_free(full.pixels); image_free(clipped.pixels);
+}
+
 TEST(RenderOutputParity, TransparentInsetShadowPreservesBackground) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

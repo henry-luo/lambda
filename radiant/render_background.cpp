@@ -1315,6 +1315,14 @@ void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect r
     if (padding_rect.width <= 0.0f || padding_rect.height <= 0.0f) return;
     constrain_corner_radii(&radius, padding_rect.width, padding_rect.height);
     const RdtMatrix* transform = render_state_current_transform(rdcon);
+    Rect visible_rect = padding_rect;
+    if (!transform) {
+        // keep scrolled/offscreen boxes from allocating masks beyond the visible paint region.
+        Bound visible = view_geometry_intersect_bound_rect(rdcon->block.clip, padding_rect);
+        visible_rect = {visible.left, visible.top,
+            visible.right - visible.left, visible.bottom - visible.top};
+        if (visible_rect.width <= 0.0f || visible_rect.height <= 0.0f) return;
+    }
 
     for (int i = shadow_count - 1; i >= 0; i--) {
         BoxShadow* shadow = shadows[i];
@@ -1322,10 +1330,10 @@ void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect r
         float spread = shadow->spread_radius * scale;
         float sigma = shadow->blur_radius * scale * 0.5f;
         float pad = ceilf(sigma * 3.0f);
-        float left = floorf(padding_rect.x - pad);
-        float top = floorf(padding_rect.y - pad);
-        float width = ceilf(padding_rect.x + padding_rect.width + pad) - left;
-        float height = ceilf(padding_rect.y + padding_rect.height + pad) - top;
+        float left = floorf(visible_rect.x - pad);
+        float top = floorf(visible_rect.y - pad);
+        float width = ceilf(visible_rect.x + visible_rect.width + pad) - left;
+        float height = ceilf(visible_rect.y + visible_rect.height + pad) - top;
         size_t bytes = 0;
         if (!render_surface_allocation_size(width, height, &bytes) ||
             !render_memory_allow_allocation(nullptr, bytes)) return;
