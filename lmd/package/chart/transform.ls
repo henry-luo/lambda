@@ -7,6 +7,7 @@ import records: .records
 import window: .window
 import source: .source
 import statistics: .statistics
+import calendar: .calendar
 
 // ============================================================
 // Public API: Apply a sequence of transforms to data
@@ -38,8 +39,19 @@ fn apply_transform_list(data, transforms, index: int, count: int, datasets) {
               else if (tag == "density" or tag == "kde") statistics.density(data, t)
               else if (tag == "regression") statistics.regression(data, t)
               else if (tag == "loess") statistics.loess(data, t)
+              else if (tag == "timeunit") apply_timeunit(data, t)
               else error("chart: unsupported transform " ++ string(tag)),
           apply_transform_list(result, transforms, index + 1, count, datasets))
+}
+
+fn apply_timeunit(data, step) {
+    if (step.field == null or step.as == null) error("chart: timeunit requires field and as")
+    else {
+        let values = [for (row in data) calendar.time_unit(row[step.field],
+            if (step.unit != null) step.unit else step.time_unit, if (step.timezone != null) step.timezone else 0)];
+        let failure = util.first_error(values);
+        if (failure is error) failure else [for (index, row in data) records.add_field(row, step.as, values[index])]
+    }
 }
 
 // ============================================================
@@ -234,8 +246,22 @@ fn lookup_fields(row, found, fields, names, fallback, index) {
 
 // Encoding shorthand is normalized before any renderer or composition derives its scales.
 pub fn prepare_encoding(data, encoding, partition_fields = []) {
-    let enc = if (encoding != null) encoding else {};
-    let binned_data = apply_transforms(data, [for (key, channel in enc where channel.bin and channel.field)
+    let temporal_data = apply_transforms(data, [for (key, channel in encoding where channel.time_unit != null and channel.field != null)
+        {type: "timeunit", field: channel.field, unit: channel.time_unit, as: channel.field ++ "_time_" ++ string(key),
+            timezone: if (channel.scale.timezone != null) channel.scale.timezone else 0}]);
+    let temporal_encoding = map([for (key, channel in encoding) for (item in [string(key),
+        if (channel.time_unit != null and channel.field != null) {*:channel,
+            field: channel.field ++ "_time_" ++ string(key), time_unit: null, _temporal: true,
+            format: if (channel.format != null) channel.format else calendar.unit_format(channel.time_unit),
+            scale: if (parse.option_enabled(channel, "scale")) {*:parse.attributes(channel.scale),
+                timezone: calendar.unit_zone(channel.time_unit, if (channel.scale.timezone != null) channel.scale.timezone else 0)} else channel.scale}
+        else channel]) item]);
+    // Aggregate sort fields may disappear during encoding aggregation; resolve their order first.
+    let enc = map([for (key, channel in temporal_encoding) for (item in [string(key),
+        if (channel.field != null and channel.sort is map)
+            {*:channel, sort: records.categories(temporal_data, channel.field, channel.sort)} else channel]) item]);
+    let sort_error = util.first_error([for (key, channel in enc) channel.sort]);
+    let binned_data = apply_transforms(temporal_data, [for (key, channel in enc where channel.bin and channel.field)
         <bin field: channel.field, as: channel.field ++ "_bin",
             maxbins: if (channel.bin.maxbins != null) channel.bin.maxbins else 10,
             step: channel.bin.step>]);
@@ -249,7 +275,7 @@ pub fn prepare_encoding(data, encoding, partition_fields = []) {
             as: if (channel.aggregate == "count") "_count" else channel.field ++ "_" ++ channel.aggregate}];
     let groups = util.unique_vals([*partition_fields, for (key, channel in binned_enc
         where channel.field != null and channel.aggregate == null) channel.field]);
-    let summarized = if (binned_data is error) binned_data
+    let summarized = if (temporal_data is error) temporal_data else if (sort_error is error) sort_error else if (binned_data is error) binned_data
         else if (len(aggregates) > 0) do_aggregate(binned_data, groups, aggregates) else binned_data;
     let normalized = map([for (key, channel in binned_enc,
         let matches = [for (spec in aggregates where spec.channel == string(key)) spec])

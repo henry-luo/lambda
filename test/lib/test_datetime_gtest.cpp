@@ -545,15 +545,24 @@ TEST_F(DateTimeTest, FormatPattern) {
     datetime_format_pattern(buf, &dt, "YYYY-MM-DD");
     EXPECT_STREQ(buf->str, "2025-04-26");
 
-    // Test YYYY/MM/DD HH:mm:ss
+    // the documented hh/h tokens use 24h; HH uses 12h.
     strbuf_reset(buf);
-    datetime_format_pattern(buf, &dt, "YYYY/MM/DD HH:mm:ss");
+    datetime_format_pattern(buf, &dt, "YYYY/MM/DD hh:mm:ss");
     EXPECT_STREQ(buf->str, "2025/04/26 14:05:09");
 
     // Test with milliseconds
     strbuf_reset(buf);
-    datetime_format_pattern(buf, &dt, "HH:mm:ss.SSS");
+    datetime_format_pattern(buf, &dt, "hh:mm:ss.SSS");
     EXPECT_STREQ(buf->str, "14:05:09.123");
+
+    strbuf_reset(buf);
+    datetime_format_pattern(buf, &dt, "HH:mm A / h");
+    EXPECT_STREQ(buf->str, "02:05 PM / 14");
+
+    dt.hour = 0;
+    strbuf_reset(buf);
+    datetime_format_pattern(buf, &dt, "hh / HH A");
+    EXPECT_STREQ(buf->str, "00 / 12 AM");
 
     strbuf_free(buf);
 }

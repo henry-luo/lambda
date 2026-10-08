@@ -51,6 +51,22 @@ fn sort_keys(data, keys, index, project) {
 
 pub fn sort_key(row, definitions) => [for (entry in definitions) row[entry.field]]
 
+// Summarize before sorting categories so ties retain first appearance (S6.2.3).
+pub fn categories(data, field, ordering = null) {
+    let values = util.unique_vals(data |> ~[field]);
+    if (ordering is array) ordering
+    else if (ordering == "ascending") sort(values)
+    else if (ordering == "descending") sort(values, "desc")
+    else if (ordering is map and ordering.field != null) {
+        let summaries = [for (partition in group_by(data, [field]))
+            {value: partition.key[0], total: aggregate(partition.rows,
+                if (ordering.op != null) ordering.op else "sum", ordering.field)}];
+        let failure = util.first_error(summaries |> ~.total);
+        if (failure is error) failure else sort_rows(summaries,
+            {field: "total", order: ordering.order}) |> ~.value
+    } else values
+}
+
 pub fn aggregate(data, op, field) {
     let values = [for (row in data where util.finite_number(row[field])) float(row[field])];
     if (op == "count") len(data)

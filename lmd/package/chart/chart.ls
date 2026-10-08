@@ -16,6 +16,7 @@ import cfg: .config
 import ann: .annotation
 import cloud: .wordcloud
 import source: .source
+import records: .records
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
@@ -60,7 +61,10 @@ fn prepare_spec(spec) {
 fn dispatch(spec) => dispatch_prepared(prepare_spec(spec))
 
 fn dispatch_prepared(resolved_spec) {
+    let mapping_error = if (resolved_spec.data is array and resolved_spec.layer == null)
+        mapping_error(resolved_spec) else null;
     if (resolved_spec.data is error) resolved_spec.data
+    else if (mapping_error is error) mapping_error
     else if (resolved_spec.facet) render_faceted(resolved_spec)
     else if (resolved_spec.layer) render_layered(resolved_spec)
     else if (resolved_spec.mark and resolved_spec.mark.kind == "arc") render_arc(resolved_spec)
@@ -68,12 +72,19 @@ fn dispatch_prepared(resolved_spec) {
     else render_single(resolved_spec)
 }
 
+fn mapping_error(spec) {
+    let visual = mark_context(spec.data, spec.encoding, null, null, {}, null);
+    util.first_error([visual.color_scale, visual.stroke_scale, visual.size_scale, visual.shape_scale,
+        scale.position_scale(spec.encoding.x, spec.data, 0.0, 1.0, spec.mark.kind, true, spec.encoding.x2),
+        scale.position_scale(spec.encoding.y, spec.data, 1.0, 0.0, spec.mark.kind, false, spec.encoding.y2)])
+}
+
 // Word clouds share chart data/composition while retaining their measured layout contract.
-fn cloud_marks(data, encoding, options, width, height) {
+fn cloud_marks(data, encoding, options, width, height, visual = null) {
     let text_ch = parse.get_channel(encoding, "text");
     let size_ch = parse.get_channel(encoding, "size");
     let color_ch = parse.get_channel(encoding, "color");
-    let color_scale = if (color_ch and color_ch.field)
+    let color_scale = if (visual.color_scale != null) visual.color_scale else if (color_ch and color_ch.field)
         scale.infer_color_scale(color_ch, data) else null;
     let words = [for (record in data)
         if (record is map or record is element) (
@@ -151,22 +162,10 @@ fn render_single(spec) {
     let x_type = if (x_ch) x_ch.dtype else "nominal";
     let y_type = if (y_ch) y_ch.dtype else "quantitative";
 
-    let horizontal = mark_type == "bar" and x_type == "quantitative" and (y_type == "nominal" or y_type == "ordinal");
-    let measure = if (horizontal) x_ch else y_ch;
-    let has_range = if (horizontal) x2_ch != null else y2_ch != null;
-    let stack_mode = if (has_range and measure.stack == null) null
-        else detect_stack_mode(mark_type, measure, color_field0, x_offset_field);
-    let ordered = if (enc.order.field != null) sort(data_transformed,
-        {by: (row) => row[enc.order.field], dir: if (enc.order.sort == "descending") "desc" else "asc"})
-        else data_transformed;
-    let stack_order = if (color_ch.sort is array) color_ch.sort
-        else if (color_ch.scale.domain != null) color_ch.scale.domain else null;
-    let data_stacked = if (stack_mode and x_field and y_field and color_field0)
-        stack.apply_stack(ordered, if (horizontal) x_field else y_field, color_field0,
-            if (horizontal) y_field else x_field, stack_mode, stack_order)
-        else ordered;
-
-    let data = data_stacked;
+    let prepared_mark = prepare_mark_data({data: data_transformed, encoding: enc, mark: mark_spec});
+    let horizontal = prepared_mark.stack_axis == "x";
+    let stack_mode = prepared_mark.stack_mode;
+    let data = prepared_mark.data;
     let color_field = color_field0;
 
     // x_offset categories for grouped bars
@@ -179,20 +178,21 @@ fn render_single(spec) {
         else null;
     let color_categories = guide_values(color_scale);
     let has_legend = color_categories != null and len(color_categories) > 0 and parse.option_enabled(color_ch, "legend");
+    let guides = leg.plans(enc, mark_context(data, enc, null, null, {}, stack_mode), theme);
 
     // compute layout (need rough scales first for axis size estimation)
-    let temp_x_scale = if (stack_mode and horizontal) build_stacked_y_scale(data, 0.0, float(spec.width), stack_mode)
+    let temp_x_scale = if (stack_mode and horizontal) build_stacked_y_scale(data, 0.0, float(spec.width), stack_mode, x_ch)
         else scale.position_scale(x_ch, data, 0.0, float(spec.width), mark_type, true, x2_ch);
     let temp_y_scale = if (stack_mode and not horizontal)
-        build_stacked_y_scale(data, float(spec.height), 0.0, stack_mode)
+        build_stacked_y_scale(data, float(spec.height), 0.0, stack_mode, y_ch)
     else build_position_scale_y2(y_ch, data, float(spec.height), 0.0, mark_type, y2_ch);
-    let lay = layout.compute_layout(spec, temp_x_scale, temp_y_scale, has_legend, color_categories);
+    let lay = layout.compute_layout(spec, temp_x_scale, temp_y_scale, has_legend, color_categories, guides);
 
     // rebuild scales with actual plot dimensions
-    let x_scale = if (stack_mode and horizontal) build_stacked_y_scale(data, 0.0, lay.plot_w, stack_mode)
+    let x_scale = if (stack_mode and horizontal) build_stacked_y_scale(data, 0.0, lay.plot_w, stack_mode, x_ch)
         else scale.position_scale(x_ch, data, 0.0, lay.plot_w, mark_type, true, x2_ch);
     let y_scale = if (stack_mode and not horizontal)
-        build_stacked_y_scale(data, lay.plot_h, 0.0, stack_mode)
+        build_stacked_y_scale(data, lay.plot_h, 0.0, stack_mode, y_ch)
     else build_position_scale_y2(y_ch, data, lay.plot_h, 0.0, mark_type, y2_ch);
 
     // The same context resolves every visual encoding in single and layered views.
@@ -224,9 +224,7 @@ fn render_single(spec) {
         else if (x_grid) x_grid else y_grid;
 
     // render legend
-    let legend_el = if (has_legend)
-        color_legend(color_ch, color_scale, color_categories, theme)
-    else null;
+    let legend_el = leg.render_plans(guides, lay);
 
     // assemble SVG
     assemble_svg(spec, lay, marks_with_ann, x_axis_el, y_axis_el, y_grid_el, legend_el, theme)
@@ -238,69 +236,116 @@ fn render_single(spec) {
 
 fn render_layered(spec) {
     let theme = cfg.resolve_theme(spec.config);
-    let axis_cfg = cfg.axis_config(theme);
-    let legend_cfg = cfg.legend_config(theme);
-    let layers = spec.layer;
-    let data = if (spec.data) spec.data else [];
-
-    let layer_specs = prepare_layers(layers, spec);
-    let data_error = util.first_error(layer_specs |> ~.data);
+    let prepared = prepare_layers(spec.layer, spec);
+    let data_error = util.first_error([for (layer in prepared)
+        if (layer.data is error) layer.data else mapping_error(layer)]);
     if (data_error is error) data_error else {
-    let enc = if (len(layer_specs) > 0) layer_specs[0].encoding else {};
-    let all_data = [for (layer in layer_specs where not (layer.data is error)) for (row in layer.data) row];
-
-    let x_ch = parse.get_channel(enc, "x");
-    let y_ch = parse.get_channel(enc, "y");
-    // color channel: use parent encoding first, else pick from first layer that has color
-    let parent_color_ch = parse.get_channel(enc, "color");
-    let all_layer_color_chs = [for (ls in layer_specs, let l_enc = ls.encoding) parse.get_channel(l_enc, "color")];
-    let first_layer_color_ch = (all_layer_color_chs |: (~ != null))[0];
-    let color_ch = if (parent_color_ch) parent_color_ch else first_layer_color_ch;
-    let x_field = if (x_ch) x_ch.field else null;
-    let y_field = if (y_ch) y_ch.field else null;
-    let color_field = if (color_ch) color_ch.field else null;
-    let mark_type = if (layer_specs[0].mark) layer_specs[0].mark.kind else "line";
-
-    let color_scale = if (color_ch) scale.infer_color_scale(color_ch, all_data) else null;
-    let color_categories = guide_values(color_scale);
-    let has_legend = color_categories != null and len(color_categories) > 0 and parse.option_enabled(color_ch, "legend");
-
-    let temp_x_scale = layer_position_scale(layer_specs, "x", 0.0, float(spec.width));
-    let temp_y_scale = layer_position_scale(layer_specs, "y", float(spec.height), 0.0);
-    let lay = layout.compute_layout(spec, temp_x_scale, temp_y_scale, has_legend, color_categories);
-    let x_scale = layer_position_scale(layer_specs, "x", 0.0, lay.plot_w);
-    let y_scale = layer_position_scale(layer_specs, "y", lay.plot_h, 0.0);
-
-    let layer_marks = [for (layer in layer_specs) (
-        let layer_theme = cfg.resolve_theme(layer.config),
-        let options = cfg.mark_config(layer_theme, layer.mark),
-        let base_context = mark_context(layer.data, layer.encoding, x_scale, y_scale, lay, null),
-        let context = {*:base_context, color_scale: if (layer.encoding.color.field == color_field and color_field != null)
-            color_scale else base_context.color_scale},
-        if (layer.data is error) layer.data
-        else if (options.kind == "wordcloud") cloud_marks(layer.data, layer.encoding, options, lay.plot_w, lay.plot_h)
-        else render_mark(options.kind, layer.data, context, options))];
-
-    // axes
-    let x_title = if (x_ch and x_ch.title) x_ch.title
-        else if (x_field) x_field else null;
-    let y_title = if (y_ch and y_ch.title) y_ch.title
-        else if (y_field) y_field else null;
-
-    let x_axis_el = if (x_scale) axis.x_axis(x_scale, lay.plot_w, lay.plot_h, cfg.axis_config(theme, x_ch), x_title) else null;
-    let y_axis_el = if (y_scale) axis.y_axis(y_scale, lay.plot_w, lay.plot_h, cfg.axis_config(theme, y_ch), y_title) else null;
-
-    // legend
-    let legend_el = if (has_legend)
-        color_legend(color_ch, color_scale, color_categories, theme)
-    else null;
-
-    // assemble with all layer marks
-    let all_marks = svg.group_class("marks layers", layer_marks);
-    let failure = util.first_error(layer_marks);
-    if (failure is error) failure
-    else assemble_svg(spec, lay, all_marks, x_axis_el, y_axis_el, null, legend_el, theme)
+        let layers = [for (layer in prepared) prepare_mark_data(layer)];
+        let shared_visual = layer_visual_scales(layers);
+        let guide_plans = layer_guide_plans(layers, shared_visual, spec.resolve);
+        let view_spec = {*:spec, encoding: if (len(layers) > 0) layers[0].encoding else {}};
+        let rough = layer_scales(layers, spec.resolve, float(spec.width), float(spec.height));
+        let rough_axes = layer_axes(layers, rough, spec.resolve);
+        let lay = layout.compute_layout(view_spec, rough[0].x, rough[0].y, false, null, guide_plans, rough_axes);
+        let mappings = layer_scales(layers, spec.resolve, lay.plot_w, lay.plot_h);
+        let axes = layer_axes(layers, mappings, spec.resolve);
+        let marks = [for (index, layer in layers) (
+            let options = cfg.mark_config(cfg.resolve_theme(layer.config), layer.mark),
+            let base = mark_context(layer.data, layer.encoding, mappings[index].x, mappings[index].y, lay, layer.stack_mode),
+            let context = resolved_visual_context(base, shared_visual, spec.resolve),
+            let image = if (options.kind == "wordcloud") cloud_marks(layer.data, layer.encoding, options, lay.plot_w, lay.plot_h, context)
+                else render_mark(options.kind, layer.data, context, options),
+            // Preserve leaf diagnostics before annotations wrap the rendered value (S7.4.1).
+            if (image is error) image
+            else if (layer.annotation != null) svg.group_class("layer-content", [image,
+                ann.render_annotations(layer.annotation, mappings[index].x, mappings[index].y,
+                    lay.plot_w, lay.plot_h, cfg.resolve_theme(layer.config))]) else image)];
+        let failure = util.first_error(marks);
+        let axis_elements = [for (guide in axes) render_layer_axis(guide, lay)];
+        let grids = [for (guide in axes where guide.config.grid)
+            if (guide.key == "x") axis.x_axis_grid(guide.mapping, lay.plot_w, lay.plot_h, guide.config)
+            else axis.y_axis_grid(guide.mapping, lay.plot_w, lay.plot_h, guide.config)];
+        let notes = if (spec.annotation != null) ann.render_annotations(spec.annotation,
+            mappings[0].x, mappings[0].y, lay.plot_w, lay.plot_h, theme) else null;
+        let all_marks = svg.group_class("marks layers", [*marks, if (notes != null) notes]);
+        if (failure is error) failure
+        else assemble_svg(view_spec, lay, all_marks,
+            if (len(axis_elements) > 0) axis_elements[0] else null,
+            if (len(axis_elements) == 2) axis_elements[1]
+            else if (len(axis_elements) > 2) svg.group_class("axes", slice(axis_elements, 1)) else null,
+            if (len(grids) > 0) svg.group_class("grids", grids) else null, leg.render_plans(guide_plans, lay), theme)
     }
+}
+
+// Shared position domains include stack endpoints; independent mappings retain each layer's policy.
+fn layer_scales(layers, resolve, width, height) {
+    let shared_x = if (resolve.scale.x != "independent") layer_position_scale(layers, "x", 0.0, width) else null;
+    let shared_y = if (resolve.scale.y != "independent") layer_position_scale(layers, "y", height, 0.0) else null;
+    [for (layer in layers) {
+        x: if (resolve.scale.x == "independent") layer_position_scale([layer], "x", 0.0, width) else shared_x,
+        y: if (resolve.scale.y == "independent") layer_position_scale([layer], "y", height, 0.0) else shared_y
+    }]
+}
+
+fn layer_axes(layers, mappings, resolve) {
+    let guides = [for (key in ["x", "y"],
+        let independent = resolve.scale[key] == "independent" or resolve.axis[key] == "independent",
+        let candidates = [for (index, layer in layers where layer.encoding[key] != null and mappings[index][key] != null)
+            {index: index, layer: layer}],
+        let selected = if (independent) candidates else slice(candidates, 0, 1))
+        for (ordinal, candidate in selected,
+            let channel = candidate.layer.encoding[key],
+            let options = cfg.axis_config(cfg.resolve_theme(candidate.layer.config), channel),
+            let mapping = mappings[candidate.index][key]
+            where options.enabled and mapping.kind != "identity") (
+            let orient = if (options.orient != null) options.orient else if (key == "x")
+                (if (ordinal % 2 == 0) "bottom" else "top") else if (ordinal % 2 == 0) "left" else "right",
+            let title = if (channel.title != null) channel.title else channel.field,
+            let space = if (key == "x") axis.estimate_x_axis_height(options, title != null and options.title_enabled, mapping)
+                else axis.estimate_y_axis_width(mapping, options),
+            {key: key, mapping: mapping, title: title, orient: orient,
+                config: {*:options, orient: orient}, space: space + abs(if (options.offset != null) options.offset else 0.0)})];
+    [for (index, guide in guides) (
+        let previous = sum([for (prior in slice(guides, 0, index) where prior.orient == guide.orient) prior.space]),
+        let sign = if (guide.orient == "left" or guide.orient == "top") -1.0 else 1.0,
+        {*:guide, config: {*:guide.config, offset: sign * previous +
+            (if (guide.config.offset != null) guide.config.offset else 0.0)}})]
+}
+
+fn render_layer_axis(guide, lay) => if (guide.key == "x")
+    axis.x_axis(guide.mapping, lay.plot_w, lay.plot_h, guide.config, guide.title)
+    else axis.y_axis(guide.mapping, lay.plot_w, lay.plot_h, guide.config, guide.title)
+
+fn layer_visual_scales(layers) {
+    map([for (key in ["color", "size", "shape"],
+        let candidates = [for (layer in layers where layer.encoding[key].field != null and
+            (key == "color" or layer.mark.kind != "wordcloud")) layer],
+        let first = candidates[0],
+        let channel = first.encoding[key],
+        let rows = [for (layer in candidates) for (row in layer.data)
+            {value: parse.channel_value(layer.encoding[key], row)}],
+        let normalized = {*:parse.attributes(channel), field: "value"},
+        let mapping = if (len(candidates) == 0) null else if (key == "color") scale.infer_color_scale(normalized, rows)
+            else if (key == "shape") shape_scale(normalized, rows) else visual_scale(normalized, rows, 20.0, 200.0))
+        for (part in [key ++ "_scale", mapping]) part])
+}
+
+fn resolved_visual_context(context, shared, resolve) {
+    {*:context, *:map([for (key in ["color", "size", "shape"]
+        where resolve.scale[key] != "independent" and context.encoding[key].field != null and shared[key ++ "_scale"] != null)
+        for (part in [key ++ "_scale", shared[key ++ "_scale"]]) part])}
+}
+
+fn layer_guide_plans(layers, shared, resolve) {
+    [for (key in ["color", "size", "shape"],
+        // Word sizes use measured font layout, so symbol-area guides belong to Cartesian leaves.
+        let candidates = [for (layer in layers where layer.encoding[key].field != null and layer.mark.kind != "wordcloud") layer],
+        let independent = resolve.scale[key] == "independent" or resolve.legend[key] == "independent",
+        let selected = if (independent) candidates else slice(candidates, 0, 1))
+        for (layer in selected,
+            let context = mark_context(layer.data, layer.encoding, null, null, {}, layer.stack_mode),
+            let mappings = resolved_visual_context(context, shared, resolve))
+            for (plan in leg.plans(map([key, layer.encoding[key]]), mappings, cfg.resolve_theme(layer.config))) plan]
 }
 
 // Resolve dataflow at each layer boundary before flattening leaves into the shared plot.
@@ -344,9 +389,10 @@ fn render_arc(spec) {
     let color_scale = if (color_ch) scale.infer_color_scale(color_ch, data) else null;
     let color_categories = guide_values(color_scale);
     let has_legend = color_categories != null and len(color_categories) > 0 and parse.option_enabled(color_ch, "legend");
+    let guides = leg.plans(enc, {color_scale: color_scale}, theme);
 
     // layout
-    let lay = layout.compute_arc_layout(spec, has_legend, color_categories);
+    let lay = layout.compute_arc_layout(spec, has_legend, color_categories, guides);
     let outer_r = if (mark_spec.outer_radius) float(mark_spec.outer_radius) else lay.radius;
     let inner_r = if (mark_spec.inner_radius)
         (let raw_ir = float(mark_spec.inner_radius),
@@ -356,6 +402,7 @@ fn render_arc(spec) {
 
     // render arcs
     let arc_ctx = {
+        encoding: enc,
         theta_field: theta_field,
         color_scale: color_scale, color_field: color_field,
         cx: lay.cx, cy: lay.cy,
@@ -364,9 +411,7 @@ fn render_arc(spec) {
     let arcs_el = mark.arc_mark(data, arc_ctx, mark_spec);
 
     // legend
-    let legend_el = if (has_legend)
-        color_legend(color_ch, color_scale, color_categories, theme)
-    else null;
+    let legend_el = leg.render_plans(guides, lay);
 
     // assemble
     let width = lay.total_w;
@@ -387,7 +432,7 @@ fn render_arc(spec) {
     // legend
     let children = if (legend_el)
         [*children1,
-         <g transform: svg.translate(lay.legend_x, lay.legend_y), legend_el>]
+         if (legend_el.class == "legends") legend_el else <g transform: svg.translate(lay.legend_x, lay.legend_y), legend_el>]
     else children1;
 
     svg.svg_root(width, height, children, cfg.svg_attributes(theme))
@@ -413,12 +458,30 @@ fn detect_stack_mode(mark_type, y_ch, color_field, x_offset_field) {
     else null
 }
 
-fn build_stacked_y_scale(data, rlo, rhi, mode) {
+fn build_stacked_y_scale(data, rlo, rhi, mode, channel = null) {
     let y0_vals = data |> float(~["_y0"])
     let y1_vals = data |> float(~["_y1"])
     let all_vals = [*y0_vals, *y1_vals]
     let include_zero = mode != "center"
-    scale.linear_scale_nice(all_vals, rlo, rhi, include_zero)
+    scale.configured_scale(all_vals, rlo, rhi, "linear", channel.scale, include_zero)
+}
+
+// Ordering and stacking must be identical in single views and layer leaves.
+fn prepare_mark_data(spec) {
+    let enc = spec.encoding;
+    let horizontal = spec.mark.kind == "bar" and enc.x.dtype == "quantitative" and
+        (enc.y.dtype == "nominal" or enc.y.dtype == "ordinal");
+    let measure = if (horizontal) enc.x else enc.y;
+    let ranged = if (horizontal) enc.x2 != null else enc.y2 != null;
+    let mode = if (ranged and measure.stack == null) null
+        else detect_stack_mode(spec.mark.kind, measure, enc.color.field, enc.x_offset.field);
+    let ordered = if (enc.order.field != null) sort(spec.data,
+        {by: (row) => row[enc.order.field], dir: if (enc.order.sort == "descending") "desc" else "asc"}) else spec.data;
+    let series_order = if (enc.color.sort is array) enc.color.sort else enc.color.scale.domain;
+    let stacked = if (mode != null and enc.x.field != null and enc.y.field != null and enc.color.field != null)
+        stack.apply_stack(ordered, measure.field, enc.color.field,
+            if (horizontal) enc.y.field else enc.x.field, mode, series_order) else ordered;
+    {*:spec, data: stacked, stack_mode: mode, stack_axis: if (horizontal) "x" else "y"}
 }
 
 // build y scale that also considers y2_field for dual-value marks
@@ -439,9 +502,7 @@ fn mark_context(data, encoding, x_scale, y_scale, lay, stack_mode) {
         color_field: color_ch.field,
         color_scale: if (color_ch.field != null) scale.infer_color_scale(color_ch, data) else null,
         stroke_scale: if (stroke_ch.field != null) scale.infer_color_scale(stroke_ch, data) else null,
-        shape_scale: if (shape_ch.field != null and parse.option_enabled(shape_ch, "scale"))
-            scale.ordinal_scale(util.unique_vals(data |> ~[shape_ch.field]),
-                if (shape_ch.scale.range != null) shape_ch.scale.range else ["circle", "square", "diamond", "triangle-up", "cross", "triangle-down"]) else null,
+        shape_scale: shape_scale(shape_ch, data),
         size_field: encoding.size.field, opacity_field: encoding.opacity.field,
         size_scale: visual_scale(encoding.size, data, 20.0, 200.0),
         opacity_scale: visual_scale(encoding.opacity, data, 0.2, 1.0),
@@ -463,28 +524,31 @@ fn layer_position_scale(layers, channel_name, rlo, rhi) {
         let channel = first.channel;
         let initial = scale.position_scale(channel, first.data, rlo, rhi, first.mark.kind, channel_name == "x");
         let values = [for (layer in layers where not (layer.data is error))
-            for (key in [channel_name, channel_name ++ "2"],
+            for (key in (if (layer.stack_mode != null and layer.stack_axis == channel_name) ["_y0", "_y1"] else [channel_name, channel_name ++ "2"]),
                 let current = layer.encoding[key]
-                where current != null and current.value == null)
+                where (current != null and current.value == null) or key == "_y0" or key == "_y1")
                 for (row in layer.data,
-                    let value = parse.channel_value(current, row)
+                    let value = if (key == "_y0" or key == "_y1") row[key] else parse.channel_value(current, row)
                     where value != null) value];
         let has_ranges = len([for (layer in layers where layer.encoding[channel_name ++ "2"] != null) true]) > 0;
         let zero = if (channel.zero != null) channel.zero
             else not has_ranges and len([for (candidate in candidates where candidate.mark.kind == "bar") true]) > 0;
+        // Rebuilding a shared domain must preserve the channel's resolved categorical order.
+        let ordered = if (channel.sort != null and contains(["band", "point", "ordinal"], initial.kind))
+            records.categories([for (value in values) {value: value}], "value", channel.sort) else values;
         if (initial.kind == "identity") initial
-        else scale.configured_scale(values, rlo, rhi, initial.kind, channel.scale, zero)
+        else scale.configured_scale(ordered, rlo, rhi, initial.kind, channel.scale, zero)
     }
 }
 
 fn guide_values(mapping) => if (mapping != null and mapping.kind != "identity") mapping.domain else null
 
-fn color_legend(channel, mapping, values, theme) {
-    let options = cfg.legend_config(theme, channel);
-    let title = if (not options.title_enabled) null else if (options.title != null) options.title
-        else if (channel.title != null) channel.title else channel.field;
-    if (mapping.kind == "sequential-color") leg.gradient_legend(mapping, title, options)
-    else leg.color_legend(values, mapping, title, options)
+fn shape_scale(channel, data) {
+    if (channel.field == null) null
+    else if (not parse.option_enabled(channel, "scale")) {kind: "identity"}
+    else scale.configured_scale(data |> ~[channel.field], 0, 1, "ordinal",
+        {*:parse.attributes(channel.scale), range: if (channel.scale.range != null) channel.scale.range
+            else ["circle", "square", "diamond", "triangle-up", "cross", "triangle-down"]})
 }
 
 fn visual_scale(channel, data, rlo, rhi) {
@@ -498,6 +562,15 @@ fn visual_scale(channel, data, rlo, rhi) {
 // ============================================================
 
 fn render_mark(mark_type, data, ctx, mark_spec) {
+    let image = render_mark_raw(mark_type, data, ctx, mark_spec);
+    if (image is error) image else if (mark_spec.clip) clip_marks(image, ctx.plot_w, ctx.plot_h) else image
+}
+
+// A nested SVG viewport clips without document-global IDs that collide in compositions.
+fn clip_marks(marks, width, height) => <svg class: "plot-clip", x: 0, y: 0, width: width, height: height,
+    viewBox: "0 0 " ++ util.fmt_num(width) ++ " " ++ util.fmt_num(height), overflow: "hidden", marks>
+
+fn render_mark_raw(mark_type, data, ctx, mark_spec) {
     if (mark_type == "bar")
         (if (ctx.x_type == "quantitative" and (ctx.y_type == "nominal" or ctx.y_type == "ordinal"))
             mark.bar_horizontal(data, ctx, mark_spec) else mark.bar(data, ctx, mark_spec))
@@ -539,7 +612,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
     let bg = <rect width: width, height: height, fill: theme.background>;
 
     // plot group contents
-    let plot_children0 = [marks_el];
+    let plot_children0 = [if (spec.clip or theme.view_clip) clip_marks(marks_el, lay.plot_w, lay.plot_h) else marks_el];
     let plot_children1 = if (grid_el) [grid_el, *plot_children0] else plot_children0;
     let plot_children2 = if (x_axis_el) [*plot_children1, x_axis_el] else plot_children1;
     let plot_children = if (y_axis_el) [*plot_children2, y_axis_el] else plot_children2;
@@ -561,7 +634,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
     // legend
     let children = if (legend_el)
         [*children1,
-         <g transform: svg.translate(lay.legend_x, lay.legend_y), legend_el>]
+         if (legend_el.class == "legends") legend_el else <g transform: svg.translate(lay.legend_x, lay.legend_y), legend_el>]
     else children1;
 
     svg.svg_root(width, height, children, cfg.svg_attributes(theme))

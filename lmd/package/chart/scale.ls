@@ -6,6 +6,8 @@
 import util: .util
 import color: .color
 import parse: .parse
+import records: .records
+import calendar: .calendar
 
 // ============================================================
 // Scale constructors (return pure data maps)
@@ -58,11 +60,7 @@ pub fn ordinal_scale(categories, range_values) {
 
 // temporal scale: linear over unix milliseconds with temporal metadata
 pub fn temporal_scale(values, rlo, rhi) {
-    let unix_vals = values |> float(datetime(~).unix);
-    let lo = float(min(unix_vals));
-    let hi = float(max(unix_vals));
-    let nice = util.nice_domain(lo, hi);
-    { kind: "temporal", domain: [nice[0], nice[1]], 'range': [float(rlo), float(rhi)] }
+    configured_scale(values, rlo, rhi, "temporal")
 }
 
 // ============================================================
@@ -71,7 +69,7 @@ pub fn temporal_scale(values, rlo, rhi) {
 
 fn numeric_value(value, kind) float | error {
     if (kind == "temporal" and not (value is int or value is i64 or value is float))
-        float(datetime(value).unix)
+        calendar.timestamp(value)
     else float(value)
 }
 
@@ -96,8 +94,14 @@ pub fn scale_apply(sc, value) {
     ) else if (sc.kind == "ordinal") (
         let index = util.find_index(sc.domain, value),
         sc.range[index % len(sc.range)]
-    ) else if (sc.kind == "sequential-color") (
-        let fraction = util.inv_lerp(sc.domain[0], sc.domain[len(sc.domain) - 1], float(value)),
+    ) else if (sc.kind == "sequential-color" or sc.kind == "diverging-color") (
+        let v = float(value),
+        let d = sc.domain,
+        let fraction = if (sc.kind == "diverging-color") (
+            if ((d[0] <= d[2] and v <= d[1]) or (d[0] > d[2] and v >= d[1]))
+                0.5 * util.inv_lerp(d[0], d[1], v)
+            else 0.5 + 0.5 * util.inv_lerp(d[1], d[2], v))
+            else util.inv_lerp(d[0], d[len(d) - 1], v),
         color.sequential_color(sc.scheme, if (sc.reverse) 1.0 - fraction else fraction)
     ) else if (sc.kind == "linear" or sc.kind == "log" or sc.kind == "sqrt" or
         sc.kind == "pow" or sc.kind == "temporal") (
@@ -131,10 +135,11 @@ pub fn scale_ticks(sc, count) {
         sc.domain
     } else if sc.kind == "ordinal" {
         sc.domain
-    } else if sc.kind == "sequential-color" {
-        util.nice_ticks(sc.domain[0], sc.domain[1], count)
+    } else if (sc.kind == "sequential-color" or sc.kind == "diverging-color") {
+        util.nice_ticks(sc.domain[0], sc.domain[len(sc.domain) - 1], count)
     } else if sc.kind == "temporal" {
-        util.nice_ticks(sc.domain[0], sc.domain[1], count)
+        calendar.ticks(sc.domain[0], sc.domain[len(sc.domain) - 1], count,
+            if (sc.timezone != null) sc.timezone else 0)
     } else {
         []
     }
@@ -169,6 +174,7 @@ pub fn configured_scale(values, rlo, rhi, default_kind, options = null, include_
     let raw_range = if (options and options.range != null) options.range else [rlo, rhi];
     let output_range = if (options and options.reverse) [raw_range[len(raw_range) - 1], raw_range[0]] else raw_range;
     let categorical = kind == "band" or kind == "point" or kind == "ordinal";
+    let zone = if (requested == "utc") 0 else calendar.offset(options);
     let domain = if (categorical) (
         if (explicit_domain != null) explicit_domain else util.unique_vals(values)
     ) else (
@@ -178,22 +184,29 @@ pub fn configured_scale(values, rlo, rhi, default_kind, options = null, include_
         let zero = if (options and options.zero != null) options.zero else include_zero,
         let lo = if (explicit_domain != null) numbers[0] else min(numbers),
         let hi = if (explicit_domain != null) numbers[len(numbers) - 1] else max(numbers),
-        let bounds = [if (zero and kind != "log") min([lo, 0.0]) else lo,
-            if (zero and kind != "log") max([hi, 0.0]) else hi],
+        let bounds = [if (zero and kind != "log" and kind != "temporal") min([lo, 0.0]) else lo,
+            if (zero and kind != "log" and kind != "temporal") max([hi, 0.0]) else hi],
         let nice = if (options and options.nice != null) options.nice
             else explicit_domain == null and kind != "log",
         let base = if (options and options.base != null) options.base else 10.0,
         let extended = if (nice and kind == "log")
             [base ** floor(math.log(bounds[0]) / math.log(base)), base ** ceil(math.log(bounds[1]) / math.log(base))]
+            else if (nice and kind == "temporal") calendar.nice_extent(bounds[0], bounds[1],
+                if (calendar.valid_offset(zone)) zone else 0)
             else if (nice) util.nice_domain(bounds[0], bounds[1]) else bounds,
-        [if (options and options.domain_min != null) numeric_value(options.domain_min, kind) else extended[0],
-            if (options and options.domain_max != null) numeric_value(options.domain_max, kind) else extended[1]]
+        let failure = util.first_error(numbers),
+        if (failure is error) failure else
+            [if (options and options.domain_min != null) numeric_value(options.domain_min, kind) else extended[0],
+                if (options and options.domain_max != null) numeric_value(options.domain_max, kind) else extended[1]]
     );
     let common = {kind: kind, domain: domain, range: output_range,
         clamp: options and options.clamp, round: options and options.round,
         base: if (options and options.base != null) options.base else 10.0,
+        timezone: zone,
         exponent: if (options and options.exponent != null) options.exponent else 1.0};
-    if (kind == "band" or kind == "point") {
+    if (domain is error) domain
+    else if (kind == "temporal" and not calendar.valid_offset(zone)) error("chart: invalid temporal timezone; use UTC offset minutes")
+    else if (kind == "band" or kind == "point") {
         let configured_padding = options and (options.padding != null or options.padding_inner != null or options.padding_outer != null);
         if (not configured_padding) {
             let result = if (kind == "band") band_scale(domain, output_range[0], output_range[1], 4.0)
@@ -228,9 +241,8 @@ pub fn position_scale(channel, data, rlo, rhi, mark_type, is_x, secondary = null
             else if (channel.dtype == "temporal") "temporal"
             else if (mark_type == "bar" or mark_type == "rect" or (mark_type == "boxplot" and is_x)) "band"
             else "point";
-        let sorted_values = if (channel.sort == "ascending") sort(util.unique_vals(all_values))
-            else if (channel.sort == "descending") sort(util.unique_vals(all_values), "desc")
-            else if (channel.sort is array) channel.sort else all_values;
+        let sorted_values = if (channel.sort != null and channel.field != null)
+            records.categories(data, channel.field, channel.sort) else all_values;
         let include_zero = if (channel.zero != null) channel.zero else mark_type == "bar";
         if (not parse.option_enabled(channel, "scale")) {kind: "identity", domain: [], range: [rlo, rhi]}
         else configured_scale(sorted_values, rlo, rhi, default_kind, channel.scale, include_zero)
@@ -253,14 +265,21 @@ pub fn infer_color_scale(channel, data) {
         else null;
 
     if (not parse.option_enabled(channel, "scale")) {kind: "identity", domain: [], range: []}
-    else if (explicit_domain and explicit_range)
-        ordinal_scale(explicit_domain, explicit_range)
     else if (data_type == "quantitative")
-        (let scheme = if (scheme_name) color.get_scheme(scheme_name) else color.blues,
-        let ext = if (explicit_domain != null) explicit_domain else if (len(values) > 0) util.extent(values) else [0, 1],
-        { kind: "sequential-color", domain: [ext[0], ext[len(ext) - 1]], scheme: scheme, reverse: channel.scale.reverse })
+        (let numeric = values |: util.finite_number(~),
+        let ext = if (explicit_domain != null) explicit_domain else if (len(numeric) > 0) util.extent(numeric) else [0, 1],
+        let lo = if (channel.scale.domain_min != null) channel.scale.domain_min else ext[0],
+        let hi = if (channel.scale.domain_max != null) channel.scale.domain_max else ext[len(ext) - 1],
+        let mid = if (channel.scale.domain_mid != null) channel.scale.domain_mid else if (len(ext) == 3) ext[1] else null,
+        let scheme = if (explicit_range != null) explicit_range else if (scheme_name) color.get_scheme(scheme_name)
+            else if (mid != null) color.red_blue_midpoint else color.blues,
+        if (mid != null and (not util.finite_number(mid) or mid <= min([lo, hi]) or mid >= max([lo, hi])))
+            error("chart: color domain_mid must lie inside the domain")
+        else {kind: if (mid != null) "diverging-color" else "sequential-color",
+            domain: if (mid != null) [lo, mid, hi] else [lo, hi], scheme: scheme, reverse: channel.scale.reverse})
     else
-        (let cats = if (explicit_domain != null) explicit_domain else util.unique_vals(values),
+        (let cats = if (explicit_domain != null) explicit_domain else records.categories(data, field_name, channel.sort),
         let scheme = if (scheme_name) color.get_scheme(scheme_name) else color.category10,
-        ordinal_scale(cats, if (channel.scale.reverse) reverse(scheme) else scheme))
+        let palette = if (explicit_range != null) explicit_range else scheme,
+        ordinal_scale(cats, if (channel.scale.reverse) reverse(palette) else palette))
 }

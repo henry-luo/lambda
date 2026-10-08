@@ -3,13 +3,14 @@
 
 import svg: .svg
 import scale: .scale
+import cfg: .config
 
 // ============================================================
 // Render all annotations from the annotation element
 // ============================================================
 
 pub fn render_annotations(annotation_el, x_scale, y_scale, plot_w, plot_h, theme) {
-    let count = len(annotation_el)
+    let count = len(content(annotation_el))
     let elements = [for (i in 0 to (count - 1),
                          let child = annotation_el[i]
                          where child != null)
@@ -26,7 +27,22 @@ fn render_one(note, x_scale, y_scale, plot_w, plot_h, theme) {
     let tag = name(note)
     if (tag == 'text_note') render_text_note(note, x_scale, y_scale, theme)
     else if (tag == 'rule_note') render_rule_note(note, x_scale, y_scale, plot_w, plot_h)
+    else if (tag == 'region_note') render_region_note(note, x_scale, y_scale, plot_w, plot_h)
     else null
+}
+
+// Missing bounds extend to the plot edge; min/abs also handle reversed scales.
+fn render_region_note(note, x_scale, y_scale, plot_w, plot_h) {
+    let x1 = if (note.x != null and x_scale != null) scale.scale_apply(x_scale, note.x) else 0.0;
+    let x2 = if (note.x2 != null and x_scale != null) scale.scale_apply(x_scale, note.x2) else plot_w;
+    let y1 = if (note.y != null and y_scale != null) scale.scale_apply(y_scale, note.y) else 0.0;
+    let y2 = if (note.y2 != null and y_scale != null) scale.scale_apply(y_scale, note.y2) else plot_h;
+    <rect class: "annotation-region", x: min([x1, x2]), y: min([y1, y2]),
+        width: abs(x2 - x1), height: abs(y2 - y1),
+        fill: if (note.color != null) note.color else "#edc948",
+        opacity: if (note.opacity != null) note.opacity else 0.2,
+        *:cfg.settings({stroke: note.stroke, 'stroke-width': note.stroke_width}),
+        if (note.text != null) <title note.text>>
 }
 
 // ============================================================

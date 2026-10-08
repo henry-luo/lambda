@@ -14,6 +14,9 @@ let aliases = {
     titleFontSize: "title_font_size", titleColor: "title_color", titlePadding: "title_padding",
     gridColor: "grid_color", gridWidth: "grid_width", gridDash: "grid_dash", domainColor: "domain_color",
     symbolSize: "symbol_size", symbolPadding: "symbol_padding", rowHeight: "row_height",
+    symbolType: "symbol_type", symbolFillColor: "symbol_fill_color", symbolStrokeColor: "symbol_stroke_color",
+    symbolStrokeWidth: "symbol_stroke_width", symbolOpacity: "symbol_opacity", columnPadding: "column_padding",
+    gradientLength: "gradient_length", gradientThickness: "gradient_thickness",
     ignorePeers: "ignore_peers"
 }
 
@@ -136,6 +139,7 @@ fn convert_transform(step) {
     else if (step.regression != null) {type: "regression", *:normalize(step),
         x: step.on, y: step.regression, r_squared_name: "rSquared"}
     else if (step.loess != null) {type: "loess", *:normalize(step), x: step.on, y: step.loess}
+    else if (step.timeUnit != null) {type: "timeunit", field: step.field, unit: step.timeUnit, as: step.as}
     else if (step.type != null) step
     else error("chart: unsupported Vega transform")
 }

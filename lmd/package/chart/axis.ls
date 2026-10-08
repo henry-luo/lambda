@@ -4,6 +4,7 @@
 import util: .util
 import svg: .svg
 import scale: .scale
+import calendar: .calendar
 
 // ============================================================
 // Default axis configuration
@@ -50,8 +51,9 @@ fn temporal_auto_format(lo_ms, hi_ms) {
 }
 
 fn format_tick_label(sc, tv, config = null) {
-    if (sc.kind == "temporal")
-        datetime(i64(tv)).format(if (config and config.format != null) config.format else temporal_auto_format(sc.domain[0], sc.domain[1]))
+    if (sc.kind == "temporal" or config.dtype == "temporal")
+        calendar.wall_time(tv, if (sc.timezone != null) sc.timezone else if (config.timezone != null) config.timezone else 0).format(
+            if (config and config.format != null) config.format else temporal_auto_format(sc.domain[0], sc.domain[1]))
     else util.format_value(tv, config.format)
 }
 
@@ -106,7 +108,10 @@ fn render_axis(sc, pw, ph, config, title_text, horizontal) {
             else null
         )] |: (~ != null);
         let title = if (cfg.title_enabled == false) null else if (cfg.title != null) cfg.title else title_text;
-        let title_position = if (horizontal) baseline + direction * (cfg.title_padding + cfg.title_font_size)
+        let title_clearance = if (horizontal and angle != 0)
+            max([cfg.title_padding + cfg.title_font_size, estimate_x_axis_height(cfg, false, sc) + cfg.title_font_size])
+            else cfg.title_padding + cfg.title_font_size;
+        let title_position = if (horizontal) baseline + direction * title_clearance
             else baseline + direction * (cfg.title_padding + cfg.label_font_size);
         let title_el = if (title) (
             if (horizontal) <text x: float(pw) / 2.0, y: title_position,
@@ -155,12 +160,17 @@ pub fn estimate_y_axis_width(sc, config) {
     let ticks = scale.scale_ticks(sc, cfg.tick_count);
     let label_lens = [for (tv in ticks) len(format_tick_label(sc, tv, cfg))];
     let max_label_len = if (len(label_lens) > 0) max(label_lens) else 3;
-    float(max_label_len) * 7.0 * float(cfg.label_font_size) / 11.0 + float(cfg.tick_size) + 10.0
+    let angle = util.deg_to_rad(if (cfg.label_angle != null) cfg.label_angle else 0.0);
+    abs(math.cos(angle)) * float(max_label_len) * 7.0 * float(cfg.label_font_size) / 11.0 +
+        abs(math.sin(angle)) * cfg.label_font_size + float(cfg.tick_size) + 10.0
 }
 
-pub fn estimate_x_axis_height(config, has_title: bool) {
+pub fn estimate_x_axis_height(config, has_title: bool, sc = null) {
     let cfg = merge_config(config);
-    let base = float(cfg.tick_size + cfg.label_font_size + 8);
+    let angle = util.deg_to_rad(if (cfg.label_angle != null) cfg.label_angle else 0.0);
+    let width = if (sc != null and cfg.labels != false)
+        max([0, for (value in tick_values(sc, cfg)) len(tick_label(sc, value, cfg))]) * cfg.label_font_size * 0.6 else 0.0;
+    let base = float(cfg.tick_size + 8) + abs(math.cos(angle)) * cfg.label_font_size + abs(math.sin(angle)) * width;
     if (has_title) base + float(cfg.title_font_size) + 8.0
     else base
 }

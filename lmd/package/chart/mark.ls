@@ -7,6 +7,8 @@ import svg: .svg
 import color: .color
 import scale: .scale
 import parse: .parse
+import cfg: .config
+import records: .records
 
 fn coordinate(ctx, channel_name, row, fallback = null) float | null | error {
     let channel = parse.channel_definition(parse.get_channel(ctx.encoding, channel_name), row);
@@ -39,8 +41,29 @@ fn tooltip(ctx, row) {
             [for (field in channel.fields) {field: field}] else [channel];
         <title join([for (field in fields)
             (if (len(fields) > 1) (if (field.title != null) field.title else field.field) ++ ": " else "") ++
-                util.format_value(parse.channel_value(field, row), field.format, field.dtype)], "\n")>
+                util.format_value(parse.channel_value(field, row), field.format,
+                    if (field._temporal) "temporal" else field.dtype, field.scale.timezone)], "\n")>
     }
+}
+
+// Composite parts use the same channel/mark cascade as primitive marks.
+fn style(ctx, row, options, defaults, linear = false) {
+    let fill = if (linear) defaults.fill else appearance(ctx, "color", row,
+        if (options.fill != null) options.fill else if (options.color != null) options.color else defaults.fill);
+    let stroke_fallback = if (options.stroke != null) options.stroke
+        else if (linear) appearance(ctx, "color", row, if (options.color != null) options.color else defaults.stroke)
+        else defaults.stroke;
+    cfg.settings({*:defaults, fill: fill,
+        opacity: appearance(ctx, "opacity", row, if (options.opacity != null) options.opacity else defaults.opacity),
+        stroke: appearance(ctx, "stroke", row, stroke_fallback),
+        'stroke-width': if (options.stroke_width != null) options.stroke_width else defaults["stroke-width"],
+        'stroke-dasharray': if (options.stroke_dash != null) options.stroke_dash else defaults["stroke-dasharray"]})
+}
+
+fn series(data, ctx, fallback) {
+    let field = if (ctx.detail_field != null) ctx.detail_field else ctx.color_field;
+    [for (partition in records.group_by(data, if (field != null) [field] else []))
+        {items: partition.rows, color: appearance(ctx, "color", partition.rows[0], fallback)}]
 }
 
 // ============================================================
@@ -95,7 +118,7 @@ pub fn bar(data, ctx, mark_config) {
         let bar_fill = appearance(ctx, "color", d, fill),
         let bar_opacity = appearance(ctx, "opacity", d, base_opacity),
         <rect x: x_final, y: y1_pos, width: bar_w, height: bar_h,
-            fill: bar_fill, opacity: bar_opacity, rx: rx,
+            *:style(ctx, d, mark_config, {fill: bar_fill, opacity: bar_opacity}), rx: rx,
             tooltip(ctx, d)>
     )];
 
@@ -122,7 +145,8 @@ pub fn bar_horizontal(data, ctx, mark_config) {
         let bar_h = if (y_scale.bandwidth) abs(y_scale.bandwidth) else 20.0,
         <rect x: min([x_pos, x_end]), y: if (y_scale.bandwidth < 0) y_pos - bar_h else y_pos,
               width: abs(x_pos - x_end), height: bar_h,
-              fill: bar_fill, opacity: appearance(ctx, "opacity", d, opacity), tooltip(ctx, d)>
+              *:style(ctx, d, mark_config, {fill: bar_fill, opacity: opacity}),
+              *:cfg.settings({rx: mark_config.corner_radius}), tooltip(ctx, d)>
     )];
 
     svg.group_class("marks bars-horizontal", bars)
@@ -145,18 +169,7 @@ pub fn line_mark(data, ctx, mark_config) {
     let opacity = if (mark_config and mark_config.opacity != null) mark_config.opacity else 1.0;
     let show_points = if (mark_config and mark_config.point) mark_config.point else false;
 
-    // group by detail field first, then color field
-    let group_field = if (detail_field) detail_field else color_field;
-    let series = if (group_field)
-        (let groups = util.unique_vals(data |> ~[group_field]),
-        [for (g in groups) (
-            let group_items = data |: ~[group_field] == g,
-            {
-                key: g,
-                items: group_items,
-                color: appearance(ctx, "color", group_items[0], stroke_color)
-            })])
-    else [{key: null, items: data, color: appearance(ctx, "color", data[0], stroke_color)}];
+    let series = series(data, ctx, stroke_color);
 
     let line_elements = [for (s in series) (
         let points = [for (d in s.items) (
@@ -165,13 +178,12 @@ pub fn line_mark(data, ctx, mark_config) {
             let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
             [x_pos + bw, y_pos])],
         let d = svg.line_path(points, mark_config.interpolate),
-        let line_el = <path d: d, fill: "none", stroke: appearance(ctx, "stroke", s.items[0], s.color),
-                            'stroke-width': stroke_w, opacity: appearance(ctx, "opacity", s.items[0], opacity),
-                            tooltip(ctx, s.items[0])>,
+        let line_el = <path d: d, *:style(ctx, s.items[0], mark_config,
+            {fill: "none", stroke: s.color, 'stroke-width': stroke_w, opacity: opacity}, true), tooltip(ctx, s.items[0])>,
         let point_els = if (show_points)
-            [for (p in points)
+            [for (index, p in points)
                 <circle cx: p[0], cy: p[1], r: 3, fill: s.color,
-                        stroke: "white", 'stroke-width': 1>]
+                        stroke: "white", 'stroke-width': 1, tooltip(ctx, s.items[index])>]
         else [],
         [line_el, *point_els]
     )];
@@ -198,18 +210,7 @@ pub fn area_mark(data, ctx, mark_config) {
     let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let opacity = if (mark_config and mark_config.opacity != null) mark_config.opacity else 0.5;
 
-    // group by detail field first, then color field
-    let group_field = if (detail_field) detail_field else color_field;
-    let series = if (group_field)
-        (let groups = util.unique_vals(data |> ~[group_field]),
-        [for (g in groups) (
-            let group_items = data |: ~[group_field] == g,
-            {
-                key: g,
-                items: group_items,
-                color: appearance(ctx, "color", group_items[0], fill_color)
-            })])
-    else [{key: null, items: data, color: appearance(ctx, "color", data[0], fill_color)}];
+    let series = series(data, ctx, fill_color);
 
     let area_elements = [for (s in series) (
         let top_points = [for (d in s.items) (
@@ -227,7 +228,8 @@ pub fn area_mark(data, ctx, mark_config) {
             else if (has_position(ctx, "y2")) coordinate(ctx, "y2", d) else plot_h,
             [x_pos + bw, y_bottom])],
         let d = svg.area_path(top_points, bottom_points, mark_config.interpolate),
-        <path d: d, fill: s.color, opacity: appearance(ctx, "opacity", s.items[0], opacity), stroke: "none", tooltip(ctx, s.items[0])>
+        <path d: d, *:style(ctx, s.items[0], mark_config, {fill: s.color, opacity: opacity, stroke: "none"}),
+            tooltip(ctx, s.items[0])>
     )];
 
     svg.group_class("marks areas", area_elements)
@@ -259,14 +261,10 @@ pub fn point_mark(data, ctx, mark_config) {
         let y_pos = coordinate(ctx, "y", d),
         let bw_x = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
         let bw_y = if (y_scale.bandwidth) y_scale.bandwidth / 2.0 else 0.0,
-        let pt_fill = appearance(ctx, "color", d, fill_color),
         let pt_size = appearance(ctx, "size", d, base_size),
-        let pt_opacity = appearance(ctx, "opacity", d, base_opacity),
         let shape = appearance(ctx, "shape", d, if (mark_config.shape != null) mark_config.shape else "circle"),
-        let stroke = appearance(ctx, "stroke", d, if (mark_config.stroke != null) mark_config.stroke else "white"),
         svg.symbol_mark(shape, x_pos + bw_x, y_pos + bw_y, pt_size,
-            {fill: pt_fill, opacity: pt_opacity, stroke: stroke,
-                'stroke-width': if (mark_config.stroke_width != null) mark_config.stroke_width else 0.5},
+            style(ctx, d, mark_config, {fill: fill_color, opacity: base_opacity, stroke: "white", 'stroke-width': 0.5}),
             [tooltip(ctx, d)])
     )];
 
@@ -307,7 +305,8 @@ pub fn arc_mark(data, ctx, mark_config) {
             scale.scale_apply(color_scale, a.datum[color_field])
         else color.pick_color(color.category10, a.index),
         let d = svg.arc_path(cx, cy, inner_radius, outer_radius, a.start - util.PI / 2.0, a.end - util.PI / 2.0),
-        <path d: d, fill: fill, opacity: opacity, stroke: "white", 'stroke-width': 1>
+        <path d: d, *:style(ctx, a.datum, mark_config, {fill: fill, opacity: opacity, stroke: "white", 'stroke-width': 1}),
+            tooltip(ctx, a.datum)>
     )];
 
     svg.group_class("marks arcs", arcs)
@@ -331,10 +330,14 @@ pub fn text_mark(data, ctx, mark_config) {
         let y_pos = coordinate(ctx, "y", d),
         let bw_x = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
         let label = util.format_value(parse.channel_value(ctx.encoding.text, d, d[y_field]),
-            ctx.encoding.text.format, ctx.encoding.text.dtype),
+            ctx.encoding.text.format, if (ctx.encoding.text._temporal) "temporal" else ctx.encoding.text.dtype,
+            ctx.encoding.text.scale.timezone),
         <text x: x_pos + bw_x, y: y_pos - 4.0,
-              'text-anchor': "middle", 'font-size': font_size, fill: appearance(ctx, "color", d, fill_color),
-            label
+              'text-anchor': if (mark_config.align == "left") "start" else if (mark_config.align == "right") "end" else "middle",
+              'font-size': appearance(ctx, "size", d, font_size),
+              *:cfg.settings({'font-family': mark_config.font_family, 'font-weight': mark_config.font_weight}),
+              *:style(ctx, d, mark_config, {fill: fill_color}),
+            label; tooltip(ctx, d)
         >
     )];
 
@@ -369,7 +372,8 @@ pub fn rule_mark(data, ctx, mark_config) {
         let base = svg.line(x_start + shifted_x, y_start, x_end + shifted_x, y_end,
             appearance(ctx, "stroke", d, appearance(ctx, "color", d, stroke_color)), stroke_w),
         let attrs = if (dash != null) {*:map(base), 'stroke-dasharray': dash} else map(base),
-        if (has_x or has_y) <line *:attrs, tooltip(ctx, d)> else null
+        if (has_x or has_y) <line *:attrs,
+            *:style(ctx, d, mark_config, {stroke: stroke_color, 'stroke-width': stroke_w}, true), tooltip(ctx, d)> else null
     )] |: (~ != null);
 
     svg.group_class("marks rules", rules)
@@ -394,7 +398,8 @@ pub fn tick_mark(data, ctx, mark_config) {
         let x_pos = coordinate(ctx, "x", d),
         let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
         let y_pos = if (y_field) coordinate(ctx, "y", d) else plot_h,
-        svg.line(x_pos + bw, y_pos - half, x_pos + bw, y_pos + half, stroke_color, stroke_w)
+        <line x1: x_pos + bw, y1: y_pos - half, x2: x_pos + bw, y2: y_pos + half,
+            *:style(ctx, d, mark_config, {stroke: stroke_color, 'stroke-width': stroke_w}, true), tooltip(ctx, d)>
     )];
 
     svg.group_class("marks ticks", ticks)
@@ -434,34 +439,35 @@ pub fn boxplot_mark(data, ctx, mark_config) {
         let bw = if (x_scale.bandwidth) x_scale.bandwidth else 30.0,
         let cx = x_pos + bw / 2.0,
         let box_x = cx - box_w / 2.0,
-        let fill = if (color_scale and color_field)
-            scale.scale_apply(color_scale, g)
-        else fill_color,
+        let fill = appearance(ctx, "color", items[0], fill_color),
+        let summary = {*:parse.attributes(items[0]), _q1: q1, _q3: q3, _median: med,
+            _min: whisker_lo, _max: whisker_hi},
+        let line_attrs = style(ctx, summary, mark_config, {stroke: "#333", 'stroke-width': 1}, true),
         let y_q1 = float(scale.scale_apply(y_scale, q1)),
         let y_q3 = float(scale.scale_apply(y_scale, q3)),
         let y_med = float(scale.scale_apply(y_scale, med)),
         let y_wlo = float(scale.scale_apply(y_scale, whisker_lo)),
         let y_whi = float(scale.scale_apply(y_scale, whisker_hi)),
         // box rect (q1 to q3)
-        let box_rect = <rect x: box_x, y: y_q3, width: box_w, height: y_q1 - y_q3,
-                             fill: fill, opacity: 0.8, stroke: "#333", 'stroke-width': 1>,
+        let box_rect = <rect x: box_x, y: min([y_q1, y_q3]), width: box_w, height: abs(y_q1 - y_q3),
+            *:style(ctx, summary, mark_config, {fill: fill, opacity: 0.8, stroke: "#333", 'stroke-width': 1}), tooltip(ctx, summary)>,
         // median line
         let med_line = <line x1: box_x, y1: y_med, x2: box_x + box_w, y2: y_med,
-                             stroke: "#333", 'stroke-width': 2>,
+                             *:style(ctx, summary, mark_config, {stroke: "#333", 'stroke-width': 2}, true), tooltip(ctx, summary)>,
         // lower whisker
         let wlo_line = <line x1: cx, y1: y_q1, x2: cx, y2: y_wlo,
-                             stroke: "#333", 'stroke-width': 1>,
+                             *:line_attrs, tooltip(ctx, summary)>,
         let wlo_cap = <line x1: cx - box_w / 4.0, y1: y_wlo, x2: cx + box_w / 4.0, y2: y_wlo,
-                            stroke: "#333", 'stroke-width': 1>,
+                            *:line_attrs, tooltip(ctx, summary)>,
         // upper whisker
         let whi_line = <line x1: cx, y1: y_q3, x2: cx, y2: y_whi,
-                             stroke: "#333", 'stroke-width': 1>,
+                             *:line_attrs, tooltip(ctx, summary)>,
         let whi_cap = <line x1: cx - box_w / 4.0, y1: y_whi, x2: cx + box_w / 4.0, y2: y_whi,
-                            stroke: "#333", 'stroke-width': 1>,
+                            *:line_attrs, tooltip(ctx, summary)>,
         // outlier circles
-        let outlier_els = [for (o in outliers)
-            <circle cx: cx, cy: float(scale.scale_apply(y_scale, o)), r: 3,
-                    fill: "none", stroke: "#333", 'stroke-width': 1>],
+        let outlier_els = [for (row in items where row[y_field] < lo_fence or row[y_field] > hi_fence)
+            <circle cx: cx, cy: float(scale.scale_apply(y_scale, row[y_field])), r: 3,
+                fill: "none", *:style(ctx, row, mark_config, {stroke: "#333", 'stroke-width': 1}, true), tooltip(ctx, row)>],
         [wlo_line, wlo_cap, whi_line, whi_cap, box_rect, med_line, *outlier_els]
     )];
 
@@ -491,12 +497,12 @@ pub fn errorbar_mark(data, ctx, mark_config) {
         let y_hi = if (y2_field)
             coordinate(ctx, "y2", d)
         else y_lo,
-        let stem = <line x1: cx, y1: y_lo, x2: cx, y2: y_hi,
-                         stroke: stroke_color, 'stroke-width': stroke_w>,
+        let attrs = style(ctx, d, mark_config, {stroke: stroke_color, 'stroke-width': stroke_w}, true),
+        let stem = <line x1: cx, y1: y_lo, x2: cx, y2: y_hi, *:attrs, tooltip(ctx, d)>,
         let cap_lo = <line x1: cx - cap_w, y1: y_lo, x2: cx + cap_w, y2: y_lo,
-                           stroke: stroke_color, 'stroke-width': stroke_w>,
+                           *:attrs, tooltip(ctx, d)>,
         let cap_hi = <line x1: cx - cap_w, y1: y_hi, x2: cx + cap_w, y2: y_hi,
-                           stroke: stroke_color, 'stroke-width': stroke_w>,
+                           *:attrs, tooltip(ctx, d)>,
         [stem, cap_lo, cap_hi]
     )];
 
@@ -509,31 +515,12 @@ pub fn errorbar_mark(data, ctx, mark_config) {
 // ============================================================
 
 pub fn errorband_mark(data, ctx, mark_config) {
-    let x_scale = ctx.x_scale;
-    let y_scale = ctx.y_scale;
-    let x_field = ctx.x_field;
-    let y_field = ctx.y_field;
-    let y2_field = if (ctx.y2_field) ctx.y2_field else null;
-    let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
-    let opacity = if (mark_config and mark_config.opacity != null) mark_config.opacity else 0.3;
-
-    let top_points = [for (d in data) (
-        let x_pos = coordinate(ctx, "x", d),
-        let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
-        let y_pos = coordinate(ctx, "y", d),
-        [x_pos + bw, y_pos])];
-
-    let bottom_points = if (y2_field)
-        [for (d in data) (
-            let x_pos = coordinate(ctx, "x", d),
-            let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
-            let y_pos = coordinate(ctx, "y2", d),
-            [x_pos + bw, y_pos])]
-    else top_points;
-
-    let d = svg.area_path(top_points, bottom_points);
-    let band = <path d: d, fill: fill_color, opacity: opacity, stroke: "none">;
-    svg.group_class("marks errorbands", [band])
+    let secondary = if (ctx.encoding.y2 != null) ctx.encoding.y2 else ctx.encoding.y;
+    let band_context = {*:ctx, y2_field: if (ctx.y2_field != null) ctx.y2_field else ctx.y_field,
+        encoding: {*:parse.attributes(ctx.encoding), y2: secondary}};
+    let result = area_mark(data, band_context, {*:mark_config,
+        opacity: if (mark_config.opacity != null) mark_config.opacity else 0.3});
+    svg.group_class("marks errorbands", content(result))
 }
 
 // ============================================================
@@ -558,11 +545,8 @@ pub fn rect_mark(data, ctx, mark_config) {
         let w = abs(x_end - x_pos),
         let h = abs(y_end - y_pos),
         let rect_y = min([y_pos, y_end]),
-        let rect_fill = appearance(ctx, "color", d, fill_color),
         <rect x: min([x_pos, x_end]), y: rect_y, width: w, height: h,
-              fill: rect_fill, opacity: appearance(ctx, "opacity", d, opacity),
-              stroke: appearance(ctx, "stroke", d, if (mark_config.stroke != null) mark_config.stroke else "white"),
-              'stroke-width': if (mark_config.stroke_width != null) mark_config.stroke_width else 0.5,
+              *:style(ctx, d, mark_config, {fill: fill_color, opacity: opacity, stroke: "white", 'stroke-width': 0.5}),
               tooltip(ctx, d)>
     )];
 

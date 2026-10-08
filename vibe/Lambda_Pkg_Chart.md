@@ -383,7 +383,17 @@ power exponent. Native scale maps use `domain`, `range`, `zero`, `nice`,
 `base`, and `exponent`. A channel `value` is a visual constant (pixels for
 position); a `datum` participates in the data scale. `scale: null` or `false`
 uses values directly. Categorical sort may be ascending, descending, or an
-explicit domain-order array.
+explicit domain-order array. A sort map `{field, op, order}` orders categories
+by an aggregate of another field; `op` defaults to `sum`. Ties retain first
+appearance (S6.2.3), and the order is resolved before encoding aggregation
+can remove the sort field.
+
+Temporal scales use calendar-aligned millisecond, second, minute, hour, day,
+week, month, or year ticks. Month and year boundaries follow the calendar,
+including leap years. `scale.timezone` is a fixed UTC offset in minutes,
+defaulting to zero; `scale.type: "utc"` denotes UTC. Input timestamps with
+offsets are placed by their instant. Named time zones and daylight-saving
+transitions remain outside this contract (§10).
 
 ### Color
 
@@ -391,11 +401,19 @@ Categorical color maps discrete values to a palette; quantitative color maps a
 numeric extent through a sequential palette. An explicit color domain/range
 pair assigns chosen colors to chosen categories.
 
-Current named palettes include `category10` (the default categorical palette,
-Tableau 10), `category20`, `set1`, `pastel1`, `dark2`, `blues`, `greens`, `reds`,
-`oranges`, `purples`, `greys`, `red_blue`, and `spectral`. Quantitative color
-defaults to `blues`. A diverging palette name alone does not establish an
-explicit midpoint-aware diverging scale; that extension remains outstanding.
+Named palettes include `category10` (the default categorical palette,
+Tableau 10), `category20`, `set1`, `set2`, `pastel1`, `dark2`, `blues`, `greens`,
+`reds`, `oranges`, `purples`, `greys`, `red_blue`, `spectral`, `viridis`,
+`plasma`, `inferno`, and `magma`. Quantitative color defaults to `blues`.
+Palette mapping selects the nearest palette entry.
+
+A quantitative `scale.domain_mid` or a three-value domain specifies a
+diverging scale. The two sides map separately to the lower and upper halves
+of the palette, so an asymmetric domain still places its explicit midpoint
+at the palette center. The midpoint must lie strictly inside the domain.
+The default diverging palette is `red_blue_midpoint`, whose center is neutral.
+Explicit ranges and reversal work for quantitative and categorical color.
+This follows the [Vega-Lite midpoint model](https://vega.github.io/vega-lite/docs/scale.html#domain).
 
 Static conditions refine a channel's fallback definition per record. A
 condition may supply a field predicate or a pure Lambda `test` callback
@@ -425,6 +443,7 @@ question from filtering the aggregate result.
 | `density` | `field`, optional `groupby`, `bandwidth`, `extent`, `steps`, `as`, `counts`, `cumulative`, `resolve`; emit sampled Gaussian density or cumulative probability records |
 | `regression` | `x`, `y`, optional `groupby`, `method`, `order`, `extent`, `steps`, `as`, `params`; emit fitted trend records or model parameters |
 | `loess` | `x`, `y`, optional `groupby`, `bandwidth`, `as`; emit a locally weighted trend at each distinct observed predictor value |
+| `timeunit` | `field`, `unit`, `as`, optional fixed-offset `timezone`; add a calendar-grouping field while retaining the source field |
 
 Aggregate operations are `count`, `sum`, `mean`/`average`, `median`, `min`,
 `max`, `distinct`, `q1`, `q3`, `stdev`, `variance`, `valid`, and `missing`.
@@ -439,6 +458,16 @@ Encoding-level binning accepts `true` or a map with `step`/`maxbins`.
 Encoding-level aggregation applies the listed aggregate operations, grouping
 by the other encoded fields and any facet partition fields. The histogram
 shorthand retains discrete bin labels and counts.
+
+`time_unit` on an encoding performs calendar grouping before aggregation.
+Chronological units include `year`, `yearquarter`, `yearmonth`, and
+`yearmonthdate`, with optional `hours`, `minutes`, and `seconds` suffixes.
+Cyclic units include `quarter`, `month`, `monthdate`, `date`, `day`/`weekday`,
+`hours`, `minutes`, and `seconds`, and supported adjacent time combinations.
+Cyclic units use a canonical leap year; weekdays run Sunday through Saturday.
+An `utc` prefix selects UTC; a map `{unit, timezone}` selects a fixed offset.
+Group keys are timestamps, and default labels describe the selected unit.
+Unsupported units and invalid offsets return value errors (S7.4.1).
 
 Sorting follows Lambda's exact total order and stability contracts
 (S6.2.2v3–S6.2.3). Input order defines the sequence of connected line/area
@@ -531,7 +560,16 @@ outstanding (§10).
 
 Layers support combinations such as line plus point, an uncertainty band plus
 line, or candlestick bodies plus whiskers. Shared scales must cover the values
-shown by the layers rather than implying that different ranges are comparable.
+shown by the layers, including both stack endpoints. Each layer applies the
+same ordering and stacking policy as a single view.
+
+`resolve: {scale: {y: "independent"}}` gives each layer its own y scale; x,
+color, size, and shape can likewise be independent. Independent position
+scales have separate axes, alternating sides by default; explicit axis
+orientation is honored. Repeated axes on one side receive separate space.
+`resolve.axis` and `resolve.legend` can request independent guides while
+retaining shared scales. Full resolution across nested view boundaries remains
+outstanding (§10).
 
 For a facet, the chart's width and height describe each cell. The outer view
 includes the cell grid, headers, and spacing. The intended comparison model
@@ -556,17 +594,31 @@ their leaves in the shared plot.
 Axes provide a domain line, ticks, labels, and optional field titles.
 Per-channel `axis` settings control orientation, domain/tick/label visibility,
 explicit `values`, `tick_count`, label angle/limit/overlap, formatting,
-typography, and title. `axis: null` or `false` suppresses the guide. Fixed
-numeric formats include `.2f` and `.1%`; temporal labels accept datetime
-format strings. Calendar-aligned temporal ticks remain outstanding (§10).
+typography, and title. `axis: null` or `false` suppresses the guide. Rotated
+labels contribute their estimated bounds to the axis margins. Temporal labels
+accept datetime format strings; `hh`/`h` use 24-hour time and `HH` uses
+12-hour time, following the [datetime contract](Lambda_Type_Datetime.md#formatting).
+`tick_count: {interval: "month", step: 1}` requests an explicit calendar interval.
+
+Numeric formats shared by axes, legends, text, and tooltips include fixed-point
+`f`, percentage `%`, scientific `e`, significant-digit `g`/`r`, SI-prefix `s`,
+and integer `d`. Examples are `,.2f`, `.3e`, `.3g`, and `.3~s`. Supported
+modifiers are grouping `,`, a positive sign `+` or leading space, currency `$`,
+parenthesized negatives `(`, and fractional-zero trimming `~`. This is a
+bounded subset of [D3 numeric formats](https://d3js.org/d3-format), not its
+full alignment, padding, locale, or alternate-base grammar.
 
 Categorical color legends associate labels with symbols; quantitative color
 uses a continuous-color bar and endpoint labels. A channel's `legend` map
-sets typography and title; Cartesian views support placement at `left`,
+sets typography and title; Cartesian and arc views support placement at `left`,
 `right`, `top`, or `bottom`;
 `legend: null` or `false` suppresses it. Horizontal grids can be requested
 through `axis_grid: true`; channel axis settings can request or suppress grids.
-Size and shape legends and broader legend layout controls remain outstanding.
+Size and shape legends use the marks' actual scale mappings. Multiple guides
+reserve separate space. Symbol legends accept `direction`, `columns`,
+`column_padding`, explicit `values`, `format`, `symbol_type`, symbol size,
+fill/stroke colors, stroke width, and opacity. Continuous legends support
+horizontal or vertical direction, `gradient_length`, and `gradient_thickness`.
 
 Configuration supplies background, typography, mark, axis, grid, legend,
 and title defaults. Presets are `light`, `dark`, `minimal`, and `presentation`;
@@ -583,12 +635,23 @@ The current native form is `<annotation>` containing:
 - `<text_note>` with `x`/`y` or plot-local `px`/`py`, `text`, and optional color,
   font size, anchor, and `dx`/`dy` offsets.
 - `<rule_note>` with `x` or `y`, color, stroke width, and optional dash pattern.
+- `<region_note>` with optional `x`/`x2` and `y`/`y2` bounds, color, opacity,
+  stroke, and hover-title `text`. Omitted bounds extend to the plot edges.
 
-A `tooltip` channel supplies SVG hover titles for bars, points, rectangles,
-rules, lines, and areas. Native `fields: ["name", "value"]` lists several
+A `tooltip` channel supplies SVG hover titles for primitive marks and the
+parts of arc, boxplot, errorbar, and errorband marks. Native
+`fields: ["name", "value"]` lists several
 fields; Vega-Lite tooltip arrays can specify per-field titles and formats.
-Text marks use the text channel's constant/field value and format. Wider
-coverage across composite marks remains outstanding.
+Text marks use the text channel's constant/field value and format. Composite
+parts inherit color, opacity, stroke, and stroke width through the same
+cascade as primitive marks. Connected paths use their series' first record
+for appearance and tooltip content. Box summaries expose `_q1`, `_q3`,
+`_median`, `_min`, and `_max`; outlier titles use the original observation.
+Error bands group by detail or color like ordinary areas.
+
+`clip: true` on a chart or mark confines plotted content to the plot rectangle;
+axes, legends, and titles retain their own space. Configuration may set
+`view: {clip: true}`.
 
 The output is an ordinary SVG element tree with dimensions and a `viewBox`.
 Rendering conceptually resolves data and transforms, derives scales and layout,
@@ -726,8 +789,11 @@ encoding aggregation/binning, multi-field flattening, horizontal and ranged
 marks, point symbols, static predicates, shared facet domains, repeat color
 consistency, basic guide controls, continuous-color legends, theme cascading,
 window calculations, lookup joins, density estimates, fitted trends, and
-waterfall composition are implemented. Nested layer templates and inherited
-composition transforms are also supported. The following gaps remain. These are feature
+waterfall composition are implemented. Independent layer scales, layered
+stack extents, size/shape legends, arc-legend placement, aggregate categorical
+sorting, broader numeric formats, midpoint-aware color, calendar ticks,
+time-unit grouping, composite styles/tooltips, shaded regions, and plot
+clipping are also supported. The following gaps remain. These are feature
 contracts and proposal boundaries, not an implementation roadmap.
 
 ### Completion of the existing chart design
@@ -735,14 +801,12 @@ contracts and proposal boundaries, not an implementation roadmap.
 | Area | Remaining capability |
 |---|---|
 | Vega-Lite compatibility | Vega expression-string evaluation, fuller condition/transform conversion, and complete inheritance and resolution controls across nested compositions; full Vega-Lite conformance is not promised |
-| Encoding and formatting | Aggregate-based categorical sort definitions; wider numeric formatting beyond fixed-point/percentage formats; uniform style and condition coverage across text, arcs, and composite marks |
-| Temporal analysis | Calendar-aligned ticks, UTC/time-zone handling, and time-unit grouping such as year, year-month, weekday, and hour |
-| Stack control | Richer stream-graph presentation beyond centered stacks; consistent stacking and shared stack extents in layered charts |
-| Composition | Independent layer-scale resolution and full guide/config resolution across nested views |
-| Guides | Arc-legend placement; size/shape legends; broader legend direction/columns/symbol controls; comprehensive label collision handling and rotated-label margin measurement |
-| Highlighting and annotations | Vega expression-string conditions, tooltip coverage for every composite mark, and shaded-region annotations |
-| SVG presentation | Integrated gradient fills, radial gradients, hatch patterns, and plot clipping; continuous-color legend bars do not imply this broader fill contract |
-| Color | Explicit midpoint-aware diverging scales and the wider proposed palette set, including viridis/plasma/inferno/magma and additional categorical schemes |
+| Temporal analysis | Named time zones and daylight-saving-aware calendar intervals |
+| Stack control | Richer stream-graph presentation beyond centered stacks |
+| Composition | Full scale/guide/config resolution across nested view boundaries |
+| Guides | Comprehensive label collision handling and font-accurate label measurement |
+| Highlighting | Vega expression-string conditions |
+| SVG presentation | Integrated gradient fills, radial gradients, and hatch patterns; continuous-color legend bars do not imply this broader fill contract |
 | Responsive sizing | Container-driven or automatic dimensions and aspect-ratio sizing beyond scaling a fixed SVG `viewBox` |
 
 ### Proposed specialized extensions

@@ -87,6 +87,8 @@ pub fn svg_attributes(theme) => if (theme.font != null) {'font-family': theme.fo
 pub fn axis_config(theme, channel = null) {
     {*:prefixed(theme, "axis_"), *:settings(channel.axis),
         format: if (channel.axis and channel.axis.format != null) channel.axis.format else channel.format,
+        dtype: if (channel._temporal) "temporal" else channel.dtype,
+        timezone: channel.scale.timezone,
         title_enabled: not parse.has_attribute(channel.axis, "title") or channel.axis.title != null,
         enabled: channel == null or parse.option_enabled(channel, "axis")}
 }

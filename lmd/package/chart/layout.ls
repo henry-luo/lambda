@@ -13,7 +13,7 @@ import cfg: .config
 // compute the layout geometry for a chart
 // spec: parsed chart spec map
 // returns: {plot_x, plot_y, plot_w, plot_h, legend_x, legend_y, total_w, total_h}
-pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_categories) {
+pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_categories, guides = null, axes = null) {
     let padding = spec.padding;
     let width = float(spec.width);
     let height = float(spec.height);
@@ -34,17 +34,25 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
 
     let y_axis_w = if (y_scale and y_cfg.enabled and y_scale.kind != "identity") axis.estimate_y_axis_width(y_scale, y_cfg) else 0.0;
     let x_axis_h = if (x_scale and x_cfg.enabled and x_scale.kind != "identity")
-        axis.estimate_x_axis_height(x_cfg, x_title != null and x_cfg.title_enabled) else 0.0;
+        axis.estimate_x_axis_height(x_cfg, x_title != null and x_cfg.title_enabled, x_scale) else 0.0;
     let legend_cfg = cfg.legend_config(theme, enc.color);
     let orient = if (legend_cfg.orient != null) legend_cfg.orient else "right";
     let legend_w = if (has_color_legend and color_categories != null) leg.legend_width(color_categories, legend_cfg) + 20.0 else 0.0;
     let legend_h = if (has_color_legend and color_categories != null)
         (if (enc.color.dtype == "quantitative") 150.0 else leg.legend_height(color_categories, legend_cfg, true)) + 20.0 else 0.0;
-    let left_margin = float(padding.left) + (if (y_cfg.orient == "right") 0.0 else y_axis_w) + (if (orient == "left") legend_w else 0.0);
-    let bottom_margin = float(padding.bottom) + (if (x_cfg.orient == "top") 0.0 else x_axis_h) + (if (orient == "bottom") legend_h else 0.0);
+    let left_guides = guide_space(guides, "left", true, if (orient == "left") legend_w else 0.0);
+    let right_guides = guide_space(guides, "right", true, if (orient == "right") legend_w else 0.0);
+    let top_guides = guide_space(guides, "top", false, if (orient == "top") legend_h else 0.0);
+    let bottom_guides = guide_space(guides, "bottom", false, if (orient == "bottom") legend_h else 0.0);
+    let left_axes = axis_space(axes, "left", if (y_cfg.orient == "right") 0.0 else y_axis_w);
+    let right_axes = axis_space(axes, "right", if (y_cfg.orient == "right") y_axis_w else 0.0);
+    let top_axes = axis_space(axes, "top", if (x_cfg.orient == "top") x_axis_h else 0.0);
+    let bottom_axes = axis_space(axes, "bottom", if (x_cfg.orient == "top") 0.0 else x_axis_h);
+    let left_margin = float(padding.left) + left_axes + left_guides;
+    let bottom_margin = float(padding.bottom) + bottom_axes + bottom_guides;
     let title_h = if (spec.title) 24.0 else 0.0;
-    let top_margin = float(padding.top) + title_h + (if (x_cfg.orient == "top") x_axis_h else 0.0) + (if (orient == "top") legend_h else 0.0);
-    let right_margin = float(padding.right) + (if (y_cfg.orient == "right") y_axis_w else 0.0) + (if (orient == "right") legend_w else 0.0);
+    let top_margin = float(padding.top) + title_h + top_axes + top_guides;
+    let right_margin = float(padding.right) + right_axes + right_guides;
 
     // plot area
     let plot_x = left_margin;
@@ -57,9 +65,16 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
     let plot_h = max([plot_h_raw, min_plot]);
 
     // legend position
-    let legend_x = if (orient == "left") float(padding.left)
+    let positioned = [for (index, guide in guides) (
+        let side = guide.orient,
+        let offset = sum([for (prior in slice(guides, 0, index) where prior.orient == side) prior.height + 20.0]),
+        {*:guide, x: if (side == "left") float(padding.left)
+            else if (side == "top" or side == "bottom") plot_x else plot_x + plot_w + right_axes + 20.0,
+            y: (if (side == "top") float(padding.top) + title_h
+                else if (side == "bottom") plot_y + plot_h + bottom_axes + 20.0 else plot_y) + offset})];
+    let legend_x = if (len(positioned) > 0) positioned[0].x else if (orient == "left") float(padding.left)
         else if (orient == "top" or orient == "bottom") plot_x else plot_x + plot_w + 20.0;
-    let legend_y = if (orient == "top") float(padding.top) + title_h
+    let legend_y = if (len(positioned) > 0) positioned[0].y else if (orient == "top") float(padding.top) + title_h
         else if (orient == "bottom") plot_y + plot_h + x_axis_h + 20.0 else plot_y;
 
     {
@@ -73,47 +88,35 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
         right_margin: right_margin,
         legend_x: legend_x,
         legend_y: legend_y,
+        guides: positioned,
         title_y: if (spec.title) float(padding.top) + 16.0 else 0.0,
         total_w: width,
         total_h: height
     }
 }
 
+fn guide_space(guides, orient, width, fallback) {
+    if (guides == null) fallback
+    else {
+        let same_side = guides |: ~.orient == orient;
+        if (len(same_side) == 0) 0.0
+        else if (width) max(same_side |> ~.width) + 20.0
+        else sum(same_side |> (~.height + 20.0))
+    }
+}
+
+fn axis_space(axes, orient, fallback) => if (axes == null) fallback
+    else sum([for (guide in axes where guide.orient == orient) guide.space])
+
 // ============================================================
 // Layout for arc (pie/donut) charts — centered
 // ============================================================
 
-pub fn compute_arc_layout(spec, has_color_legend: bool, color_categories) {
-    let padding = spec.padding;
-    let width = float(spec.width);
-    let height = float(spec.height);
-    let title_h = if (spec.title) 24.0 else 0.0;
-
-    // legend space
-    let legend_w = if (has_color_legend and color_categories)
-        leg.legend_width(color_categories, null) + 20.0
-    else 0.0;
-
-    let avail_w = width - float(padding.left) - float(padding.right) - legend_w;
-    let avail_h = height - float(padding.top) - float(padding.bottom) - title_h;
-    let radius = min([avail_w, avail_h]) / 2.0;
-
-    let cx = float(padding.left) + avail_w / 2.0;
-    let cy = float(padding.top) + title_h + avail_h / 2.0;
-
-    let legend_x = float(padding.left) + avail_w + 20.0;
-    let legend_y = float(padding.top) + title_h;
-
-    {
-        cx: cx,
-        cy: cy,
-        radius: radius,
-        title_y: if (spec.title) float(padding.top) + 16.0 else 0.0,
-        legend_x: legend_x,
-        legend_y: legend_y,
-        total_w: width,
-        total_h: height
-    }
+pub fn compute_arc_layout(spec, has_color_legend: bool, color_categories, guides = null) {
+    let geometry = compute_layout(spec, null, null, has_color_legend, color_categories, guides);
+    {*:geometry, cx: geometry.plot_x + geometry.plot_w / 2.0,
+        cy: geometry.plot_y + geometry.plot_h / 2.0,
+        radius: min([geometry.plot_w, geometry.plot_h]) / 2.0}
 }
 
 // ============================================================

@@ -59,6 +59,27 @@ pub let spectral = ["#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#e6f598", "#abd
 // ============================================================
 pub let default_color = "#4e79a7"
 
+// Sampled published d3-scale-chromatic ramps; endpoints and center are retained.
+// https://github.com/d3/d3-scale-chromatic/blob/main/src/sequential-multi/viridis.js
+pub let viridis = [
+    "#440154", "#470d60", "#48186a", "#482374", "#472d7b", "#453781", "#424086", "#3e4989", "#3b528b", "#375b8d", "#33638d", "#2f6b8e", "#2c728e", "#297a8e", "#26828e", "#23898e", "#21918c", "#1f978b", "#1f9f88", "#21a685", "#27ad81", "#31b57b", "#3dbc74", "#4cc26c", "#5cc863", "#6ece58", "#81d34d", "#95d840", "#aadc32", "#c0df25", "#d5e21a", "#eae51a", "#fde725"
+]
+
+pub let magma = [
+    "#000004", "#030312", "#0a0822", "#130d34", "#1d1147", "#29115a", "#36106b", "#440f76", "#51127c", "#5d177f", "#6a1c81", "#762181", "#832681", "#902a81", "#9c2e7f", "#aa337d", "#b73779", "#c23b75", "#cf4070", "#db476a", "#e55064", "#ee5b5e", "#f4695c", "#f9785d", "#fb8761", "#fd9668", "#fea571", "#feb47b", "#fec287", "#fed194", "#fde0a1", "#fceeb0", "#fcfdbf"
+]
+
+pub let inferno = [
+    "#000004", "#040312", "#0b0724", "#150b37", "#210c4a", "#2f0a5b", "#3d0965", "#4a0c6b", "#57106e", "#64156e", "#71196e", "#7d1e6d", "#8a226a", "#972766", "#a32c61", "#b0315b", "#bc3754", "#c63d4d", "#d04545", "#da4e3c", "#e35933", "#eb6429", "#f1711f", "#f67e14", "#f98c0a", "#fb9b06", "#fcaa0f", "#fbba1f", "#f9c932", "#f5d949", "#f2e865", "#f3f586", "#fcffa4"
+]
+
+pub let plasma = [
+    "#0d0887", "#220690", "#310597", "#3f049c", "#4c02a1", "#5901a5", "#6600a7", "#7201a8", "#7e03a8", "#8a09a5", "#9511a1", "#a01a9c", "#aa2395", "#b32c8e", "#bc3587", "#c43e7f", "#cc4778", "#d24f71", "#d9586a", "#df6263", "#e56b5d", "#eb7556", "#f07f4f", "#f48948", "#f89441", "#fb9f3a", "#fdab33", "#feb72d", "#fdc328", "#fcd025", "#f9dd25", "#f5eb27", "#f0f921"
+]
+
+pub let set2 = ["#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3", "#a6d854", "#ffd92f", "#e5c494", "#b3b3b3"]
+pub let red_blue_midpoint = ["#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#f7f7f7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac"]
+
 // ============================================================
 // Color scheme lookup
 // ============================================================
@@ -78,6 +99,12 @@ pub fn get_scheme(scheme_name: string) {
     else if (scheme_name == "greys") greys
     else if (scheme_name == "red_blue") red_blue
     else if (scheme_name == "spectral") spectral
+    else if (scheme_name == "viridis") viridis
+    else if (scheme_name == "magma") magma
+    else if (scheme_name == "inferno") inferno
+    else if (scheme_name == "plasma") plasma
+    else if (scheme_name == "set2") set2
+    else if (scheme_name == "red_blue_midpoint") red_blue_midpoint
     else category10
 }
 

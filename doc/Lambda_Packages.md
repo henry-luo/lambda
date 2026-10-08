@@ -217,19 +217,41 @@ svg.width                // 400, the default width
 
 | Element | Attributes and children |
 |---------|-------------------------|
-| `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, and the children below |
+| `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, `clip`, and the children below |
 | `<data>` | Inline `values: [...]` or row children; `name` selects the chart's `datasets` map; `url` and optional `format` use Lambda input loading |
-| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size` |
-| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`), `value`, `datum`, `title`, `aggregate`, `bin`, `stack`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
-| `<transform>` | Ordered `filter`, `sort`, `aggregate`, `calculate`, `bin`, `fold`, `flatten`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
+| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
+| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<transform>` | Ordered `filter`, `sort`, `aggregate`, `calculate`, `bin`, `timeunit`, `fold`, `flatten`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
 | `<config>` | `theme`: `light`, `dark`, `minimal`, `presentation`, or a custom map; nested `mark`/mark-type/`axis`/`legend` settings or equivalent prefixed attributes; `font`; `axis_grid: true` for horizontal grids |
 | `<layer>` | `<chart>` children drawn over one another |
 | `<facet>` | `field` with wrapping `columns` (default 3), or `row`/`column` field definitions; `spacing` (default 20); common scale domains by default |
-| `<annotation>` | `<text_note x, y, text, color, font_size, anchor, dx, dy>` and `<rule_note x or y, color, stroke_width, stroke_dash>` children |
+| `<annotation>` | `<text_note x, y, text, color, font_size, anchor, dx, dy>`, `<rule_note x or y, color, stroke_width, stroke_dash>`, and `<region_note x, x2, y, y2, color, opacity, text>` children |
 | `<hconcat>`, `<vconcat>` | `spacing` (default 20); `<chart>` children placed side by side or stacked |
 | `<repeat>` | A `<row [fields]>` and/or `<column [fields]>` child plus one `<chart>` template whose channels say `field: {repeat: "row"}` or `field: {repeat: "column"}` |
 
 A pie or donut chart is an `arc` mark with a `theta` channel, plus `inner_radius` for a donut; grouped bars use an `x_offset` channel. Aggregate operations are `count`, `sum`, `mean` (or `average`), `median`, `min`, `max`, `distinct`, `q1`, `q3`, `stdev` and `variance`. A colour channel picks a palette with `scale: {scheme: "set1"}`: `category10` is the default for categories and `blues` for quantities, and `category20`, `set1`, `pastel1`, `dark2`, `greens`, `reds`, `oranges`, `purples`, `greys`, `red_blue` and `spectral` are also available. `scale: {domain: [...], range: [...]}` assigns colours explicitly.
+
+Additional palettes are `set2`, `viridis`, `plasma`, `inferno`, and `magma`.
+Quantitative `scale: {domain: [-10, 30], domain_mid: 0}` maps the explicit
+midpoint to a diverging palette's center. A categorical `sort: {field: "sales",
+op: "sum", order: "descending"}` orders categories by grouped totals, with
+stable ties (S6.2.3).
+
+Size and shape encodings produce legends as color does. Legend settings
+include `orient`, `direction`, `columns`, `values`, `format`, and symbol
+appearance. Arc legends honor placement. Numeric labels share formats such
+as `,.2f`, `.1%`, `.3e`, `.3g`, and `.3~s` across guides, text, and tooltips.
+Layered charts can request `resolve: {scale: {y: "independent"}}`; shared
+scales include full stacked extents. `clip: true` on a chart or mark clips
+plotted content without clipping its axes or legends.
+
+Temporal scales use calendar-aligned ticks. `scale.timezone` is a fixed UTC
+offset in minutes (default zero). `time_unit: "yearmonth"` on a channel groups
+records before encoding aggregation; cyclic `month`, `day`/`weekday`, and
+`hours` are also supported, and an `utc` prefix selects UTC. A direct
+`<timeunit field: "date", unit: "yearmonth", as: "month">` transform retains
+the source field. Named time zones and daylight-saving rules remain outside
+this subset; see the [chart design](../vibe/Lambda_Pkg_Chart.md#5-encodings-scales-and-color).
 
 #### Analytical transforms
 
