@@ -213,6 +213,9 @@ const uint8_t* font_tables_find(FontTables* tables, uint32_t tag, uint32_t* out_
 // check if a table exists
 bool font_tables_has(FontTables* tables, uint32_t tag);
 
+// OpenType Coverage formats 1/2; -1 means absent, -2 means malformed.
+int font_coverage_lookup(const uint8_t* data, uint32_t length, uint16_t glyph_id);
+
 // lazy table accessors — parse on first call, cache result
 HeadTable*  font_tables_get_head(FontTables* tables);
 HheaTable*  font_tables_get_hhea(FontTables* tables);

@@ -227,12 +227,16 @@ static bool render_path_svg_visit(void* context, RdtPathCommand command,
     return false;
 }
 
+bool render_path_append_svg(StrBuf* out, const RdtPath* path) {
+    return out && path && rdt_path_visit(path, render_path_svg_visit, out);
+}
+
 void render_path_append_svg_rounded_rect(StrBuf* out, Rect rect,
                                          const Corner* radius) {
     if (!out) return;
     RdtPath* path = render_path_create_rounded_rect(rect, radius);
     if (!path) return;
-    rdt_path_visit(path, render_path_svg_visit, out);
+    render_path_append_svg(out, path);
     rdt_path_free(path);
 }
 

@@ -43,6 +43,7 @@ pub fn convert(vl) {
         padding: padding,
         title: if (vl.title is string) vl.title else vl.title.text,
         data: vl.data.values, data_source: vl.data, datasets: vl.datasets,
+        params: vl.params,
         mark: convert_mark(vl.mark), encoding: convert_encoding(vl.encoding),
         transform: convert_transforms(vl.transform), config: convert_config(vl.config),
         resolve: normalize(vl.resolve),
@@ -70,6 +71,7 @@ pub fn convert(vl) {
 
 fn inherit(parent, child) {
     {*:child, data: if (child.data != null) child.data else parent.data,
+        params: [*(if (parent.params != null) parent.params else []), *(if (child.params != null) child.params else [])],
         datasets: if (child.datasets != null) child.datasets else parent.datasets,
         width: if (child.width != null) child.width else parent.width,
         height: if (child.height != null) child.height else parent.height,
@@ -117,7 +119,7 @@ fn convert_config(config) {
     }
 }
 
-// Expressions remain static and datum-scoped; signals and event handlers are outside this adapter.
+// Parameter expressions bind declared values; Lambda view handlers own interaction state.
 fn convert_transforms(transforms) {
     if (transforms == null) null
     else <transform for (step in transforms) convert_transform(step)>

@@ -1,4 +1,4 @@
-// Static Vega expressions: parse once, then evaluate with only the current datum.
+// Bounded Vega expressions bind the current datum and explicitly declared values.
 // The adapter uses JavaScript truthiness/coercion without changing Lambda's S3/S5 rules.
 import numbers: .numbers
 import util: .util
@@ -36,6 +36,11 @@ fn character(source, index) => slice(source, index, index + 1)
 fn digit(ch) => ch != "" and ch >= "0" and ch <= "9"
 fn identifier(ch) => ch != "" and ((ch >= "a" and ch <= "z") or
     (ch >= "A" and ch <= "Z") or ch == "_" or ch == "$")
+pub fn binding_name(name) bool => (name is string and identifier(character(name, 0)) and
+    len([for (index in 1 to (len(name) - 1), let ch = character(name, index)
+        where not identifier(ch) and not digit(ch)) ch]) == 0 and
+    not contains(["datum", "event", "item", "parent", "undefined"], name) and
+    not contains([for (key, value in constants) string(key)], name)) or false
 fn scan(source, index, numeric = false) {
     let ch = character(source, index);
     if (if (numeric) digit(ch) else identifier(ch) or digit(ch)) scan(source, index + 1, numeric) else index
@@ -153,7 +158,7 @@ fn parse_primary(tokens, index) {
     } else if (value == "datum") parsed({kind: "datum"}, index + 1)
     else if (value == "undefined") parsed({kind: "undefined"}, index + 1)
     else if (contains([for (key, item in constants) string(key)], value)) parsed(literal(constants[value]), index + 1)
-    else failure("unknown variable " ++ value, token.position)
+    else parsed({kind: "variable", name: value, position: token.position}, index + 1)
 }
 fn parse_postfix(tokens, value) {
     if (value is error) value
@@ -190,13 +195,29 @@ fn parse_expression(tokens, index) {
     }
 }
 
-pub fn compile(source) {
+// Bind only explicitly supplied parameter names; expressions never read ambient state.
+fn bind_variables(node, bindings) {
+    if (node.kind == "variable") {
+        if (contains([for (key, value in bindings) string(key)], node.name)) literal(bindings[node.name])
+        else failure("unknown variable " ++ node.name, node.position)
+    } else if (node is map) {
+        let entries = [for (key, value in node) {key: string(key), value:
+            if (value is map) bind_variables(value, bindings)
+            else if (value is array) [for (entry in value) if (entry is map) bind_variables(entry, bindings) else entry]
+            else value}];
+        let failure = util.first_error([for (entry in entries)
+            if (entry.value is array) util.first_error(entry.value) else entry.value]);
+        if (failure is error) failure else map([for (entry in entries) for (part in [entry.key, entry.value]) part])
+    } else node
+}
+
+pub fn compile(source, bindings = null) {
     if (not (source is string)) failure("must be a string", 0) else {
         let tokens = tokenize(source);
         let parsed = if (tokens is error) tokens else parse_expression(tokens, 0);
         if (parsed is error) parsed
         else if (parsed.index != len(tokens)) failure("unexpected token " ++ string(tokens[parsed.index].value), tokens[parsed.index].position)
-        else parsed.node
+        else bind_variables(parsed.node, bindings)
     }
 }
 
@@ -206,6 +227,7 @@ fn absent() => {defined: false, value: null}
 fn truth(value) => value.defined and value.value != null and value.value != false and
     not (value.value is nan) and (not (value.value is number) or value.value != 0) and
     (not (value.value is string) or value.value != "")
+pub fn truthy(value) => truth(defined(value))
 fn numeric(value) {
     let raw = value.value;
     if (not value.defined) nan else if (raw == null or raw == false) 0.0

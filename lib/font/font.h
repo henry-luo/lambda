@@ -30,6 +30,7 @@ extern "C" {
 typedef struct FontContext FontContext;
 typedef struct FontHandle  FontHandle;
 typedef uint32_t           GlyphId;
+struct FontMathTable;
 
 // Forward declarations for Lambda allocators
 struct Pool;
@@ -144,6 +145,8 @@ typedef struct FontMetrics {
     float underline_thickness;  // underline stroke thickness
     float strikeout_position;   // strikeout position above baseline (in CSS pixels)
     float strikeout_size;       // strikeout line thickness (in CSS pixels)
+    float subscript_y_offset;   // OS/2 suggested script baseline offsets, CSS pixels
+    float superscript_y_offset;
 
     bool has_kerning;           // font contains kerning data
     bool use_typo_metrics;      // OS/2 fsSelection bit 7 (USE_TYPO_METRICS) is set
@@ -151,6 +154,9 @@ typedef struct FontMetrics {
 
 // get metrics for a resolved font handle (cached, zero-cost after first call)
 const FontMetrics* font_get_metrics(FontHandle* handle);
+
+// math view borrows the resolved face's bytes; the handle must remain alive.
+bool font_get_math_table(FontHandle* handle, struct FontMathTable* math);
 
 // ============================================================================
 // Glyph Info — per-glyph measurement (cached)
@@ -171,6 +177,9 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint);
 
 // get the glyph index for a codepoint (0 if not present)
 uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint);
+
+// selected variants can lack a Unicode mapping; -1 means an invalid glyph/face.
+float font_get_glyph_advance_by_index(FontHandle* handle, uint32_t glyph);
 
 // outlines use CSS pixels, Y-down, relative to the glyph's alphabetic baseline.
 typedef enum FontPathCommand {
@@ -392,6 +401,8 @@ float font_get_rendering_ascender(FontHandle* handle);
 typedef struct FontFaceSource {
     const char* path;           // local file path or data URI
     const char* format;         // "truetype", "opentype", "woff", "woff2", or NULL
+    const uint8_t* data;        // optional immutable font bytes, copied at registration
+    size_t data_length;
 } FontFaceSource;
 
 typedef struct FontFaceUnicodeRange {

@@ -3294,7 +3294,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     // F17: author/UA handlers receive the in-flight host record. When no JS
     // stage created it (a Lambda-only document), create the same record shape
     // here instead of rebuilding a separate Mark map.
-    RootFrame event_roots(4);
+    RootFrame event_roots(6);
     // behavior models are GC wrappers; event construction can collect before handler entry.
     Rooted<Item> model_root(event_roots, model_item);
     Rooted<Item> event_root(event_roots,
@@ -3304,6 +3304,18 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     Rooted<Item> nested_model_selection_root(event_roots, ItemNull);
     Item event_item = event_root.get();
     event_context_set_dom_event(evcon, event_item);
+    Rooted<Item> dispatched_target(event_roots, ItemNull), default_target(event_roots, ItemNull);
+    if (tmpl->is_behavior && target) {
+        Item original = ItemNull;
+        radiant_dom_event_member_get(event_item, "target", &original);
+        dispatched_target.set(original);
+        default_target.set(radiant_dom_wrap_node(target));
+        Item ignored = ItemNull;
+        // UA policy sees the live default-action target after author reactivity;
+        // the dispatched record's original target is restored after this call.
+        radiant_dom_event_member_set(event_item, "target", default_target.get(), &ignored);
+        radiant_dom_event_member_set(event_item, "srcElement", default_target.get(), &ignored);
+    }
 
     // set up emit context so handlers can call emit()
     EmitHandlerContext emit_ctx;
@@ -3322,6 +3334,11 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
 
     // invoke handler: Item handler(Item model, Item event)
     result_root.set(template_call_event_handler(h, model_root.get(), event_item));
+    if (tmpl->is_behavior && target) {
+        Item ignored = ItemNull;
+        radiant_dom_event_member_set(event_item, "target", dispatched_target.get(), &ignored);
+        radiant_dom_event_member_set(event_item, "srcElement", dispatched_target.get(), &ignored);
+    }
     Item verdict = result_root.get();
     bool declined = handler_verdict_is(verdict, "pass");
     if (evcon && handler_verdict_is(verdict, "prevent-default")) {
@@ -3877,6 +3894,12 @@ static bool radiant_dispatch_event_from_script_impl(void* dom_node,
         return false;
     }
     View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    // an input handler may regenerate the activating control before its UA
+    // handler dispatches change. Follow the live target retained by dispatch.
+    if (view == ctx->target && ctx->evcon->target && ctx->doc && ctx->doc->root &&
+        !view_tree_contains_view(static_cast<DomNode*>(ctx->doc->root), view)) {
+        view = ctx->evcon->target;
+    }
     // nested dispatch must retain the parent's record; otherwise its UA pass
     // mistakes it for an undelivered event and invokes author handlers twice.
     EventContext* evcon = ctx->evcon;
@@ -4703,10 +4726,14 @@ extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
     return dispatch_behavior_handler(evcon, target, "resetactivation", nullptr, nullptr);
 }
 
+typedef Item (*RadiantJsEventBuilder)(void* userdata);
+
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
                                     bool* out_model_reconciled = nullptr,
-                                    bool allow_behavior = true) {
+                                    bool allow_behavior = true,
+                                    RadiantJsEventBuilder build_event = nullptr,
+                                    void* event_userdata = nullptr) {
     if (out_model_reconciled) *out_model_reconciled = false;
     // F18 already delivered author templates from the shared JS path. Native
     // callers retained during F20 therefore see only the UA-tier result here,
@@ -4744,9 +4771,14 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     // template target-to-root before the UA behavior tier; a handler verdict
     // controls only cancellation, never whether an ancestor receives the event.
     DomDocument* doc = event_context_target_document(evcon);
-    RootFrame roots(2);
+    // startup autofocus can precede the first event turn; native factories
+    // need the evaluator's support Input even on a page without a JS realm.
+    if (build_event && !js_runtime_state_ensure_input(context)) return false;
+    RootFrame roots(3);
+    // lambda-only pages need the original Pointer/Wheel/InputEvent payload too.
+    Rooted<Item> native_event(roots, build_event ? build_event(event_userdata) : ItemNull);
     Rooted<Item> event_root(roots,
-        build_dom_event_record(doc, target, event_name, evcon, intent));
+        build_dom_event_record(doc, target, event_name, evcon, intent, native_event.get()));
     Item event = event_root.get();
     event_context_set_dom_event(evcon, event);
 
@@ -8336,7 +8368,6 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
     }
 }
 
-typedef Item (*RadiantJsEventBuilder)(void* userdata);
 
 static Item radiant_deliver_timing_event(Item env_item) {
     JS_ENV_UNPACK(env, env_item);
@@ -8421,11 +8452,17 @@ void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
 struct NativeEventPayloadScope {
     EventContext* evcon;
     View* previous_target;
+    DomDocument* document;
+    EventTargetPath previous_path;
+    bool previous_path_valid;
     const InputIntent* previous_intent;
 
     NativeEventPayloadScope(EventContext* context, View* target,
                             const InputIntent* intent) : evcon(context) {
         previous_target = evcon->target;
+        document = event_context_target_document(evcon);
+        previous_path_valid = capture_event_target_path(document, previous_target,
+                                                        &previous_path);
         previous_intent = evcon->dom_event_intent;
         // synthetic input may target a different control than the physical hit.
         evcon->target = target;
@@ -8433,7 +8470,11 @@ struct NativeEventPayloadScope {
     }
 
     ~NativeEventPayloadScope() {
-        evcon->target = previous_target;
+        // a nested reactive event may replace the saved physical target.
+        // old trees can remain connected until retirement; use the live root.
+        evcon->target = previous_target && document && document->root &&
+            !view_tree_contains_view(static_cast<DomNode*>(document->root), previous_target) && previous_path_valid
+            ? resolve_event_target_path(document, &previous_path) : previous_target;
         evcon->dom_event_intent = previous_intent;
     }
 };
@@ -8450,7 +8491,8 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     if (!event_document_has_js_runtime(evcon)) {
         if (!event_name) return false;
         bool handled = dispatch_lambda_handler(evcon, target, event_name,
-                                               intent, nullptr, run_ua_tier);
+                                               intent, nullptr, run_ua_tier,
+                                               build_event, userdata);
         if (dispatched) *dispatched = handled;
         return read_prevented && evcon ? evcon->default_prevented : false;
     }
@@ -13121,7 +13163,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // enters mousepress: clicking browser chrome must not clear focus
             // or begin a document selection behind the scrollbar.
             ViewBlock* scrollbar_press_block = nullptr;
-            if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+            if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT && evcon.target &&
                 evcon.target->is_block()) {
                 ViewBlock* target_block = lam::view_require_block(evcon.target);
                 if (scrollpane_press_part(&evcon, target_block) !=
@@ -13209,7 +13251,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
-            if (pointer_selection_start && !placed_element_caret && !evcon.default_prevented &&
+            // blur handlers can remove the pressed control while focus settles.
+            if (pointer_selection_start && evcon.target && !placed_element_caret && !evcon.default_prevented &&
                 evcon.target->view_type != RDT_VIEW_TEXT &&
                 !is_view_focusable(evcon.target)) {
                 DomElement* rich_host = rich_editable_from_target(evcon.target);
@@ -13270,7 +13313,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // This is a mousedown default action, so a canceled mousedown must
             // leave the existing text-control selection intact.
             if (pointer_selection_requested && !placed_element_caret &&
-                !evcon.default_prevented && evcon.target->view_type == RDT_VIEW_TEXT &&
+                !evcon.default_prevented && evcon.target && evcon.target->view_type == RDT_VIEW_TEXT &&
                 evcon.target_text_rect && text_target_allows_caret(evcon.target)) {
                 ViewText* text = lam::view_require_text(evcon.target);
                 TextRect* rect = evcon.target_text_rect;
@@ -13414,7 +13457,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Restore font
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
-            } else if (pointer_selection_requested && !evcon.default_prevented &&
+            } else if (pointer_selection_requested && evcon.target && !evcon.default_prevented &&
                        evcon.target->is_element()) {
                 DomElement* target_elem = lam::dom_require_element(evcon.target);
 
@@ -13888,17 +13931,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         btn_event, 0, 1);
                     if (prevented) evcon.default_prevented = true;
                 }
-                // The final primary click in a double-click carries the same
-                // target and coordinates as click, but is separately observable
-                // by `ondblclick` and EventTarget listeners. Word selection has
-                // already used the click count on mousedown; this dispatch adds
-                // no second selection policy.
-                if (evcon.target && btn_event->clicks == 2) {
-                    radiant_dispatch_button_mouse_event(
-                        &evcon, evcon.target, "dblclick", mouse_x, mouse_y,
-                        btn_event, 0, 2);
-                }
-
                 // Handle click on <video> element — play/pause toggle + seek bar
                 if (evcon.target && state && !evcon.default_prevented) {
                     View* v = evcon.target;
@@ -13992,6 +14024,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 if (evcon.target) {
                     dispatch_click_default_actions(&evcon, evcon.target);
+                }
+                // finish click defaults before dblclick replaces the in-flight
+                // record; otherwise Lambda author handlers receive click twice.
+                if (evcon.target && btn_event->clicks == 2) {
+                    radiant_dispatch_button_mouse_event(
+                        &evcon, evcon.target, "dblclick", mouse_x, mouse_y,
+                        btn_event, 0, 2);
                 }
             }
 

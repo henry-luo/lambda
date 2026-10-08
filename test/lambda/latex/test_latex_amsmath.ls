@@ -10,7 +10,8 @@ let html = latex.render_to_html(ast, null)
 "suppressed row:"; len(split(html, "latex-align-number")) == 3
 "custom tag:"; index_of(html, "(Special)") != null
 "bare tag:"; index_of(html, "Proof") != null and index_of(html, "(Proof)") == null
-"operator:"; index_of(html, "Foo") != null
+// Outlined math retains its canonical LaTeX in the SVG title; token spaces are insignificant.
+"operator:"; index_of(replace(html, " ", ""), "Foo") != null
 "first reference:"; index_of(html, "href=\"#eq:first\">1</a>") != null
 "tag reference:"; index_of(html, "Equation Special") != null
 
@@ -19,4 +20,4 @@ let order_result = latex.render_result(order_ast, null)
 let order_html = latex.render_to_html(order_ast, null);
 "operator issues:"; [for (issue in order_result.diagnostics) issue.code]
 "operator issue locations:"; all([for (issue in order_result.diagnostics) issue.offset != null])
-"operator source order:"; len(split(order_html, "Foo")) == 2
+"operator source order:"; len(split(replace(order_html, " ", ""), "Foo")) == 2

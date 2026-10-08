@@ -8,6 +8,10 @@ import md: lambda.edit.markdown
 import lambda.edit.model
 
 fn shown(items) => if (len(items) == 0) "" else format(items, 'html')
+fn has_math(items) {
+  let markup = shown(items)
+  contains(markup, "lambda-math") and contains(markup, "<path")
+}
 
 "sanitized HTML:";
 [shown(html_view("<div onclick=\"x()\" class=\"card\"><script>alert(1)</script><style>p{}</style>" ++
@@ -33,12 +37,12 @@ fn md_block(src) => [for (c in content([for (c in content(parse(src, 'markdown')
 "markdown math renders:";
 [for (source in ["Area $\\pi r^2$ & more.\n", "$$\nx < y\n$$\n",
                  "Fraction $\\frac{1}{2}$ and root $\\sqrt{x}$.[^1]\n\n[^1]: a note\n"])
-  contains(shown(markdown_view(md_block(source))), "lm_latex")]
+  has_math(markdown_view(md_block(source)))]
 let math_source = "Inline $\\frac{1}{2}$ and $\\sqrt{x}$.\n\n$$\nE = mc^2\n$$\n"
 let math_doc = md.import_text(math_source) or null
 let formulas = [for (n in math_doc.doc.content[0].content where n.tag == 'math') n];
 "inline math projections:";
-[for (n in formulas) contains(shown(attr_get(n, view_attr)), "lm_latex")]
+[for (n in formulas) has_math(attr_get(n, view_attr))]
 "math source survives:";
 [md.export_text(math_doc.doc, math_doc.envelope) == math_source,
  md.check_roundtrip(math_doc.doc, math_doc.envelope) == null]

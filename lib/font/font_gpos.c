@@ -58,51 +58,6 @@ static int16_t value_record_get_x_advance(const uint8_t* data, uint16_t value_fo
 }
 
 // ============================================================================
-// Coverage table — maps glyph ID → coverage index
-// ============================================================================
-
-// returns coverage index (0-based), or -1 if glyph not covered
-static int coverage_lookup(const uint8_t* cov_data, uint32_t cov_len, uint16_t glyph_id) {
-    if (cov_len < 4) return -1;
-    uint16_t format = rd16(cov_data);
-
-    if (format == 1) {
-        // Format 1: array of glyph IDs (sorted)
-        uint16_t count = rd16(cov_data + 2);
-        if (cov_len < 4 + (uint32_t)count * 2) return -1;
-        // binary search
-        int lo = 0, hi = (int)count - 1;
-        while (lo <= hi) {
-            int mid = (lo + hi) / 2;
-            uint16_t g = rd16(cov_data + 4 + mid * 2);
-            if (g == glyph_id) return mid;
-            if (g < glyph_id) lo = mid + 1;
-            else hi = mid - 1;
-        }
-        return -1;
-    } else if (format == 2) {
-        // Format 2: array of ranges [startGlyphID, endGlyphID, startCoverageIndex]
-        uint16_t count = rd16(cov_data + 2);
-        if (cov_len < 4 + (uint32_t)count * 6) return -1;
-        int lo = 0, hi = (int)count - 1;
-        while (lo <= hi) {
-            int mid = (lo + hi) / 2;
-            const uint8_t* r = cov_data + 4 + mid * 6;
-            uint16_t start = rd16(r);
-            uint16_t end   = rd16(r + 2);
-            if (glyph_id < start) hi = mid - 1;
-            else if (glyph_id > end) lo = mid + 1;
-            else {
-                uint16_t start_idx = rd16(r + 4);
-                return start_idx + (glyph_id - start);
-            }
-        }
-        return -1;
-    }
-    return -1;
-}
-
-// ============================================================================
 // ClassDef table — maps glyph ID → class value
 // ============================================================================
 
@@ -349,7 +304,7 @@ static int16_t pairpos_fmt1_lookup(const GposPairSub* sub, uint16_t left, uint16
 
     // look up left glyph in coverage
     if ((uint32_t)cov_off >= len) return 0;
-    int cov_idx = coverage_lookup(d + cov_off, len - cov_off, left);
+    int cov_idx = font_coverage_lookup(d + cov_off, len - cov_off, left);
     if (cov_idx < 0 || cov_idx >= pair_count) return 0;
 
     // read PairSet offset
@@ -399,7 +354,7 @@ static int16_t pairpos_fmt2_lookup(const GposPairSub* sub, uint16_t left, uint16
 
     // check left glyph is in coverage
     if ((uint32_t)cov_off >= len) return 0;
-    int cov_idx = coverage_lookup(d + cov_off, len - cov_off, left);
+    int cov_idx = font_coverage_lookup(d + cov_off, len - cov_off, left);
     if (cov_idx < 0) return 0;
 
     // get class values
@@ -443,7 +398,7 @@ static int16_t singlepos_lookup(const GposSingleSub* sub, uint16_t glyph_id) {
     int vr_size = value_record_size(vf);
 
     if ((uint32_t)cov_off >= len) return 0;
-    int cov_idx = coverage_lookup(d + cov_off, len - cov_off, glyph_id);
+    int cov_idx = font_coverage_lookup(d + cov_off, len - cov_off, glyph_id);
     if (cov_idx < 0) return 0;
 
     if (sub->format == 1) {

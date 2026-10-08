@@ -2911,6 +2911,7 @@
               "lib/font/font_family.c",
               "lib/font/font_glyf.c",
               "lib/font/font_gpos.c",
+              "lib/font/font_math.c",
               "lib/font/font_tables.c",
               "lib/arena.c",
               "lib/hashmap.c",

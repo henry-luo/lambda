@@ -1,6 +1,6 @@
 {
   "title": "Lambda Chart Dashboard",
-  "subtitle": "A showcase of chart types supported by lambda.chart",
+  "subtitle": "Cartesian, statistical, radial, hierarchical and geographic charts, plus wordcloud",
   "columns": 3,
   "charts": [
     {
@@ -999,6 +999,1564 @@
         "y": {
           "aggregate": "count",
           "type": "quantitative"
+        }
+      }
+    },
+    {
+      "label": "Wordcloud",
+      "title": "Themes in Lambda",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "wordcloud",
+        "shape": "ellipse",
+        "rotations": [
+          -20,
+          0,
+          20
+        ],
+        "seed": 17,
+        "min_font_size": 10,
+        "max_font_size": 28,
+        "fontWeight": 600
+      },
+      "data": {
+        "values": [
+          {
+            "term": "Lambda",
+            "count": 60,
+            "topic": "Language"
+          },
+          {
+            "term": "Charts",
+            "count": 48,
+            "topic": "Visuals"
+          },
+          {
+            "term": "Data",
+            "count": 40,
+            "topic": "Language"
+          },
+          {
+            "term": "SVG",
+            "count": 32,
+            "topic": "Visuals"
+          },
+          {
+            "term": "Scales",
+            "count": 28,
+            "topic": "Visuals"
+          },
+          {
+            "term": "Grammar",
+            "count": 25,
+            "topic": "Language"
+          },
+          {
+            "term": "Layout",
+            "count": 22,
+            "topic": "Visuals"
+          },
+          {
+            "term": "Words",
+            "count": 20,
+            "topic": "Language"
+          },
+          {
+            "term": "Color",
+            "count": 18,
+            "topic": "Visuals"
+          },
+          {
+            "term": "Shapes",
+            "count": 16,
+            "topic": "Visuals"
+          },
+          {
+            "term": "Labels",
+            "count": 14,
+            "topic": "Visuals"
+          },
+          {
+            "term": "Functions",
+            "count": 12,
+            "topic": "Language"
+          }
+        ]
+      },
+      "encoding": {
+        "text": {
+          "field": "term"
+        },
+        "size": {
+          "field": "count",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "topic",
+          "type": "nominal"
+        }
+      }
+    },
+    {
+      "label": "Violin Plot",
+      "title": "Score Density by Team",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "violin",
+        "steps": 40,
+        "bandwidth": 7,
+        "opacity": 0.8
+      },
+      "data": {
+        "values": [
+          {
+            "team": "Alpha",
+            "score": 42
+          },
+          {
+            "team": "Alpha",
+            "score": 48
+          },
+          {
+            "team": "Alpha",
+            "score": 53
+          },
+          {
+            "team": "Alpha",
+            "score": 58
+          },
+          {
+            "team": "Alpha",
+            "score": 60
+          },
+          {
+            "team": "Alpha",
+            "score": 62
+          },
+          {
+            "team": "Alpha",
+            "score": 63
+          },
+          {
+            "team": "Alpha",
+            "score": 66
+          },
+          {
+            "team": "Alpha",
+            "score": 72
+          },
+          {
+            "team": "Alpha",
+            "score": 79
+          },
+          {
+            "team": "Alpha",
+            "score": 84
+          },
+          {
+            "team": "Beta",
+            "score": 35
+          },
+          {
+            "team": "Beta",
+            "score": 40
+          },
+          {
+            "team": "Beta",
+            "score": 45
+          },
+          {
+            "team": "Beta",
+            "score": 48
+          },
+          {
+            "team": "Beta",
+            "score": 52
+          },
+          {
+            "team": "Beta",
+            "score": 56
+          },
+          {
+            "team": "Beta",
+            "score": 61
+          },
+          {
+            "team": "Beta",
+            "score": 65
+          },
+          {
+            "team": "Beta",
+            "score": 69
+          },
+          {
+            "team": "Beta",
+            "score": 75
+          },
+          {
+            "team": "Beta",
+            "score": 81
+          },
+          {
+            "team": "Gamma",
+            "score": 54
+          },
+          {
+            "team": "Gamma",
+            "score": 58
+          },
+          {
+            "team": "Gamma",
+            "score": 62
+          },
+          {
+            "team": "Gamma",
+            "score": 65
+          },
+          {
+            "team": "Gamma",
+            "score": 68
+          },
+          {
+            "team": "Gamma",
+            "score": 70
+          },
+          {
+            "team": "Gamma",
+            "score": 72
+          },
+          {
+            "team": "Gamma",
+            "score": 73
+          },
+          {
+            "team": "Gamma",
+            "score": 75
+          },
+          {
+            "team": "Gamma",
+            "score": 78
+          },
+          {
+            "team": "Gamma",
+            "score": 82
+          }
+        ]
+      },
+      "encoding": {
+        "x": {
+          "field": "team",
+          "type": "nominal"
+        },
+        "y": {
+          "field": "score",
+          "type": "quantitative",
+          "scale": {
+            "domain": [
+              20,
+              100
+            ]
+          }
+        },
+        "color": {
+          "field": "team",
+          "type": "nominal",
+          "legend": null
+        }
+      }
+    },
+    {
+      "label": "Slope Chart",
+      "title": "Retention Before and After",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "slope",
+        "strokeWidth": 3
+      },
+      "data": {
+        "values": [
+          {
+            "period": "Before",
+            "team": "Alpha",
+            "retention": 58
+          },
+          {
+            "period": "After",
+            "team": "Alpha",
+            "retention": 82
+          },
+          {
+            "period": "Before",
+            "team": "Beta",
+            "retention": 76
+          },
+          {
+            "period": "After",
+            "team": "Beta",
+            "retention": 68
+          },
+          {
+            "period": "Before",
+            "team": "Gamma",
+            "retention": 42
+          },
+          {
+            "period": "After",
+            "team": "Gamma",
+            "retention": 65
+          }
+        ]
+      },
+      "encoding": {
+        "x": {
+          "field": "period",
+          "type": "nominal",
+          "sort": [
+            "Before",
+            "After"
+          ]
+        },
+        "y": {
+          "field": "retention",
+          "type": "quantitative",
+          "scale": {
+            "domain": [
+              30,
+              90
+            ]
+          }
+        },
+        "color": {
+          "field": "team",
+          "type": "nominal",
+          "legend": {
+            "orient": "bottom",
+            "direction": "horizontal",
+            "title": null
+          }
+        },
+        "detail": {
+          "field": "team"
+        }
+      }
+    },
+    {
+      "label": "Trail Chart",
+      "title": "Traffic Along a Customer Journey",
+      "width": 350,
+      "height": 270,
+      "mark": "trail",
+      "data": {
+        "values": [
+          {
+            "step": 1,
+            "engagement": 20,
+            "visitors": 100
+          },
+          {
+            "step": 2,
+            "engagement": 35,
+            "visitors": 90
+          },
+          {
+            "step": 3,
+            "engagement": 28,
+            "visitors": 75
+          },
+          {
+            "step": 4,
+            "engagement": 55,
+            "visitors": 55
+          },
+          {
+            "step": 5,
+            "engagement": 70,
+            "visitors": 30
+          },
+          {
+            "step": 6,
+            "engagement": 82,
+            "visitors": 15
+          }
+        ]
+      },
+      "encoding": {
+        "x": {
+          "field": "step",
+          "type": "quantitative",
+          "axis": {
+            "tickCount": 6
+          }
+        },
+        "y": {
+          "field": "engagement",
+          "type": "quantitative"
+        },
+        "size": {
+          "field": "visitors",
+          "type": "quantitative",
+          "scale": {
+            "range": [
+              2,
+              14
+            ]
+          },
+          "legend": {
+            "orient": "bottom",
+            "direction": "horizontal",
+            "title": null,
+            "values": [
+              20,
+              60,
+              100
+            ]
+          }
+        },
+        "color": {
+          "value": "#59a14f"
+        },
+        "tooltip": {
+          "field": "visitors"
+        }
+      }
+    },
+    {
+      "label": "Radar Chart",
+      "title": "Product Capability Profiles",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "radar",
+        "filled": true,
+        "fill_opacity": 0.15,
+        "tick_count": 4
+      },
+      "data": {
+        "values": [
+          {
+            "product": "Alpha",
+            "capability": "Speed",
+            "score": 8
+          },
+          {
+            "product": "Alpha",
+            "capability": "Quality",
+            "score": 6
+          },
+          {
+            "product": "Alpha",
+            "capability": "Ease",
+            "score": 9
+          },
+          {
+            "product": "Alpha",
+            "capability": "Reach",
+            "score": 7
+          },
+          {
+            "product": "Alpha",
+            "capability": "Value",
+            "score": 5
+          },
+          {
+            "product": "Beta",
+            "capability": "Speed",
+            "score": 6
+          },
+          {
+            "product": "Beta",
+            "capability": "Quality",
+            "score": 9
+          },
+          {
+            "product": "Beta",
+            "capability": "Ease",
+            "score": 5
+          },
+          {
+            "product": "Beta",
+            "capability": "Reach",
+            "score": 8
+          },
+          {
+            "product": "Beta",
+            "capability": "Value",
+            "score": 8
+          }
+        ]
+      },
+      "encoding": {
+        "theta": {
+          "field": "capability",
+          "type": "nominal",
+          "sort": [
+            "Speed",
+            "Quality",
+            "Ease",
+            "Reach",
+            "Value"
+          ]
+        },
+        "radius": {
+          "field": "score",
+          "type": "quantitative",
+          "scale": {
+            "domain": [
+              0,
+              10
+            ]
+          }
+        },
+        "color": {
+          "field": "product",
+          "type": "nominal",
+          "legend": {
+            "orient": "bottom",
+            "direction": "horizontal",
+            "title": null
+          }
+        }
+      }
+    },
+    {
+      "label": "Parallel Coordinates",
+      "title": "Compare Product Tradeoffs",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "parallel",
+        "fields": [
+          {
+            "field": "speed",
+            "title": "Speed",
+            "scale": {
+              "domain": [
+                0,
+                100
+              ]
+            },
+            "axis": {
+              "tickCount": 3
+            }
+          },
+          {
+            "field": "quality",
+            "title": "Quality",
+            "scale": {
+              "domain": [
+                0,
+                100
+              ]
+            },
+            "axis": {
+              "tickCount": 3
+            }
+          },
+          {
+            "field": "cost",
+            "title": "Cost",
+            "scale": {
+              "domain": [
+                0,
+                100
+              ]
+            },
+            "axis": {
+              "tickCount": 3
+            }
+          },
+          {
+            "field": "reach",
+            "title": "Reach",
+            "scale": {
+              "domain": [
+                0,
+                100
+              ]
+            },
+            "axis": {
+              "tickCount": 3
+            }
+          }
+        ],
+        "strokeWidth": 2.5,
+        "label_font_size": 10
+      },
+      "data": {
+        "values": [
+          {
+            "product": "Alpha",
+            "speed": 85,
+            "quality": 72,
+            "cost": 40,
+            "reach": 90
+          },
+          {
+            "product": "Beta",
+            "speed": 55,
+            "quality": 93,
+            "cost": 80,
+            "reach": 60
+          },
+          {
+            "product": "Gamma",
+            "speed": 70,
+            "quality": 65,
+            "cost": 25,
+            "reach": 75
+          }
+        ]
+      },
+      "encoding": {
+        "color": {
+          "field": "product",
+          "type": "nominal",
+          "legend": {
+            "orient": "bottom",
+            "direction": "horizontal",
+            "title": null
+          }
+        },
+        "tooltip": {
+          "field": "product"
+        }
+      }
+    },
+    {
+      "label": "Treemap",
+      "title": "Revenue by Division and Product",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "treemap",
+        "header_height": 18,
+        "node_padding": 3
+      },
+      "data": {
+        "values": [
+          {
+            "id": "Hardware",
+            "parent": null,
+            "group": "Hardware"
+          },
+          {
+            "id": "Laptops",
+            "parent": "Hardware",
+            "value": 36,
+            "group": "Hardware"
+          },
+          {
+            "id": "Phones",
+            "parent": "Hardware",
+            "value": 24,
+            "group": "Hardware"
+          },
+          {
+            "id": "Software",
+            "parent": null,
+            "group": "Software"
+          },
+          {
+            "id": "Cloud",
+            "parent": "Software",
+            "value": 30,
+            "group": "Software"
+          },
+          {
+            "id": "Desktop",
+            "parent": "Software",
+            "value": 18,
+            "group": "Software"
+          },
+          {
+            "id": "Services",
+            "parent": null,
+            "group": "Services"
+          },
+          {
+            "id": "Support",
+            "parent": "Services",
+            "value": 20,
+            "group": "Services"
+          },
+          {
+            "id": "Training",
+            "parent": "Services",
+            "value": 12,
+            "group": "Services"
+          }
+        ]
+      },
+      "encoding": {
+        "color": {
+          "field": "group",
+          "type": "nominal",
+          "legend": null
+        },
+        "tooltip": {
+          "field": "id"
+        }
+      }
+    },
+    {
+      "label": "Sunburst",
+      "title": "Business Portfolio Hierarchy",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "sunburst",
+        "innerRadius": 20
+      },
+      "data": {
+        "values": [
+          {
+            "id": "Hardware",
+            "parent": null,
+            "group": "Hardware"
+          },
+          {
+            "id": "Laptops",
+            "parent": "Hardware",
+            "value": 36,
+            "group": "Hardware"
+          },
+          {
+            "id": "Phones",
+            "parent": "Hardware",
+            "value": 24,
+            "group": "Hardware"
+          },
+          {
+            "id": "Software",
+            "parent": null,
+            "group": "Software"
+          },
+          {
+            "id": "Cloud",
+            "parent": "Software",
+            "value": 30,
+            "group": "Software"
+          },
+          {
+            "id": "Desktop",
+            "parent": "Software",
+            "value": 18,
+            "group": "Software"
+          },
+          {
+            "id": "Services",
+            "parent": null,
+            "group": "Services"
+          },
+          {
+            "id": "Support",
+            "parent": "Services",
+            "value": 20,
+            "group": "Services"
+          },
+          {
+            "id": "Training",
+            "parent": "Services",
+            "value": 12,
+            "group": "Services"
+          }
+        ]
+      },
+      "encoding": {
+        "color": {
+          "field": "group",
+          "type": "nominal",
+          "legend": null
+        },
+        "tooltip": {
+          "field": "id"
+        }
+      }
+    },
+    {
+      "label": "Geographic / Choropleth",
+      "title": "Schematic World Regions",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "geoshape",
+        "stroke": "#ffffff",
+        "strokeWidth": 1
+      },
+      "data": {
+        "values": [
+          {
+            "region": "N. America",
+            "activity": 82,
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -165,
+                    65
+                  ],
+                  [
+                    -140,
+                    70
+                  ],
+                  [
+                    -120,
+                    58
+                  ],
+                  [
+                    -65,
+                    52
+                  ],
+                  [
+                    -80,
+                    25
+                  ],
+                  [
+                    -100,
+                    15
+                  ],
+                  [
+                    -120,
+                    35
+                  ],
+                  [
+                    -165,
+                    65
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "region": "S. America",
+            "activity": 54,
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -80,
+                    10
+                  ],
+                  [
+                    -50,
+                    5
+                  ],
+                  [
+                    -35,
+                    -10
+                  ],
+                  [
+                    -55,
+                    -55
+                  ],
+                  [
+                    -70,
+                    -40
+                  ],
+                  [
+                    -80,
+                    10
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "region": "Europe",
+            "activity": 72,
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -10,
+                    36
+                  ],
+                  [
+                    5,
+                    58
+                  ],
+                  [
+                    30,
+                    65
+                  ],
+                  [
+                    45,
+                    48
+                  ],
+                  [
+                    30,
+                    35
+                  ],
+                  [
+                    -10,
+                    36
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "region": "Africa",
+            "activity": 61,
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -17,
+                    32
+                  ],
+                  [
+                    30,
+                    32
+                  ],
+                  [
+                    50,
+                    10
+                  ],
+                  [
+                    35,
+                    -30
+                  ],
+                  [
+                    18,
+                    -35
+                  ],
+                  [
+                    -5,
+                    5
+                  ],
+                  [
+                    -17,
+                    32
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "region": "Asia",
+            "activity": 95,
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    45,
+                    48
+                  ],
+                  [
+                    60,
+                    68
+                  ],
+                  [
+                    150,
+                    65
+                  ],
+                  [
+                    175,
+                    50
+                  ],
+                  [
+                    140,
+                    30
+                  ],
+                  [
+                    120,
+                    5
+                  ],
+                  [
+                    100,
+                    15
+                  ],
+                  [
+                    80,
+                    8
+                  ],
+                  [
+                    60,
+                    30
+                  ],
+                  [
+                    45,
+                    48
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "region": "Australia",
+            "activity": 43,
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    112,
+                    -12
+                  ],
+                  [
+                    135,
+                    -10
+                  ],
+                  [
+                    153,
+                    -25
+                  ],
+                  [
+                    145,
+                    -40
+                  ],
+                  [
+                    115,
+                    -32
+                  ],
+                  [
+                    112,
+                    -12
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "encoding": {
+        "color": {
+          "field": "activity",
+          "type": "quantitative",
+          "scale": {
+            "scheme": "blues"
+          },
+          "legend": {
+            "orient": "bottom",
+            "direction": "horizontal",
+            "title": null
+          }
+        },
+        "tooltip": {
+          "field": "region"
+        }
+      },
+      "projection": {
+        "type": "naturalEarth1"
+      }
+    },
+    {
+      "label": "Error Bars",
+      "title": "Response Time Ranges",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "errorbar",
+        "strokeWidth": 2.5
+      },
+      "data": {
+        "values": [
+          {
+            "service": "API",
+            "low": 12,
+            "high": 25
+          },
+          {
+            "service": "Search",
+            "low": 22,
+            "high": 48
+          },
+          {
+            "service": "Cache",
+            "low": 5,
+            "high": 13
+          },
+          {
+            "service": "Queue",
+            "low": 18,
+            "high": 35
+          }
+        ]
+      },
+      "encoding": {
+        "x": {
+          "field": "service",
+          "type": "nominal"
+        },
+        "y": {
+          "field": "low",
+          "type": "quantitative",
+          "title": "Response time (ms)"
+        },
+        "y2": {
+          "field": "high"
+        },
+        "color": {
+          "field": "service",
+          "type": "nominal",
+          "legend": null
+        }
+      }
+    },
+    {
+      "label": "Error Band",
+      "title": "Forecast with Uncertainty",
+      "width": 350,
+      "height": 270,
+      "data": {
+        "values": [
+          {
+            "week": 1,
+            "low": 20,
+            "high": 30,
+            "forecast": 25
+          },
+          {
+            "week": 2,
+            "low": 23,
+            "high": 37,
+            "forecast": 30
+          },
+          {
+            "week": 3,
+            "low": 25,
+            "high": 45,
+            "forecast": 35
+          },
+          {
+            "week": 4,
+            "low": 29,
+            "high": 55,
+            "forecast": 42
+          },
+          {
+            "week": 5,
+            "low": 32,
+            "high": 64,
+            "forecast": 48
+          },
+          {
+            "week": 6,
+            "low": 35,
+            "high": 75,
+            "forecast": 55
+          }
+        ]
+      },
+      "layer": [
+        {
+          "mark": {
+            "type": "errorband",
+            "color": "#4e79a7",
+            "opacity": 0.25
+          },
+          "encoding": {
+            "x": {
+              "field": "week",
+              "type": "quantitative",
+              "axis": {
+                "tickCount": 6
+              }
+            },
+            "y": {
+              "field": "low",
+              "type": "quantitative",
+              "title": "Demand"
+            },
+            "y2": {
+              "field": "high"
+            }
+          }
+        },
+        {
+          "mark": {
+            "type": "line",
+            "color": "#4e79a7",
+            "point": true
+          },
+          "encoding": {
+            "x": {
+              "field": "week",
+              "type": "quantitative"
+            },
+            "y": {
+              "field": "forecast",
+              "type": "quantitative"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "label": "Tick / Strip Plot",
+      "title": "Delivery Times by Carrier",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "tick",
+        "size": 16,
+        "strokeWidth": 2
+      },
+      "data": {
+        "values": [
+          {
+            "carrier": "A",
+            "days": 2
+          },
+          {
+            "carrier": "A",
+            "days": 3
+          },
+          {
+            "carrier": "A",
+            "days": 3.5
+          },
+          {
+            "carrier": "A",
+            "days": 4
+          },
+          {
+            "carrier": "A",
+            "days": 5
+          },
+          {
+            "carrier": "B",
+            "days": 1
+          },
+          {
+            "carrier": "B",
+            "days": 2
+          },
+          {
+            "carrier": "B",
+            "days": 2.5
+          },
+          {
+            "carrier": "B",
+            "days": 3
+          },
+          {
+            "carrier": "B",
+            "days": 4
+          },
+          {
+            "carrier": "C",
+            "days": 3
+          },
+          {
+            "carrier": "C",
+            "days": 4
+          },
+          {
+            "carrier": "C",
+            "days": 5
+          },
+          {
+            "carrier": "C",
+            "days": 6
+          },
+          {
+            "carrier": "C",
+            "days": 7
+          }
+        ]
+      },
+      "encoding": {
+        "x": {
+          "field": "carrier",
+          "type": "nominal"
+        },
+        "y": {
+          "field": "days",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "carrier",
+          "type": "nominal",
+          "legend": null
+        }
+      }
+    },
+    {
+      "label": "Text Chart",
+      "title": "Conversion Rate by Channel",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "text",
+        "fontSize": 19,
+        "fontWeight": 700
+      },
+      "data": {
+        "values": [
+          {
+            "channel": "Email",
+            "rate": 0.38
+          },
+          {
+            "channel": "Search",
+            "rate": 0.55
+          },
+          {
+            "channel": "Social",
+            "rate": 0.27
+          },
+          {
+            "channel": "Direct",
+            "rate": 0.68
+          }
+        ]
+      },
+      "encoding": {
+        "x": {
+          "field": "channel",
+          "type": "nominal"
+        },
+        "y": {
+          "field": "rate",
+          "type": "quantitative",
+          "scale": {
+            "domain": [
+              0,
+              1
+            ]
+          },
+          "axis": {
+            "format": ".0%"
+          }
+        },
+        "text": {
+          "field": "rate",
+          "type": "quantitative",
+          "format": ".0%"
+        },
+        "color": {
+          "field": "channel",
+          "type": "nominal",
+          "legend": null
+        }
+      }
+    },
+    {
+      "label": "Image Chart",
+      "title": "Product Ratings vs. Cost",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "image",
+        "width": 36,
+        "height": 36
+      },
+      "data": {
+        "values": [
+          {
+            "product": "A",
+            "cost": 20,
+            "rating": 4.2,
+            "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSIxMiIgZmlsbD0iIzRlNzlhNyIvPjx0ZXh0IHg9IjI0IiB5PSIzMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjYiIGZpbGw9IndoaXRlIj5BPC90ZXh0Pjwvc3ZnPg=="
+          },
+          {
+            "product": "B",
+            "cost": 45,
+            "rating": 4.7,
+            "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSIxMiIgZmlsbD0iI2YyOGUyYiIvPjx0ZXh0IHg9IjI0IiB5PSIzMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjYiIGZpbGw9IndoaXRlIj5CPC90ZXh0Pjwvc3ZnPg=="
+          },
+          {
+            "product": "C",
+            "cost": 70,
+            "rating": 3.8,
+            "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSIxMiIgZmlsbD0iIzU5YTE0ZiIvPjx0ZXh0IHg9IjI0IiB5PSIzMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjYiIGZpbGw9IndoaXRlIj5DPC90ZXh0Pjwvc3ZnPg=="
+          }
+        ]
+      },
+      "encoding": {
+        "x": {
+          "field": "cost",
+          "type": "quantitative",
+          "scale": {
+            "domain": [
+              0,
+              90
+            ]
+          }
+        },
+        "y": {
+          "field": "rating",
+          "type": "quantitative",
+          "scale": {
+            "domain": [
+              3,
+              5
+            ]
+          }
+        },
+        "url": {
+          "field": "icon"
+        },
+        "tooltip": {
+          "field": "product"
+        }
+      }
+    },
+    {
+      "label": "Streamgraph",
+      "title": "Topic Activity Over Time",
+      "width": 350,
+      "height": 270,
+      "mark": {
+        "type": "area",
+        "interpolate": "cardinal"
+      },
+      "data": {
+        "values": [
+          {
+            "week": 1,
+            "topic": "Design",
+            "activity": 12
+          },
+          {
+            "week": 2,
+            "topic": "Design",
+            "activity": 18
+          },
+          {
+            "week": 3,
+            "topic": "Design",
+            "activity": 30
+          },
+          {
+            "week": 4,
+            "topic": "Design",
+            "activity": 24
+          },
+          {
+            "week": 5,
+            "topic": "Design",
+            "activity": 14
+          },
+          {
+            "week": 6,
+            "topic": "Design",
+            "activity": 9
+          },
+          {
+            "week": 7,
+            "topic": "Design",
+            "activity": 15
+          },
+          {
+            "week": 8,
+            "topic": "Design",
+            "activity": 22
+          },
+          {
+            "week": 1,
+            "topic": "Build",
+            "activity": 5
+          },
+          {
+            "week": 2,
+            "topic": "Build",
+            "activity": 8
+          },
+          {
+            "week": 3,
+            "topic": "Build",
+            "activity": 14
+          },
+          {
+            "week": 4,
+            "topic": "Build",
+            "activity": 26
+          },
+          {
+            "week": 5,
+            "topic": "Build",
+            "activity": 34
+          },
+          {
+            "week": 6,
+            "topic": "Build",
+            "activity": 28
+          },
+          {
+            "week": 7,
+            "topic": "Build",
+            "activity": 18
+          },
+          {
+            "week": 8,
+            "topic": "Build",
+            "activity": 12
+          },
+          {
+            "week": 1,
+            "topic": "Test",
+            "activity": 4
+          },
+          {
+            "week": 2,
+            "topic": "Test",
+            "activity": 6
+          },
+          {
+            "week": 3,
+            "topic": "Test",
+            "activity": 8
+          },
+          {
+            "week": 4,
+            "topic": "Test",
+            "activity": 12
+          },
+          {
+            "week": 5,
+            "topic": "Test",
+            "activity": 20
+          },
+          {
+            "week": 6,
+            "topic": "Test",
+            "activity": 32
+          },
+          {
+            "week": 7,
+            "topic": "Test",
+            "activity": 28
+          },
+          {
+            "week": 8,
+            "topic": "Test",
+            "activity": 18
+          }
+        ]
+      },
+      "encoding": {
+        "x": {
+          "field": "week",
+          "type": "quantitative",
+          "axis": {
+            "tickCount": 8
+          }
+        },
+        "y": {
+          "field": "activity",
+          "type": "quantitative",
+          "stack": "wiggle",
+          "axis": null
+        },
+        "color": {
+          "field": "topic",
+          "type": "nominal",
+          "legend": {
+            "orient": "bottom",
+            "direction": "horizontal",
+            "title": null
+          }
         }
       }
     }

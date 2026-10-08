@@ -322,6 +322,9 @@ bool render_path_metrics_project(const RdtPathMetrics* metrics, float x, float y
 RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wavy_fill = false);
 bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t codepoint,
     float x, float y, float scale_x, Arena* arena, bool* color_bitmap = nullptr);
+bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32_t glyph,
+    float x, float y, float scale_x, Arena* arena);
+bool render_path_append_svg(StrBuf* out, const RdtPath* path);
 
 // Shared SVG geometry parsing for rendering and DOM geometry queries. The
 // returned path is caller-owned; transform coefficients are [a,b,c,d,e,f].
@@ -405,6 +408,20 @@ struct SvgTextMeasurement {
 };
 bool svg_text_measure_batch(DomElement* svg, const SvgLengthContext* lengths,
     SvgTextMeasurement* measurements, size_t count);
+
+// direct requests share SVG's placement and bounds without constructing a DOM.
+struct TextMeasureRequest {
+    const char* text;
+    size_t length;
+    FontStyleDesc font;
+    char font_family[256]; // storage for a copied request descriptor
+    float letter_spacing, word_spacing;
+};
+// reports the actual face selected per codepoint, while the handle is borrowed.
+typedef void (*TextMeasureFontFn)(void* context, size_t request, FontHandle* font);
+bool text_measure_batch(FontContext* fonts, const TextMeasureRequest* requests,
+    SvgTextMeasurement* measurements, size_t count,
+    TextMeasureFontFn on_font = nullptr, void* font_context = nullptr);
 
 // caller-owned character-cell geometry shares the painter's positioned layout.
 RdtPath* svg_text_geometry_path(DomElement* element, const SvgLengthContext* lengths,

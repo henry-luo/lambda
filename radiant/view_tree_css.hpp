@@ -101,6 +101,7 @@ bool view_css_context_begin(ViewTree* tree);
 void view_css_context_destroy(ViewTree* tree);
 ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element);
 ViewCssStyle* view_css_resolve_pseudo(ViewTree* tree, DomElement* element, uint8_t pseudo_element);
+ViewCssStyle* view_css_anonymous_style(ViewTree* tree, ViewCssStyle* parent, DisplayValue display);
 const ViewCssStyle* view_css_common_ancestor(const ViewCssStyle* left, const ViewCssStyle* right);
 const CssValue* view_css_property(ViewTree* tree, ViewCssStyle* style, const char* name,
                                  CssDeclaration* winning = nullptr);

@@ -1,0 +1,106 @@
+{
+  "name": "Chart legend bindings, isolated instances, camera and wordcloud",
+  "html": "test/lambda/ui/_chart_interaction_bindings.ls",
+  "viewport": {
+    "width": 650,
+    "height": 450
+  },
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#one .points circle"
+      },
+      "attribute": "fill",
+      "equals": "#4e79a7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#one .legend-entry text"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#one .points circle"
+      },
+      "attribute": "fill",
+      "equals": "red"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#one .points circle",
+        "index": 1
+      },
+      "attribute": "fill",
+      "equals": "#f28e2b"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#two .points circle"
+      },
+      "attribute": "fill",
+      "equals": "#4e79a7"
+    },
+    {
+      "type": "mouse_down",
+      "x": 100,
+      "y": 270
+    },
+    {
+      "type": "mouse_move",
+      "x": 116,
+      "y": 270
+    },
+    {
+      "type": "mouse_up",
+      "x": 116,
+      "y": 270
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#camera-domain"
+      },
+      "equals": "-1"
+    },
+    {
+      "type": "dblclick",
+      "x": 100,
+      "y": 270
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#camera-domain"
+      },
+      "equals": "empty"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#words [data-chart-row]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#words [data-chart-row]"
+      },
+      "attribute": "fill",
+      "equals": "red"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#words [data-chart-row]",
+        "index": 1
+      },
+      "attribute": "fill",
+      "equals": "grey"
+    }
+  ]
+}

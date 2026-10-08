@@ -220,7 +220,7 @@ fn katex_font_families() => {
 }
 
 fn local_font_families() => {
-    main: "'Computer Modern Serif','Latin Modern Roman',KaTeX_Main,'STIX Two Math',serif",
+    main: "'Computer Modern Serif','Latin Modern Roman',KaTeX_Main,serif",
     math: "'Computer Modern Serif','Latin Modern Roman',KaTeX_Math,serif",
     ams: "KaTeX_AMS,'Computer Modern Serif','Latin Modern Roman',serif",
     cal: "KaTeX_Caligraphic,'Computer Modern Serif','Latin Modern Roman',serif",

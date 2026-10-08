@@ -96,26 +96,30 @@ fn spacing_code_inner(ri) {
 // Get spacing between two atom types
 // Returns spacing in em, or 0.0 if no spacing needed
 // style: "display" | "text" | "script" | "scriptscript"
-pub fn get_spacing(left_type, right_type, style) {
+pub fn get_spacing(left_type, right_type, style, exact = false) {
     let li = atom_type_index(left_type)
     let ri = atom_type_index(right_type)
     let code = spacing_code_for_indices(li, ri)
+    // Preserve the snapshot adapter's rounding; production uses TeX mu units.
+    let thin = if (exact) 3.0 / 18.0 else THIN_SPACE
+    let medium = if (exact) 4.0 / 18.0 else MEDIUM_SPACE
+    let thick = if (exact) 5.0 / 18.0 else THICK_SPACE
 
     if (code == 99) 0.0          // impossible combination
     else if (code == 0) 0.0      // no space
     else if (code > 0)
-        (if (code == 1) THIN_SPACE
-         else if (code == 2) MEDIUM_SPACE
-         else if (code == 3) THICK_SPACE
+        (if (code == 1) thin
+         else if (code == 2) medium
+         else if (code == 3) thick
          else 0.0)
     else
         // conditional on style (display/text only)
         if (style == "script" or style == "scriptscript") 0.0
         else
             (let abs_code = 0 - code,
-             if (abs_code == 1) THIN_SPACE
-             else if (abs_code == 2) MEDIUM_SPACE
-             else if (abs_code == 3) THICK_SPACE
+             if (abs_code == 1) thin
+             else if (abs_code == 2) medium
+             else if (abs_code == 3) thick
              else 0.0)
 }
 

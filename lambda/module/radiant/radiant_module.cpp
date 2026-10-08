@@ -19,6 +19,8 @@
 #include "../../../lib/mempool.h"
 #include "../../../lib/math_utils.h"
 #include "../../../lib/str.h"
+#include "../../../lib/font/font_math.h"
+#include "../../../lib/endian.h"
 #include "../../runtime/side_stack.h"
 #include "../../runtime/gc/gc_heap.h"
 #include "../../../lib/url.h"
@@ -153,14 +155,17 @@ static Item radiant_obj_new(void) {
 
 static void radiant_obj_set(Item obj, const char* key, Item value) {
     if (!radiant_host_api || !radiant_host_api->value || !key) return;
+    // key creation can collect a freshly returned nested metric record.
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, obj), stored(roots, value);
     Item key_item = radiant_key_item(key);
     // Helper records remain plain VMaps so Lambda callbacks can read them
     // without entering JS object storage; the layout handle itself is Velmt.
-    if (get_type_id(obj) == LMD_TYPE_VMAP && obj.vmap) {
-        vmap_set(obj, key_item, value);
+    if (get_type_id(owner.get()) == LMD_TYPE_VMAP && owner.get().vmap) {
+        vmap_set(owner.get(), key_item, stored.get());
         return;
     }
-    radiant_host_api->value->property_set(obj, key_item, value);
+    radiant_host_api->value->property_set(owner.get(), key_item, stored.get());
 }
 
 static void radiant_rooted_obj_set(Rooted<Item>& rooted_obj, const char* key, Item value) {
@@ -180,7 +185,11 @@ static bool radiant_item_is_missing(Item item) {
 static Item radiant_obj_get(Item obj, const char* key) {
     if (!radiant_host_api || !radiant_host_api->value || !key) return ItemNull;
     if (radiant_item_is_missing(obj)) return ItemNull;
+    // allocating the lookup key can relocate its owner under precise GC.
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, obj);
     Item key_item = radiant_key_item(key);
+    obj = owner.get();
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map) {
         // Lambda custom-layout callbacks may return plain result maps; JS
         // property_get assumes JS object metadata and cannot read those maps.
@@ -1630,6 +1639,8 @@ static DocState* radiant_state_for_element(Item node_item, const char* op,
     return state;
 }
 
+static const char* radiant_input_current_value(DomElement* elem);
+
 RADIANT_C_API Item fn_radiant_get_state(Item node_item, Item name_item) {
     DomElement* elem = nullptr;
     DocState* state = radiant_state_for_element(node_item, "GET_STATE", &elem);
@@ -1642,8 +1653,12 @@ RADIANT_C_API Item fn_radiant_get_state(Item node_item, Item name_item) {
         return ItemNull;
     }
     if (kind == RSTATE_TEXT) {
-        // Live value when the control has a buffer, else the `value` attribute
-        // — the attribute is the default, the buffer is the current value.
+        // range/number values live outside the text buffer; use the same live
+        // projection as DOM .value instead of exposing the default attribute.
+        if (elem->tag_name && (str_icmp_cstr(elem->tag_name, "input") == 0 ||
+                              str_icmp_cstr(elem->tag_name, "textarea") == 0)) {
+            return radiant_string_item(radiant_input_current_value(elem));
+        }
         FormControlProp* f = elem->form_control();
         if (f && f->current_value) return radiant_string_item(f->current_value);
         const char* attr = elem->get_attribute("value");
@@ -3410,6 +3425,417 @@ RADIANT_C_API Item fn_radiant_graphemes(Item text_item) {
     return result.get();
 }
 
+static bool radiant_font_style(Item item, FontStyleDesc* style, char (&family_buffer)[256]) {
+    if (get_type_id(item) != LMD_TYPE_MAP && get_type_id(item) != LMD_TYPE_VMAP) return false;
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, item);
+    *style = {};
+    style->family = "sans-serif";
+    style->size_px = 16.0f;
+    style->weight = FONT_WEIGHT_NORMAL;
+    Item family = radiant_obj_get(owner.get(), "font_family");
+    if (!radiant_item_is_missing(family)) {
+        if (get_type_id(family) != LMD_TYPE_STRING || !family.get_string()->len ||
+            family.get_string()->len >= sizeof(family_buffer) ||
+            strlen(family.get_string()->chars) != family.get_string()->len) return false;
+        // virtual maps may materialize transient strings; native descriptors own a copy.
+        str_copy(family_buffer, sizeof(family_buffer), family.get_string()->chars, family.get_string()->len);
+        style->family = family_buffer;
+    }
+    Item size = radiant_obj_get(owner.get(), "font_size");
+    if (!radiant_item_is_missing(size) && (!radiant_item_to_float(size, &style->size_px) ||
+        !isfinite(style->size_px) || style->size_px <= 0.0f)) return false;
+    Item weight = radiant_obj_get(owner.get(), "font_weight");
+    float weight_value = 400.0f;
+    if (get_type_id(weight) == LMD_TYPE_STRING) {
+        const char* name = weight.get_string()->chars;
+        if (strcmp(name, "normal") == 0) weight_value = 400.0f;
+        else if (strcmp(name, "bold") == 0) weight_value = 700.0f;
+        else return false;
+        weight = ItemNull;
+    }
+    if (!radiant_item_is_missing(weight) && (!radiant_item_to_float(weight, &weight_value) ||
+        !isfinite(weight_value) || weight_value < 1.0f || weight_value > 1000.0f ||
+        floorf(weight_value) != weight_value)) return false;
+    style->weight = (FontWeight)(int)weight_value;
+    Item slant = radiant_obj_get(owner.get(), "font_style");
+    if (!radiant_item_is_missing(slant)) {
+        if (get_type_id(slant) != LMD_TYPE_STRING) return false;
+        const char* name = slant.get_string()->chars;
+        if (strcmp(name, "italic") == 0) style->slant = FONT_SLANT_ITALIC;
+        else if (strcmp(name, "oblique") == 0) style->slant = FONT_SLANT_OBLIQUE;
+        else if (strcmp(name, "normal") != 0) return false;
+    }
+    return true;
+}
+
+// font snapshots are supplied by lambda-io; these queries never acquire resources.
+static FontContext* radiant_query_fonts(Item faces) {
+    if (!radiant_item_is_missing(faces) && !is_array_family_type_id(get_type_id(faces))) return nullptr;
+    RootFrame owner_roots(1);
+    Rooted<Item> owner(owner_roots, faces);
+    FontContextConfig config = {};
+    config.pixel_ratio = 1.0f;
+    FontContext* fonts = font_context_create(&config);
+    if (!fonts) return nullptr;
+    int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(faces);
+    for (int64_t index = 0; index < count; index++) {
+        RootFrame roots(1);
+        Rooted<Item> face(roots, item_at(owner.get(), index));
+        FontStyleDesc style;
+        char family[256];
+        if (!radiant_font_style(face.get(), &style, family)) { font_context_destroy(fonts); return nullptr; }
+        Item bytes = radiant_obj_get(face.get(), "data");
+        if (get_type_id(bytes) != LMD_TYPE_BINARY || !bytes.get_binary()->len) {
+            font_context_destroy(fonts); return nullptr;
+        }
+        FontFaceSource source = {};
+        source.data = binary_data(bytes.get_binary());
+        source.data_length = bytes.get_binary()->len;
+        FontFaceDesc descriptor = {};
+        descriptor.family = style.family; descriptor.weight = style.weight; descriptor.slant = style.slant;
+        descriptor.sources = &source; descriptor.source_count = 1;
+        if (!font_face_register(fonts, &descriptor)) { font_context_destroy(fonts); return nullptr; }
+        // reject a corrupt explicit resource before system fallback can hide it.
+        FontHandle* handle = font_face_load(fonts, &descriptor, style.size_px);
+        if (!handle) { font_context_destroy(fonts); return nullptr; }
+        font_handle_release(handle);
+    }
+    return fonts;
+}
+
+static Item radiant_text_bounds(const Bound* bounds) {
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "left", radiant_float_item(bounds->left));
+    radiant_rooted_obj_set(result, "top", radiant_float_item(bounds->top));
+    radiant_rooted_obj_set(result, "right", radiant_float_item(bounds->right));
+    radiant_rooted_obj_set(result, "bottom", radiant_float_item(bounds->bottom));
+    return result.get();
+}
+
+static Item radiant_text_measurement(const SvgTextMeasurement* metric, bool detailed) {
+    Bound bounds = metric->logical;
+    if (metric->has_ink) {
+        bounds.left = fminf(bounds.left, metric->ink.left); bounds.top = fminf(bounds.top, metric->ink.top);
+        bounds.right = fmaxf(bounds.right, metric->ink.right); bounds.bottom = fmaxf(bounds.bottom, metric->ink.bottom);
+    }
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_text_bounds(&bounds));
+    radiant_rooted_obj_set(result, "width", radiant_float_item(metric->advance));
+    radiant_rooted_obj_set(result, "height", radiant_float_item(bounds.bottom - bounds.top));
+    radiant_rooted_obj_set(result, "baseline", radiant_float_item(-bounds.top));
+    if (detailed) {
+        radiant_rooted_obj_set(result, "advance", radiant_float_item(metric->advance));
+        radiant_rooted_obj_set(result, "logical", radiant_text_bounds(&metric->logical));
+        radiant_rooted_obj_set(result, "ink", metric->has_ink ? radiant_text_bounds(&metric->ink) : ItemNull);
+    }
+    return result.get();
+}
+
+struct RadiantMeasuredFonts {
+    ArrayList** requests;
+    bool valid;
+};
+
+static void radiant_record_measured_font(void* context, size_t request, FontHandle* font) {
+    RadiantMeasuredFonts* result = (RadiantMeasuredFonts*)context;
+    if (!result->valid) return;
+    const char* family = nullptr;
+    if (!font_handle_get_style(font, &family, nullptr, nullptr, nullptr) || !family) {
+        result->valid = false;
+        return;
+    }
+    ArrayList* names = result->requests[request];
+    if (!names) result->requests[request] = names = arraylist_new(2);
+    if (!names) { result->valid = false; return; }
+    for (int index = 0; index < names->length; index++) {
+        if (strcmp((const char*)names->data[index], family) == 0) return;
+    }
+    // copy before the borrowed fallback handle is released by the shared measurer.
+    char* copy = mem_strdup(family, MEM_CAT_RENDER);
+    if (!copy) { result->valid = false; return; }
+    if (!arraylist_append(names, copy)) { mem_free(copy); result->valid = false; }
+}
+
+RADIANT_C_API Item fn_radiant_measure_text(Item requests_item, Item faces_item) {
+    if (!is_array_family_type_id(get_type_id(requests_item))) return ItemNull;
+    RootFrame roots(5);
+    Rooted<Item> source(roots, requests_item), faces(roots, faces_item), result(roots, ItemNull), box(roots, ItemNull),
+        names(roots, ItemNull);
+    int64_t length = fn_len(source.get());
+    if (length < 0 || length > INT_MAX) return ItemNull;
+    int count = (int)length;
+    if (!count) return radiant_array_new_item(0);
+    TextMeasureRequest* requests = (TextMeasureRequest*)mem_calloc(count, sizeof(TextMeasureRequest), MEM_CAT_RENDER);
+    SvgTextMeasurement* metrics = (SvgTextMeasurement*)mem_calloc(count, sizeof(SvgTextMeasurement), MEM_CAT_RENDER);
+    RadiantMeasuredFonts resolved = {(ArrayList**)mem_calloc(count, sizeof(ArrayList*), MEM_CAT_RENDER), true};
+    FontContext* fonts = requests && metrics && resolved.requests ? radiant_query_fonts(faces.get()) : nullptr;
+    bool valid = fonts != nullptr;
+    for (int index = 0; valid && index < count; index++) {
+        RootFrame request_roots(3);
+        Rooted<Item> request(request_roots, item_at(source.get(), index)), text(request_roots, ItemNull), style(request_roots, ItemNull);
+        if (get_type_id(request.get()) != LMD_TYPE_MAP && get_type_id(request.get()) != LMD_TYPE_VMAP) { valid = false; break; }
+        text.set(radiant_obj_get(request.get(), "text"));
+        style.set(radiant_obj_get(request.get(), "font"));
+        valid = get_type_id(text.get()) == LMD_TYPE_STRING &&
+            radiant_font_style(style.get(), &requests[index].font, requests[index].font_family);
+        if (!valid) {
+            log_debug("RADIANT_TEXT_QUERY invalid request index=%d text_type=%d", index, get_type_id(text.get()));
+            break;
+        }
+        requests[index].length = text.get().get_string()->len;
+        requests[index].text = mem_dup_n(text.get().get_string()->chars, requests[index].length, MEM_CAT_RENDER);
+        if (!requests[index].text) { valid = false; break; }
+        if (!str_utf8_valid(requests[index].text, requests[index].length)) { valid = false; break; }
+        const char* keys[] = {"letter_spacing", "word_spacing"};
+        float* values[] = {&requests[index].letter_spacing, &requests[index].word_spacing};
+        for (int field = 0; valid && field < 2; field++) {
+            Item value = radiant_obj_get(style.get(), keys[field]);
+            if (!radiant_item_is_missing(value)) valid = radiant_item_to_float(value, values[field]) && isfinite(*values[field]);
+        }
+    }
+    bool measured = valid && text_measure_batch(fonts, requests, metrics, count, radiant_record_measured_font, &resolved) && resolved.valid;
+    if (!measured) log_debug("RADIANT_TEXT_QUERY failed validation=%d count=%d", valid, count);
+    if (measured) {
+        result.set(radiant_array_new_item(count));
+        for (int index = 0; index < count; index++) {
+            box.set(radiant_text_measurement(&metrics[index], true));
+            ArrayList* families = resolved.requests[index];
+            names.set(radiant_array_new_item(families ? families->length : 0));
+            for (int family = 0; families && family < families->length; family++) {
+                Item name = radiant_string_item((const char*)families->data[family]);
+                radiant_array_push_item(names.get(), name);
+            }
+            radiant_rooted_obj_set(box, "resolved_fonts", names.get());
+            radiant_array_push_item(result.get(), box.get());
+        }
+    }
+    if (fonts) font_context_destroy(fonts);
+    if (requests) {
+        for (int index = 0; index < count; index++) if (requests[index].text) mem_free((void*)requests[index].text);
+        mem_free(requests);
+    }
+    if (metrics) mem_free(metrics);
+    if (resolved.requests) {
+        for (int index = 0; index < count; index++) {
+            ArrayList* families = resolved.requests[index];
+            if (!families) continue;
+            for (int family = 0; family < families->length; family++) mem_free(families->data[family]);
+            arraylist_free(families);
+        }
+        mem_free(resolved.requests);
+    }
+    return result.get();
+}
+
+static Item radiant_math_glyph_geometry(FontHandle* font, uint16_t glyph, const FontMathGlyph* info, float scale) {
+    float advance = font_get_glyph_advance_by_index(font, glyph);
+    if (advance < 0.0f) return ItemNull;
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "math.glyph_geometry");
+    RdtPath* path = rdt_path_new();
+    StrBuf* svg = strbuf_new();
+    bool valid = arena && path && svg &&
+        render_path_append_font_glyph_index(path, font, glyph, 0.0f, 0.0f, 1.0f, arena) &&
+        render_path_append_svg(svg, path);
+    RootFrame roots(1);
+    Rooted<Item> result(roots, ItemNull);
+    if (valid) {
+        Bound bounds = {};
+        bool ink = rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
+        result.set(radiant_obj_new());
+        radiant_rooted_obj_set(result, "glyph", radiant_int_item(glyph));
+        radiant_rooted_obj_set(result, "advance", radiant_float_item(advance));
+        radiant_rooted_obj_set(result, "ink", ink ? radiant_text_bounds(&bounds) : ItemNull);
+        radiant_rooted_obj_set(result, "path", radiant_string_item(svg->str));
+        radiant_rooted_obj_set(result, "italic", radiant_float_item(info->italic * scale));
+        radiant_rooted_obj_set(result, "accent", info->has_accent ? radiant_float_item(info->accent * scale) : ItemNull);
+    }
+    if (svg) strbuf_free(svg);
+    if (path) rdt_path_free(path);
+    if (arena) mem_arena_destroy(arena);
+    return result.get();
+}
+
+static Item radiant_math_construction(FontHandle* font, const FontMathTable* math,
+    uint16_t glyph, bool vertical, float scale) {
+    FontMathConstruction construction = {};
+    if (math && !font_math_construction(math, glyph, vertical, &construction)) return ItemNull;
+    RootFrame roots(4);
+    Rooted<Item> result(roots, radiant_obj_new()), variants(roots, radiant_array_new_item(construction.variant_count)),
+        parts(roots, radiant_array_new_item(construction.part_count)), entry(roots, ItemNull);
+    for (uint16_t index = 0; index < construction.variant_count; index++) {
+        FontMathVariant variant;
+        if (!font_math_variant(&construction, index, &variant)) return ItemNull;
+        FontMathGlyph info;
+        if (!font_math_glyph(math, variant.glyph, &info)) return ItemNull;
+        entry.set(radiant_math_glyph_geometry(font, variant.glyph, &info, scale));
+        if (radiant_item_is_missing(entry.get())) return ItemNull;
+        radiant_rooted_obj_set(entry, "extent", radiant_float_item(variant.advance * scale));
+        radiant_array_push_item(variants.get(), entry.get());
+    }
+    for (uint16_t index = 0; index < construction.part_count; index++) {
+        FontMathPart part;
+        if (!font_math_part(&construction, index, &part)) return ItemNull;
+        FontMathGlyph info;
+        if (!font_math_glyph(math, part.glyph, &info)) return ItemNull;
+        entry.set(radiant_math_glyph_geometry(font, part.glyph, &info, scale));
+        if (radiant_item_is_missing(entry.get())) return ItemNull;
+        radiant_rooted_obj_set(entry, "start_connector", radiant_float_item(part.start_connector * scale));
+        radiant_rooted_obj_set(entry, "end_connector", radiant_float_item(part.end_connector * scale));
+        radiant_rooted_obj_set(entry, "extent", radiant_float_item(part.advance * scale));
+        radiant_rooted_obj_set(entry, "extender", radiant_bool_item(part.extender));
+        radiant_array_push_item(parts.get(), entry.get());
+    }
+    radiant_rooted_obj_set(result, "variants", variants.get());
+    radiant_rooted_obj_set(result, "parts", parts.get());
+    radiant_rooted_obj_set(result, "min_overlap", radiant_float_item(construction.min_overlap * scale));
+    radiant_rooted_obj_set(result, "italic", radiant_float_item(construction.italic * scale));
+    return result.get();
+}
+
+static Item radiant_math_glyph_record(FontHandle* font, const FontMathTable* math,
+    uint32_t codepoint, float scale) {
+    uint32_t glyph = font_get_glyph_index(font, codepoint);
+    // math corrections and variants must belong to this face, never a silent fallback.
+    if (!glyph || glyph > UINT16_MAX) return ItemNull;
+    FontMathGlyph info = {};
+    if (math && !font_math_glyph(math, (uint16_t)glyph, &info)) return ItemNull;
+    RootFrame roots(6);
+    Rooted<Item> result(roots, radiant_math_glyph_geometry(font, (uint16_t)glyph, &info, scale)),
+        kerns(roots, radiant_obj_new()), entries(roots, ItemNull), entry(roots, ItemNull),
+        vertical(roots, ItemNull), horizontal(roots, ItemNull);
+    if (radiant_item_is_missing(result.get())) return ItemNull;
+    radiant_rooted_obj_set(result, "codepoint", radiant_int_item(codepoint));
+    radiant_rooted_obj_set(result, "extended", radiant_bool_item(info.extended));
+    radiant_rooted_obj_set(result, "has_math", radiant_bool_item(math != nullptr));
+    const char* family = nullptr;
+    font_handle_get_style(font, &family, nullptr, nullptr, nullptr);
+    radiant_rooted_obj_set(result, "font_family", radiant_string_item(family));
+    const char* corners[] = {"top_right", "top_left", "bottom_right", "bottom_left"};
+    for (unsigned corner = 0; corner < 4; corner++) {
+        const FontMathTable* kern = &info.kern[corner];
+        unsigned heights = kern->data ? read_be16(kern->data) : 0;
+        unsigned count = kern->data ? heights + 1 : 0;
+        entries.set(radiant_array_new_item((int)count));
+        for (unsigned index = 0; index < count; index++) {
+            int16_t height, value;
+            if (!font_math_kern_entry(kern, (uint16_t)index, &height, &value)) return ItemNull;
+            entry.set(radiant_obj_new());
+            radiant_rooted_obj_set(entry, "height", index < heights ? radiant_float_item(height * scale) : ItemNull);
+            radiant_rooted_obj_set(entry, "kern", radiant_float_item(value * scale));
+            radiant_array_push_item(entries.get(), entry.get());
+        }
+        radiant_rooted_obj_set(kerns, corners[corner], entries.get());
+    }
+    radiant_rooted_obj_set(result, "kerns", kerns.get());
+    vertical.set(radiant_math_construction(font, math, (uint16_t)glyph, true, scale));
+    horizontal.set(radiant_math_construction(font, math, (uint16_t)glyph, false, scale));
+    if (radiant_item_is_missing(vertical.get()) || radiant_item_is_missing(horizontal.get())) return ItemNull;
+    radiant_rooted_obj_set(result, "vertical", vertical.get());
+    radiant_rooted_obj_set(result, "horizontal", horizontal.get());
+    return result.get();
+}
+
+static Item radiant_font_metrics_record(FontHandle* handle, const FontMetrics* metrics, float size) {
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    const char* names[] = {"ascent", "descent", "line_gap", "line_height", "x_height", "cap_height", "space_width", "units_per_em",
+        "underline_thickness", "subscript_y_offset", "superscript_y_offset"};
+    float values[] = {metrics->ascender, -metrics->descender, metrics->line_gap, metrics->line_height,
+        metrics->x_height, metrics->cap_height, metrics->space_width, metrics->em_size,
+        metrics->underline_thickness, metrics->subscript_y_offset, metrics->superscript_y_offset};
+    for (size_t index = 0; index < sizeof(values) / sizeof(values[0]); index++)
+        radiant_rooted_obj_set(result, names[index], radiant_float_item(values[index]));
+    const char* family = nullptr;
+    font_handle_get_style(handle, &family, nullptr, nullptr, nullptr);
+    radiant_rooted_obj_set(result, "font_family", radiant_string_item(family));
+    radiant_rooted_obj_set(result, "font_size", radiant_float_item(size));
+    return result.get();
+}
+
+RADIANT_C_API Item fn_radiant_math_metrics(Item style_item, Item codepoints_item, Item faces_item) {
+    RootFrame roots(7);
+    Rooted<Item> style_root(roots, style_item), source(roots, codepoints_item), faces(roots, faces_item),
+        result(roots, ItemNull), constants(roots, ItemNull), glyphs(roots, ItemNull), glyph(roots, ItemNull);
+    FontStyleDesc style;
+    char family_buffer[256];
+    if (!is_array_family_type_id(get_type_id(source.get())) || !radiant_font_style(style_root.get(), &style, family_buffer)) return ItemNull;
+    int64_t count = fn_len(source.get());
+    if (count < 0 || count > INT_MAX) return ItemNull;
+    Item fallback_item = radiant_obj_get(style_root.get(), "fallback");
+    bool allow_fallback = get_type_id(fallback_item) == LMD_TYPE_BOOL && fallback_item.bool_val;
+    FontContext* fonts = radiant_query_fonts(faces.get());
+    FontHandle* handle = fonts ? font_resolve(fonts, &style) : nullptr;
+    const FontMetrics* metrics = handle ? font_get_metrics(handle) : nullptr;
+    FontMathTable math = {};
+    bool has_math = handle && font_get_math_table(handle, &math);
+    // missing MATH is a normal capability result; a present but corrupt table is an error.
+    bool valid = metrics && metrics->em_size > 0.0f && (has_math || !math.data);
+    if (valid) {
+        float scale = style.size_px / metrics->em_size;
+        if (has_math) constants.set(radiant_obj_new());
+        for (int index = 0; has_math && valid && index < FONT_MATH_CONSTANT_COUNT; index++) {
+            FontMathConstant constant = (FontMathConstant)index;
+            int32_t value;
+            valid = font_math_constant(&math, constant, &value);
+            if (valid) radiant_rooted_obj_set(constants, font_math_constant_name(constant),
+                radiant_float_item(font_math_constant_is_percent(constant) ? value : value * scale));
+        }
+        glyphs.set(radiant_array_new_item((int)count));
+        for (int64_t index = 0; valid && index < count; index++) {
+            Item codepoint = item_at(source.get(), index);
+            int cp;
+            valid = radiant_item_to_index(codepoint, &cp) && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff);
+            if (valid) {
+                FontHandle* fallback = allow_fallback && !font_has_codepoint(handle, (uint32_t)cp)
+                    ? font_resolve_for_codepoint(fonts, &style, (uint32_t)cp) : nullptr;
+                if (fallback) {
+                    // Fallback glyph corrections, metrics and paint must all come from its actual face.
+                    FontMathTable fallback_math = {};
+                    bool fallback_has_math = font_get_math_table(fallback, &fallback_math);
+                    const FontMetrics* fallback_metrics = font_get_metrics(fallback);
+                    glyph.set(fallback_metrics && fallback_metrics->em_size > 0.0f && (fallback_has_math || !fallback_math.data)
+                        ? radiant_math_glyph_record(fallback, fallback_has_math ? &fallback_math : nullptr,
+                            (uint32_t)cp, style.size_px / fallback_metrics->em_size) : ItemNull);
+                    font_handle_release(fallback);
+                } else glyph.set(radiant_math_glyph_record(handle, has_math ? &math : nullptr, (uint32_t)cp, scale));
+                radiant_array_push_item(glyphs.get(), glyph.get());
+            }
+        }
+        if (valid) {
+            result.set(radiant_obj_new());
+            radiant_rooted_obj_set(result, "has_math", radiant_bool_item(has_math));
+            radiant_rooted_obj_set(result, "font_metrics", radiant_font_metrics_record(handle, metrics, style.size_px));
+            radiant_rooted_obj_set(result, "constants", constants.get());
+            radiant_rooted_obj_set(result, "glyphs", glyphs.get());
+            radiant_rooted_obj_set(result, "font_size", radiant_float_item(style.size_px));
+            radiant_rooted_obj_set(result, "units_per_em", radiant_float_item(metrics->em_size));
+            const char* family = nullptr;
+            font_handle_get_style(handle, &family, nullptr, nullptr, nullptr);
+            radiant_rooted_obj_set(result, "font_family", radiant_string_item(family ? family : style.family));
+        }
+    }
+    if (handle) font_handle_release(handle);
+    if (fonts) font_context_destroy(fonts);
+    return result.get();
+}
+
+RADIANT_C_API Item fn_radiant_font_metrics(Item style_item, Item faces_item) {
+    RootFrame roots(3);
+    Rooted<Item> style_root(roots, style_item), faces(roots, faces_item), result(roots, ItemNull);
+    FontStyleDesc style;
+    char family_buffer[256];
+    if (!radiant_font_style(style_root.get(), &style, family_buffer)) return ItemNull;
+    FontContext* fonts = radiant_query_fonts(faces.get());
+    FontHandle* handle = fonts ? font_resolve(fonts, &style) : nullptr;
+    const FontMetrics* metrics = handle ? font_get_metrics(handle) : nullptr;
+    if (metrics) result.set(radiant_font_metrics_record(handle, metrics, style.size_px));
+    if (handle) font_handle_release(handle);
+    if (fonts) font_context_destroy(fonts);
+    return result.get();
+}
+
 // SVG measurements share the painter's layout and return only copied scalar facts (D4.2.2v2).
 RADIANT_C_API Item fn_radiant_measure_svg_text(Item html_item, Item width_item, Item height_item) {
     int width = 0, height = 0;
@@ -3419,15 +3845,23 @@ RADIANT_C_API Item fn_radiant_measure_svg_text(Item html_item, Item width_item, 
     DomDocument* doc = radiant_load_html_source(fn_to_cstr(html_item), width, height, "MEASURE_SVG_TEXT");
     if (!doc) return ItemNull;
     DomElement* body = dom_document_body_element(doc);
-    DomElement* svg = body ? body->first_child_element() : nullptr;
-    while (svg && (!svg->tag_name || strcmp(svg->tag_name, "svg") != 0)) svg = svg->next_sibling_element();
+    DomElement* svg = nullptr;
+    // HTML sources can contain text siblings; element casts do not filter them.
+    for (DomNode* node = body ? body->first_child : nullptr; node; node = node->next_sibling) {
+        if (!node->is_element()) continue;
+        DomElement* element = node->as_element();
+        if (element->tag_name && strcmp(element->tag_name, "svg") == 0) { svg = element; break; }
+    }
     if (!svg) {
         free_document(doc);
         return ItemNull;
     }
     size_t count = 0;
-    for (DomElement* text = svg->first_child_element(); text; text = text->next_sibling_element())
+    for (DomNode* node = svg->first_child; node; node = node->next_sibling) {
+        if (!node->is_element()) continue;
+        DomElement* text = node->as_element();
         if (text->tag_name && strcmp(text->tag_name, "text") == 0) count++;
+    }
     SvgTextMeasurement* metrics = count ? (SvgTextMeasurement*)mem_calloc(count, sizeof(SvgTextMeasurement),
         MEM_CAT_RENDER) : nullptr;
     SvgLengthContext lengths = {};
@@ -3442,20 +3876,7 @@ RADIANT_C_API Item fn_radiant_measure_svg_text(Item html_item, Item width_item, 
     Rooted<Item> result(roots, radiant_array_new_item((int)count));
     Rooted<Item> box(roots, ItemNull);
     for (size_t index = 0; index < count; index++) {
-        const SvgTextMeasurement* metric = &metrics[index];
-        Bound bounds = metric->logical;
-        if (metric->has_ink) {
-            bounds.left = fminf(bounds.left, metric->ink.left); bounds.top = fminf(bounds.top, metric->ink.top);
-            bounds.right = fmaxf(bounds.right, metric->ink.right); bounds.bottom = fmaxf(bounds.bottom, metric->ink.bottom);
-        }
-        box.set(radiant_obj_new());
-        radiant_rooted_obj_set(box, "width", radiant_float_item(metric->advance));
-        radiant_rooted_obj_set(box, "height", radiant_float_item(bounds.bottom - bounds.top));
-        radiant_rooted_obj_set(box, "baseline", radiant_float_item(-bounds.top));
-        radiant_rooted_obj_set(box, "left", radiant_float_item(bounds.left));
-        radiant_rooted_obj_set(box, "top", radiant_float_item(bounds.top));
-        radiant_rooted_obj_set(box, "right", radiant_float_item(bounds.right));
-        radiant_rooted_obj_set(box, "bottom", radiant_float_item(bounds.bottom));
+        box.set(radiant_text_measurement(&metrics[index], false));
         radiant_array_push_item(result.get(), box.get());
     }
     if (metrics) mem_free(metrics);
@@ -3864,6 +4285,12 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_render_svg(Item html, Item width, Item height)", (fn_ptr)fn_radiant_render_svg},
     {"measure_svg_text", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_svg_text, JUBE_FN_NONE,
      "Item fn_radiant_measure_svg_text(Item html, Item width, Item height)", (fn_ptr)fn_radiant_measure_svg_text},
+    {"measure_text", "fn(requests: array, faces: array|null) -> array|null", (fn_ptr)fn_radiant_measure_text, JUBE_FN_NONE,
+     "Item fn_radiant_measure_text(Item requests, Item faces)", (fn_ptr)fn_radiant_measure_text},
+    {"font_metrics", "fn(style: map, faces: array|null) -> map|null", (fn_ptr)fn_radiant_font_metrics, JUBE_FN_NONE,
+     "Item fn_radiant_font_metrics(Item style, Item faces)", (fn_ptr)fn_radiant_font_metrics},
+    {"math_metrics", "fn(style: map, codepoints: array, faces: array|null) -> map|null", (fn_ptr)fn_radiant_math_metrics, JUBE_FN_NONE,
+     "Item fn_radiant_math_metrics(Item style, Item codepoints, Item faces)", (fn_ptr)fn_radiant_math_metrics},
     {"graphemes", "fn(text: string) -> array|null", (fn_ptr)fn_radiant_graphemes, JUBE_FN_NONE,
      "Item fn_radiant_graphemes(Item text)", (fn_ptr)fn_radiant_graphemes},
     {"measure_html", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_html, JUBE_FN_NONE,

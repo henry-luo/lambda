@@ -10,7 +10,7 @@ import analyzer: .analyze
 import macros: .macros
 import dispatcher: .render
 import css: .css
-import math_css: lambda.doc.math.css
+import math: lambda.doc.math.math
 import html_ser: .to_html
 import registry: .packages.registry
 import geometry: .packages.geometry
@@ -184,7 +184,7 @@ pub fn render_result(ast, options) {
             options != null and options.paged == true) ++
         output_diagnostics(elements)
     {body: html, elements: elements,
-     stylesheet: css.get_stylesheet() ++ math_css.get_stylesheet(options) ++ package_stylesheet(info),
+     stylesheet: css.get_stylesheet() ++ math.stylesheet(options) ++ package_stylesheet(info),
      metadata: hyperref.metadata(link_settings, info.title, info.author),
      packages: loaded.packages, diagnostics: diagnostics,
      assets: registry.assets(ast, info.base_uri) ++ bib_data.resource_assets(ast, info.base_uri)}
@@ -341,7 +341,8 @@ fn render_footnote_item(fn_entry, info) {
 
 fn wrap_standalone(html, info, options) {
     let stylesheet = css.get_stylesheet()
-    let math_stylesheet = math_css.get_stylesheet(options)
+    let math_stylesheet = math.stylesheet(options)
+    let home = paths.resolve_path(sys.proc.self.cwd#, sys.lambda.home#)
     let meta = hyperref.metadata(info.hyperref_settings, info.title, info.author)
     let title_text = get_title_or_default(meta.title);
 
@@ -353,7 +354,8 @@ fn wrap_standalone(html, info, options) {
             if (meta.author != null) { <meta name: "author", content: meta.author> }
             if (meta.subject != null) { <meta name: "description", content: meta.subject> }
             if (meta.keywords != null) { <meta name: "keywords", content: meta.keywords> }
-            for (sheet in math_css.font_stylesheets()) { sheet }
+            // Document text uses CMU; math SVG carries the selected glyph outlines.
+            <link rel: "stylesheet", href: home ++ "/package/latex/fonts/cmu-combined.css">
             <style stylesheet>
             <style math_stylesheet>
             <style package_stylesheet(info)>

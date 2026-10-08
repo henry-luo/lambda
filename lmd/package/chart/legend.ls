@@ -68,6 +68,8 @@ pub fn symbol_legend(values, mapping, kind, title, config) {
                 else if (kind == "color") scale.scale_apply(mapping, value) else "#4e79a7",
             let label = geo.labels[index])
             <g class: "legend-entry", transform: svg.translate(x, y),
+                *:(if (geo._interaction == null) {} else {
+                    'data-chart-legend': format({*:geo._interaction, row: map([geo._interaction.field, value])}, 'json')}),
                 if (kind == "size" and geo._size_unit == "width")
                     <line x1: 0, y1: geo.row_height / 2.0, x2: geo.symbol_extent, y2: geo.row_height / 2.0,
                         stroke: paint.value(if (geo.symbol_stroke_color != null) geo.symbol_stroke_color else fill, geo._paints),
@@ -144,6 +146,7 @@ pub fn plans(encoding, mappings, theme) {
         let title = if (not options.title_enabled) null else if (options.title != null) options.title
             else if (channel.title != null) channel.title else channel.field,
         let configured = {*:options, _size_unit: channel._size_unit,
+            _interaction: if (channel._interaction != null) {*:channel._interaction, channel: kind} else null,
             format: if (options.format != null) options.format else channel.format},
         let geometry = if (continuous) gradient_geometry(mapping, title, configured)
             else symbol_geometry(values, mapping, kind, title, configured),

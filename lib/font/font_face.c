@@ -51,8 +51,8 @@ bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
 
     // copy sources
     if (desc->source_count > 0 && desc->sources) {
-        entry->sources = (struct FontFaceEntrySrc*)pool_calloc(
-            ctx->pool, (size_t)desc->source_count * sizeof(struct FontFaceEntrySrc));
+        entry->sources = (FontFaceSource*)pool_calloc(
+            ctx->pool, (size_t)desc->source_count * sizeof(FontFaceSource));
         if (!entry->sources) return false;
 
         entry->source_count = desc->source_count;
@@ -62,6 +62,15 @@ bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
             }
             if (desc->sources[i].format) {
                 entry->sources[i].format = arena_strdup(ctx->arena, desc->sources[i].format);
+            }
+            if (desc->sources[i].data && desc->sources[i].data_length) {
+                // retain the snapshot independently of the caller's binary/GC lifetime.
+                size_t length = desc->sources[i].data_length;
+                uint8_t* data = (uint8_t*)arena_alloc(ctx->arena, length);
+                if (!data) return false;
+                memcpy(data, desc->sources[i].data, length);
+                entry->sources[i].data = data;
+                entry->sources[i].data_length = length;
             }
         }
     }
@@ -180,8 +189,7 @@ const FontFaceDesc* font_face_find(FontContext* ctx, const FontStyleDesc* style)
     int n = entry->source_count;
     if (n > 16) n = 16;
     for (int i = 0; i < n; i++) {
-        srcs[i].path   = entry->sources[i].path;
-        srcs[i].format = entry->sources[i].format;
+        srcs[i] = entry->sources[i];
     }
     desc.sources = srcs;
     desc.source_count = n;
@@ -217,8 +225,7 @@ int font_face_list(FontContext* ctx, const char* family,
         int n = entry->source_count;
         if (n > 16) n = 16;
         for (int j = 0; j < n; j++) {
-            srcs_pool[count][j].path   = entry->sources[j].path;
-            srcs_pool[count][j].format = entry->sources[j].format;
+            srcs_pool[count][j] = entry->sources[j];
         }
         d->sources = srcs_pool[count];
         d->source_count = n;
@@ -253,19 +260,22 @@ static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* e
     // A src list is a format fallback list, not a glyph-coverage preference list.
     for (int i = 0; i < entry->source_count; i++) {
         const char* src_path = entry->sources[i].path;
-        if (!src_path) continue;
+        const FontFaceSource* source = &entry->sources[i];
+        if (!src_path && !source->data) continue;
 
         FontHandle* handle = NULL;
 
         // check if it's a data URI
-        if (strncmp(src_path, "data:", 5) == 0) {
+        if (source->data || strncmp(src_path, "data:", 5) == 0) {
             FontStyleDesc style = {
                 .family = entry->family,
                 .size_px = size_px,
                 .weight = entry->weight,
                 .slant = entry->slant,
             };
-            handle = font_load_from_data_uri(ctx, src_path, &style);
+            handle = source->data
+                ? font_load_from_memory(ctx, source->data, source->data_length, &style)
+                : font_load_from_data_uri(ctx, src_path, &style);
         } else {
             // local file path
             handle = font_load_face_internal(ctx, src_path, 0,
@@ -299,11 +309,12 @@ static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* e
                 font_handle_retain(handle); // entry holds a ref too
             }
             log_info("font_face: loaded '%s' from source %d: %s",
-                     entry->family, i, src_path);
+                     entry->family, i, src_path ? src_path : "memory snapshot");
             return handle;
         }
 
-        log_debug("font_face: source %d failed for '%s': %s", i, entry->family, src_path);
+        log_debug("font_face: source %d failed for '%s': %s", i, entry->family,
+                  src_path ? src_path : "memory snapshot");
     }
 
     // Sources are immutable for a document, so do not retry a failed list on

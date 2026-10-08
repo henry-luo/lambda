@@ -15,38 +15,68 @@ static void format_map_reader_with_indent(JsonContext& ctx, const MapReader& mp,
 static void format_element_reader_with_indent(JsonContext& ctx, const ElementReader& elem, int indent);
 
 // Format a MapReader's contents as JSON object properties
+static void format_map_property(JsonContext& ctx, const char* key, const ItemReader& value,
+                                int indent, bool* first, size_t key_length) {
+    // Skip function-valued properties (like JSON.stringify)
+    if (value.getType() == LMD_TYPE_FUNC) return;
+    // Skip deleted properties (JS delete operator sentinel).
+    if (lam::is_hole_sentinel(value.item())) return;
+
+    if (!*first) {
+        ctx.write_text(",\n");
+    } else {
+        ctx.write_char('\n');
+        *first = false;
+    }
+
+    ctx.write_indent(indent + 1);
+
+    // Format the key (always quoted in JSON, with proper escaping)
+    escape_append_json_stringbuf(ctx.output(), key, key_length, true, false);
+    ctx.write_text(": ");
+
+    // Format the value
+    format_item_reader_with_indent(ctx, value, indent + 1);
+}
+
 static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_reader, int indent) {
     bool first = true;
     auto iter = map_reader.entries();
     const char* key;
     ItemReader value;
-
-    while (iter.next(&key, &value)) {
-        // Skip function-valued properties (like JSON.stringify)
-        if (value.getType() == LMD_TYPE_FUNC) continue;
-        // Skip deleted properties (JS delete operator sentinel).
-        if (lam::is_hole_sentinel(value.item())) continue;
-
-        if (!first) {
-            ctx.write_text(",\n");
-        } else {
-            ctx.write_char('\n');
-            first = false;
-        }
-
-        ctx.write_indent(indent + 1);
-
-        // Format the key (always quoted in JSON, with proper escaping)
-        escape_append_json_stringbuf(ctx.output(), key, strlen(key), true, false);
-        ctx.write_text(": ");
-
-        // Format the value
-        format_item_reader_with_indent(ctx, value, indent + 1);
-    }
+    while (iter.next(&key, &value)) format_map_property(ctx, key, value, indent, &first, strlen(key));
 
     if (!first) {
         ctx.emit("%n%i", indent);
     }
+}
+
+static void format_vmap_with_indent(JsonContext& ctx, const ItemReader& item, int indent) {
+    // dynamic maps share JSON object semantics with shaped maps (D7.4.5v2).
+    // formatter traversal allocates only in its pool, never in the runtime GC.
+    VMap* map = item.item().vmap;
+    StringBuf* numeric_key = stringbuf_new(ctx.pool());
+    ctx.write_char('{');
+    bool first = true;
+    int64_t count = map->vtable->count(map->data);
+    for (int64_t index = 0; index < count; index++) {
+        Item key = map->vtable->key_at(map->data, index);
+        Item value = map->vtable->value_at(map->data, index);
+        const char* name;
+        size_t key_length;
+        if (is_text_type_id(get_type_id(key))) {
+            name = key.get_chars();
+            key_length = key.get_len();
+        } else {
+            stringbuf_reset(numeric_key);
+            format_number(numeric_key, key);
+            name = numeric_key->str->chars;
+            key_length = numeric_key->str->len;
+        }
+        if (name) format_map_property(ctx, name, ItemReader(value.to_const()), indent, &first, key_length);
+    }
+    if (!first) ctx.emit("%n%i", indent);
+    ctx.write_char('}');
 }
 
 static void format_string(JsonContext& ctx, String* str) {
@@ -178,6 +208,10 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
         void map_value(const ItemReader& item, MapReader mp) override {
             (void)item;
             format_map_reader_with_indent(ctx_, mp, indent_);
+        }
+        void vmap_value(const ItemReader& item, VMap* map) override {
+            (void)map;
+            format_vmap_with_indent(ctx_, item, indent_);
         }
         void object_value(const ItemReader& item, Object* obj) override {
             TypeObject* obj_type = (TypeObject*)obj->type;

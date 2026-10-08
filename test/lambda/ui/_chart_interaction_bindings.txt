@@ -1,0 +1,85 @@
+<html
+  <head
+    <style
+      "body{margin:0}.lambda-chart{display:inline-block;outline:none}.fixture{position:absolute}#one{left:0;top:0}#two{left:260px;top:0}#camera{left:0;top:210px}#words{left:260px;top:210px}">>
+  <body
+    <div id: "one", class: "fixture",
+      <div class: "lambda-chart", tabindex: "0",
+        <svg font-family: "Arial", data-chart-root: "chart", xmlns: "http://www.w3.org/2000/svg", width: 240, height: 180, viewBox: "0 0 240 180",
+          <rect width: 240, height: 180, fill: "white">
+          <g transform: "translate(20, 20)",
+            <g data-chart-frame: "{\n  \"view\": \"chart\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"group\"\n        ]\n      },\n      \"bind\": \"legend\"\n    }\n  ],\n  \"encoding\": {\n    \"x\": {\n      \"field\": \"x\",\n      \"dtype\": \"quantitative\"\n    },\n    \"y\": {\n      \"field\": \"y\",\n      \"dtype\": \"quantitative\"\n    },\n    \"color\": {\n      \"field\": \"group\",\n      \"dtype\": \"nominal\"\n    }\n  },\n  \"data\": [\n    {\n      \"group\": \"A\",\n      \"x\": 2,\n      \"y\": 2\n    },\n    {\n      \"group\": \"B\",\n      \"x\": 8,\n      \"y\": 8\n    }\n  ],\n  \"scales\": {\n    \"x\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        0,\n        146.009765625\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    },\n    \"y\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        140,\n        0\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    }\n  },\n  \"x\": 20,\n  \"y\": 20,\n  \"width\": 146.009765625,\n  \"height\": 140,\n  \"svg_width\": 240,\n  \"svg_height\": 180\n}",
+              <rect class: "chart-interaction-plane", width: 146.009765625, height: 140, fill: "transparent", pointer-events: "all">
+              <g class: "marks points",
+                <circle cx: 29.201953125000003, cy: 112, r: 7.978845608028654, fill: "#4e79a7", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"A\",\n  \"x\": 2,\n  \"y\": 2\n}", data-chart-view: "chart">
+                <circle cx: 116.80781250000001, cy: 28, r: 7.978845608028654, fill: "#f28e2b", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"B\",\n  \"x\": 8,\n  \"y\": 8\n}", data-chart-view: "chart">>>>
+          <g transform: "translate(186.01, 20)",
+            <g class: "legend",
+              <text x: 0, y: 10.86328125, font-family: "Arial", font-size: 12, font-weight: 700, font-style: "normal", letter-spacing: 0, word-spacing: 0, xml:space: "preserve", fill: "#333",
+                "group">
+              <g class: "legend-entry", transform: "translate(0, 19.4062)", data-chart-legend: "{\n  \"view\": \"chart\",\n  \"field\": \"group\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"group\"\n        ]\n      },\n      \"bind\": \"legend\"\n    }\n  ],\n  \"channel\": \"color\",\n  \"row\": {\n    \"group\": \"A\"\n  }\n}",
+                <rect x: 0, y: 5, width: 10, height: 10, fill: "#4e79a7">
+                <text x: 15.01611328125, y: 13.8134765625, font-family: "Arial", font-size: 11, font-weight: 400, font-style: "normal", letter-spacing: 0, word-spacing: 0, xml:space: "preserve", fill: "#333",
+                  "A">>
+              <g class: "legend-entry", transform: "translate(0, 39.4062)", data-chart-legend: "{\n  \"view\": \"chart\",\n  \"field\": \"group\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"group\"\n        ]\n      },\n      \"bind\": \"legend\"\n    }\n  ],\n  \"channel\": \"color\",\n  \"row\": {\n    \"group\": \"B\"\n  }\n}",
+                <rect x: 0, y: 5, width: 10, height: 10, fill: "#f28e2b">
+                <text x: 15, y: 13.8134765625, font-family: "Arial", font-size: 11, font-weight: 400, font-style: "normal", letter-spacing: 0, word-spacing: 0, xml:space: "preserve", fill: "#333",
+                  "B">>>>>
+        <div class: "chart-controls">>>
+    <div id: "two", class: "fixture",
+      <div class: "lambda-chart", tabindex: "0",
+        <svg font-family: "Arial", data-chart-root: "chart", xmlns: "http://www.w3.org/2000/svg", width: 240, height: 180, viewBox: "0 0 240 180",
+          <rect width: 240, height: 180, fill: "white">
+          <g transform: "translate(20, 20)",
+            <g data-chart-frame: "{\n  \"view\": \"chart\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"group\"\n        ]\n      },\n      \"bind\": \"legend\"\n    }\n  ],\n  \"encoding\": {\n    \"x\": {\n      \"field\": \"x\",\n      \"dtype\": \"quantitative\"\n    },\n    \"y\": {\n      \"field\": \"y\",\n      \"dtype\": \"quantitative\"\n    },\n    \"color\": {\n      \"field\": \"group\",\n      \"dtype\": \"nominal\"\n    }\n  },\n  \"data\": [\n    {\n      \"group\": \"A\",\n      \"x\": 2,\n      \"y\": 2\n    },\n    {\n      \"group\": \"B\",\n      \"x\": 8,\n      \"y\": 8\n    }\n  ],\n  \"scales\": {\n    \"x\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        0,\n        146.009765625\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    },\n    \"y\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        140,\n        0\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    }\n  },\n  \"x\": 20,\n  \"y\": 20,\n  \"width\": 146.009765625,\n  \"height\": 140,\n  \"svg_width\": 240,\n  \"svg_height\": 180\n}",
+              <rect class: "chart-interaction-plane", width: 146.009765625, height: 140, fill: "transparent", pointer-events: "all">
+              <g class: "marks points",
+                <circle cx: 29.201953125000003, cy: 112, r: 7.978845608028654, fill: "#4e79a7", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"A\",\n  \"x\": 2,\n  \"y\": 2\n}", data-chart-view: "chart">
+                <circle cx: 116.80781250000001, cy: 28, r: 7.978845608028654, fill: "#f28e2b", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"B\",\n  \"x\": 8,\n  \"y\": 8\n}", data-chart-view: "chart">>>>
+          <g transform: "translate(186.01, 20)",
+            <g class: "legend",
+              <text x: 0, y: 10.86328125, font-family: "Arial", font-size: 12, font-weight: 700, font-style: "normal", letter-spacing: 0, word-spacing: 0, xml:space: "preserve", fill: "#333",
+                "group">
+              <g class: "legend-entry", transform: "translate(0, 19.4062)", data-chart-legend: "{\n  \"view\": \"chart\",\n  \"field\": \"group\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"group\"\n        ]\n      },\n      \"bind\": \"legend\"\n    }\n  ],\n  \"channel\": \"color\",\n  \"row\": {\n    \"group\": \"A\"\n  }\n}",
+                <rect x: 0, y: 5, width: 10, height: 10, fill: "#4e79a7">
+                <text x: 15.01611328125, y: 13.8134765625, font-family: "Arial", font-size: 11, font-weight: 400, font-style: "normal", letter-spacing: 0, word-spacing: 0, xml:space: "preserve", fill: "#333",
+                  "A">>
+              <g class: "legend-entry", transform: "translate(0, 39.4062)", data-chart-legend: "{\n  \"view\": \"chart\",\n  \"field\": \"group\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"group\"\n        ]\n      },\n      \"bind\": \"legend\"\n    }\n  ],\n  \"channel\": \"color\",\n  \"row\": {\n    \"group\": \"B\"\n  }\n}",
+                <rect x: 0, y: 5, width: 10, height: 10, fill: "#f28e2b">
+                <text x: 15, y: 13.8134765625, font-family: "Arial", font-size: 11, font-weight: 400, font-style: "normal", letter-spacing: 0, word-spacing: 0, xml:space: "preserve", fill: "#333",
+                  "B">>>>>
+        <div class: "chart-controls">>>
+    <div id: "camera", class: "fixture",
+      <div
+        <div class: "lambda-chart", tabindex: "0",
+          <svg font-family: "Arial", data-chart-root: "chart", xmlns: "http://www.w3.org/2000/svg", width: 200, height: 160, viewBox: "0 0 200 160",
+            <rect width: 200, height: 160, fill: "white">
+            <g transform: "translate(20, 20)",
+              <g data-chart-frame: "{\n  \"view\": \"chart\",\n  \"params\": [\n    {\n      \"name\": \"camera\",\n      \"select\": {\n        \"type\": \"interval\",\n        \"encodings\": [\n          \"x\"\n        ]\n      },\n      \"bind\": \"scales\"\n    }\n  ],\n  \"encoding\": {\n    \"x\": {\n      \"field\": \"x\",\n      \"dtype\": \"quantitative\"\n    },\n    \"y\": {\n      \"field\": \"y\",\n      \"dtype\": \"quantitative\"\n    }\n  },\n  \"data\": [\n    {\n      \"group\": \"A\",\n      \"x\": 2,\n      \"y\": 2\n    },\n    {\n      \"group\": \"B\",\n      \"x\": 8,\n      \"y\": 8\n    }\n  ],\n  \"scales\": {\n    \"x\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        0,\n        160\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    },\n    \"y\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        120,\n        0\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    }\n  },\n  \"x\": 20,\n  \"y\": 20,\n  \"width\": 160,\n  \"height\": 120,\n  \"svg_width\": 200,\n  \"svg_height\": 160\n}",
+                <rect class: "chart-interaction-plane", width: 160, height: 120, fill: "transparent", pointer-events: "all">
+                <g class: "marks points",
+                  <circle cx: 32, cy: 96, r: 7.978845608028654, fill: "#4e79a7", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"A\",\n  \"x\": 2,\n  \"y\": 2\n}", data-chart-view: "chart">
+                  <circle cx: 128, cy: 24, r: 7.978845608028654, fill: "#4e79a7", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"B\",\n  \"x\": 8,\n  \"y\": 8\n}", data-chart-view: "chart">>>>>
+          <div class: "chart-controls">>
+        <output id: "camera-domain",
+          "empty">>>
+    <div id: "words", class: "fixture",
+      <div class: "lambda-chart", tabindex: "0",
+        <svg font-family: "Arial", data-chart-root: "chart", xmlns: "http://www.w3.org/2000/svg", width: 240, height: 160, viewBox: "0 0 240 160", role: "img", aria-label: "Word cloud", data-unplaced: 0,
+          <rect width: 240, height: 160, fill: "white">
+          <g transform: "translate(20, 20)",
+            <g data-chart-frame: "{\n  \"view\": \"chart\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"text\"\n        ]\n      }\n    }\n  ],\n  \"encoding\": {\n    \"color\": {\n      \"field\": null,\n      \"dtype\": null\n    }\n  },\n  \"data\": [\n    {\n      \"text\": \"Lambda\",\n      \"weight\": 3\n    },\n    {\n      \"text\": \"Charts\",\n      \"weight\": 2\n    }\n  ],\n  \"scales\": {\n    \"x\": null,\n    \"y\": null\n  },\n  \"x\": 20,\n  \"y\": 20,\n  \"width\": 200,\n  \"height\": 120,\n  \"svg_width\": 240,\n  \"svg_height\": 160\n}",
+              <rect class: "chart-interaction-plane", width: 200, height: 120, fill: "transparent", pointer-events: "all">
+              <svg xmlns: "http://www.w3.org/2000/svg", width: 200, height: 120, viewBox: "0 0 200 120", role: "img", aria-label: "Word cloud", data-unplaced: 0,
+                <g class: "wordcloud",
+                  <g transform: "translate(100, 60) rotate(0)",
+                    <title
+                      "Lambda: 3">
+                    <text data-chart-row: "{\n  \"text\": \"Lambda\",\n  \"weight\": 3\n}", data-chart-view: "chart", x: -43.365234375, y: 8.5, font-family: "Arial", font-weight: 400, font-size: 24, fill: "grey", xml:space: "preserve",
+                      "Lambda">>
+                  <g transform: "translate(100.557, 90.5208) rotate(0)",
+                    <title
+                      "Charts: 2">
+                    <text data-chart-row: "{\n  \"text\": \"Charts\",\n  \"weight\": 2\n}", data-chart-view: "chart", x: -35.34375, y: 8.5, font-family: "Arial", font-weight: 400, font-size: 24, fill: "grey", xml:space: "preserve",
+                      "Charts">>>>>>>
+        <div class: "chart-controls">>>>>

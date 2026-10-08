@@ -1,0 +1,42 @@
+<html
+  <head
+    <style
+      "body{margin:0}.lambda-chart{display:inline-block}.chart-control{display:block;padding:5px}">>
+  <body
+    <div
+      <div class: "lambda-chart", tabindex: "0",
+        <svg font-family: "Arial", data-chart-root: "chart", xmlns: "http://www.w3.org/2000/svg", width: 240, height: 100, viewBox: "0 0 240 100",
+          <rect width: 240, height: 100, fill: "white">
+          <g transform: "translate(20, 20)",
+            <g data-chart-frame: "{\n  \"view\": \"chart\",\n  \"params\": [\n    {\n      \"name\": \"enabled\",\n      \"value\": true,\n      \"bind\": {\n        \"input\": \"checkbox\"\n      }\n    },\n    {\n      \"name\": \"amount\",\n      \"value\": 2,\n      \"bind\": {\n        \"input\": \"select\",\n        \"options\": [\n          2,\n          8\n        ]\n      }\n    },\n    {\n      \"name\": \"mode\",\n      \"value\": false,\n      \"bind\": {\n        \"input\": \"radio\",\n        \"options\": [\n          false,\n          true\n        ]\n      }\n    },\n    {\n      \"name\": \"label\",\n      \"value\": \"start\",\n      \"bind\": {\n        \"input\": \"text\"\n      }\n    }\n  ],\n  \"encoding\": {\n    \"x\": {\n      \"field\": \"x\",\n      \"dtype\": \"quantitative\"\n    },\n    \"y\": {\n      \"field\": null,\n      \"dtype\": null\n    },\n    \"color\": {\n      \"field\": null,\n      \"dtype\": null\n    }\n  },\n  \"data\": [\n    {\n      \"x\": 2\n    },\n    {\n      \"x\": 8\n    }\n  ],\n  \"scales\": {\n    \"x\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        2,\n        8\n      ],\n      \"range\": [\n        0,\n        200\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    },\n    \"y\": {\n      \"kind\": \"identity\",\n      \"domain\": [],\n      \"range\": [\n        60,\n        0\n      ]\n    }\n  },\n  \"x\": 20,\n  \"y\": 20,\n  \"width\": 200,\n  \"height\": 60,\n  \"svg_width\": 240,\n  \"svg_height\": 100\n}",
+              <rect class: "chart-interaction-plane", width: 200, height: 60, fill: "transparent", pointer-events: "all">
+              <g class: "marks points",
+                <circle cx: 0, cy: 30, r: 3.0901936161855166, fill: "grey", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"x\": 2\n}", data-chart-view: "chart">
+                <circle cx: 200, cy: 30, r: 3.0901936161855166, fill: "grey", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"x\": 8\n}", data-chart-view: "chart">>>>>
+        <div class: "chart-controls",
+          <label class: "chart-control",
+            "enabled "
+            <input data-chart-input: "enabled", type: "checkbox", value: "true", checked: "">>
+          <label class: "chart-control",
+            "amount "
+            <select data-chart-input: "amount", data-chart-options: "[\n  2,\n  8\n]",
+              <option value: "0", selected: "",
+                "2">
+              <option value: "1",
+                "8">>>
+          <label class: "chart-control",
+            "mode "
+            <label
+              <input data-chart-input: "mode", type: "radio", name: "mode", value: "0", data-chart-options: "[\n  false,\n  true\n]", checked: "">
+              "false">
+            <label
+              <input data-chart-input: "mode", type: "radio", name: "mode", value: "1", data-chart-options: "[\n  false,\n  true\n]">
+              "true">>
+          <label class: "chart-control",
+            "label "
+            <input data-chart-input: "label", type: "text", value: "start">>>>
+      <output id: "amount",
+        "null">
+      <output id: "mode",
+        "null">
+      <output id: "label">>>>

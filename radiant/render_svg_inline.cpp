@@ -4450,6 +4450,9 @@ struct SvgTextPathData {
 
 typedef struct SvgTextLayout {
     SvgInlineRenderContext* ctx;
+    TextMeasureFontFn on_font;
+    void* font_context;
+    size_t request_index;
     float text_length;
     Bound paint_box;
     RdtMatrix paint_transform;
@@ -4787,6 +4790,7 @@ static float svg_text_natural_width(SvgTextLayout* layout, SvgTextRun* run,
         uint32_t codepoint = 0;
         if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
         FontHandle* fallback = svg_text_fallback_face(layout, handle, &descriptor, codepoint);
+        if (layout->on_font) layout->on_font(layout->font_context, layout->request_index, fallback ? fallback : handle);
         GlyphInfo glyph = font_get_glyph(fallback ? fallback : handle, codepoint);
         width += glyph.id ? glyph.advance_x : font_get_missing_glyph_advance(handle);
         if (fallback) font_handle_release(fallback);
@@ -5595,6 +5599,50 @@ static bool svg_text_geometry_scope_open(SvgTextGeometryScope* scope, DomElement
     return true;
 }
 
+// measurement adapters share the painter's placement, fallback and ink paths.
+static RdtPath* svg_text_layout_geometry(SvgTextLayout* layout, Element* target_source,
+    bool collected, SvgTextMeasurement* measurement) {
+    RdtPath* path = rdt_path_new();
+    RdtPath* ink = measurement ? rdt_path_new() : nullptr;
+    if (measurement) *measurement = {};
+    if (measurement) measurement->valid = path && ink && (collected || layout->run_count == 0);
+    if (collected) {
+        RdtMatrix identity = rdt_matrix_identity();
+        svg_text_measure(layout, &identity, layout->allow_embedded_font);
+        svg_text_place(layout);
+        for (int i = 0; i < layout->run_count; i++) {
+            SvgTextRun* run = &layout->runs[i];
+            if (target_source) {
+                int ancestor = run->style;
+                while (ancestor >= 0 && layout->styles[ancestor].element != target_source) ancestor = layout->styles[ancestor].parent;
+                if (ancestor < 0) continue;
+            }
+            if (!run->font) { if (measurement) measurement->valid = false; continue; }
+            svg_text_append_cell(layout, run, path);
+            if (measurement) {
+                measurement->advance += run->advance;
+                if (!str_all(layout->chars->str + run->start, run->len, str_is_space)) {
+                    RdtPath* glyphs = svg_text_run_path(layout, run);
+                    if (glyphs) {
+                        RdtMatrix matrix = svg_text_run_transform(run, &identity);
+                        render_path_append_transformed(ink, glyphs, &matrix);
+                        rdt_path_free(glyphs);
+                    }
+                }
+            }
+        }
+        svg_text_release_fonts(layout);
+    }
+    if (measurement) {
+        measurement->has_logical = rdt_path_get_bounds(path, &measurement->logical.left,
+            &measurement->logical.top, &measurement->logical.right, &measurement->logical.bottom);
+        measurement->has_ink = rdt_path_get_bounds(ink, &measurement->ink.left,
+            &measurement->ink.top, &measurement->ink.right, &measurement->ink.bottom);
+    }
+    if (ink) rdt_path_free(ink);
+    return path;
+}
+
 static RdtPath* svg_text_geometry_collect(SvgTextGeometryScope* scope, DomElement* target,
     DomElement* text, SvgTextMeasurement* measurement) {
     ScratchMark mark = scratch_mark(&scope->scratch);
@@ -5607,43 +5655,8 @@ static RdtPath* svg_text_geometry_collect(SvgTextGeometryScope* scope, DomElemen
     SvgTextLayout layout = {};
     Element* text_source = dom_element_to_element(text);
     Element* target_source = dom_element_to_element(target);
-    RdtPath* path = rdt_path_new();
-    RdtPath* ink = measurement ? rdt_path_new() : nullptr;
-    if (measurement) *measurement = {};
-    bool collected = path && svg_text_layout_collect(&ctx, text_source, &layout);
-    if (measurement) measurement->valid = path && (collected || layout.run_count == 0);
-    if (collected) {
-        RdtMatrix identity = rdt_matrix_identity();
-        svg_text_measure(&layout, &identity, layout.allow_embedded_font);
-        svg_text_place(&layout);
-        for (int i = 0; i < layout.run_count; i++) {
-            SvgTextRun* run = &layout.runs[i];
-            int ancestor = run->style;
-            while (ancestor >= 0 && layout.styles[ancestor].element != target_source) ancestor = layout.styles[ancestor].parent;
-            if (ancestor < 0) continue;
-            if (!run->font) { if (measurement) measurement->valid = false; continue; }
-            svg_text_append_cell(&layout, run, path);
-            if (measurement) {
-                measurement->advance += run->advance;
-                if (!str_all(layout.chars->str + run->start, run->len, str_is_space)) {
-                    RdtPath* glyphs = svg_text_run_path(&layout, run);
-                    if (glyphs) {
-                        RdtMatrix matrix = svg_text_run_transform(run, &identity);
-                        render_path_append_transformed(ink, glyphs, &matrix);
-                        rdt_path_free(glyphs);
-                    }
-                }
-            }
-        }
-        svg_text_release_fonts(&layout);
-    }
-    if (measurement) {
-        measurement->has_logical = rdt_path_get_bounds(path, &measurement->logical.left,
-            &measurement->logical.top, &measurement->logical.right, &measurement->logical.bottom);
-        measurement->has_ink = rdt_path_get_bounds(ink, &measurement->ink.left,
-            &measurement->ink.top, &measurement->ink.right, &measurement->ink.bottom);
-    }
-    if (ink) rdt_path_free(ink);
+    bool collected = svg_text_layout_collect(&ctx, text_source, &layout);
+    RdtPath* path = svg_text_layout_geometry(&layout, target_source, collected, measurement);
     if (layout.chars) strbuf_free(layout.chars);
     scratch_restore(&scope->scratch, mark);
     return path;
@@ -5676,7 +5689,9 @@ bool svg_text_measure_batch(DomElement* svg, const SvgLengthContext* lengths,
     bool ready = svg_text_geometry_scope_open(&scope, svg, lengths, nullptr);
     size_t index = 0;
     // only direct text children are requests; style/defs remain available to font resolution.
-    for (DomElement* text = svg->first_child_element(); ready && text; text = text->next_sibling_element()) {
+    for (DomNode* node = svg->first_child; ready && node; node = node->next_sibling) {
+        if (!node->is_element()) continue;
+        DomElement* text = node->as_element();
         if (!text->tag_name || strcmp(text->tag_name, "text") != 0) continue;
         if (index >= count) { ready = false; break; }
         RdtPath* path = svg_text_geometry_collect(&scope, text, text, &measurements[index++]);
@@ -5685,6 +5700,63 @@ bool svg_text_measure_batch(DomElement* svg, const SvgLengthContext* lengths,
     }
     svg_text_geometry_scope_close(&scope);
     return ready && index == count;
+}
+
+bool text_measure_batch(FontContext* fonts, const TextMeasureRequest* requests,
+    SvgTextMeasurement* measurements, size_t count, TextMeasureFontFn on_font, void* font_context) {
+    if (!fonts || (count && (!requests || !measurements))) return false;
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.text_measure");
+    if (!arena) return false;
+    ScratchArena scratch = {};
+    mem_scratch_init(nullptr, &scratch, arena, MEM_ROLE_RENDER, "render.text_measure.scratch");
+    SvgInlineRenderContext context = {};
+    context.font_ctx = lam::up(fonts);
+    context.resource_scratch = lam::up(&scratch);
+    bool valid = true;
+    for (size_t index = 0; valid && index < count; index++) {
+        const TextMeasureRequest* request = &requests[index];
+        const char* family = request->font.family;
+        if (!request->text || !family || strlen(family) >= sizeof(SvgTextStyle::font_family) ||
+            !isfinite(request->font.size_px) || request->font.size_px <= 0.0f) {
+            valid = false;
+            break;
+        }
+        ScratchMark mark = scratch_mark(&scratch);
+        SvgTextStyle style = {};
+        style.parent = style.path_owner = -1;
+        style.text_length = -1.0f;
+        style.preserve_space = true;
+        str_copy(style.font_family, sizeof(style.font_family), family, strlen(family));
+        style.font_size = request->font.size_px;
+        style.font_weight = request->font.weight;
+        style.font_slant = request->font.slant;
+        style.letter_spacing = request->letter_spacing;
+        style.word_spacing = request->word_spacing;
+        SvgTextLayout layout = {};
+        layout.ctx = &context;
+        layout.on_font = on_font;
+        layout.font_context = font_context;
+        layout.request_index = index;
+        layout.open_run = layout.trailing_space_run = -1;
+        layout.chars = strbuf_new_cap(64);
+        int style_index = -1;
+        bool collected = layout.chars && svg_text_push_style(&layout, &style, &style_index);
+        if (collected) {
+            svg_text_append(&layout, style_index, request->text, request->length);
+            strbuf_append_char(layout.chars, '\0');
+            layout.styles[style_index].end_run = layout.run_count;
+            layout.fonts = (SvgTextFont*)scratch_calloc(&scratch, sizeof(SvgTextFont));
+            collected = layout.fonts != nullptr;
+        }
+        RdtPath* path = svg_text_layout_geometry(&layout, nullptr, collected, &measurements[index]);
+        valid = collected && path && measurements[index].valid;
+        if (path) rdt_path_free(path);
+        if (layout.chars) strbuf_free(layout.chars);
+        scratch_restore(&scratch, mark);
+    }
+    scratch_release(&scratch);
+    mem_arena_destroy(arena);
+    return valid;
 }
 
 // ============================================================================

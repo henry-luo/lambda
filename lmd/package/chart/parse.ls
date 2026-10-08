@@ -67,9 +67,18 @@ pub fn parse_chart(chart_el) {
         aspect_ratio: chart_el.aspect_ratio,
         padding: padding,
         title: title,
+        id: chart_el.id,
+        coordinate: if (chart_el.coordinate != null) chart_el.coordinate else attributes(find_child(chart_el, 'coordinate', children_count)),
+        interaction: chart_el.interaction,
+        state: chart_el.state,
+        animate: chart_el.animate,
+        timeline: chart_el.timeline,
         data: data,
         data_source: attributes(data_el),
         datasets: chart_el.datasets,
+        params: if (chart_el.params != null) chart_el.params else (
+            let params = find_child(chart_el, 'params', children_count),
+            if (params != null) [for (param in content(params)) attributes(param)] else null),
         projection: chart_el.projection,
         resolve: chart_el.resolve,
         clip: chart_el.clip,
@@ -116,7 +125,8 @@ pub fn parse_mark(mark_el) {
 fn parse_encoding(encoding_el) {
     let count = len(content(encoding_el));
     map([for (key in ["x", "y", "color", "size", "opacity", "theta", "text", "stroke", "x_offset",
-        "x2", "y2", "detail", "tooltip", "shape", "order", "url", "theta2", "radius", "radius2", "longitude", "latitude"],
+        "x2", "y2", "detail", "tooltip", "shape", "order", "url", "theta2", "radius", "radius2", "longitude", "latitude",
+        "position", "key", "group_key", "path", "direction", "magnitude", "enter_delay", "enter_duration", "update_delay", "update_duration", "exit_delay", "exit_duration"],
         let child = find_child(encoding_el, symbol(key), count))
         for (part in [key, if (child != null) parse_channel(child) else null]) part])
 }
