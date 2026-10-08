@@ -1674,11 +1674,7 @@ static void event_loop_pump_wait_cap_cb(uv_timer_t* handle) {
     if (state) state->cap_fired = true;
 }
 
-extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {
-    if (!js_active_runtime_state) return false;
-    if (virtual_clock_enabled) {
-        return js_event_loop_advance_virtual_time((double)(max_wait_ms > 0 ? max_wait_ms : 0), 0) > 0;
-    }
+static bool event_loop_pump_native_wait(int max_wait_ms) {
     bool had_microtasks = js_microtask_pending_count() > 0;
     js_microtask_flush();
     if (had_microtasks) return true;
@@ -1706,6 +1702,28 @@ extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {
     uv_run(loop, UV_RUN_NOWAIT);
     js_microtask_flush();
     return !state.cap_fired;
+}
+
+extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {
+    if (!js_active_runtime_state) return false;
+    if (virtual_clock_enabled) {
+        return js_event_loop_advance_virtual_time((double)(max_wait_ms > 0 ? max_wait_ms : 0), 0) > 0;
+    }
+    return event_loop_pump_native_wait(max_wait_ms);
+}
+
+static bool event_loop_has_pending_requests(void) {
+    // D5.4.4: the bound context's resource table owns finite native requests;
+    // persistent sockets and timers do not extend a snapshot's capture window.
+    RuntimeResourceTable* table = js_runtime_resource_table();
+    for (int i = 0; i < runtime_resource_table_slot_count(table); i++) {
+        const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(table, i);
+        if (!entry || entry->closing || !entry->descriptor) continue;
+        RuntimeResourceKind kind = entry->descriptor->kind;
+        if (kind == RUNTIME_RESOURCE_HTTP_CLIENT || kind == RUNTIME_RESOURCE_FS_REQUEST ||
+                kind == RUNTIME_RESOURCE_DNS_REQUEST) return true;
+    }
+    return false;
 }
 
 extern "C" int js_event_loop_drain(void) {
@@ -1755,7 +1773,22 @@ extern "C" int js_event_loop_drain(void) {
                 js_event_loop_advance_virtual_time(1000.0 / 60.0, 1);
             }
         }
-        for (int turn = 0; turn < 4; turn++) {
+        uint64_t drain_start_ns = uv_hrtime();
+        stop_all_interval_timers();
+        for (int turn = 0; turn < 4 || event_loop_has_pending_requests(); turn++) {
+            // NOWAIT polling can retire the realm before an admitted fetch/XHR
+            // completes. Await its native completion within the existing drain
+            // watchdog without advancing the requested virtual capture time.
+            if (turn >= 4) {
+                uint64_t elapsed_ns = uv_hrtime() - drain_start_ns;
+                uint64_t budget_ns = (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS * 1000000ULL;
+                if (elapsed_ns >= budget_ns) {
+                    log_error("event_loop: pending native requests exceeded the snapshot drain watchdog");
+                    break;
+                }
+                int remaining_ms = (int)((budget_ns - elapsed_ns + 999999ULL) / 1000000ULL);
+                event_loop_pump_native_wait(remaining_ms);
+            }
             int active = uv_run(loop, UV_RUN_NOWAIT);
             js_event_loop_render_checkpoint();
             // Headless layout has no native frame clock; drain queued rAF work

@@ -3,7 +3,7 @@
 **Status:** In Progress (Phase 5 complete)  
 **Author:** Lambda Team  
 **Date:** April 2026  
-**Last Updated:** April 9, 2026
+**Last Updated:** October 8, 2026
 
 ---
 
@@ -412,6 +412,21 @@ alignment to match Chrome/Skia.
 blog-homepage +22%), no individual regressions.
 
 **Change 2: Gamma-corrected CoreGraphics font smoothing**
+
+**Superseded 2026-10-08:** the implementation below applied an LCD-mask gamma
+conversion to a DeviceGray bitmap. A later italic-only smoothing exclusion made
+math variables especially faint. The grayscale backend now renders native
+smoothed black text on white, then inverts luminance into mask coverage without
+an extra gamma transform. This preserves CoreText's grayscale tonal response
+for both upright and italic faces. Direct Chrome snapshots using the same
+Times-Italic face at 96px and 16px validate the change; the native regression
+`FontMetricTest.RasterPreservesNativeGrayscaleCoverage` compares against RGB
+CoreText text for Times and bundled CMU faces at 8/16/96px and 1×/2× density.
+The separate font-resource omission is fixed as
+[RAD07-L2](Radiant_Issue_Ledger.md#rad07-l2): document packages now declare the
+bundled CMU and KaTeX faces through a shared Lambda-home stylesheet helper
+(D7.2.4), so default LaTeX math uses those faces rather than system fallback.
+The historical measurements below cover the earlier implementation only.
 
 - Modified: `lib/font/font_rasterize_ct.c` — kept font smoothing enabled
   (`CGContextSetShouldSmoothFonts(true)`) for stroke thickening, then added a

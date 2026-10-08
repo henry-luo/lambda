@@ -345,6 +345,81 @@ TEST_F(Scene3dTest, MixedSvgAndNativeTimelinesPauseAndSeekIndependently) {
     ASSERT_TRUE(scene3d_animation_update(animation,1));pump_js();
     EXPECT_STREQ(scene->get_attribute("data-finished"),"bend:1");
 }
+TEST_F(Scene3dTest, RingworldAnimatesAndKeepsOrbitPanZoomIndependent) {
+    ASSERT_NE(load_page("test/demo/scene3d/ringworld.ls",1120,900),nullptr);
+    DomElement* scene=dom_find_element_by_id(page->root->as_element(),"ringworld");ASSERT_NE(scene,nullptr);
+    ASSERT_STREQ(scene->get_attribute("data-ready"),"true");
+    ASSERT_EQ(page->js.runtime,page->lambda_runtime);
+    gc_collect(runtime_heap(page->lambda_runtime)->gc,nullptr,0);
+    ImageSurface* first=scene3d_snapshot(scene,&ui,624,342,1);ASSERT_NE(first,nullptr)<<scene3d_diagnostic(scene);
+    image_surface_snapshot_retain(first);
+    auto* animation=scene3d_animations(scene);ASSERT_NE(animation,nullptr);
+    auto* action=scene3d_animation_action(animation,"orbits");ASSERT_NE(action,nullptr);
+    auto* scheduler=page->state->animation_scheduler;ASSERT_NE(scheduler,nullptr);
+    animation_scheduler_tick(scheduler,scheduler->current_time+1,nullptr);
+    EXPECT_NEAR(action->time,1,1e-6);
+    ImageSurface* second=scene3d_snapshot(scene,&ui,624,342,1);ASSERT_NE(second,nullptr);
+    unsigned changed=0;
+    for(unsigned y=0;y<342;y++) for(unsigned x=0;x<624;x++)
+        if(memcmp((uint8_t*)first->pixels+y*first->pitch+x*4,(uint8_t*)second->pixels+y*second->pitch+x*4,3)) changed++;
+    EXPECT_GT(changed,1000u);image_surface_snapshot_release(first);
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('play').click()")));
+    animation_scheduler_tick(scheduler,scheduler->current_time+1,nullptr);
+    EXPECT_NEAR(action->time,1,1e-6);
+    auto button=[&](EventType type,float x,float y) {
+        RdtEvent event={};event.type=type;event.mouse_button.x=x;event.mouse_button.y=y;
+        event.mouse_button.button=0;event.mouse_button.clicks=1;handle_event(&ui,page,&event);
+    };
+    auto drag=[&]() {
+        button(RDT_EVENT_MOUSE_DOWN,500,400);
+        RdtEvent move={};move.type=RDT_EVENT_MOUSE_MOVE;move.mouse_position.x=560;move.mouse_position.y=430;handle_event(&ui,page,&move);
+        button(RDT_EVENT_MOUSE_UP,560,430);
+    };
+    ASSERT_FALSE(item_is_error(run_js("globalThis.cameraBefore=ringworld.camera.position.clone()")));
+    drag();
+    ASSERT_FALSE(item_is_error(run_js("if(ringworld.camera.position.distanceTo(cameraBefore)<.1)throw new Error('native scene drag did not orbit')")));
+    ASSERT_FALSE(item_is_error(run_js("if(document.activeElement!==document.getElementById('ringworld'))throw new Error('scene did not receive keyboard focus')")));
+    auto key=[&](int code,int mods=0) {
+        RdtEvent event={};event.type=RDT_EVENT_KEY_DOWN;event.key.key=code;event.key.mods=mods;handle_event(&ui,page,&event);
+        event.type=RDT_EVENT_KEY_UP;handle_event(&ui,page,&event);
+    };
+    ASSERT_FALSE(item_is_error(run_js("globalThis.keyTargetBefore=ringworld.controls.target.clone();globalThis.tiltBefore=ringworld.controls.getPolarAngle()")));
+    key(RDT_KEY_RIGHT);key(RDT_KEY_UP,RDT_MOD_SHIFT);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        if(ringworld.controls.target.distanceTo(keyTargetBefore)<.001)throw new Error('arrow key did not pan');
+        if(Math.abs(ringworld.controls.getPolarAngle()-tiltBefore)<.001)throw new Error('shift-arrow did not tilt');
+    )JS")));
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('pan-mode').click();globalThis.targetBefore=ringworld.controls.target.clone()")));
+    drag();
+    ASSERT_FALSE(item_is_error(run_js("if(ringworld.controls.target.distanceTo(targetBefore)<.1)throw new Error('pan mode did not move the target')")));
+    ASSERT_NE(scene3d_snapshot(scene,&ui,624,342,1),nullptr)<<scene3d_diagnostic(scene);
+    EXPECT_EQ(scene3d_animations(scene),animation);EXPECT_NEAR(action->time,1,1e-6);
+    ASSERT_FALSE(item_is_error(run_js("globalThis.zoomBefore=ringworld.camera.position.distanceTo(ringworld.controls.target)")));
+    RdtEvent scroll={};scroll.type=RDT_EVENT_SCROLL;scroll.scroll.x=500;scroll.scroll.y=400;scroll.scroll.yoffset=1;handle_event(&ui,page,&scroll);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        if(Math.abs(ringworld.camera.position.distanceTo(ringworld.controls.target)-zoomBefore)<.01)throw new Error('wheel did not zoom');
+        document.getElementById('tilt-up').click();document.getElementById('orbit-right').click();
+        document.getElementById('zoom-in').click();document.getElementById('zoom-out').click();
+        document.getElementById('top').click();
+        if(ringworld.controls.getPolarAngle()>.17)throw new Error('top preset');
+        document.getElementById('side').click();
+        if(Math.abs(ringworld.controls.getPolarAngle()-Math.PI/2)>1e-6)throw new Error('side preset');
+        for(let i=0;i<50;i++)ringworld.zoom(.5);
+        if(Math.abs(ringworld.controls.getDistance()-7)>1e-6)throw new Error('minimum zoom');
+        for(let i=0;i<50;i++)ringworld.zoom(2);
+        if(Math.abs(ringworld.controls.getDistance()-38)>1e-6)throw new Error('maximum zoom');
+        ringworld.orbit(0,-100);
+        if(ringworld.controls.getPolarAngle()<.0799)throw new Error('tilt limit');
+        document.getElementById('reset').click();
+        if(ringworld.camera.position.distanceTo({x:7.5,y:4.8,z:11})>1e-6||ringworld.controls.target.length()>1e-6)
+            throw new Error('reset camera and pan');
+        document.getElementById('rewind').click();
+    )JS")));
+    EXPECT_NEAR(action->time,0,1e-6);
+    key(RDT_KEY_SPACE);
+    animation_scheduler_tick(scheduler,scheduler->current_time+.25,nullptr);
+    EXPECT_NEAR(action->time,.25,1e-6);
+}
 TEST_F(Scene3dTest, ParentTransformAndVisibilityUpdatePixels) {
     DomElement* group=element("group",root);DomElement* object=mesh("plane","#00ff00","basic",group);
     attr(group,"position","1 0 0");ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);

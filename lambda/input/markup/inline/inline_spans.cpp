@@ -139,7 +139,10 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     // Also include newline since we need to check for hard line breaks (2+ spaces before \n)
     const unsigned char* markup = inline_markup_bytes();
     const char* first_markup = text;
-    while (*first_markup && !markup[(unsigned char)*first_markup]) first_markup++;
+    bool extended_links = parser->config.format == Format::MARKDOWN &&
+        parser->config.flavor != Flavor::COMMONMARK && !parser->state.link_depth;
+    while (*first_markup && !markup[(unsigned char)*first_markup] &&
+        !(extended_links && strncmp(first_markup, "www.", 4) == 0)) first_markup++;
     if (!*first_markup) {
         log_debug("parse_inline_spans: no markup chars, returning as plain string");
         // Strip trailing spaces (hard line breaks at end of paragraph are ignored)
@@ -176,11 +179,17 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     stringbuf_reset(sb);
 
     const char* pos = text_copy;
+    const char* text_node_begin = text_copy;
     Format format = parser->config.format;
 
     log_debug("parse_inline_spans: format=%d (RST=%d)", (int)format, (int)Format::RST);
 
     while (*pos) {
+        // URL/email tokens must be recognized before punctuation starts inline markup.
+        if (format == Format::MARKDOWN && parser->config.flavor != Flavor::COMMONMARK &&
+            !parser->state.link_depth && is_extended_autolink_start(pos, text_node_begin) &&
+            try_parse_inline_item(parser, span, sb, &pos, parse_extended_autolink)) continue;
+
         // RST interpreted text :role:`content`
         if (format == Format::RST && *pos == ':') {
             // Check for :role:`content` pattern
@@ -432,7 +441,10 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         if (*pos == '<' && format == Format::MARKDOWN) {
             // Try autolink first (<http://...> or <email@...>)
             if (try_parse_inline_item(parser, span, sb, &pos, parse_autolink) ||
-                try_parse_inline_item(parser, span, sb, &pos, parse_raw_html)) continue;
+                try_parse_inline_item(parser, span, sb, &pos, parse_raw_html)) {
+                text_node_begin = pos;
+                continue;
+            }
 
             // Not valid HTML, add < to buffer
             stringbuf_append_char(sb, *pos);
@@ -458,7 +470,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             }
 
             // Check for footnote reference [^1]
-            if (*(pos+1) == '^') {
+            if (*(pos+1) == '^' && parser->config.flavor != Flavor::COMMONMARK) {
                 if (try_parse_inline_item(parser, span, sb, &pos, parse_footnote_reference)) continue;
             }
 
@@ -551,7 +563,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         }
 
         // Check for emoji shortcode (:)
-        if (*pos == ':') {
+        if (*pos == ':' && parser->config.flavor != Flavor::COMMONMARK) {
             const char* old_pos = pos;
             if (try_parse_inline_item(parser, span, sb, &pos, parse_emoji_shortcode)) continue;
 

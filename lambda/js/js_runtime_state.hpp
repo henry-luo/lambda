@@ -201,8 +201,9 @@ enum JsRealmSlotId {
         JS_BUILTIN_GLOBAL_MAX,
     JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE = JS_REALM_SLOT_CONSTRUCTOR_BASE +
         JS_CTOR_MAX,
-    JS_REALM_SLOT_COUNT = JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE +
+    JS_REALM_SLOT_HEADERS_CONSTRUCTOR = JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE +
         JS_CLASS__COUNT,
+    JS_REALM_SLOT_COUNT,
 };
 
 struct JsRealmSlots {
@@ -223,6 +224,7 @@ bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
 LAMBDA_RT_API Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot_existing(JsRealmSlotId base, int index);
 LAMBDA_RT_API bool js_realm_runtime_is_active(void);
+LAMBDA_RT_API bool js_realm_runtime_has_input(void);
 bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
     bool reserve);
 

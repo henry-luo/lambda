@@ -8,11 +8,13 @@
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/font/font_internal.h"
 
 DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
 
@@ -93,6 +95,199 @@ TEST_F(ViewReuseTest, CanonicalIndexReusesAnExistingExactValue) {
     EXPECT_EQ(child2->in_line, first);
     EXPECT_EQ(tree.inline_canonical_count, 1u);
     EXPECT_EQ(tree.canonical_stats.inline_hits, 1u);
+}
+
+TEST_F(ViewReuseTest, LengthMathSubstitutesVariablesBeforeResolvingLeaves) {
+    UiContext ui = {};
+    LayoutContext context = {};
+    context.pool = lam::up(tree.prop_pool.get());
+    context.ui_context = lam::up(&ui);
+    context.width = 200.0f;
+    const struct { const char* expression; float expected; } cases[] = {
+        {"var(--missing, 40px)", 40.0f},
+        {"calc(var(--missing, 12px) + 8px)", 20.0f},
+        {"min(100px, var(--missing, 32px))", 32.0f},
+        {"calc(var(--missing, 12px) + 10%)", 32.0f},
+        {"calc(var(--missing, var(--inner, 12px)) * 2)", 24.0f},
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.expression);
+        CssDeclaration* declaration = css_parse_property_declaration("width", 5,
+            entry.expression, strlen(entry.expression), tree.prop_pool);
+        ASSERT_NE(declaration, nullptr);
+        EXPECT_FLOAT_EQ(resolve_length_value(&context, CSS_PROPERTY_WIDTH,
+            declaration->value), entry.expected);
+    }
+}
+
+TEST_F(ViewReuseTest, RetainedLeadingRecomputesFromTheCurrentParentCascade) {
+    DomElement* parent = element();
+    DomElement* child = element();
+    child->parent = lam::up(parent);
+    child->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+    ASSERT_NE(child->specified_style, nullptr);
+    parent->ensure_font(&tree)->font_size = 16.0f;
+    parent->ensure_block(&tree)->line_height = lam::shared(
+        css_value_create_number(tree.prop_pool, 1.4));
+    child->ensure_block(&tree)->line_height = lam::shared(
+        css_value_create_number(tree.prop_pool, 1.2));
+    UiContext ui = {};
+    LayoutContext context = {};
+    context.pool = lam::up(tree.prop_pool.get());
+    context.selected_view_tree = lam::up(&tree);
+    context.ui_context = lam::up(&ui);
+    context.view = lam::up(static_cast<View*>(child));
+    context.font.style = lam::up(parent->font.get());
+    context.font.current_font_size = 16.0f;
+
+    resolve_css_styles(child, &context);
+    ASSERT_NE(child->block()->line_height, nullptr);
+    EXPECT_EQ(child->block()->line_height->type, CSS_VALUE_TYPE_NUMBER);
+    EXPECT_DOUBLE_EQ(child->block()->line_height->data.number.value, 1.4);
+    CssValue* previous = (CssValue*)parent->block()->line_height.get();
+    parent->blk->line_height = lam::shared(
+        css_value_create_number(tree.prop_pool, 1.6));
+    // a paint-only CSSOM edit can retire the parent's declaration before reflow.
+    css_value_destroy_owned(previous, tree.prop_pool);
+    ASSERT_EQ(child->block()->line_height->type, CSS_VALUE_TYPE_NUMBER);
+    EXPECT_DOUBLE_EQ(child->block()->line_height->data.number.value, 1.4);
+    resolve_css_styles(child, &context);
+    EXPECT_DOUBLE_EQ(child->block()->line_height->data.number.value, 1.6);
+
+    // HTML control defaults install normal before the author cascade runs.
+    child->blk->line_height = lam::shared(css_line_height_normal_value());
+    resolve_css_styles(child, &context);
+    EXPECT_EQ(child->block()->line_height->type, CSS_VALUE_TYPE_KEYWORD);
+    EXPECT_EQ(child->block()->line_height->data.keyword, CSS_VALUE_NORMAL);
+}
+
+TEST_F(ViewReuseTest, AnonymousTableRepairPreservesSourceInheritance) {
+    DomDocument doc;
+    doc.view_tree = lam::own(&tree);
+    LayoutContext context = {};
+    context.doc = lam::up(&doc);
+    context.pool = lam::up(tree.prop_pool.get());
+    context.selected_view_tree = lam::up(&tree);
+    DomElement* source = element();
+    source->doc = lam::up(&doc);
+    source->display = {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL};
+    source->set_styles_resolved(true);
+    CssValue* leading = css_value_create_number(tree.prop_pool, 1.4);
+    source->ensure_block(&tree)->line_height = lam::shared(leading);
+    DomElement* retained_wrapper = nullptr;
+    const char* values[] = {"inherit", "var(--missing, inherit)"};
+    for (const char* value : values) {
+        SCOPED_TRACE(value);
+        DomElement* child = element();
+        child->doc = lam::up(&doc);
+        child->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+        CssDeclaration* declaration = css_parse_property_declaration(
+            "display", 7, value, strlen(value), tree.prop_pool);
+        ASSERT_NE(declaration, nullptr);
+        ASSERT_TRUE(style_tree_apply_declaration(child->specified_style, declaration));
+        child->parent = lam::up(source);
+        source->first_child = lam::own(static_cast<DomNode*>(child));
+        source->last_child = lam::up(static_cast<DomNode*>(child));
+        ASSERT_EQ(resolve_display_value(child).inner, CSS_VALUE_TABLE_CELL);
+        ASSERT_TRUE(wrap_orphaned_table_children(&context, source));
+        DomElement* wrapper = source->first_child->as_element();
+        retained_wrapper = wrapper;
+        ASSERT_TRUE(wrapper->is_table_fixup());
+        EXPECT_EQ(dom_source_parent(child), source);
+        EXPECT_EQ(resolve_display_value(child).inner, CSS_VALUE_TABLE_CELL);
+        wrapper->set_styles_resolved(false);
+        EXPECT_EQ(resolve_display_value(wrapper).inner, CSS_VALUE_TABLE);
+        EXPECT_EQ(resolve_display_value(child).inner, CSS_VALUE_TABLE_CELL);
+        ASSERT_NE(wrapper->block()->line_height, nullptr);
+        EXPECT_NE(wrapper->block()->line_height.get(), leading);
+        EXPECT_DOUBLE_EQ(wrapper->block()->line_height->data.number.value, 1.4);
+        source->first_child = nullptr;
+        source->last_child = nullptr;
+    }
+    css_value_destroy_owned(leading, tree.prop_pool);
+    source->blk->line_height = nullptr;
+    EXPECT_DOUBLE_EQ(retained_wrapper->block()->line_height->data.number.value, 1.4);
+    doc.view_tree = nullptr;
+}
+
+TEST_F(ViewReuseTest, IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineNames) {
+    DomElement* grid_element = element();
+    grid_element->view_type = RDT_VIEW_BLOCK;
+    grid_element->display.outer = CSS_VALUE_BLOCK;
+    grid_element->display.inner = CSS_VALUE_GRID;
+    grid_element->set_styles_resolved(true);
+    grid_element->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+    const char* template_text = "[start] 80px [end]";
+    CssDeclaration* declaration = css_parse_property_declaration(
+        "grid-template-columns", strlen("grid-template-columns"),
+        template_text, strlen(template_text), tree.prop_pool);
+    ASSERT_NE(declaration, nullptr);
+    ASSERT_TRUE(style_tree_apply_declaration(grid_element->specified_style, declaration));
+    GridProp* grid = (GridProp*)pool_calloc(tree.prop_pool, sizeof(GridProp));
+    ASSERT_NE(grid, nullptr);
+    grid_element->ensure_embed(&tree)->grid = lam::own(grid);
+    grid->grid_template_columns = lam::own(create_grid_track_list(tree.prop_pool, 3));
+    ASSERT_NE(grid->grid_template_columns, nullptr);
+    GridTrackList* tracks = grid->grid_template_columns;
+    tracks->track_count = 1;
+    tracks->tracks[0] = create_grid_track_size(tree.prop_pool, GRID_TRACK_SIZE_LENGTH, 80.0f);
+    ASSERT_NE(tracks->tracks[0], nullptr);
+    // Spare capacity must never become authored line-name columns during measurement.
+    GridTrackSize* spare = create_grid_track_size(tree.prop_pool, GRID_TRACK_SIZE_LENGTH, 400.0f);
+    ASSERT_NE(spare, nullptr);
+    tracks->tracks[1] = tracks->tracks[2] = spare;
+    LayoutContext context = {};
+    context.pool = lam::up(tree.prop_pool.get());
+    context.selected_view_tree = lam::up(&tree);
+    Arena* scratch = arena_create_default();
+    ASSERT_NE(scratch, nullptr);
+    scratch_init(&context.scratch, scratch);
+    IntrinsicSizes sizes = measure_element_intrinsic_widths(&context, grid_element);
+    EXPECT_FLOAT_EQ(sizes.min_content, 80.0f);
+    EXPECT_FLOAT_EQ(sizes.max_content, 80.0f);
+    scratch_release(&context.scratch);
+    arena_destroy(scratch);
+}
+
+TEST_F(ViewReuseTest, TableTraversalResumesAcrossTransparentWrappersWithinItsOwner) {
+    auto append_view = [&](ViewType view_type, DomElement* parent) {
+        DomElement* child = element();
+        child->view_type = view_type;
+        child->set_styles_resolved(true);
+        if (view_type == RDT_VIEW_INLINE) {
+            child->display = {CSS_VALUE_CONTENTS, CSS_VALUE_FLOW};
+        }
+        if (parent) EXPECT_TRUE(parent->DomNode::append_child(child));
+        return child;
+    };
+    DomElement* table_node = append_view(RDT_VIEW_TABLE, nullptr);
+    DomElement* group = append_view(RDT_VIEW_TABLE_ROW_GROUP, table_node);
+    DomElement* contents = append_view(RDT_VIEW_INLINE, group);
+    ViewTableRow* first = static_cast<ViewTableRow*>(append_view(RDT_VIEW_TABLE_ROW, contents));
+    ViewTableRow* second = static_cast<ViewTableRow*>(append_view(RDT_VIEW_TABLE_ROW, group));
+    DomElement* next_group = append_view(RDT_VIEW_TABLE_ROW_GROUP, table_node);
+    ViewTableRow* third = static_cast<ViewTableRow*>(append_view(RDT_VIEW_TABLE_ROW, next_group));
+    DomElement* nested_table = append_view(RDT_VIEW_TABLE, table_node);
+    ViewTableRow* foreign = static_cast<ViewTableRow*>(append_view(RDT_VIEW_TABLE_ROW, nested_table));
+    ViewTable* table = static_cast<ViewTable*>(table_node);
+    ViewTableRowGroup* row_group = static_cast<ViewTableRowGroup*>(group);
+    EXPECT_EQ(table->first_row(), first);
+    EXPECT_EQ(table->next_row(first), second);
+    EXPECT_EQ(table->next_row(second), third);
+    EXPECT_EQ(table->next_row(third), nullptr);
+    EXPECT_EQ(table->next_row(foreign), nullptr);
+    EXPECT_EQ(row_group->first_row(), first);
+    EXPECT_EQ(row_group->next_row(first), second);
+    EXPECT_EQ(row_group->next_row(second), nullptr);
+    EXPECT_EQ(row_group->next_row(third), nullptr);
+    DomElement* cell_contents = append_view(RDT_VIEW_INLINE, first);
+    ViewTableCell* first_cell = static_cast<ViewTableCell*>(append_view(RDT_VIEW_TABLE_CELL, cell_contents));
+    ViewTableCell* second_cell = static_cast<ViewTableCell*>(append_view(RDT_VIEW_TABLE_CELL, first));
+    ViewTableCell* foreign_cell = static_cast<ViewTableCell*>(append_view(RDT_VIEW_TABLE_CELL, foreign));
+    EXPECT_EQ(first->first_cell(), first_cell);
+    EXPECT_EQ(first->next_cell(first_cell), second_cell);
+    EXPECT_EQ(first->next_cell(second_cell), nullptr);
+    EXPECT_EQ(first->next_cell(foreign_cell), nullptr);
 }
 
 TEST_F(ViewReuseTest, ComputedFamilyListsShareOneTreeLifetimeString) {
@@ -1288,6 +1483,11 @@ TEST_F(StyleEpochTest, InlineMutationAndPropertyRemovalCowIndependently) {
         css_value_create_length(doc.document_pool, 40.0, CSS_UNIT_PX));
     apply(document_root, width, first, second);
     StyleTree* canonical = second->specified_style;
+    // warm both a winning declaration and a miss before copy-on-write updates
+    ASSERT_NE(style_tree_get_declaration(canonical, CSS_PROPERTY_WIDTH), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(canonical, CSS_PROPERTY_HEIGHT), nullptr);
+    ASSERT_NE(style_tree_get_authored_declaration(canonical, CSS_PROPERTY_WIDTH), nullptr);
+    EXPECT_EQ(style_tree_get_authored_declaration(canonical, CSS_PROPERTY_HEIGHT), nullptr);
 
     CssSpecificity inline_specificity = {};
     inline_specificity.inline_style = 1;
@@ -1300,6 +1500,8 @@ TEST_F(StyleEpochTest, InlineMutationAndPropertyRemovalCowIndependently) {
     EXPECT_EQ(second->specified_style, canonical);
     EXPECT_NE(dom_element_get_specified_value(first, CSS_PROPERTY_HEIGHT), nullptr);
     EXPECT_EQ(dom_element_get_specified_value(second, CSS_PROPERTY_HEIGHT), nullptr);
+    EXPECT_NE(style_tree_get_authored_declaration(first->specified_style, CSS_PROPERTY_HEIGHT), nullptr);
+    EXPECT_EQ(style_tree_get_authored_declaration(second->specified_style, CSS_PROPERTY_HEIGHT), nullptr);
 
     ASSERT_TRUE(dom_element_remove_property(second, CSS_PROPERTY_WIDTH));
     EXPECT_FALSE(second->specified_style_shared());
@@ -1447,6 +1649,48 @@ TEST_F(StyleEpochTest, RecascadeRetiresStylesheetCustomPropertyRecords) {
         for (CssCustomProp* prop = child->css_variables; prop; prop = prop->next) records++;
         EXPECT_EQ(records, 1u);
     }
+}
+
+TEST_F(StyleEpochTest, OverlappingMutationRootsCascadeTheFinalTreeOnce) {
+    DomElement* child = append("child");
+    DomElement* grandchild = DomElement::create(&doc, "grandchild", nullptr);
+    ASSERT_NE(grandchild, nullptr);
+    ASSERT_TRUE(child->append_child(grandchild));
+    CssEngine* css_engine = css_engine_create(doc.document_pool);
+    ASSERT_NE(css_engine, nullptr);
+    doc.services.cached_css_engine = css_engine;
+    CssStylesheet* sheet = css_parse_stylesheet(css_engine, "* { width: 10px; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    doc.stylesheets = lam::own_arr((CssStylesheet**)pool_alloc(
+        doc.document_pool, sizeof(CssStylesheet*)));
+    ASSERT_NE(doc.stylesheets, nullptr);
+    doc.stylesheets[0] = sheet;
+    doc.stylesheet_count = 1;
+    doc.js.mutation_records[0] = {1, DOM_JS_MUTATION_CHILD_INSERT, child,
+        document_root, 0, 0, DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN, CSS_PROPERTY_UNKNOWN, true};
+    doc.js.mutation_record_count = doc.js.mutation_count = 1;
+    ASSERT_TRUE(radiant_apply_load_mutation_cascade(&doc, nullptr));
+    StyleEpochStats first = {};
+    style_epoch_get_stats(&doc, &first);
+    ASSERT_GT(first.lookup_count, 0u);
+
+    for (int i = 0; i < 16; i++) {
+        // The enclosing root arrives after the nested root and repeats later.
+        doc.js.mutation_records[i] = {static_cast<uint32_t>(i + 1),
+            DOM_JS_MUTATION_CHILD_INSERT, grandchild,
+            i % 2 ? document_root : child, 0, 0,
+            DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN, CSS_PROPERTY_UNKNOWN, true};
+    }
+    doc.js.mutation_record_count = doc.js.mutation_count = 16;
+    ASSERT_TRUE(radiant_apply_load_mutation_cascade(&doc, nullptr));
+    StyleEpochStats repeated = {};
+    style_epoch_get_stats(&doc, &repeated);
+    EXPECT_EQ(repeated.lookup_count - first.lookup_count, first.lookup_count);
+    CssDeclaration* width = dom_element_get_specified_value(grandchild, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(width, nullptr);
+    EXPECT_DOUBLE_EQ(width->value->data.length.value, 10.0);
+    doc.services.cached_css_engine = nullptr;
+    css_engine_destroy(css_engine);
 }
 
 TEST_F(StyleEpochTest, RecascadeReclaimsExclusiveOwnedStyleTrees) {
@@ -1742,3 +1986,33 @@ TEST(ViewTreeOwnershipTest, AllocatorsRegisterUnderTheOwnerContext) {
     EXPECT_EQ(mem_context_live_count(doc_ctx), 0u);
     mem_context_destroy(doc_ctx);
 }
+
+#ifdef __APPLE__
+TEST(FontMetricTest, NormalMetricsTrackPlatformFamilyAliasAndCssSize) {
+    FontTables tables = {};
+    Os2Table os2 = {};
+    tables.os2 = &os2;
+    tables.parsed_flags = FONT_PARSED_OS2;
+    FontHandle handle = {};
+    handle.tables = &tables;
+    handle.family_name = (char*)"Helvetica";
+    handle.metrics_ready = true;
+    const struct { const char* alias; float size; } cases[] = {
+        {"Times", 16.0f}, {"Times", 16.0f}, {"Courier", 16.0f},
+        {nullptr, 16.0f}, {nullptr, 21.0f}, {nullptr, 0.0f}, {"Times", 16.0f}};
+    for (const auto& entry : cases) {
+        handle.metric_family_name = (char*)entry.alias;
+        handle.size_px = entry.size;
+        float ascent = 0.0f, descent = 0.0f, height = 0.0f;
+        if (entry.size > 0.0f) {
+            ASSERT_TRUE(get_font_metrics_platform(entry.alias ? entry.alias : handle.family_name,
+                entry.size, &ascent, &descent, &height));
+        }
+        EXPECT_FLOAT_EQ(font_calc_normal_line_height(&handle), height);
+        float split_ascent = 0.0f, split_descent = 0.0f;
+        font_get_normal_lh_split(&handle, &split_ascent, &split_descent);
+        EXPECT_FLOAT_EQ(split_ascent, ascent + (height - ascent - descent) / 2.0f);
+        EXPECT_FLOAT_EQ(split_descent, fmaxf(0.0f, descent + (height - ascent - descent) / 2.0f));
+    }
+}
+#endif

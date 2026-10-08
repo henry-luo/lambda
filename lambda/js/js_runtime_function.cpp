@@ -1274,15 +1274,15 @@ static Item js_new_native_closure_impl(JsNativeTarget target,
         JsNativeCallBody call_body,
         const JsRuntimeState::JsFunctionCacheKey& cache_key,
         int exposed_arity, JsNativeCallPolicy policy, Item* env,
-        int env_size) {
+        int env_size, JsNativeConstructBody construct_body = NULL) {
     RootFrame roots(2);
     Rooted<Item> env_owner_root(roots,
         (Item){.item = (uint64_t)(uintptr_t)env});
     // D5.4.3: the caller-built GC environment has no object owner until the
     // fresh callable is attached; root the raw environment across allocation.
     Rooted<Item> fn_root(roots, js_new_native_function_impl(target, call_body,
-        NULL,
-        cache_key, exposed_arity, policy, false, true));
+        construct_body,
+        cache_key, exposed_arity, policy, construct_body != NULL, true));
     if (get_type_id(fn_root.get()) != LMD_TYPE_FUNC) return fn_root.get();
     JsFunction* fn = (JsFunction*)fn_root.get().function;
     // D5.3.3/D6.2.2v2: the typed closure owns its environment before scalar
@@ -1292,6 +1292,15 @@ static Item js_new_native_closure_impl(JsNativeTarget target,
     js_env_rehome_scalars(fn->env);
     js_function_finalize_capabilities(fn);
     return fn_root.get();
+}
+
+Item js_new_native_body_constructor_closure(JsNativeCallBody call_body,
+        JsNativeConstructBody construct_body, int formal_length, Item* env, int env_size) {
+    // constructor environments use the same precise ownership as native closures (D5.3.3).
+    JsNativeTarget stored = {};
+    return js_new_native_closure_impl(stored, call_body,
+        js_native_cache_key(call_body, formal_length, JS_NATIVE_CALL_BODY, true),
+        formal_length, JS_NATIVE_CALL_BODY, env, env_size, construct_body);
 }
 
 #define JS_DEFINE_NATIVE_CLOSURE_FACTORY(exposed_arity, type, member) \

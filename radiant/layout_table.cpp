@@ -19,36 +19,51 @@ static inline ViewBlock* table_array_view_block(ArrayList* list, int index) {
     return lam::view_require_block(view);
 }
 
-static bool table_view_can_contain_flattened_rows(View* view) {
-    return view && (view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
-                    (view->view_type == RDT_VIEW_INLINE &&
-                     view->as_element()->display.outer == CSS_VALUE_CONTENTS));
+static bool table_view_can_contain_flattened_items(View* view, int item_type) {
+    if (!view) return false;
+    if (item_type == RDT_VIEW_TABLE_ROW) {
+        return view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+            (view->view_type == RDT_VIEW_INLINE &&
+             view->as_element()->display.outer == CSS_VALUE_CONTENTS);
+    }
+    return view->is_element() &&
+        resolve_display_value((void*)view).outer == CSS_VALUE_CONTENTS;
 }
 
-static ViewTableRow* table_find_flattened_row(View* first, View* after,
-                                              bool* after_seen) {
+static View* table_find_flattened_item(View* first, int item_type) {
     for (View* child = first; child;
          child = static_cast<View*>(child->next_sibling)) {
-        if (child == after) {
-            *after_seen = true;
-            continue;
-        }
-        if (*after_seen && child->view_type == RDT_VIEW_TABLE_ROW) {
-            return lam::view_require<RDT_VIEW_TABLE_ROW>(child);
-        }
-        if (table_view_can_contain_flattened_rows(child)) {
-            ViewTableRow* row = table_find_flattened_row(
-                static_cast<View*>(child->as_element()->first_child), after, after_seen);
-            if (row) return row;
+        if (child->view_type == item_type) return child;
+        if (table_view_can_contain_flattened_items(child, item_type)) {
+            View* item = table_find_flattened_item(
+                static_cast<View*>(child->as_element()->first_child), item_type);
+            if (item) return item;
         }
     }
     return nullptr;
 }
 
+static View* table_next_flattened_item(View* owner, View* current, int item_type) {
+    if (!current) return nullptr;
+    View* ancestor = static_cast<View*>(current->parent);
+    while (ancestor != owner) {
+        if (!table_view_can_contain_flattened_items(ancestor, item_type)) return nullptr;
+        ancestor = static_cast<View*>(ancestor->parent);
+    }
+    // Resume at the current item instead of rescanning every preceding row
+    // or cell on each step; transparent wrappers retain their tree order.
+    for (View* item = current; item != owner;
+         item = static_cast<View*>(item->parent)) {
+        View* next = table_find_flattened_item(
+            static_cast<View*>(item->next_sibling), item_type);
+        if (next) return next;
+    }
+    return nullptr;
+}
+
 ViewTableRow* ViewTable::first_row() {
-    bool after_seen = true;
-    return table_find_flattened_row(static_cast<View*>(first_child), nullptr,
-                                    &after_seen);
+    return static_cast<ViewTableRow*>(table_find_flattened_item(
+        static_cast<View*>(first_child), RDT_VIEW_TABLE_ROW));
 }
 
 ViewBlock* ViewTable::first_row_group() {
@@ -59,10 +74,8 @@ ViewBlock* ViewTable::first_row_group() {
 }
 
 ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
-    if (!current) return nullptr;
-    bool after_seen = false;
-    return table_find_flattened_row(static_cast<View*>(first_child),
-                                    static_cast<View*>(current), &after_seen);
+    return static_cast<ViewTableRow*>(table_next_flattened_item(
+        this, current, RDT_VIEW_TABLE_ROW));
 }
 
 TableSectionType ViewTableRowGroup::get_section_type() const {
@@ -81,50 +94,23 @@ TableSectionType ViewTableRowGroup::get_section_type() const {
 }
 
 ViewTableRow* ViewTableRowGroup::first_row() {
-    bool after_seen = true;
-    return table_find_flattened_row(static_cast<View*>(first_child), nullptr,
-                                    &after_seen);
+    return static_cast<ViewTableRow*>(table_find_flattened_item(
+        static_cast<View*>(first_child), RDT_VIEW_TABLE_ROW));
 }
 
 ViewTableRow* ViewTableRowGroup::next_row(ViewTableRow* current) {
-    if (!current) return nullptr;
-    bool after_seen = false;
-    return table_find_flattened_row(static_cast<View*>(first_child),
-                                    static_cast<View*>(current), &after_seen);
-}
-
-static ViewTableCell* table_row_find_cell(View* first, View* after,
-                                          bool* after_seen) {
-    for (View* child = first; child; child = static_cast<View*>(child->next_sibling)) {
-        if (child == after) {
-            *after_seen = true;
-            continue;
-        }
-        if (*after_seen && child->view_type == RDT_VIEW_TABLE_CELL) {
-            return lam::view_require<RDT_VIEW_TABLE_CELL>(child);
-        }
-        if (child->is_element()) {
-            DisplayValue display = resolve_display_value((void*)child);
-            if (display.outer == CSS_VALUE_CONTENTS) {
-                ViewTableCell* cell = table_row_find_cell(
-                    static_cast<View*>(child->as_element()->first_child), after, after_seen);
-                if (cell) return cell;
-            }
-        }
-    }
-    return nullptr;
+    return static_cast<ViewTableRow*>(table_next_flattened_item(
+        this, current, RDT_VIEW_TABLE_ROW));
 }
 
 ViewTableCell* ViewTableRow::first_cell() {
-    bool after_seen = true;
-    return table_row_find_cell(static_cast<View*>(first_child), nullptr, &after_seen);
+    return static_cast<ViewTableCell*>(table_find_flattened_item(
+        static_cast<View*>(first_child), RDT_VIEW_TABLE_CELL));
 }
 
 ViewTableCell* ViewTableRow::next_cell(ViewTableCell* current) {
-    if (!current) return nullptr;
-    bool after_seen = false;
-    return table_row_find_cell(static_cast<View*>(first_child),
-                               static_cast<View*>(current), &after_seen);
+    return static_cast<ViewTableCell*>(table_next_flattened_item(
+        this, current, RDT_VIEW_TABLE_CELL));
 }
 
 static float table_row_collapsed_vertical_border_contribution(ViewTableRow* row,
@@ -1797,9 +1783,9 @@ static TableCellContentExtent table_cell_vertical_bounds(LayoutContext* lycon,
     return bounds;
 }
 
-static float table_cell_vertical_align_target(int valign, float content_area_height,
+float layout_table_cell_vertical_align_target(int valign, float content_area_height,
                                               float content_height, float content_start_y,
-                                              bool clamp_to_content = false) {
+                                              bool clamp_to_content) {
     if (clamp_to_content && content_area_height <= content_height) {
         return content_start_y;
     }
@@ -1828,7 +1814,7 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
     float cell_content_area = cell_height - insets.border.top - insets.border.bottom -
                               insets.padding.top - insets.padding.bottom;
     float content_start_y = insets.border.top + insets.padding.top;
-    float target_y = table_cell_vertical_align_target(
+    float target_y = layout_table_cell_vertical_align_target(
         tcell->td->vertical_align, cell_content_area, content_height, content_start_y);
     TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, tcell, true);
     if (!bounds.has_content) return;
@@ -1864,13 +1850,17 @@ static int for_each_table_span_column(int start_col, int span, int columns, Fn f
     return count;
 }
 
-static float table_sum_span_columns(float* col_widths, int start_col, int span, int columns) {
-    if (!col_widths) return 0.0f;
-    float width = 0.0f;
-    for_each_table_span_column(start_col, span, columns, [&](int c) {
-        width += col_widths[c];
-    });
+float layout_table_span_width(const float* widths, size_t count, size_t column, size_t span, float spacing) {
+    if (!widths || column >= count || !span) return 0.0f;
+    if (span > count - column) span = count - column;
+    float width = (span - 1) * spacing;
+    for (size_t i = column; i < column + span; i++) width += widths[i];
     return width;
+}
+
+static float table_sum_span_columns(float* col_widths, int start_col, int span, int columns) {
+    if (start_col < 0 || span <= 0 || columns <= start_col) return 0.0f;
+    return layout_table_span_width(col_widths, (size_t)columns, (size_t)start_col, (size_t)span, 0.0f);
 }
 
 static void table_assign_span_columns(float* col_widths, int start_col, int span,
@@ -2518,25 +2508,23 @@ static void table_apply_column_constraints(LayoutContext* lycon, ViewTable* tabl
         col_elem->blk && col_elem->block_mut()->given_max_width >= 0.0f, true, width_divisor);
 }
 
-static void table_distribute_span_extra(float* col_widths, int col, int span, int columns,
-                                        int actual_span, float extra_needed,
-                                        TableMetadata* meta = nullptr) {
-    if (!col_widths || actual_span <= 0 || extra_needed <= 0.0f) return;
-    auto eligible = [&](int index) {
+void layout_table_distribute_span_extra(float* col_widths, const LayoutTableColumnWidths& tracks,
+                                        size_t col, size_t span, float extra_needed) {
+    if (!col_widths || col >= tracks.count || !span || extra_needed <= 0.0f) return;
+    if (span > tracks.count - col) span = tracks.count - col;
+    auto eligible = [&](size_t index) {
         if (index < col || index >= col + span) return false;
         // preserve single-column contributions when distributing a spanning
         // cell's deficit; only unconstrained columns absorb it first.
-        if (meta && (meta->col_single_min_widths[index] > 0.0f ||
-                     meta->col_has_explicit_width[index])) {
-            for (int c = col; c < col + span && c < columns; c++) {
-                if (meta->col_single_min_widths[c] <= 0.0f &&
-                    !meta->col_has_explicit_width[c]) return false;
+        if (tracks.single_minimum[index] > 0.0f || tracks.constrained[index]) {
+            for (size_t c = col; c < col + span; c++) {
+                if (tracks.single_minimum[c] <= 0.0f && !tracks.constrained[c]) return false;
             }
         }
         return true;
     };
-    table_distribute_extra(col_widths, columns, extra_needed, eligible,
-        [&](int index) { return col_widths[index]; });
+    table_distribute_extra(col_widths, tracks.count, extra_needed, eligible,
+        [&](size_t index) { return col_widths[index]; });
 }
 
 static float table_cell_internal_border_spacing(ViewTable* table, ViewTableCell* tcell) {
@@ -2593,11 +2581,13 @@ static void apply_colspan_width_contribution(ViewTable* table, TableMetadata* me
     float* widths[3] = {
         meta->col_min_widths, meta->col_max_widths, meta->col_widths
     };
+    LayoutTableColumnWidths tracks = {meta->col_min_widths.get(), meta->col_max_widths.get(),
+        meta->col_single_min_widths.get(), meta->col_percent_widths.get(), meta->col_has_explicit_width.get(),
+        (size_t)columns};
     for (int i = 0; i < 3; i++) {
         float deficit = required[i] - current[i] - internal_spacing;
         if (deficit > 0.0f) {
-            table_distribute_span_extra(widths[i], col, span, columns, actual_span,
-                                        deficit, meta);
+            layout_table_distribute_span_extra(widths[i], tracks, (size_t)col, (size_t)span, deficit);
         }
     }
 }
@@ -2748,12 +2738,8 @@ static float table_column_span_width(ViewTable* table, float* col_widths,
     if (end_col > columns) end_col = columns;
     int actual_span = end_col - start_col;
     if (actual_span <= 0) return 0.0f;
-    float width = table_sum_span_columns(col_widths, start_col, actual_span, columns);
-    float spacing = table_inter_spacing(table, true);
-    if (spacing > 0.0f && actual_span > 1) {
-        width += spacing * (actual_span - 1);
-    }
-    return width;
+    return layout_table_span_width(col_widths, (size_t)columns, (size_t)start_col,
+        (size_t)actual_span, table_inter_spacing(table, true));
 }
 
 static float table_column_visual_x(ViewTable* table, float* col_widths, float* col_x_positions,
@@ -3688,6 +3674,13 @@ static bool table_cell_apply_align_content(ViewTableCell* cell,
     }
 }
 
+size_t layout_table_cell_colspan(DomElement* element) {
+    const char* value = element->get_attribute("colspan");
+    int64_t span = value ? str_to_int64_default(value, strlen(value), 1) : 1;
+    // HTML clamps positive column spans; keep both view producers on the same grid.
+    return span > 1000 ? 1000u : span > 0 ? (size_t)span : 1u;
+}
+
 static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewTableCell* cell) {
     assert(cell->td);
     cell->td->col_span = 1;
@@ -3703,13 +3696,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     if (!cellNode->is_element()) return;
     if (cellNode->node_type == DOM_NODE_ELEMENT) {
         DomElement* dom_elem = cellNode->as_element();
-        const char* colspan_str = dom_elem->get_attribute("colspan");
-        if (colspan_str && colspan_str[0] != '\0') {
-            int span = (int)str_to_int64_default(colspan_str, strlen(colspan_str), 0); // INT_CAST_OK: string length
-            if (span > 0 && span <= 1000) {
-                cell->td->col_span = span;
-            }
-        }
+        cell->td->col_span = (int)layout_table_cell_colspan(dom_elem); // INT_CAST_OK: HTML column span count is bounded by 1000.
         const char* rowspan_str = dom_elem->get_attribute("rowspan");
         if (rowspan_str && rowspan_str[0] != '\0') {
             int span = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0); // INT_CAST_OK: string length
@@ -3776,6 +3763,8 @@ static void inherit_anonymous_table_block_props(LayoutContext* lycon, DomElement
         anon->blk->direction = parent->blk->direction;
         anon->blk->text_transform = parent->blk->text_transform;
         anon->blk->line_height = parent->blk->line_height;
+        // D4.5.1v4: retained fixup boxes own leading independently of the source block.
+        radiant_compute_stored_line_height(lycon, anon);
         anon->blk->text_indent = parent->blk->text_indent;
         anon->blk->text_indent_percent = parent->blk->text_indent_percent;
         anon->blk->text_indent_calc = parent->blk->text_indent_calc;
@@ -4757,7 +4746,7 @@ static void reapply_rowspan_vertical_alignment(LayoutContext* lycon,
     TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, tcell);
     if (!bounds.has_content) return;
     float content_actual_height = bounds.max_y - bounds.min_y;
-    float new_offset = table_cell_vertical_align_target(
+    float new_offset = layout_table_cell_vertical_align_target(
         valign, content_area_height, content_actual_height, content_start_y);
     float adjustment = new_offset - bounds.min_y;
     shift_table_cell_vertical_align_children(tcell, adjustment);

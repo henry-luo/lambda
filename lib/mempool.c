@@ -25,7 +25,9 @@
 #define POOL_BLOCK_MAGIC 0x50424C4Bu
 #define POOL_EXTENT_MAGIC 0x50455854u
 #define POOL_ALIGNMENT 16u
-#define POOL_BIN_COUNT 32u
+#define POOL_SMALL_BIN_COUNT 32u
+#define POOL_SMALL_MAX_SPAN (POOL_ALIGNMENT * POOL_SMALL_BIN_COUNT)
+#define POOL_BIN_COUNT 64u
 
 #if defined(__GNUC__) || defined(__clang__)
 #define MEMPOOL_WEAK __attribute__((weak))
@@ -164,7 +166,7 @@ struct Pool {
     PoolBlock* free_bins[POOL_BIN_COUNT];
     // bit i set iff free_bins[i] is non-empty: the search jumps to the next
     // non-empty bin instead of testing each empty head above the request's
-    uint32_t free_bin_mask;
+    uint64_t free_bin_mask;
     size_t next_extent_size;
     size_t reserved_bytes;
     size_t committed_bytes;
@@ -260,13 +262,16 @@ static bool pool_block_is_free(const PoolBlock* block) {
     return block && block->requested == 0;
 }
 
-// floor(log2(span)) capped at the last bin, 0 below 2. Counting leading zeros
-// replaces a shift loop that ran three times per allocation (the request, the
-// taken block and the split remainder, about 20 steps each for a large tail).
+// Small aligned spans need distinct bins: revisiting thousands of 176-byte
+// holes for every 192-byte allocation made large DOM layouts quadratic.
 static unsigned pool_bin_index(size_t span) {
-    if (span < 2) return 0;
+    if (span <= POOL_SMALL_MAX_SPAN) {
+        return span ? (unsigned)((span - 1) / POOL_ALIGNMENT) : 0;
+    }
     unsigned floor_log2 = (unsigned)(63 - math_clz64((uint64_t)span));
-    return floor_log2 < POOL_BIN_COUNT - 1 ? floor_log2 : POOL_BIN_COUNT - 1;
+    unsigned small_log2 = (unsigned)(63 - math_clz64(POOL_SMALL_MAX_SPAN));
+    unsigned index = POOL_SMALL_BIN_COUNT + floor_log2 - small_log2;
+    return index < POOL_BIN_COUNT - 1 ? index : POOL_BIN_COUNT - 1;
 }
 
 static bool pool_block_range_valid(const PoolBlock* block,
@@ -339,7 +344,7 @@ static void pool_free_list_insert(Pool* pool, PoolBlock* block) {
     links->next = pool->free_bins[index];
     if (links->next) pool_block_links(links->next)->prev = block;
     pool->free_bins[index] = block;
-    pool->free_bin_mask |= 1u << index;
+    pool->free_bin_mask |= UINT64_C(1) << index;
 }
 
 static void pool_free_list_remove(Pool* pool, PoolBlock* block) {
@@ -348,15 +353,15 @@ static void pool_free_list_remove(Pool* pool, PoolBlock* block) {
     if (links->prev) pool_block_links(links->prev)->next = links->next;
     else if (pool->free_bins[index] == block) pool->free_bins[index] = links->next;
     if (links->next) pool_block_links(links->next)->prev = links->prev;
-    if (!pool->free_bins[index]) pool->free_bin_mask &= ~(1u << index);
+    if (!pool->free_bins[index]) pool->free_bin_mask &= ~(UINT64_C(1) << index);
 }
 
 static PoolBlock* pool_find_suitable(Pool* pool, size_t required) {
     unsigned first = pool_bin_index(required);
     // the same bins in the same order as testing each one, empty ones skipped
-    uint32_t mask = pool->free_bin_mask & (UINT32_MAX << first);
+    uint64_t mask = pool->free_bin_mask & (UINT64_MAX << first);
     while (mask) {
-        unsigned index = (unsigned)(63 - math_clz64((uint64_t)(mask & (0u - mask))));
+        unsigned index = (unsigned)(63 - math_clz64(mask & (UINT64_C(0) - mask)));
         mask &= mask - 1;
         PoolBlock* block = pool->free_bins[index];
         while (block) {

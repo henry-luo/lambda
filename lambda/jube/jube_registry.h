@@ -139,6 +139,11 @@ LAMBDA_RT_API void* jube_node_current_module_state(uint32_t slot);
 // instanceof sees one prototype identity across engine and module.
 Item jube_type_prototype(const JubeTypeDef* type);
 
+// Publish an existing member on a WebIDL interface whose JS inheritance differs
+// from the module's host-type hierarchy; the adapter supplies its native brand.
+bool jube_publish_prototype_member(const JubeTypeDef* type, Item prototype,
+    const char* name, bool (*accepts_receiver)(Item));
+
 #ifdef __cplusplus
 }
 #endif

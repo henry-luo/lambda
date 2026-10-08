@@ -341,65 +341,16 @@ static void html5_end_token_scratch(Html5Parser* parser) {
     }
 }
 
-// main entry point for parsing HTML
+// legacy C-string entries share the length-aware document parser.
 Element* html5_parse(Input* input, const char* html) {
-    // note: empty string is valid HTML input - produces implicit <html><head><body>
-    if (!html) {
-        return nullptr;
-    }
-
-    Pool* pool = input->pool;
-    Arena* arena = input->arena;
-
-    Html5Parser* parser = html5_parser_create(pool, arena, input);
-    Html5ParserScope parser_scope(parser);
-    if (!parser) return nullptr;
-    parser->html = html;
-    parser->length = strlen(html);
-    parser->pos = 0;
-    parser->tokenizer_state = HTML5_TOK_DATA;
-    html5_begin_token_scratch(parser);
-
-    // HTML5 §13.2.3.1: Skip leading UTF-8 BOM (U+FEFF = EF BB BF)
-    if (parser->length >= 3 &&
-        (unsigned char)html[0] == 0xEF &&
-        (unsigned char)html[1] == 0xBB &&
-        (unsigned char)html[2] == 0xBF) {
-        parser->pos = 3;
-    }
-
-    // create document root
-    MarkBuilder builder(input);
-    parser->document = builder.element("#document").final().element;
-
-    log_debug("html5: starting parse of %zu bytes", parser->length);
-
-    // tokenize and process
-    while (true) {
-        Html5Token* token = html5_tokenize_next(parser);
-
-        // Process EOF token through the tree builder (to create implicit elements)
-        // then break out of the loop
-        html5_process_token(parser, token);
-
-        if (token->type == HTML5_TOKEN_EOF) {
-            break;
-        }
-        html5_recycle_token_scratch(parser);
-    }
-
-    // Flush any remaining pending text (both normal and foster)
-    html5_flush_pending_text(parser);
-    html5_flush_foster_text(parser);
-    html5_end_token_scratch(parser);
-
-    log_debug("html5: parse complete, mode=%d, open_elements=%zu",
-              parser->mode, parser->open_elements->length);
-
-    return parser->document;
+    return html5_parse_n(input, html, html ? strlen(html) : 0, nullptr);
 }
 
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts) {
+    return html5_parse_n(input, html, html ? strlen(html) : 0, opts);
+}
+
+Element* html5_parse_n(Input* input, const char* html, size_t length, Html5ParseOptions* opts) {
     if (!html) {
         return nullptr;
     }
@@ -411,7 +362,7 @@ Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts)
     Html5ParserScope parser_scope(parser);
     if (!parser) return nullptr;
     parser->html = html;
-    parser->length = strlen(html);
+    parser->length = length;
     parser->pos = 0;
     parser->tokenizer_state = HTML5_TOK_DATA;
     html5_begin_token_scratch(parser);
@@ -609,7 +560,7 @@ Element* html5_fragment_get_body(Html5Parser* parser) {
 
 // forward declarations
 static void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token);
-static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_after_after_document_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_table_body_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_select_in_table_mode(Html5Parser* parser, Html5Token* token);
@@ -670,7 +621,8 @@ void html5_process_token(Html5Parser* parser, Html5Token* token) {
             html5_process_in_after_body_mode(parser, token);
             break;
         case HTML5_MODE_AFTER_AFTER_BODY:
-            html5_process_in_after_after_body_mode(parser, token);;
+        case HTML5_MODE_AFTER_AFTER_FRAMESET:
+            html5_process_in_after_after_document_mode(parser, token);
             break;
         case HTML5_MODE_TEXT:
             html5_process_in_text_mode(parser, token);
@@ -1855,22 +1807,18 @@ static void html5_process_in_after_body_mode(Html5Parser* parser, Html5Token* to
     html5_process_token(parser, token);
 }
 
-// ===== AFTER AFTER BODY MODE =====
-static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Token* token) {
-    // https://html.spec.whatwg.org/#the-after-after-body-insertion-mode
+// ===== AFTER AFTER BODY / FRAMESET MODES =====
+static void html5_process_in_after_after_document_mode(Html5Parser* parser, Html5Token* token) {
+    bool frameset = parser->mode == HTML5_MODE_AFTER_AFTER_FRAMESET;
 
-    if (html5_handle_comment_or_doctype(parser, token, "after after body mode", false)) return;
-
-    if (token->type == HTML5_TOKEN_CHARACTER) {
-        if (is_whitespace_token(token)) {
-            // process using "in body" rules
-            html5_process_in_body_mode(parser, token);
-            return;
-        }
+    // both post-document modes place comments on the document, not the open html node
+    if (token->type == HTML5_TOKEN_COMMENT) {
+        html5_insert_comment(parser, token, parser->document);
+        return;
     }
 
-    if (token->type == HTML5_TOKEN_START_TAG && strcmp(token->tag_name->chars, "html") == 0) {
-        // process using "in body" rules
+    if (token->type == HTML5_TOKEN_DOCTYPE || is_whitespace_token(token) ||
+        (token->type == HTML5_TOKEN_START_TAG && html5_token_is(token, MARKUP_NAME_HTML))) {
         html5_process_in_body_mode(parser, token);
         return;
     }
@@ -1880,7 +1828,16 @@ static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Tok
         return;
     }
 
-    // anything else: parse error, switch to body mode
+    // frameset recovery ignores stray content but still accepts a trailing noframes
+    if (frameset) {
+        if (token->type == HTML5_TOKEN_START_TAG && html5_token_is(token, MARKUP_NAME_NOFRAMES)) {
+            html5_process_in_head_mode(parser, token);
+        } else {
+            log_error("html5: unexpected token in after after frameset mode");
+        }
+        return;
+    }
+
     log_error("html5: unexpected token in after after body mode, switching to body mode");
     parser->mode = HTML5_MODE_IN_BODY;
     html5_process_token(parser, token);

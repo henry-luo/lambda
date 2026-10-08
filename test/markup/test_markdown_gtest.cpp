@@ -240,6 +240,7 @@ public:
                 {"spec-tables.txt", "Tables"},        // GFM tables
                 {"spec-tasklists.txt", "Tasklists"},  // GFM task lists
                 {"spec-strikethrough.txt", "Strikethrough"}, // GFM strikethrough
+                {"spec-gfm-autolinks.txt", "GFM Autolinks"}, // GFM rules differ from md4c permissive links
                 // {"spec-permissive-autolinks.txt", "Autolinks"}, // permissive autolinks - skipped
                 // {"spec-wiki-links.txt", "WikiLinks"}, // wiki-style links - skipped
                 // {"spec-latex-math.txt", "LaTeXMath"}, // latex math spans - skipped
@@ -335,7 +336,8 @@ protected:
         // Otherwise use "commonmark" for strict CommonMark parsing
         bool use_gfm = cmdline_options.find("--ftables") != std::string::npos ||
                        cmdline_options.find("--ftasklists") != std::string::npos ||
-                       cmdline_options.find("--fstrikethrough") != std::string::npos;
+                       cmdline_options.find("--fstrikethrough") != std::string::npos ||
+                       strstr(cmdline_options.c_str(), "--fautolinks") != nullptr;
         String* flavor_str = use_gfm ? create_test_string("markdown") : create_test_string("commonmark");
         
         Url* cwd = get_current_dir();

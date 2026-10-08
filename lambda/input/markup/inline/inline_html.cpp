@@ -340,13 +340,24 @@ static const char* try_parse_autolink_email(const char* start, const char** emai
     return p + 1; // past >
 }
 
-/**
- * parse_autolink - Parse autolinks <URL> or <email>
- *
- * @param parser The markup parser
- * @param text Pointer to current position (updated on success)
- * @return Item containing link element, or ITEM_UNDEFINED if not matched
- */
+static Item create_autolink(MarkupParser* parser, const char* start, const char* end,
+                            const char* prefix) {
+    Element* link = create_element(parser, "a");
+    if (!link) return Item{.item = ITEM_ERROR};
+    size_t length = (size_t)(end - start);
+    size_t prefix_length = strlen(prefix);
+    char* href = (char*)arena_alloc(parser->input()->arena, prefix_length + length + 1);
+    if (!href) return Item{.item = ITEM_ERROR};
+    memcpy(href, prefix, prefix_length);
+    memcpy(href + prefix_length, start, length);
+    href[prefix_length + length] = '\0';
+    add_attribute_to_element(parser, link, "href", href);
+    String* label = parser->builder.createString(start, length);
+    list_push((List*)link, Item{.item = s2it(label)});
+    return Item{.element = link};
+}
+
+/** Parse an angle-bracket URL or email, advancing text only on a match. */
 Item parse_autolink(MarkupParser* parser, const char** text) {
     if (!parser || !text || !*text || **text != '<') {
         return Item{.item = ITEM_UNDEFINED};
@@ -371,35 +382,103 @@ Item parse_autolink(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Create link element
-    Element* link = create_element(parser, "a");
-    if (!link) {
-        return Item{.item = ITEM_ERROR};
-    }
-
-    // Extract URL/email text
-    size_t url_len = url_end - url_start;
-    char* url_buf = arena_dup_n(parser->input()->arena, url_start, url_len);
-
-    // Add href attribute (mailto: for email)
-    String* href_key = parser->builder.createString("href");
-    String* href_val;
-    if (is_email) {
-        char* mailto = (char*)arena_alloc(parser->input()->arena, url_len + 8);
-        str_copy(mailto, url_len + 8, "mailto:", 7);
-        str_cat(mailto, 7, url_len + 8, url_buf, url_len);
-        href_val = parser->builder.createString(mailto);
-    } else {
-        href_val = parser->builder.createString(url_buf);
-    }
-    parser->builder.putToElement(lam::gc_borrow(link), href_key, Item{.item = s2it(href_val)});
-
-    // Add link text (same as URL/email, no mailto)
-    String* link_text = parser->builder.createString(url_buf);
-    list_push((List*)link, Item{.item = s2it(link_text)});
-
+    Item link = create_autolink(parser, url_start, url_end, is_email ? "mailto:" : "");
     *text = end;
-    return Item{.item = (uint64_t)link};
+    return link;
+}
+
+static bool email_local_char(char c) {
+    return str_is_alnum(c) || c == '.' || c == '-' || c == '_' || c == '+';
+}
+
+bool is_extended_autolink_start(const char* text, const char* begin) {
+    bool boundary = text == begin || str_is_space(text[-1]) || strchr("*_~(", text[-1]);
+    if (strncmp(text, "http://", 7) == 0 ||
+        strncmp(text, "https://", 8) == 0 || strncmp(text, "www.", 4) == 0 ||
+        strncmp(text, "mailto:", 7) == 0 || strncmp(text, "xmpp:", 5) == 0) return boundary;
+    // Scan each local-part run once, rather than retrying every character in a word.
+    return email_local_char(*text) && (text == begin || !email_local_char(text[-1]));
+}
+
+static bool autolink_domain(const char* begin, const char* end, bool email) {
+    unsigned periods = 0;
+    bool underscore = false, previous_underscore = false;
+    const char* segment = begin;
+    for (const char* p = begin; p < end; p++) {
+        if (*p == '.') {
+            if (p == segment) return false;
+            periods++;
+            previous_underscore = underscore;
+            underscore = false;
+            segment = p + 1;
+        } else if (*p == '_') {
+            underscore = true;
+        } else if (!str_is_alnum(*p) && *p != '-') {
+            return false;
+        }
+    }
+    return periods && segment < end && (email
+        ? end[-1] != '-' && end[-1] != '_'
+        : !underscore && !previous_underscore);
+}
+
+Item parse_extended_autolink(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    const char* domain = nullptr;
+    const char* prefix = "";
+    bool url = false, xmpp = false;
+    if (strncmp(start, "https://", 8) == 0) { domain = start + 8; url = true; }
+    else if (strncmp(start, "http://", 7) == 0) { domain = start + 7; url = true; }
+    else if (strncmp(start, "www.", 4) == 0) { domain = start; prefix = "http://"; url = true; }
+
+    const char* end;
+    if (url) {
+        end = domain;
+        while (*end && !str_is_space(*end) && *end != '<') end++;
+        int parentheses = 0;
+        for (const char* p = start; p < end; p++) {
+            if (*p == '(') parentheses++;
+            else if (*p == ')') parentheses--;
+        }
+        // GFM trims only terminal punctuation, unmatched parentheses, and entity-like tails.
+        while (end > domain) {
+            if (strchr("?!.,:*_~", end[-1])) { end--; continue; }
+            if (end[-1] == ')' && parentheses < 0) { end--; parentheses++; continue; }
+            if (end[-1] == ';') {
+                const char* entity = end - 1;
+                while (entity > domain && str_is_alnum(entity[-1])) entity--;
+                if (entity > domain && entity < end - 1 && entity[-1] == '&') {
+                    end = entity - 1;
+                    continue;
+                }
+            }
+            break;
+        }
+        const char* domain_end = domain;
+        while (domain_end < end && (str_is_alnum(*domain_end) ||
+            strchr("._-", *domain_end))) domain_end++;
+        if (!autolink_domain(domain, domain_end, false)) return Item{.item = ITEM_UNDEFINED};
+    } else {
+        const char* local = start;
+        if (strncmp(local, "mailto:", 7) == 0) local += 7;
+        else if (strncmp(local, "xmpp:", 5) == 0) { local += 5; xmpp = true; }
+        else prefix = "mailto:";
+        const char* at = local;
+        while (email_local_char(*at)) at++;
+        if (at == local || *at != '@') return Item{.item = ITEM_UNDEFINED};
+        domain = at + 1;
+        end = domain;
+        while (str_is_alnum(*end) || (*end && strchr("._-", *end))) end++;
+        while (end > domain && end[-1] == '.') end--;
+        if (!autolink_domain(domain, end, true)) return Item{.item = ITEM_UNDEFINED};
+        if (xmpp && *end == '/') {
+            end++;
+            while (str_is_alnum(*end) || *end == '@' || *end == '.') end++;
+        }
+    }
+    Item result = create_autolink(parser, start, end, prefix);
+    if (result.item != ITEM_ERROR) *text = end;
+    return result;
 }
 
 // ============================================================================

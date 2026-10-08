@@ -1,6 +1,8 @@
 // math/css.ls — CSS class names and embedded stylesheet for math rendering
 // Based on MathLive's core.less (~810 lines), compiled to essential CSS
 
+import paths: lambda.edit.session
+
 // ============================================================
 // CSS class name constants
 // ============================================================
@@ -98,6 +100,13 @@ pub fn font_class(font_name) {
 // ============================================================
 // Embedded stylesheet
 // ============================================================
+
+// resolve shipped faces from Lambda home, independently of the document URL (D7.2.4).
+pub fn font_stylesheets() {
+    let home = paths.resolve_path(sys.proc.self.cwd#, sys.lambda.home#);
+    [for (asset in ["latex/fonts/cmu-combined.css", "math/katex.css"])
+        <link rel: "stylesheet", href: home ++ "/package/" ++ asset>]
+}
 
 pub fn get_stylesheet(options = null) {
     let families = font_families(options)
@@ -228,6 +237,7 @@ fn local_font_families() => {
 // wrap output in standalone HTML with style tag
 pub fn wrap_standalone(content_el, options = null) =>
     <span
+        for (sheet in font_stylesheets()) { sheet }
         <style get_stylesheet(options)>
         content_el
     >

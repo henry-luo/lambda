@@ -55,6 +55,12 @@ struct LinkDefinition {
     bool has_title;
 };
 
+struct FootnoteDefinition {
+    const char* label;
+    Element* node;
+    unsigned number;
+};
+
 /**
  * ParserState - Current parsing state
  */
@@ -64,6 +70,7 @@ struct ParserState {
     int list_levels[MAX_LIST_DEPTH];
     int list_depth;
     bool parsing_list_content;  // True when parsing collected list item content
+    unsigned link_depth;        // suppress automatic links inside explicit links
 
     // Code block state
     bool in_code_block;
@@ -96,6 +103,7 @@ struct ParserState {
         memset(list_levels, 0, sizeof(list_levels));
         list_depth = 0;
         parsing_list_content = false;
+        link_depth = 0;
 
         in_code_block = false;
         code_fence = CodeFenceInfo();
@@ -157,6 +165,8 @@ public:
     // definition that would have exceeded one. Created on first definition.
     struct hashmap* link_defs_;
     int link_def_count_;
+    struct hashmap* footnote_defs_;
+    Element* footnotes_;
 
     // HTML5 fragment parser for accumulating HTML content
     // When markdown contains HTML blocks/inline, all HTML is parsed into
@@ -356,6 +366,9 @@ public:
     // Call `fn` with each defined label, normalized.
     void forEachLinkLabel(void (*fn)(void* ctx, const char* label), void* ctx) const;
 
+    bool parseFootnoteDefinition(const char* line);
+    void resolveFootnotes(Element* body);
+
 private:
     // Split content into lines
     void splitLines(const char* content);
@@ -363,6 +376,40 @@ private:
     // Free line memory
     void freeLines();
 };
+
+// Nested blocks share definition tables but must restore their enclosing line stream.
+class MarkupLinesScope {
+    MarkupParser* parser_;
+    char** lines_;
+    int count_, current_;
+    bool* lazy_;
+    size_t lazy_count_;
+public:
+    MarkupLinesScope(MarkupParser* parser, char** lines, int count)
+        : parser_(parser), lines_(parser->lines), count_(parser->line_count),
+          current_(parser->current_line), lazy_(parser->state.lazy_lines),
+          lazy_count_(parser->state.lazy_lines_count) {
+        parser->lines = lines;
+        parser->line_count = count;
+        parser->current_line = 0;
+        parser->state.lazy_lines = nullptr;
+        parser->state.lazy_lines_count = 0;
+    }
+    void restore() {
+        if (!parser_) return;
+        parser_->lines = lines_;
+        parser_->line_count = count_;
+        parser_->current_line = current_;
+        parser_->state.lazy_lines = lazy_;
+        parser_->state.lazy_lines_count = lazy_count_;
+        parser_ = nullptr;
+    }
+    ~MarkupLinesScope() { restore(); }
+    MarkupLinesScope(const MarkupLinesScope&) = delete;
+    MarkupLinesScope& operator=(const MarkupLinesScope&) = delete;
+};
+
+bool is_footnote_definition(const char* line);
 
 // SCU16 size budget: the parser's fixed footprint is independent of the
 // document's line and link-definition counts.

@@ -25,7 +25,7 @@ let transformed = chart.render_spec(converted)
 let named = chart.render(<chart width: 200, height: 150, padding: 0, datasets: {sample: [{text: "Lambda", weight: 1}]},
     <data name: "sample"> <mark type: "wordcloud", min_font_size: 12, max_font_size: 12>>)
 let invalid = chart.render_spec(vega.convert({data: {values: [{x: 1}]}, mark: "point",
-    transform: [{filter: "datum.x > 0"}]}));
+    transform: [{filter: "datum.x >"}]}));
 [
     len(flat) == 3, flat[0].a == 1, flat[0].b == 3, flat[1].a == 2, flat[1].b == null,
     flat[2].a == null, flat[2].b == 4, flat[2].id == "B",

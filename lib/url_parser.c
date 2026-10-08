@@ -482,7 +482,8 @@ UrlError url_parse_into(const char* input, Url* url) {
 
         // Extract query (including the '?')
         size_t query_len = query_end - query_start;
-        if (query_len > 0) {
+        // an empty query is present and must preserve its delimiter in href
+        {
             char* query_buf = mem_alloc(query_len + 2, MEM_CAT_TEMP); // +1 for '?', +1 for '\0'
             if (query_buf) {
                 query_buf[0] = '?';

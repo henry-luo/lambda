@@ -1018,7 +1018,7 @@ void html5_foster_parent_character(Html5Parser* parser, char c) {
     stringbuf_append_char(parser->foster_text_buffer, c);
 }
 
-void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
+void html5_insert_comment(Html5Parser* parser, Html5Token* token, Element* parent) {
     // Flush any pending text before inserting comment
     html5_flush_pending_text(parser);
 
@@ -1048,7 +1048,7 @@ void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
 
     Element* comment = elem_builder.final().element;
 
-    Element* parent = html5_current_node(parser);
+    if (parent == nullptr) parent = html5_current_node(parser);
     if (parent == nullptr) {
         parent = parser->document;
     }

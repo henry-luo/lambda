@@ -54,8 +54,8 @@ fn temporal_auto_format(lo_ms, hi_ms) {
 
 fn format_tick_label(sc, tv, config = null) {
     if (sc.kind == "temporal" or config.dtype == "temporal")
-        calendar.wall_time(tv, if (sc.timezone != null) sc.timezone else if (config.timezone != null) config.timezone else 0).format(
-            if (config and config.format != null) config.format else temporal_auto_format(sc.domain[0], sc.domain[1]))
+        util.format_value(tv, if (config and config.format != null) config.format else temporal_auto_format(sc.domain[0], sc.domain[1]),
+            "temporal", if (sc.timezone != null) sc.timezone else if (config.timezone != null) config.timezone else 0)
     else util.format_value(tv, config.format)
 }
 

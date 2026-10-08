@@ -34094,6 +34094,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     // Caller expects boxed Item — box the native return
                     result = emit_box_native_call_result(mt, result,
                         call_nfi->return_type, native_return_contract);
+                    result_is_boxed = true;
                 }
             } else {
                 // Standard boxed return — unbox if caller expects native type.
@@ -34143,6 +34144,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     // rather than treating ItemNull as ordinary false.
                     result = emit_unbox_contract_lane(mt, result, call_tid,
                         call_return_contract);
+                    result_is_boxed = false;
                 }
             }
 
@@ -34162,6 +34164,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 direct_value = em_materialize_pending_value(&mt->em,
                     direct_value, MIR_PENDING_REASON_SECOND_PAIR);
                 result = direct_value.reg;
+                result_is_boxed = true;
             }
 
             if (has_parameter_error_guard) {
@@ -34173,10 +34176,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     mt->region_producer_call = saved_region_producer_call;
                     mt->region_capability_reg = saved_region_capability_reg;
                 }
-                // The parameter-error join can already carry a boxed result
-                // or an inferred specialization; its logical carrier, not
-                // the raw callee lane, owns this conversion (D2.4.1).
-                MIR_reg_t boxed_normal = emit_box(mt, result, call_tid);
+                // preserve an existing value/error Item until propagation
+                // checks it; reboxing its success type erases errors (S7.4.2,
+                // D2.4.1–D2.4.3).
+                MIR_reg_t boxed_normal = result_is_boxed ? result
+                    : emit_box(mt, result, call_tid);
                 boxed_normal = root_gc_result_if_needed(mt, boxed_normal, MIR_T_I64,
                     LMD_TYPE_ANY, "call_normal");
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,

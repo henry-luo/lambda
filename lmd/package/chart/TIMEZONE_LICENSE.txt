@@ -1,0 +1,15 @@
+The derived timezone_data.json resource contains IANA Time Zone Database 2026e
+data. Its release URL and SHA-256 digest are recorded in the resource itself.
+
+Upstream LICENSE:
+
+Unless specified below, all files in the tz code and data (including
+this LICENSE file) are in the public domain.
+
+If the files date.c, newstrftime.3, and strftime.c are present, they
+contain material derived from BSD and use the BSD 3-clause license.
+
+This resource uses only the time-zone data; it includes none of those C files.
+Regenerate with utils/generate_chart_timezones.py from zic output for the
+standard africa, antarctica, asia, australasia, europe, northamerica,
+southamerica, etcetera, backward, and factory source files.

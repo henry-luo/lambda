@@ -4,6 +4,7 @@
 // navigates, no control acts — and a save writes the part's source.
 import lambda.edit.view
 import html: lambda.edit.html
+import md: lambda.edit.markdown
 import lambda.edit.model
 
 fn shown(items) => if (len(items) == 0) "" else format(items, 'html')
@@ -27,9 +28,20 @@ fn md_block(src) => [for (c in content([for (c in content(parse(src, 'markdown')
 "markdown block with raw script:";
 [shown(markdown_view(md_block("Hi <script>alert(1)</script> there.\n")))]
 
-// math reads as its TeX source
-"markdown block with math:";
-[shown(markdown_view(md_block("Area $\\pi r^2$ & more.\n"))), shown(markdown_view(md_block("$$\nx < y\n$$\n")))]
+// inline, display and retained Markdown blocks all use the typesetter;
+// projections never leak into saved source.
+"markdown math renders:";
+[for (source in ["Area $\\pi r^2$ & more.\n", "$$\nx < y\n$$\n",
+                 "Fraction $\\frac{1}{2}$ and root $\\sqrt{x}$.[^1]\n\n[^1]: a note\n"])
+  contains(shown(markdown_view(md_block(source))), "lm_latex")]
+let math_source = "Inline $\\frac{1}{2}$ and $\\sqrt{x}$.\n\n$$\nE = mc^2\n$$\n"
+let math_doc = md.import_text(math_source) or null
+let formulas = [for (n in math_doc.doc.content[0].content where n.tag == 'math') n];
+"inline math projections:";
+[for (n in formulas) contains(shown(attr_get(n, view_attr)), "lm_latex")]
+"math source survives:";
+[md.export_text(math_doc.doc, math_doc.envelope) == math_source,
+ md.check_roundtrip(math_doc.doc, math_doc.envelope) == null]
 
 // the HTML adapter keeps an element outside its profile with a view; one
 // that shows nothing keeps only its source

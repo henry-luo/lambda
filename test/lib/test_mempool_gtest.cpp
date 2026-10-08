@@ -331,6 +331,30 @@ TEST_F(MemoryPoolTest, ResetReusesCommittedExtents) {
     pool_free(pool, reused);
 }
 
+TEST_F(MemoryPoolTest, ReleasedBlocksReuseAcrossSmallAndLargeSizeClasses) {
+    const size_t sizes[] = {1, 16, 32, 112, 128, 144, 160, 176,
+        192, 240, 256, 464, 480, 496, 512, 528, 992, 1008, 1024, 2048};
+    for (size_t size : sizes) {
+        SCOPED_TRACE(size);
+        void* block = pool_alloc(pool, size);
+        void* guard = pool_alloc(pool, 16);
+        ASSERT_NE(block, nullptr);
+        ASSERT_NE(guard, nullptr);
+        fill_pattern(guard, 16, 0xA5);
+        PoolStats before;
+        pool_get_detailed_stats(pool, &before);
+        pool_free(pool, block);
+        void* reused = pool_alloc(pool, size);
+        ASSERT_EQ(reused, block);
+        PoolStats after;
+        pool_get_detailed_stats(pool, &after);
+        EXPECT_EQ(after.reserved_bytes, before.reserved_bytes);
+        EXPECT_TRUE(verify_pattern(guard, 16, 0xA5));
+        pool_free(pool, reused);
+        pool_free(pool, guard);
+    }
+}
+
 TEST_F(MemoryPoolTest, ReallocUsesAdjacentFreeBlockInPlace) {
     void* first = pool_alloc(pool, 128);
     void* second = pool_alloc(pool, 128);

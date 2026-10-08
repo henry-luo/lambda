@@ -16,6 +16,14 @@ addon exercises a real ESM import through the document's `three` import map.
 The pinned library, addon, license and source hashes live under `vendor/three/`.
 
 `ringworld.ls` uses the native `lambda.scene3d` package from Phase I.
+It starts with a spinning storm-banded planet and three orbiting moons, sampled
+by the shared SVG/native animation engine (S12.1.1v2, D7.4.4). Pause / Play and
+Restart control that timeline independently of the camera. Drag to orbit,
+Shift-drag or select Pan to move, and scroll to zoom. The toolbar also offers
+orbit, tilt, zoom, Top / Side presets and Reset view. Focus the scene for arrow
+key panning, Shift-arrow orbiting, `+` / `-` zoom, `R` reset and Space playback.
+`ringworld.js` reuses unmodified OrbitControls for camera input; rendering stays
+on the native scene path. Camera distance, tilt and pan have bounded limits.
 All demo resources are local to this directory; viewing needs no network.
 
 For PNG output with the full native host:

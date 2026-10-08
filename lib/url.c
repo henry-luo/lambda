@@ -577,11 +577,13 @@ const char* url_get_pathname(const Url* url) {
 }
 
 const char* url_get_search(const Url* url) {
-    return (url && url->search) ? url->search->chars : NULL;
+    // WHATWG URL: an empty query retains '?' in href but reads as empty search.
+    return (url && url->search) ? (url->search->len > 1 ? url->search->chars : "") : NULL;
 }
 
 const char* url_get_hash(const Url* url) {
-    return (url && url->hash) ? url->hash->chars : NULL;
+    // WHATWG URL: an empty fragment retains '#' in href but reads as empty hash.
+    return (url && url->hash) ? (url->hash->len > 1 ? url->hash->chars : "") : NULL;
 }
 
 uint16_t url_get_port_number(const Url* url) {

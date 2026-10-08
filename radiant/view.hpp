@@ -1360,6 +1360,7 @@ inline void radiant_border_side_set(RadiantBorderSide side, float width,
 typedef struct {
     Color color;
     float position;  // normalized stop coordinate (or CSS pixels); NaN for auto
+    bool position_is_px;  // each stop retains its unit until the gradient line is known
 } GradientStop;
 
 // Linear gradient data
@@ -2107,6 +2108,7 @@ typedef struct BlockProp {
     float zoom;  // CSS Viewport 1: local zoom factor; effective zoom multiplies ancestors
     CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
     lam::Shared<const CssValue> line_height;
+    CssValue computed_line_height;  // retained leading owns its scalar after the cascade returns
     float text_indent;  // can be negative
     float text_indent_percent;  // NaN if not percentage, else raw percentage value for deferred resolution
     lam::Up<const CssValue> text_indent_calc;  // non-null if text-indent is calc() with percentage, deferred to layout
@@ -3919,6 +3921,7 @@ const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value
 const char* css_font_family_name_from_value(const CssValue* value);
 // Immutable `normal` keyword shared by UA and font-shorthand line-height resets.
 const CssValue* css_line_height_normal_value();
+void radiant_compute_stored_line_height(LayoutContext* lycon, DomElement* span);
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
 const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              const CssValue* shorthand_value,

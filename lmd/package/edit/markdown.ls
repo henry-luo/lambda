@@ -38,6 +38,8 @@ pub let schema = {
                attrs: [{name: 'html', required: true, type: 'string'}]},
   math:       {role: 'inline', content: [], marks: 'none', atomic: true, selectable: true,
                attrs: [{name: 'tex', required: true, type: 'string'}]},
+  emoji:      {role: 'inline', content: [], marks: 'none', atomic: true, selectable: true,
+               attrs: [{name: 'name', required: true, type: 'string'}]},
   html_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
                attrs: [{name: 'html', required: true, type: 'string'}]},
   math_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
@@ -109,16 +111,19 @@ fn doc_body(parsed) {
 
 fn inline_children(item, marks) => [for (c in content(item)) for (x in inline_items(c, marks)) x]
 
-// Raw HTML and math keep their source text; raw HTML also shows its
-// rendering view-only, math its source (view.ls).
+// Raw HTML and math keep their source text and a view-only rendering (view.ls).
 fn kept_atom(tag, key, text, shown) => node_attrs(tag, attr_list([[key, text], [view_attr, shown]]), [])
 
 fn marked(item, marks, mark) any => inline_children(item, with_mark(marks, mark, true))
 
+// an emoji atom retains the distinction from literal or escaped shortcode text on save.
+fn emoji_atom(item, alias, marks) => node_attrs('emoji',
+  attr_list([['name', alias], [view_attr, html_view(format([item], 'html'))],
+             [node_marks_attr, if (len(marks) > 0) marks else null]]), [])
+
 fn inline_items(item, marks) {
   if (type(item) == string) { [text_marked(item, marks)] }
-  // the parser keeps a :name: emoji shortcode as a bare symbol
-  else if (type(item) == symbol) { [text_marked(":" ++ string(item) ++ ":", marks)] }
+  else if (type(item) == symbol) { [emoji_atom(item, string(item), marks)] }
   else if (type(item) != element) { [] }
   else {
     let tag = name(item)
@@ -133,11 +138,12 @@ fn inline_items(item, marks) {
                   inline_children(item, marks))]
     }
     else if (tag == 'img') {
-      [node_attrs('img', attr_list([['src', item.src], ['alt', item.alt], ['title', item.title]]), [])]
+      if (item["data-emoji"] != null) { [emoji_atom(item, item["data-emoji"], marks)] }
+      else { [node_attrs('img', attr_list([['src', item.src], ['alt', item.alt], ['title', item.title]]), [])] }
     }
     else if (tag == 'br') { [node('br', [])] }
     else if (tag == 'raw-html') { [kept_atom('raw_html', 'html', plain_text(item), html_view(plain_text(item)))] }
-    else if (tag == 'math') { [kept_atom('math', 'tex', plain_text(item), null)] }
+    else if (tag == 'math') { [kept_atom('math', 'tex', plain_text(item), math_view(plain_text(item), false))] }
     else { [] }
   }
 }
@@ -195,7 +201,7 @@ fn block_nodes(item) {
       [node('table', [for (p in content(item) where type(p) == element) table_part(p)])]
     }
     else if (tag == 'html-block') { [kept_atom('html_block', 'html', plain_text(item), html_view(plain_text(item)))] }
-    else if (tag == 'math') { [kept_atom('math_block', 'tex', plain_text(item), null)] }
+    else if (tag == 'math') { [kept_atom('math_block', 'tex', plain_text(item), math_view(plain_text(item), true))] }
     else if (member(inline_tags, tag)) { [node('p', inline_items(item, []))] }
     else { [] }
   }
@@ -246,15 +252,20 @@ fn survives(nodes) {
 // written rather than as an atom the formatter would respell.
 fn shown_only(item) => name(item) == 'html-block' or (name(item) == 'math' and item.type == "block")
 
-fn item_blocks(item, lines, span) {
-  let nodes = if (len(unsupported_in(item)) > 0 or shown_only(item)) null else block_nodes(item)
+fn item_blocks(item, lines, span, has_notes) {
+  let source = join(take(drop(lines, span.first - 1), span.last - span.first + 1), "\n")
+  // Definitions move to a generated footer; keep a container that declared any as source.
+  let declared_notes = if (has_notes) {
+    (parse(source, 'markdown') ^ { null })?<footnotes>
+  } else null
+  let nodes = if (len(unsupported_in(item)) > 0 or shown_only(item) or declared_notes != null)
+    null else block_nodes(item)
   if (nodes != null and survives(nodes)) nodes
-  else [kept_block(join(take(drop(lines, span.first - 1), span.last - span.first + 1), "\n"),
-                    markdown_view(item))]
+  else [kept_block(source, markdown_view(item))]
 }
 
 // Top-level blocks in source order; `from` is the first line no block claimed.
-fn import_items(items, lines, i, from, acc) {
+fn import_items(items, lines, i, from, acc, has_notes) {
   if (i >= len(items)) {
     let tail = filled_text(lines, from, len(lines));
     if (tail == null) acc else [*acc, kept_block(tail, null)]
@@ -263,7 +274,8 @@ fn import_items(items, lines, i, from, acc) {
     let span = source_range(items[i])
     let gap = filled_text(lines, from, span.first - 1)
     let kept_gap = if (gap == null) [] else [kept_block(gap, null)]
-    import_items(items, lines, i + 1, span.last, [*acc, *kept_gap, *item_blocks(items[i], lines, span)])
+    import_items(items, lines, i + 1, span.last,
+      [*acc, *kept_gap, *item_blocks(items[i], lines, span, has_notes)], has_notes)
   }
 }
 
@@ -273,13 +285,15 @@ pub fn import_text(source) map^ {
   let parsed = parse(parts.body, {type: 'markdown', sourcepos: true}) ^ {
     raise error("the Markdown source could not be parsed", ^)
   }
-  let items = [for (c in content(doc_body(parsed)) where type(c) == element) c]
+  // The generated note section has no single source span; definitions remain in the gaps.
+  let has_notes = count(parsed?<footnotes>) > 0
+  let items = [for (c in content(doc_body(parsed)) where type(c) == element and name(c) != 'footnotes') c]
   // without its lines a block could be neither kept as written nor checked
   if (any([for (it in items) it.sourcepos == null]) or false) {
     raise error("the Markdown parser did not report where each block is")
   }
   else {
-    let blocks = import_items(items, split(parts.body, "\n"), 0, 0, []);
+    let blocks = import_items(items, split(parts.body, "\n"), 0, 0, [], has_notes);
     {doc: node('doc', blocks), envelope: {front_matter: parts.front_matter}}
   }
 }
@@ -309,6 +323,10 @@ fn export_atom(item) {
   else if (item.tag == 'img') {
     [<img src: attr_get(item, 'src'), alt: attr_get(item, 'alt'), title: attr_get(item, 'title')>]
   }
+  else if (item.tag == 'emoji') {
+    let parsed = parse(":" ++ attr_get(item, 'name') ++ ":", 'markdown')^;
+    content(content(doc_body(parsed))[0])
+  }
   else if (item.tag == 'br') { [<br>] }
   else if (item.tag == 'raw_html') { [<'raw-html' attr_get(item, 'html')>] }
   else if (item.tag == 'math') { [<math type: "inline", attr_get(item, 'tex')>] }
@@ -320,7 +338,7 @@ fn export_inline(items, level) => nest_marks(items, mark_order, wrap_mark, expor
 
 fn is_inline_model(n) =>
   is_text(n) or (is_node(n) and (n.tag == 'a' or n.tag == 'img' or n.tag == 'br' or
-    n.tag == 'raw_html' or n.tag == 'math' or member(mark_order, n.tag))) or false
+    n.tag == 'raw_html' or n.tag == 'math' or n.tag == 'emoji' or member(mark_order, n.tag))) or false
 
 // A list item's content: inline runs are its text, blocks keep their shape.
 fn export_item_content(items, i, n, run, acc) {
@@ -556,7 +574,7 @@ pub let descriptor = {
   surface: 'rich_text', schema: schema, schema_preset: 'html5_subset',
   unsupported_input_types: unsupported_input_types,
   // kept as written: shown view-only, never written into (proposal §2)
-  view_only_tags: ['md_source', 'raw_html', 'html_block', 'math', 'math_block'],
+  view_only_tags: ['md_source', 'raw_html', 'html_block', 'math', 'math_block', 'emoji'],
   import_text: import_text, export_text: export_text, check_roundtrip: check_roundtrip,
   toolbar: 'markdown'
 }

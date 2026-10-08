@@ -4625,6 +4625,8 @@ static JsInterpCompletion js_interp_exec_catch(JsInterpFrame* frame,
 }
 
 static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) {
+    Item interrupt_status = js_execution_interrupt_status();
+    if (item_is_error(interrupt_status)) return js_interp_throw(interrupt_status);
     if (!node) return js_interp_normal(make_js_undefined());
     if (frame && frame->completion_home) {
         switch (node->node_type) {
@@ -6032,7 +6034,14 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
     bool mapped = !strict && js_fn_ast_has_simple_params(function);
     int arg_count = (int)js_array_length(arguments_root.get());
-    Item* args = arg_count > 0 ? arguments_root.get().array->items : NULL;
+    // GC compacts Array items while materializing arguments/defaults. Copy
+    // parameters into stable side-root homes before those safepoints (D5.3.3).
+    RootSpan argument_values((size_t)(arg_count > 0 ? arg_count : 1));
+    if (!argument_values.valid()) return ItemError;
+    Item* args = argument_values.items();
+    for (int index = 0; index < arg_count; index++) {
+        args[index] = arguments_root.get().array->items[index];
+    }
     arguments_object_root.set(js_build_arguments_object_for_call(args, arg_count,
         mapped ? 0 : 1, function_root.get()));
     if (item_is_error(arguments_object_root.get())) return arguments_object_root.get();

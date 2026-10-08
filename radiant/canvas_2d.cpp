@@ -394,6 +394,13 @@ extern "C" bool radiant_canvas_ensure(void* canvas_element) {
     entry->mode=1;return true;
 }
 
+extern "C" StrBuf* radiant_canvas_to_data_url(void* canvas_element) {
+    CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
+    if (!entry) return nullptr;
+    if (!entry->surface) return strbuf_create("data:,");
+    return render_encode_surface_data_uri(entry->surface);
+}
+
 extern "C" bool radiant_canvas_set_dimension(void* canvas_element,
                                                 bool is_width, uint32_t value) {
     DomElement* element = (DomElement*)canvas_element;

@@ -20,6 +20,7 @@ let aliases = {
     symbolType: "symbol_type", symbolFillColor: "symbol_fill_color", symbolStrokeColor: "symbol_stroke_color",
     symbolStrokeWidth: "symbol_stroke_width", symbolOpacity: "symbol_opacity", columnPadding: "column_padding",
     gradientLength: "gradient_length", gradientThickness: "gradient_thickness",
+    preserveAspectRatio: "preserve_aspect_ratio",
     ignorePeers: "ignore_peers"
 }
 
@@ -37,12 +38,15 @@ pub fn convert(vl) {
     let common = {
         width: if (vl.width != null) vl.width else 400,
         height: if (vl.height != null) vl.height else 300,
+        _width_specified: vl.width != null, _height_specified: vl.height != null,
+        aspect_ratio: if (vl.aspect_ratio != null) vl.aspect_ratio else vl.aspectRatio,
         padding: padding,
         title: if (vl.title is string) vl.title else vl.title.text,
         data: vl.data.values, data_source: vl.data, datasets: vl.datasets,
         mark: convert_mark(vl.mark), encoding: convert_encoding(vl.encoding),
         transform: convert_transforms(vl.transform), config: convert_config(vl.config),
         resolve: normalize(vl.resolve),
+        projection: normalize(vl.projection),
         layer: if (vl.layer != null) [for (layer in vl.layer) convert(layer)] else null,
         facet: null
     };
@@ -51,7 +55,7 @@ pub fn convert(vl) {
         {*:common, concat: if (horizontal) "horizontal" else "vertical",
             spacing: if (vl.spacing != null) vl.spacing else 20,
             children: [for (child in (if (horizontal) vl.hconcat else vl.vconcat))
-                convert(inherit(vl, child))]}
+                convert(child)]}
     } else if (vl.facet != null and vl.spec != null) {
         let child = convert(inherit(vl, vl.spec));
         {*:child, title: common.title, facet: {*:normalize(vl.facet),
@@ -60,7 +64,7 @@ pub fn convert(vl) {
     } else if (vl.repeat != null and vl.spec != null) {
         let repeated = if (vl.repeat is array) {column: vl.repeat} else vl.repeat;
         {*:common, repeat_row: repeated.row, repeat_column: repeated.column,
-            template: convert(inherit(vl, vl.spec))}
+            template: convert(vl.spec)}
     } else common
 }
 
@@ -113,16 +117,14 @@ fn convert_config(config) {
     }
 }
 
-// String expressions require a separate expression runtime; never silently ignore them.
+// Expressions remain static and datum-scoped; signals and event handlers are outside this adapter.
 fn convert_transforms(transforms) {
     if (transforms == null) null
     else <transform for (step in transforms) convert_transform(step)>
 }
 
 fn convert_transform(step) {
-    if (parse.has_attribute(step, "filter"))
-        (if (step.filter is string) error("chart: Vega filter strings are unsupported; use a field predicate")
-         else <filter test: step.filter>)
+    if (parse.has_attribute(step, "filter")) <filter test: step.filter>
     else if (step.aggregate != null) <aggregate
         for (field in step.groupby) <group field: field>
         for (agg in step.aggregate) <agg op: agg.op, field: agg.field, as: agg.as>>
@@ -130,12 +132,15 @@ fn convert_transform(step) {
         as: if (step.as is array) step.as[0] else step.as,
         as_end: if (step.as is array) step.as[1] else null,
         maxbins: step.bin.maxbins, step: step.bin.step>
-    else if (step.calculate != null)
-        (if (step.calculate is fn) <calculate as: step.as, expression: step.calculate>
-         else error("chart: Vega calculate strings are unsupported; use a Lambda calculation"))
+    else if (step.calculate != null) <calculate as: step.as, expression: step.calculate>
     else if (step.fold != null) <fold fields: step.fold, as: step.as>
     else if (step.flatten != null) <flatten fields: step.flatten, as: step.as>
     else if (step.window != null) {type: "window", *:normalize(step)}
+    else if (step.joinaggregate != null) {type: "joinaggregate", *:normalize(step)}
+    else if (step.pivot != null) {type: "pivot", *:step}
+    else if (step.impute != null) {type: "impute", *:step}
+    else if (step.stack != null) {type: "stack", *:step}
+    else if (step.quantile != null) {type: "quantile", *:step}
     // Foreign rows and fallback values are data; option-name aliases must not rewrite their keys.
     else if (step.lookup != null) {*:step, type: "lookup"}
     else if (step.density != null) {type: "density", *:normalize(step), field: step.density}

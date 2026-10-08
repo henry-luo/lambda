@@ -217,10 +217,10 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
         }
 
         float spread = shadow->spread_radius;
-        float shadow_x = x + shadow->offset_x - spread;
-        float shadow_y = y + shadow->offset_y - spread;
-        float shadow_w = width + 2.0f * spread;
-        float shadow_h = height + 2.0f * spread;
+        Rect shadow_rect = render_geometry_outer_shadow_rect(
+            {x, y, width, height}, shadow->offset_x, shadow->offset_y, spread);
+        float shadow_x = shadow_rect.x, shadow_y = shadow_rect.y;
+        float shadow_w = shadow_rect.width, shadow_h = shadow_rect.height;
         if (shadow_w <= 0.0f || shadow_h <= 0.0f) {
             continue;
         }
@@ -245,14 +245,16 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
     return emitted;
 }
 
-static bool boundary_copy_gradient_stops(GradientStop* src, int src_count,
+bool render_copy_gradient_stops(const GradientStop* src, int src_count, float gradient_length,
                                          RdtGradientStop* stops, int stop_capacity,
                                          int* out_count) {
     if (!src || src_count < 2 || !stops || stop_capacity < src_count) return false;
     for (int i = 0; i < src_count; i++) {
-        GradientStop* stop = &src[i];
-        float pos = stop->position >= 0.0f
-            ? stop->position
+        const GradientStop* stop = &src[i];
+        // CSS lengths become relative offsets only after the paint line is known.
+        float pos = !isnan(stop->position)
+            ? (stop->position_is_px && gradient_length > 0.0f
+                ? stop->position / gradient_length : stop->position)
             : (src_count > 1 ? (float)i / (float)(src_count - 1) : 0.0f);
         stops[i] = {pos, stop->color.r, stop->color.g, stop->color.b, stop->color.a};
     }
@@ -262,10 +264,11 @@ static bool boundary_copy_gradient_stops(GradientStop* src, int src_count,
 
 static bool boundary_prepare_gradient(ViewBlock* view, float x, float y,
                                       GradientStop* source_stops, int source_count,
+                                      float gradient_length,
                                       RdtGradientStop* stops, int stop_capacity,
                                       RdtPath** path, int* stop_count) {
     if (view->width <= 0.0f || view->height <= 0.0f ||
-        !boundary_copy_gradient_stops(source_stops, source_count,
+        !render_copy_gradient_stops(source_stops, source_count, gradient_length,
                                       stops, stop_capacity, stop_count)) {
         return false;
     }
@@ -284,14 +287,14 @@ bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float
     LinearGradient* gradient = bg->linear_gradient;
     if (bg->gradient_type != GRADIENT_LINEAR || !gradient) return false;
 
-    int stop_count = 0;
-    RdtPath* path;
-    if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
-                                   stops, stop_capacity, &path, &stop_count)) return false;
-
     Rect rect = {x, y, view->width, view->height};
     RadiantGradientLine line = radiant_linear_gradient_line(
         rect, radiant_linear_gradient_used_angle(gradient, rect));
+    float gradient_length = hypotf(line.x2 - line.x1, line.y2 - line.y1);
+    int stop_count = 0;
+    RdtPath* path;
+    if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
+                                   gradient_length, stops, stop_capacity, &path, &stop_count)) return false;
 
     out->path = lam::up(path);
     out->x1 = line.x1;
@@ -312,15 +315,16 @@ bool render_paint_boundary_build_radial_gradient(ViewBlock* view, float x, float
     RadialGradient* gradient = bg->radial_gradient;
     if (bg->gradient_type != GRADIENT_RADIAL || !gradient) return false;
 
+    float radius = fminf(view->width, view->height) * 0.5f;
     int stop_count = 0;
     RdtPath* path;
     if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
-                                   stops, stop_capacity, &path, &stop_count)) return false;
+                                   radius, stops, stop_capacity, &path, &stop_count)) return false;
 
     out->path = lam::up(path);
     out->cx = x + (gradient->cx_set ? gradient->cx * view->width : view->width * 0.5f);
     out->cy = y + (gradient->cy_set ? gradient->cy * view->height : view->height * 0.5f);
-    out->r = (view->width < view->height ? view->width : view->height) * 0.5f;
+    out->r = radius;
     out->stops = lam::up(stops);
     out->stop_count = stop_count;
     return true;

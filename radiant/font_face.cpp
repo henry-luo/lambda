@@ -160,6 +160,8 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
 
     int count = 0;
     CssFontFaceDescriptor** css_descs = css_extract_font_faces(stylesheet, base_path, nullptr, &count);
+    // extraction can allocate an array even when every descriptor is rejected (D4.5.1v4).
+    lam::Temp<CssFontFaceDescriptor*> descriptor_array(css_descs);
 
     if (!css_descs || count == 0) {
         clog_debug(font_log, "No @font-face rules found");
@@ -263,7 +265,6 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         css_font_face_descriptor_free(css_desc);
     }
 
-    lam::Temp<CssFontFaceDescriptor*> descriptor_array(css_descs);
     clog_info(font_log, "Registered %d @font-face descriptors", count);
 }
 

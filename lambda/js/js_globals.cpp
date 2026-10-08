@@ -9,6 +9,7 @@
  * - console.log with multiple arguments
  */
 #include "js_runtime.h"
+#include "js_headers.h"
 #include "js_typed_array.h"
 #include "js_well_known_names.h"
 #include "../dom/dom_events.h"
@@ -1028,10 +1029,7 @@ Map* js_resolve_object_prototype();
 
 // v18l: helper to throw TypeError if argument is not an object (ES5 §15.2.3.*)
 static Item js_require_object_type(Item arg, const char* method_name) {
-    TypeId t = get_type_id(arg);
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY ||
-        js_is_ordinary_numeric_array(arg) || t == LMD_TYPE_FUNC ||
-        t == LMD_TYPE_ELEMENT || is_virtual_container_type_id(t))
+    if (js_is_object_value(arg))
         return js_status_ok();
     Item type_name = js_name_item("TypeError");
     char msg[128];
@@ -6172,11 +6170,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
             // TypedArraySetElement (S#7.3.32).
             if (!target_valid_index) return (Item){.item = b2it(true)};
             TypeId rt = get_type_id(receiver);
-            bool recv_is_obj = (rt == LMD_TYPE_MAP ||
-                                is_virtual_container_type_id(rt) ||
-                                js_is_js_array(receiver) || rt == LMD_TYPE_FUNC ||
-                                rt == LMD_TYPE_ELEMENT);
-            if (!recv_is_obj) return (Item){.item = b2it(false)};
+            if (!js_is_object_value(receiver)) return (Item){.item = b2it(false)};
             if (rt == LMD_TYPE_MAP && js_object_has_class(receiver, JS_CLASS_TYPED_ARRAY)) {
                 bool receiver_valid_index = js_ta_numeric_index_valid(receiver, numeric_index, is_negative_zero, NULL);
                 if (!receiver_valid_index) return (Item){.item = b2it(false)};
@@ -6437,11 +6431,8 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
             it2s(writable_key)->chars, (int)it2s(writable_key)->len, true);
         if (!writable) return (Item){.item = b2it(false)};
         // Receiver must be an Object.
-        TypeId rt = get_type_id(receiver);
-        bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_VMAP ||
-                            js_is_js_array(receiver) || rt == LMD_TYPE_FUNC ||
-                            rt == LMD_TYPE_ELEMENT);
-        if (!recv_is_obj) return (Item){.item = b2it(false)};
+        // native elements and collections are ECMAScript Objects too (S1.11).
+        if (!js_is_object_value(receiver)) return (Item){.item = b2it(false)};
         // If receiver != target, write to receiver per OrdinarySetWithOwnDescriptor.
         if (receiver.item != target.item) {
             // Existing own descriptor on receiver?
@@ -6461,11 +6452,8 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     }
     // No descriptor anywhere on chain → CreateDataProperty(receiver, key, value).
     {
-        TypeId rt = get_type_id(receiver);
-        bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_VMAP ||
-                            js_is_js_array(receiver) || rt == LMD_TYPE_FUNC ||
-                            rt == LMD_TYPE_ELEMENT);
-        if (!recv_is_obj) return (Item){.item = b2it(false)};
+        // native elements and collections are ECMAScript Objects too (S1.11).
+        if (!js_is_object_value(receiver)) return (Item){.item = b2it(false)};
         Item recv_own = js_object_get_own_property_descriptor(
             receiver_root.get(), key_root.get());
         receiver_descriptor_root.set(recv_own);
@@ -13772,6 +13760,104 @@ static Item js_intersection_observer_entry_new(void) {
     return js_new_object();
 }
 
+enum JsQueuingStrategySlot { JS_QUEUE_HIGH_WATER_MARK, JS_QUEUE_SIZE_FUNCTION, JS_QUEUE_SLOT_COUNT };
+struct JsQueuingStrategyGetter { JsClass brand; JsQueuingStrategySlot slot; };
+
+static Item js_byte_length_queuing_size(Item chunk) {
+    JS_RETURN_IF_ERROR(js_require_object_coercible(chunk));
+    return js_get_key_default(chunk, js_name_item("byteLength"));
+}
+
+static Item js_count_queuing_size(void) { return (Item){.item = i2it(1)}; }
+
+static Item js_queuing_strategy_getter(Item callee, Item receiver,
+        Item* args, int argc, uint64_t* result_home) {
+    const auto* getter = (const JsQueuingStrategyGetter*)(uintptr_t)
+        js_fn_native((JsFunction*)callee.function)->target.bits;
+    if (!getter || !js_object_has_class(receiver, getter->brand))
+        return js_throw_type_error("Illegal queuing strategy receiver");
+    TypeMap* shape = (TypeMap*)receiver.map->type;
+    // the native constructor installs this private record before any public
+    // fields; shape transitions preserve it and cannot expose or delete it (D3.4.3v5).
+    ShapeEntry* entry = shape ? shape->shape : NULL;
+    Item state = entry && entry->key_kind == NAME_KEY_PRIVATE
+        ? _map_read_field(entry, receiver.map->data) : ItemNull;
+    if (get_type_id(state) != LMD_TYPE_ARRAY || state.array->length != JS_QUEUE_SLOT_COUNT)
+        return js_throw_type_error("Illegal queuing strategy receiver");
+    return state.array->items[getter->slot];
+}
+
+static Item js_queuing_strategy_constructor(Item callee, Item receiver,
+        Item* args, int argc, uint64_t* result_home) {
+    if (get_type_id(js_get_new_target()) != LMD_TYPE_FUNC)
+        return js_throw_type_error("Queuing strategy constructor requires new");
+    Item init = argc > 0 ? args[0] : make_js_undefined();
+    if (!js_is_object_value(init))
+        return js_throw_type_error("Queuing strategy requires a highWaterMark dictionary");
+    RootFrame roots(3);
+    Rooted<Item> high_water_mark(roots, js_get_key_default(init, js_name_item("highWaterMark")));
+    JS_RETURN_IF_ERROR(high_water_mark.get());
+    if (get_type_id(high_water_mark.get()) == LMD_TYPE_UNDEFINED)
+        return js_throw_type_error("Queuing strategy requires highWaterMark");
+    high_water_mark.set(js_to_number(high_water_mark.get()));
+    JS_RETURN_IF_ERROR(high_water_mark.get());
+    JsFunction* constructor = (JsFunction*)callee.function;
+    Item* environment = constructor->env;
+    Rooted<Item> object(roots, js_new_object_with_class(it2i(environment[2])));
+    Rooted<Item> state(roots, js_array_new(0));
+    js_array_push(state.get(), high_water_mark.get());
+    js_array_push(state.get(), environment[1]);
+    JS_RETURN_IF_ERROR(js_private_field_define(object.get(), environment[0], state.get()));
+    return object.get();
+}
+
+static Item js_install_queuing_strategy(Item global, const char* name, JsClass brand) {
+    RootFrame roots(6);
+    Rooted<Item> global_root(roots, global);
+    Rooted<Item> size(roots, brand == JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY
+        ? js_new_native_function(js_byte_length_queuing_size)
+        : js_new_native_function(js_count_queuing_size));
+    js_set_function_name(size.get(), js_name_item("size"));
+    NameRef private_name = name_pool_create_unique_private(context->name_pool,
+        {name, strlen(name)});
+    if (!private_name) return ItemError;
+    Item* environment = js_alloc_env3((Item){.item = s2it(private_name)}, size.get(),
+        (Item){.item = i2it(brand)});
+    if (!environment) return ItemError;
+    Rooted<Item> constructor(roots, js_new_native_body_constructor_closure(
+        js_queuing_strategy_constructor, js_native_construct_via_call_body, 1, environment, 3));
+    JS_RETURN_IF_ERROR(constructor.get());
+    js_set_function_name(constructor.get(), js_name_item(name));
+    Rooted<Item> prototype(roots, js_new_object());
+    JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+    js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    Rooted<Item> getter(roots, ItemNull);
+    Rooted<Item> key(roots, ItemNull);
+    static const JsQueuingStrategyGetter getters[] = {
+        {JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY, JS_QUEUE_HIGH_WATER_MARK},
+        {JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY, JS_QUEUE_SIZE_FUNCTION},
+        {JS_CLASS_COUNT_QUEUING_STRATEGY, JS_QUEUE_HIGH_WATER_MARK},
+        {JS_CLASS_COUNT_QUEUING_STRATEGY, JS_QUEUE_SIZE_FUNCTION},
+    };
+    for (const auto& binding : getters) {
+        if (binding.brand != brand) continue;
+        const char* property = binding.slot == JS_QUEUE_HIGH_WATER_MARK ? "highWaterMark" : "size";
+        getter.set(js_new_native_payload_function(js_queuing_strategy_getter,
+            (uint64_t)(uintptr_t)&binding, 0));
+        js_set_function_name(getter.get(), js_name_item(
+            binding.slot == JS_QUEUE_HIGH_WATER_MARK ? "get highWaterMark" : "get size"));
+        js_install_native_accessor(prototype.get(), js_name_item(property), getter.get(), ItemNull, 0);
+    }
+    key.set(js_well_known_symbol_key(4));
+    js_set_key_default(prototype.get(), key.get(), js_name_item(name));
+    js_mark_non_writable(prototype.get(), key.get());
+    js_mark_non_enumerable(prototype.get(), key.get());
+    js_set_key_cstr(global_root.get(), name, constructor.get());
+    js_mark_non_enumerable(global_root.get(), js_name_item(name));
+    return constructor.get();
+}
+
 // cumulative thread-local timing survives nested eval resetting phase counters.
 static __thread uint64_t js_realm_init_us = 0;
 
@@ -13879,8 +13965,7 @@ extern "C" Item js_get_global_this() {
         js_install_native_constructor(js_global_this_obj, "XMLHttpRequest",
             js_xhr_new);
 
-        js_set_key_cstr(js_global_this_obj, "localStorage", dom_storage_local_object());
-        js_set_key_cstr(js_global_this_obj, "sessionStorage", dom_storage_session_object());
+        dom_install_storage_globals(js_global_this_obj);
         js_install_native_method(js_global_this_obj, "matchMedia",
             dom_match_media);
         js_install_native_constructor(js_global_this_obj, "MutationObserver",
@@ -13967,6 +14052,12 @@ extern "C" Item js_get_global_this() {
             js_text_encoder_stream_new);
         js_install_native_constructor(js_global_this_obj, "TextDecoderStream",
             js_text_decoder_stream_new);
+        // Streams §7.2/§7.3: size functions are shared per realm; instance state is private.
+        js_install_queuing_strategy(js_global_this_obj, "ByteLengthQueuingStrategy",
+            JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY);
+        js_install_queuing_strategy(js_global_this_obj, "CountQueuingStrategy",
+            JS_CLASS_COUNT_QUEUING_STRATEGY);
+        js_install_headers(js_global_this_obj);
 
         // globalThis.performance shares the document clock used by rAF/events.
         {

@@ -7121,16 +7121,35 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
     return true;
 }
 
+static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
+    return view_geometry_dom_is_descendant(node, ancestor);
+}
+
+static void dom_js_add_subtree_root(DomElement* candidate,
+                                    DomElement** roots, int* count) {
+    for (int i = 0; i < *count; i++) {
+        if (dom_js_node_contains(roots[i], candidate)) return;
+    }
+    for (int i = 0; i < *count;) {
+        if (dom_js_node_contains(candidate, roots[i])) roots[i] = roots[--*count];
+        else i++;
+    }
+    roots[(*count)++] = candidate;
+}
+
+static bool dom_js_mutation_needs_subtree_cascade(DomJsMutationKind kind) {
+    return kind != DOM_JS_MUTATION_CONTROL_VALUE &&
+        kind != DOM_JS_MUTATION_STYLE && kind != DOM_JS_MUTATION_INLINE_STYLE &&
+        kind != DOM_JS_MUTATION_STYLE_REPAINT && kind != DOM_JS_MUTATION_TEXT;
+}
+
 static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
                                      DomJsMutationKind kind,
                                      SelectorMatcher* matcher) {
     if (!doc || !root) return;
 
     if (kind == DOM_JS_MUTATION_CONTROL_VALUE) return;
-    if (kind == DOM_JS_MUTATION_STYLE ||
-        kind == DOM_JS_MUTATION_INLINE_STYLE ||
-        kind == DOM_JS_MUTATION_STYLE_REPAINT ||
-        kind == DOM_JS_MUTATION_TEXT) {
+    if (!dom_js_mutation_needs_subtree_cascade(kind)) {
         root->set_styles_resolved(false);
         return;
     }
@@ -7143,6 +7162,31 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
     radiant_apply_css_stylesheets_to_tree(
         doc, root, doc->stylesheets, doc->stylesheet_count,
         pool, css_engine, matcher);
+}
+
+static bool dom_js_recascade_mutations(DomDocument* doc, SelectorMatcher* matcher) {
+    DomElement** roots = (DomElement**)mem_alloc(
+        sizeof(DomElement*) * doc->js.mutation_record_count, MEM_CAT_LAYOUT);
+    if (!roots) return false;
+    int count = 0;
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
+        if (!dom_js_record_has_connected_endpoint(doc, record)) continue;
+        DomElement* root = dom_js_record_cascade_root(doc, record);
+        if (!root) continue;
+        if (dom_js_mutation_needs_subtree_cascade(record->kind)) {
+            // All edits are already applied: overlapping roots need one pass
+            // over the final DOM, rather than one full cascade per journal entry.
+            dom_js_add_subtree_root(root, roots, &count);
+        } else {
+            dom_js_recascade_subtree(doc, root, record->kind, matcher);
+        }
+    }
+    for (int i = 0; i < count; i++) {
+        dom_js_recascade_subtree(doc, roots[i], DOM_JS_MUTATION_ATTRIBUTE, matcher);
+    }
+    mem_free(roots);
+    return true;
 }
 
 bool radiant_apply_load_mutation_cascade(DomDocument* doc,
@@ -7159,18 +7203,12 @@ bool radiant_apply_load_mutation_cascade(DomDocument* doc,
     SelectorMatcher* matcher = &matcher_storage;
     state_configure_selector_matcher((DocState*)doc->state, matcher);
 
-    for (int i = 0; i < doc->js.mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js.mutation_records[i];
-        if (!dom_js_record_has_connected_endpoint(doc, record)) continue;
-        DomElement* root = dom_js_record_cascade_root(doc, record);
-        if (root) dom_js_recascade_subtree(doc, root, record->kind, matcher);
+    if (!dom_js_recascade_mutations(doc, matcher)) {
+        if (fallback_reason) *fallback_reason = "cascade-root-allocation";
+        return false;
     }
     if (fallback_reason) *fallback_reason = "eligible";
     return true;
-}
-
-static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
-    return view_geometry_dom_is_descendant(node, ancestor);
 }
 
 static bool dom_js_node_has_table_fixup_context(DomNode* node) {
@@ -7268,25 +7306,7 @@ static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
             continue;
         }
 
-        bool covered = false;
-        for (int j = 0; j < root_count; j++) {
-            if (dom_js_node_contains(static_cast<DomNode*>(roots[j]),
-                                     static_cast<DomNode*>(candidate))) {
-                covered = true;
-                break;
-            }
-        }
-        if (covered) continue;
-
-        for (int j = 0; j < root_count;) {
-            if (dom_js_node_contains(static_cast<DomNode*>(candidate),
-                                     static_cast<DomNode*>(roots[j]))) {
-                roots[j] = roots[--root_count];
-            } else {
-                j++;
-            }
-        }
-        roots[root_count++] = candidate;
+        dom_js_add_subtree_root(candidate, roots, &root_count);
     }
 
     for (int i = 0; i < root_count; i++) {
@@ -7463,15 +7483,9 @@ static bool post_html_handler_incremental_rebuild(
         return false;
     }
 
-    for (int i = 0; i < doc->js.mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js.mutation_records[i];
-        if (!dom_js_record_has_connected_endpoint(doc, record)) {
-            continue;
-        }
-        DomElement* root = dom_js_record_cascade_root(doc, record);
-        if (root) {
-            dom_js_recascade_subtree(doc, root, record->kind, matcher);
-        }
+    if (!dom_js_recascade_mutations(doc, matcher)) {
+        if (fallback_reason_out) *fallback_reason_out = "cascade-root-allocation";
+        return false;
     }
 
     uint64_t t1 = time_now_ns();
@@ -12196,8 +12210,8 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
 
     float caret_x = 0, caret_y = 0, caret_height = 16;
 
-    // Handle different view types
-    if (view->is_text()) {
+    // collapsed DOM whitespace may own a selection boundary without a text view.
+    if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require_text(view);
         if (!text->rect) {
             log_debug("[CARET-VISUAL] Text view has no rect");
@@ -12299,6 +12313,11 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target) {
     if (context == target) return true;
     if (context) {
         EvalContext* prev = context;
+        if (prev->execution_depth != 0) {
+            // D5.4.1: releasing a live guest owner invalidates its open frames.
+            log_error("eval-switch: outgoing context is executing");
+            return false;
+        }
         // EO2: the JS cache is released with the binding it derives from
         if (js_runtime_state_thread_matches(prev)) js_runtime_state_shutdown(prev);
         if (!eval_context_shutdown(prev)) {

@@ -485,8 +485,11 @@ static int intrinsic_grid_template_column_count(DomElement* element, ViewBlock* 
                                                 int fallback_count) {
     int column_count = fallback_count;
     GridProp* grid_prop = (view && view->embed) ? view->embedp()->grid : nullptr;
-    if (grid_prop && grid_prop->grid_template_columns) {
-        column_count = grid_prop->grid_template_columns->track_count;
+    if (grid_prop && grid_prop->grid_template_columns &&
+            grid_prop->grid_template_columns->track_count > 0) {
+        // resolved tracks already account for line names and repeat expansion;
+        // counting authored tokens can exceed this array's actual length.
+        return grid_prop->grid_template_columns->track_count;
     }
 
     int unresolved_threshold = fallback_count > 0 ? fallback_count : 0;
@@ -3365,15 +3368,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->available_space.width.value <= 0.0f &&
         (width_is_percentage || max_width_is_percentage) &&
         !parent_has_auto_inline_width;
+    bool intrinsic_width_context = lycon->available_space.width.is_intrinsic() ||
+        intrinsic_percentage_width_is_indefinite(lycon) ||
+        parent_has_intrinsic_width || parent_has_auto_inline_width;
     bool percentage_width_is_intrinsic_auto = width_is_percentage &&
-        (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
-         parent_has_auto_inline_width);
+        intrinsic_width_context;
     bool percentage_size_is_intrinsic_auto =
         (width_is_percentage || max_width_is_percentage) &&
-        (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
-         parent_has_auto_inline_width);
-    bool intrinsic_width_context = lycon->available_space.width.is_intrinsic() ||
-        parent_has_intrinsic_width || parent_has_auto_inline_width;
+        intrinsic_width_context;
     bool percentage_replaced_size_is_intrinsic_auto = max_width_is_percentage &&
         layout_element_is_replaced(element) &&
         ((has_definite_width && intrinsic_width_context) ||
@@ -3395,8 +3397,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool percentage_min_width_intrinsic_zero = min_width_declaration &&
         min_width_declaration->value &&
         layout_css_value_has_nonzero_percentage(min_width_declaration->value) &&
-        (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
-         parent_has_auto_inline_width) &&
+        intrinsic_width_context &&
         (!layout_block_inline_axis_is_vertical(resolved_width_view) ||
          parent_has_auto_inline_width);
     auto intrinsic_apply_definite_width_constraints = [&](float border_width) {
@@ -4003,6 +4004,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (!is_table_element && element->tag() == MARKUP_NAME_TABLE) is_table_element = true;
 
         if (is_table_element) {
+            // cell percentages are cyclic until the table's intrinsic tracks are sized.
+            LayoutContainingBlockScope table_intrinsic_scope(lycon, LAYOUT_AXIS_X, -1.0f);
             // Intrinsic sizing can run before normal table-tree construction;
             // refresh retained fixups here so generated cells inherit the
             // authored table font before their contributions are measured.
@@ -4796,7 +4799,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (child_sizes.max_content > col_max[col]) col_max[col] = child_sizes.max_content;
 
                 // Check for explicit fixed-width track
-                if (grid_prop && grid_prop->grid_template_columns && col < col_count) {
+                if (grid_prop && grid_prop->grid_template_columns &&
+                        col < grid_prop->grid_template_columns->track_count) {
                     GridTrackSize* track = grid_prop->grid_template_columns->tracks[col];
                     if (track && track->type == GRID_TRACK_SIZE_LENGTH && track->value > 0) {
                         // Fixed length track: the column size is the fixed value, not the content
@@ -4814,7 +4818,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Check if track sizes are fixed-length (from CSS)
             // For fixed tracks, use fixed value regardless of content
             if (grid_prop && grid_prop->grid_template_columns) {
-                for (int c = 0; c < col_count; c++) {
+                int explicit_count = min(col_count, grid_prop->grid_template_columns->track_count);
+                for (int c = 0; c < explicit_count; c++) {
                     GridTrackSize* track = grid_prop->grid_template_columns->tracks[c];
                     if (track && track->type == GRID_TRACK_SIZE_LENGTH && !track->is_percentage && track->value > 0) {
                         col_max[c] = (float)track->value;

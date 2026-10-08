@@ -52,6 +52,8 @@ The parser supports 7 lightweight markup formats:
 - **Extensions**: `.md`, `.markdown`
 - **Flavors**: `commonmark`, `github`
 - **Features**: ATX headers, fenced code blocks, emphasis, links, images, tables, task lists, emoji shortcodes
+- **Dialect policy and implementation coverage**: [Markdown Input in Lambda](Input_Markdown.md)
+  defines the GFM syntax, math, Mermaid, footnote, autolink, and unfiltered HTML policy.
 
 ### reStructuredText (RST)
 - **Extensions**: `.rst`
@@ -440,7 +442,7 @@ The parser outputs Lambda elements conforming to the Mark Doc Schema defined in 
 | Table data cell | `<td>` | `align` |
 | Horizontal rule | `<hr>` | - |
 | Math block | `<math>` | `type` (inline/display) |
-| Emoji | `<emoji>` | - (content is Unicode) |
+| Emoji | bare symbol, e.g. `'smile'`, or `<img data-emoji: "octocat">` | Unicode resolves during presentation; custom images and symbols preserve their alias for Markdown saves |
 | Footnote ref | `<sup>` | - |
 | Citation | `<cite>` → `<citation>` | `id`, `prefix`, `suffix`, `mode` |
 
@@ -467,7 +469,7 @@ Metadata fields follow the unified schema with compatibility across formats (see
 4. **Nested List Support**: Multi-level list nesting with proper indent tracking
 5. **Table Parsing**: Alignment detection and multi-line cell support
 6. **Math Integration**: Inline (`$...$`) and display (`$$...$$`) math with flavor detection
-7. **Emoji Shortcodes**: 200+ GitHub-compatible emoji shortcode mappings
+7. **Emoji Shortcodes**: Complete versioned GitHub catalog (1,913 Unicode aliases and 23 custom image aliases), plus 25 legacy Lambda aliases. See the [Markdown emoji policy and implementation audit](Input_Markdown.md#7-github-emoji-shortcodes).
 8. **Metadata Parsing**: YAML frontmatter and Org-mode properties
 
 #### Areas for Improvement ⚠
@@ -800,7 +802,7 @@ To add support for a new markup format:
 
 3. **Performance Optimization**
    - Profile large document parsing
-   - Optimize emoji lookup (hash table)
+   - Emoji lookup uses a generated, sorted table and binary search.
    - Lazy line splitting
 
 ### Post-Compliance Cleanup Phase

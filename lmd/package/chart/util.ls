@@ -2,6 +2,7 @@
 // Nice number calculations, tick generation, and numeric helpers.
 
 import numbers: .numbers
+import zones: .timezone
 
 // ============================================================
 // Constants
@@ -75,8 +76,7 @@ pub fn nice_domain(dlo, dhi) {
 // Numeric helpers
 // ============================================================
 
-pub fn finite_number(value) => value is number and
-    not (value is nan) and value != inf and value != -inf
+pub fn finite_number(value) => numbers.finite_number(value)
 
 // linear interpolation
 pub fn lerp(a, b, t) {
@@ -121,8 +121,8 @@ pub fn fmt_num(value) string {
 // One formatter keeps guide, text, and tooltip labels consistent.
 pub fn format_value(value, pattern = null, dtype = null, timezone = 0) {
     if (pattern == null) string(value)
-    else if (dtype == "temporal") datetime(i64(float(datetime(value).unix) +
-        float(if (timezone != null) timezone else 0) * 60000.0)).format(pattern)
+    else if (dtype == "temporal") zones.format_timestamp(float(datetime(value).unix), pattern,
+        if (timezone != null) timezone else 0)
     else numbers.format_number(value, pattern)
 }
 
@@ -158,6 +158,16 @@ pub fn find_index(values, value) {
 pub fn first_error(values) {
     let failures = [for (value in values where value is error) value];
     if (len(failures) > 0) failures[0] else null
+}
+
+pub fn number_sequence(first, stop, step = 1) array | error {
+    if (not finite_number(first) or not finite_number(stop) or not finite_number(step) or step == 0)
+        error("chart: sequence requires finite bounds and a nonzero step")
+    else if ((stop - first) / step <= 0) []
+    else {
+        let count = int(ceil((stop - first) / step));
+        if (count is error) count else [for (index in 0 to (count - 1)) first + index * step]
+    }
 }
 
 // extract unique values from an array by a key function

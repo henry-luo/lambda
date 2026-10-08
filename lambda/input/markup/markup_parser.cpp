@@ -44,6 +44,8 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
     , current_line(0)
     , link_defs_(nullptr)
     , link_def_count_(0)
+    , footnote_defs_(nullptr)
+    , footnotes_(nullptr)
     , html5_parser_(nullptr)
     , span_sink(nullptr)
 {
@@ -62,6 +64,7 @@ MarkupParser::~MarkupParser() {
     freeLines();
     // Definition strings live in the Input arena; only the index is ours.
     LinkDefinitionMap::destroy(link_defs_);
+    if (footnote_defs_) hashmap_free(footnote_defs_);
     html5_parser_destroy(html5_parser_);
 }
 
@@ -85,6 +88,9 @@ void markup_parser_destroy(MarkupParser* parser) {
 
 void MarkupParser::resetState() {
     state.reset();
+    if (footnote_defs_) hashmap_free(footnote_defs_);
+    footnote_defs_ = nullptr;
+    footnotes_ = nullptr;
     current_line = 0;
     html5_parser_destroy(html5_parser_);
     html5_parser_ = nullptr;
@@ -469,6 +475,12 @@ void MarkupParser::prescanLinkDefinitions(int from, int to, LinkPrescanState* st
                 current_line = saved_line;
             }
             // Blockquotes don't start paragraphs at document level
+            continue;
+        }
+
+        // Footnotes have their own definition table and are consumed by the block parser.
+        if (config.flavor != Flavor::COMMONMARK && is_footnote_definition(line)) {
+            st->in_paragraph = false;
             continue;
         }
 

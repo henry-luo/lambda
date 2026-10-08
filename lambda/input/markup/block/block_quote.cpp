@@ -356,15 +356,8 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
             lines_array[i] = (char*)content_lines->data[i];
         }
 
-        // Save current parser state
-        char** saved_lines = parser->lines;
-        size_t saved_line_count = parser->line_count;
-        size_t saved_current_line = parser->current_line;
-
         // Set up parser to process the content lines
-        parser->lines = lines_array;
-        parser->line_count = num_lines;
-        parser->current_line = 0;
+        MarkupLinesScope line_scope(parser, lines_array, (int)num_lines);
 
         // For RST blockquotes, content is typically paragraph text.
         // Avoid calling full block detection to prevent infinite recursion.
@@ -384,10 +377,7 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
         }
 
         // Restore parser state
-        parser->lines = saved_lines;
-        parser->line_count = saved_line_count;
-        // The outer cursor already advanced while collecting the quote lines.
-        parser->current_line = saved_current_line;
+        line_scope.restore();
 
         // Free content lines
         for (size_t i = 0; i < num_lines; i++) {
@@ -567,18 +557,9 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
             lazy_array[i] = (bool)(intptr_t)is_lazy_line->data[i];
         }
 
-        // Save current parser state
-        char** saved_lines = parser->lines;
-        size_t saved_line_count = parser->line_count;
-        size_t saved_current_line = parser->current_line;
-        bool* saved_lazy_lines = parser->state.lazy_lines;
-        size_t saved_lazy_count = parser->state.lazy_lines_count;
-
         // Set up parser to process the content lines
         highlight_push_lines(parser, lines_array, num_lines, first_source_line);
-        parser->lines = lines_array;
-        parser->line_count = num_lines;
-        parser->current_line = 0;
+        MarkupLinesScope line_scope(parser, lines_array, (int)num_lines);
         parser->state.lazy_lines = lazy_array;
         parser->state.lazy_lines_count = num_lines;
 
@@ -592,19 +573,7 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
                 continue;
             }
 
-            // Check for link definition first - these should be consumed silently
-            // (they were already added to the link map during pre-scan)
-            if (is_link_definition_start(content_line)) {
-                int saved = parser->current_line;
-                if (parse_link_definition(parser, content_line)) {
-                    // Link definition was successfully parsed - skip it
-                    // parse_link_definition already advanced current_line for multi-line defs
-                    highlight_note_block(parser, "link_def", saved, parser->current_line + 1);
-                    parser->current_line++;
-                    continue;
-                }
-                parser->current_line = saved;
-            }
+            if (parse_definition_block(parser, content_line)) continue;
 
             // Detect block type of the stripped content
             int line_before = parser->current_line;
@@ -653,12 +622,8 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         }
 
         // Restore parser state
-        parser->lines = saved_lines;
+        line_scope.restore();
         highlight_pop_lines(parser, lines_array);
-        parser->line_count = saved_line_count;
-        parser->current_line = saved_current_line;
-        parser->state.lazy_lines = saved_lazy_lines;
-        parser->state.lazy_lines_count = saved_lazy_count;
 
         // Free the content lines and arrays
         for (size_t i = 0; i < num_lines; i++) {

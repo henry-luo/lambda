@@ -54,6 +54,31 @@ try {
 } catch (_) {
   rejected_non_canvas_receiver = true;
 }
+canvas.width = 8;
+canvas.height = 8;
+const blank_url = canvas.toDataURL();
+context.fillStyle = "#ff0000";
+context.fillRect(0, 0, 4, 4);
+const painted_url = canvas.toDataURL();
+const stable_bitmap = painted_url === canvas.toDataURL() && painted_url !== blank_url;
+context.clearRect(0, 0, 8, 8);
+const clear_bitmap = canvas.toDataURL() === blank_url;
+const fallback_png = canvas.toDataURL("unsupported/type") === blank_url;
+canvas.width = 0;
+const empty_bitmap = canvas.toDataURL() === "data:,";
+let rejected_data_url_receiver = false;
+try {
+  HTMLCanvasElement.prototype.toDataURL.call(document.createElement("div"));
+} catch (error) {
+  rejected_data_url_receiver = error instanceof TypeError;
+}
+const conversion_error = new Error("type conversion");
+let propagated_type_conversion = false;
+try {
+  canvas.toDataURL({toString() { throw conversion_error; }});
+} catch (error) {
+  propagated_type_conversion = error === conversion_error;
+}
 console.log([
   canvas instanceof HTMLCanvasElement,
   context instanceof CanvasRenderingContext2D,
@@ -74,5 +99,13 @@ console.log([
   canvas.getContext("webgl") === null,
   typeof offscreen.getContext,
   offscreen.getContext("2d").canvas === offscreen,
-  rejected_non_canvas_receiver
+  rejected_non_canvas_receiver,
+  blank_url.startsWith("data:image/png;base64,"),
+  stable_bitmap,
+  clear_bitmap,
+  fallback_png,
+  empty_bitmap,
+  rejected_data_url_receiver,
+  propagated_type_conversion,
+  HTMLCanvasElement.prototype.toDataURL.length === 0
 ].join(" "));

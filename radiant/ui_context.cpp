@@ -28,7 +28,6 @@ char* load_font_path(FontContext *font_ctx, const char* font_name);
 extern "C" void radiant_dom_invalidate_document(DomDocument* doc);
 extern "C" bool radiant_eval_context_switch(EvalContext* target);
 void radiant_register_css_counter_hooks();
-void radiant_register_css_symbol_hook();
 void radiant_register_resource_processor();
 void radiant_register_event_hooks();
 
@@ -198,7 +197,6 @@ bool ui_context_set_device_scale(UiContext* uicon,
 
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale) {
     radiant_register_css_counter_hooks();
-    radiant_register_css_symbol_hook();
     radiant_register_resource_processor();
     radiant_register_event_hooks();
     if (!uicon) return EXIT_FAILURE;

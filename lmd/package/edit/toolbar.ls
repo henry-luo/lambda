@@ -128,6 +128,63 @@ fn item_disabled(item, editor, dirty, ds) {
   else false
 }
 
+// A single stroke vocabulary keeps icons aligned at every toolbar size.
+let icon_paths = {
+  save: "M5 3h12l4 4v14H3V3h2 M7 3v6h10V3 M7 21v-8h10v8",
+  undo: "M9 4 4 9l5 5 M4 9h10a6 6 0 0 1 0 12",
+  redo: "m15 4 5 5-5 5 M20 9H10a6 6 0 0 0 0 12",
+  code: "m8 6-6 6 6 6 m8-12 6 6-6 6 m-3-14-2 16",
+  ul: "M9 6h12 M9 12h12 M9 18h12 M3 6h1 M3 12h1 M3 18h1",
+  ol: "M10 6h11 M10 12h11 M10 18h11 M3 3h1v6 M3 9h3 M3 14c4-2 4 2 0 5h3",
+  indent: "M3 4h18 M11 9h10 M11 15h10 M3 20h18 m0-12 4 4-4 4",
+  outdent: "M3 4h18 M11 9h10 M11 15h10 M3 20h18 m4-12-4 4 4 4",
+  quote: "M4 6h6v7H4V6 M10 13c0 4-2 5-5 5 M14 6h6v7h-6V6 M20 13c0 4-2 5-5 5",
+  link: "m10 13 4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M16 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0",
+  image: "M3 3h18v18H3V3 M3 17l6-6 4 4 3-3 5 5 M8 7h.01",
+  codeblock: "M3 3h18v18H3V3 m5 5-3 4 3 4 m8-8 3 4-3 4",
+  rule: "M3 12h18",
+  view_source: "m8 6-6 6 6 6 m8-12 6 6-6 6",
+  view_rich: "M4 5h16 M4 10h16 M4 15h10 M4 20h13"
+}
+
+fn icon(cmd) =>
+  <svg class: "edit-icon", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none",
+       stroke: "currentColor", ["stroke-width"]: "1.65", ["stroke-linecap"]: "round",
+       ["stroke-linejoin"]: "round", ["aria-hidden"]: "true",
+    <path d: icon_paths[cmd]>
+  >
+
+fn button_content(b) {
+  let has_icon = icon_paths[b.cmd] != null
+  let with_label = member_label(b.cmd);
+  [if (has_icon) icon(b.cmd) else null,
+   if (not has_icon or with_label) <span class: "edit-btn-label", b.label> else null]
+}
+
+fn member_label(cmd) => cmd == "save" or cmd == "view_source" or cmd == "view_rich"
+
+// File actions have their own row; formatting groups wrap as units and never
+// change height when the filename gains its dirty indicator.
+pub fn toolbar(file, editor, dirty, ds, groups, view_items) {
+  let history = group(drop(file_group, 2), editor, dirty, ds)
+  let has_formatting = len(groups) > 0;
+  <div class: "edit-toolbar",
+    <div class: "edit-document-bar",
+      file;
+      <div class: "edit-document-actions",
+        if (not has_formatting) history else null;
+        group(view_items, editor, dirty, ds)
+        group(take(file_group, 2), editor, dirty, ds)
+      >
+    >
+    if (has_formatting) <div class: "edit-format-bar", role: "toolbar", ["aria-label"]: "Document formatting",
+      history;
+      *[for (items in groups) group(items, editor, dirty, ds)]
+      if (ds != null) <span class: "edit-zoom", string(round(ds.zoom * 100.0)) ++ "%"> else null
+    > else null
+  >
+}
+
 // A toolbar button bound to its computed state.
 fn button(item, editor, dirty, ds) =>
   apply(<edit_button cmd: item.cmd, label: item.label, title: item.title,
@@ -144,30 +201,51 @@ fn button_class(b) =>
 view <edit_button> {
   <button class: button_class(~), title: ~.title,
           ["aria-pressed"]: if (~.active) "true" else "false",
-          ["aria-disabled"]: if (~.disabled) "true" else "false", ~.label>
+          ["aria-disabled"]: if (~.disabled) "true" else "false",
+          ["aria-label"]: ~.title, *button_content(~)>
+}
+on mousedown(evt) {
+  'prevent-default'
 }
 on click(evt) {
   if (not ~.disabled) { emit("edit_cmd", {cmd: ~.cmd, node: evt.target}) }
 }
 
 pub let css = "
-  .edit-toolbar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap;
-                  align-items: center; gap: 6px; padding: 8px 12px; background: #f6f8fa;
-                  border-bottom: 1px solid #d0d7de; }
-  .edit-file { display: flex; align-items: center; gap: 6px; margin-right: 8px;
-               font-weight: 600; color: #1f2328; font-size: 14px; }
-  .edit-dirty { color: #bf8700; }
-  .edit-group { display: flex; gap: 2px; padding-right: 8px; margin-right: 2px;
-                border-right: 1px solid #d0d7de; }
-  .edit-group:last-child { border-right: none; }
-  .edit-btn { min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid transparent;
-              border-radius: 6px; background: transparent; color: #1f2328; font-size: 13px;
+  .edit-toolbar { position: sticky; top: 0; z-index: 10; flex: none; background: #ffffff;
+                  border-bottom: 1px solid #dce2ea; box-shadow: 0 2px 6px rgba(20, 30, 50, 0.04); }
+  .edit-document-bar { display: flex; align-items: center; justify-content: space-between;
+                        gap: 16px; padding: 10px 20px; border-bottom: 1px solid #edf0f4; }
+  .edit-format-source .edit-document-bar { padding: 6px 20px; border-bottom: none; }
+  .edit-document-actions { display: flex; align-items: center; flex: none; gap: 12px; }
+  .edit-file { display: flex; align-items: center; gap: 6px; min-width: 0;
+               font-weight: 600; color: #253047; font-size: 13px; }
+  .edit-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .edit-dirty { flex: none; width: 8px; color: #b17a24; }
+  .edit-format-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+                      padding: 7px 20px; background: #fafbfc; }
+  .edit-group { display: flex; align-items: center; flex: none; gap: 3px;
+                padding-right: 10px; border-right: 1px solid #e2e7ef; }
+  .edit-group:last-child { padding-right: 0; border-right: none; }
+  .edit-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+              box-sizing: border-box; min-width: 32px; height: 32px; padding: 0 8px;
+              border: 1px solid transparent; border-radius: 6px; background: transparent;
+              color: #475569; font-family: inherit; font-size: 13px; line-height: 1;
               cursor: pointer; white-space: nowrap; }
-  .edit-btn:hover { background: #eaeef2; }
-  .edit-btn.active { background: #ddf4ff; border-color: #54aeff; }
-  .edit-btn.disabled { color: #8c959f; cursor: default; }
-  .edit-btn-bold { font-weight: 700; }
-  .edit-btn-italic { font-style: italic; }
+  .edit-btn:hover { background: #edf1f7; color: #1e293b; }
+  .edit-btn.active { background: #e8effb; border-color: #c9d9f3; color: #285bb0; }
+  .edit-btn:focus-visible { outline: 2px solid #799ed4; outline-offset: 2px; }
+  .edit-btn.disabled { color: #a6afbc; cursor: default; }
+  .edit-btn.disabled:hover { background: transparent; }
+  .edit-icon { display: block; flex: none; pointer-events: none; }
+  .edit-btn-save { background: #315eab; border-color: #315eab; color: #ffffff; padding: 0 12px; }
+  .edit-btn-save:hover { background: #264e93; color: #ffffff; }
+  .edit-btn-save.disabled { background: #eef2f7; border-color: #e2e7ef; color: #8c99ac; }
+  .edit-btn-save_as { border-color: #e2e7ef; background: #ffffff; }
+  .edit-btn-view_source, .edit-btn-view_rich { font-size: 12px; }
+  .edit-btn-bold { font-weight: 700; font-size: 15px; }
+  .edit-btn-italic { font-style: italic; font-family: Georgia, serif; font-size: 16px; }
   .edit-btn-underline { text-decoration: underline; }
   .edit-btn-strike { text-decoration: line-through; }
+  .edit-btn-h1, .edit-btn-h2, .edit-btn-h3 { font-size: 12px; font-weight: 600; }
 "

@@ -1,0 +1,117 @@
+# GFM extended autolinks
+
+Examples follow https://github.github.io/gfm/#autolinks-extension-.
+The md4c permissive-autolink corpus uses different punctuation and scheme rules.
+
+```````````````````````````````` example
+https://example.com
+www.example.com
+person@example.com
+.
+<p><a href="https://example.com">https://example.com</a>
+<a href="http://www.example.com">www.example.com</a>
+<a href="mailto:person@example.com">person@example.com</a></p>
+.
+--fautolinks
+````````````````````````````````
+
+```````````````````````````````` example
+Visit www.commonmark.org/help for more information.
+.
+<p>Visit <a href="http://www.commonmark.org/help">www.commonmark.org/help</a> for more information.</p>
+.
+--fautolinks
+````````````````````````````````
+
+```````````````````````````````` example
+www.google.com/search?q=Markup+(business)))
+
+(www.google.com/search?q=Markup+(business))
+
+www.google.com/search?q=(business))+ok
+.
+<p><a href="http://www.google.com/search?q=Markup+(business)">www.google.com/search?q=Markup+(business)</a>))</p>
+<p>(<a href="http://www.google.com/search?q=Markup+(business)">www.google.com/search?q=Markup+(business)</a>)</p>
+<p><a href="http://www.google.com/search?q=(business))+ok">www.google.com/search?q=(business))+ok</a></p>
+.
+--fautolinks
+````````````````````````````````
+
+```````````````````````````````` example
+www.google.com/search?q=commonmark&hl=en
+
+www.google.com/search?q=commonmark&hl;
+
+www.commonmark.org/he<lp
+.
+<p><a href="http://www.google.com/search?q=commonmark&amp;hl=en">www.google.com/search?q=commonmark&amp;hl=en</a></p>
+<p><a href="http://www.google.com/search?q=commonmark">www.google.com/search?q=commonmark</a>&amp;hl;</p>
+<p><a href="http://www.commonmark.org/he">www.commonmark.org/he</a>&lt;lp</p>
+.
+--fautolinks
+````````````````````````````````
+
+```````````````````````````````` example
+a.b-c_d@a.b
+
+a.b-c_d@a.b.
+
+a.b-c_d@a.b-
+
+a.b-c_d@a.b_
+
+hello@mail+xyz.example isn't valid, but hello+xyz@mail.example is.
+.
+<p><a href="mailto:a.b-c_d@a.b">a.b-c_d@a.b</a></p>
+<p><a href="mailto:a.b-c_d@a.b">a.b-c_d@a.b</a>.</p>
+<p>a.b-c_d@a.b-</p>
+<p>a.b-c_d@a.b_</p>
+<p>hello@mail+xyz.example isn't valid, but <a href="mailto:hello+xyz@mail.example">hello+xyz@mail.example</a> is.</p>
+.
+--fautolinks
+````````````````````````````````
+
+```````````````````````````````` example
+mailto:a.b-c_d@a.b/
+
+xmpp:foo@bar.baz/txt@bin.com
+
+xmpp:foo@bar.baz/txt/bin
+.
+<p><a href="mailto:a.b-c_d@a.b">mailto:a.b-c_d@a.b</a>/</p>
+<p><a href="xmpp:foo@bar.baz/txt@bin.com">xmpp:foo@bar.baz/txt@bin.com</a></p>
+<p><a href="xmpp:foo@bar.baz/txt">xmpp:foo@bar.baz/txt</a>/bin</p>
+.
+--fautolinks
+````````````````````````````````
+
+```````````````````````````````` example
+**https://example.com** and ~~www.example.com~~.
+
+[www.example.com](https://target.example) and `www.example.com`.
+
+[www.example.com][target]
+
+[target]: https://target.example
+.
+<p><strong><a href="https://example.com">https://example.com</a></strong> and <del><a href="http://www.example.com">www.example.com</a></del>.</p>
+<p><a href="https://target.example">www.example.com</a> and <code>www.example.com</code>.</p>
+<p><a href="https://target.example">www.example.com</a></p>
+.
+--fautolinks
+--fstrikethrough
+````````````````````````````````
+
+```````````````````````````````` example
+:https://example.com and awww.example.com and http://bad_domain.example
+
+http://good_sub.example.com and https://example.com:443/a?x=1.
+
+<span title="www.example.com">www.example.com</span>
+.
+<p>:https://example.com and awww.example.com and http://bad_domain.example</p>
+<p><a href="http://good_sub.example.com">http://good_sub.example.com</a> and <a href="https://example.com:443/a?x=1">https://example.com:443/a?x=1</a>.</p>
+<p><span title="www.example.com"><a href="http://www.example.com">www.example.com</a></span></p>
+.
+--fautolinks
+````````````````````````````````

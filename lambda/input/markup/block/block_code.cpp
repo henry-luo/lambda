@@ -512,6 +512,13 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
     }
     // If no content (has_content == false), leave the code element empty
 
+    if (parser->config.format == Format::MARKDOWN &&
+        parser->config.flavor != Flavor::COMMONMARK && strcmp(lang, "mermaid") == 0) {
+        Input* input = parser->input();
+        if (!input->embedded_diagrams) input->embedded_diagrams = array_pooled(input->pool);
+        if (input->embedded_diagrams) array_append(input->embedded_diagrams, Item{.element = code}, input->pool);
+    }
+
     return Item{.item = (uint64_t)code};
 }
 

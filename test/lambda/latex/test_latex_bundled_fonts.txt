@@ -1,0 +1,23 @@
+"native document:"
+{
+  cmu: true,
+  katex: true,
+  absolute: true,
+  readable: true
+}
+"standalone HTML:"
+{
+  cmu: true,
+  katex: true,
+  absolute: true,
+  readable: true
+}
+"fragment stylesheet links:"
+0
+"standalone math:"
+{
+  cmu: true,
+  katex: true,
+  absolute: true,
+  readable: true
+}

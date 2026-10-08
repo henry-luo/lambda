@@ -58,6 +58,6 @@ let checks = {
     null_unit: calendar.time_unit(null, "year") == null,
     bad_unit: transform.apply_transforms(records, [{type: "timeunit", field: "date", unit: "bad", as: "unit"}]) is error,
     bad_interval: calendar.ticks(start, finish, {interval: "month", step: 0}) is error,
-    bad_timezone: scale.configured_scale([start, finish], 0, 100, "temporal", {timezone: "Asia/Singapore"}) is error
+    bad_timezone: scale.configured_scale([start, finish], 0, 100, "temporal", {timezone: "Invalid/Zone"}) is error
 };
 [for (label, passed in checks where passed != true) string(label)]

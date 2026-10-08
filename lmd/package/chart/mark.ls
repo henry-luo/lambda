@@ -10,11 +10,12 @@ import parse: .parse
 import cfg: .config
 import records: .records
 import paint: .paint
+import statistics: .statistics
 
-fn coordinate(ctx, channel_name, row, fallback = null) float | null | error {
+pub fn coordinate(ctx, channel_name, row, fallback = null) float | null | error {
     let channel = parse.channel_definition(parse.get_channel(ctx.encoding, channel_name), row);
     let value = parse.channel_value(channel, row, row[ctx[channel_name ++ "_field"]]);
-    let axis = if (channel_name == "x2") "x" else if (channel_name == "y2") "y" else channel_name;
+    let axis = if (contains(["x2", "y2", "theta2", "radius2"], channel_name)) slice(channel_name, 0, len(channel_name) - 1) else channel_name;
     let mapping = ctx[axis ++ "_scale"];
     if (value == null) fallback
     else if (channel.value != null) float(value)
@@ -23,6 +24,11 @@ fn coordinate(ctx, channel_name, row, fallback = null) float | null | error {
 
 fn has_position(ctx, channel_name) =>
     ctx[channel_name ++ "_field"] != null or parse.get_channel(ctx.encoding, channel_name) != null
+
+pub fn center_coordinate(ctx, key, row) {
+    let mapping = ctx[key ++ "_scale"];
+    coordinate(ctx, key, row) + (if (mapping.bandwidth != null) mapping.bandwidth / 2.0 else 0.0)
+}
 
 pub fn appearance(ctx, channel_name, row, fallback) {
     let channel = parse.channel_definition(ctx.encoding[channel_name], row);
@@ -33,7 +39,7 @@ pub fn appearance(ctx, channel_name, row, fallback) {
     else scale.scale_apply(mapping, value)
 }
 
-fn tooltip(ctx, row) {
+pub fn tooltip(ctx, row) {
     let channel = ctx.encoding.tooltip;
     if (channel == null and ctx.tooltip_field != null) <title string(row[ctx.tooltip_field])>
     else if (channel == null) null
@@ -48,7 +54,7 @@ fn tooltip(ctx, row) {
 }
 
 // Composite parts use the same channel/mark cascade as primitive marks.
-fn style(ctx, row, options, defaults, linear = false) {
+pub fn style(ctx, row, options, defaults, linear = false) {
     let fill = if (linear) defaults.fill else appearance(ctx, "color", row,
         if (options.fill != null) options.fill else if (options.color != null) options.color else defaults.fill);
     let stroke_fallback = if (options.stroke != null) options.stroke
@@ -61,7 +67,7 @@ fn style(ctx, row, options, defaults, linear = false) {
         'stroke-dasharray': if (options.stroke_dash != null) options.stroke_dash else defaults["stroke-dasharray"]})
 }
 
-fn series(data, ctx, fallback) {
+pub fn series(data, ctx, fallback) {
     let field = if (ctx.detail_field != null) ctx.detail_field else ctx.color_field;
     [for (partition in records.group_by(data, if (field != null) [field] else []))
         {items: partition.rows, color: appearance(ctx, "color", partition.rows[0], fallback)}]
@@ -194,6 +200,111 @@ pub fn line_mark(data, ctx, mark_config) {
     svg.group_class("marks lines", all)
 }
 
+// Slope comparisons share line styling and grouping, with exactly one observation at each end.
+pub fn slope_mark(data, ctx, options) {
+    let positions = util.unique_vals([for (row in data) parse.channel_value(ctx.encoding.x, row)]);
+    let groups = series(data, ctx, color.default_color);
+    let invalid = [for (group in groups where len(group.items) != 2 or
+        len(util.unique_vals([for (row in group.items) parse.channel_value(ctx.encoding.x, row)])) != 2) group];
+    if (len(data) == 0) svg.group_class("marks slopes", [])
+    else if (len(positions) != 2 or len(invalid) > 0) error("chart: slope requires two comparison positions and one row per entity at each position")
+    else svg.group_class("marks slopes", content(line_mark([for (group in groups)
+        for (row in sort(group.items, {by: (row) => center_coordinate(ctx, "x", row)})) row], ctx, options)))
+}
+
+fn trail_sample(row, ctx, options) {
+    let width = appearance(ctx, "size", row, if (options.size != null) options.size else 2.0);
+    let x = center_coordinate(ctx, "x", row);
+    let y = center_coordinate(ctx, "y", row);
+    if (not util.finite_number(width) or width < 0) error("chart: trail width must be finite and nonnegative")
+    else if (not util.finite_number(x) or not util.finite_number(y)) error("chart: trail positions must be finite")
+    else {x: x, y: y, width: width, row: row}
+}
+
+pub fn trail_mark(data, ctx, options) {
+    let groups = [for (group in series(data, ctx, color.default_color))
+        [for (row in group.items) trail_sample(row, ctx, options)]];
+    let failure = util.first_error([for (group in groups) for (sample in group) sample]);
+    if (failure is error) failure
+    else if (options.interpolate != null and options.interpolate != "linear") error("chart: trail supports linear interpolation")
+    else svg.group_class("marks trails", [for (samples in groups where len(samples) > 0) (
+        // One compound path paints overlaps once, keeping translucent round joins uniform.
+        let segments = [
+            for (index in 1 to (len(samples) - 1),
+                let a = samples[index - 1], let b = samples[index],
+                let length = math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2) where length > 0) (
+                let nx = (a.y - b.y) / length,
+                let ny = (b.x - a.x) / length,
+                let corners = [[a.x - nx * a.width / 2.0, a.y - ny * a.width / 2.0],
+                    [b.x - nx * b.width / 2.0, b.y - ny * b.width / 2.0],
+                    [b.x + nx * b.width / 2.0, b.y + ny * b.width / 2.0],
+                    [a.x + nx * a.width / 2.0, a.y + ny * a.width / 2.0]],
+                svg.line_path(corners) ++ " Z"),
+            for (sample in samples where sample.width > 0)
+                svg.arc_path(sample.x, sample.y, 0.0, sample.width / 2.0, 0.0, util.TAU)],
+        <path d: join(segments, " "), *:style(ctx, samples[0].row, options,
+            {fill: color.default_color, stroke: "none", opacity: 1.0}), tooltip(ctx, samples[0].row)>)])
+}
+
+pub fn image_mark(data, ctx, options) {
+    let images = [for (row in data) (
+        let href = parse.channel_value(ctx.encoding.url, row, if (options.url != null) options.url else row.url),
+        let x = center_coordinate(ctx, "x", row), let y = center_coordinate(ctx, "y", row),
+        let x2 = if (has_position(ctx, "x2")) coordinate(ctx, "x2", row) else null,
+        let y2 = if (has_position(ctx, "y2")) coordinate(ctx, "y2", row) else null,
+        let width = if (x2 != null) abs(x2 - x) else if (options.width != null) options.width else 20.0,
+        let height = if (y2 != null) abs(y2 - y) else if (options.height != null) options.height else 20.0,
+        if (not (href is string) or len(href) == 0 or not util.finite_number(x) or not util.finite_number(y) or
+            not util.finite_number(width) or not util.finite_number(height) or width < 0 or height < 0)
+            error("chart: image requires a URL, finite position, and nonnegative dimensions")
+        else <image href: href, x: if (x2 != null) min([x, x2]) else x - (if (options.align == "left") 0 else if (options.align == "right") width else width / 2.0),
+            y: if (y2 != null) min([y, y2]) else y - (if (options.baseline == "top") 0 else if (options.baseline == "bottom") height else height / 2.0),
+            width: width, height: height,
+            preserveAspectRatio: if (options.preserve_aspect_ratio != null) options.preserve_aspect_ratio else if (options.aspect == false) "none" else "xMidYMid meet",
+            opacity: appearance(ctx, "opacity", row, if (options.opacity != null) options.opacity else 1.0), tooltip(ctx, row)>)];
+    let failure = util.first_error(images);
+    if (failure is error) failure else svg.group_class("marks images", images)
+}
+
+pub fn violin_mark(data, ctx, options) {
+    let horizontal = ctx.x_type == "quantitative";
+    let measure = if (horizontal) "x" else "y";
+    let category = if (horizontal) "y" else "x";
+    let category_field = ctx[category ++ "_field"];
+    let fields = util.unique_vals([category_field, for (field in [ctx.color_field, ctx.detail_field] where field != null) field]);
+    let groups = [for (partition in records.group_by(data, fields)) (
+        let samples = if (options.density_field != null) [for (row in partition.rows)
+            {value: parse.channel_value(ctx.encoding[measure], row), density: row[options.density_field]}]
+            // Private density records keep generated field names out of user data.
+            else statistics.density([for (row in partition.rows) {value: parse.channel_value(ctx.encoding[measure], row)}],
+                {field: "value", steps: options.steps, bandwidth: options.bandwidth, extent: options.extent}),
+        {row: partition.rows[0], samples: samples})];
+    let failure = util.first_error(groups |> ~.samples);
+    let invalid = if (failure is error) [] else [for (group in groups) for (sample in group.samples
+        where not util.finite_number(sample.value) or not util.finite_number(sample.density) or sample.density < 0) sample];
+    let bandwidth = abs(ctx[category ++ "_scale"].bandwidth);
+    let width = if (options.width != null) options.width else bandwidth;
+    if (category_field == null or ctx[measure ++ "_field"] == null or ctx.encoding[measure].dtype != "quantitative" or
+        ctx[category ++ "_scale"].kind != "band")
+        error("chart: violin requires a categorical band axis and a quantitative measurement axis")
+    else if (failure is error) failure
+    else if (not util.finite_number(width) or width <= 0 or len(invalid) > 0 or
+        (options.density_resolve != null and options.density_resolve != "shared" and options.density_resolve != "independent"))
+        error("chart: invalid violin width, density, or density resolution")
+    else svg.group_class("marks violins", [for (group in groups where len(group.samples) > 0) (
+        let peak = if (options.density_resolve == "shared") max([for (candidate in groups) for (sample in candidate.samples) sample.density])
+            else max(group.samples |> ~.density),
+        let center = center_coordinate(ctx, category, group.row),
+        let samples = sort(group.samples, {by: (sample) => sample.value}),
+        let sides = [for (sign in [-1.0, 1.0]) [for (sample in samples) (
+            let position = scale.scale_apply(ctx[measure ++ "_scale"], sample.value),
+            let offset = if (peak > 0) sign * width / 2.0 * sample.density / peak else 0.0,
+            if (horizontal) [position, center + offset] else [center + offset, position])]],
+        <path d: svg.area_path(sides[0], sides[1], options.interpolate),
+            *:style(ctx, group.row, options, {fill: color.default_color, stroke: "white", 'stroke-width': 1, opacity: 0.7}),
+            tooltip(ctx, group.row)> )])
+}
+
 // ============================================================
 // Area mark
 // ============================================================
@@ -276,43 +387,39 @@ pub fn point_mark(data, ctx, mark_config) {
 // Arc (pie/donut) mark
 // ============================================================
 
-pub fn arc_mark(data, ctx, mark_config) {
-    let theta_field = ctx.theta_field;
-    let color_scale = ctx.color_scale;
-    let color_field = ctx.color_field;
-    let cx = ctx.cx;
-    let cy = ctx.cy;
-    let inner_radius = ctx.inner_radius;
-    let outer_radius = ctx.outer_radius;
-    let opacity = if (mark_config and mark_config.opacity != null) mark_config.opacity else 1.0;
-    let pad = if (mark_config and mark_config.pad_angle) mark_config.pad_angle else 0.0;
-
-    // compute total
-    let total = sum(data |> float(~[theta_field]));
-
-    // build cumulative angle array
-    let angle_data = [for (i in 0 to (len(data) - 1)) (
-        let val = float(data[i][theta_field]),
-        let start = if (i == 0) 0.0
-            else
-                (let preceding = [for (j in 0 to (i - 1)) float(data[j][theta_field])],
-                sum(preceding) / total * util.TAU),
-        let end = start + val / total * util.TAU,
-        {index: i, start: start + pad / 2.0, end: end - pad / 2.0, datum: data[i]}
-    )];
-
-    let arcs = [for (a in angle_data) (
-        let fill = if (color_scale and color_field)
-            scale.scale_apply(color_scale, a.datum[color_field])
-        else color.pick_color(color.category10, a.index),
-        let d = svg.arc_path(cx, cy, inner_radius, outer_radius, a.start - util.PI / 2.0, a.end - util.PI / 2.0),
-        <path d: d, *:style(ctx, a.datum, mark_config, {fill: fill, opacity: opacity, stroke: "white", 'stroke-width': 1}),
-            tooltip(ctx, a.datum)>
-    )];
-
-    svg.group_class("marks arcs", arcs)
+// Pie shares and explicit intervals use the same radial validation and appearance.
+fn arc_element(row, start_angle, end_angle, ctx, options, fill = color.default_color) {
+    let outer = coordinate(ctx, "radius", row, ctx.outer_radius);
+    let inner = coordinate(ctx, "radius2", row, ctx.inner_radius);
+    if (not util.finite_number(start_angle) or not util.finite_number(end_angle) or not util.finite_number(inner) or
+        not util.finite_number(outer) or end_angle < start_angle or inner < 0 or outer < inner)
+        error("chart: arcs require ordered finite angles and nonnegative ordered radii")
+    else <path d: svg.arc_path(ctx.cx, ctx.cy, inner, outer, start_angle - util.PI / 2.0, end_angle - util.PI / 2.0),
+        *:style(ctx, row, options, {fill: fill, opacity: if (options.opacity != null) options.opacity else 1.0,
+            stroke: "white", 'stroke-width': 1}), tooltip(ctx, row)>
 }
 
+pub fn arc_mark(data, ctx, options) {
+    let ranged = ctx.encoding.theta2 != null;
+    let weights = if (ranged) [] else [for (row in data) parse.channel_value(ctx.encoding.theta, row)];
+    let pad = if (options.pad_angle != null) options.pad_angle else 0.0;
+    let invalid = [for (weight in weights where not util.finite_number(weight) or weight < 0) weight];
+    let total = if (len(invalid) == 0) sum(weights) else 0.0;
+    if (not ranged and (len(invalid) > 0 or not util.finite_number(total))) error("chart: pie weights and their total must be finite and nonnegative")
+    else if (not util.finite_number(pad) or pad < 0) error("chart: arc padding must be finite and nonnegative")
+    else {
+        let arcs = [for (index, row in data where ranged or (total > 0 and weights[index] > 0)) (
+            let base_angle = if (ranged) 0.0 else sum(slice(weights, 0, index)) / total * util.TAU,
+            let start_angle = if (ranged) coordinate(ctx, "theta", row) else base_angle + pad / 2.0,
+            let end_angle = if (ranged) coordinate(ctx, "theta2", row) else base_angle + weights[index] / total * util.TAU - pad / 2.0,
+            let fill = if (ranged) color.default_color else color.pick_color(color.category10, index),
+            arc_element(row, start_angle, end_angle, ctx, options, fill))];
+        let failure = util.first_error(arcs);
+        if (failure is error) failure else svg.group_class("marks arcs", arcs)
+    }
+}
+
+// ============================================================
 // ============================================================
 // Text mark
 // ============================================================

@@ -7,6 +7,9 @@
 #include "block_common.hpp"
 #include "../markup_highlight.hpp"
 #include "../../../../lib/mem.h"
+#include "lib/hashmap_typed.hpp"
+#include "lib/arena.h"
+#include "lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -38,6 +41,168 @@ extern Item parse_textile_definition_list(MarkupParser* parser, const char* line
 // Forward declarations for link reference parsing
 extern bool try_parse_link_definition(MarkupParser* parser, const char* line);
 
+typedef TypedHashMap<FootnoteDefinition,
+    HashMapCStrMemberKeyOps<FootnoteDefinition, &FootnoteDefinition::label>> FootnoteMap;
+
+static const char* footnote_label(const char* line, const char** end) {
+    const char* p = line;
+    unsigned indent = 0;
+    while (*p == ' ' && indent < 4) { p++; indent++; }
+    if (indent == 4 || strncmp(p, "[^", 2) != 0) return nullptr;
+    const char* label = p + 2;
+    p = label;
+    while (*p && *p != ']' && *p != '[' && !str_is_space(*p)) p++;
+    if (p == label || p[0] != ']' || p[1] != ':') return nullptr;
+    *end = p;
+    return label;
+}
+
+bool is_footnote_definition(const char* line) {
+    const char* end;
+    return line && footnote_label(line, &end);
+}
+
+bool MarkupParser::parseFootnoteDefinition(const char* line) {
+    if (config.format != Format::MARKDOWN || config.flavor == Flavor::COMMONMARK) return false;
+    const char* label_end;
+    const char* label = footnote_label(line, &label_end);
+    if (!label) return false;
+    char* normalized = normalizeLabel(label, (size_t)(label_end - label));
+    if (!normalized) return false;
+    if (!footnote_defs_) footnote_defs_ = FootnoteMap::create(16);
+    if (!footnotes_) footnotes_ = create_element(this, "footnotes");
+    if (!footnote_defs_ || !footnotes_) { mem_free(normalized); return false; }
+    Element* note = create_element(this, "footnote");
+    add_attribute_to_element(this, note, "label",
+        arena_dup_n(input()->arena, label, (size_t)(label_end - label)));
+    FootnoteDefinition definition = {
+        arena_dup_n(input()->arena, normalized, strlen(normalized)), note, 0
+    };
+    FootnoteDefinition probe = {normalized, nullptr, 0};
+    bool duplicate = FootnoteMap::get(footnote_defs_, probe) != nullptr;
+    if (!duplicate) {
+        FootnoteMap::set(footnote_defs_, definition);
+        list_push((List*)footnotes_, Item{.element = note});
+    }
+    mem_free(normalized);
+
+    ArrayList* content = arraylist_new(8);
+    arraylist_append(content, (void*)str_skip_line_space(label_end + 2));
+    current_line++;
+    while (current_line < line_count) {
+        const char* next = lines[current_line];
+        if (is_empty_line(next)) {
+            int after = current_line + 1;
+            while (after < line_count && is_empty_line(lines[after])) after++;
+            if (after == line_count || get_list_indentation(lines[after]) < 4) break;
+            arraylist_append(content, (void*)"");
+        } else {
+            if (get_list_indentation(next) < 4) break;
+            unsigned columns = 0;
+            while (*next && columns < 4) {
+                columns = *next == '\t' ? (columns + 4) & ~3u : columns + 1;
+                next++;
+            }
+            arraylist_append(content, (void*)next);
+        }
+        current_line++;
+    }
+    // Reuse the same parser so notes inherit document-level link definitions.
+    MarkupLinesScope line_scope(this, (char**)content->data, (int)content->length);
+    int list_depth = state.list_depth;
+    bool parsing_list = state.parsing_list_content;
+    state.list_depth = 0;
+    state.parsing_list_content = false;
+    while (current_line < line_count) {
+        int before = current_line;
+        Item block = parse_block_element(this);
+        if (block.item != ITEM_UNDEFINED && block.item != ITEM_ERROR) list_push((List*)note, block);
+        if (current_line == before) current_line++;
+    }
+    state.list_depth = list_depth;
+    state.parsing_list_content = parsing_list;
+    line_scope.restore();
+    arraylist_free(content);
+    return true;
+}
+
+static bool markup_tag_is(Element* node, const char* name) {
+    return node && strcmp(((TypeElmt*)node->type)->name.str, name) == 0;
+}
+
+static FootnoteDefinition* find_footnote(MarkupParser* parser, String* label) {
+    if (!label || !parser->footnote_defs_) return nullptr;
+    char* normalized = MarkupParser::normalizeLabel(label->chars, label->len);
+    if (!normalized) return nullptr;
+    FootnoteDefinition probe = {normalized, nullptr, 0};
+    FootnoteDefinition* definition = FootnoteMap::get(parser->footnote_defs_, probe);
+    mem_free(normalized);
+    return definition;
+}
+
+static void order_footnote(MarkupParser* parser, FootnoteDefinition* definition, Element* ordered) {
+    if (!definition || definition->number) return;
+    definition->number = (unsigned)ordered->length + 1;
+    char number[24], id[32];
+    snprintf(number, sizeof(number), "%u", definition->number);
+    snprintf(id, sizeof(id), "fn-%u", definition->number);
+    add_attribute_to_element(parser, definition->node, "id", id);
+    add_attribute_to_element(parser, definition->node, "number", number);
+    list_push((List*)ordered, Item{.element = definition->node});
+}
+
+static void resolve_footnote_references(MarkupParser* parser, Item* item, Element* ordered) {
+    if (get_type_id(*item) != LMD_TYPE_ELEMENT) return;
+    Element* node = item->element;
+    if (markup_tag_is(node, "footnote-ref")) {
+        String* label = node->get_attr("ref").string();
+        if (!label) return;
+        FootnoteDefinition* definition = find_footnote(parser, label);
+        if (!definition) {
+            // An unresolved marker remains source text, including its brackets.
+            char* literal = (char*)arena_alloc(parser->input()->arena, label->len + 4);
+            memcpy(literal, "[^", 2);
+            memcpy(literal + 2, label->chars, label->len);
+            literal[label->len + 2] = ']';
+            literal[label->len + 3] = '\0';
+            *item = Item{.item = s2it(parser->builder.createString(literal))};
+            return;
+        }
+        order_footnote(parser, definition, ordered);
+        char number[24], href[32];
+        snprintf(number, sizeof(number), "%u", definition->number);
+        snprintf(href, sizeof(href), "#fn-%u", definition->number);
+        add_attribute_to_element(parser, node, "number", number);
+        Element* sup = create_element(parser, "sup");
+        Element* link = create_element(parser, "a");
+        add_attribute_to_element(parser, link, "href", href);
+        list_push((List*)link, Item{.item = s2it(parser->builder.createString(number))});
+        list_push((List*)sup, Item{.element = link});
+        list_push((List*)node, Item{.element = sup});
+        return;
+    }
+    for (int64_t i = 0; i < node->length; i++) resolve_footnote_references(parser, &node->items[i], ordered);
+}
+
+void MarkupParser::resolveFootnotes(Element* body) {
+    if (config.format != Format::MARKDOWN || config.flavor == Flavor::COMMONMARK) return;
+    Element* ordered = create_element(this, "footnotes");
+    add_attribute_to_element(this, ordered, "class", "footnotes");
+    Item body_item = {.element = body};
+    resolve_footnote_references(this, &body_item, ordered);
+    // Resolve the growing set once, then retain unused definitions and their references.
+    int64_t resolved = 0, unused = 0;
+    while (resolved < ordered->length || (footnotes_ && unused < footnotes_->length)) {
+        if (resolved < ordered->length) {
+            resolve_footnote_references(this, &ordered->items[resolved++], ordered);
+        } else {
+            Element* note = footnotes_->items[unused++].element;
+            order_footnote(this, find_footnote(this, note->get_attr("label").string()), ordered);
+        }
+    }
+    if (ordered->length) list_push((List*)body, Item{.element = ordered});
+}
+
 /**
  * parse_block_element - Parse a single block element at current line
  *
@@ -56,18 +221,7 @@ Item parse_block_element(MarkupParser* parser) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Try to parse link reference definitions first (they don't produce output)
-    // Note: Link definitions are pre-scanned by parseContent(), so the definition
-    // may already exist. parse_link_definition returns true if the syntax is valid,
-    // regardless of whether it was a duplicate.
-    if (parser->config.format == Format::MARKDOWN && is_link_definition_start(line)) {
-        int def_line = parser->current_line;
-        if (parse_link_definition(parser, line)) {
-            highlight_note_block(parser, "link_def", def_line, parser->current_line + 1);
-            parser->current_line++;
-            return Item{.item = ITEM_UNDEFINED};
-        }
-    }
+    if (parse_definition_block(parser, line)) return Item{.item = ITEM_UNDEFINED};
 
     // An RST overline belongs to its title, not to a horizontal rule.
     if (is_rst_overline_header(parser, parser->current_line)) {
@@ -221,6 +375,8 @@ Item parse_document(MarkupParser* parser) {
             parser->current_line++;
         }
     }
+
+    parser->resolveFootnotes(body);
 
     // Add body to document
     list_push((List*)doc, Item{.item = (uint64_t)body});

@@ -745,6 +745,8 @@ static StyleCanonicalEntry* style_epoch_create_entry(
     entry->tree = tree;
     entry->recipe_count = builder->count;
     tree->canonical_owner = entry;
+    // charge the property filter before enforcing the cold-epoch cap
+    style_tree_init_declaration_cache(tree);
     PoolStats after = {};
     pool_get_detailed_stats(epoch->pool, &after);
     entry->retained_bytes = after.live_bytes > before.live_bytes
