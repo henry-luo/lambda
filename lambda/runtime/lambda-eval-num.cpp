@@ -16,7 +16,6 @@
 
 extern __thread EvalContext* context;
 
-String* str_repeat(String* str, int64_t times);
 String* fn_strcat(String* left, String* right);
 
 // Helper functions for decimal operations

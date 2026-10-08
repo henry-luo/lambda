@@ -1390,7 +1390,7 @@ Item fn_exclude(Item left, Item right) {
 
 
 String *str_repeat(String *str, int64_t times) {
-    if (times <= 0) {
+    if (times <= 0 || !str->len) {
         // Return empty string
         String *result = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         if (!result) return NULL;
@@ -1408,8 +1408,13 @@ String *str_repeat(String *str, int64_t times) {
         total_len + sizeof(String) + 1 > (size_t)INT_MAX) {
         return NULL;
     }
+    // the source must survive result allocation even for callers holding only a raw pointer.
+    RootFrame roots(1);
+    if (!roots.valid()) return NULL;
+    Rooted<String*> source(roots, str);
     String *result = (String *)heap_alloc((int)(sizeof(String) + total_len + 1), LMD_TYPE_STRING);
     if (!result) return NULL;
+    str = source.get();
     result->len = total_len;
     result->flags = 0;
     result->is_ascii = str->is_ascii;
@@ -8594,6 +8599,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     }
 
     RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
     Rooted<Item> rooted_list(roots, list_item);
     Rooted<Item> rooted_sep(roots, sep_item);
 
@@ -8609,17 +8615,19 @@ Item fn_join2(Item list_item, Item sep_item) {
         Item item = array_item_read((Array*)source, i);
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
-            total_len += item.get_len();
+            if (!lam::checked_add(total_len, item.get_len(), &total_len)) return ItemError;
             is_ascii = is_ascii && text_item_is_ascii(item);
         }
     }
 
     if (count > 1 && sep_len > 0) {
-        total_len += (count - 1) * sep_len;
+        if (!lam::checked_mul_add((size_t)(count - 1), sep_len, total_len, &total_len)) return ItemError;
     }
 
-    // allocate result
+    // the heap allocator takes a signed byte count; reject overflow before narrowing.
+    if (total_len > (size_t)INT_MAX - sizeof(String) - 1) return ItemError;
     String* result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
+    if (!result) return ItemError;
     // Result allocation may compact container storage and can reclaim the
     // separator unless both semantic inputs remain exact-rooted.
     list_item = rooted_list.get();

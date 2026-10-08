@@ -118,16 +118,48 @@ extern "C" int64_t mvp_lmd_string_compare(Item left, Item right) {
     return utf16_compare(l->chars, l->len, r->chars, r->len);
 }
 
-extern "C" Item mvp_lmd_string_at(Item value, uint32_t index) {
-    String* string = value.get_string();
-    Utf16Iterator iter = {(const unsigned char*)string->chars, string->len, 0, -1};
-    uint16_t unit;
-    for (uint64_t i = 0; i <= index; i++)
-        if (!utf16_iterator_next(&iter, &unit)) return Item{.item = ITEM_JS_UNDEFINED};
+extern "C" Item mvp_lmd_string_at(Item value, double index, int64_t mode) {
+    uint16_t unit = 0;
+    bool present = mode == LMD_STRING_FROM_CODE;
+    if (present) unit = (uint16_t)(uint32_t)index;
+    else {
+        String* string = value.get_string();
+        index = isnan(index) ? 0 : trunc(index);
+        if (index >= 0 && index < string->len) {
+            if (string->is_ascii) { unit = (uint8_t)string->chars[(uint32_t)index]; present = true; }
+            else {
+                Utf16Iterator iter = {(const unsigned char*)string->chars, string->len, 0, -1};
+                for (uint64_t i = 0; i <= (uint64_t)index; i++) {
+                    present = utf16_iterator_next(&iter, &unit);
+                    if (!present) break;
+                }
+            }
+        }
+    }
+    if (mode == LMD_STRING_CODE) return Item{.item = present ? i2it(unit) : LAMBDA_IEEE_NAN_BITS};
+    if (!present && mode == LMD_STRING_INDEX) return Item{.item = ITEM_JS_UNDEFINED};
+    // share Lambda's immutable character table; UTF-16 non-ASCII units retain WTF-8 allocation.
+    if (present && unit < 128) {
+        String* shared = get_ascii_char_string((unsigned char)unit);
+        if (shared) return Item{.item = s2it(shared)};
+    }
     char bytes[4];
-    size_t length = utf8_encode_wtf8(unit, bytes);
+    size_t length = present ? utf8_encode_wtf8(unit, bytes) : 0;
     String* result = heap_strcpy(bytes, length);
     return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+}
+
+extern "C" Item mvp_lmd_array_new(int64_t length) {
+    if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Array*> result(roots, array());
+    if (!result.get() || !array_reserve_append_slots(result.get(), length))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    // reuse the shared non-value sentinel; explicit undefined remains an own element.
+    for (int64_t i = 0; i < length; i++) result.get()->items[i].item = ITEM_JS_DELETED_SENTINEL;
+    result.get()->length = length;
+    return Item{.array = result.get()};
 }
 
 extern "C" double mvp_lmd_number_pow(double base, double exponent) {

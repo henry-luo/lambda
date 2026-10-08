@@ -226,6 +226,87 @@ TEST_F(JsMvpLmd, StringsUseUtf16) {
     boolean("'a\\u0000b'.length === 3 && 'a\\u0000b'[1] === '\\u0000'");
     boolean("'abc'[3] === undefined && 'abc'['1'] === 'b'");
 }
+TEST_F(JsMvpLmd, ArrayStringBuiltinInferenceAndRowSwaps) {
+    boolean("function repeat(s,n){return s.repeat(n)} function code(s,i){return s.charCodeAt(i)} "
+        "repeat('ab',3)==='ababab' && code(repeat('x',2),1)===120 && code('x',2)!==code('x',2)");
+    boolean("function rows(){let a=new Int32Array(3),b=new Int32Array(3);a[0]=7;b[0]=9;"
+        "for(let i=0;i<5;i++){[a,b]=[b,a]}return a[0]===9&&b[0]===7} rows()");
+    char* mir = dump("temp/mvp_lmd_row_swap.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_property_get"), nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tarray\n"), nullptr);
+    mem_free(mir);
+    boolean("let a=new Int32Array(1),b=new Uint8Array(1);a[0]=-7;b[0]=255;"
+        "[a,b]=[b,a];a[0]=257;b[0]=-9;a[0]===1&&b[0]===-9");
+    boolean("let a=1,b=2;[a,b]=[b,a];a===2&&b===1");
+    boolean("let a=1,b=2;let rhs=([a,b]=[b,a]);rhs[0]===2&&rhs[1]===1&&a===2&&b===1");
+    boolean("let a=1,b=2;[a,b]=[3];a===3&&b===undefined");
+    boolean("let a=1,b=2;[a,b]=[a=5,a+1];a===5&&b===6");
+    boolean("let a=1,b=2;[a,b]=[5e-324,-0];a===5e-324&&1/b===-Infinity");
+    boolean("function f(){let a=1,b=2;[a,b]=[a=5,a+1];"
+        "if(a!==5||b!==6)return false;[a,b]=[5e-324,-0];"
+        "if(a!==5e-324||1/b!==-Infinity)return false;[a,b]=[3];return a===3&&b===undefined}f()");
+    Item completion = run("let a=0,b=0;[a,b]=[4,5]");
+    ASSERT_EQ(get_type_id(completion), LMD_TYPE_ARRAY);
+    ASSERT_EQ(completion.array->length, 2);
+    EXPECT_EQ(it2d(completion.array->items[0]), 4);
+    EXPECT_EQ(it2d(completion.array->items[1]), 5);
+    error("const a=1;let b=2;[b,a]=[4,5];b", "TypeError");
+    error("[a]=[1];let a", "ReferenceError");
+    error("function f(){const a=1;let b=2;[b,a]=[4,5];return b}f()", "TypeError");
+    error("function f(){[a]=[1];let a}f()", "ReferenceError");
+}
+TEST_F(JsMvpLmd, OrdinaryArrayHolesFillAndJoin) {
+    boolean("let a=new Array(3);a[1]=undefined;!(0 in a)&&(1 in a)&&a[0]===undefined&&"
+        "a.join('|')==='||'&&Object.keys(a).join(',')==='1'");
+    boolean("let a=Array(3).fill(false);a[1]=true;delete a[0];"
+        "a.join(',')===',true,false'&&!(0 in a)&&a.pop()===false&&a.length===2");
+    boolean("let a=['a','b'];a.push('c','d');a.join('')==='abcd'&&a.join() === 'a,b,c,d'");
+    boolean("let a=['a',null,undefined,2,false];a.join('|')==='a|||2|false'");
+    boolean("let a=Array(2);a.fill('x',-1);a.join('-')==='-x'&&!(0 in a)&&(1 in a)");
+    boolean("let a=[];a.push(5e-324);let n=a.pop();"
+        "for(let i=0;i<100;i++){a.push(''+i)}n===5e-324&&a.length===100");
+    boolean("let a=[1,2];let alias=a;delete alias[0];a[0]===undefined&&a[1]===2");
+    boolean("let a=[1,2];a.length=0;a.push('x');a.join('')==='x'");
+    boolean("let a=[];a.push()===0&&a.pop()===undefined&&a.join('|')===''&&Array('3')[0]==='3'");
+    boolean("let a=[1,2];a.join((a.push(3),'|'))==='1|2|3'");
+    boolean("let a=Array(2);let n=0;for(let x of a){if(x===undefined)n++}n===2");
+    boolean("function Array(n){return [n]}Array(3)[0]===3&&Array(3).length===1");
+    error("new Array(-1)", "RangeError");
+    error("new Array(1.5)", "RangeError");
+    error("new Array(4294967296)", "RangeError");
+    error("[{}].join('')", "capability");
+}
+TEST_F(JsMvpLmd, CharacterCodesAndAsciiReuse) {
+    boolean("function code(s,i){return s.charCodeAt(i)}"
+        "code('abc',1.9)===98&&code('abc',-0.5)===97&&code('abc',NaN)===97&&"
+        "code('abc',undefined)===97&&code('abc','2')===99&&code('abc',-1)!==code('abc',-1)");
+    boolean("let s='a\\u{1f600}\\ud800';s.length===4&&s.charCodeAt(1)===55357&&"
+        "s.charCodeAt(2)===56832&&s.charCodeAt(3)===55296&&s.charAt(4)===''&&s[4]===undefined");
+    boolean("String.fromCharCode(65,0,65536,0xd800)==='A\\0\\0\\ud800'&&"
+        "'abc'.charAt(1)==='b'&&'abc'[1]==='b'&&'x'.repeat(0)===''");
+    boolean("function read(s,i){return s.charCodeAt(i)}"
+        "read('x',Infinity)!==read('x',Infinity)&&read('x',-Infinity)!==read('x',-Infinity)");
+    boolean("const s='abc';function f(){return s[1]+s.length}f()==='b3'");
+    boolean("let s='ab',n=0;let c=s.charAt((s='xy',n++),(n++));c==='a'&&s==='xy'&&n===2");
+    boolean("'ab'.repeat(2.9)==='abab'&&'x'.repeat(NaN)===''&&String.fromCharCode()===''");
+    boolean("function f(){let String={fromCharCode:(x)=>x+1};return String.fromCharCode(4)===5}f()");
+    error("function f(){return s.length} f();const s='abc'", "ReferenceError");
+    error("'x'.repeat(-1)", "RangeError");
+    error("''.repeat(Infinity)", "RangeError");
+}
+TEST_F(JsMvpLmd, ConcatenationOrderAndAliases) {
+    boolean("let n=1;let s='x'+n+true+null+undefined+'z';s==='x1truenullundefinedz'");
+    boolean("let n=1;let s=n+2+'x'+3+4;s==='3x34'");
+    boolean("let calls=0;function f(){calls++;return calls}"
+        "let s='x'+f()+f()+f()+f()+f()+f()+f();s==='x1234567'&&calls===7");
+    boolean("let a='a'+'b'+'c',alias=a;let b=a+'d'+'e';"
+        "let pieces=[a,b];alias==='abc'&&pieces.join('|')==='abc|abcde'");
+    boolean("let a='x',b='y';let s=''+a+(a='z')+a+b;s==='xzzy'&&a==='z'");
+    boolean("let s='a'+'\\ud800'+'\\udc00'+'b';s.length===4&&s.charCodeAt(1)===55296&&s.charCodeAt(2)===56320");
+    boolean("let a=[];for(let i=0;i<200;i++){a.push('x'+i+':'+(i+1)+'!')}"
+        "a[0]==='x0:1!'&&a[199]==='x199:200!'&&a.join('|').length>200");
+}
 TEST_F(JsMvpLmd, MutableBindingsAndHoisting) {
     boolean("var a = x; var x=1; var x; a === undefined && x === 1");
     boolean("var x=1; x='s'; x=false; x=[]; typeof x === 'object'");
