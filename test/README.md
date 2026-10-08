@@ -25,7 +25,7 @@ Last verified against tree: 2026-10-07
 | Change area | Must-pass gate | Quick targeted check |
 |---|---|---|
 | Lambda core: `lambda/runtime/`, `lambda/core/`, parser, MIR JIT | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*<name>*'`; `./test/test_mir_emission_gtest.exe --gtest_filter='Fixtures/*<name>*'`; `./test/test_lambda_errors_gtest.exe --gtest_filter='NegativeScriptTest.*'` |
-| Lambda packages: `lmd/package/**/*.ls` | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*chart_*'` (also `latex_`, `math_`, `mermaid_`, `graphviz_`, `structurizr_`, `slide_`, `editor_`, `edit_`); `make test-mathlive` |
+| Lambda packages: `lmd/package/**/*.ls` | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*scene3d_*'` (also `chart_`, `latex_`, `math_`, `mermaid_`, `graphviz_`, `structurizr_`, `slide_`, `editor_`, `edit_`); `make test-mathlive` |
 | Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make test-input-baseline` (5 corpora, also run by test-lambda-baseline) + `make test-input` (70-binary input suite) | `./test/test_markdown_gtest.exe --baseline`; `./test/test_input_roundtrip_gtest.exe --gtest_filter='JsonTests.*'`; `./test/test_html_gtest.exe` |
 | CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
 | Radiant layout / render / events: `radiant/` | **`make test-radiant-baseline`** + `node test/test_run.js --target=radiant --category=baseline` (the gate does not run the radiant suite's own gtests) | `make layout test=baseline_301_simple_margin`; `make layout suite=<dir>`; `./test/test_ui_automation_gtest.exe --suite baseline --test <id>`; `make test-render test=<name>` |
@@ -45,7 +45,7 @@ A test is killed only after it produces no output for the idle timeout. With `--
 | `--target` | Category | Binaries | Notable members |
 |---|---|---|---|
 | `library` | baseline | 52 | `test/lib/test_*` (str, arena, gc_heap, mempool, url, font…), `test_rdb_gtest`, `test_serve_gtest`, `test_avl_tree_perf` |
-| `radiant` | 13 baseline, 15 extended | 28 | baseline: `test_display_list_gtest`, `test_retained_display_list_gtest`, `test_rdt_vector_gtest`, `test_view_reuse_gtest`, `test_layout_custom_gtest`, `test_css_cascade_memory_gtest`, animation/media players. Extended: WPT runners (sources `test/wpt/test_wpt_*_gtest.cpp`), `test_chromium_contenteditable_gtest` |
+| `radiant` | 14 baseline, 15 extended | 29 | baseline: `test_display_list_gtest`, `test_retained_display_list_gtest`, `test_rdt_vector_gtest`, `test_view_reuse_gtest`, `test_layout_custom_gtest`, `test_css_cascade_memory_gtest`, animation/media players. Extended: WPT runners (sources `test/wpt/test_wpt_*_gtest.cpp`), `test_chromium_contenteditable_gtest` |
 | `input` | baseline | 70 | mark builder/reader/editor, HTML, markdown, YAML, `test/css/*`, graph parsers, `test_validator_input_gtest`, `test_lambda_domnode_gtest`, `test_dom_range_gtest` |
 | `validator` | baseline | 3 | `test_validator_gtest`, `test_ast_validator_gtest`, `test_validator_path_reporting` |
 | `lambda` | 31 baseline, 2 extended, +2 scripts | 33 | `test_zip_gtest` (ZIP32/ZIP64, Word/JAR packages, lazy decoding and ZIP writing), `test_lambda_gtest`, `_std`, `_errors`, `_proc`, `_repl`, `_concurrency`, MIR emission/ratchet/gc-stress, `test_js_gtest`, `test_ts_gtest`, `test_js_test262_gtest --prelim` (runs as `test_js_test262_prelim_gtest`). Scripts: `test/lambda/mathlive/run_lambda_mathlive_markup.mjs` (baseline), `test/run_js_parity.mjs` (extended) |
@@ -61,12 +61,13 @@ A test is killed only after it produces no output for the idle timeout. With `--
 | `make test-lambda-baseline` | `test-input-baseline`, then `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`), one merged report |
 | `make test-lambda-full` | the above plus concurrency, `test_lambda_extended_gtest`, `test_lambda_domnode_gtest`, `test_validator_input_gtest` |
 | `make test-input-baseline` | `test_wpt_html_parser_gtest --baseline`, `test_markdown_gtest --baseline`, `test_yaml_suite_gtest`, `test_math_ascii_gtest`, `test_math_gtest` |
-| `make test-radiant-baseline` | filtered `test_view_reuse_gtest`, then `run-radiant-baseline`: layout baselines (`LAYOUT_BASELINE_SUITES` in the Makefile), page-suite snapshot, UI automation `--suite baseline` and `--suite view`, `test_radiant_view_gtest`, `test_rdt_vector_gtest`, `test_page_load_gtest`, `test_css_cascade_memory_gtest`, `test_layout_fuzzy_gtest`, render visual `--baseline`, `dom-ui-run`, WPT css-syntax and input-events |
+| `make test-radiant-baseline` | native `test_scene3d_gtest`, filtered `test_view_reuse_gtest`, then `run-radiant-baseline`: layout baselines (`LAYOUT_BASELINE_SUITES` in the Makefile), page-suite snapshot, UI automation `--suite baseline` and `--suite view`, `test_radiant_view_gtest`, `test_rdt_vector_gtest`, `test_page_load_gtest`, `test_css_cascade_memory_gtest`, `test_layout_fuzzy_gtest`, render visual `--baseline`, `dom-ui-run`, WPT css-syntax and input-events |
 | `make run-radiant-baseline` | the same Radiant checks with no rebuild |
 | `make test-layout-baseline` | layout baseline suites only |
 
 Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~240):
 
+- **Native scenes:** `make test-scene3d` or `./test/test_scene3d_gtest.exe` (full macOS host with desktop graphics access). The runner explicitly enables hidden GLFW contexts; missing graphics fails rendered tests. Package goldens live in `test/lambda/scene3d/`; page, sizing and texture fixtures live in `test/scene3d/`.
 - **Layout and render:** `layout` / `test-layout` (`test=`, `suite=`, `pattern=`, `update=1`), `layout-snapshot-check suite=page`, `capture-layout test=`, `test-render` (`test=`, `suite=`, `pattern=`, `update=1`), `capture-render`.
 - **UI and DOM:** `test-ui-automation` (`ARGS=`), `dom-ui test=`, `test-page-load`, `test-reactive-ui`, `test-editable`, `test-wpt-contenteditable`, `test-css-cascade-memory`, `test-pdf-render`, `test-svg-export`, `test-svg-paint`, `test-svg-smil`.
 - **Lambda tiers and GC:** `test-lambda-interp`, `interp-sweep`, `test-gc-rooting`, `test-mir-gc-stress`, `check-error-recovery`, `test-grammar-s16`.

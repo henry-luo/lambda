@@ -12,6 +12,7 @@ enum NativeGlKind { NATIVE_GL_BUFFER, NATIVE_GL_VERTEX_ARRAY, NATIVE_GL_TEXTURE,
     NATIVE_GL_PROGRAM, NATIVE_GL_TARGET };
 struct NativeGlStats {
     uint64_t generation, allocated_bytes, draws, frames;
+    uint64_t gpu_bytes, cpu_bytes;
     uint32_t resources;
     char driver[256], version[128], shading_language[128];
 };
@@ -24,6 +25,7 @@ struct NativeGlDraw {
     unsigned count, instances;
     bool indexed, transparent;
     int side; // 0 front, 1 back, 2 double
+    bool clockwise;
 };
 struct NativeGlUniform { NativeGlResource program; int location; uint64_t generation; };
 

@@ -1,5 +1,9 @@
-fn numeric(v) bool => v is number and abs(v) < inf
+pub fn numeric(v) bool => v is number and abs(v) <= 3.4028234e38
 pub fn vector(v, size) bool => v is array and len(v) == size and all([for (x in v) numeric(x)])
+
+pub fn affine(m) bool => vector(m, 16) and m[3] == 0 and m[7] == 0 and m[11] == 0 and m[15] == 1 and
+    abs(m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) +
+        m[8] * (m[1] * m[6] - m[5] * m[2])) >= 0.0000000001
 
 pub fn matrix(position, rotation, scale) array^ {
     let checked = if (not vector(position, 3) or not vector(rotation, 3) or not vector(scale, 3) or any([for (x in scale) x == 0]))

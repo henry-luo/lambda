@@ -886,8 +886,6 @@ void render_surface_content(RasterRenderContext* rdcon, ViewBlock* view, ImageSu
     Bound clip = rdcon->has_transform
         ? rdcon->block.clip
         : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
-    render_painter_blit_surface_scaled(rdcon, surface, nullptr,
-                                       rdcon->ui_context->surface, &rect, &clip,
-                                       SCALE_MODE_LINEAR, rdcon->clip_shapes,
-                                       rdcon->clip_shape_depth, 255);
+    render_painter_draw_pixels_rect(rdcon,(const uint32_t*)surface->pixels,surface->width,surface->height,
+        surface->pitch/4,&rect,&clip,255,surface);
 }

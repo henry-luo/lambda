@@ -225,6 +225,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
     bool owned = !copy_pixels && resource_owner && !resource_owner->self.is_null() && base &&
         owner_stride == src_stride && pixels >= base &&
         pixels < base + (size_t)owner_stride * (size_t)owner_h;
+    item->draw_image.snapshot_lease = lam::up(image_surface_snapshot_retain(resource_owner));
     item->draw_image.resource = lam::Handle<ImageSurface>{};
     item->draw_image.local_pixels = nullptr;
     if (owned) {

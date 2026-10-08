@@ -9,7 +9,8 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #ifdef __APPLE__
-#include <OpenGL/gl3.h>
+#include <OpenGL/gl.h>
+#include <OpenGL/glext.h>
 #else
 #include <GL/glcorearb.h>
 #endif
@@ -24,6 +25,8 @@ static constexpr unsigned GL_RESOURCE_LIMIT = 4096;
 static constexpr unsigned GL_DIMENSION_LIMIT = 4096;
 static uint64_t native_gl_next_id = 1;
 static unsigned native_gl_context_count;
+
+static uint64_t native_gl_id() { return __atomic_fetch_add(&native_gl_next_id, 1, __ATOMIC_RELAXED); }
 
 #ifdef NATIVE_GL_ENABLED
 // the same table supplies native scenes and future imperative clients.
@@ -101,7 +104,12 @@ struct NativeGlSlot {
     NativeGlKind kind;
     GLuint name, color, depth, resolve, texture;
     unsigned width, height, samples;
-    size_t bytes;
+    size_t bytes, length;
+    void* data;
+    NativeGlAttribute attributes[16];
+    unsigned attribute_count;
+    NativeGlResource indices;
+    bool initialized;
 };
 #endif
 
@@ -147,7 +155,7 @@ static NativeGlSlot* native_gl_allocate(NativeGlContext* context, NativeGlKind k
         native_gl_error(context, "resource byte quota exceeded"); return nullptr;
     }
     for (NativeGlSlot& slot : context->slots) if (!slot.id) {
-        slot = {}; slot.id = native_gl_next_id++; slot.kind = kind; slot.bytes = bytes;
+        slot = {}; slot.id = native_gl_id(); slot.kind = kind; slot.bytes = bytes;
         context->stats.resources++; context->stats.allocated_bytes += bytes;
         return &slot;
     }
@@ -181,7 +189,7 @@ NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacit
     if (enabled && native_gl_context_count < 32) {
         context = (NativeGlContext*)mem_calloc(1, sizeof(NativeGlContext), MEM_CAT_RENDER);
         if (!context) return nullptr;
-        context->thread = pthread_self(); context->stats.generation = native_gl_next_id++;
+        context->thread = pthread_self(); context->stats.generation = native_gl_id();
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -222,7 +230,16 @@ NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacit
 
 const char* native_gl_diagnostic(NativeGlContext* context) { return context ? context->diagnostic : "native graphics unavailable"; }
 bool native_gl_stats(NativeGlContext* context, NativeGlStats* stats) {
-    if (!context || !stats) return false; *stats = context->stats; return true;
+    if (!context || !stats) return false;
+    *stats = context->stats;stats->cpu_bytes=sizeof(*context);
+#ifdef NATIVE_GL_ENABLED
+    // driver-private allocations are not observable; separate owned upload shadows from GPU storage.
+    for (const NativeGlSlot& slot:context->slots) if (slot.id) {
+        size_t shadow=slot.kind==NATIVE_GL_BUFFER?slot.length:0;
+        stats->cpu_bytes+=shadow;stats->gpu_bytes+=slot.bytes-shadow;
+    }
+#endif
+    return true;
 }
 bool native_gl_valid(NativeGlContext* context, NativeGlResource resource, NativeGlKind kind) {
 #ifdef NATIVE_GL_ENABLED
@@ -238,7 +255,7 @@ void native_gl_release(NativeGlContext* context, NativeGlResource resource) {
     for (NativeGlSlot& slot : context->slots) if (slot.id && slot.id == resource.id) {
         NativeGlFunctions& gl = context->gl;
         switch (slot.kind) {
-            case NATIVE_GL_BUFFER: gl.DeleteBuffers(1, &slot.name); break;
+            case NATIVE_GL_BUFFER: gl.DeleteBuffers(1, &slot.name); mem_free(slot.data); break;
             case NATIVE_GL_VERTEX_ARRAY: gl.DeleteVertexArrays(1, &slot.name); break;
             case NATIVE_GL_TEXTURE: gl.DeleteTextures(1, &slot.name); break;
             case NATIVE_GL_PROGRAM: gl.DeleteProgram(slot.name); break;
@@ -256,13 +273,15 @@ void native_gl_lose(NativeGlContext* context) {
 #ifdef NATIVE_GL_ENABLED
     for (NativeGlSlot& slot : context->slots) if (slot.id) native_gl_release(context, {slot.id});
 #endif
-    context->lost = true; context->stats.generation = native_gl_next_id++;
+    context->lost = true; context->stats.generation = native_gl_id();
     native_gl_error(context, "native graphics generation lost");
 }
 void native_gl_destroy(NativeGlContext* context) {
     if (!context) return;
-    native_gl_lose(context);
 #ifdef NATIVE_GL_ENABLED
+    // ordinary teardown retires resources without reporting a device failure.
+    if (!context->lost) for (NativeGlSlot& slot : context->slots)
+        if (slot.id) native_gl_release(context, {slot.id});
     if (context->window) { glfwDestroyWindow(context->window); native_gl_context_count--; }
 #endif
     mem_free(context);
@@ -271,7 +290,12 @@ void native_gl_destroy(NativeGlContext* context) {
 NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); if (!scope.valid || !data || !bytes) return {};
-    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_BUFFER, bytes); if (!slot) return {};
+    if (bytes > GL_BYTE_LIMIT / 2) { native_gl_error(context, "buffer byte quota exceeded"); return {}; }
+    // retain bounded upload bytes so indexed draws can validate the exact referenced range.
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_BUFFER, bytes * 2); if (!slot) return {};
+    slot->length = bytes; slot->data = mem_alloc(bytes, MEM_CAT_RENDER);
+    if (!slot->data) { native_gl_error(context,"buffer upload copy allocation failed");native_gl_release(context, {slot->id}); return {}; }
+    memcpy(slot->data, data, bytes);
     NativeGlFunctions& gl = context->gl;
     gl.GenBuffers(1, &slot->name); gl.BindBuffer(GL_ARRAY_BUFFER, slot->name);
     gl.BufferData(GL_ARRAY_BUFFER, bytes, data, GL_STATIC_DRAW);
@@ -286,14 +310,18 @@ NativeGlResource native_gl_vertices(NativeGlContext* context, const NativeGlAttr
     NativeGlScope scope(context); if (!scope.valid || !attributes || !count || count > 16) return {};
     NativeGlSlot* index = indices.id ? native_gl_slot(context, indices, NATIVE_GL_BUFFER) : nullptr;
     if (indices.id && !index) return {};
+    unsigned locations = 0;
     for (unsigned i = 0; i < count; i++) {
         const NativeGlAttribute& a = attributes[i];
         NativeGlSlot* buffer = native_gl_slot(context, a.buffer, NATIVE_GL_BUFFER);
         if (!buffer || a.location >= 16 || !a.components || a.components > 4 ||
-            a.offset > buffer->bytes || a.components * sizeof(float) > buffer->bytes - a.offset ||
-            a.stride > 2048) { native_gl_error(context, "invalid vertex attribute upload"); return {}; }
+            a.offset > buffer->length || a.components * sizeof(float) > buffer->length - a.offset ||
+            a.stride > 2048 || (locations & (1u << a.location))) { native_gl_error(context, "invalid vertex attribute upload"); return {}; }
+        locations |= 1u << a.location;
     }
     NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_VERTEX_ARRAY, 0); if (!slot) return {};
+    slot->attribute_count = count; slot->indices = indices;
+    memcpy(slot->attributes, attributes, count * sizeof(NativeGlAttribute));
     NativeGlFunctions& gl = context->gl; gl.GenVertexArrays(1, &slot->name); gl.BindVertexArray(slot->name);
     for (unsigned i = 0; i < count; i++) {
         const NativeGlAttribute& a = attributes[i];
@@ -358,8 +386,10 @@ bool native_gl_uniform_set(NativeGlContext* context, NativeGlUniform uniform,
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, uniform.program, NATIVE_GL_PROGRAM);
     if (!scope.valid || !slot || uniform.generation != context->stats.generation || uniform.location < 0 ||
-        !values || !count || count > 1024 || (components != 1 && components != 3 && components != 4 && components != 16)) return false;
-    for (unsigned i = 0; i < components * count; i++) if (!isfinite(values[i])) return false;
+        !values || !count || count > 1024 || (components != 1 && components != 3 && components != 4 && components != 16))
+        { native_gl_error(context,"invalid uniform update or stale program");return false; }
+    for (unsigned i = 0; i < components * count; i++) if (!isfinite(values[i]))
+        { native_gl_error(context,"uniform value is not finite");return false; }
     NativeGlFunctions& gl = context->gl; gl.UseProgram(slot->name);
     switch (components) {
         case 1: gl.Uniform1fv(uniform.location, count, values); break;
@@ -376,13 +406,14 @@ bool native_gl_uniform_set(NativeGlContext* context, NativeGlUniform uniform,
 NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface* image) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context);
-    if (!scope.valid || !image || !image->pixels || image->width <= 0 || image->height <= 0 ||
-        image->width > GL_DIMENSION_LIMIT || image->height > GL_DIMENSION_LIMIT || image->pitch < image->width * 4) return {};
+    if (!scope.valid || !image || !image->pixels || image->alpha_mode!=IMAGE_ALPHA_STRAIGHT || image->width <= 0 || image->height <= 0 ||
+        image->width > GL_DIMENSION_LIMIT || image->height > GL_DIMENSION_LIMIT || image->pitch < image->width * 4)
+        { native_gl_error(context,"invalid texture dimensions, format or alpha mode");return {}; }
     size_t bytes = (size_t)image->width * image->height * 4;
     NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TEXTURE, bytes); if (!slot) return {};
     // decoded images are top-down; native UV (0,0) is the lower-left corner.
     uint8_t* pixels = (uint8_t*)mem_alloc(bytes, MEM_CAT_RENDER);
-    if (!pixels) { native_gl_release(context, {slot->id}); return {}; }
+    if (!pixels) { native_gl_error(context,"texture staging allocation failed");native_gl_release(context, {slot->id}); return {}; }
     for (unsigned y = 0; y < (unsigned)image->height; y++)
         memcpy(pixels + (size_t)y * image->width * 4,
             (const uint8_t*)image->pixels + (size_t)(image->height - 1 - y) * image->pitch, (size_t)image->width * 4);
@@ -432,12 +463,13 @@ bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const fl
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
     if (!scope.valid || !slot || !background) return false;
+    for (unsigned c = 0; c < 4; c++) if (!isfinite(background[c]) || background[c] < 0 || background[c] > 1) return false;
     NativeGlFunctions& gl = context->gl;
     gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name); gl.Viewport(0, 0, slot->width, slot->height);
     gl.Enable(GL_FRAMEBUFFER_SRGB); gl.Enable(GL_DEPTH_TEST); gl.Disable(GL_SCISSOR_TEST); gl.DepthMask(GL_TRUE);
     gl.ClearColor(background[0] * background[3], background[1] * background[3], background[2] * background[3], background[3]);
     gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-    return native_gl_check(context, "drawing buffer clear");
+    slot->initialized=native_gl_check(context, "drawing buffer clear");return slot->initialized;
 #else
     return false;
 #endif
@@ -448,7 +480,29 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     NativeGlSlot* program = native_gl_slot(context, draw->program, NATIVE_GL_PROGRAM);
     NativeGlSlot* vertices = native_gl_slot(context, draw->vertices, NATIVE_GL_VERTEX_ARRAY);
     NativeGlSlot* texture = draw->texture.id ? native_gl_slot(context, draw->texture, NATIVE_GL_TEXTURE) : nullptr;
-    if (!program || !vertices || (draw->texture.id && !texture)) return false;
+    if (!program || !vertices || (draw->texture.id && !texture) || draw->side < 0 || draw->side > 2) return false;
+    uint32_t maximum = draw->count - 1;
+    if (draw->indexed) {
+        NativeGlSlot* indices = native_gl_slot(context, vertices->indices, NATIVE_GL_BUFFER);
+        if (!indices || draw->count > indices->length / sizeof(uint32_t)) {
+            native_gl_error(context, "index draw range exceeds upload"); return false;
+        }
+        maximum = 0;
+        for (unsigned i = 0; i < draw->count; i++) {
+            uint32_t index; memcpy(&index, (const uint8_t*)indices->data + i * sizeof(index), sizeof(index));
+            if (index > maximum) maximum = index;
+        }
+    }
+    for (unsigned i = 0; i < vertices->attribute_count; i++) {
+        const NativeGlAttribute& a = vertices->attributes[i];
+        NativeGlSlot* buffer = native_gl_slot(context, a.buffer, NATIVE_GL_BUFFER);
+        size_t element = a.components * sizeof(float), stride = a.stride ? a.stride : element;
+        uint64_t last = a.divisor ? (draw->instances - 1) / a.divisor : maximum;
+        if (!buffer || a.offset > buffer->length || element > buffer->length - a.offset ||
+            last > (buffer->length - a.offset - element) / stride) {
+            native_gl_error(context, "vertex or instance draw range exceeds upload"); return false;
+        }
+    }
     NativeGlFunctions& gl = context->gl; gl.UseProgram(program->name); gl.BindVertexArray(vertices->name);
     gl.ActiveTexture(GL_TEXTURE0); gl.BindTexture(GL_TEXTURE_2D, texture ? texture->name : 0);
     GLint sampler = gl.GetUniformLocation(program->name, "image"); if (sampler >= 0) gl.Uniform1i(sampler, 0);
@@ -457,7 +511,7 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     gl.DepthMask(draw->transparent ? GL_FALSE : GL_TRUE);
     if (draw->side == 2) gl.Disable(GL_CULL_FACE);
     else { gl.Enable(GL_CULL_FACE); gl.CullFace(draw->side == 1 ? GL_FRONT : GL_BACK); }
-    gl.FrontFace(GL_CCW);
+    gl.FrontFace(draw->clockwise ? GL_CW : GL_CCW);
     if (draw->indexed) gl.DrawElementsInstanced(GL_TRIANGLES, draw->count, GL_UNSIGNED_INT, nullptr, draw->instances);
     else gl.DrawArraysInstanced(GL_TRIANGLES, 0, draw->count, draw->instances);
     context->stats.draws++; return native_gl_check(context, "draw submission");
@@ -473,7 +527,7 @@ static float native_gl_srgb(float value, bool encode) {
 ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource target) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
-    if (!scope.valid || !slot) return nullptr;
+    if (!scope.valid || !slot || !slot->initialized) return nullptr;
     NativeGlFunctions& gl = context->gl;
     GLint read, draw, pack, row, skip_rows, skip_pixels, pbo;
     gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read); gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
@@ -492,7 +546,10 @@ ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource targ
     gl.BindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
     gl.PixelStorei(GL_PACK_ALIGNMENT, pack); gl.PixelStorei(GL_PACK_ROW_LENGTH, row);
     gl.PixelStorei(GL_PACK_SKIP_ROWS, skip_rows); gl.PixelStorei(GL_PACK_SKIP_PIXELS, skip_pixels);
-    if (!surface || !success) { image_surface_destroy(surface); return nullptr; }
+    if (!surface || !success) {
+        if (!surface) native_gl_error(context,"snapshot readback allocation failed");
+        image_surface_destroy(surface); return nullptr;
+    }
     uint8_t* pixels = (uint8_t*)surface->pixels;
     for (unsigned y = 0; y < slot->height / 2; y++) {
         uint8_t* a = pixels + (size_t)y * surface->pitch;

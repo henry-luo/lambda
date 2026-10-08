@@ -1,3 +1,4 @@
+#include "scene3d.hpp"
 #include "render.hpp"
 #include "../lib/base64.h"
 #include "layout.hpp"
@@ -24,8 +25,7 @@
 #include <float.h>
 
 static RenderPool* g_render_pool = nullptr;
-static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
-static int g_render_pool_threads = 0;
+static pthread_mutex_t g_render_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct RenderOutputClearResult {
     bool selective;
@@ -139,17 +139,28 @@ static DomDocument* render_export_load_transform_document(RenderExportSession* s
     return doc;
 }
 
-static void init_render_pool_once() {
+static void init_render_pool(int threads) {
     g_render_pool = (RenderPool*)mem_calloc(1, sizeof(RenderPool), MEM_CAT_RENDER); // OBJ_HEAP_OK: process render worker pool singleton.
-    render_pool_init(g_render_pool, g_render_pool_threads);
+    if (g_render_pool) render_pool_init(g_render_pool, threads);
 }
 
 void render_pool_shutdown() {
+    pthread_mutex_lock(&g_render_pool_lock);
     if (g_render_pool) {
         render_pool_destroy(g_render_pool);
         lam::Temp<RenderPool> pool(g_render_pool);  // shutdown releases the singleton
         g_render_pool = nullptr;
     }
+    pthread_mutex_unlock(&g_render_pool_lock);
+}
+
+static int render_output_dispatch_tiles(TileJob* jobs, int count, int threads) {
+    pthread_mutex_lock(&g_render_pool_lock);
+    // UI teardown retires the workers; a later UI must create a fresh pool.
+    if (!g_render_pool) init_render_pool(threads);
+    int actual_threads=g_render_pool?g_render_pool->thread_count:0;
+    if (g_render_pool) render_pool_dispatch(g_render_pool,jobs,count);
+    pthread_mutex_unlock(&g_render_pool_lock);return actual_threads;
 }
 
 static int render_output_thread_count() {
@@ -574,6 +585,8 @@ static void render_output_init_context(RasterRenderContext* rdcon, UiContext* ui
     rdcon->transform = rdt_matrix_identity();
     rdcon->has_transform = false;
     rdcon->raster_scale = ui_context_raster_scale(uicon);
+    // retire changed generations before retained ancestors can bypass media traversal.
+    if (uicon->document) scene3d_prepare_document(uicon->document,uicon,rdcon->raster_scale);
 
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
     setup_font(uicon, &rdcon->font, default_font);
@@ -925,9 +938,6 @@ static RenderOutputReplayResult render_output_replay_display_list(RasterRenderCo
         }
         tile_grid_clear(&grid, canvas_bg);
 
-        g_render_pool_threads = render_threads;
-        pthread_once(&g_render_pool_once, init_render_pool_once);
-
         // Render jobs are frame-scoped; scratch allocation prevents queue storage from outliving dispatch.
         ScratchScope jobs_scope(&rdcon->scratch);
         TileJob* jobs = jobs_scope.array_zero<TileJob>((size_t)grid.total);
@@ -943,12 +953,12 @@ static RenderOutputReplayResult render_output_replay_display_list(RasterRenderCo
             jobs[i].bg_color = canvas_bg;
         }
 
-        render_pool_dispatch(g_render_pool, jobs, grid.total);
+        result.thread_count=render_output_dispatch_tiles(jobs,grid.total,render_threads);
+        if (!result.thread_count) { tile_grid_destroy(&grid);return result; }
         tile_grid_composite(&grid, surface);
 
         result.tiled = true;
         result.tile_count = grid.total;
-        result.thread_count = g_render_pool ? g_render_pool->thread_count : 1;
 
         jobs_scope.end();
         tile_grid_destroy(&grid);

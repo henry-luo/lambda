@@ -96,6 +96,9 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
     if (!dst || !out || !in) return false;
 
     switch (in->op) {
+        case DL_DRAW_IMAGE:
+            out->draw_image.snapshot_lease=lam::up(image_surface_snapshot_retain(in->draw_image.snapshot_lease));
+            break;
         case DL_FILL_PATH:
             if (!retained_dl_clone_path(&out->fill_path.path, in->fill_path.path)) return false;
             break;
@@ -137,6 +140,7 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
                                               &in->fill_surface_rect.clip_shapes);
             break;
         case DL_BLIT_SURFACE_SCALED:
+            out->blit_surface_scaled.snapshot_lease = lam::up(image_surface_snapshot_retain(in->blit_surface_scaled.snapshot_lease));
             retained_dl_copy_clip_shape_stack(dst, &out->blit_surface_scaled.clip_shapes,
                                               &in->blit_surface_scaled.clip_shapes);
             break;

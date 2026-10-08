@@ -1696,6 +1696,7 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     const char* height_attr = get_svg_attr(svg_element, "height");
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
     if (!viewbox_attr) viewbox_attr = get_svg_attr(svg_element, "viewbox");
+    float numeric_width=NAN,numeric_height=NAN;
 
     SvgViewBox vb = svg_parse_viewbox(viewbox_attr);
 
@@ -1703,7 +1704,11 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     // but not an explicit intrinsic width/height attribute. Percentage
     // attributes are presentation hints resolved against the containing block,
     // so they must not become natural dimensions here.
-    if (width_attr && *width_attr && !strchr(width_attr, '%')) {
+    if (!width_attr && read_svg_number_attr(svg_element,"width",&numeric_width) && numeric_width >= 0) {
+        // Lambda element presentation hints can carry numbers rather than HTML strings.
+        size.width = numeric_width;
+        size.has_intrinsic_width = true;
+    } else if (width_attr && *width_attr && !strchr(width_attr, '%')) {
         size.width = parse_svg_length(width_attr, 300);
         size.has_intrinsic_width = true;
     } else if (vb.has_viewbox && vb.width > 0) {
@@ -1711,7 +1716,10 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     }
 
     // determine height
-    if (height_attr && *height_attr && !strchr(height_attr, '%')) {
+    if (!height_attr && read_svg_number_attr(svg_element,"height",&numeric_height) && numeric_height >= 0) {
+        size.height = numeric_height;
+        size.has_intrinsic_height = true;
+    } else if (height_attr && *height_attr && !strchr(height_attr, '%')) {
         size.height = parse_svg_length(height_attr, 150);
         size.has_intrinsic_height = true;
     } else if (vb.has_viewbox && vb.height > 0) {
