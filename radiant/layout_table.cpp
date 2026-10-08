@@ -3402,31 +3402,12 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
     });
     for (int i = 0; i < rowspan_cells->length; i++) {
         RowspanCell* rsc = (RowspanCell*)rowspan_cells->data[i];
-        // expanded overlapping rows. otherwise sibling rowspans over the same
-        float current_total = table_sum_rows(
-            meta, rsc->start_row, rsc->end_row, row_spacing);
-        float excess = rsc->required_height - current_total;
-        if (excess <= 0.0f) {
-            continue;
-        }
-        float total_content = table_sum_rows(meta, rsc->start_row, rsc->end_row, 0.0f);
-        if (total_content > 0) {
-            for (int r = rsc->start_row; r < rsc->end_row; r++) {
-                float proportion = meta->row_heights[r] / total_content;
-                float amount = excess * proportion;
-                meta->row_heights[r] += amount;
-            }
-        } else {
-            // height into the later grid row. this preserves empty placeholder
-            // rows used only to terminate rowspans.
-            int target_row = rsc->end_row - 1;
-            if (meta->row_collapsed) {
-                while (target_row > rsc->start_row && meta->row_collapsed[target_row]) {
-                    target_row--;
-                }
-            }
-            meta->row_heights[target_row] += excess;
-        }
+        // reevaluate overlapping constraints after earlier spans have expanded their rows.
+        int target_row = rsc->end_row - 1;
+        if (meta->row_collapsed)
+            while (target_row > rsc->start_row && meta->row_collapsed[target_row]) target_row--;
+        layout_table_distribute_rowspan_height(meta->row_heights, meta->row_count,
+            rsc->start_row, rsc->end_row - rsc->start_row, rsc->required_height, row_spacing, target_row);
     }
     for (int i = 0; i < rowspan_cells->length; i++) {
         lam::Temp<RowspanCell> cell((RowspanCell*)rowspan_cells->data[i]);
@@ -3672,19 +3653,48 @@ static bool table_cell_apply_align_content(ViewTableCell* cell,
     }
 }
 
-static size_t table_html_column_span(DomElement* element, const char* attribute) {
+static size_t table_html_span(DomElement* element, const char* attribute, size_t maximum, bool allow_zero = false) {
     const char* value = element ? element->get_attribute(attribute) : nullptr;
-    int64_t span = value ? str_to_int64_default(value, strlen(value), 1) : 1;
-    // HTML clamps positive column spans; keep both view producers on the same grid.
-    return span > 1000 ? 1000u : span > 0 ? (size_t)span : 1u;
+    if (!value) return 1u;
+    while (str_is_html_space(*value)) value++;
+    if (*value == '+') value++;
+    if (!str_is_digit(*value)) return 1u;
+    size_t span = 0;
+    while (str_is_digit(*value)) {
+        size_t digit = (size_t)(*value++ - '0');
+        // saturate before native overflow; HTML rejects every negative spelling, including -0.
+        if (span > (maximum - digit) / 10) return maximum;
+        span = span * 10 + digit;
+    }
+    return span || allow_zero ? span : 1u;
 }
 
 size_t layout_table_cell_colspan(DomElement* element) {
-    return table_html_column_span(element, "colspan");
+    return table_html_span(element, "colspan", 1000);
 }
 
 size_t layout_table_column_span(DomElement* element) {
-    return table_html_column_span(element, "span");
+    return table_html_span(element, "span", 1000);
+}
+
+size_t layout_table_cell_rowspan(DomElement* element) {
+    return table_html_span(element, "rowspan", 65534, true);
+}
+
+size_t layout_table_used_rowspan(size_t specified, size_t remaining) {
+    return !remaining ? 1u : !specified || specified > remaining ? remaining : specified;
+}
+
+void layout_table_distribute_rowspan_height(float* heights, size_t count, size_t start,
+        size_t span, float required, float spacing, size_t empty_target) {
+    float extent = layout_table_span_width(heights, count, start, span, spacing);
+    float extra = required - extent;
+    if (extra <= 0.0f) return;
+    float content = layout_table_span_width(heights, count, start, span, 0.0f);
+    if (content > 0.0f) {
+        for (size_t row = start; row < start + span && row < count; row++)
+            heights[row] += extra * (heights[row] / content);
+    } else if (empty_target < count) heights[empty_target] += extra;
 }
 
 static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewTableCell* cell) {
@@ -3703,15 +3713,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     if (cellNode->node_type == DOM_NODE_ELEMENT) {
         DomElement* dom_elem = cellNode->as_element();
         cell->td->col_span = (int)layout_table_cell_colspan(dom_elem); // INT_CAST_OK: HTML column span count is bounded by 1000.
-        const char* rowspan_str = dom_elem->get_attribute("rowspan");
-        if (rowspan_str && rowspan_str[0] != '\0') {
-            int span = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0); // INT_CAST_OK: string length
-            if (span == 0) {
-                cell->td->row_span = 0;
-            } else if (span > 0 && span <= 65534) {
-                cell->td->row_span = span;
-            }
-        }
+        cell->td->row_span = (int)layout_table_cell_rowspan(dom_elem); // INT_CAST_OK: HTML row span count is bounded by 65534.
         if (cell->in_line && cell->inl()->vertical_align) {
             table_cell_apply_vertical_align_keyword(cell, cell->inl()->vertical_align);
         }
@@ -6543,14 +6545,7 @@ static bool normalize_rowspans_to_row_groups(ViewTable* table) {
         int remaining_in_group = table_row_remaining_in_group(row);
         row->each_cell( [&](ViewTableCell* cell) {
             int original_span = cell->td->row_span;
-            int used_span = original_span;
-            if (used_span == 0) {
-                used_span = remaining_in_group;
-            } else if (used_span > remaining_in_group) {
-                // CSS 2.1 §17.5: a cell box cannot extend beyond the last row
-                used_span = remaining_in_group;
-            }
-            if (used_span < 1) used_span = 1;
+            int used_span = (int)layout_table_used_rowspan(original_span, remaining_in_group); // INT_CAST_OK: bounded row count.
             if (used_span != original_span) {
                 cell->td->row_span = used_span;
                 changed = true;
@@ -6563,17 +6558,12 @@ static bool normalize_rowspans_to_row_groups(ViewTable* table) {
 static int table_place_span(bool* occupied, TableMetadata* meta, int rows, int columns,
                             int row, int col, int row_span, int col_span,
                             int* start_col = nullptr, int* max_col_used = nullptr) {
-    while (col < columns && (meta ? meta->grid(row, col) : occupied[row * columns + col])) col++;
-    if (start_col) *start_col = col;
-    for (int r = row; r < row + row_span && r < rows; r++) {
-        for (int c = col; c < col + col_span && c < columns; c++) {
+    return layout_table_place_span(rows, columns, row, col, row_span, col_span,
+        [&](int r, int c) { return meta ? meta->grid(r, c) : occupied[r * columns + c]; },
+        [&](int r, int c) {
             if (meta) meta->grid(r, c) = true;
             else occupied[r * columns + c] = true;
-        }
-    }
-    int right = col + col_span;
-    if (max_col_used && right > *max_col_used) *max_col_used = right;
-    return right;
+        }, start_col, max_col_used);
 }
 
 static int table_place_row_cells(ViewTableRow* row, int row_index, int rows,

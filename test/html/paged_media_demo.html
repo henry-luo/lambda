@@ -35,7 +35,7 @@ th { background: #e0ecff; }
 <p>The same composed pages can be viewed here or exported to PDF, SVG and PNG. Window resizing changes the visible area while the paper dimensions stay fixed.</p>
 <p>Try a two-column preview with <code>--page-grid 1x2 --page-column-gap 24</code>, or a facing spread with <code>--book --book-page 2</code>.</p>
 <h2 class="chapter">Tables across pages</h2>
-<p>The header repeats when this automatically sized table continues onto another sheet. Cell spacing and column spans are preserved across page breaks. The final row group stays together and begins on a new sheet.</p>
+<p>The header repeats when this automatically sized table continues onto another sheet. Cell spacing and column spans are preserved across page breaks. Connected row spans stay together. The final row group begins on a new sheet.</p>
 <table>
   <caption>Paged layout features</caption>
   <colgroup><col><col></colgroup>
@@ -52,6 +52,8 @@ th { background: #e0ecff; }
   </tbody>
   <tbody style="break-before: page; break-inside: avoid">
     <tr><td>Row groups</td><td>This group starts on a new sheet and stays together.</td></tr>
+    <tr><td rowspan="2">Row spans</td><td>This label covers two rows.</td></tr>
+    <tr><td>The connected rows move together when they fit on a sheet.</td></tr>
     <tr class="alignment"><td>Cell alignment</td><td>This cell sits at the bottom of the row; the label is centered vertically.</td></tr>
     <tr class="baseline"><td>Shared baseline</td><td>Different sizes</td></tr>
   </tbody>

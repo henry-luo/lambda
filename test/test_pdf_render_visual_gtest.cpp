@@ -724,6 +724,30 @@ static void expect_pngs_exactly_equal(const char* expected_path, const char* act
     image_free(actual.pixels);
 }
 
+static bool render_paged_parity_variant(const char* stem, const char* html,
+        char* preview, PdfFileInfo* pdf, const char* preview_options = "--paged --block-remote-resources --page-grid 1x6") {
+    char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s.html", stem);
+    snprintf(preview, PATH_MAX, "temp/render_output_parity/%s.png", stem);
+    snprintf(pdf->path, sizeof(pdf->path), "temp/render_output_parity/%s.pdf", stem);
+    snprintf(pdf->base, sizeof(pdf->base), "%s", stem);
+    return render_html_fixture(path, pdf->path, html, "--paged --block-remote-resources") &&
+        render_document_fixture(path, preview, preview_options);
+}
+
+static void expect_paged_pair_output_parity(char previews[2][PATH_MAX], PdfFileInfo pdfs[2],
+        int minimum_pages, int maximum_pages) {
+    int count = pdf_page_count(pdfs[0].path);
+    ASSERT_GE(count, minimum_pages); ASSERT_LE(count, maximum_pages);
+    ASSERT_EQ(pdf_page_count(pdfs[1].path), count);
+    expect_pngs_exactly_equal(previews[1], previews[0]);
+    for (int page = 1; page <= count; page++) {
+        char pngs[2][PATH_MAX];
+        for (size_t variant = 0; variant < 2; variant++)
+            ASSERT_TRUE(render_reference_page(&pdfs[variant], page, pngs[variant], sizeof(pngs[variant])));
+        expect_pngs_exactly_equal(pngs[1], pngs[0]);
+    }
+}
+
 static void expect_html_pair_output_parity(const char* name, const char* actual, const char* reference) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* sources[] = {actual, reference};
@@ -1050,10 +1074,6 @@ TEST(RenderOutputParity, PagedCaptionsMatchBlockWrappersAcrossTableAndCaptionCon
         SCOPED_TRACE(long_caption ? "caption continuations" : "table continuations");
         char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
         for (size_t variant = 0; variant < 2; variant++) {
-            char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s.html", stems[variant]);
-            snprintf(previews[variant], sizeof(previews[variant]), "temp/render_output_parity/%s.png", stems[variant]);
-            snprintf(pdfs[variant].path, sizeof(pdfs[variant].path), "temp/render_output_parity/%s.pdf", stems[variant]);
-            snprintf(pdfs[variant].base, sizeof(pdfs[variant].base), "%s", stems[variant]);
             StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
             strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
                 "@page :left{size:140px 112px}html,body{margin:0;font:10px/12px Arial}"
@@ -1079,19 +1099,10 @@ TEST(RenderOutputParity, PagedCaptionsMatchBlockWrappersAcrossTableAndCaptionCon
             if (!variant) strbuf_append_format(html, "<caption>%s</caption>", top);
             strbuf_append_str(html, "</table>");
             if (variant) strbuf_append_format(html, "<div class='cap bottom'>%s</div></div>", bottom);
-            bool rendered = render_html_fixture(path, pdfs[variant].path, html->str, "--paged --block-remote-resources");
+            bool rendered = render_paged_parity_variant(stems[variant], html->str, previews[variant], &pdfs[variant]);
             strbuf_free(html); ASSERT_TRUE(rendered);
-            ASSERT_TRUE(render_document_fixture(path, previews[variant], "--paged --block-remote-resources --page-grid 1x6"));
         }
-        int count = pdf_page_count(pdfs[0].path); ASSERT_GE(count, 2); ASSERT_LE(count, 6);
-        ASSERT_EQ(pdf_page_count(pdfs[1].path), count);
-        expect_pngs_exactly_equal(previews[1], previews[0]);
-        for (int page = 1; page <= count; page++) {
-            char pngs[2][PATH_MAX];
-            for (size_t variant = 0; variant < 2; variant++)
-                ASSERT_TRUE(render_reference_page(&pdfs[variant], page, pngs[variant], sizeof(pngs[variant])));
-            expect_pngs_exactly_equal(pngs[1], pngs[0]);
-        }
+        expect_paged_pair_output_parity(previews, pdfs, 2, 6);
     }
 }
 
@@ -1103,10 +1114,6 @@ TEST(RenderOutputParity, PagedColumnLayersAndWidthsMatchExplicitCellsAcrossConti
         SCOPED_TRACE(automatic ? "automatic layout" : "fixed layout");
         char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
         for (size_t variant = 0; variant < 2; variant++) {
-            char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s.html", stems[variant]);
-            snprintf(previews[variant], sizeof(previews[variant]), "temp/render_output_parity/%s.png", stems[variant]);
-            snprintf(pdfs[variant].path, sizeof(pdfs[variant].path), "temp/render_output_parity/%s.pdf", stems[variant]);
-            snprintf(pdfs[variant].base, sizeof(pdfs[variant].base), "%s", stems[variant]);
             StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
             strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
                 "html,body{margin:0;font:10px/12px Arial}table{table-layout:%s;width:100%%;border-spacing:4px 2px;background:magenta}"
@@ -1122,11 +1129,11 @@ TEST(RenderOutputParity, PagedColumnLayersAndWidthsMatchExplicitCellsAcrossConti
                 "<tfoot><tr><td>F</td><td>F</td><td>F</td></tr></tfoot>"
                 "<tbody><tr><td colspan='2'>A\nB\nC\nD\nE\nF\nG\nH\nI\nJ</td><td>Z</td></tr></tbody>"
                 "<tbody><tr id='override'><td>U</td><td>V</td><td>W</td></tr></tbody></table>");
-            bool rendered = render_html_fixture(path, pdfs[variant].path, html->str, "--paged --block-remote-resources");
-            strbuf_free(html); ASSERT_TRUE(rendered); ASSERT_EQ(pdf_page_count(pdfs[variant].path), 3);
-            ASSERT_TRUE(render_document_fixture(path, previews[variant], "--paged --block-remote-resources --page-grid 1x3"));
+            bool rendered = render_paged_parity_variant(stems[variant], html->str, previews[variant], &pdfs[variant],
+                "--paged --block-remote-resources --page-grid 1x3");
+            strbuf_free(html); ASSERT_TRUE(rendered);
         }
-        expect_pngs_exactly_equal(previews[1], previews[0]);
+        expect_paged_pair_output_parity(previews, pdfs, 3, 3);
         ImageData preview = {}; ASSERT_TRUE(load_png_rgba(previews[0], &preview));
         EXPECT_EQ(preview.width, 480); EXPECT_EQ(preview.height, 112);
         for (int page = 0; page < 3; page++) {
@@ -1136,12 +1143,41 @@ TEST(RenderOutputParity, PagedColumnLayersAndWidthsMatchExplicitCellsAcrossConti
             expect_preview_pixel(preview, page * 160 + 46, 15, 255, 0, 255);
             expect_preview_pixel(preview, page * 160 + 70, 25, 255, 0, 255);
             expect_preview_pixel(preview, page * 160 + 70, 30, page == 2 ? 0 : 255, page == 2 ? 255 : 0, page == 2 ? 255 : 0);
-            char pngs[2][PATH_MAX];
-            for (size_t variant = 0; variant < 2; variant++)
-                ASSERT_TRUE(render_reference_page(&pdfs[variant], page + 1, pngs[variant], sizeof(pngs[variant])));
-            expect_pngs_exactly_equal(pngs[1], pngs[0]);
+
         }
         image_free(preview.pixels);
+    }
+}
+
+TEST(RenderOutputParity, PagedRowSpansMatchExplicitStackedCellsAcrossRepeatedFurniture) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* stems[] = {"paged_rowspans", "paged_rowspan_block_reference"};
+    for (bool automatic : {false, true}) for (const char* align : {"top", "middle", "bottom", "baseline"}) {
+        SCOPED_TRACE(automatic ? "automatic layout" : "fixed layout");
+        SCOPED_TRACE(align);
+        char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+        for (size_t variant = 0; variant < 2; variant++) {
+            StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+            strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
+                "@page :left{size:140px 112px}html,body{margin:0;font:10px/12px Arial}"
+                "table{table-layout:%s;width:100%%;border-spacing:0;background:magenta}"
+                "caption{padding:0;text-align:left}td,th{padding:0;vertical-align:top}"
+                "col:first-child{width:40px;background:cyan}.span{vertical-align:%s;background:yellow}"
+                ".upper{height:20px;background:lime}.lower{height:20px;background:#ccf}"
+                "thead{background:#cce0ff}tfoot{background:#ddffdd}</style>"
+                "<table><caption>Span clusters</caption><colgroup><col><col></colgroup>"
+                "<thead><tr><th>Head A</th><th>Head B</th></tr></thead>"
+                "<tfoot><tr><td>Foot A</td><td>Foot B</td></tr></tfoot><tbody>", automatic ? "auto" : "fixed", align);
+            // one reference row contains ordinary blocks, giving each two-row cluster the same explicit geometry.
+            for (size_t row = 0; row < 5; row++) strbuf_append_str(html, variant ?
+                "<tr><td class='span'>Span</td><td><div class='upper'>Upper</div><div class='lower'>Lower</div></td></tr>" :
+                "<tr><td class='span' rowspan='2'>Span</td><td class='upper'>Upper</td></tr><tr><td class='lower'>Lower</td></tr>");
+            strbuf_append_str(html, "</tbody></table>");
+            bool rendered = render_paged_parity_variant(stems[variant], html->str, previews[variant], &pdfs[variant]);
+            strbuf_free(html); ASSERT_TRUE(rendered);
+        }
+        expect_paged_pair_output_parity(previews, pdfs, 5, 5);
     }
 }
 
