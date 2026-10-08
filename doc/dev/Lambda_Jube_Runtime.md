@@ -35,6 +35,13 @@ SHA-256 for the native library, which the host verifies before loading.
 A missing or incompatible module surfaces as Node's ordinary
 `MODULE_NOT_FOUND`.
 
+Discovery scans `JUBE_MODULE_PATH` entries in order, then `modules` beside
+the executable, then the working directory's `modules`. The first manifest
+for a module's specifier wins; later copies of the same module cannot replace
+it. An incompatible selected image reports an error rather than trying a
+lower-priority copy. Manifests from different modules claiming one specifier
+still conflict, and the selected manifest must match its descriptor (D7.3.4).
+
 The host exports only the symbols listed in `lambda/jube/jube_host_exports.txt`
 to modules (D7.3.6).
 

@@ -707,17 +707,22 @@ extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
                                             added, removed);
                 break;
             }
-            Item record = js_new_object();
-            Item added = js_array_new(0);
-            Item removed = js_array_new(0);
+            // every record field survives later allocations before the pending array owns it (D5.3.3).
+            RootFrame roots(7);
+            Rooted<Item> record(roots, js_new_object());
+            Rooted<Item> added(roots, js_array_new(0));
+            Rooted<Item> removed(roots, js_array_new(0));
+            added.set(dom_static_node_list_from_array(added.get()));
+            removed.set(dom_static_node_list_from_array(removed.get()));
+            Rooted<Item> type(roots, js_make_string(attribute ? "attributes" : "characterData"));
+            Rooted<Item> target_item(roots, dom_wrap_element(observed_node));
+            Rooted<Item> attribute_item(roots, attribute_name ? js_make_string(attribute_name) : ItemNull);
             bool include_old = (attribute && registration->attribute_old_value) ||
                                (character && registration->character_data_old_value);
-            observer_set_record_fields(record,
-                js_make_string(child ? "childList" : attribute ? "attributes" : "characterData"),
-                dom_wrap_element(observed_node), added, removed,
-                attribute_name ? js_make_string(attribute_name) : ItemNull,
-                include_old && old_value ? js_make_string(old_value) : ItemNull);
-            observer_queue_record(observer, record);
+            Rooted<Item> old_item(roots, include_old && old_value ? js_make_string(old_value) : ItemNull);
+            observer_set_record_fields(record.get(), type.get(), target_item.get(), added.get(), removed.get(),
+                attribute_item.get(), old_item.get());
+            observer_queue_record(observer, record.get());
             break;
         }
     }

@@ -58,6 +58,13 @@ The flow (`font.cpp:99-153`):
 
 `populate_font_prop_metrics` (`font.cpp:80`) copies engine metrics onto the `FontProp`: `space_width` via `resolved_space_width` (`font.cpp:23`, which loads the space glyph through `font_load_glyph` and divides out `pixel_ratio`, falling back to `FontMetrics::space_width` then `font_get_glyph`); `ascender`/`descender` from `font_get_normal_lh_split`; `font_height` from `FontMetrics::hhea_line_height`; and `has_kerning` from `FontMetrics::has_kerning`, forced to `false` when CSS `font-kerning: none` is set (`font.cpp:94-96`). These derived fields let the text layout loop avoid per-glyph engine calls for the common measurements (space advance, line metrics).
 
+macOS name and descriptor lookups in `font_platform.c` use CoreText's options
+to prevent automatic activation and, on macOS 13+, automatic download.
+Otherwise a web font's name can enter FontRegistry's interactive download
+service and block layout indefinitely. Explicit document font downloads
+remain in the resource loader; unavailable platform faces use ordinary font
+fallback. See Apple's [font creation options](https://developer.apple.com/documentation/coretext/ctfontoptions).
+
 ---
 
 ## 4. The engine surface Radiant depends on (`lib/font/font.h`)

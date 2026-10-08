@@ -2344,7 +2344,9 @@ static bool jube_specifier_entry_upsert(const char* specifier, const char* modul
             jube_specifier_catalog_failed = true;
             return false;
         }
-        if (!entry.manifest_path[0] && existing->manifest_path[0]) {
+        // catalog roots are scanned in priority order; later fallback copies
+        // must not replace a configured or executable-local manifest.
+        if (existing->manifest_path[0]) {
             strcpy(entry.manifest_path, existing->manifest_path);
         }
         if (!entry.module && existing->module) entry.module = existing->module;

@@ -543,6 +543,10 @@ static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
     }
     if (bytes) *bytes += record->primary_size;
     if (node->is_element()) {
+        for (DomAttr* attribute = node->as_element()->ext ? node->as_element()->ext->attribute_nodes.get() : nullptr;
+             attribute; attribute = attribute->attribute_next) {
+            if (!dom_subtree_can_retire(doc, attribute, blocked, allowed_pins, bytes)) return false;
+        }
         for (DomNode* child = node->as_element()->first_child; child;
              child = child->next_sibling) {
             if (!dom_subtree_can_retire(doc, child, blocked, allowed_pins, bytes)) return false;
@@ -617,6 +621,11 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
     if (result.item != ItemNull.item) dom_retire_release_render_result(doc, result);
     size_t retired = 0;
     if (node->is_element()) {
+        while (node->as_element()->ext && node->as_element()->ext->attribute_nodes) {
+            DomAttr* attribute = node->as_element()->ext->attribute_nodes;
+            dom_attribute_node_detach(attribute);
+            retired += dom_retire_subtree(doc, attribute, pending);
+        }
         DomNode* child = node->as_element()->first_child;
         while (child) {
             DomNode* next = child->next_sibling;
@@ -626,6 +635,8 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
         dom_element_release_retired_storage(node->as_element());
     } else if (node->is_text()) {
         dom_text_release_retired_storage(doc, node->as_text());
+    } else if (DomAttr* attribute = node->as_attribute()) {
+        dom_attribute_node_release_retired_storage(attribute);
     }
 
     size_t primary_size = record->primary_size;

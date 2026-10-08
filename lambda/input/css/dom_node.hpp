@@ -32,6 +32,7 @@ typedef union {
 struct DomElement;
 struct DomText;
 struct DomComment;
+struct DomAttr;
 struct DomDocument;
 struct ViewState;
 typedef struct Arena Arena;
@@ -40,6 +41,7 @@ typedef struct Element Element;  // Lambda Element type
 
 enum DomNodeType {
     DOM_NODE_ELEMENT = 1,     // Element node
+    DOM_NODE_ATTRIBUTE = 2,   // attribute nodes have an owner, never a tree parent
     DOM_NODE_TEXT = 3,        // Text node
     DOM_NODE_COMMENT = 8,     // Comment node
     DOM_NODE_DOCUMENT = 9,    // Document node
@@ -131,6 +133,10 @@ struct DomNode {
         return is_comment() ? ((DomComment*)this) : nullptr;
     }
 
+    inline DomAttr* as_attribute() {
+        return node_type == DOM_NODE_ATTRIBUTE ? ((DomAttr*)this) : nullptr;
+    }
+
     inline const DomElement* as_element() const {
         return is_element() ? ((const DomElement*)this) : nullptr;
     }
@@ -186,6 +192,17 @@ struct DomNode {
     }
 
     const char* view_name();
+};
+
+// tier-1: node arena and document-pool strings; detached Attr values survive replacement.
+struct DomAttr : DomNode {
+    lam::Up<DomDocument> doc;
+    lam::Up<DomDocument> storage_document;
+    Pool* storage_pool;
+    lam::Up<DomElement> owner_element;
+    lam::Own<const char> namespace_uri, qualified_name, local_name, prefix, value;
+    lam::Up<DomAttr> attribute_next;
+    void (*owner_changed)(void*);
 };
 
 // CSS Generated Content keeps ::before/::after at the rendered child edges

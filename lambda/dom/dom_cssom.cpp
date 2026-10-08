@@ -83,6 +83,8 @@ struct CssomWrapperEntry {
     CssomWrapperEntry* previous;
     CssomWrapperEntry* next;
     DomNodeRef node_ref;
+    DomDocument* attribute_owner_document;
+    DomNodeRef attribute_owner_ref;
 };
 struct CssomWrapperIndex {
     void* native;
@@ -163,10 +165,24 @@ static void cssom_wrapper_remove(CssomWrapperEntry* entry) {
     if (entry->next) entry->next->previous = entry->previous;
 }
 
+static void cssom_wrapper_attribute_owner(CssomWrapperEntry* entry, DomElement* owner) {
+    if (entry->attribute_owner_document) {
+        dom_node_unpin(entry->attribute_owner_document, entry->attribute_owner_ref, DOM_NODE_PIN_WRAPPER);
+        entry->attribute_owner_document = nullptr;
+        entry->attribute_owner_ref = {};
+    }
+    if (owner && dom_node_pin(owner->doc, dom_node_ref(owner), DOM_NODE_PIN_WRAPPER)) {
+        // an Attr wrapper retains its owner without creating a strong GC cache cycle (D4.5.1v4).
+        entry->attribute_owner_document = owner->doc;
+        entry->attribute_owner_ref = dom_node_ref(owner);
+    }
+}
+
 static void cssom_wrapper_cleared(uint64_t*, void* data) {
     CssomWrapperEntry* entry = (CssomWrapperEntry*)data;
     cssom_wrapper_remove(entry);
     if (entry->kind == CSSOM_CACHE_NODE) {
+        cssom_wrapper_attribute_owner(entry, nullptr);
         dom_node_unpin(entry->document, entry->node_ref, DOM_NODE_PIN_WRAPPER);
         // retired nodes are swept only after every weak slot in this collection has cleared.
         entry->next = entry->cache->swept_nodes;
@@ -190,10 +206,16 @@ static bool cssom_cache_wrapper(void* native, CssomCacheKind kind,
             mem_free(entry);
             return false;
         }
+        DomAttr* attribute = ((DomNode*)native)->as_attribute();
+        if (attribute) {
+            cssom_wrapper_attribute_owner(entry, attribute->owner_element);
+            if (!attribute->owner_element) dom_node_schedule_detached(document, attribute);
+        }
     }
     CssomWrapperIndex key = {native, kind, entry};
     hashmap_set(cache->index, &key);
     if (hashmap_oom(cache->index)) {
+        cssom_wrapper_attribute_owner(entry, nullptr);
         if (kind == CSSOM_CACHE_NODE)
             dom_node_unpin(document, entry->node_ref, DOM_NODE_PIN_WRAPPER);
         mem_free(entry);
@@ -215,6 +237,7 @@ static void cssom_wrapper_detach(CssomWrapperEntry* entry) {
         virtual_host_set(wrapper, virtual_host_type(wrapper), nullptr);
     }
     gc_unregister_weak(entry->cache->gc, &entry->item);
+    cssom_wrapper_attribute_owner(entry, nullptr);
     if (entry->kind == CSSOM_CACHE_NODE)
         dom_node_unpin(entry->document, entry->node_ref, DOM_NODE_PIN_WRAPPER);
     cssom_wrapper_remove(entry);
@@ -293,9 +316,8 @@ static void cssom_document_destroyed(DomDocumentResourceData* data) {
     mem_free(resource);
 }
 
-static bool cssom_prepare_document(DomDocument* document) {
+static bool cssom_prepare_document_for_cache(DomDocument* document, CssomWrapperCache* cache) {
     if (!document) return true;
-    CssomWrapperCache* cache = cssom_wrapper_cache(true);
     if (!cache) return false;
     CssomDocumentResource* resource = cssom_document_resource(document);
     if (!resource) {
@@ -320,6 +342,10 @@ static bool cssom_prepare_document(DomDocument* document) {
     return true;
 }
 
+static bool cssom_prepare_document(DomDocument* document) {
+    return cssom_prepare_document_for_cache(document, cssom_wrapper_cache(true));
+}
+
 extern "C" Item dom_cached_node_wrapper(void* node) {
     CssomWrapperEntry* entry = cssom_wrapper_entry(node, CSSOM_CACHE_NODE);
     return entry && entry->item && dom_node_ref_validate(entry->document, entry->node_ref)
@@ -330,6 +356,33 @@ extern "C" bool dom_cache_node_wrapper(void* node, void* document, Item wrapper)
     DomDocument* doc = (DomDocument*)document;
     return node && doc && cssom_prepare_document(doc) &&
         cssom_cache_wrapper(node, CSSOM_CACHE_NODE, wrapper, doc);
+}
+
+extern "C" void dom_attribute_node_owner_changed(void* node) {
+    DomAttr* attribute = node ? ((DomNode*)node)->as_attribute() : nullptr;
+    if (!attribute) return;
+    // each realm can wrap this native Attr; refresh every lease after replacement or removal.
+    DomDocument* documents[] = {attribute->storage_document, attribute->doc};
+    for (DomDocument* document : documents) {
+        CssomDocumentResource* resource = cssom_document_resource(document);
+        for (int i = 0; resource && i < resource->caches->length; i++) {
+            CssomWrapperCache* cache = (CssomWrapperCache*)resource->caches->data[i];
+            CssomWrapperIndex key = {node, CSSOM_CACHE_NODE, nullptr};
+            const CssomWrapperIndex* found = (const CssomWrapperIndex*)hashmap_get(cache->index, &key);
+            if (found) {
+                CssomWrapperEntry* entry = found->entry;
+                if (entry->document != attribute->doc &&
+                    cssom_prepare_document_for_cache(attribute->doc, cache) &&
+                    dom_node_pin(attribute->doc, dom_node_ref(attribute), DOM_NODE_PIN_WRAPPER)) {
+                    // adoption moves the wrapper lease to the current registry before the old lease is released.
+                    dom_node_unpin(entry->document, entry->node_ref, DOM_NODE_PIN_WRAPPER);
+                    entry->document = attribute->doc;
+                    entry->node_ref = dom_node_ref(attribute);
+                }
+                cssom_wrapper_attribute_owner(entry, attribute->owner_element);
+            }
+        }
+    }
 }
 
 extern "C" void* dom_cached_node_wrapper_document(Item wrapper) {

@@ -49,6 +49,8 @@ DomElement* dom_parent_element(DomElement* element) {
     return parent;
 }
 
+static const char* dom_element_stored_attribute(DomElement* element, const char* key);
+
 const char* dom_element_lookup_namespace_uri(DomElement* element, const char* prefix) {
     if (!element) return nullptr;
     if (prefix && strcmp(prefix, "xml") == 0) return "http://www.w3.org/XML/1998/namespace";
@@ -64,7 +66,7 @@ const char* dom_element_lookup_namespace_uri(DomElement* element, const char* pr
     // XML namespace declarations inherit independently of HTML integration points.
     for (DomNode* node = element; node; node = node->parent) {
         if (!node->is_element()) continue;
-        const char* uri = node->as_element()->get_attribute(declaration);
+        const char* uri = dom_element_stored_attribute(node->as_element(), declaration);
         if (uri) return *uri ? uri : nullptr;
     }
     return nullptr;
@@ -72,7 +74,7 @@ const char* dom_element_lookup_namespace_uri(DomElement* element, const char* pr
 
 const char* dom_element_namespace_uri(DomElement* element) {
     if (!element || !element->tag_name) return "";
-    const char* uri = element->get_attribute("__lambda_ns_uri");
+    const char* uri = dom_element_stored_attribute(element, "__lambda_ns_uri");
     if (uri) return uri;
     const char* colon = strchr(element->tag_name, ':');
     char prefix[128] = {};
@@ -1100,6 +1102,9 @@ bool dom_element_commit_inline_declarations(DomElement* element, CssRule* rule, 
 
 void dom_element_release_retired_storage(DomElement* element) {
     if (!element || !element->doc) return;
+    // no live Attr wrapper can reach an owner selected for retirement; keep detached values intact.
+    while (element->ext && element->ext->attribute_nodes)
+        dom_attribute_node_detach(element->ext->attribute_nodes);
     Element* backing_source = dom_node_registry_backing_source(
         element->doc, static_cast<DomNode*>(element));
     if (element->doc->element_dom_map && backing_source) {
@@ -1317,9 +1322,21 @@ static void dom_element_attribute_did_remove(DomElement* element,
 // SVG and other foreign content keep their case (`viewBox`, `gradientUnits`,
 // as the parser and Lambda templates spell them), and DOM §4.9 lowercases a
 // queried name only for HTML elements, so a name stored exactly as asked wins.
+static const char* dom_element_stored_attribute(DomElement* element, const char* key) {
+    if (!element->is_synthetic()) {
+        ElementReader reader(dom_element_to_element(element));
+        const char* value = reader.get_attr_string(key);
+        if (value) return value;
+    }
+    int index = dom_element_find_synthetic_attribute(element, key);
+    return index >= 0 ? element->ext->synthetic_attributes[index].value.get() : nullptr;
+}
+
 static const char* dom_element_attr_key(DomElement* element, const char* name,
                                         char* lower, size_t lower_size) {
     lowercase_attr_name(name, lower, lower_size);
+    if ((element->doc && element->doc->xml_document) ||
+        strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") != 0) return name;
     if (strcmp(lower, name) == 0) return lower;
     bool stored_exact = element->is_synthetic()
         ? dom_element_find_synthetic_attribute(element, name) >= 0
@@ -1329,6 +1346,119 @@ static const char* dom_element_attr_key(DomElement* element, const char* name,
 
 static bool dom_attribute_name_present(const char* name) {
     return name && name[0] != '\0';
+}
+
+bool dom_attribute_node_set_value(DomAttr* attribute, const char* value) {
+    if (!attribute || !attribute->doc || !value) return false;
+    if (attribute->value && strcmp(attribute->value, value) == 0) return true;
+    Pool* pool = attribute->storage_pool;
+    char* copy = pool_strdup(pool, value);
+    if (!copy) return false;
+    if (attribute->value) pool_free(pool, (void*)attribute->value.get());
+    attribute->value = lam::own(copy);
+    return true;
+}
+
+DomAttr* dom_attribute_node_create(DomDocument* document, const char* namespace_uri,
+    const char* qualified_name, const char* value) {
+    if (!document || !document->node_arena || !qualified_name || !value) return nullptr;
+    DomAttr* attribute = (DomAttr*)arena_calloc(document->node_arena, sizeof(DomAttr));
+    if (!attribute) return nullptr;
+    attribute->node_type = DOM_NODE_ATTRIBUTE;
+    attribute->id = dom_document_alloc_node_id(document);
+    attribute->doc = lam::up(document);
+    attribute->storage_document = lam::up(document);
+    Pool* pool = document->document_pool;
+    attribute->storage_pool = pool;
+    const char* uri = namespace_uri ? namespace_uri : "";
+    const char* colon = *uri ? strchr(qualified_name, ':') : nullptr;
+    attribute->namespace_uri = lam::own(pool_strdup(pool, uri));
+    attribute->qualified_name = lam::own(pool_strdup(pool, qualified_name));
+    attribute->local_name = lam::own(pool_strdup(pool, colon ? colon + 1 : qualified_name));
+    if (colon) {
+        char* prefix = pool_strdup(pool, qualified_name);
+        if (prefix) prefix[colon - qualified_name] = '\0';
+        attribute->prefix = lam::own(prefix);
+    }
+    if (!attribute->namespace_uri || !attribute->qualified_name || !attribute->local_name ||
+        (colon && !attribute->prefix) || !dom_attribute_node_set_value(attribute, value)) return nullptr;
+    return dom_node_registry_register(document, attribute, sizeof(DomAttr), true) ? attribute : nullptr;
+}
+
+void dom_attribute_node_detach(DomAttr* attribute) {
+    DomElement* owner = attribute ? attribute->owner_element.get() : nullptr;
+    if (!owner) return;
+    DomAttr* previous = nullptr;
+    for (DomAttr* current = owner->ext ? owner->ext->attribute_nodes.get() : nullptr;
+         current; current = current->attribute_next) {
+        if (current == attribute) {
+            if (previous) previous->attribute_next = attribute->attribute_next;
+            else owner->ext->attribute_nodes = attribute->attribute_next;
+            break;
+        }
+        previous = current;
+    }
+    attribute->owner_element = nullptr;
+    attribute->attribute_next = nullptr;
+    if (attribute->owner_changed) attribute->owner_changed(attribute);
+    dom_node_schedule_detached(attribute->doc, attribute);
+}
+
+void dom_attribute_node_release_retired_storage(DomAttr* attribute) {
+    // values and names belong to the physical source pool even after adoption (D4.5.1v4).
+    const char* fields[] = {attribute->namespace_uri.get(), attribute->qualified_name.get(),
+        attribute->local_name.get(), attribute->prefix.get(), attribute->value.get()};
+    for (const char* field : fields) if (field) pool_free(attribute->storage_pool, (void*)field);
+    attribute->namespace_uri = nullptr;
+    attribute->qualified_name = nullptr;
+    attribute->local_name = nullptr;
+    attribute->prefix = nullptr;
+    attribute->value = nullptr;
+}
+
+void dom_attribute_node_attach(DomElement* element, DomAttr* attribute) {
+    if (!element || !attribute || attribute->owner_element == element) return;
+    DomElementExt* extension = element->ensure_ext();
+    if (!extension) return;
+    dom_attribute_node_detach(attribute);
+    attribute->owner_element = lam::up(element);
+    attribute->attribute_next = extension->attribute_nodes;
+    extension->attribute_nodes = lam::up(attribute);
+    dom_node_cancel_detached(attribute->doc, attribute);
+    if (attribute->owner_changed) attribute->owner_changed(attribute);
+}
+
+DomAttr* dom_element_attribute_node(DomElement* element, const char* name) {
+    if (!element || !name) return nullptr;
+    char lower[128];
+    const char* key = dom_element_attr_key(element, name, lower, sizeof(lower));
+    const char* value = element->get_attribute(key);
+    // parsed valueless attributes have a null Mark value but still own an Attr.
+    if (!value && !element->has_attribute(key)) return nullptr;
+    for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr;
+         attribute; attribute = attribute->attribute_next) {
+        if (strcmp(attribute->qualified_name, key) == 0) return attribute;
+    }
+    const char* local_name = nullptr;
+    const char* uri = dom_element_attribute_namespace_uri(element, key, &local_name);
+    DomAttr* attribute = dom_attribute_node_create(element->doc, uri, key, value ? value : "");
+    if (attribute) dom_attribute_node_attach(element, attribute);
+    return attribute;
+}
+
+static void dom_attribute_nodes_did_set(DomElement* element, const char* key, const char* value) {
+    for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr;
+         attribute; attribute = attribute->attribute_next) {
+        if (strcmp(attribute->qualified_name, key) == 0) dom_attribute_node_set_value(attribute, value);
+    }
+}
+
+static void dom_attribute_nodes_did_remove(DomElement* element, const char* key) {
+    for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr; attribute;) {
+        DomAttr* next = attribute->attribute_next;
+        if (strcmp(attribute->qualified_name, key) == 0) dom_attribute_node_detach(attribute);
+        attribute = next;
+    }
 }
 
 struct DomAttributeValueEntry {
@@ -1378,7 +1508,7 @@ static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder,
     return cache->values.oom() ? nullptr : string;
 }
 
-bool DomElement::set_attribute(const char* name, const char* value) {
+bool DomElement::set_attribute(const char* name, const char* value, bool preserve_case) {
     DomElement* element = this;
     if (!dom_attribute_name_present(name) || !value) {
         log_debug("dom_element_set_attribute: invalid parameters");
@@ -1389,6 +1519,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
     // attribute already stored in its own case is updated in place
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
+    if (preserve_case) key = name;
 
     const char* previous_value = strcmp(lower_name, "style") == 0 ? element->get_attribute(key) : nullptr;
     bool same_value = previous_value && strcmp(previous_value, value) == 0;
@@ -1420,6 +1551,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
                 return false;
             }
 
+            dom_attribute_nodes_did_set(element, key, value);
             dom_element_attribute_did_set(element, lower_name, value, same_value);
             return true;
         }
@@ -1430,6 +1562,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
 
     if (element->is_synthetic() &&
         dom_element_set_synthetic_attribute(element, key, value)) {
+        dom_attribute_nodes_did_set(element, key, value);
         dom_element_attribute_did_set(element, lower_name, value, same_value);
         return true;
     }
@@ -1462,22 +1595,8 @@ const char* DomElement::get_attribute(const char* name) {
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
-    // Use ElementReader for read-only access
-    if (!element->is_synthetic()) {
-        Element* backing = dom_element_to_element(element);
-        // get_attr_string answers for statically typed and run-time string
-        // fields alike (state-bound template attributes are the latter).
-        ElementReader reader(backing);
-        const char* result = reader.get_attr_string(key);
-        if (result) return result;
-    }
-
-    int synthetic_index = dom_element_find_synthetic_attribute(element, key);
-    if (synthetic_index >= 0) {
-        return element->ext->synthetic_attributes[synthetic_index].value;
-    }
-
-    return nullptr;
+    // namespace resolution reads stored keys directly, avoiding recursive case normalization.
+    return dom_element_stored_attribute(element, key);
 }
 
 const char* DomElement::get_attribute(NameId name_id) {
@@ -1511,6 +1630,7 @@ bool DomElement::remove_attribute(const char* name) {
                 return false;
             }
 
+            dom_attribute_nodes_did_remove(element, key);
             dom_element_attribute_did_remove(element, lower_name);
             return true;
         }
@@ -1518,6 +1638,7 @@ bool DomElement::remove_attribute(const char* name) {
 
     if (element->is_synthetic() &&
         dom_element_remove_synthetic_attribute(element, key)) {
+        dom_attribute_nodes_did_remove(element, key);
         dom_element_attribute_did_remove(element, lower_name);
         return true;
     }

@@ -53,6 +53,15 @@ static int font_platform_trace_enabled(void) {
     }
     return enabled != 0;
 }
+
+static CTFontOptions font_platform_lookup_options(void) {
+    // layout must not block on FontRegistry's interactive activation/download service.
+    CTFontOptions options = kCTFontOptionsPreventAutoActivation;
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 130000
+    if (__builtin_available(macOS 13.0, *)) options |= kCTFontOptionsPreventAutoDownload;
+#endif
+    return options;
+}
 #endif
 
 // ============================================================================
@@ -518,7 +527,8 @@ int get_font_metrics_platform(const char* font_family, float font_size,
     if (!cf_family) return 0;
 
     // create CTFont at the specified size
-    CTFontRef ct_font = CTFontCreateWithName(cf_family, (CGFloat)font_size, NULL);
+    CTFontRef ct_font = CTFontCreateWithNameAndOptions(
+        cf_family, (CGFloat)font_size, NULL, font_platform_lookup_options());
     CFRelease(cf_family);
 
     if (!ct_font) {
@@ -687,7 +697,8 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
 
     static CTFontRef s_base_font = NULL;
     if (!s_base_font) {
-        s_base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
+        s_base_font = CTFontCreateWithNameAndOptions(
+            CFSTR("Times New Roman"), 12.0, NULL, font_platform_lookup_options());
         if (!s_base_font) {
             CFRelease(str);
             return NULL;
@@ -942,7 +953,8 @@ void* font_platform_create_ct_font(const char* postscript_name,
             if (attrs) {
                 CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
                 if (desc) {
-                    ct_font = CTFontCreateWithFontDescriptor(desc, (CGFloat)size_px, NULL);
+                    ct_font = CTFontCreateWithFontDescriptorAndOptions(
+                        desc, (CGFloat)size_px, NULL, font_platform_lookup_options());
                     CFRelease(desc);
                 }
                 CFRelease(attrs);
@@ -956,7 +968,8 @@ void* font_platform_create_ct_font(const char* postscript_name,
     if (!ct_font && postscript_name && postscript_name[0]) {
         CFStringRef ps = CFStringCreateWithCString(NULL, postscript_name, kCFStringEncodingUTF8);
         if (ps) {
-            CTFontRef candidate = CTFontCreateWithName(ps, (CGFloat)size_px, NULL);
+            CTFontRef candidate = CTFontCreateWithNameAndOptions(
+                ps, (CGFloat)size_px, NULL, font_platform_lookup_options());
             CFRelease(ps);
             if (candidate) {
                 CFStringRef actual = CTFontCopyPostScriptName(candidate);
@@ -978,7 +991,8 @@ void* font_platform_create_ct_font(const char* postscript_name,
     if (!ct_font && family_name && family_name[0]) {
         CFStringRef fam = CFStringCreateWithCString(NULL, family_name, kCFStringEncodingUTF8);
         if (fam) {
-            ct_font = CTFontCreateWithName(fam, (CGFloat)size_px, NULL);
+            ct_font = CTFontCreateWithNameAndOptions(
+                fam, (CGFloat)size_px, NULL, font_platform_lookup_options());
             CFRelease(fam);
         }
     }

@@ -338,6 +338,7 @@ struct DomDocument : DomDocumentResourceData {
     lam::Up<DomElement> root;       // Root element of DOM tree (optional); owned by the node chain
     int html_version;            // Detected HTML version - maps to HtmlVersion enum
     bool html_scripting_enabled; // HTML parser scripting mode for special elements
+    bool xml_document;          // document factories preserve case in XML documents.
     uint32_t next_node_id;        // next DomNode id for event/state logs (0 reserved)
 
     // CSS stylesheets (for @font-face processing after UiContext init)
@@ -777,6 +778,14 @@ void dom_element_remove_namespaced_attribute(DomElement* element,
 const char* dom_element_get_namespaced_attribute(DomElement* element,
     const char* namespace_uri, const char* local_name);
 
+DomAttr* dom_attribute_node_create(DomDocument* document, const char* namespace_uri,
+    const char* qualified_name, const char* value);
+DomAttr* dom_element_attribute_node(DomElement* element, const char* name);
+bool dom_attribute_node_set_value(DomAttr* attribute, const char* value);
+void dom_attribute_node_attach(DomElement* element, DomAttr* attribute);
+void dom_attribute_node_detach(DomAttr* attribute);
+void dom_attribute_node_release_retired_storage(DomAttr* attribute);
+
 // An element's pointers into its document's view tree (props, item props,
 // layout caches and fragments), as lam::ViewProp / lam::ViewRef fields on the
 // element or its extension. A field can name only a listed slot, and the
@@ -824,6 +833,7 @@ struct DomElementExt {
     int synthetic_attribute_count;
     int synthetic_attribute_capacity;
     lam::Own<DomNamespacedAttribute> namespaced_attributes;
+    lam::Up<DomAttr> attribute_nodes;
     lam::Up<struct DomInlineDeclarations> inline_declarations; // document resource; authored CSSOM block
     // Layout-only ruby column geometry. This lives outside InlineProp because
     // computed inline styles may be absent or canonicalized across elements.
@@ -1138,7 +1148,7 @@ struct DomElement : DomNode {
     FilterProp* ensure_filter(LayoutContext* lycon);
     MultiColumnProp* ensure_multicol(LayoutContext* lycon);
 
-    bool set_attribute(const char* name, const char* value);
+    bool set_attribute(const char* name, const char* value, bool preserve_case = false);
     bool set_attribute(NameId name_id, const char* value);
     const char* get_attribute(const char* name);
     const char* get_attribute(NameId name_id);
