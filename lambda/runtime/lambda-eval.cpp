@@ -48,6 +48,8 @@
 #endif
 #include "../validator/validator.hpp"
 #include "../input/input.hpp"
+#include "../io/fs_node.hpp"
+#include "io_file_search.hpp"
 #include "../input/html5/html5_parser.h"
 #include "../io/target.h"
 #include "../jube/jube_interface.h"
@@ -1389,7 +1391,7 @@ Item fn_exclude(Item left, Item right) {
 
 
 String *str_repeat(String *str, int64_t times) {
-    if (times <= 0) {
+    if (times <= 0 || !str->len) {
         // Return empty string
         String *result = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         if (!result) return NULL;
@@ -1407,8 +1409,13 @@ String *str_repeat(String *str, int64_t times) {
         total_len + sizeof(String) + 1 > (size_t)INT_MAX) {
         return NULL;
     }
+    // the source must survive result allocation even for callers holding only a raw pointer.
+    RootFrame roots(1);
+    if (!roots.valid()) return NULL;
+    Rooted<String*> source(roots, str);
     String *result = (String *)heap_alloc((int)(sizeof(String) + total_len + 1), LMD_TYPE_STRING);
     if (!result) return NULL;
+    str = source.get();
     result->len = total_len;
     result->flags = 0;
     result->is_ascii = str->is_ascii;
@@ -3260,10 +3267,10 @@ static VirtualOpStatus element_attr_value_at_for(Item item, int64_t index, Item*
     return VIRTUAL_OP_OK;
 }
 
-static VirtualOpStatus materialized_element_attr_get(Element* element, Item key,
+static VirtualOpStatus materialized_map_field_get(Map* owner, Item key,
         Item* out) {
     if (out) *out = ItemNull;
-    if (!element || !element->type || !out || !is_text_type_id(get_type_id(key))) {
+    if (!owner || !owner->type || !out || !is_text_type_id(get_type_id(key))) {
         return VIRTUAL_OP_MISSING;
     }
     const char* chars = key.get_chars();
@@ -3271,11 +3278,11 @@ static VirtualOpStatus materialized_element_attr_get(Element* element, Item key,
     Symbol* symbol = get_type_id(key) == LMD_TYPE_SYMBOL ? key.get_safe_symbol() : NULL;
     if (symbol && !symbol_is_lambda_name(symbol)) return VIRTUAL_OP_MISSING;
     Target* ns = symbol_lambda_namespace(symbol);
-    FOR_EACH_MAP_FIELD((TypeMap*)element->type, field) {
+    FOR_EACH_MAP_FIELD((TypeMap*)owner->type, field) {
         if (!field->name || field->name->length != length ||
                 !target_equal(field->ns, ns)) continue;
         if (!length || memcmp(field->name->str, chars, length) == 0) {
-            *out = _map_field_value((TypeMap*)element->type, element->data, field);
+            *out = _map_field_value((TypeMap*)owner->type, owner->data, field);
             return VIRTUAL_OP_OK;
         }
     }
@@ -3289,7 +3296,7 @@ static VirtualOpStatus element_attr_get_for(Item item, Item key, Item* out) {
                 !item.velmt->vtable->element.attrs.get) return VIRTUAL_OP_MISSING;
         return item.velmt->vtable->element.attrs.get(item.velmt->data, key, out);
     }
-    return materialized_element_attr_get(item.element, key, out);
+    return materialized_map_field_get(item.map, key, out);
 }
 
 static VirtualOpStatus element_tag_for(Item item, Item* out) {
@@ -3436,25 +3443,42 @@ static Bool element_semantic_eq(Item a_item, Item b_item, int depth,
     return BOOL_TRUE;
 }
 
-// helper: structural equality for VMaps (virtual maps)
-static Bool vmap_eq(VMap* a, VMap* b, int depth, EqualityMode mode) {
-    if (a == b) return BOOL_TRUE;
-    Item a_item = {.vmap = a};
-    Item b_item = {.vmap = b};
+// Compare virtual maps with either map carrier through one presence-aware field walk.
+static Bool virtual_map_eq(Item a_item, Item b_item, int depth, EqualityMode mode) {
+    if (a_item.item == b_item.item) return BOOL_TRUE;
+    RootFrame roots(5);
+    Rooted<Item> a_root(roots, a_item);
+    Rooted<Item> b_root(roots, b_item);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> val_a(roots, ItemNull);
+    Rooted<Item> val_b(roots, ItemNull);
+    bool native_b = get_type_id(b_item) == LMD_TYPE_MAP;
+    if (native_b && lambda_value_nominal(LMD_TYPE_MAP,
+            (const void*)(uintptr_t)b_item.item)) return BOOL_FALSE;
     // Handle equality is capability identity; two empty handle carriers must
     // never collapse to structural VMap equality.
     if (lambda_task_handle_is(a_item) || lambda_task_handle_is(b_item)) return BOOL_FALSE;
-    int64_t count_a = a->vtable->count(a->data);
-    int64_t count_b = b->vtable->count(b->data);
+    int64_t count_a = a_root.get().vmap->vtable->count(a_root.get().vmap->data);
+    int64_t count_b = native_b ? ((TypeMap*)b_root.get().map->type)->length
+        : b_root.get().vmap->vtable->count(b_root.get().vmap->data);
     if (count_a != count_b) return BOOL_FALSE;
 
     // iterate A's keys and look up each in B
     for (int64_t i = 0; i < count_a; i++) {
-        Item key = a->vtable->key_at(a->data, i);
-        Item val_a = a->vtable->value_at(a->data, i);
-        Item val_b = b->vtable->get(b->data, key);
-        // if key not found in B, val_b will be null but val_a shouldn't be
-        Bool r = fn_eq_depth(val_a, val_b, depth + 1, mode);
+        key_root.set(a_root.get().vmap->vtable->key_at(a_root.get().vmap->data, i));
+        // S5.4.1: a missing key is distinct from a present null-valued key.
+        if (native_b) {
+            Item value = ItemNull;
+            VirtualOpStatus status = materialized_map_field_get(b_root.get().map, key_root.get(), &value);
+            val_b.set(value);
+            if (status == VIRTUAL_OP_ERROR) return BOOL_ERROR;
+            if (status != VIRTUAL_OP_OK) return BOOL_FALSE;
+        } else {
+            if (!vmap_backing_has(b_root.get().vmap, key_root.get())) return BOOL_FALSE;
+            val_b.set(b_root.get().vmap->vtable->get(b_root.get().vmap->data, key_root.get()));
+        }
+        val_a.set(a_root.get().vmap->vtable->value_at(a_root.get().vmap->data, i));
+        Bool r = fn_eq_depth(val_a.get(), val_b.get(), depth + 1, mode);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
@@ -3582,6 +3606,12 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityMode mode) 
         return numeric_items_equal_exact(a_item, b_item);
     }
     if (a_type_id != b_type_id) {
+        // S5.4.1 / D7.4.5v2: a virtual carrier does not change the map value family.
+        if ((a_type_id == LMD_TYPE_MAP && b_type_id == LMD_TYPE_VMAP) ||
+                (a_type_id == LMD_TYPE_VMAP && b_type_id == LMD_TYPE_MAP)) {
+            return virtual_map_eq(a_type_id == LMD_TYPE_VMAP ? a_item : b_item,
+                a_type_id == LMD_TYPE_MAP ? a_item : b_item, depth, mode);
+        }
         // special case: type(null) == null, type(error) == error
         // when one side is a type value and the other is null/error,
         // compare the type's inner type_id against the value's type_id
@@ -3740,7 +3770,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityMode mode) 
         }
         // vmap structural equality
         if (a_tid == LMD_TYPE_VMAP) {
-            return vmap_eq(a_item.vmap, b_item.vmap, depth, mode);
+            return virtual_map_eq(a_item, b_item, depth, mode);
         }
         // range equality (start, end, length)
         if (a_tid == LMD_TYPE_RANGE) {
@@ -4554,7 +4584,9 @@ Item fn_query(Item data, Item type_val, int direct) {
     Rooted<Item> type_root(roots, type_val);
     Rooted<Array*> result(roots, array_plain());
     // direct=1 means .? (self-inclusive), direct=0 means ? (not self-inclusive)
+    uint64_t failure_version = virtual_failure_version;
     query_collect(source.get(), type_root.get(), direct != 0, result.get(), 0);
+    if (virtual_failure_version != failure_version) return err2it_or_error(context ? context->last_error : nullptr);
     return list_collapse_value({.array = result.get()});
 }
 
@@ -4619,7 +4651,9 @@ Item fn_child_query(Item data, Item type_val) {
     Rooted<Item> source(roots, data);
     Rooted<Item> type_root(roots, type_val);
     Rooted<Array*> result(roots, array_plain());
+    uint64_t failure_version = virtual_failure_version;
     child_query_collect(source.get(), type_root.get(), result.get());
+    if (virtual_failure_version != failure_version) return err2it_or_error(context ? context->last_error : nullptr);
     return list_collapse_value({.array = result.get()});   // the run a subscript yields (S8.2.4v3)
 }
 
@@ -5415,6 +5449,26 @@ static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_p
 
 Item fn_input2(Item target_item, Item type) {
     GUARD_ERROR2(target_item, type);
+    RootFrame input_roots(4);
+    Rooted<Item> input_target_root(input_roots, target_item);
+    Rooted<Item> input_options_root(input_roots, type);
+    Rooted<Item> input_type_root(input_roots, ItemNull);
+    Rooted<Item> input_flavor_root(input_roots, ItemNull);
+    virtual_error_reporter = [](Item error) {
+        if (context) eval_context_set_last_error(context, it2err(error));
+    };
+    ZipLimits limits = zip_default_limits();
+    ZipError zip_error = {};
+    if (get_type_id(type) == LMD_TYPE_MAP) {
+        IoFsOptionMap option_map = {};
+        Item error = ItemNull;
+        if (!io_fs_options_open(type, "input", SYSFUNC_INPUT2, &option_map, &error)) return error;
+    }
+    if (!fs_zip_options(type, &limits, nullptr, &zip_error)) {
+        return runtime_error_item(ERR_TYPE_MISMATCH, zip_error.message, nullptr);
+    }
+    InputZipLimitsScope zip_scope(&limits);
+    bool fs_target = fs_node_is(target_item);
 
     // Dry-run mode: return fabricated input data
     if (g_dry_run) {
@@ -5441,7 +5495,7 @@ Item fn_input2(Item target_item, Item type) {
 
     // Validate target type: must be string, symbol, or path
     TypeId target_type_id = get_type_id(target_item);
-    if (!is_text_type_id(target_type_id) && target_type_id != LMD_TYPE_PATH) {
+    if (!fs_target && !is_text_type_id(target_type_id) && target_type_id != LMD_TYPE_PATH) {
         set_runtime_error(ERR_TYPE_MISMATCH,
             "input target must be a string, symbol, or path, got type: %s",
             get_type_name(target_type_id));
@@ -5450,13 +5504,13 @@ Item fn_input2(Item target_item, Item type) {
 
     // Convert target Item to Target struct
     Url* cwd = context ? (Url*)context->cwd : NULL;
-    Target* target = item_to_target(target_item.item, cwd);
-    if (!target) {
+    Target* target = fs_target ? nullptr : item_to_target(target_item.item, cwd);
+    if (!fs_target && !target) {
         set_runtime_error(ERR_INVALID_URL, "input: failed to resolve target");
         return ItemError;
     }
 
-    log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
+    if (target) log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
 
     TypeId type_id = get_type_id(type);
     if (type_id == LMD_TYPE_NULL) {
@@ -5466,6 +5520,7 @@ Item fn_input2(Item target_item, Item type) {
     else if (is_text_type_id(type_id)) {
         // Legacy behavior: type is a simple string/symbol
         type_str = fn_string(type);
+        input_type_root.set((Item){.item = s2it(type_str)});
     }
     else if (type_id == LMD_TYPE_MAP) {
         log_debug("input type is a map");
@@ -5481,6 +5536,7 @@ Item fn_input2(Item target_item, Item type) {
             TypeId type_value_type = get_type_id(input_type);
             if (is_text_type_id(type_value_type)) {
                 type_str = fn_string(input_type);
+                input_type_root.set((Item){.item = s2it(type_str)});
             }
             else {
                 set_runtime_error(ERR_TYPE_MISMATCH,
@@ -5499,6 +5555,7 @@ Item fn_input2(Item target_item, Item type) {
             TypeId flavor_value_type = get_type_id(input_flavor);
             if (is_text_type_id(flavor_value_type)) {
                 flavor_str = fn_string(input_flavor);
+                input_flavor_root.set((Item){.item = s2it(flavor_str)});
             }
             else {
                 set_runtime_error(ERR_TYPE_MISMATCH,
@@ -5532,6 +5589,15 @@ Item fn_input2(Item target_item, Item type) {
         set_runtime_error(ERR_INVALID_STATE, "input: runtime context is not initialized");
         target_free(target);
         return ItemError;
+    }
+
+    if (fs_target) {
+        Item result = fs_node_input(input_target_root.get(), type_str, flavor_str);
+        if (get_type_id(result) == LMD_TYPE_ERROR) {
+            if (context) eval_context_set_last_error(context, it2err(result));
+            return result;
+        }
+        return schema_type ? lambda_type_check(result, schema_type, "input schema") : result;
     }
 
     // Pre-register exact schema fields before parsing so known Input names hit
@@ -6717,6 +6783,9 @@ extern "C" Item lambda_object_member(Item self, const char* key) {
     bool is_found = false;
     Item field_val = _map_get((TypeMap*)obj->type, obj->data, (char*)key, &is_found);
     if (is_found) return field_val;
+    const TypeNominal* nominal = ((TypeMap*)obj->type)->nominal;
+    if (nominal && nominal->extension && nominal->extension->member)
+        return nominal->extension->member(self, key, strlen(key), &is_found);
     const TypeMethod* method = lambda_object_find_method((TypeObject*)obj->type, key);
     if (!method) return ItemNull;
     // OB6 rules a bare `pn` method reference a compile error, but the rejection
@@ -7141,6 +7210,15 @@ int64_t fn_count(Item item) {
     return 1;
 }
 
+extern "C" Item fn_virtual_content_check(Item item) { return virtual_content_error(item); }
+
+extern "C" Item fn_len_checked(Item item) {
+    GUARD_ERROR1(item);
+    Item error = virtual_content_error(item);
+    // ItemNull carries a nonzero tag; only an error tag indicates a failed host read (S7.4.1).
+    return get_type_id(error) == LMD_TYPE_ERROR ? error : (Item){.item = i2it(fn_len(item))};
+}
+
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     int64_t size = 0;
@@ -7248,6 +7326,7 @@ int64_t fn_len(Item item) {
 // Native len variants — type-specialized, avoid Item type switch overhead
 // Used when compile-time type is known. The transpiler must unbox Items to raw
 // pointers before calling these (emit_unbox_container strips tag bits).
+// Physical VArray/Velmt carriers use fn_len_checked before these NO_GC leaves.
 
 extern "C" int64_t fn_len_l(List* list) {
     if (!list) return 0;
@@ -7291,6 +7370,32 @@ extern "C" int64_t fn_len_s(String* str) {
 // view, so aliasing can never be observed as a second writable handle. Whether
 // writes should pass through to the element is deliberately left open.
 Item fn_content(Item item) {
+    GUARD_ERROR1(item);
+    if (fs_node_is(item)) return fs_node_content(item);
+    if (get_type_id(item) == LMD_TYPE_VELMT) {
+        Item error = virtual_content_error(item);
+        if (get_type_id(error) == LMD_TYPE_ERROR) return error;
+        // Other virtual hosts expose the same immutable child-view contract.
+        RootFrame roots(1);
+        Rooted<Item> owner(roots, item);
+        struct ChildView { Item owner; };
+        static const VArrayVtable vtable = {
+            {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VARRAY, {},
+                [](void* p) { mem_free(p); },
+                [](void* p, gc_heap* gc) { gc_mark_item(gc, ((ChildView*)p)->owner.item); }, nullptr},
+            {[](void* p) -> int64_t { return velmt_child_count(((ChildView*)p)->owner.velmt); },
+                [](void* p, int64_t i, Item* out) -> VirtualOpStatus {
+                    Velmt* e = ((ChildView*)p)->owner.velmt;
+                    return e->vtable->element.children.get_at(e->data, i, out);
+                }, nullptr, nullptr, nullptr}
+        };
+        ChildView* view = (ChildView*)mem_calloc(1, sizeof(ChildView), MEM_CAT_INPUT_OTHER);
+        if (!view) return ItemError;
+        view->owner = owner.get();
+        Item result = varray_new(&vtable, view, nullptr, nullptr);
+        if (!result.item) { mem_free(view); return ItemError; }
+        return result;
+    }
     TypeId type_id = get_type_id(item);
     if (type_id != LMD_TYPE_ELEMENT) {
         return lambda_type_error(item, &TYPE_ELMT, "content");
@@ -7351,6 +7456,7 @@ extern "C" int64_t fn_seq_count(Item item) {
 
 extern "C" int64_t fn_len_e(Element* elmt) {
     if (!elmt) return 0;
+    if (elmt->type_id == LMD_TYPE_VELMT) return velmt_attr_count((Velmt*)elmt) + velmt_child_count((Velmt*)elmt);
     // The JIT specializes `len` on a statically-element argument to this
     // helper, so it must apply the same S8.3.1v2 rule as fn_len's element arm
     // or the two tiers disagree — which is exactly how the nominal half of
@@ -8497,6 +8603,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     }
 
     RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
     Rooted<Item> rooted_list(roots, list_item);
     Rooted<Item> rooted_sep(roots, sep_item);
 
@@ -8512,17 +8619,19 @@ Item fn_join2(Item list_item, Item sep_item) {
         Item item = array_item_read((Array*)source, i);
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
-            total_len += item.get_len();
+            if (!lam::checked_add(total_len, item.get_len(), &total_len)) return ItemError;
             is_ascii = is_ascii && text_item_is_ascii(item);
         }
     }
 
     if (count > 1 && sep_len > 0) {
-        total_len += (count - 1) * sep_len;
+        if (!lam::checked_mul_add((size_t)(count - 1), sep_len, total_len, &total_len)) return ItemError;
     }
 
-    // allocate result
+    // the heap allocator takes a signed byte count; reject overflow before narrowing.
+    if (total_len > (size_t)INT_MAX - sizeof(String) - 1) return ItemError;
     String* result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
+    if (!result) return ItemError;
     // Result allocation may compact container storage and can reclaim the
     // separator unless both semantic inputs remain exact-rooted.
     list_item = rooted_list.get();
@@ -13212,7 +13321,8 @@ static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_
         ShapeEntry* replacement = plan ? plan->replacement : NULL;
         bool compatible = plan ? plan->reuse_payload :
             typemap_payload_reusable(old_map_type, new_type, changed_entry, removed_entry, &replacement);
-        TypeId storage = replacement ? shape_entry_storage_type_id(replacement) : LMD_TYPE_NULL;
+        // the immutable plan already classified this lane with the shared storage resolver.
+        TypeId storage = replacement ? (plan ? plan->storage_type : shape_entry_storage_type_id(replacement)) : LMD_TYPE_NULL;
         // these simple stores neither allocate nor retain a borrowed numeric home.
         bool immediate_store = !replacement || (replacement->type == type_info[storage].type &&
             (storage == LMD_TYPE_INT || storage == LMD_TYPE_FLOAT || storage == LMD_TYPE_NULL ||
@@ -13458,6 +13568,19 @@ static bool map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_type, changed_entry, new_value, fixed_slot_count);
 }
 
+static bool container_retype_field(Container* owner, TypeId kind, void** type_slot,
+        void** data_slot, int* cap_slot, ShapeEntry* field, Item value) {
+    TypeMap* source = (TypeMap*)*type_slot;
+    TypeId tid = get_type_id(value);
+    Input* tree = runtime_shape_tree();
+    const TypeMapRetypePlan* plan = NULL;
+    TypeMap* target = tree ? type_tree_retype_field(tree, source, field, tid, &plan) : NULL;
+    if (target) return container_move_to_type(type_slot, data_slot, cap_slot,
+        owner, source, target, field, value, 0, NULL, plan);
+    return map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
+        kind, owner, field, type_info[tid].type, value);
+}
+
 // D3.4.3/D3.4.5: immutable transitions for packed plain maps, without JS policy hooks.
 bool map_shape_set(Map* map, String* key, Item value) {
     TypeMap* type = (TypeMap*)map->type;
@@ -13467,13 +13590,8 @@ bool map_shape_set(Map* map, String* key, Item value) {
     TypeId tid = get_type_id(value);
     if (field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
-    Input* tree = runtime_shape_tree();
-    const TypeMapRetypePlan* plan = NULL;
-    TypeMap* target = tree ? type_tree_retype_field(tree, type, field, tid, &plan) : NULL;
-    if (target) return container_move_to_type(&map->type, &map->data, &map->data_cap,
-        map, type, target, field, value, 0, NULL, plan);
-    return map_rebuild_for_type_change(&map->type, &map->data, &map->data_cap,
-        LMD_TYPE_MAP, map, field, type_info[tid].type, value);
+    return container_retype_field(map, LMD_TYPE_MAP, &map->type, &map->data,
+        &map->data_cap, field, value);
 }
 
 bool map_shape_delete(Map* map, String* key) {
@@ -13482,11 +13600,8 @@ bool map_shape_delete(Map* map, String* key) {
     ShapeEntry* removed = typemap_hash_lookup(old, key->chars, (int)key->len);
     if (!removed) return true;
     Input* tree = runtime_shape_tree();
-    TypeMap* target = tree ? type_tree_root_like(tree, map) : NULL;
-    FOR_EACH_MAP_FIELD(old, field) {
-        if (field != removed && target) target = type_tree_add_map_field_chars(tree, target,
-            field->name->str, field->name->length, field->type->type_id, NULL);
-    }
+    const TypeMapRetypePlan* plan = NULL;
+    TypeMap* target = tree ? type_tree_delete_field(tree, map, removed, &plan) : NULL;
     if (!target) {
         // the bounded tree declined: retain family identity in a private filtered chain.
         target = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
@@ -13512,7 +13627,7 @@ bool map_shape_delete(Map* map, String* key) {
         return true;
     }
     return container_move_to_type(&map->type, &map->data, &map->data_cap,
-        map, old, target, NULL, ItemNull, 0, removed);
+        map, old, target, NULL, ItemNull, 0, removed, plan);
 }
 
 // map/element field assignment: obj.field = val
@@ -14552,6 +14667,11 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 log_error("fn_map_set: attempted store to virtual shape field");
                 return ItemError;
             }
+            // arena-owned elements cannot trace replacement GC values;
+            // attribute overrides need the same roots as initial stores.
+            if (map_type_id == LMD_TYPE_ELEMENT && context &&
+                    context->ui_mode && context->arena &&
+                    !ui_prepare_element_field(&value)) return ItemError;
             if (map_type_id == LMD_TYPE_MAP &&
                     map_ctor_offset_is_reserved(map_item.map, entry->byte_offset)) {
                 // An RHS, parameter initializer or inherited setter can publish
@@ -14587,7 +14707,18 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 return ItemNull;
             }
             TypeId field_type = entry->type->type_id;
-            entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
+            bool plain_shape = !map_type->js_meta && map_type->type_id == map_type_id &&
+                !map_type->is_shared_constructor_shape && !map_type->slot_entries &&
+                map_type->slot_count == 0 && !map_item.container->has_ctor_reserved &&
+                (map_type_id != LMD_TYPE_MAP || map_item.map->map_kind == MAP_KIND_PLAIN);
+            // D3.4.3v5/D3.4.5: Lambda shared shapes use the context's tree,
+            // never the JS constructor path, which requires an active JS realm.
+            if (plain_shape && field_type != LMD_TYPE_ANY &&
+                    map_shared_ctor_shape_should_detach_for_type(map_type, field_type, value_type)) {
+                return container_retype_field(map_item.container, map_type_id, type_slot,
+                    data_slot, cap_slot, entry, value) ? ItemNull : ItemError;
+            }
+            if (!plain_shape) entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, key_ref, entry, value_type);
             if (!entry || !entry->type) return ItemError;
             // A reserved constructor slot becomes observable only at the
@@ -14726,17 +14857,9 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             // another takes one shared target instead of minting a private
             // chain per write, and its later adds grow from that target in the
             // tree. JS shapes keep their own transitions and the rebuild.
-            if (!map_type->js_meta && map_type->type_id == map_type_id &&
-                    (map_type_id != LMD_TYPE_MAP || map_item.map->map_kind == MAP_KIND_PLAIN)) {
-                Input* tree = runtime_shape_tree();
-                const TypeMapRetypePlan* plan = NULL;
-                TypeMap* target = tree
-                    ? type_tree_retype_field(tree, map_type, entry, value_type, &plan) : NULL;
-                if (target) {
-                    container_move_to_type(type_slot, data_slot, cap_slot, cont, map_type,
-                        target, entry, value, 0, NULL, plan);
-                    return ItemNull;
-                }
+            if (plain_shape) {
+                return container_retype_field(cont, map_type_id, type_slot,
+                    data_slot, cap_slot, entry, value) ? ItemNull : ItemError;
             }
             map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
                                         map_type_id, cont, entry,

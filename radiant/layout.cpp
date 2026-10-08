@@ -1317,7 +1317,7 @@ LayoutBorderSpacingValue layout_resolve_border_spacing_value(
         LayoutContext* lycon, const CssValue* value) {
     LayoutBorderSpacingValue result = {0.0f, 0.0f, false, false};
     if (!value) return result;
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_FUNCTION) {
         result.horizontal = result.vertical = resolve_length_value(
             lycon, CSS_PROPERTY_BORDER_SPACING, value);
         result.resolved = true;
@@ -1352,6 +1352,11 @@ LayoutBorderSpacingValue layout_resolve_border_spacing_value(
     return result;
 }
 
+float layout_html_table_border_spacing(DomElement* element) {
+    const char* cellspacing = element->get_attribute("cellspacing");
+    return cellspacing ? fmaxf(0.0f, (float)str_to_double_default(cellspacing, strlen(cellspacing), 0.0)) : 2.0f;
+}
+
 bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
                                         float* spacing_h, float* spacing_v) {
     if (!spacing_h || !spacing_v) return false;
@@ -1383,13 +1388,7 @@ bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
         if (ancestor_element->tag() == MARKUP_NAME_TABLE) {
             // CSS 2.1 §17.6.1 inheritance must retain the HTML table UA value
             // when display:block prevents the source table from allocating TableProp.
-            float spacing = 2.0f;
-            const char* cellspacing = ancestor_element->get_attribute("cellspacing");
-            if (cellspacing) {
-                spacing = (float)str_to_double_default(
-                    cellspacing, strlen(cellspacing), 0.0);
-                if (spacing < 0.0f) spacing = 0.0f;
-            }
+            float spacing = layout_html_table_border_spacing(ancestor_element);
             *spacing_h = spacing;
             *spacing_v = spacing;
             return true;

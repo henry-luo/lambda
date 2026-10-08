@@ -39,6 +39,8 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/input-parsers.h"
+#include "../lambda/io/mark_builder.hpp"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "layout.hpp"  // MAX_LAYOUT_DEPTH — shared DOM-recursion depth cap
@@ -2393,6 +2395,25 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 // Main entry point
 // ============================================================================
 
+// import maps are document data, not executable scripts; collect before module instantiation.
+static void collect_document_import_maps(Element* element,Input* input,ArrayBuilder& maps,unsigned depth=0) {
+    if (!element || depth>MAX_LAYOUT_DEPTH) return;
+    if (is_script_element(element)) {
+        const char* type=extract_element_attribute(element,"type",nullptr);
+        if (type && str_icmp_cstr(type,"importmap")==0) {
+            StrBuf* source=strbuf_new();if(!source) return;extract_script_text(element,source);
+            bool valid=false;Item map=parse_json_to_item_strict(input,source->str,&valid);
+            if (valid && get_type_id(map)==LMD_TYPE_MAP) maps.append(map);
+            else log_error("script import map: expected a JSON object");
+            strbuf_free(source);
+        }
+        return;
+    }
+    for (int64_t i=0;i<element->length;i++) {
+        Item child=element->items[i];if (get_type_id(child)==LMD_TYPE_ELEMENT) collect_document_import_maps(child.element,input,maps,depth+1);
+    }
+}
+
 extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc,
                                                   Pool* pool, Url* base_url,
                                                   DocumentScriptPhaseTiming* timing) {
@@ -2489,6 +2510,10 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // avoids a throwaway parse merely to select a backend and keeps callbacks
     // on one closure ABI.
     runtime->js_ast_backend = true;
+    MarkBuilder import_builder(dom_doc->input);
+    ArrayBuilder import_maps=import_builder.array();
+    collect_document_import_maps(html_root,dom_doc->input,import_maps);
+    runtime->js_import_maps=import_maps.final();
     Context* saved_input_context = input_context;
     EvalContext* document_context = runtime_get_eval_context(runtime);
     if (!document_context) {
@@ -3063,6 +3088,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     runtime->dom_doc = nullptr;
     runtime->dom_ui_context = nullptr;
     runtime->js_document_base_url = nullptr;
+    runtime->js_import_maps = ItemNull;
     runtime_cleanup(runtime);
     mem_free(runtime);
 

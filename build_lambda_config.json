@@ -563,6 +563,7 @@
         "lambda/core/shape_builder.cpp",
         "lambda/core/lambda-data.cpp",
         "lambda/io/collection_io.cpp",
+        "lambda/io/zip_archive.cpp",
         "lambda/io/target.cpp",
         "lambda/core/lambda-decimal.cpp",
         "lambda/io/mark_builder.cpp",
@@ -2241,6 +2242,7 @@
         "lambda/input/parse_error.cpp",
         "lambda/input/source_tracker.cpp",
         "lambda/io/collection_io.cpp",
+        "lambda/io/zip_archive.cpp",
         "lambda/io/mark_builder.cpp",
         "lambda/io/mark_editor.cpp",
         "lambda/io/target.cpp",
@@ -3419,6 +3421,43 @@
             ],
             "binary": "test_display_list_gtest.exe",
             "icon": "\ud83e\uddfe"
+          },
+          {
+            "source": "test/test_scene3d_gtest.cpp",
+            "name": "Native Scene3D Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "Security",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "binary": "test_scene3d_gtest.exe",
+            "icon": "\ud83c\udfa8",
+            "parallel": false
           },
           {
             "source": "test/test_rdt_vector_gtest.cpp",
@@ -5072,6 +5111,19 @@
         "name": "\ud83d\udc11 Lambda Runtime Tests",
         "category": "baseline",
         "tests": [
+          {
+            "source": "test_zip_gtest.cpp",
+            "name": "ZIP I/O Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_zip_gtest.exe",
+            "icon": "ZIP"
+          },
           {
             "source": "test_input_script_cache_gtest.cpp",
             "name": "Input Script Cache Tests",

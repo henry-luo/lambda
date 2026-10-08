@@ -1055,7 +1055,7 @@ on mouseup(evt) {
       /* Keep the indentation and icon fixed when a file name overflows. */
       .tree-toggle, .root-toggle, .tree-spacer, .tree-icon { flex-shrink: 0; }
       .folder-icon { color: #e5bb62; }
-      @font-face { font-family: 'Seti Icons'; src: url('icons/seti.woff') format('woff'); }
+      @font-face { font-family: 'Seti Icons'; src: url('../../lmd/package/doc/icons/seti.woff') format('woff'); }
       .file-icon { height: 20px; line-height: 20px; color: #9bbdfc; }
       .default-icon { font-size: 13px; }
       .lambda-icon { font-size: 19px; }

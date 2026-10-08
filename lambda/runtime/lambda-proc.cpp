@@ -1,3 +1,5 @@
+#include "../io/fs_node.hpp"
+#include "io_file_search.hpp"
 #include "../io/mark_output_builder.hpp"
 #include "transpiler.hpp"
 #include "../../lib/log.h"
@@ -70,7 +72,9 @@ Item pn_print(Item item) {
         strbuf_free(sb);
         return ItemNull;
     }
+    uint64_t before = virtual_failure_version;
     String *str = fn_string(item);
+    if (virtual_failure_version != before) return err2it_or_error(context ? context->last_error : nullptr);
     if (str) {
         printf("%s", str->chars); // PRINTF_OK: Lambda's procedural print() builtin.
     }
@@ -110,56 +114,12 @@ static int create_parent_dirs(const char* file_path) {
     return ok ? 0 : -1;
 }
 
-// Helper: Generate a unique temp file path for atomic writes
-static void generate_temp_path(const char* file_path, StrBuf* temp_buf) {
-    static int counter = 0;
-    strbuf_append_all(temp_buf, 2, file_path, ".tmp.");
-    strbuf_append_int(temp_buf, ++counter);
-    strbuf_append_char(temp_buf, '.');
-    strbuf_append_int(temp_buf, (int)time(NULL));
-}
-
-// Helper: Perform atomic rename (temp file to final file)
-static int atomic_rename(const char* temp_path, const char* final_path) {
-    return file_rename(temp_path, final_path);
-}
-
 static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic,
-                            const void* data, size_t data_len) {
-    StrBuf* temp_path_buf = NULL;
-    const char* write_path = file_path;
-    if (atomic) {
-        temp_path_buf = strbuf_new();
-        generate_temp_path(file_path, temp_path_buf);
-        write_path = temp_path_buf->str;
-    }
-
-    FILE* f = fopen(write_path, mode);
-    if (!f) {
-        log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
-        if (temp_path_buf) strbuf_free(temp_path_buf);
-        return false;
-    }
-
-    size_t written = fwrite(data, 1, data_len, f);
-    fclose(f);
-    if (written != data_len) {
-        log_error("pn_output_internal: failed to write to file %s", write_path);
-        if (atomic) file_delete(write_path);
-        if (temp_path_buf) strbuf_free(temp_path_buf);
-        return false;
-    }
-
-    if (atomic) {
-        if (atomic_rename(write_path, file_path) != 0) {
-            log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
-            file_delete(write_path);
-            strbuf_free(temp_path_buf);
-            return false;
-        }
-        strbuf_free(temp_path_buf);
-    }
-    return true;
+                            const void* data, size_t length) {
+    // The shared writer checks close/flush and reserves atomic destinations exclusively.
+    return (atomic ? write_binary_file_atomic(file_path, data, length)
+        : mode[0] == 'a' ? append_binary_file(file_path, (const char*)data, length)
+        : write_binary_file(file_path, (const char*)data, length)) == 0;
 }
 
 // Unified output implementation
@@ -169,7 +129,7 @@ static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic
 // append: true for append mode, false for write (truncate) mode
 // atomic: if true, write to temp file first then rename (only for write mode, not append)
 // Returns: bytes written on success, ItemError on failure
-static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic) {
+static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic, const ZipWriteOptions* zip_options = nullptr) {
     if (g_dry_run) return dry_run_fabricated_output();
     const char* mode = append ? "a" : "w";
     const char* mode_binary = append ? "ab" : "wb";
@@ -224,6 +184,26 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
 
     // Clean up target (no longer needed)
     target_free(target);
+
+    const char* extension = file_path_ext(file_path);
+    bool zip = format_str ? !strcmp(format_str, "zip") : extension && !str_icmp_cstr(extension, ".zip");
+    if (zip) {
+        if (append) {
+            strbuf_free(path_buf);
+            return io_fs_error(ERR_INVALID_OPERATION, "output: ZIP append is unsupported");
+        }
+        RootFrame roots(1);
+        Rooted<Item> source_root(roots, source);
+        StrBuf* encoded = strbuf_new();
+        ZipError error = {};
+        bool ok = encoded && fs_zip_encode(source_root.get(), zip_options, encoded, &error);
+        if (ok) ok = write_binary_file_atomic(file_path, encoded->str, encoded->length) == 0;
+        size_t size = encoded ? encoded->length : 0;
+        if (encoded) strbuf_free(encoded);
+        strbuf_free(path_buf);
+        return ok ? (Item){.item = i2it((int64_t)size)}
+            : io_fs_error(ERR_FILE_WRITE_ERROR, "output ZIP: %s", error.message[0] ? error.message : "atomic write failed");
+    }
 
     // handle error source: report and return error
     TypeId source_type = get_type_id(source);
@@ -320,117 +300,36 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
 
     log_debug("pn_output_internal: using format '%s'", effective_format);
 
-    // format the data
+    // Complete formatting before opening the destination, including lazy read failures.
+    RootFrame roots(1);
+    Rooted<Item> source_root(roots, source);
     Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "proc.output.format");
-    String* formatted = NULL;
-    bool use_mark_format = false;
-
-    if (strcmp(effective_format, "json") == 0) {
-        formatted = format_json(temp_pool, source);
-    } else if (strcmp(effective_format, "yaml") == 0) {
-        formatted = format_yaml(temp_pool, source);
-    } else if (strcmp(effective_format, "xml") == 0) {
-        formatted = format_xml(temp_pool, source);
-    } else if (strcmp(effective_format, "html") == 0) {
-        formatted = format_html(temp_pool, source);
-    } else if (strcmp(effective_format, "markdown") == 0) {
-        formatted = format_markdown_string(temp_pool, source);
-    } else if (strcmp(effective_format, "text") == 0) {
-        formatted = format_text_string(temp_pool, source);
-    } else if (strcmp(effective_format, "toml") == 0) {
-        formatted = format_toml(temp_pool, source);
-    } else if (strcmp(effective_format, "ini") == 0) {
-        formatted = format_ini(temp_pool, source);
-    } else if (strcmp(effective_format, "mark") == 0) {
-        use_mark_format = true;
-    } else {
-        log_error("pn_output_internal: unsupported format '%s'", effective_format);
+    size_t format_length = strlen(effective_format);
+    String* format = (String*)pool_calloc(temp_pool, sizeof(String) + format_length + 1);
+    if (!format) { mem_pool_destroy(temp_pool); strbuf_free(path_buf); return ItemError; }
+    format->len = format_length; format->is_ascii = 1;
+    memcpy(format->chars, effective_format, format_length);
+    String* formatted = format_data(source_root.get(), format, nullptr, temp_pool);
+    if (!formatted) {
         mem_pool_destroy(temp_pool);
         strbuf_free(path_buf);
-        return ItemError;
+        return io_fs_error(ERR_FORMAT_ERROR, "output: formatting failed");
     }
-
-    // determine actual write path (temp file for atomic writes)
-    StrBuf* temp_path_buf = NULL;
-    const char* write_path = file_path;
-    if (atomic) {
-        temp_path_buf = strbuf_new();
-        generate_temp_path(file_path, temp_path_buf);
-        write_path = temp_path_buf->str;
+    StrBuf* mark = nullptr;
+    const char* data = formatted->chars;
+    size_t length = formatted->len;
+    if (!strcmp(effective_format, "mark")) {
+        mark = strbuf_new_cap(length + 2);
+        if (!mark) { mem_pool_destroy(temp_pool); strbuf_free(path_buf); return ItemError; }
+        strbuf_append_str_n(mark, data, length);
+        strbuf_append_char(mark, '\n');
+        data = mark->str; length = mark->length;
     }
-
-    // write to file
-    FILE* f = fopen(write_path, mode);
-    if (!f) {
-        log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
-        mem_pool_destroy(temp_pool);
-        if (temp_path_buf) strbuf_free(temp_path_buf);
-        strbuf_free(path_buf);
-        return ItemError;
-    }
-
-    size_t written;
-    if (use_mark_format) {
-        // use print_item for native Mark format
-        StrBuf* content_buf = strbuf_new_cap(1024);
-        print_item(content_buf, source, 0, NULL);
-        strbuf_append_char(content_buf, '\n');  // add trailing newline
-        written = fwrite(content_buf->str, 1, content_buf->length, f);
-        fclose(f);
-
-        if (written != content_buf->length) {
-            log_error("pn_output_internal: failed to write to file %s", write_path);
-            if (atomic) file_delete(write_path);  // clean up temp file on error
-            strbuf_free(content_buf);
-            mem_pool_destroy(temp_pool);
-            if (temp_path_buf) strbuf_free(temp_path_buf);
-            strbuf_free(path_buf);
-            return ItemError;
-        }
-
-        log_debug("pn_output_internal: wrote %zu bytes (mark) to %s", written, file_path);
-        strbuf_free(content_buf);
-    } else {
-        if (!formatted) {
-            log_error("pn_output_internal: formatting failed");
-            fclose(f);
-            mem_pool_destroy(temp_pool);
-            if (temp_path_buf) strbuf_free(temp_path_buf);
-            strbuf_free(path_buf);
-            return ItemError;
-        }
-
-        written = fwrite(formatted->chars, 1, strlen(formatted->chars), f);
-        fclose(f);
-
-        if (written != strlen(formatted->chars)) {
-            log_error("pn_output_internal: failed to write to file %s", write_path);
-            if (atomic) file_delete(write_path);  // clean up temp file on error
-            mem_pool_destroy(temp_pool);
-            if (temp_path_buf) strbuf_free(temp_path_buf);
-            strbuf_free(path_buf);
-            return ItemError;
-        }
-
-        log_debug("pn_output_internal: wrote %zu bytes (%s) to %s", written, effective_format, file_path);
-    }
-
-    // atomic: rename temp file to final path
-    if (atomic) {
-        if (atomic_rename(write_path, file_path) != 0) {
-            log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
-            file_delete(write_path);  // clean up temp file
-            mem_pool_destroy(temp_pool);
-            strbuf_free(temp_path_buf);
-            strbuf_free(path_buf);
-            return ItemError;
-        }
-        strbuf_free(temp_path_buf);
-    }
-
+    bool ok = write_raw_bytes(file_path, mode_binary, atomic, data, length);
+    if (mark) strbuf_free(mark);
     mem_pool_destroy(temp_pool);
     strbuf_free(path_buf);
-    return {.item = i2it((int64_t)written)};
+    return ok ? (Item){.item = i2it((int64_t)length)} : ItemError;
 }
 
 // 2-parameter wrapper: output(source, trg) - writes data to target (default format, write mode)
@@ -480,6 +379,16 @@ static bool get_map_bool_field(Map* map, const char* field_name, bool default_va
 //   atomic: bool - write to temp file first, then rename (default: false)
 // Returns: bytes written on success, error on failure
 Item pn_output3(Item source, Item target_item, Item options_item) {
+    ZipWriteOptions zip_options = zip_default_write_options();
+    ZipLimits limits = zip_options.limits;
+    ZipError zip_error = {};
+    if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        IoFsOptionMap option_map = {};
+        Item error = ItemNull;
+        if (!io_fs_options_open(options_item, "output", SYSPROC_OUTPUT3, &option_map, &error)) return error;
+    }
+    if (!fs_zip_options(options_item, &limits, &zip_options, &zip_error))
+        return io_fs_error(ERR_TYPE_MISMATCH, "output: %s", zip_error.message);
     const char* format_str = NULL;
     bool append = false;
     bool atomic = false;
@@ -511,7 +420,7 @@ Item pn_output3(Item source, Item target_item, Item options_item) {
         return ItemError;
     }
 
-    return pn_output_internal(source, target_item, format_str, append, atomic);
+    return pn_output_internal(source, target_item, format_str, append, atomic, &zip_options);
 }
 
 // 2-parameter append wrapper: used by |>> pipe operator

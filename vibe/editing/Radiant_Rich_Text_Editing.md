@@ -7,7 +7,7 @@
 
 **Date:** 2026-05-04
 **Status:** Proposal
-**Prerequisites:** Reactive_UI Phases 1–26 (Reactive_UI.md … Reactive_UI5.md), MarkEditor (Mark_Editor2.md), DomRange (Radiant_Design_Selection.md), text_control (`textarea`/`input` editing).
+**Prerequisites:** [Reactive UI](../Lambda_Design_Reactive_UI.md) (the consolidated template and interaction design), MarkEditor (Mark_Editor2.md), DomRange (Radiant_Design_Selection.md), text_control (`textarea`/`input` editing).
 
 ---
 
@@ -35,7 +35,7 @@ The reactive UI work has already built ~70% of the substrate. We are not startin
 | Universal source tree (Mark/Lambda elements) | `lambda-data.hpp`, parsers under `lambda/input/` | The **document model** (PM "Node", Slate "Element") |
 | `MarkEditor` with versioned immutable mode | `mark_editor.hpp/.cpp`, `Mark_Editor2.md` | Atomic, undoable mutations on the Mark tree |
 | `edit_bridge` C ABI | `edit_bridge.{h,cpp}` | JIT-compiled edit handlers can call typed mutation ops |
-| `view` / `edit` templates with pattern dispatch | `template_registry.{h,cpp}`, `Reactive_UI.md §4–8` | Source-tree → result-tree transformation |
+| `view` / `edit` templates with pattern dispatch | `template_registry.{h,cpp}`, [Reactive UI §§4–9](../Lambda_Design_Reactive_UI.md#4-matching-and-application) | Source-tree → result-tree transformation |
 | `render_map` (source ↔ result reconciliation) | `render_map.{h,c}` | PM-style "decorations" / Slate "rendering" — tells us which DOM node came from which source node |
 | `DomBoundary` / `DomRange` / `DomSelection` | `dom_range.hpp`, `Radiant_Design_Selection.md` | W3C-conformant selection over the *rendered* DOM |
 | `state_store` (`CaretState`, `SelectionState`, dirty/reflow scheduling) | `state_store.hpp` | Visual caret + incremental repaint |
@@ -351,7 +351,7 @@ The `<input>`/`<textarea>` projection now routes through StateStore-backed text-
 
 No new mechanism — reuse `render_map` two-phase update (`Phase 1: mark dirty after model mutation; Phase 2: top-down re-transform`).
 
-The change for rich text is that **mutations are now driven by the transaction layer**, so `render_map_mark_dirty` is called per modified source node from `Step::apply`. The existing incremental DOM patch pipeline picks up from there. Performance characteristics from Reactive_UI4/5 (~32–42 ms) carry over because typing in a paragraph dirties exactly one source node.
+The change for rich text is that **mutations are now driven by the transaction layer**, so `render_map_mark_dirty` is called per modified source node from `Step::apply`. The existing incremental DOM patch pipeline picks up from there. The incremental presentation contract is described in [Reactive UI §10](../Lambda_Design_Reactive_UI.md#10-incremental-presentation); paragraph edits invalidate the affected source presentations (S12.1.3).
 
 A small but important addition: **decorations**. PM's decorations let us paint things like:
 
@@ -460,7 +460,7 @@ void         edit_session_subscribe(EditSession*, EditEventKind, EditCallback, v
 ### Phase R5 — Paste, drop, decorations
 
 1. HTML paste: parser + schema coercion.
-2. Drag-and-drop of source-tree subtrees (extends the Phase 26 drag work in `Reactive_UI5.md`).
+2. Drag-and-drop of source-tree subtrees (extends the drag design in [Reactive UI §14](../Lambda_Design_Reactive_UI.md#14-drag-and-drop)).
 3. Decoration set + spellcheck + find/replace as the first two consumers.
 
 **Exit:** copy from a browser → paste into Lambda → structure preserved up to schema; find/replace highlights live without entering history.

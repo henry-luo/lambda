@@ -326,7 +326,20 @@ lambda view [document_file] [options]
 
 Unknown options are silently ignored.
 
-**Default file:** `test/html/index.html` (when no file is specified)
+**Default file:** `<LAMBDA_HOME>/package/doc/doc_viewer.ls`, the bundled
+`lambda.doc` document viewer (D7.2.4). It browses the current working directory.
+`lambda demo` opens its `doc_viewer.html` startup splash. Both commands use
+`./lmd` as the default Lambda home and honor `LAMBDA_HOME`.
+
+**Directory and archive browsing:** `lambda view directory/` and
+`lambda view archive.zip` open the bundled file tree rooted at that source.
+ZIP32/ZIP64 files, including ZIP-backed DOCX and JAR packages, are detected by
+their content even when renamed or extensionless. Expand directories and
+archive rows, then select members to read source, inspect structured data or
+preview documents/images. Archive capture is eager; member decompression stays
+lazy (**S12.4.1v2/S14.3.1v2**). Members are read directly from the retained
+archive without extraction. Invalid archives and deferred member failures use
+the existing input errors.
 
 **Supported formats:**
 
@@ -348,6 +361,10 @@ lambda view page.html
 lambda view report.pdf
 lambda view https://example.com
 lambda view diagram.mmd
+lambda view documents/
+lambda view assets.zip
+lambda view report.docx
+lambda view application.jar
 ```
 
 ---

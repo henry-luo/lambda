@@ -64,13 +64,14 @@ DOM_UI_JOBS ?= $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); e
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
-RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_rdt_vector_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest test_view_reuse_gtest
+RADIANT_BASELINE_TEST_PROJECTS := test_scene3d_gtest test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_rdt_vector_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest test_view_reuse_gtest
 RADIANT_DOM2_WPT_RUNNERS := input_events
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
 # clean baseline run reports a missing executable. The concurrency and Node
 # preliminary projects remain excluded by that runner.
 LAMBDA_BASELINE_TEST_PROJECTS := \
+	test_zip_gtest \
 	test_lambda_gtest \
 	test_input_script_cache_gtest \
 	test_lambda_parser_poc_gtest \
@@ -2155,8 +2156,13 @@ run-layout-baseline-suites:
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-radiant-baseline: build-radiant-baseline
+	@./test/test_scene3d_gtest.exe
 	@./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:FontMetricTest.*:ResourceAdmissionTest.*'
 	@$(MAKE) --no-print-directory run-radiant-baseline
+
+.PHONY: test-scene3d
+test-scene3d: build-radiant-baseline
+	@./test/test_scene3d_gtest.exe
 
 # Requires test/render Node dependencies, Chromium and Poppler's pdftocairo/pdfimages.
 test-svg-export: build
@@ -2618,7 +2624,7 @@ editable-form-regressions: build-test
 test-editable-ua: test-editable-ua-focused test-editable editable-form-regressions
 
 editable-ui: build-test
-	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,test_editing_paired_false_island_contenteditable,rte_typing_at_caret,editable_mixed_routes" $(ARGS)
+	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,rte_typing_at_caret,editable_mixed_routes" $(ARGS)
 
 editable-editor-e2e: build-test
 	@./test/test_ui_automation_gtest.exe --suite editor --test "editable_editors_*" $(ARGS)

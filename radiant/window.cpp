@@ -335,13 +335,14 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
                                        const DocumentJsHostConfig* js_host_config,
                                        CookieJar* top_level_cookie_jar,
                                        HtmlLoadPhaseTiming* timing,
-                                       DocumentScriptPhaseTiming* script_timing) {
+                                       DocumentScriptPhaseTiming* script_timing,
+                                       bool print_media = false) {
     // For HTTP/HTTPS URLs, always route to HTML loader regardless of extension
     if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
         log_debug("Loading as remote HTML document (HTTP/HTTPS)");
         return load_html_doc_profiled(base_url, (char*)filename, width, height,
                                       js_host_config, top_level_cookie_jar,
-                                      timing, script_timing);
+                                      timing, script_timing, print_media);
     }
 
     if (!graph_path_is_graph(filename)) {
@@ -360,7 +361,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
     }
     log_debug("Loading document: %s", filename);
     return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                         top_level_cookie_jar);
+                         top_level_cookie_jar, false, print_media);
 }
 
 // Get human-readable format name for window title
@@ -464,6 +465,11 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
 
     // BrowsingSession owns replacement of the previously presented document;
     // this presentation helper only publishes the newly loaded document.
+    if (ui_context.document != doc) {
+        // navigation retires the old document's registry-owned edition.
+        ui_context.paged_view = nullptr;
+        ui_context.paged_scroll_x = ui_context.paged_scroll_y = 0.0f;
+    }
     ui_context.document = lam::up(doc);
     ui_context_sync_document_raster_scale(&ui_context, doc);
 
@@ -496,6 +502,10 @@ static bool window_clear_layout_dirty_visitor(DomNode* node, void*) {
 }
 
 void reflow_html_doc(DomDocument* doc) {
+    if (doc && doc == ui_context.document && ui_context.paged_options) {
+        render_paged_window_compose(&ui_context);
+        return;
+    }
     if (!doc || !doc->root) {
         log_debug("No document to reflow");
         return;
@@ -601,7 +611,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     }
 
     // Alt+Left = browser back, Alt+Right = browser forward
-    if (action == GLFW_PRESS && (mods & GLFW_MOD_ALT)) {
+    if (!ui_context.paged_options && action == GLFW_PRESS && (mods & GLFW_MOD_ALT)) {
         BrowsingSession* session = ui_context.browsing_session;
         if (session && ui_context.document) {
             int css_vw = ui_context.viewport_width;
@@ -957,7 +967,7 @@ void render(GLFWwindow* window) {
         log_debug("render: updated viewport to %dx%d CSS pixels",
                   (int)ui_context.viewport_width, (int)ui_context.viewport_height);
         // reflow the document
-        if (ui_context.document) {
+        if (ui_context.document && !ui_context.paged_options) {
             reflow_html_doc(ui_context.document);
             // Resize listeners must observe the new metrics and may mutate
             // layout synchronously before this frame is presented.
@@ -985,13 +995,15 @@ void render(GLFWwindow* window) {
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
 
-    if (ui_context.document && ui_context.document->view_tree) {
+    if (ui_context.document && (ui_context.document->view_tree || ui_context.paged_view)) {
         // Cocoa can request a refresh while document scripts run, before the
         // initial layout has published a view tree.
         // ES19: init before the repaint test, not inside it — a control added by a
         // reflow that produced no dirty region still owes its `init` turn.
-        radiant_run_behavior_init(ui_context.document);
-        radiant_run_autofocus(ui_context.document);
+        if (!ui_context.paged_options) {
+            radiant_run_behavior_init(ui_context.document);
+            radiant_run_autofocus(ui_context.document);
+        }
         // rerender if the document is dirty or needs repaint (e.g., caret changed)
         if (ui_context.document->state &&
             (ui_context.document->state->is_dirty ||
@@ -1227,7 +1239,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    const char** font_dirs, int font_dir_count,
                                                    bool enable_event_log,
                                                    bool enable_state_dump,
-                                                   UiAppMode app_mode) {
+                                                   UiAppMode app_mode,
+                                                   const RenderPagedOptions* paged_options = nullptr) {
     struct DeferredRetirement {
         bool previous = dom_retire_set_deferred(true);
         ~DeferredRetirement() { dom_retire_set_deferred(previous); }
@@ -1259,6 +1272,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     ui_context.event_log_enabled = enable_event_log;
     ui_context.state_dump_enabled = enable_state_dump;
     ui_context.app_mode = app_mode;
+    ui_context.paged_options = lam::up(paged_options);
 
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < font_dir_count; i++) {
@@ -1369,6 +1383,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         // CSS media queries should use CSS pixels (logical pixels), not physical pixels
         int css_width = (int)ui_context.viewport_width;
         int css_height = (int)ui_context.viewport_height;
+        if (paged_options) {
+            ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+            css_width = (int)ceilf(environment.viewport_width); // INT_CAST_OK: discrete loader viewport.
+            css_height = (int)ceilf(environment.viewport_height); // INT_CAST_OK: discrete loader viewport.
+        }
 
         // The state owner must exist before top-level loading so page scripts,
         // document cookies, and the first HTTP request share one profile jar.
@@ -1407,6 +1426,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             false,
             false
         };
+        if (paged_options) {
+            js_host_config.disable_css_animations = true;
+            js_host_config.resource_policy = paged_options->block_remote_resources
+                ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK;
+        }
         DomDocument* doc = nullptr;
         uint64_t document_load_start = time_now_ns();
         {
@@ -1439,7 +1463,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 pool = nullptr;
                 doc = load_doc_by_format(file_to_load, cwd, css_width, css_height,
                     &js_host_config, session_cookie_jar(ui_context.browsing_session),
-                    &phase_timing.html, &phase_timing.script);
+                    &phase_timing.html, &phase_timing.script, paged_options != nullptr);
             }
         }
         phase_timing.document_load_ms = view_phase_elapsed_ms(
@@ -1463,6 +1487,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         }
 
         ui_context.document = lam::up(doc);
+        if (paged_options && !doc->root) {
+            fputs("view --paged: the document has no HTML layout source\n", stderr);
+            if (sim_ctx) event_sim_free(sim_ctx);
+            url_destroy(cwd);
+            window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
+            return 1;
+        }
         ui_context_sync_document_raster_scale(&ui_context, doc);
 
         // Initialize network support for HTTP-loaded documents.
@@ -1556,20 +1587,29 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (doc->root) {
             log_mem_stage("before-layout");
             uint64_t layout_start = time_now_ns();
-            layout_html_doc(&ui_context, doc, false);
+            if (paged_options) {
+                if (!render_paged_window_compose(&ui_context)) {
+                    if (sim_ctx) event_sim_free(sim_ctx);
+                    url_destroy(cwd);
+                    window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
+                    return 1;
+                }
+            } else {
+                layout_html_doc(&ui_context, doc, false);
+            }
             phase_timing.layout_ms = view_phase_elapsed_ms(layout_start, time_now_ns());
             log_mem_stage("after-layout");
-            radiant_dispatch_lambda_body_load(&ui_context, doc);
+            if (!paged_options) radiant_dispatch_lambda_body_load(&ui_context, doc);
         }
         log_notice("view: layout complete, rendering...");
         // Render document
         uint64_t behavior_init_start = time_now_ns();
-        radiant_run_behavior_init(doc, &phase_timing.behavior);   // ES19: layout -> init -> render
+        if (!paged_options) radiant_run_behavior_init(doc, &phase_timing.behavior);   // ES19: layout -> init -> render
         phase_timing.behavior_init_ms = view_phase_elapsed_ms(behavior_init_start, time_now_ns());
         uint64_t autofocus_start = time_now_ns();
-        radiant_run_autofocus(doc);       // ES30: package policy -> native focus
+        if (!paged_options) radiant_run_autofocus(doc);       // ES30: package policy -> native focus
         phase_timing.autofocus_ms = view_phase_elapsed_ms(autofocus_start, time_now_ns());
-        if (doc && doc->view_tree) {
+        if (doc && (doc->view_tree || ui_context.paged_view)) {
             log_mem_stage("before-render");
             uint64_t render_start = time_now_ns();
             render_html_doc(&ui_context, doc->view_tree, NULL);
@@ -1831,11 +1871,12 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                     const char** font_dirs, int font_dir_count,
-                                    bool enable_event_log, bool enable_state_dump) {
+                                    bool enable_event_log, bool enable_state_dump,
+                                    const RenderPagedOptions* paged_options) {
     return view_doc_in_window_with_events_internal(doc_file, nullptr, nullptr, 0,
                                                    event_file, headless,
                                                    font_dirs, font_dir_count, enable_event_log,
-                                                   enable_state_dump, UI_APP_MODE_VIEW);
+                                                   enable_state_dump, UI_APP_MODE_VIEW, paged_options);
 }
 
 int view_lambda_document_transform_with_events(const char* document_file,
@@ -1868,5 +1909,5 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false);
+    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false, nullptr);
 }

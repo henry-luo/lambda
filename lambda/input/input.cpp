@@ -1,5 +1,6 @@
 #include "../../lib/utf.h"
 #include "input.hpp"
+#include "../io/fs_node.hpp"
 #include "input-parsers.h"
 #include "../core/lambda-decimal.hpp"
 #include "../io/mark_builder.hpp"
@@ -1296,8 +1297,8 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     int count = 0;
     if (owned) for (TypeMapRetypePlan* plan = parent->retype_plans; plan; plan = plan->next) {
         count++;
-        if (plan->parent == parent && plan->source == field &&
-                plan->replacement->type == type_info[value_type].type) {
+        if (plan->parent == parent && plan->source == field && plan->replacement &&
+                plan->value_type == value_type) {
             if (out_plan) *out_plan = plan;
             return plan->target;
         }
@@ -1307,6 +1308,7 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
     if (!plan) return target;
     plan->parent = parent; plan->source = field; plan->target = target;
+    plan->value_type = value_type;
     plan->reuse_payload = typemap_payload_reusable(parent, target, field, NULL, &plan->replacement);
     // a changed width can stop the compatibility walk before it reaches the replacement.
     if (!plan->replacement) {
@@ -1317,6 +1319,37 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
         }
     }
     if (!plan->replacement) return target;
+    plan->storage_type = shape_entry_storage_type_id(plan->replacement);
+    plan->next = parent->retype_plans; parent->retype_plans = plan;
+    if (out_plan) *out_plan = plan;
+    return target;
+}
+
+TypeMap* type_tree_delete_field(Input* input, Map* container, const ShapeEntry* field,
+        const TypeMapRetypePlan** out_plan) {
+    if (out_plan) *out_plan = NULL;
+    TypeMap* parent = container ? (TypeMap*)container->type : NULL;
+    if (!input || !parent || !field) return NULL;
+    bool owned = parent->is_transition_shared_shape && type_tree_owns(input, parent);
+    int count = 0;
+    if (owned) for (TypeMapRetypePlan* plan = parent->retype_plans; plan; plan = plan->next) {
+        count++;
+        if (plan->parent == parent && plan->source == field && !plan->replacement) {
+            if (out_plan) *out_plan = plan;
+            return plan->target;
+        }
+    }
+    TypeMap* target = type_tree_root_like(input, container);
+    FOR_EACH_MAP_FIELD(parent, entry) {
+        if (entry != field && target) target = type_tree_add_map_field_chars(input, target,
+            entry->name->str, entry->name->length, entry->type->type_id, NULL);
+    }
+    if (!target || !owned || count >= shape_tree_fanout_cap(parent)) return target;
+    TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
+    if (!plan) return target;
+    // a null replacement distinguishes deletion; shared nodes make the cached migration immutable.
+    plan->parent = parent; plan->source = field; plan->target = target;
+    plan->reuse_payload = typemap_payload_reusable(parent, target, NULL, field, &plan->replacement);
     plan->next = parent->retype_plans; parent->retype_plans = plan;
     if (out_plan) *out_plan = plan;
     return target;
@@ -2060,7 +2093,8 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
-        if (detected_graph_flavor) effective_type = "graph";
+        if (zip_source_expected(pathname, source, source_len)) effective_type = "zip";
+        else if (detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
         MimeDetector* detector = effective_type ? NULL : mime_detector_init();
         if (!effective_type && detector) {
@@ -2084,7 +2118,18 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     log_debug("input_from_source: effective_type='%s'", effective_type ? effective_type : "null");
 
     Input* input = NULL;
-    if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
+    if (effective_type && (!strcmp(effective_type, "zip") || !strcmp(effective_type, "binary"))) {
+        input = InputManager::create_input_with_name_parent(abs_url, name_parent);
+        if (!input) return nullptr;
+        if (!strcmp(effective_type, "zip")) input_zip(input, source, source_len);
+        else {
+            MarkBuilder builder(input);
+            Binary* bytes = source_len ? builder.createBinary(source, source_len) : nullptr;
+            input->root = source_len ? (bytes ? (Item){.item = x2it(bytes)} : ItemError) : ItemNull;
+            input->parse_failed = get_type_id(input->root) == LMD_TYPE_ERROR;
+        }
+    }
+    else if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
         // Use InputManager to properly set up the Input with a pool
         input = InputManager::create_input_with_name_parent(abs_url, name_parent);
         if (!input) {
@@ -2092,7 +2137,8 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
             return NULL;
         }
         // Allocate string from the pool instead of malloc
-        String *str = create_string(input->pool, source);
+        MarkBuilder builder(input);
+        String *str = builder.createString(source, source_len);
         input->root = {.item = s2it(str)};
     }
     else {
@@ -2208,22 +2254,15 @@ extern "C" Input* input_from_source_with_options(const char* source,
 // preserve the byte count for length-aware parsers, including HTML and PDF.
 static Input* input_from_local_path(const char* pathname, Url* abs_url,
         String* type, String* flavor, NamePool* name_parent = NULL) {
-    bool is_binary_pdf = false;
-    if (type && strcmp(type->chars, "pdf") == 0) {
-        is_binary_pdf = true;
-    } else if (pathname) {
-        size_t plen = strlen(pathname);
-        if (plen >= 4 && str_icmp_cstr(pathname + plen - 4, ".pdf") == 0) {
-            is_binary_pdf = true;
-        }
+    size_t src_len = 0;
+    char* source = nullptr;
+    // Acquire exact bytes once; ZIP detection must never depend on strlen().
+    ZipLimits limits = input_zip_limits ? *input_zip_limits : zip_default_limits();
+    if (!file_read_all_limit(pathname, MEM_CAT_INPUT_OTHER, limits.archive_bytes, &source, &src_len)) {
+        log_debug("INPUT_CAPTURE_FAILED: %s", pathname ? pathname : "null");
+        return nullptr;
     }
 
-    size_t src_len = 0;
-    char* source = NULL;
-    if (!file_read_all(pathname, MEM_CAT_TEMP, &source, &src_len)) {
-        log_debug("input_from_local_path: failed to read file at path: %s", pathname ? pathname : "null");
-        return NULL;
-    }
     Input* input = input_from_source_n_with_name_parent(source, src_len,
         abs_url, type, flavor, name_parent);
 #ifndef LAMBDA_NO_GRAPH_INPUT
@@ -2231,7 +2270,7 @@ static Input* input_from_local_path(const char* pathname, Url* abs_url,
         (strcmp(flavor->chars, "structurizr") == 0 || strcmp(flavor->chars, "c4") == 0);
     const bool detected_structurizr = !flavor &&
         input_detect_structurizr_flavor(pathname, source, src_len) != NULL;
-    if (input && !is_binary_pdf && (explicit_structurizr || detected_structurizr)) {
+    if (input && (explicit_structurizr || detected_structurizr)) {
         resolve_graph_structurizr_local_includes(input, pathname);
     }
 #endif

@@ -1,6 +1,6 @@
 {
   "name": "Doc viewer toggles expandable property rows across their cells",
-  "html": "test/ui/doc_viewer.ls",
+  "html": "lmd/package/doc/doc_viewer.ls",
   "viewport": {"width": 1280, "height": 900},
   "events": [
     {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},

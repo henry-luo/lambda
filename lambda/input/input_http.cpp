@@ -9,6 +9,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/byte_builder.h"
 #include "input.hpp"
+#include "../io/fs_node.hpp"
 #include "../network/http_client.h"
 #include "../network/cookie_jar.h"
 #include "../network/enhanced_file_cache.h"
@@ -72,13 +73,20 @@ static struct curl_slist* http_document_navigation_headers() {
 #define HTTP_CACHE_MAX_SIZE (100 * 1024 * 1024)
 #define HTTP_CACHE_MAX_ENTRIES 10000
 
+static size_t http_input_byte_limit() {
+    uint64_t limit = HTTP_MAX_RESPONSE_SIZE;
+    if (input_zip_limits && input_zip_limits->archive_bytes < limit) limit = input_zip_limits->archive_bytes;
+    return (size_t)limit;
+}
+
 // Callback function to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
+    if (nmemb && size > SIZE_MAX / nmemb) return 0;
     size_t total_size = size * nmemb;
     if (!response || !byte_builder_append_limited(&response->body, contents,
-                                                   total_size, HTTP_MAX_RESPONSE_SIZE)) {
-        log_error("HTTP: Response exceeds maximum size (%d MB), aborting download",
-                  HTTP_MAX_RESPONSE_SIZE / (1024 * 1024));
+                                                   total_size, http_input_byte_limit())) {
+        log_error("HTTP: Response exceeds maximum size (%zu bytes), aborting download",
+                  http_input_byte_limit());
         return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
     }
     return total_size;
@@ -295,7 +303,8 @@ static char* download_http_content_with_enhanced_cache(const char* url,
     char* cache_path = enhanced_cache_lookup(cache, url);
     if (cache_path) {
         size_t cached_size = 0;
-        char* content = read_binary_file(cache_path, &cached_size);
+        char* content = nullptr;
+        file_read_all_limit(cache_path, MEM_CAT_INPUT_OTHER, http_input_byte_limit(), &content, &cached_size);
         if (content) {
             log_debug("HTTP: native cache hit for %s (%zu bytes)", url, cached_size);
             if (content_size) *content_size = cached_size;
@@ -366,7 +375,7 @@ Input* input_from_http_with_name_parent(const char* url, const char* type,
     char* cache_path = NULL;
     size_t content_size = 0;
     char* content = download_http_content_with_enhanced_cache(url, &content_size,
-        effective_cache_dir, &cache_path, true);
+        effective_cache_dir, &cache_path, false);
 
     if (!content) {
         return NULL;
@@ -393,6 +402,7 @@ Input* input_from_http_with_name_parent(const char* url, const char* type,
     }
 
     // Parse content using existing input system
+    // Preserve binary lengths across both fresh downloads and cache hits.
     Input* input = input_from_source_n_with_name_parent(content, content_size, abs_url,
         type_str, flavor_str, name_parent);
 

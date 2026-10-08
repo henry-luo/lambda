@@ -1,0 +1,91 @@
+<!doctype html><html><body><canvas id="owner" width="64" height="64"></canvas>
+<span id="result" data-result="pending"></span>
+<script type="module">
+import * as THREE from '../demo/scene3d/vendor/three/three.module.js';
+import { NativeAnimationMixer } from '../demo/scene3d/native-animation.js';
+const result=document.getElementById('result');let checks=0;
+function check(value,message) {if(!value)throw new Error(message);checks++;}
+function near(a,b) {return Math.abs(a-b)<2e-6;}
+try {
+ const canvas=document.getElementById('owner');
+ const nativeRoot=new THREE.Object3D(),oracleRoot=new THREE.Object3D();
+ nativeRoot.name=oracleRoot.name='moving';
+ nativeRoot.position.x=oracleRoot.position.x=0.25;
+ const tracks=[new THREE.VectorKeyframeTrack('.position',[0,1,2],[-1,0,0,1,2,0,-1,0,0]),
+  new THREE.QuaternionKeyframeTrack('.quaternion',[0,2],[0,0,0,1,0,0,1,0]),
+  new THREE.BooleanKeyframeTrack('.visible',[0,1,2],[true,false,true])];
+ const clip=new THREE.AnimationClip('travel',2,tracks);
+ const native=new NativeAnimationMixer(nativeRoot,canvas),oracle=new THREE.AnimationMixer(oracleRoot);
+ const action=native.clipAction(clip),reference=oracle.clipAction(clip);
+ check(native.clipAction(clip)===action,'clip action identity');
+ action.setLoop(THREE.LoopPingPong,3).play();reference.setLoop(THREE.LoopPingPong,3).play();
+ const nativeEvents=[],oracleEvents=[];
+ native.addEventListener('loop',e=>nativeEvents.push(e.type+':'+e.loopDelta));
+ native.addEventListener('finished',e=>nativeEvents.push(e.type+':'+e.direction));
+ oracle.addEventListener('loop',e=>oracleEvents.push(e.type+':'+e.loopDelta));
+ oracle.addEventListener('finished',e=>oracleEvents.push(e.type+':'+e.direction));
+ for(const delta of [0,.25,.5,.75,.5,.8,1.3,2.5]) {
+  native.update(delta);oracle.update(delta);
+  check(nativeRoot.position.distanceTo(oracleRoot.position)<2e-6,'vector mixer sample');
+  check(Math.abs(nativeRoot.quaternion.dot(oracleRoot.quaternion))>1-2e-6,'quaternion mixer sample');
+  check(nativeRoot.visible===oracleRoot.visible,'boolean mixer sample');
+  check(near(native.time,oracle.time),'mixer time');
+ }
+ check(nativeEvents.join()===oracleEvents.join(),'event trace');
+ native.stopAllAction();oracle.stopAllAction();
+ check(near(nativeRoot.position.x,.25)&&nativeRoot.visible,'base restoration');
+ native.uncacheClip(clip);
+ check(native.existingAction(clip)===null,'uncached identity');
+ let rejected=false;try {action.play();}catch(error) {rejected=error instanceof TypeError;}
+ check(rejected,'stale action rejected');
+ for(let i=0;i<20;i++) {native.clipAction(clip).play();native.update(.2);native.uncacheClip(clip);}
+ check(near(nativeRoot.position.x,.25),'repeated uncache restores base');
+ native.dispose();
+ rejected=false;try {native.update(.1);}catch(error) {rejected=error instanceof TypeError;}
+ check(rejected,'disposed mixer rejected');
+ // Native bindings own callbacks, including closures that only the host retains across a GC.
+ const automatic=new NativeAnimationMixer(nativeRoot,canvas);
+ const once=automatic.clipAction(clip).setLoop(THREE.LoopOnce,1);once.clampWhenFinished=true;once.play();
+ automatic.setAutomatic(true);
+ rejected=false;try {automatic.update(.1);}catch(error) {rejected=error instanceof TypeError;}
+ check(rejected,'automatic driver excludes explicit advancement');
+ globalThis.animationFrameProbe=()=> {
+  automatic.setAutomatic(false).setTime(0).setAutomatic(true);
+  globalThis.autoSamples=[];
+  function probe(time) {autoSamples.push([time,automatic.time,nativeRoot.position.x]);if(autoSamples.length<3)requestAnimationFrame(probe);}
+  requestAnimationFrame(probe);
+ };
+ globalThis.animationLifetimeCheck=()=> {
+  automatic.setAutomatic(false).setTime(.5);
+  check(near(nativeRoot.position.x,0),'rooted callback after collection');
+  automatic.dispose();
+  const owner=new NativeAnimationMixer(nativeRoot,canvas);owner.clipAction(clip).play();
+  const competitor=new NativeAnimationMixer(nativeRoot,canvas);
+  let rejected=false;try {competitor.clipAction(clip);}catch(error) {rejected=error instanceof TypeError;}
+  check(rejected,'single playback owner');
+  rejected=false;try {competitor.clipAction(new THREE.AnimationClip('overlap',1,
+   [new THREE.NumberKeyframeTrack('.position[x]',[0,1],[0,1])]));}catch(error) {rejected=error instanceof TypeError;}
+  check(rejected,'whole vector excludes indexed owners');competitor.dispose();owner.dispose();
+  const morph=new THREE.Mesh(new THREE.BufferGeometry(),new THREE.MeshBasicMaterial());
+  morph.morphTargetInfluences=[0];morph.morphTargetDictionary={stretch:0};
+  const morphOwner=new NativeAnimationMixer(morph,canvas),morphAlias=new NativeAnimationMixer(morph,canvas);
+  morphOwner.clipAction(new THREE.AnimationClip('named',1,
+   [new THREE.NumberKeyframeTrack('.morphTargetInfluences[stretch]',[0,1],[0,1])]));
+  rejected=false;try {morphAlias.clipAction(new THREE.AnimationClip('indexed',1,
+   [new THREE.NumberKeyframeTrack('.morphTargetInfluences[0]',[0,1],[0,1])]));}catch(error) {rejected=error instanceof TypeError;}
+  check(rejected,'named and numeric morph indices share ownership');morphAlias.dispose();morphOwner.dispose();
+  const detached=new THREE.Group(),child=new THREE.Object3D();child.name='child';detached.add(child);
+  const invalid=new NativeAnimationMixer(detached,canvas);
+  invalid.clipAction(new THREE.AnimationClip('detach',1,[new THREE.NumberKeyframeTrack('child.position[x]',[0,1],[0,1])])).play();
+  detached.remove(child);rejected=false;try {invalid.update(.5);}catch(error) {rejected=error instanceof TypeError;}
+  check(rejected,'detached object cancels its host');
+  const disposing=new NativeAnimationMixer(nativeRoot,canvas);
+  disposing.addEventListener('finished',()=>disposing.dispose());
+  disposing.clipAction(clip).setLoop(THREE.LoopOnce,1).play();
+  rejected=false;try {disposing.update(2.1);}catch(error) {rejected=error instanceof TypeError;}
+  check(rejected,'event can dispose the active host safely');
+  result.setAttribute('data-checks',checks);result.setAttribute('data-result','passed');
+ };
+ result.setAttribute('data-checks',checks);result.setAttribute('data-result','ready-for-gc');
+} catch(error) {result.setAttribute('data-result',String(error));throw error;}
+</script></body></html>

@@ -125,6 +125,11 @@ FILE* file_open_regular_write(const char* filename, bool overwrite) {
 
 bool file_read_all(const char* filename, MemCategory category,
                    char** out_data, size_t* out_size) {
+    return file_read_all_limit(filename, category, SIZE_MAX - 1, out_data, out_size);
+}
+
+bool file_read_all_limit(const char* filename, MemCategory category,
+        uint64_t limit, char** out_data, size_t* out_size) {
     if (out_data) *out_data = NULL;
     if (out_size) *out_size = 0;
     if (!filename || !out_data) {
@@ -149,7 +154,7 @@ bool file_read_all(const char* filename, MemCategory category,
         fclose(file);
         return false;
     }
-    if (sb.st_size < 0 || (uintmax_t)sb.st_size > (uintmax_t)(SIZE_MAX - 1)) {
+    if (sb.st_size < 0 || (uintmax_t)sb.st_size > (uintmax_t)(SIZE_MAX - 1) || (uintmax_t)sb.st_size > limit) {
         log_error("FILE-READ-ALL: file is too large: %s", filename);
         fclose(file);
         return false;
@@ -352,8 +357,9 @@ int write_binary_file(const char* filename, const char* data, size_t len) {
         return -1;
     }
     size_t written = fwrite(data, 1, len, f);
-    fclose(f);
-    if (written != len) {
+    bool failed = written != len || ferror(f);
+    if (fclose(f) != 0) failed = true;
+    if (failed) {
         log_error("write_binary_file: short write to '%s'", filename);
         return -1;
     }
@@ -390,8 +396,9 @@ int append_binary_file(const char* filename, const char* data, size_t len) {
         return -1;
     }
     size_t written = fwrite(data, 1, len, f);
-    fclose(f);
-    if (written != len) {
+    bool failed = written != len || ferror(f);
+    if (fclose(f) != 0) failed = true;
+    if (failed) {
         log_error("append_binary_file: short write to '%s'", filename);
         return -1;
     }
@@ -399,6 +406,10 @@ int append_binary_file(const char* filename, const char* data, size_t len) {
 }
 
 int write_text_file_atomic(const char* filename, const char* content) {
+    return content ? write_binary_file_atomic(filename, content, strlen(content)) : -1;
+}
+
+int write_binary_file_atomic(const char* filename, const void* content, size_t content_len) {
     if (!filename || !content) {
         log_error("write_text_file_atomic: NULL argument");
         return -1;
@@ -450,7 +461,6 @@ int write_text_file_atomic(const char* filename, const char* content) {
         mem_free(tmp);
         return -1;
     }
-    size_t content_len = strlen(content);
     if (fwrite(content, 1, content_len, f) != content_len || fflush(f) != 0) {
         log_error("write_text_file_atomic: write error on '%s'", tmp);
         fclose(f);

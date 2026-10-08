@@ -14,6 +14,8 @@
 #include "../js/js_runtime.h"
 #include "dom.h"
 #include "dom_canvas.h"
+#include "dom_webgl.h"
+#include "../module/radiant/radiant_webgl_bridge.hpp"
 #include "realm/dom_realm.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_class.h"
@@ -550,16 +552,19 @@ static Item js_canvas_get_context(Item callee, Item this_value,
     (void)result_home;
     RootFrame roots(2);
     Rooted<Item> canvas_root(roots, this_value);
-    Rooted<Item> identifier_root(roots, argc > 0 && args
-        ? js_to_string(args[0]) : js_name_item("undefined"));
+    Rooted<Item> identifier_root(roots, ItemNull);
     if (!dom_is_html_canvas_element(canvas_root.get()) &&
         !(get_type_id(canvas_root.get()) == LMD_TYPE_MAP &&
           js_class_id(canvas_root.get()) == JS_CLASS_OFFSCREEN_CANVAS)) {
         return dom_realm_throw_type_error("Illegal invocation");
     }
+    identifier_root.set(argc > 0 && args ? js_to_string(args[0]) : js_name_item("undefined"));
     if (item_is_error(identifier_root.get())) return identifier_root.get();
     String* identifier = get_type_id(identifier_root.get()) == LMD_TYPE_STRING
         ? it2s(identifier_root.get()) : nullptr;
+    if (identifier && identifier->len==6 && memcmp(identifier->chars,"webgl2",6)==0)
+        return dom_webgl_context_for(canvas_root.get(),argc>1?args[1]:ItemNull);
+    if (dom_is_html_canvas_element(canvas_root.get()) && radiant_webgl_has_context(dom_unwrap_element(canvas_root.get()))) return ItemNull;
     if (!identifier || identifier->len != 2 ||
         memcmp(identifier->chars, "2d", 2) != 0) {
         return ItemNull;

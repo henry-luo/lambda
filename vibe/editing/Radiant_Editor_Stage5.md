@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-29
 **Status:** Detailed design + implementation of the embedded drawing surface introduced at a high level in **[Stage 4](Radiant_Editor_Stage4.md)**. Design **validated** in a JS reference implementation (`test/editor-js/`, drawing layer green across 392 fixtures); **Lambda pure-logic core ported & headless-tested** (§0.5) — tool machine, render templates, snap, clipboard, and live-Radiant integration remain.
-**Builds on:** [Stage 4 — high-level drawing integration](Radiant_Editor_Stage4.md) (the `<drawing>` block embed, the flow/canvas mode model, selection bridging, and the "zero new step kinds" rule), [Reactive_UI.md](Reactive_UI.md).
+**Builds on:** [Stage 4 — high-level drawing integration](Radiant_Editor_Stage4.md) (the `<drawing>` block embed, the flow/canvas mode model, selection bridging, and the "zero new step kinds" rule), [Reactive UI](../Lambda_Design_Reactive_UI.md).
 **Goal:** a full **draw.io-class** diagram editor embedded in the flow document — shapes, connectors with real routing, ports, groups, layers, snap/align, clipboard, and (roadmap) stencils, edgeless canvas, and collab.
 
 > **Section numbering.** The dense internal cross-references (§3.2, §5.1, §9.3, …) are preserved from the original combined draft. The high-level integration overview — TL;DR, integration scope, and the core **selection model** (Stage 4 §2, including the `multi-node` variant) — lives in [Stage 4](Radiant_Editor_Stage4.md). The **mode model, focus, and live-session glue** (formerly Stage 4 §2.3-§2.4) now live in **§4** of this document.
@@ -377,7 +377,7 @@ Mode entry calls `mod_editor.set_mode('canvas', drawing_id)` which:
 3. Sets `editor.focused_drawing = drawing_id` (used by hit-test scoping).
 4. Fires `'mode-change'` event to subscribers (toolbar UI re-renders).
 
-Mode exit reverses; final selection inside the canvas is **retained** in the state store so re-entering the same drawing restores it (per Reactive_UI §5A.2's state-key model — `(drawing_id, "select_tool", "selection")`). The `multi_node_selection` variant the canvas mode uses is already implemented in the core model ([Stage 4 §2.2](Radiant_Editor_Stage4.md)).
+Mode exit reverses; final selection inside the canvas is **retained** in the state store so re-entering the same drawing restores it (per the [Reactive UI §5.2](../Lambda_Design_Reactive_UI.md#52-initialization-and-retention) state-retention model — `(drawing_id, "select_tool", "selection")`). The `multi_node_selection` variant the canvas mode uses is already implemented in the core model ([Stage 4 §2.2](Radiant_Editor_Stage4.md)).
 
 ### 4.2 Focus & the `data-drawing-focus` annotation
 
@@ -563,7 +563,7 @@ For point hit-test on the canvas: iterate layers top to bottom (last in source =
 
 ## 8. Render Contract
 
-### 8.1 Template structure (Reactive_UI §3 templates)
+### 8.1 Template structure ([Reactive UI §3](../Lambda_Design_Reactive_UI.md#3-template-declaration-and-context) templates)
 
 ```lambda
 edit <drawing> {
@@ -725,7 +725,7 @@ For each candidate, if the dragged shape's corresponding anchor is within snap-d
 
 ### 10.4 Guides as decorations
 
-All snap / alignment visuals are **decorations** (Reactive_UI §8 / Stage 3 §3.10) — they never enter the source tree, never enter history. The active tool's `paint_decorations` produces them.
+All snap / alignment visuals are **decorations** ([Reactive UI §10.6](../Lambda_Design_Reactive_UI.md#106-caret-and-interaction-only-updates) / Stage 3 §3.10) — they never enter the source tree, never enter history. The active tool's `paint_decorations` produces them.
 
 ---
 

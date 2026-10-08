@@ -85,10 +85,16 @@ void dom_engine_svg_timing_key(DomElement* target, const char* key);
 bool dom_engine_layout_active(DomDocument* doc);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 
+// selected native pointer stream: 0/1 success, -1 inactive ID, -2 detached target.
+int dom_engine_pointer_capture(DomElement* element,int32_t pointer_id,unsigned operation);
+
 // HTML image loading: the engine owns decoding and intrinsic-image state; the
 // DOM core owns the deferred `load` event and node lifetime around it.
 bool dom_engine_set_image_source(DomElement* element, const char* source);
 bool dom_engine_image_natural_size(DomElement* element, int* width, int* height);
+bool dom_engine_image_rendered_size(DomElement* element, int* width, int* height);
+void dom_engine_install_animation_globals(void);
+void dom_engine_animation_frame_prepare(void* document, double timestamp_ms);
 
 // one-shot named frame events; the document owns requests, never script closures
 uint64_t dom_engine_frame_request(void* owner, const char* event_name);

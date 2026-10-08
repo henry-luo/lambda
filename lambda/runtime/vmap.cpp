@@ -132,14 +132,20 @@ static uint64_t vmap_hash_item(const void* entry, uint64_t seed0, uint64_t seed1
     return lambda_item_hash(e->key, seed0, seed1);
 }
 
+bool vmap_keys_equal(Item a, Item b) {
+    if (vmap_key_is_name(a) && vmap_key_is_name(b)) {
+        return vmap_compare_name_keys(a, b) == 0;
+    }
+    return lambda_item_compare(a, b) == 0;
+}
+
 // compare two Item keys for equality
 static int vmap_compare_item(const void* a, const void* b, void* udata) {
     const HashMapEntry* ea = (const HashMapEntry*)a;
     const HashMapEntry* eb = (const HashMapEntry*)b;
     HashMapData* hd = (HashMapData*)udata;
-    if (hd && hd->lambda_key_domain &&
-            vmap_key_is_name(ea->key) && vmap_key_is_name(eb->key)) {
-        return vmap_compare_name_keys(ea->key, eb->key);
+    if (hd && hd->lambda_key_domain) {
+        return vmap_keys_equal(ea->key, eb->key) ? 0 : 1;
     }
     return lambda_item_compare(ea->key, eb->key);
 }
@@ -361,8 +367,10 @@ extern "C" Item vmap_backing_get(VMap* vm, Item key) {
 extern "C" bool vmap_backing_has(VMap* vm, Item key) {
     if (!vm || !vm->data || !vm->vtable) return false;
     int64_t count = vm->vtable->count(vm->data);
+    bool canonical = vm->vtable == &hashmap_vtable && ((HashMapData*)vm->data)->lambda_key_domain;
     for (int64_t index = 0; index < count; index++) {
-        if (lambda_item_compare(vm->vtable->key_at(vm->data, index), key) == 0) {
+        Item candidate = vm->vtable->key_at(vm->data, index);
+        if (canonical ? vmap_keys_equal(candidate, key) : lambda_item_compare(candidate, key) == 0) {
             return true;
         }
     }

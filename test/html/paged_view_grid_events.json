@@ -1,0 +1,11 @@
+{
+  "name": "paged window horizontal grid navigation",
+  "viewport": {"width": 220, "height": 140},
+  "events": [
+    {"type": "assert_pixel", "x": 20, "y": 20, "min_r": 255, "max_g": 0, "max_b": 0},
+    {"type": "scroll", "x": 20, "y": 20, "dx": -4.4},
+    {"type": "assert_pixel", "x": 20, "y": 20, "max_r": 0, "min_g": 255, "max_b": 0},
+    {"type": "scroll", "x": 20, "y": 20, "dx": -4.4},
+    {"type": "assert_pixel", "x": 20, "y": 20, "max_r": 0, "max_g": 0, "min_b": 255}
+  ]
+}

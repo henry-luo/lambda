@@ -1,0 +1,73 @@
+{
+  "name": "ZIP members preview HTML in a frame, Markdown and SVG without extraction",
+  "html": "test/input/zip/viewer.zip",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='viewer.zip/index.html'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#html-preview"
+      },
+      "count": 1
+    },
+    {
+      "type": "switch_frame",
+      "selector": "#html-preview"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Archive HTML"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "h1"
+      },
+      "property": "color",
+      "equals": "rgb(20, 60, 100)"
+    },
+    {
+      "type": "switch_frame"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='viewer.zip/readme.md'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rendered-preview h1"
+      },
+      "equals": "Archive Markdown"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='viewer.zip/drawing.svg'] .tree-label"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "width": 30,
+      "height": 20,
+      "tolerance": 1
+    }
+  ]
+}

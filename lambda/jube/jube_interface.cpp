@@ -88,8 +88,8 @@ typedef struct JubeTypeIndexEntry {
     JubeTypeRecord* record;
 } JubeTypeIndexEntry;
 
-#define JUBE_TYPE_RECORD_CAPACITY 64
-static JubeTypeRecord* s_type_records[JUBE_TYPE_RECORD_CAPACITY];
+// optional renderer interfaces grow the catalog; record addresses remain stable for cached dispatch.
+static lam::ArrayList<JubeTypeRecord*> s_type_records(MEM_CAT_CONTAINER,0);
 static int s_type_record_count = 0;
 static HashMap* s_type_index = NULL;
 
@@ -428,7 +428,7 @@ static Item jube_member_js_method_item(JubeMemberRecord* rec) {
     int arity = rec->bind && (rec->bind->flags & JUBE_MEMBER_HAS_REQUIRED_ARGS)
         ? (int)(rec->bind->flags >> 8) : rec->arity;
     if (arity < 0) arity = 0;
-    if (arity > 8) arity = 8;
+    // payload functions receive an argument span; WebIDL methods may require more than eight arguments.
     RootFrame roots(1);
     Rooted<Item> function_root(roots, js_new_native_payload_function(jube_tramp_invoke,
         (uint64_t)(uintptr_t)rec, arity));
@@ -1680,8 +1680,8 @@ static int jube_compile_type(const JubeModuleDef* module,
         }
     }
 
-    if (s_type_record_count >= JUBE_TYPE_RECORD_CAPACITY) {
-        log_error("JUBE_IFACE: type record capacity exceeded at '%s'", type_name);
+    if (!s_type_records.reserve(s_type_record_count+1)) {
+        log_error("JUBE_IFACE: type record allocation failed at '%s'", type_name);
         jube_free_parsed_members(parsed, parsed_count);
         return -1;
     }
@@ -1859,7 +1859,7 @@ static int jube_compile_type(const JubeModuleDef* module,
         jube_free_parsed_members(parsed, parsed_count);
         return -1;
     }
-    s_type_records[s_type_record_count++] = trec;
+    s_type_records.push_back(trec);s_type_record_count++;
 
 #ifndef NDEBUG
     log_info("JUBE_REG: type %s.%s members=%d (methods=%d, consts=%d, inherited=%d)",
@@ -2145,7 +2145,7 @@ extern "C" void jube_interface_remove_module(const JubeModuleDef* module) {
         jube_interface_release_record(trec, true);
         s_type_record_count--;
         s_type_records[i] = s_type_records[s_type_record_count];
-        s_type_records[s_type_record_count] = NULL;
+        s_type_records.remove(s_type_record_count);
     }
 }
 
@@ -2156,8 +2156,9 @@ extern "C" void jube_interface_cleanup(void) {
     while (s_type_record_count > 0) {
         int index = --s_type_record_count;
         jube_interface_release_record(s_type_records[index], false);
-        s_type_records[index] = NULL;
+        s_type_records.remove(index);
     }
+    s_type_records.release();
     if (s_type_index) {
         JubeTypeIndex::destroy(s_type_index);
         s_type_index = NULL;

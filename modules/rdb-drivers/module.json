@@ -1,7 +1,7 @@
 {
   "name": "rdb-drivers",
   "version": "0.1.0",
-  "base_abi_version": 8,
+  "base_abi_version": 9,
   "hosted_api_version": 5,
   "kind": "runtime-library",
   "engine": "rdb",

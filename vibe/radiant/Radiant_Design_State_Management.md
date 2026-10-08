@@ -225,7 +225,7 @@ A page containing Lambda templates *and* non-cooperative `<script>` JS is persis
 
 - **RSO1 — Input markup store.** The model-change store: delta capture, the source-path identity contract (provider side of RS7), and its natural unification with edit-template undo/redo. Separate design discussion.
 - **RSO2 — Template-instance-relative addressing.** Exact key format for interaction state on generated nodes: (model source path, template_ref, path-within-output) encoding, and collision rules when templates nest.
-- **RSO3 — Suspend/resume hook syntax** in `view`/`edit` templates (`Reactive_UI.md` grammar extension) and their ordering guarantees relative to `init`/`update`.
+- **RSO3 — Suspend/resume hook syntax** in `view`/`edit` templates ([Reactive UI §8.2](../Lambda_Design_Reactive_UI.md#82-lifecycle-vocabulary)) and their ordering guarantees relative to `init`/`update`.
 - **RSO4 — Timer resume details:** relative vs absolute deadlines, clamping policy, interaction with rAF and the frame clock.
 - **RSO5 — Schema persistence column + resident migrations:** implement the class tags; give `details`/`dialog` open a first-class field; unify the value/selection double-home (`FormControlProp` ↔ `ViewState.form`); collapse the triple-homed `dropdown_open`; decide the CSS-var override capture point; single-home scroll.
 - **RSO6 — Delta compaction** for long-lived JS pages (squash per-subtree; bound tombstone growth).

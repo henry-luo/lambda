@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30 (updated 2026-07-01) · **Status:** JS runtime end-state reached — Phases 1–3 and 5 done (plain-DOM JS editor runs fully script-driven under Radiant; native rich-edit engine deleted; `contenteditable` is a pure routing flag). Phase 4 (the Lambda `.ls` track) deferred to a future milestone. Remaining within-4B items are one Radiant-core layout follow-up (#3) plus two accepted/dev-only notes (#2, #4) — see **Progress → Open / known issues**. See **Progress** below.
 **Scope:** Make the Stage-4 rich-text editor run **inside Radiant** by moving **all document-model editing into the scripting layer** and reducing the C++ side to a **common substrate** — caret/selection, the editable flag, and event generation/routing — shared by **two co-equal runtime editors**: the **JS** editor (ported from React to plain DOM, the focus of 4B) and the **Lambda `.ls`** editor (`lambda/editor/`). The native C++ rich-text **editing-behavior subsystem is disabled/retired**; `contenteditable` becomes **just a flag** that routes input events to script handlers. Promotes the deferred design note in **[Stage 4, Appendix A](Radiant_Editor_Stage4.md#appendix-a--vanilla-dom-editor-future-third-rendering-target)** into committed work.
-**Builds on:** [Radiant_Editor_Stage4.md](Radiant_Editor_Stage4.md), [Radiant_Rich_Text_Editing.md](Radiant_Rich_Text_Editing.md) → [Radiant_Rich_Text_Editor3.md](Radiant_Rich_Text_Editor3.md) (Stages 1-3), [Reactive_UI.md](Reactive_UI.md) (reactive substrate, Lambda event dispatch, `render_map`), [JS_13_Web_DOM.md](../../doc/dev/js/JS_13_Web_DOM.md) (LambdaJS DOM).
+**Builds on:** [Radiant_Editor_Stage4.md](Radiant_Editor_Stage4.md), [Radiant_Rich_Text_Editing.md](Radiant_Rich_Text_Editing.md) → [Radiant_Rich_Text_Editor3.md](Radiant_Rich_Text_Editor3.md) (Stages 1-3), [Reactive UI](../Lambda_Design_Reactive_UI.md) (reactive substrate, Lambda event dispatch, `render_map`), [JS_13_Web_DOM.md](../../doc/dev/js/JS_13_Web_DOM.md) (LambdaJS DOM).
 **Co-developed with:** the Lambda `.ls` editor — **as important as the JS version, built in parallel, aligned on source-model/doc handling, and checked against the same fixtures** (§1, §6). Drawing editor → [Stage 5](Radiant_Editor_Stage5.md).
 
 ---
@@ -113,7 +113,7 @@ Both editors share the **same design and the same fixtures**, differing only in 
 | Event binding | `addEventListener` | `on <event>(evt)` template handlers |
 | Reconcile / commit | **new plain-DOM reconciler (§4)** | `render_map` (exists) |
 
-**Alignment rule:** any change to the source-model/doc handling, step algebra, or command semantics lands in *both* and is gated by the shared fixture corpus. Document-content **history** lives in each runtime (JS `history.ts`; Lambda `MarkEditor` `EditVersion` chain per [Reactive_UI.md](Reactive_UI.md) §6). Native keeps only caret/selection history (**hybrid**, your earlier decision).
+**Alignment rule:** any change to the source-model/doc handling, step algebra, or command semantics lands in *both* and is gated by the shared fixture corpus. Document-content **history** lives in each runtime (JS `history.ts`; Lambda `MarkEditor` `EditVersion` chain per [Reactive UI §6](../Lambda_Design_Reactive_UI.md#6-model-mutation-document-structure-and-history)). Native keeps only caret/selection history (**hybrid**, your earlier decision).
 
 ### 1.4 `contenteditable` = a flag — feasibility (the audit)
 

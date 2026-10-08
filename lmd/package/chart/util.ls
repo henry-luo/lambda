@@ -1,6 +1,8 @@
 // chart/util.ls — Math utilities for the chart library
 // Nice number calculations, tick generation, and numeric helpers.
 
+import numbers: .numbers
+
 // ============================================================
 // Constants
 // ============================================================
@@ -73,6 +75,9 @@ pub fn nice_domain(dlo, dhi) {
 // Numeric helpers
 // ============================================================
 
+pub fn finite_number(value) => value is number and
+    not (value is nan) and value != inf and value != -inf
+
 // linear interpolation
 pub fn lerp(a, b, t) {
     float(a) + (float(b) - float(a)) * float(t)
@@ -113,21 +118,12 @@ pub fn fmt_num(value) string {
     else string(round(float(value) * 1000000.0) / 1000000.0)
 }
 
-// Small fixed-point/percentage formats cover native guide, text, and tooltip labels.
-pub fn format_value(value, pattern = null, dtype = null) {
+// One formatter keeps guide, text, and tooltip labels consistent.
+pub fn format_value(value, pattern = null, dtype = null, timezone = 0) {
     if (pattern == null) string(value)
-    else if (dtype == "temporal") datetime(value).format(pattern)
-    else if (starts_with(pattern, ".") and (ends_with(pattern, "f") or ends_with(pattern, "%"))) {
-        let digits = int(slice(pattern, 1, len(pattern) - 1));
-        let percentage = ends_with(pattern, "%");
-        let factor = 10.0 ** float(digits);
-        let rounded = round(abs(float(value)) * (if (percentage) 100.0 else 1.0) * factor);
-        let whole = int(floor(rounded / factor));
-        let remainder = string(int(rounded - float(whole) * factor));
-        let zeros = join([for (i in 0 to (digits - len(remainder) - 1)) "0"], "");
-        (if (value < 0) "-" else "") ++ string(whole) ++
-            (if (digits > 0) "." ++ zeros ++ remainder else "") ++ (if (percentage) "%" else "")
-    } else string(value)
+    else if (dtype == "temporal") datetime(i64(float(datetime(value).unix) +
+        float(if (timezone != null) timezone else 0) * 60000.0)).format(pattern)
+    else numbers.format_number(value, pattern)
 }
 
 // ============================================================

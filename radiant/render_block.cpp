@@ -615,6 +615,7 @@ static void render_block_finish_phase(RasterRenderContext* rdcon, ViewBlock* blo
 typedef struct RasterBlockPaintDriver : RenderPaintBlockDriver {
     RasterRenderContext* rdcon;
     RenderBlockPhase phase;
+    void (*content)(RasterRenderContext*, ViewBlock*);
 } RasterBlockPaintDriver;
 
 static bool raster_block_paint_begin(RenderPaintBlockDriver* ctx, ViewBlock* block, void** phase) {
@@ -630,6 +631,16 @@ static bool raster_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block || !phase) return false;
     render_block_paint_self(driver->rdcon, block, (RenderBlockPhase*)phase);
+    if (driver->content) {
+        RenderBlockPhase* current=(RenderBlockPhase*)phase;
+        if (!current->self_hidden) {
+            // replaced pixels belong inside the same CSS transform, clip and opacity group as the box.
+            BlockBlot saved=driver->rdcon->block;
+            driver->rdcon->block.x=current->parent_block.x;driver->rdcon->block.y=current->parent_block.y;
+            driver->content(driver->rdcon,block);driver->rdcon->block=saved;
+        }
+        return false;
+    }
     return block_should_paint_children(block);
 }
 
@@ -648,10 +659,11 @@ static void raster_block_paint_finish(RenderPaintBlockDriver* ctx, ViewBlock* bl
 }
 
 static RenderBlockPaintResult render_block_run_paint_pipeline(RasterRenderContext* rdcon,
-                                                              ViewBlock* block) {
+                                                              ViewBlock* block,
+                                                              void (*content)(RasterRenderContext*, ViewBlock*)) {
     RenderBlockPaintResult result = {};
     RasterBlockPaintDriver driver = {};
-    driver.rdcon = rdcon;
+    driver.rdcon = rdcon;driver.content=content;
     RenderPaintBlockOps ops = {};
     ops.ctx = lam::up(&driver);
     ops.begin = raster_block_paint_begin;
@@ -674,11 +686,16 @@ static void render_block_finish_profile(RasterRenderContext* rdcon,
 }
 
 void render_block_view(RasterRenderContext* rdcon, ViewBlock* block) {
+    render_block_view_content(rdcon,block,nullptr);
+}
+
+void render_block_view_content(RasterRenderContext* rdcon, ViewBlock* block,
+    void (*content)(RasterRenderContext*, ViewBlock*)) {
     uint64_t rbv_start = time_now_ns();
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_BLOCK);
 
     if (render_block_skip_paint(rdcon, block)) return;
 
-    RenderBlockPaintResult result = render_block_run_paint_pipeline(rdcon, block);
+    RenderBlockPaintResult result = render_block_run_paint_pipeline(rdcon, block, content);
     render_block_finish_profile(rdcon, &result, rbv_start);
 }

@@ -63,12 +63,7 @@ for file in PrinceCatalogue.pdf somatosensory.pdf flyer.pdf Get_Started_With_Sma
     cp "./test/pdf/$file" "./release/test/pdf/$file"
 done
 
-# Step 2d: Bundle the document viewer ('lambda demo' opens test/ui/doc_viewer.html,
-# a bare 'lambda view' opens test/ui/doc_viewer.ls). Both load the Seti icon font
-# from test/ui/icons/; the script loads KaTeX CSS from ../../lmd/ (copied in Step 1).
-mkdir -p ./release/test/ui/icons
-cp ./test/ui/doc_viewer.ls ./test/ui/doc_viewer.html ./release/test/ui/
-cp ./test/ui/icons/seti.woff ./test/ui/icons/SETI_LICENSE.txt ./release/test/ui/icons/
+# The lambda.doc viewer, its splash and icon font ship in lmd/ (Step 1).
 
 # Step 2e: Bundle one representative (most comprehensive) sample per supported input
 # format, so the demo viewer has something to browse for each type.

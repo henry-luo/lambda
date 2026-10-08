@@ -560,9 +560,11 @@ typedef struct TypeMapTransition {
 struct TypeMapRetypePlan {
     const TypeMap* parent;
     const ShapeEntry* source;
-    ShapeEntry* replacement;
+    ShapeEntry* replacement;  // null for deletion plans
     TypeMap* target;
     bool reuse_payload;
+    TypeId storage_type;  // the immutable replacement's shared lane classification
+    TypeId value_type;  // compact retype key; replacement is null for deletion
     TypeMapRetypePlan* next;
 };
 
@@ -1088,6 +1090,10 @@ typedef uint8_t (*ConstraintFn)(uint64_t value);
 // open instance gain a field without ceasing to be an instance of its type
 // (S2.1.4 part 3, OB16); `is T` therefore compares this POINTER, never a name.
 // The record is sealed for the life of the evaluation (S2.1.4 part 2).
+// D2.6.9v3: guest member semantics are explicit beside the shared nominal identity.
+struct TypeNominalExtension {
+    Item (*member)(Item receiver, const char* key, size_t length, bool* found);
+};
 typedef struct TypeNominal {
     StrView type_name;            // "Point", "Circle"
     struct TypeNominal* base;     // parent record, NULL if none
@@ -1097,6 +1103,8 @@ typedef struct TypeNominal {
     struct AstNode* constraint;   // object-level that(...) AST, NULL if none
     ConstraintFn constraint_fn;   // JIT-compiled constraint checker, NULL if none
     TypeId struct_kind;           // the one structural kind this type declares
+    const TypeNominalExtension* extension;
+    void* extension_data;        // evaluation-owned metadata; guest roots own its Items
 } TypeNominal;
 
 // D2.6.6v2 phase 2: an object's shape extends TypeElmt, not TypeMap. A nominal

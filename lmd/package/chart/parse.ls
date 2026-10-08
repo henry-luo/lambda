@@ -66,6 +66,7 @@ pub fn parse_chart(chart_el) {
         data_source: attributes(data_el),
         datasets: chart_el.datasets,
         resolve: chart_el.resolve,
+        clip: chart_el.clip,
         mark: mark,
         encoding: encoding,
         transform: transform_el,

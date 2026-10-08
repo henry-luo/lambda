@@ -10,6 +10,8 @@
 #include <string>
 #endif
 
+extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool);
+
 // Common function declarations
 void format_number(StringBuf* sb, Item item);
 void format_number_compact(StringBuf* sb, Item item);

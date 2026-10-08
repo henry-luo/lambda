@@ -120,4 +120,7 @@ DOM_ELEMENT_OP(GET_START_TIME, get_start_time)
 DOM_ELEMENT_OP(GET_SIMPLE_DURATION, get_simple_duration)
 DOM_ELEMENT_OP(GET_TARGET_ELEMENT, get_target_element)
 
+DOM_ELEMENT_OP(SET_POINTER_CAPTURE, set_pointer_capture)
+DOM_ELEMENT_OP(RELEASE_POINTER_CAPTURE, release_pointer_capture)
+DOM_ELEMENT_OP(HAS_POINTER_CAPTURE, has_pointer_capture)
 #undef DOM_ELEMENT_OP

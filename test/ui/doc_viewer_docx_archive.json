@@ -1,0 +1,129 @@
+{
+  "name": "View DOCX XML, relationships and binary image parts",
+  "html": "test/input/zip/office.docx",
+  "viewport": {
+    "width": 1280,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".project-root .tree-label"
+      },
+      "equals": "office.docx"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='office.docx/word'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='office.docx/word/document.xml'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "document.xml"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-entry[data-property-name='w:document']"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-source"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "contains": "<w:t>Hello</w:t>"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='office.docx/_rels'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='office.docx/_rels/.rels'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": ".rels"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "contains": "relationships/officeDocument"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='office.docx/word/media'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='office.docx/word/media/pixel.png'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-preview img"
+      },
+      "width": 1,
+      "height": 1,
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='office.docx/notes'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='office.docx/notes/é space.txt'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "equals": "unicode"
+    }
+  ]
+}

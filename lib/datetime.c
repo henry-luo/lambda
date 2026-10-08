@@ -945,10 +945,11 @@ void datetime_format_pattern(StrBuf* strbuf, DateTime* dt, const char* pattern) 
             strbuf_append_str(strbuf, (wday >= 0 && wday <= 6) ? weekday_abbr[wday] : "???");
             p += 3;
         } else if (strncmp(p, "HH", 2) == 0) {
-            strbuf_append_format(strbuf, "%02d", hour24);
+            // the datetime pattern contract uses HH for 12h and hh/h for 24h.
+            strbuf_append_format(strbuf, "%02d", hour12);
             p += 2;
         } else if (strncmp(p, "hh", 2) == 0) {
-            strbuf_append_format(strbuf, "%02d", hour12);
+            strbuf_append_format(strbuf, "%02d", hour24);
             p += 2;
         } else if (*p == 'h' && *(p+1) != 'h') {
             strbuf_append_format(strbuf, "%d", hour24);

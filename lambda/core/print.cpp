@@ -14,6 +14,8 @@
 
 #define MAX_DEPTH 2000
 
+static thread_local bool print_diagnostic_only = false;
+
 static char* binary_literal_text(Binary* bin, size_t* text_len) {
     size_t byte_len = binary_length(bin);
     const uint8_t* bytes = binary_data(bin);
@@ -587,6 +589,8 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_VELMT> item) const {
         Velmt* element = item.ptr();
+        Item error = virtual_content_error({.velmt = element});
+        if (get_type_id(error) == LMD_TYPE_ERROR) { print_item(strbuf, error, depth + 1, indent); return; }
         Item tag = ItemNull;
         if (element && element->vtable && element->vtable->element.tag) {
             element->vtable->element.tag(element->data, &tag);
@@ -731,6 +735,13 @@ struct PrintItemVisitor {
 void print_item(StrBuf *strbuf, Item item, int depth, const char* indent) {
     // limit depth to prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
+    TypeId physical_type = get_type_id(item);
+    if (print_diagnostic_only && is_virtual_container_type_id(physical_type)) {
+        // S14.3.1v2: diagnostics must not force lazy content or consume its expansion budget.
+        strbuf_append_str(strbuf, physical_type == LMD_TYPE_VARRAY ? "[virtual array]" :
+            physical_type == LMD_TYPE_VMAP ? "[virtual map]" : "[virtual element]");
+        return;
+    }
     if (!item.item) {
         log_debug("TRACE: print_item - item is NULL, appending null");
         strbuf_append_str(strbuf, "null");
@@ -876,9 +887,12 @@ void log_item(Item item, const char* msg) {
 #ifndef LAMBDA_NO_CONSOLE_DUMP
     // `--no-log` disables diagnostics entirely; traversing runtime values here
     // can touch representation-specific storage even though the message is discarded.
-    if (log_is_disabled()) return;
+    if (log_is_disabled() || !log_level_enabled(log_default_category, LOG_LEVEL_DEBUG)) return;
     StrBuf *strbuf = strbuf_new();
+    bool previous = print_diagnostic_only;
+    print_diagnostic_only = true;
     print_item(strbuf, item, 0, NULL);
+    print_diagnostic_only = previous;
     log_debug("%s: %s", msg, strbuf->str);
     strbuf_free(strbuf);
 #endif

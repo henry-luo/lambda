@@ -1,4 +1,5 @@
 #include "input/input.hpp"
+#include "io/zip_archive.hpp"
 #include "format/format.h"
 #include "format/format-markup.h"
 #include "../lib/mime-detect.h"
@@ -697,6 +698,8 @@ static bool g_lambda_main_memtrack_shutdown_done = false;
 static bool g_lambda_main_mempool_cleanup_done = false;
 static const char* g_lambda_main_mem_dump_path = nullptr;
 static bool g_lambda_main_pre_memtrack_cleanup_done = false;
+static char* g_lambda_main_viewer_path = nullptr;
+static char** g_lambda_main_demo_argv = nullptr;
 
 static void lambda_main_pre_memtrack_cleanup_once(void) {
     if (g_lambda_main_pre_memtrack_cleanup_done) {
@@ -704,6 +707,11 @@ static void lambda_main_pre_memtrack_cleanup_once(void) {
     }
     g_lambda_main_pre_memtrack_cleanup_done = true;
     module_ast_prebuild_cleanup();
+    // sys.proc.self.argv can retain the rewritten demo arguments until teardown.
+    mem_free(g_lambda_main_viewer_path);
+    mem_free(g_lambda_main_demo_argv);
+    g_lambda_main_viewer_path = nullptr;
+    g_lambda_main_demo_argv = nullptr;
 #ifndef LAMBDA_NO_JS
     // JS helper globals outlive Runtime teardown, so release them before
     // emitting live-allocation telemetry or entering memtrack shutdown.
@@ -845,17 +853,50 @@ struct DocWindowLaunchOptions {
     bool state_dump;
     const char* graph_view_key;
     bool source_surface;
+    bool paged;
+    RenderPagedOptions paged_options;
     const char* font_dirs[16];
     int font_dir_count;
 };
+
+static bool lambda_view_path_is_archive(const char* path) {
+    if (zip_source_expected(path, nullptr, 0)) return true;
+    FILE* stream = file_open_regular_read(path);
+    if (!stream) return false;
+    uint8_t signature[4];
+    size_t size = fread(signature, 1, sizeof(signature), stream);
+    fclose(stream);
+    // only route by the signature here; input() validates and captures the archive.
+    return zip_source_expected(path, signature, size);
+}
 
 // Parse argv[2..] for a document-window command. `--view-key` belongs to the
 // viewer and `--source` to the editor. Returns false after reporting a usage error.
 static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
                                             DocWindowLaunchOptions* out) {
     *out = DocWindowLaunchOptions{};
+    out->paged_options = render_paged_options_default();
+    // window previews separate paper from the surrounding canvas by default.
+    out->paged_options.preview.padding = 24.0f;
+    out->paged_options.preview.group_gap = 24.0f;
+    bool has_paged_options = false;
     for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
+        if (is_view && strcmp(argv[i], "--paged") == 0) {
+            out->paged = true;
+        } else if (is_view && render_paged_option_arity(argv[i]) >= 0) {
+            const char* name = argv[i];
+            if (!strcmp(name, "--export-pages") || !strcmp(name, "--thumbnail-page")) {
+                fputs("Error: export-only page options are unavailable in view\n", stderr);
+                return false;
+            }
+            const char* value = render_paged_option_arity(name) && i + 1 < argc ? argv[++i] : nullptr;
+            const char* error = nullptr;
+            if (!render_paged_option_apply(&out->paged_options, name, value, &error)) {
+                fprintf(stderr, "Error: %s: %s\n", name, error); // PRINTF_OK: CLI usage error.
+                return false;
+            }
+            has_paged_options = true;
+        } else if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
             out->event_file = argv[++i];
         } else if (strcmp(argv[i], "--event-result") == 0 && i + 1 < argc) {
             out->event_result = argv[++i];
@@ -884,6 +925,14 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
             out->filename = argv[i];
         }
     }
+    if (has_paged_options && !out->paged) {
+        fputs("Error: page preview options require --paged\n", stderr);
+        return false;
+    }
+    if (out->paged && (!out->filename || out->graph_view_key)) {
+        fputs("Error: view --paged requires an HTML or Lambda document and no --view-key\n", stderr);
+        return false;
+    }
     return true;
 }
 #endif // LAMBDA_HEADLESS
@@ -910,7 +959,8 @@ extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                            const char** font_dirs = nullptr, int font_dir_count = 0,
                                            bool enable_event_log = false,
-                                           bool enable_state_dump = false);
+                                           bool enable_state_dump = false,
+                                           const RenderPagedOptions* paged_options = nullptr);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 extern void event_sim_set_result_path(const char* result_path);
@@ -2367,23 +2417,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
     }
 
-    // 'demo' is an alias for 'view test/ui/doc_viewer.html' (the bundled document
-    // viewer with its startup splash); rewrite argv before publishing it so every later stage, including
-    // sys.proc.self.argv, sees the canonical view command.
-    if (argc >= 2 && strcmp(argv[1], "demo") == 0) {
-        char** demo_argv = (char**)mem_alloc(sizeof(char*) * (argc + 2), MEM_CAT_SYSTEM);
-        demo_argv[0] = argv[0];
-        demo_argv[1] = (char*)"view";
-        demo_argv[2] = (char*)"test/ui/doc_viewer.html";
-        for (int i = 2; i < argc; i++) demo_argv[i + 1] = argv[i];
-        argc++;
-        demo_argv[argc] = NULL;
-        argv = demo_argv;
-    }
-
-    // publish the compacted vector so sys.proc.self.argv uses its live count.
-    sysinfo_set_argv(argc, argv);
-
 #ifndef NDEBUG
     // suppress debug-build note in bash mode (test expected output was generated with release build)
     bool is_bash_mode = (argc >= 2 && strcmp(argv[1], "bash") == 0);
@@ -2435,6 +2468,25 @@ static int lambda_main_impl(int argc, char *argv[]) {
     }
     memtrack_init(mode);
     atexit(lambda_main_memtrack_atexit);  // fallback for exit() paths
+
+    // 'demo' opens the bundled lambda.doc splash from Lambda home (D7.2.4).
+    // allocate after tracker initialization so teardown uses the same headers.
+    if (argc >= 2 && strcmp(argv[1], "demo") == 0) {
+        char** demo_argv = (char**)mem_alloc(sizeof(char*) * (argc + 2), MEM_CAT_SYSTEM);
+        g_lambda_main_demo_argv = demo_argv;
+        g_lambda_main_viewer_path = lambda_home_path("package/doc/doc_viewer.html");
+        demo_argv[0] = argv[0];
+        demo_argv[1] = (char*)"view";
+        demo_argv[2] = g_lambda_main_viewer_path;
+        for (int i = 2; i < argc; i++) demo_argv[i + 1] = argv[i];
+        argc++;
+        demo_argv[argc] = NULL;
+        argv = demo_argv;
+    }
+
+    // publish the compacted vector so sys.proc.self.argv uses its live count.
+    sysinfo_set_argv(argc, argv);
+
     run_assertions();
     log_debug("Assertions completed");
 
@@ -3885,7 +3937,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nDescription:\n");
             printf("  The 'view' command opens a document in an interactive window.\n");
             printf("  Supports multiple document formats with full rendering and styling.\n");
-            printf("  If no file is specified, opens the document viewer (test/ui/doc_viewer.ls).\n");
+            printf("  If no file is specified, opens the bundled lambda.doc document viewer.\n");
+            printf("  Directories and ZIP archives open as browsable file trees.\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
             printf("  .html      HyperText Markup Language\n");
@@ -3911,14 +3964,29 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .toml      TOML (source view)\n");
             printf("  .txt       Plain text\n");
             printf("  .csv       Comma-separated values (source view)\n");
+            printf("  .zip/.docx/.jar  ZIP-backed archives (file tree)\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nOptions:\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
+            fputs("  --paged                   Preview HTML/Lambda as print-media pages\n"
+                  "  --pages <1,3-5>           Select physical pages (default: all)\n"
+                  "  --page-grid <rows>x<cols> Arrange pages in groups\n"
+                  "  --page-scale <number>     Preview zoom (default: 1)\n"
+                  "  --page-padding <px>       Outer preview padding\n"
+                  "  --page-column-gap <px>    Gap between page columns\n"
+                  "  --page-row-gap <px>       Gap between page rows\n"
+                  "  --page-group-gap <px>     Gap between page groups\n"
+                  "  --page-fill <row|column>  Fill order within each group\n"
+                  "  --page-groups <vertical|horizontal> Group direction\n"
+                  "  --book [--book-page <n>]  Preview a facing-page spread\n"
+                  "  --right-binding          Use right-bound book order\n"
+                  "  --block-remote-resources Disable remote subresources\n", stdout);
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
-            printf("  %s view                          # Open the document viewer (test/ui/doc_viewer.ls)\n", argv[0]);
+            printf("  %s view                          # Open the bundled lambda.doc document viewer\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
             printf("  %s view page.html                # View HTML document\n", argv[0]);
+            fprintf(stdout, "  %s view test/html/paged_media_demo.html --paged  # Print preview\n", argv[0]); // PRINTF_OK: CLI help.
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
             printf("  %s view script.ls                # View Lambda script result\n", argv[0]);
             printf("  %s view paper.tex                # View LaTeX document\n", argv[0]);
@@ -3927,12 +3995,13 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  %s view data.json                # View JSON source\n", argv[0]);
             printf("  %s view flowchart.mmd            # View Mermaid diagram\n", argv[0]);
             printf("  %s view architecture.d2          # View D2 diagram\n", argv[0]);
-            printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
+            printf("  %s view documents/report.pdf    # View PDF with path\n", argv[0]);
             printf("  %s view page.html --event-file events.json  # Automated testing\n", argv[0]);
             printf("  %s view page.html --event-file events.json --headless  # Headless testing (no window)\n", argv[0]);
             printf("  --state-dump  Emit per-cascade Mark state-store dump under ./temp/state/\n");
             printf("\nKeyboard Controls:\n");
             printf("  ESC        Close window\n");
+            fputs("  Paged mode: wheel/arrows scroll; PageUp/PageDown, Home/End navigate\n", stdout);
             printf("  Q          Quit viewer\n");
             return lambda_main_finish(0);
         }
@@ -3953,10 +4022,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         event_sim_set_result_path(launch.event_result);
 
-        // default to the document viewer when no file is specified
+        // the viewer ships with the package tree and follows LAMBDA_HOME (D7.2.4).
         if (filename == NULL) {
-            filename = "test/ui/doc_viewer.ls";
-            log_info("No file specified, using default: %s", filename);
+            g_lambda_main_viewer_path = lambda_home_path("package/doc/doc_viewer.ls");
+            filename = g_lambda_main_viewer_path;
+            log_info("VIEW_DEFAULT: opening bundled document viewer: %s", filename);
         }
 
         // Check if file exists (skip check for HTTP/HTTPS URLs)
@@ -3964,6 +4034,19 @@ static int lambda_main_impl(int argc, char *argv[]) {
         if (!is_http_url && !file_exists(filename)) {
             printf("Error: File '%s' does not exist\n", filename);
             return lambda_main_finish(1);
+        }
+
+        if (launch.paged) {
+            const char* extension = file_path_ext(filename);
+            if (!is_http_url && (!extension || (strcmp(extension, ".html") &&
+                    strcmp(extension, ".htm") && strcmp(extension, ".ls")))) {
+                fputs("Error: view --paged supports HTML and Lambda documents\n", stderr);
+                return lambda_main_finish(1);
+            }
+            int result = view_doc_in_window_with_events(filename, event_file, headless,
+                font_dirs, font_dir_count, event_log, state_dump, &launch.paged_options);
+            lambda_view_log_completion(result);
+            return lambda_main_finish(result);
         }
 
         // For HTTP URLs, route likely HTML documents directly and probe only
@@ -3999,6 +4082,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
                 // Get file extension from Content-Type
                 effective_ext = content_type_to_extension(response->content_type);
+                if (zip_source_expected(filename, response->data, response->size)) effective_ext = ".zip";
                 log_info("HTTP Content-Type: %s -> extension: %s",
                          response->content_type ? response->content_type : "(none)",
                          effective_ext ? effective_ext : "(none)");
@@ -4037,7 +4121,16 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check if this is a graph file that needs conversion
         bool is_graph_file = graph_path_is_graph(filename);
 
-        if (is_graph_file && graph_view_key) {
+        bool browse_tree = file_is_dir(filename) || lambda_view_path_is_archive(filename);
+        if (browse_tree) {
+            static const LambdaDocumentTransformConfig browser_transform = {
+                "browse", "lambda.doc.doc_viewer", "open_browser",
+                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false
+            };
+            log_info("VIEW_FILE_TREE: opening directory or ZIP archive: %s", filename);
+            exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump);
+        } else if (is_graph_file && graph_view_key) {
             const LambdaDocumentTransformConfig* transform =
                 lambda_document_transform_for_input_type("graph");
             LambdaDocumentTransformOption option = {"view_key",
@@ -4054,9 +4147,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        }
-
-        if (is_graph_file || (ext && (strcmp(ext, ".pdf") == 0 ||
+        } else if (is_graph_file || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||

@@ -28,6 +28,15 @@
 #include "../../../lib/mem.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
+
+extern "C" void dom_engine_animation_frame_prepare(void* document,double timestamp_ms) {
+    auto* doc=(DomDocument*)document;
+    AnimationScheduler* scheduler=doc&&doc->state?doc->state->animation_scheduler:nullptr;
+    if(!scheduler||!scheduler->has_active_animations) return;
+    // sample native bindings at the same host timestamp before a rAF callback submits its Three.js draw.
+    animation_scheduler_anchor_host_time(scheduler,timestamp_ms/1000.0);
+    animation_scheduler_tick(scheduler,timestamp_ms/1000.0,nullptr,false,nullptr,true);
+}
 #include "../../../lib/url.h"
 #include <assert.h>
 #include <ctype.h>
@@ -1690,48 +1699,6 @@ RADIANT_REFLECT_STRING(radiant_dom_m4b_wrap, "wrap", "soft")
 #undef DOM_REFLECT_BOOL
 #undef DOM_REFLECT_INT
 #undef DOM_REFLECT_STR
-
-extern "C" bool dom_engine_set_image_source(DomElement* element,
-                                                const char* source) {
-    if (!element || !source || !radiant_dom_is_tag(element, "img") ||
-        !element->doc) return false;
-    UiContext* uicon = (UiContext*)element->doc->js.host_ui_context;
-    if (!uicon) return false;
-
-    DomDocument* saved_document = uicon->document;
-    uicon->document = element->doc;
-    ImageSurface* surface = load_image(uicon, source);
-    uicon->document = lam::up(saved_document);
-    if (!surface) return false;
-
-    if (!element->embed) {
-        if (element->doc->view_tree) {
-            element->ensure_embed(element->doc->view_tree);
-        } else if (element->doc->document_pool) {
-            element->embed = lam::view_prop((EmbedProp*)pool_calloc(
-                element->doc->document_pool, sizeof(EmbedProp)));
-            if (element->embed) *element->embed = EMBED_PROP_DEFAULT;
-        }
-    }
-    if (!element->embed) return false;
-    element->embed->img = lam::up(surface);
-    return true;
-}
-
-extern "C" bool dom_engine_image_natural_size(DomElement* element,
-                                                  int* width, int* height) {
-    if (width) *width = 0;
-    if (height) *height = 0;
-    if (!element || !radiant_dom_is_tag(element, "img") || !element->embed ||
-        !element->embed->img || !element->embed->img->has_intrinsic_size) {
-        return false;
-    }
-    ImageSurface* image = element->embed->img;
-    if (image->width <= 0 || image->height <= 0) return false;
-    if (width) *width = image->width;
-    if (height) *height = image->height;
-    return true;
-}
 
 RADIANT_C_API int radiant_dom_m4b_href_get(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);

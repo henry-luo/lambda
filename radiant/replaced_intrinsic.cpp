@@ -125,6 +125,7 @@ bool layout_replaced_default_size(NameId tag, float* width, float* height) {
         case MARKUP_NAME_OBJECT:
         case MARKUP_NAME_EMBED:
         case MARKUP_NAME_SVG:
+        case MARKUP_NAME_SCENE3D:
             default_width = 300.0f;
             default_height = 150.0f;
             break;
@@ -191,7 +192,7 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
         }
     }
 
-    if (block->tag() == MARKUP_NAME_SVG && block->is_element()) {
+    if (layout_is_svg_viewport(block->tag()) && block->is_element()) {
         SvgAnimationSourceScope animation_sources(block->as_element()->doc);
         Element* svg = dom_element_backing(lam::dom_require_element(block));
         SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(svg);
@@ -380,7 +381,7 @@ bool layout_measure_replaced_flex_intrinsic(LayoutContext* lycon,
                                             IntrinsicSize* out) {
     if (!lycon || !item || !out) return false;
     NameId tag = item->tag();
-    if (tag != MARKUP_NAME_IMG && tag != MARKUP_NAME_SVG &&
+    if (tag != MARKUP_NAME_IMG && !layout_is_svg_viewport(tag) &&
         tag != MARKUP_NAME_CANVAS) return false;
     ViewBlock* block = lam::view_as_block(item);
     float width = 0.0f;

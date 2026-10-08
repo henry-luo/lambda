@@ -1,0 +1,69 @@
+{
+  "name": "Archive listing stays usable before and after a deferred member CRC failure",
+  "html": "test/input/zip/corrupt.zip",
+  "viewport": {
+    "width": 1280,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='corrupt.zip/data.json'] > .tree-row .tree-label"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='corrupt.zip/word'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='corrupt.zip/word/document.xml'] > .tree-row .tree-label"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='corrupt.zip/word/document.xml'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-source"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "contains": "Unable to read selected file:"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "contains": "word/document.xml"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='corrupt.zip/data.json'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".property-entry[data-property-name='answer'] .property-value"
+      },
+      "equals": "42"
+    }
+  ]
+}

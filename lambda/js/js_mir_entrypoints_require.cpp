@@ -14,6 +14,7 @@
 #include "../../lib/mem_factory.h"
 #include "../../lib/path_str.h"
 #include "../../lib/str.h"
+#include "../../lib/url.h"
 #include "../../lib/time_util.h"
 #include <cstdio>
 #include <cstdlib>
@@ -1812,7 +1813,14 @@ char* js_load_script_source_from_cache(const char* path,
     }
 
     bool is_http = js_path_is_http_url(path);
-    char* canonical = is_http ? NULL : file_realpath(path);
+    bool is_file_url = strncmp(path, "file:", 5) == 0;
+    Url* file_url = is_file_url ? url_parse(path) : nullptr;
+    lam::Temp<char> local_path(file_url ? url_to_local_path(file_url) : nullptr);
+    if (file_url) url_destroy(file_url);
+    if (is_file_url && !local_path) return NULL;
+    // inline document modules resolve to file URLs; decode them before filesystem/cache access.
+    const char* read_path = local_path ? local_path.get() : path;
+    char* canonical = is_http ? NULL : file_realpath(read_path);
     const char* identity = canonical ? canonical : path;
     InputScriptRequest request = {};
     request.identity = identity;
@@ -1847,7 +1855,7 @@ char* js_load_script_source_from_cache(const char* path,
         }
     } else {
         source = input_script_cache_copy_file_source(
-            input_manager_global_script_cache(), &request, path, out_length);
+            input_manager_global_script_cache(), &request, read_path, out_length);
     }
     if (canonical) mem_free(canonical);
     if (!source) {

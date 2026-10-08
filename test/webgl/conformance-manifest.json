@@ -1,0 +1,29 @@
+{
+  "upstream": "https://github.com/KhronosGroup/WebGL",
+  "revision": "714857a28445e8f5d8d6ae1c78498578009534d8",
+  "mode": "Selected assertions ported to the Radiant document harness; not complete upstream files or full conformance.",
+  "sources": [
+    {
+      "path": "sdk/tests/conformance/misc/is-object.html",
+      "sha256": "7f8fef6398b51a5aa3e6450c8393c6a00027b81330eda1d8799a8fc7edbbc48e"
+    },
+    {
+      "path": "sdk/tests/conformance/state/gl-object-get-calls.html",
+      "sha256": "ebc1426a03db0fdeab05a085afa8767c1395ab3ec6d7436e934ca3e77e73858a"
+    },
+    {
+      "path": "sdk/tests/conformance/textures/misc/tex-image-and-sub-image-2d-with-array-buffer-view.html",
+      "sha256": "ea6283b274cebb92bb670a39f3a4cc3a244b354ad71028fb630c18d42906e582"
+    },
+    {
+      "path": "sdk/tests/conformance2/buffers/buffer-data-and-buffer-sub-data-sub-source.html",
+      "sha256": "8e83133d1329d2d1524f4cc21cce5e1ee2b59df4ec20f502fc8e23bd3451bb0e"
+    }
+  ],
+  "slices": {
+    "buffer-data-and-buffer-sub-data-sub-source": "all eight numeric view types; optional source/destination offsets, lengths, zero-length and invalid ranges; actual getBufferSubData bytes",
+    "is-object": "buffer/framebuffer/renderbuffer/texture before bind, after bind and delete; shader/program creation and deletion",
+    "gl-object-get-calls": "selected binding identity/default-framebuffer queries in api.js",
+    "tex-image-and-sub-image-2d-with-array-buffer-view": "RGBA8/UNSIGNED_BYTE upload, flip, premultiply and framebuffer readback; packed/DOM image formats deferred"
+  }
+}

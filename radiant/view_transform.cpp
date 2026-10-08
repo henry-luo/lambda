@@ -1,4 +1,5 @@
 #include "view.hpp"
+#include "animation_value.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
 #include <math.h>
@@ -504,20 +505,14 @@ static bool decompose_transform_matrix_3d(const RdtMatrix4* matrix,
 
 static void interpolate_transform_quaternion(const float from[4], const float to[4],
                                               float progress, float result[4]) {
-    float product = 0.0f;
-    for (int component = 0; component < 4; component++) product += from[component] * to[component];
-    // q and -q describe the same orientation; keep interpolation on the shorter arc.
-    float orientation = product < 0.0f ? -1.0f : 1.0f;
-    product = fminf(fabsf(product), 1.0f);
-    float from_weight = 1.0f - progress, to_weight = progress;
-    if (product < 1.0f - .000001f) {
-        float angle = acosf(product), denominator = sinf(angle);
-        from_weight = sinf((1.0f - progress) * angle) / denominator;
-        to_weight = sinf(progress * angle) / denominator;
+    double start[4], end[4], sample[4];
+    for (unsigned component = 0; component < 4; component++) {
+        start[component] = from[component];
+        end[component] = to[component];
     }
-    for (int component = 0; component < 4; component++)
-        result[component] = from_weight * from[component] + to_weight * orientation * to[component];
-    normalize_transform_quaternion(result);
+    // CSS and scene tracks share the normalized shortest-arc quaternion sampler.
+    animation_quaternion_slerp(start, end, progress, sample);
+    for (unsigned component = 0; component < 4; component++) result[component] = (float)sample[component];
 }
 
 static RdtMatrix4 recompose_transform_matrix_3d(const TransformMatrix3dComponents* sample) {
@@ -526,13 +521,9 @@ static RdtMatrix4 recompose_transform_matrix_3d(const TransformMatrix3dComponent
     RdtMatrix4 translation = rdt_matrix4_translate(sample->translation[0], sample->translation[1], sample->translation[2]);
     result = rdt_matrix4_multiply(&result, &translation);
     RdtMatrix4 rotation = rdt_matrix4_identity();
-    const float* q = sample->quaternion;
-    for (int axis = 0; axis < 3; axis++) {
-        int next = (axis + 1) % 3, last = (axis + 2) % 3;
-        rotation.values[axis * 4 + axis] = 1.0f - 2.0f * (q[next] * q[next] + q[last] * q[last]);
-        rotation.values[axis * 4 + next] = 2.0f * (q[axis] * q[next] - q[last] * q[3]);
-        rotation.values[axis * 4 + last] = 2.0f * (q[axis] * q[last] + q[next] * q[3]);
-    }
+    double quaternion[4], rotation_values[16];for(unsigned c=0;c<4;c++) quaternion[c]=sample->quaternion[c];
+    animation_quaternion_matrix(quaternion, rotation_values);
+    for(unsigned c=0;c<16;c++) rotation.values[c]=(float)rotation_values[c];
     result = rdt_matrix4_multiply(&result, &rotation);
     RdtMatrix4 shear = rdt_matrix4_identity();
     shear.values[1] = sample->skew[0];

@@ -1055,6 +1055,12 @@ static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
     if (sys_conversion_literal_is_error_free(tp, info, first_arg)) return false;
 
     switch (info->fn) {
+    case SYSFUNC_CONTENT: {
+        // A literal's ordinary content face is infallible; host elements retain
+        // the registry's lazy-read error lane.
+        AstNode* root = ast_unwrap_primary(first_arg);
+        return !root || root->node_type != AST_NODE_ELEMENT;
+    }
     case SYSFUNC_INT:
     case SYSFUNC_FLOAT:
     case SYSFUNC_DECIMAL:
@@ -1798,6 +1804,7 @@ static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self) {
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
         if (!info) return false;
+        if (ast_call_may_force_virtual_content(call)) return true;
         if (sysfunc_originates_defect(info)) return true;
         // S11.4.3: a rejected error operand is the call's value (resolved with
         // the call); any other row passes an operand's error through (S7.9.3)

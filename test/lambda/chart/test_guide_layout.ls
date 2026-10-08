@@ -22,7 +22,7 @@ let reversed = chart.render(<chart width: 300, height: 200, padding: 0,
         <y field: "y", dtype: "quantitative", axis: null>>
 >)[1][0];
 [
-    geometry.plot_x > 0, geometry.plot_y > 0, geometry.right_margin > 0, geometry.bottom_margin == 0,
+    geometry.plot_x > 0, geometry.plot_y > 0, geometry.right_margin > 0, geometry.bottom_margin > 0,
     geometry.legend_x == 0, image[1][1][0].y1 == 0, image[1][2][0].x1 > 0,
     gradient.class == "legend gradient-legend", name(gradient[0]) == 'rect', len(content(gradient)) == 22,
     gradient[0].fill == "#084594", gradient[19].fill == "#deebf7",

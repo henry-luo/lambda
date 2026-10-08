@@ -1036,7 +1036,33 @@ Parse content from a file path or URL.
 `p#a.b` forces and then navigates. `input(p, format)` stays the
 explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
-**Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
+**Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
+
+**ZIP32/ZIP64** input returns an archive-backed `fs` element, including for
+ZIP-backed `.docx` and other package files. It captures and closes the complete
+source during `input()` (**S12.4.1v2**); listing children and reading metadata
+never decompress payloads. `content(file)^` and `input(member, format)^` force
+only that member, validate its CRC, and cache bytes/results/errors
+(**S14.3.1v2**). Ordinary directory input still returns child Paths.
+
+Use `input(path, 'binary')^` or `input(member, 'binary')^` for exact bytes;
+explicit formats override ZIP auto-detection. An empty binary source returns
+`null` (**S2.2.2v2**). Nested ZIP members remain binary by default and open
+only with explicit `'zip'`. Stored and DEFLATE are supported; encryption,
+split archives and other compression/container formats are rejected.
+
+Input maps accept the bounded quota options listed in
+[ZIP I/O §9.1](../vibe/Lambda_IO_Zip.md#91-limits-and-output-options).
+Unknown options follow **S17.8.1**. Navigate through `content(node)^`, since
+direct element iteration also visits attributes (**S8.1.2v2**).
+
+```lambda
+pn inspect_archive(source) {
+    let archive = input(source)^
+    let parts = content(archive)^;
+    {name: parts[0].name, entry_path: parts[0].entry_path}
+}
+```
 
 Mark auto-detection uses only `.mark` (D2.9.1); `input(target, 'mark')`
 accepts any filename regardless of its extension (D2.9.2).
@@ -1069,7 +1095,7 @@ let api_data = input(https.'api.example.com'.'users.json')^
 
 // Input with options map
 let math_expr = input(/.'formula.txt', {type: 'math', flavor: 'latex'})^
-let csv_data = input(/.'data.csv', {type: 'csv', delimiter: ','})^
+let csv_data = input(/.'data.csv', {type: 'csv'})^
 
 // Auto-detection (based on file extension)
 let auto_data = input(/.'document.md')^  // Automatically detects Markdown
@@ -1220,9 +1246,24 @@ pn save_data() {
     output(data, /.'data.out', 'yaml')^    // Force YAML format
 
     // With options
-    output(data, /.'pretty.json', {type: 'json', indent: 4})^
+    output(data, /.'pretty.json', {format: 'json'})^
 }
 ```
+
+ZIP output consumes an archive node, a directory node, its child view, or a
+constructed `fs` tree. A `.zip` target selects ZIP automatically; package
+extensions such as `.docx` require explicit `'zip'`. Original archive-member
+bytes round-trip independently of parsed content. Constructed files carry
+text/binary children, or one structured value with an explicit `format`
+attribute. Empty files and directories are preserved.
+
+ZIP options are `format: 'zip'`, `compression: 'deflate' | 'stored'`,
+`compression_level: -1..9`, `zip64: bool`, and `deterministic: bool`, plus
+shared quota options. ZIP64 is automatic when required; `zip64: true` forces
+it for small archives. Output encodes completely before atomic replacement,
+returns the byte count, and rejects append mode (**S10.1.4/S12.1.1v2**).
+See [ZIP I/O §9.1](../vibe/Lambda_IO_Zip.md#91-limits-and-output-options)
+for defaults and constructed-tree examples.
 
 **Supported output formats:**
 
@@ -1236,6 +1277,7 @@ pn save_data() {
 | `mark` | `.mark` | Mark Notation (D2.9.1) |
 | `text` | `.txt` | Plain text |
 | `toml` | `.toml` | TOML format |
+| `zip` | `.zip` | ZIP32/ZIP64 filesystem tree; Stored or DEFLATE |
 | `ini` | `.ini` | INI configuration format |
 
 #### Output Function

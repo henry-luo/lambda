@@ -1,6 +1,6 @@
 {
   "name": "Document viewer lays out a long source file after navigation",
-  "html": "test/ui/doc_viewer.ls",
+  "html": "lmd/package/doc/doc_viewer.ls",
   "viewport": {"width": 1280, "height": 900},
   "events": [
     {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},

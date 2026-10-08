@@ -1,3 +1,4 @@
+#include "scene3d.hpp"
 #include "event.hpp"
 #include "../lib/queue.h"
 #include "layout.hpp"
@@ -52,6 +53,7 @@ extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
 extern "C" Item js_data_transfer_new_read_only_with_strings(const char* text_plain,
                                                               const char* text_html);
 extern Item js_make_number(double value);
+#include "../lambda/dom/realm/dom_realm.h"
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include "../lib/time_util.h"
@@ -7749,6 +7751,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc) {
     if (!uicon || !doc || doc->js.mutation_count == 0) return;
+    scene3d_collect(doc);
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
@@ -8373,6 +8376,7 @@ struct RadiantTimingEventData {
     const char* value;
     double seconds;
     double detail;
+    uint64_t action;
 };
 
 static Item radiant_build_css_timing_event(void* userdata) {
@@ -8383,6 +8387,21 @@ static Item radiant_build_css_timing_event(void* userdata) {
 static Item radiant_build_svg_timing_event(void* userdata) {
     RadiantTimingEventData* data = (RadiantTimingEventData*)userdata;
     return js_create_native_svg_time_event(data->type, data->detail, data->seconds);
+}
+
+static Item radiant_build_scene_timing_event(void* userdata) {
+    auto* data=(RadiantTimingEventData*)userdata;
+    RootFrame roots(2);Rooted<Item> event(roots,js_create_event(data->type,false,false));
+    Rooted<Item> value(roots,make_string_item(data->name));
+    dom_realm_set_name(event.get(),"clip",value.get());
+    value.set(js_make_number(data->action));dom_realm_set_name(event.get(),"action",value.get());
+    value.set(js_make_number(data->detail));dom_realm_set_name(event.get(),!strcmp(data->type,"loop")?"loopDelta":"direction",value.get());
+    value.set(js_make_number(data->seconds));dom_realm_set_name(event.get(),"time",value.get());return event.get();
+}
+void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,const char* type,
+        const char* clip,uint64_t action,double detail,double seconds) {
+    RadiantTimingEventData data={type,clip,nullptr,seconds,detail,action};
+    radiant_queue_timing_event(uicon,target,radiant_build_scene_timing_event,&data);
 }
 
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
@@ -8559,6 +8578,52 @@ static Item build_pointer_event_item(void* userdata) {
         args->meta, args->pointer_type, 1, true);
 }
 
+struct NativePointerCapture : DomDocumentResourceData {
+    NativePointerCapture* next;
+    DomDocument* document;
+    DomNodeRef current,pending;
+    int buttons;
+    bool active;
+};
+static NativePointerCapture* native_pointer_captures;
+static void native_pointer_capture_destroy(DomDocumentResourceData* data) {
+    auto* capture=(NativePointerCapture*)data;auto** link=&native_pointer_captures;
+    while(*link&&*link!=capture) link=&(*link)->next;
+    if(*link) *link=capture->next;mem_free(capture);
+}
+static NativePointerCapture* native_pointer_capture(DomDocument* doc,bool create) {
+    for(auto* capture=native_pointer_captures;capture;capture=capture->next) if(capture->document==doc) return capture;
+    if(!doc||!create) return nullptr;
+    auto* capture=(NativePointerCapture*)mem_calloc(1,sizeof(NativePointerCapture),MEM_CAT_RENDER);if(!capture) return nullptr;
+    capture->document=doc;
+    if(!dom_document_add_resource(doc,capture,native_pointer_capture_destroy)) {mem_free(capture);return nullptr;}
+    capture->next=native_pointer_captures;native_pointer_captures=capture;return capture;
+}
+extern "C" int dom_engine_pointer_capture(DomElement* element,int32_t id,unsigned operation) {
+    auto* capture=element?native_pointer_capture(element->doc,false):nullptr;
+    if(operation==2) return capture&&id==1&&dom_node_ref_validate(element->doc,capture->pending)==element;
+    if(!capture||id!=1||!capture->active) return -1;
+    if(operation==0) {
+        if(!dom_is_connected(element)) return -2;
+        if(capture->buttons) capture->pending=dom_node_ref(element);
+    } else if(dom_node_ref_validate(element->doc,capture->pending)==element) capture->pending={};
+    return 1;
+}
+static void native_pointer_process_capture(EventContext* evcon,NativePointerCapture* capture,PointerEventBuildArgs* args) {
+    DomNode* pending=dom_node_ref_validate(capture->document,capture->pending);
+    if(pending&&!dom_is_connected(pending)) pending=nullptr;
+    DomNode* current=dom_node_ref_validate(capture->document,capture->current);
+    if(current==pending) return;
+    DomNodeRef next=dom_node_ref(pending);
+    const char* original=args->type;
+    // Pointer Events 3 §4.1.3.2: process pending capture before routing the next pointer event.
+    if(current) {args->type="lostpointercapture";radiant_dispatch_built_event(evcon,(View*)current,build_pointer_event_item,args,true,nullptr,true,args->type);}
+    pending=dom_node_ref_validate(capture->document,next);
+    if(pending&&dom_is_connected(pending)) {args->type="gotpointercapture";radiant_dispatch_built_event(evcon,(View*)pending,build_pointer_event_item,args,true,nullptr,true,args->type);}
+    else next={};
+    capture->current=next;args->type=original;
+}
+
 static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
                                            const char* type, double client_x,
                                            double client_y, int button, int buttons,
@@ -8569,8 +8634,20 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
         type, client_x, client_y, button, buttons,
         ctrl, shift, alt, meta, pointer_type ? pointer_type : "mouse"
     };
-    return radiant_dispatch_built_event(evcon, target, build_pointer_event_item,
-        &args, true, dispatched, true, type);
+    NativePointerCapture* capture=native_pointer_capture(event_context_target_document(evcon),true);
+    if(capture) {
+        if(!strcmp(type,"pointerdown")) capture->active=true;
+        capture->buttons=buttons;
+        native_pointer_process_capture(evcon,capture,&args);
+        DomNode* captured=dom_node_ref_validate(capture->document,capture->current);
+        if(captured) target=(View*)captured;
+    }
+    bool prevented=radiant_dispatch_built_event(evcon,target,build_pointer_event_item,&args,true,dispatched,true,type);
+    if(capture&&(!strcmp(type,"pointerup")||!strcmp(type,"pointercancel"))) {
+        capture->pending={};native_pointer_process_capture(evcon,capture,&args);
+        if(!strcmp(type,"pointercancel")) capture->active=false;
+    }
+    return prevented;
 }
 
 static bool radiant_dispatch_button_mouse_event(
@@ -12388,6 +12465,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     // For PDFs, we can still handle basic events using the view_tree
     if (!doc) {
         log_error("No document to handle event");
+        return;
+    }
+    if (uicon && uicon->paged_options && doc == uicon->document) {
+        // preview coordinates belong to page instances, so DOM hit testing cannot consume them.
+        float x = uicon->paged_scroll_x, y = uicon->paged_scroll_y;
+        if (event->type == RDT_EVENT_SCROLL) {
+            x -= event->scroll.xoffset * RDT_WHEEL_PIXEL_STEP;
+            y -= event->scroll.yoffset * RDT_WHEEL_PIXEL_STEP;
+        } else if (event->type == RDT_EVENT_KEY_DOWN) {
+            switch (event->key.key) {
+                case RDT_KEY_LEFT: x -= RDT_WHEEL_PIXEL_STEP; break;
+                case RDT_KEY_RIGHT: x += RDT_WHEEL_PIXEL_STEP; break;
+                case RDT_KEY_UP: y -= RDT_WHEEL_PIXEL_STEP; break;
+                case RDT_KEY_DOWN: y += RDT_WHEEL_PIXEL_STEP; break;
+                case RDT_KEY_PAGE_UP: y -= uicon->viewport_height; break;
+                case RDT_KEY_PAGE_DOWN: y += uicon->viewport_height; break;
+                case RDT_KEY_HOME: x = y = 0.0f; break;
+                case RDT_KEY_END: y = INFINITY; break;
+                default: return;
+            }
+        } else return;
+        render_paged_window_scroll(uicon, x, y);
         return;
     }
     // Native input can arrive while the document loader owns the main thread;

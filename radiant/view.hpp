@@ -143,6 +143,7 @@ typedef enum AnimationType {
     ANIM_GIF,
     ANIM_LOTTIE,
     ANIM_SVG,
+    ANIM_TIMELINE,
 } AnimationType;
 
 typedef enum AnimationDirection {
@@ -239,6 +240,8 @@ struct AnimationInstance {
     bool sampled;
     bool layout_changed;
     bool retain_after_finish;   // CSS name reconciliation keeps an inactive timeline until removal
+    bool scheduler_removed, sampling;
+    AnimationInstance* retired_next;
 
     float bounds[4];
     double pause_time;
@@ -255,6 +258,8 @@ typedef struct AnimationScheduler {
     bool has_active_animations;
     bool host_time_anchored;
     bool needs_layout;
+    unsigned sampling_depth;
+    AnimationInstance* retired;
 
     Pool* pool;
 } AnimationScheduler;
@@ -263,7 +268,7 @@ AnimationScheduler* animation_scheduler_create(Pool* pool);
 void animation_scheduler_destroy(AnimationScheduler* scheduler);
 bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
                               DirtyTracker* dirty_tracker, bool force_css_sample = false,
-                              AnimationInstance* only = nullptr);
+                              AnimationInstance* only = nullptr, bool timelines_only = false);
 void animation_scheduler_anchor_host_time(AnimationScheduler* scheduler, double now);
 void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_move_before(AnimationScheduler* scheduler,
@@ -277,6 +282,9 @@ void animation_scheduler_remove_views(AnimationScheduler* scheduler);
 void animation_scheduler_prune_disconnected_css_views(AnimationScheduler* scheduler,
                                                        DomDocument* document);
 AnimationInstance* animation_instance_create(AnimationScheduler* scheduler);
+AnimationInstance* animation_clock_driver_start(AnimationScheduler* scheduler, AnimationType type,
+    void* target, AnimTickFn tick, AnimFinishFn released);
+double animation_clock_time(const AnimationScheduler* scheduler, const AnimationInstance* driver, double origin);
 void animation_instance_pause(AnimationInstance* anim, double now);
 void animation_instance_sample(AnimationInstance* anim, double now);
 void animation_instance_resume(AnimationInstance* anim, double now);
@@ -686,6 +694,7 @@ typedef struct ImageSurface {
     // surfaces built on the stack or inside another object, which are never
     // referenced by a retained display list.
     lam::Handle<struct ImageSurface> self;
+    uint32_t snapshot_refs; // immutable publications: owner plus retained display-list leases
     lam::Own<struct ImageSurface> retire_next;  // link in the retire queue once destroyed
 } ImageSurface;
 
@@ -697,6 +706,9 @@ extern ImageSurface* image_surface_alloc(void);
 // valid until the scope ends: destroyed surfaces are released only at a quiet
 // point, when no read scope is open anywhere.
 extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
+// immutable snapshot leases retain storage across replacement/removal (D4.5.1v4).
+extern ImageSurface* image_surface_snapshot_retain(ImageSurface* surface);
+extern void image_surface_snapshot_release(ImageSurface* surface);
 // Invalidates every handle to `surface` and returns its slot at once (only for
 // surfaces no reader can hold; image_surface_destroy defers instead).
 extern void image_surface_release_slot(ImageSurface* surface);
@@ -4144,6 +4156,10 @@ typedef struct UiContext {
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
     lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
+    // the document registry owns the paged edition; launch options outlive the window loop.
+    lam::Up<ViewTree> paged_view;
+    lam::Up<const struct RenderPagedOptions> paged_options;
+    float paged_scroll_x, paged_scroll_y;
     // One Lambda runtime for the window's stateless document loaders (LaTeX,
     // PDF, TikZ, graph, math). Created by the first such load; released after
     // the documents built on it.
@@ -4252,6 +4268,7 @@ extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 bool document_dependency_admits(const DomDocument* document, const char* source);
 ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source);
+ImageSurface* image_element_surface(DomElement* element);
 ImageSurface* load_document_image_resource(DomDocument* document, lam::Own<struct hashmap>* cache,
     const char* source);
 void image_resource_cache_cleanup(lam::Own<struct hashmap>* cache, UiContext* animation_ui = nullptr);

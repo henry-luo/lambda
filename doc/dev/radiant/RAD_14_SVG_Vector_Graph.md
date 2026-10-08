@@ -1,6 +1,6 @@
 # Radiant — SVG, Vector Graphics & Diagram Layout
 
-> **Last verified against tree:** 2026-10-07 (§4.4 layer content keys and folded uniform scale); 2026-10-06 (geometric clip intersections and lazy SVG font metrics; 2026-10-03 P7/P10 stroke/filter audit in §4.2, P12 SMIL in §4.5 and P13 exports in §5.3; other SVG geometry/paint sections retain the 2026-10-02 audit; graph sections retain the 2026-09-30 audit)
+> **Last verified against tree:** 2026-10-08 (shared chart text measurement); 2026-10-07 (§4.4 layer content keys and folded uniform scale); 2026-10-06 (geometric clip intersections and lazy SVG font metrics; 2026-10-03 P7/P10 stroke/filter audit in §4.2, P12 SMIL in §4.5 and P13 exports in §5.3; other SVG geometry/paint sections retain the 2026-10-02 audit; graph sections retain the 2026-09-30 audit)
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and active ThorVG backend, with an excluded CoreGraphics implementation retained for future exploration; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
 >
@@ -131,6 +131,20 @@ bridge (**D4.2.2v2-D4.2.4, D4.5.1v3**). ThorVG text remains a fallback for an
 unavailable font path. Normative UTF-16, nested-calibration and SVG 2 decoration
 fixtures record their specific disagreement with Chromium 143; general shaping
 is an existing font-engine limitation.
+
+Chart guide measurement shares this positioned SVG layout. A batch keeps one
+font/style context for direct text requests, copies advances and the union of
+character-cell and glyph-outline bounds, and releases its transient document.
+The host `radiant.measure_svg_text` function is read-only (**D7.4.6**); only
+copied scalar metrics cross the ownership seam (**D4.2.2v2**, **D4.5.1v4**).
+This also preserves the existing SVG DOM geometry path through the shared
+collector. Measurement includes the renderer's current fallback and spacing
+behavior; it does not introduce a separate shaper.
+
+Chart truncation uses `radiant.graphemes` for stateful UAX #29 segmentation
+with the bundled Unicode data. Its copied strings and result array belong to
+the caller's runtime, protected by precise roots (**D4.5.1v4**). It preserves
+input bytes, including embedded NUL, independently of SVG font shaping.
 
 ### 4.3 Record then replay
 

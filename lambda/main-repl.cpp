@@ -241,9 +241,9 @@ void print_help() {
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  lambda layout <file.html>    - Analyze HTML/CSS layout structure\n");
     printf("  lambda render <input.html> -o <output.svg|pdf|png|jpg>  - Render HTML to SVG/PDF/PNG/JPEG\n");
-    printf("  lambda view <file.pdf|file.html>  - Open PDF or HTML document in viewer (default: test/ui/doc_viewer.ls)\n");
+    printf("  lambda view [file.pdf|file.html]  - Open a document (default: bundled lambda.doc viewer)\n");
     printf("  lambda edit <file.md|file.html|file.svg>  - Open a document in the editing application\n");
-    printf("  lambda demo                  - Open the bundled document viewer demo (test/ui/doc_viewer.html)\n");
+    printf("  lambda demo                  - Open the bundled lambda.doc viewer with its startup splash\n");
     printf("  lambda fetch <url> [-o file]  - Fetch HTTP/HTTPS resource\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nScript Options:\n");
@@ -282,7 +282,7 @@ void print_help() {
     printf("  view <file.pdf>       - Open PDF document in interactive viewer window\n");
     printf("  view <file.html>      - Open HTML document in interactive browser window\n");
     printf("  edit <file.md>        - Author a document (Markdown, HTML, SVG) and save it back\n");
-    printf("  demo                  - Same as 'view test/ui/doc_viewer.html'\n");
+    printf("  demo                  - Open the bundled lambda.doc viewer with its startup splash\n");
     printf("\nNetwork Commands:\n");
     printf("  fetch <url>           - Fetch URL and print to stdout\n");
     printf("  fetch <url> -o file   - Fetch URL and save to file\n");

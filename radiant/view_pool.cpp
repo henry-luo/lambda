@@ -1,3 +1,4 @@
+#include "scene3d.hpp"
 #include "layout.hpp"
 #include "view.hpp"
 #include "view_tree_model.hpp"
@@ -1084,6 +1085,8 @@ void view_tree_release_detached_embedded_documents(ViewTree*, DomNode* root) {
 }
 
 void view_tree_prepare_detached_subtree(DomNode* root) {
+    // release private contexts while their document and native subtree identities are live.
+    scene3d_release_subtree(root);
     if (root && root->is_element()) {
         layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(root->as_element());
     }

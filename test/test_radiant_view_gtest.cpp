@@ -302,8 +302,9 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* event_path,
                                                          const ShellEnvEntry* env,
                                                          const char* optimization = nullptr,
+                                                         const char* const* preview_options = nullptr,
                                                          int timeout_ms = 0) {
-    const char* args[8] = {};
+    const char* args[32] = {};
     int arg_count = 0;
     args[arg_count++] = "./lambda.exe";
     args[arg_count++] = "view";
@@ -314,12 +315,67 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
     }
     args[arg_count++] = "--headless";
     if (optimization) args[arg_count++] = optimization;
+    if (preview_options) for (size_t i = 0; preview_options[i]; i++) args[arg_count++] = preview_options[i];
     args[arg_count] = NULL;
     ShellOptions options = {0};
     options.env = env;
     options.merge_stderr = true;
     options.timeout_ms = timeout_ms;
     return shell_exec("./lambda.exe", args, &options);
+}
+
+TEST(RadiantViewTest, PagedWindowScrollResizeAndDensity) {
+    const char* options[] = {"--paged", "--page-padding", "10", "--page-group-gap", "20", nullptr};
+    const ShellEnvEntry env[] = {{"VIEW_MEM_STAGES", "1"}, {"MEMTRACK_MODE", "DEBUG"}, {nullptr, nullptr}};
+    ShellResult result = test_radiant_view_run_logged_headless("test/html/paged_view.html",
+        "test/html/paged_view_events.json", env, nullptr, options);
+    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(nullptr, strstr(result.stdout_buf ? result.stdout_buf : "", "[MEMTRACK_LIVE] bytes=0 count=0"));
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, PagedWindowDemoAndBookPreview) {
+    const char* modes[][6] = {{"--paged", nullptr}, {"--paged", "--book", "--book-page", "2", nullptr},
+        {"--paged", "--book", "--book-page", "2", "--right-binding", nullptr},
+        {"--paged", "--pages", "none", nullptr}};
+    for (const char* const* mode : modes) {
+        ShellResult result = test_radiant_view_run_logged_headless("test/html/paged_media_demo.html",
+            nullptr, nullptr, nullptr, mode);
+        EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+    ShellResult result = test_radiant_view_run_logged_headless("test/html/ui_script_content_gc.ls",
+        nullptr, nullptr, nullptr, modes[0]);
+    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, PagedWindowGridAndFilteredZoom) {
+    const char* grid[] = {"--paged", "--page-padding", "10", "--page-grid", "1x3", "--page-column-gap", "20", nullptr};
+    const char* selection[] = {"--paged", "--pages", "2", "--page-scale", "0.5", "--page-padding", "10", nullptr};
+    const char* const* options[] = {grid, selection};
+    const char* events[] = {"test/html/paged_view_grid_events.json", "test/html/paged_view_selection_events.json"};
+    for (size_t i = 0; i < 2; i++) {
+        ShellResult result = test_radiant_view_run_logged_headless("test/html/paged_view.html",
+            events[i], nullptr, nullptr, options[i]);
+        EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+}
+
+TEST(RadiantViewTest, PagedWindowRejectsInvalidOptionsAndComposition) {
+    const char* missing_mode[] = {"--page-grid", "2x2", nullptr};
+    const char* missing_value[] = {"--paged", "--page-scale", nullptr};
+    const char* invalid_scale[] = {"--paged", "--page-scale", "nan", nullptr};
+    const char* invalid_range[] = {"--paged", "--pages", "20", nullptr};
+    const char* export_only[] = {"--paged", "--export-pages", "1", nullptr};
+    const char* const* options[] = {missing_mode, missing_value, invalid_scale, invalid_range, export_only};
+    for (const char* const* option : options) {
+        ShellResult result = test_radiant_view_run_logged_headless("test/html/paged_view.html",
+            nullptr, nullptr, nullptr, option);
+        EXPECT_NE(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
 }
 
 static ShellResult test_radiant_view_run_layout_timing(const char* page,
@@ -1410,7 +1466,7 @@ static void test_radiant_view_check_timeout_cleanup(const char* label,
     };
     // fail a missing guest timeout instead of leaving the regression runner hung.
     ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, env,
-        nullptr, 10000);
+        nullptr, nullptr, 10000);
     EXPECT_FALSE(result.timed_out);
     EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
     EXPECT_TRUE(test_radiant_view_file_contains(view_log,
@@ -1521,8 +1577,36 @@ TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {
     EXPECT_TRUE(test_radiant_view_profile_has_intrinsic_measurement(view_log));
 }
 
+TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
+    const char* paths[] = {"test/input/zip", "test/input/zip/wide.zip",
+        "test/input/zip/viewer.zip", "test/input/zip/empty.zip", "test/input/zip/renamed.dat", "test/input/zip/extensionless",
+        "test/input/zip/office.docx", "test/input/zip/sample.jar"};
+    const char* view_log = "./temp/test_radiant_view_archive_tree.log";
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "INFO"}, {NULL, NULL},
+    };
+    test_radiant_view_ensure_temp_dir();
+    for (const char* path : paths) {
+        SCOPED_TRACE(path);
+        remove(view_log);
+        ShellResult result = test_radiant_view_run_logged_headless(path, nullptr, env);
+        EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        EXPECT_TRUE(test_radiant_view_file_contains(view_log, "VIEW_FILE_TREE:"));
+        shell_result_free(&result);
+    }
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, RejectsUnsafeArchiveBeforeOpeningTree) {
+    ASSERT_TRUE(test_radiant_view_file_readable("./lambda.exe"));
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/input/zip/traversal.zip", nullptr, nullptr);
+    EXPECT_NE(result.exit_code, 0);
+    shell_result_free(&result);
+}
+
 TEST(RadiantViewTest, ReusesCleanRowsAfterDirectoryClose) {
-    const char* page = "test/ui/doc_viewer.ls";
+    const char* page = "lmd/package/doc/doc_viewer.ls";
     const char* events = "test/ui/doc_viewer_layout_shift.json";
     const char* view_log = "./temp/test_radiant_view_directory_close.log";
     ASSERT_TRUE(test_radiant_view_file_readable(page));
@@ -2224,7 +2308,8 @@ TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
     shell_result_free(&shell_result);
 
-    const char* expected[] = {"r1s1e10", "k2", "n1n2n3", "w1w1", "v1", "r4s4e40", "r5s5e50"};
+    const char* expected[] = {"r1s1e10", "k2", "n1n2n3", "w1w1", "v1", "r4s4e40", "r5s5e50",
+        "[9, 6, 13]override7128"};
     for (const char* text : expected) {
         EXPECT_TRUE(test_radiant_view_file_contains(view_path, text))
             << "missing content '" << text << "' after forced GC";

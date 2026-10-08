@@ -23,7 +23,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 7. [latex — LaTeX to HTML](#7-latex--latex-to-html)
 8. [pdf — PDF Rendering](#8-pdf--pdf-rendering)
 9. [openapi — OpenAPI Tools](#9-openapi--openapi-tools)
-10. [Engine Packages: edit, editor, dom](#10-engine-packages-edit-editor-dom)
+10. [Engine Packages: edit, editor, dom, doc](#10-engine-packages-edit-editor-dom-doc)
 11. [Tests](#11-tests)
 
 ---
@@ -39,6 +39,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
+| `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor` | `lambda.editor.mod_editor` | Engine internal | The editing model: documents, selections, transactions, history | `lambda edit`, through `edit` |
 | `dom` | `lambda.dom.dom` | Engine internal | Browser behaviour for HTML: form controls, links, focus, `<details>`, editing | `lambda view` on interactive pages |
@@ -82,7 +83,7 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4). Shipped pa
 | `lambda.sys.<name>` | A system function, reachable even when a script shadows its name (S17.2.1, S17.2.2) |
 
 - **Name an existing module.** There is no implicit directory index, so `import chart: lambda.chart` fails with E217; write `lambda.chart.chart`. `lambda.slide` has an explicit `package/slide.ls` entry file.
-- **`lambda.doc.*` holds only the math typesetting package today.** It sits there so that `lambda.math` can stay the built-in math module (D7.2.4); the LaTeX package is `lambda.latex`, not `lambda.doc.latex`.
+- **`lambda.doc.*` groups document packages and the bundled viewer.** The viewer and its resources live in `package/doc/`; math typesetting maps to `package/math/` so that `lambda.math` can stay the built-in math module (D7.2.4). The LaTeX package is `lambda.latex`, not `lambda.doc.latex`.
 - **An alias is a binding name**, so it can be neither a keyword nor `lambda` itself (S16.10.1v2). Choose another alias for the `edit` package:
 
 ```lambda error=E100
@@ -217,19 +218,121 @@ svg.width                // 400, the default width
 
 | Element | Attributes and children |
 |---------|-------------------------|
-| `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, and the children below |
+| `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, `clip`, and the children below |
 | `<data>` | Inline `values: [...]` or row children; `name` selects the chart's `datasets` map; `url` and optional `format` use Lambda input loading |
-| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size` |
-| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`), `value`, `datum`, `title`, `aggregate`, `bin`, `stack`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
-| `<transform>` | Steps applied in order: `<filter field, op, value>`, `<sort field, order>`, `<aggregate>` with `<group field>` and `<agg op, field, as>` children, `<calculate as, op, field, field2>`, `<bin field, as, maxbins, step>`, `<fold fields, as>`, `<flatten fields, as>` |
+| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
+| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<transform>` | Ordered `filter`, `sort`, `aggregate`, `calculate`, `bin`, `timeunit`, `fold`, `flatten`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
 | `<config>` | `theme`: `light`, `dark`, `minimal`, `presentation`, or a custom map; nested `mark`/mark-type/`axis`/`legend` settings or equivalent prefixed attributes; `font`; `axis_grid: true` for horizontal grids |
 | `<layer>` | `<chart>` children drawn over one another |
 | `<facet>` | `field` with wrapping `columns` (default 3), or `row`/`column` field definitions; `spacing` (default 20); common scale domains by default |
-| `<annotation>` | `<text_note x, y, text, color, font_size, anchor, dx, dy>` and `<rule_note x or y, color, stroke_width, stroke_dash>` children |
+| `<annotation>` | `<text_note x, y, text, color, font_size, anchor, dx, dy>`, `<rule_note x or y, color, stroke_width, stroke_dash>`, and `<region_note x, x2, y, y2, color, opacity, text>` children |
 | `<hconcat>`, `<vconcat>` | `spacing` (default 20); `<chart>` children placed side by side or stacked |
 | `<repeat>` | A `<row [fields]>` and/or `<column [fields]>` child plus one `<chart>` template whose channels say `field: {repeat: "row"}` or `field: {repeat: "column"}` |
 
 A pie or donut chart is an `arc` mark with a `theta` channel, plus `inner_radius` for a donut; grouped bars use an `x_offset` channel. Aggregate operations are `count`, `sum`, `mean` (or `average`), `median`, `min`, `max`, `distinct`, `q1`, `q3`, `stdev` and `variance`. A colour channel picks a palette with `scale: {scheme: "set1"}`: `category10` is the default for categories and `blues` for quantities, and `category20`, `set1`, `pastel1`, `dark2`, `greens`, `reds`, `oranges`, `purples`, `greys`, `red_blue` and `spectral` are also available. `scale: {domain: [...], range: [...]}` assigns colours explicitly.
+
+Additional palettes are `set2`, `viridis`, `plasma`, `inferno`, and `magma`.
+Quantitative `scale: {domain: [-10, 30], domain_mid: 0}` maps the explicit
+midpoint to a diverging palette's center. A categorical `sort: {field: "sales",
+op: "sum", order: "descending"}` orders categories by grouped totals, with
+stable ties (S6.2.3).
+
+Size and shape encodings produce legends as color does. Legend settings
+include `orient`, `direction`, `columns`, `values`, `format`, and symbol
+appearance. Arc legends honor placement. Numeric labels share formats such
+as `,.2f`, `.1%`, `.3e`, `.3g`, and `.3~s` across guides, text, and tooltips.
+Layered charts can request `resolve: {scale: {y: "independent"}}`; shared
+scales include full stacked extents. `clip: true` on a chart or mark clips
+plotted content without clipping its axes or legends.
+
+Mark `fill`, `stroke`, and `color` also accept gradient and hatch maps. A
+gradient is `{gradient: "linear" | "radial", stops: [{offset, color, opacity?}, ...]}`;
+linear direction uses `x1`/`y1`/`x2`/`y2`, and radial gradients additionally use
+`r1`/`r2`. Coordinates are relative to the mark's bounding box. The default
+linear direction runs left to right; radial defaults run from the center to
+radius `0.5`. Optional `spread` selects `pad`, `repeat`, or `reflect`.
+Offsets and stop opacity lie in `[0, 1]`; stops must be ordered.
+
+`{pattern: "hatch", color: "black", spacing: 8, angle: 45, stroke_width: 1}`
+draws repeating stripes. Optional `background` fills the tile, `opacity`
+controls stripe opacity, and `cross: true` adds perpendicular stripes.
+Gradients and hatches work through conditional color values, identity color
+fields, and categorical palette ranges, including their legend symbols.
+They also work on annotations, backgrounds, and titles, and across chart
+compositions. Invalid paint maps return value errors (S7.4.1). See the
+[chart design](../vibe/Lambda_Pkg_Chart.md#gradient-and-hatch-paints) for full
+defaults and examples.
+
+Temporal scales use calendar-aligned ticks. `scale.timezone` is a fixed UTC
+offset in minutes (default zero). `time_unit: "yearmonth"` on a channel groups
+records before encoding aggregation; cyclic `month`, `day`/`weekday`, and
+`hours` are also supported, and an `utc` prefix selects UTC. A direct
+`<timeunit field: "date", unit: "yearmonth", as: "month">` transform retains
+the source field. Named time zones and daylight-saving rules remain outside
+this subset; see the [chart design](../vibe/Lambda_Pkg_Chart.md#5-encodings-scales-and-color).
+
+Chart axes, legends, titles, and facet headings use measured SVG font bounds.
+The default family is `"Arial"`; chart `font` and guide `label_font_*` /
+`title_font_*` settings control both measurement and output. `label_limit` fits
+text and an ellipsis into a pixel width, preserving whole grapheme clusters
+(including combining marks, emoji sequences, and flags).
+`label_overlap: "hide"` culls against measured positions on either axis and
+across axes, titles, legends, and text annotations within a view;
+`label_separation` sets the gap. Text annotations accept the same overlap
+controls, font family/size/weight/style, and letter/word spacing. Fixed text
+retains its authored position; optional notes precede optional axis labels.
+Plot clipping removes invisible annotation bounds from collision checks.
+Legend rows and margins accommodate the
+selected fonts. Different available fonts can produce different geometry;
+complex-script shaping follows Radiant's current SVG support.
+
+The reusable read-only host function
+`radiant.measure_svg_text(html, width, height)` measures each direct `<text>`
+child of the first SVG in the HTML body, preserving request order. Other SVG
+children can supply font resources. It returns copied `width` (advance),
+`height`, `baseline`, and baseline-relative `left`, `top`, `right`, `bottom`
+bounds covering character cells and visible glyphs. Empty text has zero
+metrics; invalid input or failed measurement returns null. Viewport dimensions
+must be positive integers. This follows **D7.4.6** / **S12.1.1v2**; only scalar
+facts escape the transient document under **D4.2.2v2**.
+
+`radiant.graphemes(text)` returns the original text as an array of extended
+grapheme clusters, following the bundled Unicode segmentation data. Empty
+text returns `[]`; invalid UTF-8 returns null. It preserves spelling without
+normalization and is read-only under **D7.4.6** / **S12.1.1v2**. Chart truncation
+uses these boundaries; ordinary `split` retains its **S17.1.1** contract.
+
+#### Analytical transforms
+
+`lambda.chart.transform.apply_transforms(rows, steps, datasets = null)` also
+applies the transform vocabulary directly. `steps` is a `<transform>` element
+or an array of maps carrying `type`. Invalid options return value errors
+(S7.4.1); later steps stop at the first diagnostic.
+
+| Step | Options and result |
+|---|---|
+| `<window>` | `groupby`, multi-field `sort`, inclusive `frame` (default `[null, 0]`), `ignore_peers`; `<agg op, field, as, param>` children add aggregate, ranking, lag/lead, or first/last/nth-value fields without changing source order |
+| `<lookup>` | `field`, `from: {data, key, fields}`, optional parallel `as` names and `default`; a left join against inline, named, or file/URL data. Omit foreign `fields` and supply one `as` name to embed the matching record |
+| `<density>` | `field`, optional `groupby`, `bandwidth` (zero estimates it), `extent`, `steps`, `as`, `counts`, `cumulative`, `resolve: "shared"`; Gaussian estimates default to `value`/`density` output |
+| `<regression>` | `x`, `y`, optional `groupby`, `method` (`linear`, `log`, `exp`, `pow`, `quad`, `poly`), polynomial `order`, `extent`, `steps`, `as`, `params`; curve records or `coef`/`r_squared` model parameters |
+| `<loess>` | `x`, `y`, optional `groupby`, `bandwidth` in `(0, 1]` (default 0.3), `as`; locally weighted trend records |
+
+Windows support aggregate operations plus `row_number`, `rank`, `dense_rank`,
+`percent_rank`, `cume_dist`, `ntile`, `lag`, `lead`, `first_value`, `last_value`,
+and zero-based `nth_value`. Tied sort keys share ranks and expand frames unless
+`ignore_peers` is true. Sorting is stable (S6.2.3). Lookup uses exact value
+equality (S5.1.1, S5.4.1), selects the first duplicate match, and fills missing
+matches with `default` (null). Numeric summaries and statistical transforms
+ignore nonfinite/nonnumeric values; invalid or rank-deficient fits return a
+diagnostic. Vega-Lite conversion supports these transforms, including its
+`window` operation array and `regression`/`loess` with `on` syntax.
+
+Running-sum windows followed by a calculation of each prior total produce
+waterfall charts with ordinary `bar` marks and `y`/`y2` ranges. Density and
+fitted-trend outputs use ordinary line/area marks. See the
+[chart design](../vibe/Lambda_Pkg_Chart.md#6-data-transformations) for full contracts
+and a runnable waterfall example.
 
 ### 4.4 Word and tag clouds
 
@@ -614,7 +717,7 @@ openapi.validate_params(spec, "/pets", "get", {}).errors[0].message    // "requi
 
 ---
 
-## 10. Engine Packages: edit, editor, dom
+## 10. Engine Packages: edit, editor, dom, doc
 
 These packages implement parts of the engine in Lambda. They load automatically when a command needs them, and their API follows the engine: it is not stable, and scripts should not depend on it.
 
@@ -629,6 +732,17 @@ These packages implement parts of the engine in Lambda. They load automatically 
 ### 10.3 `dom` — browser behaviour for HTML
 
 `lambda.dom.*` implements the user-agent behaviour of HTML documents in Radiant, written as `view` templates with `on` handlers (see [Reactive_UI.md](Reactive_UI.md)): form controls and their state, constraint validation, form submission and `application/x-www-form-urlencoded` encoding, link navigation, sequential focus and `autofocus`, `<details>` and `<summary>`, context menus, keyboard activation, caret movement, scrolling keys, IME composition, ARIA reflection, and the editing of `contenteditable` regions, including `designMode`, `execCommand` and the `queryCommand*` functions. Radiant loads `lambda.dom.dom` once per document, the first time an event reaches an element the package governs, and registers its templates as behaviour templates on the page's elements rather than as the page's own templates. Editing policy belongs to this package, never to native code (D7.2.5).
+
+---
+
+### 10.4 `doc` — the bundled document viewer
+
+Bare `lambda view` loads `package/doc/doc_viewer.ls` from Lambda home;
+`lambda demo` opens the adjacent `doc_viewer.html` startup splash. The viewer
+browses the current working directory and loads documents on selection. Its
+Seti icon font and license ship in `package/doc/icons/`, and its KaTeX stylesheet
+comes from `package/math/`. These application resources belong to the shipped
+`lambda.doc` package (D7.2.4); UI event fixtures remain under `test/ui/`.
 
 ---
 

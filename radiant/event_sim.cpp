@@ -3097,7 +3097,7 @@ static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) 
 
 // Helper: force render the current surface
 static void force_render_surface(UiContext* uicon) {
-    if (uicon->document && uicon->document->view_tree) {
+    if (uicon->document && (uicon->document->view_tree || uicon->paged_view)) {
         DocState* state = (DocState*)uicon->document->state;
         // clock and intrinsic-size changes need layout before paint consumes their dirty flags.
         sim_reflow_if_pending(uicon->document, state);
@@ -3108,7 +3108,7 @@ static void force_render_surface(UiContext* uicon) {
 }
 
 static void render_pending_surface(UiContext* uicon) {
-    if (!uicon || !uicon->document || !uicon->document->view_tree) return;
+    if (!uicon || !uicon->document || (!uicon->document->view_tree && !uicon->paged_view)) return;
     DocState* state = (DocState*)uicon->document->state;
     if (!state) return;
     bool pending = state->is_dirty || state->needs_repaint ||
@@ -4062,7 +4062,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Recreate surface and reflow
             ui_context_create_surface(uicon, new_phys_w, new_phys_h);
             extern void reflow_html_doc(DomDocument* doc);
-            if (uicon->document) {
+            if (uicon->document && !uicon->paged_options) {
                 reflow_html_doc(uicon->document);
                 // Synthetic resize follows the native browser-visible turn
                 // after viewport metrics and the initial reflow are current.
