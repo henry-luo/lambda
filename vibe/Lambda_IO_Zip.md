@@ -1,19 +1,21 @@
 # Lambda I/O ZIP: Archive Input and Output
 
-> **Status:** PROPOSAL (2026-10-08), not implemented or ratified. The requested
-> direction is ZIP input through `input()`, a directory-like `Velmt` view,
-> alignment with file/directory I/O, and later ZIP output. API details and the
-> questions in §9 remain proposals; this document changes no formal ruling.
+> **Status:** IMPLEMENTED (2026-10-08), Phase 1 and Phase 2. ZIP32/ZIP64
+> input captures an immutable archive and validated index; decompression,
+> CRC validation, and member parsing are lazy under **S12.4.1v2/S14.3.1v2**.
+> ZIP output supports archive trees and constructed filesystem elements.
+> Implementation and verification: [`impl/Lambda_Impl_IO_Zip.md`](impl/Lambda_Impl_IO_Zip.md).
 >
 > **Scope:** standard ZIP containers, including ZIP-backed document/package
-> files. Phase 1 is read-only `input()` support; Phase 2 adds `output()`.
+> files. Phase 1 provides read-only `input()` support; Phase 2 provides `output()`.
 > Passwords and encryption are excluded from both phases. Other archive
 > formats, including 7z, are future work.
 >
 > **Spec linkage:** §3–§4 → **D7.4.5v2** (virtual element/array carriers),
 > **S8.1.2v2** (element iteration), **S2.5.7v4** (`content` returns an array),
 > **S2.2.4** and **S2.6.2–S2.6.4** (empty files and element content);
-> §5 → **S12.4.1**, **S14.3.1** (eager input and resource closure);
+> §5 → **S12.4.1v2**, **S14.3.1v2** (eager archive capture, lazy member
+> decompression, and resource closure);
 > §6 and Appendix A → **D7.1.2v2**, **D7.5.2** (I/O ownership and policy),
 > **D4.1.3**, **D4.2.4**, **D5.3.3** (memory ownership and precise roots);
 > §7 → **S10.1.4**, **S12.1.1v2** (explicit procedural output).
@@ -42,18 +44,19 @@ metadata attributes and a `content()` child axis. ZIP input should reuse that
 shape and its file-content machinery, rather than introduce `<zip-entry>`
 records, a path-to-bytes map, or another filesystem data model.
 
-There is one deliberate change in direction: `Lambda_IO_File.md` §2.2 and §9
-keep ZIP-tree handling outside `input()`. This proposal requests a ZIP-specific
-extension to `input()` and records that earlier restriction for reconciliation
-when accepted. It does not change ordinary file or directory input results.
+There is one deliberate change in direction: the earlier
+`Lambda_IO_File.md` proposal kept ZIP-tree handling outside `input()`. This
+ZIP-specific extension supersedes that restriction; the filesystem record now
+points here and preserves the earlier wording in its superseded appendix.
+Ordinary file and directory input results remain compatible.
 
 | Operation | Current or previously proposed behavior | This proposal |
 |---|---|---|
 | `input(ordinary_file)` | Eagerly parsed root | Preserve the result. |
 | `input(directory)` | Eager array of direct-child `Path` values | Preserve compatibility; do not silently replace it with a node. |
 | `fs(path)` | Proposed filesystem `Velmt` factory | Reuse its node contract and archive backend when implemented. |
-| `input(zip_file)` | No ZIP-tree input backend | Return an archive-backed filesystem `Velmt`. |
-| `input(zip_backed_document)` | No generic package-tree input backend | Return the same archive-backed tree, regardless of the outer extension. |
+| `input(zip_file)` | Previously no ZIP-tree input backend | Return an archive-backed filesystem `Velmt`. |
+| `input(zip_backed_document)` | Previously no generic package-tree input backend | Return the same archive-backed tree, regardless of the outer extension. |
 
 Alignment therefore means **one node contract for the proposed filesystem
 tree**, shared metadata spellings, and one member-file read/parse path. It does
@@ -61,15 +64,17 @@ not claim that today's `input(directory)` already returns a `Velmt`.
 
 ## 2. Supported archive profile
 
-The initial proposed profile is single-disk ZIP32, with both Stored (method 0)
-and DEFLATE (method 8) members required. Standard comments, bounded extra
-fields, and data descriptors are supported; an archive with no entries is
-valid. ZIP support must not depend on a `.zip` extension. These choices refer
-to the container and method definitions in [PKWARE APPNOTE 6.3.10,
+Phase 1 supports **single-disk ZIP32 and ZIP64**, with both Stored (method 0)
+and DEFLATE (method 8) members required. ZIP64 support is user-confirmed
+(2026-10-08; **S12.4.1v2**). Standard comments, bounded extra fields, and data
+descriptors are supported; an archive with no entries is valid. ZIP support
+must not depend on a `.zip` extension. These choices refer to the container
+and method definitions in [PKWARE APPNOTE 6.3.10,
 §4](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT).
 
 | In Phase 1 | Outside the initial profile |
 |---|---|
+| Single-disk ZIP32 and ZIP64 | Split/multi-disk and self-extracting archives |
 | `.zip` and ZIP-backed files such as `.docx`, `.xlsx`, `.pptx`, `.epub`, and `.jar`, when their entries use supported methods | Semantic import of the outer document/package format |
 | Files, explicit directory entries, implicit parent directories, and empty members | Symlink following, device entries, or other special filesystem objects |
 | Stored and DEFLATE, including mixed-method archives | Other ZIP compression methods |
@@ -82,17 +87,20 @@ option, password prompt, partial decrypted view, or external unzip fallback.
 Split/multi-disk and self-extracting archives are also deferred. 7z, RAR, tar,
 and standalone gzip streams do not enter this ZIP parser.
 
-**ZIP64 is an open scope choice (§9).** It is an extension within the standard
-ZIP format, not another archive family like 7z. The ZIP32 baseline follows the
-earlier filesystem proposal; if ZIP64 is deferred, recognize and reject it
-explicitly instead of truncating its counts, lengths, or offsets.
+ZIP64 is part of the supported standard ZIP format. Resolve its end record,
+locator, and extended-information fields wherever ZIP32 fields use sentinel
+values, including small members written with ZIP64 local headers. Preserve
+64-bit counts, lengths, and offsets throughout validation and indexing, with
+checked conversion at allocation/API boundaries. The same I/O and expansion
+quotas apply to both ZIP32 and ZIP64; format support does not imply unlimited
+memory. The public node model is identical for both variants.
 
 ## 3. Phase 1 public surface
 
 Use the existing format-selection convention:
 
 ```lambda no-run
-// no-run: proposed ZIP dispatcher and filesystem-node input support
+// no-run: requires the external assets.zip/report.docx/download.bin files
 let archive = input("assets.zip")^
 let package = input("report.docx")^
 let forced = input("download.bin", 'zip')^
@@ -133,15 +141,15 @@ a value produce a warning and are ignored.
 
 `content(archive)^` and `content(directory)^` return a read-only `VArray` of
 direct child filesystem nodes. A file member can be passed to `input()` as a
-proposed filesystem-node source, using the same format selectors as a local
+filesystem-node source, using the same format selectors as a local
 file. Passing a directory member to this new overload is a type/source error;
 its children are obtained through `content()`.
 
 ```lambda no-run
-// no-run: proposed filesystem-node input overload and ZIP content backend
+// no-run: requires an external report.docx package
 let archive = input("report.docx")^
-let word = first(content(archive)^ that ~.name == "word")
-let part = first(content(word)^ that ~.name == "document.xml")
+let word = [for (entry in content(archive)^ where entry.name == "word") entry][0]
+let part = [for (entry in content(word)^ where entry.name == "document.xml") entry][0]
 
 let document = input(part, 'xml')^
 let original_bytes = input(part, 'binary')^
@@ -213,7 +221,7 @@ the same content operation. Synthesize missing intermediate directories so
 an archive containing only `word/media/image1.png` still has the expected
 three-level hierarchy. Explicit empty directories remain visible.
 
-Proposed child order is first appearance in the central directory. An
+Child order is first appearance in the central directory. An
 implicit directory occupies its first descendant's position; a later explicit
 directory record supplies its metadata without adding a duplicate child.
 Repeated observations of the same archive value preserve order.
@@ -244,8 +252,9 @@ recursively expands archives.
 
 ## 5. Input evaluation, snapshots, and lifetime
 
-**S12.4.1** requires `input()` to close its resources within the call and
-return a pure value. **S14.3.1** calls input eager. The proposed approach is:
+**S12.4.1v2** requires `input()` to capture and index the complete archive,
+close its source within the call, and return a pure value. **S14.3.1v2** makes
+member decompression lazy. The user-confirmed evaluation boundary is:
 
 1. Read the complete outer archive into an owned, immutable byte snapshot
    through the ordinary I/O boundary, enforcing the input-byte limit while
@@ -259,26 +268,27 @@ return a pure value. **S14.3.1** calls input eager. The proposed approach is:
    size and CRC, and parse as requested. Cache each successful result or
    terminal failure for repeat access.
 
+Constructing the root, listing or indexing directory children, querying child
+counts, and reading metadata perform **no member decompression or payload CRC
+validation**. Only a member-content operation such as `content(file)^` or
+`input(member, format)^` forces that member's payload. Stored members follow
+the same access-time integrity checks even though they need no decompression.
+
 There is no deferred filesystem read, open ZIP handle, memory mapping that can
 observe later source writes, or hidden retry against a changed source. A member
 or child array retained after the root becomes unreachable must still retain
 the backing snapshot. Re-reading the source with `input()` creates a fresh
 value; it does not mutate an earlier archive.
 
-**The timing in step 4 remains open, not a claimed exception to the formal
-specs.** It defers decompression, integrity errors, and default parsing, even
-though all external I/O has completed. §9 asks whether this interpretation of
-eager archive input is acceptable. The strict alternative decompresses and
-CRC-validates every member before returning, with any required default parsing
-also completed then; wrappers and child arrays can still be virtual over those
-already computed results.
+Eagerness here means acquiring and validating the complete container snapshot;
+it does not mean expanding member bodies. Decompression, payload integrity
+errors, and parsing occur only at member-content access. This boundary is
+recorded in **S12.4.1v2/S14.3.1v2**; eagerly decoding every member is
+superseded (§9 and Appendix B).
 
-Before implementation, settle this boundary and reconcile the filesystem
-proposal's file-content wording with ordinary element normalization. In
-particular, its §4.2 promise of a child containing a parsed `null` must not
-override **S2.6.2**. If acceptance changes a formal ruling, revise that ruling
-in place with its version suffix and the spec semver, update the relevant
-filesystem record, and regenerate the formal index.
+The filesystem proposal follows ordinary element normalization: a parsed
+`null` produces no child under **S2.6.2**, while explicit member input still
+returns that parser root.
 
 ## 6. Validation, errors, and limits
 
@@ -311,7 +321,7 @@ Use the normal `T^E` error mechanism for unreadable input, malformed ZIP,
 unsupported features, integrity failure, decoding failure, and exceeded limits.
 Include the outer source and member name where applicable, without logging
 payloads. Container/index failures occur at `input()`; deferred payload failures
-occur at the selected member-content boundary if §5's timing is accepted.
+occur at the selected member-content boundary under **S14.3.1v2**.
 An error is never an empty directory, missing child, `null`, or truncated file.
 
 Virtual dispatch must preserve these errors. `content(FsNode)` and member
@@ -327,7 +337,7 @@ door. **S10.1.4** makes `output` the explicit file-write operation, and
 **S12.1.1v2** places writes in procedures.
 
 ```lambda no-run
-// no-run: proposed ZIP output formatter; source_tree is an existing fs tree
+// no-run: source_tree is supplied by the caller
 pn save_archive(source_tree) {
     output(source_tree, "copy.zip", 'zip')^
 }
@@ -360,17 +370,18 @@ payload, formatting, or encoding error does not publish a partial replacement;
 all output resources close on success or failure. Phase 1 remains read-only.
 
 Round-trip success means the same member names, logical payload bytes, and
-supported metadata. It does not promise identical compressed bytes, record
+supported metadata. Synthesized parent directories may be written as explicit
+directory records. It does not promise identical compressed bytes, record
 ordering beyond the chosen traversal order, or preservation of every unknown
 ZIP extra field. Timestamp and compression policy must be explicit enough to
 allow deterministic output when requested.
 
 ## 8. Delivery and acceptance
 
-Phase 1 delivers explicit and automatic ZIP input, the shared filesystem
-`Velmt`/`VArray` view, member read/parse support, snapshot ownership, errors,
-and quotas. It does not depend on completing local filesystem tree migration
-or output support.
+Phase 1 delivers explicit and automatic ZIP32/ZIP64 input, the shared
+filesystem `Velmt`/`VArray` view, lazy member decompression and read/parse
+support, snapshot ownership, errors, and quotas. It does not depend on
+completing local filesystem tree migration or output support.
 
 Acceptance coverage should include:
 
@@ -381,12 +392,17 @@ Acceptance coverage should include:
   a legacy `.doc` rejection case.
 - Nested traversal, special-character and non-ASCII names, stable child order,
   metadata meanings, explicit member parsing, and binary payloads containing
-  NUL bytes. ZIP32/ZIP64 behavior must match the resolved scope.
+  NUL bytes. Cover ZIP32 and ZIP64, including forced ZIP64 on small members,
+  64-bit metadata boundaries, and large entry counts without truncation.
 - Corrupt offsets/headers/CRC, truncated input, duplicate/conflicting names,
   traversal attempts, unsupported methods, encryption, special entries, and
   declared/actual quota violations, including nested archive budgets.
 - Source replacement/deletion after input, a retained member after dropping
   its root, repeated reads, forced GC, and parity across T0 and MIR tiers.
+- Opening, listing, counting, indexing children, and reading metadata perform
+  zero member decompressions. Accessing one file decodes only its payload;
+  repeat access reuses the cached result. A corrupt member CRC is reported
+  only when that member's payload is forced, not during a directory listing.
 - Existing ordinary file/directory results and the Lambda baseline remain
   unchanged. Each new golden-driven `.ls` fixture has its matching `.txt`.
 
@@ -396,55 +412,109 @@ options, failure cleanup, and rejection of append mode. Performance evaluation,
 if undertaken, uses a release build and measures index cost and accessed-member
 cost separately.
 
-## 9. Open questions
+## 9. Confirmed decisions and remaining proposal scope
 
-1. **How eager must ZIP input be?** Recommended: capture bytes and validate the
-   complete index during `input()`, then decompress/CRC-check and parse member
-   content on access without further external I/O (§5). Alternative: complete
-   all member decoding and integrity checks, plus default content parsing,
-   before returning. This decision must agree with **S12.4.1/S14.3.1**; the
-   draft does not silently revise them.
-2. **Include ZIP64 in Phase 1?** The proposed minimum is ZIP32, matching the
-   earlier filesystem proposal. ZIP64 is standard ZIP and useful for large
-   archives or many entries; supporting it now avoids an additional format
-   limitation. Either choice must be stated in the advertised support profile.
+The user settled both initial questions on 2026-10-08:
 
-The remaining surface choices are concrete recommendations for review:
-reuse `fs` nodes, add `input(file_node, format)`, provide shared raw-binary
-selection, and keep `input(directory)` compatible. They are not additional
-ratified rulings.
+1. **Include ZIP64 in Phase 1**, alongside ZIP32 (**S12.4.1v2**).
+2. **Decompress lazily on member-content access** after capturing the complete
+   archive and validating its index. Listing and metadata reads never force
+   payloads (**S12.4.1v2/S14.3.1v2**).
 
-## Appendix A. Implementation notes
+The implementation uses the shared `fs` node contract, `input(file_node,
+format)`, exact raw-binary selection, and compatible ordinary directory input.
+The general local `fs(path)` factory and live filesystem refresh are separate
+work in [`Lambda_IO_File.md`](Lambda_IO_File.md).
 
-- **Source acquisition:** `lambda/input/input.cpp:2212`,
-  `input_from_local_path`, currently selects a binary reader specially for
-  PDF and otherwise computes length with `strlen()`. ZIP and member parsing
-  require a shared length-bearing byte-source path, using existing
-  `lib/file.h` helpers and `input_from_source_n`; adding only an extension
-  check for `.zip` or `.docx` leaves the underlying binary-input defect.
-- **Dispatch:** `lib/mime-types.c` already contains ZIP signatures and Office
-  package MIME names; `lambda/input/input.cpp:2015`, `mime_to_parser_type`,
-  still has a generic text fallback. Reuse detection, add validated archive
-  dispatch, and preserve explicit format precedence. Use one container parser
-  for local sources, member snapshots, and any existing length-safe transport
-  adapter; new transport support is not required.
-- **Directory compatibility:** `lambda/input/input-dir.cpp:23`,
-  `input_from_directory_with_name_parent`, builds child `Path` values today.
-  Share the proposed filesystem-node factory without changing that legacy
-  return shape as a side effect of ZIP support.
-- **Virtual access:** `lambda/runtime/lambda-eval.cpp:7292`, `fn_content`,
-  currently admits concrete elements only. Extend the generic element-family
-  path once for filesystem backends; implement member-source resolution in
-  the shared input dispatcher rather than copying parsing logic into ZIP.
-- **Layering and codecs:** archive indexing and format adaptation belong in
-  `lambda-io` under **D7.1.2v2**; raw acquisition stays behind **D7.5.2**.
-  Reuse the existing zlib dependency for raw DEFLATE and CRC support. A ZIP
-  library, if selected during implementation, needs no vendor-source edits;
-  codec choice does not change the public tree contract.
-- **Lifetime:** retain source/index and parsed `Input` owners explicitly.
-  Pool/arena storage follows **D4.1.3/D4.2.4**; GC-managed wrappers, cached
-  Items, and native helper temporaries use precise trace hooks and
-  **D5.3.3** `RootFrame`/`Rooted` ownership. An arena buffer is not a GC
-  object, and tracing a raw pointer is not a substitute for retaining its
-  actual owner. Do not retain a filesystem descriptor or rely on native-stack
-  scanning to keep member data alive.
+### 9.1 Limits and output options
+
+**Z1 — bounded archive policy (D7.5.2, S17.8.1).** The options below are
+accepted in input and output option maps. Limits are nonnegative integers;
+zero is a real limit. Existing transport limits may be stricter (the synchronous
+HTTP adapter also retains its 50 MiB response cap). Index limits include implicit directories and wrapper
+metadata. An explicit nested ZIP inherits its parent's budget and nesting
+limit; its option map cannot enlarge that budget. Successful and failed
+expansions consume the shared ledger, and cached reads do not consume it again.
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `max_archive_bytes` | 268435456 (256 MiB) | Captured input bytes or encoded output bytes. |
+| `max_index_bytes` | 67108864 (64 MiB) | Index and filesystem metadata budget. |
+| `max_member_bytes` | 268435456 (256 MiB) | Uncompressed bytes per member. |
+| `max_expanded_bytes` | 1073741824 (1 GiB) | Aggregate declared/actual expansion, shared across explicitly opened nested archives. |
+| `max_entries` | 1000000 | Entries including synthesized parent directories, excluding the synthetic archive root. |
+| `max_name_bytes` | 4096 | Decoded UTF-8 member path bytes. |
+| `max_path_depth` | 128 | Member hierarchy depth. |
+| `max_nesting_depth` | 8 | Explicit nested ZIP depth; outer archive is depth zero. |
+
+**Z2 — ZIP encoding policy (S10.1.4, S12.1.1v2).** Output options use
+`format: 'zip'` (or a `.zip` target), `compression: 'deflate'` (default) or
+`'stored'`, `compression_level: -1` (default, or 0–9), `zip64: false`
+(default; required ZIP64 records are still emitted automatically), and
+`deterministic: false` (default). Deterministic output sorts member paths by
+UTF-8 bytes and uses 1980-01-01 00:00:00 floating DOS timestamps. The same
+logical input and options produce the same bytes within a codec version.
+Ordinary output preserves supported entry modes and DOS timestamps; unknown
+timestamps use 1980-01-01. Unknown extra fields, comments, and original
+compressed representations are rebuilt.
+ZIP publication always uses the shared atomic writer; append mode is rejected.
+
+Constructed trees use `<fs kind: 'dir', ...>` for the root, child directories
+with `name` and `kind: 'dir'`, and files with `name`, `kind: 'file'` and
+text/binary children. Names are single components, without `/`. A file with
+`format: 'json'` (or another supported formatter) carries zero or one value;
+multiple structured values without a formatter are rejected. Empty file nodes
+encode zero bytes. `mode` optionally supplies permission bits.
+
+```lambda
+pn save_constructed_zip() {
+    let tree = <fs kind: 'dir',
+        <fs name: "hello.txt", kind: 'file', "hello">
+        <fs name: "data.json", kind: 'file', format: 'json', {answer: 42}>
+        <fs name: "empty", kind: 'file'>
+    >
+    output(tree, "temp/example.zip", {deterministic: true})^
+}
+```
+
+## Appendix A. Implemented architecture
+
+- **Acquisition and dispatch:** `lambda/input/input.cpp` acquires exact bytes
+  with `lib/file.h`'s bounded reader and detects ZIP before MIME/text fallback.
+  Explicit format selection remains authoritative. The same length-bearing
+  dispatcher parses member payloads and preserves raw binary bytes.
+- **Archive backend:** `lambda/io/zip_archive.cpp` owns the immutable snapshot,
+  checked ZIP32/ZIP64 index, CP437/UTF-8/Unicode-extra name decoding, expansion
+  ledger, cached DEFLATE/Stored payloads and CRC errors, and ZIP writer. It
+  reuses zlib and shared endian/byte-storage/file helpers without vendor edits.
+- **Filesystem adapter:** `lambda/input/input-zip.cpp` implements the shared
+  metadata contract and `Velmt`/`VArray` operations. Flat child-index spans
+  provide O(1) indexed navigation; wrappers and attributes initialize on
+  access. Payloads and per-format parse results are cached independently.
+- **Lifetime:** **D4.1.3/D4.2.4** Input-owned pool/arena nodes and parse caches
+  live until their InputManager is torn down. Pool cleanup releases the archive
+  once. A retained child remains valid after dropping the root. Runtime-owned
+  generic content views retain/trace their owner with **D5.3.3** precise roots.
+- **Virtual errors:** virtual ABI 2 adds an optional fallible `prepare` hook
+  before cached `count`. Content, indexing, iteration, query and formatting
+  preserve failures. `len()` keeps its ordinary `int` contract; deferred host
+  failures travel through the **S7.4.3/D6.1.3** defect channel, remaining
+  catchable with `or` without changing ordinary count annotations. Jube ABI 9
+  rejects modules compiled against the earlier callback layout.
+- **Output:** `lambda/runtime/lambda-proc.cpp` selects ZIP through the ordinary
+  output door; the I/O adapter validates the tree and encodes all bytes before
+  publication. `write_binary_file_atomic` closes/checks the temporary file and
+  renames it only after successful encoding. Generic structured output also
+  completes fallible formatting before opening its target.
+
+## Appendix B. Superseded proposal choices
+
+Superseded by the user's 2026-10-08 decisions (§9):
+
+- ~~The proposed minimum is ZIP32; including ZIP64 in Phase 1 is an open
+  scope choice.~~ Both ZIP32 and ZIP64 are now required in Phase 1.
+- ~~Member decoding timing remains open. The strict alternative decompresses
+  and CRC-validates every member, with default parsing completed before
+  `input()` returns.~~ The complete archive snapshot and index are eager;
+  member decompression, CRC validation, and parsing occur only on access
+  (**S12.4.1v2/S14.3.1v2**).

@@ -563,6 +563,7 @@
         "lambda/core/shape_builder.cpp",
         "lambda/core/lambda-data.cpp",
         "lambda/io/collection_io.cpp",
+        "lambda/io/zip_archive.cpp",
         "lambda/io/target.cpp",
         "lambda/core/lambda-decimal.cpp",
         "lambda/io/mark_builder.cpp",
@@ -2241,6 +2242,7 @@
         "lambda/input/parse_error.cpp",
         "lambda/input/source_tracker.cpp",
         "lambda/io/collection_io.cpp",
+        "lambda/io/zip_archive.cpp",
         "lambda/io/mark_builder.cpp",
         "lambda/io/mark_editor.cpp",
         "lambda/io/target.cpp",
@@ -5072,6 +5074,19 @@
         "name": "\ud83d\udc11 Lambda Runtime Tests",
         "category": "baseline",
         "tests": [
+          {
+            "source": "test_zip_gtest.cpp",
+            "name": "ZIP I/O Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_zip_gtest.exe",
+            "icon": "ZIP"
+          },
           {
             "source": "test_input_script_cache_gtest.cpp",
             "name": "Input Script Cache Tests",

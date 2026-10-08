@@ -10,7 +10,8 @@
 extern "C" {
 #endif
 
-#define JUBE_ABI_VERSION 8
+// VArrayOps/Velmt children now include fallible preparation (virtual ABI 2).
+#define JUBE_ABI_VERSION 9
 #define JUBE_ABI_VERSION_LEGACY 1
 #define JUBE_HOST_API_VERSION 5
 

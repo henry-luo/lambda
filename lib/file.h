@@ -86,6 +86,9 @@ int append_binary_file(const char* filename, const char* data, size_t len);
 
 // Write to temp file then rename (crash-safe). Returns 0 on success, -1 on error.
 int write_text_file_atomic(const char* filename, const char* content);
+int write_binary_file_atomic(const char* filename, const void* content, size_t size);
+bool file_read_all_limit(const char* filename, MemCategory category,
+    uint64_t limit, char** out_data, size_t* out_size);
 
 // ---------------------------------------------------------------------------
 // File operations

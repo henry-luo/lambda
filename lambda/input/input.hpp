@@ -119,6 +119,9 @@ void shape_tree_stats_note_private_copy(int64_t entries);
 #ifdef __cplusplus
 extern "C" {
 #endif
+Input* input_from_source_n(const char* source, size_t length, Url* url,
+    String* type, String* flavor);
+
 // Shared input utility functions (most declarations in input-utils.h)
 #include "input-utils.h"
 
@@ -130,6 +133,9 @@ void skip_tab_pace(const char** text);
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 Input* input_from_source_with_name_parent(const char* source, Url* url,
     String* type, String* flavor, NamePool* name_parent);
+Input* input_from_source_n_with_name_parent(const char* source, size_t length,
+    Url* url, String* type, String* flavor, NamePool* name_parent,
+    const InputParseOptions* options = nullptr);
 // parse({sourcepos: true}): markup parsers tag each top-level block with the
 // source lines it spans (`sourcepos`, as in cmark)
 Input* input_from_source_with_positions(const char* source, Url* url,

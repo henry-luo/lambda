@@ -345,7 +345,8 @@ SysFuncInfo sys_func_defs[] = {
     // Type/conversion functions — all method-eligible
     // ========================================================================
     {SYSFUNC_LEN, "len", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_INT64, NULL, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_len_checked", FPTR(fn_len_checked), NULL, NULL, false, 0,
+     false, &TYPE_INT, false},
     // S8.3.3v3: count(x) is the size of the run x is -- the same raw-int ABI
     // as len, so an error operand is rejected at the boundary like len's
     {SYSFUNC_COUNT, "count", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
@@ -355,7 +356,8 @@ SysFuncInfo sys_func_defs[] = {
     // `len(content(e))` is the child count and `content(e)[i]` the child index
     // walk that `len(e)`-based indexing can no longer provide (LR09-9).
     {SYSFUNC_CONTENT, "content", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_content", FPTR(fn_content), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_content", FPTR(fn_content), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
 
     {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false,
      C_RET_TYPE_PTR, NULL, "fn_type", FPTR(fn_type), NULL, NULL, false, 0},
@@ -2067,6 +2069,9 @@ JitImport jit_runtime_imports[] = {
     {"pipe_map_val", FPTR(pipe_map_val)},
     {"pipe_map_key", FPTR(pipe_map_key)},
     {"iter_len", FPTR(iter_len)},
+    {"fn_virtual_content_check", FPTR(fn_virtual_content_check), JIT_IMPORT_STABLE_ITEM},
+    {"fn_len_checked", FPTR(fn_len_checked), JIT_IMPORT_STABLE_ITEM},
+    {"fn_len", FPTR(fn_len)},
     {"iter_key_at", FPTR(iter_key_at)},
     {"iter_val_at", FPTR(iter_val_at)},
 
@@ -4068,8 +4073,23 @@ static const char* const io_text_search_option_names[] = {
     NULL,
 };
 
+static const char* const input_option_names[] = {
+    "type", "flavor", "schema", "max_archive_bytes", "max_index_bytes", "max_member_bytes",
+    "max_expanded_bytes", "max_entries", "max_name_bytes", "max_path_depth", "max_nesting_depth", NULL
+};
+static const char* const output_option_names[] = {
+    "format", "mode", "atomic", "compression", "compression_level", "zip64", "deterministic",
+    "max_archive_bytes", "max_index_bytes", "max_member_bytes", "max_expanded_bytes",
+    "max_entries", "max_name_bytes", "max_path_depth", "max_nesting_depth", NULL
+};
 const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
     switch (fn) {
+    case SYSFUNC_INPUT2:
+        if (options_arg_index) *options_arg_index = 1;
+        return input_option_names;
+    case SYSPROC_OUTPUT3:
+        if (options_arg_index) *options_arg_index = 2;
+        return output_option_names;
     case SYSPROC_IO_GREP:
         if (options_arg_index) *options_arg_index = 2;
         return io_grep_option_names;

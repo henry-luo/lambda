@@ -235,6 +235,14 @@ The audit identified lazy/streaming execution as the remaining structural piece 
 
 ### 8.2 Surface: `input()` is eager, `stream()` is lazy (PD9)
 
+**ZIP refinement (USER, implemented 2026-10-08; S12.4.1v2/S14.3.1v2):** ZIP32/ZIP64
+input eagerly captures the complete immutable archive and validates its index,
+then decompresses, CRC-checks, and parses member payloads only on content
+access. Listing and metadata reads never decompress members. This returns a
+value over captured bytes with no retained source handle; it does not create
+a stream plan or change ordinary relational pipeline evaluation. Detailed
+record: [`Lambda_IO_Zip.md` §5](Lambda_IO_Zip.md#5-input-evaluation-snapshots-and-lifetime).
+
 ```lambda
 let data = input("big.json")      // eager: parse + materialize, today's semantics
 var s    = stream("big.json")     // lazy: a stream value over the same source specifiers
@@ -322,7 +330,7 @@ P1–P2 are pure language-level wins (no DataFrame needed — they work on array
 
 **Confirmed (2026-07-07) — the lazy-execution set:**
 
-- **PD9 ✓** — `input()` eager / `stream()` lazy: symmetric source pair, same source specifiers; `stream(x)` over in-memory values also legal. §8.2. *(user-confirmed)*
+- **PD9 ✓** — `input()` eager / `stream()` lazy: symmetric source pair, same source specifiers; `stream(x)` over in-memory values also legal. ZIP input eagerly captures/indexes bytes, with lazy member decompression under **S12.4.1v2/S14.3.1v2** (2026-10-08). §8.2. *(user-confirmed)*
 - **PD10 ✓** — Hybrid lazy model: laziness carried by the stream value through **unchanged** `|>`/`for` (dispatch, not new operator semantics); terminal ops force; plan-build never errors or does I/O. Value-backed streams are values (re-forcible); live-I/O streams are one-shot resources, **`pn`-only**. §8.2–8.3. *(user-confirmed)*
 - **PD11 ✓** — `fn` stages fusible/reorderable/pushable (compiler-verified purity); `pn` stages are plan barriers. §8.5. *(user-confirmed by adopting the hybrid)*
 - **PD12 ✓ (direction)** — Stream faults handled via `on error(e) { ... }` on the enclosing `pn`, reusing the view/edit event-handler form; without a handler, normal `T^E` propagation. **Sub-items to spec:** abort-only vs skip-and-continue resume, multi-stream scoping, interaction with the future `defer`/`with` cleanup construct. §8.4. *(user-confirmed pattern; details open)*

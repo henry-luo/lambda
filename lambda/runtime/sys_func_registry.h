@@ -368,9 +368,9 @@ typedef struct JitImport {
 static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
     if (!info) return LMD_TYPE_ANY;
     switch (info->fn) {
-    // len() and count() stay raw machine counts. Search/ordinal calls return
-    // Item so their public null result cannot be mistaken for an integer sentinel.
-    case SYSFUNC_LEN: case SYSFUNC_COUNT:
+    // count() returns a raw count; len() now returns Item so host-read errors
+    // travel in its value lane without double boxing at either backend.
+    case SYSFUNC_COUNT:
         return LMD_TYPE_INT;
     // The raw bitwise family operates on machine words. Its result is
     // converted into the int lane at the boundary below.

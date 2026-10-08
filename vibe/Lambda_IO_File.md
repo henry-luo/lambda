@@ -1,19 +1,23 @@
 # Lambda I/O File: Velmt-backed Files, Directories, and ZIP Archives
 
-> **Status:** PROPOSAL (2026-09-09). This records the agreed direction for
-> filesystem values; it does not yet amend the formal specifications or change
-> the current `Path`/`input()` implementation.
+> **Status:** PROPOSAL (2026-09-09; ZIP refinements 2026-10-08). The general
+> filesystem surface remains proposed. ZIP32/ZIP64 input with eager archive
+> capture and lazy member decompression is recorded in
+> **S12.4.1v2/S14.3.1v2** and is implemented, including ZIP output. The
+> general local filesystem factory/refresh remains future work.
 >
 > **Scope:** a read-only Lambda filesystem tree represented by `Velmt` and
-> `VArray`: local files, directories, symbolic links, and ordinary ZIP
-> archives using DEFLATE. This document does not design write operations,
-> streams, a new URL scheme, or ZIP64.
+> `VArray`: local files, directories, symbolic links, and single-disk
+> ZIP32/ZIP64 archives using Stored or DEFLATE. This document does not design
+> write operations, streams, or a new URL scheme. The ZIP profile and later
+> output phase are detailed in [`Lambda_IO_Zip.md`](Lambda_IO_Zip.md).
 >
 > **Formal anchors:** **D7.4.5v2** (Velmt and VArray are virtual forms of the
 > element and array semantic kinds), **D7.5.2** (one central I/O door),
 > **S8.1.2v2** (element iteration includes attributes before children),
-> **S2.2.4** (empty-file content), **S12.4.1** and **S14.3.1** (`input()` is
-> eager), and **D5.2.1v3** (precise tracing/rooting).
+> **S2.2.4** (empty-file content), **S12.4.1v2** and **S14.3.1v2** (eager
+> archive capture with lazy member decompression), and **D5.3.3** (precise
+> tracing/rooting).
 >
 > **Related records:** [`Module_IO_File.md`](Module_IO_File.md) is the
 > cross-language `lib/file.*` substrate. [`Lambda_Design_Type_Virtual.md`](Lambda_Design_Type_Virtual.md)
@@ -66,7 +70,7 @@ values followed by children. `content(node)` selects only the child axis.
 | `fs.refresh(node)^` | new | Resolve the node's locator anew, follow links, capture a fresh metadata snapshot, and return a distinct filesystem Velmt whose content slot is empty. It does not list a directory, read a file, parse input, or inflate ZIP data. |
 | `content(node)^` | existing function, extended | For a filesystem Velmt, establish/access its independent content snapshot and return its VArray child view. Native-element behavior remains the existing read-only view. |
 
-`open()` is not an alternative spelling: **S12.4.1** reserves it for scoped,
+`open()` is not an alternative spelling: **S12.4.1v2** reserves it for scoped,
 procedural resource acquisition. `fs(path)` creates a value descriptor, not an
 open handle.
 
@@ -76,22 +80,23 @@ report an I/O error. A failure must not be coerced to an empty VArray. The
 static effect typing of this receiver-sensitive overload is an implementation
 gate in §8; the intended user contract is explicit at the call site.
 
-### 2.2 `input()` remains unchanged
+### 2.2 Ordinary input compatibility and ZIP input
 
-`input(path)` remains the eager parse operation required by **S12.4.1** and
-**S14.3.1**:
+Ordinary file/directory input remains compatible. ZIP input captures and
+indexes the archive eagerly, with lazy member-content access under
+**S12.4.1v2/S14.3.1v2** and [`Lambda_IO_Zip.md` §5](Lambda_IO_Zip.md#5-input-evaluation-snapshots-and-lifetime):
 
-| Existing call | Preserved result |
+| Call | Result |
 |---|---|
-| `input(file)^` | The eagerly parsed input root. |
+| `input(ordinary_file)^` | The eagerly parsed input root. |
 | `input(dir)^` | The current eagerly materialized, direct-child `Path` list. |
-| `input(zip)^` | The current normal input dispatch/result or error; ZIP-tree behavior is not implicitly enabled through `input`. |
+| `input(zip)^` | An archive-backed filesystem Velmt over captured bytes and a validated index; ZIP32 and ZIP64 are supported, with lazy member decompression. |
 
 Likewise, existing `Path` concatenation, properties, wildcard behavior, and
 iteration stay compatible in the first migration. The existing Path resolver
 may later be implemented through this backend only if it materializes its
-present results exactly. No source program silently changes from a `Path` list
-or parsed root into an FS Velmt.
+present results exactly. Ordinary file/directory input does not silently
+change from a `Path` list or parsed root into an FS Velmt.
 
 ## 3. Node shape and metadata
 
@@ -226,18 +231,22 @@ source file.
 
 The retained parsed `Input` owner and every cached child `Item` must be traced
 by the Velmt state. Raw pointers into an Input arena are not sufficient under
-the precise-rooting/GC contract in **D5.2.1v3**.
+the precise-rooting/GC contract in **D5.3.3**.
 
 ## 5. ZIP archive content
 
-An ordinary `.zip` archive is physically a file but has directory-like
-content. Its first `content(archive)^`:
+ZIP32/ZIP64 archives, including ZIP-backed document files, are physically
+files with directory-like content. They share the backend described in
+[`Lambda_IO_Zip.md`](Lambda_IO_Zip.md). For an `fs(path)` descriptor, the first
+`content(archive)^` establishes the archive snapshot; `input(archive)^` instead
+establishes it inside the input call under **S12.4.1v2**. Establishing it:
 
-1. reads and validates the ZIP end record and central directory;
-2. normalizes each entry path and synthesizes missing intermediate directory
+1. captures the complete immutable archive bytes and closes the source;
+2. reads and validates the ZIP/ZIP64 end records and central directory;
+3. normalizes each entry path and synthesizes missing intermediate directory
    nodes;
-3. builds a compact archive entry index, not a tree of eager child Velmts;
-4. returns a VArray for the archive root's direct entries.
+4. builds a compact archive entry index, not a tree of eager child Velmts;
+5. returns a VArray for the archive root's direct entries.
 
 The VArray behavior mirrors a directory: selecting a child creates a Velmt
 with its name and archive-entry locator only. Attribute access on that child
@@ -247,15 +256,16 @@ uses central-directory metadata lazily; reading its content is deferred until
 For an archive-member file, content reads its compressed byte range from the
 retained archive snapshot, applies ZIP method 8 raw DEFLATE through zlib, CRC
 checks the output, and sends the uncompressed bytes to the ordinary file parse
-path. Method 0 (Stored) may be accepted as the no-inflation counterpart; the
-required initial compressed format is standard ZIP DEFLATE, not a standalone
-zlib or gzip stream.
+path. Method 0 (Stored) is also required, with integrity validation on payload
+access. Both variants preserve binary lengths; neither is a standalone zlib
+or gzip stream. Listing children, reading metadata, and obtaining child counts
+never decompress members (**S14.3.1v2**).
 
 Initial archive limits and rejections are intentional:
 
 | Accepted initially | Rejected initially |
 |---|---|
-| Single-disk ZIP32, normalized relative names, DEFLATE (and optionally Stored) entries | Encryption, ZIP64, multi-disk archives, absolute paths, `..` traversal, duplicate normalized names, unsupported compression, and quota violations |
+| Single-disk ZIP32/ZIP64, normalized relative names, Stored and DEFLATE entries | Encryption, multi-disk archives, absolute paths, `..` traversal, duplicate normalized names, unsupported compression, and quota violations |
 
 The central directory must be fully indexed to navigate an archive safely; it
 is the ZIP-specific exception to an OS directory's incremental name scan. No
@@ -302,7 +312,8 @@ directory at content resolution:
 The proposed backend intentionally improves three observable points only on
 the new `fs` surface: lazy directory child discovery, meaningful directory
 `size: null`, and correct dangling-link identity/error handling. Existing
-Path and `input` behavior stay compatible until separately ratified.
+Path and ordinary file/directory input behavior stay compatible. ZIP input
+follows the archive-specific boundary in **S12.4.1v2/S14.3.1v2**.
 
 ## 8. Implementation boundaries
 
@@ -324,16 +335,17 @@ Path and `input` behavior stay compatible until separately ratified.
    dangling/cyclic links, empty/parsed-null files, ZIP hierarchy, DEFLATE,
    CRC failures, traversal rejection, quotas, GC stress, and MIR/T0 parity.
 
-No formal-spec amendment is made by this proposal. Before implementation, the
-accepted surface, error/effect typing for `content(FsNode)`, and the
-status-bearing VArray count change must be ratified in the applicable formal
-`S#`/`D#` rulings and reflected back here.
+The ZIP input capture and lazy-content boundary is recorded in
+**S12.4.1v2/S14.3.1v2**. Before implementation, the remaining filesystem
+surface, error/effect typing for `content(FsNode)`, and the status-bearing
+VArray count change must be ratified in the applicable formal `S#`/`D#`
+rulings and reflected back here.
 
 ## 9. Rejected shortcuts
 
-- **Make `input()` return an FS Velmt.** Rejected: it changes the existing
-  eager parsed-value and eager-directory-list contract of **S12.4.1** and
-  **S14.3.1**.
+- **Change ordinary file/directory `input()` results to FS Velmts.** Rejected:
+  preserve parsed roots and direct-child Path arrays. ZIP input has the
+  archive-specific boundary of **S12.4.1v2/S14.3.1v2**.
 - **Expose ZIP through a new `zip://` Path scheme.** Deferred: archive-member
   addressing is not needed to provide the tree and would alter the Path
   surface prematurely.
@@ -345,3 +357,22 @@ status-bearing VArray count change must be ratified in the applicable formal
   attributes must resolve automatically and independently of content.
 - **Hide failures as no children.** Rejected: absent, empty, and failed I/O
   are distinct states.
+
+## Appendix S. Superseded ZIP restrictions
+
+The user-confirmed ZIP input direction and 2026-10-08 scope/evaluation
+decisions in [`Lambda_IO_Zip.md` §9](Lambda_IO_Zip.md#9-confirmed-decisions-and-remaining-proposal-scope)
+replace these earlier proposal statements:
+
+- ~~`input(zip)^`: the current normal input dispatch/result or error;
+  ZIP-tree behavior is not implicitly enabled through `input`.~~ ZIP input
+  returns a filesystem Velmt backed by an eagerly captured, indexed snapshot.
+- ~~Single-disk ZIP32, normalized relative names, DEFLATE (and optionally
+  Stored) entries; encryption, ZIP64, multi-disk archives, absolute paths,
+  `..` traversal, duplicate normalized names, unsupported compression, and
+  quota violations are rejected.~~ Phase 1 includes ZIP32 and ZIP64, with
+  Stored and DEFLATE required; the other listed rejections remain.
+- ~~Make `input()` return an FS Velmt. Rejected: it changes the existing
+  eager parsed-value and eager-directory-list contract of S12.4.1 and
+  S14.3.1.~~ This restriction now applies to ordinary file/directory input;
+  ZIP input follows **S12.4.1v2/S14.3.1v2**.

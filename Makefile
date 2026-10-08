@@ -71,6 +71,7 @@ RADIANT_DOM2_WPT_RUNNERS := input_events
 # clean baseline run reports a missing executable. The concurrency and Node
 # preliminary projects remain excluded by that runner.
 LAMBDA_BASELINE_TEST_PROJECTS := \
+	test_zip_gtest \
 	test_lambda_gtest \
 	test_input_script_cache_gtest \
 	test_lambda_parser_poc_gtest \

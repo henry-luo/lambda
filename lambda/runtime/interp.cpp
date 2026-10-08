@@ -3613,6 +3613,12 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
     // item_keys allocates; the collection must already be published.
     SymbolKeyList* keys = item_keys(coll_slot.get());
     int key_filter = (int)loop->key_filter;
+    Item content_error = virtual_content_error(coll_slot.get());
+    if (get_type_id(content_error) == LMD_TYPE_ERROR) {
+        if (keys) symbol_key_list_free(keys);
+        interp_signal(f, EvalSignal::ERROR_SKIP, content_error);
+        return false;
+    }
     int64_t length = iter_len(coll_slot.get(), keys, key_filter);
 
     NameEntry* value_entry = interp_scope_lookup(fc->node->vars, loop->name);
@@ -3685,6 +3691,12 @@ static Array* interp_for_collect_groups(ForCtx* fc, AstLoopNode* loop) {
 
     SymbolKeyList* keys = item_keys(collection_slot.get());
     int key_filter = (int)loop->key_filter;
+    Item content_error = virtual_content_error(collection_slot.get());
+    if (get_type_id(content_error) == LMD_TYPE_ERROR) {
+        if (keys) symbol_key_list_free(keys);
+        interp_signal(f, EvalSignal::ERROR_SKIP, content_error);
+        return NULL;
+    }
     int64_t length = iter_len(collection_slot.get(), keys, key_filter);
     NameEntry* value_entry = interp_scope_lookup(fc->node->vars, loop->name);
     NameEntry* index_entry = loop->index_name
@@ -3841,6 +3853,12 @@ static bool interp_join_collect_source(ForCtx* fc, AstLoopNode* loop,
     collection_slot.set(collection);
     SymbolKeyList* keys = item_keys(collection_slot.get());
     int key_filter = (int)loop->key_filter;
+    Item content_error = virtual_content_error(collection_slot.get());
+    if (get_type_id(content_error) == LMD_TYPE_ERROR) {
+        if (keys) symbol_key_list_free(keys);
+        interp_signal(f, EvalSignal::ERROR_SKIP, content_error);
+        return false;
+    }
     int64_t length = iter_len(collection_slot.get(), keys, key_filter);
     NameEntry* value_entry = interp_scope_lookup(fc->node->vars, loop->name);
     NameEntry* index_entry = loop->index_name

@@ -48,6 +48,8 @@
 #endif
 #include "../validator/validator.hpp"
 #include "../input/input.hpp"
+#include "../io/fs_node.hpp"
+#include "io_file_search.hpp"
 #include "../input/html5/html5_parser.h"
 #include "../io/target.h"
 #include "../jube/jube_interface.h"
@@ -4576,7 +4578,9 @@ Item fn_query(Item data, Item type_val, int direct) {
     Rooted<Item> type_root(roots, type_val);
     Rooted<Array*> result(roots, array_plain());
     // direct=1 means .? (self-inclusive), direct=0 means ? (not self-inclusive)
+    uint64_t failure_version = virtual_failure_version;
     query_collect(source.get(), type_root.get(), direct != 0, result.get(), 0);
+    if (virtual_failure_version != failure_version) return err2it_or_error(context ? context->last_error : nullptr);
     return list_collapse_value({.array = result.get()});
 }
 
@@ -4641,7 +4645,9 @@ Item fn_child_query(Item data, Item type_val) {
     Rooted<Item> source(roots, data);
     Rooted<Item> type_root(roots, type_val);
     Rooted<Array*> result(roots, array_plain());
+    uint64_t failure_version = virtual_failure_version;
     child_query_collect(source.get(), type_root.get(), result.get());
+    if (virtual_failure_version != failure_version) return err2it_or_error(context ? context->last_error : nullptr);
     return list_collapse_value({.array = result.get()});   // the run a subscript yields (S8.2.4v3)
 }
 
@@ -5437,6 +5443,26 @@ static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_p
 
 Item fn_input2(Item target_item, Item type) {
     GUARD_ERROR2(target_item, type);
+    RootFrame input_roots(4);
+    Rooted<Item> input_target_root(input_roots, target_item);
+    Rooted<Item> input_options_root(input_roots, type);
+    Rooted<Item> input_type_root(input_roots, ItemNull);
+    Rooted<Item> input_flavor_root(input_roots, ItemNull);
+    virtual_error_reporter = [](Item error) {
+        if (context) eval_context_set_last_error(context, it2err(error));
+    };
+    ZipLimits limits = zip_default_limits();
+    ZipError zip_error = {};
+    if (get_type_id(type) == LMD_TYPE_MAP) {
+        IoFsOptionMap option_map = {};
+        Item error = ItemNull;
+        if (!io_fs_options_open(type, "input", SYSFUNC_INPUT2, &option_map, &error)) return error;
+    }
+    if (!fs_zip_options(type, &limits, nullptr, &zip_error)) {
+        return runtime_error_item(ERR_TYPE_MISMATCH, zip_error.message, nullptr);
+    }
+    InputZipLimitsScope zip_scope(&limits);
+    bool fs_target = fs_node_is(target_item);
 
     // Dry-run mode: return fabricated input data
     if (g_dry_run) {
@@ -5463,7 +5489,7 @@ Item fn_input2(Item target_item, Item type) {
 
     // Validate target type: must be string, symbol, or path
     TypeId target_type_id = get_type_id(target_item);
-    if (!is_text_type_id(target_type_id) && target_type_id != LMD_TYPE_PATH) {
+    if (!fs_target && !is_text_type_id(target_type_id) && target_type_id != LMD_TYPE_PATH) {
         set_runtime_error(ERR_TYPE_MISMATCH,
             "input target must be a string, symbol, or path, got type: %s",
             get_type_name(target_type_id));
@@ -5472,13 +5498,13 @@ Item fn_input2(Item target_item, Item type) {
 
     // Convert target Item to Target struct
     Url* cwd = context ? (Url*)context->cwd : NULL;
-    Target* target = item_to_target(target_item.item, cwd);
-    if (!target) {
+    Target* target = fs_target ? nullptr : item_to_target(target_item.item, cwd);
+    if (!fs_target && !target) {
         set_runtime_error(ERR_INVALID_URL, "input: failed to resolve target");
         return ItemError;
     }
 
-    log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
+    if (target) log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
 
     TypeId type_id = get_type_id(type);
     if (type_id == LMD_TYPE_NULL) {
@@ -5488,6 +5514,7 @@ Item fn_input2(Item target_item, Item type) {
     else if (is_text_type_id(type_id)) {
         // Legacy behavior: type is a simple string/symbol
         type_str = fn_string(type);
+        input_type_root.set((Item){.item = s2it(type_str)});
     }
     else if (type_id == LMD_TYPE_MAP) {
         log_debug("input type is a map");
@@ -5503,6 +5530,7 @@ Item fn_input2(Item target_item, Item type) {
             TypeId type_value_type = get_type_id(input_type);
             if (is_text_type_id(type_value_type)) {
                 type_str = fn_string(input_type);
+                input_type_root.set((Item){.item = s2it(type_str)});
             }
             else {
                 set_runtime_error(ERR_TYPE_MISMATCH,
@@ -5521,6 +5549,7 @@ Item fn_input2(Item target_item, Item type) {
             TypeId flavor_value_type = get_type_id(input_flavor);
             if (is_text_type_id(flavor_value_type)) {
                 flavor_str = fn_string(input_flavor);
+                input_flavor_root.set((Item){.item = s2it(flavor_str)});
             }
             else {
                 set_runtime_error(ERR_TYPE_MISMATCH,
@@ -5554,6 +5583,15 @@ Item fn_input2(Item target_item, Item type) {
         set_runtime_error(ERR_INVALID_STATE, "input: runtime context is not initialized");
         target_free(target);
         return ItemError;
+    }
+
+    if (fs_target) {
+        Item result = fs_node_input(input_target_root.get(), type_str, flavor_str);
+        if (get_type_id(result) == LMD_TYPE_ERROR) {
+            if (context) eval_context_set_last_error(context, it2err(result));
+            return result;
+        }
+        return schema_type ? lambda_type_check(result, schema_type, "input schema") : result;
     }
 
     // Pre-register exact schema fields before parsing so known Input names hit
@@ -7163,6 +7201,15 @@ int64_t fn_count(Item item) {
     return 1;
 }
 
+extern "C" Item fn_virtual_content_check(Item item) { return virtual_content_error(item); }
+
+extern "C" Item fn_len_checked(Item item) {
+    GUARD_ERROR1(item);
+    Item error = virtual_content_error(item);
+    // ItemNull carries a nonzero tag; only an error tag indicates a failed host read (S7.4.1).
+    return get_type_id(error) == LMD_TYPE_ERROR ? error : (Item){.item = i2it(fn_len(item))};
+}
+
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     int64_t size = 0;
@@ -7270,6 +7317,7 @@ int64_t fn_len(Item item) {
 // Native len variants — type-specialized, avoid Item type switch overhead
 // Used when compile-time type is known. The transpiler must unbox Items to raw
 // pointers before calling these (emit_unbox_container strips tag bits).
+// Physical VArray/Velmt carriers use fn_len_checked before these NO_GC leaves.
 
 extern "C" int64_t fn_len_l(List* list) {
     if (!list) return 0;
@@ -7313,6 +7361,32 @@ extern "C" int64_t fn_len_s(String* str) {
 // view, so aliasing can never be observed as a second writable handle. Whether
 // writes should pass through to the element is deliberately left open.
 Item fn_content(Item item) {
+    GUARD_ERROR1(item);
+    if (fs_node_is(item)) return fs_node_content(item);
+    if (get_type_id(item) == LMD_TYPE_VELMT) {
+        Item error = virtual_content_error(item);
+        if (get_type_id(error) == LMD_TYPE_ERROR) return error;
+        // Other virtual hosts expose the same immutable child-view contract.
+        RootFrame roots(1);
+        Rooted<Item> owner(roots, item);
+        struct ChildView { Item owner; };
+        static const VArrayVtable vtable = {
+            {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VARRAY, {},
+                [](void* p) { mem_free(p); },
+                [](void* p, gc_heap* gc) { gc_mark_item(gc, ((ChildView*)p)->owner.item); }, nullptr},
+            {[](void* p) -> int64_t { return velmt_child_count(((ChildView*)p)->owner.velmt); },
+                [](void* p, int64_t i, Item* out) -> VirtualOpStatus {
+                    Velmt* e = ((ChildView*)p)->owner.velmt;
+                    return e->vtable->element.children.get_at(e->data, i, out);
+                }, nullptr, nullptr, nullptr}
+        };
+        ChildView* view = (ChildView*)mem_calloc(1, sizeof(ChildView), MEM_CAT_INPUT_OTHER);
+        if (!view) return ItemError;
+        view->owner = owner.get();
+        Item result = varray_new(&vtable, view, nullptr, nullptr);
+        if (!result.item) { mem_free(view); return ItemError; }
+        return result;
+    }
     TypeId type_id = get_type_id(item);
     if (type_id != LMD_TYPE_ELEMENT) {
         return lambda_type_error(item, &TYPE_ELMT, "content");
@@ -7373,6 +7447,7 @@ extern "C" int64_t fn_seq_count(Item item) {
 
 extern "C" int64_t fn_len_e(Element* elmt) {
     if (!elmt) return 0;
+    if (elmt->type_id == LMD_TYPE_VELMT) return velmt_attr_count((Velmt*)elmt) + velmt_child_count((Velmt*)elmt);
     // The JIT specializes `len` on a statically-element argument to this
     // helper, so it must apply the same S8.3.1v2 rule as fn_len's element arm
     // or the two tiers disagree — which is exactly how the nominal half of

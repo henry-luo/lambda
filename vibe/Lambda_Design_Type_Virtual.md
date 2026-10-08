@@ -231,6 +231,7 @@ typedef struct VArrayOps {
     VirtualOpStatus (*splice)(void* data, int64_t start, int64_t remove_count,
                               const Item* values, int64_t value_count,
                               Item* out);
+    VirtualOpStatus (*prepare)(void* data, Item* error);
 } VArrayOps;
 
 typedef struct VArrayVtable {
@@ -238,6 +239,13 @@ typedef struct VArrayVtable {
     VArrayOps items;
 } VArrayVtable;
 ```
+
+Virtual ABI 2 (2026-10-08, ZIP input under **S14.3.1v2**) appends an optional
+fallible `prepare` hook. Accessors invoke it before a cached, infallible count;
+errors remain Items through content, indexing, iteration, query and formatting.
+A failed preparation is never an empty container. Existing eager backends leave
+the hook null. Jube ABI 9 rejects earlier module callback layouts; the carrier
+TypeIds and common header remain those of **D7.4.5v2**.
 
 `count` backs `len`; `get_at` backs indexing and iteration; `set_at` backs a
 procedural indexed write; `splice` is the one mutation primitive from which

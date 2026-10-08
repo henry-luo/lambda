@@ -162,7 +162,7 @@ String* format_mark(Pool* pool, Item root_item) {
     return result;
 }
 
-extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
+static String* format_data_impl(Item item, String* type, String* flavor, Pool* pool) {
     // format(x) documents a default serializer; null type must not drop scalars.
     const char* t = type ? type->chars : "text";
     const char* f = (flavor && flavor->len > 0) ? flavor->chars : NULL;
@@ -288,4 +288,10 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
 
     log_error("format: unsupported format type: %s%s%s", t, f ? "-" : "", f ? f : "");
     return NULL;
+}
+
+extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
+    uint64_t before = virtual_failure_version;
+    String* result = format_data_impl(item, type, flavor, pool);
+    return virtual_failure_version == before ? result : nullptr;
 }

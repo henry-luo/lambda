@@ -587,6 +587,8 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_VELMT> item) const {
         Velmt* element = item.ptr();
+        Item error = virtual_content_error({.velmt = element});
+        if (get_type_id(error) == LMD_TYPE_ERROR) { print_item(strbuf, error, depth + 1, indent); return; }
         Item tag = ItemNull;
         if (element && element->vtable && element->vtable->element.tag) {
             element->vtable->element.tag(element->data, &tag);

@@ -262,6 +262,22 @@ static inline bool ast_node_originates_defect(AstNode* node) {
     }
 }
 
+static inline bool ast_call_may_force_virtual_content(AstCallNode* call) {
+    AstNode* callee = call ? ast_unwrap_primary(call->function) : NULL;
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC ||
+            !((AstSysFuncNode*)callee)->fn_info ||
+            ((AstSysFuncNode*)callee)->fn_info->fn != SYSFUNC_LEN) return false;
+    AstNode* source = ast_unwrap_primary(call->argument);
+    if (source && source->node_type == AST_NODE_ELEMENT) return false;
+    bool nullable = false;
+    Type* base = source && source->type
+        ? lambda_type_nullable_lane_base(source->type, &nullable) : NULL;
+    // S7.4.3/D6.1.3: a deferred host read is a defect beside len's int
+    // contract. Prepared child arrays and concrete scalars need no read.
+    return !base || base->type_id == LMD_TYPE_ANY ||
+        is_element_family_type_id(base->type_id) || base->type_id == LMD_TYPE_PATH;
+}
+
 // LR03-13 (S11.4.1v3, S7.7.1): a call through a declared function-type
 // contract -- a binding or parameter annotated `fn (...) T` -- checks its
 // result against T where the call is made, because admitting the function

@@ -1873,3 +1873,6 @@ bool shape_entry_uses_native_lane(const ShapeEntry* field,
     *out = *desc;
     return true;
 }
+
+thread_local void (*virtual_error_reporter)(Item error) = nullptr;
+thread_local uint64_t virtual_failure_version = 0;

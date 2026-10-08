@@ -985,7 +985,7 @@ static_assert(offsetof(VMapVtable, trace) == LAMBDA_GC_OFF_VMAP_VTABLE_TRACE,
               "VMap trace hook must match the GC ABI");
 #pragma clang diagnostic pop
 
-#define LAMBDA_VIRTUAL_ABI_VERSION 1u
+#define LAMBDA_VIRTUAL_ABI_VERSION 2u
 
 // D7.4.5v2: VArray and Velmt use the same host metadata prefix as VMap while
 // exposing structural callbacks for their actual semantic container kind.
@@ -1014,6 +1014,8 @@ struct VArrayOps {
     VirtualOpStatus (*set_at)(void* data, int64_t index, Item value, Item* out);
     VirtualOpStatus (*splice)(void* data, int64_t start, int64_t remove_count,
                               const Item* values, int64_t value_count, Item* out);
+    // prepare lazy content before asking for an infallible cached count.
+    VirtualOpStatus (*prepare)(void* data, Item* error);
 };
 
 struct VArrayVtable {
@@ -1106,16 +1108,48 @@ static inline void virtual_host_set(Item item, const void* host_type, void* host
     container->host_data = host_data;
 }
 
+// Runtime installs a reporter at the input boundary; core/io can return errors
+// without depending on runtime allocation or evaluation state.
+extern thread_local void (*virtual_error_reporter)(Item error);
+extern thread_local uint64_t virtual_failure_version;
+static inline Item virtual_prepare(const VArrayOps& ops, void* data) {
+    Item error = ItemNull;
+    if (ops.prepare && ops.prepare(data, &error) == VIRTUAL_OP_ERROR) {
+        virtual_failure_version++;
+        if (virtual_error_reporter) virtual_error_reporter(error);
+        return error;
+    }
+    return ItemNull;
+}
+static inline Item virtual_content_error(Item item) {
+    if (get_type_id(item) == LMD_TYPE_VELMT) {
+        return virtual_prepare(item.velmt->vtable->element.children, item.velmt->data);
+    }
+    if (get_type_id(item) == LMD_TYPE_VARRAY) {
+        return virtual_prepare(item.varray->vtable->items, item.varray->data);
+    }
+    return ItemNull;
+}
+
 static inline int64_t varray_count(const VArray* array) {
+    if (array && array->vtable && get_type_id(virtual_prepare(array->vtable->items, array->data)) == LMD_TYPE_ERROR) return 0;
     return array && array->vtable && array->vtable->items.count
         ? array->vtable->items.count(array->data) : 0;
+}
+
+static inline Item virtual_read_result(VirtualOpStatus status, Item value) {
+    if (status == VIRTUAL_OP_ERROR) {
+        virtual_failure_version++;
+        if (virtual_error_reporter) virtual_error_reporter(value);
+    }
+    return status == VIRTUAL_OP_OK || status == VIRTUAL_OP_ERROR ? value : ItemNull;
 }
 
 static inline Item varray_get(const VArray* array, int64_t index) {
     Item out = ItemNull;
     if (!array || !array->vtable || !array->vtable->items.get_at) return out;
-    return array->vtable->items.get_at(array->data, index, &out) == VIRTUAL_OP_OK
-        ? out : ItemNull;
+    VirtualOpStatus status = array->vtable->items.get_at(array->data, index, &out);
+    return virtual_read_result(status, out);
 }
 
 static inline VirtualOpStatus varray_set(VArray* array, int64_t index,
@@ -1133,6 +1167,7 @@ static inline int64_t velmt_attr_count(const Velmt* element) {
 }
 
 static inline int64_t velmt_child_count(const Velmt* element) {
+    if (element && element->vtable && get_type_id(virtual_prepare(element->vtable->element.children, element->data)) == LMD_TYPE_ERROR) return 0;
     return element && element->vtable && element->vtable->element.children.count
         ? element->vtable->element.children.count(element->data) : 0;
 }
@@ -1140,15 +1175,15 @@ static inline int64_t velmt_child_count(const Velmt* element) {
 static inline Item velmt_child_get(const Velmt* element, int64_t index) {
     Item out = ItemNull;
     if (!element || !element->vtable || !element->vtable->element.children.get_at) return out;
-    return element->vtable->element.children.get_at(element->data, index, &out) == VIRTUAL_OP_OK
-        ? out : ItemNull;
+    VirtualOpStatus status = element->vtable->element.children.get_at(element->data, index, &out);
+    return virtual_read_result(status, out);
 }
 
 static inline Item velmt_attr_get(const Velmt* element, Item key) {
     Item out = ItemNull;
     if (!element || !element->vtable || !element->vtable->element.attrs.get) return out;
-    return element->vtable->element.attrs.get(element->data, key, &out) == VIRTUAL_OP_OK
-        ? out : ItemNull;
+    VirtualOpStatus status = element->vtable->element.attrs.get(element->data, key, &out);
+    return virtual_read_result(status, out);
 }
 
 static inline VirtualOpStatus velmt_tag(const Velmt* element, Item* out) {

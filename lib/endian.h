@@ -70,6 +70,10 @@ static inline void write_le32(uint8_t* p, uint32_t v) {
     p[0] = (uint8_t)v;        p[1] = (uint8_t)(v >> 8);
     p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
 }
+static inline void write_le64(uint8_t* p, uint64_t v) {
+    write_le32(p, (uint32_t)v);
+    write_le32(p + 4, (uint32_t)(v >> 32));
+}
 
 // ── portable byteswap (swap byte order of a value already in registers) ──
 static inline uint16_t bswap16(uint16_t v) {

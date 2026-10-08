@@ -18288,6 +18288,14 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
 
+        TypeId collection_type = mir_expr_carrier_type(mt, loop->as);
+        if (collection_type == LMD_TYPE_ANY || collection_type == LMD_TYPE_PATH ||
+                is_element_family_type_id(collection_type)) {
+            MIR_reg_t content_error = emit_call_1(mt, "fn_virtual_content_check", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
+            emit_return_if_item_error(mt, content_error);
+        }
+
         // Get unified iteration length via iter_len(data, keys, key_filter)
         len = emit_call_3(mt, "iter_len", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
@@ -30922,6 +30930,10 @@ static MIR_reg_t emit_inline_array_length(MirTranspiler* mt, MIR_reg_t array,
         MIR_new_reg_op(mt->ctx, kind),
         MIR_new_mem_op(mt->ctx, MIR_T_U8, MIR_CONTAINER_TYPE_ID_OFFSET,
             array, 0, 1)));
+    MIR_label_t virtual_array = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, virtual_array), MIR_new_reg_op(mt->ctx, kind),
+        MIR_new_int_op(mt->ctx, LMD_TYPE_VARRAY)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
         MIR_new_label_op(mt->ctx, direct), MIR_new_reg_op(mt->ctx, kind),
         MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
@@ -30952,6 +30964,13 @@ static MIR_reg_t emit_inline_array_length(MirTranspiler* mt, MIR_reg_t array,
     emit_label(mt, zero);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 0)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+    emit_label(mt, virtual_array);
+    MIR_reg_t virtual_item = emit_call_1(mt, "fn_len_checked", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, array));
+    emit_return_if_item_error(mt, virtual_item);
+    MIR_reg_t virtual_len = emit_unbox_contract_lane(mt, virtual_item, LMD_TYPE_INT, &TYPE_INT);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, virtual_len)));
     emit_label(mt, done);
     return result;
 }
@@ -31540,6 +31559,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         // When the argument type is known, dispatch to type-specific fn_len_* variants
         // that take native pointers and return int64_t directly (no boxing overhead).
         if (info->fn == SYSFUNC_LEN && arg_count == 1 && !rejected_flow) {
+            // A fallible virtual count keeps its Item lane; native shortcuts
+            // still produce raw counts and must box when the call is a join.
+            auto len_result = [&](MIR_reg_t count) -> MirValue {
+                bool boxed = mir_expr_carrier_type(mt, (AstNode*)call_node) == LMD_TYPE_ANY;
+                MIR_reg_t result = boxed ? emit_box_int_lane(mt, LaneReg(count)).r : count;
+                return mir_call_value_from_result(mt, call_node, result, boxed);
+            };
             arg = call_node->argument;
             MirVarEntry* cached_array = mir_typed_array_cache_for_object(mt, arg);
             if (cached_array && !cached_array->is_var_param &&
@@ -31548,7 +31574,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 // T22-2b: immutable admitted ArrayNum params cache this header
                 // at entry. Reusing its length makes len(x) loop-invariant
                 // without moving a fallible/effectful expression across a loop.
-                RETURN_CALL_VALUE(cached_array->typed_array_cache_len);
+                return len_result(cached_array->typed_array_cache_len);
             }
             // State variables and other boxed locals may retain a narrower AST
             // type; native len_* helpers require the actual MIR raw-pointer form.
@@ -31605,16 +31631,16 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                         MIR_new_reg_op(mt->ctx, result),
                         MIR_new_reg_op(mt->ctx, slow_len)));
                     emit_label(mt, l_end);
-                    RETURN_CALL_VALUE(result);
+                    return len_result(result);
                 }
             }
             if (arg_tid == LMD_TYPE_ARRAY) {
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_box_item(mt, arg));
-                RETURN_CALL_VALUE(emit_inline_array_length(mt, a1, "fn_len_l"));
+                return len_result(emit_inline_array_length(mt, a1, "fn_len_l"));
             }
             if (arg_tid == LMD_TYPE_ARRAY_NUM) {
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_box_item(mt, arg));
-                RETURN_CALL_VALUE(emit_inline_array_length(mt, a1, "fn_len_a"));
+                return len_result(emit_inline_array_length(mt, a1, "fn_len_a"));
             }
             if (arg_tid == LMD_TYPE_STRING) {
                 // Symbols have a different header (the namespace pointer sits
@@ -31630,15 +31656,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     text = transpile_expr_value(mt, arg);
                 }
                 MIR_reg_t a1 = emit_text_pointer_lane(mt, text, arg_tid);
-                RETURN_CALL_VALUE(emit_call_1(mt, "fn_len_s", MIR_T_I64,
+                return len_result(emit_call_1(mt, "fn_len_s", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a1)));
             }
-            if (arg_tid == LMD_TYPE_ELEMENT) {
-                MIR_reg_t a1 = emit_unbox_container(mt, transpile_box_item(mt, arg));
-                RETURN_CALL_VALUE(emit_call_1(mt, "fn_len_e", MIR_T_I64,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, a1)));
-            }
-            // Fallback: use generic fn_len(Item) for unknown types (handled below)
+            // Element counts can force a host file's content; preserve that
+            // error through fn_len_checked even for an element-typed parameter.
         }
 
         // ==== Native starts_with/ends_with for typed strings ====
@@ -32185,7 +32207,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         // (S7.10.5v3) -- whose static type is the payload alone.
         TypeId call_expr_tid = mir_expr_carrier_type(mt, (AstNode*)call_node);
         #define POST_PROCESS_UNBOX(result) \
-            if (sysfunc_returns_optional_int(info) && c_ret_tid == LMD_TYPE_ANY) { \
+            if ((sysfunc_returns_optional_int(info) || info->fn == SYSFUNC_LEN) && c_ret_tid == LMD_TYPE_ANY) { \
                 emit_return_if_item_error(mt, result); \
             } \
             if (info->fn == SYSFUNC_INT64) { \
@@ -40308,6 +40330,7 @@ static bool mir_call_originates_defect(MirTranspiler* mt, AstCallNode* call,
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
         if (!info) return false;
+        if (ast_call_may_force_virtual_content(call)) return true;
         if (sysfunc_originates_defect(info)) return true;
         // as for an implicit parameter: only an operand that can be an error
         return mir_sys_call_error_flows(mt, call);
@@ -40640,6 +40663,7 @@ static bool mir_call_may_defect(MirTranspiler* mt, AstCallNode* call) {
     if (ast_call_contract_return(call)) return true;
     AstNode* function = ast_unwrap_primary(call->function);
     if (function && function->node_type == AST_NODE_SYS_FUNC) {
+        if (ast_call_may_force_virtual_content(call)) return true;
         // S7.9.3: any other system row passes an operand's error through
         // (`abs(f(x)) * 2` had multiplied the error's bits)
         if (sysfunc_observes_error(((AstSysFuncNode*)function)->fn_info)) return false;
@@ -40891,6 +40915,13 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
 
         if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+            if (info && info->fn == SYSFUNC_LEN && expected == LMD_TYPE_INT &&
+                    call->argument && !call->argument->next &&
+                    mir_expr_carrier_type(mt, call->argument) == LMD_TYPE_STRING) {
+                // The typed-string branch emits the raw fn_len_s leaf, even
+                // though the general host-capable ABI now returns Item.
+                return true;
+            }
             // The semantic return type is not a carrier witness: int() and
             // the bitwise helpers return boxed Items even when their AST type
             // is int. Only the registry's actual C lane may cross a native
