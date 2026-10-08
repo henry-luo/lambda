@@ -1797,9 +1797,9 @@ static TableCellContentExtent table_cell_vertical_bounds(LayoutContext* lycon,
     return bounds;
 }
 
-static float table_cell_vertical_align_target(int valign, float content_area_height,
+float layout_table_cell_vertical_align_target(int valign, float content_area_height,
                                               float content_height, float content_start_y,
-                                              bool clamp_to_content = false) {
+                                              bool clamp_to_content) {
     if (clamp_to_content && content_area_height <= content_height) {
         return content_start_y;
     }
@@ -1828,7 +1828,7 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
     float cell_content_area = cell_height - insets.border.top - insets.border.bottom -
                               insets.padding.top - insets.padding.bottom;
     float content_start_y = insets.border.top + insets.padding.top;
-    float target_y = table_cell_vertical_align_target(
+    float target_y = layout_table_cell_vertical_align_target(
         tcell->td->vertical_align, cell_content_area, content_height, content_start_y);
     TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, tcell, true);
     if (!bounds.has_content) return;
@@ -4758,7 +4758,7 @@ static void reapply_rowspan_vertical_alignment(LayoutContext* lycon,
     TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, tcell);
     if (!bounds.has_content) return;
     float content_actual_height = bounds.max_y - bounds.min_y;
-    float new_offset = table_cell_vertical_align_target(
+    float new_offset = layout_table_cell_vertical_align_target(
         valign, content_area_height, content_actual_height, content_start_y);
     float adjustment = new_offset - bounds.min_y;
     shift_table_cell_vertical_align_children(tcell, adjustment);

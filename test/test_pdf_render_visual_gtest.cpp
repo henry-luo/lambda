@@ -1095,6 +1095,121 @@ TEST(RenderOutputParity, PagedTableGroupBreaksAndAvoidanceMatchExplicitRowBounda
     }
 }
 
+static void check_paged_table_cell_alignment(bool split, bool baseline = false) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    for (bool automatic : {false, true}) for (bool clone : {false, true}) {
+        if (!split && clone) continue;
+        SCOPED_TRACE(automatic ? "automatic" : "fixed");
+        SCOPED_TRACE(clone ? "clone" : "slice");
+        char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+        for (size_t variant = 0; variant < 2; variant++) {
+            char html_path[PATH_MAX];
+            snprintf(pdfs[variant].base, sizeof(pdfs[variant].base), "paged_cell_align_%s%s_%zu",
+                baseline ? "baseline_" : "", split ? "split" : "rows", variant);
+            snprintf(html_path, sizeof(html_path), "temp/render_output_parity/%s.html", pdfs[variant].base);
+            snprintf(pdfs[variant].path, sizeof(pdfs[variant].path), "temp/render_output_parity/%s.pdf", pdfs[variant].base);
+            snprintf(previews[variant], sizeof(previews[variant]), "temp/render_output_parity/%s.png", pdfs[variant].base);
+            StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+            strbuf_append_format(html, "<!doctype html><style>@page{size:240px %upx;margin:10px}"
+                "html,body,div{margin:0;font:10px/12px Arial}"
+                "table{table-layout:%s;width:100%%;border-collapse:separate;border-spacing:%s}"
+                "td,th{vertical-align:top;padding:2px;border:1px solid black;white-space:pre-wrap;orphans:1;widows:1;"
+                "background:yellow;box-decoration-break:%s}.ink{height:12px;background:#0033cc}",
+                split ? 100u : baseline ? 240u : 200u, automatic ? "auto" : "fixed", split ? "0" : "4px 2px", clone ? "clone" : "slice");
+            if (baseline && !variant) strbuf_append_str(html, "td,th{margin:17px 23px 29px}");
+            if (!split) {
+                strbuf_append_str(html, baseline ? "thead tr,tfoot tr{height:42px}tbody tr{height:48px}" :
+                    "thead tr{height:36px}tbody tr{height:48px}tfoot tr{height:24px}");
+                if (baseline) strbuf_append_str(html, variant ?
+                    ".first,.middle,.bottom{padding-top:14px}.middle{padding-bottom:14px}" :
+                    "td,th{vertical-align:baseline}.middle{padding-bottom:14px}.bottom{padding-top:14px}");
+                else strbuf_append_str(html, variant ?
+                    "thead .middle{padding-top:11px}thead .bottom{padding-top:20px}"
+                    "tbody .middle{padding-top:17px}tbody .bottom{padding-top:32px}"
+                    "tfoot .middle{padding-top:5px}tfoot .bottom{padding-top:8px}" :
+                    ".middle{vertical-align:middle}.bottom{vertical-align:bottom}");
+                strbuf_append_str(html, "</style><table><thead><tr><th class='first' colspan='2'><div class='ink'>H</div></th>"
+                    "<th class='middle'><div class='ink'>H</div></th><th class='bottom'><div class='ink'>H</div></th></tr></thead>"
+                    "<tfoot><tr><td class='first' colspan='2'><div class='ink'>F</div></td><td class='middle'><div class='ink'>F</div></td>"
+                    "<td class='bottom'><div class='ink'>F</div></td></tr></tfoot><tbody>");
+                for (size_t i = 0; i < 3; i++) strbuf_append_str(html,
+                    "<tr><td class='first' colspan='2'><div class='ink'>X</div></td><td class='middle'><div class='ink'>X</div></td>"
+                    "<td class='bottom'><div class='ink'>X</div></td></tr>");
+                strbuf_append_str(html, "</tbody></table>");
+            } else if (baseline) {
+                if (!variant) {
+                    strbuf_append_str(html, "td{vertical-align:baseline}.middle{padding-top:14px}</style><table><tbody><tr>"
+                        "<td>A\nB\nC\nD\nE\nF\nG\nH\nI\nJ</td><td class='middle' colspan='2'>K\nL\nM\nN\nO\nP\nQ\nR</td>"
+                        "<td>Z</td></tr></tbody></table>");
+                } else {
+                    strbuf_append_format(html, "tr+tr{break-before:page}tr:first-child td{padding-top:14px}"
+                        "tr+tr td{padding-top:%upx}", clone ? 14u : 0u);
+                    if (!clone) strbuf_append_str(html,
+                        "tr:first-child td{padding-bottom:0;border-bottom:0}tr+tr td{border-top:0}");
+                    strbuf_append_str(html, "</style><table><tbody><tr><td>A\nB\nC\nD\nE</td>"
+                        "<td colspan='2'>K\nL\nM\nN\nO</td><td>Z</td></tr><tr>"
+                        "<td>F\nG\nH\nI\nJ</td><td colspan='2'>P\nQ\nR</td><td></td></tr></tbody></table>");
+                }
+            } else if (!variant) {
+                strbuf_append_str(html, ".middle{vertical-align:middle}.bottom{vertical-align:bottom}</style><table><tbody><tr>"
+                    "<td>A\nB\nC\nD\nE\nF\nG\nH\nI\nJ</td><td class='middle' colspan='2'>A\nB\nC\nD\nE\nF\nG\nH</td>"
+                    "<td class='bottom'>Z</td></tr></tbody></table>");
+            } else {
+                strbuf_append_format(html, "tr+tr{break-before:page}tr:first-child .bottom{padding-top:62px}"
+                    "tr+tr .middle{padding-top:%upx}", clone ? 14u : 12u);
+                if (!clone) strbuf_append_str(html, "tr:first-child td{padding-bottom:0;border-bottom:0}tr+tr td{padding-top:0;border-top:0}"
+                    "tr+tr .middle{padding-top:12px}");
+                strbuf_append_str(html, "</style><table><tbody><tr><td>A\nB\nC\nD\nE\nF</td>"
+                    "<td class='middle' colspan='2'>A\nB\nC\nD\nE\nF</td><td class='bottom'>Z</td></tr><tr>"
+                    "<td>G\nH\nI\nJ</td><td class='middle' colspan='2'>G\nH</td><td></td></tr></tbody></table>");
+            }
+            bool rendered = render_html_fixture(html_path, pdfs[variant].path, html->str, "--paged --block-remote-resources");
+            strbuf_free(html); ASSERT_TRUE(rendered); ASSERT_EQ(pdf_page_count(pdfs[variant].path), 2);
+            ASSERT_TRUE(render_document_fixture(html_path, previews[variant], "--paged --block-remote-resources --page-grid 1x2"));
+        }
+        expect_pngs_exactly_equal(previews[1], previews[0]);
+        if (!split) {
+            ImageData preview = {}; ASSERT_TRUE(load_png_rgba(previews[0], &preview));
+            EXPECT_EQ(preview.width, 480); EXPECT_EQ(preview.height, baseline ? 240 : 200);
+            for (int page = 0; page < 2; page++) {
+                if (baseline) {
+                    expect_preview_pixel(preview, page * 240 + 140, 75, 0, 51, 204);
+                    expect_preview_pixel(preview, page * 240 + 200, 75, 0, 51, 204);
+                    expect_preview_pixel(preview, page * 240 + 140, 67, 255, 255, 0);
+                } else {
+                    expect_preview_pixel(preview, page * 240 + 140, 55, 255, 255, 0);
+                    expect_preview_pixel(preview, page * 240 + 140, 70, 0, 51, 204);
+                    expect_preview_pixel(preview, page * 240 + 200, 85, 0, 51, 204);
+                }
+            }
+            image_free(preview.pixels);
+        }
+        for (int page = 1; page <= 2; page++) {
+            char pngs[2][PATH_MAX];
+            for (size_t variant = 0; variant < 2; variant++)
+                ASSERT_TRUE(render_reference_page(&pdfs[variant], page, pngs[variant], sizeof(pngs[variant])));
+            expect_pngs_exactly_equal(pngs[1], pngs[0]);
+        }
+    }
+}
+
+TEST(RenderOutputParity, PagedTableCellAlignmentMatchesExplicitPaddingInRepeatedRows) {
+    check_paged_table_cell_alignment(false);
+}
+
+TEST(RenderOutputParity, PagedSplitCellAlignmentMatchesExplicitRowsWithSliceAndCloneEdges) {
+    check_paged_table_cell_alignment(true);
+}
+
+TEST(RenderOutputParity, PagedTableBaselinesMatchExplicitPaddingInRepeatedRows) {
+    check_paged_table_cell_alignment(false, true);
+}
+
+TEST(RenderOutputParity, PagedSplitCellBaselinesMatchIndependentExplicitRowSlices) {
+    check_paged_table_cell_alignment(true, true);
+}
+
 static void check_paged_table_spacing(bool spanning) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = spanning ? "temp/render_output_parity/paged_table_colspan.html" : "temp/render_output_parity/paged_table_spacing.html";

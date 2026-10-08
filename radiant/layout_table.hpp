@@ -4,6 +4,10 @@ struct DomElement;
 
 size_t layout_table_cell_colspan(DomElement* element);
 
+// shared top/middle/bottom placement; valign uses TableCellProp::CELL_VALIGN_*.
+float layout_table_cell_vertical_align_target(int valign, float content_area_height,
+    float content_height, float content_start_y, bool clamp_to_content = false);
+
 // shared track distribution; callers resolve source-specific widths and spacing first.
 void layout_table_distribute_fixed_columns(float* widths, size_t columns,
     float* content_width, float specified_width, size_t unspecified_columns);

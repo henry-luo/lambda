@@ -16,6 +16,12 @@ p { margin: 12px 0; }
 table { table-layout: auto; width: 100%; border-collapse: separate; border-spacing: 4px 3px; }
 th, td { padding: 6px; border: 1px solid #cbd5e1; vertical-align: top; }
 th { background: #e0ecff; }
+.alignment { height: 96px; }
+.alignment td:first-child { vertical-align: middle; }
+.alignment td:last-child { vertical-align: bottom; }
+.baseline td { vertical-align: baseline; }
+.baseline td:first-child { font: 12px/18px Arial; }
+.baseline td:last-child { font: 20px/26px Arial; }
 @media screen { body { background: #edf3fa; } }
 @media print { body { background: white; } }
 </style>
@@ -41,6 +47,7 @@ th { background: #e0ecff; }
   </tbody>
   <tbody style="break-before: page; break-inside: avoid; break-after: page">
     <tr><td>Row groups</td><td>This group starts on a new sheet and stays together.</td></tr>
-    <tr><td>Final row</td><td>The table continues after the split cell.</td></tr>
+    <tr class="alignment"><td>Cell alignment</td><td>This cell sits at the bottom of the row; the label is centered vertically.</td></tr>
+    <tr class="baseline"><td>Shared baseline</td><td>Different sizes</td></tr>
   </tbody>
 </table>

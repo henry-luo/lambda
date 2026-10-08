@@ -12,13 +12,19 @@ system OpenGL, ANGLE as reference only, and desktop GLSL acceptance remain
 selected. The user also selected `<scene3d>` and SVG-style HTML sizing through
 `viewBox`. Phase I implements the explicit `lambda.scene3d` package and the
 bounded native 3D mapping below.
+On 2026-10-08 the user selected Phase III: richer interactive Three.js scenes
+and Three.js-style animation evaluated by an extension of the existing SVG
+animation engine, with OpenGL responsible for 3D rendering. Phase III is
+specified in §8 and is not yet implemented.
 
 **Date:** 2026-10-08
 
 **Scope:** Phase I provides the `lambda.scene3d` package and
 `<scene3d>` element, embedded alongside HTML/SVG and rendered by Radiant over
 system OpenGL. Phase II adds the JS WebGL API around the shared graphics core
-and validates Three.js. A Three.js-like scene model is the Phase I vocabulary,
+and validates Three.js. Phase III adds image textures, PBR, shadows,
+postprocessing, controls/picking, complete selected Three.js recovery, and
+shared SVG/3D animation. A Three.js-like scene model is the Phase I vocabulary,
 not a dependency on Three.js or a promise of its complete feature set.
 
 **Authority:** [documentation convention](../../doc/Doc_Convention.md).
@@ -55,6 +61,13 @@ pin that later workload before defining the adapter's complete startup/API
 manifest. Phase I scene success does not imply JS/WebGL compatibility.
 [Three.js renderer documentation](https://threejs.org/docs/pages/WebGLRenderer.html)
 
+**Phase III adds richer scenes and shared animation.** Use Three.js's
+clip/track/action/mixer model to define the selected animation behavior.
+Extend the existing SVG animation engine into shared timing, sampling and
+mixing services; SVG and 3D use target-specific bindings and renderers (§8).
+The native 3D renderer and Three.js/WebGL renderer consume sampled values and
+submit OpenGL work. Animation evaluation remains independent of that renderer.
+
 **Desktop GLSL acceptance is intentional.** Accept native desktop shaders that
 the active OpenGL context accepts, including constructs outside browser
 WebGL's shader restrictions. Phase I uses native desktop shaders for built-in
@@ -78,7 +91,7 @@ tested explicitly rather than treated as an implementation bug.
 | **D4.5.2** | "Radiant never retains a GC pointer"; keep a script value only by copying it or holding a registered root. |
 | **D5.3.3** | Native helpers use "slot-backed `RootFrame` / `Rooted<T>`" and continuously rooted handoffs. |
 | **D7.4.2v2** | Modules are "fully shielded from the async substrate"; completion and event delivery use existing host facilities. |
-| **D7.3.5** | "Every module kind names its conformance gate, wired into CI"; Phase I uses package/native-rendering corpora, and Phase II adds applicable web-platform slices. |
+| **D7.3.5** | "Every module kind names its conformance gate, wired into CI"; Phase I uses package/native-rendering corpora, Phase II adds applicable web-platform slices, and Phase III adds animation parity, SVG regressions and interactive rendered fixtures. |
 | **D7.1.4v2** | Headless profile C retains its null windowing backend and existing dependency exclusions. |
 | **D7.1.7v6** | `lambda-wasm` remains the browser evaluation profile; this native graphics proposal does not expand it. |
 
@@ -99,8 +112,9 @@ See [concurrency](../radiant/Radiant_Design_Concurrency.md) and
 
 The existing [Canvas 2D design](../radiant/Radiant_Design_Canvas.md) provides a
 document-owned canvas registry, bitmap allocation, native drawing state,
-paint invalidation, and raster canvas painting. The current `getContext()`
-dispatcher admits only `"2d"`; other names return `null`.
+paint invalidation, and raster canvas painting. Phase II extends its
+`getContext()` dispatcher with the selected `"webgl2"` profile while preserving
+Canvas 2D and context-mode exclusivity.
 
 Reuse document-owned graphics lifetimes, snapshot publication, and image
 painting from the canvas foundation. Add a native scene viewport with its own
@@ -279,9 +293,11 @@ ambient/directional lighting with correct transformed normals. Define the
 linear-light shading and sRGB input/output conversions together with snapshot
 composition; test them rather than assuming a Three.js-identical appearance.
 Instancing uses the same geometry/material path with per-instance transforms,
-not a separate renderer. Advanced PBR, shadows, skeletal/morph animation,
-environment maps, GLTF loaders, and arbitrary upstream Three.js features are
-follow-on scope.
+not a separate renderer. Phase III adds shared animation, including skeletal
+poses and morph weights, to this native scene path (§8). Its PBR, shadows and
+postprocessing fixtures first exercise the pinned Three.js/WebGL client;
+additional native material parity, GLTF loaders and arbitrary upstream Three.js
+features remain follow-on scope.
 
 ### Shared graphics mechanisms
 
@@ -412,9 +428,9 @@ the first implementation.
 Scene/resource changes mark the viewport dirty and request paint; box changes
 also use normal layout invalidation. Update existing scene elements through
 the normal Lambda view/DOM path. Do not introduce an imperative GL API or a
-new animation loop for Lambda authors. A scene description can be sampled at
-an explicit time for deterministic animation tests; a full animation-track
-language is later work.
+new animation loop for Lambda authors. Phase III's clip/track descriptions and
+playback bindings use the shared SVG/3D engine (§8). A scene can be sampled at
+an explicit time for deterministic animation tests and capture.
 
 In Phase II, WebGL draws/clears and existing animation-frame callbacks dirty
 their canvas; the same presentation boundary resolves its image. Script-visible
@@ -603,14 +619,166 @@ browser reference images and real pointer tests when controls/picking land.
 JS/DOM/module/animation dependencies are part of this phase and may reveal
 existing engine gaps.
 
-### Further coverage
+### Phase III — richer interactive scenes and shared SVG/3D animation
 
-PBR/standard materials, shadow maps, postprocessing, more formats/UBOs/MRT,
-transform feedback, queries/syncs, full loss/restoration, OrbitControls,
-advanced asset loaders, and additional platforms each need their own scope
-and evidence. Native scene features and JS API compatibility may progress
-independently. Full browser shader validation remains a separate decision;
-WebGPU/TSL, WebXR, and every Three.js example are not implied deliverables.
+**Selected scope (USER, 2026-10-08; not yet implemented):** deliver the richer
+Three.js scene features below and animation based on Three.js's definitions.
+The animation engine must reuse and extend Radiant's existing SVG animation
+engine; the 3D rendering stage uses the native OpenGL path. Reusing only the
+frame clock while creating an independent 3D evaluator does not satisfy this
+requirement.
+
+#### Scene and interaction scope
+
+| Capability | Required behavior |
+|---|---|
+| Image textures | Unmodified `TextureLoader` loads local PNG/JPEG assets through existing document resource/decode policies. Implement the needed image/canvas upload overloads, with dimensions, orientation, alpha, color space, mipmaps and upload lifetime validated. |
+| PBR materials | Render `MeshStandardMaterial` with metalness/roughness, normal maps and environment lighting. Audit its actual shader/API/extension requirements and implement those requirements in the shared GL services and WebGL adapter. |
+| Shadows | Render actual shadow maps, including a moving caster/light and the required depth-texture/render-target behavior. Verify the shadow changes with the sampled animation pose. |
+| Postprocessing | Run a pinned unmodified Three.js multipass addon, such as `EffectComposer` with a selected pass. Validate offscreen targets, pass ordering, resize and preservation of application framebuffer/viewport state. |
+| Controls and picking | Run pinned unmodified `OrbitControls` with real pointer drag, wheel zoom and pointer capture/cancellation. Use `Raycaster` for click selection and verify coordinates under CSS sizing/transforms and display density. |
+| Lifecycle and recovery | Reconstruct the selected Three.js scene after controlled loss/restoration; cover loss during animation, resize/density, two canvases, disposal and repeated resource recreation with bounded allocations. |
+
+Retain the Phase II official Three.js pin unless a documented upgrade is needed.
+Add source hashes/licenses for required unmodified addons and local assets;
+expand the audited call, query, extension and shader manifests for every new
+fixture. New WebGL formats, methods or extensions enter the supported profile
+only with actual behavior and named API tests. DOM/image loading and input
+dependencies are part of this phase's acceptance.
+
+#### Three.js animation model
+
+Use the pinned Three.js implementation as the behavioral reference, with these
+roles kept distinct:
+
+| Concept | Phase III contract |
+|---|---|
+| `AnimationClip` | Reusable named data containing a duration in seconds and property tracks; inferred duration follows the final track key when requested. |
+| `KeyframeTrack` | A target property path, ordered key times, typed values and an interpolation mode. Support number, vector, color, quaternion, boolean and string value classes for the declared binding profile. |
+| `AnimationAction` | Per-playback state: play/stop/reset, enabled/paused, scheduled start, local time/time scale, `LoopOnce`, finite or infinite `LoopRepeat`/`LoopPingPong`, reverse playback and clamp-on-finish. Include effective weight, normal/additive blending, fades, crossfades and time warping. |
+| `AnimationMixer` | Root-scoped action/binding ownership, mixer time/time scale, explicit delta advancement and exact-time sampling. Reusing a clip/root preserves action identity; stop/uncache operations release playback and binding state. |
+| Property binding and mixing | Resolve declared scene-node/property paths, combine active contributions once per property, preserve the base value and restore it when the final contributing action is released. Emit the selected `loop`/`finished` events with pinned ordering and payloads. |
+
+References: [AnimationClip](https://threejs.org/docs/pages/AnimationClip.html),
+[KeyframeTrack](https://threejs.org/docs/pages/KeyframeTrack.html),
+[AnimationAction](https://threejs.org/docs/pages/AnimationAction.html),
+[AnimationMixer](https://threejs.org/docs/pages/AnimationMixer.html), and
+[PropertyBinding](https://threejs.org/docs/pages/PropertyBinding.html).
+The checked-in Three.js 0.186.1 source, identified by its
+[manifest](../../test/demo/scene3d/vendor/three/manifest.json), is the versioned
+oracle when rolling documentation differs; record the tested methods and
+type/interpolation pairs.
+
+Require discrete and linear sampling, quaternion spherical interpolation, and
+the pinned smooth/Bezier modes for the track types that support them. Boolean
+and string tracks select discrete values. Quaternion interpolation/mixing must
+respect normalization and equivalent signs. Three.js smooth interpolation and
+tangent-based Bezier tracks are distinct from SVG `keySplines` timing easing;
+implement their mathematics as shared typed samplers instead of substituting
+one curve for another. Preserve the applicable pinned endpoint, loop and blend
+rules, including base-value contribution and additive quaternion composition.
+
+The initial binding profile includes node position/quaternion/scale and
+visibility, camera/light and material numeric/color properties, skeletal bone
+transforms and morph-target weights. Publish the supported paths and types;
+reject invalid bindings or malformed tracks before playback. Use procedural
+bone/morph fixtures so animation acceptance does not depend on a general asset
+loader. Lambda clip/track constructors remain pure data (S12.1.1v2); mutable
+playback state and evaluated values belong to the document host.
+
+#### Reuse of the SVG animation engine
+
+Extract and extend renderer-independent timeline, keyframe-segment lookup,
+typed interpolation, composition, playback control and invalidation services
+from the existing SVG animation implementation. SVG remains a client of those
+shared services. Preserve SVG/SMIL's own interval, event, repeat, accumulate,
+additive and sandwich-order rules in its adapter; Three.js actions apply their
+own loop, weight and blending policies through the same engine. Sharing
+mechanisms must not equate different SVG and Three.js semantics.
+
+```mermaid
+flowchart TD
+    CLOCK[Existing document scheduler and frame clock] --> ENGINE[Shared SVG and 3D animation runtime]
+    SVG[SVG and SMIL adapter] --> ENGINE
+    CLIPS[Three.js-style clips and actions] --> ENGINE
+    ENGINE --> SVGBIND[SVG presentation bindings]
+    ENGINE --> SCENEBIND[Native scene animated-value bindings]
+    ENGINE --> JSBIND[Declared bridge to Three.js object properties]
+    SVGBIND --> SVGPAINT[SVG painter]
+    SCENEBIND --> NATIVE[Native scene renderer]
+    JSBIND --> THREE[Unmodified Three.js renderer]
+    NATIVE --> GL[Shared native OpenGL path]
+    THREE --> GL
+    GL --> SNAP[Image snapshot and page composition]
+    SVGPAINT --> SNAP
+```
+
+Add typed vector/quaternion samplers and weighted action mixing to that shared
+engine where SVG has no equivalent. Keep parsing and property bindings at the
+edges: SVG resolves presentation attributes, native `<scene3d>` resolves
+document-owned animated scene properties, and a declared JS/native animation
+bridge applies sampled values to Three.js objects. Native samples use an
+animated-value overlay without rewriting authored Lambda data or SVG base
+attributes. Bone/morph pose evaluation uses the same engine; OpenGL consumes
+the resulting matrices/weights for drawing.
+
+The Three.js bridge is first-party adapter code around unmodified Three.js
+objects and clip data. Its native playback uses the shared engine; do not
+claim that upstream JavaScript `AnimationMixer.update()` has automatically
+become native. Run the unmodified upstream mixer separately as the comparison
+oracle. A bound property has one playback owner per frame, preventing a native
+action and an upstream mixer from advancing/applying the same track twice.
+The native Lambda path needs no JavaScript evaluator.
+
+Use the existing document `AnimationScheduler`, `RadiantFrameClock` and RC1
+page thread. Sample a frame with one host timestamp, apply bindings before the
+affected draw, invalidate changed scene/canvas generations, then render through
+OpenGL and publish the normal image snapshot. Explicit `update(delta)` and
+automatic scheduling are mutually exclusive playback drivers; exact-time
+sampling supports repeatable tests/capture. SVG and 3D share scheduling while
+retaining their independently controllable timelines. Paused/finished playback
+lets the page loop park when no active playback/control envelope or other page
+work needs frames. Events use existing host scheduling
+(D7.4.2v2); GL work remains on its owning thread.
+
+Playback records, bindings and sampled state have document ownership and
+generation validation. Retained JS targets use registered roots and declared
+host interfaces (D4.5.2/D5.3.3, D7.4.1v2/D7.4.4); no borrowed JS array or object
+pointer survives a call. Detachment, root replacement and teardown cancel the
+affected bindings and release caches. Graphics loss suspends presentation;
+CPU playback follows its existing play/pause state. Restoration uploads the
+current evaluated pose into new GPU resources without resetting or advancing
+the timeline twice. Published images retain the snapshot leases of §7.
+
+#### Acceptance and evidence
+
+Deliver an animated textured PBR scene with environment lighting, moving
+shadows, a postprocessing pass, orbit controls and click selection. Include a
+mixed SVG/native-3D page driven by the shared engine. Keep demo assets,
+addons, hashes and browser references under `test/demo/scene3d/`.
+
+| Required evidence | What it establishes |
+|---|---|
+| Fixed-time animation samples | Compare typed values and event traces against the pinned unmodified Three.js mixer at key boundaries, intermediate times, seeks, reverse playback, repeated/ping-pong loops, fades, crossfades and additive blends. Include quaternion sign/normalization and base-value restoration. |
+| Native animated pixels | Render transform/material, skeletal and morph fixtures at chosen times; verify visible motion/deformation and reuse of unchanged geometry/resources. |
+| Shared SVG/3D runtime | A mixed page demonstrates the shared clock and evaluator, independent pause/seek controls and correct invalidation. Existing SVG/SMIL timing, interpolation, events, `<use>` instances and animated-image fixtures must keep passing. Sharing only scheduling is insufficient. |
+| Rich scene/browser comparison | Capture independent browser and native references at identical frame times and declared pixel tolerances for textures, PBR, shadows and multipass output; record the expanded API/shader manifest. |
+| Real input | Pointer/wheel/capture/cancellation and raycast selection tests verify visible camera/selection changes across resize, CSS transforms and display density. |
+| Lifecycle, GC and performance | Two scenes/canvases, target removal, repeated play/stop/uncache, resize, loss/restoration during a crossfade, forced GC and teardown preserve resources and event order. Record bounded CPU/GPU/cache growth, animation sampling cost and release frame pacing on named hardware. |
+
+Wire the focused animation, SVG regression, native rendering and interaction
+gates into the existing test lanes (D7.3.5). Retain the Phase I/II rendering,
+Lambda, JS runtime and selected Khronos/WPT gates. Implementation sequencing
+and measured progress belong in a Phase III implementation record; this
+section selects behavior and completion evidence.
+
+### Further coverage after Phase III
+
+Additional native material parity, advanced asset loaders, broader
+formats/UBOs/MRT/transform-feedback/query/sync coverage, comprehensive device
+reset recovery and additional platforms need separate scope and evidence.
+Full browser shader validation remains a separate decision; WebGPU/TSL,
+WebXR and every Three.js example are not implied deliverables.
 
 ## 9. Loss, limits, and unavailable graphics
 
@@ -623,7 +791,9 @@ recovery is supported. Do not report stale pixels as a successful new frame.
 Phase II adds the WebGL lost-context API rules and `webglcontextlost` /
 `webglcontextrestored` events. Old script wrappers remain invalid after recovery;
 the application/Three.js recreates its resources. Stop presentation work while
-teardown or loss is active. Full scripted restoration has its own later gate.
+teardown or loss is active. Phase III adds the selected complete Three.js
+scene reconstruction gate, including loss during shared-engine animation;
+comprehensive device-reset recovery remains further coverage.
 
 Measure and bound texture/buffer allocations, staging snapshots, simultaneous
 contexts, and shader/program caches. Initialization, shader compilation,
@@ -732,6 +902,9 @@ corpus, not Three.js execution.
 - Whether WebGL1 is ever added as a separate API; it is deferred initially.
 - The Phase II optional-extension manifest and whether advanced asset loaders
   join either phase's required workload set.
+- Phase III's selected animation binding/interpolation manifest, shared SVG
+  engine extraction, rich-scene API/shader expansion and frame-pacing evidence
+  are specified in §8; their implementation and validation remain pending.
 - GPU-process containment and any expansion of existing headless profiles.
 
 These follow-on decisions do not change the formal specification. Phase I
@@ -741,8 +914,8 @@ evidence covers the named macOS driver; other desktops remain unverified.
 
 Detailed Phase I implementation and validation are recorded in
 [`vibe/impl/Radiant_Scene3d_Phase1.md`](../impl/Radiant_Scene3d_Phase1.md).
-The following seams are implemented for Phase I; export and JS adaptation remain
-follow-on work as indicated.
+The following table records Phase I/II seams and the selected Phase III
+extensions; Phase III and export remain pending as indicated.
 
 | Location | Responsibility |
 |---|---|
@@ -755,6 +928,8 @@ follow-on work as indicated.
 | `radiant/canvas_2d.cpp`, `render_canvas_content`, and existing image painting | Extract shared snapshot/image-presentation helpers; preserve Canvas 2D behavior. |
 | `radiant/render.hpp`, SVG/PDF dispatch, and image-generation support | Snapshot lifetime and follow-on scene/canvas export. |
 | Phase II `lambda/dom/dom_canvas.cpp` / declared host interfaces | Context selection, JS resource wrappers and argument conversion above the shared native GL core (D7.4.1v2/D7.4.4). |
+| Phase III `radiant/svg_animation.cpp`, `radiant/animation.cpp`, and shared declarations | Extract/extend shared timeline, typed sampling and composition services; preserve the SVG adapter and add clip/action/mixer policy and 3D bindings. Reuse `radiant_tick_document_animations`, `RadiantFrameClock` and the existing page loop. |
+| Phase III scene projection and declared JS/native animation bridge | Consume shared sampled values for native scenes and Three.js objects; own/revalidate bindings, root script identities, invalidate changed generations, and keep all GL calls in the rendering path. |
 | `build_lambda_config.json` | First-party build wiring and existing system-GL dependencies; no ANGLE dependency. |
 
 | Gate | Required evidence |
@@ -765,7 +940,9 @@ follow-on work as indicated.
 | Phase I: page/lifecycle | Mixed HTML/SVG layout and pixels, SVG sizing/viewBox fixture matrix, clipping/stacking/scale, updates/removal, multiple viewports, forced GC, resource accounting, teardown, and Canvas 2D regressions. |
 | Phase II: WebGL adapter | Actual context/object semantics, JS conversions/uploads, shader adaptation, state/error preservation, extensions/loss, and named Khronos/WPT API slices. |
 | Phase II: Three.js | Unmodified pinned package and ESM path, complete selected startup/draw manifest, native canvas pixels and browser references, JS/DOM/event dependencies. |
-| Follow-on | Advanced native materials/scenes, broader WebGL API coverage, controls/picking, rendered PNG/SVG/PDF export, additional desktops, and measured frame pacing for each claimed scope. |
+| Phase III: richer scenes | Image/canvas textures, PBR/environment lighting, moving shadows, multipass rendering, real OrbitControls/picking, and selected full Three.js restoration; expanded API/shader manifests and browser/native pixels. |
+| Phase III: shared animation | Pinned Three.js clip/track/action/mixer parity, shared SVG/3D evaluator, native animated pixels including bones/morphs, SVG regression coverage, input/lifecycle/forced-GC tests, bounded memory and measured release frame pacing. |
+| Follow-on | Additional native material parity, broader WebGL API coverage, rendered PNG/SVG/PDF export, additional desktops and comprehensive device-reset recovery. |
 
 The focused `test/test_scene3d_gtest.cpp` runner and `test/lambda/scene3d/`
 goldens are wired into their relevant baselines, with rendered scene/page fixtures
@@ -779,7 +956,7 @@ make test-radiant-baseline
 make test-lambda-baseline
 ```
 
-Phase II also runs the JS runtime gate:
+Phases II and III also run the JS runtime gate:
 
 ```sh
 make test262-baseline
