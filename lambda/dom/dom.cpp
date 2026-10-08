@@ -11319,9 +11319,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     if (prop_id == JS_DOM_PROP_ID) {
         const char* id_str = dom_to_attr_cstr(value);
         if (elem->doc && elem->doc->document_pool) {
-            size_t len = strlen(id_str);
-            char* id_copy = pool_dup_n(elem->doc->document_pool, id_str, len);
-            elem->id = lam::up(id_copy);
+            // the attribute setter owns cache replacement, including adopted-node provenance.
             elem->set_attribute("id", id_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("dom_set_property: set id='%s' on <%s>",
@@ -14384,7 +14382,7 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
     // The verified backing child is linked through the DOM chain below.
     if (text->native_string != inserted_string) {
         if (text->owns_native_string()) {
-            pool_free(parent->doc->document_pool, text->native_string);
+            dom_text_release_retired_storage(parent->doc, text);
         }
         text->native_string = lam::up(inserted_string);
         text->text = lam::up(inserted_string->chars);

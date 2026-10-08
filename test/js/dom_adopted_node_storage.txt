@@ -1,0 +1,6 @@
+true true true
+destination-id three four destination text blue second
+true destination
+true true true
+returned text returned
+ARTICLE destination-id returned text returned true

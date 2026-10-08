@@ -624,6 +624,71 @@ TEST_F(DomGcBackingTest, SameHeapAdoptionRefreshesBorrowedPointers) {
     check_adoption(false);
 }
 
+TEST(DomRetirementOwnerArenaTest, AdoptedMetadataRetiresFromItsPhysicalPool) {
+    Pool* input_pool = pool_create();
+    ASSERT_NE(input_pool, nullptr);
+    Input* input = Input::create(input_pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    DomDocument doc;
+    DomDocument target_doc;
+    ASSERT_TRUE(doc.init(input));
+    ASSERT_TRUE(target_doc.init(input));
+    MarkBuilder builder(input);
+    DomElement* child = DomElement::create(&doc, "span", builder.element("span").final().element);
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("id", "source-id"));
+    ASSERT_TRUE(child->set_attribute("class", "source-class"));
+    ASSERT_TRUE(child->set_attribute("data-storage", "source"));
+    uint32_t id = dom_document_alloc_node_id(&target_doc);
+    ASSERT_TRUE(dom_node_registry_transfer(&doc, &target_doc, child, &id));
+    static_cast<DomNode*>(child)->id = id;
+    child->doc = lam::up(&target_doc);
+    EXPECT_EQ(child->storage_owner(), &doc);
+    EXPECT_TRUE(pool_owns(doc.document_pool, child->tag_name));
+    ASSERT_TRUE(child->set_attribute("id", "destination-id"));
+    ASSERT_TRUE(child->set_attribute("class", "destination-class"));
+    ASSERT_TRUE(child->set_attribute("data-storage", "destination"));
+    const char* tag = child->tag_name;
+    const char* cached_id = child->id;
+    const char* cached_class = child->class_names[0];
+    DomElementExt* extension = child->ext;
+    EXPECT_TRUE(pool_owns(doc.document_pool, cached_id));
+    EXPECT_TRUE(pool_owns(doc.document_pool, cached_class));
+    dom_node_schedule_detached(&target_doc, child);
+    EXPECT_EQ(dom_retire_sweep(&target_doc), 1u);
+    EXPECT_FALSE(pool_owns(doc.document_pool, tag));
+    EXPECT_FALSE(pool_owns(doc.document_pool, cached_id));
+    EXPECT_FALSE(pool_owns(doc.document_pool, cached_class));
+    EXPECT_FALSE(pool_owns(doc.document_pool, extension));
+    target_doc.destroy();
+    doc.destroy();
+    pool_destroy(input_pool);
+}
+
+TEST_F(DomGcBackingTest, AdoptedOwnedTextTracksReplacementAndReturnPools) {
+    init_adoption_target(true);
+    DomText* text = DomText::create_detached_copy(&doc, "inline", 6);
+    ASSERT_NE(text, nullptr);
+    String* original = dom_document_create_string(&doc, "source", 6);
+    ASSERT_TRUE(dom_text_adopt_document_string(text, &doc, original));
+    uint32_t id = dom_document_alloc_node_id(&target_doc);
+    ASSERT_TRUE(dom_node_registry_transfer(&doc, &target_doc, text, &id));
+    text->id = id;
+    ASSERT_TRUE(dom_text_adopt_document_string(text, &target_doc, original));
+    EXPECT_EQ(dom_node_registry_owned_string_pool(&target_doc, text), doc.document_pool);
+    String* replacement = dom_document_create_string(&target_doc, "destination", 11);
+    ASSERT_TRUE(dom_text_adopt_document_string(text, &target_doc, replacement));
+    EXPECT_FALSE(pool_owns(doc.document_pool, original));
+    EXPECT_TRUE(pool_owns(target_doc.document_pool, replacement));
+    id = dom_document_alloc_node_id(&doc);
+    ASSERT_TRUE(dom_node_registry_transfer(&target_doc, &doc, text, &id));
+    text->id = id;
+    EXPECT_EQ(dom_node_registry_owned_string_pool(&doc, text), target_doc.document_pool);
+    dom_node_schedule_detached(&doc, text);
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_FALSE(pool_owns(target_doc.document_pool, replacement));
+}
+
 struct BackingRootTeardownProbe : DomDocumentResourceData {
     gc_heap_t* gc;
     bool called;
