@@ -65,6 +65,17 @@ Repeated UI lifetimes also exposed a pre-existing tile-pool lifecycle defect:
 shutdown destroyed the pool but a once-only initializer prevented recreation.
 Pool creation/dispatch/shutdown now share a lock and recreate workers as needed.
 
+The Ringworld example additionally exposed an attribute-override lifetime bug:
+`fn_map_set` retained newly added UI attributes but skipped retention when
+replacing an existing field. Camera options replaced the default vectors, then
+procedural geometry allocation collected the replacements before validation.
+Overrides now use the same `ui_prepare_element_field` helper as initial stores
+(D4.5.2/D5.3.3). The forced, poisoning-GC UI regression checks both a replacement
+vector and computed replacement text; it fails with the previous host and passes
+with the fix.
+Follow-up validation passes all 6,405 Lambda/input baseline checks, the 22 native
+scene tests, and the forced-GC UI regression on `auto`, `interp` and `jit`.
+
 ## Bounds and unavailable profiles
 
 Initial limits are 8 viewports per document, 32 contexts per process, 4,096 GPU
@@ -92,6 +103,10 @@ Import `lambda.scene3d` explicitly (S16.9.6/S16.9.8). The entry exports `Scene`,
 `geometry`, `material`, `texture`, `mesh`, `resources`; `normalize`, `validate`;
 and pure `transform`, `multiply`, `point` helpers (D7.2.4/S12.1.1v2).
 See [the mixed Lambda page](../../test/scene3d/mixed.ls) for executable syntax.
+The [Ringworld playground](../../test/scene3d/_ringworld.ls) provides a larger
+visual example: procedural banded sphere and annular geometry, three moons,
+directional lighting, shared resources and 160 instanced stars. Open it with
+`./lambda.exe view test/scene3d/_ringworld.ls` from this worktree.
 Constructors preserve ordinary element attributes and accept an options map;
 normalization returns an element or an error, and validation returns true or
 an error. Renderer validation also applies to literal scenes without the package.
