@@ -1041,20 +1041,80 @@ TEST(RenderOutputParity, PagedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
     }
 }
 
-TEST(RenderOutputParity, PagedTableSpacingKeepsBackgroundGapsAcrossCellContinuations) {
+TEST(RenderOutputParity, PagedTableGroupBreaksAndAvoidanceMatchExplicitRowBoundaries) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-    const char* html_path = "temp/render_output_parity/paged_table_spacing.html";
-    const char* pdf_path = "temp/render_output_parity/paged_table_spacing.pdf";
-    const char* preview_path = "temp/render_output_parity/paged_table_spacing.png";
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* stems[] = {"paged_group_breaks", "paged_group_row_reference"};
+    for (bool automatic : {false, true}) {
+        SCOPED_TRACE(automatic ? "automatic layout" : "fixed layout");
+        char preview_paths[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+        for (size_t variant = 0; variant < 2; variant++) {
+            char html_path[PATH_MAX];
+            snprintf(html_path, sizeof(html_path), "temp/render_output_parity/%s.html", stems[variant]);
+            snprintf(preview_paths[variant], sizeof(preview_paths[variant]), "temp/render_output_parity/%s.png", stems[variant]);
+            snprintf(pdfs[variant].path, sizeof(pdfs[variant].path), "temp/render_output_parity/%s.pdf", stems[variant]);
+            snprintf(pdfs[variant].base, sizeof(pdfs[variant].base), "%s", stems[variant]);
+            StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+            strbuf_append_format(html, "<!doctype html><style>@page{size:120px 100px;margin:10px}"
+                "html,body{margin:0;font:10px/12px Arial}div{height:18px}"
+                "table{table-layout:%s;width:100%%;border-collapse:separate;border-spacing:4px 2px;background:magenta}"
+                "td,th{vertical-align:top;padding:0;orphans:1;widows:1}thead{background:#cce0ff}tfoot{background:#ddffdd}"
+                "tbody td:first-child{background:yellow}tbody td:last-child{background:red}", automatic ? "auto" : "fixed");
+            strbuf_append_str(html, variant ?
+                "#b tr:first-child{break-before:page}#b tr:last-child,#c tr:last-child{break-after:page}" :
+                "#b{break-inside:avoid;break-after:page}#c{break-after:page}");
+            strbuf_append_str(html, "</style><div>Prelude</div><table><thead><tr><th colspan='2'>Head</th><th>H</th></tr></thead>"
+                "<tfoot><tr><td colspan='3'>Foot</td></tr></tfoot><tbody id='a'>"
+                "<tr><td colspan='2'>A1</td><td>A</td></tr><tr><td colspan='2'>A2</td><td>A</td></tr></tbody><tbody id='b'>"
+                "<tr><td colspan='2'>B1</td><td>B</td></tr><tr><td colspan='2'>B2</td><td>B</td></tr></tbody><tbody id='c'>"
+                "<tr><td colspan='2'>C1</td><td>C</td></tr></tbody></table>\n  \t");
+            bool rendered = render_html_fixture(html_path, pdfs[variant].path, html->str, "--paged --block-remote-resources");
+            strbuf_free(html); ASSERT_TRUE(rendered); ASSERT_EQ(pdf_page_count(pdfs[variant].path), 3);
+            ASSERT_TRUE(render_document_fixture(html_path, preview_paths[variant], "--paged --block-remote-resources --page-grid 1x3"));
+        }
+        expect_pngs_exactly_equal(preview_paths[1], preview_paths[0]);
+        ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_paths[0], &preview));
+        EXPECT_EQ(preview.width, 360); EXPECT_EQ(preview.height, 100);
+        const int header_y[] = {35, 17, 17}, body_y[] = {49, 31, 31}, footer_y[] = {77, 59, 45};
+        for (int page = 0; page < 3; page++) {
+            expect_preview_pixel(preview, page * 120 + 65, header_y[page], 204, 224, 255);
+            expect_preview_pixel(preview, page * 120 + 45, body_y[page], 255, 255, 0);
+            expect_preview_pixel(preview, page * 120 + 65, footer_y[page], 221, 255, 221);
+            char pngs[2][PATH_MAX];
+            for (size_t variant = 0; variant < 2; variant++)
+                ASSERT_TRUE(render_reference_page(&pdfs[variant], page + 1, pngs[variant], sizeof(pngs[variant])));
+            expect_pngs_exactly_equal(pngs[1], pngs[0]);
+            ImageData physical = {}; ASSERT_TRUE(load_png_rgba(pngs[0], &physical));
+            EXPECT_EQ(physical.width, RENDER_WIDTH); EXPECT_EQ(physical.height, RENDER_WIDTH * 100 / 120);
+            expect_preview_pixel(physical, 65 * RENDER_WIDTH / 120, header_y[page] * RENDER_WIDTH / 120, 204, 224, 255);
+            expect_preview_pixel(physical, 45 * RENDER_WIDTH / 120, body_y[page] * RENDER_WIDTH / 120, 255, 255, 0);
+            expect_preview_pixel(physical, 65 * RENDER_WIDTH / 120, footer_y[page] * RENDER_WIDTH / 120, 221, 255, 221);
+            image_free(physical.pixels);
+        }
+        image_free(preview.pixels);
+    }
+}
+
+static void check_paged_table_spacing(bool spanning) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = spanning ? "temp/render_output_parity/paged_table_colspan.html" : "temp/render_output_parity/paged_table_spacing.html";
+    const char* pdf_path = spanning ? "temp/render_output_parity/paged_table_colspan.pdf" : "temp/render_output_parity/paged_table_spacing.pdf";
+    const char* preview_path = spanning ? "temp/render_output_parity/paged_table_colspan.png" : "temp/render_output_parity/paged_table_spacing.png";
     for (const char* algorithm : {"fixed", "auto"}) {
         SCOPED_TRACE(algorithm); StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
         strbuf_append_format(html, "<!doctype html><style>@page{size:120px 100px;margin:10px}"
             "html,body{margin:0;font:10px/12px Arial}table{table-layout:%s;width:100%%;border-spacing:4px 3px;background:#ff00ff}"
             "td{vertical-align:top;padding:2px;border:1px solid black;orphans:1;widows:1}"
             "thead{background:#cce0ff}tfoot{background:#ddffdd}tbody tr{background:#ffff00}"
-            "tbody td:last-child{background:red}.long{white-space:pre-wrap}</style>"
+            "tbody td:last-child{background:red}.long{white-space:pre-wrap}</style>", algorithm);
+        if (spanning) strbuf_append_str(html,
+            "<table><thead><tr><td style='width:28px;box-sizing:border-box'>H</td>"
+            "<td style='width:28px;box-sizing:border-box'>H</td><td style='width:28px;box-sizing:border-box'>H</td></tr></thead>"
+            "<tfoot><tr><td colspan=3>Foot</td></tr></tfoot>"
+            "<tbody><tr><td colspan=2 class=long>A\nB\nC\nD\nE\nF</td><td>X</td></tr></tbody></table>");
+        else strbuf_append_str(html,
             "<table><thead><tr><td>Head</td><td>Head</td></tr></thead><tfoot><tr><td>Foot</td><td>Foot</td></tr></tfoot>"
-            "<tbody><tr><td class=long>A\nB\nC\nD\nE\nF</td><td>Short</td></tr></tbody></table>", algorithm);
+            "<tbody><tr><td class=long>A\nB\nC\nD\nE\nF</td><td>Short</td></tr></tbody></table>");
         bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
         strbuf_free(html); ASSERT_TRUE(rendered); ASSERT_EQ(pdf_page_count(pdf_path), 3);
         ASSERT_TRUE(render_document_fixture(html_path, preview_path,
@@ -1063,10 +1123,15 @@ TEST(RenderOutputParity, PagedTableSpacingKeepsBackgroundGapsAcrossCellContinuat
         EXPECT_EQ(preview.width, 360); EXPECT_EQ(preview.height, 100);
         const int footer_y[] = {64, 61, 64};
         const struct { int x, y; uint8_t r, g, b; } points[] = {
-            {12, 18, 255, 0, 255}, {60, 18, 255, 0, 255}, {50, 11, 255, 0, 255},
-            {50, 32, 255, 0, 255}, {50, 18, 204, 224, 255},
+            {12, 18, 255, 0, 255}, {spanning ? 44 : 60, 18, 255, 0, 255}, {50, 11, 255, 0, 255},
+            {50, 32, 255, 0, 255}, {spanning ? 66 : 50, 18, 204, 224, 255},
             {50, 40, 255, 255, 0}, {100, 40, 255, 0, 0}};
         for (int page = 0; page < 3; page++) {
+            if (spanning) {
+                expect_preview_pixel(preview, page * 120 + 60, 40, 255, 255, 0);
+                expect_preview_pixel(preview, page * 120 + 76, 40, 255, 0, 255);
+                expect_preview_pixel(preview, page * 120 + 44, footer_y[page] + 6, 221, 255, 221);
+            }
             for (const auto& point : points)
                 expect_preview_pixel(preview, page * 120 + point.x, point.y, point.r, point.g, point.b);
             expect_preview_pixel(preview, page * 120 + 50, footer_y[page] + 6, 221, 255, 221);
@@ -1077,11 +1142,16 @@ TEST(RenderOutputParity, PagedTableSpacingKeepsBackgroundGapsAcrossCellContinuat
         image_free(preview.pixels);
         ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
         PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
-        snprintf(pdf.base, sizeof(pdf.base), "paged_table_spacing");
+        snprintf(pdf.base, sizeof(pdf.base), "%s", spanning ? "paged_table_colspan" : "paged_table_spacing");
         for (int page = 0; page < 3; page++) {
             char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page + 1, png, sizeof(png)));
             ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
             EXPECT_EQ(image.width, RENDER_WIDTH); EXPECT_EQ(image.height, RENDER_WIDTH * 100 / 120);
+            if (spanning) {
+                expect_preview_pixel(image, 60 * RENDER_WIDTH / 120, 40 * RENDER_WIDTH / 120, 255, 255, 0);
+                expect_preview_pixel(image, 76 * RENDER_WIDTH / 120, 40 * RENDER_WIDTH / 120, 255, 0, 255);
+                expect_preview_pixel(image, 44 * RENDER_WIDTH / 120, (footer_y[page] + 6) * RENDER_WIDTH / 120, 221, 255, 221);
+            }
             for (const auto& point : points)
                 expect_preview_pixel(image, point.x * RENDER_WIDTH / 120, point.y * RENDER_WIDTH / 120, point.r, point.g, point.b);
             expect_preview_pixel(image, 50 * RENDER_WIDTH / 120, (footer_y[page] + 6) * RENDER_WIDTH / 120, 221, 255, 221);
@@ -1091,6 +1161,14 @@ TEST(RenderOutputParity, PagedTableSpacingKeepsBackgroundGapsAcrossCellContinuat
             image_free(image.pixels);
         }
     }
+}
+
+TEST(RenderOutputParity, PagedTableSpacingKeepsBackgroundGapsAcrossCellContinuations) {
+    check_paged_table_spacing(false);
+}
+
+TEST(RenderOutputParity, PagedColumnSpansCoverInternalGapsAcrossPdfAndPreviewContinuations) {
+    check_paged_table_spacing(true);
 }
 
 static void append_svg_image_fixture(StrBuf* html, const char* attributes,

@@ -1864,13 +1864,17 @@ static int for_each_table_span_column(int start_col, int span, int columns, Fn f
     return count;
 }
 
-static float table_sum_span_columns(float* col_widths, int start_col, int span, int columns) {
-    if (!col_widths) return 0.0f;
-    float width = 0.0f;
-    for_each_table_span_column(start_col, span, columns, [&](int c) {
-        width += col_widths[c];
-    });
+float layout_table_span_width(const float* widths, size_t count, size_t column, size_t span, float spacing) {
+    if (!widths || column >= count || !span) return 0.0f;
+    if (span > count - column) span = count - column;
+    float width = (span - 1) * spacing;
+    for (size_t i = column; i < column + span; i++) width += widths[i];
     return width;
+}
+
+static float table_sum_span_columns(float* col_widths, int start_col, int span, int columns) {
+    if (start_col < 0 || span <= 0 || columns <= start_col) return 0.0f;
+    return layout_table_span_width(col_widths, (size_t)columns, (size_t)start_col, (size_t)span, 0.0f);
 }
 
 static void table_assign_span_columns(float* col_widths, int start_col, int span,
@@ -2518,25 +2522,23 @@ static void table_apply_column_constraints(LayoutContext* lycon, ViewTable* tabl
         col_elem->blk && col_elem->block_mut()->given_max_width >= 0.0f, true, width_divisor);
 }
 
-static void table_distribute_span_extra(float* col_widths, int col, int span, int columns,
-                                        int actual_span, float extra_needed,
-                                        TableMetadata* meta = nullptr) {
-    if (!col_widths || actual_span <= 0 || extra_needed <= 0.0f) return;
-    auto eligible = [&](int index) {
+void layout_table_distribute_span_extra(float* col_widths, const LayoutTableColumnWidths& tracks,
+                                        size_t col, size_t span, float extra_needed) {
+    if (!col_widths || col >= tracks.count || !span || extra_needed <= 0.0f) return;
+    if (span > tracks.count - col) span = tracks.count - col;
+    auto eligible = [&](size_t index) {
         if (index < col || index >= col + span) return false;
         // preserve single-column contributions when distributing a spanning
         // cell's deficit; only unconstrained columns absorb it first.
-        if (meta && (meta->col_single_min_widths[index] > 0.0f ||
-                     meta->col_has_explicit_width[index])) {
-            for (int c = col; c < col + span && c < columns; c++) {
-                if (meta->col_single_min_widths[c] <= 0.0f &&
-                    !meta->col_has_explicit_width[c]) return false;
+        if (tracks.single_minimum[index] > 0.0f || tracks.constrained[index]) {
+            for (size_t c = col; c < col + span; c++) {
+                if (tracks.single_minimum[c] <= 0.0f && !tracks.constrained[c]) return false;
             }
         }
         return true;
     };
-    table_distribute_extra(col_widths, columns, extra_needed, eligible,
-        [&](int index) { return col_widths[index]; });
+    table_distribute_extra(col_widths, tracks.count, extra_needed, eligible,
+        [&](size_t index) { return col_widths[index]; });
 }
 
 static float table_cell_internal_border_spacing(ViewTable* table, ViewTableCell* tcell) {
@@ -2593,11 +2595,13 @@ static void apply_colspan_width_contribution(ViewTable* table, TableMetadata* me
     float* widths[3] = {
         meta->col_min_widths, meta->col_max_widths, meta->col_widths
     };
+    LayoutTableColumnWidths tracks = {meta->col_min_widths.get(), meta->col_max_widths.get(),
+        meta->col_single_min_widths.get(), meta->col_percent_widths.get(), meta->col_has_explicit_width.get(),
+        (size_t)columns};
     for (int i = 0; i < 3; i++) {
         float deficit = required[i] - current[i] - internal_spacing;
         if (deficit > 0.0f) {
-            table_distribute_span_extra(widths[i], col, span, columns, actual_span,
-                                        deficit, meta);
+            layout_table_distribute_span_extra(widths[i], tracks, (size_t)col, (size_t)span, deficit);
         }
     }
 }
@@ -2748,12 +2752,8 @@ static float table_column_span_width(ViewTable* table, float* col_widths,
     if (end_col > columns) end_col = columns;
     int actual_span = end_col - start_col;
     if (actual_span <= 0) return 0.0f;
-    float width = table_sum_span_columns(col_widths, start_col, actual_span, columns);
-    float spacing = table_inter_spacing(table, true);
-    if (spacing > 0.0f && actual_span > 1) {
-        width += spacing * (actual_span - 1);
-    }
-    return width;
+    return layout_table_span_width(col_widths, (size_t)columns, (size_t)start_col,
+        (size_t)actual_span, table_inter_spacing(table, true));
 }
 
 static float table_column_visual_x(ViewTable* table, float* col_widths, float* col_x_positions,
@@ -3688,6 +3688,13 @@ static bool table_cell_apply_align_content(ViewTableCell* cell,
     }
 }
 
+size_t layout_table_cell_colspan(DomElement* element) {
+    const char* value = element->get_attribute("colspan");
+    int64_t span = value ? str_to_int64_default(value, strlen(value), 1) : 1;
+    // HTML clamps positive column spans; keep both view producers on the same grid.
+    return span > 1000 ? 1000u : span > 0 ? (size_t)span : 1u;
+}
+
 static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewTableCell* cell) {
     assert(cell->td);
     cell->td->col_span = 1;
@@ -3703,13 +3710,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     if (!cellNode->is_element()) return;
     if (cellNode->node_type == DOM_NODE_ELEMENT) {
         DomElement* dom_elem = cellNode->as_element();
-        const char* colspan_str = dom_elem->get_attribute("colspan");
-        if (colspan_str && colspan_str[0] != '\0') {
-            int span = (int)str_to_int64_default(colspan_str, strlen(colspan_str), 0); // INT_CAST_OK: string length
-            if (span > 0 && span <= 1000) {
-                cell->td->col_span = span;
-            }
-        }
+        cell->td->col_span = (int)layout_table_cell_colspan(dom_elem); // INT_CAST_OK: HTML column span count is bounded by 1000.
         const char* rowspan_str = dom_elem->get_attribute("rowspan");
         if (rowspan_str && rowspan_str[0] != '\0') {
             int span = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0); // INT_CAST_OK: string length

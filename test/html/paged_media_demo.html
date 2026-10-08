@@ -26,7 +26,7 @@ th { background: #e0ecff; }
 <p>The same composed pages can be viewed here or exported to PDF, SVG and PNG. Window resizing changes the visible area while the paper dimensions stay fixed.</p>
 <p>Try a two-column preview with <code>--page-grid 1x2 --page-column-gap 24</code>, or a facing spread with <code>--book --book-page 2</code>.</p>
 <h2 class="chapter">Tables across pages</h2>
-<p>The header repeats when this automatically sized table continues onto another sheet. Cell spacing is preserved across page breaks.</p>
+<p>The header repeats when this automatically sized table continues onto another sheet. Cell spacing and column spans are preserved across page breaks. The final row group stays together and begins on a new sheet.</p>
 <table>
   <thead><tr><th>Feature</th><th>Example</th></tr></thead>
   <tbody>
@@ -36,7 +36,11 @@ th { background: #e0ecff; }
     <tr><td>Forced breaks</td><td>This chapter starts on a new sheet</td></tr>
     <tr><td>Page counters</td><td>Physical page and total in the footer</td></tr>
     <tr><td>Repeated headers</td><td>The blue table heading on each continuation</td></tr>
+    <tr><td colspan="2">This cell spans both columns, including the space between their tracks.</td></tr>
     <tr><td>Long cell</td><td>Line 1<br>Line 2<br>Line 3<br>Line 4<br>Line 5<br>Line 6<br>Line 7<br>Line 8<br>Line 9<br>Line 10<br>Line 11<br>Line 12<br>Line 13<br>Line 14<br>Line 15<br>Line 16<br>Line 17<br>Line 18<br>Line 19<br>Line 20<br>Line 21<br>Line 22<br>Line 23<br>Line 24<br>Line 25<br>Line 26<br>Line 27<br>Line 28</td></tr>
+  </tbody>
+  <tbody style="break-before: page; break-inside: avoid; break-after: page">
+    <tr><td>Row groups</td><td>This group starts on a new sheet and stays together.</td></tr>
     <tr><td>Final row</td><td>The table continues after the split cell.</td></tr>
   </tbody>
 </table>

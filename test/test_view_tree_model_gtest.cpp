@@ -832,7 +832,17 @@ protected:
     }
     DomElement* image(const char* css = nullptr, DomElement* parent = nullptr, const char* url = nullptr);
     DomElement* svg_image(const char* attributes, const char* css = nullptr);
-    DomElement* fixed_table(size_t rows, DomElement** header = nullptr, DomElement** footer = nullptr) {
+    bool table_rows(DomElement* section, size_t count, const char* a = "Body A",
+            const char* b = "Body B", const char* first_colspan = nullptr) {
+        for (size_t i = 0; i < count; i++) {
+            DomElement* row = block(nullptr, nullptr, "tr", section);
+            if (!row || !block(a, nullptr, "td", row) || !block(b, nullptr, "td", row)) return false;
+            if (first_colspan && !row->first_child->as_element()->set_attribute("colspan", first_colspan)) return false;
+        }
+        return true;
+    }
+    DomElement* fixed_table(size_t rows, DomElement** header = nullptr, DomElement** footer = nullptr,
+            const char* first_colspan = nullptr) {
         DomElement* table = block(nullptr, "table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0", "table");
         if (!table) return nullptr;
         const char* tags[] = {"thead", "tfoot", "tbody"};
@@ -843,11 +853,8 @@ protected:
             if (!group && header) *header = section;
             if (group == 1 && footer) *footer = section;
             size_t count = group == 2 ? rows : 1;
-            for (size_t i = 0; i < count; i++) {
-                DomElement* row = block(nullptr, nullptr, "tr", section);
-                if (!row || !block(group == 0 ? "Head A" : group == 1 ? "Foot A" : "Body A", nullptr, "td", row) ||
-                    !block(group == 0 ? "Head B" : group == 1 ? "Foot B" : "Body B", nullptr, "td", row)) return nullptr;
-            }
+            if (!table_rows(section, count, group == 0 ? "Head A" : group == 1 ? "Foot A" : "Body A",
+                group == 0 ? "Head B" : group == 1 ? "Foot B" : "Body B", first_colspan)) return nullptr;
         }
         return table;
     }
@@ -1950,6 +1957,190 @@ TEST_F(SecondaryViewTest, TableSpacingContributesToIntrinsicWidthsAndFixedPercen
     }
 }
 
+TEST_F(SecondaryViewTest, FixedColumnSpansDivideFirstVisualRowWidthsAndIncludeInternalSpacing) {
+    stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { vertical-align: top }");
+    DomElement* table = block(nullptr, "table-layout: fixed; width: 100%; border-spacing: 4px 2px", "table");
+    ASSERT_NE(table, nullptr);
+    DomElement* header = block(nullptr, nullptr, "thead", table); ASSERT_NE(header, nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", header); ASSERT_NE(row, nullptr);
+    DomElement* spanning = block("A", nullptr, "td", row); ASSERT_NE(spanning, nullptr);
+    ASSERT_TRUE(spanning->set_attribute("colspan", "2"));
+    ASSERT_NE(block("B", nullptr, "td", row), nullptr);
+    DomElement* body = block(nullptr, nullptr, "tbody", table); ASSERT_NE(body, nullptr);
+    row = block(nullptr, nullptr, "tr", body); ASSERT_NE(row, nullptr);
+    DomElement* cells[3] = {};
+    for (DomElement*& cell : cells) { cell = block("X", "width: 300px", "td", row); ASSERT_NE(cell, nullptr); }
+    for (bool border_box : {false, true}) {
+        ASSERT_TRUE(spanning->set_attribute("style", border_box ?
+            "width: 50%; box-sizing: border-box; padding: 2px; border: 1px solid black" :
+            "width: 50%; padding: 2px; border: 1px solid black"));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        LayoutViewNode* span = source_fragment(tree, spanning, VIEW_FRAGMENT_BODY, true); ASSERT_NE(span, nullptr);
+        float width = border_box ? 102.0f : 108.0f;
+        EXPECT_FLOAT_EQ(span->rect.width, width); EXPECT_FLOAT_EQ(span->rect.x, 14.0f);
+        float x = 14.0f;
+        for (size_t i = 0; i < 3; i++) {
+            LayoutViewNode* cell = source_fragment(tree, cells[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(cell, nullptr);
+            float track = i < 2 ? (width - 4.0f) * 0.5f : 208.0f - width;
+            EXPECT_FLOAT_EQ(cell->rect.width, track); EXPECT_FLOAT_EQ(cell->rect.x, x);
+            x += track + 4.0f;
+        }
+        EXPECT_FLOAT_EQ(x, 230.0f);
+    }
+}
+
+TEST_F(SecondaryViewTest, AutomaticColumnSpansKeepSingleColumnConstraintsAndAccountForOverlappingSpans) {
+    stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { vertical-align: top }");
+    DomElement* table = block(nullptr, "table-layout: auto; margin: 0 auto; border-spacing: 4px 2px", "table");
+    ASSERT_NE(table, nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* cells[3] = {block(nullptr, "width: 40px", "td", row), block(nullptr, nullptr, "td", row),
+        block(nullptr, "width: 30px", "td", row)};
+    for (DomElement* cell : cells) ASSERT_NE(cell, nullptr);
+    row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* first = block(nullptr, "width: 120px", "td", row); ASSERT_NE(first, nullptr);
+    ASSERT_TRUE(first->set_attribute("colspan", "2")); ASSERT_NE(block(nullptr, nullptr, "td", row), nullptr);
+    row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    ASSERT_NE(block(nullptr, nullptr, "td", row), nullptr);
+    DomElement* second = block(nullptr, "width: 140px", "td", row); ASSERT_NE(second, nullptr);
+    ASSERT_TRUE(second->set_attribute("colspan", "2"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    LayoutViewNode* grid = source_fragment(tree, table, VIEW_FRAGMENT_BODY, true); ASSERT_NE(grid, nullptr);
+    EXPECT_FLOAT_EQ(grid->rect.width, 192.0f); EXPECT_FLOAT_EQ(grid->rect.x, 24.0f);
+    const float widths[] = {40.0f, 106.0f, 30.0f};
+    for (size_t i = 0; i < 3; i++) {
+        LayoutViewNode* cell = source_fragment(tree, cells[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(cell, nullptr);
+        EXPECT_FLOAT_EQ(cell->rect.width, widths[i]);
+    }
+    EXPECT_FLOAT_EQ(source_fragment(tree, first, VIEW_FRAGMENT_BODY, true)->rect.width, 150.0f);
+    EXPECT_FLOAT_EQ(source_fragment(tree, second, VIEW_FRAGMENT_BODY, true)->rect.width, 140.0f);
+    EXPECT_EQ(first->parent->as_element()->first_child, first); EXPECT_FLOAT_EQ(first->width, 0.0f);
+}
+
+TEST_F(SecondaryViewTest, SpanningCellsUseActualTracksOnAlternatingPagesAndRetainTheirEdition) {
+    stylesheet("@page { size: 240px 100px; margin: 10px } @page :left { size: 200px 100px } "
+        "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
+    DomElement* row = block(nullptr, "height: 60px", "tr", table); ASSERT_NE(row, nullptr);
+    ASSERT_NE(block("A", "width: 25%", "td", row), nullptr);
+    ASSERT_NE(block("B", "width: 25%", "td", row), nullptr); ASSERT_NE(block("C", nullptr, "td", row), nullptr);
+    DomElement* spanning[2] = {};
+    for (DomElement*& cell : spanning) {
+        row = block(nullptr, "height: 60px", "tr", table); ASSERT_NE(row, nullptr);
+        cell = block("A", nullptr, "td", row); ASSERT_NE(cell, nullptr);
+        ASSERT_TRUE(cell->set_attribute("colspan", "2")); ASSERT_NE(block("C", nullptr, "td", row), nullptr);
+    }
+    ViewTree* retained = nullptr;
+    for (const char* layout : {"table-layout: fixed; width: 100%; border-spacing: 4px 2px",
+            "table-layout: auto; width: 100%; border-spacing: 4px 2px"}) {
+        SCOPED_TRACE(layout); ASSERT_TRUE(table->set_attribute("style", layout));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 3u);
+        const float widths[] = {86.0f, 106.0f};
+        for (size_t i = 0; i < 2; i++) {
+            LayoutViewNode* cell = source_fragment(tree, spanning[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(cell, nullptr);
+            EXPECT_EQ(occurrence_page(cell), i + 2); EXPECT_FLOAT_EQ(cell->rect.width, widths[i]);
+            EXPECT_FLOAT_EQ(cell->rect.x, 14.0f);
+        }
+        if (!retained) retained = tree;
+    }
+    EXPECT_FLOAT_EQ(source_fragment(retained, spanning[0], VIEW_FRAGMENT_BODY, true)->rect.width, 86.0f);
+}
+
+TEST_F(SecondaryViewTest, AutomaticSpansApplyShorterConstraintsBeforeEarlierLongerSpans) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* table = block(nullptr, "border-spacing: 4px 2px", "table"); ASSERT_NE(table, nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* longest = block(nullptr, "width: 180px", "td", row); ASSERT_NE(longest, nullptr);
+    ASSERT_TRUE(longest->set_attribute("colspan", "3"));
+    row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* shorter = block(nullptr, "width: 160px", "td", row); ASSERT_NE(shorter, nullptr);
+    ASSERT_TRUE(shorter->set_attribute("colspan", "2")); ASSERT_NE(block(nullptr, nullptr, "td", row), nullptr);
+    row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* cells[] = {block(nullptr, "width: 20px", "td", row), block(nullptr, "width: 40px", "td", row),
+        block(nullptr, "width: 30px", "td", row)};
+    for (DomElement* cell : cells) ASSERT_NE(cell, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_FLOAT_EQ(source_fragment(tree, table, VIEW_FRAGMENT_BODY, true)->rect.width, 202.0f);
+    const float widths[] = {52.0f, 104.0f, 30.0f};
+    for (size_t i = 0; i < 3; i++)
+        EXPECT_FLOAT_EQ(source_fragment(tree, cells[i], VIEW_FRAGMENT_BODY, true)->rect.width, widths[i]);
+    EXPECT_FLOAT_EQ(source_fragment(tree, longest, VIEW_FRAGMENT_BODY, true)->rect.width, 194.0f);
+    EXPECT_FLOAT_EQ(source_fragment(tree, shorter, VIEW_FRAGMENT_BODY, true)->rect.width, 160.0f);
+}
+
+TEST_F(SecondaryViewTest, ColumnSpanNormalizationKeepsOneCellCursorEvenAtTheHtmlLimit) {
+    stylesheet("@page { size: 240px 100px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { vertical-align: top; white-space: pre-wrap; orphans: 1; widows: 1 }");
+    DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* cell = block("A\nB\nC\nD\nE\nF\nG\nH", nullptr, "td", row); ASSERT_NE(cell, nullptr);
+    for (const char* span : {"0", "-3", "invalid", "1001"}) {
+        SCOPED_TRACE(span); ASSERT_TRUE(cell->set_attribute("colspan", span));
+        for (const char* css : {"table-layout: fixed; width: 100%; border-spacing: 0", "table-layout: auto; width: 100%; border-spacing: 0"}) {
+            SCOPED_TRACE(css); ASSERT_TRUE(table->set_attribute("style", css));
+            ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+            ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+            EXPECT_EQ(tree->model->page_count, 2u);
+            for (LayoutViewNode* box = view_tree_node_state(tree, cell, false)->first_occurrence; box; box = box->next_occurrence)
+                if (box->paint_box) EXPECT_NEAR(box->rect.width, 220.0f, .002f);
+            size_t bytes = 0;
+            for (LayoutViewNode* text = view_tree_node_state(tree, cell->first_child, false)->first_occurrence;
+                    text; text = text->next_occurrence) { EXPECT_EQ(text->text_start, bytes); bytes += text->text_length; }
+            EXPECT_EQ(bytes, 15u);
+        }
+    }
+}
+
+TEST_F(SecondaryViewTest, UnsupportedRowSpansAndUnequalSpanningGridsFailBeforePublishing) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* table = fixed_table(1); ASSERT_NE(table, nullptr);
+    DomElement* cell = table->first_child->as_element()->first_child->as_element()->first_child->as_element();
+    const struct { const char* attribute; const char* value; } cases[] = {{"rowspan", "2"}, {"rowspan", "0"},
+        {"colspan", "2"}, {"colspan", "1001"}};
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.value); ASSERT_TRUE(cell->set_attribute(test.attribute, test.value));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+        EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u); ASSERT_NE(diagnostic.reason, nullptr);
+        ASSERT_TRUE(cell->remove_attribute(test.attribute));
+    }
+    ASSERT_TRUE(cell->set_attribute("colspan", "2"));
+    ASSERT_NE(table_cell_text(cell, ""), nullptr);
+    PagedLayoutOptions options = paged_layout_options_default(); options.max_items = 2;
+    PagedLayoutDiagnostic diagnostic = {}; ViewTree* tree = secondary();
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_STREQ(diagnostic.reason, "table grid exceeds its track budget");
+    EXPECT_EQ(tree->model->page_count, 0u);
+}
+
+TEST_F(SecondaryViewTest, PercentageColumnSpansUseEachAlgorithmsTrackBudget) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* cell = block("A", "width: 50%", "td", row); ASSERT_NE(cell, nullptr);
+    ASSERT_TRUE(cell->set_attribute("colspan", "2")); ASSERT_NE(block("B", nullptr, "td", row), nullptr);
+    const struct { const char* css; float width; } cases[] = {
+        {"table-layout: fixed; width: 100%; border-spacing: 4px 2px", 102.0f},
+        {"table-layout: auto; width: 100%; border-spacing: 4px 2px", 106.0f}};
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.css); ASSERT_TRUE(table->set_attribute("style", test.css));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        LayoutViewNode* box = source_fragment(tree, cell, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+        EXPECT_FLOAT_EQ(box->rect.width, test.width);
+        LayoutViewNode* next = source_fragment(tree, cell->next_sibling, VIEW_FRAGMENT_BODY, true); ASSERT_NE(next, nullptr);
+        EXPECT_FLOAT_EQ(next->rect.x, box->rect.x + box->rect.width + 4.0f);
+        EXPECT_FLOAT_EQ(next->rect.x + next->rect.width, 226.0f);
+    }
+}
+
 TEST_F(SecondaryViewTest, TableSpacingUsesSelectedInheritanceHtmlDefaultsAndCalculatedLengths) {
     stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
     ASSERT_TRUE(source->set_attribute("style", "border-spacing: .5em 1em; font-size: 8px"));
@@ -2072,7 +2263,7 @@ TEST_F(SecondaryViewTest, OversizedTableCellsContinueIndependentlyWithoutRepeati
     stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
         "td { padding: 2px; border: 1px solid black; vertical-align: top; white-space: pre-wrap; orphans: 1; widows: 1 }");
     DomElement* header = nullptr; DomElement* footer = nullptr;
-    DomElement* table = fixed_table(1, &header, &footer); ASSERT_NE(table, nullptr);
+    DomElement* table = fixed_table(1, &header, &footer, "2"); ASSERT_NE(table, nullptr);
     DomElement* row = footer->next_sibling->as_element()->first_child->as_element();
     DomElement* tall = row->first_child->as_element();
     DomText* text = table_cell_text(tall, "A\nB\nC\nD\nE\nF\nG\nH\nI\nJ"); ASSERT_NE(text, nullptr);
@@ -2107,7 +2298,7 @@ TEST_F(SecondaryViewTest, OversizedTableCellsContinueIndependentlyWithoutRepeati
 TEST_F(SecondaryViewTest, TableCellWidowsChooseAnEarlierLegalBoundaryBeforeRelaxation) {
     stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
         "td { padding: 2px; border: 1px solid black; vertical-align: top; white-space: pre-wrap; orphans: 2; widows: 2 }");
-    DomElement* footer = nullptr; DomElement* table = fixed_table(1, nullptr, &footer); ASSERT_NE(table, nullptr);
+    DomElement* footer = nullptr; DomElement* table = fixed_table(1, nullptr, &footer, "2"); ASSERT_NE(table, nullptr);
     DomElement* cell = footer->next_sibling->as_element()->first_child->as_element()->first_child->as_element();
     DomText* text = table_cell_text(cell, "A\nB\nC\nD\nE\nF\nG"); ASSERT_NE(text, nullptr);
     for (const char* layout : {"table-layout: fixed; width: 100%; border-spacing: 0", "table-layout: auto; width: 100%; border-spacing: 0"}) {
@@ -2126,7 +2317,7 @@ TEST_F(SecondaryViewTest, TableCellWidowsChooseAnEarlierLegalBoundaryBeforeRelax
 TEST_F(SecondaryViewTest, SplitTableCellDecorationsHonorSliceAndClone) {
     stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
         "td { padding: 2px; border: 1px solid black; vertical-align: top; white-space: pre-wrap; orphans: 1; widows: 1 }");
-    DomElement* footer = nullptr; DomElement* table = fixed_table(1, nullptr, &footer); ASSERT_NE(table, nullptr);
+    DomElement* footer = nullptr; DomElement* table = fixed_table(1, nullptr, &footer, "2"); ASSERT_NE(table, nullptr);
     DomElement* cell = footer->next_sibling->as_element()->first_child->as_element()->first_child->as_element();
     ASSERT_NE(table_cell_text(cell, "A\nB\nC\nD\nE\nF\nG\nH\nI\nJ"), nullptr);
     for (bool clone : {false, true}) {
@@ -2168,6 +2359,265 @@ TEST_F(SecondaryViewTest, RetainedTablePagesKeepTheirProducerAndPaintAfterSource
             EXPECT_EQ(memcmp((uint8_t*)before->pixels + y * before->pitch,
                 (uint8_t*)after->pixels + y * after->pitch, (size_t)before->width * 4), 0);
         image_surface_destroy(before); image_surface_destroy(after);
+    }
+}
+
+TEST_F(SecondaryViewTest, TableGroupForcedBreaksRepeatFurnitureAndDoNotCreateTrailingPages) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { padding: 2px; border: 1px solid black; vertical-align: top }");
+    DomElement* header = nullptr; DomElement* footer = nullptr;
+    DomElement* table = fixed_table(2, &header, &footer); ASSERT_NE(table, nullptr);
+    DomElement* first = table->last_child->as_element();
+    ASSERT_TRUE(first->set_attribute("style", "break-before: page; break-after: page"));
+    DomElement* second = block(nullptr, "break-before: page; break-after: page", "tbody", table);
+    DomElement* third = block(nullptr, "break-before: page; break-after: page", "tbody", table);
+    ASSERT_TRUE(table_rows(second, 2)); ASSERT_TRUE(table_rows(third, 1));
+    DomText* trailing = DomText::create_copy("\n  \t", 4, source); ASSERT_NE(trailing, nullptr);
+    ASSERT_TRUE(source->DomNode::append_child(trailing));
+    for (const char* algorithm : {"fixed", "auto"}) {
+        SCOPED_TRACE(algorithm);
+        StrBuf* css = strbuf_new(); strbuf_append_format(css, "table-layout: %s; width: 100%%; border-spacing: 4px 2px", algorithm);
+        ASSERT_TRUE(table->set_attribute("style", css->str)); strbuf_free(css);
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 3u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        ViewNodeState* whitespace = view_tree_node_state(tree, trailing, false); ASSERT_NE(whitespace, nullptr);
+        ASSERT_NE(whitespace->first_occurrence, nullptr); EXPECT_EQ(occurrence_page(whitespace->first_occurrence), 3u);
+        EXPECT_EQ(whitespace->first_occurrence->text_length, 4u); EXPECT_FLOAT_EQ(whitespace->first_occurrence->rect.height, 0.0f);
+        size_t page = 0;
+        for (DomElement* group : {first, second, third}) {
+            page++;
+            for (DomNode* row = group->first_child; row; row = row->next_sibling) {
+                ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+                EXPECT_EQ(state->occurrence_count, 1u); EXPECT_EQ(occurrence_page(state->first_occurrence), page);
+            }
+        }
+        for (DomElement* group : {header, footer}) {
+            ViewNodeState* state = view_tree_node_state(tree, group->first_child, false); ASSERT_NE(state, nullptr);
+            EXPECT_EQ(state->occurrence_count, 3u);
+        }
+    }
+    EXPECT_EQ(first->parent, table); EXPECT_EQ(second->parent, table); EXPECT_EQ(third->parent, table);
+}
+
+TEST_F(SecondaryViewTest, AdjoiningTableGroupBreaksResolveSidednessBeforeInsertingBlankPages) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* header = nullptr; DomElement* table = fixed_table(1, &header); ASSERT_NE(table, nullptr);
+    ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", "break-after: left"));
+    DomElement* second = block(nullptr, "break-before: right", "tbody", table); ASSERT_TRUE(table_rows(second, 1));
+    for (bool row_override : {false, true}) {
+        ASSERT_TRUE(second->first_child->as_element()->set_attribute("style", row_override ? "break-before: left" : ""));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, row_override ? 2u : 3u);
+        ViewNodeState* state = view_tree_node_state(tree, second->first_child, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), row_override ? 2u : 3u);
+        state = view_tree_node_state(tree, header->first_child, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, 2u);
+        if (!row_override && tree->model->page_count == 3u) EXPECT_TRUE(tree->model->pages.get()[1]->blank);
+    }
+}
+
+TEST_F(SecondaryViewTest, AvoidedTableGroupsMoveTogetherWithSpacingAndColumnSpans) {
+    stylesheet("@page { size: 240px 120px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { padding: 2px; border: 1px solid black; vertical-align: top }");
+    DomElement* table = fixed_table(2, nullptr, nullptr, "2"); ASSERT_NE(table, nullptr);
+    DomElement* second = block(nullptr, "break-inside: avoid", "tbody", table); ASSERT_TRUE(table_rows(second, 2, "Kept A", "Kept B", "2"));
+    for (const char* algorithm : {"fixed", "auto"}) {
+        StrBuf* css = strbuf_new(); strbuf_append_format(css, "table-layout: %s; width: 100%%; border-spacing: 4px 2px", algorithm);
+        ASSERT_TRUE(table->set_attribute("style", css->str)); strbuf_free(css);
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        for (DomNode* row = second->first_child; row; row = row->next_sibling) {
+            ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+            EXPECT_EQ(state->occurrence_count, 1u); EXPECT_EQ(occurrence_page(state->first_occurrence), 2u);
+        }
+    }
+}
+
+TEST_F(SecondaryViewTest, OversizedAvoidedTableGroupsRelaxWithoutLosingOrRepeatingRows) {
+    stylesheet("@page { size: 240px 120px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { padding: 2px; border: 1px solid black; vertical-align: top } thead, tfoot { break-inside: avoid }");
+    DomElement* table = fixed_table(6); ASSERT_NE(table, nullptr);
+    DomElement* body = table->last_child->as_element(); ASSERT_TRUE(body->set_attribute("style", "break-inside: avoid"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 1u);
+    size_t index = 0;
+    for (DomNode* row = body->first_child; row; row = row->next_sibling) {
+        ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, 1u); EXPECT_EQ(occurrence_page(state->first_occurrence), 1u + index++ / 3u);
+    }
+}
+
+TEST_F(SecondaryViewTest, ForcedRowBreaksOverrideTableGroupAvoidanceWithoutRelaxation) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { padding: 2px; border: 1px solid black; vertical-align: top }");
+    DomElement* table = fixed_table(4); ASSERT_NE(table, nullptr);
+    DomElement* body = table->last_child->as_element(); ASSERT_TRUE(body->set_attribute("style", "break-inside: avoid"));
+    ASSERT_TRUE(body->first_child->next_sibling->as_element()->set_attribute("style", "break-before: page"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+    size_t index = 0;
+    for (DomNode* row = body->first_child; row; row = row->next_sibling) {
+        ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), index++ ? 2u : 1u);
+    }
+}
+
+TEST_F(SecondaryViewTest, TableGroupBoundaryAvoidanceCanChooseAnEarlierRow) {
+    stylesheet("@page { size: 240px 120px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { padding: 2px; border: 1px solid black; vertical-align: top }");
+    DomElement* table = fixed_table(3); ASSERT_NE(table, nullptr);
+    DomElement* first = table->last_child->as_element();
+    DomElement* second = block(nullptr, nullptr, "tbody", table); ASSERT_TRUE(table_rows(second, 1));
+    for (bool before : {false, true}) {
+        ASSERT_TRUE(first->set_attribute("style", before ? "" : "break-after: avoid"));
+        ASSERT_TRUE(second->set_attribute("style", before ? "break-before: avoid" : ""));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        ViewNodeState* last = view_tree_node_state(tree, first->last_child, false); ASSERT_NE(last, nullptr);
+        ViewNodeState* next = view_tree_node_state(tree, second->first_child, false); ASSERT_NE(next, nullptr);
+        EXPECT_EQ(occurrence_page(last->first_occurrence), 2u); EXPECT_EQ(occurrence_page(next->first_occurrence), 2u);
+    }
+}
+
+TEST_F(SecondaryViewTest, AvoidedTableGroupsRetainIndependentOversizedCellContinuations) {
+    stylesheet("@page { size: 240px 120px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+        "td { padding: 2px; border: 1px solid black; vertical-align: top; white-space: pre-wrap; orphans: 1; widows: 1 }");
+    DomElement* table = fixed_table(1); ASSERT_NE(table, nullptr);
+    DomElement* body = table->last_child->as_element(); ASSERT_TRUE(body->set_attribute("style", "break-inside: avoid"));
+    DomElement* cell = body->first_child->as_element()->first_child->as_element();
+    DomText* text = table_cell_text(cell, "A\nB\nC\nD\nE\nF\nG\nH\nI\nJ"); ASSERT_NE(text, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 1u);
+    ViewNodeState* state = view_tree_node_state(tree, text, false); ASSERT_NE(state, nullptr);
+    size_t bytes = 0;
+    for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence) {
+        EXPECT_EQ(fragment->text_start, bytes); bytes += fragment->text_length;
+    }
+    EXPECT_EQ(bytes, text->length);
+}
+
+TEST_F(SecondaryViewTest, TableGroupEdgeKeepsReachAdjoiningOuterBlocks) {
+    stylesheet("@page { size: 240px 100px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    for (bool before : {false, true}) {
+        DomElement* leading = block("Leading", "height: 40px"); ASSERT_NE(leading, nullptr);
+        DomElement* kept = before ? block("Kept", "height: 20px") : nullptr;
+        DomElement* table = fixed_table(1); ASSERT_NE(table, nullptr);
+        ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", before ? "break-before: avoid" : "break-after: avoid"));
+        DomElement* tail = before ? nullptr : block("Tail");
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        ViewNodeState* state = view_tree_node_state(tree, table->last_child->as_element()->first_child, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), 2u);
+        state = view_tree_node_state(tree, before ? kept : tail, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), 2u);
+        ASSERT_TRUE(source->DomNode::remove_child(leading)); ASSERT_TRUE(source->DomNode::remove_child(table));
+        ASSERT_TRUE(source->DomNode::remove_child(before ? kept : tail));
+    }
+}
+
+TEST_F(SecondaryViewTest, GroupBreakAfterAndFollowingBlockBeforeShareOneSidedBoundary) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* header = nullptr; DomElement* table = fixed_table(1, &header); ASSERT_NE(table, nullptr);
+    ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", "break-after: left"));
+    DomElement* tail = block("Tail", "break-before: right"); ASSERT_NE(tail, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u); EXPECT_TRUE(tree->model->pages.get()[1]->blank);
+    ViewNodeState* table_state = view_tree_node_state(tree, table, false); ASSERT_NE(table_state, nullptr);
+    EXPECT_EQ(table_state->occurrence_count, 1u);
+    ViewNodeState* state = view_tree_node_state(tree, header->first_child, false); ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->occurrence_count, 1u);
+    state = view_tree_node_state(tree, tail, false); ASSERT_NE(state, nullptr);
+    EXPECT_EQ(occurrence_page(state->first_occurrence), 3u);
+}
+
+TEST_F(SecondaryViewTest, AdjoiningTablesResolveFirstGroupSidednessAndCloseBeforeAdvancing) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* first = fixed_table(1); DomElement* second = fixed_table(1);
+    ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
+    ASSERT_TRUE(first->last_child->as_element()->set_attribute("style", "break-after: right"));
+    ASSERT_TRUE(second->last_child->as_element()->set_attribute("style", "break-before: left"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    for (DomElement* table : {first, second}) {
+        ViewNodeState* state = view_tree_node_state(tree, table, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, 1u);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), table == first ? 1u : 2u);
+    }
+}
+
+TEST_F(SecondaryViewTest, TerminalTableGroupBreakDistinguishesCollapsedAndPreservedWhitespace) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* table = fixed_table(1); ASSERT_NE(table, nullptr);
+    ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", "break-after: page"));
+    DomText* trailing = DomText::create_copy("\n", 1, source); ASSERT_NE(trailing, nullptr);
+    ASSERT_TRUE(source->DomNode::append_child(trailing));
+    for (bool preserve : {false, true}) {
+        ASSERT_TRUE(source->set_attribute("style", preserve ? "white-space: pre-wrap" : "white-space: normal"));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, preserve ? 2u : 1u);
+        ViewNodeState* state = view_tree_node_state(tree, trailing, false); ASSERT_NE(state, nullptr);
+        ASSERT_NE(state->first_occurrence, nullptr); EXPECT_EQ(occurrence_page(state->first_occurrence), preserve ? 2u : 1u);
+        EXPECT_FLOAT_EQ(state->first_occurrence->rect.height, preserve ? 12.0f : 0.0f);
+        EXPECT_EQ(state->first_occurrence->text_length, 1u);
+    }
+}
+
+TEST_F(SecondaryViewTest, TerminalTableGroupBreakRetainsFollowingZeroHeightInsertionAnchors) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p, div { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* table = fixed_table(1); ASSERT_NE(table, nullptr);
+    ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", "break-after: page"));
+    DomElement* floating = block("Float", "float: top; float-reference: page; height: 20px"); ASSERT_NE(floating, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    ViewNodeState* state = view_tree_node_state(tree, floating, false); ASSERT_NE(state, nullptr);
+    size_t painted = 0;
+    for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence)
+        if (fragment->paint_box) { EXPECT_EQ(occurrence_page(fragment), 2u); painted++; }
+    EXPECT_EQ(painted, 1u);
+}
+
+TEST_F(SecondaryViewTest, AdditionalHeaderGroupsUseBodyGroupBreaksAndAreNotRepeated) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* header = nullptr; DomElement* table = fixed_table(1, &header); ASSERT_NE(table, nullptr);
+    DomElement* extra = block(nullptr, "break-before: page; break-inside: avoid", "thead", table);
+    ASSERT_TRUE(table_rows(extra, 2));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+    ViewNodeState* state = view_tree_node_state(tree, header->first_child, false); ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->occurrence_count, 2u);
+    for (DomNode* row = extra->first_child; row; row = row->next_sibling) {
+        state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, 1u); EXPECT_EQ(occurrence_page(state->first_occurrence), 2u);
+        EXPECT_EQ(state->first_occurrence->role, VIEW_FRAGMENT_BODY);
+    }
+}
+
+TEST_F(SecondaryViewTest, UnsupportedRepeatedGroupBreaksAndGroupHeightsAreDiagnosed) {
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* table = fixed_table(1, &header, &footer);
+    ASSERT_NE(table, nullptr);
+    for (DomElement* group : {header, footer, table->last_child->as_element()}) {
+        for (const char* policy : {"height: 40px", "break-before: page", "break-after: right"}) {
+            if (group != header && group != footer && strcmp(policy, "height: 40px")) continue;
+            ASSERT_TRUE(group->set_attribute("style", policy));
+            ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+            EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+            EXPECT_EQ(tree->model->page_count, 0u); EXPECT_FALSE(tree->model->committed);
+            ASSERT_NE(diagnostic.reason, nullptr); ASSERT_TRUE(group->set_attribute("style", ""));
+        }
     }
 }
 
