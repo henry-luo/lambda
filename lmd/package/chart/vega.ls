@@ -1,6 +1,7 @@
 // chart/vega.ls — Adapt the supported declarative Vega-Lite subset to native chart specifications.
 
 import parse: .parse
+import cfg: .config
 
 let aliases = {
     strokeWidth: "stroke_width", cornerRadius: "corner_radius", innerRadius: "inner_radius",
@@ -12,7 +13,8 @@ let aliases = {
     labelLimit: "label_limit", labelFontSize: "label_font_size", labelColor: "label_color",
     titleFontSize: "title_font_size", titleColor: "title_color", titlePadding: "title_padding",
     gridColor: "grid_color", gridWidth: "grid_width", gridDash: "grid_dash", domainColor: "domain_color",
-    symbolSize: "symbol_size", symbolPadding: "symbol_padding", rowHeight: "row_height"
+    symbolSize: "symbol_size", symbolPadding: "symbol_padding", rowHeight: "row_height",
+    ignorePeers: "ignore_peers"
 }
 
 fn normalize(options) {
@@ -34,6 +36,7 @@ pub fn convert(vl) {
         data: vl.data.values, data_source: vl.data, datasets: vl.datasets,
         mark: convert_mark(vl.mark), encoding: convert_encoding(vl.encoding),
         transform: convert_transforms(vl.transform), config: convert_config(vl.config),
+        resolve: normalize(vl.resolve),
         layer: if (vl.layer != null) [for (layer in vl.layer) convert(layer)] else null,
         facet: null
     };
@@ -61,7 +64,10 @@ fn inherit(parent, child) {
         width: if (child.width != null) child.width else parent.width,
         height: if (child.height != null) child.height else parent.height,
         padding: if (child.padding != null) child.padding else parent.padding,
-        config: {*:parse.attributes(parent.config), *:parse.attributes(child.config)}}
+        transform: [for (step in parent.transform) step, for (step in child.transform) step],
+        encoding: {*:parse.attributes(parent.encoding), *:parse.attributes(child.encoding)},
+        resolve: cfg.inherit(parent.resolve, child.resolve),
+        config: cfg.inherit(parent.config, child.config)}
 }
 
 fn convert_mark(mark_json) {
@@ -123,6 +129,13 @@ fn convert_transform(step) {
          else error("chart: Vega calculate strings are unsupported; use a Lambda calculation"))
     else if (step.fold != null) <fold fields: step.fold, as: step.as>
     else if (step.flatten != null) <flatten fields: step.flatten, as: step.as>
+    else if (step.window != null) {type: "window", *:normalize(step)}
+    // Foreign rows and fallback values are data; option-name aliases must not rewrite their keys.
+    else if (step.lookup != null) {*:step, type: "lookup"}
+    else if (step.density != null) {type: "density", *:normalize(step), field: step.density}
+    else if (step.regression != null) {type: "regression", *:normalize(step),
+        x: step.on, y: step.regression, r_squared_name: "rSquared"}
+    else if (step.loess != null) {type: "loess", *:normalize(step), x: step.on, y: step.loess}
     else if (step.type != null) step
     else error("chart: unsupported Vega transform")
 }

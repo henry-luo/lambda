@@ -73,6 +73,9 @@ pub fn nice_domain(dlo, dhi) {
 // Numeric helpers
 // ============================================================
 
+pub fn finite_number(value) => value is number and
+    not (value is nan) and value != inf and value != -inf
+
 // linear interpolation
 pub fn lerp(a, b, t) {
     float(a) + (float(b) - float(a)) * float(t)

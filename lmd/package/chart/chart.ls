@@ -15,6 +15,7 @@ import stack: .stack
 import cfg: .config
 import ann: .annotation
 import cloud: .wordcloud
+import source: .source
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
@@ -39,34 +40,27 @@ pub fn render_spec(spec) {
 }
 
 fn resolve_data(spec) {
-    let source = spec.data_source;
-    if (spec.data != null) spec.data
-    else if (source.values != null) source.values
-    else if (source.name != null) (
-        let dataset = spec.datasets[source.name],
-        if (dataset == null) error("chart: unknown dataset " ++ source.name)
-        else if (dataset.values != null) dataset.values else dataset)
-    else if (source.url != null) (
-        // Acknowledge the input effect and return its diagnostic through the chart value-error API (S7.4.1–S7.4.2).
-        let loaded = if (source.format != null) input(source.url, source.format) ^ { ~ }
-            else input(source.url) ^ { ~ },
-        loaded)
-    else []
+    source.resolve(spec.data, spec.data_source, spec.datasets)
 }
 
-fn dispatch(spec) {
+fn prepare_spec(spec) {
     let raw_data = resolve_data(spec);
     let data = if (raw_data is error) raw_data
         else if (not (raw_data is array)) error("chart: data must be an array")
-        else transform.apply_transforms(raw_data, spec.transform);
+        else transform.apply_transforms(raw_data, spec.transform, spec.datasets);
     let partition_fields = [for (field in [spec.facet.field,
         if (spec.facet.row is string) spec.facet.row else spec.facet.row.field,
         if (spec.facet.column is string) spec.facet.column else spec.facet.column.field] where field != null) field];
     let prepared = if (data is error) {data: data}
         else if (spec.layer != null) {data: data, encoding: spec.encoding}
         else transform.prepare_encoding(data, spec.encoding, partition_fields);
-    let resolved_spec = {*:spec, data: prepared.data, encoding: prepared.encoding, transform: null};
-    if (prepared.data is error) prepared.data
+    {*:spec, data: prepared.data, encoding: prepared.encoding, transform: null}
+}
+
+fn dispatch(spec) => dispatch_prepared(prepare_spec(spec))
+
+fn dispatch_prepared(resolved_spec) {
+    if (resolved_spec.data is error) resolved_spec.data
     else if (resolved_spec.facet) render_faceted(resolved_spec)
     else if (resolved_spec.layer) render_layered(resolved_spec)
     else if (resolved_spec.mark and resolved_spec.mark.kind == "arc") render_arc(resolved_spec)
@@ -249,16 +243,7 @@ fn render_layered(spec) {
     let layers = spec.layer;
     let data = if (spec.data) spec.data else [];
 
-    let layer_specs = [for (layer in layers) (
-        let raw = if (layer.data != null) layer.data
-            else if (layer.data_source.name != null or layer.data_source.url != null)
-                resolve_data({*:layer, datasets: spec.datasets}) else data,
-        let transformed = if (raw is error) raw else transform.apply_transforms(raw, layer.transform),
-        let prepared = if (transformed is error) {data: transformed}
-            else transform.prepare_encoding(transformed, {*:spec.encoding, *:layer.encoding}),
-        {*:layer, data: prepared.data, encoding: prepared.encoding,
-            config: {*:parse.attributes(spec.config), *:parse.attributes(layer.config)}}
-    )];
+    let layer_specs = prepare_layers(layers, spec);
     let data_error = util.first_error(layer_specs |> ~.data);
     if (data_error is error) data_error else {
     let enc = if (len(layer_specs) > 0) layer_specs[0].encoding else {};
@@ -316,6 +301,26 @@ fn render_layered(spec) {
     if (failure is error) failure
     else assemble_svg(spec, lay, all_marks, x_axis_el, y_axis_el, null, legend_el, theme)
     }
+}
+
+// Resolve dataflow at each layer boundary before flattening leaves into the shared plot.
+fn prepare_layers(layers, parent) {
+    [for (layer in layers,
+        let datasets = {*:parse.attributes(parent.datasets), *:parse.attributes(layer.datasets)},
+        let own_data = layer.data != null or layer.data_source.values != null or
+            layer.data_source.name != null or layer.data_source.url != null,
+        let raw = if (own_data) resolve_data({*:layer, datasets: datasets}) else parent.data,
+        let transformed = if (raw is error) raw else if (not (raw is array)) error("chart: data must be an array")
+            else transform.apply_transforms(raw, layer.transform, datasets),
+        let encoding = {*:cfg.settings(parent.encoding), *:cfg.settings(layer.encoding)},
+        let inherited = {*:layer, data: transformed, encoding: encoding, datasets: datasets,
+            config: cfg.inherit(parent.config, layer.config), transform: null},
+        let prepared = if (transformed is error) {data: transformed}
+            else if (layer.layer != null) null else transform.prepare_encoding(transformed, encoding),
+        let leaves = if (transformed is error) [inherited]
+            else if (layer.layer != null) prepare_layers(layer.layer, inherited)
+            else [{*:inherited, data: prepared.data, encoding: prepared.encoding}])
+        for (leaf in leaves) leaf]
 }
 
 // ============================================================
@@ -713,11 +718,16 @@ fn render_repeat(spec) {
 // substitute {repeat: "row"} and {repeat: "column"} in template and render
 fn substitute_and_render(tmpl, row_field, col_field) {
     let spec = if (tmpl is element) parse.parse_chart(tmpl) else tmpl;
-    let enc = spec.encoding;
-    let new_enc = substitute_encoding(enc, row_field, col_field);
-    let new_spec = {*:spec, encoding: shared_encoding(new_enc, resolve_data(spec), spec.mark.kind,
-        {scale: {x: "independent", y: "independent"}})};
-    dispatch(new_spec)
+    let prepared = prepare_spec(substitute_spec(spec, row_field, col_field));
+    // Derived color fields need their transformed values before repeat domains are fixed.
+    if (prepared.data is error) prepared.data
+    else dispatch_prepared({*:prepared, encoding: shared_encoding(prepared.encoding, prepared.data, spec.mark.kind,
+        {scale: {x: "independent", y: "independent"}})})
+}
+
+fn substitute_spec(spec, row_field, col_field) {
+    {*:spec, encoding: substitute_encoding(spec.encoding, row_field, col_field),
+        layer: if (spec.layer != null) [for (layer in spec.layer) substitute_spec(layer, row_field, col_field)] else null}
 }
 
 fn substitute_encoding(enc, row_field, col_field) {
@@ -742,7 +752,10 @@ fn shared_encoding(encoding, data, mark_type, resolve) {
 }
 
 fn substitute_channel(channel, row_field, col_field) {
-    if (channel and channel.field and channel.field.repeat)
-        {*:channel, field: if (channel.field.repeat == "column") col_field else row_field}
+    if (channel is array) [for (item in channel) substitute_channel(item, row_field, col_field)]
+    else if (channel is map) map([for (key, value in channel) for (item in [string(key),
+        if (string(key) == "field" and value.repeat != null)
+            (if (value.repeat == "column") col_field else row_field)
+        else substitute_channel(value, row_field, col_field)]) item])
     else channel
 }

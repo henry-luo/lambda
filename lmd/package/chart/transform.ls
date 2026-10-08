@@ -1,22 +1,27 @@
 // chart/transform.ls — Data transform operations for the chart library
-// Applied in order before encoding: filter, aggregate, calculate, bin, sort, fold, flatten
+// Applied in source order before encoding, including analytical and join operations.
 
 import util: .util
 import parse: .parse
+import records: .records
+import window: .window
+import source: .source
+import statistics: .statistics
 
 // ============================================================
 // Public API: Apply a sequence of transforms to data
 // ============================================================
 
-pub fn apply_transforms(data, transform_el) {
+pub fn apply_transforms(data, transform_el, datasets = null) {
     if (not transform_el) data
-    else (let n = len(transform_el),
+    else (let steps = if (transform_el is element) content(transform_el) else transform_el,
+          let n = len(steps),
           if (n == 0) data
-          else apply_transform_list(data, transform_el, 0, n))
+          else apply_transform_list(data, steps, 0, n, datasets))
 }
 
 // recursive helper: apply transforms one at a time
-fn apply_transform_list(data, transforms, index: int, count: int) {
+fn apply_transform_list(data, transforms, index: int, count: int, datasets) {
     if (data is error or index >= count) data
     else (let t = transforms[index],
           let tag = if (t is element) string(name(t)) else t.type,
@@ -28,8 +33,13 @@ fn apply_transform_list(data, transforms, index: int, count: int) {
               else if (tag == "bin") apply_bin(data, t)
               else if (tag == "fold") apply_fold(data, t)
               else if (tag == "flatten") apply_flatten(data, t)
+              else if (tag == "window") window.evaluate(data, t)
+              else if (tag == "lookup") apply_lookup(data, t, datasets)
+              else if (tag == "density" or tag == "kde") statistics.density(data, t)
+              else if (tag == "regression") statistics.regression(data, t)
+              else if (tag == "loess") statistics.loess(data, t)
               else error("chart: unsupported transform " ++ string(tag)),
-          apply_transform_list(result, transforms, index + 1, count))
+          apply_transform_list(result, transforms, index + 1, count, datasets))
 }
 
 // ============================================================
@@ -45,13 +55,7 @@ fn apply_filter(data, filter_el) {
 // ============================================================
 
 fn apply_sort(data, sort_el) {
-    let field_name = sort_el.field;
-    let order = if (sort_el.order) sort_el.order else "ascending";
-    if order == "descending" {
-        [for (d in data order by d[field_name] desc) d]
-    } else {
-        [for (d in data order by d[field_name]) d]
-    }
+    records.sort_rows(data, if (sort_el.sort != null) sort_el.sort else sort_el)
 }
 
 // ============================================================
@@ -59,18 +63,7 @@ fn apply_sort(data, sort_el) {
 // ============================================================
 
 pub fn compute_agg(data, op, field) {
-    if (op == "count") len(data)
-    else if (op == "sum") sum(data |> float(~[field]))
-    else if (op == "mean" or op == "average") avg(data |> float(~[field]))
-    else if (op == "median") math.median(data |> float(~[field]))
-    else if (op == "min") min(data |> float(~[field]))
-    else if (op == "max") max(data |> float(~[field]))
-    else if (op == "distinct") len(util.unique_vals(data |> ~[field]))
-    else if (op == "q1") math.quantile(data |> float(~[field]), 0.25)
-    else if (op == "q3") math.quantile(data |> float(~[field]), 0.75)
-    else if (op == "stdev") math.sqrt(math.variance(data |> float(~[field])))
-    else if (op == "variance") math.variance(data |> float(~[field]))
-    else 0
+    records.aggregate(data, op, field)
 }
 
 // ============================================================
@@ -90,24 +83,22 @@ fn apply_aggregate(data, agg_el) {
 }
 
 fn do_aggregate(data, group_fields, agg_specs) {
-    if len(group_fields) == 0 {
+    let summaries = if len(group_fields) == 0 {
         [build_agg_row(data, [], agg_specs)]
     } else {
-        let gkeys = util.unique_vals(data |> group_key(~, group_fields));
-        [for (gk in gkeys) (
-            let items = data |: group_key(~, group_fields) == gk,
-            build_agg_row(items, group_fields, agg_specs)
-        )]
-    }
+        [for (partition in records.group_by(data, group_fields))
+            build_agg_row(partition.rows, group_fields, agg_specs)]
+    };
+    let failure = util.first_error(summaries);
+    if (failure is error) failure else summaries
 }
 
-fn group_key(row, fields) => [for (field in fields) row[field]]
-
 fn build_agg_row(items, group_fields, agg_specs) {
-    let group_pairs = [for (f in group_fields) for (x in [f, items[0][f]]) x];
-    let agg_pairs = [for (spec in agg_specs)
-        for (x in [spec.as, float(compute_agg(items, spec.op, spec.field))]) x];
-    map([*group_pairs, *agg_pairs])
+    let values = [for (spec in agg_specs) compute_agg(items, spec.op, spec.field)];
+    let failure = util.first_error(values);
+    if (failure is error) failure
+    else {*:records.group_fields(items[0], group_fields),
+        *:map([for (index, spec in agg_specs) for (x in [spec.as, values[index]]) x])}
 }
 
 // ============================================================
@@ -213,8 +204,32 @@ fn flatten_fields(source, row, fields, as_names, index, field_index) {
 // ============================================================
 
 pub fn add_field(row, field_name, value) {
-    let existing_pairs = [for (k, v in parse.attributes(row) where string(k) != field_name) for (x in [string(k), v]) x];
-    map([*existing_pairs, field_name, value])
+    records.add_field(row, field_name, value)
+}
+
+fn apply_lookup(data, step, datasets) {
+    let from = step.from;
+    let foreign = source.resolve(null, if (from.data != null) from.data else from, datasets);
+    let field = if (step.lookup != null) step.lookup else step.field;
+    let key = if (from.key != null) from.key else step.key;
+    let fields = if (from.fields != null) from.fields else step.fields;
+    let names = if (step.as is string) [step.as] else if (step.as != null) step.as else fields;
+    if (foreign is error) foreign
+    else if (not (foreign is array) or field == null or key == null or
+        (fields == null and (names == null or len(names) != 1)) or
+        (fields != null and (not (fields is array) or len(names) != len(fields))))
+        error("chart: lookup requires primary/foreign keys, array data, and matching output fields")
+    else [for (row in data,
+        let matches = foreign |: ~[key] == row[field],
+        let found = matches[0])
+        lookup_fields(row, found, fields, names, step.default, 0)]
+}
+
+fn lookup_fields(row, found, fields, names, fallback, index) {
+    if (index >= len(names)) row
+    else lookup_fields(add_field(row, names[index],
+        if (found == null) fallback else if (fields == null) found else found[fields[index]]),
+        found, fields, names, fallback, index + 1)
 }
 
 // Encoding shorthand is normalized before any renderer or composition derives its scales.

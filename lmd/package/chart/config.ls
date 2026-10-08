@@ -3,8 +3,14 @@
 
 import parse: .parse
 
-fn settings(value) => map([for (key, field in parse.attributes(value) where field != null)
+pub fn settings(value) => map([for (key, field in parse.attributes(value) where field != null)
     for (part in [string(key), field]) part])
+
+pub fn inherit(parent, child) {
+    let merged = {*:settings(parent), *:settings(child)};
+    map([for (key, field in merged) for (part in [string(key),
+        if (parent[key] is map and child[key] is map) inherit(parent[key], child[key]) else field]) part])
+}
 
 fn prefixed(value, prefix) => map([for (key, field in value where starts_with(string(key), prefix))
     for (part in [slice(string(key), len(prefix)), field]) part])

@@ -414,15 +414,23 @@ question from filtering the aggregate result.
 | Operation | Specification and meaning |
 |---|---|
 | `filter` | `field`, `op`, `value`, or a `test` using the condition predicate vocabulary; retain matching rows |
-| `sort` | `field`, `order`; order records ascending or descending |
+| `sort` | `field`, `order`, each a scalar or parallel array, or `sort: [{field, order}, ...]`; stable ordering with mixed directions |
 | `aggregate` | `<group field: ...>` and `<agg op: ..., field: ..., as: ...>` children; produce grouped summaries |
 | `calculate` | `as`, `op`, `field`, optional `field2`, or a pure `expression` callback; copy, convert, or combine fields |
 | `bin` | `field`, optional `as`, `maxbins`, `step`; discretize a continuous field into intervals |
 | `fold` | `fields`, optional `as`; turn wide records into key/value records, defaulting to `key` and `value` |
 | `flatten` | `fields`, optional `as`; zip array-valued fields into rows, extending to the longest array and padding shorter fields with null |
+| `window` | `groupby`, `sort`, `frame`, `ignore_peers`; `<agg op, field, as, param>` children add ordered calculations while preserving source row order |
+| `lookup` | `field` (or `lookup`), `from: {data, key, fields}`, optional `as` and `default`; extend each primary record with matching foreign fields |
+| `density` | `field`, optional `groupby`, `bandwidth`, `extent`, `steps`, `as`, `counts`, `cumulative`, `resolve`; emit sampled Gaussian density or cumulative probability records |
+| `regression` | `x`, `y`, optional `groupby`, `method`, `order`, `extent`, `steps`, `as`, `params`; emit fitted trend records or model parameters |
+| `loess` | `x`, `y`, optional `groupby`, `bandwidth`, `as`; emit a locally weighted trend at each distinct observed predictor value |
 
 Aggregate operations are `count`, `sum`, `mean`/`average`, `median`, `min`,
-`max`, `distinct`, `q1`, `q3`, `stdev`, and `variance`. Calculate operations
+`max`, `distinct`, `q1`, `q3`, `stdev`, `variance`, `valid`, and `missing`.
+Numeric summaries ignore null, nonnumeric, NaN, and infinite observations;
+`count` counts rows, and an empty numeric summary is null except for `sum`,
+which is zero. Calculate operations
 include `+`, `-`, `*`, `/`, `copy`, `string`, `float`, and `int`; arbitrary
 computations can instead be written as Lambda expressions before rendering.
 
@@ -435,6 +443,81 @@ shorthand retains discrete bin labels and counts.
 Sorting follows Lambda's exact total order and stability contracts
 (S6.2.2v3–S6.2.3). Input order defines the sequence of connected line/area
 observations unless the caller or a transform orders them explicitly.
+
+### Ordered calculations and joins
+
+Windows partition by `groupby` fields and use a stable multi-field `sort`.
+Supported operations include all aggregate operations plus `row_number`,
+`rank`, `dense_rank`, `percent_rank`, `cume_dist`, `ntile`, `lag`, `lead`,
+`first_value`, `last_value`, and `nth_value`. `param` supplies a bucket count
+for `ntile`, a nonnegative offset for lag/lead (default one), or a zero-based
+position for `nth_value`.
+
+A frame uses inclusive row offsets: `[null, 0]` is cumulative, `[-2, 2]`
+is a sliding neighborhood, and `[null, null]` covers the partition. The default
+is cumulative. Tied sort keys share ranks and expand frame boundaries unless
+`ignore_peers: true`; without a sort, rows retain their observed order and
+are distinct peers. Ranks and lag/lead use the partition independently of the
+frame. These controls follow the supported
+[Vega window vocabulary](https://vega.github.io/vega/docs/transforms/window/).
+Nonreflexive group keys never coalesce, and their source rows are retained
+(S5.1.2).
+
+Lookup is a left join using exact key equality (S5.1.1, S5.2.1v2, S5.4.1).
+`from.data` accepts inline values, a named dataset, or a file/URL source.
+The shorter `from: {name, key, fields}` form also selects a named dataset.
+Foreign `fields` retain their names unless `as` supplies parallel aliases;
+omitting `fields` requires one `as` name and embeds the matching record.
+Missing matches use `default` (null by default). Duplicate foreign keys select
+the first source record. Numeric and string keys remain distinct, and an
+existing output field is replaced.
+
+A waterfall chart combines cumulative windows with ranged bars:
+
+```lambda
+import chart: lambda.chart.chart
+
+chart.render(<chart width: 420, height: 260,
+    <data values: [{step: "Start", change: 10}, {step: "Loss", change: -4},
+        {step: "Gain", change: 2}]>
+    <transform
+        <window ignore_peers: true, <agg op: "sum", field: "change", as: "end">>
+        <calculate as: "start", expression: (row) => row.end - row.change>>
+    <mark type: "bar">
+    <encoding <x field: "step", dtype: "ordinal">
+        <y field: "start", dtype: "quantitative"> <y2 field: "end">
+        <color value: "green", condition: {field: "change", lt: 0, value: "red"}>>
+>)
+```
+
+### Distributions and fitted trends
+
+Density returns `value`/`density` fields by default, with group fields retained.
+`bandwidth: 0` (the default) estimates bandwidth from the observations;
+positive bandwidth supplies it explicitly. `steps` selects an exact uniform
+sample count; otherwise a count between `minsteps` (25) and `maxsteps` (200)
+is used. An omitted extent uses the observations' range; a constant range
+emits one sample. `resolve: "shared"` uses one extent and grid across groups,
+which supports stacked density curves. `counts` scales probabilities by the
+group count, and `cumulative` returns cumulative probability.
+
+Regression methods are `linear`, `log`, `exp`, `pow`, `quad`, and `poly`;
+the longer names `logarithmic`, `exponential`, `power`, `quadratic`, and
+`polynomial` are aliases. Polynomial `order` defaults to three. Exponential
+and power models fit in log-response space; logarithmic and power models
+use log predictors. Nonpositive values are excluded where logarithms require
+positive inputs. `params: true` returns `coef` (intercept first) and
+`r_squared`, rather than curve points; Vega conversion uses `rSquared`.
+An underdetermined or rank-deficient fit returns a diagnostic.
+
+Loess uses local linear fits with distance weights. Its `bandwidth` is the
+fraction of observations in a neighborhood, in `(0, 1]`, defaulting to 0.3.
+Repeated predictor values share one fitted output. Regression and loess
+default to the input `x`/`y` field names; `as` supplies two alternatives.
+All three transforms retain grouping fields, ignore nonfinite/nonnumeric
+observations, and return an empty array for empty valid input. They feed
+ordinary line/area encodings; a dedicated mirrored violin layout remains
+outstanding (§10).
 
 ## 7. Chart composition
 
@@ -463,7 +546,10 @@ A native repeat has `<row [fields]>` and/or `<column [fields]>` children plus a
 `<chart>` template. Its channel fields use `{repeat: "row"}` or
 `{repeat: "column"}`. Each row/column combination becomes a view. Color domains are shared across repeated views, and substitution applies to
 every channel in the chart template, including wordcloud text and size.
-Nested layer templates still need broader substitution support (§10).
+Substitution also reaches nested layer encodings, conditional fields, and
+tooltip arrays. Parent transforms run before child transforms; nested layers
+inherit data, encoding channels, datasets, and configuration before drawing
+their leaves in the shared plot.
 
 ## 8. Presentation, guides, annotations, and output
 
@@ -638,8 +724,10 @@ cloud.render([
 As of 2026-10-08, wordcloud markup integration, position-scale controls,
 encoding aggregation/binning, multi-field flattening, horizontal and ranged
 marks, point symbols, static predicates, shared facet domains, repeat color
-consistency, basic guide controls, continuous-color legends, and theme
-cascading are implemented. The following gaps remain. These are feature
+consistency, basic guide controls, continuous-color legends, theme cascading,
+window calculations, lookup joins, density estimates, fitted trends, and
+waterfall composition are implemented. Nested layer templates and inherited
+composition transforms are also supported. The following gaps remain. These are feature
 contracts and proposal boundaries, not an implementation roadmap.
 
 ### Completion of the existing chart design
@@ -650,22 +738,18 @@ contracts and proposal boundaries, not an implementation roadmap.
 | Encoding and formatting | Aggregate-based categorical sort definitions; wider numeric formatting beyond fixed-point/percentage formats; uniform style and condition coverage across text, arcs, and composite marks |
 | Temporal analysis | Calendar-aligned ticks, UTC/time-zone handling, and time-unit grouping such as year, year-month, weekday, and hour |
 | Stack control | Richer stream-graph presentation beyond centered stacks; consistent stacking and shared stack extents in layered charts |
-| Composition | Nested layer-template repeat substitution; independent layer-scale resolution and full guide/config inheritance across nested views |
+| Composition | Independent layer-scale resolution and full guide/config resolution across nested views |
 | Guides | Arc-legend placement; size/shape legends; broader legend direction/columns/symbol controls; comprehensive label collision handling and rotated-label margin measurement |
 | Highlighting and annotations | Vega expression-string conditions, tooltip coverage for every composite mark, and shaded-region annotations |
 | SVG presentation | Integrated gradient fills, radial gradients, hatch patterns, and plot clipping; continuous-color legend bars do not imply this broader fill contract |
 | Color | Explicit midpoint-aware diverging scales and the wider proposed palette set, including viridis/plasma/inferno/magma and additional categorical schemes |
 | Responsive sizing | Container-driven or automatic dimensions and aspect-ratio sizing beyond scaling a fixed SVG `viewBox` |
 
-### Proposed analytical and specialized extensions
+### Proposed specialized extensions
 
 | Extension | Intended design |
 |---|---|
-| Window transforms | Partitioned, ordered calculations with bounded or unbounded frames: row number, rank/dense rank, sum/mean/count/min/max, first/last value, lag/lead, ntile, percent rank, and cumulative distribution. Frames include cumulative `[null, 0]`, sliding `[-2, 2]`, and whole-partition `[null, null]` |
-| Lookup transforms | Left-join selected fields from a secondary dataset by a key |
-| Density and fitted trends | Kernel density with automatic or explicit bandwidth and optional grouping; linear, polynomial, exponential, logarithmic, and power regression; loess smoothing |
-| Waterfall charts | Running totals rendered as ranged bars, optionally colored by the sign of each change; depends on window calculations |
-| Density/violin charts | Density curves and mirrored per-category distributions |
+| Violin charts | Mirrored per-category density layouts; density curve data is available through the density transform |
 | Radar charts | Categorical angular axes and quantitative radius, with closed series, radial guides, and optional filled polygons |
 | Treemaps and sunbursts | Hierarchical records identified by node/parent/value fields, shown as proportional nested rectangles or concentric angular partitions; requires hierarchy layout and additional range/radial channels |
 | Slope charts | Entity/detail-grouped lines between two comparison positions, including reversed ranking scales |

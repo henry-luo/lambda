@@ -274,6 +274,7 @@ struct TierParityFixture {
 };
 static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/map_virtual_admission.ls", "test/lambda/map_virtual_admission.txt"},
+    {"test/lambda/map_virtual_equality.ls", "test/lambda/map_virtual_equality.txt"},
     {"test/lambda/proc/cow_var_typed_rebind.ls", "test/lambda/proc/cow_var_typed_rebind.txt"},
     {"test/lambda/proc/cow_var_nullable_record.ls", "test/lambda/proc/cow_var_nullable_record.txt"},
     {"test/lambda/proc/cow_var_nullable_record_typed_handle.ls",
