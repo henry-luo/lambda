@@ -4,6 +4,7 @@
 import axis: .axis
 import leg: .legend
 import parse: .parse
+import cfg: .config
 
 // ============================================================
 // Compute layout from parsed spec
@@ -21,6 +22,9 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
     let enc = spec.encoding;
     let x_ch = parse.get_channel(enc, "x");
     let y_ch = parse.get_channel(enc, "y");
+    let theme = cfg.resolve_theme(spec.config);
+    let x_cfg = cfg.axis_config(theme, x_ch);
+    let y_cfg = cfg.axis_config(theme, y_ch);
     let x_title = if (x_ch and x_ch.title) x_ch.title
         else if (x_ch and x_ch.field) x_ch.field
         else null;
@@ -28,36 +32,35 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
         else if (y_ch and y_ch.field) y_ch.field
         else null;
 
-    // estimate axis sizes
-    let left_margin = if (y_scale)
-        axis.estimate_y_axis_width(y_scale, null) + float(padding.left)
-    else float(padding.left);
-
-    let bottom_margin = if (x_scale)
-        axis.estimate_x_axis_height(null, x_title != null) + float(padding.bottom)
-    else float(padding.bottom);
-
-    let top_margin_base = float(padding.top);
+    let y_axis_w = if (y_scale and y_cfg.enabled and y_scale.kind != "identity") axis.estimate_y_axis_width(y_scale, y_cfg) else 0.0;
+    let x_axis_h = if (x_scale and x_cfg.enabled and x_scale.kind != "identity")
+        axis.estimate_x_axis_height(x_cfg, x_title != null and x_cfg.title_enabled) else 0.0;
+    let legend_cfg = cfg.legend_config(theme, enc.color);
+    let orient = if (legend_cfg.orient != null) legend_cfg.orient else "right";
+    let legend_w = if (has_color_legend and color_categories != null) leg.legend_width(color_categories, legend_cfg) + 20.0 else 0.0;
+    let legend_h = if (has_color_legend and color_categories != null)
+        (if (enc.color.dtype == "quantitative") 150.0 else leg.legend_height(color_categories, legend_cfg, true)) + 20.0 else 0.0;
+    let left_margin = float(padding.left) + (if (y_cfg.orient == "right") 0.0 else y_axis_w) + (if (orient == "left") legend_w else 0.0);
+    let bottom_margin = float(padding.bottom) + (if (x_cfg.orient == "top") 0.0 else x_axis_h) + (if (orient == "bottom") legend_h else 0.0);
     let title_h = if (spec.title) 24.0 else 0.0;
-    let top_margin = top_margin_base + title_h;
-
-    // legend space
-    let legend_w = if (has_color_legend and color_categories)
-        leg.legend_width(color_categories, null) + 20.0
-    else 0.0;
-    let right_margin = float(padding.right) + legend_w;
+    let top_margin = float(padding.top) + title_h + (if (x_cfg.orient == "top") x_axis_h else 0.0) + (if (orient == "top") legend_h else 0.0);
+    let right_margin = float(padding.right) + (if (y_cfg.orient == "right") y_axis_w else 0.0) + (if (orient == "right") legend_w else 0.0);
 
     // plot area
     let plot_x = left_margin;
     let plot_y = top_margin;
     let plot_w_raw = width - left_margin - right_margin;
     let plot_h_raw = height - top_margin - bottom_margin;
-    let plot_w = if (plot_w_raw < 50.0) 50.0 else plot_w_raw;
-    let plot_h = if (plot_h_raw < 50.0) 50.0 else plot_h_raw;
+    // Axis-free marks own their fit validation; do not enlarge their viewport.
+    let min_plot = if (x_scale or y_scale) 50.0 else 0.0;
+    let plot_w = max([plot_w_raw, min_plot]);
+    let plot_h = max([plot_h_raw, min_plot]);
 
     // legend position
-    let legend_x = plot_x + plot_w + 20.0;
-    let legend_y = plot_y;
+    let legend_x = if (orient == "left") float(padding.left)
+        else if (orient == "top" or orient == "bottom") plot_x else plot_x + plot_w + 20.0;
+    let legend_y = if (orient == "top") float(padding.top) + title_h
+        else if (orient == "bottom") plot_y + plot_h + x_axis_h + 20.0 else plot_y;
 
     {
         plot_x: plot_x,
@@ -118,9 +121,9 @@ pub fn compute_arc_layout(spec, has_color_legend: bool, color_categories) {
 // ============================================================
 
 pub fn compute_facet_layout(n_facets, columns, sub_w, sub_h, spacing, title, padding) {
-    let cols = if (columns and columns > 0) columns else n_facets;
+    let cols = if (columns and columns > 0) columns else max([1, n_facets]);
     let rows = int(ceil(float(n_facets) / float(cols)));
-    let sp = if (spacing) float(spacing) else 20.0;
+    let sp = if (spacing != null) float(spacing) else 20.0;
     let pad = if (padding) padding else {top: 20, right: 20, bottom: 20, left: 20};
     let header_h = 18.0;
     let title_h = if (title) 24.0 else 0.0;
