@@ -1089,7 +1089,10 @@ accepts any filename regardless of its extension (D2.9.2).
 
 These textual model formats map to existing Lambda values (D4.1.3). External
 buffers, textures, and procedural scripts remain references; parsing does not
-load dependencies or start playback. See the [3D input mappings and limits](../vibe/radiant/Radiant_Design_WebGL.md#14-textual-3d-asset-input).
+load dependencies or start playback. To resolve supported model assets into
+renderable scene elements and shared animation clips, use `lambda.scene3d.load()`
+([asset-loading API and profiles](../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes), D7.2.4/S12.1.1v2).
+See the [3D input mappings and limits](../vibe/radiant/Radiant_Design_WebGL.md#14-textual-3d-asset-input).
 
 **Input Function Usage:**
 

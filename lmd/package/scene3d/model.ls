@@ -68,6 +68,12 @@ fn check_node(n, all_nodes) bool^ {
     let checked_vectors = [for (key in ["position", "rotation", "scale", "target", "up"] where n[key] != null)
         if (not t.vector(n[key], 3) or (key == "scale" and any([for (x in n[key]) x == 0])))
             raise fail("invalid object transform") else true]
+    let checked_quaternion = if (n.quaternion != null and (not t.vector(n.quaternion, 4) or sum([for (q in n.quaternion) q * q]) == 0))
+        raise fail("invalid object quaternion")
+    let checked_matrix = if (n.matrix != null and (not t.affine(n.matrix) or n.position != null or n.rotation != null or n.scale != null or n.quaternion != null))
+        raise fail("matrix and TRS transforms are exclusive")
+    let checked_bind = if (n["inverse-bind-matrix"] != null and (kind != 'bone' or not t.affine(n["inverse-bind-matrix"])))
+        raise fail("invalid authored inverse bind matrix")
     let checked_color = if ((kind == 'scene3d' or kind == 'material' or kind == 'light') and
         n[if (kind == 'scene3d') "background" else "color"] != null and
         not color(n[if (kind == 'scene3d') "background" else "color"])) raise fail("invalid color")
@@ -94,6 +100,7 @@ fn check_node(n, all_nodes) bool^ {
                 let target = targets[0]
                 let property = path[len(path) - 1]
                 let nested = len(path) == 3
+                let checked_matrix = if (target.matrix != null and contains(["position", "scale", "quaternion"], property)) raise fail("cannot animate matrix node TRS")
                 let checked_material = if (nested and (name(target) != 'mesh' or path[1] != "material")) raise fail("invalid material animation path")
                 let kind = if (nested) 'material' else name(target)
                 let expected = if (contains(["position", "scale"], property)) 'vector'
@@ -119,6 +126,7 @@ fn check_node(n, all_nodes) bool^ {
         let checked_type = if (not contains(['basic', 'lambert'], n.type)) raise fail("unknown material type")
         let checked_opacity = if (n.opacity != null and (not numeric(n.opacity) or n.opacity < 0 or n.opacity > 1)) raise fail("invalid material opacity")
         let checked_transparent = if (n.transparent != null and not (n.transparent is bool)) raise fail("invalid transparency")
+        let checked_alpha = if (n["alpha-mode"] != null and not contains(['opaque', 'blend'], n["alpha-mode"])) raise fail("invalid material alpha mode")
         let checked_side = if (n.side != null and not contains(['front', 'back', 'double'], n.side)) raise fail("invalid material side")
         let checked_texture = if (n.texture != null) {
             let d = definition(all_nodes, n.texture, 'texture')^
@@ -129,7 +137,12 @@ fn check_node(n, all_nodes) bool^ {
         if (not contains(['ambient', 'directional'], n.type) or (n.intensity != null and (not numeric(n.intensity) or n.intensity < 0)))
             raise fail("invalid light") else true
     } else if (kind == 'texture') {
-        if (not (n.src is string) or len(n.src) == 0) raise fail("texture requires source") else true
+        let checked_source = if (not (n.src is string) or len(n.src) == 0) raise fail("texture requires source")
+        let checked_sampler = [for (key in ["wrap-s", "wrap-t", "min-filter", "mag-filter"] where n[key] != null)
+            if (not contains(if (key == "wrap-s" or key == "wrap-t") [10497, 33071, 33648]
+                else if (key == "min-filter") [9728, 9729, 9984, 9985, 9986, 9987] else [9728, 9729], n[key]))
+                raise fail("invalid texture sampler") else true]
+        true
     } else if (kind == 'mesh') {
         let geometries = [for (c in children where name(c) == 'geometry') c]
         let materials = [for (c in children where name(c) == 'material') c]
@@ -157,7 +170,7 @@ fn check_node(n, all_nodes) bool^ {
 fn normalized(n) element {
     let attrs = fields(n)
     if (name(n) == 'scene3d') <scene3d *: attrs, *[for (c in content(n)) normalized(c)]>
-    else if (name(n) == 'group') <group position: [0.0, 0.0, 0.0], rotation: [0.0, 0.0, 0.0], scale: [1.0, 1.0, 1.0], *: attrs,
+    else if (name(n) == 'group') <group *: (if (n.matrix == null) {position: [0.0, 0.0, 0.0], rotation: [0.0, 0.0, 0.0], scale: [1.0, 1.0, 1.0]} else {}), *: attrs,
         *[for (c in content(n)) normalized(c)]>
     else if (name(n) == 'camera') <camera fov: 50.0, near: 0.1, far: 1000.0, *: attrs>
     else if (name(n) == 'mesh') <mesh visible: true, *: attrs, *[for (c in content(n)) normalized(c)]>

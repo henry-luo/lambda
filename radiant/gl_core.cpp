@@ -494,14 +494,23 @@ bool native_gl_uniform_set(NativeGlContext* context, NativeGlUniform uniform,
 #endif
 }
 
-NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface* image) {
+NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface* image, const NativeGlSampler& sampler) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context);
     if (!scope.valid || !image || !image->pixels || image->alpha_mode!=IMAGE_ALPHA_STRAIGHT || image->width <= 0 || image->height <= 0 ||
         image->width > GL_DIMENSION_LIMIT || image->height > GL_DIMENSION_LIMIT || image->pitch < image->width * 4)
         { native_gl_error(context,"invalid texture dimensions, format or alpha mode");return {}; }
+    auto valid_wrap=[](unsigned value) {return value==GL_REPEAT||value==GL_MIRRORED_REPEAT||value==GL_CLAMP_TO_EDGE;};
+    bool mipmaps=sampler.min_filter>=GL_NEAREST_MIPMAP_NEAREST&&sampler.min_filter<=GL_LINEAR_MIPMAP_LINEAR;
+    if(!valid_wrap(sampler.wrap_s)||!valid_wrap(sampler.wrap_t)||
+        (!mipmaps&&sampler.min_filter!=GL_NEAREST&&sampler.min_filter!=GL_LINEAR)||
+        (sampler.mag_filter!=GL_NEAREST&&sampler.mag_filter!=GL_LINEAR)) {native_gl_error(context,"invalid texture sampler");return {};}
     size_t bytes = (size_t)image->width * image->height * 4;
-    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TEXTURE, bytes); if (!slot) return {};
+    size_t allocated=bytes;
+    if(mipmaps) for(unsigned width=image->width,height=image->height;width>1||height>1;) {
+        width=width>1?width/2:1;height=height>1?height/2:1;allocated+=(size_t)width*height*4;
+    }
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TEXTURE, allocated); if (!slot) return {};
     // decoded images are top-down; native UV (0,0) is the lower-left corner.
     uint8_t* pixels = (uint8_t*)mem_alloc(bytes, MEM_CAT_RENDER);
     if (!pixels) { native_gl_error(context,"texture staging allocation failed");native_gl_release(context, {slot->id}); return {}; }
@@ -512,8 +521,9 @@ NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface*
     gl.GenTextures(1, &slot->name); gl.BindTexture(GL_TEXTURE_2D, slot->name);
     gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1); gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     gl.TexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, image->width, image->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, sampler.min_filter); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, sampler.mag_filter);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, sampler.wrap_s); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, sampler.wrap_t);
+    if(mipmaps) gl.GenerateMipmap(GL_TEXTURE_2D);
     mem_free(pixels);
     if (native_gl_check(context, "texture upload")) return {slot->id};
     native_gl_release(context, {slot->id});

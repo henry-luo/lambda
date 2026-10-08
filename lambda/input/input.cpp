@@ -2183,6 +2183,8 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
             // HTML NULs are tokenizer input, so preserve the transport's byte count.
             input->root = (Item){.element = html5_parse_n(input, source, source_len, NULL)};
         }
+        else if (strcmp(effective_type, "scene3d-asset") == 0)
+            input_scene3d_asset(input, source, source_len, flavor ? flavor->chars : nullptr);
         else if (input_parse_model(input, source, source_len, effective_type)) {}
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}
 #ifndef LAMBDA_NO_PDF

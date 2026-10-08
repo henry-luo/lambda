@@ -2198,6 +2198,8 @@
         "lambda/input/input-mark.cpp",
         "lambda/input/input-mdx.cpp",
         "lambda/input/input-model.cpp",
+        "lambda/input/input-scene3d.cpp",
+        "lambda/input/input-scene3d-gltf.cpp",
         "lambda/input/input-rtf.cpp",
         "lambda/input/input-toml.cpp",
         "lambda/input/input-utils.cpp",

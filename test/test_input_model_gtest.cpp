@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "../lambda/input/input.hpp"
+#include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lib/log.h"
 #include "../lib/mime-detect.h"
@@ -17,8 +18,9 @@ protected:
             format->len = strlen(type);
             memcpy(format->chars, type, format->len + 1);
         }
+        Url* cwd=get_current_dir();Url* url=filename?url_parse_with_base(filename,cwd):nullptr;url_destroy(cwd);
         Input* input = input_from_source_n(source, length == SIZE_MAX ? strlen(source) : length,
-            filename ? url_parse(filename) : nullptr, format, nullptr);
+            url, format, nullptr);
         free(format);
         return input;
     }
@@ -289,4 +291,92 @@ TEST_F(ModelInputTest, RejectsEmbeddedNulInEveryTextualFormat) {
         SCOPED_TRACE(format);
         EXPECT_TRUE(parse(source, format, nullptr, sizeof(source) - 1)->parse_failed);
     }
+}
+
+static Input* load_scene_asset(const char* path) {
+    Input* owner=InputManager::create_input(nullptr);MarkBuilder b(owner);
+    Url* cwd=get_current_dir();Input* result=input_from_url(b.createString(path),b.createString("scene3d-asset"),nullptr,cwd);
+    url_destroy(cwd);return result;
+}
+
+TEST_F(ModelInputTest, SceneAssetResolvesObjMaterialTextureAndConcaveNegativeCorners) {
+    Input* input=load_scene_asset("test/demo/scene3d/assets/loading/concave.obj");ASSERT_NE(input,nullptr);
+    ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    ElementReader root(input->root),mesh=root.findChildElement("mesh");
+    EXPECT_TRUE(root.hasTag("group"));
+    auto geometry=mesh.findChildElement("geometry");
+    EXPECT_EQ(geometry.get_attr("positions").asArray().length(),45);
+    EXPECT_EQ(geometry.get_attr("normals").asArray().length(),45);
+    EXPECT_EQ(geometry.get_attr("uvs").asArray().length(),30);
+    auto texture=root.findChildElement("resources").findChildElement("texture");
+    ASSERT_NE(texture.get_attr("src").cstring(),nullptr);
+    EXPECT_NE(strstr(texture.get_attr("src").cstring(),"/loading/textures/checker.png"),nullptr);
+    EXPECT_EQ(strstr(texture.get_attr("src").cstring(),"/../"),nullptr);
+}
+
+TEST_F(ModelInputTest, SceneAssetDecodesExternalAndEmbeddedGltfSkinMorphAndCubicTracks) {
+    const char* files[]={"test/demo/scene3d/assets/loading/articulated.gltf","test/demo/scene3d/assets/loading/embedded.gltf"};
+    for(const char* file:files) {
+        SCOPED_TRACE(file);Input* input=load_scene_asset(file);ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+        ElementReader root(input->root),rig=root.findChildElement("skeleton"),bone=rig.findChildElement("bone");
+        EXPECT_EQ(bone.get_attr("inverse-bind-matrix").asArray().length(),16);
+        EXPECT_NEAR(bone.get_attr("inverse-bind-matrix").asArray().get(12).asFloat(),-.2,1e-6);
+        ElementReader node=root.findChildElement("group");
+        EXPECT_STREQ(node.get_attr("id").cstring(),"asset-node-0");
+        ElementReader mesh=root.childAt(3).asElement().findChildElement("mesh");
+        auto geometry=mesh.findChildElement("geometry");
+        auto positions=geometry.get_attr("positions").asArray();ASSERT_EQ(positions.length(),24);EXPECT_NEAR(positions.get(0).asFloat(),-.8,1e-6);
+        EXPECT_EQ(geometry.get_attr("skin-indices").asArray().get(0).asFloat(),0);
+        EXPECT_EQ(geometry.get_attr("skin-indices").asArray().get(16).asFloat(),1);
+        EXPECT_EQ(geometry.get_attr("skin-weights").asArray().get(0).asFloat(),1);
+        EXPECT_NEAR(geometry.get_attr("morph-positions").asArray().get(18).asFloat(),.5,1e-6);
+        auto clip=root.findChildElement("animation-clip");EXPECT_EQ(clip.childCount(),5);
+        auto cubic=clip.childAt(2).asElement();EXPECT_EQ(cubic.get_attr("in-tangents").asArray().length(),6);
+        EXPECT_EQ(cubic.get_attr("interpolation").getType(),LMD_TYPE_SYMBOL);
+        auto texture=root.findChildElement("resources").findChildElement("texture");
+        EXPECT_EQ(strncmp(texture.get_attr("src").cstring(),"data:image/png;base64,",22),0);
+        EXPECT_STREQ(root.findChildElement("resources").findChildElement("material").get_attr("alpha-mode").cstring(),"opaque");
+    }
+}
+
+TEST_F(ModelInputTest, SceneAssetBuildsA3dSkeletonAndPersistentActionTracks) {
+    Input* input=load_scene_asset("test/demo/scene3d/assets/loading/puppet.a3d");ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    ElementReader root(input->root),rig=root.findChildElement("skeleton"),clip=root.findChildElement("animation-clip");
+    EXPECT_EQ(rig.findChildElement("bone").findChildElement("bone").childCount(),0);
+    ASSERT_EQ(clip.childCount(),4);EXPECT_EQ(clip.get_attr("duration").asFloat(),2);
+    EXPECT_EQ(clip.childAt(0).asElement().get_attr("times").asArray().length(),5);
+    auto child_positions=clip.childAt(2).asElement().get_attr("values").asArray();
+    EXPECT_EQ(child_positions.get(3).asFloat(),0);
+    EXPECT_NEAR(child_positions.get(6).asFloat(),.6,1e-6);
+    EXPECT_NEAR(child_positions.get(9).asFloat(),.6,1e-6);
+    auto geometry=root.findChildElement("mesh").findChildElement("geometry");
+    EXPECT_EQ(geometry.get_attr("positions").asArray().length(),36);
+    EXPECT_EQ(geometry.get_attr("skin-indices").asArray().length(),48);
+}
+
+TEST_F(ModelInputTest, SceneAssetRejectsUnsupportedRequiredExtensionsAndBrokenTopology) {
+    const char* invalid[]={
+        "{\"asset\":{\"version\":\"2.0\"},\"extensionsRequired\":[\"KHR_draco_mesh_compression\"]}",
+        "{\"asset\":{\"version\":\"2.0\"},\"nodes\":[{\"children\":[1]},{\"children\":[0]}]}",
+        "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"uri\":\"data:application/octet-stream;base64,AAAA\",\"byteLength\":8}]}",
+        "{\"asset\":{\"version\":\"2.0\"},\"nodes\":[{\"mesh\":0}],\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],\"accessors\":[{\"count\":3,\"type\":\"VEC3\",\"componentType\":5126,\"bufferView\":0}],\"bufferViews\":[{\"buffer\":0,\"byteLength\":4}],\"buffers\":[{\"uri\":\"data:application/octet-stream;base64,AAAAAA==\",\"byteLength\":4}]}"
+    };
+    for(const char* source:invalid) {Input* input=parse(source,"scene3d-asset","fixture.gltf");ASSERT_NE(input,nullptr);EXPECT_TRUE(input->parse_failed);EXPECT_EQ(get_type_id(input->root),LMD_TYPE_ERROR);}
+    Input* obj=parse("v 0 0 0\nv 1 0 0\nv 0 1 0\nf -4 2 3\n","scene3d-asset","fixture.obj");ASSERT_NE(obj,nullptr);EXPECT_TRUE(obj->parse_failed);
+    Input* command=parse("csh do-not-execute\n","scene3d-asset","fixture.obj");ASSERT_NE(command,nullptr);EXPECT_TRUE(command->parse_failed);
+}
+
+TEST_F(ModelInputTest, SceneAssetMaterialDeclarationsAndClampOptionsResolveIndependentlyOfOrder) {
+    Input* obj=parse("v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nusemtl painted\nf 1/1 2/1 3/1\no next\nmtllib materials/palette.mtl\n",
+        "scene3d-asset","test/demo/scene3d/assets/loading/virtual.obj");
+    ASSERT_NE(obj,nullptr);ASSERT_FALSE(obj->parse_failed)<<obj->parse_error_message;
+    auto texture=ElementReader(obj->root).findChildElement("resources").findChildElement("texture");
+    EXPECT_EQ(texture.get_attr("wrap-s").asFloat(),10497);
+    Input* mtl=parse("newmtl checker\nmap_Kd -clamp on textures/checker.png\n",
+        "scene3d-asset","test/demo/scene3d/assets/loading/virtual.mtl");
+    ASSERT_NE(mtl,nullptr);ASSERT_FALSE(mtl->parse_failed)<<mtl->parse_error_message;
+    auto clamped=ElementReader(mtl->root).findChildElement("resources").findChildElement("texture");
+    EXPECT_EQ(clamped.get_attr("wrap-s").asFloat(),33071);EXPECT_EQ(clamped.get_attr("wrap-t").asFloat(),33071);
+    Input* missing=parse("mtllib definitely_missing_loader_fixture.mtl\n","scene3d-asset","fixture.obj");
+    ASSERT_NE(missing,nullptr);EXPECT_TRUE(missing->parse_failed);
 }

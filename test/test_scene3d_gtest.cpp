@@ -29,6 +29,13 @@
 #include "../lib/image.h"
 #include <time.h>
 
+static void scene3d_test_capture(const char* name,ImageSurface* image) {
+    const char* directory=getenv("LAMBDA_SCENE3D_CAPTURE_DIR");if(!directory) return;
+    StrBuf* path=strbuf_new();strbuf_append_format(path,"%s/%s-native.png",directory,name);
+    EXPECT_EQ(image_save_png(path->str,(const unsigned char*)image->pixels,image->width,image->height,4),1);
+    strbuf_free(path);
+}
+
 struct AnimationOracleTrack {
     const char* name;
     double times[5], values[20], incoming[40], outgoing[40];
@@ -767,17 +774,11 @@ TEST_F(Scene3dTest, ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels) {
     RecordProperty("pbr_draws",(int64_t)stats.draws);
     RecordProperty("pbr_gpu_bytes",(int64_t)stats.gpu_bytes);
     RecordProperty("pbr_cpu_bytes",(int64_t)stats.cpu_bytes);
-    auto capture=[&](const char* name) {
-        const char* directory=getenv("LAMBDA_SCENE3D_CAPTURE_DIR");if(!directory) return;
-        StrBuf* path=strbuf_new();strbuf_append_format(path,"%s/%s-native.png",directory,name);
-        EXPECT_EQ(image_save_png(path->str,(const unsigned char*)ui.surface->pixels,ui.surface->width,ui.surface->height,4),1);
-        strbuf_free(path);
-    };
-    capture("observatory");
+    scene3d_test_capture("observatory",ui.surface);
     for(const char* sample:{"observatory.sample(1.25)","observatory.sample(3.5)"}) {
         ASSERT_FALSE(item_is_error(run_js(sample)));
         ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
-        capture(strstr(sample,"1.25")?"observatory-1.25":"observatory-3.5");
+        scene3d_test_capture(strstr(sample,"1.25")?"observatory-1.25":"observatory-3.5",ui.surface);
     }
     size_t bytes=ui.surface->pitch*ui.surface->height;
     auto* baseline=(uint8_t*)mem_alloc(bytes,MEM_CAT_RENDER);ASSERT_NE(baseline,nullptr);memcpy(baseline,ui.surface->pixels,bytes);
@@ -786,14 +787,14 @@ TEST_F(Scene3dTest, ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels) {
     unsigned shadow_changes=0;
     for(unsigned y=400;y<580;y++) for(unsigned x=120;x<720;x++)
         if(memcmp(baseline+y*ui.surface->pitch+x*4,(uint8_t*)ui.surface->pixels+y*ui.surface->pitch+x*4,3)) shadow_changes++;
-    EXPECT_GT(shadow_changes,100u);capture("observatory-no-shadow");
+    EXPECT_GT(shadow_changes,100u);scene3d_test_capture("observatory-no-shadow",ui.surface);
     memcpy(baseline,ui.surface->pixels,bytes);
     ASSERT_FALSE(item_is_error(run_js("observatory.composer.passes[1].enabled=false;observatory.render()")));
     ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
     unsigned pass_changes=0;
     for(size_t offset=0;offset<bytes;offset+=4)
         if(memcmp(baseline+offset,(uint8_t*)ui.surface->pixels+offset,3)) pass_changes++;
-    EXPECT_GT(pass_changes,100u);capture("observatory-no-fxaa");mem_free(baseline);
+    EXPECT_GT(pass_changes,100u);scene3d_test_capture("observatory-no-fxaa",ui.surface);mem_free(baseline);
     if(getenv("LAMBDA_SCENE3D_MEASURE_FRAMES")) {
 #ifndef NDEBUG
         FAIL()<<"Frame-pacing measurements require the release runner";
@@ -1028,4 +1029,71 @@ TEST_F(Scene3dTest, SelectedPinnedKhronosBufferObjectAndTextureAssertions) {
     DomElement* result=dom_find_element_by_id(page->root->as_element(),"result");ASSERT_NE(result,nullptr);
     ASSERT_STREQ(result->get_attribute("data-result"),"passed");
     EXPECT_GE(strtol(result->get_attribute("data-checks"),nullptr,10),99);
+}
+
+TEST(AnimationCore, GltfHermiteUsesSegmentDurationAndNormalizesCubicQuaternions) {
+    const double times[]={2,5},values[]={0,0},incoming[]={0,-2},outgoing[]={2,0};
+    AnimationTrackView track={times,values,nullptr,incoming,outgoing,2,1,ANIMATION_NUMBER,ANIMATION_HERMITE};
+    ASSERT_TRUE(animation_track_validate(track));double result[4]={};
+    ASSERT_TRUE(animation_track_sample(track,3.5,result));EXPECT_DOUBLE_EQ(result[0],1.5);
+    ASSERT_TRUE(animation_track_sample(track,2,result));EXPECT_DOUBLE_EQ(result[0],0);
+    ASSERT_TRUE(animation_track_sample(track,5,result));EXPECT_DOUBLE_EQ(result[0],0);
+    track.in_tangents=nullptr;EXPECT_FALSE(animation_track_validate(track));
+    const double q[]={0,0,0,1,0,0,1,0},zero[8]={};
+    track={times,q,nullptr,zero,zero,2,4,ANIMATION_QUATERNION,ANIMATION_HERMITE};
+    ASSERT_TRUE(animation_track_validate(track));ASSERT_TRUE(animation_track_sample(track,3.5,result));
+    EXPECT_NEAR(result[2],sqrt(.5),1e-12);EXPECT_NEAR(result[3],sqrt(.5),1e-12);
+}
+
+static unsigned asset_changed_pixels(ImageSurface* a,ImageSurface* b) {
+    unsigned count=0;
+    for(unsigned y=0;y<(unsigned)a->height;y++) for(unsigned x=0;x<(unsigned)a->width;x++)
+        if(memcmp((uint8_t*)a->pixels+y*a->pitch+x*4,(uint8_t*)b->pixels+y*b->pitch+x*4,4)) count++;
+    return count;
+}
+
+TEST_F(Scene3dTest, ImportedAssetGalleryRendersTexturedObjAndPlaysGltfAndA3dClips) {
+    ASSERT_NE(load_page("test/demo/scene3d/asset-gallery.ls",1200,480),nullptr);
+    const char* ids[]={"obj-view","gltf-view","a3d-view"};
+    const char* clips[]={nullptr,"gltf-asset-clip-0","a3d-asset-clip-0"};
+    for(unsigned i=0;i<3;i++) {
+        SCOPED_TRACE(ids[i]);auto* scene=dom_find_element_by_id(page->root->as_element(),ids[i]);ASSERT_NE(scene,nullptr);
+        ImageSurface* initial=scene3d_snapshot(scene,&ui,360,320,1);ASSERT_NE(initial,nullptr)<<scene3d_diagnostic(scene);
+        Scene3dStats before{},after{};ASSERT_TRUE(scene3d_stats(scene,&before));EXPECT_EQ(before.meshes,i==1?3u:1u);
+        EXPECT_EQ(before.textures,i<2?1u:0u);
+        // count foreground pixels against the authored background, and require texture/color variation.
+        unsigned foreground=0,variation=0;const uint8_t* background=(uint8_t*)initial->pixels;
+        for(unsigned y=0;y<320;y++) for(unsigned x=0;x<360;x++) {
+            auto* p=(uint8_t*)initial->pixels+y*initial->pitch+x*4;
+            if(memcmp(p,background,3)) {foreground++;if(p[0]>p[2]) variation++;}
+        }
+        EXPECT_GT(foreground,4000u);EXPECT_GT(variation,500u);
+        if(i==1) {pixel(initial,249,110,63,231,149);pixel(initial,268,219,63,231,149);}
+        scene3d_test_capture(ids[i],initial);
+        if(!clips[i]) continue;
+        auto* animation=scene3d_animations(scene);ASSERT_NE(animation,nullptr);
+        auto* action=scene3d_animation_action(animation,clips[i]);ASSERT_NE(action,nullptr);
+        ASSERT_TRUE(scene3d_animation_seek(animation,0));
+        ImageSurface* first=scene3d_snapshot(scene,&ui,360,320,1);ASSERT_NE(first,nullptr);image_surface_snapshot_retain(first);
+        ASSERT_TRUE(scene3d_animation_seek(animation,1));
+        ImageSurface* second=scene3d_snapshot(scene,&ui,360,320,1);ASSERT_NE(second,nullptr)<<scene3d_diagnostic(scene);image_surface_snapshot_retain(second);
+        EXPECT_GT(asset_changed_pixels(first,second),4000u);
+        scene3d_test_capture(i==1?"gltf-pose-0":"a3d-pose-0",first);
+        scene3d_test_capture(i==1?"gltf-pose-1":"a3d-pose-1",second);
+        ASSERT_TRUE(scene3d_stats(scene,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);
+        EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(before.graphics.allocated_bytes,after.graphics.allocated_bytes);
+        scene3d_context_lost(scene);ImageSurface* restored=scene3d_snapshot(scene,&ui,360,320,1);ASSERT_NE(restored,nullptr);
+        EXPECT_EQ(scene3d_animations(scene),animation);EXPECT_EQ(scene3d_animation_action(animation,clips[i]),action);
+        EXPECT_EQ(asset_changed_pixels(second,restored),0u);
+        ASSERT_TRUE(animation_action_stop(action));ASSERT_TRUE(scene3d_animation_seek(animation,0));
+        ImageSurface* stopped=scene3d_snapshot(scene,&ui,360,320,1);ASSERT_NE(stopped,nullptr);EXPECT_EQ(asset_changed_pixels(first,stopped),0u);
+        if(i==1) {
+            // the embedded PNG has alpha, but default glTF materials must render it opaque.
+            auto* material=dom_find_element_by_id(page->root->as_element(),"gltf-asset-material-0");ASSERT_NE(material,nullptr);
+            ASSERT_TRUE(material->set_attribute("alpha-mode","blend"));page->mutation_epoch++;
+            ImageSurface* blended=scene3d_snapshot(scene,&ui,360,320,1);ASSERT_NE(blended,nullptr);
+            EXPECT_GT(asset_changed_pixels(first,blended),4000u);
+        }
+        image_surface_snapshot_release(first);image_surface_snapshot_release(second);
+    }
 }

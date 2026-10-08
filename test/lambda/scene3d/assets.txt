@@ -1,0 +1,9 @@
+['group', "arrow", 1, 1]
+[45, 45, 30]
+[24, 32, 0, 1, 48, 0.5]
+["flag-asset-clip-0", "Wave", true, 5, 2]
+[["flag-asset-node-0.quaternion", 'quaternion', 'linear'], ["flag-asset-rig-0-node-0.quaternion", 'quaternion', 'linear'], ["flag-asset-node-1.position", 'vector', 'hermite'], ["flag-asset-rig-0-node-1.position", 'vector', 'hermite'], ["flag-asset-node-2-primitive-0.morph-weights", 'vector', 'discrete']]
+["puppet-asset-clip-0", false, 4, 2]
+[0.8, 4, 1, 0]
+true
+true
