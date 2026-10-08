@@ -47,14 +47,6 @@ export function render_lambda_math(formula, options = {}) {
   return rendered;
 }
 
-export function mathlive_to_lambda_classes(html) {
-  return html.replace(/ML__/g, 'lm_');
-}
-
-export function lambda_to_mathlive_classes(html) {
-  return html.replace(/\blm_/g, 'ML__');
-}
-
 export async function render_mathlive_markup(formula, options = {}) {
   if (mathlive_exports == null) {
     mathlive_exports = await import(MATHLIVE_SSR_PATH);
@@ -82,7 +74,7 @@ export function mathlive_expected_error(formula) {
 function build_lambda_math_script(formula, display) {
   const formula_literal = JSON.stringify(formula);
   const render_function = display ? 'render_display' : 'render_inline';
-  return `import math_pkg: lambda.doc.math.mathlive
+  return `import math_pkg: lambda.doc.math.math
 import html_ser: lambda.latex.to_html
 
 let formula = ${formula_literal}
@@ -91,14 +83,14 @@ let result = if (parsed is error) {
     {formula: formula, error: string(parsed), html: "", ast: null}
 } else {
     let rendered = math_pkg.${render_function}(parsed)
-    let html = html_ser.to_html(rendered)
-    {formula: formula, error: "no-error", html: html, ast: parsed}
+    if (rendered is error) {formula: formula, error: string(rendered), html: "", ast: parsed}
+    else {formula: formula, error: "no-error", html: html_ser.to_html(rendered), ast: parsed}
 }
 format(result, "json")
 `;
 }
 
-function parse_lambda_json(stdout) {
+export function parse_lambda_json(stdout) {
   const output = stdout.trim();
   try {
     return output.startsWith('"') && output.endsWith('"')

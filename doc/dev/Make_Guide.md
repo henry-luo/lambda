@@ -131,6 +131,7 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 | Target | Description |
 |--------|-------------|
 | `test-math` | Run LaTeX Math test suite (all). |
+| `test-math-corpus` | Check the public SVG renderer across the retained math formula corpus. |
 | `test-math-baseline` | Run LaTeX Math baseline tests (DVI must pass 100%). |
 | `test-math-extended` | Run LaTeX Math extended tests (semantic comparison). |
 | `test-math-verbose` | Run LaTeX Math tests with verbose output. |

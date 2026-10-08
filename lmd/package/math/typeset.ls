@@ -61,7 +61,7 @@ fn spaced(boxes, c) {
             contains(["mbin", "mop", "mrel", "mopen", "mpunct"], boxes[i - 1].type) or
             contains(["mrel", "mclose", "mpunct"], boxes[i + 1].type))) {*:item, type: "mord"} else item]
     let with_spaces = [for (i, item in normalized) [
-        if (i > 0) bx.empty(spaces.get_spacing(normalized[i - 1].type, item.type, c.style, true) * font.UNITS * scale(c)) else bx.empty(), item]]
+        if (i > 0) bx.empty(spaces.get_spacing(normalized[i - 1].type, item.type, c.style) * font.UNITS * scale(c)) else bx.empty(), item]]
     if (len(normalized) == 1) normalized[0] else bx.row([for (pair in with_spaces, item in pair) item])
 }
 

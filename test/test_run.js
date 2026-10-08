@@ -83,17 +83,16 @@ const IS_WINDOWS = process.platform === 'win32';
 
 const SCRIPT_TESTS = [
     {
-        baseName: 'run_lambda_mathlive_markup',
-        script: 'test/lambda/mathlive/run_lambda_mathlive_markup.mjs',
-        // Keep the complete MathLive adapter corpus in the Lambda baseline lane;
-        // the adapter report still tracks the upstream 206-case regression set.
+        baseName: 'run_math_corpus',
+        script: 'test/lambda/math/run_corpus.mjs',
+        // Exercise the current font-driven renderer over both retained formula corpora.
         suite: 'lambda',
         category: 'baseline',
         baselineFixtureSource: 'all',
-        displayName: 'Lambda MathLive Markup Baseline',
+        displayName: 'Lambda Math SVG Corpus',
         icon: '🔢',
         runner: 'node',
-        args: ['--strict'],
+        args: [],
         exclusive: true,
     },
     {
@@ -734,7 +733,7 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
         typeof data.summary.passed === 'number' &&
         typeof data.summary.failed === 'number'
     ) {
-        // Scripted test report format, e.g. Lambda MathLive markup adapter
+        // Scripted test report format, e.g. the Lambda math SVG corpus
         passed = data.summary.passed;
         failed = data.summary.failed;
         total = typeof data.summary.total === 'number' ? data.summary.total : passed + failed;

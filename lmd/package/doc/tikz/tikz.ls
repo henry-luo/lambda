@@ -5,7 +5,6 @@ import plots: .pgfplots
 import lsystem: .lsystem
 import named: .named
 import svg: lambda.chart.svg
-import math_css: lambda.doc.math.css
 import latex_util: lambda.latex.util
 import pgfmath: .pgfmath
 import people: .people
@@ -1082,15 +1081,12 @@ pub fn render_with_program(source, external_declarations,
 
 // Direct .pgf documents use the parsed TikZ tree, including multiple pictures.
 pub fn render_document(ast, options) any^ {
-    let graphic = render_parsed(ast, options)^
-    let math_stylesheet = math_css.get_stylesheet(options);
+    let graphic = render_parsed(ast, options)^;
     <html lang: "en",
         <head
             <meta charset: "utf-8">
             <meta name: "viewport", content: "width=device-width, initial-scale=1">
             <title "TikZ/PGF Picture">
-            for (sheet in math_css.font_stylesheets()) { sheet }
-            <style math_stylesheet>
         >
         <body style: "margin:0;padding:24px;background:white;color:#222;" ++
             "font-family:Georgia,serif;",

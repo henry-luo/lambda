@@ -147,9 +147,8 @@ without adding complex-script shaping. For absolute TeX lengths, pass
 `font_size` to provide the CSS-pixel/em conversion; otherwise that conversion
 uses 16px. Resource acquisition stays in Lambda IO (**D7.1.2v2**).
 
-The previous MathLive-compatible spans and stylesheet are available through
-the explicit `lambda.doc.math.mathlive` import. Its fixed font tables serve
-compatibility fixtures and are not imported by the default renderer.
+The legacy MathLive renderer, its stylesheet and fixed metrics tables have
+been removed. Use `lambda.doc.math.math` for all rendering.
 
 ---
 

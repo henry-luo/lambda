@@ -1,5 +1,5 @@
 // test_math_spacing.ls — Test math inter-atom spacing table
-// Coverage: spacing_table.ls — atom_type_index, get_spacing, spacing_class
+// Coverage: spacing_table.ls — atom_type_index, get_spacing
 
 import sp: lambda.doc.math.spacing_table
 
@@ -36,12 +36,5 @@ import sp: lambda.doc.math.spacing_table
 // ---- get_spacing: text style (same as display for conditional) ----
 "23. ord-bin text:"; sp.get_spacing("mord", "mbin", "text")
 "24. ord-rel text:"; sp.get_spacing("mord", "mrel", "text")
-
-// ---- spacing_class ----
-"25. class 0:"; sp.spacing_class(0.0)
-"26. class thin:"; sp.spacing_class(0.16667)
-"27. class medium:"; sp.spacing_class(0.22222)
-"28. class thick:"; sp.spacing_class(0.27778)
-"29. class negative:"; sp.spacing_class(-0.16667)
 
 "===== ALL SPACING TESTS DONE ====="

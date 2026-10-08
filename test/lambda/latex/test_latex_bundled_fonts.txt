@@ -20,3 +20,10 @@
   outlines: true,
   external_stylesheets: 0
 }
+"prose AMS symbol:"
+{
+  svg: true,
+  outlines: true,
+  external_stylesheets: 0,
+  unknown: null
+}

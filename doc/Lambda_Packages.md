@@ -691,7 +691,7 @@ lambda render arch.dsl -o containers.svg --view-key Containers   # one Structuri
 The math package typesets a parsed math tree as self-contained inline SVG,
 using the selected font's glyph outlines and optional OpenType MATH data. The default reuses
 bundled CMU Serif and the existing small KaTeX symbol/alphabet faces; geometry
-has no dependency on `metrics_data.mark`. No new font asset is distributed.
+comes directly from those fonts. No new font asset is distributed.
 [Math_Support.md §2](Math_Support.md#2-rendering-math-to-html) documents the API.
 
 ```lambda
@@ -729,9 +729,8 @@ Invalid font data returns `null`; a codepoint with no glyph returns a null entry
 Distances use the requested CSS pixel size; MATH percentages remain percentages.
 Algorithms stay in Lambda and font parsing stays in `lib/font` (**D7.1.1**).
 
-The explicit `lambda.doc.math.mathlive` import retains the previous HTML/CSS
-renderer for font-specific compatibility fixtures. Its `metrics_data` dependency
-is isolated from the production entry point.
+The legacy `lambda.doc.math.mathlive` renderer and its fixed metrics tables
+have been removed; use `lambda.doc.math.math`.
 
 `lambda view`, `lambda layout` and `lambda render` typeset the `$…$` and `$$…$$` math of Markdown documents through this package, and the `latex` package uses it for the math inside LaTeX documents.
 

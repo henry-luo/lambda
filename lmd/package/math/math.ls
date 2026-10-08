@@ -1,5 +1,4 @@
-// Public font-driven math API. Math5 Phase 11; the old markup adapter lives in
-// mathlive.ls and is an explicit compatibility import, never a hidden fallback.
+// Public font-driven math API. Math5 Phases 11–12.
 import typeset: .typeset
 
 // Options: display, color, font_family, fonts [{font_family, data: binary}],

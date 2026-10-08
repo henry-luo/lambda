@@ -342,7 +342,6 @@ fn render_footnote_item(fn_entry, info) {
 fn wrap_standalone(html, info, options) {
     let stylesheet = css.get_stylesheet()
     let math_stylesheet = math.stylesheet(options)
-    let home = paths.resolve_path(sys.proc.self.cwd#, sys.lambda.home#)
     let meta = hyperref.metadata(info.hyperref_settings, info.title, info.author)
     let title_text = get_title_or_default(meta.title);
 
@@ -355,7 +354,7 @@ fn wrap_standalone(html, info, options) {
             if (meta.subject != null) { <meta name: "description", content: meta.subject> }
             if (meta.keywords != null) { <meta name: "keywords", content: meta.keywords> }
             // Document text uses CMU; math SVG carries the selected glyph outlines.
-            <link rel: "stylesheet", href: home ++ "/package/latex/fonts/cmu-combined.css">
+            font_stylesheet();
             <style stylesheet>
             <style math_stylesheet>
             <style package_stylesheet(info)>
@@ -369,4 +368,10 @@ fn wrap_standalone(html, info, options) {
 fn get_title_or_default(title) {
     if (title != null) { title }
     else { "LaTeX Document" }
+}
+
+// Document text needs CMU CSS even when math is emitted as outlined SVG.
+pub fn font_stylesheet() {
+    let home = paths.resolve_path(sys.proc.self.cwd#, sys.lambda.home#);
+    <link rel: "stylesheet", href: home ++ "/package/latex/fonts/cmu-combined.css">
 }

@@ -8,6 +8,9 @@
 > to the MathLive box model itself, then use that model to retire the remaining
 > hardcoded islands instead of adding more side-channel fields.
 
+> Current status (2026-10-09): Phases 11–12 replace and remove the MathLive
+> renderer. Phases 1–10 below record its historical migration.
+
 ## 1. Current State
 
 As of the Math4 endpoint:
@@ -501,9 +504,8 @@ KaTeX symbol/alphabet faces. Noto Sans Math remains a MATH-table test fixture
 under `test/lambda/math/fonts`. Explicit binary font snapshots keep resource
 acquisition in Lambda IO.
 SVG carries the measured glyph outlines, so downstream font substitution cannot
-change geometry. Chart measurement uses direct text records. Legacy
-`metrics_data` remains only behind the explicit `mathlive.ls` compatibility
-entry point and its low-level fixtures; production math does not import it.
+change geometry. Chart measurement uses direct text records. Phase 12 removes
+the transitional `mathlive.ls` adapter and its fixed `metrics_data` tables.
 
 Validation (2026-10-09): all 78 selected math/LaTeX/metrics/editor integration
 checks, 15 native font tests, and four editor math UI fixtures pass. The
@@ -525,7 +527,8 @@ use geometric outline stretching, which can change stroke weights.
 Font caches are query-local, and math
 outlines trade selectable text for deterministic measured/painted geometry.
 SVG titles retain the source expression. The Phase 1–10 acceptance criteria
-below describe the retained MathLive adapter; Phase 11 uses the gates above.
+below describe the historical MathLive adapter; Phases 11–12 use the font and
+SVG gates instead.
 
 Font audit and revision (2026-10-08, user): **MATH is an optional enhancement.**
 The 8 existing KaTeX WOFF2 faces and 12 CMU WOFF2 faces have no MATH table;
@@ -552,6 +555,38 @@ CMU sans/monospace, and the existing script/calligraphic/fraktur/AMS alphabets.
 Missing symbols try the authored bundled symbol families before platform
 fallback. Native MATH parser tests now use the test-only Noto fixture;
 production rendering neither reads nor requires that fixture.
+
+### Phase 12 — Remove the Legacy MathLive Renderer
+
+Implemented (2026-10-09, user): remove `mathlive.ls`, the HTML box/context/atom
+renderer, fixed metrics and their generator, class/font tables, MathLive-only
+formatting, CSS, probes and low-level compatibility tests. The public entry
+point remains `lambda.doc.math.math`, with font facts supplied by Radiant and
+layout policy in Lambda (**D7.1.1 / D7.1.2v2**). MATH remains optional.
+
+Document viewer and TikZ shells no longer load the retired math stylesheets;
+LaTeX document text keeps its CMU stylesheet. AMS commands in prose now use the
+same font-driven SVG renderer. Shared symbol mappings, spacing policy, syntax
+helpers and the fonts used by the current renderer remain.
+
+`make test-math-corpus` replaces the strict MathLive-markup target and remains
+in the Lambda baseline lane. It runs the retained formula corpus through the
+public renderer, rejecting errors, nonfinite dimensions/transforms, invalid
+SVG view boxes and external-font/legacy markup dependencies. Historical
+reference snapshots remain test data; matching their HTML is no longer a
+contract. The font-layout, ordinary-font and integration goldens continue to
+check measured/painted agreement and document behavior.
+
+Validation: 921/921 formula cases pass the SVG corpus; all 69 selected package
+checks and two editor/viewer UI fixtures pass. The larger LaTeX document corpus
+initially exceeded the harness's 60-second limit under concurrent load, then
+passed in isolation (55 seconds); its direct output also matches the golden.
+The document viewer compiles, and the production import/legacy-symbol audit
+finds no remaining dependencies.
+The required full interpreter sweep reports 1,053 matches, 54 exclusions,
+zero tier mismatches and three timeouts. Only retired fixture entries are
+removed from the committed lists; unrelated reclassifications from the shared
+checkout are not part of this change.
 
 ## 7. Risk Register
 
