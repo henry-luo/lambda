@@ -103,10 +103,10 @@ Import `lambda.scene3d` explicitly (S16.9.6/S16.9.8). The entry exports `Scene`,
 `geometry`, `material`, `texture`, `mesh`, `resources`; `normalize`, `validate`;
 and pure `transform`, `multiply`, `point` helpers (D7.2.4/S12.1.1v2).
 See [the mixed Lambda page](../../test/scene3d/mixed.ls) for executable syntax.
-The [Ringworld playground](../../test/scene3d/_ringworld.ls) provides a larger
+The [Ringworld demo](../../test/demo/scene3d/ringworld.ls) provides a larger
 visual example: procedural banded sphere and annular geometry, three moons,
 directional lighting, shared resources and 160 instanced stars. Open it with
-`./lambda.exe view test/scene3d/_ringworld.ls` from this worktree.
+`./lambda.exe view test/demo/scene3d/ringworld.ls` from this worktree.
 Constructors preserve ordinary element attributes and accept an options map;
 normalization returns an element or an error, and validation returns true or
 an error. Renderer validation also applies to literal scenes without the package.

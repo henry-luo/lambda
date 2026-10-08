@@ -1,4 +1,4 @@
-// visual playground: open with ./lambda.exe view test/scene3d/_ringworld.ls
+// visual demo: open with ./lambda.exe view test/demo/scene3d/ringworld.ls
 import s: lambda.scene3d
 
 let pi = 3.141592653589793
