@@ -4,7 +4,7 @@
 **Status:** object/Map support, bounded tuning, and numeric-loop/array-parameter
 lowering corrections are implemented.
 Latest gate counts, release measurements and limitations are in
-[JS_MVP_Lmd §10.8](../jube/JS_MVP_Lmd.md#108-latest-validation-and-release-evidence--2026-10-07).
+[JS_MVP_Lmd §17](../jube/JS_MVP_Lmd.md#17-slow-kernel-tuning).
 
 **Scope authority:** [JS_MVP_Lmd §10](../jube/JS_MVP_Lmd.md#10-map-and-plain-object-phase),
 **S1.11**, **S8.2.2v5**, **D1.3v3**, **D2.6.6v3**, **D2.6.9v3**,
@@ -213,7 +213,7 @@ Allocation and numeric-array improvements require separate profiling.
 
 ### 6.3 Latest validation
 
-See [JS_MVP_Lmd §10.8](../jube/JS_MVP_Lmd.md#108-latest-validation-and-release-evidence--2026-10-07)
+See [JS_MVP_Lmd §17](../jube/JS_MVP_Lmd.md#17-slow-kernel-tuning)
 for the latest gates and release comparison. The earlier object/Map tuning
 artifacts remain under `temp/mvp_lmd_tuning2/`; the numeric-loop/array-parameter
 round is recorded in §7. Early diagnostic runs that overlap compilation are
@@ -252,7 +252,7 @@ Both are in `test/test_js_mvp_lmd_gtest.cpp`.
 Evidence for this round is retained under `temp/mvp_lmd_numeric_tuning/`:
 the pre-change source, frozen release control, gate logs, paired runner,
 matched sources, MIR and raw process outputs. The short screen is diagnostic;
-§10.8 of the working design records only the final paired comparison.
+§10.8 of the working design links the archived comparison; §17 records the latest results.
 
 Finalized MIR instruction counts fall from **204 to 201** for `diviter` and
 **3,539 to 2,926** for `pnpoly`. Final measurements run after all builds and
@@ -319,7 +319,7 @@ also reproduce with identical counts on the frozen control and are unchanged.
 The final debug baseline is the required aggregate gate.
 
 Final release evidence is in
-[`element_tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/element_tuning_mir_20261007.json).
+[`MVP_Result3.json`](../../test/benchmark/js_mvp_lmd/MVP_Result3.json).
 All 30 workloads have 15 paired rounds; six receive a 30-pair follow-up. The
 follow-up confirms 1.68× for `pnpoly` and 1.31× for `dense_array`, while
 `diviter` is unchanged. All 4,410 measured and 252 preflight outputs match.

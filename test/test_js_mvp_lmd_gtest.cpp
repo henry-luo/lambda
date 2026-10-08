@@ -94,6 +94,50 @@ TEST_F(JsMvpLmd, IntegerWideningAndZeroSign) {
     numeric("function f(x){return x/2} f(5)", 2.5);
     numeric("function maybe(x){if(x)return 1} function f(){return maybe(false)+1} f()", NAN);
 }
+TEST_F(JsMvpLmd, OptionalIntegerElementsPreserveUndefined) {
+    boolean("function f(i){const a=[-2,0,7];return a[i]} var g=f;"
+        "g(0)===-2 && g(1)===0 && g(3)===undefined && g(3)!==0 && g(3)==null &&"
+        "typeof g(3)==='undefined' && (g(3)+1)!==(g(3)+1)");
+    boolean("function f(){const a=[-2,0,7];let i=Math.sqrt(16);"
+        "return a[i]===undefined && a[i]!==0 && !a[i] && (a[i]|0)===0 &&"
+        "(a[i]+1)!==(a[i]+1) && -a[i]!==-a[i] && (''+a[i])==='undefined'} f()");
+    boolean("function f(){const a=new Int32Array(2);a[0]=-7;let i=Math.sqrt(9);"
+        "const old=a[i];a[0]=11;return old===undefined && a[i]!==0 && a[i]===a[i] &&"
+        "!(a[i]<1) && !(a[i]>=0) && (a[i]|0)===0 && a[0]===11} f()");
+    boolean("function f(){const a=new Uint8Array(1);a[0]=255;let i=Math.sqrt(4);"
+        "const missing=a[i];a.fill(missing);return a[0]===0 && missing===undefined} f()");
+    boolean("function f(i){const a=[-0,1.5,NaN];return a[i]} var g=f;"
+        "1/g(0)===-Infinity && g(1)===1.5 && g(2)!==g(2) && g(3)===undefined");
+    error("function f(){const keys=[0,1];const a=new Uint8Array(2);let i=Math.sqrt(9);"
+        "return a[keys[i]]} f()", "capability");
+}
+TEST_F(JsMvpLmd, ConditionShortCircuitOrder) {
+    numeric("var n=0;function hit(x){n=n*10+x;return x}"
+        "if(hit(0)&&hit(1))n=9;if(hit(2)||hit(3))n=n*10+4;"
+        "if(!(hit(0)||hit(5)&&hit(0)))n=n*10+6;n", 240506);
+    boolean("function f(){const from=[0,1];const board=new Uint8Array(2).fill(1);"
+        "let i=Math.sqrt(1);return board[from[i]] && !board[2]} f()");
+}
+TEST_F(JsMvpLmd, ImmutableContainerFactsAcrossCalls) {
+    numeric("function sum(a){let s=0;for(let i=0;i<3;i++)s+=a[i];return s}"
+        "function f(){const a=[1.5,-2,4];return sum(a)} f()", 3.5);
+    numeric("function change(a){a[1]='3'} function sum(a){return a[0]+a[1]}"
+        "function f(){const a=[1,2];change(a);return sum(a)==='13'?1:0} f()", 1);
+    boolean("function make(n){if(n===0)return {left:null,right:null};"
+        "return {left:make(n-1),right:make(n-1)}}"
+        "function check(n){if(n.left===null)return 1;return 1+check(n.left)+check(n.right)}"
+        "check(make(5))===63");
+    boolean("function get(o){return o.child} function wrap(o){return {child:get(o)}}"
+        "var a={child:{value:7}};var b={other:1};"
+        "wrap(a).child.value===7 && wrap(b).child===undefined");
+    boolean("function get(o){return o.x} var a={x:1};a.x='new';get(a)==='new'");
+    boolean("function get(o){return o.x} var a={x:1};delete a.x;get(a)===undefined");
+    boolean("function get(o){return o.x} var key='x';var a={[key]:3};get(a)===3");
+    boolean("function f(){const make=()=>({t:1});return make()!==make() && make().t===1} f()");
+    numeric("function f(){let g=()=>1;g=()=>2;return g()} f()", 2);
+    boolean("function f(){const g=()=>1;const alias=g;return alias===g && alias()===1} f()");
+    error("function f(){return g();const g=()=>1} f()", "ReferenceError");
+}
 TEST_F(JsMvpLmd, IntegerLoopProofsAndInvalidation) {
     numeric("function f(n){let i=n;let s=0;while(i>=0){s+=i;i--}return s} f(10000)", 50005000);
     Item result = run("function f(n){let i=n;let s=0;while(i>=0){s+=i;i--}return s} f(10000)");

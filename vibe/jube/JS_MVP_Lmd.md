@@ -1,11 +1,14 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-07
+**Date:** 2026-10-08
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
-phase implemented. The last validated release and measurements are recorded in §10.8.
-The numeric-library phase is implemented in source (§15); its runtime and
-performance acceptance gates remain pending.
+phase implemented. The latest measurements and validation status are recorded in §17.
+The numeric-library phase is implemented in source (§15); its full feature
+edge matrix remains pending. §§16–17 record the subsequent tuning.
+
+**Performance history:** [MVP_Result1–5](../../test/benchmark/js_mvp_lmd/README.md)
+retains one representative comparison per major tuning phase.
 
 **Destination:** `lambda/js/mvp-lmd/`
 
@@ -309,14 +312,14 @@ measurement evidence. This phase introduced no new runtime helper.
 ### 9.6 Archived integer evidence — 2026-10-07
 
 The preceding integer-tuning measurements are retained in
-[`integer_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/integer_mir_20261007.json).
-The latest round of phase results is §10.8.
+[`MVP_Result1.json`](../../test/benchmark/js_mvp_lmd/MVP_Result1.json).
+The latest round of phase results is §17.
 
 ## 10. Map and plain-object phase
 
 **Status:** IMPLEMENTED; user constraints recorded 2026-10-07. The phase extends
 §3 while retaining §1's four goals and the execution-isolation boundary.
-Section 10.7 records scope decisions; §10.8 contains the latest results.
+Section 10.7 records scope decisions; §17 contains the latest results.
 
 **Fixed direction:** reuse Lambda map/object storage and shape transitions;
 align string-key identity through shared canonical UTF-8; include map
@@ -516,56 +519,14 @@ computed growth, retyping, deletion churn, lookup/update, and key/value loops.
   general iterator objects/callbacks, and general destructuring remain outside
   this phase. No further scope decision blocks the admitted subset.
 
-### 10.8 Latest validation and release evidence — 2026-10-07
+### 10.8 Validation and release evidence
 
-The tuning in §§11–14 is implemented. Latest gates:
-
-- MVP: **34/34**, also **34/34** with forced GC and freed-memory poisoning.
-- Shared Lambda/input aggregate: **6,292/6,292**, including **20/20** MIR-size
-  checks. Two initial child-execution failures passed five focused replays and
-  the unchanged aggregate rerun; their initial cause remains unconfirmed.
-- Full-JS Test262: **40,259 fully passing; two retry-only; zero regressions**.
-  The two large AST Unicode-identifier cases remain marked slow/unstable by
-  the baseline. Both also pass an isolated replay on each frozen release.
-  No harness or timeout changes were made.
-
-Release comparison: **15 alternating pairs over all 30 admitted workloads**,
-followed by **30 pairs on six targeted/noisy rows**, with an identical-control
-peer and old/new LJS and available untyped Lambda references. **All 4,410
-measured outputs and 252 discarded preflight outputs match.** Native MIR is
-pinned. Times are self-reported execution medians; startup/initial compilation
-is excluded, and Node tiering during the workload is included.
-
-| Workload | Before ms | Tuned ms | LJS ms | Untyped Lambda ms | Node ms | Paired speedup |
-|---|---:|---:|---:|---:|---:|---:|
-| pnpoly | 28.710 | 17.069 | 76.073 | 12.476 | 5.878 | **1.68×** |
-| dense_array | 76.513 | 58.613 | 287.933 | — | 11.877 | **1.31×** |
-| diviter | 291.066 | 294.748 | 680.134 | 318.402 | 558.098 | **1.00×** |
-
-The first two rows use the 30-pair follow-up; `diviter` uses the full-set run.
-Speedup is the median of paired ratios, while time columns are independent
-medians. The 95% paired-bootstrap intervals for tuned/before time are
-**0.592–0.600** (`pnpoly`) and **0.755–0.774** (`dense_array`); their control-peer
-speedups are **0.998×** and **1.001×**. The full set also improves `integer_dense`
-(**1.32×**) and Map iteration (**1.29×**).
-
-The initial `fib` slowdown disappears on follow-up. Object deletion remains
-noisy: **0.990×** paired speedup with a time-ratio interval of **0.964–1.147**.
-No material shared-client slowdown is confirmed. One-minute host load fell
-from **33.6 to 7.0** during the full run on eight logical CPUs; the follow-up
-retains the same binaries and sources.
-
-`pnpoly` is now **1.37× slower than untyped Lambda** and **2.90× slower than
-Node**. Generic element checks and dynamic storage remain further costs;
-this phase adds no numeric-array specialization. No compilation-time or
-allocation-count improvement is claimed.
-
-Evidence: [`element_tuning_mir_20261007.json`](../../test/benchmark/js_mvp_lmd/element_tuning_mir_20261007.json).
-Exact releases, sources, MIR, frame telemetry, runners, raw outputs and gate
-logs are in `temp/mvp_lmd_element_tuning/` (`confirm/` and `recheck/`).
-Release SHA-256: `3fbbefeb3521edcb95060e4bca0b2d164aca7d98d6c5ffa34b29c4135d15e6a8`.
-Ownership bounds and the reviewed MIR-budget delta are in
-[JS_MVP_Lmd_Objects §8](../impl/JS_MVP_Lmd_Objects.md#8-generic-element-coercion-and-scalar-ownership).
+The latest measurements and validation status are in §17. Earlier object/Map
+and element-coercion evidence is archived in
+[`MVP_Result3.json`](../../test/benchmark/js_mvp_lmd/MVP_Result3.json)
+and the [implementation record](../impl/JS_MVP_Lmd_Objects.md#8-generic-element-coercion-and-scalar-ownership).
+Exact earlier releases, sources, MIR, runners and gate logs remain in
+`temp/mvp_lmd_element_tuning/` (`confirm/` and `recheck/`).
 
 ## 11. Object and Map tuning
 
@@ -648,7 +609,7 @@ controls plus the existing MVP, forced-GC, Lambda and Test262 gates.
 
 ## 14. Element coercion and scalar ownership
 
-Implemented; latest evidence is in §10.8.
+Implemented; latest evidence is in §17.
 
 1. Route generic numeric coercion through the shared inline-number decoder,
    retaining JS conversion and capability errors for other values.
@@ -694,9 +655,10 @@ The first nine benchmark targets, identified from their current sources, are:
 | Larceny | `primes`, `quicksort`, `triangl`, `paraffins`, `ray` |
 | Kostya | `primes`, `matmul` |
 
-These remain kernel targets, not verified new passes. Preserve algorithms,
-inputs, iteration counts, and result checks; adapt only the host harness as
-in the existing comparisons. Node CLI/I/O compatibility is outside this phase.
+The release comparison in §15.3 now checks these kernels, with the duplicate
+`primes` workload measured through its canonical Kostya row. Algorithms,
+inputs, iteration counts, and result checks are preserved; only the host
+harness is adapted. Node CLI/I/O compatibility is outside this phase.
 
 ### 15.2 Reuse and helper disclosure
 
@@ -723,9 +685,10 @@ implementation evidence; do not add parallel per-element-kind implementations.
 
 ### 15.3 Acceptance and following phases
 
-Release compilation and whitespace checks passed. No runtime tests or benchmark
-measurements were run for this implementation round; the gates below remain
-pending, and §10.8's results do not validate these changes.
+Release compilation and the **25 standard / 17 microbenchmark** comparison
+passed. §17 records the latest results, including all 12 newly admitted
+kernels. The full constructor/Math/numeric-edge acceptance matrix below
+remains pending; §17's targeted semantic/GC checks cover its tuning changes.
 
 Validate numeric edges, constructor lengths, typed stores, bounds, aliases,
 shadowing, and allocation lifetimes normally and with forced GC/poisoning.
@@ -749,3 +712,85 @@ AWFY also needs its class/receiver behavior; array methods alone do not admit
 it. These later surfaces require their own scoped phases. `__proto__`, fancy
 descriptors, accessors, and proxies remain excluded; plain objects and Map
 continue to use ordinary Lambda storage without VMap (**D2.6.9v3**, §10).
+
+## 16. Numeric facts and element access tuning
+
+**Status:** IMPLEMENTED IN SOURCE, acceptance pending; 2026-10-08.
+This phase addresses lost numeric facts around array loads, especially in
+`triangl`, `array1`, and `matmul`.
+
+1. Preserve typed-array lane and length facts through aliases, `.fill()`, and
+   closed calls. Keep out-of-bounds reads observable as undefined.
+2. Carry element results directly into numeric consumers and preserve integer
+   store inputs, using existing Lambda storage emitters. Box at observable
+   boundaries; retain JS coercion order, wrapping, signed zero, and ownership.
+3. Improve counted-loop integer and bounds proofs, including nested loops and
+   affine indices. Hoist only facts valid across mutation, calls, and GC.
+4. Propagate numeric contents of unchanged ordinary array literals into loads
+   and closed calls without changing their boxed storage representation.
+
+Reuse shared Lambda facilities first and disclose further helpers under §15.2.
+These are static representation proofs under **D2.2.5**, **D2.4.3**,
+**D2.6.1v3**, **D5.3.4**, and **D8.2.6**, without runtime feedback or inline
+caches (**D8.4.1v2**). Allocation and recursive-call tuning follow measurement;
+Math and fill already use native scalar/lane operations.
+Three disclosed compiler utilities were added; no native runtime helper was
+added. See the [implementation record](../impl/JS_MVP_Lmd_Numeric_Tuning.md).
+
+Apply §15.3's semantic and GC gates. Compare frozen release binaries across
+all supported kernels using pinned MIR, self-reported times, alternating
+pairs, and an identical-control peer; retain the prior scalar/object/Map
+workloads as regression controls. Source-level coercion probes motivate this
+phase but are not compiler speedup evidence.
+
+The [numeric-tuning report](../../test/benchmark/js_mvp_lmd/MVP_Result4.md)
+archives this phase's comparison. §17 records the latest performance and
+targeted semantic/GC validation; §15.3's full numeric feature matrix remains
+pending.
+
+## 17. Slow-kernel tuning
+
+**Status:** implemented; latest paired release benchmarks pass; 2026-10-08.
+Prioritize `triangl`, `deriv`, `gcbench`, `pnpoly`, `binarytrees`, and optional
+integer conversions in `quicksort`.
+
+- Retain integer elements and optional locals with separate presence flags;
+  preserve missing values, NaN, signed zero, and snapshot ownership.
+- Lower conditions directly to branches and carry immutable container facts
+  through closed calls and unchanged local factories.
+- Reuse guarded Lambda shape stores, plain-Item returns for closed nonnumeric
+  factories, and precise roots. Evaluate fixed-key literal values in order
+  before allocating their unobservable parent; avoid scalar storage for
+  nonnumeric locals.
+
+Reuse Lambda storage, range, conversion, map allocation, return ABI and precise
+root machinery (**S1.11**, **D2.2.5**, **D2.4.3**, **D3.4.3v5**,
+**D5.2.1v3**, **D5.3.4**, **D8.2.6**). The original two disclosed compiler
+helpers remain `branch_condition` and `immutable_member_kind`; this follow-up
+adds no helper or runtime import.
+
+**Latest Result5:** 15 alternating release pairs over all 42 unchanged workloads,
+pinned MIR and self-reported execution time, pass **3,330 measured and 222
+discarded output checks**. Against the preceding Result5 candidate:
+
+| Workload | Before → after ms | Paired gain |
+|---|---:|---:|
+| quicksort | 1.707 → 1.298 | 1.316× |
+| gcbench | 95.970 → 91.792 | 1.046× |
+| binarytrees | 3.981 → 3.753 | 1.061× |
+| triangl | 157.987 → 155.499 | 1.016× |
+| deriv | 8.789 → 8.465 | 1.040× |
+| pnpoly | 7.425 → 7.332 | 1.017× |
+
+All 42 improve **1.025×** geometrically. Across 25 standard kernels, MVP is
+**1.247× faster than untyped Lambda** and **2.444× faster than Node**.
+Escaped object retyping retains a **2.2% slowdown**, confirmed with 30 further
+pairs; no full-run workload slows by more than 5% at its paired median.
+The [Result5 report](../../test/benchmark/js_mvp_lmd/MVP_Result5.md) and JSON
+retain the initial round and both current comparisons.
+
+The release build passes. Unit, forced-GC and baseline suites were not rerun
+for this follow-up; the initial round's gates apply to its earlier binary.
+Remaining work includes recursive allocation/collection cost and stronger
+control-flow bounds. Details and validation scope are in the
+[implementation record](../impl/JS_MVP_Lmd_Slow_Tuning.md).

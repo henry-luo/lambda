@@ -1,7 +1,8 @@
 # JS MVP Lambda numeric libraries — implementation record
 
 **Date:** 2026-10-07  
-**Status:** implemented in source; runtime and benchmark acceptance pending.
+**Status:** implemented in source; release benchmark outputs checked 2026-10-08;
+runtime acceptance pending.
 
 **Scope:** [JS_MVP_Lmd §15](../jube/JS_MVP_Lmd.md#15-numeric-libraries-and-wider-benchmark-coverage),
 **S1.11**, **D1.3v3**, **D2.2.5**, **D2.4.3**, **D2.6.1v3**, **D5.3**, **D8.2.6**.
@@ -83,8 +84,16 @@ and [ToIndex](https://tc39.es/ecma262/multipage/abstract-operations.html#sec-toi
 - No tests were added or run in this implementation round. Numeric edge,
   alias/snapshot, shadowing, forced-GC/poison, existing MVP, Lambda/input, and
   Test262 checks remain pending.
-- The nine §15 benchmark kernels remain unverified targets. No new timing or
-  speedup claim is made. Next measurements must retain matched kernels,
-  inputs, iteration counts, and result oracles; use frozen release binaries,
-  pinned native MIR, self-reported times, alternating pairs, and a control peer.
+- The [numeric-phase paired comparison](../../test/benchmark/js_mvp_lmd/MVP_Result4.md)
+  retains this release as its control and checks 25 standard kernels and 17
+  microbenchmarks with 15 alternating pairs and an identical-control peer.
+  All 3,330 measured and 222 discarded outputs
+  match. It covers the §15 kernels using the canonical Kostya sieve row,
+  plus `array1`, `binarytrees`, `fannkuch`, and `spectralnorm`. Frozen releases,
+  source hashes, pinned native MIR and self-reported times are retained.
+  Untyped `matmul` removes parameter annotations; its output parameter and
+  `spectralnorm`'s outputs use `var` per **S9.1.3**. These corrected temporary
+  ports replace initially incorrect zero/NaN outputs. The report records
+  timing and native-port differences; its A/B comparison measures the
+  subsequent numeric-tuning bundle.
 - Native compilation on Linux and Windows remains pending.
