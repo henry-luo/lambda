@@ -469,6 +469,8 @@ The working atomic-image adapter uses producer-owned immutable source items and 
 
 Table repetition and row splitting should be validated against [CSS Tables fragmentation](https://www.w3.org/TR/css-tables-3/#fragmentation), with the tested draft revision recorded. Repeating headers is not equivalent to duplicating the `<thead>` DOM subtree.
 
+The fixed-layout table adapter now emits row boundaries and independent inline-cell continuations, caching tracks at each used page width and reserving repeated header/footer groups. Occurrences retain source identities and selected-generation ownership under **D4.5.1v4 / D4.1.4v5**. This admits rectangular, nonspanning, top-aligned cells with separate borders and zero spacing; automatic sizing, captions/column boxes, collapsed borders, spanning cells and richer cell/group continuations remain required. The [implementation record](../impl/Radiant_Impl_Paged_Media.md#fixed-layout-table-fragmentation-2026-10-08) records the exact admission boundaries and validation against the 16 December 2025 CSS Tables 3 working draft. P4 remains partial.
+
 ### 5.5 Extract shared mechanisms without destabilizing columns
 
 Start by separating break-value interpretation, candidate policy, line-minimum checks and fragment recording from column placement. Promote reusable helpers to a coherent module header; do not copy `static` helpers into a new paginator. Keep column dimensions, balancing, rows and spanners in `layout_multicol.cpp`.

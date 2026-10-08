@@ -986,6 +986,48 @@ static void expect_preview_pixel(const ImageData& image, int x, int y, uint8_t r
     EXPECT_EQ(pixel[0], r); EXPECT_EQ(pixel[1], g); EXPECT_EQ(pixel[2], b);
 }
 
+TEST(RenderOutputParity, PagedFixedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_fixed_tables.html";
+    const char* pdf_path = "temp/render_output_parity/paged_fixed_tables.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_fixed_tables.png";
+    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+    strbuf_append_str(html, "<!doctype html><style>@page{size:240px 140px;margin:10px}"
+        "html,body{margin:0;font:10px/12px Arial}table{table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0}"
+        "td,th{vertical-align:top;padding:2px;border:1px solid black;orphans:1;widows:1}"
+        "thead{background:#cce0ff}tfoot{background:#ddffdd}.long{white-space:pre-wrap}</style>"
+        "<table><thead><tr><th>Heading A</th><th>Heading B</th></tr></thead>"
+        "<tfoot><tr><td>Footer A</td><td>Footer B</td></tr></tfoot><tbody>");
+    for (size_t i = 0; i < 9; i++) strbuf_append_str(html, "<tr><td>Body A</td><td>Body B</td></tr>");
+    strbuf_append_str(html, "<tr><td class='long'>A\nB\nC\nD\nE\nF\nG\nH\nI\nJ</td><td>Short</td></tr></tbody></table>");
+    bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
+    strbuf_free(html); ASSERT_TRUE(rendered);
+    ASSERT_EQ(pdf_page_count(pdf_path), 4);
+    EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
+    ASSERT_TRUE(render_document_fixture(html_path, preview_path,
+        "--paged --block-remote-resources --page-grid 2x2 --page-scale .5"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    EXPECT_EQ(preview.width, 240); EXPECT_EQ(preview.height, 140);
+    const int footers[] = {106, 106, 115, 97};
+    for (int page = 0; page < 4; page++) {
+        int x = page % 2 * 120, y = page / 2 * 70;
+        expect_preview_pixel(preview, x + 100, y + 8, 204, 224, 255);
+        expect_preview_pixel(preview, x + 100, y + footers[page] / 2, 221, 255, 221);
+    }
+    image_free(preview.pixels);
+    ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
+    snprintf(pdf.base, sizeof(pdf.base), "paged_fixed_tables");
+    for (int page = 0; page < 4; page++) {
+        char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page + 1, png, sizeof(png)));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+        EXPECT_EQ(image.width, 600); EXPECT_EQ(image.height, 350);
+        expect_preview_pixel(image, 500, 40, 204, 224, 255);
+        expect_preview_pixel(image, 500, footers[page] * 5 / 2, 221, 255, 221);
+        image_free(image.pixels);
+    }
+}
+
 static void append_svg_image_fixture(StrBuf* html, const char* attributes,
         const char* color, const char* style = nullptr) {
     strbuf_append_str(html, "<img");

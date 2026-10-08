@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_table.hpp"
 #include "view.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "render.hpp"
 #include "../lib/log.h"
@@ -2403,16 +2404,16 @@ static int table_apply_fixed_first_row_cell_width(LayoutContext* lycon, ViewTabl
     return span;
 }
 
-static void table_distribute_fixed_column_widths(float* explicit_col_widths, int columns,
+void layout_table_distribute_fixed_columns(float* explicit_col_widths, size_t columns,
                                                  float* content_width,
                                                  float total_explicit,
-                                                 int unspecified_cols) {
-    if (!explicit_col_widths || columns <= 0 || !content_width) return;
+                                                 size_t unspecified_cols) {
+    if (!explicit_col_widths || !columns || !content_width) return;
     if (total_explicit > 0.0f) {
         float remaining_width = *content_width - total_explicit;
         if (unspecified_cols > 0 && remaining_width > 0.0f) {
             float width_per_unspecified = remaining_width / unspecified_cols;
-            for (int i = 0; i < columns; i++) {
+            for (size_t i = 0; i < columns; i++) {
                 if (explicit_col_widths[i] == 0.0f) {
                     explicit_col_widths[i] = width_per_unspecified;
                 }
@@ -2423,7 +2424,7 @@ static void table_distribute_fixed_column_widths(float* explicit_col_widths, int
         }
     } else {
         float width_per_col = *content_width / columns;
-        table_assign_columns(explicit_col_widths, columns, width_per_col);
+        for (size_t i = 0; i < columns; i++) explicit_col_widths[i] = width_per_col;
     }
 }
 
@@ -7094,7 +7095,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     content_width, &total_explicit, &unspecified_cols);
             });
         }
-        table_distribute_fixed_column_widths(
+        layout_table_distribute_fixed_columns(
             explicit_col_widths, columns, &content_width, total_explicit, unspecified_cols);
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
         table_apply_fixed_height_distribution(lycon, table, rows);
