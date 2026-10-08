@@ -570,7 +570,7 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
     if (status != 0 || fw->curl_error != 0) {
         // network error
         const char* msg = fw->error_msg[0] ? fw->error_msg : "fetch failed";
-        Item error = dom_realm_new_error_named(make_string_item("TypeError"), make_string_item(msg));
+        Item error = dom_realm_new_error_named_cstr("TypeError", msg);
         Item args[1] = {error};
         dom_realm_call(reject_root.get(), ItemNull, args, 1);
     } else {
@@ -676,7 +676,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     char url_buf[2048];
     const char* url = js_item_to_cstr(url_root.get(), url_buf, sizeof(url_buf));
     if (!url) {
-        return dom_realm_promise_reject(dom_realm_new_error_named(make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
+        return dom_realm_promise_reject(dom_realm_new_error_named_cstr("TypeError", "fetch: invalid URL"));
     }
 
     // Browser fetch resolves a relative request against the active document,
@@ -690,8 +690,8 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         char* absolute_url = dom_resolve_network_url(url, document_url);
         if (!absolute_url || strlen(absolute_url) >= sizeof(resolved_url)) {
             if (absolute_url) mem_free(absolute_url);
-            return dom_realm_promise_reject(dom_realm_new_error_named(
-                make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
+            return dom_realm_promise_reject(dom_realm_new_error_named_cstr(
+                "TypeError", "fetch: invalid URL"));
         }
         snprintf(resolved_url, sizeof(resolved_url), "%s", absolute_url);
         mem_free(absolute_url);
@@ -699,8 +699,8 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     }
 
     if (document && !input_resource_policy_admits(document->resource_policy, url)) {
-        return dom_realm_promise_reject(dom_realm_new_error_named(
-            make_string_item("TypeError"), make_string_item("fetch: resource blocked by document policy")));
+        return dom_realm_promise_reject(dom_realm_new_error_named_cstr(
+            "TypeError", "fetch: resource blocked by document policy"));
     }
 
     JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
@@ -770,7 +770,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
                 path ? path : url);
             if (local_path) mem_free(local_path);
             return dom_realm_promise_reject(
-                dom_realm_new_error_named(make_string_item("TypeError"), make_string_item(msg)));
+                dom_realm_new_error_named_cstr("TypeError", msg));
         }
         if (local_path) mem_free(local_path);
         fseek(f, 0, SEEK_END);
@@ -804,10 +804,12 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     if (!js_permission_has_net()) {
         // blocked network fetches must reject before queueing curl work, or the
         // permission fixture waits for the worker/drain timeout instead of catch().
-        Item cause = js_permission_make_net_error("connect", url);
-        Item err = dom_realm_new_error_named(make_string_item("TypeError"), make_string_item("fetch failed"));
-        dom_realm_set_cstr(err, "cause", cause);
-        return dom_realm_promise_reject(err);
+        RootFrame roots(2);
+        Rooted<Item> cause_root(roots, js_permission_make_net_error("connect", url));
+        Rooted<Item> error_root(roots, dom_realm_new_error_named_cstr("TypeError", "fetch failed"));
+        // The permission cause must survive allocating the enclosing TypeError.
+        dom_realm_set_cstr(error_root.get(), "cause", cause_root.get());
+        return dom_realm_promise_reject(error_root.get());
     }
 
     uv_loop_t* loop = lambda_uv_loop();

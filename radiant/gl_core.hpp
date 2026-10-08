@@ -40,7 +40,12 @@ void native_gl_release(NativeGlContext* context, NativeGlResource resource);
 NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes);
 NativeGlResource native_gl_vertices(NativeGlContext* context, const NativeGlAttribute* attributes,
     unsigned count, NativeGlResource indices);
-NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface* image);
+struct NativeGlSampler {
+    unsigned wrap_s=0x812f,wrap_t=0x812f; // CLAMP_TO_EDGE
+    unsigned min_filter=0x2601,mag_filter=0x2601; // LINEAR
+};
+NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface* image,
+    const NativeGlSampler& sampler = {});
 NativeGlResource native_gl_program(NativeGlContext* context, const char* vertex, const char* fragment);
 unsigned native_gl_uniform_count(NativeGlContext* context, NativeGlResource program);
 bool native_gl_uniform_info(NativeGlContext* context, NativeGlResource program, unsigned index,

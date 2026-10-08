@@ -27,6 +27,32 @@
 static const char* TEST_VIDEO_PATH = "test/media/test_video_audio.mp4";
 static bool native_frame_decode_unavailable = false;
 
+TEST(RdtVideoMimeTest, ReportsActualDecoderCapabilities) {
+    const char* invalid[] = {"", "video", "video/", "/mp4", "video /mp4",
+        "video/mp4/extra", "text/html", "application/octet-stream",
+        "video/mp4; codecs=\"not-a-codec\""};
+    for (const char* type : invalid) EXPECT_STREQ("", rdt_video_can_play_type(type, strlen(type))) << type;
+    const char nul_type[] = "video/mp4\0";
+    EXPECT_STREQ("", rdt_video_can_play_type(nul_type, sizeof(nul_type) - 1));
+#ifdef __APPLE__
+    const char* mp4 = "video/mp4";
+    EXPECT_STREQ("maybe", rdt_video_can_play_type(mp4, strlen(mp4)));
+    const char* h264 = "video/mp4; codecs=\"avc1.42E01E\"";
+    EXPECT_STREQ("probably", rdt_video_can_play_type(h264, strlen(h264)));
+    const char* equivalents[] = {" \tVIDEO/MP4 \r\n", "video/mp4;", "video/mp4; nonsense=value",
+        "video/mp4; codecs=", "video/mp4; codecs=\"\""};
+    for (const char* type : equivalents) EXPECT_STREQ("maybe", rdt_video_can_play_type(type, strlen(type))) << type;
+    const char* codec_variants[] = {"video/mp4; CODECS=avc1.42E01E",
+        "video/mp4; codecs=\"avc1.42E01E\"ignored",
+        "video/mp4; ignored=\"; codecs=bad\"; codecs=avc1.42E01E",
+        "video/mp4; codecs=\"avc1.42E01E\"; codecs=bad",
+        "video/mp4; codecs=\"avc1.42E01\\E\""};
+    for (const char* type : codec_variants) EXPECT_STREQ("probably", rdt_video_can_play_type(type, strlen(type))) << type;
+#else
+    EXPECT_STREQ("", rdt_video_can_play_type("video/mp4", 9));
+#endif
+}
+
 // ============================================================================
 // Helper: poll state until target or timeout
 // ============================================================================

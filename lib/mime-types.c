@@ -58,6 +58,12 @@ MimePattern magic_patterns[] = {
     {"{", 1, 0, 30, "application/json"},
     {"[", 1, 0, 30, "application/json"},
 
+    // ASCII Model3D has a distinct header; OBJ and MTL require a filename.
+    {"3dmodel ", 8, 0, 50, "text/x-3d-model"},
+    {"3dmodel\t", 8, 0, 50, "text/x-3d-model"},
+    {"\xef\xbb\xbf" "3dmodel ", 11, 0, 50, "text/x-3d-model"},
+    {"\xef\xbb\xbf" "3dmodel\t", 11, 0, 50, "text/x-3d-model"},
+
     // Plain text (fallback)
         // XML
     {"<?xml", 5, 0, 50, "application/xml"},
@@ -278,6 +284,9 @@ MimeGlob glob_patterns[] = {
     // 3D
     {"*.stl", "model/stl"},
     {"*.obj", "model/obj"},
+    {"*.mtl", "model/mtl"},
+    {"*.gltf", "model/gltf+json"},
+    {"*.a3d", "text/x-3d-model"},
     {"*.3mf", "model/3mf"},
 
     // Executables

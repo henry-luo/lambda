@@ -3,6 +3,7 @@
 struct DomElement;
 
 size_t layout_table_cell_colspan(DomElement* element);
+size_t layout_table_column_span(DomElement* element);
 
 // shared top/middle/bottom placement; valign uses TableCellProp::CELL_VALIGN_*.
 float layout_table_cell_vertical_align_target(int valign, float content_area_height,

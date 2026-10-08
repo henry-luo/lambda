@@ -1082,6 +1082,17 @@ accepts any filename regardless of its extension (D2.9.2).
 | CSS | Cascading Style Sheets | `input(/.'style.css', 'css')` |
 | INI | Configuration files | `input(/.'config.ini', 'ini')` |
 | Math | Mathematical expressions | `input(/.'formula.txt', 'math')` |
+| OBJ | Wavefront geometry as ordered Lambda elements | `input("model.obj", 'obj')` |
+| MTL | Wavefront material library as ordered Lambda elements | `input("model.mtl", 'mtl')` |
+| glTF | JSON model, skin, and animation document as maps/arrays | `input("scene.gltf", 'gltf')` |
+| A3D | ASCII Model3D geometry, skeletons, actions, and voxels | `input("character.a3d", 'a3d')` |
+
+These textual model formats map to existing Lambda values (D4.1.3). External
+buffers, textures, and procedural scripts remain references; parsing does not
+load dependencies or start playback. To resolve supported model assets into
+renderable scene elements and shared animation clips, use `lambda.scene3d.load()`
+([asset-loading API and profiles](../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes), D7.2.4/S12.1.1v2).
+See the [3D input mappings and limits](../vibe/radiant/Radiant_Design_WebGL.md#14-textual-3d-asset-input).
 
 **Input Function Usage:**
 
@@ -1110,7 +1121,7 @@ Parse a string into Lambda data structures. Like `input()` but operates on strin
 | `parse(str)` | Parse string (auto-detect format) | `parse("{\"x\": 1}")` |
 | `parse(str, format)` | Parse string with specified format | `parse(str, 'json')` |
 
-**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`
+**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
 
 ```lambda
 // Parse JSON string

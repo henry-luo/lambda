@@ -2253,9 +2253,7 @@ static float table_prepare_final_padding_box_width(ViewTable* table, TableMetada
 }
 
 static int table_positive_span_attr(ViewElement* element) {
-    const char* span_str = element ? element->get_attribute("span") : NULL;
-    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count from attribute
-    return span > 0 ? span : 1;
+    return (int)layout_table_column_span(element ? element->as_element() : nullptr); // INT_CAST_OK: HTML column span count is bounded by 1000.
 }
 
 static float table_resolve_fixed_explicit_size(LayoutContext* lycon, ViewTable* table,
@@ -3674,11 +3672,19 @@ static bool table_cell_apply_align_content(ViewTableCell* cell,
     }
 }
 
-size_t layout_table_cell_colspan(DomElement* element) {
-    const char* value = element->get_attribute("colspan");
+static size_t table_html_column_span(DomElement* element, const char* attribute) {
+    const char* value = element ? element->get_attribute(attribute) : nullptr;
     int64_t span = value ? str_to_int64_default(value, strlen(value), 1) : 1;
     // HTML clamps positive column spans; keep both view producers on the same grid.
     return span > 1000 ? 1000u : span > 0 ? (size_t)span : 1u;
+}
+
+size_t layout_table_cell_colspan(DomElement* element) {
+    return table_html_column_span(element, "colspan");
+}
+
+size_t layout_table_column_span(DomElement* element) {
+    return table_html_column_span(element, "span");
 }
 
 static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewTableCell* cell) {

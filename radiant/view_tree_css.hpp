@@ -32,7 +32,7 @@ struct ViewCssStyle {
     Color border_color[4];
     float line_height;
     lam::Up<const CssValue> line_height_value;
-    CssEnum text_align, white_space, float_value, clear_value, position, box_sizing;
+    CssEnum text_align, white_space, float_value, clear_value, position, box_sizing, caption_side;
     CssEnum list_style_type;
     bool list_marker_inside;
     bool list_reversed;

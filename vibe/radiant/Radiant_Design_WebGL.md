@@ -27,6 +27,7 @@ and validates Three.js. Phase III adds image textures, PBR, shadows,
 postprocessing, controls/picking, complete selected Three.js recovery, and
 shared SVG/3D animation. A Three.js-like scene model is the Phase I vocabulary,
 not a dependency on Three.js or a promise of its complete feature set.
+Textual model inputs map into Lambda data as described in §14.
 
 **Authority:** [documentation convention](../../doc/Doc_Convention.md).
 This proposal applies existing formal contracts without revising them. It
@@ -912,6 +913,193 @@ corpus, not Three.js execution.
 These follow-on decisions do not change the formal specification. Phase I
 evidence covers the named macOS driver; other desktops remain unverified.
 
+## 14. Textual 3D asset input
+
+On 2026-10-08 the user selected textual model parsers, automatic file-type
+detection, and a mapping into ordinary Lambda data. This adds `obj`, `mtl`,
+`gltf`, and `a3d` to `input()` and `parse()`. No new runtime value type is
+needed. Parsing produces data for inspection, transformation, validation, and
+eventual scene loading; it does not yet import these documents into a Radiant
+scene or Three.js GPU resources.
+
+### Detection and ownership
+
+| Format | Extension | Input MIME type | Root value |
+|---|---|---|---|
+| Wavefront geometry | `.obj` | `model/obj` | `<obj …>` |
+| Wavefront material library | `.mtl` | `model/mtl` | `<mtl …>` |
+| glTF JSON | `.gltf` | `model/gltf+json` | JSON map, without a wrapper |
+| ASCII Model3D | `.a3d` | `text/x-3d-model` | `<a3d …>` |
+
+Filename detection is case-insensitive and uses the URL pathname. A3D also
+has a distinctive `3dmodel` header followed by space or tab, with an optional
+UTF-8 BOM. Filename-free OBJ/MTL input requires an explicit type: short words
+such as `v` and `newmtl` are too ambiguous for content sniffing. Filename-free
+glTF JSON follows ordinary JSON detection; use `gltf` explicitly for its
+minimal document checks. HTTP Content-Type lookup recognizes the four MIME
+types above. GLB, binary M3D, IQM, and VOX are outside this increment.
+
+```lambda
+let geometry = input("model.obj")^
+let materials = input("model.mtl")^
+let asset = input("scene.gltf")^
+let animated = input("character.a3d")^
+let triangle = parse("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", 'obj')^
+```
+
+**D4.1.3** places input allocations in the Input pool/arena, outside GC
+rooting. Parsed strings, numeric values, arrays, maps, and elements all belong
+to that Input; no value borrows a temporary line buffer. **S2.5.1v2** and
+**S2.6.3** keep arrays as single content items. **S2.6.4** merges adjacent
+strings in element content, so positional operands use arrays and repeated
+file references use separate `<file>` elements. Element child order retains
+state transitions and repeated properties rather than overwriting them in a
+map. Whitespace, comments, and quoting are normalized; source-byte roundtrip
+and OBJ/MTL/A3D output formatters are not provided.
+
+### Wavefront OBJ and MTL mapping
+
+OBJ uses an ordered stream of elements tagged with the original keyword.
+Vertices, texture coordinates, normals, and parameter vertices carry a
+numeric array child; coordinate values are floats. Polygon, line, and point
+references become maps with `v`, optional `vt`, and optional `vn` integer
+fields. Signed one-based OBJ indices remain as authored, including negative
+relative indices. Faces remain polygons of their original cardinality.
+
+```lambda
+<obj
+  <o "Hull">
+  <g ["front", "visible"]>
+  <v [0.0, 1.0, 2.0]>
+  <vt [0.25, 0.5]>
+  <usemtl "copper">
+  <f {v: -3, vt: 1, vn: 2}, {v: -2, vn: 2}, {v: -1, vn: 2}>
+>
+```
+
+`curv`/`surf` have numeric `u0`, `u1`, and, for surfaces, `v0`, `v1`
+attributes plus control-point reference maps. `parm`/`bmat` carry an `axis`
+attribute and numeric array. `trim`/`hole`/`scrv` carry `{start, end, curve}`
+maps. Numeric declarations such as `deg` use numeric arrays. Other
+statements, including grouping, free-form declarations, library references,
+`call`, and unknown extensions, retain operands in an array; groups and library
+names stay strings, and other operands distinguish integers, floats, and
+strings. Object/material names and the `csh`
+command tail are single strings. Backslash continuation and `#` comments are
+handled outside quoted tokens.
+
+MTL becomes `<mtl <material name: "…", …> …>`. Material properties remain
+ordered keyword elements, including duplicate properties and PBR extensions.
+Colors retain their authored component count in an array and have
+`space: "rgb"` or `space: "xyz"`; spectral colors have `space: "spectral"`,
+`file`, and `factor` attributes. Scalar material properties carry a one-item
+numeric array; `illum` is integer and `d -halo` has `halo: true`. Texture
+statements carry `file` and `options` attributes:
+
+```lambda
+<material name: "copper",
+  <Kd space: "rgb", [0.8, 0.4, 0.2]>
+  <Ks space: "spectral", file: "copper.rfl", factor: 1.0>
+  <map_Kd file: "copper.png",
+    options: <options <o -1.0, 0.5> <s 2.0, 2.0, 2.0> <clamp "on">>>
+>
+```
+
+The standard texture options retain order and variable operand counts.
+Unknown property keywords preserve their typed operands. Unknown texture
+switches retain the complete remaining statement tail in an `unparsed` string
+and emit a warning: without their arity, the filename boundary is ambiguous.
+A future option definition can interpret that tail. Undefined numeric values,
+missing required fields, zero OBJ corner references, incomplete corners, and
+unfinished continuations produce parser errors. Parsing does not resolve
+indices against the tables, validate every free-form command, triangulate,
+tessellate, load material libraries, or execute `call`/`csh`.
+
+### glTF mapping, including animation
+
+The existing JSON parser supplies the complete Lambda map/array/scalar
+mapping. Root `asset.version` must be a nonempty string; complete glTF schema,
+version support, accessor bounds, and reference validation belong to a later
+loader. `extensions` and `extras` survive unchanged, including unknown
+extensions. The parser rejects malformed JSON, incomplete containers,
+non-JSON numeric spellings, trailing content, and embedded NUL bytes.
+
+Meshes, primitives, nodes, materials, scenes, skins, inverse-bind accessor
+references, and morph targets keep the glTF JSON structure. Animation
+`samplers` and `channels` remain arrays of maps; interpolation names, target
+node/path, and accessor indices are retained. This data can later feed the
+shared animation engine in §8 after accessor decoding and binding. Parsing
+alone does not create animation actions or start playback.
+
+### ASCII Model3D mapping, including skeletal actions
+
+The `<a3d>` root has `scale`, `name`, `license`, `author`, and `description`
+attributes. Chunk order is retained; chunk names are optional `name`
+attributes except where the format requires one. Known chunks map as follows:
+
+| A3D chunk | Lambda representation |
+|---|---|
+| `Textmap` | `<textmap>` with `[u, v]` array children |
+| `Vertex` | `<vertices>` with `<vertex [x,y,z,w]>` children; optional `color` string and `weights: [{bone, weight}, …]` |
+| `Bones` | `<bones>` with `<bone name, position, orientation, parent>`; parent is a zero-based bone index or `null` for roots |
+| `Material` | `<material name>` with ordered property elements; A3D colors stay `#AARRGGBB` strings and texture names stay strings |
+| `Mesh` | `<mesh>` with ordered `<use>`, `<par>`, and `<face>` records; corner maps have zero-based `v`, optional `vt`, `vn`, `maximum` |
+| `Shape` | `<shape>` with ordered command elements and typed operand arrays; `use` has a single material-name string |
+| `VoxTypes` | `<voxtypes <type …>>`; color/name strings, decoded rotation/shape integers, weight maps and inventory `{count, type}` arrays |
+| `Voxel` | `<voxel>` with `pos`/`dim` integer array records and `<layer>` children of row arrays; `.` becomes `-1`, `-` becomes `-2` |
+| `Labels` | `<labels>` with ordered `color`/`lang` changes and `<label vertex: n, "text">` records |
+| `Action` | `<action name, duration_ms>` with `<frame time_ms>` children containing `{bone, position, orientation}` pose maps |
+| `Preview`, `Assets`, `Procedural` | Corresponding lowercase chunk with one `<file "path">` child per line |
+| `Extra` | `<extra name: "ABCD", binary>`; hex bytes decode to Lambda `binary` |
+| Unknown chunk | `<chunk kind: "Keyword", name: "…", <line "raw line"> …>` plus a warning |
+
+The same Vertex table contains positions, normals, and orientation
+quaternions; consumers determine their role through references. Bone slash
+depth becomes explicit parent indices. Weights retain their authored values
+and must be normalized with at most eight influences. Actions preserve
+millisecond timing and pose references, including standalone animation files.
+Voxel row/layer counts, bone parent levels, action frame times, chunk field
+shapes, and hex payload syntax are checked. A terminating `End` is required.
+No cross-chunk resource/reference validation or mathematical shape evaluation
+is performed. An empty `Extra` is childless rather than an empty binary,
+following **S2.2.2v2**.
+
+### What needs interpretation beyond the Lambda mapping
+
+All core textual records have a natural Lambda representation. The following
+parts need explicit consumers, or remain opaque:
+
+- **External or encoded resources:** glTF buffer/image URIs and data URIs,
+  OBJ material libraries, MTL texture/spectral files, and A3D assets remain
+  references. Textual glTF commonly references binary geometry, skinning, and
+  animation buffers; JSON parsing cannot expose decoded vertex/keyframe arrays
+  without buffer loading and accessor decoding. Compression extensions likewise
+  require their own decoders. No resource is fetched implicitly.
+- **Geometry and execution:** OBJ free-form surfaces and trimming curves,
+  A3D parametric shape commands, and procedural texture/surface scripts map to
+  definitions and references. Producing triangles requires tessellation or
+  script execution. The parsers perform neither, and preserve the input data.
+- **Application-specific meaning:** A3D `Extra` payloads become opaque binary;
+  unknown chunks/properties and glTF extensions retain data but acquire no
+  rendering semantics. There is no lossless universal conversion from these
+  features to the current native scene vocabulary.
+
+**S12.1.1v2** separates pure value construction from host effects, and
+**S12.4.1v2** makes `input()` return an acquired value rather than an open
+resource. Accordingly these parsers read only the supplied document; a later
+asset loader must explicitly acquire dependencies and bind geometry,
+materials, skeletons, and clips to the renderer and animation engine.
+
+Format references: [original Wavefront OBJ reference](https://help.autodesk.com/cloudhelp/2022/ENU/Alias-ImportExportData/files/File-format-reference/GUID-A1CC091A-A9C8-45DB-A3EA-2DAFE7E1A59D.html),
+[preserved original MTL specification](https://github.com/Alhadis/language-wavefront/blob/master/docs/mtl-spec.rst),
+[Khronos glTF 2.0 specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html),
+and [ASCII Model3D specification](https://gitlab.com/bztsrc/model3d/blob/master/docs/a3d_format.md).
+Implementation: `lambda/input/input-model.cpp`; focused checks:
+`test/test_input_model_gtest.cpp`, `test/input/model/`, and
+`test/lambda/input_model_formats.ls` with its `.txt` golden.
+Validation and broader-suite limits are recorded in
+[the input implementation evidence](../impl/Lambda_Input_Models.md).
+
 ## Appendix A — implementation seams and delivery gates
 
 Detailed Phase I implementation and validation are recorded in
@@ -1015,3 +1203,135 @@ revisions. They remain as history and do not constrain the current design.
 - ~~Three.js is the initial compatibility target, using its WebGL2 entry point.~~ Replaced by §1/§8: native Lambda scenes are Phase I; JS WebGL and Three.js are Phase II.
 - ~~Radiant needs no duplicate native 3D scene graph for this workload. Its retained page display list references the canvas image; Three.js's retained scene lives in the script heap.~~ Replaced by §4/§5: Lambda elements drive a native rendering projection in Phase I. The quoted ownership still describes the separate Phase II Three.js path.
 - ~~For Three.js-generated GLSL ES, implement a first-party, token-aware source adapter.~~ Its placement in initial delivery is superseded by §6: native desktop material shaders first; ES normalization joins Phase II.
+
+## 15. Asset loading into native scenes
+
+**D7.2.4**, **D4.1.3**, and **S12.1.1v2** apply: `lambda.scene3d` exposes
+source-package constructors; the input layer resolves model dependencies and
+owns the resulting values; the document host owns graphics and playback.
+Section 14's raw `obj`, `mtl`, `gltf`, and `a3d` inputs retain their original
+Lambda mappings. Asset loading is an additional conversion, selected internally
+by `input(source, {type: 'scene3d-asset', flavor: 'auto'})`.
+
+```lambda
+import s: lambda.scene3d
+let model = s.load("test/demo/scene3d/assets/loading/articulated.gltf",
+    {id: "flag", autoplay: true, clip: "Wave"})^
+let viewport = s.normalize(s.scene([
+    s.camera({id: "camera", position: [0.0, 0.0, 4.0]}),
+    s.light('ambient'), model
+], {camera: "camera", width: 480, height: 360}))^
+```
+
+`load(source, options)` returns a `<group>` containing resource definitions,
+object hierarchy, meshes, skeletons, and animation clips. It can be placed
+beside ordinary package-created objects. Supply the enclosing scene's camera
+and lights. Standalone MTL loading returns a group containing material and
+texture resources. Loading validates references and supported representations;
+`normalize` also checks the final composed scene.
+
+| Option | Meaning |
+|---|---|
+| `id` | Group ID and prefix for every descendant ID, resource reference and track path; default `"model"`. Use distinct IDs for multiple loads. Nonempty, at most 48 characters, without `.`. |
+| `format` | `'auto'` by default, or `'obj'`, `'mtl'`, `'gltf'`, `'a3d'` for extensionless sources. |
+| `autoplay` | `false` by default. `true` starts the selected clip through the existing document animation scheduler. |
+| `clip` | Original clip ID (e.g. `"asset-clip-0"`) or label; a supplied selection must identify exactly one clip. The first clip is selected by default. |
+| `transform` | Optional attributes applied to the returned group, e.g. `{position: [2, 0, 0], scale: [0.5, 0.5, 0.5]}`. |
+
+Generated IDs use source indices rather than author names, which may repeat or
+contain animation-path separators. For example, `id: "flag"` produces
+`flag-asset-node-0`, `flag-asset-node-2-primitive-0`, and
+`flag-asset-clip-0`. Author names become `name` or clip `label` attributes.
+The native scene's 127-byte ID limit also applies to composed IDs.
+
+### Dependency resolution and ownership
+
+OBJ material libraries resolve against the OBJ URL, and diffuse texture paths
+resolve against their own MTL URL. Library declarations are collected before
+meshes are converted. glTF buffer/image URIs resolve against the glTF URL.
+Existing URL/input services perform dependency acquisition; images use the
+existing document image path. The loader has no second network stack. Data URIs use the shared
+base64 decoder. Images stored in glTF buffer views become image data URIs for
+the existing image acquisition path. Missing dependencies produce input errors.
+
+Decoded buffers are Input-owned binary values. Geometry, materials, skeletons,
+and tracks are rebuilt in the destination Input arena (**D4.1.3**), with no
+retained parser scratch pointers. Enum attributes use Lambda symbols; IDs,
+names, paths and URIs use strings. Numeric streams remain arrays, preserving
+component boundaries under **S2.6.4**. No new runtime value type is required.
+
+### Renderable format profiles
+
+| Format | Native scene conversion | Explicit limits / omitted data |
+|---|---|---|
+| OBJ | Polygon faces, signed relative indices at the statement position, independent position/normal/UV references, homogeneous positions, object/group/material boundaries, concave polygon triangulation, authored normals or generated flat normals. | Smoothing groups require authored normals. Lines, points, free-form curves/surfaces, legacy texture commands, `call` and `csh` are rejected. No commands execute. |
+| MTL | One-component gray or three-component RGB diffuse color, opacity (`d`/`Tr`), unlit `illum 0` or Lambert shading, diffuse images, repeat wrapping and `-clamp on/off`. | Spectral/XYZ colors, halo dissolve and unsupported texture options are errors. Out-of-range diffuse colors are clipped with a warning. Specular, ambient, emissive and PBR properties have no faithful Lambert equivalent and emit warnings. |
+| glTF 2.0 JSON | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0, RGB colors, base-color texture/factor, opaque/blended materials, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. | Required extensions other than `KHR_materials_unlit` are rejected. Optional extensions use the core fallback with warnings. PBR metallic/roughness shading uses a documented Lambert base-color approximation; secondary PBR maps are warned and omitted. Alpha masking, vertex alpha, non-UV0/transformed textures, lines/points and compressed geometry are unsupported. Embedded glTF cameras are omitted with a warning; supply a native scene camera. GLB remains outside this textual profile. |
+| A3D | Polygon meshes/materials, zero-based references, vertex color/UV/normal data, model scale, parent-relative bone transforms and persistent partial action-frame overrides. Actions become position and quaternion tracks in seconds. | At most four influences per skinned vertex; vertices in skinned meshes need weights. Texture-name/embedded-asset resolution, maximum-vertex/parametric records, mathematical shapes, voxels and procedural/unknown chunks are rejected. Preview, labels, asset lists and extra application bytes remain available through raw parsing and are omitted from rendering. |
+
+The glTF decoder supports little-endian signed/unsigned byte/short, unsigned
+int and float components, normalized integer attributes, accessor/view offsets,
+interleaved strides, and sparse overrides. It validates reference indices,
+component encodings, declared buffer lengths, accessor bounds and increasing
+sparse indices. It is a supported-profile loader, not a complete glTF schema
+validator. Raster sampling honors glTF wrap and min/mag filters, generates
+mipmaps when requested, and accounts for their GPU storage. glTF's top-origin
+UVs convert to the native raster convention; OBJ UVs already use that convention.
+Materials carry `alpha-mode: 'opaque'` or `'blend'`; glTF's default `OPAQUE`
+ignores factor and texture alpha, while `BLEND` uses the ordered transparent
+pass, per the [glTF alpha-coverage specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#alpha-coverage).
+Hand-authored native materials without this attribute retain automatic alpha detection.
+
+Resource limits include 64 MiB per glTF buffer, 4,194,304 decoded components per
+accessor, 262,144 vertices per geometry, 4,096 corners per polygon, 4,096 glTF
+nodes and hierarchy depth 64. Native deformation retains 16 bones (including
+joint ancestors), four normalized influences per vertex, and two relative morph
+targets. Larger models report a limit error. Singular matrices and zero-scale poses
+are unsupported by the native transform path. These limits are separate from
+whether their raw data maps naturally into Lambda.
+
+### Bind poses, transforms, and shared animation
+
+Native nodes accept a nonzero static `quaternion` (`[x,y,z,w]`) (normalized when read) or an affine
+column-major `matrix`. Matrix and TRS attributes are exclusive, and TRS animation
+cannot target a matrix node. Animation bindings read authored quaternions as
+the base pose, so stopping a clip restores the imported pose.
+
+A bone may carry `inverse-bind-matrix`. For these authored binds the skin
+matrix is `inverse(meshWorld) * boneWorld * inverseBind`; native scenes without
+an authored inverse bind retain their existing inferred bind-pose behavior.
+The importer remaps glTF joint indices to native skeleton preorder and includes
+joint ancestors, retaining their animation channels. This avoids replacing an
+authored bind with a guess from the current hierarchy.
+
+Per the [Khronos glTF 2.0 specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html),
+`STEP` maps to shared discrete sampling, `LINEAR` to linear/vector or quaternion
+SLERP, and `CUBICSPLINE` to shared Hermite sampling. Hermite tangents are
+derivatives per second; the sampler multiplies them by the segment duration
+and normalizes sampled quaternion results. Native `hermite` tracks carry one
+`in-tangents` / `out-tangents` value per value component, unlike Bezier's absolute
+time/value pairs. The evaluator, mixer, actions, scheduler, seek, and context-loss
+lifetime are the existing SVG/native animation machinery from §8; only the
+native draw path consumes the resulting bone matrices and morph weights.
+A3D quaternion actions use this engine's SLERP interpolation.
+
+### Verification fixtures
+
+`test/demo/scene3d/asset-gallery.ls` displays all three mesh formats. Its CC0
+assets and dependency files are under `assets/loading/`, with a reproducible
+Python standard-library generator. The glTF fixture includes an external buffer
+and an equivalent data-URI version, an interleaved vertex stream, normalized
+byte colors/weights, a sparse morph target, reversed joint order, authored bind
+matrices, a transformed mesh node, static quaternion/matrix markers, and STEP,
+LINEAR and CUBICSPLINE playback. The A3D fixture exercises two-bone actions.
+An alpha-bearing embedded texture verifies default glTF OPAQUE rendering
+against an explicit BLEND rendering of the same material.
+
+Native tests assert visible textured/color geometry, marker pixels, changed
+pixels at fixed playback times, restoration after stop, unchanged geometry/GPU
+allocations while seeking, and identical poses after context loss. Package
+goldens check composition, ID rewriting, clip selection and validation across
+execution tiers. Negative fixtures cover unsupported required extensions,
+cycles, truncated buffers, accessor overruns, invalid OBJ references and inert
+commands. Validation results and capture commands are recorded in
+[the implementation record](../impl/Radiant_Scene3d_Assets.md).

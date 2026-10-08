@@ -13,6 +13,11 @@ struct RdtVideo {
 
 extern "C" {
 
+const char* rdt_video_can_play_type(const char*, size_t) {
+    // this backend cannot decode media until a platform implementation exists.
+    return "";
+}
+
 RdtVideo* rdt_video_create(const RdtVideoCallbacks* cb, void* userdata) {
     (void)cb; (void)userdata;
     RdtVideo* v = (RdtVideo*)mem_calloc(1, sizeof(RdtVideo), MEM_CAT_RENDER); // OBJ_HEAP_OK: video backend handle owns platform state until rdt_video_destroy.

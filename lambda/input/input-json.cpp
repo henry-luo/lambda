@@ -98,6 +98,25 @@ static bool parse_string_raw(InputContext& ctx, const char **json,
             return false;
         }
 
+        // properties intentionally accepts unknown escapes; JSON must validate
+        // its narrower escape vocabulary before using the shared decoder.
+        char escape = **json;
+        if (!strchr("\"\\/bfnrtu", escape)) {
+            ctx.addError(tracker.location(), "Invalid JSON escape");
+            return false;
+        }
+        if (escape == 'u') {
+            uint32_t cp;
+            size_t consumed;
+            if (!escape_decode_utf16_escape(*json + 1, strnlen(*json + 1, 10), true, &cp, &consumed)) {
+                ctx.addError(tracker.location(), "Invalid JSON Unicode escape");
+                return false;
+            }
+            *json += consumed + 1;
+            tracker.advance(consumed + 1);
+            stringbuf_append_utf8(sb, cp);
+            continue;
+        }
         int consumed = parse_escape_char(json, sb);
         tracker.advance(consumed);
     }
@@ -138,6 +157,34 @@ static Item parse_number(InputContext& ctx, const char **json) {
     *json = end;
     tracker.advance(len);
 
+    // strtod accepts non-JSON spellings such as 01, 1. and hexadecimal floats.
+    // Validate the decimal grammar here so all JSON consumers share the rule.
+    const char* digit = start;
+    bool valid = true;
+    if (digit < end && *digit == '-') digit++;
+    if (digit < end && *digit == '0') digit++;
+    else {
+        valid = digit < end && *digit >= '1' && *digit <= '9';
+        while (digit < end && *digit >= '0' && *digit <= '9') digit++;
+    }
+    if (digit < end && *digit == '.') {
+        digit++;
+        const char* first = digit;
+        while (digit < end && *digit >= '0' && *digit <= '9') digit++;
+        valid &= digit > first;
+    }
+    if (digit < end && (*digit == 'e' || *digit == 'E')) {
+        digit++;
+        if (digit < end && (*digit == '+' || *digit == '-')) digit++;
+        const char* first = digit;
+        while (digit < end && *digit >= '0' && *digit <= '9') digit++;
+        valid &= digit > first;
+    }
+    if (!valid || digit != end) {
+        ctx.addError(tracker.location(), "Invalid JSON number spelling");
+        return ctx.builder.createNull();
+    }
+
     Item number_item = parse_scanned_decimal_number(ctx, start, len, false, true);
     if (number_item.item == ITEM_NULL) {
         const char* msg = scanned_number_has_float_marker(start, len)
@@ -169,6 +216,7 @@ static Item parse_array(InputContext& ctx, const char **json, int depth) {
         return arr_builder.final();
     }
 
+    bool closed = false;
     while (**json && !ctx.shouldStopParsing()) {
         Item item = parse_value(ctx, json, depth + 1);
         arr_builder.append(item);
@@ -177,12 +225,15 @@ static Item parse_array(InputContext& ctx, const char **json, int depth) {
         if (**json == ']') {
             (*json)++;
             tracker.advance(1);
+            closed = true;
             break;
         }
 
         json_consume_comma_or_recover(ctx, json, ']', "Expected ',' or ']' in array");
     }
 
+    // EOF cannot implicitly close a container, including after a comma.
+    if (!closed) ctx.addError(tracker.location(), "Unterminated JSON array");
     return arr_builder.final();
 }
 
@@ -206,6 +257,7 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
         return map_builder.final();
     }
 
+    bool closed = false;
     while (**json && !ctx.shouldStopParsing()) {
         // parse object keys with the same JSON string routine as values so
         // escape and control-character validation cannot drift.
@@ -245,12 +297,14 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
         if (**json == '}') {
             (*json)++;
             tracker.advance(1);
+            closed = true;
             break;
         }
 
         json_consume_comma_or_recover(ctx, json, '}', "Expected ',' or '}' in object");
     }
 
+    if (!closed) ctx.addError(tracker.location(), "Unterminated JSON object");
     return map_builder.final();
 }
 

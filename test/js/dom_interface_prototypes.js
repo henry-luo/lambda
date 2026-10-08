@@ -77,3 +77,16 @@ delete Element.prototype.locked;
 var collection = child.childNodes;
 console.log(Reflect.set({}, 'marker', 23, collection), collection.marker, Object.hasOwn(collection, 'marker'));
 console.log(Reflect.set({}, 'marker', 23, 5));
+
+// Proxy admission includes native nodes and collections as targets and handlers.
+function forwardNativeGet(target, key) { return Reflect.get(target, key, target); }
+var proxyTargets = [[child, 'id'], [collection, 'length']];
+for (var proxyTarget of proxyTargets) {
+    var forwarded = new Proxy(proxyTarget[0], {get: forwardNativeGet});
+    console.log(forwarded[proxyTarget[1]] === proxyTarget[0][proxyTarget[1]]);
+}
+for (var nativeHandler of [child, collection]) {
+    nativeHandler.get = function(target, key) { return Reflect.get(target, key); };
+    console.log(new Proxy({value: 31}, nativeHandler).value);
+    delete nativeHandler.get;
+}
