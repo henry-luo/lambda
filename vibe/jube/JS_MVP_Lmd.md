@@ -1107,3 +1107,30 @@ and with forced GC/poisoning. Combined Lambda/input baseline passes
 **6,459/6,459**; Test262 passes **40,261/40,261** with zero retries.
 Exact binaries, fresh Lambda/Node references and uncertainty are recorded in
 the linked report.
+
+## 24. Method specialization and stable class fields
+
+Reduce the remaining CD/Richards overhead through bounded, guarded inlining of
+parameterized methods, setters and callbacks; stable nullable field storage;
+and scalar replacement of provably unobserved temporary class instances.
+Reuse the existing inline frame, scalar-field and immutable shape machinery
+(**D3.4.3v5–D3.4.5**, **D5.2–D5.3**). Captured function identity, argument order,
+mutable closure cells and receiver semantics must remain intact
+(**S1.11**, **D1.3v3**, **D6.2.3v2–D6.2.4**). Escaping or observable instances
+retain ordinary allocation. Disclose added helpers before implementing them.
+
+Accept each step only with output-checked, balanced release comparisons using
+pinned native MIR and self-reported time. Protect all 60 workloads and shared
+Lambda clients; run focused ownership tests, forced GC and both baseline gates.
+Keep results separate from the published Result series until requested.
+
+**Implemented:** guarded method/callback inlining, bounded scalar class locals,
+and nullable links using Lambda's existing Map pointer lane. Release comparisons
+show Richards **15.1%**, CD **2.7%**, Permute **23.6%**, Queens **17.7%** and
+Towers **26.6%** faster; all **60 workloads** pass output checks. Performance
+acceptance remains open: longer checks retain Map lookup **2.14%** and GCbench
+**0.17%** slowdowns, and cold compilation/startup costs increase. MVP checks
+pass **58/58** normally and with forced GC/poisoning, Lambda/input **6,468/6,468**,
+and the final Test262 run **40,261/40,261** with zero retries. Exact evidence,
+earlier gate instability and remaining scope are in
+[method and field specialization](../impl/JS_MVP_Lmd_Specialization.md).
