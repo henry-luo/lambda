@@ -9,6 +9,7 @@ The numeric-library phase is implemented in source (§15); its full feature
 edge matrix remains pending. §§16–17 record the subsequent tuning.
 Basic classes and single inheritance are implemented in source (§21);
 class-phase validation and performance evidence are tracked separately there.
+Closures, callbacks and array growth are implemented and validated in §22.
 
 **Performance history:** [MVP_Result3–7](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
@@ -98,12 +99,12 @@ object/Map boundary and its scope decisions.
 | Scalars | Undefined, null, Boolean, Number, String; NaN, infinities, signed zero | BigInt, Symbol, boxed primitive objects |
 | Operators | Arithmetic, remainder/power, bitwise/shifts, comparisons, loose/strict equality, `typeof`, `void`, short-circuiting, conditional/comma; object `in`/property `delete`; fixed-class `instanceof` (§21) | Object-to-primitive coercion; general prototype/`instanceof` customization |
 | Variables | `var`, `let`, `const`; assignments, logical/compound assignments, updates, changing kinds; simple array destructuring assignment (§18; validation in §19) | Binding/nested/rest/default patterns; sloppy implicit global creation |
-| Arrays | Dense mixed/nested literals, indexed reads/writes, append at length, length reads/shrink; constructors, `fill`/`push`/`pop`/`join`, constructor/deletion holes and own projections (§18; validation in §19) | Hole literals, sparse writes, other named properties, first-class intrinsic methods, descriptors/prototypes |
+| Arrays | Dense mixed/nested literals, indexed reads/writes with gap holes, length reads/shrink/growth; constructors, `fill`/`push`/`pop`/`join`/`slice`/`forEach`, deletion holes and own projections (§18, §22) | Hole literals, other named properties, first-class intrinsic methods, descriptors/prototypes |
 | Typed arrays | `Int32Array`, `Uint8Array`, `Float64Array`: length construction, zero initialization, indexed reads/writes, `.length`, `.fill(value, start?, end?)` (§15; validation pending) | Buffer/view constructors, other properties/methods, typed-array iteration, detachment/resizing/shared storage |
 | Math | Fixed calls to `sqrt`, `sin`, `floor`, `trunc`, `abs`, `min`, `max`, `ceil`, `cos` (§15; validation pending) | First-class Math object/methods, dynamic method names, mutation, other Math members |
 | Objects/Map | Data properties, own projections, `new Map()` and fixed collection operations (§10); class-created inheritance links (§21) | `__proto__`, descriptors/accessors, proxies, arbitrary/mutable prototypes, iterable Map construction |
 | Control flow | Blocks, conditionals, while/do/for, direct `for-of` with simple pair binding (§10.5), switch/fallthrough, labels, break/continue, return; uncaught `throw` (§21) | `for-in`, general iterators, generators, async, try/catch/finally |
-| Functions/classes | Ordinary declarations/expressions, arrows, simple parameters, recursion, function values, indirect calls, program bindings; named top-level classes, constructors, instance/static methods, single inheritance, class `this`/`new.target` and `super` (§21) | Enclosing local captures, default/rest/spread parameters, observable ordinary-function `this`/`arguments`, class expressions/nested classes, field initializers, private/accessor members, ordinary-function construction |
+| Functions/classes | Ordinary declarations/expressions, arrows, simple parameters, recursion, function values, indirect calls, program bindings; shared/escaping local captures and per-iteration bindings (§22); named top-level classes, constructors, instance/static methods, single inheritance, class `this`/`new.target` and `super` (§21), arrow lexical class receivers | Default/rest/spread parameters, observable ordinary-function `this`/`arguments`, global-arrow `this`, arrow lexical `super`, class expressions/nested classes, field initializers, private/accessor members, ordinary-function construction |
 | Program | One script with execution-owned bindings and retained early-error/strictness rules | Modules, eval, Function constructor, with, DOM/Node APIs, general global object |
 
 Strings preserve Unicode, including lone surrogates, with UTF-16 length and
@@ -140,7 +141,8 @@ ToInt32/ToUint32 wrapping, and JS remainder/power behavior (**S1.11**,
 - `let`/`const` retain block scope and TDZ; const prevents rebinding without
   freezing the referenced container.
 - Program bindings are execution-local and shared by functions in that
-  execution. Enclosing function/block captures remain excluded.
+  execution. Enclosing function/block captures share lexical bindings;
+  `let`/`const` loop iterations retain distinct bindings (§22, **D6.2.3v2**).
 - `undefined`, `NaN`, and `Infinity` use resolved intrinsic bindings, with
   proper shadowing, restricted global declarations, and strict/sloppy writes.
   An unresolved read and a TDZ read retain their distinct `typeof` behavior.
@@ -156,7 +158,7 @@ Lambda's mutable-value rules in **S9.1**.
 ### 4.3 Ordinary arrays
 
 Use ordinary host `Array` with mixed Item elements. Literals are dense;
-§18 adds constructor/deletion holes, distinct from stored undefined.
+§18 adds constructor/deletion holes; §22 adds growth gaps, distinct from stored undefined.
 Aliases and cycles are valid. Foreign containers and mutable prototypes
 are outside admission.
 
@@ -166,8 +168,8 @@ are outside admission.
 | In-bounds read/write | A hole reads as undefined; writing creates/replaces the own element and returns the original RHS. |
 | Read at/above length | Undefined for an admitted canonical index. |
 | Write at length | Append one element. |
-| Write beyond length | Capability failure before creating a hole. |
-| Length assignment | Shrink/retain a valid length; invalid lengths cause RangeError; valid growth is unsupported. |
+| Write beyond length | Extend length and leave absent properties in the gap. |
+| Length assignment | Shrink/retain/grow a valid length; growth creates holes; invalid lengths cause RangeError. |
 
 Numeric `-0` denotes index zero; string `"-0"` does not. `2^32 - 1` is not an
 array index. Key conversion runs once. Length conversion, RHS evaluation,
@@ -470,7 +472,7 @@ JS syntax and observable behavior under **S1.11**.
 | `for (const v of Object.values(o))` / pair binding over `Object.entries(o)` | Own values / key-value pairs |
 
 The pair pattern is restricted to two simple bindings without defaults/rest;
-it does not admit general destructuring or captured per-iteration locals.
+§22 adds captures of the distinct per-iteration lexical bindings.
 Collection and projection expressions evaluate once. Proven intrinsic loop
 sources lower directly to a cursor/key/value loop; escaping iterator values
 and custom iterator protocols remain unsupported. Elide an entry array only
@@ -806,7 +808,7 @@ Plain objects retain Map/shape transitions (**D3.4.3v5**); VMap, `__proto__`,
 descriptors/accessors and proxies remain excluded. Follow §15.2's helper
 disclosure and §15.3's acceptance requirements. Constructors/classes and
 receivers, including the error statements in AWFY bundles, are covered in §21;
-captured mutable locals follow for workloads such as Navier–Stokes.
+captured mutable locals are covered in §22.
 
 The [implementation record](../impl/JS_MVP_Lmd_Array_String.md) lists shared
 reuse, disclosed helpers and the checks added after the initial Result6 capture.
@@ -940,7 +942,7 @@ methods; inherited lookup follows the shared nominal base chain.
 
 Uncaught `throw`, direct `throw new Error(message)`, and primitive template
 interpolation cover the AWFY diagnostic paths. First-class Error objects,
-handlers, class expressions/nested classes, field initializers, captured locals,
+handlers, class expressions/nested classes, field initializers,
 ordinary-function construction, Error options, computed `super` keys, and
 writes/deletes through `super` remain excluded. Class prototype and constructor
 properties are readable; their
@@ -995,3 +997,74 @@ noise. All 54 timings and separate regression confirmations are recorded in
 [MVP_Result7](../../test/benchmark/js_mvp_lmd/MVP_Result7.md).
 Exact binaries, uncertainty and remaining validation are also documented in the
 [implementation record](../impl/JS_MVP_Lmd_Classes.md#class-and-regression-tuning-2026-10-08).
+
+## 22. Closures, callbacks and array growth
+
+**Status:** first step IMPLEMENTED AND VALIDATED, 2026-10-08. The [implementation record](../impl/JS_MVP_Lmd_Closures.md) contains helper disclosures, exact artifacts and timing limits. Static fields and `substring` remain the follow-up.
+
+**Closure alignment (USER, 2026-10-08).** JS/MVP closures must align with and
+reuse Lambda's function/environment representation, allocation, owned `Item`
+storage, scalar homes and precise GC tracing. Lambda captures are immutable
+snapshots; JS captures reference shared lexical bindings that may be mutable
+(**D6.2.3v2–D6.2.4**, **D1.3v3**). Enclosing code and sibling closures must
+observe the same binding updates, including after the creating call returns.
+Preserve JS `const`, temporal-dead-zone and per-iteration `let` semantics;
+support nested/escaping captures and arrow lexical `this` (**S1.11**).
+The JS extension must preserve Lambda's immutable-capture contract and the
+shared runtime's ownership and call boundaries (**D5.2–D5.3**, **D6.2.2v2**).
+
+### 22.1 Scope and coverage targets
+
+| Addition | Target workloads |
+|---|---|
+| Captured locals/parameters and lexical `this`; array `forEach` | AWFY `nbody`, `richards` |
+| Closures in the bundled SOM library; hole-preserving array `slice` and `.length` growth | AWFY `bounce`, `storage`, `cd` |
+| Indexed writes beyond length, preserving holes in the gap | JetStream `crypto_sha1` |
+
+The first step enables **six additional workloads (54 → 60)**, including the
+complete bundled libraries for Bounce/storage. `slice` must
+return an independent shallow copy with holes preserved. `forEach` captures
+the initial length, skips absent elements, observes intervening mutations and
+propagates callback failures. Reuse existing Lambda array storage and copying
+operations with explicit JS bounds/hole policy (**S1.11**, **D1.3v3**).
+
+A follow-up adds public static class fields in declaration order and UTF-16
+`String.substring`, targeting AWFY `deltablue` and `json` (**60 → 62**).
+Static fields reuse class storage, nominal ancestry and shape transitions
+(**D2.6.9v3**, **D3.4.3v5–D3.4.5**). Separately audit adapters for Julia
+`parse_integers`, `iteration_pi_sum` and `matrix_statistics`; preserve kernels,
+warmup, timing boundaries and oracles. Refresh the manifest's stale 63-row
+assumption against the current 71-row standard inventory.
+
+Ordinary-function construction, arbitrary prototype mutation, descriptors,
+accessors, proxies, `__proto__`, BigInt, RegExp and Node I/O remain deferred.
+Prefer extending existing Lambda helpers or adding a narrow semantic option;
+disclose every necessary new helper and its dependency closure before coding.
+Retain §1's prohibition on calling full LambdaJS runtime helpers.
+
+### 22.2 Correctness and performance acceptance
+
+Allocate capture environments only where required; retain native locals,
+direct calls, class caches and existing in-bounds array fast paths elsewhere.
+Implement in small independently measured steps. Validate shared/escaping
+captures, loop bindings, lexical `this`, scalar lifetimes and array mutation
+under forced GC; complete the outstanding class-phase checks and Lambda/Test262
+baseline gates.
+
+**No performance regression is an acceptance requirement.** Compare all 54
+existing workloads against the frozen Result7 release using pinned native MIR,
+unchanged inputs/oracles, alternating self-reported timings and an identical
+control noise lane. Check each workload and shared Lambda clients; aggregate
+gains cannot excuse individual regressions. Confirm suspected slowdowns with
+longer paired runs, fix or revert confirmed regressions, and report unresolved
+noise explicitly. Measure newly admitted workloads against fresh untyped
+Lambda and Node references with documented timing and port differences.
+
+**Latest results:** 60 workloads pass their output checks. Thirty balanced
+release pairs across the prior 54 workloads show no confirmed regression
+against Result7 (geometric mean time ratio 0.9973); 60-pair checks of three
+shared Lambda clients also show no confirmed slowdown. MVP semantic checks
+pass **52/52**, normally and with forced GC/poisoning; Lambda baseline passes
+**6,427/6,427** and Test262 baseline **40,261/40,261** with zero retries.
+The six new comparisons use fresh Lambda/Node references; SHA1's canonical
+Lambda port is explicitly annotated and is not labeled untyped.
