@@ -326,7 +326,10 @@ lambda view [document_file] [options]
 
 Unknown options are silently ignored.
 
-**Default file:** `test/html/index.html` (when no file is specified)
+**Default file:** `<LAMBDA_HOME>/package/doc/doc_viewer.ls`, the bundled
+`lambda.doc` document viewer (D7.2.4). It browses the current working directory.
+`lambda demo` opens its `doc_viewer.html` startup splash. Both commands use
+`./lmd` as the default Lambda home and honor `LAMBDA_HOME`.
 
 **Supported formats:**
 

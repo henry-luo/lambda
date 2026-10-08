@@ -23,7 +23,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 7. [latex — LaTeX to HTML](#7-latex--latex-to-html)
 8. [pdf — PDF Rendering](#8-pdf--pdf-rendering)
 9. [openapi — OpenAPI Tools](#9-openapi--openapi-tools)
-10. [Engine Packages: edit, editor, dom](#10-engine-packages-edit-editor-dom)
+10. [Engine Packages: edit, editor, dom, doc](#10-engine-packages-edit-editor-dom-doc)
 11. [Tests](#11-tests)
 
 ---
@@ -39,6 +39,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
+| `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor` | `lambda.editor.mod_editor` | Engine internal | The editing model: documents, selections, transactions, history | `lambda edit`, through `edit` |
 | `dom` | `lambda.dom.dom` | Engine internal | Browser behaviour for HTML: form controls, links, focus, `<details>`, editing | `lambda view` on interactive pages |
@@ -82,7 +83,7 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4). Shipped pa
 | `lambda.sys.<name>` | A system function, reachable even when a script shadows its name (S17.2.1, S17.2.2) |
 
 - **Name an existing module.** There is no implicit directory index, so `import chart: lambda.chart` fails with E217; write `lambda.chart.chart`. `lambda.slide` has an explicit `package/slide.ls` entry file.
-- **`lambda.doc.*` holds only the math typesetting package today.** It sits there so that `lambda.math` can stay the built-in math module (D7.2.4); the LaTeX package is `lambda.latex`, not `lambda.doc.latex`.
+- **`lambda.doc.*` groups document packages and the bundled viewer.** The viewer and its resources live in `package/doc/`; math typesetting maps to `package/math/` so that `lambda.math` can stay the built-in math module (D7.2.4). The LaTeX package is `lambda.latex`, not `lambda.doc.latex`.
 - **An alias is a binding name**, so it can be neither a keyword nor `lambda` itself (S16.10.1v2). Choose another alias for the `edit` package:
 
 ```lambda error=E100
@@ -667,7 +668,7 @@ openapi.validate_params(spec, "/pets", "get", {}).errors[0].message    // "requi
 
 ---
 
-## 10. Engine Packages: edit, editor, dom
+## 10. Engine Packages: edit, editor, dom, doc
 
 These packages implement parts of the engine in Lambda. They load automatically when a command needs them, and their API follows the engine: it is not stable, and scripts should not depend on it.
 
@@ -682,6 +683,17 @@ These packages implement parts of the engine in Lambda. They load automatically 
 ### 10.3 `dom` — browser behaviour for HTML
 
 `lambda.dom.*` implements the user-agent behaviour of HTML documents in Radiant, written as `view` templates with `on` handlers (see [Reactive_UI.md](Reactive_UI.md)): form controls and their state, constraint validation, form submission and `application/x-www-form-urlencoded` encoding, link navigation, sequential focus and `autofocus`, `<details>` and `<summary>`, context menus, keyboard activation, caret movement, scrolling keys, IME composition, ARIA reflection, and the editing of `contenteditable` regions, including `designMode`, `execCommand` and the `queryCommand*` functions. Radiant loads `lambda.dom.dom` once per document, the first time an event reaches an element the package governs, and registers its templates as behaviour templates on the page's elements rather than as the page's own templates. Editing policy belongs to this package, never to native code (D7.2.5).
+
+---
+
+### 10.4 `doc` — the bundled document viewer
+
+Bare `lambda view` loads `package/doc/doc_viewer.ls` from Lambda home;
+`lambda demo` opens the adjacent `doc_viewer.html` startup splash. The viewer
+browses the current working directory and loads documents on selection. Its
+Seti icon font and license ship in `package/doc/icons/`, and its KaTeX stylesheet
+comes from `package/math/`. These application resources belong to the shipped
+`lambda.doc` package (D7.2.4); UI event fixtures remain under `test/ui/`.
 
 ---
 

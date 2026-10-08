@@ -1406,7 +1406,7 @@ TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {
 }
 
 TEST(RadiantViewTest, ReusesCleanRowsAfterDirectoryClose) {
-    const char* page = "test/ui/doc_viewer.ls";
+    const char* page = "lmd/package/doc/doc_viewer.ls";
     const char* events = "test/ui/doc_viewer_layout_shift.json";
     const char* view_log = "./temp/test_radiant_view_directory_close.log";
     ASSERT_TRUE(test_radiant_view_file_readable(page));

@@ -1,6 +1,6 @@
 {
   "name": "Doc viewer shows XML nodes or the declared stylesheet",
-  "html": "test/ui/doc_viewer.ls",
+  "html": "lmd/package/doc/doc_viewer.ls",
   "viewport": {"width": 1280, "height": 1200},
   "events": [
     {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},

@@ -1,6 +1,6 @@
 {
   "name": "Document viewer renders PNG and SVG previews",
-  "html": "test/ui/doc_viewer.ls",
+  "html": "lmd/package/doc/doc_viewer.ls",
   "viewport": {"width": 1280, "height": 4000},
   "events": [
     {"type": "click", "target": {"selector": "#file-filter"}},

@@ -1,6 +1,6 @@
 {
   "name": "Doc viewer retires interaction state after reactive directory changes",
-  "html": "test/ui/doc_viewer.ls",
+  "html": "lmd/package/doc/doc_viewer.ls",
   "viewport": {"width": 1280, "height": 4000},
   "events": [
     {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},

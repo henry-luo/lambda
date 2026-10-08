@@ -1,17 +1,11 @@
-// doc_editor.ls — Phase 1 document-editor prototype
+// doc_viewer.ls — bundled lambda.doc document viewer (D7.2.4)
 //
-// A read-only project browser built with Lambda's reactive UI.  The left
-// panel is rooted at the current project directory; directories are loaded
-// only when opened so the prototype remains useful for large worktrees.
+// A read-only project browser built with Lambda's reactive UI. The left
+// panel is rooted at the current working directory; directories load on demand.
 //
-// Run:
-//   ./lambda.exe view test/ui/doc_editor.html
-// Restrained splash variant:
-//   ./lambda.exe view test/ui/doc_editor_calm.html
-// Direct view without the startup splash:
-//   ./lambda.exe view test/ui/doc_editor.ls
-// Headless smoke:
-//   ./lambda.exe view test/ui/doc_editor.ls --headless --no-log
+// Run: ./lambda.exe view
+// With the startup splash: ./lambda.exe demo
+// Headless smoke: ./lambda.exe view --headless --no-log
 
 import pdf: lambda.pdf.pdf
 import dom
@@ -1107,7 +1101,7 @@ on mouseup(evt) {
     <meta charset:"UTF-8">
     <title "Lambda Document Viewer">
     // the math stylesheet selects KaTeX symbol fonts; register their bundled faces.
-    <link rel:"stylesheet", href:"../../lmd/package/math/katex.css">
+    <link rel:"stylesheet", href:"../math/katex.css">
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
     <style math_css.get_stylesheet(null)>
