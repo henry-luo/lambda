@@ -3113,8 +3113,8 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
     doc->html_root = lam::up(html_root);
     doc->html_version = version;
     doc->url = lam::own(url);
+    // load-time scripts may already own document timelines; replacing view geometry must preserve their state.
     // Load-time geometry reads may already have committed a ViewTree.
-    doc->state = nullptr;
     if (doc->page_kind == DOM_PAGE_KIND_HTML && doc->view_tree && doc->view_tree->root) {
         // The snapshot used pre-script styles; retained used values such as
         // collapsed zoomed margins cannot seed the post-script layout epoch.

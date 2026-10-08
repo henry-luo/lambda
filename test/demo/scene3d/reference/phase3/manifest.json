@@ -1,0 +1,369 @@
+{
+  "threeVersion": "0.186.1",
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "viewport": {
+    "width": 848,
+    "height": 650,
+    "deviceScaleFactor": 1
+  },
+  "browserGl": "ANGLE SwiftShader",
+  "canvasRect": {
+    "x": 24,
+    "y": 94,
+    "width": 800,
+    "height": 500
+  },
+  "galleryCalls": {
+    "getExtension": 8,
+    "getShaderPrecisionFormat": 2,
+    "getParameter": 16,
+    "createTexture": 13,
+    "bindTexture": 81,
+    "texParameteri": 46,
+    "texImage2D": 12,
+    "texImage3D": 2,
+    "clearColor": 14,
+    "clearDepth": 1,
+    "clearStencil": 1,
+    "enable": 27,
+    "depthFunc": 1,
+    "frontFace": 19,
+    "cullFace": 1,
+    "createFramebuffer": 8,
+    "getContextAttributes": 1,
+    "activeTexture": 41,
+    "bindFramebuffer": 58,
+    "framebufferTexture2D": 6,
+    "createRenderbuffer": 3,
+    "bindRenderbuffer": 6,
+    "renderbufferStorage": 3,
+    "framebufferRenderbuffer": 3,
+    "drawBuffers": 6,
+    "viewport": 22,
+    "scissor": 22,
+    "createBuffer": 51,
+    "bindBuffer": 146,
+    "bufferData": 51,
+    "createProgram": 15,
+    "createShader": 30,
+    "shaderSource": 30,
+    "compileShader": 30,
+    "attachShader": 30,
+    "bindAttribLocation": 15,
+    "linkProgram": 15,
+    "getProgramInfoLog": 15,
+    "getShaderInfoLog": 30,
+    "getProgramParameter": 45,
+    "deleteShader": 30,
+    "getActiveUniform": 223,
+    "getUniformLocation": 223,
+    "getActiveAttrib": 33,
+    "getAttribLocation": 33,
+    "useProgram": 57,
+    "uniformMatrix4fv": 190,
+    "uniform3f": 89,
+    "uniform1f": 95,
+    "disable": 28,
+    "depthMask": 48,
+    "colorMask": 1,
+    "createVertexArray": 35,
+    "bindVertexArray": 103,
+    "enableVertexAttribArray": 77,
+    "vertexAttribPointer": 77,
+    "drawElements": 94,
+    "uniform1i": 46,
+    "uniform3fv": 9,
+    "pixelStorei": 6,
+    "texStorage2D": 4,
+    "texSubImage2D": 3,
+    "uniformMatrix3fv": 71,
+    "vertexAttribDivisor": 4,
+    "drawElementsInstanced": 6,
+    "stencilMask": 1,
+    "clear": 24,
+    "drawArrays": 35,
+    "deleteBuffer": 25,
+    "deleteVertexArray": 13,
+    "deleteProgram": 6,
+    "deleteFramebuffer": 1,
+    "deleteTexture": 1,
+    "uniform1iv": 3,
+    "uniform2f": 6,
+    "generateMipmap": 2
+  },
+  "selectedCalls": {
+    "getExtension": 32,
+    "getShaderPrecisionFormat": 8,
+    "getParameter": 72,
+    "createTexture": 34,
+    "bindTexture": 103,
+    "texParameteri": 90,
+    "texImage2D": 40,
+    "texImage3D": 8,
+    "clearColor": 24,
+    "clearDepth": 5,
+    "clearStencil": 4,
+    "enable": 34,
+    "depthFunc": 4,
+    "frontFace": 22,
+    "cullFace": 4,
+    "createFramebuffer": 21,
+    "getContextAttributes": 5,
+    "activeTexture": 42,
+    "bindFramebuffer": 65,
+    "framebufferTexture2D": 10,
+    "createRenderbuffer": 4,
+    "bindRenderbuffer": 7,
+    "renderbufferStorage": 3,
+    "framebufferRenderbuffer": 3,
+    "drawBuffers": 6,
+    "viewport": 25,
+    "scissor": 22,
+    "createBuffer": 77,
+    "bindBuffer": 182,
+    "bufferData": 108,
+    "createProgram": 20,
+    "createShader": 40,
+    "shaderSource": 39,
+    "compileShader": 39,
+    "attachShader": 38,
+    "bindAttribLocation": 17,
+    "linkProgram": 20,
+    "getProgramInfoLog": 19,
+    "getShaderInfoLog": 39,
+    "getProgramParameter": 54,
+    "deleteShader": 38,
+    "getActiveUniform": 234,
+    "getUniformLocation": 234,
+    "getActiveAttrib": 36,
+    "getAttribLocation": 38,
+    "useProgram": 61,
+    "uniformMatrix4fv": 194,
+    "uniform3f": 91,
+    "uniform1f": 97,
+    "disable": 34,
+    "depthMask": 51,
+    "colorMask": 3,
+    "createVertexArray": 38,
+    "bindVertexArray": 107,
+    "enableVertexAttribArray": 82,
+    "vertexAttribPointer": 82,
+    "drawElements": 101,
+    "uniform1i": 47,
+    "uniform3fv": 9,
+    "pixelStorei": 22,
+    "texStorage2D": 9,
+    "texSubImage2D": 8,
+    "uniformMatrix3fv": 72,
+    "vertexAttribDivisor": 4,
+    "drawElementsInstanced": 6,
+    "stencilMask": 4,
+    "clear": 37,
+    "drawArrays": 37,
+    "deleteBuffer": 46,
+    "deleteVertexArray": 16,
+    "deleteProgram": 10,
+    "deleteFramebuffer": 5,
+    "deleteTexture": 10,
+    "uniform1iv": 3,
+    "uniform2f": 6,
+    "generateMipmap": 5,
+    "isBuffer": 18,
+    "getBufferParameter": 3,
+    "bufferSubData": 41,
+    "getError": 89,
+    "readPixels": 18,
+    "getShaderSource": 2,
+    "getShaderParameter": 5,
+    "uniform4fv": 1,
+    "uniform4f": 1,
+    "getBufferSubData": 16,
+    "isFramebuffer": 3,
+    "isRenderbuffer": 3,
+    "deleteRenderbuffer": 1,
+    "isTexture": 3,
+    "isProgram": 2,
+    "isShader": 2,
+    "checkFramebufferStatus": 4,
+    "isContextLost": 3
+  },
+  "galleryQueries": [
+    "2978",
+    "3088",
+    "3379",
+    "7938",
+    "32937",
+    "34076",
+    "34921",
+    "34930",
+    "35375",
+    "35660",
+    "35661",
+    "36183",
+    "36347",
+    "36348",
+    "36349",
+    "EXT_color_buffer_float",
+    "WEBGL_clip_cull_distance",
+    "OES_texture_float_linear",
+    "EXT_color_buffer_half_float",
+    "WEBGL_multisampled_render_to_texture",
+    "WEBGL_render_shared_exponent",
+    "EXT_texture_filter_anisotropic",
+    "KHR_parallel_shader_compile"
+  ],
+  "shaderCorpus": [
+    {
+      "sha256": "57992ba1822d9083b9d599bd4f12f123a5c55e0679d27ce558bf3f6c9a22a1ea",
+      "bytes": 17743
+    },
+    {
+      "sha256": "bcdda36f135c0388e9076c7c4a019061f5f45b4476ed8757a5a0960a332f49d5",
+      "bytes": 13456
+    },
+    {
+      "sha256": "3aaed86d428786179e94e62044c4bdf1babf093f322f4e9b9abf9f75202e0bd0",
+      "bytes": 19347
+    },
+    {
+      "sha256": "f9df43d0839c875e054abcd90b7fa58e039b94cd239ceae7d56a9103dfeb6d6c",
+      "bytes": 78182
+    },
+    {
+      "sha256": "45f0a7644a07c847f731af9255e2404ce67c8b2d091567952c6056800c6c004e",
+      "bytes": 19351
+    },
+    {
+      "sha256": "b38588b0d0118a2034c7dcf2acb3eee7ef73e162e1ae3fcf541a5e70ed92934e",
+      "bytes": 78163
+    },
+    {
+      "sha256": "bdfcf383074b0b149f4814a6fa5ed077031497bdf7cf1965666873f2cf4f0330",
+      "bytes": 20070
+    },
+    {
+      "sha256": "a58c5713b09fdd9e04417721568d59ac9368828e18583ee01cf90492aae27240",
+      "bytes": 46765
+    },
+    {
+      "sha256": "50c5efa3bb655d74cacc16cbaeee11b5db3ce9ac3b798531ac9fd976aa0f8340",
+      "bytes": 1897
+    },
+    {
+      "sha256": "baf6c5fa526584485a51f0f01a6d6ddf4504211b4eac3c6bfba652edcc7afeda",
+      "bytes": 7145
+    },
+    {
+      "sha256": "d7c2028cfa7d80d4f6e8d1830738f75aa9e804e9bcde19c695954b5e3b59596f",
+      "bytes": 1900
+    },
+    {
+      "sha256": "2531b12ef2a4a188f788e0371e32b35d5a944f5bf0994c96dee61f336f0a5b40",
+      "bytes": 8808
+    },
+    {
+      "sha256": "64e49ac41975e9759b2c34b6f3e22ae4b2fac35f95a09a174881d55db3498bbf",
+      "bytes": 14844
+    },
+    {
+      "sha256": "3cea1c28b53b70afcffd9826e07e84c52fc721b6ff4a437c4a3451e1f1e9b706",
+      "bytes": 12580
+    },
+    {
+      "sha256": "88a40011387d63ac03f2177a98fd95fdc49e1667e3b1dbef212d952d90dfd37e",
+      "bytes": 19716
+    },
+    {
+      "sha256": "ec07e8e25168c8a7d64266fd7060dd3dd2704a8adf0394fad07562c63a39293d",
+      "bytes": 78489
+    },
+    {
+      "sha256": "66afed83ae94d81bb2e7f3b2d648e8cfabffc2e66f9797bcaa64b110bf55403c",
+      "bytes": 19635
+    },
+    {
+      "sha256": "0ae6e9d48b8f83ca7ecc843138a297e03886413ba892c3c36355d17fc830369b",
+      "bytes": 78432
+    },
+    {
+      "sha256": "92807320feaf087a82aec6c127e7bef84e49dc5b9f0b47513b1900b9af5f9994",
+      "bytes": 19669
+    },
+    {
+      "sha256": "e050cacc036a78d54d3e347fafc52e1b71d50e12f25f0d350fbef7aed6f5c609",
+      "bytes": 78448
+    },
+    {
+      "sha256": "9663e32c9c49ab7bba79671c9a74d085b285bddcdc22add8184143321299b5a3",
+      "bytes": 1661
+    },
+    {
+      "sha256": "660d88705298f129483d897ed4f24a1e93c3315abf0b389e1be0ec6f5043f5cb",
+      "bytes": 7923
+    },
+    {
+      "sha256": "ed71a9b472d058598757ad6bd186303494838b23dcf80fcea95b2fb441978225",
+      "bytes": 402
+    },
+    {
+      "sha256": "71cd4bf2be93fe1833dd735c4f1183e61aa1d6ac3fa26039a73c07645072c628",
+      "bytes": 5109
+    },
+    {
+      "sha256": "6db097922dcd56850a56b75536df9940d6e7c6d337bcb055d7bc403b74d6e560",
+      "bytes": 19667
+    },
+    {
+      "sha256": "2837ec51fc6a3edbf5e3155119e7320a22038ae4d6726b32d204151c85b67040",
+      "bytes": 78440
+    },
+    {
+      "sha256": "2061715cbe50a935765f6a8ceda319385d3458722ef6a56e55bbb40d95224f64",
+      "bytes": 19586
+    },
+    {
+      "sha256": "d4fa8dc25a510e6ee525cd8b45fac7d26056b6afa0b0e96ebff4b4b5a8eef897",
+      "bytes": 78383
+    },
+    {
+      "sha256": "78c78982d2e8926fa07b2fa6bf9b5daa24c341e899904ed6d20f5b16f47dba0e",
+      "bytes": 19620
+    },
+    {
+      "sha256": "420cae341a49ae795dbefc69ec6a21d9374318785aa273a6e65ac9cb44539e25",
+      "bytes": 78399
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture": "api",
+      "result": "passed",
+      "checks": "49"
+    },
+    {
+      "fixture": "khronos-selected",
+      "result": "passed",
+      "checks": "100"
+    },
+    {
+      "fixture": "loss",
+      "result": "passed",
+      "checks": null
+    },
+    {
+      "fixture": "three-lifecycle",
+      "result": "passed",
+      "checks": "16"
+    },
+    {
+      "fixture": "images",
+      "result": "passed",
+      "checks": "37"
+    },
+    {
+      "fixture": "formats",
+      "result": "passed",
+      "checks": "11"
+    }
+  ]
+}

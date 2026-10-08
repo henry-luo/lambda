@@ -202,6 +202,7 @@ struct NativeGlContext {
     WebGlOptions webgl_options;
     unsigned webgl_width, webgl_height;
     bool webgl_dirty, webgl_discard, webgl_flip, webgl_premultiply, webgl_loss_reported;
+    bool extension_checked, floating_targets;
     unsigned webgl_colorspace;
 #ifdef NATIVE_GL_ENABLED
     GLFWwindow* window;
@@ -475,13 +476,14 @@ bool native_gl_uniform_set(NativeGlContext* context, NativeGlUniform uniform,
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, uniform.program, NATIVE_GL_PROGRAM);
     if (!scope.valid || !slot || uniform.generation != context->stats.generation || uniform.location < 0 ||
-        !values || !count || count > 1024 || (components != 1 && components != 3 && components != 4 && components != 16))
+        !values || !count || count > 1024 || (components != 1 && components != 2 && components != 3 && components != 4 && components != 16))
         { native_gl_error(context,"invalid uniform update or stale program");return false; }
     for (unsigned i = 0; i < components * count; i++) if (!isfinite(values[i]))
         { native_gl_error(context,"uniform value is not finite");return false; }
     NativeGlFunctions& gl = context->gl; gl.UseProgram(slot->name);
     switch (components) {
         case 1: gl.Uniform1fv(uniform.location, count, values); break;
+        case 2: gl.Uniform2fv(uniform.location, count, values); break;
         case 3: gl.Uniform3fv(uniform.location, count, values); break;
         case 4: gl.Uniform4fv(uniform.location, count, values); break;
         case 16: gl.UniformMatrix4fv(uniform.location, count, GL_FALSE, values); break;
@@ -729,9 +731,28 @@ static unsigned webgl_scalar_bytes(unsigned type) {
         case GL_BYTE: case GL_UNSIGNED_BYTE: return 1;
         case GL_SHORT: case GL_UNSIGNED_SHORT: case GL_HALF_FLOAT: return 2;
         case GL_INT: case GL_UNSIGNED_INT: case GL_FLOAT: return 4;
+        case GL_UNSIGNED_SHORT_5_6_5:case GL_UNSIGNED_SHORT_4_4_4_4:case GL_UNSIGNED_SHORT_5_5_5_1:return 2;
+        case GL_UNSIGNED_INT_24_8:case GL_UNSIGNED_INT_2_10_10_10_REV:
+        case GL_UNSIGNED_INT_10F_11F_11F_REV:case GL_UNSIGNED_INT_5_9_9_9_REV:return 4;
+        case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:return 8;
         default: return 0;
     }
 }
+struct WebGlStorageFormat {GLenum internal,format,type;bool floating;};
+static const WebGlStorageFormat webgl_storage_formats[]={
+    {GL_RGBA8,GL_RGBA,GL_UNSIGNED_BYTE,false},{GL_SRGB8_ALPHA8,GL_RGBA,GL_UNSIGNED_BYTE,false},
+    {GL_RGB8,GL_RGB,GL_UNSIGNED_BYTE,false},{GL_SRGB8,GL_RGB,GL_UNSIGNED_BYTE,false},
+    {GL_R8,GL_RED,GL_UNSIGNED_BYTE,false},{GL_RG8,GL_RG,GL_UNSIGNED_BYTE,false},
+    {GL_RGBA16F,GL_RGBA,GL_FLOAT,true},{GL_RGBA32F,GL_RGBA,GL_FLOAT,true},
+    {GL_R16F,GL_RED,GL_FLOAT,true},{GL_R32F,GL_RED,GL_FLOAT,true},
+    {GL_RG16F,GL_RG,GL_FLOAT,true},{GL_RG32F,GL_RG,GL_FLOAT,true},
+    {GL_R11F_G11F_B10F,GL_RGB,GL_FLOAT,true},
+    {GL_DEPTH_COMPONENT16,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT,false},
+    {GL_DEPTH_COMPONENT24,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT,false},
+    {GL_DEPTH_COMPONENT32F,GL_DEPTH_COMPONENT,GL_FLOAT,false},
+    {GL_DEPTH24_STENCIL8,GL_DEPTH_STENCIL,GL_UNSIGNED_INT_24_8,false},
+    {GL_DEPTH32F_STENCIL8,GL_DEPTH_STENCIL,GL_FLOAT_32_UNSIGNED_INT_24_8_REV,false}
+};
 enum WebGlParameterKind { PARAM_INVALID, PARAM_INTEGER, PARAM_BOOLEAN, PARAM_FLOAT, PARAM_INT64 };
 static WebGlParameterKind webgl_parameter_kind(unsigned pname) {
     switch(pname) {
@@ -763,11 +784,21 @@ static bool webgl_texture_parameter(unsigned pname) {
     }
 }
 struct WebGlPixelLayout { size_t bytes,stride,start,pixel; };
+struct WebGlImageUnpackScope {
+    NativeGlFunctions* gl;
+    GLint values[6];
+    const GLenum names[6]={GL_UNPACK_ALIGNMENT,GL_UNPACK_ROW_LENGTH,GL_UNPACK_IMAGE_HEIGHT,
+        GL_UNPACK_SKIP_PIXELS,GL_UNPACK_SKIP_ROWS,GL_UNPACK_SKIP_IMAGES};
+    WebGlImageUnpackScope(NativeGlFunctions& functions,bool compact):gl(compact?&functions:nullptr) {
+        if(gl) for(unsigned i=0;i<6;i++) { gl->GetIntegerv(names[i],&values[i]);gl->PixelStorei(names[i],i?0:1); }
+    }
+    ~WebGlImageUnpackScope() { if(gl) for(unsigned i=0;i<6;i++) gl->PixelStorei(names[i],values[i]); }
+};
 static bool webgl_pixel_layout(NativeGlContext* context, unsigned width, unsigned height, unsigned depth,
     unsigned format, unsigned type, bool pack, WebGlPixelLayout* layout) {
     unsigned scalar = webgl_scalar_bytes(type), components;
     switch (format) {
-        case GL_RED: case GL_RED_INTEGER: case GL_DEPTH_COMPONENT: components = 1; break;
+        case GL_RED: case GL_RED_INTEGER: case GL_DEPTH_COMPONENT: case GL_DEPTH_STENCIL: components = 1; break;
         case GL_RG: case GL_RG_INTEGER: components = 2; break;
         case GL_RGB: case GL_RGB_INTEGER: components = 3; break;
         case GL_RGBA: case GL_RGBA_INTEGER: components = 4; break;
@@ -785,7 +816,10 @@ static bool webgl_pixel_layout(NativeGlContext* context, unsigned width, unsigne
         (depth>1 && (uint64_t)skip_rows+height>(image?(unsigned)image:height))) {
         native_gl_webgl_error(context,GL_INVALID_OPERATION);return false;
     }
-    layout->pixel=scalar*components;
+    bool packed=type==GL_UNSIGNED_SHORT_5_6_5||type==GL_UNSIGNED_SHORT_4_4_4_4||type==GL_UNSIGNED_SHORT_5_5_5_1||
+        type==GL_UNSIGNED_INT_24_8||type==GL_UNSIGNED_INT_2_10_10_10_REV||type==GL_UNSIGNED_INT_10F_11F_11F_REV||
+        type==GL_UNSIGNED_INT_5_9_9_9_REV||type==GL_FLOAT_32_UNSIGNED_INT_24_8_REV;
+    layout->pixel=scalar*(packed?1:components);
     layout->stride=((size_t)(row?row:width)*layout->pixel+alignment-1)&~(size_t)(alignment-1);
     // bound every intermediate before multiplying: pixel-store skips can be INT_MAX.
     uint64_t rows=(uint64_t)skip_images*(image?image:height)+skip_rows;
@@ -953,6 +987,8 @@ bool native_gl_webgl_call(NativeGlContext* context, const WebGlCommand* command,
     }
     if (!scope.valid) return false;
     NativeGlFunctions& gl=context->gl;const double* n=command->n;
+    // DOM-source conversion preserves the application's client-array unpack state on every exit.
+    WebGlImageUnpackScope image_unpack(gl,command->compact_pixels||command->op==WEBGL_texStorage2D||command->op==WEBGL_texStorage3D);
     webgl_collect_errors(context);
     auto fail=[&](unsigned error) { native_gl_webgl_error(context,error);return true; };
     auto resource=[&](unsigned index, NativeGlKind kind)->NativeGlSlot* {
@@ -1247,17 +1283,10 @@ bool native_gl_webgl_call(NativeGlContext* context, const WebGlCommand* command,
             if(n[3]<=0||n[4]<=0||n[1]<=0||levels>13||width>4096||height>4096||!depth||depth>4096) return fail(GL_INVALID_VALUE);
             GLenum binding=webgl_texture_binding(n[0]);if(!binding) return fail(GL_INVALID_ENUM);
             NativeGlSlot* slot=webgl_binding(context,binding,NATIVE_GL_TEXTURE);if(!slot||slot->immutable) return fail(GL_INVALID_OPERATION);
-            GLenum format=GL_RGBA,type=GL_UNSIGNED_BYTE;
-            switch((unsigned)n[2]) {
-                case GL_RGBA8: case GL_SRGB8_ALPHA8: break;
-                case GL_RGB8: case GL_SRGB8: format=GL_RGB;break;
-                case GL_R8: format=GL_RED;break;
-                case GL_RG8: format=GL_RG;break;
-                case GL_RGBA16F: case GL_RGBA32F: type=GL_FLOAT;break;
-                case GL_R16F: case GL_R32F: format=GL_RED;type=GL_FLOAT;break;
-                case GL_RG16F: case GL_RG32F: format=GL_RG;type=GL_FLOAT;break;
-                default:return fail(GL_INVALID_ENUM);
-            }
+            const WebGlStorageFormat* storage_format=nullptr;
+            for(const auto& candidate:webgl_storage_formats) if(candidate.internal==(unsigned)n[2]) {storage_format=&candidate;break;}
+            if(!storage_format) return fail(GL_INVALID_ENUM);
+            GLenum format=storage_format->format,type=storage_format->type;
             unsigned maximum=width>height?width:height;if(n[0]==GL_TEXTURE_3D&&depth>maximum) maximum=depth;
             unsigned max_levels=1;while(maximum>1) { maximum/=2;max_levels++; }
             if(levels>max_levels) return fail(GL_INVALID_OPERATION);
@@ -1481,6 +1510,39 @@ bool native_gl_webgl_call(NativeGlContext* context, const WebGlCommand* command,
         native_gl_webgl_error(context,error);
     }
     return true;
+#else
+    return false;
+#endif
+}
+bool native_gl_extension_supported(NativeGlContext* context,const char* name) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);if(!scope.valid||!name) return false;
+    bool floating=!strcmp(name,"EXT_color_buffer_float"),linear=!strcmp(name,"OES_texture_float_linear");
+    if(!floating&&!linear) return false;
+    if(!context->extension_checked) {
+        NativeGlFunctions& gl=context->gl;webgl_collect_errors(context);
+        GLint texture,read,draw,unpack_buffer;
+        gl.GetIntegerv(GL_TEXTURE_BINDING_2D,&texture);gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
+        gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw);gl.GetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING,&unpack_buffer);
+        WebGlImageUnpackScope unpack(gl,true);gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER,0);
+        GLuint probe_texture=0,probe_framebuffer=0;gl.GenTextures(1,&probe_texture);gl.GenFramebuffers(1,&probe_framebuffer);
+        gl.BindTexture(GL_TEXTURE_2D,probe_texture);gl.BindFramebuffer(GL_FRAMEBUFFER,probe_framebuffer);
+        gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        bool supported=true;
+        // advertise the extension only after every required color format is actually framebuffer-renderable.
+        for(const auto& format:webgl_storage_formats) if(format.floating) {
+            gl.TexImage2D(GL_TEXTURE_2D,0,format.internal,1,1,0,format.format,format.type,nullptr);
+            gl.FramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,probe_texture,0);
+            supported=gl.CheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE&&supported;
+        }
+        while(gl.GetError()!=GL_NO_ERROR) supported=false;
+        gl.BindFramebuffer(GL_READ_FRAMEBUFFER,read);gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER,draw);
+        gl.BindTexture(GL_TEXTURE_2D,texture);gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER,unpack_buffer);
+        gl.DeleteFramebuffers(1,&probe_framebuffer);gl.DeleteTextures(1,&probe_texture);
+        context->extension_checked=true;context->floating_targets=supported;
+    }
+    // native contexts require desktop GL 3.3+, where float texture filtering is core functionality.
+    return context->floating_targets;
 #else
     return false;
 #endif

@@ -1,0 +1,74 @@
+<!doctype html><html><head><style>body{margin:0}canvas{width:128px;height:128px}</style></head><body>
+<canvas id="image" width="128" height="128"></canvas><span id="result" data-result="pending"></span>
+<script type="module">
+import * as THREE from '../demo/scene3d/vendor/three/three.module.js';
+const result=document.getElementById('result');
+const renderer=new THREE.WebGLRenderer({canvas:document.getElementById('image'),antialias:false,preserveDrawingBuffer:true});
+renderer.setSize(128,128,false);
+const gl=renderer.getContext();
+let checks=0;
+function check(ok, message) {if(!ok)throw new Error(message);checks++;}
+const pixel=new Uint8Array(4);
+function read(x,y) {gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);return Array.from(pixel);}
+function matches(value,expected) {return value.every((n,i)=>Math.abs(n-expected[i])<=3);}
+const camera=new THREE.OrthographicCamera(-1,1,1,-1,0.1,10);camera.position.z=2;
+const scene=new THREE.Scene();
+const geometry=new THREE.PlaneGeometry(2,2);
+const material=new THREE.MeshBasicMaterial();scene.add(new THREE.Mesh(geometry,material));
+const texture=new THREE.TextureLoader().load('../scene3d/quadrants.png',()=>{
+ try {
+  texture.colorSpace=THREE.SRGBColorSpace;texture.magFilter=texture.minFilter=THREE.NearestFilter;
+  material.map=texture;material.needsUpdate=true;
+  renderer.render(scene,camera);
+  check(matches(read(32,96),[255,0,0,255]),'PNG top-left orientation: '+Array.from(pixel)+' error '+gl.getError()+' natural '+texture.image.naturalWidth+'x'+texture.image.naturalHeight+' image '+(texture.image instanceof HTMLImageElement)+' dimensions '+texture.image.width+'x'+texture.image.height);
+  check(matches(read(96,96),[0,255,0,255]),'PNG top-right orientation');
+  check(matches(read(32,32),[0,0,255,255]),'PNG lower-left orientation');
+  check(matches(read(96,32),[255,255,255,255]),'PNG lower-right orientation');
+  const source=document.createElement('canvas');source.width=3;source.height=2;
+  const context=source.getContext('2d');context.fillStyle='rgba(0,255,255,0.5)';context.fillRect(0,0,3,2);
+  const canvasTexture=new THREE.CanvasTexture(source);canvasTexture.colorSpace=THREE.SRGBColorSpace;
+  canvasTexture.magFilter=canvasTexture.minFilter=THREE.NearestFilter;
+  material.map=canvasTexture;material.needsUpdate=true;renderer.render(scene,camera);
+  check(matches(read(64,64),[0,255,255,255]),'canvas unpremultiply for opaque material: '+Array.from(pixel));
+  context.fillStyle='#00ff00';context.fillRect(0,0,3,2);canvasTexture.needsUpdate=true;renderer.render(scene,camera);
+  check(matches(read(64,64),[0,255,0,255]),'dynamic canvas generation is uploaded');
+  context.fillStyle='rgba(0,255,255,0.5)';context.clearRect(0,0,3,2);context.fillRect(0,0,3,2);
+  // image uploads ignore row layout, but source skips still constrain the selected rectangle.
+  const direct=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,direct);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT,8);gl.pixelStorei(gl.UNPACK_ROW_LENGTH,9);gl.pixelStorei(gl.UNPACK_SKIP_PIXELS,2);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);
+  check(gl.getError()===gl.INVALID_OPERATION,'image source skip outside its bounds');
+  gl.pixelStorei(gl.UNPACK_SKIP_PIXELS,0);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);
+  check(gl.getError()===gl.NO_ERROR,'six-argument image upload');
+  check(gl.getParameter(gl.UNPACK_ALIGNMENT)===8&&gl.getParameter(gl.UNPACK_ROW_LENGTH)===9&&gl.getParameter(gl.UNPACK_SKIP_PIXELS)===0,'unpack state preserved');
+  const framebuffer=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,direct,0);
+  check(gl.checkFramebufferStatus(gl.FRAMEBUFFER)===gl.FRAMEBUFFER_COMPLETE&&matches(read(0,0),[0,255,255,128]),'canvas source retains alpha in texture storage');
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);gl.pixelStorei(gl.UNPACK_SKIP_PIXELS,1);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,2,0,gl.RGBA,gl.UNSIGNED_BYTE,texture.image);
+  check(gl.getError()===0&&matches(read(0,0),[0,255,0,255])&&matches(read(0,1),[255,255,255,255]),'explicit image source rectangle');
+  gl.pixelStorei(gl.UNPACK_SKIP_PIXELS,0);
+  gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,texture.image);
+  check(gl.getError()===0&&matches(read(0,0),[255,0,0,255]),'explicit source subimage updates destination');
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.deleteFramebuffer(framebuffer);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT,4);gl.pixelStorei(gl.UNPACK_ROW_LENGTH,0);gl.pixelStorei(gl.UNPACK_SKIP_PIXELS,0);
+  gl.deleteTexture(direct);canvasTexture.dispose();texture.dispose();material.dispose();geometry.dispose();
+  let completed=0;
+  for(let i=0;i<24;i++) {
+   const image=new Image();image.width=17;image.height=19;
+   image.onload=()=> {
+    try {
+     check(image.naturalWidth===2&&image.naturalHeight===2&&image.width===17&&image.height===19,'detached image dimensions');
+     if(++completed!==24)return;
+     const broken=new Image();broken.onload=()=>{throw new Error('broken image reported load');};
+     broken.onerror=()=> {check(broken.naturalWidth===0&&broken.naturalHeight===0,'replacement failure clears intrinsic size');
+      result.setAttribute('data-checks',checks);result.setAttribute('data-result','passed');};
+     broken.src='../scene3d/quadrants.png';broken.src='missing-phase3-image.png';
+    }catch(error){result.setAttribute('data-result',String(error));throw error;}
+   };
+   image.src='../scene3d/quadrants.png';
+  }
+ } catch(error) {result.setAttribute('data-result',String(error));throw error;}
+},undefined,error=>{result.setAttribute('data-result','load failed');throw error;});
+</script></body></html>

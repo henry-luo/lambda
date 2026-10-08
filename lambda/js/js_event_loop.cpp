@@ -10,6 +10,7 @@
  */
 #include "js_event_loop.h"
 #include "../dom/dom.h"
+#include "../dom/dom_engine.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_class.h"
@@ -291,6 +292,7 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
     // Headless draining advances synthetic frames faster than wall time, so
     // exposing wall time here prevented animation libraries from completing.
     js_performance_frame_clock_begin(timestamp_ms);
+    dom_engine_animation_frame_prepare(dom_get_document(),timestamp_ms);
 
     for (int i = 0; i < pending; i++) {
         int64_t id = -1;

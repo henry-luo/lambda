@@ -162,6 +162,7 @@ const char radiant_dom_interface_decl[] =
     "    get_attribute_ns: fn(a0: any, a1: any) any,\n"
     "    remove_attribute_ns: fn(a0: any, a1: any) any, remove_attribute: fn(a0: any) any,\n"
     "    toggle_attribute: fn(a0: any, a1: any) any, has_attribute: fn(a0: any) any,\n"
+    "    set_pointer_capture: fn(id: any) any, release_pointer_capture: fn(id: any) any, has_pointer_capture: fn(id: any) bool,\n"
     "    get_attribute_names: fn() any, matches: fn(a0: any) any,\n"
     "    webkit_matches_selector: fn(a0: any) any, ms_matches_selector: fn(a0: any) any,\n"
     "    query_selector: fn(a0: any) any, query_selector_all: fn(a0: any) any,\n"
@@ -1222,6 +1223,9 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL_JS("scroll_to", "scrollTo", radiant_dom_m4d_scroll_to),
     BIND_CALL_JS("scroll_by", "scrollBy", radiant_dom_m4d_scroll_by),
     BIND_CALL("click", radiant_dom_m4d_click),
+    BIND_CALL_JS("set_pointer_capture", "setPointerCapture", radiant_dom_m4d_set_pointer_capture),
+    BIND_CALL_JS("release_pointer_capture", "releasePointerCapture", radiant_dom_m4d_release_pointer_capture),
+    BIND_CALL_JS("has_pointer_capture", "hasPointerCapture", radiant_dom_m4d_has_pointer_capture),
     BIND_CALL("reset", radiant_dom_m4d_reset),
     BIND_CALL("submit", radiant_dom_m4d_submit),
     BIND_CALL_JS("request_submit", "requestSubmit", radiant_dom_m4d_request_submit),

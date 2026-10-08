@@ -1,5 +1,7 @@
 #include "scene3d.hpp"
 #include "scene3d_math.hpp"
+#include "scene3d_source.hpp"
+#include "scene3d_animation.hpp"
 #include "render.hpp"
 #include "layout.hpp"
 #include "../lambda/core/mark_reader.hpp"
@@ -17,28 +19,42 @@ static constexpr unsigned SCENE_NODE_LIMIT = 8192;
 static constexpr unsigned SCENE_VERTEX_LIMIT = 262144;
 static constexpr unsigned SCENE_INSTANCE_LIMIT = 16384;
 
-struct Scene3dVertex { float position[3], normal[3], uv[2], color[3]; };
+struct Scene3dVertex {
+    float position[3], normal[3], uv[2], color[3];
+    float skin_indices[4], skin_weights[4], morph_positions[2][3], morph_normals[2][3];
+};
 struct Scene3dGeometry {
     NativeGlResource vertices, indices;
     unsigned vertex_count, index_count;
     Scene3dVec center;
     NativeGlResource unit_vertices;
+    unsigned bone_index_count, morph_count;
 };
 struct Scene3dMaterial {
+    DomNodeRef source;
     float color[4];
+    bool source_transparent;
     bool lambert, transparent;
     int side;
     NativeGlResource texture;
 };
 struct Scene3dMesh {
+    DomNodeRef source;
     Scene3dGeometry* geometry;
     Scene3dMaterial* material;
     Scene3dMatrix world;
+    Scene3dMatrix local_instance;
     NativeGlResource instances, vertices;
     unsigned instance_count;
     bool clockwise;
+    bool instance_mirrored;
+    bool visible;
     float depth;
     unsigned order;
+    DomNodeRef bones[16];
+    Scene3dMatrix inverse_bind[16], bone_matrices[16], bind_matrix;
+    unsigned bone_count;
+    float morph_weights[2], morph_base_weights[2];
 };
 struct Scene3dProjection {
     Pool* pool;
@@ -53,6 +69,8 @@ struct Scene3dProjection {
     float fov, near_plane, far_plane, aspect;
     float background[4], ambient[3], directions[8][3], lights[8][3];
     unsigned light_count, geometry_count, texture_count;
+    DomNodeRef* dynamic_objects;
+    int dynamic_count, dynamic_capacity;
 };
 struct Scene3dEntry {
     Scene3dEntry* next;
@@ -60,6 +78,8 @@ struct Scene3dEntry {
     NativeGlContext* graphics;
     NativeGlResource program, target, white;
     Scene3dProjection projection;
+    Scene3dAnimationState* animation;
+    uint64_t animated_generation;
     ImageSurface* snapshot;
     uint64_t mutation_epoch, projection_generation, snapshot_generation;
     float width, height, scale;
@@ -87,7 +107,9 @@ struct Scene3dBuild {
     Scene3dDefinition* definitions;
     unsigned definition_count, nodes;
     const char* camera;
+    DomElement* mesh_source;
 };
+static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* world,bool* visible,bool authored=false);
 
 static void scene3d_retire_snapshot(Scene3dEntry* entry) {
     image_surface_bump_generation(entry->snapshot);
@@ -103,7 +125,7 @@ static ItemReader scene3d_value(DomElement* node, const char* key) {
     Element* backing = dom_element_backing(node);
     return backing ? ElementReader(backing).get_attr(key) : ItemReader();
 }
-static const char* scene3d_text(DomElement* node, const char* key) {
+const char* scene3d_text(DomElement* node, const char* key) {
     const char* text=node->get_attribute(key);
     if (text) return text;
     ItemReader value=scene3d_value(node,key);
@@ -116,7 +138,7 @@ static bool scene3d_scalar(ItemReader value, float* result) {
     if (!item_try_to_double(value.item(),&number)) return false;
     *result=(float)number;return isfinite(*result);
 }
-static bool scene3d_number(DomElement* node, const char* key, float fallback, float* result) {
+bool scene3d_number(DomElement* node, const char* key, float fallback, float* result) {
     const char* text = node->get_attribute(key);
     if (text) {
         char* end; float value = strtof(text, &end);
@@ -127,7 +149,7 @@ static bool scene3d_number(DomElement* node, const char* key, float fallback, fl
     if (value.isNull()) { *result = fallback; return true; }
     return scene3d_scalar(value,result);
 }
-static bool scene3d_flag(DomElement* node, const char* key, bool fallback, bool* result) {
+bool scene3d_flag(DomElement* node, const char* key, bool fallback, bool* result) {
     const char* text = node->get_attribute(key);
     if (text) {
         if (!strcmp(text,"true") || !strcmp(text,"1")) { *result = true; return true; }
@@ -139,7 +161,7 @@ static bool scene3d_flag(DomElement* node, const char* key, bool fallback, bool*
     if (!value.isBool()) return false;
     *result = value.asBool(); return true;
 }
-static bool scene3d_numbers(DomElement* node, const char* key, Pool* pool,
+bool scene3d_numbers(DomElement* node, const char* key, Pool* pool,
     float** values, unsigned* count, unsigned limit) {
     *values = nullptr; *count = 0;
     const char* text = node->get_attribute(key);
@@ -169,12 +191,12 @@ static bool scene3d_numbers(DomElement* node, const char* key, Pool* pool,
     } else {
         ArrayReader array = value.asArray();
         for (unsigned i = 0; i < length; i++) {
-            if (!scene3d_scalar(array.get(i),&data[i])) return false;
+            if (!scene3d_scalar(array.get(i),&data[i])) {pool_free(pool,data);return false;}
         }
     }
     *values = data; *count = length; return true;
 }
-static bool scene3d_vector(DomElement* node, const char* key, Scene3dVec fallback, Scene3dVec* result) {
+bool scene3d_vector(DomElement* node, const char* key, Scene3dVec fallback, Scene3dVec* result) {
     // vectors have a fixed bounded stack copy; no script array is retained.
     const char* text = node->get_attribute(key); ItemReader value = scene3d_value(node, key);
     if (!text && value.isNull()) { *result = fallback; return true; }
@@ -194,16 +216,43 @@ static bool scene3d_vector(DomElement* node, const char* key, Scene3dVec fallbac
     }
     *result = {data[0], data[1], data[2]}; return true;
 }
-static bool scene3d_local(DomElement* node, Scene3dMatrix* matrix) {
+static bool scene3d_local(DomElement* node, Scene3dMatrix* matrix, Scene3dAnimationState* animation=nullptr) {
     Scene3dVec position, rotation, scale;
     if (!scene3d_vector(node,"position",{},&position) || !scene3d_vector(node,"rotation",{},&rotation) ||
         !scene3d_vector(node,"scale",{1,1,1},&scale) || scale.x == 0 || scale.y == 0 || scale.z == 0) return false;
-    *matrix = scene3d_transform(position, rotation, scale); return true;
+    AnimationValue value={};
+    if(scene3d_animation_value(animation,node,"position",&value)) position={(float)value.numbers[0],(float)value.numbers[1],(float)value.numbers[2]};
+    if(scene3d_animation_value(animation,node,"scale",&value)) scale={(float)value.numbers[0],(float)value.numbers[1],(float)value.numbers[2]};
+    if(scale.x==0||scale.y==0||scale.z==0) return false;
+    if(scene3d_animation_value(animation,node,"quaternion",&value)) {
+        double rotation_matrix[16];if(!animation_quaternion_matrix(value.numbers,rotation_matrix)) return false;
+        *matrix=scene3d_identity();const float scales[]={scale.x,scale.y,scale.z};
+        for(unsigned column=0;column<3;column++) for(unsigned row=0;row<3;row++)
+            matrix->v[column*4+row]=(float)rotation_matrix[row*4+column]*scales[column];
+        matrix->v[12]=position.x;matrix->v[13]=position.y;matrix->v[14]=position.z;
+    } else *matrix = scene3d_transform(position, rotation, scale);
+    return true;
+}
+static bool scene3d_animated_flag(Scene3dEntry* entry,DomElement* node,bool* visible) {
+    if(!scene3d_flag(node,"visible",true,visible)) return false;
+    AnimationValue value={};if(scene3d_animation_value(entry->animation,node,"visible",&value)) *visible=value.numbers[0]!=0;
+    return true;
+}
+static bool scene3d_animated_number(Scene3dEntry* entry,DomElement* node,const char* key,float fallback,float* number) {
+    if(!scene3d_number(node,key,fallback,number)) return false;
+    AnimationValue value={};if(scene3d_animation_value(entry->animation,node,key,&value)) *number=(float)value.numbers[0];
+    return isfinite(*number);
+}
+static bool scene3d_animated_color(Scene3dEntry* entry,DomElement* node,float color[4]) {
+    if(!scene3d_color(node,"color","#ffffff",color)) return false;
+    AnimationValue value={};if(scene3d_animation_value(entry->animation,node,"color",&value))
+        for(unsigned c=0;c<3;c++) color[c]=(float)value.numbers[c];
+    return isfinite(color[0])&&isfinite(color[1])&&isfinite(color[2]);
 }
 static float scene3d_linear(float value) {
     return value <= .04045f ? value / 12.92f : powf((value + .055f) / 1.055f, 2.4f);
 }
-static bool scene3d_color(DomElement* node, const char* key, const char* fallback, float color[4]) {
+bool scene3d_color(DomElement* node, const char* key, const char* fallback, float color[4]) {
     const char* text = scene3d_text(node,key); if (!text) text = fallback;
     if (!strcmp(text,"transparent")) { memset(color, 0, sizeof(float)*4); return true; }
     uint8_t r,g,b,a;
@@ -233,7 +282,7 @@ static bool scene3d_collect_definitions(Scene3dBuild* build, DomElement* node, u
     if (depth > 64 || ++build->nodes > SCENE_NODE_LIMIT) return scene3d_fail(build->entry,"scene hierarchy quota exceeded");
     Scene3dDefinition* d = &build->definitions[build->definition_count++]; d->source = node;
     // malformed typed attributes must not fall through as absent defaults or inline resources.
-    const char* text_keys[]={"id","type","color","background","side","geometry","material","texture","src","camera"};
+    const char* text_keys[]={"id","type","color","background","side","geometry","material","texture","src","camera","skeleton"};
     for (const char* key:text_keys)
         if (!scene3d_value(node,key).isNull() && !scene3d_text(node,key))
             return scene3d_fail(build->entry,"scene text attribute requires a string or symbol");
@@ -330,6 +379,36 @@ static Scene3dGeometry* scene3d_geometry(Scene3dBuild* build, Scene3dDefinition*
             vertices[i].normal[0]=n.x; vertices[i].normal[1]=n.y; vertices[i].normal[2]=n.z;
         }
     } else { scene3d_fail(build->entry,"unknown geometry type"); return nullptr; }
+    float* deformation[4]={};unsigned components[4]={};
+    const char* deformation_keys[]={"skin-indices","skin-weights","morph-positions","morph-normals"};
+    for(unsigned i=0;i<4;i++) if(!scene3d_numbers(node,deformation_keys[i],p->pool,&deformation[i],&components[i],SCENE_VERTEX_LIMIT*6)) {
+        scene3d_fail(build->entry,"invalid geometry deformation data");return nullptr;
+    }
+    unsigned skin_size=geometry->vertex_count*4,morph_size=geometry->vertex_count*3;
+    if((components[0]&&components[0]!=skin_size)||components[0]!=components[1]||
+        components[2]%morph_size||components[2]>morph_size*2||(components[3]&&components[3]!=components[2])) {
+        scene3d_fail(build->entry,"invalid skin or morph component counts");return nullptr;
+    }
+    geometry->morph_count=components[2]/morph_size;
+    for(unsigned i=0;i<geometry->vertex_count;i++) {
+        if(components[0]) {
+            float total=0;
+            for(unsigned c=0;c<4;c++) {
+                float index=deformation[0][i*4+c],weight=deformation[1][i*4+c];
+                if(index<0||index>=16||floorf(index)!=index||weight<0||weight>1) {
+                    scene3d_fail(build->entry,"invalid skin index or weight");return nullptr;
+                }
+                vertices[i].skin_indices[c]=index;vertices[i].skin_weights[c]=weight;total+=weight;
+                if(weight>0&&geometry->bone_index_count<(unsigned)index+1) geometry->bone_index_count=(unsigned)index+1;
+            }
+            if(fabsf(total-1)>1e-5f) {scene3d_fail(build->entry,"skin weights must sum to one");return nullptr;}
+        }
+        for(unsigned target=0;target<geometry->morph_count;target++) for(unsigned c=0;c<3;c++) {
+            unsigned offset=target*morph_size+i*3+c;
+            vertices[i].morph_positions[target][c]=deformation[2][offset];
+            vertices[i].morph_normals[target][c]=components[3]?deformation[3][offset]:0;
+        }
+    }
     Scene3dVec lo={FLT_MAX,FLT_MAX,FLT_MAX},hi={-FLT_MAX,-FLT_MAX,-FLT_MAX};
     for (unsigned i=0;i<geometry->vertex_count;i++) {
         const float* v=vertices[i].position;
@@ -375,11 +454,13 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     const char* type=scene3d_text(node,"type");
     if (!type || (strcmp(type,"basic") && strcmp(type,"lambert"))) { scene3d_fail(build->entry,"unknown material type"); return nullptr; }
     material->lambert=!strcmp(type,"lambert"); float opacity;
-    if (!scene3d_color(node,"color","#ffffff",material->color) ||
-        !scene3d_number(node,"opacity",1,&opacity) || opacity<0 || opacity>1 ||
+    material->source=dom_node_ref(node);
+    if (!scene3d_animated_color(build->entry,node,material->color) ||
+        !scene3d_animated_number(build->entry,node,"opacity",1,&opacity) || opacity<0 || opacity>1 ||
         !scene3d_flag(node,"transparent",false,&material->transparent)) {
         scene3d_fail(build->entry,"invalid material color or opacity"); return nullptr;
     }
+    material->source_transparent=material->transparent;
     material->color[3]*=opacity; material->transparent=material->transparent || material->color[3]<1;
     const char* side=scene3d_text(node,"side");
     if (side && strcmp(side,"front") && strcmp(side,"back") && strcmp(side,"double")) {
@@ -396,6 +477,7 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
         material->texture=scene3d_texture(build,texture_definition); if (!material->texture.id) return nullptr;
         // image alpha participates in the same ordered transparent pass.
         material->transparent=material->transparent || texture_definition->texture_alpha;
+        material->source_transparent=material->source_transparent||texture_definition->texture_alpha;
     }
     definition->material=material; return material;
 }
@@ -403,13 +485,42 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
 static float scene3d_determinant(const float* m) {
     return m[0]*(m[5]*m[10]-m[9]*m[6])-m[4]*(m[1]*m[10]-m[9]*m[2])+m[8]*(m[1]*m[6]-m[5]*m[2]);
 }
+static bool scene3d_collect_bones(Scene3dBuild* build,Scene3dMesh* mesh,DomElement* node,unsigned depth=0) {
+    if(depth>64) return false;
+    for(DomNode* child=node->first_child;child;child=child->next_sibling) if(child->is_element()) {
+        DomElement* bone=child->as_element();if(!scene3d_tag(bone,"bone")||mesh->bone_count>=16) return false;
+        Scene3dMatrix world;bool visible;unsigned index=mesh->bone_count++;
+        if(!scene3d_world(build->entry,bone,&world,&visible,true)||!scene3d_inverse_affine(world,&mesh->inverse_bind[index])) return false;
+        mesh->bones[index]=dom_node_ref(bone);
+        if(!scene3d_collect_bones(build,mesh,bone,depth+1)) return false;
+    }
+    return true;
+}
 
 static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, Scene3dMaterial* material,
-    const Scene3dMatrix& world, const float* matrices, unsigned count, bool clockwise) {
+    const Scene3dMatrix& world, const float* matrices, unsigned count, bool clockwise,
+    const Scene3dMatrix& local_instance=scene3d_identity()) {
     Scene3dProjection* p=&build->entry->projection;
     if (p->mesh_count>=SCENE_NODE_LIMIT) return scene3d_fail(build->entry,"draw record quota exceeded");
     Scene3dMesh* mesh=(Scene3dMesh*)pool_calloc(p->pool,sizeof(Scene3dMesh)); if (!mesh) return false;
     mesh->geometry=geometry;mesh->material=material;mesh->world=world;mesh->clockwise=clockwise;mesh->instance_count=count;
+    mesh->source=dom_node_ref(build->mesh_source);mesh->local_instance=local_instance;mesh->visible=true;
+    mesh->instance_mirrored=clockwise!=(scene3d_determinant(world.v)<0);
+    if(geometry->morph_count) {
+        float* values;unsigned count;
+        if(!scene3d_numbers(build->mesh_source,"morph-weights",p->pool,&values,&count,2)||count!=geometry->morph_count)
+            return scene3d_fail(build->entry,"morph weights must match the geometry targets");
+        for(unsigned target=0;target<count;target++) mesh->morph_base_weights[target]=mesh->morph_weights[target]=values[target];
+    }
+    const char* skeleton=scene3d_text(build->mesh_source,"skeleton");
+    if(skeleton||geometry->bone_index_count) {
+        Scene3dDefinition* rig=scene3d_definition(build,nullptr,skeleton,"skeleton");bool visible;
+        if(!rig||!scene3d_collect_bones(build,mesh,rig->source)||!geometry->bone_index_count||
+            mesh->bone_count<geometry->bone_index_count||!scene3d_world(build->entry,build->mesh_source,&mesh->bind_matrix,&visible,true))
+            return scene3d_fail(build->entry,"invalid skeleton, bind pose or skin indices");
+        if(count!=1||matrices||memcmp(local_instance.v,scene3d_identity().v,sizeof(local_instance.v)))
+            return scene3d_fail(build->entry,"skinned meshes require a single identity instance");
+    }
     bool unit=!matrices;
     if (unit && geometry->unit_vertices.id) mesh->vertices=geometry->unit_vertices;
     else {
@@ -420,11 +531,15 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
         }
         mesh->instances=unit?p->identity:native_gl_buffer(build->entry->graphics,matrices,count*16*sizeof(float));
         if (!unit && !scene3d_resource(build,mesh->instances)) return false;
-        NativeGlAttribute attributes[8]={};
+        NativeGlAttribute attributes[14]={};
         const unsigned components[]={3,3,2,3},offsets[]={0,3*sizeof(float),6*sizeof(float),8*sizeof(float)};
         for (unsigned i=0;i<4;i++) attributes[i]={geometry->vertices,i,components[i],sizeof(Scene3dVertex),offsets[i],0};
         for (unsigned i=0;i<4;i++) attributes[i+4]={mesh->instances,i+4,4,16*sizeof(float),i*4*sizeof(float),1};
-        mesh->vertices=native_gl_vertices(build->entry->graphics,attributes,8,geometry->indices);
+        const unsigned deformation_offsets[]={offsetof(Scene3dVertex,skin_indices),offsetof(Scene3dVertex,skin_weights),
+            offsetof(Scene3dVertex,morph_positions),offsetof(Scene3dVertex,morph_positions)+3*sizeof(float),
+            offsetof(Scene3dVertex,morph_normals),offsetof(Scene3dVertex,morph_normals)+3*sizeof(float)};
+        for(unsigned i=0;i<6;i++) attributes[i+8]={geometry->vertices,i+8,i<2?4u:3u,sizeof(Scene3dVertex),deformation_offsets[i],0};
+        mesh->vertices=native_gl_vertices(build->entry->graphics,attributes,14,geometry->indices);
         if (!scene3d_resource(build,mesh->vertices)) return false;
         if (unit) geometry->unit_vertices=mesh->vertices;
     }
@@ -433,6 +548,7 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
 }
 
 static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& world) {
+    build->mesh_source=node;
     Scene3dProjection* p=&build->entry->projection;
     const char* geometry_ref=scene3d_text(node,"geometry"); const char* material_ref=scene3d_text(node,"material");
     Scene3dDefinition* gd=geometry_ref?scene3d_definition(build,nullptr,geometry_ref,"geometry"):nullptr;
@@ -483,7 +599,7 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
         for (unsigned i=0;i<count;i+=16) {
             Scene3dMatrix instance;memcpy(instance.v,matrices+i,sizeof(instance.v));
             Scene3dMatrix combined=scene3d_multiply(world,instance);
-            if (!scene3d_mesh_record(build,geometry,material,combined,nullptr,1,scene3d_determinant(combined.v)<0)) return false;
+            if (!scene3d_mesh_record(build,geometry,material,combined,nullptr,1,scene3d_determinant(combined.v)<0,instance)) return false;
         }
     } else {
         float* batch=(float*)pool_alloc(p->pool,count*sizeof(float));if (!batch) return false;
@@ -499,22 +615,14 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
     return true;
 }
 
-static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& parent, bool inherited_visible) {
-    if (node!=build->root && scene3d_tag(node,"scene3d")) return scene3d_fail(build->entry,"nested scene viewport is not a scene object");
-    Scene3dMatrix local; bool visible;
-    if (!scene3d_local(node,&local) || !scene3d_flag(node,"visible",true,&visible)) return scene3d_fail(build->entry,"invalid object transform or visibility");
-    Scene3dMatrix world=scene3d_multiply(parent,local); visible=visible&&inherited_visible;
-    for (float component:world.v) if (!isfinite(component)) return scene3d_fail(build->entry,"world transform overflow");
-    // resources and objects have distinct child vocabularies; ignored children must never look valid.
-    bool branch=scene3d_tag(node,"scene3d") || scene3d_tag(node,"group") || scene3d_tag(node,"resources");
-    if (!branch && !scene3d_tag(node,"mesh") && node->first_child)
-        return scene3d_fail(build->entry,"invalid scene child");
+static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& parent,
+        const Scene3dMatrix& world, bool visible) {
     Scene3dProjection* p=&build->entry->projection;
     if (scene3d_tag(node,"camera")) {
         const char* type=scene3d_text(node,"type"); float fov,near_plane,far_plane,aspect;
-        if (!type || strcmp(type,"perspective") || !scene3d_number(node,"fov",50,&fov) ||
-            !scene3d_number(node,"near",.1f,&near_plane) || !scene3d_number(node,"far",1000,&far_plane) ||
-            !scene3d_number(node,"aspect",0,&aspect) || fov<=0 || fov>=180 || near_plane<=0 || far_plane<=near_plane || aspect<0)
+        if (!type || strcmp(type,"perspective") || !scene3d_animated_number(build->entry,node,"fov",50,&fov) ||
+            !scene3d_animated_number(build->entry,node,"near",.1f,&near_plane) || !scene3d_animated_number(build->entry,node,"far",1000,&far_plane) ||
+            !scene3d_animated_number(build->entry,node,"aspect",0,&aspect) || fov<=0 || fov>=180 || near_plane<=0 || far_plane<=near_plane || aspect<0)
             return scene3d_fail(build->entry,"invalid perspective camera");
         Scene3dVec target,up;
         if (!scene3d_vector(node,"target",{},&target) || !scene3d_vector(node,"up",{0,1,0},&up)) return scene3d_fail(build->entry,"invalid camera orientation");
@@ -527,7 +635,7 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
     } else if (scene3d_tag(node,"light")) {
         const char* type=scene3d_text(node,"type"); float color[4],intensity;
         if (!type || (strcmp(type,"ambient") && strcmp(type,"directional")) ||
-            !scene3d_color(node,"color","#ffffff",color) || !scene3d_number(node,"intensity",1,&intensity) || intensity<0)
+            !scene3d_animated_color(build->entry,node,color) || !scene3d_animated_number(build->entry,node,"intensity",1,&intensity) || intensity<0)
             return scene3d_fail(build->entry,"invalid light");
         if (visible && !strcmp(type,"ambient")) for (unsigned c=0;c<3;c++) p->ambient[c]+=color[c]*intensity;
         else if (visible) {
@@ -538,21 +646,42 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
             unsigned i=p->light_count++; p->directions[i][0]=direction.x;p->directions[i][1]=direction.y;p->directions[i][2]=direction.z;
             for (unsigned c=0;c<3;c++) p->lights[i][c]=color[c]*intensity;
         }
+    }
+    return true;
+}
+
+static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& parent, bool inherited_visible) {
+    if (node!=build->root && scene3d_tag(node,"scene3d")) return scene3d_fail(build->entry,"nested scene viewport is not a scene object");
+    Scene3dMatrix local; bool visible;
+    if (!scene3d_local(node,&local,build->entry->animation) || !scene3d_animated_flag(build->entry,node,&visible)) return scene3d_fail(build->entry,"invalid object transform or visibility");
+    Scene3dMatrix world=scene3d_multiply(parent,local); visible=visible&&inherited_visible;
+    for (float component:world.v) if (!isfinite(component)) return scene3d_fail(build->entry,"world transform overflow");
+    // resources and objects have distinct child vocabularies; ignored children must never look valid.
+    bool rig=scene3d_tag(node,"skeleton")||scene3d_tag(node,"bone");
+    bool branch=scene3d_tag(node,"scene3d") || scene3d_tag(node,"group") || scene3d_tag(node,"resources")||rig;
+    if (!branch && !scene3d_tag(node,"mesh") && node->first_child)
+        return scene3d_fail(build->entry,"invalid scene child");
+    Scene3dProjection* p=&build->entry->projection;
+    if (scene3d_tag(node,"camera") || scene3d_tag(node,"light")) {
+        if(!lam::pool_grow_array(p->pool,&p->dynamic_objects,&p->dynamic_capacity,p->dynamic_count+1,8)) return false;
+        p->dynamic_objects[p->dynamic_count++]=dom_node_ref(node);
+        if(!scene3d_project_dynamic(build,node,parent,world,visible)) return false;
     } else if (scene3d_tag(node,"mesh")) {
         // invisible objects still validate their geometry/material data.
-        int before=p->mesh_count; if (!scene3d_mesh(build,node,world)) return false;
-        if (!visible) p->mesh_count=before;
-    } else if (!scene3d_tag(node,"scene3d") && !scene3d_tag(node,"group") && !scene3d_tag(node,"resources"))
+        if (!scene3d_mesh(build,node,world)) return false;
+    } else if (!branch)
         return scene3d_fail(build->entry,"unknown scene element");
     if (branch)
         for (DomNode* child=node->first_child;child;child=child->next_sibling) if (child->is_element()) {
             DomElement* element=child->as_element();
+            if(rig&&!scene3d_tag(element,"bone")) return scene3d_fail(build->entry,"skeletons and bones accept bone children");
             if (scene3d_tag(node,"resources") && !scene3d_tag(element,"geometry") &&
                 !scene3d_tag(element,"material") && !scene3d_tag(element,"texture"))
                 return scene3d_fail(build->entry,"resources accept geometry, material and texture definitions");
             if (scene3d_tag(element,"geometry")) { if (!scene3d_geometry(build,scene3d_definition(build,element,nullptr,"geometry"))) return false; }
             else if (scene3d_tag(element,"material")) { if (!scene3d_material(build,scene3d_definition(build,element,nullptr,"material"))) return false; }
             else if (scene3d_tag(element,"texture")) { if (!scene3d_texture(build,scene3d_definition(build,element,nullptr,"texture")).id) return false; }
+            else if (scene3d_tag(element,"animation-clip")) continue;
             else if (!scene3d_project_node(build,element,world,visible)) return false;
         }
     return true;
@@ -563,7 +692,68 @@ static void scene3d_projection_destroy(Scene3dEntry* entry) {
     for (int i=p->resource_count-1;i>=0;i--) native_gl_release(entry->graphics,p->resources[i]);
     mem_pool_destroy(p->pool); *p={};
 }
+static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* world,bool* visible,bool authored) {
+    DomElement* ancestors[65];unsigned count=0;
+    for(DomNode* current=node;current&&current->is_element()&&count<65;current=current->parent) {
+        ancestors[count++]=current->as_element();if(current==entry->root.address) break;
+    }
+    if(!count||ancestors[count-1]!=entry->root.address) return false;
+    *world=scene3d_identity();*visible=true;
+    while(count) {
+        DomElement* ancestor=ancestors[--count];Scene3dMatrix local;bool shown;
+        if(!scene3d_local(ancestor,&local,authored?nullptr:entry->animation)||!scene3d_animated_flag(entry,ancestor,&shown)) return false;
+        *world=scene3d_multiply(*world,local);*visible=*visible&&shown;
+    }
+    for(float component:world->v) if(!isfinite(component)) return false;
+    return true;
+}
+static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
+    Scene3dProjection* p=&entry->projection;
+    // poses update retained draw records; geometry, indices, textures and VAOs keep their resource identities.
+    for(int i=0;i<p->mesh_count;i++) {
+        auto* mesh=p->meshes[i];DomNode* node=dom_node_ref_validate(root->doc,mesh->source);Scene3dMatrix world;
+        if(!node||!node->is_element()||!scene3d_world(entry,node->as_element(),&world,&mesh->visible)) return false;
+        mesh->world=scene3d_multiply(world,mesh->local_instance);
+        float determinant=scene3d_determinant(mesh->world.v);if(!isfinite(determinant)||determinant==0) return false;
+        mesh->clockwise=mesh->instance_mirrored!=(determinant<0);
+        if(mesh->bone_count) {
+            Scene3dMatrix inverse_mesh;if(!scene3d_inverse_affine(mesh->world,&inverse_mesh)) return false;
+            for(unsigned bone=0;bone<mesh->bone_count;bone++) {
+                DomNode* source=dom_node_ref_validate(root->doc,mesh->bones[bone]);Scene3dMatrix bone_world;bool visible;
+                if(!source||!source->is_element()||!scene3d_world(entry,source->as_element(),&bone_world,&visible)) return false;
+                // attached skinning converts the current bone world pose back into this mesh's local frame.
+                mesh->bone_matrices[bone]=scene3d_multiply(scene3d_multiply(inverse_mesh,bone_world),
+                    scene3d_multiply(mesh->inverse_bind[bone],mesh->bind_matrix));
+            }
+        }
+        if(mesh->geometry->morph_count) {
+            AnimationValue weights={};
+            if(scene3d_animation_value(entry->animation,node->as_element(),"morph-weights",&weights)) {
+                if(weights.count!=mesh->geometry->morph_count) return false;
+                for(unsigned target=0;target<weights.count;target++) mesh->morph_weights[target]=weights.numbers[target];
+            } else {
+                for(unsigned target=0;target<mesh->geometry->morph_count;target++) mesh->morph_weights[target]=mesh->morph_base_weights[target];
+            }
+        }
+        auto* material=mesh->material;DomNode* source=dom_node_ref_validate(root->doc,material->source);float opacity;
+        if(!source||!source->is_element()||!scene3d_animated_color(entry,source->as_element(),material->color)||
+            !scene3d_animated_number(entry,source->as_element(),"opacity",1,&opacity)||opacity<0||opacity>1) return false;
+        material->color[3]*=opacity;material->transparent=material->source_transparent||material->color[3]<1;
+    }
+    memset(p->ambient,0,sizeof(p->ambient));p->light_count=0;p->camera_found=false;
+    Scene3dBuild build={};build.entry=entry;build.root=root;build.camera=scene3d_text(root,"camera");
+    for(int i=0;i<p->dynamic_count;i++) {
+        DomNode* source=dom_node_ref_validate(root->doc,p->dynamic_objects[i]);
+        if(!source||!source->is_element()||!source->parent||!source->parent->is_element()) return false;
+        Scene3dMatrix parent,world;bool visible,unused;
+        if(!scene3d_world(entry,source->parent->as_element(),&parent,&unused)||
+            !scene3d_world(entry,source->as_element(),&world,&visible)||
+            !scene3d_project_dynamic(&build,source->as_element(),parent,world,visible)) return false;
+    }
+    return p->camera_found;
+}
 static void scene3d_entry_destroy(Scene3dEntry* entry) {
+    scene3d_animation_destroy(entry->animation);
     scene3d_projection_destroy(entry); scene3d_retire_snapshot(entry);
     native_gl_destroy(entry->graphics); mem_free(entry);
 }
@@ -624,6 +814,9 @@ const char* scene3d_diagnostic(DomElement* root) {
     Scene3dRegistry* registry=root?scene3d_registry(root->doc,false):nullptr;
     return registry && registry->count>=8?"scene viewport quota exceeded":"scene3d has no rendered projection";
 }
+Scene3dAnimationState* scene3d_animations(DomElement* root) {
+    Scene3dEntry* entry=scene3d_entry(root,false);return entry?entry->animation:nullptr;
+}
 bool scene3d_stats(DomElement* root, Scene3dStats* stats) {
     Scene3dEntry* e=scene3d_entry(root,false); if (!e || !stats) return false;
     *stats=e->stats; native_gl_stats(e->graphics,&stats->graphics);
@@ -644,14 +837,30 @@ layout(location=1) in vec3 normal;
 layout(location=2) in vec2 uv;
 layout(location=3) in vec3 color;
 layout(location=4) in mat4 instance;
+layout(location=8) in vec4 skin_indices;
+layout(location=9) in vec4 skin_weights;
+layout(location=10) in vec3 morph_position0;
+layout(location=11) in vec3 morph_position1;
+layout(location=12) in vec3 morph_normal0;
+layout(location=13) in vec3 morph_normal1;
 uniform mat4 model, projection;
+uniform mat4 bones[16];
+uniform vec2 morph_weights;
+uniform float skinned;
 out vec3 world_normal, vertex_color;
 out vec2 texture_uv;
 void main() {
     mat4 world = model * instance;
-    world_normal = transpose(inverse(mat3(world))) * normal;
+    vec3 vertex = position + morph_position0*morph_weights.x + morph_position1*morph_weights.y;
+    vec3 posed_normal = normal + morph_normal0*morph_weights.x + morph_normal1*morph_weights.y;
+    if(skinned>0.5) {
+        mat4 skin = bones[int(skin_indices.x)]*skin_weights.x+bones[int(skin_indices.y)]*skin_weights.y+
+            bones[int(skin_indices.z)]*skin_weights.z+bones[int(skin_indices.w)]*skin_weights.w;
+        vertex=(skin*vec4(vertex,1.0)).xyz;posed_normal=mat3(skin)*posed_normal;
+    }
+    world_normal = transpose(inverse(mat3(world))) * posed_normal;
     vertex_color = color; texture_uv = uv;
-    gl_Position = projection * world * vec4(position,1.0);
+    gl_Position = projection * world * vec4(vertex,1.0);
 }
 )GLSL";
 static const char* scene3d_fragment_shader = R"GLSL(#version 330 core
@@ -677,6 +886,11 @@ void main() {
 
 static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui) {
     scene3d_projection_destroy(entry); entry->diagnostic[0]=0;
+    if(!scene3d_animation_matches(entry->animation,root)) {
+        scene3d_animation_destroy(entry->animation);
+        entry->animation=scene3d_animation_create(root,entry->diagnostic,sizeof(entry->diagnostic));
+        if(!entry->animation) return false;
+    }
     Scene3dProjection* p=&entry->projection;
     p->pool=mem_pool_create((MemContext*)root->doc->services.mem_ctx,MEM_ROLE_RENDER,"scene3d.projection");
     if (!p->pool) return scene3d_fail(entry,"projection allocation failed");
@@ -711,7 +925,8 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     float pixel_width=ceilf(width*raster_scale),pixel_height=ceilf(height*raster_scale);
     if (!isfinite(pixel_width) || !isfinite(pixel_height) || pixel_width>4096 || pixel_height>4096)
         { scene3d_fail(entry,"scene raster dimensions exceed quota");scene3d_retire_snapshot(entry);return nullptr; }
-    bool changed=entry->mutation_epoch!=root->doc->mutation_epoch || entry->width!=width || entry->height!=height || entry->scale!=raster_scale;
+    bool changed=entry->mutation_epoch!=root->doc->mutation_epoch || entry->width!=width || entry->height!=height || entry->scale!=raster_scale ||
+        entry->animated_generation!=scene3d_animation_generation(entry->animation);
     if (!changed && entry->snapshot) return entry->snapshot;
     if (!entry->graphics) entry->graphics=native_gl_create(ui->window!=nullptr,entry->diagnostic,sizeof(entry->diagnostic));
     if (!entry->graphics) return nullptr;
@@ -728,6 +943,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         scene3d_projection_destroy(entry);scene3d_retire_snapshot(entry);return nullptr;
     }
     Scene3dProjection* p=&entry->projection;
+    if(!scene3d_refresh_pose(entry,root)) {scene3d_fail(entry,"invalid animated scene pose or detached binding");scene3d_retire_snapshot(entry);return nullptr;}
     if (!entry->target.id || entry->stats.raster_width!=(unsigned)pixel_width || entry->stats.raster_height!=(unsigned)pixel_height) {
         native_gl_release(entry->graphics,entry->target);
         entry->target=native_gl_target(entry->graphics,(unsigned)pixel_width,(unsigned)pixel_height);
@@ -757,9 +973,13 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     float light_count=p->light_count;rendered=rendered&&scene3d_uniform(entry,"light_count",&light_count,1);
     for (int i=0;rendered && i<p->mesh_count;i++) {
         Scene3dMesh* mesh=p->meshes[i];Scene3dMaterial* material=mesh->material;
+        if(!mesh->visible) continue;
         float lambert=material->lambert?1:0,textured=material->texture.id?1:0;
         rendered=scene3d_uniform(entry,"model",mesh->world.v,16) && scene3d_uniform(entry,"material",material->color,4) &&
             scene3d_uniform(entry,"lambert",&lambert,1) && scene3d_uniform(entry,"textured",&textured,1);
+        float skinned=mesh->bone_count?1:0;
+        rendered=rendered&&scene3d_uniform(entry,"skinned",&skinned,1)&&scene3d_uniform(entry,"morph_weights",mesh->morph_weights,2);
+        if(mesh->bone_count) rendered=rendered&&scene3d_uniform(entry,"bones[0]",mesh->bone_matrices[0].v,16,mesh->bone_count);
         NativeGlDraw draw={entry->program,mesh->vertices,material->texture.id?material->texture:entry->white,
             mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
             mesh->geometry->index_count!=0,material->transparent,material->side,mesh->clockwise};
@@ -770,6 +990,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     // retire the generation while leases keep old pixels available to in-flight/retained consumers.
     scene3d_retire_snapshot(entry);snapshot->snapshot_refs=1;entry->snapshot=snapshot;entry->snapshot_generation++;
     entry->width=width;entry->height=height;entry->scale=raster_scale;entry->mutation_epoch=root->doc->mutation_epoch;
+    entry->animated_generation=scene3d_animation_generation(entry->animation);
     entry->stats.projection_generation=entry->projection_generation;entry->stats.snapshot_generation=entry->snapshot_generation;
     entry->stats.meshes=p->mesh_count;entry->stats.geometries=p->geometry_count;entry->stats.textures=p->texture_count;
     entry->stats.raster_width=(unsigned)pixel_width;entry->stats.raster_height=(unsigned)pixel_height;entry->stats.camera_aspect=aspect;
@@ -784,7 +1005,7 @@ void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster
         if (node && node->is_element()) {
             BlockBlot origin={};
             Rect rect=render_geometry_block_content_rect(&origin,(ViewBlock*)node->as_element(),1);
-            if (entry->mutation_epoch!=document->mutation_epoch || entry->width!=rect.width ||
+            if (entry->mutation_epoch!=document->mutation_epoch || entry->animated_generation!=scene3d_animation_generation(entry->animation) || entry->width!=rect.width ||
                 entry->height!=rect.height || entry->scale!=raster_scale)
                 scene3d_snapshot(node->as_element(),ui,rect.width,rect.height,raster_scale);
         }

@@ -3,6 +3,8 @@
 From the worktree root:
 
 ```sh
+./lambda.exe view test/demo/scene3d/observatory.html
+./lambda.exe view test/demo/scene3d/shared-animation.html
 ./lambda.exe view test/demo/scene3d/three-gallery.html
 ./lambda.exe view test/demo/scene3d/ringworld.ls
 ```
@@ -31,3 +33,23 @@ the separate headless-C executable excludes graphics (D7.1.4v2).
 reference. `reference/manifest.json` records viewport, canvas bounds, fixture
 results, actual calls/queries and hashes of the generated shader corpus.
 See [the WebGL test guide](../../webgl/README.md) for reproduction.
+
+`observatory.html` is the Phase III interactive demo: metallic rings and satellites,
+PNG normal/JPEG albedo maps, RoomEnvironment/PMREM illumination, moving PCF
+shadows and EffectComposer RenderPass/FXAA/OutputPass. Drag to orbit, scroll to
+zoom, click a satellite or use Play / pause. Radiant uses the first-party
+`NativeAnimationMixer` binding adapter and shared SVG/native evaluator; a browser
+uses the pinned upstream Three.js mixer. Addons remain unmodified.
+
+`shared-animation.html` combines native GPU skinning and relative morph targets
+with SVG/SMIL. Separate buttons pause/play/seek each timeline. Native deformation
+currently supports 16 bones, four normalized influences per vertex and two
+relative morph targets, including optional relative normals. Bone order is DFS
+within `<skeleton>`; mesh `skeleton` references its ID. `skin-indices`,
+`skin-weights`, `morph-positions` and `morph-normals` are geometry attributes;
+`morph-weights` belongs to the mesh. Skinned instancing is rejected.
+
+The generated original assets and provenance are in `assets/`; the generator
+needs Python Pillow. Phase III fixed-time references and API/shader audit live
+under `reference/phase3/`. See the [implementation record](../../../vibe/impl/Radiant_WebGL_Phase3.md)
+for the declared playback/binding profile, validation and measurements.

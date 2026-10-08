@@ -75,6 +75,11 @@ DOM_ENGINE_WEAK bool dom_engine_image_natural_size(DomElement* e, int* w, int* h
     if (h) *h = 0;
     return false;
 }
+DOM_ENGINE_WEAK bool dom_engine_image_rendered_size(DomElement* e,int* w,int* h) {
+    (void)e;(void)w;(void)h;return false;
+}
+DOM_ENGINE_WEAK void dom_engine_install_animation_globals(void) {}
+DOM_ENGINE_WEAK void dom_engine_animation_frame_prepare(void* d,double t) {(void)d;(void)t;}
 DOM_ENGINE_WEAK uint64_t dom_engine_frame_request(void* n, const char* e) {
     (void)n; (void)e; return 0;
 }
@@ -84,3 +89,5 @@ DOM_ENGINE_WEAK bool dom_engine_frame_cancel(void* n, uint64_t t) {
 DOM_ENGINE_WEAK bool dom_engine_frame_tick(DomDocument* d, double t) {
     (void)d; (void)t; return false;
 }
+
+DOM_ENGINE_WEAK int dom_engine_pointer_capture(DomElement*,int32_t,unsigned operation) { return operation==2?0:-1; }

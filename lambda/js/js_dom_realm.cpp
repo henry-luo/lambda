@@ -23,6 +23,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../dom/dom.h"
+#include "../dom/dom_engine.h"
 #include "../dom/dom_canvas.h"
 #include "../dom/dom_cssom.h"
 #include "../dom/dom_realm_hooks.h"
@@ -767,6 +768,7 @@ extern "C" void dom_selection_install_globals(void) {
     // Range.prototype / Selection.prototype (IDL shape, .length probes) before
     // any script can read them.
     dom_webgl_install_globals();
+    dom_engine_install_animation_globals();
     jube_type_prototype((const JubeTypeDef*)radiant_dom_range_host_type());
     jube_type_prototype((const JubeTypeDef*)radiant_dom_selection_host_type());
 

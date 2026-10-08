@@ -1342,6 +1342,18 @@ TEST(RdtImageTest, AlphaModeSurvivesOwnedImageReleaseAndSeparatesCachedUploads) 
     rdt_vector_destroy(&vector); dl_destroy(&dl); arena_destroy(arena);
 }
 
+TEST(ImagePaintTest, RecycledPixelsFromDifferentSurfaceIdentitiesNeverReuseOldPaint) {
+    rdt_engine_init(0);
+    uint32_t source=0xff0000ffu,pixels[64]={};
+    RdtVector vector={};rdt_vector_init(&vector,pixels,8,8,8);
+    rdt_draw_image(&vector,&source,1,1,1,0,0,8,8,255,nullptr,1,false,41);
+    EXPECT_EQ(pixels[36],0xff0000ffu);
+    source=0xff00ff00u;
+    rdt_draw_image(&vector,&source,1,1,1,0,0,8,8,255,nullptr,1,false,42);
+    EXPECT_EQ(pixels[36],0xff00ff00u);
+    rdt_vector_destroy(&vector);
+}
+
 TEST(SvgStrokeTest, MiterLimitSurvivesRecordingAndChangesCachedStrokeGeometry) {
     rdt_engine_init(0);
     RdtPath* path = svg_parse_path_d("M20 100L50 20L80 100");
