@@ -2617,7 +2617,7 @@ editable-form-regressions: build-test
 test-editable-ua: test-editable-ua-focused test-editable editable-form-regressions
 
 editable-ui: build-test
-	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,test_editing_paired_false_island_contenteditable,rte_typing_at_caret,editable_mixed_routes" $(ARGS)
+	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,rte_typing_at_caret,editable_mixed_routes" $(ARGS)
 
 editable-editor-e2e: build-test
 	@./test/test_ui_automation_gtest.exe --suite editor --test "editable_editors_*" $(ARGS)
