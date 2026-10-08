@@ -3303,7 +3303,7 @@ DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node
         MARKUP_NAME_TEMPLATE, MARKUP_NAME_MAP, MARKUP_NAME_AREA, MARKUP_NAME_RP,
         MARKUP_NAME_DATALIST};
     static const NameId flow_block_tags[] = {
-        MARKUP_NAME_OPTION, MARKUP_NAME_OPTGROUP, MARKUP_NAME_CAPTION};
+        MARKUP_NAME_OPTION, MARKUP_NAME_OPTGROUP};
     if (layout_tag_in_list(tag_id, block_tags, sizeof(block_tags) / sizeof(*block_tags)) ||
         layout_tag_in_list(tag_id, flow_block_tags,
                            sizeof(flow_block_tags) / sizeof(*flow_block_tags))) {
@@ -3346,6 +3346,8 @@ DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node
             : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
     }
     if (tag_id == MARKUP_NAME_BUTTON) return {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW};
+    // captions retain their table role in every view, including independent paged composition.
+    if (tag_id == MARKUP_NAME_CAPTION) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_CAPTION};
     if (tag_id == MARKUP_NAME_HR) return {CSS_VALUE_BLOCK, RDT_DISPLAY_REPLACED};
     if (tag_id == MARKUP_NAME_RUBY) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
     if (tag_id == MARKUP_NAME_RT) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT};
@@ -3369,7 +3371,7 @@ DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node
         if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
             return {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL};
         }
-        if (strcmp(tag_name, "caption") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
+        if (strcmp(tag_name, "caption") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_CAPTION};
         if (strcmp(tag_name, "colgroup") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN_GROUP};
         if (strcmp(tag_name, "col") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN};
     }
