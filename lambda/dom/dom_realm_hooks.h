@@ -40,15 +40,6 @@ extern "C" Item dom_image_constructor_body(Item callee, Item this_value,
 extern "C" Item dom_matrix_constructor(Item init);
 extern "C" Item dom_point_constructor(Item x, Item y, Item z, Item w);
 
-/**
- * Body behind `Element.prototype.querySelector(All)`. Libraries call those
- * through the prototype rather than an instance, so the realm has to publish
- * them there; the operation itself is the core's ordinary ordinal dispatch.
- */
-extern "C" Item dom_element_prototype_operation_body(Item callee, Item this_value,
-                                                    Item* args, int argc,
-                                                    uint64_t* result_home);
-
 /** Body behind `Element.prototype.animate`. */
 extern "C" Item dom_element_animate(Item keyframes_item, Item options_item);
 

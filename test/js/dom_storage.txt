@@ -5,3 +5,17 @@ mode
 1
 true
 STORAGE_DONE
+true true
+[object Storage]
+true
+2 true true true
+function undefined true true
+native
+1
+TypeError
+TypeError
+TypeError
+TypeError
+TypeError
+function undefined true
+wrapped:value

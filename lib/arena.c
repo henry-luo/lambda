@@ -3,6 +3,9 @@
 #include "memtrack.h"
 #include "log.h"
 #include "math_checked.hpp"
+#include "binsearch.h"
+#include "grow_capacity.h"
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -53,6 +56,8 @@ typedef struct ArenaChunk {
 struct Arena {
     ArenaChunk* current;        // current chunk being allocated from
     ArenaChunk* first;          // first chunk in list
+    ArenaChunk** chunk_index;   // chunks sorted by address, allocated after the first
+    size_t chunk_index_capacity;
     size_t chunk_size;          // current chunk size (grows adaptively)
     size_t max_chunk_size;      // maximum chunk size limit
     size_t initial_chunk_size;  // initial chunk size for reset
@@ -182,6 +187,43 @@ static ArenaChunk* _arena_alloc_chunk(Arena* arena, size_t capacity) {
     chunk->capacity = capacity;
     chunk->used = 0;
 
+    // DOM construction revisits a completed Input's chunks in arbitrary order;
+    // searching their allocation-order list for every node was quadratic.
+    if (arena->chunk_count) {
+        size_t count = (size_t)arena->chunk_count + 1;
+        size_t index_capacity = 0, index_bytes = 0;
+        if (count > INT_MAX ||
+            !lib_grow_capacity(arena->chunk_index_capacity, count, 4, &index_capacity) ||
+            !math_checked_mul(index_capacity, sizeof(ArenaChunk*), &index_bytes)) {
+            mem_free_loc(chunk, 0);
+            return NULL;
+        }
+        if (index_capacity != arena->chunk_index_capacity) {
+            ArenaChunk** index = (ArenaChunk**)mem_alloc_loc(
+                index_bytes, arena->category, 0);
+            if (!index) {
+                mem_free_loc(chunk, 0);
+                return NULL;
+            }
+            if (arena->chunk_index) {
+                memcpy(index, arena->chunk_index, arena->chunk_count * sizeof(ArenaChunk*));
+                mem_free_loc(arena->chunk_index, 0);
+            } else {
+                index[0] = arena->first;
+            }
+            arena->chunk_index = index;
+            arena->chunk_index_capacity = index_capacity;
+        }
+        size_t lo = 0, hi = arena->chunk_count;
+        while (lo < hi) {
+            size_t mid = lo + (hi - lo) / 2;
+            if ((uintptr_t)arena->chunk_index[mid] < (uintptr_t)chunk) lo = mid + 1;
+            else hi = mid;
+        }
+        memmove(arena->chunk_index + lo + 1, arena->chunk_index + lo,
+            (arena->chunk_count - lo) * sizeof(ArenaChunk*));
+        arena->chunk_index[lo] = chunk;
+    }
     return chunk;
 }
 
@@ -211,6 +253,8 @@ Arena* arena_create(size_t initial_chunk_size, size_t max_chunk_size) {
     arena->total_allocated = 0;
     arena->total_used = 0;
     arena->chunk_count = 0;
+    arena->chunk_index = NULL;
+    arena->chunk_index_capacity = 0;
     arena->valid = ARENA_VALID_MARKER;
     arena->mem_node = NULL;
     arena->high_water_active_bytes = 0;
@@ -267,6 +311,7 @@ void arena_destroy(Arena* arena) {
     }
 
     // Mark arena as invalid and free it
+    mem_free_loc(arena->chunk_index, 0);
     arena->valid = 0;
     mem_free_loc(arena, 0);
 }
@@ -499,6 +544,9 @@ void arena_clear(Arena* arena) {
     }
 
     // Reset first chunk
+    mem_free_loc(arena->chunk_index, 0);
+    arena->chunk_index = NULL;
+    arena->chunk_index_capacity = 0;
     arena->first->next = NULL;
     arena->first->used = 0;
     arena->current = arena->first;
@@ -547,7 +595,7 @@ void arena_get_stats(Arena* arena, ArenaStats* out) {
     memset(out, 0, sizeof(*out));
     if (!arena || arena->valid != ARENA_VALID_MARKER) return;
 
-    size_t backing = sizeof(Arena);
+    size_t backing = sizeof(Arena) + arena->chunk_index_capacity * sizeof(ArenaChunk*);
     for (ArenaChunk* chunk = arena->first; chunk; chunk = chunk->next) {
         backing += sizeof(ArenaChunk) + chunk->capacity;
     }
@@ -638,6 +686,17 @@ uint32_t arena_active_scope_count(Arena* arena) {
     return arena->active_scope_count;
 }
 
+static int _arena_chunk_range_compare(const void* record, const void* key, void* unused) {
+    (void)unused;
+    ArenaChunk* chunk = *(ArenaChunk* const*)record;
+    uintptr_t start = (uintptr_t)chunk->data;
+    uintptr_t address = (uintptr_t)key;
+    if (address < start) return 1;
+    // Read the current bump extent so reset, rewind and tail retirement cannot
+    // leave stale ownership proofs in the address index (D4.1.4v5).
+    return address - start < chunk->used ? 0 : -1;
+}
+
 bool arena_owns(Arena* arena, const void* ptr) {
     if (!arena || arena->valid != ARENA_VALID_MARKER || !ptr) {
         return false;
@@ -656,20 +715,9 @@ bool arena_owns(Arena* arena, const void* ptr) {
         }
     }
 
-    // Iterate through all chunks to find if ptr is within any chunk's data
-    ArenaChunk* chunk = arena->first;
-    while (chunk) {
-        uintptr_t data_start = (uintptr_t)&chunk->data[0];
-        uintptr_t data_end = data_start + chunk->used;
-        uintptr_t ptr_addr = (uintptr_t)ptr;
-
-        if (ptr_addr >= data_start && ptr_addr < data_end) {
-            return true;
-        }
-        chunk = chunk->next;
-    }
-
-    return false;
+    return arena->chunk_index && binsearch_range(arena->chunk_index,
+        (int)arena->chunk_count, sizeof(ArenaChunk*), ptr,
+        _arena_chunk_range_compare, NULL) >= 0;
 }
 
 void* arena_get_mem_node(Arena* arena) {

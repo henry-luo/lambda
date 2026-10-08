@@ -812,24 +812,26 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
     matcher->total_matches++;
 
     switch (simple_selector->type) {
-        case CSS_SELECTOR_TYPE_ELEMENT:
-            // Match element type
-            if (!selector_matcher_type_namespace_matches(simple_selector, element)) {
-                return false;
-            }
+        case CSS_SELECTOR_TYPE_ELEMENT: {
+            bool exact_name = false;
             if (simple_selector->value) {
                 // safety check for NULL or invalid tag_name
                 if (!element->tag_name || (uintptr_t)element->tag_name.get() < 0x1000) {
                     log_error("Invalid tag_name pointer in element: %p", element->tag_name);
                     return false;
                 }
-                // Prefixes identify namespaces; the type selector compares local names.
-                return strcmp(dom_element_namespace_uri(element),
-                    "http://www.w3.org/1999/xhtml") == 0
-                    ? str_icmp_cstr(element->local_name(), simple_selector->value) == 0
-                    : strcmp(element->local_name(), simple_selector->value) == 0;
+                const char* local_name = element->local_name();
+                exact_name = strcmp(local_name, simple_selector->value) == 0;
+                // reject unrelated tags before namespace lookup walks their ancestors.
+                if (!exact_name && str_icmp_cstr(local_name, simple_selector->value) != 0)
+                    return false;
             }
-            return true; // No type specified matches any element
+            if (!selector_matcher_type_namespace_matches(simple_selector, element))
+                return false;
+            return !simple_selector->value || exact_name ||
+                strcmp(dom_element_namespace_uri(element),
+                    "http://www.w3.org/1999/xhtml") == 0;
+        }
 
         case CSS_SELECTOR_TYPE_CLASS:
             // Match class - with case sensitivity based on configuration

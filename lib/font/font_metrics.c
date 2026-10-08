@@ -305,25 +305,50 @@ static int font_get_handle_platform_metrics(FontHandle* handle,
                                             float* out_descent,
                                             float* out_line_height) {
     if (!handle) return 0;
-    if (handle->size_px == 0.0f) {
-        // CoreText clamps zero-point faces to a default size; CSS metrics scale to zero.
-        if (out_ascent) *out_ascent = 0.0f;
-        if (out_descent) *out_descent = 0.0f;
-        if (out_line_height) *out_line_height = 0.0f;
+    const char* family = font_metrics_family(handle);
+    void* platform_ref = NULL;
+#ifdef __APPLE__
+    if (handle->is_document_font || handle->is_explicit_scan_font ||
+        handle->metrics_from_platform_ref) platform_ref = handle->ct_raster_ref;
+#endif
+    if (handle->cached_platform_metrics_ready &&
+        handle->cached_platform_metric_family == family &&
+        handle->cached_platform_metric_ref == platform_ref &&
+        handle->cached_platform_metric_size == handle->size_px) {
+        if (out_ascent) *out_ascent = handle->cached_platform_ascent;
+        if (out_descent) *out_descent = handle->cached_platform_descent;
+        if (out_line_height) *out_line_height = handle->cached_platform_line_height;
         return 1;
     }
+    float ascent = 0.0f, descent = 0.0f, line_height = 0.0f;
+    int available;
+    if (handle->size_px == 0.0f) {
+        // CoreText clamps zero-point faces to a default size; CSS metrics scale to zero.
+        available = 1;
+    }
 #ifdef __APPLE__
-    if ((handle->is_document_font || handle->is_explicit_scan_font ||
-         handle->metrics_from_platform_ref) &&
-        handle->ct_raster_ref) {
+    else if (platform_ref) {
         // CSS faces and caller-supplied directories retain their selected file;
         // resolving the family name again can substitute another installed face.
-        return font_platform_get_metrics_from_ref(handle->ct_raster_ref,
-            out_ascent, out_descent, out_line_height);
+        available = font_platform_get_metrics_from_ref(platform_ref,
+            &ascent, &descent, &line_height);
     }
 #endif
-    return get_font_metrics_platform(font_metrics_family(handle), handle->size_px,
-        out_ascent, out_descent, out_line_height);
+    else available = get_font_metrics_platform(family, handle->size_px,
+        &ascent, &descent, &line_height);
+    if (!available) return 0;
+    // Repeated intrinsic/style passes must not reconstruct an identical platform face.
+    handle->cached_platform_metric_family = family;
+    handle->cached_platform_metric_ref = platform_ref;
+    handle->cached_platform_metric_size = handle->size_px;
+    handle->cached_platform_ascent = ascent;
+    handle->cached_platform_descent = descent;
+    handle->cached_platform_line_height = line_height;
+    handle->cached_platform_metrics_ready = true;
+    if (out_ascent) *out_ascent = ascent;
+    if (out_descent) *out_descent = descent;
+    if (out_line_height) *out_line_height = line_height;
+    return 1;
 }
 
 float font_get_max_char_width(FontHandle* handle) {

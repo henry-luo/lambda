@@ -8,6 +8,8 @@ extern "C" {
 
 Item dom_storage_local_object(void);
 Item dom_storage_session_object(void);
+void dom_storage_install_interface(Item prototype);
+void dom_install_storage_globals(Item global);
 void dom_storage_reset(void);
 // Rebinds the realm-local storage cache to the current document/session.
 void dom_storage_bind_document(void);

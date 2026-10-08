@@ -1353,6 +1353,12 @@ static NameEntry* jm_guarded_numeric_while_binding(JsMirTranspiler* mt,
         scan.indexed_uses >= 2 ? binding : NULL;
 }
 
+static void jm_emit_execution_interrupt_check(JsMirTranspiler* mt) {
+    // D8.4.3v2: every loop back-edge can leave through its ordinary error lane.
+    jm_call_0(mt, "js_execution_interrupt_status", MIR_T_I64);
+    jm_emit_error_lane_propagate_check(mt);
+}
+
 static void jm_transpile_while_copy(JsMirTranspiler* mt, JsWhileNode* wh) {
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
@@ -1365,6 +1371,7 @@ static void jm_transpile_while_copy(JsMirTranspiler* mt, JsWhileNode* wh) {
     jm_eval_cptn_reset(mt);
 
     jm_emit_label(mt, l_test);
+    jm_emit_execution_interrupt_check(mt);
 
     // Reload scope-env variables so the loop condition sees values updated by
     // inner-function (closure) calls made during the previous loop iteration.
@@ -1520,6 +1527,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     mt->iteration_depth++;
 
     jm_emit_label(mt, l_test);
+    jm_emit_execution_interrupt_check(mt);
 
     // Reload scope-env variables so the loop condition sees values updated by
     // inner-function (closure) calls made during the previous iteration.
@@ -2108,6 +2116,7 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
 
     // Body first
     jm_emit_label(mt, l_body);
+    jm_emit_execution_interrupt_check(mt);
     if (dw->body) {
         if (dw->body->node_type == AST_NODE_BLOCK) {
             jm_push_scope(mt);
@@ -2443,6 +2452,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         mt->iteration_depth++;
 
         jm_emit_label(mt, l_test);
+        jm_emit_execution_interrupt_check(mt);
         // js_for_in_keys returns an engine-owned immutable snapshot. Keeping its
         // initial length avoids a loop-carried raw scalar masquerading as a boxed
         // call result in the precise-root machinery on large function back-edges.
@@ -2591,6 +2601,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Test: call iterator step.  for-await needs the raw iterator result so
     // it can await async-generator .next() promises before checking `done`.
     jm_emit_label(mt, l_test);
+    jm_emit_execution_interrupt_check(mt);
     MIR_reg_t step_result = 0;
     MIR_reg_t step_iter_result = 0;
     if (is_for_await) {

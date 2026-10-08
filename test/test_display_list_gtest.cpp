@@ -1403,12 +1403,12 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsRadialGradientPaint) {
     gradient.cy = 0.75f;
     gradient.stop_count = 2;
     gradient.stops = lam::own_arr(css_stops);
-    css_stops[0].position = -1.0f;
+    css_stops[0].position = NAN;
     css_stops[0].color.r = 0x01;
     css_stops[0].color.g = 0x02;
     css_stops[0].color.b = 0x03;
     css_stops[0].color.a = 0xff;
-    css_stops[1].position = -1.0f;
+    css_stops[1].position = NAN;
     css_stops[1].color.r = 0x04;
     css_stops[1].color.g = 0x05;
     css_stops[1].color.b = 0x06;

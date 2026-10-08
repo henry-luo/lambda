@@ -53,6 +53,7 @@ extern Item fn_replace4(Item str, Item old_str, Item new_str, Item options);
 
 // super property access (js_runtime.cpp)
 extern Item js_super_property_get(Item receiver, Item key);
+extern Item js_execution_interrupt_status(void);
 extern Item js_super_instance_method_get(Item receiver, Item key);
 // Tune8 §2.2: super_property_set takes an explicit strict flag; the
 // non_strict variant has been removed.
@@ -2545,6 +2546,9 @@ JitImport jit_runtime_imports[] = {
     {"js_set_arguments_info", FPTR(js_set_arguments_info), JIT_IMPORT_VOID_PRESERVES},
     {"js_build_template_object_cached", FPTR(js_build_template_object_cached)},
     {"js_check_tdz", FPTR(js_check_tdz)},
+    {"js_execution_interrupt_status", FPTR(js_execution_interrupt_status),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE, JIT_EXCEPTION_MAY_SET, 0}},
     {"js_check_capture_binding", FPTR(js_check_capture_binding)},
     // This constructs an Error Item; classing it as a scalar loses the carrier
     // when the SET lane routes a strict const-assignment exception.

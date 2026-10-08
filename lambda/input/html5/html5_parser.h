@@ -266,6 +266,8 @@ public:
 
 // Main parsing function
 Element* html5_parse(Input* input, const char* html);
+Element* html5_parse_n(Input* input, const char* html, size_t length,
+                        Html5ParseOptions* opts);
 
 // WHATWG initial-insertion-mode doctype classification:
 // 0 = no quirks, 1 = quirks, 2 = limited quirks.
@@ -382,7 +384,7 @@ void html5_insert_character(Html5Parser* parser, char c);
 void html5_insert_text(Html5Parser* parser, const char* text, size_t len);
 void html5_foster_parent_character(Html5Parser* parser, char c);
 void html5_flush_foster_text(Html5Parser* parser);
-void html5_insert_comment(Html5Parser* parser, Html5Token* token);
+void html5_insert_comment(Html5Parser* parser, Html5Token* token, Element* parent = nullptr);
 
 // Active formatting elements
 void html5_push_active_formatting_element(Html5Parser* parser, Element* elem, Html5Token* token);

@@ -953,6 +953,8 @@ protected:
         scheduler = NULL;
         eval.scheduler = NULL;
         lambda_uv_cleanup();
+        // the minimal fixture owns the same realm shape arena as a full runtime.
+        runtime_shape_tree_release(&eval);
         err_set_heap_allocator(NULL);
         EXPECT_TRUE(eval_context_shutdown(&eval));
         gc_heap_destroy(concurrency_test_gc);
@@ -983,6 +985,43 @@ TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
     EXPECT_EQ(order[1], 2);
     EXPECT_EQ(order[2], 3);
     EXPECT_EQ(lambda_scheduler_live_count(scheduler), 0);
+}
+
+TEST_F(LambdaConcurrencyRuntime, SharedMapRetypeKeepsSiblingShapeWithoutJsRealm) {
+    ASSERT_FALSE(js_realm_runtime_is_active());
+    eval.pool = pool;
+    Input* owner = runtime_shape_tree();
+    ASSERT_NE(owner, nullptr);
+    String* key = name_pool_create_len(owner->name_pool, "value", 5);
+    String* tail = name_pool_create_len(owner->name_pool, "tail", 4);
+    String* replacement = name_pool_create_len(owner->name_pool, "updated", 7);
+    ASSERT_NE(key, nullptr);
+    ASSERT_NE(tail, nullptr);
+    ASSERT_NE(replacement, nullptr);
+    Map* maps[2] = {map_pooled(owner->pool), map_pooled(owner->pool)};
+    for (Map* map : maps) {
+        ASSERT_NE(map, nullptr);
+        map_put(map, key, {.item = b2it(false)}, owner);
+        map_put(map, tail, {.item = i2it(19)}, owner);
+    }
+    TypeMap* shared = (TypeMap*)maps[0]->type;
+    ASSERT_EQ(maps[1]->type, shared);
+    ASSERT_TRUE(typemap_is_shared_shape(shared));
+    ASSERT_EQ(fn_map_set({.map = maps[0]}, {.item = s2it(key)},
+        {.item = s2it(replacement)}).item, ItemNull.item);
+    TypeMap* changed = (TypeMap*)maps[0]->type;
+    ShapeEntry* value = typemap_hash_lookup(changed, "value", 5);
+    ShapeEntry* trailing = typemap_hash_lookup(changed, "tail", 4);
+    ASSERT_NE(value, nullptr);
+    ASSERT_NE(trailing, nullptr);
+    EXPECT_STREQ(_map_read_field(value, maps[0]->data).get_safe_string()->chars, "updated");
+    EXPECT_EQ(lambda_int_item_value(_map_read_field(trailing, maps[0]->data)), 19);
+    EXPECT_EQ(maps[1]->type, shared);
+    value = typemap_hash_lookup(shared, "value", 5);
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->type->type_id, LMD_TYPE_BOOL);
+    EXPECT_EQ(_map_read_field(value, maps[1]->data).item, b2it(false));
+    EXPECT_FALSE(js_realm_runtime_is_active());
 }
 
 // JSCU25: a weak registration counts as live until it leaves, a drain with
@@ -1307,6 +1346,31 @@ TEST_F(ActivationCore, SuspendAndResumeExchangeValues) {
     EXPECT_EQ(lambda_int_item_to_i64(activation_value(activation)), 1111);
     EXPECT_EQ(activation_current(), nullptr);
     EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+    activation_destroy(activation);
+}
+
+static Item activation_check_execution_depth(Activation*, Item arg) {
+    // D5.4.1: a fresh stack cannot advertise quiescence while guest frames run.
+    EXPECT_GT(context->execution_depth, 0u);
+    Item resumed = activation_suspend(arg);
+    EXPECT_GT(context->execution_depth, 0u);
+    return resumed;
+}
+
+TEST_F(ActivationCore, GuestExecutionDepthFollowsSuspension) {
+    uint32_t original_depth = context->execution_depth;
+    Activation* activation = activation_create(activation_check_execution_depth,
+        ItemNull, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    {
+        RuntimeExecutionScope caller;
+        uint32_t caller_depth = context->execution_depth;
+        EXPECT_EQ(activation_resume(activation, ItemNull), ACTIVATION_SUSPENDED);
+        EXPECT_EQ(context->execution_depth, caller_depth);
+        EXPECT_EQ(activation_resume(activation, ItemNull), ACTIVATION_DONE);
+        EXPECT_EQ(context->execution_depth, caller_depth);
+    }
+    EXPECT_EQ(context->execution_depth, original_depth);
     activation_destroy(activation);
 }
 

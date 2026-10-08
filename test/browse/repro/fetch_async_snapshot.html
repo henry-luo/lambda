@@ -1,0 +1,21 @@
+<!doctype html><html><body><p id="status">snapshot-request-pending</p><script>
+let earlyTimer = false;
+let lateTimer = false;
+setTimeout(() => { earlyTimer = true; }, 10);
+setTimeout(() => { lateTimer = true; }, 100);
+setInterval(() => { lateTimer = true; }, 100);
+fetch('xhr_async_transport_delay.json')
+    .then(response => response.json())
+    .then(body => {
+        if (body.transport !== 'libuv') throw new Error('first response');
+        return fetch('xhr_async_transport_delay.json');
+    })
+    .then(response => response.json())
+    .then(body => {
+        if (body.transport !== 'libuv' || !earlyTimer || lateTimer || performance.now() >= 100)
+            throw new Error('native completion changed the virtual capture window');
+        document.getElementById('status').textContent = 'snapshot-requests-complete';
+        console.log('FETCH_ASYNC_SNAPSHOT_PASS');
+    })
+    .catch(error => { console.log('FETCH_ASYNC_SNAPSHOT_FAIL ' + error.message); });
+</script></body></html>

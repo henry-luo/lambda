@@ -1754,7 +1754,8 @@ RADIANT_C_API int radiant_dom_anchor_hash_get(Item receiver, Item* out) {
     // Fragment-only references are valid URL references even when the host
     // parser has no base-path component; their hash is still the raw suffix.
     const char* hash = href ? strchr(href, '#') : nullptr;
-    *out = radiant_dom_string_item(hash ? hash : "");
+    // HTMLHyperlinkElementUtils.hash hides the delimiter of an empty fragment.
+    *out = radiant_dom_string_item(hash && hash[1] ? hash : "");
     return 1;
 }
 
@@ -2477,10 +2478,9 @@ static Item radiant_dom_data_descriptor(Item value, bool writable,
 
 static bool radiant_dom_projected_own_value(Item object, Item key, Item* out) {
     if (!out || get_type_id(key) != LMD_TYPE_STRING) return false;
-    // DOM3 Phase 4: converted members resolve through the record system, so
-    // own-keys projection and descriptors keep covering them after their
-    // legacy chain arms are deleted
-    if (jube_member_projected_get(object, key, out)) return true;
+    // prototype publication removes the legacy projected own descriptor;
+    // method overrides and expando attributes must reach ordinary JS storage.
+    if (jube_member_native_own_get(object, key, out)) return true;
     // Generic DOM reads also expose expandos; treating that fallback as a
     // projected value would make an expando undeletable and non-configurable.
     return false;

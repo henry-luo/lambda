@@ -111,6 +111,7 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 | `test-lambda-baseline` | Run Lambda engine baseline tests only. **Must pass 100%.** |
 | `test-input-baseline` | Run input parser baselines: HTML5 WPT, CommonMark, YAML, ASCII Math, LaTeX Math. |
 | `test-radiant-baseline` | Alias for `test-layout-baseline`. |
+| `test-radiant-online` | Build the release renderer and standalone online launcher; load real URLs and check shutdown allocations with `MEMTRACK_MODE=STATS` by default (D4.2.5v3). |
 | `test-layout-baseline` | Run Radiant layout baseline tests. **Must pass 100%.** |
 | `test-extended` | Run extended test suites only (HTTP/HTTPS, ongoing features). |
 

@@ -114,6 +114,7 @@ extern "C" bool path_is_absolute(Path* path);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
+extern bool js_realm_runtime_has_input(void);
 
 // External typeset function
 
@@ -14496,14 +14497,19 @@ static ShapeEntry* map_resolve_entry_in_shape(TypeMap* shape, NameRef key_ref,
 static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
         TypeMap** map_type_slot, void** type_slot, const char* key_cstr,
         size_t key_len, NameRef key_ref, ShapeEntry* entry, TypeId value_type) {
+    // constructor pre-shapes and their JS transitions belong to Map storage.
+    if (get_type_id(map_item) != LMD_TYPE_MAP) return entry;
     if (!map_type_slot || !*map_type_slot || !entry || !entry->type) return entry;
     TypeId field_type = entry->type->type_id;
     if (!map_shared_ctor_shape_should_detach_for_type(*map_type_slot, field_type, value_type)) {
         return entry;
     }
     NameId operation_name_id = key_ref ? property_key_id(key_ref) : NAME_ID_NONE;
-    TypeMap* transition = js_typemap_transition_for_type(map_item, entry,
-        operation_name_id, value_type);
+    bool js_active = js_realm_runtime_has_input();
+    // a Lambda context may have a JS capsule before its Input exists; use
+    // the Lambda pool until that realm can own transitions (D5.4.1).
+    TypeMap* transition = js_active ? js_typemap_transition_for_type(map_item, entry,
+        operation_name_id, value_type) : NULL;
     if (transition) {
         *map_type_slot = transition;
         if (type_slot) *type_slot = transition;
@@ -14511,8 +14517,9 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
             key_cstr, key_len);
         if (refreshed) return refreshed;
     }
-    TypeMap* clone = js_typemap_clone_for_mutation_pub(map_item);
-    if (!clone) return entry;
+    TypeMap* clone = js_active ? js_typemap_clone_for_mutation_pub(map_item)
+        : map_clone_typemap_for_mutation(map_item.map, context->pool);
+    if (!clone) return NULL;
     *map_type_slot = clone;
     if (type_slot) *type_slot = clone;
     // Ordinary Input and runtime strings use the id-less byte seam; identity

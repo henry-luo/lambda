@@ -42,6 +42,7 @@ struct RadiantGradientLine {
     float y2;
 };
 
+
 inline float radiant_linear_gradient_used_angle(const LinearGradient* gradient,
                                                 Rect rect) {
     if (!gradient) return 0.0f;
@@ -140,6 +141,10 @@ typedef struct {
     float offset;          // 0.0 – 1.0
     uint8_t r, g, b, a;
 } RdtGradientStop;
+
+bool render_copy_gradient_stops(const GradientStop* source, int source_count,
+                                float gradient_length, RdtGradientStop* stops,
+                                int stop_capacity, int* out_count);
 
 typedef enum {
     RDT_GRADIENT_PAD,
@@ -2168,6 +2173,8 @@ Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
                                         float scale);
 float render_geometry_filter_effect_expand(const FilterProp* filter);
 float render_geometry_block_visual_overflow(const ViewBlock* block);
+Rect render_geometry_outer_shadow_rect(Rect border_box, float offset_x,
+                                       float offset_y, float spread);
 bool render_geometry_transform_matrix(const TransformProp* transform,
                                       float x, float y, float width, float height,
                                       RdtMatrix* out_matrix);

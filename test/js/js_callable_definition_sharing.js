@@ -31,3 +31,11 @@ function* resumable(value) { var next = factory(value); yield next(); return nex
 var generator = resumable(10);
 console.log('suspension', generator.next().value, generator.next().value);
 console.log('retained', closures[0](2), closures[1](2));
+
+// Suspended parameter and arguments views survive allocating rest/default setup.
+function* parameterViews(first, second = {value: 19}, ...rest) {
+    yield [first, second.value, rest.join(':')].join(',');
+    return arguments[0];
+}
+var parameterGenerator = parameterViews(17, undefined, 23, 29);
+console.log('parameter-views', parameterGenerator.next().value, parameterGenerator.next().value);

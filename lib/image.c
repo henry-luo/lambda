@@ -566,11 +566,6 @@ static unsigned char* decode_gif(GifFileType* gif, int* width, int* height, int*
 
         // Get the color map
         ColorMapObject* color_map = desc->ColorMap ? desc->ColorMap : gif->SColorMap;
-        if (!color_map) {
-            log_error("No color map found in GIF image");
-            mem_free(image_data);
-            return NULL;
-        }
 
         // Check for transparency
         int transparent_color = -1;
@@ -609,6 +604,11 @@ static unsigned char* decode_gif(GifFileType* gif, int* width, int* height, int*
                         image_data[dst_idx + 1] = 0;
                         image_data[dst_idx + 2] = 0;
                         image_data[dst_idx + 3] = 0;
+                    } else if (!color_map) {
+                        // transparent pixels need no palette; require one only for opaque pixels.
+                        log_error("[image] no color map for opaque GIF pixel");
+                        mem_free(image_data);
+                        return NULL;
                     } else if (color_index < color_map->ColorCount) {
                         GifColorType* color = &color_map->Colors[color_index];
                         image_data[dst_idx + 0] = color->Red;
