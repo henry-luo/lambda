@@ -109,6 +109,7 @@ struct MvpLmdProgram {
     LmdBinding** intrinsic_uses;
     HashMap* import_cache;
     unsigned* literal_kinds;
+    Item* character_items;
     bool immutable_objects;
     bool array_holes;
 };
@@ -144,6 +145,7 @@ struct LmdCompiler {
     LmdControl* control;
     bool strict;
     LmdInlineFrame* inlining;
+    MIR_label_t integer_bail;
 };
 struct LmdValue { MIR_reg_t reg; unsigned kind; bool literal = false; double number = 0; bool integer = false; LmdRange range;
     MIR_reg_t number_present = 0; };
@@ -155,7 +157,7 @@ struct LmdInlineFrame { LmdInlineFrame* parent; LmdFunction* function; int count
 struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     bool key_known = false; int64_t index = 0; MIR_reg_t name = 0; LmdObjectPlan* plan = NULL; ShapeEntry* field = NULL; int method = 0; LmdShapeSet shapes = {}; String* spelling = NULL; bool guarded = false;
     unsigned lanes = 0; bool numeric_key = false; bool in_bounds = false; LmdRange elements;
-    MIR_reg_t key_present = 0; };
+    MIR_reg_t key_present = 0; String* string_literal = NULL; };
 
 static LmdBinding* binding(MvpLmdProgram* p, NameEntry* entry) {
     for (int i = 0; i < p->bindings->length; i++) {
@@ -491,6 +493,8 @@ static AstNode* scalar_field_initializer(MvpLmdProgram* p, AstNode* node);
 static LmdArrayFacts array_facts(MvpLmdProgram* p, AstNode* n);
 static LmdRange range(MvpLmdProgram* p, AstNode* n, bool scoped = false, bool present_only = false);
 static LmdRange finite_range(double lower, double upper);
+static bool finite_integer(double value);
+static AstNode* enclosing_loop(MvpLmdProgram* p, AstNode* node, LmdFunction* owner, bool include_for_of = false);
 static unsigned immutable_member_kind(MvpLmdProgram* p, String* name) {
     if (!p->immutable_objects || !name) return K_ANY;
     unsigned result = 0;
@@ -807,6 +811,20 @@ static LmdRange range_binary(Operator operation, LmdRange left, LmdRange right) 
         return finite_range(0, fmin(left.upper, right.upper - 1));
     return {0, 0, 2};
 }
+static LmdBinding* linear_index(MvpLmdProgram* p, AstNode* node, double* offset) {
+    *offset = 0;
+    if (node && node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* shifted = (AstBinaryNode*)node;
+        if ((shifted->op != OPERATOR_ADD && shifted->op != OPERATOR_SUB) ||
+                shifted->right->node_type != AST_NODE_LITERAL ||
+                ((AstLiteralNode*)shifted->right)->literal_type != AST_LITERAL_NUMBER) return NULL;
+        *offset = ((AstLiteralNode*)shifted->right)->value.number_value;
+        if (!finite_integer(*offset)) return NULL;
+        if (shifted->op == OPERATOR_SUB) *offset = -*offset;
+        node = shifted->left;
+    }
+    return node && node->node_type == AST_NODE_IDENT ? identifier_binding(p, (AstIdentNode*)node) : NULL;
+}
 static LmdRange range(MvpLmdProgram* p, AstNode* n, bool scoped, bool present_only) {
     if (!n) return {0, 0, 2};
     // absence contributes no payload; ordinary arithmetic must still see its unknown/NaN range.
@@ -822,7 +840,8 @@ static LmdRange range(MvpLmdProgram* p, AstNode* n, bool scoped, bool present_on
         }
         LmdArrayFacts facts = array_facts(p, member->object);
         if (member->computed && facts.lanes && !(facts.lanes & LMD_ARRAY_UNKNOWN)) {
-            LmdRange index = range(p, member->property, scoped);
+            // kind admission uses this site's bounds; retain the same proof for its integer payload.
+            LmdRange index = range(p, member->property, true);
             if (!index.state || !facts.length.state) return {};
             bool numeric_key = !(kind(p, member->property) & ~(K_NUMBER | K_UNDEFINED));
             if ((present_only && numeric_key) || (index.state == 1 && facts.length.state == 1 && index.lower >= 0 && index.upper < facts.length.lower)) {
@@ -855,12 +874,21 @@ static LmdRange range(MvpLmdProgram* p, AstNode* n, bool scoped, bool present_on
                 child = parent, parent = ast_index_parent(&p->frontend->ast_index, parent)) {
             if (parent->node_type != AST_NODE_LOOP) continue;
             AstLoopControlNode* loop = (AstLoopControlNode*)parent;
-            if (loop->body != child || loop->update != b->update || !loop->cond ||
+            if (loop->form == LOOP_FORM_DO_WHILE) continue;
+            if (loop->body != child || !loop->cond ||
                     loop->cond->node_type != AST_NODE_BINARY) continue;
+            // a nested loop can revisit the read after writing, before this condition is retested.
+            if (loop->update != b->update && (!b->update ||
+                    enclosing_loop(p, b->update, b->owner, true) != parent ||
+                    ast_index_find(&p->frontend->ast_index, n) >=
+                    ast_index_find(&p->frontend->ast_index, b->update))) continue;
             AstBinaryNode* cond = (AstBinaryNode*)loop->cond;
-            if (cond->left->node_type != AST_NODE_IDENT ||
-                    identifier_binding(p, (AstIdentNode*)cond->left) != b) continue;
+            double offset;
+            if (linear_index(p, cond->left, &offset) != b ||
+                    finite_range(result.lower + offset, result.upper + offset).state != 1) continue;
             LmdRange limit = range(p, cond->right);
+            if (limit.state != 1) continue;
+            limit = finite_range(limit.lower - offset, limit.upper - offset);
             if (limit.state != 1) continue;
             double lo = result.lower, hi = result.upper;
             if (cond->op == OPERATOR_LT || cond->op == OPERATOR_LE)
@@ -941,13 +969,26 @@ static bool loop_linear(MvpLmdProgram* p, AstNode* n) {
     }, &check);
     return check.ok;
 }
-static AstNode* enclosing_loop(MvpLmdProgram* p, AstNode* node, LmdFunction* owner, bool include_for_of = false) {
+static AstNode* enclosing_loop(MvpLmdProgram* p, AstNode* node, LmdFunction* owner, bool include_for_of) {
     for (AstNode* parent = ast_index_parent(&p->frontend->ast_index, node);
             parent && parent != (AstNode*)owner->ast;
             parent = ast_index_parent(&p->frontend->ast_index, parent))
         if (parent->node_type == AST_NODE_LOOP ||
                 (include_for_of && parent->node_type == AST_NODE_FOR_OF_STAM)) return parent;
     return NULL;
+}
+static bool loop_reset_before(MvpLmdProgram* p, LmdBinding* binding, AstLoopControlNode* loop) {
+    if (!binding->initializer) return false;
+    AstIndex* index = &p->frontend->ast_index;
+    AstNode* declaration = ast_index_parent(index, binding->initializer);
+    if (!declaration || declaration->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
+    AstNode* statement = ast_index_parent(index, declaration);
+    if (statement == loop->init) return true;
+    AstNode* block = ast_index_parent(index, (AstNode*)loop);
+    // a direct preceding declaration executes on every entry to the containing block.
+    return block && block->node_type == AST_NODE_BLOCK && statement &&
+        ast_index_parent(index, statement) == block &&
+        ast_index_find(index, statement) < ast_index_find(index, (AstNode*)loop);
 }
 // a unique additive write in a counted loop has a finite activation-wide bound.
 static LmdRange counted_range(MvpLmdProgram* p, LmdBinding* b) {
@@ -963,22 +1004,53 @@ static LmdRange counted_range(MvpLmdProgram* p, LmdBinding* b) {
     if (location != loop->body && loop->update != b->update) return {0, 0, 2};
     if (!loop->cond || loop->cond->node_type != AST_NODE_BINARY) return {0, 0, 2};
     AstBinaryNode* cond = (AstBinaryNode*)loop->cond;
-    if (!cond->left || cond->left->node_type != AST_NODE_IDENT) return {0, 0, 2};
-    LmdBinding* index = identifier_binding(p, (AstIdentNode*)cond->left);
+    AstNode* index_node = cond->left;
+    bool square = index_node && index_node->node_type == AST_NODE_BINARY &&
+        ((AstBinaryNode*)index_node)->op == OPERATOR_MUL;
+    if (square) {
+        AstBinaryNode* product = (AstBinaryNode*)index_node;
+        if (product->left->node_type != AST_NODE_IDENT || product->right->node_type != AST_NODE_IDENT ||
+                ((AstIdentNode*)product->left)->entry != ((AstIdentNode*)product->right)->entry)
+            return {0, 0, 2};
+        index_node = product->left;
+    }
+    double offset;
+    LmdBinding* index = linear_index(p, index_node, &offset);
     if (!index || index->writes != 2 || !index->initializer || !index->update || index->external) return {0, 0, 2};
-    // a for initializer resets its own induction variable on every enclosing-loop trip.
-    AstNode* initializer = ast_index_parent(&p->frontend->ast_index, index->initializer);
-    bool reset_index = b == index && initializer &&
-        ast_index_parent(&p->frontend->ast_index, initializer) == loop->init && loop->update == index->update;
-    if (!reset_index && (enclosing_loop(p, ancestor, b->owner) || !loop_linear(p, loop->body))) return {0, 0, 2};
+    bool reset = loop_reset_before(p, index, loop) && (b == index || loop_reset_before(p, b, loop));
+    if ((!reset && enclosing_loop(p, ancestor, b->owner)) ||
+            ((!reset || b != index) && !loop_linear(p, loop->body))) return {0, 0, 2};
     AstNode* write = ast_index_parent(&p->frontend->ast_index, index->update);
     if (loop->update != index->update && (!write || write->node_type != AST_NODE_EXPR_STMT ||
             ast_index_parent(&p->frontend->ast_index, write) != loop->body)) return {0, 0, 2};
     LmdRange initial = range(p, index->initializer), limit = range(p, cond->right);
     LmdRange step = update_delta(p, index), start = range(p, b->initializer), delta = update_delta(p, b);
+    if (!square && cond->right->node_type == AST_NODE_IDENT) {
+        LmdBinding* bound = identifier_binding(p, (AstIdentNode*)cond->right);
+        if (bound && bound != index && !bound->external && bound->writes == 2 && bound->update &&
+                loop_reset_before(p, bound, loop) && enclosing_loop(p, bound->update, bound->owner) == ancestor) {
+            LmdRange change = update_delta(p, bound);
+            // an inward-moving opposite cursor cannot extend the induction variable's trip count.
+            if (change.state == 1 &&
+                    (((cond->op == OPERATOR_LT || cond->op == OPERATOR_LE) && change.upper <= 0) ||
+                     ((cond->op == OPERATOR_GT || cond->op == OPERATOR_GE) && change.lower >= 0)))
+                limit = range(p, bound->initializer);
+        }
+    }
     if (!initial.state || !limit.state || !step.state || !start.state || !delta.state) return {};
     if (initial.state != 1 || limit.state != 1 || step.state != 1 || start.state != 1 || delta.state != 1)
         return {0, 0, 2};
+    if (offset) {
+        // normalize affine tests only while both the shifted bound and arithmetic remain exact.
+        limit = finite_range(limit.lower - offset, limit.upper - offset);
+        if (limit.state != 1) return {0, 0, 2};
+    }
+    if (square) {
+        if (step.lower <= 0 || limit.upper < 0 ||
+                (cond->op != OPERATOR_LT && cond->op != OPERATOR_LE)) return {0, 0, 2};
+        // a loose square-root bound includes JS multiplication rounding and the final update.
+        limit = finite_range(0, floor(sqrt(limit.upper)) + 1);
+    }
     int64_t distance, stride;
     if (step.lower > 0 && (cond->op == OPERATOR_LT || cond->op == OPERATOR_LE))
         { distance = (int64_t)limit.upper - (int64_t)initial.lower; stride = (int64_t)step.lower; }
@@ -992,7 +1064,13 @@ static LmdRange counted_range(MvpLmdProgram* p, LmdBinding* b) {
     int64_t up = delta.upper > 0 ? (int64_t)delta.upper : 0;
     if ((down && count > (lo - INT53_MIN) / down) ||
             (up && count > (INT53_MAX - hi) / up)) return {0, 0, 2};
-    return finite_range((double)(lo - count * down), (double)(hi + count * up));
+    LmdRange result = finite_range((double)(lo - count * down), (double)(hi + count * up));
+    if (offset) {
+        double index_lo = initial.lower + (step.lower < 0 ? count * step.lower : 0);
+        double index_hi = initial.upper + (step.upper > 0 ? count * step.upper : 0);
+        if (finite_range(index_lo + offset, index_hi + offset).state != 1) return {0, 0, 2};
+    }
+    return result;
 }
 struct LmdRanges { MvpLmdProgram* p; LmdFunction* owner; bool changed; };
 static void join_range(LmdRanges* t, LmdRange* into, unsigned* changes, LmdRange incoming) {
@@ -1073,7 +1151,7 @@ static LmdValue number(LmdCompiler* c, double value) {
     bool integral = finite_integer(value);
     // inlined arithmetic retains its callee's numeric region, independently of the caller.
     LmdFunction* owner = c->inlining ? c->inlining->function : c->function;
-    bool native_int = integral && (!owner->native || owner->integer_region);
+    bool native_int = integral && (c->integer_bail || !owner->native || owner->integer_region);
     MIR_reg_t r = em_new_reg(&c->em, "number", native_int ? MIR_T_I64 : MIR_T_D);
     move(c, r, native_int ? MIR_new_int_op(c->em.ctx, (int64_t)value) :
         MIR_new_double_op(c->em.ctx, value), !native_int);
@@ -1500,7 +1578,7 @@ static bool integer_binary(LmdCompiler* c, Operator operation, LmdValue left,
         LmdValue right, LmdValue* out) {
     MirNumericOpPlan plan = {};
     if (left.number_present || right.number_present) return false;
-    if (!em_numeric_op_plan(operation, &plan) ||
+    if (!em_numeric_op_plan(operation, &plan, true) ||
             (!plan.is_comparison && operation != OPERATOR_ADD && operation != OPERATOR_SUB &&
              operation != OPERATOR_MOD)) return false;
     if ((!left.integer && !is_boxed(left)) || (!right.integer && !is_boxed(right)) ||
@@ -1517,10 +1595,8 @@ static bool integer_binary(LmdCompiler* c, Operator operation, LmdValue left,
             ints[i] = em_unbox_finite_int_item(&c->em, operands[i].reg);
         }
     }
-    MIR_insn_code_t code = plan.is_comparison ? plan.i64_opcode :
-        operation == OPERATOR_ADD ? MIR_ADD : operation == OPERATOR_SUB ? MIR_SUB : MIR_MOD;
     if (operation == OPERATOR_MOD) branch(c, MIR_BEQ, miss, reg(c, ints[1]), integer(c, 0));
-    MIR_reg_t value = op(c, code, reg(c, ints[0]), reg(c, ints[1]));
+    MIR_reg_t value = op(c, plan.i64_opcode, reg(c, ints[0]), reg(c, ints[1]));
     if (!plan.is_comparison) {
         if (operation == OPERATOR_MOD) {
             // a negative exact multiple has JS -0, which has no finite integer carrier.
@@ -1569,7 +1645,7 @@ static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, 
         return boxed(c, result, definite ? K_STRING : K_NUMBER | K_STRING);
     }
     MirNumericOpPlan plan = {};
-    bool planned = em_numeric_op_plan(operation, &plan);
+    bool planned = em_numeric_op_plan(operation, &plan, true);
     if (planned && plan.is_comparison && ((semantic(left) & semantic(right)) & K_STRING)) {
         MIR_reg_t result = em_new_reg(&c->em, "relational", MIR_T_I64);
         MIR_label_t numeric = label(c), done = label(c);
@@ -1592,6 +1668,31 @@ static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, 
             if (right.number_present) result = op(c, MIR_AND, reg(c, result), reg(c, right.number_present));
             return {result, K_BOOL};
         }
+        if (c->integer_bail && integral && !plan.is_comparison) {
+            MIR_reg_t l = left.reg, r = right.reg, value;
+            if (operation == OPERATOR_MUL) {
+                bool right_factor = right.literal && right.number > 0;
+                LmdValue factor = right_factor ? right : left;
+                MIR_reg_t input = right_factor ? l : r;
+                // admission requires a positive literal factor; guard before multiplying.
+                uint64_t maximum = INT53_MAX / (uint64_t)factor.number;
+                branch(c, MIR_UBGT, c->integer_bail, reg(c, input), integer(c, maximum));
+            }
+            if (operation == OPERATOR_DIV) {
+                uint64_t divisor = (uint64_t)right.number;
+                branch_truth(c, c->integer_bail, op(c, MIR_AND, reg(c, l), integer(c, divisor - 1)));
+                unsigned shift = 0;
+                for (; divisor > 1; divisor >>= 1) shift++;
+                value = op(c, MIR_URSH, reg(c, l), integer(c, shift));
+            } else value = op(c, plan.i64_opcode, reg(c, l), reg(c, r));
+            // operands are nonnegative int53 values; add/sub intermediates fit i64.
+            if (operation == OPERATOR_ADD || operation == OPERATOR_SUB)
+                branch(c, MIR_UBGT, c->integer_bail, reg(c, value), integer(c, INT53_MAX));
+            bool positive = operation == OPERATOR_ADD ? left.range.lower > 0 || right.range.lower > 0 :
+                operation == OPERATOR_MUL ? left.range.lower > 0 && right.range.lower > 0 :
+                operation == OPERATOR_DIV && left.range.lower > 0;
+            return {value, K_NUMBER, false, 0, true, finite_range(positive ? 1 : 0, INT53_MAX)};
+        }
         if (left.literal && right.literal && left.integer && right.integer &&
                 (operation == OPERATOR_ADD || operation == OPERATOR_SUB || operation == OPERATOR_MUL))
             return number(c, operation == OPERATOR_ADD ? left.number + right.number :
@@ -1599,9 +1700,7 @@ static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, 
         LmdRange bounds = range_binary(operation, left.range, right.range);
         if (integral && bounds.state == 1 &&
                 (operation == OPERATOR_ADD || operation == OPERATOR_SUB || operation == OPERATOR_MUL || operation == OPERATOR_MOD)) {
-            MIR_insn_code_t code = operation == OPERATOR_ADD ? MIR_ADD : operation == OPERATOR_SUB ? MIR_SUB :
-                operation == OPERATOR_MUL ? MIR_MUL : MIR_MOD;
-            return {op(c, code, reg(c, left.reg), reg(c, right.reg)), K_NUMBER, false, 0, true, bounds};
+            return {op(c, plan.i64_opcode, reg(c, left.reg), reg(c, right.reg)), K_NUMBER, false, 0, true, bounds};
         }
         LmdValue integer_result;
         if (integer_binary(c, operation, left, right, &integer_result)) return integer_result;
@@ -1621,6 +1720,12 @@ static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, 
                     MIR_T_D, reg(c, l), MIR_T_D, reg(c, r), true)), true);
                 put_label(c, done); return {result, K_NUMBER};
             }
+        }
+        if (operation == OPERATOR_DIV && right.literal && right.number >= 1 && isfinite(right.number)) {
+            int exponent;
+            if (frexp(right.number, &exponent) == 0.5)
+                // division by a positive power of two has the same single rounding as exact scaling.
+                return {op(c, MIR_DMUL, reg(c, l), MIR_new_double_op(c->em.ctx, 1.0 / right.number), MIR_T_D), K_NUMBER};
         }
         if (plan.helper_name) return {em_call_2(&c->em, plan.helper_name, MIR_T_D,
             MIR_T_D, reg(c, l), MIR_T_D, reg(c, r), true), K_NUMBER};
@@ -1719,7 +1824,11 @@ static void write_binding(LmdCompiler* c, LmdBinding* b, LmdValue v, AstNode* si
         if (!b->entry->is_function_name_binding || c->strict) fail(c, LMD_MVP_TYPE, site);
         return;
     }
-    if (local) { scalar_field_write(c, local, v); return; }
+    if (local) {
+        if (c->integer_bail && v.range.lower < 1)
+            branch(c, MIR_BEQ, c->integer_bail, reg(c, v.reg), integer(c, 0));
+        scalar_field_write(c, local, v); return;
+    }
     if (b->native) {
         if (b->number_present) {
             MIR_reg_t present = v.number_present ? v.number_present :
@@ -1979,6 +2088,15 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
     }
     if (typed || semantic(owner) == K_ARRAY || semantic(owner) == K_STRING) {
         LmdReference ref = {NULL, owner, known ? constant(c, (uint64_t)index) : property_key(c, key, typed), known, index};
+        AstNode* source = field->object;
+        if (source->node_type == AST_NODE_IDENT) {
+            LmdBinding* b = identifier_binding(c->program, (AstIdentNode*)source);
+            source = b && b->entry->is_const && b->writes == 1 ? b->initializer : NULL;
+        }
+        // evaluating the owner above retains TDZ and source effects before using immutable literal facts.
+        if (source && source->node_type == AST_NODE_LITERAL &&
+                ((AstLiteralNode*)source)->literal_type == AST_LITERAL_STRING)
+            ref.string_literal = ((AstLiteralNode*)source)->value.string_value;
         ref.spelling = member_spelling(field);
         if (capture_name) ref.name = to_string(c, key).reg;
         LmdArrayFacts facts = array_facts(c->program, field->object);
@@ -2060,8 +2178,25 @@ static LmdValue array_read(LmdCompiler* c, LmdReference ref, bool borrow_scalar 
         false, 0, integral, length ? LmdRange{} : ref.elements, present} :
         boxed(c, result, ref.lanes == LMD_ARRAY_ITEMS ? K_NUMBER | K_UNDEFINED : K_ANY);
 }
+static Item* literal_characters(MvpLmdProgram* p) {
+    if (p->character_items) return p->character_items;
+    Item* items = (Item*)pool_alloc(p->frontend->pool, 128 * sizeof(Item));
+    if (!items) { diagnostic(p, NULL, "character table allocation failed"); return NULL; }
+    for (int i = 0; i < 128; i++) {
+        char byte = (char)i;
+        String* character = get_ascii_char_string((unsigned char)i);
+        if (!character) character = name_pool_create_len(p->frontend->name_pool, &byte, 1);
+        if (!character) { diagnostic(p, NULL, "character literal allocation failed"); return NULL; }
+        items[i].item = s2it(character);
+    }
+    // entries are static ASCII strings or frontend-owned names, never borrowed GC values.
+    p->character_items = items;
+    return items;
+}
 static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
+    bool ascii_literal = ref.string_literal && ref.string_literal->is_ascii;
     if (ref.key_known && ref.index == -1) {
+        if (ascii_literal) return number(c, ref.string_literal->len);
         MIR_reg_t string = payload(c, ref.owner.reg);
         MIR_reg_t size = em_load_at(&c->em, string, offsetof(String, len), MIR_T_U32, "byte_length");
         MIR_label_t done = label(c);
@@ -2073,18 +2208,40 @@ static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
         put_label(c, done);
         return {size, K_NUMBER, false, 0, true, finite_range(0, UINT32_MAX)};
     }
-    MIR_label_t length = ref.key_known ? NULL : label(c), done = ref.key_known ? NULL : label(c);
+    Item* characters = literal_characters(c->program);
+    if (!characters) return boxed(c, constant(c, ITEM_JS_UNDEFINED));
+    // numeric keys cannot select length; retain the character result kind through consumers.
+    MIR_label_t length = ref.key_known || ref.numeric_key ? NULL : label(c), done = label(c);
+    MIR_label_t slow = ascii_literal ? NULL : label(c);
     MIR_reg_t result = em_new_reg(&c->em, "string_property", MIR_T_I64);
     if (length) branch(c, MIR_BEQ, length, reg(c, ref.key), MIR_new_int_op(c->em.ctx, -1));
-    MIR_reg_t at = em_call_3(&c->em, "mvp_lmd_string_at", MIR_T_I64,
-        MIR_T_I64, reg(c, ref.owner.reg), MIR_T_D, reg(c, to_number(c, {ref.key, K_NUMBER, false, 0, true})),
-        MIR_T_I64, integer(c, LMD_STRING_INDEX), true);
-    check_error(c, at); move(c, result, reg(c, at));
+    MIR_reg_t string = ascii_literal ? constant(c, (uint64_t)ref.string_literal) : payload(c, ref.owner.reg);
+    if (slow) {
+        MIR_reg_t flags = em_load_at(&c->em, string, offsetof(String, flags), MIR_T_U8, "string_flags");
+        branch_truth(c, slow, op(c, MIR_AND, reg(c, flags), integer(c, 1)), false);
+    }
+    move(c, result, integer(c, ITEM_JS_UNDEFINED));
+    MIR_reg_t size = ascii_literal ? constant(c, ref.string_literal->len) :
+        em_load_at(&c->em, string, offsetof(String, len), MIR_T_U32, "string_bytes");
+    branch(c, MIR_UBGE, done, reg(c, ref.key), reg(c, size));
+    MIR_reg_t address = op(c, MIR_ADD, reg(c, string), reg(c, ref.key));
+    MIR_reg_t unit = em_load_at(&c->em, address, offsetof(String, chars), MIR_T_U8, "ascii_unit");
+    MIR_reg_t entry = op(c, MIR_ADD, integer(c, (uint64_t)characters),
+        reg(c, op(c, MIR_LSH, reg(c, unit), integer(c, 3))));
+    move(c, result, reg(c, em_load_at(&c->em, entry, 0, MIR_T_I64, "ascii_character")));
+    if (slow) {
+        jump(c, done); put_label(c, slow);
+        MIR_reg_t at = em_call_3(&c->em, "mvp_lmd_string_at", MIR_T_I64,
+            MIR_T_I64, reg(c, ref.owner.reg), MIR_T_D, reg(c, to_number(c, {ref.key, K_NUMBER, false, 0, true})),
+            MIR_T_I64, integer(c, LMD_STRING_INDEX), true);
+        check_error(c, at); move(c, result, reg(c, at));
+    }
     if (length) {
         jump(c, done); put_label(c, length);
         LmdReference length_ref = ref; length_ref.key_known = true; length_ref.index = -1;
-        move(c, result, reg(c, box(c, string_read(c, length_ref)).reg)); put_label(c, done);
+        move(c, result, reg(c, box(c, string_read(c, length_ref)).reg));
     }
+    put_label(c, done);
     return boxed(c, result, length ? K_ANY : K_STRING | K_UNDEFINED);
 }
 // JS admission/coercion precedes these shared physical lane operations (D2.4.3).
@@ -2914,6 +3071,47 @@ static bool immediate_scalar_operand(LmdCompiler* c, AstNode* n) {
     unsigned key = kind(c->program, field->property, c->inlining);
     return key == K_NUMBER || key == K_STRING;
 }
+static bool remainder_zero(LmdCompiler* c, AstBinaryNode* test, LmdValue* result) {
+    bool unequal = test->op == OPERATOR_NE || test->op == OPERATOR_JS_STRICT_NE;
+    if (!unequal && test->op != OPERATOR_EQ && test->op != OPERATOR_JS_STRICT_EQ) return false;
+    if (test->right->node_type != AST_NODE_LITERAL ||
+            ((AstLiteralNode*)test->right)->literal_type != AST_LITERAL_NUMBER ||
+            ((AstLiteralNode*)test->right)->value.number_value != 0 ||
+            test->left->node_type != AST_NODE_BINARY) return false;
+    AstBinaryNode* remainder = (AstBinaryNode*)test->left;
+    if (remainder->op != OPERATOR_MOD || remainder->right->node_type != AST_NODE_LITERAL ||
+            ((AstLiteralNode*)remainder->right)->literal_type != AST_LITERAL_NUMBER) return false;
+    double divisor = ((AstLiteralNode*)remainder->right)->value.number_value;
+    if (divisor < 1 || divisor > 9007199254740992.0 || divisor != trunc(divisor)) return false;
+    uint64_t integer_divisor = (uint64_t)divisor;
+    if (integer_divisor & (integer_divisor - 1)) return false;
+    LmdValue value = expression(c, remainder->left, false, true);
+    MIR_reg_t zero;
+    if (value.integer && !value.number_present) {
+        zero = op(c, MIR_EQ, reg(c, op(c, MIR_AND, reg(c, value.reg), integer(c, integer_divisor - 1))), integer(c, 0));
+    } else {
+        unsigned power = 0;
+        for (uint64_t d = integer_divisor; d > 1; d >>= 1) power++;
+        MIR_reg_t bits = em_emit_double_bits(&c->em, to_number(c, value));
+        MIR_reg_t magnitude = op(c, MIR_AND, reg(c, bits), integer(c, INT64_MAX));
+        MIR_reg_t exponent = op(c, MIR_URSH, reg(c, magnitude), integer(c, 52));
+        MIR_label_t exceptional = label(c), done = label(c);
+        zero = constant(c, 0);
+        MIR_reg_t shift = op(c, MIR_SUB, reg(c, exponent), integer(c, 1023 + power));
+        // ordinary exponents need one guard; keep zero, tiny and huge Numbers off this path.
+        branch(c, MIR_UBGE, exceptional, reg(c, shift), integer(c, 52));
+        MIR_reg_t fraction = op(c, MIR_AND,
+            reg(c, op(c, MIR_LSH, reg(c, magnitude), reg(c, shift))), integer(c, (UINT64_C(1) << 52) - 1));
+        move(c, zero, reg(c, op(c, MIR_EQ, reg(c, fraction), integer(c, 0))));
+        jump(c, done); put_label(c, exceptional);
+        MIR_reg_t large = op(c, MIR_ULT,
+            reg(c, op(c, MIR_SUB, reg(c, shift), integer(c, 52))), integer(c, 2047 - 1023 - power - 52));
+        move(c, zero, reg(c, op(c, MIR_OR, reg(c, large),
+            reg(c, op(c, MIR_EQ, reg(c, magnitude), integer(c, 0)))))); put_label(c, done);
+    }
+    *result = {unequal ? op(c, MIR_XOR, reg(c, zero), integer(c, 1)) : zero, K_BOOL};
+    return true;
+}
 static bool string_concat(LmdCompiler* c, AstBinaryNode* node, LmdValue* result) {
     AstNode* leaves[6];
     int count = 0;
@@ -3060,6 +3258,8 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
     }
     case AST_NODE_BINARY: {
         AstBinaryNode* b = (AstBinaryNode*)n;
+        LmdValue divisible;
+        if (remainder_zero(c, b, &divisible)) return divisible;
         LmdValue concatenated;
         if (b->op == OPERATOR_ADD && string_concat(c, b, &concatenated)) return concatenated;
         if (b->op == OPERATOR_AND || b->op == OPERATOR_OR || b->op == OPERATOR_JS_NULLISH_COALESCE)
@@ -3215,6 +3415,108 @@ static void control_completion(LmdCompiler* c) {
     // if/iteration/switch initialize their own script completion to undefined.
     if (!c->function->id && !c->inlining) move(c, c->em.frame.return_reg, integer(c, ITEM_JS_UNDEFINED));
 }
+struct LmdIntegerLoopPlan { LmdCompiler* compiler; LmdInlineFrame frame; bool allowed; bool floating; int nodes; };
+static void integer_loop_node(AstNode* node, void* opaque) {
+    if (!node) return;
+    LmdIntegerLoopPlan* plan = (LmdIntegerLoopPlan*)opaque;
+    if (!plan->allowed || ++plan->nodes > 96) { plan->allowed = false; return; }
+    Operator operation = OPERATOR_ASSIGN;
+    AstNode* target = NULL;
+    AstNode* left = NULL;
+    AstNode* right = NULL;
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        LmdBinding* b = identifier_binding(plan->compiler->program, (AstIdentNode*)node);
+        if (!b || !b->native || b->external || b->kinds != K_NUMBER || b->owner != plan->frame.function)
+            { plan->allowed = false; return; }
+        for (int i = 0; i < plan->frame.count; i++) if (plan->frame.bindings[i] == b) return;
+        if (plan->frame.count == 32) { plan->allowed = false; return; }
+        plan->frame.bindings[plan->frame.count++] = b;
+        plan->floating |= !b->integer; return;
+    }
+    case AST_NODE_LITERAL: {
+        AstLiteralNode* literal = (AstLiteralNode*)node;
+        if (literal->literal_type != AST_LITERAL_NUMBER || !finite_integer(literal->value.number_value) ||
+                literal->value.number_value < 0) plan->allowed = false;
+        return;
+    }
+    case AST_NODE_ASSIGN: {
+        AstAssignNode* a = (AstAssignNode*)node;
+        target = left = a->left; right = a->right;
+        operation = a->op == OPERATOR_ASSIGN ? OPERATOR_ASSIGN : compound_operator(a->op); break;
+    }
+    case AST_NODE_UNARY: {
+        AstUnaryNode* u = (AstUnaryNode*)node;
+        if (u->op != OPERATOR_JS_INCREMENT && u->op != OPERATOR_JS_DECREMENT)
+            { plan->allowed = false; return; }
+        target = u->operand; break;
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* b = (AstBinaryNode*)node;
+        operation = b->op; left = b->left; right = b->right; break;
+    }
+    case AST_NODE_BLOCK: case AST_NODE_EXPR_STMT: case AST_NODE_IF_EXPR: case AST_NODE_NULL: break;
+    default: plan->allowed = false; return;
+    }
+    if (target) {
+        LmdBinding* b = target->node_type == AST_NODE_IDENT
+            ? identifier_binding(plan->compiler->program, (AstIdentNode*)target) : NULL;
+        if (!b || b->entry->is_const || b->entry->is_function_name_binding)
+            { plan->allowed = false; return; }
+    }
+    if (operation != OPERATOR_ASSIGN) {
+        MirNumericOpPlan numeric = {};
+        bool equality = operation == OPERATOR_EQ || operation == OPERATOR_NE ||
+            operation == OPERATOR_JS_STRICT_EQ || operation == OPERATOR_JS_STRICT_NE;
+        bool comparison = em_numeric_op_plan(operation, &numeric) && numeric.is_comparison;
+        if (!equality && !comparison && operation != OPERATOR_ADD && operation != OPERATOR_SUB) {
+            AstLiteralNode* factor = right && right->node_type == AST_NODE_LITERAL ? (AstLiteralNode*)right : NULL;
+            if (operation == OPERATOR_MUL && (!factor || factor->literal_type != AST_LITERAL_NUMBER || factor->value.number_value <= 0))
+                factor = left && left->node_type == AST_NODE_LITERAL ? (AstLiteralNode*)left : NULL;
+            if ((operation != OPERATOR_MUL && operation != OPERATOR_DIV && operation != OPERATOR_MOD) ||
+                    !factor || factor->literal_type != AST_LITERAL_NUMBER ||
+                    !finite_integer(factor->value.number_value) || factor->value.number_value < 1)
+                { plan->allowed = false; return; }
+            uint64_t divisor = (uint64_t)factor->value.number_value;
+            if (operation == OPERATOR_DIV && (divisor & (divisor - 1)))
+                { plan->allowed = false; return; }
+        }
+    }
+    js_ast_visit_children(node, integer_loop_node, opaque);
+}
+static void integer_loop(LmdCompiler* c, AstLoopControlNode* node, MIR_label_t done) {
+    if (c->integer_bail || node->form != LOOP_FORM_WHILE || node->init || node->update || !node->cond) return;
+    LmdIntegerLoopPlan plan = {}; plan.compiler = c; plan.allowed = true;
+    plan.frame.parent = c->inlining; plan.frame.function = c->inlining ? c->inlining->function : c->function;
+    if (!plan.frame.function->id) return;
+    integer_loop_node(node->cond, &plan); integer_loop_node(node->body, &plan);
+    if (!plan.allowed || !plan.floating || !plan.frame.count) return;
+    MIR_label_t slow = label(c), head = label(c), finished = label(c), bail = label(c);
+    MIR_reg_t snapshots[32];
+    for (int i = 0; i < plan.frame.count; i++) {
+        LmdValue value = read_binding(c, plan.frame.bindings[i], (AstNode*)node);
+        MIR_reg_t integer = integer_lane(c, to_number(c, value), 1, INT53_MAX, slow, true);
+        plan.frame.slots[i].value = {integer, K_NUMBER, false, 0, true, finite_range(1, INT53_MAX)};
+        plan.frame.slots[i].integer = true; plan.frame.slots[i].kinds = K_NUMBER;
+        plan.frame.slots[i].range = finite_range(1, INT53_MAX); plan.frame.slots[i].written = true;
+        snapshots[i] = em_new_reg(&c->em, "iteration_snapshot", MIR_T_I64);
+    }
+    c->inlining = &plan.frame; c->integer_bail = bail;
+    put_label(c, head);
+    for (int i = 0; i < plan.frame.count; i++) move(c, snapshots[i], reg(c, plan.frame.slots[i].value.reg));
+    branch_condition(c, node->cond, finished, false);
+    statement(c, node->body); jump(c, head);
+    c->inlining = plan.frame.parent; c->integer_bail = NULL;
+    put_label(c, finished);
+    for (int i = 0; i < plan.frame.count; i++) if (!plan.frame.bindings[i]->entry->is_const)
+        write_binding(c, plan.frame.bindings[i], plan.frame.slots[i].value, (AstNode*)node);
+    jump(c, done); put_label(c, bail);
+    // only local numeric writes are admitted; undo a partial iteration before the generic replay.
+    for (int i = 0; i < plan.frame.count; i++) if (!plan.frame.bindings[i]->entry->is_const)
+        write_binding(c, plan.frame.bindings[i],
+            {snapshots[i], K_NUMBER, false, 0, true, finite_range(1, INT53_MAX)}, (AstNode*)node);
+    put_label(c, slow);
+}
 static void loop(LmdCompiler* c, AstLoopControlNode* n, const char* name = NULL, int length = 0) {
     control_completion(c);
     scope_initialize(c, n->vars);
@@ -3227,6 +3529,7 @@ static void loop(LmdCompiler* c, AstLoopControlNode* n, const char* name = NULL,
         if (n->init->node_type == AST_NODE_VAR_STAM) statement(c, n->init);
         else (void)expression(c, n->init);
     }
+    integer_loop(c, n, done);
     if (n->form != LOOP_FORM_DO_WHILE) jump(c, test);
     put_label(c, start); statement(c, n->body);
     put_label(c, next); if (n->update) (void)expression(c, n->update);

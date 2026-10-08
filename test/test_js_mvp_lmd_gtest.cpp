@@ -207,6 +207,66 @@ TEST_F(JsMvpLmd, GuardedIntegerRemainder) {
     numeric("function rem(x){return x%1} rem(5e-324)", 5e-324);
     numeric("var n=5; function rem(){return n++%4} rem()+n", 7);
 }
+TEST_F(JsMvpLmd, PowerOfTwoZeroTestsAndScaling) {
+    boolean("let d=2;function fast(x){return x%2===0}function slow(x){return x%d===0}"
+        "let values=[0,-0,1,-1,2,-2,1.5,-1.5,5e-324,-5e-324,9007199254740991,"
+        "9007199254740992,9007199254740994,1e100,1.7976931348623157e308,Infinity,-Infinity,NaN,'4',null,undefined];"
+        "let ok=true;for(let x of values){if(fast(x)!==slow(x))ok=false}ok");
+    boolean("let d=9007199254740992;function fast(x){return x%9007199254740992!==0}"
+        "function slow(x){return x%d!==0}let values=[0,-0,1,-1,9007199254740991,9007199254740992,"
+        "9007199254740994,-9007199254740992,1e100,Infinity,NaN];"
+        "let ok=true;for(let x of values){if(fast(x)!==slow(x))ok=false}ok");
+    boolean("function integer(x){return x%1==0}integer(-0)&&integer(-3)&&!integer(0.5)&&"
+        "!integer(5e-324)&&!integer(Infinity)&&!integer(NaN)");
+    boolean("let d=4;function fast(x){return x%4===0}function slow(x){return x%d===0}"
+        "let values=[5e-324,-5e-324,1e-323,0.9999999999999999,3.9999999999999996,"
+        "4.000000000000001,18014398509481982,18014398509481984,18014398509481988,"
+        "-18014398509481982,1.7976931348623157e308];"
+        "let ok=true;for(let x of values){if(fast(x)!==slow(x))ok=false}ok");
+    boolean("let n=0;function next(){n++;return 4}next()%2===0&&n===1");
+    boolean("function half(x){return x/2}half(7)===3.5&&1/half(-0)===-Infinity&&"
+        "1/half(-5e-324)===-Infinity&&half(1e-323)===5e-324&&half(Infinity)===Infinity&&half(NaN)!==half(NaN)");
+    error("function f(x){return x%2===0}f({})", "capability");
+}
+TEST_F(JsMvpLmd, SquareBoundsAndResetCursors) {
+    numeric("function f(n){let i=0,sum=0;while(i+2<n){sum+=i;i+=3}return sum+i}f(10)", 18);
+    numeric("function f(){let i=10,sum=0;while(i-2>0){sum+=i;i-=3}return sum+i}f()", 22);
+    numeric("function f(){let i=0;while(i+0.5<3){i++}return i}f()", 3);
+    numeric("function f(){let i=9007199254740989;while(i+2<9007199254740991){i++}return i}f()", 9007199254740989.0);
+    boolean("function f(){const a=[7];let i=3;do{const x=a[i];i=0;return x}while(i<1)}f()===undefined");
+    boolean("function f(){const a=[7];let i=0;while(i<1){i++;return a[i]}}f()===undefined");
+    boolean("function f(){const a=[7];let i=0,x=0;while(i<1){let j=0;"
+        "while(j<2){x=a[i];i=1;j++}}return x}f()===undefined");
+    boolean("function f(){const a=new Uint8Array(1);let i=0,x=0;while(i<1){"
+        "for(let j of [0,1]){x=a[i];i=1}}return x}f()===undefined");
+    numeric("function f(n){let count=0;for(let i=2;i*i<=n;i++){count++}return count}f(1000)", 30);
+    boolean("function f(n){let a=new Uint8Array(n+1);for(let i=2;i*i<=n;i++){"
+        "for(let j=i*i;j<=n;j+=i){a[j]=1}}return a[100]}f(100)===1");
+    numeric("function f(){let count=0;for(let repeat=0;repeat<3;repeat++){"
+        "let lo=0,hi=7;while(lo<hi){count++;lo++;hi--}}return count}f()", 12);
+    numeric("function f(){let count=0;for(let repeat=0;repeat<3;repeat++){"
+        "let hi=8,lo=0;while(hi>lo){count++;hi-=2;lo++}}return count}f()", 9);
+    numeric("function f(){let count=0;for(let i=-2;i*i<=9;i--){count++}return count}f()", 2);
+    numeric("function f(){let count=0;for(let i=0.5;i*i<=4;i++){count++}return count}f()", 2);
+    numeric("function f(){let count=0;let lo=0;for(let repeat=0;repeat<3;repeat++){"
+        "let hi=7;while(lo<hi){count++;lo++;hi--}}return count}f()", 7);
+    numeric("function f(){let count=0;for(let repeat=0;repeat<3;repeat++){"
+        "let lo=0,hi=3;while(lo<hi){count++;hi++;lo+=2}}return count}f()", 9);
+}
+TEST_F(JsMvpLmd, GuardedIntegerLoopReplay) {
+    numeric("function f(n){let x=n,steps=1;while(x!==1){if(x%2===0){x=x/2}else{x=3*x+1}steps++}return steps}f(27)", 112);
+    numeric("function f(n){let x=n,s=1;while(x>1){s++;x=x/2}return s+x}f(5)", 4.625);
+    numeric("function f(n){let x=n,s=1;while(x<9007199254740994){s++;x=3*x+1}return s}f(4503599627370495)", 2);
+    numeric("function f(n){let x=n,s=1;while(x<9007199254740992){s++;x=x+1}return s}f(9007199254740991)", 2);
+    numeric("function f(n){let x=n,s=1;while(x>0){s++;x=x-1}return s}f(3.5)", 5);
+    numeric("function f(n){let x=n,s=1;while(x>0){s++;x=x-1}return s}f(3)", 4);
+    boolean("function f(n){let x=n;while(x>1){x=x/2}return x}1/f(-0)===-Infinity&&f(-2)===-2&&f(0)===0");
+    boolean("function f(n){let x=n;while(x>1){x=x/2}return x}let x=f(NaN);x!==x");
+    numeric("function f(n){let x=n,s=1;while(x>1){s++;x=3*0}return s+x}f(5)", 2);
+    numeric("function f(n){let x=n,s=1;while(x>1){s++;x=x/2;s++}return s+x}f(5)", 7.625);
+    numeric("function f(n){let x=n;while(x++<3){x=x/2}return x}f(3)", 4);
+    numeric("let seen=0;function hit(){seen++}function f(n){let x=n;while(x>1){hit();x=x/2}return x}f(5)+seen", 3.625);
+}
 TEST_F(JsMvpLmd, EqualityAndTruth) {
     boolean("null == undefined && null !== undefined && 0 == false && '1' == true");
     boolean("'x' === 'x' && '1' !== 1 && NaN !== NaN && 0 === -0");
@@ -288,10 +348,21 @@ TEST_F(JsMvpLmd, CharacterCodesAndAsciiReuse) {
     boolean("function read(s,i){return s.charCodeAt(i)}"
         "read('x',Infinity)!==read('x',Infinity)&&read('x',-Infinity)!==read('x',-Infinity)");
     boolean("const s='abc';function f(){return s[1]+s.length}f()==='b3'");
+    boolean("const s='abc';function f(i){return s[i]}"
+        "f(3)===undefined&&f('length')===3&&f(1)==='b'");
+    boolean("const s='abc';let n=0,a=[];for(let i=0;i<4;i++){a.push(s[(n++,i)])}"
+        "n===4&&a.join('')==='abc'&&a[3]===undefined");
+    boolean("function f(s){let a=[];for(let i=0;i<s.length;i++){a.push(s[i])}return a.join('')}"
+        "f('a\\0b\\u007f')==='a\\0b\\u007f'&&f('abc')==='abc'");
+    boolean("let s='abc';function f(i){return s[i]}s='\\u{1f600}';"
+        "f(0)==='\\ud83d'&&f(1)==='\\ude00'&&f(2)===undefined");
+    boolean("const s='\\u{1f600}';function f(i){return s[i]}"
+        "s.length===2&&f(1)==='\\ude00'");
     boolean("let s='ab',n=0;let c=s.charAt((s='xy',n++),(n++));c==='a'&&s==='xy'&&n===2");
     boolean("'ab'.repeat(2.9)==='abab'&&'x'.repeat(NaN)===''&&String.fromCharCode()===''");
     boolean("function f(){let String={fromCharCode:(x)=>x+1};return String.fromCharCode(4)===5}f()");
     error("function f(){return s.length} f();const s='abc'", "ReferenceError");
+    error("function f(i){return s[i]} f(0);const s='abc'", "ReferenceError");
     error("'x'.repeat(-1)", "RangeError");
     error("''.repeat(Infinity)", "RangeError");
 }

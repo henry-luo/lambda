@@ -4,7 +4,7 @@
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
-the latest tuning measurements and validation status are recorded in §19.
+the latest tuning measurements and validation status are recorded in §20.
 The numeric-library phase is implemented in source (§15); its full feature
 edge matrix remains pending. §§16–17 record the subsequent tuning.
 
@@ -518,7 +518,7 @@ computed growth, retyping, deletion churn, lookup/update, and key/value loops.
 
 ### 10.8 Validation and release evidence
 
-The latest measurements and validation status are in §17. Earlier object/Map
+The latest measurements and validation status are in §20. Earlier object/Map
 and element-coercion evidence is archived in
 [`MVP_Result3.json`](../../test/benchmark/js_mvp_lmd/MVP_Result3.json)
 and the [implementation record](../impl/JS_MVP_Lmd_Objects.md#8-generic-element-coercion-and-scalar-ownership).
@@ -766,31 +766,11 @@ root machinery (**S1.11**, **D2.2.5**, **D2.4.3**, **D3.4.3v5**,
 helpers remain `branch_condition` and `immutable_member_kind`; this follow-up
 adds no helper or runtime import.
 
-**Latest Result5:** 15 alternating release pairs over all 42 unchanged workloads,
-pinned MIR and self-reported execution time, pass **3,330 measured and 222
-discarded output checks**. Against the preceding Result5 candidate:
-
-| Workload | Before → after ms | Paired gain |
-|---|---:|---:|
-| quicksort | 1.707 → 1.298 | 1.316× |
-| gcbench | 95.970 → 91.792 | 1.046× |
-| binarytrees | 3.981 → 3.753 | 1.061× |
-| triangl | 157.987 → 155.499 | 1.016× |
-| deriv | 8.789 → 8.465 | 1.040× |
-| pnpoly | 7.425 → 7.332 | 1.017× |
-
-All 42 improve **1.025×** geometrically. Across 25 standard kernels, MVP is
-**1.247× faster than untyped Lambda** and **2.444× faster than Node**.
-Escaped object retyping retains a **2.2% slowdown**, confirmed with 30 further
-pairs; no full-run workload slows by more than 5% at its paired median.
-The [Result5 report](../../test/benchmark/js_mvp_lmd/MVP_Result5.md) and JSON
-retain the initial round and both current comparisons.
-
-The release build passes. Unit, forced-GC and baseline suites were not rerun
-for this follow-up; the initial round's gates apply to its earlier binary.
-Remaining work includes recursive allocation/collection cost and stronger
-control-flow bounds. Details and validation scope are in the
-[implementation record](../impl/JS_MVP_Lmd_Slow_Tuning.md).
+The [Result5 report](../../test/benchmark/js_mvp_lmd/MVP_Result5.md) and
+[implementation record](../impl/JS_MVP_Lmd_Slow_Tuning.md) retain this phase's
+measurements, regression limits and validation scope. Current measurements
+are in §20. Recursive allocation/collection cost and stronger control-flow
+bounds remain tuning opportunities.
 
 ## 18. Ordinary arrays and core string methods
 
@@ -825,7 +805,7 @@ captured mutable locals follow for workloads such as Navier–Stokes.
 
 The [implementation record](../impl/JS_MVP_Lmd_Array_String.md) lists shared
 reuse, disclosed helpers and the checks added after the initial Result6 capture.
-The targeted semantic/forced-GC checks now pass; §19 records the current
+The targeted semantic/forced-GC checks now pass; §20 records the current
 baseline status separately from the historical snapshot.
 
 ## 19. Array and string tuning after Result6
@@ -852,25 +832,52 @@ not count as compiler speedups. Acceptance uses unchanged sources, frozen
 release binaries, pinned MIR, paired self-reported timings on all 48 workloads,
 and §15.3's semantic, forced-GC, Lambda and Test262 checks.
 
-**Latest measurement:** 15 alternating release pairs against the exact Result6
-binary, plus an identical-control peer, pass all **2,160 measured and 144
-discarded output checks** on unchanged sources. Self-reported milliseconds:
-
-| Workload | Before → after ms | Paired gain |
-|---|---:|---:|
-| levenshtein | 122.536 → 1.550 | 79.154× |
-| base64 | 79.794 → 14.682 | 5.438× |
-| brainfuck | 125.390 → 41.884 | 2.994× |
-| json_gen | 14.651 → 5.623 | 2.542× |
-
-`mbrot` and `puzzle` remain effectively flat. All 48 improve **1.267×**
-geometrically; no paired 95% interval establishes a slowdown. The initially
-observed tree regressions were removed before this final run. Stronger general
-bounds and per-array mutation facts remain future work. Exact provenance,
-helper inventory and validation are in the
+This phase's measurements, exact provenance, helper inventory and validation
+are retained in the
 [implementation record](../impl/JS_MVP_Lmd_Array_String.md#result6-tuning-19).
+Current measurements follow in §20. Stronger general bounds and per-array
+mutation facts remain future work.
 
-Checks pass: **41/41 MVP tests** normally and with forced GC/poisoning,
-**6,404/6,404 Lambda/input baseline**, and **40,261/40,261 Test262** on a clean
-repeat with zero retries. The first Test262 run had two slow Unicode cases
-that passed only on retry; both runs are retained in the implementation record.
+## 20. Remaining numeric and indexing costs
+
+**Status:** IMPLEMENTED AND VALIDATED, 2026-10-08.
+Target `collatz`, `primes`, `fannkuch`, and `base64` by simplifying remainder
+zero tests, extending safe integer loop bounds, retaining integer array indices,
+and specializing ASCII indexed reads. Reuse Lambda's AST/emitter, character
+table and storage functions; preserve JS rounding, missing values and precise
+roots (**S1.11**, **D2.4.3**, **D5.3.4**, **D8.2.6**).
+The follow-up adds guarded integer recurrence loops with exact floating-point
+fallback, consistent scoped bounds for numeric reads, and cached ASCII Items.
+Existing Lambda functions and the shared numeric opcode plan are reused;
+no new runtime helper is added. Unicode and unsafe numeric cases retain their
+general paths. The disclosed compiler-helper inventory is in the implementation
+record.
+
+**Latest measurement:** 15 alternating release pairs against the prior §20
+binary, with an identical-control peer and fresh untyped Lambda references
+for `collatz` and `base64`. Native MIR is pinned; self-reported execution time
+excludes compilation and process startup. All **2,190 measured and 146
+discarded output checks** pass on unchanged sources. Median milliseconds:
+
+| Workload | Before → after | Paired gain | Untyped Lambda |
+|---|---:|---:|---:|
+| collatz | 344.351 → 200.168 | 1.720× | 298.685 |
+| base64 | 13.414 → 11.869 | 1.128× | 12.069 |
+
+Across all 48 workloads the geometric gain is **1.032×**. Collatz now takes
+**33.0% less time** than untyped Lambda; base64 is approximately level
+(1.7% lower median). The same bounds correction improves `array1` **2.14×**.
+
+The previous ~2% Map/JSON regressions come from **native executable layout
+sensitivity**: their MIR operations and hot helper bodies are unchanged, and
+matching helper placement removes the measurable regressions over 60 pairs.
+The final normal build still measures `map_lookup` **1.0% slower** than §19;
+JSON's **0.2%** shift is within uncertainty. There are no statistically
+significant regressions against the prior §20 build in the 48-workload run.
+Separate 60-pair object checks also find no regression in the corrected final
+build. The small residual Map cost remains recorded.
+
+Checks pass: **44/44 MVP tests** normally and with forced GC/poisoning,
+**6,408/6,408 Lambda/input**, and **40,261/40,261 Test262** with zero retries.
+Exact provenance, helper inventory, uncertainty and baseline status:
+[implementation record](../impl/JS_MVP_Lmd_Array_String.md#further-collatzbase64-tuning-and-regression-diagnosis).

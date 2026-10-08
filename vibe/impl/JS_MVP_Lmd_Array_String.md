@@ -1,8 +1,8 @@
 # JS MVP Lambda arrays and strings
 
 **Status:** implemented; targeted semantic/GC, benchmark and baseline checks pass,
-2026-10-08. See the Result6 tuning record below for current evidence.
-Scope: [JS_MVP_Lmd §18](../jube/JS_MVP_Lmd.md#18-ordinary-arrays-and-core-string-methods).
+2026-10-08. See the §20 follow-up below for current validation status.
+Scope: [JS_MVP_Lmd §§18–20](../jube/JS_MVP_Lmd.md#18-ordinary-arrays-and-core-string-methods).
 Authority: **S1.11**, **D2.6.1v3**, **D3.4.3v5**, **D5.3.1–D5.3.4**.
 
 ## Implementation and shared reuse
@@ -166,3 +166,235 @@ the frozen benchmark candidate. Result6's
 original cross-engine snapshot remains historical; this section records its
 subsequent tuning and targeted semantic/GC acceptance. The broader numeric
 feature matrix from MVP §15 remains separate outstanding work.
+
+## Numeric and indexing follow-up (§20)
+
+Implementation, targeted semantic/GC checks, paired benchmarks and both
+baseline gates pass, 2026-10-08. Two small performance regressions are retained
+and quantified below.
+Authority: **S1.11**, **D2.4.3**, **D5.3.4**, **D8.2.6**. Changes stay in
+`mvp_lmd_mir.cpp`; no shared runtime or full-JS execution code changes.
+
+### Implementation and disclosed helpers
+
+- `remainder_zero`, a new compiler utility disclosed before coding, recognizes
+  equality/inequality of remainder by a literal positive power of two against
+  zero. Proven integers use a mask; general Numbers use exponent/significand
+  bits. Operand evaluation and ToNumber still occur exactly once. Signed zero,
+  fractions, subnormals, NaN and infinities retain JS results. It reuses the
+  shared bit emitter and coercion; no native helper or owned state is added.
+- Existing arithmetic lowering scales division by a positive literal power
+  of two with its exact reciprocal. Multiplication has the same single
+  rounding, including underflow and signed zero; arbitrary divisors retain
+  division.
+- `loop_reset_before`, the second disclosed compiler utility, uses the existing
+  AST index to recognize a declaration in the for initializer or directly
+  before the loop in the same block. Existing counted-range analysis can then
+  retain bounds for nested reset counters, including inward-moving opposite
+  cursors. Unique writes, activation ownership, update placement, monotonicity
+  and int53 overflow checks remain mandatory. Increasing square conditions
+  use a conservative square-root upper bound. No AST mutation or runtime
+  state is introduced.
+- Indexed string reads reuse `get_ascii_char_string`, already part of Lambda's
+  initialized static ASCII table. The new MVP import is `NO_GC`, with a scalar
+  argument and pointer result. Guarded ASCII byte loads retain bounds checks;
+  non-ASCII strings use the existing UTF-16 helper. Immutable ASCII literals
+  retain their length and contents after evaluating the receiver, preserving
+  TDZ and source effects. Numeric keys cannot denote `length`, so indexed
+  results retain string/undefined kinds and omit numeric append-store work.
+
+### Evidence and limitations
+
+- `make build-release-compile` passes: 0 errors, 28 warnings (`build4.log`).
+  Exact control SHA-256:
+  `1a9aabc08d566eb428d8073c0658d300c0711d26ba7c8bcef85bba37f8e8d084`.
+  Exact candidate:
+  `2039dbcb41b9e3ad0dae100730ddbcb8b79710c0f5da74e5e258935e32192730`.
+- Rebuilt MVP tests pass **43/43** normally and under
+  `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` (`tests4.log`,
+  `tests4-gc.log`). Added coverage includes dynamic-reference comparisons for
+  remainder-zero lowering, power-of-two scaling, loop resets/opposite cursors,
+  square bounds and rejected fractional/outward cases, character result
+  ownership, Unicode/surrogates, dynamic `length`, TDZ and key side effects.
+- `final48/comparison.json` records 15 alternating release rounds, one discarded
+  process per lane, the unchanged 48-workload manifest and identical-control
+  peers. All **2,220 measured / 148 discarded** outputs match; the four target
+  rows include fresh untyped Lambda references. Source and binary hashes stay
+  unchanged. Native MIR is pinned and freshly captured. Timings exclude
+  compilation/startup; Node and full LambdaJS are not remeasured.
+- Target paired gains are **1.514× collatz**, **1.669× primes**, **1.460×
+  fannkuch**, and **1.109× base64**. All four paired 95% intervals favor the
+  candidate. Emitted MIR instruction counts change 200→198, 327→298, 910→869,
+  and 2,366→2,191 respectively. Counts are supporting evidence, not a model of
+  dynamic instruction cost. The four-row untyped comparisons are contemporaneous;
+  historical Result6 references are not silently reused.
+- All 48 improve **1.032×** geometrically. `map_lookup` and `json_gen` regress
+  in the full run; **60 more pairs** confirm paired gains **0.980× / 0.981×**.
+  Candidate/control 95% intervals are **1.009–1.027 / 1.015–1.028**; identical
+  control-peer intervals span one. Their emitted operations are unchanged
+  apart from address constants. The timing cause was unresolved in that round
+  (the follow-up below isolates native placement); these
+  small regressions are retained alongside the target gains, not classified
+  as noise. Confirmation adds **360 measured / 6 discarded** matching outputs.
+- Collatz and base64 remain **1.153× / 1.104×** slower than fresh untyped
+  Lambda; primes and fannkuch take **0.908× / 0.940×** its time. Adaptive
+  integer recurrence state and further character/append conversion reductions
+  remain possible follow-ups. The broader §15 numeric-feature matrix and
+  Linux/Windows validation remain separate pending work.
+
+`make test-lambda-baseline` passes **6,407/6,407**: 4,303 runtime and 2,104
+input parser tests (`lambda-baseline.log`). `make test262-baseline` passes
+**40,261/40,261** on its first run, with zero retries, batch losses, failures
+or non-fully-passing cases (`test262-baseline.log`). `git diff --check` passes.
+The restored release `lambda.exe` matches the frozen candidate hash exactly.
+
+Artifacts are under `temp/mvp_four_tuning_20261008/`: frozen `control.exe` and
+`final.exe`, `final-source/`, `final_hashes.json`, `analysis.json`, `final48/`,
+`confirm/`, `validation.json`, `tuning.patch`, runner, source/MIR captures and
+per-sample outputs. Earlier stage
+screens are diagnostic: stage1 had an ASCII-import ABI mismatch fixed before
+stage2, and its compiler-source snapshot was not frozen. Only the final run
+and confirmation provide accepted release evidence.
+
+```sh
+python3 temp/mvp_four_tuning_20261008/runner.py \
+  --candidate temp/mvp_four_tuning_20261008/final.exe \
+  --control temp/mvp_four_tuning_20261008/control.exe \
+  --output temp/mvp_four_tuning_20261008/replay --runs 15 \
+  --references --lambda-only \
+  --reference-only kostya/collatz,kostya/primes,beng/fannkuch,kostya/base64
+```
+
+### Further collatz/base64 tuning and regression diagnosis
+
+Implementation, paired benchmarks, **44/44 normal and forced-GC MVP tests**,
+and both baseline gates pass, 2026-10-08.
+Authority: **S1.11**, **D2.2.5**, **D2.4.3**, **D5.3.4**, **D8.2.6**.
+
+Four compiler utilities were disclosed before coding; no runtime helper is
+added. `linear_index` shares recognition of exact literal-offset loop indices.
+`literal_characters` builds one frontend-owned table of the 128 ASCII character
+Items, reusing Lambda's static character strings or name-pool strings. Dynamic
+ASCII and literal reads retain their byte/UTF-16 and bounds guards, then load
+the Item directly. The previous native character import is no longer needed.
+
+`integer_loop_node` admits only small while loops with local Number bindings,
+numeric literals, simple assignments/updates, comparisons and conditional
+statements. Calls, properties, declarations, nested loops, exits and captured
+or global state stay on the ordinary path. `integer_loop` reuses the existing
+inline binding frame to emit a positive-int53 version after exact entry guards.
+Overflow, zero writes and fractional power-of-two division restore all local
+values from the iteration's entry snapshot before replaying the original
+floating-point loop. Numeric condition writes are included in that snapshot;
+successful termination publishes the final condition's changes. No AST or
+retained representation facts are mutated and no GC-owned state is introduced.
+
+The shared `em_numeric_op_plan` gains an explicit integer-arithmetic option.
+Its default remains unchanged. MVP's boxed, statically proved and guarded-loop
+paths now reuse that opcode selection; JS admission and division exactness
+remain in the frontend. Tests cover partial-iteration rollback, overflow,
+fractional/negative/zero/NaN entry, condition updates, zero multiplication,
+rejected observable calls, affine/square bounds, do-while and post-update
+reads, character ownership, NUL/DEL and Unicode. The first integer-loop test
+run exposed use of the numeric plan's comparison-only opcode field; it was
+fixed before performance acceptance.
+
+The bounds refinement also fixes a representation mismatch: kind inference
+proved byte reads present using the enclosing condition, while range inference
+discarded that same scoped proof and chose doubles. Both now use the same
+site bounds. Increasing/decreasing affine limits retain exact int53 checks;
+while-body narrowing applies only before the sole update, requires that update
+to belong to the same enclosing loop, and excludes do-while's untested first
+iteration. Final review reproduced a wrong `undefined` result when an inner
+loop updated the index before the outer condition was retested. Reusing
+`enclosing_loop` rejects that stale proof; ordinary and for-of nested-loop
+regressions now pass. General remainder-zero tests also use
+one common-exponent guard, leaving zero/tiny/huge/nonfinite cases on a cold
+path. The slower scaled-conversion experiment was discarded.
+
+**Regression cause:** the original Map and JSON slowdowns reproduce with the
+exact §19/§20 binaries. Their emitted MIR operations are unchanged. Link maps
+show the hot `mvp_lmd_map_call` and `mvp_lmd_number_to_string` helpers moved
+**5,280 bytes**. Their sizes remain 2,564/448 bytes; their changed instructions
+are exclusively call/address relocations with identical call targets. The
+same audit of `fn_strcat3` finds only relocations. This identifies executable
+layout sensitivity at hot native calls, rather than extra Map/string work.
+The specific cache/predictor mechanism was not isolated with hardware counters.
+
+A diagnostic relink places **31 unchanged runtime helpers at identical
+addresses and sizes** in both builds. Across 60 alternating pairs, Map medians
+are **13.076/13.129 ms** and JSON medians **5.761/5.775 ms**. Candidate/control
+95% intervals are **0.998–1.015** and **0.997–1.017**, with control-peer
+intervals also spanning one. The original statistically significant regressions
+disappear when helper placement is matched. The ordering file is retained
+only as an attribution experiment; final release measurements use the normal
+build configuration.
+
+Artifacts: `temp/mvp_followup_20261008/`, including `reproduce/`, both original
+and ordered link maps/binaries, `runtime.order`, `native-relocations.json`,
+`ordered-runtime-layout.json`, `ordered-comparison/`, stage screens and final
+frozen binaries/source hashes. The accepted control is
+`2039dbcb41b9e3ad0dae100730ddbcb8b79710c0f5da74e5e258935e32192730`;
+the candidate is
+`da89d81a9fa893516ede62345771b82a3709fd45faed23c0c2bc7dc37f7220ca`.
+
+**Final performance:** `final48/comparison.json` records 15 alternating rounds
+across all 48 unchanged workloads, pinned native MIR, an identical-control
+peer, and fresh untyped Lambda references for the two targets. All **2,190
+measured / 146 discarded** output checks pass; binary/source hashes remain
+unchanged. Timing is self-reported execution only, excluding compilation and
+startup. Node and full LambdaJS are not remeasured. Median milliseconds:
+
+| Workload | Prior §20 | Candidate | Untyped Lambda | Paired gain |
+|---|---:|---:|---:|---:|
+| collatz | 344.351 | 200.168 | 298.685 | 1.720× |
+| base64 | 13.414 | 11.869 | 12.069 | 1.128× |
+
+Candidate/control paired-bootstrap 95% intervals are **0.581–0.603** and
+**0.879–0.895**. Against fresh untyped Lambda they are **0.665–0.694** and
+**0.964–0.996**: collatz now takes **33.0% less time**, while base64's 1.7%
+advantage is small. The 48-workload geometric gain is **1.032×**. No row's
+candidate/control two-sided interval lies entirely above one. `array1` also
+improves **0.662→0.309 ms** because
+the scoped bounds retain its integral element/sum representation.
+
+Additional **60-pair** runs distinguish remaining shifts:
+
+| Comparison | Workload | Control → candidate ms | Candidate/control 95% interval |
+|---|---|---:|---:|
+| Final vs original §19 | map_lookup | 12.9760 → 13.0995 | 1.004–1.015 |
+| Final vs original §19 | json_gen | 5.6735 → 5.6825 | 0.997–1.006 |
+| Final vs prior §20 | object_growth | 3.0000 → 2.9735 | 0.983–0.997 |
+| Final vs prior §20 | object_retype_escaped | 6.7920 → 6.8095 | 0.997–1.009 |
+
+All control-peer intervals in these confirmation runs span one. The original
+Map regression is reduced but persists at **1.0%** in the normal final build.
+The JSON and escaped-object shifts are not statistically separated from noise
+here; object-growth slightly improves. A 1.3% escaped-object slowdown in the
+earlier candidate is no longer measurable in this final build. Those earlier
+timings are retained under `*.before-nested-proof/` and are not final acceptance
+evidence. `final-original/` and `final-object/` add
+**720 measured / 12 discarded** matching outputs. No ordering-file workaround
+or benchmark-source change is shipped.
+
+The final release build passes with **0 errors / 28 warnings** (`build9.log`).
+The rebuilt semantic tests pass **44/44** normally (`tests9.log`) and with
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` (`tests9-gc.log`).
+`make test-lambda-baseline` passes **6,408/6,408** (4,304 runtime + 2,104
+input tests). `make test262-baseline` passes **40,261/40,261**, with zero
+retries, batch losses or regressions. Both gates were rerun after the nested-loop
+proof fix; their final logs are `lambda-baseline.log` and
+`test262-baseline.log`. `git diff --check` passes, and the restored release
+`lambda.exe` matches the frozen final binary exactly.
+`analysis.json` retains the compact statistics; `final-source/`,
+`final_hashes.json`, `validation.json` and `tuning.patch` record provenance.
+The broader §15 feature-edge matrix and Linux/Windows validation remain
+separate pending work.
+
+```sh
+python3 temp/mvp_followup_20261008/runner.py \
+  --candidate temp/mvp_followup_20261008/final.exe \
+  --control temp/mvp_followup_20261008/control.exe \
+  --output temp/mvp_followup_20261008/replay --runs 15 \
+  --references --lambda-only --reference-only kostya/collatz,kostya/base64
+```

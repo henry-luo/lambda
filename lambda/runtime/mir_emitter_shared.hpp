@@ -1227,28 +1227,27 @@ static inline void em_branch_int53_outside(MirEmitter* em, MIR_reg_t value, MIR_
 typedef struct MirNumericOpPlan {
     const char* reg_name;
     MIR_insn_code_t f64_opcode;
-    // Only comparison plans consume this field.  Arithmetic in the shared
-    // scalar domain is explicitly F64 so `/` never inherits integer division.
+    // arithmetic requires explicit integer admission; the default scalar domain stays F64.
     MIR_insn_code_t i64_opcode;
     const char* helper_name;
     bool is_comparison;
 } MirNumericOpPlan;
 
-static inline bool em_numeric_op_plan(Operator op, MirNumericOpPlan* plan) {
+static inline bool em_numeric_op_plan(Operator op, MirNumericOpPlan* plan, bool integer_arithmetic = false) {
     if (!plan) return false;
     switch (op) {
     case OPERATOR_ADD:
-        *plan = {"add", MIR_DADD, MIR_MOV, NULL, false}; return true;
+        *plan = {"add", MIR_DADD, integer_arithmetic ? MIR_ADD : MIR_MOV, NULL, false}; return true;
     case OPERATOR_SUB:
-        *plan = {"sub", MIR_DSUB, MIR_MOV, NULL, false}; return true;
+        *plan = {"sub", MIR_DSUB, integer_arithmetic ? MIR_SUB : MIR_MOV, NULL, false}; return true;
     case OPERATOR_MUL:
-        *plan = {"mul", MIR_DMUL, MIR_MOV, NULL, false}; return true;
+        *plan = {"mul", MIR_DMUL, integer_arithmetic ? MIR_MUL : MIR_MOV, NULL, false}; return true;
     case OPERATOR_DIV:
-        *plan = {"div", MIR_DDIV, MIR_MOV, NULL, false}; return true;
+        *plan = {"div", MIR_DDIV, integer_arithmetic ? MIR_DIV : MIR_MOV, NULL, false}; return true;
     case OPERATOR_MOD:
         // MIR has no IEEE remainder instruction; the registered fmod import
         // is the shared scalar leaf selected by a frontend that admits `%`.
-        *plan = {"mod", MIR_MOV, MIR_MOV, "fmod", false}; return true;
+        *plan = {"mod", MIR_MOV, integer_arithmetic ? MIR_MOD : MIR_MOV, "fmod", false}; return true;
     case OPERATOR_EQ:
     case OPERATOR_JS_STRICT_EQ:
         *plan = {"eq", MIR_DEQ, MIR_EQ, NULL, true}; return true;
