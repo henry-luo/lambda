@@ -744,6 +744,7 @@ typedef struct LambdaGcOrderedMapLayout {
     struct hashmap* index;
     int64_t size;
     int64_t cursors;
+    int64_t last_entry;
 } LambdaGcOrderedMapLayout;
 
 typedef struct LambdaGcListLayout {

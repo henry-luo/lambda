@@ -1295,8 +1295,8 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     int count = 0;
     if (owned) for (TypeMapRetypePlan* plan = parent->retype_plans; plan; plan = plan->next) {
         count++;
-        if (plan->parent == parent && plan->source == field &&
-                plan->replacement->type == type_info[value_type].type) {
+        if (plan->parent == parent && plan->source == field && plan->replacement &&
+                plan->value_type == value_type) {
             if (out_plan) *out_plan = plan;
             return plan->target;
         }
@@ -1306,6 +1306,7 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
     if (!plan) return target;
     plan->parent = parent; plan->source = field; plan->target = target;
+    plan->value_type = value_type;
     plan->reuse_payload = typemap_payload_reusable(parent, target, field, NULL, &plan->replacement);
     // a changed width can stop the compatibility walk before it reaches the replacement.
     if (!plan->replacement) {
@@ -1316,6 +1317,37 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
         }
     }
     if (!plan->replacement) return target;
+    plan->storage_type = shape_entry_storage_type_id(plan->replacement);
+    plan->next = parent->retype_plans; parent->retype_plans = plan;
+    if (out_plan) *out_plan = plan;
+    return target;
+}
+
+TypeMap* type_tree_delete_field(Input* input, Map* container, const ShapeEntry* field,
+        const TypeMapRetypePlan** out_plan) {
+    if (out_plan) *out_plan = NULL;
+    TypeMap* parent = container ? (TypeMap*)container->type : NULL;
+    if (!input || !parent || !field) return NULL;
+    bool owned = parent->is_transition_shared_shape && type_tree_owns(input, parent);
+    int count = 0;
+    if (owned) for (TypeMapRetypePlan* plan = parent->retype_plans; plan; plan = plan->next) {
+        count++;
+        if (plan->parent == parent && plan->source == field && !plan->replacement) {
+            if (out_plan) *out_plan = plan;
+            return plan->target;
+        }
+    }
+    TypeMap* target = type_tree_root_like(input, container);
+    FOR_EACH_MAP_FIELD(parent, entry) {
+        if (entry != field && target) target = type_tree_add_map_field_chars(input, target,
+            entry->name->str, entry->name->length, entry->type->type_id, NULL);
+    }
+    if (!target || !owned || count >= shape_tree_fanout_cap(parent)) return target;
+    TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
+    if (!plan) return target;
+    // a null replacement distinguishes deletion; shared nodes make the cached migration immutable.
+    plan->parent = parent; plan->source = field; plan->target = target;
+    plan->reuse_payload = typemap_payload_reusable(parent, target, NULL, field, &plan->replacement);
     plan->next = parent->retype_plans; parent->retype_plans = plan;
     if (out_plan) *out_plan = plan;
     return target;

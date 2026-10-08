@@ -13320,7 +13320,8 @@ static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_
         ShapeEntry* replacement = plan ? plan->replacement : NULL;
         bool compatible = plan ? plan->reuse_payload :
             typemap_payload_reusable(old_map_type, new_type, changed_entry, removed_entry, &replacement);
-        TypeId storage = replacement ? shape_entry_storage_type_id(replacement) : LMD_TYPE_NULL;
+        // the immutable plan already classified this lane with the shared storage resolver.
+        TypeId storage = replacement ? (plan ? plan->storage_type : shape_entry_storage_type_id(replacement)) : LMD_TYPE_NULL;
         // these simple stores neither allocate nor retain a borrowed numeric home.
         bool immediate_store = !replacement || (replacement->type == type_info[storage].type &&
             (storage == LMD_TYPE_INT || storage == LMD_TYPE_FLOAT || storage == LMD_TYPE_NULL ||
@@ -13598,11 +13599,8 @@ bool map_shape_delete(Map* map, String* key) {
     ShapeEntry* removed = typemap_hash_lookup(old, key->chars, (int)key->len);
     if (!removed) return true;
     Input* tree = runtime_shape_tree();
-    TypeMap* target = tree ? type_tree_root_like(tree, map) : NULL;
-    FOR_EACH_MAP_FIELD(old, field) {
-        if (field != removed && target) target = type_tree_add_map_field_chars(tree, target,
-            field->name->str, field->name->length, field->type->type_id, NULL);
-    }
+    const TypeMapRetypePlan* plan = NULL;
+    TypeMap* target = tree ? type_tree_delete_field(tree, map, removed, &plan) : NULL;
     if (!target) {
         // the bounded tree declined: retain family identity in a private filtered chain.
         target = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
@@ -13628,7 +13626,7 @@ bool map_shape_delete(Map* map, String* key) {
         return true;
     }
     return container_move_to_type(&map->type, &map->data, &map->data_cap,
-        map, old, target, NULL, ItemNull, 0, removed);
+        map, old, target, NULL, ItemNull, 0, removed, plan);
 }
 
 // map/element field assignment: obj.field = val

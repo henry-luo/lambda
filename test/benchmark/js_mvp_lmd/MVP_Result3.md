@@ -2,7 +2,7 @@
 
 **Element coercion and scalar ownership** — [MVP §§13–14](../../../vibe/jube/JS_MVP_Lmd.md).
 
-[Series index and comparison](README.md) · [Raw JSON](MVP_Result3.json) · [Previous](MVP_Result2.md) · [Next](MVP_Result4.md)
+[Series index and comparison](README.md) · [Raw JSON](MVP_Result3.json) · [Next](MVP_Result4.md)
 
 **Phase:** Element coercion and scalar ownership.
 
