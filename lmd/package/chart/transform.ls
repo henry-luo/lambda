@@ -8,6 +8,8 @@ import window: .window
 import source: .source
 import statistics: .statistics
 import calendar: .calendar
+import expr: .expression
+import reshape: .reshape
 
 // ============================================================
 // Public API: Apply a sequence of transforms to data
@@ -35,6 +37,14 @@ fn apply_transform_list(data, transforms, index: int, count: int, datasets) {
               else if (tag == "fold") apply_fold(data, t)
               else if (tag == "flatten") apply_flatten(data, t)
               else if (tag == "window") window.evaluate(data, t)
+              else if (tag == "joinaggregate") window.evaluate(data,
+                  {*:parse.attributes(t), window: if (t.joinaggregate != null) t.joinaggregate
+                      else if (t is element) [for (child in content(t)) parse.attributes(child)] else t.window,
+                      frame: [null, null], sort: null})
+              else if (tag == "pivot") reshape.pivot(data, t)
+              else if (tag == "impute") reshape.impute(data, t)
+              else if (tag == "stack") reshape.stack_rows(data, t)
+              else if (tag == "quantile") reshape.quantile(data, t)
               else if (tag == "lookup") apply_lookup(data, t, datasets)
               else if (tag == "density" or tag == "kde") statistics.density(data, t)
               else if (tag == "regression") statistics.regression(data, t)
@@ -59,7 +69,10 @@ fn apply_timeunit(data, step) {
 // ============================================================
 
 fn apply_filter(data, filter_el) {
-    data |: parse.test_predicate(filter_el, ~)
+    let predicate = parse.prepare_predicate(filter_el);
+    let tests = if (predicate is error) predicate else [for (row in data) parse.test_predicate(predicate, row)];
+    let failure = if (tests is error) tests else util.first_error(tests);
+    if (failure is error) failure else [for (index, row in data where tests[index]) row]
 }
 
 // ============================================================
@@ -123,9 +136,15 @@ fn apply_calculate(data, calc_el) {
     let field1 = calc_el.field1;
     let field2 = calc_el.field2;
     let field = if (calc_el.field) calc_el.field else field1;
-    if (not as_field) data
-    else [for (d in data) add_field(d, as_field,
-        if (calc_el.expression is fn) calc_el.expression(d) else calc_value(d, op, field, field2))]
+    let compiled = if (calc_el.expression is string) expr.compile(calc_el.expression) else null;
+    if (compiled is error) compiled else if (not as_field) error("chart: calculate requires as")
+    else {
+        let values = [for (d in data)
+            if (compiled != null) expr.evaluate(compiled, d)
+            else if (calc_el.expression is fn) calc_el.expression(d) else calc_value(d, op, field, field2)];
+        let failure = util.first_error(values);
+        if (failure is error) failure else [for (index, row in data) add_field(row, as_field, values[index])]
+    }
 }
 
 fn calc_value(d, op, field, field2) {
@@ -246,6 +265,17 @@ fn lookup_fields(row, found, fields, names, fallback, index) {
 
 // Encoding shorthand is normalized before any renderer or composition derives its scales.
 pub fn prepare_encoding(data, encoding, partition_fields = []) {
+    let prepared = parse.prepare_channels(encoding);
+    if (prepared is error) {data: prepared, encoding: encoding}
+    else {
+        let resolved = prepare_encoding_channels(data, prepared, partition_fields);
+        let failure = if (resolved.data is error) resolved.data
+            else parse.validate_conditions(resolved.encoding, resolved.data);
+        if (failure is error) {*:resolved, data: failure} else resolved
+    }
+}
+
+fn prepare_encoding_channels(data, encoding, partition_fields) {
     let temporal_data = apply_transforms(data, [for (key, channel in encoding where channel.time_unit != null and channel.field != null)
         {type: "timeunit", field: channel.field, unit: channel.time_unit, as: channel.field ++ "_time_" ++ string(key),
             timezone: if (channel.scale.timezone != null) channel.scale.timezone else 0}]);

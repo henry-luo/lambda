@@ -76,10 +76,15 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
     // plot area
     let plot_x = left_margin;
     let plot_y = top_margin;
-    let plot_w_raw = width - left_margin - right_margin;
-    let plot_h_raw = height - top_margin - bottom_margin;
+    let natural_width = if (spec._plot_width != null) spec._plot_width + left_margin + right_margin else width;
+    let natural_height = if (spec._plot_height != null) spec._plot_height + top_margin + bottom_margin else height;
+    let total_width = if (spec._aspect_from == "width") natural_height * spec.aspect_ratio else natural_width;
+    let total_height = if (spec._aspect_from == "height") natural_width / spec.aspect_ratio else natural_height;
+    let plot_w_raw = total_width - left_margin - right_margin;
+    let plot_h_raw = total_height - top_margin - bottom_margin;
     // Axis-free marks own their fit validation; do not enlarge their viewport.
-    let min_plot = if (x_scale or y_scale) 50.0 else 0.0;
+    let min_plot = if ((x_scale or y_scale) and not spec._fit_container and
+        spec._plot_width == null and spec._plot_height == null) 50.0 else 0.0;
     let plot_w = max([plot_w_raw, min_plot]);
     let plot_h = max([plot_h_raw, min_plot]);
 
@@ -113,9 +118,10 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
         title_metric: title.metric,
         x_axis_config: x_cfg, y_axis_config: y_cfg,
         _error: util.first_error([x_cfg._error, y_cfg._error, title._error,
+            if (spec._fit_container and (plot_w_raw < 0 or plot_h_raw < 0)) error("chart: container dimensions cannot fit guides") else null,
             for (guide in guides) guide._error, for (guide in axes) guide.config._error]),
-        total_w: width,
-        total_h: height
+        total_w: total_width,
+        total_h: total_height
     }
 }
 
@@ -191,8 +197,10 @@ pub fn compute_facet_layout(n_facets, columns, sub_w, sub_h, spacing, title, pad
     let header_h = max([0.0, for (metric in metrics) metric.height + 4.0]);
     let title_h = title_plan.height;
 
-    let total_w = float(pad.left) + float(cols) * float(sub_w) + float(cols - 1) * sp + float(pad.right);
-    let total_h = float(pad.top) + title_h + float(rows) * (float(sub_h) + header_h) + float(rows - 1) * sp + float(pad.bottom);
+    // Empty grids have no inter-cell gaps in either direction.
+    let occupied_cols = if (n_facets == 0) 0 else cols;
+    let total_w = float(pad.left) + float(occupied_cols) * float(sub_w) + float(max([0, occupied_cols - 1])) * sp + float(pad.right);
+    let total_h = float(pad.top) + title_h + float(rows) * (float(sub_h) + header_h) + float(max([0, rows - 1])) * sp + float(pad.bottom);
 
     {
         rows: rows,

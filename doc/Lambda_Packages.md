@@ -204,7 +204,7 @@ name(svg)                // 'svg'
 svg.width                // 400, the default width
 ```
 
-> **Experimental.** The converter supports inline/named/file/URL data, common transforms, and layer/facet/concat/repeat composition. Vega expression strings and unsupported transforms return a diagnostic; use field predicates or Lambda data preparation for those cases.
+> **Experimental.** The converter supports inline/named/file/URL data, the documented transforms, static expression strings, and layer/facet/concat/repeat composition. Unsupported expression syntax, helpers, or transforms return a diagnostic; use Lambda data preparation for requests outside the supported subset.
 
 ### 4.2 API
 
@@ -218,17 +218,53 @@ svg.width                // 400, the default width
 
 | Element | Attributes and children |
 |---------|-------------------------|
-| `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, `clip`, and the children below |
+| `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, `clip`, `projection`, and the children below |
 | `<data>` | Inline `values: [...]` or row children; `name` selects the chart's `datasets` map; `url` and optional `format` use Lambda input loading |
-| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
-| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
-| `<transform>` | Ordered `filter`, `sort`, `aggregate`, `calculate`, `bin`, `timeunit`, `fold`, `flatten`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
+| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`, `violin`, `slope`, `trail`, `image`, `radar`, `parallel`, `treemap`, `sunburst`, `geoshape` (`geo`); an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
+| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<theta2>`, `<radius>`, `<radius2>`, `<longitude>`, `<latitude>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`, `<url>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`; `geojson` for a shape field), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `stack_order`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<transform>` | Ordered `filter`, `sort`, `aggregate`, `joinaggregate`, `calculate`, `bin`, `timeunit`, `fold`, `flatten`, `pivot`, `impute`, `stack`, `quantile`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
 | `<config>` | `theme`: `light`, `dark`, `minimal`, `presentation`, or a custom map; nested `mark`/mark-type/`axis`/`legend` settings or equivalent prefixed attributes; `font`; `axis_grid: true` for horizontal grids |
 | `<layer>` | `<chart>` children drawn over one another |
 | `<facet>` | `field` with wrapping `columns` (default 3), or `row`/`column` field definitions; `spacing` (default 20); common scale domains by default |
 | `<annotation>` | `<text_note x, y, text, color, font_size, anchor, dx, dy>`, `<rule_note x or y, color, stroke_width, stroke_dash>`, and `<region_note x, x2, y, y2, color, opacity, text>` children |
 | `<hconcat>`, `<vconcat>` | `spacing` (default 20); `<chart>` children placed side by side or stacked |
 | `<repeat>` | A `<row [fields]>` and/or `<column [fields]>` child plus one `<chart>` template whose channels say `field: {repeat: "row"}` or `field: {repeat: "column"}` |
+
+A `violin` mark mirrors a category's estimated density; `density_field`
+accepts precomputed densities. A `slope` mark connects each detail entity's
+pair of comparison positions. A `trail` mark uses `size` as pixel width
+(default scaled range `[1, 10]`) and supports linear interpolation with round
+joins; its size legend shows widths. An `image` mark takes a `url` channel,
+mark URL, or row URL, plus pixel `width`/`height` or x2/y2 bounds. These marks
+retain styles, tooltips, clipping, and composition. See the
+[mark design](../vibe/Lambda_Pkg_Chart.md#distribution-comparison-and-image-marks)
+for validation and options (S7.4.1).
+
+A `radar` uses categorical `theta` and quantitative `radius`, with one row per
+category in each color/detail series. `filled: true` fills the closed polygon.
+A `parallel` declares at least two `fields`, each a field name or
+`{field, title, scale, axis, format, zero}`; each axis has its own scale.
+An `arc` with `theta2` draws angular intervals; `radius`/`radius2` supply radial
+bounds. Disabled scales use radians and pixels directly. See the
+[radial and multi-axis contract](../vibe/Lambda_Pkg_Chart.md#radial-and-multi-axis-charts).
+
+`treemap` and `sunburst` accept flat hierarchy records, with `node_field`,
+`parent_field`, and `value_field` defaulting to `id`, `parent`, and `value`.
+Leaves have nonnegative weights (default one); internal weights sum children.
+Null parents identify roots; unknown parents, duplicate IDs, and cycles are
+errors. `node_padding`/`header_height` control treemaps;
+`inner_radius`/`outer_radius` control sunbursts. Measured labels and the
+original rows' color/tooltips remain available. See the
+[hierarchy contract](../vibe/Lambda_Pkg_Chart.md#hierarchical-charts).
+
+`geoshape` accepts GeoJSON FeatureCollections, Features, geometries, or records
+with a `geometry` field. Feature properties are available directly to ordinary
+color and tooltip encodings. Longitude/latitude channels can supply points.
+Mark or chart `projection` selects `mercator`, `equirectangular`, `albers`,
+`orthographic`, or `natural_earth`, with optional center, scale, translation,
+padding, precision, and Albers parallels. Polygon holes and projection clipping
+are preserved. See the [geographic contract](../vibe/Lambda_Pkg_Chart.md#geographic-charts)
+for geometry rules and boundaries (S7.4.1).
 
 A pie or donut chart is an `arc` mark with a `theta` channel, plus `inner_radius` for a donut; grouped bars use an `x_offset` channel. Aggregate operations are `count`, `sum`, `mean` (or `average`), `median`, `min`, `max`, `distinct`, `q1`, `q3`, `stdev` and `variance`. A colour channel picks a palette with `scale: {scheme: "set1"}`: `category10` is the default for categories and `blues` for quantities, and `category20`, `set1`, `pastel1`, `dark2`, `greens`, `reds`, `oranges`, `purples`, `greys`, `red_blue` and `spectral` are also available. `scale: {domain: [...], range: [...]}` assigns colours explicitly.
 
@@ -243,8 +279,30 @@ include `orient`, `direction`, `columns`, `values`, `format`, and symbol
 appearance. Arc legends honor placement. Numeric labels share formats such
 as `,.2f`, `.1%`, `.3e`, `.3g`, and `.3~s` across guides, text, and tooltips.
 Layered charts can request `resolve: {scale: {y: "independent"}}`; shared
-scales include full stacked extents. `clip: true` on a chart or mark clips
+scales include full stacked extents. Resolution reaches nested layers,
+facets, concatenations, and repeats; an inner independent request starts a
+new group. `resolve.axis` and `resolve.legend` choose shared or independent
+guides; a shared guide appears in the first eligible view, and independent
+scales always have independent guides. All composition forms inherit data,
+encodings, datasets, and configuration; transforms run once at their own
+boundary. See the [composition design](../vibe/Lambda_Pkg_Chart.md#7-chart-composition)
+for defaults and common scale policy.
+`clip: true` on a chart or mark clips
 plotted content without clipping its axes or legends.
+
+Area charts support `stack: "wiggle"` on y for streamgraphs. Values must be
+finite and nonnegative; x, y, and color fields are required. Missing series/x
+samples contribute zero, and duplicates add. Numeric and temporal x values
+are ordered ascending; categorical x follows its domain or sort order.
+
+The quantitative channel's `stack_order` accepts a series-value array,
+`"none"`, `"reverse"`, `"ascending"`, `"descending"`, or `"inside_out"`.
+It overrides the color-domain or color-sort order and preserves palette
+assignments. Wiggle defaults to inside-out when those explicit orders are
+absent. Ascending ties retain input order; descending reverses the full
+ascending order (S6.2.3). Invalid controls or wiggle data return value errors
+(S7.4.1). See the [stacking design](../vibe/Lambda_Pkg_Chart.md#stacking-and-grouping)
+for the full contract.
 
 Mark `fill`, `stroke`, and `color` also accept gradient and hatch maps. A
 gradient is `{gradient: "linear" | "radial", stops: [{offset, color, opacity?}, ...]}`;
@@ -264,13 +322,18 @@ compositions. Invalid paint maps return value errors (S7.4.1). See the
 [chart design](../vibe/Lambda_Pkg_Chart.md#gradient-and-hatch-paints) for full
 defaults and examples.
 
-Temporal scales use calendar-aligned ticks. `scale.timezone` is a fixed UTC
-offset in minutes (default zero). `time_unit: "yearmonth"` on a channel groups
+Temporal scales use calendar-aligned ticks. `scale.timezone` accepts a fixed UTC
+offset in minutes or an IANA name such as `"America/New_York"` (default zero).
+The pinned IANA 2026e rules make daylight-saving days and repeated/skipped
+hours independent of the host's local zone (S12.1.1v2).
+`time_unit: "yearmonth"` on a channel groups
 records before encoding aggregation; cyclic `month`, `day`/`weekday`, and
 `hours` are also supported, and an `utc` prefix selects UTC. A direct
 `<timeunit field: "date", unit: "yearmonth", as: "month">` transform retains
-the source field. Named time zones and daylight-saving rules remain outside
-this subset; see the [chart design](../vibe/Lambda_Pkg_Chart.md#5-encodings-scales-and-color).
+the source field; its `timezone` accepts the same names and offsets.
+`Z`/`ZZ` label tokens show the actual offset. See the
+[chart design](../vibe/Lambda_Pkg_Chart.md#5-encodings-scales-and-color) for
+local-time gap and overlap rules.
 
 Chart axes, legends, titles, and facet headings use measured SVG font bounds.
 The default family is `"Arial"`; chart `font` and guide `label_font_*` /
@@ -303,6 +366,15 @@ text returns `[]`; invalid UTF-8 returns null. It preserves spelling without
 normalization and is read-only under **D7.4.6** / **S12.1.1v2**. Chart truncation
 uses these boundaries; ordinary `split` retains its **S17.1.1** contract.
 
+Both `chart.render(spec, viewport = null)` and `chart.render_spec(spec, viewport = null)`
+accept optional `{width, height}` container dimensions. Use `width`/`height`
+as `"container"` or `"auto"`, or request a discrete `{step: pixels}`.
+`aspect_ratio` derives an automatic dimension. Rendering with new dimensions
+recomputes marks and guides; it remains pure (S12.1.1v2). Explicit numeric
+dimensions retain precedence. Concat/repeat distribute available space;
+facet dimensions describe cells. See the
+[sizing contract](../vibe/Lambda_Pkg_Chart.md#sizing-and-available-space).
+
 #### Analytical transforms
 
 `lambda.chart.transform.apply_transforms(rows, steps, datasets = null)` also
@@ -313,6 +385,11 @@ or an array of maps carrying `type`. Invalid options return value errors
 | Step | Options and result |
 |---|---|
 | `<window>` | `groupby`, multi-field `sort`, inclusive `frame` (default `[null, 0]`), `ignore_peers`; `<agg op, field, as, param>` children add aggregate, ranking, lag/lead, or first/last/nth-value fields without changing source order |
+| `<joinaggregate>` | `groupby` and `<agg>` children, or a `joinaggregate` operation array; attach whole-group summaries while retaining source rows |
+| `<pivot>` | `pivot`, `value`, `groupby`, `op` (default `sum`), `limit`; turn field values into aggregate columns |
+| `<impute>` | `impute`, `key`, `groupby`, `keyvals`, `method`, `value`, `frame`; fill null fields and missing group/key combinations |
+| `<stack>` | `stack`, `groupby`, `sort`, `offset: "zero"/"center"/"normalize"`, `as`; add start/end fields without replacing source rows |
+| `<quantile>` | `quantile`, `groupby`, `probs` or `step`, `as`; emit empirical probability/quantile records |
 | `<lookup>` | `field`, `from: {data, key, fields}`, optional parallel `as` names and `default`; a left join against inline, named, or file/URL data. Omit foreign `fields` and supply one `as` name to embed the matching record |
 | `<density>` | `field`, optional `groupby`, `bandwidth` (zero estimates it), `extent`, `steps`, `as`, `counts`, `cumulative`, `resolve: "shared"`; Gaussian estimates default to `value`/`density` output |
 | `<regression>` | `x`, `y`, optional `groupby`, `method` (`linear`, `log`, `exp`, `pow`, `quad`, `poly`), polynomial `order`, `extent`, `steps`, `as`, `params`; curve records or `coef`/`r_squared` model parameters |
@@ -327,6 +404,16 @@ matches with `default` (null). Numeric summaries and statistical transforms
 ignore nonfinite/nonnumeric values; invalid or rank-deficient fits return a
 diagnostic. Vega-Lite conversion supports these transforms, including its
 `window` operation array and `regression`/`loess` with `on` syntax.
+
+Filter `test`, calculate `expression`, and channel condition `test` accept
+static Vega expression strings as well as pure Lambda callbacks (S12.1.1v2).
+Expressions bind `datum` and support nested fields, literals, operators,
+short-circuit conditions, and common mathematical, type, string, and array
+helpers. Missing fields remain distinct from null inside expressions.
+Unknown syntax/helpers and evaluation failures return value errors
+(S7.4.1), including invalid expressions with empty data. Signals, events,
+assignments, method calls, and ambient globals are outside this static subset.
+See the [expression contract](../vibe/Lambda_Pkg_Chart.md#color).
 
 Running-sum windows followed by a calculation of each prior total produce
 waterfall charts with ordinary `bar` marks and `y`/`y2` ranges. Density and

@@ -24,6 +24,7 @@ let concat_spec = vega.convert({data: {values: records},
         {width: 200, height: 150, mark: "line", encoding: encoding,
             transform: [{filter: {field: "total", gt: 1}}]}]})
 let concat = chart.render_spec(concat_spec)
+let concat_parent_rows = tr.apply_transforms(records, concat_spec.transform)
 let facet_spec = vega.convert({width: 200, height: 150, data: {values: records},
     transform: [{calculate: (row) => if (row.a < 2) "low" else "high", as: "group"}],
     facet: {field: "group"}, columns: 2, resolve: {scale: {y: "independent"}},
@@ -53,9 +54,9 @@ let checks = {
     nested_dataflow: native[1][0][1][2].cy < native[1][0][0][2].cy,
     nested_config_color: native[1][0][1][0].fill == "blue" and native[1][0][0][0].fill == "red",
     nested_config_size: native[1][0][1][0].r == native[1][0][0][0].r,
-    concat_transform_order: len(content(concat_spec.children[1].transform)) == 2,
-    concat_transform_values: tr.apply_transforms(records, concat_spec.children[0].transform)[2].total == 9,
-    concat_child_filter: len(tr.apply_transforms(records, concat_spec.children[1].transform)) == 2,
+    concat_transform_order: len(content(concat_spec.transform)) == 1 and len(content(concat_spec.children[1].transform)) == 1,
+    concat_transform_values: concat_parent_rows[2].total == 9,
+    concat_child_filter: len(tr.apply_transforms(concat_parent_rows, concat_spec.children[1].transform)) == 2,
     concat_svg: concat.width == 420 and len(content(concat[1][0][1][0])) == 3,
     facet_inherited_transform: len(content(facet)) == 3,
     facet_resolution: facet_spec.resolve.scale.y == "independent",

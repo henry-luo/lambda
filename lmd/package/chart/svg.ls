@@ -158,32 +158,44 @@ pub fn area_path(top_points, bottom_points, interpolate = null) string {
 
 // build an arc path segment for pie/donut charts
 pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle) string {
-    let cos_s = math.cos(start_angle);
-    let sin_s = math.sin(start_angle);
-    let cos_e = math.cos(end_angle);
-    let sin_e = math.sin(end_angle);
-    let large = if (end_angle - start_angle > util.PI) 1 else 0;
+    if (end_angle - start_angle >= util.TAU) {
+        // SVG cannot express a full circle with one arc whose endpoints coincide.
+        let ox = cx + outer_r * math.cos(start_angle);
+        let oy = cy + outer_r * math.sin(start_angle);
+        let outer = M(ox, oy) ++ " " ++ A(outer_r, outer_r, 0, 0, 1, 2.0 * cx - ox, 2.0 * cy - oy) ++
+            " " ++ A(outer_r, outer_r, 0, 0, 1, ox, oy) ++ " Z";
+        if (inner_r <= 0) outer else (
+            let ix = cx + inner_r * math.cos(start_angle), let iy = cy + inner_r * math.sin(start_angle),
+            outer ++ " " ++ M(ix, iy) ++ " " ++ A(inner_r, inner_r, 0, 0, 0, 2.0 * cx - ix, 2.0 * cy - iy) ++
+                " " ++ A(inner_r, inner_r, 0, 0, 0, ix, iy) ++ " Z")
+    } else {
+        let cos_s = math.cos(start_angle);
+        let sin_s = math.sin(start_angle);
+        let cos_e = math.cos(end_angle);
+        let sin_e = math.sin(end_angle);
+        let large = if (end_angle - start_angle > util.PI) 1 else 0;
 
-    let ox1 = cx + outer_r * cos_s;
-    let oy1 = cy + outer_r * sin_s;
-    let ox2 = cx + outer_r * cos_e;
-    let oy2 = cy + outer_r * sin_e;
+        let ox1 = cx + outer_r * cos_s;
+        let oy1 = cy + outer_r * sin_s;
+        let ox2 = cx + outer_r * cos_e;
+        let oy2 = cy + outer_r * sin_e;
 
-    if inner_r > 0.0 {
-        // donut: outer arc, line to inner, inner arc (reverse), close
-        let ix1 = cx + inner_r * cos_e;
-        let iy1 = cy + inner_r * sin_e;
-        let ix2 = cx + inner_r * cos_s;
-        let iy2 = cy + inner_r * sin_s;
-        let p1 = M(ox1, oy1) ++ " " ++ A(outer_r, outer_r, 0, large, 1, ox2, oy2);
-        let p2 = p1 ++ " " ++ L(ix1, iy1) ++ " " ++ A(inner_r, inner_r, 0, large, 0, ix2, iy2);
-        p2 ++ " " ++ Z_cmd()
-    }
-    else {
-        // pie: move to center, line to edge, arc, close
-        let p1 = M(cx, cy) ++ " " ++ L(ox1, oy1);
-        let p2 = p1 ++ " " ++ A(outer_r, outer_r, 0, large, 1, ox2, oy2);
-        p2 ++ " " ++ Z_cmd()
+        if inner_r > 0.0 {
+            // donut: outer arc, line to inner, inner arc (reverse), close
+            let ix1 = cx + inner_r * cos_e;
+            let iy1 = cy + inner_r * sin_e;
+            let ix2 = cx + inner_r * cos_s;
+            let iy2 = cy + inner_r * sin_s;
+            let p1 = M(ox1, oy1) ++ " " ++ A(outer_r, outer_r, 0, large, 1, ox2, oy2);
+            let p2 = p1 ++ " " ++ L(ix1, iy1) ++ " " ++ A(inner_r, inner_r, 0, large, 0, ix2, iy2);
+            p2 ++ " " ++ Z_cmd()
+        }
+        else {
+            // pie: move to center, line to edge, arc, close
+            let p1 = M(cx, cy) ++ " " ++ L(ox1, oy1);
+            let p2 = p1 ++ " " ++ A(outer_r, outer_r, 0, large, 1, ox2, oy2);
+            p2 ++ " " ++ Z_cmd()
+        }
     }
 }
 

@@ -1,15 +1,17 @@
-// Calendar arithmetic uses UTC instants plus an explicit fixed offset in minutes.
+// Calendar arithmetic uses UTC instants and an explicit offset or IANA zone.
 import util: .util
+import zones: .timezone
 
 pub fn timestamp(value) float | error => if (value is number) float(value) else float(datetime(value).unix)
 
 pub fn offset(options) => if (options.timezone != null) options.timezone else 0
 
-pub fn valid_offset(value) => value is number and util.finite_number(value) and floor(value) == value and abs(value) <= 840
+pub fn valid_offset(value) => zones.valid_zone(value)
 
 pub fn wall_time(value, zone = 0) {
     let stamp = timestamp(value);
-    if (stamp is error) stamp else datetime(i64(stamp + float(zone) * 60000.0)).utc
+    let wall = if (stamp is error) stamp else zones.wall(stamp, zone);
+    if (wall is error) wall else datetime(i64(wall)).utc
 }
 
 fn month_start(index, zone) {
@@ -42,8 +44,8 @@ fn unit_ms(unit) => if (unit == "second") 1000.0 else if (unit == "minute") 6000
     else if (unit == "hour") 3600000.0 else if (unit == "day") 86400000.0
     else if (unit == "week") 604800000.0 else 1.0
 
-fn floor_interval(value, chosen, zone) {
-    let dt = wall_time(value, zone);
+fn fixed_floor(value, chosen, zone) {
+    let dt = datetime(i64(value + float(zone) * 60000.0)).utc;
     if (chosen.unit == "year") float(date(int(floor(float(dt.year) / float(chosen.step))) * chosen.step, 1, 1).unix) - zone * 60000.0
     else if (chosen.unit == "month") month_start(int(floor(float(dt.year * 12 + dt.month - 1) / float(chosen.step))) * chosen.step, zone)
     else {
@@ -55,35 +57,77 @@ fn floor_interval(value, chosen, zone) {
     }
 }
 
-fn advance(value, chosen, zone, count = 1) {
-    let dt = wall_time(value, zone);
+fn fixed_advance(value, chosen, zone, count = 1) {
+    let dt = datetime(i64(value + float(zone) * 60000.0)).utc;
     if (chosen.unit == "year") float(date(dt.year + chosen.step * count, 1, 1).unix) - zone * 60000.0
     else if (chosen.unit == "month") month_start(dt.year * 12 + dt.month - 1 + chosen.step * count, zone)
     else value + unit_ms(chosen.unit) * chosen.step * count
 }
 
+fn fixed_ticks(lo, hi, chosen, zone) {
+    let boundary = fixed_floor(lo, chosen, zone);
+    let start = if (boundary < lo) fixed_advance(boundary, chosen, zone) else boundary;
+    let first = datetime(i64(start + zone * 60000.0)).utc;
+    let final_time = datetime(i64(hi + zone * 60000.0)).utc;
+    let length = if (chosen.unit == "year") int(floor(float(final_time.year - first.year) / float(chosen.step)))
+        else if (chosen.unit == "month") int(floor(float((final_time.year - first.year) * 12 + final_time.month - first.month) / float(chosen.step)))
+        else int(floor((hi - start) / (unit_ms(chosen.unit) * chosen.step)));
+    [for (index in 0 to length, let value = fixed_advance(start, chosen, zone, index) where value <= hi) value]
+}
+
+fn calendar_unit(chosen) bool | error => contains(["day", "week", "month", "year"], chosen.unit)
+
+// Constant-offset segments preserve local alignment while naturally including folds and omitting gaps.
+fn named_ticks(lo, hi, chosen, zone) {
+    let segments = zones.segments(lo, hi, zone);
+    if (segments is error) segments else util.unique_vals(sort([
+        for (segment in segments) for (value in fixed_ticks(segment.lo, segment.hi, chosen, segment.offset)
+            where zones.offset_at(value, zone) == segment.offset and
+                (not calendar_unit(chosen) or zones.from_wall(zones.wall(value, zone), zone) == value)) value,
+        // A day whose midnight is skipped starts at the first valid local instant.
+        for (segment in (if (calendar_unit(chosen)) segments else []),
+            let boundary = fixed_floor(zones.wall(segment.lo, zone), chosen, 0),
+            let value = zones.from_wall(boundary, zone) where value >= lo and value <= hi) value]))
+}
+
+fn named_floor(value, chosen, zone, boundary = null) {
+    let wall_boundary = if (boundary == null) fixed_floor(zones.wall(value, zone), chosen, 0) else boundary;
+    let candidate = zones.from_wall(wall_boundary, zone, if (calendar_unit(chosen)) null else value,
+        if (calendar_unit(chosen)) "forward" else "reject");
+    if (candidate != null) candidate
+    else named_floor(value, chosen, zone, fixed_advance(wall_boundary, chosen, 0, -1))
+}
+
+fn floor_interval(value, chosen, zone) => if (zone is number) fixed_floor(value, chosen, zone) else named_floor(value, chosen, zone)
+
+fn advance(value, chosen, zone) {
+    if (zone is number) fixed_advance(value, chosen, zone)
+    else {
+        let next_wall = fixed_advance(fixed_floor(zones.wall(value, zone), chosen, 0), chosen, 0);
+        let choices = zones.candidates(next_wall, zone);
+        let future = [for (stamp in choices where stamp > value) stamp];
+        let upper = if (len(future) > 0) future[0] else zones.from_wall(next_wall, zone);
+        let ticks = named_ticks(value + 1.0, upper, chosen, zone);
+        if (len(ticks) > 0) ticks[0] else upper
+    }
+}
+
 pub fn ticks(lo, hi, count = 8, zone = 0) {
-    if (lo > hi) reverse(ticks(hi, lo, count, zone))
+    if (not valid_offset(zone) or not util.finite_number(lo) or not util.finite_number(hi)) error("chart: invalid temporal tick extent or timezone")
+    else if (lo > hi) reverse(ticks(hi, lo, count, zone))
     else if (count is number and count <= 0) []
-    else if (lo == hi) [lo]
     else {
         let chosen = interval(count, hi - lo);
-        if (not valid_interval(chosen) or not valid_offset(zone)) error("chart: invalid temporal tick interval or timezone")
-        else {
-            let boundary = floor_interval(lo, chosen, zone);
-            let start = if (boundary < lo) advance(boundary, chosen, zone) else boundary;
-            let first = wall_time(start, zone);
-            let final_time = wall_time(hi, zone);
-            let length = if (chosen.unit == "year") int(floor(float(final_time.year - first.year) / float(chosen.step)))
-                else if (chosen.unit == "month") int(floor(float((final_time.year - first.year) * 12 + final_time.month - first.month) / float(chosen.step)))
-                else int(floor((hi - start) / (unit_ms(chosen.unit) * chosen.step)));
-            [for (index in 0 to length, let value = advance(start, chosen, zone, index) where value <= hi) value]
-        }
+        if (not valid_interval(chosen)) error("chart: invalid temporal tick interval")
+        else if (lo == hi) [lo]
+        else if (zone is number) fixed_ticks(lo, hi, chosen, zone)
+        else named_ticks(lo, hi, chosen, zone)
     }
 }
 
 pub fn nice_extent(lo, hi, zone = 0) {
-    if (lo > hi) reverse(nice_extent(hi, lo, zone))
+    if (not valid_offset(zone) or not util.finite_number(lo) or not util.finite_number(hi)) error("chart: invalid temporal extent or timezone")
+    else if (lo > hi) reverse(nice_extent(hi, lo, zone))
     else {
         let chosen = interval(8, hi - lo);
         let start = floor_interval(lo, chosen, zone);
@@ -113,7 +157,7 @@ pub fn time_unit(value, specification, zone = 0) {
             "date", "day", "weekday", "hour", "hours", "hoursminutes", "hoursminutesseconds",
             "minute", "minutes", "minutesseconds", "second", "seconds"], unit);
         if (dt is error) dt else if (not supported) error("chart: unsupported time_unit " ++ string(raw))
-        else float(date(year, month, day).unix) + ((hour * 60.0 + minute) * 60.0 + second) * 1000.0 - actual_zone * 60000.0
+        else zones.from_wall(float(date(year, month, day).unix) + ((hour * 60.0 + minute) * 60.0 + second) * 1000.0, actual_zone)
     }
 }
 
