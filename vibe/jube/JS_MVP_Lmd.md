@@ -10,7 +10,7 @@ edge matrix remains pending. §§16–17 record the subsequent tuning.
 Basic classes and single inheritance are implemented in source (§21);
 class-phase validation and performance evidence are tracked separately there.
 
-**Performance history:** [MVP_Result2–6](../../test/benchmark/js_mvp_lmd/README.md)
+**Performance history:** [MVP_Result3–7](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
 
 **Destination:** `lambda/js/mvp-lmd/`
@@ -955,13 +955,43 @@ and mandelbrot. Shared nominal identity, ancestry, layouts and guest member
 resolution establish the runtime interop foundation; cross-language callable
 adaptation and subclass construction remain explicit unsupported boundaries.
 
-**Latest evidence:** the release passes output checks for all 48 prior workloads
-and all six new AWFY targets with native MIR pinned. The prior-workload geometric
-mean time is 0.38% lower. However, 60-pair confirmation measures `object_delete`
-**6.4% slower** and `map_lookup` **0.7% slower**; escaped-object retyping improves
-**16.4%** after reusing caller-owned roots/scalars (**D5.1.3**, **D5.3.3**).
-The no-regression gate remains open. Class semantic/forced-GC and broad baseline
-suites have not been run for this phase; §20's totals belong to its prior binary.
+Latest benchmark evidence is recorded in §21.2. Class semantic/forced-GC and
+broad baseline suites have not been run for this phase; §20's totals belong to
+its prior binary.
 
 The [class implementation record](../impl/JS_MVP_Lmd_Classes.md) records helper
 reuse, benchmark evidence, regression analysis and outstanding validation.
+
+### 21.2 Class workload tuning
+
+Tune numeric indexing without intermediate string keys, fixed-name property
+lookup with immutable-shape guards, and ordinary receiver calls through the
+existing MIR entry ABI. Retain own-field overrides, shape-change fallbacks,
+constructor validation and caller-owned scalar/root lifetimes (**D3.4.3v5–D3.4.5**,
+**D5.2.1v3**, **D6.2.2v2**). Reuse shared field readers/writers and shape transitions;
+extend existing helpers before introducing new runtime entry points.
+
+Deletion reuses a bounded plan on immutable tree-owned shapes; repeated Map
+get/set/has operations reuse a checked entry ordinal. Both retain shared
+canonical-key equality and existing mutation fallbacks (**D3.4.4v4**, **D3.4.5**).
+
+Measure sieve, permute, queens, towers and list against frozen releases and
+untyped Lambda. Confirm deletion and Map lookup regressions separately, then
+check all prior workloads using alternating release runs, pinned native MIR,
+self-reported time, output oracles and an identical-control noise lane.
+
+**Latest results:** all **54 workloads** pass output checks. Against the fresh
+pre-tuning release, sieve is **6.45× faster**, permute **3.96×**, queens **3.55×**,
+towers **2.66×**, and list **2.03×**; list is now **26% faster than untyped Lambda**.
+Sieve, permute, queens and towers remain **2.47–3.44× slower** than their Lambda
+ports (including the Towers storage/validation differences).
+
+The 48 prior workloads have **3.23% lower geometric-mean time**. Sixty-pair
+confirmations resolve the original deletion and Map lookup regressions:
+**49.5%** and **36.4% lower time** than the pre-class release; JSON generation
+is neutral. Follow-up checks find no confirmed new slowdown, including escaped
+retyping, gcbench and binarytrees. Small effects remain limited by measurement
+noise. All 54 timings and separate regression confirmations are recorded in
+[MVP_Result7](../../test/benchmark/js_mvp_lmd/MVP_Result7.md).
+Exact binaries, uncertainty and remaining validation are also documented in the
+[implementation record](../impl/JS_MVP_Lmd_Classes.md#class-and-regression-tuning-2026-10-08).

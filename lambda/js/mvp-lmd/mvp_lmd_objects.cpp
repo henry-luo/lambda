@@ -37,6 +37,9 @@ static uint64_t key_hash(Item key) {
     return hashmap_sip(&key.item, sizeof(key.item), 2, 0);
 }
 static bool key_equal(Item a, Item b) {
+    if (a.item == b.item) return true;
+    // distinct packed integers need no double conversion for SameValueZero.
+    if (get_type_id(a) == LMD_TYPE_INT && get_type_id(b) == LMD_TYPE_INT) return false;
     if (is_number(a) && is_number(b)) {
         double x = it2d(a), y = it2d(b);
         return x == y || (isnan(x) && isnan(y));
@@ -248,8 +251,16 @@ extern "C" Item mvp_lmd_map_call(Item owner, Item method_item, Item key, Item va
         if (get_type_id(canonical) == LMD_TYPE_ERROR) return canonical;
         return mvp_lmd_map_call(object.get(), method_item, canonical, held.get());
     }
-    uint64_t hash = key_hash(key);
-    int64_t previous, head, slot = entry_find(map, key, hash, &previous, &head);
+    uint64_t hash = 0;
+    int64_t previous = -1, head = -1, slot = map->last_entry - 1;
+    // ordinals retain no GC edges; validate the live key after deletion, clear or compaction.
+    // deletion still walks the bucket because it needs the predecessor link.
+    if (method == 4 || slot < 0 || slot >= map->entries->length ||
+            map->entries->items[slot + 3].item != ITEM_TRUE || !key_equal(map->entries->items[slot], key)) {
+        hash = key_hash(key);
+        slot = entry_find(map, key, hash, &previous, &head);
+        map->last_entry = slot + 1;
+    }
     if (method == 1) return slot < 0 ? Item{.item = ITEM_JS_UNDEFINED} : map->entries->items[slot + 1];
     if (method == 3) return slot < 0 ? Item{.item = ITEM_FALSE} : Item{.item = ITEM_TRUE};
     if (method == 4) {
@@ -302,6 +313,7 @@ extern "C" Item mvp_lmd_map_call(Item owner, Item method_item, Item key, Item va
         for (int i = 0; i < 4; i++) map->entries->items[slot + i] = ItemNull;
         map->entries->length = slot; return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
+    // learn only existing-entry hits: unique insertions do not benefit from a last-key probe.
     map->size++; return object.get();
 }
 extern "C" int64_t mvp_lmd_map_next(Item owner, int64_t cursor) {

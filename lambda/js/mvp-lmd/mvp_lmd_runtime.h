@@ -24,6 +24,12 @@ struct MvpLmdCallable : Function {
 };
 extern const TypeNominalExtension mvp_lmd_class_extension;
 MvpLmdClass* mvp_lmd_class_record(Item owner);
+struct MvpLmdPropertyCache {
+    TypeMap* shape;
+    ShapeEntry* field;
+    Item inherited;
+    bool writable;
+};
 enum MvpLmdFailure { LMD_MVP_CAPABILITY, LMD_MVP_REFERENCE, LMD_MVP_TYPE,
     LMD_MVP_RANGE, LMD_MVP_MEMORY };
 
@@ -69,5 +75,6 @@ Item mvp_lmd_class_super(Item function, int64_t constructor);
 Item mvp_lmd_constructor_result(Item value, Item receiver, int64_t derived);
 Item mvp_lmd_instanceof(Item value, Item constructor);
 Item mvp_lmd_throw(Item value, int64_t error_constructor);
-Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation);
+Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
+    MvpLmdPropertyCache* cache);
 }

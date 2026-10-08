@@ -560,9 +560,11 @@ typedef struct TypeMapTransition {
 struct TypeMapRetypePlan {
     const TypeMap* parent;
     const ShapeEntry* source;
-    ShapeEntry* replacement;
+    ShapeEntry* replacement;  // null for deletion plans
     TypeMap* target;
     bool reuse_payload;
+    TypeId storage_type;  // the immutable replacement's shared lane classification
+    TypeId value_type;  // compact retype key; replacement is null for deletion
     TypeMapRetypePlan* next;
 };
 

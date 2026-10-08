@@ -36,7 +36,8 @@ static Item mvp_lmd_inherited_member(Item owner, const char* key, size_t length,
 }
 const TypeNominalExtension mvp_lmd_class_extension = {mvp_lmd_inherited_member};
 
-extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation) {
+extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
+        MvpLmdPropertyCache* cache) {
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     if (cls) {
         bool constructor = get_type_id(owner) == LMD_TYPE_FUNC;
@@ -58,8 +59,23 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
             if (!found && operation != LMD_PROP_OWN)
                 result = mvp_lmd_inherited_member(owner, key->chars, key->len, &found);
             if (item_is_error(result)) return result;
+            // immutable shapes invalidate on shadowing/retyping; methods remain program-rooted.
+            TypeMap* shape = (TypeMap*)map->type;
+            if (cache && !constructor && found &&
+                    (typemap_is_shared_shape(shape) || shape == &cls->shape) &&
+                    (field || get_type_id(result) == LMD_TYPE_FUNC)) {
+                cache->shape = shape; cache->field = field;
+                cache->inherited = field ? ItemNull : result; cache->writable = !metadata;
+            }
             if (operation == LMD_PROP_OWN) return Item{.item = b2it(found)};
             if (found) return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : result;
+        }
+        if (cache && operation == LMD_PROP_SET && !metadata && typemap_is_shared_shape((TypeMap*)map->type)) {
+            ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, name.get_string()->chars, name.get_string()->len);
+            if (field) {
+                cache->shape = (TypeMap*)map->type; cache->field = field;
+                cache->inherited = ItemNull; cache->writable = true;
+            }
         }
         owner = Item{.map = map};
     }
@@ -155,4 +171,3 @@ extern "C" Item mvp_lmd_throw(Item value, int64_t error_constructor) {
     }
     return err2it(error);
 }
-

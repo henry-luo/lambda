@@ -163,7 +163,7 @@ struct LmdInlineFrame { LmdInlineFrame* parent; LmdFunction* function; int count
 struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     bool key_known = false; int64_t index = 0; MIR_reg_t name = 0; LmdObjectPlan* plan = NULL; ShapeEntry* field = NULL; int method = 0; LmdShapeSet shapes = {}; String* spelling = NULL; bool guarded = false;
     unsigned lanes = 0; bool numeric_key = false; bool in_bounds = false; LmdRange elements;
-    MIR_reg_t key_present = 0; String* string_literal = NULL; };
+    MIR_reg_t key_present = 0; String* string_literal = NULL; LmdValue deferred_name = {}; };
 
 static LmdBinding* binding(MvpLmdProgram* p, NameEntry* entry) {
     for (int i = 0; i < p->bindings->length; i++) {
@@ -2128,12 +2128,54 @@ static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_la
     return true;
 }
 static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
-        MIR_reg_t name = 0, MIR_reg_t value = 0) {
-    if (c->program->receiver_abi)
-        return em_call_4(&c->em, "mvp_lmd_class_property", MIR_T_I64,
+        MIR_reg_t name = 0, MIR_reg_t value = 0, String* spelling = NULL) {
+    if (c->program->receiver_abi) {
+        MvpLmdPropertyCache* cache = spelling && operation <= LMD_PROP_SET
+            ? (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
+        MIR_reg_t joined = 0;
+        MIR_label_t done = NULL;
+        if (cache) {
+            MIR_label_t miss = label(c), inherited = label(c); done = label(c);
+            joined = em_new_reg(&c->em, "cached_property", MIR_T_I64);
+            MIR_reg_t address = constant(c, (uint64_t)cache);
+            MIR_reg_t shape = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCache, shape), MIR_T_I64, "cached_shape");
+            em_guard_map_shape(&c->em, owner, shape, miss, false);
+            MIR_reg_t field = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCache, field), MIR_T_I64, "cached_field");
+            branch(c, MIR_BEQ, operation == LMD_PROP_SET ? miss : inherited, reg(c, field), integer(c, 0));
+            MIR_reg_t data = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "cached_data");
+            if (operation == LMD_PROP_SET) {
+                branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
+                    offsetof(MvpLmdPropertyCache, writable), MIR_T_U8, "cached_writable")), integer(c, 0));
+                MIR_reg_t expected = em_load_at(&c->em, field, offsetof(ShapeEntry, type), MIR_T_I64, "cached_type");
+                expected = em_load_at(&c->em, expected, offsetof(Type, type_id), MIR_T_U8, "cached_tag");
+                MIR_reg_t actual = tag(c, boxed(c, value));
+                MIR_label_t tagged = label(c);
+                branch(c, MIR_BNE, tagged, reg(c, op(c, MIR_URSH, reg(c, value), integer(c, 56))), integer(c, LMD_TYPE_INT));
+                move(c, actual, integer(c, LMD_TYPE_INT)); put_label(c, tagged);
+                branch(c, MIR_BNE, miss, reg(c, actual), reg(c, expected));
+                MIR_reg_t offset = em_load_at(&c->em, field, offsetof(ShapeEntry, byte_offset), MIR_T_I64, "cached_offset");
+                MIR_reg_t stored = em_call_3(&c->em, "map_field_store", MIR_T_I64,
+                    MIR_T_P, reg(c, op(c, MIR_ADD, reg(c, data), reg(c, offset))),
+                    MIR_T_I64, reg(c, value), MIR_T_I64, reg(c, actual), true);
+                branch(c, MIR_BEQ, miss, reg(c, op(c, MIR_AND, reg(c, stored), integer(c, UINT8_MAX))), integer(c, 0));
+                move(c, joined, reg(c, value)); jump(c, done);
+            } else {
+                // the shared reader borrows the field's scalar lane; the consumer adopts it before a safepoint.
+                move(c, joined, reg(c, em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
+                    MIR_T_P, reg(c, data), MIR_T_P, reg(c, field), true))); jump(c, done);
+                put_label(c, inherited);
+                move(c, joined, reg(c, em_load_at(&c->em, address, offsetof(MvpLmdPropertyCache, inherited),
+                    MIR_T_I64, "cached_method"))); jump(c, done);
+            }
+            put_label(c, miss);
+        }
+        MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, name ? reg(c, name) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, value ? reg(c, value) : integer(c, ITEM_JS_UNDEFINED),
-            MIR_T_I64, integer(c, operation), true);
+            MIR_T_I64, integer(c, operation), MIR_T_P, integer(c, (uint64_t)cache), true);
+        if (!done) return result;
+        move(c, joined, reg(c, result)); put_label(c, done); return joined;
+    }
     if (operation >= LMD_PROP_KEYS)
         return em_call_2(&c->em, "mvp_lmd_object_project", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, integer(c, operation - LMD_PROP_KEYS), true);
@@ -2150,6 +2192,9 @@ static LmdValue canonical_key(LmdCompiler* c, LmdValue value) {
     LmdValue string = to_string(c, value);
     MIR_reg_t key = em_call_1(&c->em, "mvp_lmd_property_key", MIR_T_I64, MIR_T_I64, reg(c, string.reg), true);
     check_error(c, key); return boxed(c, key, K_STRING);
+}
+static MIR_reg_t reference_name(LmdCompiler* c, LmdReference ref) {
+    return ref.name ? ref.name : canonical_key(c, ref.deferred_name).reg;
 }
 static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = false) {
     if (n->node_type == AST_NODE_IDENT) return {identifier_binding(c->program, (AstIdentNode*)n), {}, 0};
@@ -2199,6 +2244,23 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
         LmdRange bounds = known ? finite_range(index, index) : key.integer && key.range.state == 1
             ? key.range : range(c->program, field->property, true);
         ref.in_bounds = !(facts.lanes & LMD_ARRAY_UNKNOWN) && bounds.state == 1 && facts.length.state == 1 && bounds.lower >= 0 && bounds.upper < facts.length.lower;
+        return ref;
+    }
+    // primitive numeric conversion has no user effects; defer it until an object needs a name.
+    if (field->computed && (semantic(key) & K_NUMBER) && !capture_name &&
+            semantic(owner) != K_OBJECT && semantic(owner) != K_MAP) {
+        bool numeric = semantic(key) == K_NUMBER;
+        if (!numeric) {
+            MIR_reg_t saved = em_new_reg(&c->em, "index_key", MIR_T_I64);
+            move(c, saved, reg(c, box(c, key).reg));
+            MIR_label_t ready = label(c);
+            branch(c, MIR_BEQ, ready, reg(c, tag(c, key)), integer(c, LMD_TYPE_FLOAT));
+            // nonnumeric keys still convert before the RHS, preserving conversion errors/effects.
+            move(c, saved, reg(c, canonical_key(c, key).reg)); put_label(c, ready);
+            key = boxed(c, saved, K_NUMBER | K_STRING);
+        }
+        LmdReference ref = {NULL, owner, known ? constant(c, (uint64_t)index) : property_key(c, key), known, index};
+        ref.numeric_key = numeric; ref.deferred_name = key;
         return ref;
     }
     if (!field->computed) {
@@ -2383,7 +2445,10 @@ static LmdValue typed_array_lanes(LmdCompiler* c, LmdValue owner, MIR_reg_t inde
 }
 static LmdValue typed_array_reference(LmdCompiler* c, LmdReference ref, AstNode* site,
         LmdValue* value = NULL, bool callee = false, bool numeric = false) {
-    if (ref.name) {
+    if (ref.deferred_name.reg) {
+        ref.key = property_key(c, ref.deferred_name, true);
+        ref.key_known = false;
+    } else if (ref.name) {
         ref.key = property_key(c, boxed(c, ref.name, K_STRING), true);
         ref.key_known = false;
     }
@@ -2510,7 +2575,8 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         move(c, result, reg(c, box(c, field_read(c, candidate)).reg)); jump(c, done);
         put_label(c, miss);
     }
-    MIR_reg_t value = property_access(c, callee ? LMD_PROP_CALLEE : LMD_PROP_GET, ref.owner.reg, ref.name);
+    MIR_reg_t value = property_access(c, callee ? LMD_PROP_CALLEE : LMD_PROP_GET,
+        ref.owner.reg, reference_name(c, ref), 0, ref.spelling);
     unsigned result_kind = !callee && site && (site->node_type == AST_NODE_MEMBER_EXPR || site->node_type == AST_NODE_INDEX_EXPR)
         ? kind(c->program, site, c->inlining) : K_ANY;
     check_error(c, value); move(c, result, reg(c, (result_kind & K_NUMBER) ? stable_item(c, value).reg : value));
@@ -2580,14 +2646,15 @@ static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, As
         array_index_write(c, ref, value); jump(c, done);
         put_label(c, length); array_length_write(c, ref, value, site); put_label(c, done);
     }
-    if (!ref.name) { put_label(c, done); return; }
+    if (!ref.name && !ref.deferred_name.reg) { put_label(c, done); return; }
     jump(c, done); put_label(c, object);
     if (ref.plan && ref.field) {
         MIR_label_t miss = label(c);
         if (field_write(c, ref, value, miss)) jump(c, done);
         put_label(c, miss);
     }
-    MIR_reg_t stored = property_access(c, LMD_PROP_SET, ref.owner.reg, ref.name, box(c, value).reg);
+    MIR_reg_t stored = property_access(c, LMD_PROP_SET, ref.owner.reg,
+        reference_name(c, ref), box(c, value).reg, ref.spelling);
     check_error(c, stored); put_label(c, done);
 }
 
@@ -3062,23 +3129,44 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     MIR_reg_t result = em_new_reg(&c->em, "call_result", result_type);
     bool pair = native && em_returns_result_pair(direct->return_abi.companion);
     MIR_reg_t companion = pair ? em_new_reg(&c->em, "call_error", MIR_T_I64) : 0;
+    MIR_label_t invoked = NULL;
     if (c->program->receiver_abi && !direct) {
         bool super_member = member && ((AstFieldNode*)n->callee)->object->node_type == AST_NODE_IDENT &&
             named(((AstIdentNode*)((AstFieldNode*)n->callee)->object)->name, "super");
         MIR_op_t receiver = captured && captured->receiver.reg ? reg(c, captured->receiver.reg) :
             member ? reg(c, super_member ? c->receiver : method.owner.reg) : integer(c, ITEM_JS_UNDEFINED);
-        result = em_call_5(&c->em, "mvp_lmd_class_invoke", MIR_T_I64,
+        MIR_label_t slow = label(c), fast = label(c); invoked = label(c);
+        if (captured && captured->new_target.reg) jump(c, slow);
+        else {
+            // the shared ABI tag alone does not prove the extended callable tail exists.
+            MvpLmdCallable marker = {}; marker.requires_runtime_context = true;
+            MIR_reg_t flags = em_load_at(&c->em, callee.reg, offsetof(Function, flags), MIR_T_U32, "call_flags");
+            branch(c, MIR_BEQ, slow, reg(c, op(c, MIR_AND, reg(c, flags), integer(c, marker.flags))), integer(c, 0));
+            branch(c, MIR_BNE, slow, reg(c, em_load_at(&c->em, callee.reg,
+                offsetof(Function, runtime_context), MIR_T_I64, "call_context")), reg(c, c->em.frame.runtime));
+            branch(c, MIR_BNE, slow, reg(c, em_load_at(&c->em, callee.reg,
+                (char*)&marker.constructor - (char*)&marker, MIR_T_U8, "constructor")), integer(c, 0));
+            args[1] = reg(c, em_load_at(&c->em, callee.reg,
+                (char*)&marker.program - (char*)&marker, MIR_T_I64, "call_program"));
+            args[5] = receiver;
+            jump(c, fast);
+        }
+        put_label(c, slow);
+        MIR_reg_t constructed = em_call_5(&c->em, "mvp_lmd_class_invoke", MIR_T_I64,
             MIR_T_I64, reg(c, callee.reg), MIR_T_I64,
             receiver, MIR_T_P, span ? reg(c, span) : integer(c, 0), MIR_T_I64, integer(c, count),
             MIR_T_I64, captured && captured->new_target.reg ? reg(c, captured->new_target.reg)
                 : integer(c, ITEM_JS_UNDEFINED), true);
-    } else {
+        move(c, result, reg(c, constructed)); jump(c, invoked); put_label(c, fast);
+    }
+    {
         em_before_resolved_call(&c->em, "mvp_lmd_entry", &entry->call, nargs, types, args);
         MIR_insn_t insn = mir_new_call_with_target(c->em.ctx, entry->proto,
             direct ? MIR_new_ref_op(c->em.ctx, direct->forward) : reg(c, target), result, nargs, args, companion);
         mir_append_emit_insn(c->em.ctx, c->em.func_item, insn);
         em_after_resolved_call(&c->em, "mvp_lmd_entry", &entry->call, insn, 0, result_type);
     }
+    if (invoked) put_label(c, invoked);
     // consume the context companion before any safepoint or rooted store (D5.2.1v3).
     bool pending = !direct_args || fn_return_shape_may_be_pending(direct->return_abi.shape);
     if (!pair && (native || pending)) companion = em_load_at(&c->em, c->em.frame.runtime,
@@ -3995,7 +4083,9 @@ static const LmdImport imports[] = {
     {"mvp_lmd_array_new", (void*)mvp_lmd_array_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,SCALAR))},
     {"str_repeat", (void*)str_repeat, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,SCALAR))},
     {"fn_join2", (void*)fn_join2, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
-    {"mvp_lmd_class_property", (void*)mvp_lmd_class_property, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
+    {"mvp_lmd_class_property", (void*)mvp_lmd_class_property, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,RAW_PTR))},
+    {"map_shape_field_to_item", (void*)map_shape_field_to_item, AUDIT(JIT_EFFECT_NO_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,RAW_PTR))},
+    {"map_field_store", (void*)map_field_store, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"mvp_lmd_class_new", (void*)mvp_lmd_class_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM))},
     {"mvp_lmd_class_invoke", (void*)mvp_lmd_class_invoke, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, SCALAR,
         ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,RAW_PTR)|ARG(3,SCALAR)|ARG(4,ITEM),
