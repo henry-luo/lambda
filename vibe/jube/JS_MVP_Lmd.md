@@ -4,12 +4,13 @@
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
-the latest tuning measurements and validation status are recorded in §20.
+the latest tuning measurements and validation status are recorded in §23.
 The numeric-library phase is implemented in source (§15); its full feature
 edge matrix remains pending. §§16–17 record the subsequent tuning.
 Basic classes and single inheritance are implemented in source (§21);
 class-phase validation and performance evidence are tracked separately there.
 Closures, callbacks and array growth are implemented and validated in §22.
+Class property access and constructor allocation are tuned in §23.
 
 **Performance history:** [MVP_Result3–7](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
@@ -982,7 +983,7 @@ untyped Lambda. Confirm deletion and Map lookup regressions separately, then
 check all prior workloads using alternating release runs, pinned native MIR,
 self-reported time, output oracles and an identical-control noise lane.
 
-**Latest results:** all **54 workloads** pass output checks. Against the fresh
+**Phase results:** all **54 workloads** pass output checks. Against the fresh
 pre-tuning release, sieve is **6.45× faster**, permute **3.96×**, queens **3.55×**,
 towers **2.66×**, and list **2.03×**; list is now **26% faster than untyped Lambda**.
 Sieve, permute, queens and towers remain **2.47–3.44× slower** than their Lambda
@@ -1060,7 +1061,7 @@ longer paired runs, fix or revert confirmed regressions, and report unresolved
 noise explicitly. Measure newly admitted workloads against fresh untyped
 Lambda and Node references with documented timing and port differences.
 
-**Latest results:** 60 workloads pass their output checks. Thirty balanced
+**Phase results:** 60 workloads pass their output checks. Thirty balanced
 release pairs across the prior 54 workloads show no confirmed regression
 against Result7 (geometric mean time ratio 0.9973); 60-pair checks of three
 shared Lambda clients also show no confirmed slowdown. MVP semantic checks
@@ -1068,3 +1069,41 @@ pass **52/52**, normally and with forced GC/poisoning; Lambda baseline passes
 **6,427/6,427** and Test262 baseline **40,261/40,261** with zero retries.
 The six new comparisons use fresh Lambda/Node references; SHA1's canonical
 Lambda port is explicitly annotated and is not labeled untyped.
+
+## 23. Class workload tuning
+
+Target Bounce, NBody, Richards and CD while retaining the 60-workload cohort.
+Reuse Lambda's immutable shapes and packed lanes (**D3.4.3v5–D3.4.5**), shared
+numeric emitters and precise scalar ownership (**D5.2–D5.3**):
+
+- Cache four exact shapes per class property site, including field storage and
+  offset. Inline ordinary numeric, Boolean and pointer lanes; retain shared readers for
+  other and optional layouts. Numeric consumers and matching native stores
+  avoid intermediate boxing.
+- Inline small, capture-free, parameterless method expressions only after
+  checking the captured callee's entry address. Overrides retain ordinary calls.
+- Reuse a completed constructor shape only for straight-line field assignments
+  with receiver-free values. Calls, receiver observation/escape, computed keys,
+  branches and derived construction retain incremental initialization.
+- Hoist the captured iterator's stride and read live Map entries directly;
+  retain the existing shared cursor helper for deleted entries.
+- Reuse Map's last-entry cache for guarded exact-key `get`/`has` hits, retaining
+  the existing lookup helper and scalar adoption on the other paths.
+
+No shared Function/closure representation changes (**D6.2.3v2–D6.2.4**).
+The only new helpers are the cache-population helper `mvp_lmd_cache_property`
+and compiler proof `constructor_layout_reusable`; both were disclosed before
+coding. No new runtime import is needed. Acceptance uses frozen release
+binaries, pinned native MIR, output-checked self-reported timings, balanced
+pairs with an identical-control peer, all 60 workloads, and forced-GC/baseline
+gates. Detailed evidence: [class tuning](../impl/JS_MVP_Lmd_Class_Tuning.md).
+
+**Latest results:** the final release reduces self-reported time by **23.0%**
+on Bounce, **52.2%** on NBody, **47.5%** on Richards and **40.2%** on CD.
+All **60 workloads** pass output checks, with no statistically confirmed
+regression in the paired comparisons. Longer checks measure Map lookup **5.5%**
+and Map iteration **7.9%** faster. MVP semantic tests pass **54/54**, normally
+and with forced GC/poisoning. Combined Lambda/input baseline passes
+**6,459/6,459**; Test262 passes **40,261/40,261** with zero retries.
+Exact binaries, fresh Lambda/Node references and uncertainty are recorded in
+the linked report.

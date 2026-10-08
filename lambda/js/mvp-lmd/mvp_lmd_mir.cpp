@@ -166,7 +166,7 @@ struct LmdScalarField { LmdValue value; unsigned kinds; bool written; bool integ
     LmdRange range; int home; AstNode* initializer; };
 struct LmdInlineFrame { LmdInlineFrame* parent; LmdFunction* function; int count;
     LmdBinding* bindings[32]; LmdScalarField slots[32];
-    LmdObjectPlan* plans[32]; bool guarded[32]; };
+    LmdObjectPlan* plans[32]; bool guarded[32]; MIR_reg_t receiver; };
 struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     bool key_known = false; int64_t index = 0; MIR_reg_t name = 0; LmdObjectPlan* plan = NULL; ShapeEntry* field = NULL; int method = 0; LmdShapeSet shapes = {}; String* spelling = NULL; bool guarded = false;
     unsigned lanes = 0; bool numeric_key = false; bool in_bounds = false; LmdRange elements;
@@ -2186,7 +2186,7 @@ static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_la
     return true;
 }
 static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
-        MIR_reg_t name = 0, MIR_reg_t value = 0, String* spelling = NULL) {
+        MIR_reg_t name = 0, MIR_reg_t value = 0, String* spelling = NULL, bool numeric = false, const LmdValue* native_value = NULL) {
     if (c->program->receiver_abi) {
         MvpLmdPropertyCache* cache = spelling && operation <= LMD_PROP_SET
             ? (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
@@ -2194,45 +2194,120 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         MIR_label_t done = NULL;
         if (cache) {
             MIR_label_t miss = label(c), inherited = label(c); done = label(c);
-            joined = em_new_reg(&c->em, "cached_property", MIR_T_I64);
-            MIR_reg_t address = constant(c, (uint64_t)cache);
-            MIR_reg_t shape = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCache, shape), MIR_T_I64, "cached_shape");
-            em_guard_map_shape(&c->em, owner, shape, miss, false);
-            MIR_reg_t field = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCache, field), MIR_T_I64, "cached_field");
+            joined = em_new_reg(&c->em, "cached_property", numeric ? MIR_T_D : MIR_T_I64);
+            MIR_reg_t pointer = em_guard_container(&c->em, owner, LMD_TYPE_MAP, miss);
+            MIR_reg_t shape = em_load_at(&c->em, pointer, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "property_shape");
+            MIR_reg_t address = em_new_reg(&c->em, "cache_entry", MIR_T_I64);
+            MIR_label_t matched = label(c);
+            for (int i = 0; i < MVP_LMD_PROPERTY_CACHE_SIZE; i++) {
+                move(c, address, integer(c, (uint64_t)&cache->entries[i]));
+                MIR_reg_t expected = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, shape), MIR_T_I64, "cached_shape");
+                if (i + 1 == MVP_LMD_PROPERTY_CACHE_SIZE) branch(c, MIR_BNE, miss, reg(c, shape), reg(c, expected));
+                else branch(c, MIR_BEQ, matched, reg(c, shape), reg(c, expected));
+            }
+            put_label(c, matched);
+            MIR_reg_t field = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, field), MIR_T_I64, "cached_field");
             branch(c, MIR_BEQ, operation == LMD_PROP_SET ? miss : inherited, reg(c, field), integer(c, 0));
             MIR_reg_t data = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "cached_data");
-            if (operation == LMD_PROP_SET) {
+            MIR_reg_t storage = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, storage), MIR_T_U8, "cached_storage");
+            MIR_reg_t offset = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, offset), MIR_T_I64, "cached_offset");
+            MIR_reg_t slot = op(c, MIR_ADD, reg(c, data), reg(c, offset));
+            if (native_value) {
+                TypeId type = semantic(*native_value) == K_BOOL ? LMD_TYPE_BOOL :
+                    native_value->integer ? LMD_TYPE_INT : LMD_TYPE_FLOAT;
+                branch(c, MIR_BNE, miss, reg(c, storage), integer(c, type));
                 branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
-                    offsetof(MvpLmdPropertyCache, writable), MIR_T_U8, "cached_writable")), integer(c, 0));
-                MIR_reg_t expected = em_load_at(&c->em, field, offsetof(ShapeEntry, type), MIR_T_I64, "cached_type");
-                expected = em_load_at(&c->em, expected, offsetof(Type, type_id), MIR_T_U8, "cached_tag");
-                MIR_reg_t actual = tag(c, boxed(c, value));
-                MIR_label_t tagged = label(c);
-                branch(c, MIR_BNE, tagged, reg(c, op(c, MIR_URSH, reg(c, value), integer(c, 56))), integer(c, LMD_TYPE_INT));
-                move(c, actual, integer(c, LMD_TYPE_INT)); put_label(c, tagged);
-                branch(c, MIR_BNE, miss, reg(c, actual), reg(c, expected));
-                MIR_reg_t offset = em_load_at(&c->em, field, offsetof(ShapeEntry, byte_offset), MIR_T_I64, "cached_offset");
-                MIR_reg_t stored = em_call_3(&c->em, "map_field_store", MIR_T_I64,
-                    MIR_T_P, reg(c, op(c, MIR_ADD, reg(c, data), reg(c, offset))),
-                    MIR_T_I64, reg(c, value), MIR_T_I64, reg(c, actual), true);
-                branch(c, MIR_BEQ, miss, reg(c, op(c, MIR_AND, reg(c, stored), integer(c, UINT8_MAX))), integer(c, 0));
-                move(c, joined, reg(c, value)); jump(c, done);
+                    offsetof(MvpLmdPropertyCacheEntry, writable), MIR_T_U8, "cached_writable")), integer(c, 0));
+                // the RHS is already evaluated; matching lanes need neither an Item nor a scalar home.
+                em_store_at(&c->em, slot, 0, type == LMD_TYPE_FLOAT ? MIR_T_D :
+                    type == LMD_TYPE_BOOL ? MIR_T_U8 : MIR_T_I64, native_value->reg);
+                move(c, joined, integer(c, ITEM_JS_UNDEFINED)); jump(c, done);
             } else {
-                // the shared reader borrows the field's scalar lane; the consumer adopts it before a safepoint.
-                move(c, joined, reg(c, em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
-                    MIR_T_P, reg(c, data), MIR_T_P, reg(c, field), true))); jump(c, done);
-                put_label(c, inherited);
-                move(c, joined, reg(c, em_load_at(&c->em, address, offsetof(MvpLmdPropertyCache, inherited),
-                    MIR_T_I64, "cached_method"))); jump(c, done);
+                const struct { TypeId type; MIR_type_t lane; unsigned kind; } scalars[] = {
+                    {LMD_TYPE_FLOAT, MIR_T_D, K_NUMBER}, {LMD_TYPE_INT, MIR_T_I64, K_NUMBER},
+                    {LMD_TYPE_BOOL, MIR_T_U8, K_BOOL}};
+                MIR_label_t lanes[3] = {label(c), label(c), label(c)}, shared = label(c);
+                MIR_reg_t actual = 0;
+                if (operation == LMD_PROP_SET) {
+                    branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
+                        offsetof(MvpLmdPropertyCacheEntry, writable), MIR_T_U8, "cached_writable")), integer(c, 0));
+                    actual = tag(c, boxed(c, value));
+                    MIR_label_t tagged = label(c);
+                    branch(c, MIR_BNE, tagged, reg(c, op(c, MIR_URSH, reg(c, value), integer(c, 56))), integer(c, LMD_TYPE_INT));
+                    move(c, actual, integer(c, LMD_TYPE_INT)); put_label(c, tagged);
+                    branch(c, MIR_BNE, miss, reg(c, actual), reg(c, storage));
+                }
+                MIR_label_t scalar = label(c);
+                MIR_reg_t pointer_lane = em_load_at(&c->em, address,
+                    offsetof(MvpLmdPropertyCacheEntry, pointer_lane), MIR_T_U8, "cached_pointer_lane");
+                branch(c, MIR_BEQ, scalar, reg(c, pointer_lane), integer(c, 0));
+                if (operation == LMD_PROP_SET) {
+                    em_store_at(&c->em, slot, 0, MIR_T_I64, payload(c, value));
+                    move(c, joined, reg(c, value));
+                } else {
+                    MIR_reg_t loaded = em_load_at(&c->em, slot, 0, MIR_T_I64, "cached_pointer");
+                    // shared readers own null canonicalization and legacy raw-header repair.
+                    branch(c, MIR_BEQ, shared, reg(c, loaded), integer(c, 0));
+                    MIR_label_t tagged = label(c);
+                    branch(c, MIR_BEQ, tagged, reg(c, pointer_lane), integer(c, 1));
+                    branch(c, MIR_BEQ, shared, reg(c, em_load_at(&c->em, loaded,
+                        LAMBDA_GC_OFF_CONTAINER_TYPE_ID, MIR_T_U8, "cached_pointer_kind")), integer(c, LMD_TYPE_RAW_POINTER));
+                    put_label(c, tagged);
+                    loaded = op(c, MIR_OR, reg(c, loaded), reg(c, em_load_at(&c->em, address,
+                        offsetof(MvpLmdPropertyCacheEntry, pointer_tag), MIR_T_I64, "cached_pointer_tag")));
+                    move(c, joined, reg(c, numeric ? to_number(c, boxed(c, loaded)) : loaded), numeric);
+                }
+                jump(c, done); put_label(c, scalar);
+                for (int i = 0; i < 3; i++)
+                    branch(c, MIR_BEQ, lanes[i], reg(c, storage), integer(c, scalars[i].type));
+                put_label(c, shared);
+                if (operation == LMD_PROP_SET) {
+                    MIR_reg_t stored = em_call_3(&c->em, "map_field_store", MIR_T_I64,
+                        MIR_T_P, reg(c, slot), MIR_T_I64, reg(c, value), MIR_T_I64, reg(c, actual), true);
+                    branch(c, MIR_BEQ, miss, reg(c, op(c, MIR_AND, reg(c, stored), integer(c, UINT8_MAX))), integer(c, 0));
+                    move(c, joined, reg(c, value)); jump(c, done);
+                } else {
+                    // shared readers retain optional layouts; consume/adopt their borrowed scalar before a safepoint.
+                    MIR_reg_t loaded = em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
+                        MIR_T_P, reg(c, data), MIR_T_P, reg(c, field), true);
+                    if (numeric) { check_error(c, loaded); loaded = to_number(c, boxed(c, loaded)); }
+                    move(c, joined, reg(c, loaded), numeric); jump(c, done);
+                }
+                for (int i = 0; i < 3; i++) {
+                    put_label(c, lanes[i]);
+                    bool integral = scalars[i].type == LMD_TYPE_INT;
+                    MIR_reg_t lane;
+                    if (operation == LMD_PROP_SET) {
+                        lane = integral ? em_unbox_finite_int_item(&c->em, value) :
+                            scalars[i].kind == K_NUMBER ? to_number(c, boxed(c, value, K_NUMBER)) : value;
+                        if (integral) em_branch_int53_outside(&c->em, lane, miss);
+                        em_store_at(&c->em, slot, 0, scalars[i].lane, lane);
+                        move(c, joined, reg(c, value));
+                    } else {
+                        lane = em_load_at(&c->em, slot, 0, scalars[i].lane, "cached_scalar");
+                        if (integral) em_branch_int53_outside(&c->em, lane, shared);
+                        LmdValue loaded = {lane, scalars[i].kind, false, 0, integral};
+                        move(c, joined, reg(c, numeric ? to_number(c, loaded) : box(c, loaded).reg), numeric);
+                    }
+                    jump(c, done);
+                }
+                if (operation != LMD_PROP_SET) {
+                    put_label(c, inherited);
+                    MIR_reg_t loaded = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, inherited),
+                        MIR_T_I64, "cached_method");
+                    move(c, joined, reg(c, numeric ? to_number(c, boxed(c, loaded)) : loaded), numeric); jump(c, done);
+                }
             }
             put_label(c, miss);
         }
+        if (native_value) value = box(c, *native_value).reg;
         MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, name ? reg(c, name) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, value ? reg(c, value) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, integer(c, operation), MIR_T_P, integer(c, (uint64_t)cache), true);
+        if (numeric) { check_error(c, result); result = to_number(c, boxed(c, result)); }
         if (!done) return result;
-        move(c, joined, reg(c, result)); put_label(c, done); return joined;
+        move(c, joined, reg(c, result), numeric); put_label(c, done); return joined;
     }
     if (operation >= LMD_PROP_KEYS)
         return em_call_2(&c->em, "mvp_lmd_object_project", MIR_T_I64,
@@ -2597,7 +2672,11 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
     if (k == K_ARRAY || k == K_STRING) {
         return sequence_reference(c, ref, k, site, callee, borrow_scalar, numeric);
     }
-    MIR_reg_t result = em_new_reg(&c->em, "property", MIR_T_I64);
+    bool consume = numeric && c->program->receiver_abi;
+    MIR_reg_t result = em_new_reg(&c->em, "property", consume ? MIR_T_D : MIR_T_I64);
+    auto save = [&](LmdValue value) {
+        move(c, result, reg(c, consume ? to_number(c, value) : box(c, value).reg), consume);
+    };
     MIR_label_t array = label(c), string = label(c), typed = label(c), object = label(c), done = label(c);
     if (k != K_OBJECT && k != K_MAP) {
         MIR_reg_t tid = tag(c, ref.owner);
@@ -2608,11 +2687,11 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         if (c->program->receiver_abi) branch(c, MIR_BEQ, object, reg(c, tid), integer(c, LMD_TYPE_FUNC));
         property_failure(c, ref.owner, site);
         put_label(c, array);
-        move(c, result, reg(c, box(c, sequence_reference(c, ref, K_ARRAY, site, callee)).reg)); jump(c, done);
+        save(sequence_reference(c, ref, K_ARRAY, site, callee)); jump(c, done);
         put_label(c, string);
-        move(c, result, reg(c, box(c, sequence_reference(c, ref, K_STRING, site, callee)).reg)); jump(c, done);
+        save(sequence_reference(c, ref, K_STRING, site, callee)); jump(c, done);
         put_label(c, typed);
-        move(c, result, reg(c, box(c, typed_array_reference(c, ref, site, NULL, callee)).reg)); jump(c, done);
+        save(typed_array_reference(c, ref, site, NULL, callee)); jump(c, done);
     }
     put_label(c, object);
     if (callee && ref.method) {
@@ -2631,11 +2710,12 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         MIR_label_t miss = label(c);
         em_guard_map_shape(&c->em, ref.owner.reg, planned_shape(c, candidate.plan), miss,
             k == K_OBJECT || k == K_MAP);
-        move(c, result, reg(c, box(c, field_read(c, candidate)).reg)); jump(c, done);
+        save(field_read(c, candidate)); jump(c, done);
         put_label(c, miss);
     }
     MIR_reg_t value = property_access(c, callee ? LMD_PROP_CALLEE : LMD_PROP_GET,
-        ref.owner.reg, reference_name(c, ref), 0, ref.spelling);
+        ref.owner.reg, reference_name(c, ref), 0, ref.spelling, consume);
+    if (consume) { move(c, result, reg(c, value), true); put_label(c, done); return {result, K_NUMBER}; }
     unsigned result_kind = !callee && site && (site->node_type == AST_NODE_MEMBER_EXPR || site->node_type == AST_NODE_INDEX_EXPR)
         ? kind(c->program, site, c->inlining) : K_ANY;
     check_error(c, value); move(c, result, reg(c, (result_kind & K_NUMBER) ? stable_item(c, value).reg : value));
@@ -2715,8 +2795,11 @@ static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, As
         if (field_write(c, ref, value, miss)) jump(c, done);
         put_label(c, miss);
     }
+    bool native = c->program->receiver_abi && !is_boxed(value) && !value.number_present &&
+        !(value.literal && value.range.state == 1 && !value.integer) &&
+        (semantic(value) == K_NUMBER || semantic(value) == K_BOOL);
     MIR_reg_t stored = property_access(c, LMD_PROP_SET, ref.owner.reg,
-        reference_name(c, ref), box(c, value).reg, ref.spelling);
+        reference_name(c, ref), native ? 0 : box(c, value).reg, ref.spelling, false, native ? &value : NULL);
     check_error(c, stored); put_label(c, done);
 }
 
@@ -2939,7 +3022,10 @@ static void inline_budget(AstNode* node, void* opaque) {
     LmdInlineBudget* budget = (LmdInlineBudget*)opaque;
     if (!budget->allowed || ++budget->nodes > (budget->statements ? 64 : 24)) { budget->allowed = false; return; }
     switch (node->node_type) {
-    case AST_NODE_IDENT: case AST_NODE_LITERAL: case AST_NODE_BINARY:
+    case AST_NODE_IDENT:
+        if (budget->owner->home && named(((AstIdentNode*)node)->name, "super")) budget->allowed = false;
+        break;
+    case AST_NODE_LITERAL: case AST_NODE_BINARY:
     case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: case AST_NODE_CONDITIONAL_EXPR:
         break;
     case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL: case AST_NODE_PROPERTY:
@@ -2971,9 +3057,12 @@ static void inline_budget(AstNode* node, void* opaque) {
     }
     if (budget->allowed) js_ast_visit_children(node, inline_budget, budget);
 }
-static AstNode* inline_body(MvpLmdProgram* p, LmdFunction* f, AstNode** prefix) {
+static AstNode* inline_body(MvpLmdProgram* p, LmdFunction* f, AstNode** prefix, bool guarded_method = false) {
     *prefix = NULL;
-    if (!f || !f->closed_calls || ast_linked_node_count(f->ast->params) > LAMBDA_MAX_FUNCTION_ARGS) return NULL;
+    if (!f || (!f->closed_calls && !guarded_method) ||
+            ast_linked_node_count(f->ast->params) > LAMBDA_MAX_FUNCTION_ARGS) return NULL;
+    if (guarded_method && (!f->home || f->captures || f->owns_captures || f->ast->params ||
+            f->id == f->home->constructor_id)) return NULL;
     // duplicate formals need the ordinary parameter installation order.
     if (js_ast_collect_parameter_facts(f->ast->params).has_duplicate_param_names) return NULL;
     AstNode* body = f->ast->body;
@@ -3194,6 +3283,28 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         branch(c, MIR_BEQ, valid, reg(c, abi), integer(c, FN_ENTRY_ABI_MVP_LMD));
         fail(c, LMD_MVP_CAPABILITY, (AstNode*)n); put_label(c, valid);
         target = em_load_at(&c->em, callee.reg, offsetof(Function, ptr), MIR_T_I64, "entry");
+        if (member && method.spelling) {
+            for (int fi = 0; fi < c->program->functions->length; fi++) {
+                LmdFunction* candidate = (LmdFunction*)c->program->functions->data[fi];
+                if (!candidate->home || !named(((AstIdentNode*)((AstMethodNode*)candidate->ast)->key)->name,
+                        method.spelling->chars)) continue;
+                AstNode* prefix = NULL;
+                AstNode* body = inline_body(c->program, candidate, &prefix, true);
+                if (!body || prefix) continue;
+                MIR_label_t other = label(c);
+                // guard the captured callee, not its spelling: argument effects may replace the method.
+                branch(c, MIR_BNE, other, reg(c, target), MIR_new_ref_op(c->em.ctx, candidate->forward));
+                LmdInlineFrame frame = {}; frame.parent = c->inlining; frame.function = candidate;
+                bool super_member = ((AstFieldNode*)n->callee)->object->node_type == AST_NODE_IDENT &&
+                    named(((AstIdentNode*)((AstFieldNode*)n->callee)->object)->name, "super");
+                frame.receiver = super_member ? c->receiver : method.owner.reg;
+                c->inlining = &frame;
+                LmdValue inlined = expression(c, body);
+                c->inlining = frame.parent;
+                move(c, member_result, reg(c, box(c, inlined).reg)); jump(c, call_done);
+                put_label(c, other);
+            }
+        }
     }
     MIR_reg_t span = 0;
     if (count && !direct_args) {
@@ -3305,10 +3416,36 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
             jump(c, call_done); put_label(c, next);
         }
         MIR_reg_t absent = constant(c, ITEM_JS_UNDEFINED);
-        MIR_reg_t result = em_call_4(&c->em, "mvp_lmd_map_call", MIR_T_I64,
+        MIR_reg_t result = 0;
+        MIR_label_t map_done = NULL;
+        int lookup = named(method.spelling, "get") ? 1 : named(method.spelling, "has") ? 3 : 0;
+        if (lookup) {
+            result = em_new_reg(&c->em, "map_result", MIR_T_I64);
+            MIR_label_t miss = label(c); map_done = label(c);
+            branch(c, MIR_BNE, miss, reg(c, callee.reg), integer(c, mvp_lmd_method_token(lookup)));
+            MIR_reg_t map = em_guard_container(&c->em, method.owner.reg, LMD_TYPE_MAP, miss);
+            branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, map,
+                LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "map_kind")), integer(c, MAP_KIND_ORDERED));
+            MIR_reg_t entries = em_load_at(&c->em, map, offsetof(LambdaGcOrderedMapLayout, entries), MIR_T_I64, "ordered_entries");
+            MIR_reg_t slot = op(c, MIR_SUB, reg(c, em_load_at(&c->em, map,
+                offsetof(LambdaGcOrderedMapLayout, last_entry), MIR_T_I64, "last_entry")), integer(c, 1));
+            branch(c, MIR_UBGE, miss, reg(c, slot), reg(c, em_load_at(&c->em, entries,
+                LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "ordered_length")));
+            MIR_reg_t row = em_array_element_address(&c->em, entries, slot, sizeof(Item));
+            // reuse the live ordinal cache; unequal representations retain canonical SameValueZero lookup.
+            branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, row, 3 * sizeof(Item), MIR_T_I64, "ordered_live")), integer(c, ITEM_TRUE));
+            branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, row, 0, MIR_T_I64, "ordered_key")),
+                reg(c, count ? values[0].reg : absent));
+            move(c, result, lookup == 3 ? integer(c, ITEM_TRUE) :
+                reg(c, em_load_at(&c->em, row, sizeof(Item), MIR_T_I64, "ordered_value")));
+            jump(c, map_done); put_label(c, miss);
+        }
+        MIR_reg_t fallback = em_call_4(&c->em, "mvp_lmd_map_call", MIR_T_I64,
             MIR_T_I64, reg(c, method.owner.reg), MIR_T_I64, reg(c, callee.reg),
             MIR_T_I64, reg(c, count ? values[0].reg : absent),
             MIR_T_I64, reg(c, count > 1 ? values[1].reg : absent), true);
+        if (map_done) { move(c, result, reg(c, fallback)); put_label(c, map_done); }
+        else result = fallback;
         check_error(c, result); move(c, member_result, reg(c, stable_item(c, result).reg));
         put_label(c, call_done); resolved = member_result;
     }
@@ -3493,6 +3630,11 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
     }
     case AST_NODE_IDENT: {
         AstIdentNode* id = (AstIdentNode*)n;
+        if (c->inlining && c->inlining->receiver &&
+                (named(id->name, "this") || named(id->name, "new.target")))
+            return named(id->name, "this")
+                ? boxed(c, op(c, MIR_OR, reg(c, c->inlining->receiver), integer(c, 0)))
+                : boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
         if ((c->function->home || c->function->lexical_receiver) &&
                 (named(id->name, "this") || named(id->name, "new.target"))) {
             MIR_reg_t value = named(id->name, "this") ? c->receiver : c->new_target;
@@ -3991,6 +4133,10 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
     em_store_at(&c->em, owner.reg, offsetof(LambdaGcOrderedMapLayout, cursors), MIR_T_I64,
         op(c, MIR_ADD, reg(c, count), integer(c, 1)));
     move(c, active, integer(c, 1)); put_label(c, registered);
+    // the captured iterable's representation also fixes its stride across body mutations.
+    MIR_reg_t step = constant(c, 1); MIR_label_t stride_ready = label(c);
+    branch(c, MIR_BNE, stride_ready, reg(c, iterable_type), integer(c, LMD_TYPE_MAP));
+    move(c, step, integer(c, 4)); put_label(c, stride_ready);
     LmdControl control = {c->control, done, next, name, length, (AstNode*)loop, owner.reg, active}; c->control = &control;
     for (LmdControl* outer = control.parent; outer; outer = outer->parent)
         if (outer->loop_target == (AstNode*)loop) { outer->next = next; outer->stop = done; }
@@ -4002,16 +4148,24 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
     // Object projections produce a fresh dense snapshot even when the input has holes.
     move(c, item, reg(c, box(c, array_read(c, {NULL, owner, cursor}, false, false, object_projection)).reg)); jump(c, body);
     put_label(c, map);
+    MIR_reg_t entries = em_load_at(&c->em, owner.reg, offsetof(LambdaGcOrderedMapLayout, entries), MIR_T_I64, "ordered_entries");
+    branch(c, MIR_UBGE, done, reg(c, cursor), reg(c, em_load_at(&c->em, entries,
+        LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "ordered_length")));
+    MIR_label_t live = label(c);
+    MIR_reg_t marker = em_load_at(&c->em, em_array_element_address(&c->em, entries,
+        op(c, MIR_ADD, reg(c, cursor), integer(c, 3)), 8), 0, MIR_T_I64, "ordered_live");
+    // dense entries need no native call; the existing readonly helper skips tombstones.
+    branch(c, MIR_BEQ, live, reg(c, marker), integer(c, ITEM_TRUE));
     move(c, cursor, reg(c, em_call_2(&c->em, "mvp_lmd_map_next", MIR_T_I64,
         MIR_T_I64, reg(c, owner.reg), MIR_T_I64, reg(c, cursor), true)));
     branch(c, MIR_BLT, done, reg(c, cursor), integer(c, 0));
+    put_label(c, live);
     bool native_entry = direct_pair || projection == 7 || projection == 8;
     MIR_label_t ordinary_entries = selected_projection && projection != 6 ? label(c) : NULL;
     if (native_entry) {
         // an ordinary method's returned Map uses its default entry iteration.
         if (ordinary_entries) branch(c, MIR_BEQ, ordinary_entries,
             reg(c, selected_projection), integer(c, 6));
-        MIR_reg_t entries = em_load_at(&c->em, owner.reg, offsetof(LambdaGcOrderedMapLayout, entries), MIR_T_I64, "ordered_entries");
         int count = direct_pair ? 2 : 1;
         for (int i = 0; i < count; i++) {
             MIR_reg_t slot = op(c, MIR_ADD, reg(c, cursor), integer(c, direct_pair ? i : projection == 8));
@@ -4055,9 +4209,6 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
         }
     } else write_binding(c, identifier_binding(c->program, (AstIdentNode*)head), value, head, loop->declares_binding);
     statement(c, loop->body); put_label(c, next);
-    MIR_reg_t step = constant(c, 1); MIR_label_t advance = label(c);
-    branch(c, MIR_BNE, advance, reg(c, tag(c, owner)), integer(c, LMD_TYPE_MAP));
-    move(c, step, integer(c, 4)); put_label(c, advance);
     move(c, cursor, reg(c, op(c, MIR_ADD, reg(c, cursor), reg(c, step)))); jump(c, test);
     put_label(c, done); release_iterators(c, control.parent); c->control = control.parent;
 }
@@ -4862,10 +5013,49 @@ static bool dense_append_loop(MvpLmdProgram* p, AstFieldNode* field, AstNode* wr
     }
     return true;
 }
+static bool constructor_layout_reusable(AstNode* node, bool value = false) {
+    if (!node) return false;
+    if (value) {
+        if (node->node_type == AST_NODE_LITERAL) return true;
+        if (node->node_type == AST_NODE_IDENT) {
+            String* name = ((AstIdentNode*)node)->name;
+            return !named(name, "this") && !named(name, "super") && !named(name, "new.target");
+        }
+        if (node->node_type == AST_NODE_BINARY) {
+            AstBinaryNode* binary = (AstBinaryNode*)node;
+            return constructor_layout_reusable(binary->left, true) &&
+                constructor_layout_reusable(binary->right, true);
+        }
+        if (node->node_type == AST_NODE_UNARY) {
+            AstUnaryNode* unary = (AstUnaryNode*)node;
+            return (unary->op == OPERATOR_POS || unary->op == OPERATOR_NEG || unary->op == OPERATOR_NOT ||
+                unary->op == OPERATOR_JS_BIT_NOT) && constructor_layout_reusable(unary->operand, true);
+        }
+        return false;
+    }
+    if (node->node_type == AST_NODE_BLOCK) {
+        for (AstNode* child = ((AstBlockNode*)node)->statements; child; child = child->next)
+            if (!constructor_layout_reusable(child)) return false;
+        return true;
+    }
+    if (node->node_type != AST_NODE_EXPR_STMT) return false;
+    AstNode* expression = ((AstExprStmtNode*)node)->expression;
+    if (!expression || expression->node_type != AST_NODE_ASSIGN) return false;
+    AstAssignNode* assignment = (AstAssignNode*)expression;
+    if (assignment->op != OPERATOR_ASSIGN || assignment->left->node_type != AST_NODE_MEMBER_EXPR) return false;
+    AstFieldNode* field = (AstFieldNode*)assignment->left;
+    // no calls, receiver reads or escapes can reveal the preallocated field set during initialization.
+    return !field->computed && field->object->node_type == AST_NODE_IDENT &&
+        named(((AstIdentNode*)field->object)->name, "this") && constructor_layout_reusable(assignment->right, true);
+}
 static int lower_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
     for (int i = 0; i < p->classes->length; i++) {
         MvpLmdClass* cls = (MvpLmdClass*)p->classes->data[i];
+        if (cls->constructor_id >= 0 && !cls->ast->superclass) {
+            LmdFunction* constructor = (LmdFunction*)p->functions->data[cls->constructor_id];
+            cls->reusable_layout = constructor_layout_reusable(constructor->ast->body);
+        }
         bool ok = plan_shape_field(p, &cls->prototype_shape,
             name_pool_create_len(p->frontend->name_pool, "constructor", 11), LMD_TYPE_FUNC, JSPD_NON_ENUMERABLE);
         ok &= plan_shape_field(p, &cls->static_shape,
