@@ -76,7 +76,7 @@ fn page(shown) =>
       <meta charset: "UTF-8">
       <title sess.window_title(shown.session, false)>
       for (sheet in math_css.font_stylesheets()) { sheet }
-      <style files.css ++ tools.css ++ shell.surface_css ++ src.surface_css>
+      <style math_css.get_stylesheet(null) ++ files.css ++ tools.css ++ shell.surface_css ++ src.surface_css>
     >
     apply(<edit_doc shown: shown>, {mode: "edit"})
   >

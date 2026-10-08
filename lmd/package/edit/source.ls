@@ -950,11 +950,8 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
                          after_save: null {
   let dirty = sess.is_dirty(session, b);
   <body class: "edit-app edit-format-source",
-    <div class: "edit-toolbar", role: "toolbar", ["aria-label"]: "Document",
-      files.file_label(session, dirty)
-      tools.group(tools.file_group, history_probe(hist), dirty, null)
-      if (session.rich_format != null) tools.group(tools.rich_view_group, history_probe(hist), dirty, null) else null
-    >
+    tools.toolbar(files.file_label(session, dirty), history_probe(hist), dirty, null, [],
+                  if (session.rich_format != null) tools.rich_view_group else []);
     <div class: "src-main",
       gutter(b, vw);
       <div id: "edit-surface", class: if (vw.wrap) "src-text src-wrap" else "src-text", contenteditable: "true",

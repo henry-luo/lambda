@@ -62,8 +62,8 @@ fn kept_source(n) {
 }
 
 // What the editor keeps but cannot edit shows view-only: the rendering the
-// adapter stored (view.ls). A part without one — math, or a part that renders
-// nothing on its own: a lone tag, a comment, a link definition — shows its
+// adapter stored (view.ls). A part without one — a failed formula, or a part
+// that renders nothing on its own: a lone tag, a comment, a link definition — shows its
 // source instead, so it never hides from the reader or the caret.
 fn kept_view(n) {
   let shown = attr_get(n, view_attr)
@@ -188,6 +188,7 @@ pub let css = "
   .edit-surface img { max-width: 100%; }
   .edit-surface hr { border: none; border-top: 2px solid #d8dee4; margin: 1.2em 0; }
   .edit-view-only { cursor: default; }
+  .edit-math-display { text-align: center; padding: 12px 0; overflow-x: auto; }
   .edit-view-block { display: block; margin: 0.5em -9px; padding: 1px 8px;
                      border: 1px dashed #d0d7de; border-radius: 6px; }
   .edit-view-source { font-family: 'SF Mono', Menlo, monospace; font-size: 0.85em;

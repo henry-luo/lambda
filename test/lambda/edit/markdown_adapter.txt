@@ -45,6 +45,6 @@ true
 "edited export:"
 ["Changed intro.\n\nText[^1] here.\n\n*Italic with **nested bold***\n\n[^1]: a note,  spaced\n\n[ref]: https://example.com\n\nOutro with [a link](https://example.com).\n"]
 "inline atom views:"
-[['raw_html', 0], ['raw_html', 0], ['raw_html', 1], ['raw_html', 0], ['math', 0]]
+[['raw_html', 0], ['raw_html', 0], ['raw_html', 1], ['raw_html', 0], ['math', 1]]
 "declined commands:"
 ["formatUnderline", "formatSubscript"]

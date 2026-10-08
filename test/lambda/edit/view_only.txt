@@ -8,8 +8,12 @@
 ["<p>Press <kbd>K</kbd>, see <a title=\"https://example.com\">docs</a> and <img src=\"p.png\" alt=\"p\"><sup class=\"edit-view-note\">[1]</sup>.</p>"]
 "markdown block with raw script:"
 ["<p>Hi  there.</p>"]
-"markdown block with math:"
-["<p>Area <span class=\"edit-view-source\">$\\pi r^2$</span> &amp; more.</p>", ""]
+"markdown math renders:"
+[true, true, true]
+"inline math projections:"
+[true, true]
+"math source survives:"
+[true, true]
 "html adapter views:"
 [['raw_html', "<kbd>K</kbd>"], ['raw_html', ""], ['html_block', "<video src=\"v.mp4\"></video>"]]
 "views stay out of the saved HTML:"

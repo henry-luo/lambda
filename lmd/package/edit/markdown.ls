@@ -109,8 +109,7 @@ fn doc_body(parsed) {
 
 fn inline_children(item, marks) => [for (c in content(item)) for (x in inline_items(c, marks)) x]
 
-// Raw HTML and math keep their source text; raw HTML also shows its
-// rendering view-only, math its source (view.ls).
+// Raw HTML and math keep their source text and a view-only rendering (view.ls).
 fn kept_atom(tag, key, text, shown) => node_attrs(tag, attr_list([[key, text], [view_attr, shown]]), [])
 
 fn marked(item, marks, mark) any => inline_children(item, with_mark(marks, mark, true))
@@ -137,7 +136,7 @@ fn inline_items(item, marks) {
     }
     else if (tag == 'br') { [node('br', [])] }
     else if (tag == 'raw-html') { [kept_atom('raw_html', 'html', plain_text(item), html_view(plain_text(item)))] }
-    else if (tag == 'math') { [kept_atom('math', 'tex', plain_text(item), null)] }
+    else if (tag == 'math') { [kept_atom('math', 'tex', plain_text(item), math_view(plain_text(item), false))] }
     else { [] }
   }
 }
@@ -195,7 +194,7 @@ fn block_nodes(item) {
       [node('table', [for (p in content(item) where type(p) == element) table_part(p)])]
     }
     else if (tag == 'html-block') { [kept_atom('html_block', 'html', plain_text(item), html_view(plain_text(item)))] }
-    else if (tag == 'math') { [kept_atom('math_block', 'tex', plain_text(item), null)] }
+    else if (tag == 'math') { [kept_atom('math_block', 'tex', plain_text(item), math_view(plain_text(item), true))] }
     else if (member(inline_tags, tag)) { [node('p', inline_items(item, []))] }
     else { [] }
   }
