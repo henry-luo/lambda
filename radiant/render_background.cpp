@@ -1293,18 +1293,9 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
 }
 
 /**
- * Render inset box-shadow effects (CSS Backgrounds Level 3 §7)
- *
- * Inset shadows are rendered AFTER the background, inside the element's padding box.
- *
- * Algorithm:
- * 1. Fill a ring INSIDE the element: outer = element border-box, inner = element
- *    rect inset by (blur_radius + spread) and shifted by offset.  The ring provides
- *    enough material (blur_radius wide) for the Gaussian to produce a smooth gradient.
- * 2. Use box_blur_region_inset: copies expanded region to a temp buffer, fills the
- *    outer padding with the element's background color (so blur kernel sees the
- *    correct base color at element edges), blurs in-place, then copies the inner
- *    rect back to the surface.  This avoids edge-clamping artifacts.
+ * Blur the inverse padding-box cutout in isolation, then clip and composite it.
+ * Blurring painted backgrounds smears gradients and cannot model the shadow
+ * outside the padding edge; CSS inset shadows extend from that outside region.
  */
 void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->box_shadow) return;
@@ -1314,134 +1305,80 @@ void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect r
     int shadow_count = render_collect_box_shadows(&scope, view, true, &shadows);
     if (shadow_count == 0) return;
 
-    // Scale factor: rect is in physical pixels but shadow props and border radii
-    // are in CSS pixels. Multiply by raster_scale at the lowering boundary.
-    float sc = rdcon->raster_scale;
+    float scale = rdcon->raster_scale;
+    BorderProp* border = view->boundary()->border;
+    Corner radius = border ? border->radius : Corner{};
+    // reduce the border-box radii before deriving the padding-box and cutout radii.
+    constrain_corner_radii(&radius, rect.width / scale, rect.height / scale);
+    radius = background_corner_inset_box(&radius, CSS_VALUE_PADDING_BOX, border, nullptr, scale);
+    Rect padding_rect = render_geometry_adjust_box_rect(rect, CSS_VALUE_PADDING_BOX, scale, border, nullptr);
+    if (padding_rect.width <= 0.0f || padding_rect.height <= 0.0f) return;
+    constrain_corner_radii(&radius, padding_rect.width, padding_rect.height);
+    const RdtMatrix* transform = render_state_current_transform(rdcon);
 
-    // Get border radius if present (scaled to physical pixels)
-    float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
-    if (view->boundary()->border) {
-        Corner* radius = &view->boundary_mut()->border->radius;
-        r_tl = radius->horizontal[0] * sc;
-        r_tr = radius->horizontal[1] * sc;
-        r_br = radius->horizontal[2] * sc;
-        r_bl = radius->horizontal[3] * sc;
-    }
-
-    const RdtMatrix* xform = render_state_current_transform(rdcon);
-
-    // Render inset shadows in reverse order (last specified = bottommost)
     for (int i = shadow_count - 1; i >= 0; i--) {
-        BoxShadow* s = shadows[i];
+        BoxShadow* shadow = shadows[i];
+        if (shadow->color.a == 0) continue;
+        float spread = shadow->spread_radius * scale;
+        float sigma = shadow->blur_radius * scale * 0.5f;
+        float pad = ceilf(sigma * 3.0f);
+        float left = floorf(padding_rect.x - pad);
+        float top = floorf(padding_rect.y - pad);
+        float width = ceilf(padding_rect.x + padding_rect.width + pad) - left;
+        float height = ceilf(padding_rect.y + padding_rect.height + pad) - top;
+        size_t bytes = 0;
+        if (!render_surface_allocation_size(width, height, &bytes) ||
+            !render_memory_allow_allocation(nullptr, bytes)) return;
+        int pixel_width = (int)width; // INT_CAST_OK: validated physical raster buffer extent
+        int pixel_height = (int)height; // INT_CAST_OK: validated physical raster buffer extent
+        bytes = (size_t)pixel_width * (size_t)pixel_height * sizeof(uint32_t);
+        // recorded image pixels must survive until the display list is released.
+        ScratchArena* image_arena = rdcon->dl ? &rdcon->dl->arena : &rdcon->scratch;
+        uint32_t* pixels = (uint32_t*)scratch_alloc(image_arena, bytes);
+        if (!pixels) return;
+        memset(pixels, 0, bytes);
+        ImageSurface image = {};
+        image.pixels = pixels; image.width = pixel_width; image.height = pixel_height;
+        image.pitch = pixel_width * 4;
 
-        // Scale shadow properties from CSS pixels to physical pixels
-        float s_offset_x = s->offset_x * sc;
-        float s_offset_y = s->offset_y * sc;
-        float s_blur     = s->blur_radius * sc;
-        float s_spread   = s->spread_radius * sc;
-
-        // Band = blur/2 + spread.  This provides enough fill material for the
-        // Gaussian to produce a smooth gradient while avoiding over-darkening.
-        // box_blur_region_inset pads outside the element with bg_color so the
-        // blur kernel sees the correct base color.
-        float band = s_blur * 0.5f + s_spread;
-        float inner_x = rect.x + s_offset_x + band;
-        float inner_y = rect.y + s_offset_y + band;
-        float inner_w = rect.width  - 2 * band;
-        float inner_h = rect.height - 2 * band;
-
-        // Use full shadow color (no alpha reduction needed — box_blur_region_inset
-        // handles the edge falloff by painting element bg color in the padding area)
-        Color fill_color = s->color;
-
-        if (inner_w <= 0 || inner_h <= 0) {
-            // Shadow band consumes entire element — fill with adjusted shadow color
-            RdtPath* fill_path = background_rect_path(rect);
-            RdtPath* clip_path = background_rect_path(rect);
-
-            rc_push_clip(rdcon, clip_path, xform);
-            rc_fill_path(rdcon, fill_path, fill_color, RDT_FILL_WINDING, xform);
-            rc_pop_clip(rdcon);
-            rdt_path_free(fill_path);
-            rdt_path_free(clip_path);
-            continue;
+        RdtPath* mask = background_rect_path({0.0f, 0.0f, width, height});
+        Rect cutout = {padding_rect.x + shadow->offset_x * scale + spread - left,
+            padding_rect.y + shadow->offset_y * scale + spread - top,
+            padding_rect.width - 2.0f * spread, padding_rect.height - 2.0f * spread};
+        if (cutout.width > 0.0f && cutout.height > 0.0f) {
+            Corner cutout_radius = radiant_corner_inset(&radius, spread, spread);
+            constrain_corner_radii(&cutout_radius, cutout.width, cutout.height);
+            render_path_append_rounded_rect(mask, cutout, &cutout_radius, false);
         }
+        RdtVector vector = {};
+        Color mask_color = {};
+        mask_color.r = mask_color.g = mask_color.b = 255;
+        mask_color.a = shadow->color.a;
+        int saved_depth = rdt_clip_save_depth();
+        rdt_vector_init(&vector, pixels, pixel_width, pixel_height, pixel_width);
+        rdt_fill_path(&vector, mask, mask_color, RDT_FILL_EVEN_ODD, nullptr);
+        rdt_vector_destroy(&vector);
+        rdt_clip_restore_depth(saved_depth);
+        rdt_path_free(mask);
 
-        // Adjust border radii for inner cutout (shrink by band width)
-        float ir_tl = max(0.0f, r_tl - band);
-        float ir_tr = max(0.0f, r_tr - band);
-        float ir_br = max(0.0f, r_br - band);
-        float ir_bl = max(0.0f, r_bl - band);
-
-
-        // Even-odd fill: outer (CW) = element border-box, inner (CCW) = inset cutout
-        RdtPath* shadow_path = rdt_path_new();
-
-        // The shared path builder keeps outer and inner rounded geometry in
-        // one owner while retaining the winding required by even-odd fill.
-        Corner outer_radius = render_path_uniform_corner(r_tl, r_tr, r_br, r_bl);
-        Corner inner_radius = render_path_uniform_corner(ir_tl, ir_tr, ir_br, ir_bl);
-        render_path_append_rounded_rect(shadow_path, rect, &outer_radius, true);
-        render_path_append_rounded_rect(
-            shadow_path, {inner_x, inner_y, inner_w, inner_h}, &inner_radius, false);
-
-        // For rounded elements, the inset blur operates on a rectangular region
-        // that extends into the rounded corners. Save corner pixels before fill+blur
-        // and restore them after, so the blur doesn't leak outside the rounded border.
-        bool inset_need_clip = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0) && s_blur > 0;
-        int inset_save_rx = 0, inset_save_ry = 0, inset_save_rw = 0, inset_save_rh = 0;
-        int inset_clip_type = 0;
-        float inset_clip_params[RDT_CLIP_PARAM_COUNT] = {};
-        if (inset_need_clip) {
-            inset_save_rx = (int)floorf(rect.x);
-            inset_save_ry = (int)floorf(rect.y);
-            inset_save_rw = (int)ceilf(rect.x + rect.width) - inset_save_rx;
-            inset_save_rh = (int)ceilf(rect.y + rect.height) - inset_save_ry;
-            inset_clip_type = CLIP_SHAPE_ROUNDED_RECT;
-            inset_clip_params[0] = rect.x;  inset_clip_params[1] = rect.y;
-            inset_clip_params[2] = rect.width; inset_clip_params[3] = rect.height;
-            inset_clip_params[4] = r_tl; inset_clip_params[5] = r_tr;
-            inset_clip_params[6] = r_br; inset_clip_params[7] = r_bl;
-            rc_shadow_clip_save(rdcon, inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh);
+        if (sigma > 0.0f) {
+            ScratchScope blur_scope(&rdcon->scratch);
+            uint32_t* temporary = blur_scope.array<uint32_t>(bytes / sizeof(uint32_t));
+            if (!temporary) return;
+            ImageSurface intermediate = image;
+            intermediate.pixels = temporary;
+            if (!render_gaussian_blur_axis(&rdcon->scratch, &image, &intermediate,
+                    sigma, 0, 0, pixel_width, 1) ||
+                !render_gaussian_blur_axis(&rdcon->scratch, &intermediate, &image,
+                    sigma, 1, 0, pixel_height, 1)) return;
         }
-
-        // Clip to element boundary and fill
-        RdtPath* clip_path = background_rect_path(rect);
-        rc_push_clip(rdcon, clip_path, xform);
-        rc_fill_path(rdcon, shadow_path, fill_color, RDT_FILL_EVEN_ODD, xform);
+        tint_premultiplied_surface_region(&image, 0, 0, pixel_width, pixel_height, shadow->color);
+        RdtPath* clip = render_path_create_rounded_rect(padding_rect, &radius);
+        rc_push_clip(rdcon, clip, transform);
+        rc_draw_image(rdcon, pixels, pixel_width, pixel_height, pixel_width,
+            left, top, width, height, 255, transform);
         rc_pop_clip(rdcon);
-        rdt_path_free(shadow_path);
-        rdt_path_free(clip_path);
-
-        // Apply box blur within element rect
-        if (s_blur > 0) {
-            float blur_px = s_blur;
-            int br_x = (int)floorf(rect.x);
-            int br_y = (int)floorf(rect.y);
-            int br_w = (int)ceilf(rect.width);
-            int br_h = (int)ceilf(rect.height);
-            int pad = (int)ceilf(blur_px);
-
-            // Get element background color for the blur padding area.
-            // This ensures the blur kernel at element edges sees the correct base
-            // color instead of the parent's background.
-            Color bg;
-            bg.r = 255; bg.g = 255; bg.b = 255; bg.a = 255;  // default white
-            if (view->bound && view->boundary_mut()->background) {
-                bg = view->boundary()->background->color;
-            }
-            // Convert to surface pixel format (ABGR8888)
-            uint32_t bg_pixel = render_pixel_pack_abgr(
-                bg.r, bg.g, bg.b, bg.a);
-
-            rc_box_blur_inset(rdcon, br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
-        }
-
-        // Restore corner pixels outside rounded border-box after inset blur
-        if (inset_need_clip) {
-            rc_shadow_clip_restore(rdcon, inset_clip_type, inset_clip_params,
-                                   inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh, 0);
-        }
+        rdt_path_free(clip);
     }
 }
 

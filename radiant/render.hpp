@@ -3778,6 +3778,10 @@ void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect r
 // Can be used by box-shadow, text-shadow, and filter:blur()
 void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius);
 
+// one separable Gaussian pass; edge modes are transparent, duplicate, and wrap.
+bool render_gaussian_blur_axis(ScratchArena* scratch, const ImageSurface* source,
+    ImageSurface* destination, float sigma, unsigned axis, int low, int high, unsigned edge);
+
 // Convert straight-alpha ABGR pixels to premultiplied-alpha ABGR in-place.
 // Use before isolated-source blurs that will later composite with premul src-over.
 void premultiply_surface_region(ImageSurface* surface, int rx, int ry, int rw, int rh);

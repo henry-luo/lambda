@@ -451,11 +451,47 @@ static int svg_filter_edge_index(int64_t coordinate, int low, int high, unsigned
     return low + (int)(wrapped < 0 ? wrapped + period : wrapped); // INT_CAST_OK: wrapped raster index within the input extent
 }
 
+bool render_gaussian_blur_axis(ScratchArena* scratch, const ImageSurface* source,
+    ImageSurface* destination, float sigma, unsigned axis, int low, int high, unsigned edge) {
+    if (!scratch || !source || !destination || !source->pixels || !destination->pixels ||
+        source->pixels == destination->pixels || source->width != destination->width ||
+        source->height != destination->height || axis > 1 || !isfinite(sigma) || sigma <= 0.0f) return false;
+    float radius_value = ceilf(sigma * 3.0f);
+    if (!isfinite(radius_value) || radius_value > (float)(INT_MAX / 2)) return false;
+    int radius = (int)radius_value; // INT_CAST_OK: bounded raster kernel tap count
+    size_t taps = (size_t)radius * 2 + 1;
+    ScratchScope kernel_scope(scratch);
+    float* weights = kernel_scope.array<float>(taps);
+    if (!weights) return false;
+    float sum = 0.0f;
+    for (int tap = -radius; tap <= radius; tap++) {
+        float weight = expf(-.5f * (float)tap * (float)tap / (sigma * sigma));
+        weights[tap + radius] = weight; sum += weight;
+    }
+    for (size_t tap = 0; tap < taps; tap++) weights[tap] /= sum;
+    const uint32_t* data = (const uint32_t*)source->pixels;
+    uint32_t* output = (uint32_t*)destination->pixels;
+    size_t source_stride = (size_t)source->pitch / sizeof(uint32_t);
+    size_t destination_stride = (size_t)destination->pitch / sizeof(uint32_t);
+    for (int row = 0; row < source->height; row++) for (int column = 0; column < source->width; column++) {
+        float values[4] = {};
+        for (int tap = -radius; tap <= radius; tap++) {
+            int sample = svg_filter_edge_index((int64_t)(axis ? row : column) + tap, low, high, edge);
+            int px = axis ? column : sample, py = axis ? sample : row;
+            if (px < 0 || py < 0 || px >= source->width || py >= source->height) continue;
+            uint32_t pixel = data[(size_t)py * source_stride + (size_t)px];
+            for (unsigned channel = 0; channel < 4; channel++) values[channel] +=
+                (float)((pixel >> (channel * 8)) & 255u) / 255.0f * weights[tap + radius];
+        }
+        output[(size_t)row * destination_stride + (size_t)column] = svg_filter_pack(values);
+    }
+    return true;
+}
+
 static ImageSurface* svg_filter_blur(SvgFilterExecution* execution, int input, float sigma_x, float sigma_y, bool linear, unsigned edge = 0) {
     ImageSurface* current = svg_filter_copy_input(execution, input, linear);
     if (!current) return nullptr;
     size_t pixels = (size_t)current->width * (size_t)current->height;
-    uint32_t* data = (uint32_t*)current->pixels;
     const float sigmas[] = {sigma_x, sigma_y};
     const SvgFilterImage* source = svg_filter_image(execution, input);
     Bound region = source ? source->region : execution->region;
@@ -475,28 +511,13 @@ static ImageSurface* svg_filter_blur(SvgFilterExecution* execution, int input, f
         int high = edge ? (int)fmaxf(0.0f, fminf(extent, region_high)) : (axis ? current->height : current->width); // INT_CAST_OK: bounded raster sample index
         size_t taps = (size_t)radius * 2 + 1;
         if (!svg_filter_spend(execution, pixels * taps)) { image_surface_destroy(current); return nullptr; }
-        // each separable pass releases its kernel through the incoming LIFO scratch contract.
-        ScratchScope kernel_scope(execution->run->scratch);
-        float* weights = kernel_scope.array<float>(taps);
         ImageSurface* output = svg_filter_surface(execution);
-        if (!weights || !output) { if (output) image_surface_destroy(output); image_surface_destroy(current); return nullptr; }
-        float sum = 0.0f;
-        for (int tap = -radius; tap <= radius; tap++) { float weight = expf(-.5f * (float)tap * (float)tap / (sigma * sigma)); weights[tap + radius] = weight; sum += weight; }
-        for (size_t tap = 0; tap < taps; tap++) weights[tap] /= sum;
-        uint32_t* destination = (uint32_t*)output->pixels;
-        for (int row = 0; row < current->height; row++) for (int column = 0; column < current->width; column++) {
-            float values[4] = {};
-            for (int tap = -radius; tap <= radius; tap++) {
-                int sample = svg_filter_edge_index((int64_t)(axis ? row : column) + tap, low, high, edge);
-                int px = axis ? column : sample, py = axis ? sample : row;
-                if (px < 0 || py < 0 || px >= current->width || py >= current->height) continue;
-                uint32_t pixel = data[(size_t)py * (size_t)current->width + (size_t)px];
-                for (unsigned channel = 0; channel < 4; channel++) values[channel] +=
-                    (float)((pixel >> (channel * 8)) & 255u) / 255.0f * weights[tap + radius];
-            }
-            destination[(size_t)row * (size_t)current->width + (size_t)column] = svg_filter_pack(values);
+        if (!output || !render_gaussian_blur_axis(execution->run->scratch,
+            current, output, sigma, axis, low, high, edge)) {
+            if (output) image_surface_destroy(output);
+            image_surface_destroy(current); return nullptr;
         }
-        image_surface_destroy(current); current = output; data = destination;
+        image_surface_destroy(current); current = output;
     }
     return current;
 }
