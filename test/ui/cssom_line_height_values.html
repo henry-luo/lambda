@@ -1,0 +1,73 @@
+<!doctype html><meta charset="utf-8"><style>
+#source:lang(en){font-size:10px;line-height:2}#source:lang(fr){font-size:20px;line-height:3}
+#alternate{font-size:12px;line-height:3}.pseudo::before{content:'x';font-size:2em;line-height:150%}.pseudo-math::before{content:'x';font-size:2em}
+</style><button id="check">Check computed line-height values</button><div id="source" lang="en"></div><div id="alternate"></div><output id="report"></output><script>
+document.getElementById('check').addEventListener('click',function(){
+var source=document.getElementById('source'),alternate=document.getElementById('alternate'),report=document.getElementById('report'),nodes=[],leaf,live;
+function chain(depth){var current=source;nodes=[];for(var index=0;index<depth;index++){var child=document.createElement('div');current.appendChild(child);nodes.push(child);current=child;}return current;}
+function check(name,fn){source.textContent='';alternate.textContent='';source.lang='en';source.style.cssText='';document.documentElement.style.fontSize='20px';leaf=chain(24);leaf.style.fontSize='2em';live=getComputedStyle(leaf);try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+check("number",function(){source.style.lineHeight="2";return live.lineHeight;});
+check("percentage",function(){source.style.lineHeight="150%";return live.lineHeight;});
+check("em",function(){source.style.lineHeight="1.5em";return live.lineHeight;});
+check("rem",function(){source.style.lineHeight="1rem";return live.lineHeight;});
+check("absolute",function(){source.style.lineHeight="12pt";return live.lineHeight;});
+check("viewport-width",function(){source.style.lineHeight="5vw";return live.lineHeight;});
+check("viewport-height",function(){source.style.lineHeight="5vh";return live.lineHeight;});
+check("number-math",function(){source.style.lineHeight="calc(2)";return live.lineHeight;});
+check("length-math",function(){source.style.lineHeight="calc(2 * 1em)";return live.lineHeight;});
+check("percentage-math",function(){source.style.lineHeight="calc(150%)";return live.lineHeight;});
+check("mixed-math",function(){source.style.lineHeight="calc(10px + 50%)";return live.lineHeight;});
+check("minimum-number",function(){source.style.lineHeight="min(1.5, 2)";return live.lineHeight;});
+check("maximum-number",function(){source.style.lineHeight="max(1, 2)";return live.lineHeight;});
+check("clamped-number",function(){source.style.lineHeight="clamp(0.5, 1.5, 2)";return live.lineHeight;});
+check("rounded-number",function(){source.style.lineHeight="round(up, 1.2, 1)";return live.lineHeight;});
+check("modulo-number",function(){source.style.lineHeight="mod(5, 2)";return live.lineHeight;});
+check("absolute-number",function(){source.style.lineHeight="abs(-2)";return live.lineHeight;});
+check("square-root-number",function(){source.style.lineHeight="sqrt(4)";return live.lineHeight;});
+check("trigonometric-number",function(){source.style.lineHeight="sin(90deg)";return live.lineHeight;});
+check("power-number",function(){source.style.lineHeight="pow(2, 2)";return live.lineHeight;});
+check("negative-number-math",function(){source.style.lineHeight="calc(-2)";return live.lineHeight;});
+check("negative-length-math",function(){source.style.lineHeight="calc(-1em)";return live.lineHeight;});
+check("nan-number-math",function(){source.style.lineHeight="calc(0 / 0)";return live.lineHeight;});
+check("zero-number",function(){source.style.lineHeight="0";return live.lineHeight;});
+check("zero-font",function(){source.style.fontSize="0px";return live.lineHeight;});
+check("variable-number",function(){source.style.setProperty("--leading","2");source.style.lineHeight="var(--leading)";return live.lineHeight;});
+check("variable-percentage",function(){source.style.setProperty("--leading","150%");source.style.lineHeight="var(--leading)";return live.lineHeight;});
+check("variable-length",function(){source.style.setProperty("--leading","2em");source.style.lineHeight="var(--leading)";return live.lineHeight;});
+check("variable-math",function(){source.style.setProperty("--leading","calc(1em + 50%)");source.style.lineHeight="var(--leading)";return live.lineHeight;});
+check("declaration-variable-owner",function(){source.style.setProperty("--leading","2");source.style.lineHeight="var(--leading)";leaf.style.setProperty("--leading","9");return live.lineHeight;});
+check("variable-fallback",function(){leaf.style.lineHeight="var(--absent, 3)";return live.lineHeight;});
+check("invalid-variable-inherits",function(){leaf.style.lineHeight="var(--absent)";return live.lineHeight;});
+check("invalid-substituted-type-inherits",function(){leaf.style.setProperty("--leading","2s");leaf.style.lineHeight="var(--leading)";return live.lineHeight;});
+check("invalid-substituted-math-inherits",function(){leaf.style.setProperty("--leading","1");leaf.style.lineHeight="calc(1px + var(--leading))";return live.lineHeight;});
+check("normal",function(){leaf.style.lineHeight="normal";return live.lineHeight;});
+check("initial",function(){leaf.style.lineHeight="initial";return live.lineHeight;});
+check("inherit",function(){leaf.style.lineHeight="inherit";return live.lineHeight;});
+check("unset",function(){leaf.style.lineHeight="unset";return live.lineHeight;});
+check("live-owner-font",function(){source.style.lineHeight="1.5em";var before=live.lineHeight;source.style.fontSize="20px";return before==="15px"&&live.lineHeight==="30px";});
+check("live-variable-number",function(){source.style.setProperty("--leading","2");source.style.lineHeight="var(--leading)";var before=live.lineHeight;source.style.setProperty("--leading","3");return before==="40px"&&live.lineHeight==="60px";});
+check("live-language-owner",function(){var before=live.lineHeight;source.lang="fr";return before==="40px"&&live.lineHeight==="120px";});
+check("shorthand-number",function(){source.style.font="15px/2 serif";return live.lineHeight;});
+check("shorthand-percentage",function(){source.style.font="12px/150% serif";return live.lineHeight;});
+check("shorthand-default",function(){source.style.font="12px serif";return live.lineHeight;});
+check("variable-font-shorthand",function(){source.style.setProperty("--face","12px/2 serif");source.style.font="var(--face)";return live.fontSize==="24px"&&live.lineHeight==="48px";});
+check("leaf-font-shorthand",function(){leaf.style.font="20px/2 serif";return live.lineHeight;});
+check("later-longhand",function(){source.style.font="12px/2 serif";source.style.lineHeight="3";return live.lineHeight;});
+check("later-shorthand",function(){source.style.lineHeight="3";source.style.font="12px/2 serif";return live.lineHeight;});
+check("relative-declaration-owner",function(){nodes[12].style.fontSize="150%";nodes[12].style.lineHeight="calc(150% + 2px)";return live.lineHeight;});
+check("deep-length-owner",function(){source.textContent="";leaf=chain(128);leaf.style.fontSize="2em";source.style.lineHeight="1.5em";return getComputedStyle(leaf).lineHeight;});
+check("reparented-owner",function(){alternate.appendChild(source.firstElementChild);return live.lineHeight;});
+check("live-root-rem",function(){source.style.lineHeight="1rem";var before=live.lineHeight;document.documentElement.style.fontSize="24px";return before==="20px"&&live.lineHeight==="24px";});
+check("length-independent-of-child-font",function(){source.style.lineHeight="17px";leaf.style.fontSize="50px";return live.lineHeight;});
+check("invalid-mixed-number",function(){leaf.style.lineHeight="1";leaf.style.lineHeight="calc(1px + 1)";return leaf.style.lineHeight==="1"&&live.lineHeight==="20px";});
+check("invalid-time",function(){leaf.style.lineHeight="1";leaf.style.lineHeight="calc(1s)";return leaf.style.lineHeight==="1"&&live.lineHeight==="20px";});
+check("invalid-mixed-minimum",function(){leaf.style.lineHeight="1";leaf.style.lineHeight="min(2, 3px)";return leaf.style.lineHeight==="1"&&live.lineHeight==="20px";});
+check("invalid-squared-length",function(){leaf.style.lineHeight="1";leaf.style.lineHeight="calc(1em * 1em)";return leaf.style.lineHeight==="1"&&live.lineHeight==="20px";});
+check("pseudo-origin-font",function(){return getComputedStyle(leaf,"::before").fontSize;});
+check("pseudo-origin-number",function(){return getComputedStyle(leaf,"::before").lineHeight;});
+check("pseudo-own-font",function(){leaf.className="pseudo";return getComputedStyle(leaf,"::before").fontSize;});
+check("pseudo-own-percentage",function(){leaf.className="pseudo";return getComputedStyle(leaf,"::before").lineHeight;});
+check("pseudo-own-math",function(){leaf.className="pseudo-math";source.style.lineHeight="calc(2)";return getComputedStyle(leaf,"::before").lineHeight;});
+check("pseudo-origin-color",function(){leaf.style.color="green";return getComputedStyle(leaf,"::before").color;});
+source.textContent='';alternate.textContent='';document.documentElement.style.fontSize='';
+});</script>

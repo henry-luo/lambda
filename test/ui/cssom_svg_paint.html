@@ -1,0 +1,57 @@
+<!doctype html>
+<link rel="stylesheet" href="cssom_svg_paint.css">
+<button id="check">check</button><button id="verify">verify</button><div id="report"></div>
+<div id="html" fill="red" stroke="blue" stroke-width="5"></div>
+<svg width="200" height="100" viewBox="0 0 200 100">
+  <rect id="defaults" width="10" height="10" />
+  <rect id="attributes" fill="red" stroke="blue" stroke-width="2" />
+  <g id="parent" fill="green" stroke="currentColor" stroke-width="3em" font-size="20" color="red">
+    <rect id="child" font-size="10" color="blue" />
+  </g>
+  <rect id="target" /><rect id="sheet" /><rect id="imported" /><rect id="relative" fill="url(#paint) red" />
+</svg>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var target=document.getElementById('target'),s=target.style,c=getComputedStyle(target),report=document.getElementById('report');
+function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+check('default-fill',function(){return getComputedStyle(document.getElementById('defaults')).fill;});
+check('default-stroke',function(){return getComputedStyle(document.getElementById('defaults')).stroke;});
+check('default-width',function(){return getComputedStyle(document.getElementById('defaults')).strokeWidth;});
+check('html-defaults',function(){var h=getComputedStyle(document.getElementById('html'));return h.fill==='rgb(0, 0, 0)'&&h.stroke==='none'&&h.strokeWidth==='1px';});
+check('attribute-fill',function(){return getComputedStyle(document.getElementById('attributes')).fill;});
+check('attribute-stroke',function(){return getComputedStyle(document.getElementById('attributes')).stroke;});
+check('attribute-width',function(){return getComputedStyle(document.getElementById('attributes')).strokeWidth;});
+check('inherited-fill',function(){return getComputedStyle(document.getElementById('child')).fill;});
+check('inherited-current-color',function(){return getComputedStyle(document.getElementById('child')).stroke;});
+check('inherited-em-owner',function(){return getComputedStyle(document.getElementById('child')).strokeWidth;});
+check('cascade-css-over-attribute',function(){var a=document.getElementById('attributes');a.style.fill='blue';return getComputedStyle(a).fill;});
+check('live-current-color',function(){s.color='rgb(12, 34, 56)';s.fill='currentColor';return c.fill;});
+check('live-color-change',function(){s.color='rgb(90, 80, 70)';return c.fill;});
+check('invalid-paint-preserves',function(){s.fill='red';s.fill='url(#paint) potato';return c.fill;});
+check('invalid-string-preserves',function(){s.fill='"red"';return c.fill;});
+check('invalid-width-preserves',function(){s.strokeWidth='4px';s.strokeWidth='-2';s.strokeWidth='3deg';return c.strokeWidth;});
+check('invalid-var-inherits',function(){var child=document.getElementById('child');child.style.cssText='fill:blue;fill:var(--bad);--bad:url(#paint) potato';return getComputedStyle(child).fill;});
+check('variable-paint',function(){s.setProperty('--paint','rgb(1, 2, 3)');s.fill='var(--paint)';return c.fill;});
+check('variable-width',function(){s.setProperty('--width','5');s.strokeWidth='var(--width)';return c.strokeWidth;});
+check('percentage-width',function(){s.strokeWidth='12.5%';return c.strokeWidth;});
+check('absolute-width',function(){s.strokeWidth='1in';return c.strokeWidth;});
+check('em-width',function(){s.fontSize='12px';s.strokeWidth='2em';return c.strokeWidth;});
+check('math-width',function(){s.strokeWidth='calc(2em + 3px)';return c.strokeWidth;});
+check('mixed-math-width',function(){s.strokeWidth='calc(2em + 10%)';return c.strokeWidth;});
+check('number-math-width',function(){s.strokeWidth='calc(2 * 3)';return c.strokeWidth;});
+check('negative-math-clamped',function(){s.strokeWidth='calc(2px - 4px)';return c.strokeWidth;});
+check('paint-url-fallback',function(){s.fill='url("https://example.test/paint.svg#p") red';return c.fill;});
+check('relative-url',function(){return getComputedStyle(document.getElementById('relative')).fill;});
+check('empty-url',function(){s.fill='url("") red';return c.fill;});
+check('sheet-url',function(){var v=getComputedStyle(document.getElementById('sheet')).fill;return v.indexOf('url("file://')===0&&v.indexOf('/assets/paint.svg#p") rgb(0, 0, 255)')>0;});
+check('imported-url',function(){var v=getComputedStyle(document.getElementById('imported')).fill;return v.indexOf('url("file://')===0&&v.indexOf('/data/assets/paint.svg#p") rgb(255, 0, 0)')>0;});
+check('long-url',function(){var url='https://example.test/'+('a'.repeat(1200))+'#p';s.fill='url("'+url+'") blue';return c.fill==='url("'+url+'") rgb(0, 0, 255)';});
+check('context-paint',function(){s.fill='CONTEXT-FILL';s.stroke='CONTEXT-STROKE';return c.fill==='context-fill'&&c.stroke==='context-stroke';});
+check('live-attribute',function(){var a=document.getElementById('attributes');a.style.removeProperty('fill');a.setAttribute('fill','purple');return getComputedStyle(a).fill;});
+check('initial-reset',function(){s.fill='initial';s.stroke='initial';s.strokeWidth='initial';return c.fill==='rgb(0, 0, 0)'&&c.stroke==='none'&&c.strokeWidth==='1px';});
+});
+document.getElementById('verify').addEventListener('click',function(){
+var c=getComputedStyle(document.getElementById('target'));
+document.getElementById('report').setAttribute('data-after-layout',String(c.fill==='rgb(0, 0, 0)'&&c.stroke==='none'&&c.strokeWidth==='1px'));
+});
+</script>

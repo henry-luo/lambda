@@ -1,184 +1,141 @@
-// chart/vega.ls — Convert Vega-Lite JSON spec to Lambda chart spec map
-// Takes a parsed JSON (map) representing a Vega-Lite specification
-// and returns a normalized spec map compatible with chart.render_spec().
+// chart/vega.ls — Adapt the supported declarative Vega-Lite subset to native chart specifications.
 
-// ============================================================
-// Public API: convert Vega-Lite JSON to chart spec
-// ============================================================
+import parse: .parse
+import cfg: .config
+
+let aliases = {
+    strokeWidth: "stroke_width", cornerRadius: "corner_radius", innerRadius: "inner_radius",
+    outerRadius: "outer_radius", padAngle: "pad_angle", fontSize: "font_size", fontWeight: "font_weight",
+    fontFamily: "font_family", strokeDash: "stroke_dash", xOffset: "x_offset", timeUnit: "time_unit",
+    paddingInner: "padding_inner", paddingOuter: "padding_outer", domainMin: "domain_min",
+    domainMax: "domain_max", domainMid: "domain_mid", tickCount: "tick_count", tickSize: "tick_size",
+    tickMinStep: "tick_min_step", labelAngle: "label_angle", labelOverlap: "label_overlap",
+    labelLimit: "label_limit", labelFontSize: "label_font_size", labelColor: "label_color",
+    titleFontSize: "title_font_size", titleColor: "title_color", titlePadding: "title_padding",
+    gridColor: "grid_color", gridWidth: "grid_width", gridDash: "grid_dash", domainColor: "domain_color",
+    symbolSize: "symbol_size", symbolPadding: "symbol_padding", rowHeight: "row_height",
+    ignorePeers: "ignore_peers"
+}
+
+fn normalize(options) {
+    if (options is map) map([for (key, value in options)
+        for (item in [if (aliases[string(key)] != null) aliases[string(key)] else string(key), normalize(value)]) item])
+    else if (options is array) [for (item in options) normalize(item)]
+    else options
+}
 
 pub fn convert(vl) {
-    let width = if (vl.width) vl.width else 400;
-    let height = if (vl.height) vl.height else 300;
-
-    // parse padding
-    let raw_padding = if (vl.padding) vl.padding else 20;
-    let padding = if (raw_padding is int)
-        {top: raw_padding, right: raw_padding, bottom: raw_padding, left: raw_padding}
-    else raw_padding;
-
-    // title: can be string or {text: ...}
-    let title = if (vl.title is string) vl.title
-        else if (vl.title and vl.title.text) vl.title.text
-        else null;
-
-    // data
-    let data = if (vl.data and vl.data.values) vl.data.values else null;
-
-    // mark
-    let mark = convert_mark(vl.mark);
-
-    // encoding
-    let encoding = if (vl.encoding) convert_encoding(vl.encoding) else {};
-
-    // transforms
-    let transform = if (vl.transform) convert_transforms(vl.transform) else null;
-
-    // layer
-    let layer = if (vl.layer) convert_layer(vl.layer, data) else null;
-
-    {
-        width: width,
-        height: height,
+    let raw_padding = if (vl.padding != null) vl.padding else 20;
+    let padding = if (raw_padding is int or raw_padding is float)
+        {top: raw_padding, right: raw_padding, bottom: raw_padding, left: raw_padding} else raw_padding;
+    let common = {
+        width: if (vl.width != null) vl.width else 400,
+        height: if (vl.height != null) vl.height else 300,
         padding: padding,
-        title: title,
-        data: data,
-        mark: mark,
-        encoding: encoding,
-        transform: transform,
-        config: null,
-        layer: layer,
+        title: if (vl.title is string) vl.title else vl.title.text,
+        data: vl.data.values, data_source: vl.data, datasets: vl.datasets,
+        mark: convert_mark(vl.mark), encoding: convert_encoding(vl.encoding),
+        transform: convert_transforms(vl.transform), config: convert_config(vl.config),
+        resolve: normalize(vl.resolve),
+        layer: if (vl.layer != null) [for (layer in vl.layer) convert(layer)] else null,
         facet: null
-    }
+    };
+    if (vl.hconcat != null or vl.vconcat != null) {
+        let horizontal = vl.hconcat != null;
+        {*:common, concat: if (horizontal) "horizontal" else "vertical",
+            spacing: if (vl.spacing != null) vl.spacing else 20,
+            children: [for (child in (if (horizontal) vl.hconcat else vl.vconcat))
+                convert(inherit(vl, child))]}
+    } else if (vl.facet != null and vl.spec != null) {
+        let child = convert(inherit(vl, vl.spec));
+        {*:child, title: common.title, facet: {*:normalize(vl.facet),
+            columns: if (vl.columns != null) vl.columns else vl.facet.columns,
+            spacing: vl.spacing}}
+    } else if (vl.repeat != null and vl.spec != null) {
+        let repeated = if (vl.repeat is array) {column: vl.repeat} else vl.repeat;
+        {*:common, repeat_row: repeated.row, repeat_column: repeated.column,
+            template: convert(inherit(vl, vl.spec))}
+    } else common
 }
 
-// ============================================================
-// Mark conversion
-// ============================================================
+fn inherit(parent, child) {
+    {*:child, data: if (child.data != null) child.data else parent.data,
+        datasets: if (child.datasets != null) child.datasets else parent.datasets,
+        width: if (child.width != null) child.width else parent.width,
+        height: if (child.height != null) child.height else parent.height,
+        padding: if (child.padding != null) child.padding else parent.padding,
+        transform: [for (step in parent.transform) step, for (step in child.transform) step],
+        encoding: {*:parse.attributes(parent.encoding), *:parse.attributes(child.encoding)},
+        resolve: cfg.inherit(parent.resolve, child.resolve),
+        config: cfg.inherit(parent.config, child.config)}
+}
 
 fn convert_mark(mark_json) {
-    (if (mark_json is string)
-        { kind: mark_json, color: null, opacity: null, stroke: null,
-          stroke_width: null, fill: null, interpolate: null, point: null,
-          corner_radius: null, inner_radius: 0, outer_radius: null,
-          pad_angle: null, size: null, shape: null, font_size: null,
-          stroke_dash: null }
-    else if (mark_json)
-        (let kind = (if (mark_json["type"]) mark_json["type"]
-            else if (mark_json.kind) mark_json.kind
-            else "point"),
-        {
-            kind: kind,
-            color: mark_json.color,
-            opacity: mark_json.opacity,
-            stroke: mark_json.stroke,
-            stroke_width: vl_key(mark_json, "strokeWidth", "stroke_width"),
-            fill: mark_json.fill,
-            interpolate: mark_json.interpolate,
-            point: mark_json.point,
-            corner_radius: vl_key(mark_json, "cornerRadius", "corner_radius"),
-            inner_radius: (if (vl_key(mark_json, "innerRadius", "inner_radius"))
-                vl_key(mark_json, "innerRadius", "inner_radius") else 0),
-            outer_radius: vl_key(mark_json, "outerRadius", "outer_radius"),
-            pad_angle: vl_key(mark_json, "padAngle", "pad_angle"),
-            size: mark_json.size,
-            shape: mark_json.shape,
-            font_size: vl_key(mark_json, "fontSize", "font_size"),
-            stroke_dash: vl_key(mark_json, "strokeDash", "stroke_dash"),
-            width: mark_json.width
-        })
-    else null)
+    if (mark_json is string) parse.parse_mark({type: mark_json})
+    else if (mark_json != null) parse.parse_mark({*:normalize(mark_json),
+        font_family: if (mark_json.font != null) mark_json.font else normalize(mark_json).font_family})
+    else null
 }
-
-// lookup a key with camelCase or snake_case fallback
-fn vl_key(m, camel: string, snake: string) {
-    (if (m[camel]) m[camel] else m[snake])
-}
-
-// ============================================================
-// Encoding conversion
-// ============================================================
 
 fn convert_encoding(enc) {
-    {
-        x: if (enc.x) convert_channel(enc.x) else null,
-        y: if (enc.y) convert_channel(enc.y) else null,
-        color: if (enc.color) convert_channel(enc.color) else null,
-        size: if (enc.size) convert_channel(enc.size) else null,
-        opacity: if (enc.opacity) convert_channel(enc.opacity) else null,
-        theta: if (enc.theta) convert_channel(enc.theta) else null,
-        text: if (enc.text) convert_channel(enc.text) else null,
-        stroke: if (enc.stroke) convert_channel(enc.stroke) else null,
-        x_offset: if (enc.xOffset) convert_channel(enc.xOffset)
-            else if (enc.x_offset) convert_channel(enc.x_offset)
-            else null,
-        x2: if (enc.x2) convert_channel(enc.x2) else null,
-        y2: if (enc.y2) convert_channel(enc.y2) else null,
-        detail: if (enc.detail) convert_channel(enc.detail) else null,
-        tooltip: if (enc.tooltip) convert_channel(enc.tooltip) else null
+    if (enc == null) {}
+    else map([for (key, channel in enc)
+        for (item in [if (string(key) == "xOffset") "x_offset" else string(key),
+            if (channel is array) [for (entry in channel) convert_channel(entry)] else convert_channel(channel)]) item])
+}
+
+fn convert_channel(channel) {
+    let options = normalize(channel);
+    let kind = channel.type;
+    parse.parse_channel({*:options,
+        dtype: if (kind == "Q") "quantitative" else if (kind == "N") "nominal"
+            else if (kind == "O") "ordinal" else if (kind == "T") "temporal" else kind,
+        stack: if (channel.stack == false) "none" else channel.stack,
+        axis_enabled: parse.option_enabled(channel, "axis"),
+        legend_enabled: parse.option_enabled(channel, "legend"),
+        scale_enabled: parse.option_enabled(channel, "scale")})
+}
+
+fn convert_config(config) {
+    if (config == null) null
+    else {
+        let normalized = normalize(config);
+        let flattened = map([for (section, settings in normalized where settings is map)
+            for (key, value in settings) for (item in [string(section) ++ "_" ++ string(key), value]) item]);
+        {*:normalized, *:flattened,
+            axis_grid: if (config.axis.grid != null) config.axis.grid else normalized.axis_grid}
     }
 }
 
-fn convert_channel(ch) {
-    {
-        field: ch.field,
-        dtype: vl_type(ch["type"]),
-        value: ch.value,
-        datum: ch.datum,
-        title: ch.title,
-        format: ch.format,
-        sort: ch.sort,
-        aggregate: ch.aggregate,
-        stack: if (ch.stack == false) "none" else ch.stack,
-        bin: ch.bin,
-        zero: ch.zero,
-        scale: ch.scale,
-        axis: ch.axis,
-        legend: ch.legend
-    }
-}
-
-// map Vega-Lite type names to Lambda chart dtype names
-fn vl_type(t) {
-    if (t == "quantitative") "quantitative"
-    else if (t == "nominal") "nominal"
-    else if (t == "ordinal") "ordinal"
-    else if (t == "temporal") "temporal"
-    else if (t == "Q") "quantitative"
-    else if (t == "N") "nominal"
-    else if (t == "O") "ordinal"
-    else if (t == "T") "temporal"
-    else t
-}
-
-// ============================================================
-// Transform conversion
-// ============================================================
-
+// String expressions require a separate expression runtime; never silently ignore them.
 fn convert_transforms(transforms) {
-    // transforms is an array of transform objects
-    // we return them as-is since chart.transform module handles maps
-    transforms
+    if (transforms == null) null
+    else <transform for (step in transforms) convert_transform(step)>
 }
 
-// ============================================================
-// Layer conversion
-// ============================================================
-
-fn convert_layer(layers, parent_data) {
-    [for (layer in layers)
-        (let layer_data = if (layer.data and layer.data.values) layer.data.values
-            else parent_data,
-        {
-            width: if (layer.width) layer.width else 400,
-            height: if (layer.height) layer.height else 300,
-            padding: {top: 20, right: 20, bottom: 20, left: 20},
-            title: null,
-            data: layer_data,
-            mark: convert_mark(layer.mark),
-            encoding: if (layer.encoding) convert_encoding(layer.encoding) else {},
-            transform: null,
-            config: null,
-            layer: null,
-            facet: null
-        })]
+fn convert_transform(step) {
+    if (parse.has_attribute(step, "filter"))
+        (if (step.filter is string) error("chart: Vega filter strings are unsupported; use a field predicate")
+         else <filter test: step.filter>)
+    else if (step.aggregate != null) <aggregate
+        for (field in step.groupby) <group field: field>
+        for (agg in step.aggregate) <agg op: agg.op, field: agg.field, as: agg.as>>
+    else if (step.bin != null) <bin field: step.field,
+        as: if (step.as is array) step.as[0] else step.as,
+        as_end: if (step.as is array) step.as[1] else null,
+        maxbins: step.bin.maxbins, step: step.bin.step>
+    else if (step.calculate != null)
+        (if (step.calculate is fn) <calculate as: step.as, expression: step.calculate>
+         else error("chart: Vega calculate strings are unsupported; use a Lambda calculation"))
+    else if (step.fold != null) <fold fields: step.fold, as: step.as>
+    else if (step.flatten != null) <flatten fields: step.flatten, as: step.as>
+    else if (step.window != null) {type: "window", *:normalize(step)}
+    // Foreign rows and fallback values are data; option-name aliases must not rewrite their keys.
+    else if (step.lookup != null) {*:step, type: "lookup"}
+    else if (step.density != null) {type: "density", *:normalize(step), field: step.density}
+    else if (step.regression != null) {type: "regression", *:normalize(step),
+        x: step.on, y: step.regression, r_squared_name: "rSquared"}
+    else if (step.loess != null) {type: "loess", *:normalize(step), x: step.on, y: step.loess}
+    else if (step.type != null) step
+    else error("chart: unsupported Vega transform")
 }

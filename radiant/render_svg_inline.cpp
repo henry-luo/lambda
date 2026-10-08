@@ -761,7 +761,7 @@ static SvgStyleEntry* svg_style_entry(SvgStyleContext* style, Element* element) 
     return entry;
 }
 
-static CssValue* svg_parse_property_value(Pool* pool, const char* text, const char* name) {
+CssValue* svg_parse_property_value(Pool* pool, const char* text, const char* name) {
     if (!text) return nullptr;
     StrBuf* source = strbuf_new();
     if (!name || !source) { if (source) strbuf_free(source); return nullptr; }
@@ -821,7 +821,8 @@ static const CssValue* svg_lookup_variable(void* context, DomElement* element,
 }
 
 static const char* svg_resolve_property_declaration(SvgStyleContext* style, DomElement* element,
-    const char* name, CssDeclaration* declaration, const SvgDomStyleScope* scope = nullptr) {
+    const char* name, CssDeclaration* declaration, const SvgDomStyleScope* scope = nullptr,
+    bool compute_lengths = true) {
     SvgVariableContext variables = {style, scope};
     const CssValue* authored = declaration->value;
     declaration->value = (CssValue*)css_resolve_var_value(
@@ -835,30 +836,59 @@ static const char* svg_resolve_property_declaration(SvgStyleContext* style, DomE
         declaration->value = (CssValue*)css_font_shorthand_longhand(declaration->value, name, style->pool);
         declaration->value_text = nullptr; declaration->value_text_len = 0;
     }
+    CssPropertyCode property = css_property_code_from_name(name);
+    // invalid winning substitutions default as a unit; a losing declaration cannot become visible.
+    if (css_property_is_svg_presentation(property) &&
+        !css_property_validate_value(property, declaration->value)) return nullptr;
+    // only validated paint lists contain a URL head; other properties can substitute an empty list.
+    const CssValue* paint = css_property_is_svg_resource(property) && declaration->value &&
+        declaration->value->type == CSS_VALUE_TYPE_LIST
+        ? declaration->value->data.list.values[0] : declaration->value;
+    if (css_property_is_svg_resource(property) && paint && paint->type == CSS_VALUE_TYPE_URL) {
+        Url* base = declaration->source_file ? url_parse_path_or_url(declaration->source_file,
+            style->document ? style->document->url.get() : nullptr) : nullptr;
+        const char* address = radiant_resolve_css_url(style->pool, paint->data.url,
+            base ? base : style->document ? style->document->url.get() : nullptr);
+        if (base) url_destroy(base);
+        if (!address) return nullptr;
+        if (address != paint->data.url) {
+            // URL computation must not rewrite the retained authored declaration or its shared value tree.
+            declaration->value = css_value_clone_owned(declaration->value, style->pool);
+            if (!declaration->value) return nullptr;
+            CssValue* computed_paint = declaration->value->type == CSS_VALUE_TYPE_LIST
+                ? declaration->value->data.list.values[0] : declaration->value;
+            computed_paint->data.url = address;
+        }
+        // loader-normalized canonical URLs also take precedence over authored relative text.
+        declaration->value_text = nullptr; declaration->value_text_len = 0;
+    }
+    if (css_property_is_svg_presentation(property) && !css_property_is_svg_paint(property) &&
+        (!css_property_is_svg_length(property) || compute_lengths)) {
+        // compute at the declaring element so inherited lengths and opacity retain their computed basis.
+        String* computed = css_prop_serialize_svg_value(style->pool, element, property, declaration->value);
+        return computed ? computed->chars : nullptr;
+    }
+    if (css_property_is_svg_length(property) && !compute_lengths) {
+        // cached source values bind to the existing instance font context, not the definition's DOM ancestry.
+        declaration->value_text = nullptr; declaration->value_text_len = 0;
+    }
     return declaration->value ? css_serialize_declaration_value(declaration, style->pool) : nullptr;
 }
 
 static const char* svg_resolve_attribute_variables(SvgStyleContext* style, DomElement* element,
-    const char* name, const char* value, const SvgDomStyleScope* scope = nullptr) {
-    if (!value || !strstr(value, "var(")) return value;
+    const char* name, const char* value, const SvgDomStyleScope* scope = nullptr,
+    bool compute_lengths = true) {
+    if (!value || (!strstr(value, "var(") &&
+        !css_property_is_svg_presentation(css_property_code_from_name(name)))) return value;
     CssDeclaration declaration = {};
     declaration.value = svg_parse_property_value(style->pool, value, name);
-    return svg_resolve_property_declaration(style, element, name, &declaration, scope);
+    return svg_resolve_property_declaration(style, element, name, &declaration, scope, compute_lengths);
 }
 
 struct SvgPropertyDefault { const char* name; const char* initial; bool inherits; };
 static const SvgPropertyDefault svg_property_defaults[] = {
-        {"stop-color", "black", false}, {"stop-opacity", "1", false},
-        {"flood-color", "black", false}, {"flood-opacity", "1", false},
-        {"lighting-color", "white", false}, {"mask-type", "luminance", false},
-        {"fill-opacity", "1", true}, {"stroke-opacity", "1", true},
-        {"fill-rule", "nonzero", true}, {"clip-rule", "nonzero", true},
-        {"stroke-linecap", "butt", true}, {"stroke-linejoin", "miter", true},
-        {"stroke-miterlimit", "4", true}, {"stroke-dasharray", "none", true},
-        {"stroke-dashoffset", "0", true}, {"paint-order", "normal", true},
-        {"marker-start", "none", true}, {"marker-mid", "none", true}, {"marker-end", "none", true},
-        {"color-interpolation", "sRGB", true}, {"color-interpolation-filters", "linearRGB", true},
-        {"vector-effect", "none", false}, {"clip-path", "none", false}, {"mask", "none", false}, {"filter", "none", false},
+        {"mask-type", "luminance", false},
+        {"clip-path", "none", false}, {"mask", "none", false}, {"filter", "none", false},
     };
 
 const char* svg_property_initial(const char* name, bool* inherits) {
@@ -889,22 +919,15 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
     bool selected = css_select_element_declaration(style->engine, style->matcher, entry->node,
         doc->stylesheets, (size_t)doc->stylesheet_count, entry->inline_declarations,
         entry->inline_count, name, &declaration);
-    CssDeclaration* presentation = style_tree_get_presentation_declaration(
-        entry->node->specified_style, css_property_code_from_name(name));
-    // The paint walk has its own CSS query, but consumes the same host layer.
-    if (presentation && (!selected ||
-        css_declaration_cascade_compare(presentation, &declaration) > 0)) {
-        declaration = *presentation;
-        selected = true;
-    }
     if (selected) {
-        prop->value = svg_resolve_property_declaration(style, entry->node, name, &declaration);
+        prop->value = svg_resolve_property_declaration(style, entry->node, name, &declaration, nullptr,
+            !dom_element_is_svg(entry->node));
         prop->from_css = true;
     } else {
-        prop->value = get_svg_attr(elem, name);
-        if (!prop->value && (strcmp(name, "marker-start") == 0 || strcmp(name, "marker-mid") == 0 ||
-            strcmp(name, "marker-end") == 0)) prop->value = get_svg_attr(elem, "marker");
-        prop->value = svg_resolve_attribute_variables(style, entry->node, name, prop->value);
+        // css shorthands have no SVG presentation-attribute form.
+        prop->value = dom_element_is_svg(entry->node) &&
+            !css_property_is_identity_shorthand(css_property_code_from_name(name)) ? get_svg_attr(elem, name) : nullptr;
+        prop->value = svg_resolve_attribute_variables(style, entry->node, name, prop->value, nullptr, false);
     }
     if (!declaration.important) {
         const char* animated = svg_animation_value(entry->node, name, true);
@@ -923,6 +946,14 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
         prop->value = inherits ? nullptr : parent && parent->is_element()
             ? svg_style_property_value(ctx, dom_element_to_element(parent->as_element()), name) : initial;
         if (!inherits && !prop->value) prop->value = initial;
+    }
+    CssPropertyCode property = css_property_code_from_name(name);
+    DomNode* parent = entry->node->parent;
+    if (!prop->value && inherits && css_property_is_svg_presentation(property) &&
+        !css_property_is_svg_paint(property) && parent && parent->is_element() &&
+        !dom_element_is_svg(parent->as_element())) {
+        // the SVG traversal inherits internally; seed its root from surrounding HTML CSS, ignoring HTML attributes.
+        prop->value = svg_style_property_value(ctx, dom_element_to_element(parent->as_element()), name);
     }
     // D4.5.1v4: another use instance can replace the document's borrowed sample pool in this walk.
     if (generation && prop->value) prop->value = pool_strdup(style->pool, prop->value);
@@ -987,7 +1018,9 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
             matcher, current, doc->stylesheets, (size_t)doc->stylesheet_count,
             inline_declarations, inline_count, name, &declaration);
         const char* value = selected ? svg_resolve_property_declaration(&query, current, name, &declaration, scope)
-            : svg_animation_attribute(current, name);
+            : dom_element_is_svg(current) &&
+                !css_property_is_identity_shorthand(css_property_code_from_name(name))
+                ? svg_animation_attribute(current, name) : nullptr;
         bool svg_transform_sample = false;
         if (!declaration.important) {
             const char* animated = svg_animation_value(current, name, true);
@@ -996,11 +1029,10 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
                 svg_transform_sample = strcmp(name, "transform") == 0;
             }
         }
-        if (!value && (strcmp(name, "marker-start") == 0 || strcmp(name, "marker-mid") == 0 ||
-            strcmp(name, "marker-end") == 0)) value = current->get_attribute("marker");
         if (!selected) value = svg_resolve_attribute_variables(&query, current, name, value, scope);
         bool inherit = value && (str_icmp_cstr(value, "inherit") == 0 ||
-            (inherits && str_icmp_cstr(value, "unset") == 0));
+            (inherits && str_icmp_cstr(value, "unset") == 0) ||
+            (strcmp(name, "color") == 0 && str_icmp_cstr(value, "currentColor") == 0));
         if (value && (str_icmp_cstr(value, "initial") == 0 || str_icmp_cstr(value, "unset") == 0)) {
             bool property_inherits = false;
             if (!inherit) value = svg_property_initial(name, &property_inherits);
@@ -1111,22 +1143,33 @@ float svg_resolve_length_unit(float number, CssUnit unit,
 }
 
 static bool svg_normalize_math_lengths(CssValue* value, const SvgLengthContext* context,
-    SvgLengthAxis axis, unsigned depth, size_t* remaining) {
+    SvgLengthAxis axis, unsigned depth, size_t* remaining, bool preserve_percentages,
+    CssMathLeafResolver resolve_leaf, void* leaf_context) {
     if (!value || depth > 32 || !*remaining) return false;
     (*remaining)--;
     if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        float number = value->type == CSS_VALUE_TYPE_LENGTH
+        if (preserve_percentages && value->type == CSS_VALUE_TYPE_PERCENTAGE)
+            return isfinite(value->data.percentage.value);
+        double resolved = NAN;
+        float number = resolve_leaf && resolve_leaf(leaf_context, value, &resolved) ? (float)resolved
+            : value->type == CSS_VALUE_TYPE_LENGTH
             ? svg_resolve_length_unit((float)value->data.length.value, value->data.length.unit, context, axis, NAN)
             : svg_resolve_length_unit((float)value->data.percentage.value, CSS_UNIT_PERCENT, context, axis, NAN);
         if (!isfinite(number)) return false;
-        value->type = CSS_VALUE_TYPE_NUMBER;
-        value->data.number = {number, false};
+        if (preserve_percentages) {
+            value->type = CSS_VALUE_TYPE_LENGTH;
+            value->data.length = {number, CSS_UNIT_PX};
+        } else {
+            value->type = CSS_VALUE_TYPE_NUMBER;
+            value->data.number = {number, false};
+        }
         return true;
     }
     if (value->type == CSS_VALUE_TYPE_NUMBER) return isfinite(value->data.number.value);
     if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int i = 0; i < value->data.list.count; i++)
-            if (!svg_normalize_math_lengths(value->data.list.values[i], context, axis, depth + 1, remaining)) return false;
+            if (!svg_normalize_math_lengths(value->data.list.values[i], context, axis, depth + 1,
+                remaining, preserve_percentages, resolve_leaf, leaf_context)) return false;
         return value->data.list.count > 0;
     }
     if (value->type == CSS_VALUE_TYPE_FUNCTION) {
@@ -1135,7 +1178,8 @@ static bool svg_normalize_math_lengths(CssValue* value, const SvgLengthContext* 
             strcmp(function->name, "min") != 0 && strcmp(function->name, "max") != 0 &&
             strcmp(function->name, "clamp") != 0)) return false;
         for (int i = 0; i < function->arg_count; i++)
-            if (!svg_normalize_math_lengths(function->args[i], context, axis, depth + 1, remaining)) return false;
+            if (!svg_normalize_math_lengths(function->args[i], context, axis, depth + 1,
+                remaining, preserve_percentages, resolve_leaf, leaf_context)) return false;
         return function->arg_count > 0;
     }
     // the CSS parser retains arithmetic operators and parentheses as tokens in its lists.
@@ -1146,6 +1190,15 @@ static bool svg_normalize_math_lengths(CssValue* value, const SvgLengthContext* 
         token = info ? info->name : nullptr;
     }
     return token && token[0] && !token[1] && strchr("+-*/()", token[0]);
+}
+
+bool svg_normalize_length_value(CssValue* value, const SvgLengthContext* context,
+    SvgLengthAxis axis, bool preserve_percentages, CssMathLeafResolver resolve_leaf,
+    void* leaf_context) {
+    size_t remaining = 4096;
+    // both used geometry and CSSOM normalize caller-owned leaves through the same bounded walk.
+    return context && svg_normalize_math_lengths(value, context, axis, 0, &remaining,
+        preserve_percentages, resolve_leaf, leaf_context);
 }
 
 float svg_resolve_angle(const char* value, float fallback) {
@@ -1179,12 +1232,13 @@ float svg_resolve_length(const char* value, const SvgLengthContext* context,
         if (strlen(value) > 65536) return fallback;
         Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.length_math");
         if (!pool) return fallback;
-        CssValue* parsed = svg_parse_property_value(pool, value, "width");
-        size_t remaining = 4096;
-        LayoutContext layout = {};
-        // normalize owned leaves only; the shared evaluator retains precedence and nested functions.
-        float result = svg_normalize_math_lengths(parsed, context, axis, 0, &remaining)
-            ? resolve_length_value(&layout, CSS_PROPERTY_WIDTH, parsed) : NAN;
+        // SVG lengths accept unitless number math; CSS box width rejects that domain.
+        CssValue* parsed = svg_parse_property_value(pool, value, "stroke-width");
+        CssMathEvaluationContext math = {nullptr, nullptr, 1.0, false};
+        CssMathResult evaluated = svg_normalize_length_value(parsed, context, axis)
+            ? css_math_evaluate(parsed, &math) : CssMathResult{};
+        float result = evaluated.resolved && evaluated.type == CSS_MATH_NUMBER
+            ? (float)evaluated.value : NAN;
         mem_pool_destroy(pool);
         return isfinite(result) ? result : fallback;
     }
@@ -1202,42 +1256,43 @@ float svg_resolve_length(const char* value, const SvgLengthContext* context,
 int svg_resolve_dash_array(const char* value, const SvgLengthContext* lengths,
     float* dashes, int capacity) {
     bool measure = !dashes && capacity == 0;
-    if (!value || !lengths || (!measure && capacity < 1) || str_icmp_cstr(value, "none") == 0) return 0;
-    int count = 0;
-    float total = 0.0f;
-    const char* cursor = str_skip_ascii_space(value);
-    while (*cursor) {
-        if ((!measure && count >= capacity) || count >= INT_MAX / 2 || *cursor == ',') return 0;
-        const char* start = cursor;
-        char* number_end = nullptr;
-        strtof(cursor, &number_end);
-        if (number_end == cursor) return 0;
-        cursor = number_end;
-        while (isalpha((unsigned char)*cursor) || *cursor == '%') cursor++;
-        char token[96];
-        size_t size = (size_t)(cursor - start);
-        if (size >= sizeof(token)) return 0;
-        str_copy(token, sizeof(token), start, size);
-        float dash = svg_resolve_length(token, lengths, SVG_LENGTH_DIAGONAL, NAN);
-        if (!isfinite(dash) || dash < 0.0f) return 0;
-        if (!measure) dashes[count] = dash;
-        count++;
-        total += dash;
-        const char* separator = cursor;
-        cursor = str_skip_ascii_space(cursor);
-        if (*cursor == ',') {
-            cursor = str_skip_ascii_space(cursor + 1);
-            if (!*cursor) return 0;
-        } else if (*cursor && cursor == separator) return 0;
+    if (!value || !lengths || (!measure && capacity < 1)) return 0;
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.dash_math");
+    if (!pool) return 0;
+    CssValue* parsed = svg_parse_property_value(pool, value, "stroke-dasharray");
+    struct DashContext {
+        const SvgLengthContext* lengths;
+        float* output;
+        int capacity;
+        int count;
+        double total;
+    } context = {lengths, dashes, capacity, 0, 0.0};
+    auto visit = [](const CssValue* item, void* data) -> bool {
+        DashContext* context = (DashContext*)data;
+        if (context->count >= INT_MAX / 2 || (context->output && context->count >= context->capacity)) return false;
+        // parsed values are scratch-owned; the shared SVG walk computes percentages against the viewport diagonal.
+        if (!svg_normalize_length_value((CssValue*)item, context->lengths, SVG_LENGTH_DIAGONAL)) return false;
+        CssMathEvaluationContext math_context = {};
+        CssMathResult math = css_math_evaluate(item, &math_context);
+        if (!math.resolved || math.type != CSS_MATH_NUMBER || !isfinite(math.value)) return false;
+        float dash = (float)fmax(0.0, math.value);
+        if (!isfinite(dash)) return false;
+        if (context->output) context->output[context->count] = dash;
+        context->count++;
+        context->total += dash;
+        return true;
+    };
+    bool valid = parsed && css_property_validate_value(CSS_PROPERTY_STROKE_DASHARRAY, parsed) &&
+        css_value_visit_list_items(parsed, visit, &context);
+    mem_pool_destroy(pool);
+    if (!valid || !isfinite(context.total) || context.total <= 0.0) return 0;
+    if (context.count & 1) {
+        if (measure) return context.count * 2;
+        if (context.count > capacity / 2) return 0;
+        int original = context.count;
+        for (int index = 0; index < original; index++) dashes[context.count++] = dashes[index];
     }
-    if (!isfinite(total) || total <= 0.0f) return 0;
-    if (count & 1) {
-        if (measure) return count * 2;
-        if (count > capacity / 2) return 0;
-        int original = count;
-        for (int index = 0; index < original; index++) dashes[count++] = dashes[index];
-    }
-    return count;
+    return context.count;
 }
 
 static float parse_svg_length(const char* value, float default_value) {
@@ -1370,12 +1425,13 @@ static SvgPaint svg_parse_paint(SvgInlineRenderContext* ctx, const char* value,
         paint.source_transform = ctx->transform;
         paint.source_style = ctx->style_context; paint.source_path = ctx->source_path;
     }
-    if (!value || strcmp(value, "none") == 0) return paint;
+    if (!value) return paint;
     value = str_skip_ascii_space(value);
+    if (str_icmp_cstr(value, "none") == 0) return paint;
     if (str_icmp_cstr(value, "currentColor") == 0) paint.kind = SVG_PAINT_CURRENT_COLOR;
-    else if (strcmp(value, "context-fill") == 0) paint.kind = SVG_PAINT_CONTEXT_FILL;
-    else if (strcmp(value, "context-stroke") == 0) paint.kind = SVG_PAINT_CONTEXT_STROKE;
-    else if (strncmp(value, "url(", 4) == 0) {
+    else if (str_icmp_cstr(value, "context-fill") == 0) paint.kind = SVG_PAINT_CONTEXT_FILL;
+    else if (str_icmp_cstr(value, "context-stroke") == 0) paint.kind = SVG_PAINT_CONTEXT_STROKE;
+    else if (str_istarts_with_cstr(value, "url(")) {
         const char* start = str_skip_ascii_space(value + 4);
         char quote = (*start == '\'' || *start == '"') ? *start++ : 0;
         const char* end = quote ? strchr(start, quote) : strchr(start, ')');
@@ -1453,7 +1509,8 @@ static void svg_apply_inherited_paint_attrs(SvgInlineRenderContext* ctx, Element
     const char* stroke_width = get_svg_attr_or_style(ctx, elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
     if (stroke_width) {
         SvgLengthContext lengths = svg_length_context(ctx, elem);
-        ctx->stroke_width = svg_resolve_length(stroke_width, &lengths, SVG_LENGTH_DIAGONAL, 1.0f);
+        // signed SVG coordinate math stays signed; stroke widths clamp only after computation.
+        ctx->stroke_width = fmaxf(0.0f, svg_resolve_length(stroke_width, &lengths, SVG_LENGTH_DIAGONAL, 1.0f));
     }
     const char* fill_opacity = svg_style_property_value(ctx, elem, "fill-opacity");
     if (fill_opacity) ctx->fill_opacity = clamp_unit(parse_svg_pct_or_num(fill_opacity, 1.0f));
@@ -2638,6 +2695,7 @@ static RdtGradientOptions svg_stroke_options(SvgInlineRenderContext* ctx, Elemen
     SvgInheritedProperty width = svg_computed_property(ctx, elem, SVG_STYLE_STROKE_WIDTH, apply_font);
     result.stroke_width = width.value ? svg_resolve_length(width.value, &width.lengths, SVG_LENGTH_DIAGONAL, ctx->stroke_width)
         : get_svg_number_attr(elem, "stroke-width", ctx->stroke_width, &width.lengths, SVG_LENGTH_DIAGONAL);
+    result.stroke_width = fmaxf(0.0f, result.stroke_width);
     const char* cap = svg_computed_property(ctx, elem, SVG_STYLE_STROKE_CAP, apply_font).value;
     result.cap = cap && strcmp(cap, "round") == 0 ? RDT_CAP_ROUND
         : cap && strcmp(cap, "square") == 0 ? RDT_CAP_SQUARE : RDT_CAP_BUTT;
@@ -2645,7 +2703,9 @@ static RdtGradientOptions svg_stroke_options(SvgInlineRenderContext* ctx, Elemen
     result.join = join && strcmp(join, "round") == 0 ? RDT_JOIN_ROUND
         : join && strcmp(join, "bevel") == 0 ? RDT_JOIN_BEVEL : RDT_JOIN_MITER;
     result.miter_limit = parse_svg_pct_or_num(svg_computed_property(ctx, elem, SVG_STYLE_MITER_LIMIT, apply_font).value, 4.0f);
-    if (!isfinite(result.miter_limit) || result.miter_limit < 1.0f) result.miter_limit = 4.0f;
+    if (!isfinite(result.miter_limit) || result.miter_limit < 0.0f) result.miter_limit = 4.0f;
+    // SVG 2 permits limits below one; every miter then exceeds the limit and falls back to a bevel.
+    if (result.join == RDT_JOIN_MITER && result.miter_limit < 1.0f) result.join = RDT_JOIN_BEVEL;
     SvgInheritedProperty dashes = svg_computed_property(ctx, elem, SVG_STYLE_DASH_ARRAY, apply_font);
     result.dash_count = svg_resolve_dash_array(dashes.value, &dashes.lengths, nullptr, 0);
     if (result.dash_count > 0) {
@@ -6406,7 +6466,7 @@ static bool svg_effect_coverage(SvgInlineRenderContext* ctx, const SvgResourceRe
     const char* type = svg_style_property_value(&style, resource, "mask-type");
     *luminance = !type || strcmp(type, "alpha") != 0;
     const char* interpolation = svg_style_ancestor_property_value(&style, resource, "color-interpolation");
-    *linear = interpolation && strcmp(interpolation, "linearRGB") == 0;
+    *linear = interpolation && str_ieq_cstr(interpolation, "linearRGB");
     return svg_rasterize_traversal(&style, resource, svg_draw_mask_children, &region, coverage, &bounds);
 }
 
@@ -6501,7 +6561,7 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
         for (size_t axis = 0; axis < 4; axis++) node->region[axis] = lam::own(svg_filter_compile_token(program, memory, get_svg_attr(child, region_names[axis])));
         if (!program->valid) break;
         const char* interpolation = svg_style_ancestor_property_value(&style, child, "color-interpolation-filters");
-        node->linear = !interpolation || strcmp(interpolation, "sRGB") != 0;
+        node->linear = !interpolation || !str_ieq_cstr(interpolation, "sRGB");
         if (node->kind == RDT_SVG_FILTER_BLUR || node->kind == RDT_SVG_FILTER_SHADOW) {
             node->valid = svg_filter_pair(get_svg_attr(child, "stdDeviation"), node->kind == RDT_SVG_FILTER_SHADOW ? 2.0f : 0.0f, node->values, false);
             if (node->kind == RDT_SVG_FILTER_BLUR) {

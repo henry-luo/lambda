@@ -134,6 +134,7 @@ bool css_viewport_length_to_px(CssUnit unit, double value, double width,
 const char* css_math_token_name(const CssValue* value);
 bool css_value_contains_var_reference(const CssValue* value);
 bool css_value_contains_pending_substitution(const CssValue* value);
+bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second);
 const char* css_value_identifier_name(const CssValue* value);
 bool css_value_is_global_keyword(const CssValue* value);
 
@@ -158,6 +159,10 @@ struct CssMathResult {
 CssMathResult css_math_evaluate(const CssValue* value,
     const CssMathEvaluationContext* context, int depth = 0);
 CssMathType css_math_value_type(const CssValue* value, int depth = 0);
+
+// line-height numbers retain their multiplier; other numeric forms compute to inherited px.
+bool css_compute_line_height_value(const CssValue* value,
+    const CssMathEvaluationContext* context, CssValue* computed);
 
 // CSS Fonts §2.5 maps absolute font-size keywords before layout applies
 // inherited relative sizes such as larger and smaller.
@@ -768,6 +773,31 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_ROTATE,
     CSS_PROPERTY_SCALE,
 
+    // registered SVG presentation properties share their existing paint consumers.
+    CSS_PROPERTY_FILL_OPACITY,
+    CSS_PROPERTY_STROKE_OPACITY,
+    CSS_PROPERTY_STROKE_DASHARRAY,
+    CSS_PROPERTY_STROKE_DASHOFFSET,
+    CSS_PROPERTY_STROKE_LINECAP,
+    CSS_PROPERTY_STROKE_LINEJOIN,
+    CSS_PROPERTY_STROKE_MITERLIMIT,
+    CSS_PROPERTY_FILL_RULE,
+    CSS_PROPERTY_CLIP_RULE,
+    CSS_PROPERTY_PAINT_ORDER,
+    CSS_PROPERTY_STOP_COLOR,
+    CSS_PROPERTY_STOP_OPACITY,
+    CSS_PROPERTY_FLOOD_COLOR,
+    CSS_PROPERTY_FLOOD_OPACITY,
+    CSS_PROPERTY_LIGHTING_COLOR,
+    CSS_PROPERTY_MARKER_START,
+    CSS_PROPERTY_MARKER_MID,
+    CSS_PROPERTY_MARKER_END,
+    CSS_PROPERTY_MARKER,
+    CSS_PROPERTY_VECTOR_EFFECT,
+    CSS_PROPERTY_COLOR_INTERPOLATION,
+    CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS,
+    CSS_PROPERTY_TEXT_ANCHOR,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 
@@ -1038,6 +1068,7 @@ typedef struct CssDeclaration {
     uint32_t layer_order;     // zero is unlayered; named layers follow declaration order
     uint32_t scope_proximity; // zero is unscoped; scoped values store ancestor hops plus one
     bool important;           // !important flag
+    bool pending_identity_shorthand; // projected var()/env() longhands serialize as pending
     const char* source_file;  // Source file (for debugging)
     int source_line;          // Source line (for debugging)
     const char* property_name; // Original property name (for unknown/vendor properties)
@@ -1440,6 +1471,7 @@ typedef struct CssProperty {
     // Value computation function
     void* (*compute_value)(void* specified_value, void* parent_value, Pool* pool);
     NameId name_id;                // generated identity for predefined property spelling
+    bool identity_shorthand;      // one complete value is shared by every longhand
 } CssProperty;
 
 // ============================================================================
@@ -1524,6 +1556,7 @@ int css_property_get_longhand_properties(CssPropertyCode shorthand_id,
                                         CssPropertyCode* longhand_ids,
                                         int max_count);
 CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property);
+bool css_property_is_identity_shorthand(CssPropertyCode property);
 
 /**
  * Get the initial value for a property
@@ -1707,6 +1740,14 @@ enum CssTextDecorationLineFlag : uint8_t {
 };
 uint8_t css_text_decoration_line_flag(CssEnum keyword);
 bool css_property_validate_value(CssPropertyCode id, const CssValue* value);
+bool css_property_is_svg_paint(CssPropertyCode id);
+bool css_property_is_svg_resource(CssPropertyCode id);
+bool css_property_is_svg_presentation(CssPropertyCode id);
+bool css_property_is_svg_opacity(CssPropertyCode id);
+bool css_property_is_svg_length(CssPropertyCode id);
+
+typedef bool (*CssListItemVisitor)(const CssValue* value, void* context);
+bool css_value_visit_list_items(const CssValue* value, CssListItemVisitor visitor, void* context);
 bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode);

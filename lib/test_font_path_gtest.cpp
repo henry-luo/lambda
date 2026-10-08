@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include "font/font_internal.h"
+#include "../radiant/view.hpp"
+#include <math.h>
 
 #ifdef __APPLE__
 struct NativePathProbe { size_t commands; bool abort; };
@@ -37,3 +39,68 @@ TEST(FontPathTest, NativeUnicodeMappingDoesNotRequireParsedTables) {
     arena_destroy(arena); font_handle_release(font); font_context_destroy(context);
 }
 #endif
+
+TEST(FontMetricTest, CssUnitsRetainLogicalSizesAndCachedVerticalAdvances) {
+    const char* paths[] = {
+        "test/layout/data/font/LiberationSans-Regular.ttf",
+        "test/layout/data/font/NotoSansKR-Subset.otf",
+    };
+    for (float ratio : {1.0f, 2.0f}) {
+        FontContextConfig config = {}; config.pixel_ratio = ratio;
+        FontContext* context = font_context_create(&config);
+        ASSERT_NE(context, nullptr);
+        FontStyleDesc style = {};
+        style.family = "metric-test"; style.size_px = 10.0f; style.weight = FONT_WEIGHT_NORMAL;
+        for (size_t face = 0; face < 2; face++) {
+            FontHandle* font = font_load_from_file(context, paths[face], &style);
+            EXPECT_NE(font, nullptr);
+            if (!font) continue;
+            const FontMetrics* metrics = font_get_metrics(font);
+            EXPECT_NE(metrics, nullptr);
+            float pixels = -1.0f;
+            EXPECT_TRUE(css_font_metric_unit_px(font, &style, CSS_UNIT_CAP, 10.0f, false, &pixels));
+            if (metrics) EXPECT_NEAR(pixels, metrics->cap_height > 0.0f
+                ? metrics->cap_height : metrics->ascender, 0.0001f);
+            EXPECT_TRUE(css_font_metric_unit_px(font, &style, CSS_UNIT_EX, 10.0f, false, &pixels));
+            EXPECT_NEAR(pixels, font_get_x_height_ratio(font) * 10.0f, 0.0001f);
+            for (uint32_t codepoint : {(uint32_t)'0', (uint32_t)0x6C34}) {
+                if (font_get_glyph_index(font, codepoint) == 0) continue;
+                GlyphInfo first = font_get_glyph(font, codepoint);
+                GlyphInfo cached = font_get_glyph(font, codepoint);
+                // both advance caches must preserve the orientation selected by the font backend.
+                EXPECT_EQ(cached.id, first.id);
+                EXPECT_FLOAT_EQ(cached.advance_x, first.advance_x);
+                EXPECT_FLOAT_EQ(cached.advance_y, first.advance_y);
+#ifdef __APPLE__
+                GlyphInfo native = {};
+                EXPECT_TRUE(font_rasterize_ct_metrics(font->ct_raster_ref, codepoint,
+                    font->bitmap_scale, &native));
+                EXPECT_GT(native.advance_y, 0.0f);
+                EXPECT_FLOAT_EQ(first.advance_y, native.advance_y);
+                if (face == 1) EXPECT_NEAR(native.advance_y, 10.0f, 0.0001f);
+#endif
+                CssUnit unit = codepoint == '0' ? CSS_UNIT_CH : CSS_UNIT_IC;
+                for (bool upright : {false, true}) {
+                    EXPECT_TRUE(css_font_metric_unit_px(font, &style, unit, 10.0f, upright, &pixels));
+                    float advance = upright ? fabsf(first.advance_y) : first.advance_x;
+                    float fallback = unit == CSS_UNIT_CH && !upright ? 5.0f : 10.0f;
+                    EXPECT_NEAR(pixels, advance > 0.0f ? advance : fallback, 0.0001f);
+                    EXPECT_TRUE(css_font_metric_unit_px(font, &style, unit, 0.0f, upright, &pixels));
+                    EXPECT_FLOAT_EQ(pixels, 0.0f);
+                }
+                for (bool rendering : {false, true}) {
+                    LoadedGlyph* loaded = font_load_glyph(font, &style, codepoint, rendering);
+                    EXPECT_NE(loaded, nullptr);
+                    if (!loaded) continue;
+                    float physical_advance = loaded->advance_y;
+                    EXPECT_NEAR(physical_advance, first.advance_y * ratio, 0.0001f);
+                    loaded = font_load_glyph(font, &style, codepoint, rendering);
+                    EXPECT_NE(loaded, nullptr);
+                    if (loaded) EXPECT_FLOAT_EQ(loaded->advance_y, physical_advance);
+                }
+            }
+            font_handle_release(font);
+        }
+        font_context_destroy(context);
+    }
+}

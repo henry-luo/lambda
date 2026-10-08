@@ -13,6 +13,7 @@
 #include "css_style_node.hpp"
 #include "dom_lifecycle.hpp"
 #include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
+#include "html_input.hpp"
 #include "../../lambda.hpp"  // Full Element definition (needed for embedded Element field)
 #include "../../core/name_identity.h"
 #include "../../io/resource_policy.h"
@@ -45,7 +46,13 @@ typedef struct StateStore StateStore;  // From radiant/state_store.hpp
 typedef struct Url Url;  // From lib/url.h
 
 // Shared HTML first-strong scan used by dir=auto layout and :dir() matching.
-int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir, bool first);
+int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir, bool first,
+                              bool raw_content = false);
+typedef const char* (*DomDirectionValueResolver)(DomElement*, void*);
+int dom_element_directionality(DomElement* element,
+    DomDirectionValueResolver resolve_value = nullptr, void* context = nullptr);
+bool dom_element_has_directionality_hint(DomElement* element);
+extern "C" int dom_css_element_directionality(void* element);
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct MarkerProp MarkerProp;  // From radiant/view.hpp
@@ -635,6 +642,8 @@ bool css_custom_property_name_matches(const char* stored_name,
     const char* lookup_name, size_t stored_length = (size_t)-1,
     size_t lookup_length = (size_t)-1);
 DomElement* dom_parent_element(DomElement* element);
+const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
+    const char* name, size_t name_length = (size_t)-1);
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element,
     const char* name, size_t name_length = (size_t)-1,
     StrView* token_text = nullptr);
@@ -1475,6 +1484,7 @@ static_assert(offsetof(DomElement, elmt) % 8 == 0,
 #define PSEUDO_STATE_DRAG_OVER      (1 << 24)  // element is a drag-over target
 #define PSEUDO_STATE_OPEN           (1 << 25)  // open disclosure or picker
 #define PSEUDO_STATE_VALUE_DEPENDENT (1u << 26) // stylesheet dependency query for live values
+#define PSEUDO_STATE_DIRECTION_DEPENDENT (1u << 27) // host direction can depend on descendant state
 
 // ============================================================================
 // DOM Document Creation and Destruction

@@ -2155,7 +2155,7 @@ run-layout-baseline-suites:
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-radiant-baseline: build-radiant-baseline
-	@./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:ResourceAdmissionTest.*'
+	@./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:FontMetricTest.*:ResourceAdmissionTest.*'
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
 # Requires test/render Node dependencies, Chromium and Poppler's pdftocairo/pdfimages.

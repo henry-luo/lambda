@@ -1,0 +1,48 @@
+<!doctype html>
+<style>
+#parent { --selected:--parent-value; --parent-value:17px; --inherited-result:var(var(--selected)); }
+#child { --selected:--child-value; --child-value:31px; }
+</style>
+<button id="check">check</button><button id="verify">verify layout</button><div id="report"></div>
+<div id="target" style="font-size:20px"></div><div id="consumer"></div><div id="parent"><span id="child"></span></div>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var element=document.getElementById('target'),s=element.style,c=getComputedStyle(element),report=document.getElementById('report');
+function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+function value(name,text){s.removeProperty(name);s.setProperty(name,text);return c.getPropertyValue(name);}
+check('literal-name',function(){s.setProperty('--other','10px');return value('--result','var(--other)')==='10px';});
+check('computed-name',function(){s.setProperty('--name','--other');return value('--result','var(var(--name),9px)')==='10px';});
+check('three-level-name',function(){s.setProperty('--pointer','--name');return value('--result','var(var(var(--pointer)),9px)')==='10px';});
+check('inner-fallback-name',function(){return value('--result','var(var(--absent,--other),9px)')==='10px';});
+check('outer-fallback',function(){s.setProperty('--name','--absent');return value('--result','var(var(--name),9px)')==='9px';});
+check('invalid-quoted-name',function(){return value('--result','var("--other",safe)')==='safe';});
+check('invalid-number-name',function(){s.setProperty('--name','3');return value('--result','var(var(--name),safe)')==='safe';});
+check('invalid-many-name-tokens',function(){s.setProperty('--name','--other --another');return value('--result','var(var(--name),safe)')==='safe';});
+check('invalid-empty-name',function(){s.cssText+='--empty: ;';return value('--result','var(var(--empty),safe)')==='safe';});
+check('invalid-name-no-fallback',function(){return value('--result','var("--other")')==='';});
+check('case-sensitive-name',function(){s.setProperty('--Other','21px');s.setProperty('--name','--Other');return value('--result','var(var(--name))')==='21px';});
+check('escaped-name',function(){s.setProperty('--name','--\\6f ther');return value('--result','var(var(--name))')==='10px';});
+check('escaped-punctuation-name',function(){s.setProperty('--punct!','22px');s.setProperty('--name','--punct\\!');return value('--result','var(var(--name))')==='22px';});
+check('name-comments',function(){s.setProperty('--name','/* before */ --other /* after */');return value('--result','var(/* outer */ var(--name) /* tail */)')==='10px';});
+check('empty-removes-extra-token',function(){return value('--result','var(--other var(--empty),safe)')==='10px';});
+check('newly-adjacent-name-tokens',function(){s.setProperty('--fragment','--oth');return value('--result','var(var(--fragment)er,safe)')==='safe';});
+check('raw-replacement-spelling',function(){s.setProperty('--raw','/* kept */ +001.20');s.setProperty('--name','--raw');return value('--result','var(var(--name))')==='/* kept */ +001.20';});
+check('unused-fallback-cycle',function(){s.setProperty('--ready','ready');return value('--cycle','var(--ready,var(--cycle))')==='ready';});
+check('computed-name-cycle',function(){s.setProperty('--cycle-name','--cycle');s.setProperty('--cycle','var(var(--cycle-name),wrong)');return c.getPropertyValue('--cycle')===''&&value('--result','var(--cycle,safe)')==='safe';});
+check('cycle-in-name',function(){s.setProperty('--name-cycle','var(--name-cycle)');return value('--result','var(var(--name-cycle),safe)')==='safe';});
+check('inherited-declaration-owner',function(){return getComputedStyle(document.getElementById('child')).getPropertyValue('--inherited-result')==='17px';});
+check('registered-name-initial',function(){CSS.registerProperty({name:'--registered-name',syntax:'<custom-ident>',inherits:false,initialValue:'--other'});return value('--result','var(var(--registered-name))')==='10px';});
+check('registered-length-target',function(){CSS.registerProperty({name:'--length',syntax:'<length>',inherits:false,initialValue:'2px'});s.setProperty('--length','1em');s.setProperty('--name','--length');return value('--result','var(var(--name))')==='20px';});
+check('registered-target-cycle-default',function(){s.setProperty('--length-name','--length');s.setProperty('--length','var(var(--length-name),999px)');return c.getPropertyValue('--length')==='2px'&&value('--result','var(var(--length-name),999px)')==='2px';});
+check('registered-name-cycle-default',function(){s.setProperty('--registered-name','var(--registered-name)');return value('--result','var(var(--registered-name))')==='10px';});
+check('live-name-change',function(){s.setProperty('--name','--other');s.setProperty('--result','var(var(--name))');var before=c.getPropertyValue('--result');s.setProperty('--name','--Other');return before==='10px'&&c.getPropertyValue('--result')==='21px';});
+check('standard-consumers',function(){var consumer=document.getElementById('consumer');consumer.style.cssText='--width:55px;--width-name:--width;--height:13px;--height-name:--height;--color:red;--color-name:--color;width:var(var(--width-name));height:var(var(--height-name));color:var(var(--color-name))';return consumer.style.width!==''&&consumer.style.height!=='';});
+});
+// the event simulator commits used geometry between these handlers.
+document.getElementById('verify').addEventListener('click',function(){
+var computed=getComputedStyle(document.getElementById('consumer')),report=document.getElementById('report');
+report.setAttribute('data-used-width',String(computed.width==='55px'));
+report.setAttribute('data-used-height',String(computed.height==='13px'));
+report.setAttribute('data-used-color',String(computed.color==='rgb(255, 0, 0)'));
+});
+</script>

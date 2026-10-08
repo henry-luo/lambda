@@ -871,7 +871,8 @@ bool str_to_int64(const char* s, size_t len, int64_t* out, const char** end) {
 
     if (neg) {
         if (acc > (uint64_t)INT64_MAX + 1) return false;
-        *out = -(int64_t)acc;
+        // reduce the magnitude before conversion; negating INT64_MIN is signed overflow.
+        *out = acc ? -(int64_t)(acc - 1) - 1 : 0;
     } else {
         if (acc > (uint64_t)INT64_MAX) return false;
         *out = (int64_t)acc;

@@ -3681,7 +3681,10 @@ static void resolve_current_font_size(LayoutContext* lycon) {
         ? font_prop_used_size(lycon->font.style) : 16.0f;
 }
 
-struct CssLayoutMathContext {LayoutContext* layout; uintptr_t property;};
+static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
+    const CssValue* value, bool computed_units);
+
+struct CssLayoutMathContext {LayoutContext* layout; uintptr_t property; bool computed_units;};
 
 static bool css_layout_math_leaf(void* data, const CssValue* value, double* result) {
     CssLayoutMathContext* context = (CssLayoutMathContext*)data;
@@ -3689,7 +3692,8 @@ static bool css_layout_math_leaf(void* data, const CssValue* value, double* resu
         CssUnit canonical;
         return css_dimension_to_canonical(value->data.length.unit, value->data.length.value, &canonical, result);
     }
-    *result = resolve_length_value(context->layout, context->property, value);
+    *result = resolve_length_value_mode(context->layout, context->property, value,
+        context->computed_units);
     return !isnan(*result);
 }
 
@@ -3726,41 +3730,28 @@ static float css_containing_inline_percentage_base(LayoutContext* lycon) {
     return lycon->block.parent->content_width;
 }
 
-static float css_font_relative_em_size(LayoutContext* lycon) {
-    float size = lycon->font.style && lycon->font.style->font_size > 0.0f
-        ? lycon->font.style->font_size : lycon->font.current_font_size;
-    return size > 0.0f ? size : 16.0f;
-}
-
-static float css_font_metric_logical_px(LayoutContext* lycon, float metric) {
-    float raster_scale = ui_context_raster_scale(lycon->ui_context);
-    if (raster_scale > 0.0f) metric /= raster_scale;
-    float zoom = layout_effective_zoom(lycon->view);
-    if (zoom > 0.0f) metric /= zoom;
-    if (lycon->font.style && lycon->font.style->font_size > 0.0f &&
-        lycon->font.current_font_size > 0.0f &&
-        lycon->font.style->font_size != lycon->font.current_font_size) {
-        metric *= lycon->font.current_font_size / lycon->font.style->font_size;
-    }
-    return metric;
-}
-
-static float css_font_relative_glyph_advance(LayoutContext* lycon,
-                                             uint32_t codepoint,
-                                             float fallback_em_fraction) {
-    FontHandle* handle = font_box_handle(&lycon->font);
-    if (handle && lycon->font.style) {
-        FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
-        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
-        if (glyph && glyph->advance_x > 0.0f) {
-            return css_font_metric_logical_px(lycon, glyph->advance_x);
-        }
-    }
-    return css_font_relative_em_size(lycon) * fallback_em_fraction;
+static float css_layout_line_height_basis(LayoutContext* lycon, DomElement* owner) {
+    FontProp* font = nullptr;
+    for (DomElement* current = owner; current && !font; current = dom_parent_element(current))
+        if (current->font) font = current->font;
+    FontStyleDesc style = font ? font_style_desc_from_prop(font) : FontStyleDesc{};
+    style.size_px = font ? font->font_size : css_font_size_keyword_px(CSS_VALUE_MEDIUM);
+    if (!style.family) style.family = css_property_get_by_code(CSS_PROPERTY_FONT_FAMILY)->initial_value;
+    if (!font) style.weight = FONT_WEIGHT_NORMAL;
+    const CssValue* leading = owner && owner->blk && owner->block()->line_height
+        ? owner->block()->line_height : css_line_height_normal_value();
+    float pixels = NAN;
+    return css_font_line_height_px(lycon->ui_context ? lycon->ui_context->font_ctx : nullptr,
+        &style, leading, &pixels) ? pixels : NAN;
 }
 
 // resolve a CSS length, percentage, or number to pixels.
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
+    return resolve_length_value_mode(lycon, property, value, false);
+}
+
+static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
+    const CssValue* value, bool computed_units) {
     if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
     static thread_local int length_resolve_depth = 0;
     if (length_resolve_depth > 64) {
@@ -3824,84 +3815,39 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = num * (lycon->font.style && lycon->font.style->font_size > 0.0f
                 ? lycon->font.style->font_size : lycon->font.current_font_size);
             break;
-        case CSS_UNIT_EX: {
-            float x_height_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
-            float font_size = lycon->font.style && lycon->font.style->font_size > 0.0f
-                ? lycon->font.style->font_size : lycon->font.current_font_size;
-            result = num * font_size * x_height_ratio;
-            break;
-        }
-        case CSS_UNIT_CH: {
-            // CSS Values 4 §6.1.1: the zero glyph's inline advance.
-            result = num * css_font_relative_glyph_advance(
-                lycon, (uint32_t)'0', 0.5f);
-            break;
-        }
-        case CSS_UNIT_CAP: {
-            FontHandle* handle = font_box_handle(&lycon->font);
-            const FontMetrics* metrics = handle ? font_get_metrics(handle) : nullptr;
-            float cap = metrics && metrics->cap_height > 0.0f
-                ? css_font_metric_logical_px(lycon, metrics->cap_height)
-                : css_font_relative_em_size(lycon);
-            result = num * cap;
-            break;
-        }
+        case CSS_UNIT_EX:
+        case CSS_UNIT_CH:
+        case CSS_UNIT_CAP:
         case CSS_UNIT_IC: {
-            result = num * css_font_relative_glyph_advance(
-                lycon, 0x6C34, 1.0f);
+            FontStyleDesc style = lycon->font.style ? font_style_desc_from_prop(lycon->font.style) : FontStyleDesc{};
+            float font_size = lycon->font.style ? lycon->font.style->font_size : lycon->font.current_font_size;
+            bool upright = length_owner && layout_element_inline_axis_is_vertical(length_owner) &&
+                layout_specified_keyword(length_owner, CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED) == CSS_VALUE_UPRIGHT;
+            float pixels = 0.0f;
+            result = css_font_metric_unit_px(font_box_handle(&lycon->font), &style,
+                unit, font_size, upright, &pixels) ? num * pixels : NAN;
             break;
         }
-        case CSS_UNIT_LH: {
-            if (lycon->selected_style) {
-                result = num * lycon->selected_style->line_height;
-                break;
-            }
-            // CSS Values 4 §6.1.1: `lh` is the computed line-height of the
-            // element whose length is being resolved.
-            DomElement* owner = lycon->view && lycon->view->is_element()
-                ? lycon->view->as_element() : nullptr;
-            const CssValue* line_height = owner && owner->blk
-                ? owner->block()->line_height : nullptr;
-            float target_font_size = lycon->font.style &&
-                lycon->font.style->font_size > 0.0f
-                ? lycon->font.style->font_size : lycon->font.current_font_size;
-            if (target_font_size <= 0.0f) target_font_size = 16.0f;
-            if (line_height) {
-                result = num * layout_resolve_line_height_value(
-                    lycon, line_height, owner, target_font_size);
-            } else {
-                CssValue normal_value = {};
-                normal_value.type = CSS_VALUE_TYPE_KEYWORD;
-                normal_value.data.keyword = CSS_VALUE_NORMAL;
-                result = num * layout_resolve_line_height_value(
-                    lycon, &normal_value, owner, target_font_size);
-            }
-            break;
-        }
+        case CSS_UNIT_LH:
         case CSS_UNIT_RLH: {
+            bool font_affecting = effective_property == CSS_PROPERTY_FONT_SIZE ||
+                effective_property == CSS_PROPERTY_LINE_HEIGHT;
             if (lycon->selected_style) {
-                ViewCssStyle* root_style = lycon->selected_style;
-                while (root_style->parent) root_style = root_style->parent;
-                result = num * root_style->line_height;
+                ViewCssStyle* basis = lycon->selected_style;
+                if (unit == CSS_UNIT_RLH) while (basis->parent) basis = basis->parent;
+                if (font_affecting && (unit == CSS_UNIT_LH || basis == lycon->selected_style))
+                    basis = basis->parent;
+                result = num * (basis ? basis->line_height : css_layout_line_height_basis(lycon, nullptr));
                 break;
             }
-            DomElement* root = length_owner && length_owner->doc
-                ? length_owner->doc->root : nullptr;
-            const CssValue* line_height = root && root->blk
-                ? root->block()->line_height : nullptr;
-            float root_size = lycon->root_font_size > 0.0f
-                ? lycon->root_font_size : 16.0f;
-            if (!line_height || (line_height->type == CSS_VALUE_TYPE_LENGTH &&
-                    line_height->data.length.unit == CSS_UNIT_RLH)) {
-                CssValue normal_value = {};
-                normal_value.type = CSS_VALUE_TYPE_KEYWORD;
-                normal_value.data.keyword = CSS_VALUE_NORMAL;
-                result = num * layout_resolve_line_height_value(
-                    lycon, &normal_value, root, root_size);
-            } else {
-                result = num * layout_resolve_line_height_value(
-                    lycon, line_height, root, root_size);
-            }
+            DomElement* basis = unit == CSS_UNIT_RLH && length_owner && length_owner->doc
+                ? length_owner->doc->root : length_owner;
+            // line-height/font-size use parent leading on the referred element, including the root's initial basis.
+            if (font_affecting && (unit == CSS_UNIT_LH || basis == length_owner))
+                basis = basis ? dom_parent_element(basis) : nullptr;
+            if (basis && length_owner && length_owner->doc && length_owner->doc->root && basis == length_owner->doc->root->parent)
+                basis = nullptr;
+            result = num * css_layout_line_height_basis(lycon, basis);
             break;
         }
         default:
@@ -3921,7 +3867,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = percentage * lycon->scroll_percentage_base / 100.0;
         } else if (effective_property == CSS_PROPERTY_FONT_SIZE || effective_property == CSS_PROPERTY_LINE_HEIGHT || effective_property == CSS_PROPERTY_VERTICAL_ALIGN) {
             result = percentage * lycon->font.style->font_size / 100.0;
-            if (effective_property == CSS_PROPERTY_LINE_HEIGHT) {
+            if (effective_property == CSS_PROPERTY_LINE_HEIGHT && !computed_units) {
                 result *= layout_effective_zoom(lycon->view);
             }
         } else if (effective_property == CSS_PROPERTY_LETTER_SPACING) {
@@ -4004,7 +3950,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             break;
         }
         uintptr_t raw_property = (intptr_t)property < 0 ? property : (uintptr_t)(-(intptr_t)property);
-        CssLayoutMathContext leaf_context = {lycon, raw_property};
+        CssLayoutMathContext leaf_context = {lycon, raw_property, computed_units};
         CssMathEvaluationContext math_context = {css_layout_math_leaf, &leaf_context,
             1.0 / ui_context_raster_scale(lycon->ui_context), false};
         CssMathResult math = css_math_evaluate(value, &math_context);
@@ -4016,7 +3962,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             // as non-length properties; missing substitutions compute invalid.
             const CssValue* substituted = resolve_var_function(lycon, value);
             result = substituted && substituted != value
-                ? resolve_length_value(lycon, property, substituted) : NAN;
+                ? resolve_length_value_mode(lycon, property, substituted, computed_units) : NAN;
         } else {
             log_warn("unknown CSS function: %s()", func->name);
             result = NAN;
@@ -4025,7 +3971,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     }
     case CSS_VALUE_TYPE_LIST:
         if (value->data.list.count > 0 && value->data.list.values[0]) {
-            result = resolve_length_value(lycon, property, value->data.list.values[0]);
+            result = resolve_length_value_mode(lycon, property, value->data.list.values[0], computed_units);
         } else {
             result = 0.0f;
         }
@@ -4050,7 +3996,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     case CSS_VALUE_TYPE_VAR: {
         const CssValue* substituted = resolve_var_function(lycon, value);
         result = substituted && substituted != value
-            ? resolve_length_value(lycon, property, substituted) : NAN;
+            ? resolve_length_value_mode(lycon, property, substituted, computed_units) : NAN;
         break;
     }
     default:
@@ -4058,7 +4004,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         result = NAN;  // Use NAN instead of 0 to indicate unresolvable value
         break;
     }
-    if (value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result) &&
+    if (!computed_units && value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result) &&
         effective_property != CSS_PROPERTY_FONT_SIZE &&
         !(lycon->transform_angle_math && effective_property == CSS_PROPERTY_TRANSFORM)) {
         // CSS Viewport 1 applies effective zoom to every resolved CSS length,
@@ -4072,6 +4018,29 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     }
     length_resolve_depth--;
     return result;
+}
+
+static void compute_stored_line_height(LayoutContext* lycon, ViewSpan* span) {
+    const CssValue* value = span && span->blk ? span->block()->line_height : nullptr;
+    if (!value || value->type == CSS_VALUE_TYPE_NUMBER ||
+        value->type == CSS_VALUE_TYPE_KEYWORD ||
+        (value->type == CSS_VALUE_TYPE_LENGTH && value->data.length.unit == CSS_UNIT_PX)) return;
+    FontBox saved_font = lycon->font;
+    if (span->font && span->font->font_size >= 0.0f) {
+        lycon->font.style = lam::up(span->font);
+        lycon->font.current_font_size = span->font->font_size;
+    }
+    CssLayoutMathContext leaves = {lycon, (uintptr_t)(-(intptr_t)CSS_PROPERTY_LINE_HEIGHT), true};
+    CssMathEvaluationContext context = {css_layout_math_leaf, &leaves, 1.0, false};
+    CssValue computed = {};
+    bool resolved = css_compute_line_height_value(value, &context, &computed);
+    lycon->font = saved_font;
+    if (!resolved) return;
+    // computed lengths inherit before zoom; numbers keep their multiplier for each descendant font.
+    CssValue* retained = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
+    if (!retained) return;
+    *retained = computed;
+    span->blk->line_height = lam::shared(retained);
 }
 
 static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
@@ -6147,7 +6116,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 inheritance_span->font->font_size_from_medium = ancestor->font->font_size_from_medium;
                 continue;  // Move to next property
             }
-            if (prop_id == CSS_PROPERTY_DIRECTION && !dom_elem->get_attribute("dir")) {
+            if (prop_id == CSS_PROPERTY_DIRECTION && !dom_element_has_directionality_hint(dom_elem)) {
                 // css writing modes: direction inherits from the computed parent value;
                 // html dir can supply that value without a specified CSS declaration.
                 CssEnum inherited_direction = find_inherited_block_keyword(
@@ -6215,6 +6184,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
         }
     }
+    compute_stored_line_height(lycon, lam::view_require_element(lycon->view));
     resolve_text_align_longhands(dom_elem, lycon);
     resolve_overflow_axes(dom_elem, lycon);
     resolve_overscroll_axes(dom_elem, lycon);

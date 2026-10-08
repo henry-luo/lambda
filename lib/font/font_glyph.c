@@ -227,6 +227,7 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
         if (handle->ascii_glyph_id[idx] != 0) {
             info.id = handle->ascii_glyph_id[idx];
             info.advance_x = handle->ascii_advance[idx];
+            info.advance_y = handle->ascii_advance_y[idx];
             return info;
         }
     }
@@ -239,6 +240,7 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
         if (cached) {
             info.id = cached->glyph_id;
             info.advance_x = cached->advance_x;
+            info.advance_y = cached->advance_y;
             return info;
         }
     }
@@ -338,6 +340,7 @@ apply_overrides:
             .codepoint = codepoint,
             .glyph_id  = char_index,
             .advance_x = info.advance_x,
+            .advance_y = info.advance_y,
         };
         hashmap_set(cache, &entry);
     }
@@ -346,6 +349,7 @@ apply_overrides:
     if (codepoint >= 32 && codepoint <= 126 && char_index != 0) {
         uint32_t idx = codepoint - 32;
         handle->ascii_advance[idx] = info.advance_x;
+        handle->ascii_advance_y[idx] = info.advance_y;
         handle->ascii_glyph_id[idx] = char_index;
     }
 
@@ -732,7 +736,7 @@ static LoadedGlyph* try_load_from_handle_ct(FontHandle* h, uint32_t codepoint) {
 
     // advance: CT returns CSS pixels, font_load_glyph expects physical pixels
     s_loaded_glyph.advance_x = info.advance_x * pixel_ratio;
-    s_loaded_glyph.advance_y = 0;
+    s_loaded_glyph.advance_y = info.advance_y * pixel_ratio;
     if (should_use_ct_advance_override(h)) {
         float ct_adv = font_platform_get_glyph_advance(h->ct_font_ref, codepoint);
         if (ct_adv >= 0.0f) {

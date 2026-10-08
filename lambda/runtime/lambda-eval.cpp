@@ -3259,10 +3259,10 @@ static VirtualOpStatus element_attr_value_at_for(Item item, int64_t index, Item*
     return VIRTUAL_OP_OK;
 }
 
-static VirtualOpStatus materialized_element_attr_get(Element* element, Item key,
+static VirtualOpStatus materialized_map_field_get(Map* owner, Item key,
         Item* out) {
     if (out) *out = ItemNull;
-    if (!element || !element->type || !out || !is_text_type_id(get_type_id(key))) {
+    if (!owner || !owner->type || !out || !is_text_type_id(get_type_id(key))) {
         return VIRTUAL_OP_MISSING;
     }
     const char* chars = key.get_chars();
@@ -3270,11 +3270,11 @@ static VirtualOpStatus materialized_element_attr_get(Element* element, Item key,
     Symbol* symbol = get_type_id(key) == LMD_TYPE_SYMBOL ? key.get_safe_symbol() : NULL;
     if (symbol && !symbol_is_lambda_name(symbol)) return VIRTUAL_OP_MISSING;
     Target* ns = symbol_lambda_namespace(symbol);
-    FOR_EACH_MAP_FIELD((TypeMap*)element->type, field) {
+    FOR_EACH_MAP_FIELD((TypeMap*)owner->type, field) {
         if (!field->name || field->name->length != length ||
                 !target_equal(field->ns, ns)) continue;
         if (!length || memcmp(field->name->str, chars, length) == 0) {
-            *out = _map_field_value((TypeMap*)element->type, element->data, field);
+            *out = _map_field_value((TypeMap*)owner->type, owner->data, field);
             return VIRTUAL_OP_OK;
         }
     }
@@ -3288,7 +3288,7 @@ static VirtualOpStatus element_attr_get_for(Item item, Item key, Item* out) {
                 !item.velmt->vtable->element.attrs.get) return VIRTUAL_OP_MISSING;
         return item.velmt->vtable->element.attrs.get(item.velmt->data, key, out);
     }
-    return materialized_element_attr_get(item.element, key, out);
+    return materialized_map_field_get(item.map, key, out);
 }
 
 static VirtualOpStatus element_tag_for(Item item, Item* out) {
@@ -3435,25 +3435,42 @@ static Bool element_semantic_eq(Item a_item, Item b_item, int depth,
     return BOOL_TRUE;
 }
 
-// helper: structural equality for VMaps (virtual maps)
-static Bool vmap_eq(VMap* a, VMap* b, int depth, EqualityMode mode) {
-    if (a == b) return BOOL_TRUE;
-    Item a_item = {.vmap = a};
-    Item b_item = {.vmap = b};
+// Compare virtual maps with either map carrier through one presence-aware field walk.
+static Bool virtual_map_eq(Item a_item, Item b_item, int depth, EqualityMode mode) {
+    if (a_item.item == b_item.item) return BOOL_TRUE;
+    RootFrame roots(5);
+    Rooted<Item> a_root(roots, a_item);
+    Rooted<Item> b_root(roots, b_item);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> val_a(roots, ItemNull);
+    Rooted<Item> val_b(roots, ItemNull);
+    bool native_b = get_type_id(b_item) == LMD_TYPE_MAP;
+    if (native_b && lambda_value_nominal(LMD_TYPE_MAP,
+            (const void*)(uintptr_t)b_item.item)) return BOOL_FALSE;
     // Handle equality is capability identity; two empty handle carriers must
     // never collapse to structural VMap equality.
     if (lambda_task_handle_is(a_item) || lambda_task_handle_is(b_item)) return BOOL_FALSE;
-    int64_t count_a = a->vtable->count(a->data);
-    int64_t count_b = b->vtable->count(b->data);
+    int64_t count_a = a_root.get().vmap->vtable->count(a_root.get().vmap->data);
+    int64_t count_b = native_b ? ((TypeMap*)b_root.get().map->type)->length
+        : b_root.get().vmap->vtable->count(b_root.get().vmap->data);
     if (count_a != count_b) return BOOL_FALSE;
 
     // iterate A's keys and look up each in B
     for (int64_t i = 0; i < count_a; i++) {
-        Item key = a->vtable->key_at(a->data, i);
-        Item val_a = a->vtable->value_at(a->data, i);
-        Item val_b = b->vtable->get(b->data, key);
-        // if key not found in B, val_b will be null but val_a shouldn't be
-        Bool r = fn_eq_depth(val_a, val_b, depth + 1, mode);
+        key_root.set(a_root.get().vmap->vtable->key_at(a_root.get().vmap->data, i));
+        // S5.4.1: a missing key is distinct from a present null-valued key.
+        if (native_b) {
+            Item value = ItemNull;
+            VirtualOpStatus status = materialized_map_field_get(b_root.get().map, key_root.get(), &value);
+            val_b.set(value);
+            if (status == VIRTUAL_OP_ERROR) return BOOL_ERROR;
+            if (status != VIRTUAL_OP_OK) return BOOL_FALSE;
+        } else {
+            if (!vmap_backing_has(b_root.get().vmap, key_root.get())) return BOOL_FALSE;
+            val_b.set(b_root.get().vmap->vtable->get(b_root.get().vmap->data, key_root.get()));
+        }
+        val_a.set(a_root.get().vmap->vtable->value_at(a_root.get().vmap->data, i));
+        Bool r = fn_eq_depth(val_a.get(), val_b.get(), depth + 1, mode);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
@@ -3581,6 +3598,12 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityMode mode) 
         return numeric_items_equal_exact(a_item, b_item);
     }
     if (a_type_id != b_type_id) {
+        // S5.4.1 / D7.4.5v2: a virtual carrier does not change the map value family.
+        if ((a_type_id == LMD_TYPE_MAP && b_type_id == LMD_TYPE_VMAP) ||
+                (a_type_id == LMD_TYPE_VMAP && b_type_id == LMD_TYPE_MAP)) {
+            return virtual_map_eq(a_type_id == LMD_TYPE_VMAP ? a_item : b_item,
+                a_type_id == LMD_TYPE_MAP ? a_item : b_item, depth, mode);
+        }
         // special case: type(null) == null, type(error) == error
         // when one side is a type value and the other is null/error,
         // compare the type's inner type_id against the value's type_id
@@ -3739,7 +3762,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityMode mode) 
         }
         // vmap structural equality
         if (a_tid == LMD_TYPE_VMAP) {
-            return vmap_eq(a_item.vmap, b_item.vmap, depth, mode);
+            return virtual_map_eq(a_item, b_item, depth, mode);
         }
         // range equality (start, end, length)
         if (a_tid == LMD_TYPE_RANGE) {

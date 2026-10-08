@@ -1,33 +1,45 @@
 // chart/transform.ls — Data transform operations for the chart library
-// Applied in order before encoding: filter, aggregate, calculate, bin, sort, fold, flatten
+// Applied in source order before encoding, including analytical and join operations.
 
 import util: .util
+import parse: .parse
+import records: .records
+import window: .window
+import source: .source
+import statistics: .statistics
 
 // ============================================================
 // Public API: Apply a sequence of transforms to data
 // ============================================================
 
-pub fn apply_transforms(data, transform_el) {
+pub fn apply_transforms(data, transform_el, datasets = null) {
     if (not transform_el) data
-    else (let n = len(transform_el),
+    else (let steps = if (transform_el is element) content(transform_el) else transform_el,
+          let n = len(steps),
           if (n == 0) data
-          else apply_transform_list(data, transform_el, 0, n))
+          else apply_transform_list(data, steps, 0, n, datasets))
 }
 
 // recursive helper: apply transforms one at a time
-fn apply_transform_list(data, transforms, index: int, count: int) {
-    if (index >= count) data
+fn apply_transform_list(data, transforms, index: int, count: int, datasets) {
+    if (data is error or index >= count) data
     else (let t = transforms[index],
-          let tag = name(t),
-          let result = if (tag == 'filter') apply_filter(data, t)
-              else if (tag == 'sort') apply_sort(data, t)
-              else if (tag == 'aggregate') apply_aggregate(data, t)
-              else if (tag == 'calculate') apply_calculate(data, t)
-              else if (tag == 'bin') apply_bin(data, t)
-              else if (tag == 'fold') apply_fold(data, t)
-              else if (tag == 'flatten') apply_flatten(data, t)
-              else data,
-          apply_transform_list(result, transforms, index + 1, count))
+          let tag = if (t is element) string(name(t)) else t.type,
+          let result = if (t is error) t
+              else if (tag == "filter") apply_filter(data, t)
+              else if (tag == "sort") apply_sort(data, t)
+              else if (tag == "aggregate") apply_aggregate(data, t)
+              else if (tag == "calculate") apply_calculate(data, t)
+              else if (tag == "bin") apply_bin(data, t)
+              else if (tag == "fold") apply_fold(data, t)
+              else if (tag == "flatten") apply_flatten(data, t)
+              else if (tag == "window") window.evaluate(data, t)
+              else if (tag == "lookup") apply_lookup(data, t, datasets)
+              else if (tag == "density" or tag == "kde") statistics.density(data, t)
+              else if (tag == "regression") statistics.regression(data, t)
+              else if (tag == "loess") statistics.loess(data, t)
+              else error("chart: unsupported transform " ++ string(tag)),
+          apply_transform_list(result, transforms, index + 1, count, datasets))
 }
 
 // ============================================================
@@ -35,21 +47,7 @@ fn apply_transform_list(data, transforms, index: int, count: int) {
 // ============================================================
 
 fn apply_filter(data, filter_el) {
-    let field = filter_el.field;
-    let op = filter_el.op;
-    let value = filter_el.value;
-
-    if field and op and value != null {
-        (if (op == "==") (data |: ~[field] == value)
-         else if (op == "!=") (data |: ~[field] != value)
-         else if (op == ">") (data |: float(~[field]) > float(value))
-         else if (op == ">=") (data |: float(~[field]) >= float(value))
-         else if (op == "<") (data |: float(~[field]) < float(value))
-         else if (op == "<=") (data |: float(~[field]) <= float(value))
-         else data)
-    } else {
-        data
-    }
+    data |: parse.test_predicate(filter_el, ~)
 }
 
 // ============================================================
@@ -57,13 +55,7 @@ fn apply_filter(data, filter_el) {
 // ============================================================
 
 fn apply_sort(data, sort_el) {
-    let field_name = sort_el.field;
-    let order = if (sort_el.order) sort_el.order else "ascending";
-    if order == "descending" {
-        [for (d in data order by d[field_name] desc) d]
-    } else {
-        [for (d in data order by d[field_name]) d]
-    }
+    records.sort_rows(data, if (sort_el.sort != null) sort_el.sort else sort_el)
 }
 
 // ============================================================
@@ -71,18 +63,7 @@ fn apply_sort(data, sort_el) {
 // ============================================================
 
 pub fn compute_agg(data, op, field) {
-    if (op == "count") len(data)
-    else if (op == "sum") sum(data |> float(~[field]))
-    else if (op == "mean" or op == "average") avg(data |> float(~[field]))
-    else if (op == "median") math.median(data |> float(~[field]))
-    else if (op == "min") min(data |> float(~[field]))
-    else if (op == "max") max(data |> float(~[field]))
-    else if (op == "distinct") len(util.unique_vals(data |> ~[field]))
-    else if (op == "q1") math.quantile(data |> float(~[field]), 0.25)
-    else if (op == "q3") math.quantile(data |> float(~[field]), 0.75)
-    else if (op == "stdev") math.sqrt(math.variance(data |> float(~[field])))
-    else if (op == "variance") math.variance(data |> float(~[field]))
-    else 0
+    records.aggregate(data, op, field)
 }
 
 // ============================================================
@@ -102,27 +83,22 @@ fn apply_aggregate(data, agg_el) {
 }
 
 fn do_aggregate(data, group_fields, agg_specs) {
-    if len(group_fields) == 0 {
+    let summaries = if len(group_fields) == 0 {
         [build_agg_row(data, [], agg_specs)]
     } else {
-        let gkeys = util.unique_vals(data |> group_key_str(~, group_fields));
-        [for (gk in gkeys) (
-            let items = data |: group_key_str(~, group_fields) == gk,
-            build_agg_row(items, group_fields, agg_specs)
-        )]
-    }
-}
-
-fn group_key_str(row, fields) {
-    let parts = [for (f in fields) string(row[f])];
-    join(parts, "|||")
+        [for (partition in records.group_by(data, group_fields))
+            build_agg_row(partition.rows, group_fields, agg_specs)]
+    };
+    let failure = util.first_error(summaries);
+    if (failure is error) failure else summaries
 }
 
 fn build_agg_row(items, group_fields, agg_specs) {
-    let group_pairs = [for (f in group_fields) for (x in [f, items[0][f]]) x];
-    let agg_pairs = [for (spec in agg_specs)
-        for (x in [spec.as, float(compute_agg(items, spec.op, spec.field))]) x];
-    map([*group_pairs, *agg_pairs])
+    let values = [for (spec in agg_specs) compute_agg(items, spec.op, spec.field)];
+    let failure = util.first_error(values);
+    if (failure is error) failure
+    else {*:records.group_fields(items[0], group_fields),
+        *:map([for (index, spec in agg_specs) for (x in [spec.as, values[index]]) x])}
 }
 
 // ============================================================
@@ -136,7 +112,8 @@ fn apply_calculate(data, calc_el) {
     let field2 = calc_el.field2;
     let field = if (calc_el.field) calc_el.field else field1;
     if (not as_field) data
-    else [for (d in data) add_field(d, as_field, calc_value(d, op, field, field2))]
+    else [for (d in data) add_field(d, as_field,
+        if (calc_el.expression is fn) calc_el.expression(d) else calc_value(d, op, field, field2))]
 }
 
 fn calc_value(d, op, field, field2) {
@@ -167,10 +144,11 @@ fn apply_bin(data, bin_el) {
         let vmin = min(values);
         let vmax = max(values);
         let range_span = vmax - vmin;
-        let step = if (step_override) float(step_override)
-                   else util.nice_num(range_span / float(maxbins), true);
-        let as_end = as_field ++ "_end";
-        [for (d in data) (
+        let step = if (step_override != null) float(step_override)
+                   else if (range_span == 0) 1.0 else util.nice_num(range_span / float(maxbins), true);
+        let as_end = if (bin_el.as_end != null) bin_el.as_end else as_field ++ "_end";
+        if (step <= 0 or maxbins <= 0) error("chart: bin step and maxbins must be positive")
+        else [for (d in data) (
             let v = float(d[field]),
             let bin_start = floor(v / step) * step,
             let bin_end = bin_start + step,
@@ -205,14 +183,20 @@ fn apply_flatten(data, flat_el) {
     let as_names = flat_el.as;
     if not fields or len(fields) == 0 {
         data
-    } else if len(fields) == 1 {
-        let src_field = fields[0];
-        let dst_field = if (as_names and len(as_names) > 0) as_names[0] else src_field;
-        [for (d in data) for (val in d[src_field])
-            add_field(d, dst_field, val)]
     } else {
-        data
+        // Zip parallel arrays to the longest length, padding shorter fields with null.
+        [for (row in data,
+              let count = max([for (field in fields) len(row[field])]))
+            for (index in 0 to (count - 1))
+                flatten_fields(row, row, fields, as_names, index, 0)]
     }
+}
+
+fn flatten_fields(source, row, fields, as_names, index, field_index) {
+    if (field_index >= len(fields)) row
+    else flatten_fields(source, add_field(row,
+        if (as_names != null and field_index < len(as_names)) as_names[field_index] else fields[field_index],
+        source[fields[field_index]][index]), fields, as_names, index, field_index + 1)
 }
 
 // ============================================================
@@ -220,6 +204,56 @@ fn apply_flatten(data, flat_el) {
 // ============================================================
 
 pub fn add_field(row, field_name, value) {
-    let existing_pairs = [for (k, v in row) for (x in [string(k), v]) x];
-    map([*existing_pairs, field_name, value])
+    records.add_field(row, field_name, value)
+}
+
+fn apply_lookup(data, step, datasets) {
+    let from = step.from;
+    let foreign = source.resolve(null, if (from.data != null) from.data else from, datasets);
+    let field = if (step.lookup != null) step.lookup else step.field;
+    let key = if (from.key != null) from.key else step.key;
+    let fields = if (from.fields != null) from.fields else step.fields;
+    let names = if (step.as is string) [step.as] else if (step.as != null) step.as else fields;
+    if (foreign is error) foreign
+    else if (not (foreign is array) or field == null or key == null or
+        (fields == null and (names == null or len(names) != 1)) or
+        (fields != null and (not (fields is array) or len(names) != len(fields))))
+        error("chart: lookup requires primary/foreign keys, array data, and matching output fields")
+    else [for (row in data,
+        let matches = foreign |: ~[key] == row[field],
+        let found = matches[0])
+        lookup_fields(row, found, fields, names, step.default, 0)]
+}
+
+fn lookup_fields(row, found, fields, names, fallback, index) {
+    if (index >= len(names)) row
+    else lookup_fields(add_field(row, names[index],
+        if (found == null) fallback else if (fields == null) found else found[fields[index]]),
+        found, fields, names, fallback, index + 1)
+}
+
+// Encoding shorthand is normalized before any renderer or composition derives its scales.
+pub fn prepare_encoding(data, encoding, partition_fields = []) {
+    let enc = if (encoding != null) encoding else {};
+    let binned_data = apply_transforms(data, [for (key, channel in enc where channel.bin and channel.field)
+        <bin field: channel.field, as: channel.field ++ "_bin",
+            maxbins: if (channel.bin.maxbins != null) channel.bin.maxbins else 10,
+            step: channel.bin.step>]);
+    let histogram = enc.x.bin and enc.y.aggregate == "count";
+    let binned_enc = map([for (key, channel in enc) for (item in [string(key),
+        if (channel.bin and channel.field) {*:channel, field: channel.field ++ "_bin", bin: null,
+            dtype: if (histogram and string(key) == "x") "ordinal" else channel.dtype}
+        else channel]) item]);
+    let aggregates = [for (key, channel in binned_enc where channel.aggregate != null)
+        {channel: string(key), field: channel.field, op: channel.aggregate,
+            as: if (channel.aggregate == "count") "_count" else channel.field ++ "_" ++ channel.aggregate}];
+    let groups = util.unique_vals([*partition_fields, for (key, channel in binned_enc
+        where channel.field != null and channel.aggregate == null) channel.field]);
+    let summarized = if (binned_data is error) binned_data
+        else if (len(aggregates) > 0) do_aggregate(binned_data, groups, aggregates) else binned_data;
+    let normalized = map([for (key, channel in binned_enc,
+        let matches = [for (spec in aggregates where spec.channel == string(key)) spec])
+        for (item in [string(key), if (len(matches) > 0)
+            {*:channel, field: matches[0].as, dtype: "quantitative", aggregate: null} else channel]) item]);
+    {data: summarized, encoding: normalized}
 }

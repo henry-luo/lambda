@@ -203,7 +203,7 @@ name(svg)                // 'svg'
 svg.width                // 400, the default width
 ```
 
-> **Experimental.** The converter reads inline `data.values` only; `data.url` is not fetched. A Vega-Lite `transform` array is accepted but not applied, so filter or aggregate the rows in Lambda before converting.
+> **Experimental.** The converter supports inline/named/file/URL data, common transforms, and layer/facet/concat/repeat composition. Vega expression strings and unsupported transforms return a diagnostic; use field predicates or Lambda data preparation for those cases.
 
 ### 4.2 API
 
@@ -218,20 +218,70 @@ svg.width                // 400, the default width
 | Element | Attributes and children |
 |---------|-------------------------|
 | `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, and the children below |
-| `<data>` | `values: [...]`, or one child element per row (`<row>` by convention), whose attributes are the fields |
-| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size` |
-| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`), `value`, `title`, `aggregate`, `bin`, `stack`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
-| `<transform>` | Steps applied in order: `<filter field, op, value>`, `<sort field, order>`, `<aggregate>` with `<group field>` and `<agg op, field, as>` children, `<calculate as, op, field, field2>`, `<bin field, as, maxbins, step>`, `<fold fields, as>`, `<flatten fields, as>` |
-| `<config>` | `theme: "dark"` for the dark theme; `axis_grid: true` for horizontal grid lines |
+| `<data>` | Inline `values: [...]` or row children; `name` selects the chart's `datasets` map; `url` and optional `format` use Lambda input loading |
+| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size` |
+| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`), `value`, `datum`, `title`, `aggregate`, `bin`, `stack`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<transform>` | Ordered `filter`, `sort`, `aggregate`, `calculate`, `bin`, `fold`, `flatten`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
+| `<config>` | `theme`: `light`, `dark`, `minimal`, `presentation`, or a custom map; nested `mark`/mark-type/`axis`/`legend` settings or equivalent prefixed attributes; `font`; `axis_grid: true` for horizontal grids |
 | `<layer>` | `<chart>` children drawn over one another |
-| `<facet>` | `field`, `columns` (default 3), `spacing` (default 20): one small chart per value of `field` |
+| `<facet>` | `field` with wrapping `columns` (default 3), or `row`/`column` field definitions; `spacing` (default 20); common scale domains by default |
 | `<annotation>` | `<text_note x, y, text, color, font_size, anchor, dx, dy>` and `<rule_note x or y, color, stroke_width, stroke_dash>` children |
 | `<hconcat>`, `<vconcat>` | `spacing` (default 20); `<chart>` children placed side by side or stacked |
 | `<repeat>` | A `<row [fields]>` and/or `<column [fields]>` child plus one `<chart>` template whose channels say `field: {repeat: "row"}` or `field: {repeat: "column"}` |
 
 A pie or donut chart is an `arc` mark with a `theta` channel, plus `inner_radius` for a donut; grouped bars use an `x_offset` channel. Aggregate operations are `count`, `sum`, `mean` (or `average`), `median`, `min`, `max`, `distinct`, `q1`, `q3`, `stdev` and `variance`. A colour channel picks a palette with `scale: {scheme: "set1"}`: `category10` is the default for categories and `blues` for quantities, and `category20`, `set1`, `pastel1`, `dark2`, `greens`, `reds`, `oranges`, `purples`, `greys`, `red_blue` and `spectral` are also available. `scale: {domain: [...], range: [...]}` assigns colours explicitly.
 
+#### Analytical transforms
+
+`lambda.chart.transform.apply_transforms(rows, steps, datasets = null)` also
+applies the transform vocabulary directly. `steps` is a `<transform>` element
+or an array of maps carrying `type`. Invalid options return value errors
+(S7.4.1); later steps stop at the first diagnostic.
+
+| Step | Options and result |
+|---|---|
+| `<window>` | `groupby`, multi-field `sort`, inclusive `frame` (default `[null, 0]`), `ignore_peers`; `<agg op, field, as, param>` children add aggregate, ranking, lag/lead, or first/last/nth-value fields without changing source order |
+| `<lookup>` | `field`, `from: {data, key, fields}`, optional parallel `as` names and `default`; a left join against inline, named, or file/URL data. Omit foreign `fields` and supply one `as` name to embed the matching record |
+| `<density>` | `field`, optional `groupby`, `bandwidth` (zero estimates it), `extent`, `steps`, `as`, `counts`, `cumulative`, `resolve: "shared"`; Gaussian estimates default to `value`/`density` output |
+| `<regression>` | `x`, `y`, optional `groupby`, `method` (`linear`, `log`, `exp`, `pow`, `quad`, `poly`), polynomial `order`, `extent`, `steps`, `as`, `params`; curve records or `coef`/`r_squared` model parameters |
+| `<loess>` | `x`, `y`, optional `groupby`, `bandwidth` in `(0, 1]` (default 0.3), `as`; locally weighted trend records |
+
+Windows support aggregate operations plus `row_number`, `rank`, `dense_rank`,
+`percent_rank`, `cume_dist`, `ntile`, `lag`, `lead`, `first_value`, `last_value`,
+and zero-based `nth_value`. Tied sort keys share ranks and expand frames unless
+`ignore_peers` is true. Sorting is stable (S6.2.3). Lookup uses exact value
+equality (S5.1.1, S5.4.1), selects the first duplicate match, and fills missing
+matches with `default` (null). Numeric summaries and statistical transforms
+ignore nonfinite/nonnumeric values; invalid or rank-deficient fits return a
+diagnostic. Vega-Lite conversion supports these transforms, including its
+`window` operation array and `regression`/`loess` with `on` syntax.
+
+Running-sum windows followed by a calculation of each prior total produce
+waterfall charts with ordinary `bar` marks and `y`/`y2` ranges. Density and
+fitted-trend outputs use ordinary line/area marks. See the
+[chart design](../vibe/Lambda_Pkg_Chart.md#6-data-transformations) for full contracts
+and a runnable waterfall example.
+
 ### 4.4 Word and tag clouds
+
+Wordcloud is also a chart markup type. The `text` channel selects the word,
+`size` selects its positive weight, and optional `color` controls appearance.
+Records default to `text`/`weight` when channels are omitted. Mark options are
+the same as the direct API below; chart dimensions, padding, title, transforms,
+and composition apply normally.
+
+```lambda
+import chart: lambda.chart.chart
+
+chart.render(<chart width: 400, height: 260, padding: 10,
+    <data values: [{label: "Lambda", count: 30}, {label: "Charts", count: 12}]>
+    <mark type: "wordcloud", shape: "ellipse", seed: 17>
+    <encoding <text field: "label"> <size field: "count", dtype: "quantitative">>
+>)
+```
+
+Chart entry points return value errors on invalid data or options, while the
+direct wordcloud APIs below raise errors (S7.4.1–S7.4.2).
 
 `lambda.chart.wordcloud` lays out weighted words and renders an SVG element.
 It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4).

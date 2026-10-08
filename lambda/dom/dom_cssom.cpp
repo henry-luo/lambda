@@ -1465,12 +1465,94 @@ static bool cssom_decl_matches(const CssDeclaration* declaration, StrView name) 
 static CssDeclaration* cssom_decl_find(CssRule* rule, StrView name) {
     if (!rule || !name.str) return nullptr;
     CssDeclaration* selected = nullptr;
+    CssPropertyCode requested = css_property_code_from_name(name.str);
+    const CssProperty* group = css_property_get_by_code(css_property_cascade_shorthand(requested));
+    bool identity = group && group->identity_shorthand;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* declaration = rule->data.style_rule.declarations[i];
-        if (cssom_decl_matches(declaration, name) &&
+        bool projected = declaration && identity && declaration->property_code == group->code;
+        if ((cssom_decl_matches(declaration, name) || projected) &&
             (!selected || !selected->important || declaration->important)) selected = declaration;
     }
     return selected;
+}
+
+static const char* cssom_decl_value(CssRule* rule, StrView name, Pool* output, bool priority = false) {
+    if (!output) return "";
+    CssPropertyCode requested = name.str ? css_property_code_from_name(name.str) : CSS_PROPERTY_UNKNOWN;
+    const CssProperty* property = css_property_get_by_code(requested);
+    auto serialize = [output](CssDeclaration* declaration, bool allow_pending) -> const char* {
+        if (!declaration) return "";
+        bool pending = declaration->pending_identity_shorthand ||
+            (css_property_is_identity_shorthand(declaration->property_code) &&
+             css_value_contains_pending_substitution(declaration->value));
+        if (pending && !allow_pending) return "";
+        if (declaration->property_code >= CSS_PROPERTY_MARKER_START &&
+            declaration->property_code <= CSS_PROPERTY_TEXT_ANCHOR) {
+            CssFormatter* formatter = css_formatter_create(output, CSS_FORMAT_COMPACT);
+            if (!formatter) return "";
+            formatter->options.quote_urls = true;
+            css_format_value(formatter, declaration->value);
+            String* result = stringbuf_to_string(formatter->output);
+            return result ? result->chars : "";
+        }
+        return css_serialize_declaration_value(declaration, output);
+    };
+    if (property && property->identity_shorthand) {
+        const char* selected = nullptr;
+        bool important = false;
+        bool pending = false;
+        for (int i = 0; i < property->longhand_count; i++) {
+            const char* spelling = css_property_spelling_from_code(property->longhand_props[i]);
+            CssDeclaration* member = cssom_decl_find(rule, strview_from_cstr(spelling));
+            if (!member || (i && member->important != important)) return "";
+            if (priority && !member->important) return "";
+            bool member_pending = member->pending_identity_shorthand ||
+                (css_property_is_identity_shorthand(member->property_code) &&
+                 css_value_contains_pending_substitution(member->value));
+            const char* value = serialize(member, true);
+            if (!priority && i && (pending != member_pending || strcmp(selected, value))) return "";
+            selected = value; important = member->important; pending = member_pending;
+        }
+        return priority ? important ? "important" : "" : selected ? selected : "";
+    }
+    CssDeclaration* declaration = cssom_decl_find(rule, name);
+    return priority ? declaration && declaration->important ? "important" : "" : serialize(declaration, false);
+}
+
+static bool cssom_decl_expand_identity(CssRule* rule, CssPropertyCode member) {
+    CssPropertyCode shorthand = css_property_cascade_shorthand(member);
+    const CssProperty* property = css_property_get_by_code(shorthand);
+    if (!property || !property->identity_shorthand) return true;
+    size_t count = rule->data.style_rule.declaration_count;
+    size_t expanded_count = count;
+    for (size_t i = 0; i < count; i++)
+        if (rule->data.style_rule.declarations[i]->property_code == shorthand)
+            expanded_count += property->longhand_count - 1;
+    if (count == expanded_count) return true;
+    CssDeclaration** expanded = (CssDeclaration**)pool_calloc(rule->pool, expanded_count * sizeof(CssDeclaration*));
+    if (!expanded) return false;
+    size_t next = 0;
+    for (size_t i = 0; i < count; i++) {
+        CssDeclaration* source = rule->data.style_rule.declarations[i];
+        if (source->property_code != shorthand) { expanded[next++] = source; continue; }
+        for (int j = 0; j < property->longhand_count; j++) {
+            CssDeclaration* copy = (CssDeclaration*)pool_calloc(rule->pool, sizeof(CssDeclaration));
+            if (!copy) return false;
+            // the view borrows immutable payloads; inline commit makes owned snapshots (D4.5.1v4).
+            *copy = *source;
+            copy->property_code = property->longhand_props[j];
+            copy->name_id = css_property_name_id(copy->property_code);
+            copy->property_name = css_property_spelling_from_code(copy->property_code);
+            copy->property_name_length = strlen(copy->property_name);
+            copy->pending_identity_shorthand = css_value_contains_pending_substitution(source->value);
+            copy->owns_payload = false; copy->tree_owned_record = false;
+            expanded[next++] = copy;
+        }
+    }
+    rule->data.style_rule.declarations = expanded;
+    rule->data.style_rule.declaration_count = expanded_count;
+    return true;
 }
 
 static bool cssom_decl_supports(CssRule* rule, StrView name) {
@@ -1531,12 +1613,17 @@ static StrView cssom_decl_name(StrView property, bool named, char* buffer, size_
 }
 
 static bool cssom_decl_store(CssRule* rule, StrView name, CssDeclaration* replacement) {
+    CssPropertyCode requested = css_property_code_from_name(name.str);
+    bool identity = css_property_is_identity_shorthand(requested);
+    // replacing one member preserves its siblings and replaces their inherited priority independently.
+    if (!identity && !cssom_decl_expand_identity(rule, requested)) return false;
     size_t count = rule->data.style_rule.declaration_count;
     CssDeclaration** declarations = rule->data.style_rule.declarations;
     bool found = false;
     size_t retained = 0;
     for (size_t i = 0; i < count; i++) {
-        if (cssom_decl_matches(declarations[i], name)) {
+        if (cssom_decl_matches(declarations[i], name) || (identity &&
+            css_property_shorthand_contains(requested, declarations[i]->property_code))) {
             // A setter replaces every duplicate while retaining the first property's slot.
             if (!found && replacement) declarations[retained++] = replacement;
             found = true;
@@ -1588,18 +1675,24 @@ struct CssomDeclarationView {
         }
         rule = &inline_rule;
     }
+    Pool* serialization_pool() {
+        // read projections retire with the view instead of accumulating in the stylesheet (D4.5.1v4).
+        if (!scratch) scratch = pool_create();
+        return scratch;
+    }
     ~CssomDeclarationView() { if (scratch) pool_destroy(scratch); }
 };
 
-static String* cssom_decl_text(CssRule* rule) {
-    StringBuf* buffer = stringbuf_new(rule->pool);
+static String* cssom_decl_text(CssRule* rule, Pool* output) {
+    if (!output) return nullptr;
+    StringBuf* buffer = stringbuf_new(output);
     if (!buffer) return nullptr;
     size_t count = 0;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         if (!cssom_decl_first(rule, i)) continue;
         if (count++) stringbuf_append_str(buffer, " ");
         append_rule_declaration_text(buffer, cssom_decl_find(rule,
-            css_declaration_name(rule->data.style_rule.declarations[i])), rule->pool);
+            css_declaration_name(rule->data.style_rule.declarations[i])), output);
         stringbuf_append_str(buffer, ";");
     }
     return stringbuf_to_string(buffer);
@@ -1683,7 +1776,7 @@ extern "C" Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name)
     if (strcmp(property, "length") == 0 || strcmp(property, "cssText") == 0) {
         bool text = strcmp(property, "cssText") == 0;
         if (text) {
-            String* result = cssom_decl_text(rule);
+            String* result = cssom_decl_text(rule, view.serialization_pool());
             return make_string_item(result ? result->chars : "");
         }
         size_t count = 0;
@@ -1695,8 +1788,7 @@ extern "C" Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name)
     }
     char name_buffer[128];
     StrView name = cssom_decl_name(cssom_property_name(prop_name), true, name_buffer, sizeof(name_buffer));
-    CssDeclaration* declaration = cssom_decl_find(rule, name);
-    return make_string_item(declaration ? css_serialize_declaration_value(declaration, pool) : "");
+    return make_string_item(cssom_decl_value(rule, name, view.serialization_pool()));
 }
 
 static Item cssom_decl_method_get(Item receiver, Item property, bool priority) {
@@ -1715,10 +1807,7 @@ static Item cssom_decl_method_get(Item receiver, Item property, bool priority) {
         return dom_computed_style_get_property(receiver_root.get(), property_root.get());
     }
     if (!rule) return make_string_item("");
-    CssDeclaration* declaration = cssom_decl_supports(rule, name) ? cssom_decl_find(rule, name) : nullptr;
-    const char* value = priority ? (declaration && declaration->important ? "important" : "")
-        : declaration ? css_serialize_declaration_value(declaration, rule->pool) : "";
-    return make_string_item(value);
+    return make_string_item(cssom_decl_supports(rule, name) ? cssom_decl_value(rule, name, view.serialization_pool(), priority) : "");
 }
 
 extern "C" Item dom_cssom_rule_decl_get_value(Item receiver, Item property) {
@@ -1753,7 +1842,7 @@ static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
         cssom_decl_notify_mutation(view->rule);
         return;
     }
-    String* text = cssom_decl_text(view->rule);
+    String* text = cssom_decl_text(view->rule, view->serialization_pool());
     if (!text) return;
     CssPropertyCode property = name.str ? css_property_code_from_name(name.str) : CSS_PROPERTY_UNKNOWN;
     css_transition_capture_before_change(view->element, property);
@@ -1839,10 +1928,9 @@ extern "C" Item dom_cssom_rule_decl_remove_property(Item receiver, Item property
     if (!rule) return make_string_item("");
     char name_buffer[128];
     StrView name = cssom_decl_name(cssom_property_name(property_root.get()), false, name_buffer, sizeof(name_buffer));
-    CssDeclaration* declaration = cssom_decl_supports(rule, name) ? cssom_decl_find(rule, name) : nullptr;
-    const char* old_value = declaration ? css_serialize_declaration_value(declaration, rule->pool) : "";
-    previous_root.set(make_string_item(old_value));
-    if (declaration && cssom_decl_store(rule, name, nullptr)) cssom_decl_commit(&view, name);
+    bool supported = cssom_decl_supports(rule, name);
+    previous_root.set(make_string_item(supported ? cssom_decl_value(rule, name, view.serialization_pool()) : ""));
+    if (supported && cssom_decl_store(rule, name, nullptr)) cssom_decl_commit(&view, name);
     return previous_root.get();
 }
 

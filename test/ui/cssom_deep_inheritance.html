@@ -1,0 +1,48 @@
+<!doctype html><meta charset="utf-8">
+<style>#source:lang(en){color:red;font-size:10px;line-height:2;--tone:red}#source:lang(fr){color:blue;font-size:20px;line-height:2;--tone:blue}#alternate{color:purple;font-size:12px}</style>
+<button id="check">Check deep inherited computed values</button>
+<div id="source" lang="en"></div><div id="alternate"></div><output id="report"></output>
+<script>
+document.getElementById('check').addEventListener('click',function(){
+var source=document.getElementById('source'),alternate=document.getElementById('alternate'),report=document.getElementById('report'),nodes=[];
+function chain(depth,style){var current=source;nodes=[];for(var index=0;index<depth;index++){var child=document.createElement('div');if(style)child.style.cssText=style;current.appendChild(child);nodes.push(child);current=child;}return current;}
+function check(name,fn){source.textContent='';alternate.textContent='';source.lang='en';source.style.cssText='';document.documentElement.style.fontSize='';try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+check('inherited-color-0',function(){var leaf=chain(0);return getComputedStyle(leaf).color==='rgb(255, 0, 0)';});
+check('inherited-font-0',function(){var leaf=chain(0);return getComputedStyle(leaf).fontSize==='10px';});
+check('inherited-color-8',function(){var leaf=chain(8);return getComputedStyle(leaf).color==='rgb(255, 0, 0)';});
+check('inherited-font-8',function(){var leaf=chain(8);return getComputedStyle(leaf).fontSize==='10px';});
+check('inherited-color-17',function(){var leaf=chain(17);return getComputedStyle(leaf).color==='rgb(255, 0, 0)';});
+check('inherited-font-17',function(){var leaf=chain(17);return getComputedStyle(leaf).fontSize==='10px';});
+check('inherited-color-33',function(){var leaf=chain(33);return getComputedStyle(leaf).color==='rgb(255, 0, 0)';});
+check('inherited-font-33',function(){var leaf=chain(33);return getComputedStyle(leaf).fontSize==='10px';});
+check('inherited-color-65',function(){var leaf=chain(65);return getComputedStyle(leaf).color==='rgb(255, 0, 0)';});
+check('inherited-font-65',function(){var leaf=chain(65);return getComputedStyle(leaf).fontSize==='10px';});
+check('inherited-color-128',function(){var leaf=chain(128);return getComputedStyle(leaf).color==='rgb(255, 0, 0)';});
+check('inherited-font-128',function(){var leaf=chain(128);return getComputedStyle(leaf).fontSize==='10px';});
+check('inherited-color-384',function(){var leaf=chain(384);return getComputedStyle(leaf).color==='rgb(255, 0, 0)';});
+check('inherited-font-384',function(){var leaf=chain(384);return getComputedStyle(leaf).fontSize==='10px';});
+check('retained-live-color',function(){var leaf=chain(128),live=getComputedStyle(leaf);var before=live.color;source.lang='fr';return before==='rgb(255, 0, 0)'&&live.color==='rgb(0, 0, 255)';});
+check('retained-live-font',function(){var leaf=chain(128),live=getComputedStyle(leaf);var before=live.fontSize;source.lang='fr';return before==='10px'&&live.fontSize==='20px';});
+check('explicit-inherit-chain',function(){var leaf=chain(128,'color:inherit;font-size:inherit');source.lang='fr';var live=getComputedStyle(leaf);return live.color==='rgb(0, 0, 255)'&&live.fontSize==='20px';});
+check('unset-chain',function(){var leaf=chain(128,'color:unset;font-size:unset');source.lang='fr';var live=getComputedStyle(leaf);return live.color==='rgb(0, 0, 255)'&&live.fontSize==='20px';});
+check('invalid-substitution-chain',function(){var leaf=chain(128,'color:var(--absent);font-size:var(--absent)');source.lang='fr';var live=getComputedStyle(leaf);return live.color==='rgb(0, 0, 255)'&&live.fontSize==='20px';});
+check('nearest-color-source',function(){var leaf=chain(128);nodes[93].style.color='green';source.lang='fr';return getComputedStyle(leaf).color==='rgb(0, 128, 0)';});
+check('nearest-font-source',function(){var leaf=chain(128);nodes[93].style.fontSize='12px';source.lang='fr';return getComputedStyle(leaf).fontSize==='12px';});
+check('leaf-em-font',function(){var leaf=chain(128);leaf.style.fontSize='2em';return getComputedStyle(leaf).fontSize==='20px';});
+check('leaf-percent-font',function(){var leaf=chain(128);leaf.style.fontSize='150%';return getComputedStyle(leaf).fontSize==='15px';});
+check('leaf-math-font',function(){var leaf=chain(128);leaf.style.fontSize='calc(50% + 5px)';return getComputedStyle(leaf).fontSize==='10px';});
+check('relative-font-checkpoints',function(){var leaf=chain(128);nodes[31].style.fontSize='2em';nodes[95].style.fontSize='150%';return getComputedStyle(leaf).fontSize==='30px';});
+check('font-shorthand-source',function(){var leaf=chain(128);nodes[93].style.font='12px serif';return getComputedStyle(leaf).fontSize==='12px';});
+check('root-rem-basis',function(){var leaf=chain(128);document.documentElement.style.fontSize='24px';source.style.fontSize='2rem';leaf.style.fontSize='calc(50% + 1rem)';return getComputedStyle(leaf).fontSize==='48px';});
+check('deep-unitless-line-height',function(){var leaf=chain(128);leaf.style.fontSize='2em';return getComputedStyle(leaf).lineHeight==='40px';});
+check('deep-percentage-line-height',function(){var leaf=chain(128);source.style.lineHeight='150%';leaf.style.fontSize='2em';return getComputedStyle(leaf).lineHeight==='15px';});
+check('deep-length-line-height',function(){var leaf=chain(128);source.style.lineHeight='17px';return getComputedStyle(leaf).lineHeight==='17px';});
+check('relative-source-percentage-line-height',function(){var leaf=chain(128);nodes[93].style.fontSize='150%';nodes[93].style.lineHeight='200%';leaf.style.fontSize='2em';return getComputedStyle(leaf).lineHeight==='30px';});
+check('deep-explicit-background-inherit',function(){var leaf=chain(128,'background-color:inherit');source.style.backgroundColor='yellow';return getComputedStyle(leaf).backgroundColor==='rgb(255, 255, 0)';});
+check('deep-initial-stops-inheritance',function(){var leaf=chain(128);nodes[93].style.color='initial';return getComputedStyle(leaf).color==='rgb(0, 0, 0)';});
+check('deep-custom-property-control',function(){var leaf=chain(128);return getComputedStyle(leaf).getPropertyValue('--tone').trim()==='red';});
+check('deep-custom-color-consumer',function(){var leaf=chain(128);leaf.style.color='var(--tone)';source.lang='fr';return getComputedStyle(leaf).color==='rgb(0, 0, 255)';});
+check('deep-reparented-source',function(){var leaf=chain(128);alternate.appendChild(source.firstElementChild);return getComputedStyle(leaf).color==='rgb(128, 0, 128)'&&getComputedStyle(leaf).fontSize==='12px';});
+source.textContent='';alternate.textContent='';
+});
+</script>

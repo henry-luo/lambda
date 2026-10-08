@@ -144,6 +144,19 @@ int css_tokenizer_tokenize(CssTokenizer* tokenizer, const char* input, size_t le
 CssToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count);
 size_t css_token_array_remove_comments(Pool* pool, CssToken* tokens, size_t count);
 bool css_token_is_integer(const CssToken* token);
+// retain authored spelling while making tokens recovered at EOF safe to reparse.
+StrView css_token_source_text(const CssToken* token, Pool* pool);
+static inline CssTokenType css_token_block_closer(CssTokenType type) {
+    switch (type) {
+    case CSS_TOKEN_FUNCTION: case CSS_TOKEN_LEFT_PAREN: return CSS_TOKEN_RIGHT_PAREN;
+    case CSS_TOKEN_LEFT_BRACKET: return CSS_TOKEN_RIGHT_BRACKET;
+    case CSS_TOKEN_LEFT_BRACE: return CSS_TOKEN_RIGHT_BRACE;
+    default: return CSS_TOKEN_EOF;
+    }
+}
+static inline bool css_token_is_block_end(CssTokenType type) {
+    return type == CSS_TOKEN_RIGHT_PAREN || type == CSS_TOKEN_RIGHT_BRACKET || type == CSS_TOKEN_RIGHT_BRACE;
+}
 
 // Unicode support functions
 UnicodeChar css_parse_unicode_char(const char* input, size_t max_length);
@@ -328,6 +341,8 @@ typedef struct CssSimpleSelector {
 
     // Pseudo-class argument (for :lang(), :dir(), etc.)
     const char* argument;
+    const char** language_ranges; // decoded :lang() ident/string tokens, owned by the selector pool
+    size_t language_range_count;
 
     // Function selectors (:is(), :where(), :has(), :not())
     struct CssSelector** function_selectors;

@@ -1512,7 +1512,8 @@ LayoutFlexStyleInfo layout_flex_declared_style_info(
 float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* value,
                                        DomElement* owner, float target_font_size) {
     if (!lycon || !value) return 0.0f;
-    if (target_font_size <= 0.0f) target_font_size = 16.0f;
+    // a zero computed font still has zero leading; only an unresolved size uses the default.
+    if (target_font_size < 0.0f) target_font_size = 16.0f;
     if (value->type == CSS_VALUE_TYPE_NUMBER) {
         return value->data.number.value * target_font_size;
     }

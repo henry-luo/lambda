@@ -135,12 +135,9 @@ struct CssElementDeclarationQuery {
 };
 
 static void css_query_consider_declaration(CssElementDeclarationQuery* query,
-    const CssDeclaration* declaration, CssSpecificity specificity, CssOrigin origin) {
+    const CssDeclaration* declaration, CssSpecificity specificity, CssOrigin origin,
+    const char* source_url = nullptr) {
     if (!declaration || !declaration->valid || !declaration->property_name) return;
-    // SVG declaration queries need shorthand priority before projecting their resolved longhand value.
-    bool marker_shorthand = str_icmp_cstr(declaration->property_name, "marker") == 0 &&
-        (strcmp(query->property, "marker-start") == 0 || strcmp(query->property, "marker-mid") == 0 ||
-         strcmp(query->property, "marker-end") == 0);
     bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
         css_font_shorthand_contains_property(query->property);
     bool custom_property = strncmp(declaration->property_name, "--", 2) == 0;
@@ -156,8 +153,10 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool all_reset = strcmp(declaration->property_name, "all") == 0 &&
         strncmp(query->property, "--", 2) != 0 && strcmp(query->property, "direction") != 0 &&
         strcmp(query->property, "unicode-bidi") != 0;
-    if (!marker_shorthand && !font_shorthand && !shorthand && !break_alias && !all_reset && !same_property) return;
+    if (!font_shorthand && !shorthand && !break_alias && !all_reset && !same_property) return;
     CssDeclaration candidate = *declaration;
+    // computed URLs use the winning sheet's base, including imported and nested rules.
+    if (source_url) candidate.source_file = source_url;
     candidate.specificity = specificity;
     candidate.specificity.important = declaration->important;
     candidate.origin = origin;
@@ -224,7 +223,8 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
     }
     if (matched) for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         css_query_consider_declaration(query, rule->data.style_rule.declarations[i],
-                                       specificity, rule->origin);
+                                       specificity, rule->origin,
+                                       rule->stylesheet ? rule->stylesheet->origin_url : nullptr);
     }
     CssRuleChildList children = css_rule_child_list(rule);
     for (size_t i = 0; children.count && i < *children.count; i++)
@@ -265,6 +265,14 @@ static bool css_select_element_declaration_inner(CssEngine* engine, SelectorMatc
     for (size_t i = 0; !pseudo_element && inline_declarations && i < inline_count; i++) {
         css_query_consider_declaration(&query, inline_declarations[i],
                                        inline_specificity, CSS_ORIGIN_AUTHOR);
+    }
+    CssDeclaration* presentation = !pseudo_element ? style_tree_get_presentation_declaration(
+        element->specified_style, css_property_code_from_name(property_name)) : nullptr;
+    // native presentation samples share the same query and rollback eligibility as authored CSS.
+    if (presentation && css_declaration_cascade_eligible(presentation, ceiling, filters) &&
+        (!query.found || css_declaration_cascade_compare(presentation, &query.best) > 0)) {
+        query.best = *presentation;
+        query.found = true;
     }
     if (query.found && css_declaration_is_rollback(&query.best)) {
         // SVG queries share the style tree's origin and layer rollback rules.
@@ -523,6 +531,8 @@ CssEngine* css_engine_create(Pool* pool) {
     engine->performance.optimize_specificity = true;
     engine->performance.parallel_parsing = false; // Not implemented yet
     engine->performance.max_cache_size = 1000;
+    engine->limits.max_substitution_bytes = CSS_SUBSTITUTION_DEFAULT_MAX_BYTES;
+    engine->limits.max_substitution_tokens = CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS;
 
     // Set default document context
     engine->context.base_url = "";
@@ -572,6 +582,12 @@ void css_engine_destroy(CssEngine* engine) {
 }
 
 // Configuration functions
+void css_engine_set_substitution_limits(CssEngine* engine, size_t max_bytes, size_t max_tokens) {
+    if (!engine) return;
+    engine->limits.max_substitution_bytes = max_bytes ? max_bytes : CSS_SUBSTITUTION_DEFAULT_MAX_BYTES;
+    engine->limits.max_substitution_tokens = max_tokens ? max_tokens : CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS;
+}
+
 void css_engine_enable_feature(CssEngine* engine, const char* feature_name, bool enabled) {
     if (!engine || !feature_name) return;
 

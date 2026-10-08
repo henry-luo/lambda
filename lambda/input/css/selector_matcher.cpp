@@ -9,6 +9,9 @@
 #include <string.h>
 #include <stdlib.h>
 
+static bool selector_matcher_matches_language_ranges(const CssSimpleSelector* selector,
+                                                     DomElement* element);
+
 // CSS-only targets do not host a custom-element registry.
 extern "C" __attribute__((weak)) bool dom_css_custom_element_defined(const char* /*name*/) {
     return false;
@@ -30,6 +33,9 @@ extern "C" __attribute__((weak)) int dom_css_element_matches_validity(
 extern "C" __attribute__((weak)) int dom_css_element_placeholder_shown(
         void* /*element*/) {
     return -1;
+}
+extern "C" __attribute__((weak)) int dom_css_element_directionality(void* element) {
+    return dom_element_directionality((DomElement*)element);
 }
 
 // ============================================================================
@@ -905,6 +911,8 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                 element);
         case CSS_SELECTOR_PSEUDO_SLOTTED:
             return selector_matcher_matches_slotted(matcher, simple_selector, element);
+        case CSS_SELECTOR_PSEUDO_LANG:
+            return selector_matcher_matches_language_ranges(simple_selector, element);
 
         case CSS_SELECTOR_PSEUDO_NTH_CHILD:
         case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
@@ -1135,55 +1143,112 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
 // Pseudo-Class Matching
 // ============================================================================
 
-static bool selector_matcher_matches_lang(const char* argument, DomElement* element) {
-    if (!argument || !element) return false;
+static StrView selector_language_subtag(const char** cursor) {
+    const char* start = *cursor;
+    const char* end = strchr(start, '-');
+    if (!end) end = start + strlen(start);
+    *cursor = *end ? end + 1 : end;
+    return {start, (size_t)(end - start)};
+}
+
+static bool selector_language_subtags_valid(const char* text, bool wildcards) {
+    if (!text || !*text) return false;
+    bool first = true;
+    while (*text) {
+        StrView subtag = selector_language_subtag(&text);
+        if (!subtag.length || subtag.length > 8) return false;
+        if (!(wildcards && subtag.length == 1 && subtag.str[0] == '*')) {
+            for (size_t i = 0; i < subtag.length; i++) {
+                char c = subtag.str[i];
+                bool alpha = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+                if (!alpha && (first || c < '0' || c > '9')) return false;
+            }
+        }
+        if (!*text && subtag.str[subtag.length] == '-') return false;
+        first = false;
+    }
+    return true;
+}
+
+static bool selector_language_range_matches(const char* range, const char* language) {
+    if (!selector_language_subtags_valid(range, true) ||
+        !selector_language_subtags_valid(language, false)) return false;
+    // extended filtering under RFC 4647 skips intermediate subtags but never crosses a singleton.
+    const char* range_cursor = range;
+    const char* language_cursor = language;
+    StrView wanted = selector_language_subtag(&range_cursor);
+    StrView actual = selector_language_subtag(&language_cursor);
+    if (!(wanted.length == 1 && wanted.str[0] == '*') &&
+        !str_ieq(wanted.str, wanted.length, actual.str, actual.length)) return false;
+    while (*range_cursor) {
+        wanted = selector_language_subtag(&range_cursor);
+        if (!wanted.length) return false;
+        if (wanted.length == 1 && wanted.str[0] == '*') continue;
+        for (;;) {
+            if (!*language_cursor) return false;
+            actual = selector_language_subtag(&language_cursor);
+            if (str_ieq(wanted.str, wanted.length, actual.str, actual.length)) break;
+            if (actual.length == 1) return false;
+        }
+    }
+    return true;
+}
+
+static bool selector_matcher_matches_language_ranges(const CssSimpleSelector* selector,
+                                                     DomElement* element) {
+    if (!selector || !element) return false;
     const char* language = nullptr;
     for (DomElement* current = element; current; current = current->parent_element()) {
-        language = current->get_attribute("lang");
-        if (!language) language = current->get_attribute("xml:lang");
+        language = dom_element_get_namespaced_attribute(current,
+            "http://www.w3.org/XML/1998/namespace", "lang");
+        const char* namespace_uri = dom_element_namespace_uri(current);
+        bool html = strcmp(namespace_uri, "http://www.w3.org/1999/xhtml") == 0;
+        if (!language && !html) {
+            const char* local_name = nullptr;
+            const char* attribute_namespace = dom_element_attribute_namespace_uri(
+                current, "xml:lang", &local_name);
+            if (attribute_namespace && strcmp(attribute_namespace, "http://www.w3.org/XML/1998/namespace") == 0)
+                language = current->get_attribute("xml:lang");
+        }
+        if (!language && (html || strcmp(namespace_uri, "http://www.w3.org/2000/svg") == 0))
+            language = current->get_attribute("lang");
         if (language) break;
     }
-    if (!language || !language[0]) return false;
-    size_t language_len = strlen(language);
-    for (const char* item = argument; *item;) {
-        const char* comma = strchr(item, ',');
-        const char* end = comma ? comma : item + strlen(item);
-        if (end > item + 1 &&
-            ((*item == '"' && end[-1] == '"') ||
-             (*item == '\'' && end[-1] == '\''))) {
-            item++;
-            end--;
-        }
-        size_t length = (size_t)(end - item);
-        if ((length == 1 && item[0] == '*') ||
-            (length > 0 && language_len >= length &&
-             str_ieq(language, length, item, length) &&
-             (language_len == length || language[length] == '-'))) return true;
-        item = comma ? comma + 1 : end;
+    for (size_t i = 0; i < selector->language_range_count; i++) {
+        const char* range = selector->language_ranges[i];
+        // an empty range matches explicitly unknown and untagged content languages.
+        if ((!language || !*language) ? !*range : selector_language_range_matches(range, language))
+            return true;
     }
     return false;
 }
 
+static bool selector_matcher_matches_lang(const char* argument, DomElement* element) {
+    if (!argument) return false;
+    // legacy direct callers use the same grammar; normal AST matching needs no temporary pool.
+    SelectorQueryScratch scratch;
+    if (!scratch.ensure_pool()) return false;
+    size_t length = strlen(argument);
+    char* text = (char*)pool_calloc(scratch.pool, length + 8);
+    if (!text) return false;
+    memcpy(text, ":lang(", 6);
+    memcpy(text + 6, argument, length);
+    text[6 + length] = ')';
+    if (!scratch.parse_list(text) || scratch.group->selector_count != 1) return false;
+    CssSelector* selector = scratch.group->selectors[0];
+    if (selector->compound_selector_count != 1 ||
+        selector->compound_selectors[0]->simple_selector_count != 1) return false;
+    CssSimpleSelector* simple = selector->compound_selectors[0]->simple_selectors[0];
+    return simple->type == CSS_SELECTOR_PSEUDO_LANG &&
+        selector_matcher_matches_language_ranges(simple, element);
+}
+
 static bool selector_matcher_matches_dir(const char* argument, DomElement* element) {
     if (!argument || !element) return false;
-    bool want_rtl = str_icmp_cstr(argument, "rtl") == 0;
-    for (DomElement* current = element; current;
-         current = current->parent_element()) {
-        const char* dir = current->get_attribute("dir");
-        if (dir && str_icmp_cstr(dir, "rtl") == 0) return want_rtl;
-        if (dir && str_icmp_cstr(dir, "ltr") == 0) return !want_rtl;
-        bool auto_dir = dir && str_icmp_cstr(dir, "auto") == 0;
-        if (!dir && current->tag_name &&
-            str_icmp_cstr(current->tag_name, "bdi") == 0) auto_dir = true;
-        if (!auto_dir) continue;
-        for (DomNode* child = current->first_child; child;
-             child = child->next_sibling) {
-            int strong = dom_find_strong_direction(child, true, true);
-            if (strong != 0) return want_rtl ? strong > 0 : strong < 0;
-        }
-        return !want_rtl;
-    }
-    return !want_rtl;
+    bool rtl = str_ieq_cstr(argument, "rtl");
+    if (!rtl && !str_ieq_cstr(argument, "ltr")) return false;
+    int direction = dom_css_element_directionality(element);
+    return rtl ? direction > 0 : direction < 0;
 }
 
 static bool selector_matcher_matches_local_link(SelectorMatcher* matcher,

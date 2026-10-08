@@ -24,6 +24,8 @@
 // policy; this helper only resolves an address using the caller's category.
 char* radiant_resolve_resource_url(const char* href, Url* base_url,
                                    MemCategory category);
+// local and empty references retain their text; resolved addresses belong to the caller's pool.
+const char* radiant_resolve_css_url(Pool* pool, const char* value, const Url* base_url);
 char* radiant_resolve_resource_path(const char* href, const char* base_path,
                                     bool allow_fixture_root, MemCategory category);
 bool radiant_url_is_http(const char* url);

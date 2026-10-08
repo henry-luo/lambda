@@ -3,6 +3,11 @@
 #include "../runtime/re2_wrapper.hpp"  // for pattern_full_match
 #include "../core/lambda-decimal.hpp"  // for decimal literal comparison
 
+static bool validator_is_map_kind(ConstItem item) {
+    // D7.4.5v2: virtual storage still inhabits the generic map kind.
+    return item.type_id() == LMD_TYPE_MAP || item.type_id() == LMD_TYPE_VMAP;
+}
+
 // Note: Helper functions (should_stop_for_timeout, should_stop_for_max_errors,
 // init_validation_session) are now in validate_helpers.cpp
 
@@ -397,7 +402,7 @@ static ValidationResult* validate_against_base_payload(SchemaValidator* validato
     if (base_type->type_id == LMD_TYPE_MAP) {
         if (base_type == &TYPE_MAP) {
             // Generic map type - just check if item is a map
-            if (item.type_id() == LMD_TYPE_MAP) {
+            if (validator_is_map_kind(item)) {
                 result->valid = true;
             } else {
                 add_type_mismatch_error(result, validator, "map", item.type_id());
@@ -517,7 +522,7 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
             return validation_verdict(validator_numeric_item_embeds(item, fast_base));
         }
         if (fast_base == &TYPE_MAP) {
-            return validation_verdict(item.type_id() == LMD_TYPE_MAP);
+            return validation_verdict(validator_is_map_kind(item));
         }
         if (fast_base == &TYPE_ELMT) {
             return validation_verdict(item.type_id() == LMD_TYPE_ELEMENT);
@@ -1011,7 +1016,7 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
             if (type == &TYPE_MAP) {
                 // Generic map type - just check if item is a map
                 result = create_validation_result(validator->get_pool());
-                if (item.type_id() == LMD_TYPE_MAP) {
+                if (validator_is_map_kind(item)) {
                     result->valid = true;
                 } else {
                     add_type_mismatch_error(result, validator, "map", item.type_id());

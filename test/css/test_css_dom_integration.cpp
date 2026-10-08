@@ -1199,6 +1199,64 @@ TEST_F(DomIntegrationTest, LangInheritsAndAnyLinkUsesLinkState) {
     EXPECT_FALSE(selector_matcher_matches(matcher, group->selectors[0], child, nullptr));
 }
 
+TEST_F(DomIntegrationTest, LangUsesExtendedRangesAndExplicitUnknownStopsInheritance) {
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child = create_element_with_backing("span");
+    parent->append_child(child);
+    ASSERT_TRUE(parent->set_attribute("lang", "de-Latn-DE"));
+    const char* matches[] = {":lang(de-DE)", ":lang(\"de-*-DE\")", ":lang(\"*-Latn\")",
+        ":lang(fr, DE-de)", ":lang(\\64 e-DE)"};
+    for (const char* text : matches) {
+        CssSelectorGroup* group = css_parse_selector_group_text(text, strlen(text), pool);
+        ASSERT_NE(group, nullptr) << text;
+        EXPECT_TRUE(selector_matcher_matches_group(matcher, group, child, nullptr)) << text;
+    }
+    EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_LANG, "de-DE", child));
+    EXPECT_FALSE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_LANG, "de DE", child));
+    ASSERT_TRUE(child->set_attribute("lang", "de-x-DE"));
+    const char* text = ":lang(de-DE)";
+    CssSelectorGroup* group = css_parse_selector_group_text(text, strlen(text), pool);
+    EXPECT_FALSE(selector_matcher_matches_group(matcher, group, child, nullptr));
+    ASSERT_TRUE(child->set_attribute("lang", ""));
+    EXPECT_FALSE(selector_matcher_matches_group(matcher, group, child, nullptr));
+    child->remove_attribute("lang");
+    ASSERT_TRUE(child->set_attribute("xml:lang", "fr"));
+    EXPECT_TRUE(selector_matcher_matches_group(matcher, group, child, nullptr));
+    ASSERT_TRUE(dom_element_record_namespaced_attribute(child,
+        "http://www.w3.org/XML/1998/namespace", "xml:lang", "fr"));
+    EXPECT_FALSE(selector_matcher_matches_group(matcher, group, child, nullptr));
+}
+
+TEST_F(DomIntegrationTest, DirExcludesIsolatedDescendantsAndUsesInputDefaults) {
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* isolated = create_element_with_backing("bdi");
+    DomElement* input_control = create_element_with_backing("input");
+    ASSERT_TRUE(parent->set_attribute("dir", "auto"));
+    parent->append_child(isolated);
+    ASSERT_NE(isolated->append_text("\xD7\x90"), nullptr);
+    ASSERT_NE(parent->append_text("\xD9\xA1\xD6\xB0\xC3\x97"), nullptr);
+    ASSERT_NE(parent->append_text("\xD4\xB1"), nullptr);
+    EXPECT_EQ(dom_element_directionality(parent), -1);
+    EXPECT_EQ(dom_element_directionality(isolated), 1);
+    ASSERT_TRUE(isolated->set_attribute("dir", "invalid"));
+    EXPECT_EQ(dom_element_directionality(parent), -1);
+    DomElement* included = create_element_with_backing("span");
+    ASSERT_TRUE(included->set_attribute("dir", "invalid"));
+    ASSERT_NE(included->append_text("\xD7\x90"), nullptr);
+    EXPECT_EQ(dom_find_strong_direction(included, true, true), 1);
+    ASSERT_TRUE(included->set_attribute("dir", "ltr"));
+    EXPECT_EQ(dom_find_strong_direction(included, true, true), 0);
+    ASSERT_TRUE(parent->set_attribute("dir", "rtl"));
+    parent->append_child(input_control);
+    ASSERT_TRUE(input_control->set_attribute("type", "TeL"));
+    EXPECT_EQ(dom_element_directionality(input_control), -1);
+    ASSERT_TRUE(input_control->set_attribute("dir", "auto"));
+    ASSERT_TRUE(input_control->set_attribute("value", "\xF0\x9E\xA4\x80"));
+    EXPECT_EQ(dom_element_directionality(input_control), 1);
+    ASSERT_TRUE(input_control->set_attribute("value", "\xD9\xA1"));
+    EXPECT_EQ(dom_element_directionality(input_control), -1);
+}
+
 TEST_F(DomIntegrationTest, ModalAndPopoverSelectorsUseElementState) {
     DomElement* dialog = create_element_with_backing("dialog");
     DomElement* popover = create_element_with_backing("div");
@@ -1249,8 +1307,10 @@ TEST_F(DomIntegrationTest, DirUsesInheritedAttributeAndFirstStrongText) {
     DomElement* bdi = create_element_with_backing("bdi");
     ASSERT_NE(bdi->append_text("\xD8\xA7"), nullptr);
     EXPECT_TRUE(selector_matcher_matches(matcher, rtl->selectors[0], bdi, nullptr));
-    EXPECT_EQ(css_parse_selector_group_text(
-        ":dir(sideways)", strlen(":dir(sideways)"), pool), nullptr);
+    CssSelectorGroup* unknown = css_parse_selector_group_text(
+        ":dir(sideways)", strlen(":dir(sideways)"), pool);
+    ASSERT_NE(unknown, nullptr);
+    EXPECT_FALSE(selector_matcher_matches_group(matcher, unknown, child, nullptr));
 }
 
 TEST_F(DomIntegrationTest, LocalLinkComparesDocumentUrlWithoutFragment) {

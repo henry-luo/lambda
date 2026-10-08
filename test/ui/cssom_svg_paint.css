@@ -1,0 +1,2 @@
+@import url(data/cssom_svg_paint_import.css);
+#sheet { fill: url(assets/paint.svg#p) blue; }

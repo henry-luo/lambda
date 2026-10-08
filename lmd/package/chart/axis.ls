@@ -20,7 +20,8 @@ pub let default_axis_config = {
     tick_color: "#888",
     grid_color: "#e0e0e0",
     label_color: "#333",
-    title_color: "#333"
+    title_color: "#333",
+    enabled: true, domain: true, ticks: true, labels: true, label_angle: 0
 }
 
 // ============================================================
@@ -48,148 +49,102 @@ fn temporal_auto_format(lo_ms, hi_ms) {
     else "hh:mm:ss"
 }
 
-fn format_tick_label(sc, tv) {
+fn format_tick_label(sc, tv, config = null) {
     if (sc.kind == "temporal")
-        datetime(i64(tv)).format(temporal_auto_format(sc.domain[0], sc.domain[1]))
-    else string(tv)
+        datetime(i64(tv)).format(if (config and config.format != null) config.format else temporal_auto_format(sc.domain[0], sc.domain[1]))
+    else util.format_value(tv, config.format)
 }
 
-// ============================================================
-// X-axis (bottom)
-// ============================================================
+fn tick_values(sc, config) {
+    let values = if (config.values != null) config.values else scale.scale_ticks(sc, config.tick_count);
+    if (config.tick_min_step != null and len(values) > 1)
+        [for (index, value in values where index == 0 or abs(float(value) - float(values[index - 1])) >= config.tick_min_step) value]
+    else values
+}
 
-pub fn x_axis(sc, pw, ph, config, title_text) {
+fn tick_label(sc, value, config) {
+    let label = format_tick_label(sc, value, config);
+    let limit = if (config.label_limit != null) int(floor(config.label_limit / (float(config.label_font_size) * 0.6))) else len(label);
+    if (len(label) > limit) slice(label, 0, max([0, limit - 1])) ++ "…" else label
+}
+
+// Both axes share guide visibility, placement, and label policy.
+fn render_axis(sc, pw, ph, config, title_text, horizontal) {
     let cfg = merge_config(config);
-    let tick_values = scale.scale_ticks(sc, cfg.tick_count);
-    let is_band = sc.kind == "band";
-    let band_offset = if (is_band) float(sc.bandwidth) / 2.0 else 0.0;
-
-    // domain line
-    let domain_line = svg.line(0, ph, pw, ph, cfg.domain_color, 1);
-
-    // tick marks and labels
-    let tick_elements = [for (tv in tick_values)
-        (let x_pos = float(scale.scale_apply(sc, tv)) + band_offset,
-        if (x_pos >= -1.0 and x_pos <= float(pw) + 1.0)
-            <g class: "tick", transform: svg.translate(x_pos, ph),
-                svg.line(0, 0, 0, cfg.tick_size, cfg.tick_color, 1);
-                <text x: 0,
-                      y: cfg.tick_size + cfg.label_offset + cfg.label_font_size,
-                      'text-anchor': "middle",
-                      'font-size': cfg.label_font_size,
-                      fill: cfg.label_color,
-                    format_tick_label(sc, tv)
+    if (cfg.enabled == false or sc.kind == "identity") null
+    else {
+        let values = tick_values(sc, cfg);
+        let band_offset = if (sc.kind == "band") sc.bandwidth / 2.0 else 0.0;
+        let far_side = if (horizontal) cfg.orient == "top" else cfg.orient == "right";
+        let baseline = if (horizontal) (if (far_side) 0.0 else ph) else if (far_side) pw else 0.0;
+        let direction = if (horizontal) (if (far_side) -1.0 else 1.0) else if (far_side) 1.0 else -1.0;
+        let domain_line = if (cfg.domain == false) null else if (horizontal)
+            svg.line(0, baseline, pw, baseline, cfg.domain_color, 1)
+            else svg.line(baseline, 0, baseline, ph, cfg.domain_color, 1);
+        let angle = if (cfg.label_angle != null) cfg.label_angle else 0;
+        let label_attrs = if (angle != 0) {transform: "rotate(" ++ util.fmt_num(angle) ++ ")"} else {};
+        let label_anchor = if (cfg.label_align == "left") "start" else if (cfg.label_align == "right") "end"
+            else if (cfg.label_align == "center" or horizontal) "middle" else if (far_side) "start" else "end";
+        let max_label = max([0, for (value in values) len(tick_label(sc, value, cfg))]);
+        let stride = if (cfg.label_overlap == "hide" and horizontal)
+            max([1, int(ceil(float(max_label * len(values)) * cfg.label_font_size * 0.6 / max([1.0, pw])))]) else 1;
+        let tick_elements = [for (index, value in values) (
+            let position = float(scale.scale_apply(sc, value)) + band_offset,
+            let extent = if (horizontal) pw else ph,
+            if (position >= -1.0 and position <= extent + 1.0)
+                <g class: "tick", transform: if (horizontal) svg.translate(position, baseline) else svg.translate(baseline, position),
+                    if (cfg.ticks != false) (if (horizontal)
+                        svg.line(0, 0, 0, direction * cfg.tick_size, cfg.tick_color, 1)
+                        else svg.line(0, 0, direction * cfg.tick_size, 0, cfg.tick_color, 1));
+                    if (cfg.labels != false and index % stride == 0)
+                        <text x: if (horizontal) 0 else direction * (cfg.tick_size + cfg.label_offset),
+                            y: if (horizontal) direction * (cfg.tick_size + cfg.label_offset + cfg.label_font_size)
+                                else cfg.label_font_size / 3.0,
+                            'text-anchor': label_anchor, 'font-size': cfg.label_font_size, fill: cfg.label_color,
+                            *:label_attrs, tick_label(sc, value, cfg)>
                 >
-            >
-        else null)
-    ] |: (~ != null);
-
-    // title
-    let title_el = if (title_text)
-        <text x: float(pw) / 2.0,
-              y: float(ph) + float(cfg.title_padding) + float(cfg.title_font_size),
-              'text-anchor': "middle",
-              'font-size': cfg.title_font_size,
-              fill: cfg.title_color,
-            title_text
-        >
-    else null;
-
-    let children0 = [domain_line, *tick_elements];
-    let children = if (title_el) [*children0, title_el] else children0;
-    svg.group_class("axis x-axis", children)
+            else null
+        )] |: (~ != null);
+        let title = if (cfg.title_enabled == false) null else if (cfg.title != null) cfg.title else title_text;
+        let title_position = if (horizontal) baseline + direction * (cfg.title_padding + cfg.title_font_size)
+            else baseline + direction * (cfg.title_padding + cfg.label_font_size);
+        let title_el = if (title) (
+            if (horizontal) <text x: float(pw) / 2.0, y: title_position,
+                'text-anchor': "middle", 'font-size': cfg.title_font_size, fill: cfg.title_color, title>
+            else <text x: title_position, y: float(ph) / 2.0,
+                'text-anchor': "middle", 'font-size': cfg.title_font_size, fill: cfg.title_color,
+                transform: svg.rotate(if (far_side) 90 else -90, title_position, float(ph) / 2.0), title>
+        ) else null;
+        let children = [for (item in [domain_line, *tick_elements, title_el] where item != null) item];
+        let result = svg.group_class(if (horizontal) "axis x-axis" else "axis y-axis", children);
+        if (cfg.offset != null and cfg.offset != 0)
+            svg.group(if (horizontal) svg.translate(0, cfg.offset) else svg.translate(cfg.offset, 0), [result])
+        else result
+    }
 }
 
-// ============================================================
-// X-axis with grid lines
-// ============================================================
+pub fn x_axis(sc, pw, ph, config, title_text) => render_axis(sc, pw, ph, config, title_text, true)
+pub fn y_axis(sc, pw, ph, config, title_text) => render_axis(sc, pw, ph, config, title_text, false)
 
-pub fn x_axis_grid(sc, pw, ph, config) {
+fn render_grid(sc, pw, ph, config, horizontal) {
     let cfg = merge_config(config);
-    let tick_values = scale.scale_ticks(sc, cfg.tick_count);
-    let is_band = sc.kind == "band";
-    let band_offset = if (is_band) float(sc.bandwidth) / 2.0 else 0.0;
-
-    let grid_lines = [for (tv in tick_values)
-        (let x_pos = float(scale.scale_apply(sc, tv)) + band_offset,
-        if (x_pos > 0.0 and x_pos < float(pw))
-            <line x1: x_pos, y1: 0, x2: x_pos, y2: ph,
-                  stroke: cfg.grid_color, 'stroke-width': 1,
-                  'stroke-dasharray': "4,4">
-        else null)
-    ] |: (~ != null);
-
-    svg.group_class("grid x-grid", grid_lines)
+    let values = tick_values(sc, cfg);
+    let band_offset = if (sc.kind == "band") sc.bandwidth / 2.0 else 0.0;
+    let lines = [for (value in values) (
+        let position = float(scale.scale_apply(sc, value)) + band_offset,
+        let extent = if (horizontal) pw else ph,
+        if (position > 0.0 and position < extent)
+            <line x1: if (horizontal) position else 0, y1: if (horizontal) 0 else position,
+                x2: if (horizontal) position else pw, y2: if (horizontal) ph else position,
+                stroke: cfg.grid_color, 'stroke-width': 1,
+                'stroke-dasharray': if (cfg.grid_dash != null) cfg.grid_dash else "4,4">
+        else null
+    )] |: (~ != null);
+    svg.group_class(if (horizontal) "grid x-grid" else "grid y-grid", lines)
 }
 
-// ============================================================
-// Y-axis (left)
-// ============================================================
-
-pub fn y_axis(sc, pw, ph, config, title_text) {
-    let cfg = merge_config(config);
-    let tick_values = scale.scale_ticks(sc, cfg.tick_count);
-    let is_band = sc.kind == "band";
-    let band_offset = if (is_band) float(sc.bandwidth) / 2.0 else 0.0;
-
-    // domain line
-    let domain_line = svg.line(0, 0, 0, ph, cfg.domain_color, 1);
-
-    // tick marks and labels
-    let tick_elements = [for (tv in tick_values)
-        (let y_pos = float(scale.scale_apply(sc, tv)) + band_offset,
-        if (y_pos >= -1.0 and y_pos <= float(ph) + 1.0)
-            <g class: "tick", transform: svg.translate(0, y_pos),
-                svg.line(0, 0, 0 - cfg.tick_size, 0, cfg.tick_color, 1);
-                <text x: 0 - cfg.tick_size - cfg.label_offset,
-                      y: cfg.label_font_size / 3.0,
-                      'text-anchor': "end",
-                      'font-size': cfg.label_font_size,
-                      fill: cfg.label_color,
-                    format_tick_label(sc, tv)
-                >
-            >
-        else null)
-    ] |: (~ != null);
-
-    // title (rotated 90 degrees)
-    let title_el = if (title_text)
-        <text x: 0.0 - float(cfg.title_padding) - float(cfg.label_font_size),
-              y: float(ph) / 2.0,
-              'text-anchor': "middle",
-              'font-size': cfg.title_font_size,
-              fill: cfg.title_color,
-              transform: svg.rotate(-90, 0.0 - float(cfg.title_padding) - float(cfg.label_font_size), float(ph) / 2.0),
-            title_text
-        >
-    else null;
-
-    let children0 = [domain_line, *tick_elements];
-    let children = if (title_el) [*children0, title_el] else children0;
-    svg.group_class("axis y-axis", children)
-}
-
-// ============================================================
-// Y-axis with grid lines
-// ============================================================
-
-pub fn y_axis_grid(sc, pw, ph, config) {
-    let cfg = merge_config(config);
-    let tick_values = scale.scale_ticks(sc, cfg.tick_count);
-    let is_band = sc.kind == "band";
-    let band_offset = if (is_band) float(sc.bandwidth) / 2.0 else 0.0;
-
-    let grid_lines = [for (tv in tick_values)
-        (let y_pos = float(scale.scale_apply(sc, tv)) + band_offset,
-        if (y_pos > 0.0 and y_pos < float(ph))
-            <line x1: 0, y1: y_pos, x2: pw, y2: y_pos,
-                  stroke: cfg.grid_color, 'stroke-width': 1,
-                  'stroke-dasharray': "4,4">
-        else null)
-    ] |: (~ != null);
-
-    svg.group_class("grid y-grid", grid_lines)
-}
+pub fn x_axis_grid(sc, pw, ph, config) => render_grid(sc, pw, ph, config, true)
+pub fn y_axis_grid(sc, pw, ph, config) => render_grid(sc, pw, ph, config, false)
 
 // ============================================================
 // Compute space needed for axes
@@ -198,9 +153,9 @@ pub fn y_axis_grid(sc, pw, ph, config) {
 pub fn estimate_y_axis_width(sc, config) {
     let cfg = merge_config(config);
     let ticks = scale.scale_ticks(sc, cfg.tick_count);
-    let label_lens = [for (tv in ticks) len(format_tick_label(sc, tv))];
+    let label_lens = [for (tv in ticks) len(format_tick_label(sc, tv, cfg))];
     let max_label_len = if (len(label_lens) > 0) max(label_lens) else 3;
-    float(max_label_len) * 7.0 + float(cfg.tick_size) + 10.0
+    float(max_label_len) * 7.0 * float(cfg.label_font_size) / 11.0 + float(cfg.tick_size) + 10.0
 }
 
 pub fn estimate_x_axis_height(config, has_title: bool) {
