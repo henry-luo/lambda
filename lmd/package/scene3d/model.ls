@@ -1,4 +1,5 @@
 import t: .transform
+import animation: .animation
 
 fn numeric(v) bool => t.numeric(v)
 fn value(v, fallback) => if (v == null) fallback else v
@@ -35,6 +36,21 @@ fn check_geometry(n) bool^ {
             not all([for (x in n.indices) numeric(x) and x >= 0 and x < len(p) / 3 and floor(x) == x])))
             raise fail("geometry index out of bounds")
         let checked_triangles = if (n.indices == null and len(p) % 9 != 0) raise fail("geometry requires triangles")
+        let vertices = len(p) / 3
+        let skin = n["skin-indices"], weights = n["skin-weights"]
+        let checked_skin = if (skin != null or weights != null) {
+            if (not (skin is array) or not (weights is array) or len(skin) != vertices * 4 or len(weights) != len(skin) or
+                not all([for (x in skin) numeric(x) and x >= 0 and x < 16 and floor(x) == x]) or
+                not all([for (x in weights) numeric(x) and x >= 0 and x <= 1]) or
+                not all([for (i in 0 to (vertices - 1)) abs(sum(slice(weights, i * 4, i * 4 + 4)) - 1.0) <= 0.00001]))
+                raise fail("invalid skin indices or weights") else true
+        } else true
+        let morph = n["morph-positions"], normals = n["morph-normals"]
+        let checked_morph = if (morph != null or normals != null) {
+            if (not (morph is array) or not contains([len(p), len(p) * 2], len(morph)) or not all([for (x in morph) numeric(x)]) or
+                (normals != null and (not (normals is array) or len(normals) != len(morph) or not all([for (x in normals) numeric(x)]))))
+                raise fail("invalid relative morph targets") else true
+        } else true
         true
     } else {
         let size = value(n.size, [1.0, 1.0, 1.0])
@@ -44,9 +60,9 @@ fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track'], kind))
         raise fail("unknown scene element")
-    let checked_refs = [for (key in (if (kind == 'scene3d') ["camera"] else if (kind == 'mesh') ["geometry", "material"]
+    let checked_refs = [for (key in (if (kind == 'scene3d') ["camera"] else if (kind == 'mesh') ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture"] else []) where n[key] != null)
         if (not text(n[key])) raise fail("resource reference requires text") else true]
     let checked_vectors = [for (key in ["position", "rotation", "scale", "target", "up"] where n[key] != null)
@@ -57,11 +73,43 @@ fn check_node(n, all_nodes) bool^ {
         not color(n[if (kind == 'scene3d') "background" else "color"])) raise fail("invalid color")
     let checked_visible = if (n.visible != null and not (n.visible is bool)) raise fail("invalid visibility")
     let children = content(n)
-    let allowed = if (kind == 'scene3d' or kind == 'group') ['group', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture']
+    let allowed = if (kind == 'scene3d' or kind == 'group') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip']
+        else if (kind == 'skeleton' or kind == 'bone') ['bone']
         else if (kind == 'resources') ['geometry', 'material', 'texture']
+        else if (kind == 'animation-clip') ['keyframe-track']
         else if (kind == 'mesh') ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
-    if (kind == 'camera') {
+    if (kind == 'animation-clip') {
+        if (not text(n.id) or len(children) == 0 or len(children) > 256 or
+            (n.duration != null and not numeric(n.duration)) or
+            (n.autoplay != null and not (n.autoplay is bool)) or (n.additive != null and not (n.additive is bool)))
+            raise fail("invalid animation clip") else true
+    } else if (kind == 'keyframe-track') {
+        if (not animation.valid_track(n)) raise fail("invalid animation track")
+        else {
+            let path = split(n.path, ".")
+            let targets = [for (target in all_nodes where target.id != null and string(target.id) == path[0]) target]
+            if (len(path) < 2 or len(path) > 3 or len(targets) != 1) raise fail("invalid animation target")
+            else {
+                let target = targets[0]
+                let property = path[len(path) - 1]
+                let nested = len(path) == 3
+                let checked_material = if (nested and (name(target) != 'mesh' or path[1] != "material")) raise fail("invalid material animation path")
+                let kind = if (nested) 'material' else name(target)
+                let expected = if (contains(["position", "scale"], property)) 'vector'
+                    else if (property == "quaternion") 'quaternion' else if (property == "visible") 'bool'
+                    else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light'], kind)) 'color'
+                    else if (property == "morph-weights" and kind == 'mesh') 'vector'
+                    else if ((property == "opacity" and kind == 'material') or (property == "intensity" and kind == 'light') or
+                        (contains(["fov", "near", "far", "aspect"], property) and kind == 'camera')) 'number' else null
+                let components = len(n.values) / len(n.times)
+                if (expected == null or n.type != expected or
+                    (contains(["position", "scale"], property) and components != 3) or
+                    (property == "morph-weights" and (target["morph-weights"] == null or components != len(target["morph-weights"]))))
+                    raise fail("invalid animation binding type or components") else true
+            }
+        }
+    } else if (kind == 'camera') {
         let fov = value(n.fov, 50.0), near = value(n.near, 0.1), far = value(n.far, 1000.0)
         if (n.type != 'perspective' or not numeric(fov) or fov <= 0 or fov >= 180 or not numeric(near) or near <= 0 or
             not numeric(far) or far <= near or (n.aspect != null and (not numeric(n.aspect) or n.aspect <= 0)))
@@ -95,6 +143,14 @@ fn check_node(n, all_nodes) bool^ {
         } else if (len(materials) != 1) raise fail("mesh requires material") else true
         let checked_instances = if (n.instances != null and (not (n.instances is array) or len(n.instances) > 16384 or
             not all([for (m in n.instances) t.affine(m)]))) raise fail("invalid instance matrices")
+        let checked_skeleton = if (n.skeleton != null) {
+            let rig = definition(all_nodes, n.skeleton, 'skeleton')^
+            let bones = [for (b in nodes(rig)^ where name(b) == 'bone') b]
+            if (len(bones) == 0 or len(bones) > 16 or n.instances != null) raise fail("invalid skeleton or skinned instances") else true
+        } else true
+        let checked_weights = if (n["morph-weights"] != null and
+            (not (n["morph-weights"] is array) or len(n["morph-weights"]) < 1 or len(n["morph-weights"]) > 2 or
+            not all([for (x in n["morph-weights"]) numeric(x)]))) raise fail("invalid morph weights")
         true
     } else true
 }

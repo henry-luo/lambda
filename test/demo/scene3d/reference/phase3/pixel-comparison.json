@@ -1,0 +1,87 @@
+{
+  "observatory": {
+    "canvas_rectangle": [
+      24,
+      94,
+      824,
+      594
+    ],
+    "mean_absolute_error_rgb": [
+      1.2816775,
+      1.2359975,
+      1.376915
+    ],
+    "channel_samples_within_tolerance_fraction": 0.9983666666666666,
+    "tolerance": 8,
+    "native_sha256": "4ccb243682cc0930d924a16d05044ddabcc687cccd26a4084959b10e17b744b5",
+    "browser_sha256": "04dbf7edbf7e5db790761f9d00ef53ee50d6f8679dd8b2e0bc3a706e6feb700b"
+  },
+  "observatory-1.25": {
+    "canvas_rectangle": [
+      24,
+      94,
+      824,
+      594
+    ],
+    "mean_absolute_error_rgb": [
+      1.284815,
+      1.228655,
+      1.38157
+    ],
+    "channel_samples_within_tolerance_fraction": 0.998435,
+    "tolerance": 8,
+    "native_sha256": "8bbefa052bb581bef1d0ab90b33196aa31bfb362bb661fcd6755d963f579be22",
+    "browser_sha256": "c5b8d9d95512c2f6a04cc786bb27e0d6d7cbbfeadc9dfafe3b6128cdcda96de3"
+  },
+  "observatory-3.5": {
+    "canvas_rectangle": [
+      24,
+      94,
+      824,
+      594
+    ],
+    "mean_absolute_error_rgb": [
+      1.2475725,
+      1.1993075,
+      1.36416
+    ],
+    "channel_samples_within_tolerance_fraction": 0.9984416666666667,
+    "tolerance": 8,
+    "native_sha256": "162fa7e0a65994ca46ea486cea83c7385781fc00a226db20522840a6cce6e3c3",
+    "browser_sha256": "bf701306bd7b0d1e521469d05a38ffd088fda4890e2fc2568c6d7238ce30c67f"
+  },
+  "observatory-no-shadow": {
+    "canvas_rectangle": [
+      24,
+      94,
+      824,
+      594
+    ],
+    "mean_absolute_error_rgb": [
+      1.2407875,
+      1.195185,
+      1.3635325
+    ],
+    "channel_samples_within_tolerance_fraction": 0.9985016666666666,
+    "tolerance": 8,
+    "native_sha256": "aa18160704f3139fd1692564ad389b3707b929134d8e7d39aa72df1f72799629",
+    "browser_sha256": "b2cfe9e7c4a3f66857234acbc5e22abbb55940b6d75ad9c27830ded38260f4ae"
+  },
+  "observatory-no-fxaa": {
+    "canvas_rectangle": [
+      24,
+      94,
+      824,
+      594
+    ],
+    "mean_absolute_error_rgb": [
+      1.2258875,
+      1.1937225,
+      1.358735
+    ],
+    "channel_samples_within_tolerance_fraction": 0.99902,
+    "tolerance": 8,
+    "native_sha256": "d86554161b8c01273003a68a4234673b9188f5dba82239c38e325fc01673a523",
+    "browser_sha256": "9c0438ddd1cacdcddffee4afab8bc2fe81df54b9ed6db715540ff2496fc5d357"
+  }
+}

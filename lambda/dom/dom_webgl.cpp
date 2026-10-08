@@ -57,7 +57,8 @@ static const JubeTypeDef webgl_types[]={
     {"webgl_renderbuffer",JUBE_TYPE_OWNING_NATIVE,nullptr,webgl_destroy},
     {"webgl_uniform_location",JUBE_TYPE_OWNING_NATIVE,nullptr,webgl_destroy},
     {"webgl2_rendering_context",JUBE_TYPE_OWNING_NATIVE,nullptr,webgl_destroy},
-    {"webgl_lose_context",JUBE_TYPE_OWNING_NATIVE,nullptr,webgl_destroy}
+    {"webgl_lose_context",JUBE_TYPE_OWNING_NATIVE,nullptr,webgl_destroy},
+    {"webgl_capability_extension",JUBE_TYPE_OWNING_NATIVE,nullptr,webgl_destroy}
 };
 static constexpr int WEBGL_CONTEXT_KIND=9,WEBGL_UNIFORM_KIND=8;
 static WebGlObject* webgl_object(Item value,int kind=-1) {
@@ -191,10 +192,41 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
         }
         WebGlCommand lost={};lost.op=WEBGL_isContextLost;WebGlReply reply={};
         if(!radiant_webgl_call(object->canvas,&lost,&reply)||reply.n[0]) return ItemNull;
-        if(op==WEBGL_getExtension) return str_icmp_cstr(it2s(string_root.get())->chars,"WEBGL_lose_context")==0?webgl_extension(receiver_root.get(),object):ItemNull;
-        array_root.set(js_array_new(0));string_root.set(js_name_item("WEBGL_lose_context"));js_array_push(array_root.get(),string_root.get());return array_root.get();
+        const char* names[]={"WEBGL_lose_context","EXT_color_buffer_float","OES_texture_float_linear"};
+        if(op==WEBGL_getExtension) {
+            const char* name=it2s(string_root.get())->chars;
+            for(unsigned i=0;i<3;i++) if(!str_icmp_cstr(name,names[i])) {
+                if(!i) return webgl_extension(receiver_root.get(),object);
+                if(!radiant_webgl_extension_supported(object->canvas,names[i])) return ItemNull;
+                WebGlReply extension={};extension.kind=WEBGL_RESOURCE;extension.resource_kind=11;extension.resource=i;
+                return webgl_reply_object(receiver_root.get(),object,extension);
+            }
+            return ItemNull;
+        }
+        array_root.set(js_array_new(0));
+        for(unsigned i=0;i<3;i++) if(!i||radiant_webgl_extension_supported(object->canvas,names[i])) {
+            value_root.set(js_name_item(names[i]));js_array_push(array_root.get(),value_root.get());
+        }
+        return array_root.get();
     }
     WebGlCommand command={};command.op=op;WebGlReply reply={};
+    bool explicit_image=argc==9&&(op==WEBGL_texImage2D||op==WEBGL_texSubImage2D)&&dom_unwrap_element(args[8]);
+    bool image_upload=explicit_image||(op==WEBGL_texImage2D&&argc==6)||(op==WEBGL_texSubImage2D&&argc==7);
+    if(image_upload) {
+        bool sub=op==WEBGL_texSubImage2D;
+        const unsigned image_indices[]={0,1,2,sub?3u:6u,sub?6u:7u,7};
+        const char* conversions=explicit_image?(sub?"uiiiiiuu":"uiuiiiuu"):(sub?"uiiiuu":"uiuuu");
+        for(unsigned i=0;conversions[i];i++) {
+            Item status=webgl_number_arg(args[i],conversions[i],&command.n[explicit_image?i:image_indices[i]]);
+            if(item_is_error(status)) return status;
+        }
+        // all coercions precede unwrapping; no borrowed image or JS storage survives this host call.
+        void* source=dom_unwrap_element(args[explicit_image?8:sub?6:5]);
+        if(!source) return dom_realm_throw_type_error("WebGL image source must be an HTML image or canvas");
+        command.source_dimensions=explicit_image;
+        radiant_webgl_image(object->canvas,&command,source,&reply);
+        return make_js_undefined();
+    }
     for(unsigned i=0;signature[i];i++) {
         Item value=(int)i<argc?args[i]:make_js_undefined();char conversion=signature[i];
         if(conversion=='n') continue;
@@ -364,6 +396,7 @@ static const char webgl_interface[]=
     "type webgl_buffer {}\ntype webgl_vertex_array_object {}\ntype webgl_texture {}\ntype webgl_program {}\n"
     "type webgl_internal_target {}\ntype webgl_shader {}\ntype webgl_framebuffer {}\ntype webgl_renderbuffer {}\ntype webgl_uniform_location {}\n"
     "type webgl_lose_context {lose_context: fn() any, restore_context: fn() any}\n"
+    "type webgl_capability_extension {}\n"
     "type webgl2_rendering_context {\ncanvas: any, drawing_buffer_width: int, drawing_buffer_height: int,\n"
 #define WEBGL_CONSTANT(name,value) #name ": int = " #value ",\n"
 #include "../module/radiant/webgl_constants.def"
@@ -395,6 +428,7 @@ static const JubeTypeBinding webgl_bindings[]={
     {"webgl_framebuffer",&webgl_types[6],nullptr,0},
     {"webgl_renderbuffer",&webgl_types[7],nullptr,0},
     {"webgl_uniform_location",&webgl_types[8],nullptr,0},
+    {"webgl_capability_extension",&webgl_types[11],nullptr,0},
 
     {"webgl2_rendering_context",&webgl_types[WEBGL_CONTEXT_KIND],webgl_members,sizeof(webgl_members)/sizeof(webgl_members[0])}
 };

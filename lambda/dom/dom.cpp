@@ -1372,7 +1372,7 @@ static void expando_reset(); // forward declaration
 static void reset_dom_wrapper_cache(); // forward declaration
 static void reset_foreign_document_cache(); // forward declaration
 static void reset_pending_iframe_loads();
-static void _schedule_image_load(DomElement* image);
+static void _schedule_image_load(DomElement* image,bool loaded);
 // Phase 6E: text-control helpers are shared with Radiant event/render paths
 // (radiant/event.hpp is already included at the top of this file).
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
@@ -3349,6 +3349,13 @@ static const int IFRAME_CACHE_SIZE = 32;
 static const int DOC_WIN_TABLE_SIZE = 32;
 // Wrapper identity and foreign-document ownership are document-realm state.
 // Calls below use this direct capsule after their normal JS/host entry bind.
+struct DomPendingImageEvent {
+    DomPendingImageEvent* next;
+    DomElement* image;
+    DomDocument* document;
+    DomNodeRef ref;
+    bool loaded;
+};
 struct JsDomForeignDocumentRuntimeState {
     ForeignDocCacheEntry* foreign_doc_cache = nullptr;
     int foreign_doc_cache_count = 0;
@@ -3360,9 +3367,7 @@ struct JsDomForeignDocumentRuntimeState {
     DomNodeRef pending_iframe_refs[16] = {};
     DomDocument* pending_iframe_docs[16] = {};
     int pending_iframe_load_count = 0;
-    DomElement* pending_image_loads[16] = {};
-    DomNodeRef pending_image_refs[16] = {};
-    DomDocument* pending_image_docs[16] = {};
+    DomPendingImageEvent* pending_images = nullptr;
     int pending_image_load_count = 0;
     bool iframe_load_drain_scheduled = false;
 };
@@ -3393,9 +3398,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (),
 #define s_pending_iframe_refs (dom_foreign_document_rt_state->pending_iframe_refs)
 #define s_pending_iframe_docs (dom_foreign_document_rt_state->pending_iframe_docs)
 #define s_pending_iframe_load_count (dom_foreign_document_rt_state->pending_iframe_load_count)
-#define s_pending_image_loads (dom_foreign_document_rt_state->pending_image_loads)
-#define s_pending_image_refs (dom_foreign_document_rt_state->pending_image_refs)
-#define s_pending_image_docs (dom_foreign_document_rt_state->pending_image_docs)
+#define s_pending_images (dom_foreign_document_rt_state->pending_images)
 #define s_pending_image_load_count (dom_foreign_document_rt_state->pending_image_load_count)
 #define s_iframe_load_drain_scheduled (dom_foreign_document_rt_state->iframe_load_drain_scheduled)
 
@@ -4056,10 +4059,12 @@ extern "C" Item dom_window_prompt(Item message_item, Item default_item) {
 // drain that fires `load` on each pending iframe in insertion order.
 // ----------------------------------------------------------------------------
 static void _dispatch_pending_load(DomElement* element, DomDocument* owner_doc,
-                                   DomNodeRef ref) {
-    if (element) {
-        Item ev = js_create_event("load", /*bubbles=*/false, /*cancelable=*/false);
-        dom_dispatch_event(dom_wrap_element(element), ev);
+                                   DomNodeRef ref, const char* type="load") {
+    if (element && dom_node_ref_validate(owner_doc,ref)) {
+        RootFrame roots(2);
+        Rooted<Item> ev(roots,js_create_event(type, /*bubbles=*/false, /*cancelable=*/false));
+        Rooted<Item> target(roots,dom_wrap_element(element));
+        dom_dispatch_event(target.get(), ev.get());
     }
     if (owner_doc && ref.address) {
         dom_node_unpin(owner_doc, ref, DOM_NODE_PIN_EVENT_QUEUE);
@@ -4092,24 +4097,13 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
         }
         if (owner_doc && !known) sweep_docs[sweep_doc_count++] = owner_doc;
     }
-    int image_count = s_pending_image_load_count;
-    s_pending_image_load_count = 0;
-    for (int i = 0; i < image_count; i++) {
-        DomElement* image = s_pending_image_loads[i];
-        s_pending_image_loads[i] = nullptr;
-        DomDocument* owner_doc = s_pending_image_docs[i];
-        DomNodeRef ref = s_pending_image_refs[i];
-        s_pending_image_docs[i] = nullptr;
-        s_pending_image_refs[i] = {nullptr, 0};
-        _dispatch_pending_load(image, owner_doc, ref);
-        bool known = false;
-        for (int d = 0; d < sweep_doc_count; d++) {
-            if (sweep_docs[d] == owner_doc) {
-                known = true;
-                break;
-            }
-        }
-        if (owner_doc && !known) sweep_docs[sweep_doc_count++] = owner_doc;
+    // detach the current batch: handlers may enqueue another source while this one dispatches.
+    DomPendingImageEvent* images=s_pending_images;
+    s_pending_images=nullptr;s_pending_image_load_count=0;
+    while(images) {
+        auto* event=images;images=event->next;
+        _dispatch_pending_load(event->image,event->document,event->ref,event->loaded?"load":"error");
+        dom_retire_sweep(event->document);mem_free(event);
     }
     for (int i = 0; i < sweep_doc_count; i++) dom_retire_sweep(sweep_docs[i]);
     return ItemNull;
@@ -4139,23 +4133,23 @@ extern "C" void dom_iframe_navigation_complete(void* iframe) {
     _schedule_iframe_load((DomElement*)iframe);
 }
 
-static void _schedule_image_load(DomElement* image) {
+static void _schedule_image_load(DomElement* image,bool loaded) {
     if (!image || !dom_foreign_document_state_ensure()) return;
-    for (int i = 0; i < s_pending_image_load_count; i++) {
-        if (s_pending_image_loads[i] == image) return;
+    DomPendingImageEvent** tail=&s_pending_images;
+    while(*tail) {
+        if((*tail)->image==image) {(*tail)->loaded=loaded;return;}
+        tail=&(*tail)->next;
     }
-    if (s_pending_image_load_count >= 16) return;
-    DomNodeRef ref = dom_node_ref((DomNode*)image);
-    if (!image->doc || !dom_node_ref_validate(image->doc, ref) ||
-        !dom_node_pin(image->doc, ref, DOM_NODE_PIN_EVENT_QUEUE)) return;
-    int pending_index = s_pending_image_load_count++;
-    s_pending_image_loads[pending_index] = image;
-    s_pending_image_refs[pending_index] = ref;
-    s_pending_image_docs[pending_index] = image->doc;
-    if (!s_iframe_load_drain_scheduled) {
-        s_iframe_load_drain_scheduled = true;
-        Item cb = js_new_native_this_span_function(_iframe_load_drain);
-        dom_schedule_task(cb);
+    DomNodeRef ref=dom_node_ref(image);
+    if(!image->doc||!dom_node_ref_validate(image->doc,ref)) return;
+    auto* event=(DomPendingImageEvent*)mem_calloc(1,sizeof(DomPendingImageEvent),MEM_CAT_JS_RUNTIME);
+    if(!event) return;
+    if(!dom_node_pin(image->doc,ref,DOM_NODE_PIN_EVENT_QUEUE)) {mem_free(event);return;}
+    event->image=image;event->document=image->doc;event->ref=ref;event->loaded=loaded;
+    *tail=event;s_pending_image_load_count++;
+    if(!s_iframe_load_drain_scheduled) {
+        s_iframe_load_drain_scheduled=true;
+        Item callback=js_new_native_this_span_function(_iframe_load_drain);dom_schedule_task(callback);
     }
 }
 
@@ -4171,15 +4165,10 @@ static void reset_pending_iframe_loads() {
     memset(s_pending_iframe_refs, 0, sizeof(s_pending_iframe_refs));
     memset(s_pending_iframe_docs, 0, sizeof(s_pending_iframe_docs));
     s_pending_iframe_load_count = 0;
-    for (int i = 0; i < s_pending_image_load_count; i++) {
-        if (s_pending_image_docs[i] && s_pending_image_refs[i].address) {
-            dom_node_unpin(s_pending_image_docs[i], s_pending_image_refs[i],
-                           DOM_NODE_PIN_EVENT_QUEUE);
-        }
+    while(s_pending_images) {
+        auto* event=s_pending_images;s_pending_images=event->next;
+        dom_node_unpin(event->document,event->ref,DOM_NODE_PIN_EVENT_QUEUE);mem_free(event);
     }
-    memset(s_pending_image_loads, 0, sizeof(s_pending_image_loads));
-    memset(s_pending_image_refs, 0, sizeof(s_pending_image_refs));
-    memset(s_pending_image_docs, 0, sizeof(s_pending_image_docs));
     s_pending_image_load_count = 0;
     s_iframe_load_drain_scheduled = false;
 }
@@ -8023,12 +8012,9 @@ static void dom_reinit_behavior_if_constraint_attr(DomElement* elem,
 
 static void _after_image_src_set(DomElement* elem, const char* attr_name,
                                  const char* attr_value) {
-    // Image decoding belongs to the host engine; DOM schedules `load` only
-    // after the engine has accepted the new source and attached its surface.
+    // the decoder owns intrinsic state; DOM queues completion after accepting or rejecting the source.
     if (!_is_tag(elem, "img") || str_icmp_cstr(attr_name, "src") != 0) return;
-    if (dom_engine_set_image_source(elem, attr_value)) {
-        _schedule_image_load(elem);
-    }
+    _schedule_image_load(elem,dom_engine_set_image_source(elem,attr_value));
 }
 
 extern "C" void dom_after_set_attribute(void* elem_ptr,
@@ -9180,6 +9166,8 @@ typedef enum JsDomReflectKind {
     X("height", "height", INT, 0, DOM_TAG_INPUT) \
     X("width", "width", INT, 300, DOM_TAG_CANVAS) \
     X("height", "height", INT, 150, DOM_TAG_CANVAS) \
+    X("width", "width", INT, 0, DOM_TAG_IMG) \
+    X("height", "height", INT, 0, DOM_TAG_IMG) \
     X("size", "size", INT, 0, DOM_TAG_SELECT) \
     X("rows", "rows", INT, 2, DOM_TAG_TEXTAREA) \
     X("cols", "cols", INT, 20, DOM_TAG_TEXTAREA) \
@@ -10097,13 +10085,26 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_CHILD_NODES) return dom_fp_child_nodes(elem_item);
 
     if (_is_tag(elem, "img") &&
-        (prop_id == JS_DOM_PROP_NATURAL_WIDTH || prop_id == JS_DOM_PROP_NATURAL_HEIGHT)) {
+        (prop_id == JS_DOM_PROP_NATURAL_WIDTH || prop_id == JS_DOM_PROP_NATURAL_HEIGHT ||
+         prop_id == JS_DOM_PROP_WIDTH || prop_id == JS_DOM_PROP_HEIGHT)) {
         int natural_width = 0;
         int natural_height = 0;
         // The decoder owns intrinsic image state; an unavailable image exposes zero.
         dom_engine_image_natural_size(elem, &natural_width, &natural_height);
-        return (Item){.item = i2it(prop_id == JS_DOM_PROP_NATURAL_WIDTH
-            ? natural_width : natural_height)};
+        bool width = prop_id == JS_DOM_PROP_NATURAL_WIDTH || prop_id == JS_DOM_PROP_WIDTH;
+        bool natural = prop_id == JS_DOM_PROP_NATURAL_WIDTH || prop_id == JS_DOM_PROP_NATURAL_HEIGHT;
+        if (natural) return (Item){.item = i2it(width ? natural_width : natural_height)};
+        if(dom_is_connected(elem)) dom_ensure_geometry_snapshot(elem->doc);
+        int rendered_width=0,rendered_height=0;
+        if(dom_engine_image_rendered_size(elem,&rendered_width,&rendered_height))
+            return (Item){.item=i2it(width?rendered_width:rendered_height)};
+        // detached loader images expose their declared or intrinsic dimensions before layout exists.
+        const char* attribute = elem->get_attribute(width ? "width" : "height");
+        if (attribute) {
+            char* end = nullptr; unsigned long dimension = strtoul(attribute, &end, 10);
+            return (Item){.item = i2it(end != attribute && dimension <= UINT32_MAX ? dimension : 0)};
+        }
+        return (Item){.item = i2it(width ? natural_width : natural_height)};
     }
 
     // =========================================================================
@@ -16759,6 +16760,20 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         return dom_core_blur(elem_item);
     }
 
+    if(operation==JUBE_DOM_SET_POINTER_CAPTURE||operation==JUBE_DOM_RELEASE_POINTER_CAPTURE||operation==JUBE_DOM_HAS_POINTER_CAPTURE) {
+        if(!argc) return dom_raise_type_error("Pointer capture requires a pointer ID");
+        JS_ASSIGN_OR_RETURN(numeric,js_to_number(args[0]));
+        double number=0;item_try_to_double(numeric,&number);
+        // WebIDL long conversion wraps after truncation, including nonfinite values to zero.
+        double integer=isfinite(number)?fmod(trunc(number),4294967296.0):0;
+        if(integer<0) integer+=4294967296.0;
+        int32_t id=integer>=2147483648.0?(int32_t)(integer-4294967296.0):(int32_t)integer;
+        unsigned op=operation==JUBE_DOM_SET_POINTER_CAPTURE?0:operation==JUBE_DOM_RELEASE_POINTER_CAPTURE?1:2;
+        int status=dom_engine_pointer_capture(elem,id,op);
+        if(status<0) return dom_raise_named(status==-1?"NotFoundError":"InvalidStateError","Pointer capture target or ID is unavailable");
+        return op==2?Item{.item=b2it(status!=0)}:make_js_undefined();
+    }
+
     // HTMLElement.click() — synthesise and dispatch a `click` MouseEvent
     // (bubbles, cancelable, composed). Per the HTML spec §6.4.4, calling
     // click() on a disabled form control is a no-op (no event fires).
@@ -18064,9 +18079,7 @@ extern "C" void dom_foreign_documents_release_context(void) {
 #undef s_pending_iframe_refs
 #undef s_pending_iframe_docs
 #undef s_pending_iframe_load_count
-#undef s_pending_image_loads
-#undef s_pending_image_refs
-#undef s_pending_image_docs
+#undef s_pending_images
 #undef s_pending_image_load_count
 #undef s_iframe_load_drain_scheduled
 

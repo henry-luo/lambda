@@ -208,6 +208,20 @@ AnimationInstance* animation_instance_create(AnimationScheduler* scheduler) {
     return anim;
 }
 
+AnimationInstance* animation_clock_driver_start(AnimationScheduler* scheduler, AnimationType type,
+        void* target, AnimTickFn tick, AnimFinishFn released) {
+    if (!scheduler || !tick) return nullptr;
+    AnimationInstance* driver = animation_instance_create(scheduler);
+    if (!driver) return nullptr;
+    driver->type = type; driver->target = target; driver->duration = INFINITY;
+    driver->start_time = scheduler->current_time; driver->tick = tick;
+    driver->on_finish = driver->on_cancel = released;
+    animation_scheduler_add(scheduler, driver); return driver;
+}
+double animation_clock_time(const AnimationScheduler* scheduler, const AnimationInstance* driver, double origin) {
+    return scheduler && driver ? origin + scheduler->current_time - driver->start_time : origin;
+}
+
 static void animation_scheduler_link_before(AnimationScheduler* scheduler,
     AnimationInstance* anim, AnimationInstance* before) {
     anim->next = before;
@@ -234,6 +248,7 @@ void animation_scheduler_move_before(AnimationScheduler* scheduler,
 
 void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim) {
     if (!scheduler || !anim) return;
+    anim->scheduler_removed=false;
     animation_scheduler_link_before(scheduler, anim, nullptr);
     scheduler->count++;
     scheduler->has_active_animations = true;
@@ -243,8 +258,9 @@ void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* a
 }
 
 void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim) {
-    if (!scheduler || !anim) return;
+    if (!scheduler || !anim||anim->scheduler_removed) return;
     animation_scheduler_unlink(scheduler, anim);
+    anim->scheduler_removed=true;
 
     scheduler->count--;
     if (scheduler->count == 0) {
@@ -254,11 +270,13 @@ void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance
     log_debug("anim: removed animation type=%d target=%p (remaining: %d)",
               anim->type, anim->target, scheduler->count);
 
-    pool_free(scheduler->pool, anim);
+    // author callbacks can cancel this or a later driver; sampled-list nodes survive the current walk.
+    if(scheduler->sampling_depth) {anim->retired_next=scheduler->retired;scheduler->retired=anim;}
+    else pool_free(scheduler->pool, anim);
 }
 
 void animation_scheduler_cancel(AnimationScheduler* scheduler, AnimationInstance* anim) {
-    if (!scheduler || !anim) return;
+    if (!scheduler || !anim||anim->scheduler_removed) return;
     if (anim->on_cancel) anim->on_cancel(anim);
     animation_scheduler_remove(scheduler, anim);
 }
@@ -397,7 +415,7 @@ static void animation_notify_finished(AnimationInstance* anim) {
 
 bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
                               DirtyTracker* dirty_tracker, bool force_css_sample,
-                              AnimationInstance* only) {
+                              AnimationInstance* only, bool timelines_only) {
     if (!scheduler || scheduler->count == 0) {
         if (scheduler) {
             scheduler->has_active_animations = false;
@@ -407,14 +425,17 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
     }
 
     scheduler->current_time = now;
-    bool any_active = only ? scheduler->has_active_animations : false;
-    if (!only) scheduler->needs_layout = false;
+    scheduler->sampling_depth++;
+    bool subset=only||timelines_only;
+    bool any_active = subset ? scheduler->has_active_animations : false;
+    if (!subset) scheduler->needs_layout = false;
 
     AnimationInstance* anim = scheduler->first;
     while (anim) {
         AnimationInstance* next = anim->next;
+        if(anim->scheduler_removed||anim->sampling) {anim=next;continue;}
         // a style pass samples its own effects without overwriting pending targets.
-        if (only && anim != only) {
+        if ((only && anim != only)||(timelines_only&&anim->type!=ANIM_TIMELINE)) {
             anim = next;
             continue;
         }
@@ -474,10 +495,13 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
 
         // call the tick callback to apply the animated value
         if (anim->tick) {
+            anim->sampling=true;
             anim->tick(anim, eased_t);
+            anim->sampling=false;
         }
+        if(anim->scheduler_removed) {anim=next;continue;}
         // style-time samples are consumed by the current layout pass.
-        if (!only && anim->layout_changed) scheduler->needs_layout = true;
+        if (!subset && anim->layout_changed) scheduler->needs_layout = true;
         anim->layout_changed = false;
 
         // mark dirty region for both old and new bounds (the old position
@@ -511,6 +535,9 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
     }
 
     scheduler->has_active_animations = any_active && scheduler->count > 0;
+    if(!--scheduler->sampling_depth) while(scheduler->retired) {
+        auto* retired=scheduler->retired;scheduler->retired=retired->retired_next;pool_free(scheduler->pool,retired);
+    }
     return scheduler->has_active_animations;
 }
 

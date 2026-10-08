@@ -1,4 +1,5 @@
 #include "svg_animation.hpp"
+#include "animation_value.hpp"
 #include "render.hpp"
 #include "event.hpp"
 #include "../lambda/dom/dom.h"
@@ -388,8 +389,7 @@ static void svg_animation_tick(AnimationInstance* instance, float) {
         return;
     }
     double previous = timeline->time;
-    svg_animation_note_time(timeline,
-        timeline->origin + doc->state->animation_scheduler->current_time - instance->start_time);
+    svg_animation_note_time(timeline, animation_clock_time(doc->state->animation_scheduler, instance, timeline->origin));
     timeline->ticking = true;
     svg_animation_notify_time(timeline, previous);
     timeline->ticking = false;
@@ -415,14 +415,9 @@ static void svg_animation_start_driver(SvgTimeline* timeline, unsigned depth = 0
     if (!svg_animation_connected(doc, timeline->root)) return;
     if (!doc->state && !state_store_create(doc)) return;
     AnimationScheduler* scheduler = doc->state->animation_scheduler;
-    AnimationInstance* driver = animation_instance_create(scheduler);
-    if (!driver) return;
-    driver->type = ANIM_SVG; driver->target = timeline;
-    driver->duration = INFINITY; driver->start_time = scheduler->current_time;
-    driver->tick = svg_animation_tick;
-    driver->on_finish = driver->on_cancel = svg_animation_driver_released;
-    timeline->origin = timeline->time; timeline->driver = driver;
-    animation_scheduler_add(scheduler, driver);
+    timeline->origin = timeline->time;
+    timeline->driver = animation_clock_driver_start(scheduler, ANIM_SVG, timeline,
+        svg_animation_tick, svg_animation_driver_released);
 }
 
 static void svg_animation_clear_frozen(SvgAnimationRegistry* registry, SvgAnimationControl* control) {
@@ -1332,10 +1327,7 @@ static const char* svg_animation_combine(SvgAnimationRegistry* registry, DomElem
         !svg_animation_vectors_compatible(&a, &b)) return nullptr;
     // retain equal units so later font/viewport samples determine the target's used value.
     if (!svg_animation_align_lengths(target, name, &a, &b)) return nullptr;
-    for (unsigned i = 0; i < a.count; i++) {
-        a.components[i] = a.components[i] * left_weight + b.components[i] * right_weight;
-        if (!isfinite(a.components[i])) return nullptr;
-    }
+    if (!animation_value_combine(a.components, b.components, a.count, left_weight, right_weight)) return nullptr;
     // component values stay unclamped until the target's normal used-value resolution.
     return svg_animation_vector_text(registry, &a, nullptr);
 }
@@ -1519,8 +1511,7 @@ static const char* svg_animation_sample_values(SvgTimeline* timeline, DomElement
         times[i] = paced && distances[count-1] > 0 ? distances[i] / distances[count-1] :
             (double)i / (discrete ? count : count - 1);
     }
-    unsigned segment = 0;
-    while (segment + 1 < count && progress >= times[segment + 1]) segment++;
+    unsigned segment = animation_keyframe_segment(times, count, progress);
     if (progress == 1) segment = count - 1;
     float local = segment + 1 < count && times[segment+1] > times[segment]
         ? (progress - times[segment]) / (times[segment+1] - times[segment]) : 0;

@@ -815,8 +815,8 @@ void rdt_clip_restore_depth(int saved_depth) {
 
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha) {
-    (void)resource_generation;
+                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha, uint64_t resource_identity) {
+    (void)resource_generation;(void)resource_identity;
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* cg = vec->impl;
 

@@ -1,0 +1,37 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Shared SVG and native 3D animation</title>
+<style>body{margin:24px;background:#101b2a;color:#e8f1ef;font-family:sans-serif}scene3d{display:block;width:400px;height:260px}svg{display:block;margin-top:16px}p{color:#a4b8ba}</style>
+</head><body><h1>One engine, two painters</h1><p>Native bone skinning and a relative morph target, alongside SVG/SMIL.</p>
+<scene3d id="deformation" width="400" height="260" camera="camera" background="#182e41">
+<camera id="camera" type="perspective" position="0 0 4" target="0 0 0" fov="55"></camera>
+<skeleton id="rig" position="-0.85 -0.7 0"><bone id="base"><bone id="tip" position="0 0.7 0"></bone></bone></skeleton>
+<mesh id="ribbon" position="-0.85 -0.7 0" skeleton="rig">
+<geometry type="buffer" positions="-0.25 0 0  0.25 0 0  0.25 1.4 0  -0.25 1.4 0" indices="0 1 2 0 2 3"
+ skin-indices="0 0 0 0  0 0 0 0  1 0 0 0  1 0 0 0" skin-weights="1 0 0 0  1 0 0 0  1 0 0 0  1 0 0 0"></geometry>
+<material type="basic" color="#5ce3c0" side="double"></material></mesh>
+<mesh id="morph" position="0.55 -0.7 0" morph-weights="0">
+<geometry type="buffer" positions="-0.25 0 0  0.25 0 0  0.25 1.4 0  -0.25 1.4 0" indices="0 1 2 0 2 3"
+ morph-positions="0 0 0  0 0 0  0.85 0 0  0.85 0 0"></geometry>
+<material type="basic" color="#f7c073" side="double"></material></mesh>
+<animation-clip id="bend" duration="2" autoplay="true">
+<keyframe-track path="tip.quaternion" type="quaternion" times="0 1 2" values="0 0 0 1  0 0 0.5 0.8660254038  0 0 0 1"></keyframe-track>
+<keyframe-track path="morph.morph-weights" type="vector" times="0 1 2" values="0 1 0"></keyframe-track>
+</animation-clip>
+</scene3d>
+<svg id="wave" width="400" height="80" viewBox="0 0 400 80"><rect width="400" height="80" fill="#182e41"/>
+<circle id="pulse" cx="35" cy="40" r="15" fill="#5ce3c0"><animate attributeName="cx" values="35;365;35" dur="2s" repeatCount="indefinite"/></circle></svg>
+<p>The SVG and 3D timelines use the document scheduler and shared numeric sampler. Their adapters retain their own timing rules.</p>
+<p><button id="native-pause">Pause 3D</button> <button id="native-play">Play 3D</button>
+<button id="native-seek">3D at 1 second</button> <button id="svg-pause">Pause SVG</button>
+<button id="svg-play">Play SVG</button> <button id="svg-seek">SVG at 0.5 seconds</button></p>
+<script>
+if(typeof RadiantAnimationHost==='function') {
+ const native=new RadiantAnimationHost(document.getElementById('deformation'));
+ document.getElementById('native-pause').onclick=()=>native.operate(12,0);
+ document.getElementById('native-play').onclick=()=>native.operate(12,2,'bend');
+ document.getElementById('native-seek').onclick=()=>native.operate(12,1,1);
+}
+const svg=document.getElementById('wave');
+document.getElementById('svg-pause').onclick=()=>svg.pauseAnimations();
+document.getElementById('svg-play').onclick=()=>svg.unpauseAnimations();
+document.getElementById('svg-seek').onclick=()=>svg.setCurrentTime(.5);
+</script></body></html>

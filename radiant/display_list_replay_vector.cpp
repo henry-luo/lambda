@@ -64,7 +64,9 @@ DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
             rdt_draw_image(vec, image.pixels, image.width, image.height, image.stride,
                            r->dst_x, r->dst_y, r->dst_w, r->dst_h, r->opacity,
                            r->has_transform ? &r->transform : nullptr,
-                           image.generation, image.straight_alpha);
+                           image.generation, image.straight_alpha,
+                           // snapshot buffers can reuse addresses with the same local generation.
+                           image.owner?((uint64_t)image.owner->self.gen<<32)|image.owner->self.index:0);
             return DL_REPLAY_VECTOR_DREW;
         }
 
