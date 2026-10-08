@@ -52,7 +52,8 @@ static void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
     TypeId type = entry->storage;
     entry->pointer_lane = type == LMD_TYPE_STRING ? 1 : type == LMD_TYPE_FUNC ||
         type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY_NUM ? 2 : 0;
-    entry->pointer_tag = type == LMD_TYPE_FUNC || type == LMD_TYPE_STRING ? (uint64_t)type << 56 : 0;
+    // function Items are direct pointers, like Maps; tagging them changes strict identity.
+    entry->pointer_tag = type == LMD_TYPE_STRING ? (uint64_t)type << 56 : 0;
 }
 
 extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,

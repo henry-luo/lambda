@@ -61,6 +61,143 @@ TEST_F(JsMvpLmd, ScalarNumbers) {
     Item negative = run("-0"); EXPECT_TRUE(signbit(negative.get_double()));
     numeric("function tiny(){return 5e-324} tiny()", 5e-324);
 }
+TEST_F(JsMvpLmd, NumericRegionLayoutsAndFallback) {
+    boolean(R"JS(
+        class Point { constructor(x,y) { this.x=x; this.y=y; } }
+        class Motion { constructor(first,last) { this.first=first; this.last=last; } }
+        function kernel(p,m) {
+            if (p.x < 0) return -1;
+            const a=m.first; const b=m.last;
+            let dx=b.x-a.x; let dy=b.y-a.y;
+            let lo=(p.x-a.x)/dx; let hi=(p.y-a.y)/dy;
+            if (dx<0) { const t=lo; lo=hi; hi=t; }
+            if (dy<0) { const t=lo; lo=hi; hi=t; }
+            return lo+hi;
+        }
+        let p=new Point(2,3);
+        let m=new Motion(new Point(0,0),new Point(4,6));
+        let ok=kernel(p,m)===1 && kernel(p,m)===1;
+        p.x=1.5; ok=ok && kernel(p,m)===0.875;
+        p.x='2'; ok=ok && kernel(p,m)===1;
+        p.x=2; p.extra=8; ok=ok && kernel(p,m)===1;
+        delete p.y; ok=ok && kernel(p,m)!==kernel(p,m);
+        p.x=-1; m.first=null; ok && kernel(p,m)===-1;
+    )JS");
+}
+TEST_F(JsMvpLmd, NumericMethodGuardsAndSpecialNumbers) {
+    boolean(R"JS(
+        class Compare {
+            order(a,b) { if(a===b)return 0; if(a<b)return -1;
+                if(a>b)return 1; if(a===a)return 1; return -1; }
+            twice(a,b) { const x=this.order(a,b); if(x)return x; return this.order(b,a); }
+        }
+        let c=new Compare();
+        c.twice(1,2)===-1 && c.twice(2,1)===1 && c.twice(-0,0)===0 &&
+        c.twice(NaN,NaN)===-1 && c.twice(5e-324,0)===1 &&
+        c.twice('10','2')===-1 && c.twice(undefined,1)===1;
+    )JS");
+    boolean(R"JS(
+        class Compare { order(a,b) { if(a===b)return 0; if(a<b)return -1; return 1; } }
+        let c=new Compare(); let sum=0;
+        for(let i=0;i<4;i++)sum+=c.order(i,2);
+        function change() { c.order=function(a,b){return 7;}; return 1; }
+        sum===-1 && c.order(change(),2)===-1 && c.order(1,2)===7;
+    )JS");
+}
+TEST_F(JsMvpLmd, NumericRegionEffectsStayOrdered) {
+    numeric(R"JS(
+        class Point { constructor(x,y) { this.x=x; this.y=y; } }
+        function kernel(p) {
+            const a=p.x; p.x=9; const b=p.x;
+            let dx=b-a; let dy=p.y-a;
+            if(dx<0) { const t=dx; dx=dy; dy=t; }
+            if(dy<0) { const t=dx; dx=dy; dy=t; }
+            return a+b+dx+dy+p.x+p.y;
+        }
+        let p=new Point(1,2); kernel(p)+kernel(p);
+    )JS", 52);
+    boolean(R"JS(
+        class Point {
+            constructor(x,y) { this.x=x; this.y=y; }
+            order(a,b) { if(a===b)return 0; if(a<b)return -1; return 1; }
+            compare(other) { const x=this.order(this.x,other.x);
+                if(x)return x; return this.order(this.y,other.y); }
+        }
+        let a=new Point(1,2), b=new Point(1,3); let ok=true;
+        for(let i=0;i<4;i++)ok=ok && a.compare(b)===-1;
+        a.order=function(x,y) { a.y=7; a.order=function(x,y){return x-y;}; return 0; };
+        ok && a.compare(b)===4 && a.y===7;
+    )JS");
+}
+TEST_F(JsMvpLmd, NumericConstructorRegionsKeepIdentityAndLanes) {
+    boolean(R"JS(
+        class Point {
+            constructor(x,y) { this.x=x; this.y=y; }
+            plus(other) { return new Point(this.x+other.x,this.y+other.y); }
+        }
+        let p=new Point(1,-0), q=new Point(2,-0);
+        let a=p.plus(q), b=p.plus(q);
+        let ok=a!==b && a.x===3 && b.x===3 && 1/b.y===-Infinity;
+        p.x='x'; let c=p.plus(q); ok=ok && c.x==='x2' && a.x===3;
+        p.x=5e-324; q.x=0; let tiny=p.plus(q);
+        p.x=2; let later=p.plus(q);
+        ok && tiny.x===5e-324 && later.x===2 && tiny instanceof Point;
+    )JS");
+    boolean(R"JS(
+        class Flag { constructor() { this.value=true; } get() { return this.value; } }
+        let f=new Flag(); let ok=true;
+        for(let i=0;i<4;i++)ok=ok && f.get()===true;
+        f.value=1; ok=ok && f.get()===1 && f.get()!==true;
+        f.value=false; ok && f.get()===false;
+    )JS");
+}
+TEST_F(JsMvpLmd, ScalarFactoryReturnsPreserveEffectsAndEscape) {
+    boolean("const f=()=>3;const o={f:f};o.f===f && o.f()===3 && o.f===f");
+    numeric(R"JS(
+        class Pair { constructor(x,y) { this.x=x; this.y=y; } }
+        function pair(a,b) { return new Pair(b,a); }
+        let effect=0;
+        function sum() { const p=pair(++effect,++effect,++effect); p.x+=p.y; return p.x; }
+        sum()+effect;
+    )JS", 6);
+    char* mir = dump("temp/mvp_scalar_factory.mir");
+    ASSERT_NE(mir, nullptr);
+    char* consumer = strstr(mir, "mvp_lmd_f3:\tfunc");
+    ASSERT_NE(consumer, nullptr);
+    char* end = strstr(consumer, "\tendfunc");
+    ASSERT_NE(end, nullptr); *end = 0;
+    EXPECT_EQ(strstr(consumer, "mvp_lmd_class_invoke"), nullptr);
+    EXPECT_EQ(strstr(consumer, "mvp_lmd_object_new"), nullptr);
+    mem_free(mir);
+    boolean(R"JS(
+        class Pair { constructor(x,y) { this.x=x; this.y=y; } }
+        function pair(x) { return new Pair(x,5e-324); }
+        function local() { const p=pair(1e-323); let old=p.y; p.y=1; return old===5e-324 && p.x===1e-323; }
+        function escape() { const p=pair(2); return p; }
+        let a=escape(), b=escape();
+        local() && a!==b && a instanceof Pair && a.x===2 && a.y===5e-324;
+    )JS");
+    error(R"JS(
+        function pair(x) { return new Pair(x); }
+        function use() { const p=pair(1); return p.x; }
+        use(); class Pair { constructor(x) { this.x=x; } }
+    )JS", "ReferenceError");
+}
+TEST_F(JsMvpLmd, PlainMutationsUseLambdaShapes) {
+    numeric(R"JS(
+        function work() {
+            let o={x:5e-324,y:2}; let saved=o.x;
+            delete o.y; o.z=3; o.x=1;
+            return saved;
+        }
+        work();
+    )JS", 5e-324);
+    char* mir = dump("temp/mvp_plain_shape_mutation.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "call\tmap_shape_set"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tmap_shape_delete"), nullptr);
+    mem_free(mir);
+}
 TEST_F(JsMvpLmd, IntegerRuntimeSubtype) {
     Item result = run("function id(x){return x} var f=id; [1, f(2), f(1/1), f(0/1), -0, 1.5, NaN, Infinity]");
     ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
