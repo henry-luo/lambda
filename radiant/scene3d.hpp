@@ -13,6 +13,7 @@ struct RasterRenderContext;
 struct Scene3dStats {
     NativeGlStats graphics;
     uint64_t projection_generation, snapshot_generation;
+    uint64_t projection_bytes, projection_reserved_bytes, snapshot_bytes;
     uint32_t meshes, geometries, textures;
     unsigned raster_width, raster_height;
     float camera_aspect;
@@ -25,3 +26,5 @@ void scene3d_collect(DomDocument* document);
 void scene3d_release_subtree(struct DomNode* root);
 void scene3d_context_lost(DomElement* root);
 void render_scene3d_content(RasterRenderContext* context, ViewBlock* view);
+
+void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster_scale);

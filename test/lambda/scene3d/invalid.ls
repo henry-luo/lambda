@@ -13,5 +13,10 @@ let camera = s.camera({id: "main"});
  contains(message(s.scene([camera, s.mesh(s.box(), s.material('unknown'))])), "material"),
  contains(message(s.scene([camera, <mesh geometry: "missing", material: "missing">])), "reference"),
  contains(message(s.scene([camera, <p "HTML is a sibling">])), "child"),
- contains(message(s.scene([camera, s.mesh(s.box(), s.material('basic', {opacity: 2.0}))])), "opacity")
+ contains(message(s.scene([camera, s.mesh(s.box(), s.material('basic', {opacity: 2.0}))])), "opacity"),
+ contains(message(s.scene([camera, "text"])), "elements"),
+ contains(message(s.scene([camera, s.mesh(s.box(), s.material('basic', {color: "#xx00ff"}))])), "color"),
+ contains(message(s.scene([camera, s.mesh(s.box(), s.material('basic', {transparent: 1}))])), "transparency"),
+ contains(message(s.scene([camera, s.mesh(s.box(), s.material(), {instances: [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]]})])), "instance"),
+ contains(message(s.scene([camera], {camera: 42})), "reference requires text")
 ]

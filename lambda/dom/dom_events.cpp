@@ -1738,8 +1738,8 @@ extern "C" Item js_ctor_touch_event_fn(Item type_arg, Item init_arg) {
     return ev;
 }
 
-static Item js_ctor_timing_event(Item type_arg, Item init_arg, JsClass class_id,
-                                 const char* name_key) {
+static Item js_ctor_string_event(Item type_arg, Item init_arg, JsClass class_id,
+                                 const char* name_key, bool timing) {
     RootFrame roots(3);
     Rooted<Item> type_root(roots, type_arg);
     Rooted<Item> init_root(roots, init_arg);
@@ -1751,19 +1751,24 @@ static Item js_ctor_timing_event(Item type_arg, Item init_arg, JsClass class_id,
     // frame closes, so the partially built receiver needs its own precise root (D5.4.3).
     Item ev = event_root.get();
     event_set_str(ev, name_key, init_str(init_root.get(), name_key, ""));
-    event_set_double(ev, "elapsedTime", init_double(init_root.get(), "elapsedTime", 0.0));
-    event_set_str(ev, "pseudoElement", init_str(init_root.get(), "pseudoElement", ""));
+    if (timing) {
+        event_set_double(ev, "elapsedTime", init_double(init_root.get(), "elapsedTime", 0.0));
+        event_set_str(ev, "pseudoElement", init_str(init_root.get(), "pseudoElement", ""));
+    }
     return ev;
 }
 
 #define JS_DOM_TIMING_EVENT_CTOR(name, class_id, property_name) \
     extern "C" Item name(Item type_arg, Item init_arg) { \
-        return js_ctor_timing_event(type_arg, init_arg, class_id, property_name); \
+        return js_ctor_string_event(type_arg, init_arg, class_id, property_name, true); \
     }
 JS_DOM_TIMING_EVENT_CTOR(js_ctor_transition_event_fn,
     JS_CLASS_TRANSITION_EVENT, "propertyName")
 JS_DOM_TIMING_EVENT_CTOR(js_ctor_animation_event_fn,
     JS_CLASS_ANIMATION_EVENT, "animationName")
+extern "C" Item js_ctor_webgl_context_event_fn(Item type_arg, Item init_arg) {
+    return js_ctor_string_event(type_arg, init_arg, JS_CLASS_WEBGL_CONTEXT_EVENT, "statusMessage", false);
+}
 #undef JS_DOM_TIMING_EVENT_CTOR
 #undef JS_DOM_UI_EVENT_CTOR
 

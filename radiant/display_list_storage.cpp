@@ -168,6 +168,13 @@ void DisplayList::init(Arena* backing_arena) {
 
 void dl_item_free_owned_payload(DisplayItem* item) {
     if (!item) return;
+    if (item->op == DL_DRAW_IMAGE && item->draw_image.snapshot_lease) {
+        image_surface_snapshot_release(item->draw_image.snapshot_lease);item->draw_image.snapshot_lease=nullptr;
+    }
+    if (item->op == DL_BLIT_SURFACE_SCALED && item->blit_surface_scaled.snapshot_lease) {
+        image_surface_snapshot_release(item->blit_surface_scaled.snapshot_lease);
+        item->blit_surface_scaled.snapshot_lease = nullptr;
+    }
     const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
     if (!descriptor || descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_NONE) return;
     // Ownership kind and offset live in the op row so new owned payloads cannot omit cleanup.

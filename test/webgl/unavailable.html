@@ -1,0 +1,7 @@
+<!doctype html><html><body style="margin:0"><canvas id="canvas" width="32" height="32" style="display:block;width:32px;height:32px"></canvas>
+<script>
+const canvas = document.getElementById('canvas');
+const unavailable = canvas.getContext('webgl2') === null;
+const paint = canvas.getContext('2d');
+if (paint) { paint.fillStyle = unavailable ? '#00ff00' : '#ff0000';paint.fillRect(0,0,32,32); }
+</script></body></html>

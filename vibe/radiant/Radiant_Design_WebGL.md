@@ -1,16 +1,21 @@
 # Radiant 3D and WebGL Design — Lambda Scenes First
 
-**Status:** revised design proposal. On 2026-10-08 the user selected a
+**Status:** Phase I implemented natively on macOS; validation and remaining
+aggregate-baseline failures are recorded in
+[the implementation evidence](../impl/Radiant_Scene3d_Phase1.md).
+Phase II's initial native WebGL2/unmodified Three.js profile is implemented
+on macOS; its API manifest, browser pixels, validation and limits are recorded
+in [the Phase II evidence](../impl/Radiant_WebGL_Phase2.md). On 2026-10-08 the user selected a
 Lambda-element scene package and native Radiant rendering for Phase I, with
 the JS WebGL wrapper and Three.js execution deferred to Phase II. First-party
 system OpenGL, ANGLE as reference only, and desktop GLSL acceptance remain
 selected. The user also selected `<scene3d>` and SVG-style HTML sizing through
-`viewBox`. The package spelling and detailed 3D mapping below remain
-recommendations; this document does not implement the package or renderer.
+`viewBox`. Phase I implements the explicit `lambda.scene3d` package and the
+bounded native 3D mapping below.
 
 **Date:** 2026-10-08
 
-**Scope:** Phase I provides a proposed `lambda.scene3d` package and
+**Scope:** Phase I provides the `lambda.scene3d` package and
 `<scene3d>` element, embedded alongside HTML/SVG and rendered by Radiant over
 system OpenGL. Phase II adds the JS WebGL API around the shared graphics core
 and validates Three.js. A Three.js-like scene model is the Phase I vocabulary,
@@ -20,7 +25,7 @@ not a dependency on Three.js or a promise of its complete feature set.
 This proposal applies existing formal contracts without revising them. It
 supersedes the analysis formerly at `vibe/idea/WebGL.md`.
 Superseded decisions from the original ANGLE-based proposal are retained in
-Appendix S. The file remains at the originally requested `vibe/radaint/` path.
+Appendix S. The design now lives at the selected `vibe/radiant/` path.
 
 ## 1. Direction
 
@@ -142,8 +147,8 @@ are context infrastructure, not native child-window overlays in the page.
 scene when mixed with HTML and SVG. Its HTML sizing follows SVG viewport and
 `viewBox` behavior (§7). The earlier tag alternatives are retained in Appendix S.
 
-Recommend **`lambda.scene3d`** for the general 3D graphics package; that package
-spelling remains proposed independently of the selected element name.
+**`lambda.scene3d`** is the implemented general 3D graphics package, alongside
+the selected `<scene3d>` element name.
 
 The earlier `import graphics: lambda.3d` suggestion fails current parsing, while
 `lambda.scene3d` uses the existing dotted-name syntax (S16.9.6/S16.9.8).
@@ -167,8 +172,8 @@ an imperative render call, or an imported package solely to make its tag
 recognizable. Importing the package supplies the construction/type helpers.
 Inside the scene root, children describe 3D objects and resources rather than
 ordinary HTML layout boxes. This is a renderer vocabulary boundary, not new
-Lambda syntax. The following data example parses today; native scene rendering
-is proposed work.
+Lambda syntax. The following data example uses the implemented native scene
+vocabulary.
 
 ```lambda
 <div class: "preview",
@@ -713,40 +718,40 @@ corpus, not Three.js execution.
 
 ## 13. Decisions still requiring implementation evidence or consultation
 
-- Final package spelling and entry exports: `lambda.scene3d` remains
-  recommended. `<scene3d>` and SVG-style HTML sizing are selected.
-- Exact Phase I package exports, scene/resource schema, transform conventions,
-  material/light equations, color-space policy, and initial quotas.
+- Phase I package exports, scene/resource schema, transform conventions,
+  material/light equations, color-space policy and initial quotas are recorded
+  in the implementation evidence above. Expansions need their own tests.
 - Pinned Three.js revision, submitted ES-shader corpus, and complete startup/draw
   API manifest for Phase II, not prerequisites for native scene bring-up.
 - Platform deployment minimums and verified GL/GLSL capabilities, including
   whether the proposed GL 3.3 baseline suffices for other desktops.
 - Phase II ES-source adaptation and desktop precision-query mapping;
   native desktop shader acceptance is already selected.
-- Initial resource quotas and a measurable frame-pacing target for the required
+- Revisions to initial resource quotas and a measurable frame-pacing target for the required
   scenes on named hardware.
 - Whether WebGL1 is ever added as a separate API; it is deferred initially.
 - The Phase II optional-extension manifest and whether advanced asset loaders
   join either phase's required workload set.
 - GPU-process containment and any expansion of existing headless profiles.
 
-These are open details of the proposal, not silent changes to the formal
-specification. No implementation-complete or cross-platform claim is made.
+These follow-on decisions do not change the formal specification. Phase I
+evidence covers the named macOS driver; other desktops remain unverified.
 
 ## Appendix A — implementation seams and delivery gates
 
-Keep detailed implementation progress in a future `vibe/impl/` plan. These
-locations describe proposed work; no package, scene dispatcher, GL core, or
-focused scene runner is implemented by this revision.
+Detailed Phase I implementation and validation are recorded in
+[`vibe/impl/Radiant_Scene3d_Phase1.md`](../impl/Radiant_Scene3d_Phase1.md).
+The following seams are implemented for Phase I; export and JS adaptation remain
+follow-on work as indicated.
 
 | Location | Responsibility |
 |---|---|
-| Proposed `lmd/package/scene3d.ls` and `lmd/package/scene3d/` | Explicit public module, scene types/constructors, pure normalization and transform/geometry helpers (D7.2.1–D7.2.4, S12.1.1v2). |
+| `lmd/package/scene3d.ls` and `lmd/package/scene3d/` | Explicit public module, scene types/constructors, pure normalization and transform/geometry helpers (D7.2.1–D7.2.4, S12.1.1v2). |
 | Existing Lambda element/DOM admission and `radiant-dom` boundary | Admit the root/scene subtree as document-owned values; no direct runtime-to-GL link (D7.5.3). |
 | `radiant/layout_block.cpp`, `radiant/render_svg_inline.cpp`, shared declarations in `radiant/render.hpp`, and existing replaced-content dispatch | Reuse/extract SVG intrinsic sizing, viewBox validation, and fitting helpers; keep scene children out of HTML box layout; use float layout dimensions. |
-| Proposed native scene module in `radiant/` | Scene projection with SVG-style projected-frame fitting, references, transforms/cameras, geometry, materials/lights, draw ordering, invalidation, and document-owned caches. |
-| Proposed shared GL module/provider in `radiant/` | Context/resource tables, shader services, validated native uploads, scoped state/draws, FBOs, resolve/readback, and accounting. |
-| `radiant/ui_context.cpp` / `radiant/window.cpp` | Explicit core-context creation, function loading, owning-thread lifetime, unavailable-provider handling. |
+| `radiant/scene3d.cpp` and `radiant/scene3d_math.hpp` | Scene projection with SVG-style projected-frame fitting, references, transforms/cameras, geometry, materials/lights, draw ordering, invalidation, and document-owned caches. |
+| `radiant/gl_core.cpp` | Context/resource tables, explicit core-context creation/function loading, shader services, validated native uploads, scoped state/draws, FBOs, resolve/readback, accounting and owning-thread lifetime. |
+| `radiant/ui_context.cpp` / `radiant/window.cpp` | Existing full-host GLFW infrastructure and explicit hidden-window test opt-in; ordinary headless operation stays windowless. |
 | `radiant/canvas_2d.cpp`, `render_canvas_content`, and existing image painting | Extract shared snapshot/image-presentation helpers; preserve Canvas 2D behavior. |
 | `radiant/render.hpp`, SVG/PDF dispatch, and image-generation support | Snapshot lifetime and follow-on scene/canvas export. |
 | Phase II `lambda/dom/dom_canvas.cpp` / declared host interfaces | Context selection, JS resource wrappers and argument conversion above the shared native GL core (D7.4.1v2/D7.4.4). |
@@ -762,11 +767,10 @@ focused scene runner is implemented by this revision.
 | Phase II: Three.js | Unmodified pinned package and ESM path, complete selected startup/draw manifest, native canvas pixels and browser references, JS/DOM/event dependencies. |
 | Follow-on | Advanced native materials/scenes, broader WebGL API coverage, controls/picking, rendered PNG/SVG/PDF export, additional desktops, and measured frame pacing for each claimed scope. |
 
-Add a focused native scene runner and a Lambda scene corpus to the relevant
-baseline. Proposed locations are `test/test_scene3d_gtest.cpp`,
-`test/lambda/scene3d/`, and rendered scene/page fixtures using existing render
-infrastructure. Their final runner commands belong in the implementation plan
-and `test/README.md`; no `make test-scene3d` target exists today.
+The focused `test/test_scene3d_gtest.cpp` runner and `test/lambda/scene3d/`
+goldens are wired into their relevant baselines, with rendered scene/page fixtures
+under `test/scene3d/`. `make test-scene3d` runs the native gate. Commands and
+evidence are recorded in the implementation plan and `test/README.md`.
 
 Use existing aggregate gates after Phase I implementation:
 

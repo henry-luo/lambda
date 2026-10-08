@@ -33,15 +33,7 @@ static void render_raster_profile_block(RasterRenderContext* rdcon, ViewBlock* b
 
 static void render_raster_retained_media(RasterRenderContext* rdcon, ViewBlock* block,
                                          RenderRasterBlockFn render_content) {
-    if (render_block_dirty_misses(rdcon, block) ||
-        render_block_try_retained_fragment(rdcon, block)) return;
-
-    RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, block);
-    rdcon->element_marker_suppression_depth++;
-    render_block_view(rdcon, block);
-    rdcon->element_marker_suppression_depth--;
-    render_content(rdcon, block);
-    render_element_marker_end(rdcon, &marker_scope);
+    render_block_view_content(rdcon,block,render_content);
 }
 
 static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* block,
@@ -81,6 +73,10 @@ static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* 
         render_block_view(rdcon, block);
     }
     else if (block->tag_id == MARKUP_NAME_SCENE3D) {
+        // project mutations before checking retained fragments, including changes to non-layout scene children.
+        Rect rect=render_geometry_block_content_rect(&rdcon->block,block,rdcon->raster_scale);
+        scene3d_snapshot(block->as_element(),rdcon->ui_context,rect.width/rdcon->raster_scale,
+            rect.height/rdcon->raster_scale,rdcon->raster_scale);
         render_raster_retained_media(rdcon, block, render_scene3d_content);
     }
     else if (block->tag_id == MARKUP_NAME_CANVAS) {
@@ -132,6 +128,10 @@ static void render_raster_walk_inline(RenderContext* vctx, ViewSpan* span, float
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
 
     ViewBlock* block = lam::unsafe_view_block_api_span(span);
+    if (block && block->tag_id == MARKUP_NAME_SCENE3D) {
+        // inline replaced viewports use the same media paint scope as block viewports.
+        render_raster_dispatch_block(rdcon,block,false);return;
+    }
     if (block && block->tag_id == MARKUP_NAME_SVG) {
         // Inline SVG is represented by a ViewSpan, not a block View. Its
         // replaced-element paint must use the SVG raster path before the

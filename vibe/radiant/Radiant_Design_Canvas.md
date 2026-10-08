@@ -13,9 +13,9 @@ records both the accepted placement and the deliberately unsupported surface.
 not propose WebGL, WebGPU, browser Worker integration, or browser-complete
 Canvas conformance.
 
-Native Lambda 3D scenes over desktop OpenGL, followed by a JS WebGL adapter
-and Three.js in Phase II, are proposed separately in
-[Radiant WebGL Design](../radaint/Radiant_Design_WebGL.md); they reuse canvas
+Native Lambda 3D scenes over desktop OpenGL are implemented in Phase I, with a
+JS WebGL adapter and Three.js planned for Phase II, as described in
+[Radiant WebGL Design](Radiant_Design_WebGL.md); they reuse canvas
 ownership and painting while keeping graphics-context state separate.
 
 **Formal linkage:** **D7.4.1v2** requires native resources to cross the script

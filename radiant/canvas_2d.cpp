@@ -1,6 +1,9 @@
 #include "render.hpp"
 #include "radiant.hpp"
 #include "glyph_sampling.hpp"
+#include "gl_core.hpp"
+#include "event.hpp"
+#include "../lambda/module/radiant/radiant_webgl_bridge.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
@@ -54,6 +57,11 @@ struct CanvasClip {
 
 struct CanvasEntry {
     DomElement* element;
+    NativeGlContext* graphics;
+    uint64_t webgl_id;
+    WebGlOptions webgl_options;
+    unsigned mode; // 0 unselected, 1 canvas2d, 2 webgl2
+    CanvasEntry* graphics_next;
     ImageSurface* surface;
     CanvasState state;
     CanvasSavedState* saved_states;
@@ -68,6 +76,9 @@ struct CanvasEntry {
     bool path_has_subpath;
     CanvasEntry* next;
 };
+
+static CanvasEntry* webgl_canvases;
+static uint64_t next_webgl_canvas=1;
 
 // The registry and its entries live in one pool under the document's memory
 // context; per-entry drawing stacks (saved states, clips) stay Temp-managed.
@@ -177,7 +188,13 @@ static void canvas_entry_release(CanvasEntry* entry) {
     canvas_free_clips(entry);
     if (entry->path) rdt_path_free(entry->path);
     canvas_state_destroy(&entry->state);
-    if (entry->surface) image_surface_destroy(entry->surface);
+    if (entry->graphics) {
+        CanvasEntry** link=&webgl_canvases;
+        while (*link && *link!=entry) link=&(*link)->graphics_next;
+        if (*link) *link=entry->graphics_next;
+        native_gl_destroy(entry->graphics);
+        image_surface_snapshot_release(entry->surface);
+    } else if (entry->surface) image_surface_destroy(entry->surface);
 }
 
 static void canvas_registry_destroy(DomDocumentResourceData* data) {
@@ -239,6 +256,12 @@ static bool canvas_dimensions_supported(int width, int height) {
 
 static bool canvas_replace_surface(CanvasEntry* entry, int width, int height) {
     if (!entry || !canvas_dimensions_supported(width, height)) return false;
+    if (entry->graphics) {
+        if (!native_gl_webgl_resize(entry->graphics, width, height)) return false;
+        image_surface_bump_generation(entry->surface);
+        image_surface_snapshot_release(entry->surface);entry->surface=nullptr;
+        return true;
+    }
     ImageSurface* replacement = nullptr;
     if (width > 0 && height > 0) {
         replacement = image_surface_create(width, height);
@@ -366,7 +389,9 @@ static bool canvas_ensure_path(CanvasEntry* entry) {
 }
 
 extern "C" bool radiant_canvas_ensure(void* canvas_element) {
-    return canvas_entry_for_element((DomElement*)canvas_element, true) != nullptr;
+    CanvasEntry* entry=canvas_entry_for_element((DomElement*)canvas_element,true);
+    if (!entry || entry->mode==2) return false;
+    entry->mode=1;return true;
 }
 
 extern "C" bool radiant_canvas_set_dimension(void* canvas_element,
@@ -886,8 +911,89 @@ void render_surface_content(RasterRenderContext* rdcon, ViewBlock* view, ImageSu
     Bound clip = rdcon->has_transform
         ? rdcon->block.clip
         : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
-    render_painter_blit_surface_scaled(rdcon, surface, nullptr,
-                                       rdcon->ui_context->surface, &rect, &clip,
-                                       SCALE_MODE_LINEAR, rdcon->clip_shapes,
-                                       rdcon->clip_shape_depth, 255);
+    render_painter_draw_pixels_rect(rdcon,(const uint32_t*)surface->pixels,surface->width,surface->height,
+        surface->pitch/4,&rect,&clip,255,surface);
+}
+
+extern "C" bool radiant_webgl_has_context(void* canvas) {
+    CanvasEntry* entry=canvas_entry_for_element((DomElement*)canvas,false);
+    return entry && entry->mode==2;
+}
+extern "C" uint64_t radiant_webgl_create(void* canvas, const WebGlOptions* options) {
+    DomElement* element=(DomElement*)canvas;
+    CanvasEntry* entry=canvas_entry_for_element(element,true);
+    if (!entry || !options || entry->mode==1) return 0;
+    if (entry->graphics) return entry->webgl_id;
+    UiContext* ui=element->doc?(UiContext*)element->doc->js.host_ui_context:nullptr;
+    char diagnostic[2048];
+    NativeGlContext* graphics=native_gl_create(ui && ui->window,diagnostic,sizeof(diagnostic));
+    if (!graphics) return 0;
+    unsigned width=canvas_attribute_dimension(element,"width",300),height=canvas_attribute_dimension(element,"height",150);
+    if (!native_gl_webgl_init(graphics,width,height,options)) { native_gl_destroy(graphics);return 0; }
+    image_surface_destroy(entry->surface);entry->surface=nullptr;
+    entry->graphics=graphics;entry->webgl_options=*options;entry->mode=2;entry->webgl_id=next_webgl_canvas++;
+    entry->graphics_next=webgl_canvases;webgl_canvases=entry;
+    return entry->webgl_id;
+}
+extern "C" bool radiant_webgl_resize(void* canvas,unsigned width,unsigned height) {
+    CanvasEntry* entry=canvas_entry_for_element((DomElement*)canvas,false);
+    return entry && entry->graphics && canvas_replace_surface(entry,width,height);
+}
+static CanvasEntry* webgl_canvas(uint64_t id) {
+    for (CanvasEntry* entry=webgl_canvases;entry;entry=entry->graphics_next)
+        if (entry->webgl_id==id) return entry;
+    return nullptr;
+}
+extern "C" void radiant_webgl_error(uint64_t canvas,unsigned error) {
+    CanvasEntry* entry=webgl_canvas(canvas);if (entry) native_gl_webgl_error(entry->graphics,error);
+}
+extern "C" bool radiant_webgl_call(uint64_t canvas,const WebGlCommand* command,WebGlReply* reply) {
+    CanvasEntry* entry=webgl_canvas(canvas);if (!entry) return false;
+    bool success=native_gl_webgl_call(entry->graphics,command,reply);
+    switch(command->op) {
+        case WEBGL_clear: case WEBGL_drawArrays: case WEBGL_drawElements:
+        case WEBGL_drawArraysInstanced: case WEBGL_drawElementsInstanced:
+        case WEBGL_blitFramebuffer:
+            if(entry->element->doc->state) doc_state_request_repaint(entry->element->doc->state);
+            break;
+        default:break;
+    }
+    return success;
+}
+void radiant_canvas_prepare_document(DomDocument* document) {
+    for (CanvasEntry* entry=webgl_canvases;entry;entry=entry->graphics_next) if (entry->element->doc==document) {
+        ImageSurface* snapshot=native_gl_webgl_snapshot(entry->graphics);if (!snapshot) continue;
+        image_surface_bump_generation(entry->surface);image_surface_snapshot_release(entry->surface);
+        snapshot->snapshot_refs=1;entry->surface=snapshot;
+    }
+}
+
+extern "C" bool radiant_webgl_lose(uint64_t canvas) {
+    CanvasEntry* entry=webgl_canvas(canvas);if (!entry) return false;
+    WebGlCommand command={};command.op=WEBGL_isContextLost;WebGlReply reply={};
+    native_gl_webgl_call(entry->graphics,&command,&reply);if (reply.n[0]) return false;
+    native_gl_lose(entry->graphics);
+    image_surface_bump_generation(entry->surface);image_surface_snapshot_release(entry->surface);entry->surface=nullptr;
+    if (entry->element->doc->state) doc_state_request_repaint(entry->element->doc->state);
+    return true;
+}
+extern "C" bool radiant_webgl_restore(uint64_t canvas) {
+    CanvasEntry* entry=webgl_canvas(canvas);if (!entry) return false;
+    WebGlCommand command={};command.op=WEBGL_isContextLost;WebGlReply reply={};
+    native_gl_webgl_call(entry->graphics,&command,&reply);if (!reply.n[0]) return false;
+    DomElement* element=entry->element;UiContext* ui=(UiContext*)element->doc->js.host_ui_context;
+    char diagnostic[2048];NativeGlContext* replacement=native_gl_create(ui && ui->window,diagnostic,sizeof(diagnostic));
+    if (!replacement) return false;
+    if (!native_gl_webgl_init(replacement,canvas_attribute_dimension(element,"width",300),
+            canvas_attribute_dimension(element,"height",150),&entry->webgl_options)) {
+        native_gl_destroy(replacement);return false;
+    }
+    native_gl_destroy(entry->graphics);entry->graphics=replacement;
+    if (element->doc->state) doc_state_request_repaint(element->doc->state);
+    return true;
+}
+
+extern "C" bool radiant_webgl_stats(void* canvas,NativeGlStats* stats) {
+    CanvasEntry* entry=canvas_entry_for_element((DomElement*)canvas,false);
+    return entry && entry->graphics && native_gl_stats(entry->graphics,stats);
 }

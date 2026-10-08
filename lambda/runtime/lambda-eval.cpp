@@ -14659,6 +14659,11 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 log_error("fn_map_set: attempted store to virtual shape field");
                 return ItemError;
             }
+            // arena-owned elements cannot trace replacement GC values;
+            // attribute overrides need the same roots as initial stores.
+            if (map_type_id == LMD_TYPE_ELEMENT && context &&
+                    context->ui_mode && context->arena &&
+                    !ui_prepare_element_field(&value)) return ItemError;
             if (map_type_id == LMD_TYPE_MAP &&
                     map_ctor_offset_is_reserved(map_item.map, entry->byte_offset)) {
                 // An RHS, parameter initializer or inherited setter can publish

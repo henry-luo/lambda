@@ -116,6 +116,19 @@ ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle) {
     return before == handle.gen && after == handle.gen ? surface : nullptr;
 }
 
+ImageSurface* image_surface_snapshot_retain(ImageSurface* surface) {
+    if (!surface || !__atomic_load_n(&surface->snapshot_refs, __ATOMIC_ACQUIRE)) return nullptr;
+    __atomic_add_fetch(&surface->snapshot_refs, 1u, __ATOMIC_RELAXED);
+    return surface;
+}
+
+void image_surface_snapshot_release(ImageSurface* surface) {
+    if (!surface) return;
+    if (__atomic_load_n(&surface->snapshot_refs, __ATOMIC_ACQUIRE) &&
+        __atomic_sub_fetch(&surface->snapshot_refs, 1u, __ATOMIC_ACQ_REL)) return;
+    if (!image_surface_defer_release(surface)) image_surface_release_now(surface);
+}
+
 void image_surface_release_slot(ImageSurface* surface) {
     if (!surface || surface->self.is_null()) return;
     pthread_mutex_lock(&g_image_slots_lock);

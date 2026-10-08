@@ -1,11 +1,20 @@
 import t: .transform
 
-fn numeric(v) bool => v is number and abs(v) < inf
+fn numeric(v) bool => t.numeric(v)
 fn value(v, fallback) => if (v == null) fallback else v
 fn fail(message) error => error("scene3d: " ++ message)
 fn text(v) bool => (v is string or v is symbol) and len(string(v)) > 0
+fn color(v) bool {
+    if (not (v is string)) false
+    else if (v == "transparent") true
+    else {
+        let hex = if (slice(v, 0, 1) == "#") slice(v, 1, len(v)) else v
+        contains([3, 4, 6, 8], len(hex)) and all([for (i in 0 to (len(hex) - 1)) contains("0123456789abcdefABCDEF", slice(hex, i, i + 1))])
+    }
+}
 fn fields(node) map => map([for (k, v in node where k is string or k is symbol) (string(k), v)])
 fn nodes(node, depth = 0) array^ {
+    let checked_element = if (not (node is element)) raise fail("scene children must be elements")
     let checked = if (depth > 64) raise fail("hierarchy quota exceeded");
     [node, *[for (child in content(node)) *nodes(child, depth + 1)^]]
 }
@@ -37,9 +46,15 @@ fn check_node(n, all_nodes) bool^ {
     let kind = name(n)
     let checked_kind = if (not contains(['scene3d', 'group', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture'], kind))
         raise fail("unknown scene element")
+    let checked_refs = [for (key in (if (kind == 'scene3d') ["camera"] else if (kind == 'mesh') ["geometry", "material"]
+        else if (kind == 'material') ["texture"] else []) where n[key] != null)
+        if (not text(n[key])) raise fail("resource reference requires text") else true]
     let checked_vectors = [for (key in ["position", "rotation", "scale", "target", "up"] where n[key] != null)
         if (not t.vector(n[key], 3) or (key == "scale" and any([for (x in n[key]) x == 0])))
             raise fail("invalid object transform") else true]
+    let checked_color = if ((kind == 'scene3d' or kind == 'material' or kind == 'light') and
+        n[if (kind == 'scene3d') "background" else "color"] != null and
+        not color(n[if (kind == 'scene3d') "background" else "color"])) raise fail("invalid color")
     let checked_visible = if (n.visible != null and not (n.visible is bool)) raise fail("invalid visibility")
     let children = content(n)
     let allowed = if (kind == 'scene3d' or kind == 'group') ['group', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture']
@@ -55,8 +70,12 @@ fn check_node(n, all_nodes) bool^ {
     else if (kind == 'material') {
         let checked_type = if (not contains(['basic', 'lambert'], n.type)) raise fail("unknown material type")
         let checked_opacity = if (n.opacity != null and (not numeric(n.opacity) or n.opacity < 0 or n.opacity > 1)) raise fail("invalid material opacity")
+        let checked_transparent = if (n.transparent != null and not (n.transparent is bool)) raise fail("invalid transparency")
         let checked_side = if (n.side != null and not contains(['front', 'back', 'double'], n.side)) raise fail("invalid material side")
-        let checked_texture = if (n.texture != null) definition(all_nodes, n.texture, 'texture')^
+        let checked_texture = if (n.texture != null) {
+            let d = definition(all_nodes, n.texture, 'texture')^
+            if (len(children) != 0) raise fail("duplicate material texture") else true
+        } else if (len(children) > 1) raise fail("duplicate material texture") else true
         true
     } else if (kind == 'light') {
         if (not contains(['ambient', 'directional'], n.type) or (n.intensity != null and (not numeric(n.intensity) or n.intensity < 0)))
@@ -75,7 +94,7 @@ fn check_node(n, all_nodes) bool^ {
             if (len(materials) != 0) raise fail("duplicate mesh material") else true
         } else if (len(materials) != 1) raise fail("mesh requires material") else true
         let checked_instances = if (n.instances != null and (not (n.instances is array) or len(n.instances) > 16384 or
-            not all([for (m in n.instances) t.vector(m, 16)]))) raise fail("invalid instance matrices")
+            not all([for (m in n.instances) t.affine(m)]))) raise fail("invalid instance matrices")
         true
     } else true
 }

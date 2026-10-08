@@ -677,6 +677,7 @@ typedef struct {
     // pixels and the owner's decoded size when recorded. Replay resolves the
     // handle (dl_draw_image_resolve) and reads the owner's pixels then: a stale
     // handle draws nothing, a changed generation draws the current frame.
+    lam::Up<ImageSurface> snapshot_lease;
     lam::Handle<ImageSurface> resource;
     uint64_t resource_generation;
     int src_x, src_y;
@@ -735,6 +736,7 @@ typedef struct {
 // Direct-pixel scaled blit (raster images via blit_surface_scaled)
 typedef struct {
     lam::Handle<ImageSurface> src_resource;  // the source surface, resolved at replay
+    lam::Up<ImageSurface> snapshot_lease; // keeps an immutable published image alive
     lam::Up<ImageSurface> local_source;  // unowned source (null handle) only: frame-local, never retained
     uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
@@ -1988,6 +1990,9 @@ bool render_block_dirty_misses(RasterRenderContext* rdcon, ViewBlock* block);
 bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block);
 bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block);
 void render_block_view(RasterRenderContext* rdcon, ViewBlock* view_block);
+void render_block_view_content(RasterRenderContext* rdcon, ViewBlock* block,
+    void (*content)(RasterRenderContext*, ViewBlock*));
+
 // render embedded HTML through the ordinary child, scrolling and stacking phases.
 double render_block_paint_children(RasterRenderContext* rdcon, ViewBlock* block);
 void render_embed_doc(RasterRenderContext* rdcon, ViewBlock* block);
@@ -4440,3 +4445,5 @@ LAM_NODE_OF(RenderExportSession, NodeStack);
 LAM_NODE_OF(RasterPaintContext, NodeStack);
 LAM_NODE_OF(RasterRenderContext, NodeStack);
 LAM_NODE_OF(SvgInlineRenderContext, NodeStack);
+
+void radiant_canvas_prepare_document(DomDocument* document);

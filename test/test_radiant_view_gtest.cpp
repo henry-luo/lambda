@@ -2116,7 +2116,8 @@ TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
     shell_result_free(&shell_result);
 
-    const char* expected[] = {"r1s1e10", "k2", "n1n2n3", "w1w1", "v1", "r4s4e40", "r5s5e50"};
+    const char* expected[] = {"r1s1e10", "k2", "n1n2n3", "w1w1", "v1", "r4s4e40", "r5s5e50",
+        "[9, 6, 13]override7128"};
     for (const char* text : expected) {
         EXPECT_TRUE(test_radiant_view_file_contains(view_path, text))
             << "missing content '" << text << "' after forced GC";
