@@ -2486,7 +2486,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // The document retains this owner when handlers are enabled.  Do not put
     // a semantic runtime on this stack: later timer/event turns must enter the
     // same canonical EvalContext that compiled the document.
-    Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+    // generated HTML already owns an evaluator; callbacks and Lambda templates
+    // must share it rather than switching owners inside a nested DOM event.
+    Runtime* runtime = dom_document_script_runtime(dom_doc);
+    bool new_runtime = runtime == nullptr;
+    if (new_runtime) runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
     if (!runtime) {
         log_error("execute_document_scripts: failed to allocate document runtime");
         script_task_collection_free(&script_tasks);
@@ -2498,7 +2502,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // kept module_state_id 0 and collided on one module-state slab, ESO34),
     // path dedup never hit, and nothing owned the Scripts to free them.
     // runtime_init memsets, so it must run before the fields set below.
-    runtime_init(runtime);
+    if (new_runtime) runtime_init(runtime);
     // D8.1.1v13: the shared DOM package uses this document's result arena.
     runtime_set_ui_result_input(runtime, dom_doc->input);
     runtime->dom_doc = (void*)dom_doc;
@@ -2517,7 +2521,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     Context* saved_input_context = input_context;
     EvalContext* document_context = runtime_get_eval_context(runtime);
     if (!document_context) {
-        mem_free(runtime);
+        if (new_runtime) mem_free(runtime);
         script_task_collection_free(&script_tasks);
         return;
     }
@@ -2527,7 +2531,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // than being refused; nothing is saved for later restore.
     if (!radiant_eval_context_switch(document_context) ||
             !js_runtime_state_init(document_context)) {
-        if (runtime->eval_context) {
+        if (new_runtime && runtime->eval_context) {
             js_runtime_state_destroy_context();
             if (eval_context_matches(runtime->eval_context)) {
                 eval_context_shutdown(runtime->eval_context);
@@ -2535,7 +2539,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             mem_free(runtime->eval_context);
             runtime->eval_context = nullptr;
         }
-        mem_free(runtime);
+        if (new_runtime) mem_free(runtime);
         script_task_collection_free(&script_tasks);
         return;
     }
@@ -3081,14 +3085,18 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     Runtime* runtime = dom_doc->js.runtime;
     if (!runtime) return;
 
-    dom_lifecycle_release_backing_roots(dom_doc);
-    // The document remains caller-owned; detach it before the centralized
-    // Runtime teardown releases every heap pool, name pool, script, and capsule.
+    // detach the borrowed document before either owner can tear down the runtime.
     dom_doc->js.runtime = nullptr;
     runtime->dom_doc = nullptr;
     runtime->dom_ui_context = nullptr;
     runtime->js_document_base_url = nullptr;
     runtime->js_import_maps = ItemNull;
+    if (runtime == dom_doc->lambda_runtime) {
+        // the generated tree and its custom layouts retain this owner until
+        // DomDocument::destroy; releasing the JS alias must not free it twice.
+        return;
+    }
+    dom_lifecycle_release_backing_roots(dom_doc);
     runtime_cleanup(runtime);
     mem_free(runtime);
 

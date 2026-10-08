@@ -2239,17 +2239,21 @@ static void run_html_document_scripts(DomDocument* dom_doc, Pool* pool,
     if (post_script_ns) *post_script_ns = t_post_script;
 }
 
+static void complete_document_scripts(DomDocument* doc, Pool* pool) {
+    uint64_t script_start_ns = time_now_ns();
+    run_html_document_scripts(doc, pool, nullptr, nullptr,
+                              false, 0, 0, script_start_ns, nullptr);
+    populate_layout_document(doc, doc->root, doc->html_root,
+                             (HtmlVersion)doc->html_version, doc->url, doc->lambda_runtime);
+    extract_body_transform_scale(doc->root, doc);
+    dom_js_mutation_records_reset(doc);
+}
+
 void complete_deferred_html_scripts(DomDocument* doc) {
     if (!doc || !doc->html_scripts_deferred || !doc->html_root ||
         !doc->document_pool || !doc->services.cached_css_engine) return;
     doc->html_scripts_deferred = false;
-    uint64_t script_start_ns = time_now_ns();
-    run_html_document_scripts(doc, doc->document_pool, nullptr, nullptr,
-                              false, 0, 0, script_start_ns, nullptr);
-    populate_layout_document(doc, doc->root, doc->html_root,
-                             (HtmlVersion)doc->html_version, doc->url, nullptr);
-    extract_body_transform_scale(doc->root, doc);
-    dom_js_mutation_records_reset(doc);
+    complete_document_scripts(doc, doc->document_pool);
 }
 
 static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css_filename,
@@ -2774,7 +2778,8 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               int width, int height, Pool* pool,
                                               bool include_text,
                                               bool* handled,
-                                              const DocumentJsHostConfig* host_config = nullptr) {
+                                              const DocumentJsHostConfig* host_config = nullptr,
+                                              bool defer_html_scripts = false) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
     // legacy format loaders inherit one request-scoped admission context.
@@ -2798,7 +2803,14 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
         if (text_route && !include_text) return nullptr;
         if (handled) *handled = true;
         log_info("[Layout] Detected %s file, using format loader", ext);
-        return route->loader(url, width, height, pool);
+        DomDocument* document = route->loader(url, width, height, pool);
+        if (document && document->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
+            // generated HTML needs the same script lifecycle, after its host is bound.
+            document_apply_js_host_config(document, host_config);
+            if (defer_html_scripts) document->html_scripts_deferred = true;
+            else complete_document_scripts(document, pool);
+        }
+        return document;
     }
     return nullptr;
 }
@@ -2844,7 +2856,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     bool handled = false;
     // Use the parsed pathname so a query does not hide the file extension.
     doc = load_layout_special_file(full_url, url_get_pathname(full_url),
-                                   viewport_width, viewport_height, pool, true, &handled, js_host_config);
+                                   viewport_width, viewport_height, pool, true, &handled, js_host_config,
+                                   defer_html_scripts);
     // non-HTML documents still dispatch callbacks through their owning viewer.
     if (handled) document_apply_js_host_config(doc, js_host_config);
     if (!handled) {
@@ -4166,8 +4179,8 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     if (dom_doc->stylesheet_count > 0) {
         dom_doc->cached_inline_sheets = lam::own_arr(inline_stylesheets);
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
-        dom_doc->services.cached_css_engine = css_engine;
     }
+    dom_doc->services.cached_css_engine = css_engine;
 
     if (!stateless) {
         Item html_item_root = {.element = html_elem};

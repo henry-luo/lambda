@@ -19,6 +19,15 @@ The critical design fact carried over from [RAD_01 — View & DOM Model](RAD_01_
 
 ---
 
+Lambda-generated HTML follows the same script lifecycle after evaluation and
+initial CSS cascade. The format router binds `DocumentJsHostConfig` before
+running inline/external scripts and import maps; deferred loads wait for
+`complete_deferred_html_scripts`. The generated tree and JS realm share the
+document's existing Runtime/EvalContext; nested events cannot switch owners
+with live frames (D5.4.1). JS cleanup drops its runtime alias; document teardown
+releases the shared owner. Playback uses the declared host interface
+(S12.1.1v2, D7.4.4).
+
 ## 2. Extracting scripts: the task collection
 
 `execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url)` begins by walking the **Lambda `Element*` parse tree** (not the `DomElement*` tree) in document order via `collect_scripts_recursive`, building a `JsScriptTaskCollection`. Each `<script>` becomes a `JsScriptTask` tagged with a kind (`JS_SCRIPT_TASK_CLASSIC` / `MODULE` / `BODY_ONLOAD`), a scheduling class (`POST_DOM` / `ASYNC` / `DEFER` / `AFTER_SCRIPTS`), and a compile policy. Inline scripts read their text out of the element (with XHTML `<![CDATA[ … ]]>` markers stripped); external `src` scripts are resolved with `resolve_script_url` and loaded through `load_script_content`, which either does `download_http_content_cached` for HTTP(S) or reads from disk — the **same URL-resolution and HTTP infrastructure Radiant uses for CSS and images** ([RAD_20 — Application Shell & Browsing](RAD_20_Application_Shell_Browsing.md)). Remote JavaScript snapshots are then admitted to the manager-owned `InputScriptCache`; the runner has no local source LRU. The generic HTTP disk cache remains the remote-transfer cache, while the shared cache owns script-source lifetime and artifact reuse (D8.5.1v2).
