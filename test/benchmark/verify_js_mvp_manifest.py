@@ -9,6 +9,7 @@ import sys
 
 from js_benchmark_manifest import (
     MVP_V1_PROFILE,
+    MVP_LMD_V1_PROFILE,
     TUNE14_V1_PROFILE,
     build_workloads,
 )
@@ -22,7 +23,7 @@ TUNE14_MANIFEST_PATH = os.path.join(SCRIPT_DIR, "js_tune14_manifest_v1.json")
 
 def expected_profile(manifest, path):
     profile = manifest.get("profile", MVP_V1_PROFILE)
-    if profile not in {MVP_V1_PROFILE, TUNE14_V1_PROFILE}:
+    if profile not in {MVP_V1_PROFILE, MVP_LMD_V1_PROFILE, TUNE14_V1_PROFILE}:
         raise ValueError("unknown JS benchmark manifest profile: " + str(profile))
     if profile == MVP_V1_PROFILE and os.path.abspath(path) != MVP_MANIFEST_PATH:
         raise ValueError("a non-MVP manifest must declare its profile")
@@ -51,16 +52,16 @@ def main():
                             run_name="js_benchmark_manifest_verify")
     rows = runner["build_benchmark_list"](None, None, include_text=True)
     workloads = manifest.get("workloads", [])
-    if manifest.get("schema") != 2 or len(rows) != 63 or len(workloads) != 63:
-        print("JS benchmark manifest must contain the 63 standard workloads", file=sys.stderr)
-        return 1
     expected_workloads = build_workloads(runner, rows, profile)
+    if manifest.get("schema") != 2 or len(workloads) != len(expected_workloads):
+        print("JS benchmark manifest population differs from its profile", file=sys.stderr)
+        return 1
     for entry, expected in zip(workloads, expected_workloads):
         if entry != expected:
             print("JS benchmark manifest mismatch: " + expected["id"], file=sys.stderr)
             return 1
-    label = "JS MVP" if profile == MVP_V1_PROFILE else "JS Tune14"
-    print(label + " benchmark manifest verified: 63 workloads")
+    label = {MVP_V1_PROFILE: "JS MVP", MVP_LMD_V1_PROFILE: "JS MVP Lambda", TUNE14_V1_PROFILE: "JS Tune14"}[profile]
+    print(label + " benchmark manifest verified: " + str(len(workloads)) + " workloads")
     return 0
 
 
