@@ -793,6 +793,12 @@ struct FontProp {
 
 size_t font_text_decoration_names(const FontProp* font, char* out, size_t capacity);
 
+// convert measured font units to computed CSS pixels before raster scale or zoom.
+bool css_font_metric_unit_px(FontHandle* handle, const FontStyleDesc* style,
+    CssUnit unit, float computed_size, bool upright, float* pixels);
+bool css_font_line_height_px(FontContext* fonts, const FontStyleDesc* style,
+    const CssValue* line_height, float* pixels);
+
 inline float font_prop_used_size(const FontProp* fp) {
     if (!fp) return 0.0f;
     float zoom = fp->used_zoom > 0.0f ? fp->used_zoom : 1.0f;

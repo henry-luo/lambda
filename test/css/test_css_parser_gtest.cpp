@@ -32,6 +32,35 @@ protected:
     }
 };
 
+TEST_F(CssParserTest, ValueDependencySearchVisitsCompleteMixedTrees) {
+    CssValue* leading = css_value_create_length(pool, 2.0, CSS_UNIT_LH);
+    CssValue* pending = css_value_create_function(pool, "var", nullptr, 0);
+    CssValue* environmental = css_value_create_function(pool, "env", nullptr, 0);
+    ASSERT_NE(leading, nullptr); ASSERT_NE(pending, nullptr); ASSERT_NE(environmental, nullptr);
+    CssValue* nodes[] = {leading, pending, environmental};
+    for (size_t depth = 0; depth < 128; depth++) {
+        for (size_t index = 0; index < 3; index++) {
+            CssValue** children = (CssValue**)pool_alloc(pool, 2 * sizeof(CssValue*));
+            ASSERT_NE(children, nullptr);
+            children[0] = nodes[index];
+            children[1] = css_value_create_length(pool, 1.0, CSS_UNIT_PX);
+            nodes[index] = depth % 2 ? css_value_create_list(pool, children, 2)
+                : css_value_create_function(pool, "calc", children, 2);
+            ASSERT_NE(nodes[index], nullptr);
+        }
+    }
+    // dependency discovery must not misclassify a nested font basis or pending substitution as independent.
+    EXPECT_TRUE(css_value_contains_length_unit(nodes[0], CSS_UNIT_LH, CSS_UNIT_RLH));
+    EXPECT_FALSE(css_value_contains_length_unit(nodes[0], CSS_UNIT_EX, CSS_UNIT_CH));
+    EXPECT_FALSE(css_value_contains_var_reference(nodes[0]));
+    EXPECT_FALSE(css_value_contains_pending_substitution(nodes[0]));
+    EXPECT_TRUE(css_value_contains_var_reference(nodes[1]));
+    EXPECT_TRUE(css_value_contains_pending_substitution(nodes[1]));
+    EXPECT_FALSE(css_value_contains_var_reference(nodes[2]));
+    EXPECT_TRUE(css_value_contains_pending_substitution(nodes[2]));
+    EXPECT_FALSE(css_value_contains_length_unit(nodes[2], CSS_UNIT_LH, CSS_UNIT_RLH));
+}
+
 TEST_F(CssParserTest, LinguisticFunctionsValidateTokensBeforeDecoding) {
     const char* valid[] = {":lang(en)", ":lang( en, 'de-*-DE' )", ":lang(\"*\")",
         ":lang(\\65 n)", ":lang(en/**/,fr)", ":lang(\"\")", ":lang(en", ":dir(sideways)",

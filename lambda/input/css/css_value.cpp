@@ -13,6 +13,7 @@ extern "C" {
 
 #include "../../../lib/color.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/arraylist.h"
 #include <math.h>
 
 static double css_color_clamp(double value, double maximum = 1.0) {
@@ -450,37 +451,57 @@ const char* css_math_token_name(const CssValue* value) {
     return NULL;
 }
 
-static bool css_value_contains_var_reference_inner(const CssValue* value,
-                                                   int depth, bool include_pending) {
-    if (!value || depth > 32) return false;
+enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT};
+
+static bool css_value_matches_search(const CssValue* value, CssValueSearch search,
+    CssUnit first, CssUnit second) {
+    if (!value) return false;
+    if (search == CSS_SEARCH_LENGTH_UNIT)
+        return value->type == CSS_VALUE_TYPE_LENGTH &&
+            (value->data.length.unit == first || value->data.length.unit == second);
     if (value->type == CSS_VALUE_TYPE_VAR) return true;
-    if (include_pending && (value->type == CSS_VALUE_TYPE_ENV || value->type == CSS_VALUE_TYPE_ATTR)) return true;
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        if (!value->data.list.values) return false;
-        for (int i = 0; i < value->data.list.count; i++) {
-            if (css_value_contains_var_reference_inner(
-                    value->data.list.values[i], depth + 1, include_pending)) return true;
+    if (search == CSS_SEARCH_PENDING && (value->type == CSS_VALUE_TYPE_ENV || value->type == CSS_VALUE_TYPE_ATTR)) return true;
+    const CssFunction* function = value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    return function && function->name && (strcmp(function->name, "var") == 0 ||
+        (search == CSS_SEARCH_PENDING && (strcmp(function->name, "env") == 0 || strcmp(function->name, "attr") == 0)));
+}
+
+static bool css_value_contains(CssValueSearch search, const CssValue* value,
+    CssUnit first = CSS_UNIT_PX, CssUnit second = CSS_UNIT_PX) {
+    if (!value) return false;
+    if (css_value_matches_search(value, search, first, second)) return true;
+    if (value->type != CSS_VALUE_TYPE_LIST && value->type != CSS_VALUE_TYPE_FUNCTION) return false;
+    ArrayList* pending = arraylist_new(8);
+    if (!pending) return true;  // inability to exclude a dependency must still enter its validation path
+    bool found = !arraylist_append(pending, (void*)value);
+    while (!found && pending->length > 0) {
+        const CssValue* current = (const CssValue*)pending->data[--pending->length];
+        if (css_value_matches_search(current, search, first, second)) { found = true; break; }
+        const CssValue* const* children = nullptr;
+        int count = 0;
+        if (current->type == CSS_VALUE_TYPE_LIST) {
+            children = current->data.list.values; count = current->data.list.count;
+        } else if (current->type == CSS_VALUE_TYPE_FUNCTION && current->data.function) {
+            children = current->data.function->args; count = current->data.function->arg_count;
         }
-    } else if (value->type == CSS_VALUE_TYPE_FUNCTION &&
-               value->data.function && value->data.function->name) {
-        if (strcmp(value->data.function->name, "var") == 0) return true;
-        if (include_pending && (strcmp(value->data.function->name, "env") == 0 ||
-            strcmp(value->data.function->name, "attr") == 0)) return true;
-        for (int i = 0; value->data.function->args &&
-             i < value->data.function->arg_count; i++) {
-            if (css_value_contains_var_reference_inner(
-                    value->data.function->args[i], depth + 1, include_pending)) return true;
+        for (int index = 0; children && index < count; index++) {
+            if (children[index] && !arraylist_append(pending, (void*)children[index])) { found = true; break; }
         }
     }
-    return false;
+    arraylist_free(pending);
+    return found;
 }
 
 bool css_value_contains_var_reference(const CssValue* value) {
-    return css_value_contains_var_reference_inner(value, 0, false);
+    return css_value_contains(CSS_SEARCH_VAR, value);
 }
 
 bool css_value_contains_pending_substitution(const CssValue* value) {
-    return css_value_contains_var_reference_inner(value, 0, true);
+    return css_value_contains(CSS_SEARCH_PENDING, value);
+}
+
+bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second) {
+    return css_value_contains(CSS_SEARCH_LENGTH_UNIT, value, first, second);
 }
 
 float css_font_size_keyword_px(CssEnum keyword) {

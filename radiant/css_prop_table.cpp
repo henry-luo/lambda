@@ -459,79 +459,81 @@ static const CssValue* cssom_declared_font_value(Pool* scratch, DomElement* elem
                                                 CssPropertyCode id, int pseudo_type) {
     CssDeclaration* longhand = computed_decl(element, id, pseudo_type);
     CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_FONT, pseudo_type);
-    bool use_shorthand = shorthand && shorthand->value &&
-        (!longhand || css_declaration_cascade_compare(shorthand, longhand) > 0);
+    const CssProperty* property = css_property_get_by_code(id);
+    bool use_shorthand = property && css_font_shorthand_contains_property(property->name) &&
+        shorthand && shorthand->value && (!longhand || css_declaration_cascade_compare(shorthand, longhand) > 0);
     const CssValue* value = use_shorthand ? shorthand->value : longhand ? longhand->value : nullptr;
     if (!value) return nullptr;
     const CssValue* resolved = css_resolve_element_var_value(scratch, element, value, id);
     CssPropertyCode source = use_shorthand ? CSS_PROPERTY_FONT : id;
     if (!resolved || !css_property_validate_value(source, resolved)) return nullptr;
     // font's omitted line-height resets to normal; its components share validation and projection.
-    const CssProperty* property = css_property_get_by_code(id);
     return use_shorthand && property
         ? css_font_shorthand_longhand(resolved, property->name, scratch) : resolved;
 }
 
-static const CssValue* inherited_decl_value(Pool* scratch, DomElement* element,
-    CssPropertyCode id, int pseudo_type, DomElement** declaring_element, int* declaring_pseudo) {
-    while (element) {
-        const CssValue* value = cssom_declared_font_value(scratch, element, id, pseudo_type);
-        if (cssom_value_inherits(value, id)) {
-            element = cssom_inherited_source(element, &pseudo_type);
-            continue;
-        }
-        if (cssom_value_uses_initial(value)) return nullptr;
-        if (value && declaring_element) *declaring_element = element;
-        if (value && declaring_pseudo) *declaring_pseudo = pseudo_type;
-        return value;
-    }
-    return nullptr;
+struct CssomFontState {
+    FontStyleDesc font;
+    CssValue line_height;
+    bool vertical;
+    bool sideways;
+    bool upright;
+};
+
+struct CssomFontMathContext {
+    DomElement* element;
+    float parent_size;
+    float root_size;
+    const CssomFontState* metrics;
+    const CssomFontState* leading;
+    const CssomFontState* root;
+    bool viewport_vertical;
+};
+
+static FontHandle* cssom_resolve_metric_font(DomElement* element, const CssomFontState* state) {
+    UiContext* host = element && element->doc ? (UiContext*)element->doc->js.host_ui_context : nullptr;
+    return host && host->font_ctx && state ? font_resolve(host->font_ctx, &state->font) : nullptr;
 }
 
-static bool cssom_resolve_font_size(DomElement* element, int pseudo_type,
-                                     float* root_font_size, float* font_size);
+static float cssom_font_state_line_height(DomElement* element, const CssomFontState* state) {
+    UiContext* host = element && element->doc ? (UiContext*)element->doc->js.host_ui_context : nullptr;
+    float pixels = NAN;
+    return state && css_font_line_height_px(host ? host->font_ctx : nullptr,
+        &state->font, &state->line_height, &pixels) ? pixels : NAN;
+}
 
-static bool cssom_resolve_font_size_value(DomElement* element,
-    const CssValue* value, float parent_font_size, float root_font_size, float* font_size,
-    bool math_operand = false);
-
-struct CssomFontMathContext {DomElement* element; float parent_size; float root_size;};
+static bool cssom_resolve_font_size_value(CssomFontMathContext* context,
+    const CssValue* value, float* font_size, bool math_operand = false);
 
 static bool cssom_font_math_leaf(void* data, const CssValue* value, double* result) {
     CssomFontMathContext* context = (CssomFontMathContext*)data;
     float size = 0.0f;
-    if (!cssom_resolve_font_size_value(context->element, value, context->parent_size,
-        context->root_size, &size, true)) return false;
+    if (!cssom_resolve_font_size_value(context, value, &size, true)) return false;
     *result = size;
     return true;
 }
 
-static bool cssom_resolve_font_size_value(DomElement* element,
-                                          const CssValue* value,
-                                          float parent_font_size,
-                                          float root_font_size,
-                                          float* font_size, bool math_operand) {
-    if (!element || !value || !font_size) return false;
+static bool cssom_resolve_font_size_value(CssomFontMathContext* context,
+    const CssValue* value, float* font_size, bool math_operand) {
+    if (!context || !context->element || !value || !font_size) return false;
     float resolved = -1.0f;
     if (value->type == CSS_VALUE_TYPE_FUNCTION) {
-        // Font math uses the parent's percentage/em basis before registered descendants inherit lengths.
-        CssomFontMathContext leaf_context = {element, parent_font_size, root_font_size};
-        CssMathEvaluationContext context = {cssom_font_math_leaf, &leaf_context, 1.0, false};
-        CssMathResult math = css_math_evaluate(value, &context);
+        CssMathEvaluationContext math_context = {cssom_font_math_leaf, context, 1.0, false};
+        CssMathResult math = css_math_evaluate(value, &math_context);
         if (!math.resolved || (math.type != CSS_MATH_LENGTH && math.type != CSS_MATH_PERCENT &&
             math.type != CSS_MATH_LENGTH_PERCENT && !(math.type == CSS_MATH_NUMBER && math.value == 0.0)))
             return false;
         resolved = isnan(math.value) ? 0.0 : math_operand ? math.value : fmax(0.0, math.value);
     } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        CssUnit unit = value->data.length.unit;
+        double number = value->data.length.value;
         double absolute_pixels = 0.0;
-        if (css_absolute_length_to_px(value->data.length.unit,
-                                      value->data.length.value, &absolute_pixels)) {
+        if (css_absolute_length_to_px(unit, number, &absolute_pixels)) {
             resolved = (float)absolute_pixels;
         } else {
-            DomDocument* document = element->doc;
+            DomDocument* document = context->element->doc;
             UiContext* host = document ? (UiContext*)document->js.host_ui_context : nullptr;
             CssEngine* engine = document ? (CssEngine*)document->services.cached_css_engine : nullptr;
-            // viewport metadata is an override; the host/cascade owns the actual viewport dimensions.
             float viewport_width = host ? host->viewport_width
                 : engine ? (float)engine->context.viewport_width : 0.0f;
             float viewport_height = host ? host->viewport_height
@@ -539,128 +541,183 @@ static bool cssom_resolve_font_size_value(DomElement* element,
             if (document && document->viewport.width > 0) viewport_width = document->viewport.width;
             if (document && document->viewport.height > 0) viewport_height = document->viewport.height;
             double viewport_pixels = 0.0;
-            WritingMode mode = element->blk ? element->block()->writing_mode
-                : WM_HORIZONTAL_TB;
-            if (css_viewport_length_to_px(value->data.length.unit,
-                    value->data.length.value, viewport_width, viewport_height,
-                    mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL,
-                    &viewport_pixels)) {
+            if (css_viewport_length_to_px(unit, number, viewport_width, viewport_height,
+                    context->viewport_vertical, &viewport_pixels)) {
                 resolved = (float)viewport_pixels;
-            } else {
-            switch (value->data.length.unit) {
-                case CSS_UNIT_EM: resolved = (float)value->data.length.value * parent_font_size; break;
-                case CSS_UNIT_REM: resolved = (float)value->data.length.value * root_font_size; break;
-                default: return false;
-            }
+            } else if (unit == CSS_UNIT_LH || unit == CSS_UNIT_RLH) {
+                resolved = number * cssom_font_state_line_height(context->element,
+                    unit == CSS_UNIT_LH ? context->leading : context->root);
+            } else if (unit == CSS_UNIT_EM) resolved = number * context->parent_size;
+            else if (unit == CSS_UNIT_REM) resolved = number * context->root_size;
+            else {
+                FontHandle* handle = cssom_resolve_metric_font(context->element, context->metrics);
+                float pixels = 0.0f;
+                bool valid = context->metrics && css_font_metric_unit_px(handle,
+                    &context->metrics->font, unit, context->metrics->font.size_px,
+                    context->metrics->vertical && context->metrics->upright && !context->metrics->sideways, &pixels);
+                // the font cache owns its entry; this read releases only its temporary caller reference.
+                font_handle_release(handle);
+                if (!valid) return false;
+                resolved = number * pixels;
             }
         }
     } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        resolved = (float)(value->data.percentage.value * parent_font_size / 100.0);
+        resolved = value->data.percentage.value * context->parent_size / 100.0;
     } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
         if (value->data.number.value == 0.0) resolved = 0.0f;
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         CssEnum keyword = value->data.keyword;
-        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
-            resolved = parent_font_size;
-        } else if (keyword == CSS_VALUE_LARGER) {
-            resolved = parent_font_size * 1.2f;
-        } else if (keyword == CSS_VALUE_SMALLER) {
-            resolved = parent_font_size / 1.2f;
-        } else if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT) {
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) resolved = context->parent_size;
+        else if (keyword == CSS_VALUE_LARGER) resolved = context->parent_size * 1.2f;
+        else if (keyword == CSS_VALUE_SMALLER) resolved = context->parent_size / 1.2f;
+        else if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT)
             resolved = css_font_size_keyword_px(CSS_VALUE_MEDIUM);
-        } else {
-            resolved = css_font_size_keyword_px(keyword);
-        }
+        else resolved = css_font_size_keyword_px(keyword);
     }
     if (!isfinite(resolved) || (!math_operand && resolved < 0.0f)) return false;
     *font_size = resolved;
     return true;
 }
 
-static bool cssom_resolve_font_size(DomElement* element, int pseudo_type,
-                                     float* root_font_size, float* font_size) {
-    if (!element || !root_font_size || !font_size) return false;
+static void cssom_compute_font_state(Pool* scratch, DomElement* element, int pseudo_type,
+    const CssomFontState* parent, const CssomFontState* root, CssomFontState* state,
+    const CssValue* size, bool compute_leading) {
+    *state = *parent;
+    const CssValue* family = cssom_declared_font_value(scratch, element, CSS_PROPERTY_FONT_FAMILY, pseudo_type);
+    if (family && !cssom_value_inherits(family, CSS_PROPERTY_FONT_FAMILY)) {
+        if (cssom_value_uses_initial(family)) state->font.family = property_initial(CSS_PROPERTY_FONT_FAMILY);
+        else {
+            CssFormatter* formatter = css_formatter_create(scratch, CSS_FORMAT_COMPACT);
+            if (formatter) {
+                css_format_value(formatter, (CssValue*)family);
+                String* text = stringbuf_to_string(formatter->output);
+                if (text) state->font.family = text->chars;
+            }
+        }
+    }
+    const CssValue* weight = cssom_declared_font_value(scratch, element, CSS_PROPERTY_FONT_WEIGHT, pseudo_type);
+    if (weight && !cssom_value_inherits(weight, CSS_PROPERTY_FONT_WEIGHT)) {
+        if (weight->type == CSS_VALUE_TYPE_NUMBER) state->font.weight = (FontWeight)weight->data.number.value;
+        else if (weight->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum keyword = weight->data.keyword;
+            if (keyword == CSS_VALUE_BOLDER) state->font.weight = parent->font.weight < 350
+                ? FONT_WEIGHT_NORMAL : parent->font.weight < 550 ? FONT_WEIGHT_BOLD : FONT_WEIGHT_BLACK;
+            else if (keyword == CSS_VALUE_LIGHTER) state->font.weight = parent->font.weight < 550
+                ? FONT_WEIGHT_THIN : parent->font.weight < 750 ? FONT_WEIGHT_NORMAL : FONT_WEIGHT_BOLD;
+            else state->font.weight = keyword == CSS_VALUE_BOLD ? FONT_WEIGHT_BOLD : FONT_WEIGHT_NORMAL;
+        }
+    }
+    const CssValue* slant = cssom_declared_font_value(scratch, element, CSS_PROPERTY_FONT_STYLE, pseudo_type);
+    if (slant && !cssom_value_inherits(slant, CSS_PROPERTY_FONT_STYLE)) {
+        const char* name = css_value_identifier_name(slant);
+        state->font.slant = name && str_icmp_cstr(name, "italic") == 0 ? FONT_SLANT_ITALIC
+            : name && str_icmp_cstr(name, "oblique") == 0 ? FONT_SLANT_OBLIQUE : FONT_SLANT_NORMAL;
+    }
+    const CssValue* writing = cssom_declared_font_value(scratch, element, CSS_PROPERTY_WRITING_MODE, pseudo_type);
+    if (writing && !cssom_value_inherits(writing, CSS_PROPERTY_WRITING_MODE)) {
+        CssEnum mode = writing->type == CSS_VALUE_TYPE_KEYWORD
+            ? writing->data.keyword : CSS_VALUE_HORIZONTAL_TB;
+        // sideways boxes retain vertical viewport axes while their glyph metrics stay horizontal.
+        state->sideways = mode == CSS_VALUE_SIDEWAYS_RL || mode == CSS_VALUE_SIDEWAYS_LR;
+        state->vertical = layout_writing_mode_from_css(mode) != WM_HORIZONTAL_TB;
+    }
+    const CssValue* orientation = cssom_declared_font_value(scratch, element, CSS_PROPERTY_TEXT_ORIENTATION, pseudo_type);
+    if (orientation && !cssom_value_inherits(orientation, CSS_PROPERTY_TEXT_ORIENTATION)) {
+        const char* name = css_value_identifier_name(orientation);
+        state->upright = name && str_icmp_cstr(name, "upright") == 0;
+    }
+    bool is_root = pseudo_type == 0 && element->doc && element == element->doc->root;
+    CssomFontMathContext lengths = {element, parent->font.size_px, root->font.size_px,
+        parent, parent, root, state->vertical};
+    if (size) cssom_resolve_font_size_value(&lengths, size, &state->font.size_px);
+    lengths.parent_size = state->font.size_px;
+    if (is_root) lengths.root_size = state->font.size_px;
+    lengths.metrics = state;
+    const CssValue* leading = compute_leading ? cssom_declared_font_value(
+        scratch, element, CSS_PROPERTY_LINE_HEIGHT, pseudo_type) : nullptr;
+    if (leading && !cssom_value_inherits(leading, CSS_PROPERTY_LINE_HEIGHT)) {
+        if (cssom_value_uses_initial(leading)) state->line_height = *css_line_height_normal_value();
+        else {
+            CssMathEvaluationContext context = {cssom_font_math_leaf, &lengths, 1.0, false};
+            css_compute_line_height_value(leading, &context, &state->line_height);
+        }
+    }
+}
+
+static bool cssom_resolve_font_state(Pool* scratch, DomElement* element, int pseudo_type,
+    CssomFontState* root, CssomFontState* result, bool compute_leading = false) {
+    if (!scratch || !element || !root || !result) return false;
     ArrayList* ancestors = cssom_collect_style_ancestors(element);
     if (!ancestors) return false;
-    Pool* scratch = pool_create();
-    if (!scratch) { arraylist_free(ancestors); return false; }
-    float parent_font_size = 16.0f;
-    // compute each inherited basis once from the CSS root toward the queried element.
+    size_t count = (size_t)ancestors->length + (pseudo_type != 0 ? 1 : 0);
+    const CssValue** sizes = (const CssValue**)pool_calloc(scratch, count * sizeof(CssValue*));
+    if (!sizes) { arraylist_free(ancestors); return false; }
+    bool needs_leading = compute_leading;
+    for (size_t index = 0; index < count; index++) {
+        DomElement* current = index < (size_t)ancestors->length
+            ? (DomElement*)ancestors->data[(size_t)ancestors->length - index - 1] : element;
+        sizes[index] = cssom_declared_font_value(scratch, current, CSS_PROPERTY_FONT_SIZE,
+            index < (size_t)ancestors->length ? 0 : pseudo_type);
+        needs_leading |= css_value_contains_length_unit(sizes[index], CSS_UNIT_LH, CSS_UNIT_RLH);
+    }
+    CssomFontState state = {};
+    state.font = {property_initial(CSS_PROPERTY_FONT_FAMILY), css_font_size_keyword_px(CSS_VALUE_MEDIUM),
+        FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    state.line_height = *css_line_height_normal_value();
+    *root = state;
+    // font sizes and line-height dependencies compute once, from the CSS root toward the target.
     for (int index = ancestors->length; index > 0; index--) {
-        DomElement* current = (DomElement*)ancestors->data[index - 1];
-        const CssValue* value = cssom_declared_font_value(scratch, current, CSS_PROPERTY_FONT_SIZE, 0);
-        float resolved = parent_font_size;
-        if (value) {
-            if (!cssom_resolve_font_size_value(current, value, parent_font_size,
-                                               *root_font_size, &resolved)) resolved = parent_font_size;
-        }
-        parent_font_size = resolved;
-        if (index == ancestors->length) *root_font_size = resolved;
+        CssomFontState current = {};
+        cssom_compute_font_state(scratch, (DomElement*)ancestors->data[index - 1], 0, &state, root, &current,
+            sizes[ancestors->length - index], needs_leading && (compute_leading || index > 1 || pseudo_type != 0));
+        state = current;
+        if (index == ancestors->length) *root = state;
     }
     if (pseudo_type != 0) {
-        const CssValue* value = cssom_declared_font_value(scratch, element,
-            CSS_PROPERTY_FONT_SIZE, pseudo_type);
-        float resolved = parent_font_size;
-        if (value && cssom_resolve_font_size_value(element, value, parent_font_size,
-                *root_font_size, &resolved)) parent_font_size = resolved;
+        CssomFontState current = {};
+        cssom_compute_font_state(scratch, element, pseudo_type, &state, root, &current,
+            sizes[ancestors->length], compute_leading);
+        state = current;
     }
-    *font_size = parent_font_size;
-    pool_destroy(scratch);
+    *result = state;
     arraylist_free(ancestors);
     return true;
 }
 
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size) {
-    float root_font_size = 16.0f;
-    // Layout has already matched this tree; reading its font must not invalidate the cascade.
-    return cssom_resolve_font_size(element, 0, &root_font_size, font_size);
+    if (!font_size) return false;
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    CssomFontState root = {}, state = {};
+    bool valid = cssom_resolve_font_state(scratch, element, 0, &root, &state);
+    if (valid) *font_size = state.font.size_px;
+    pool_destroy(scratch);
+    return valid;
 }
 
-static bool serialize_cssom_font_size(DomElement* element, int pseudo_type,
-                                      char* out, size_t out_size) {
-    float root_font_size = 16.0f;
-    float font_size = 0.0f;
-    // refresh inherited inputs before any declaration pointer enters font computation.
+static bool serialize_cssom_font_size(DomElement* element, int pseudo_type, char* out, size_t out_size) {
     dom_ensure_computed(element, false);
-    if (!cssom_resolve_font_size(element, pseudo_type,
-                                           &root_font_size, &font_size)) {
-        return false;
-    }
-    return format_number(out, out_size, font_size, "px");
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    CssomFontState root = {}, state = {};
+    bool success = cssom_resolve_font_state(scratch, element, pseudo_type, &root, &state) &&
+        format_number(out, out_size, state.font.size_px, "px");
+    pool_destroy(scratch);
+    return success;
 }
 
 static bool serialize_line_height(const CssPropAccessor* accessor, DomElement* element,
-                                  int pseudo_type, char* out, size_t out_size) {
+    int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element) return false;
     Pool* scratch = pool_create();
     if (!scratch) return false;
-    DomElement* declaring_element = nullptr;
-    int declaring_pseudo = 0;
-    const CssValue* value = inherited_decl_value(scratch, element,
-        CSS_PROPERTY_LINE_HEIGHT, pseudo_type, &declaring_element, &declaring_pseudo);
+    CssomFontState root = {}, state = {};
     bool success = false;
-    if (!value || (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL)) {
-        success = copy_text(out, out_size, "normal");
-    } else {
-        float root_font_size = 16.0f, owner_font_size = 0.0f;
-        if (cssom_resolve_font_size(declaring_element, declaring_pseudo,
-                &root_font_size, &owner_font_size)) {
-            CssomFontMathContext lengths = {declaring_element, owner_font_size, root_font_size};
-            CssMathEvaluationContext context = {cssom_font_math_leaf, &lengths, 1.0, false};
-            CssValue computed = {};
-            if (css_compute_line_height_value(value, &context, &computed)) {
-                double pixels = computed.type == CSS_VALUE_TYPE_NUMBER
-                    ? computed.data.number.value : computed.data.length.value;
-                if (computed.type == CSS_VALUE_TYPE_NUMBER) {
-                    float target_font_size = 0.0f;
-                    if (cssom_resolve_font_size(element, pseudo_type,
-                            &root_font_size, &target_font_size))
-                        pixels = computed.data.number.value * target_font_size;
-                    else pixels = NAN;
-                }
-                if (!isnan(pixels)) success = format_number(out, out_size,
-                    layout_clamp_dimension((float)pixels), "px");
-            }
+    if (cssom_resolve_font_state(scratch, element, pseudo_type, &root, &state, true)) {
+        if (state.line_height.type == CSS_VALUE_TYPE_KEYWORD) success = copy_text(out, out_size, "normal");
+        else {
+            float pixels = cssom_font_state_line_height(element, &state);
+            if (!isnan(pixels)) success = format_number(out, out_size, layout_clamp_dimension(pixels), "px");
         }
     }
     pool_destroy(scratch);
@@ -723,11 +780,13 @@ String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
         CssomSvgScalarWriter writer = {formatter,
             {dom_svg_length_context(declaring), {declaring, 16.0f, 16.0f}},
             id != CSS_PROPERTY_STROKE_DASHOFFSET, id == CSS_PROPERTY_STROKE_DASHARRAY, false};
-        if (!dom_element_is_svg(declaring))
-            css_compute_cascaded_font_size(declaring, &writer.lengths.svg.font_size);
-        writer.lengths.font.parent_size = writer.lengths.svg.font_size;
-        if (declaring->doc && declaring->doc->root)
-            css_compute_cascaded_font_size(declaring->doc->root, &writer.lengths.font.root_size);
+        CssomFontState root = {}, state = {};
+        if (cssom_resolve_font_state(pool, declaring, 0, &root, &state, true)) {
+            if (!dom_element_is_svg(declaring)) writer.lengths.svg.font_size = state.font.size_px;
+            else state.font.size_px = writer.lengths.svg.font_size;
+            writer.lengths.font = {declaring, state.font.size_px, root.font.size_px,
+                &state, &state, &root, state.vertical};
+        }
         if (id == CSS_PROPERTY_STROKE_DASHARRAY) {
             if (!css_value_visit_list_items(value, cssom_append_svg_length, &writer)) return nullptr;
         } else if (!cssom_append_svg_length(value, &writer)) return nullptr;

@@ -6602,6 +6602,72 @@ TEST(RenderOutputParity, InheritedLineHeightMathMatchesComputedLengthsAcrossOutp
     for (StrBuf* source : html) strbuf_free(source);
 }
 
+TEST(RenderOutputParity, FontMetricAndLeadingUnitsMatchExplicitLengthsAcrossOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    const char* rules[] = {
+        "#ex{line-height:2ex}#ch{line-height:2ch}#cap{line-height:2cap}"
+        "#ic{line-height:2ic}#lh{line-height:2lh}#rlh{line-height:2rlh}"
+        "#size{font-size:2ex;line-height:1em}#zoom{line-height:2cap;zoom:2}",
+        "#ex{line-height:10.56640625px}#ch{line-height:11.123046875px}"
+        "#cap,#zoom{line-height:13.759765625px}#ic{line-height:20px}"
+        "#lh,#rlh{line-height:80px}#size{font-size:21.1328125px;line-height:21.1328125px}#zoom{zoom:2}",
+    };
+    const char* ids[] = {"ex", "ch", "cap", "ic", "lh", "rlh", "size", "zoom"};
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    for (size_t index = 0; index < 2; index++) {
+        strbuf_append_str(html[index], "<!doctype html><style>"
+            "@font-face{font-family:MetricSans;src:url(../../test/layout/data/font/LiberationSans-Regular.ttf)}"
+            "html{font:20px/2 MetricSans}body{margin:0;background:white}"
+            ".frame{position:absolute;left:0;width:70px}.owner{font-size:10px}"
+            ".leaf{font-size:20px;background:blue}#size{font-size:inherit}");
+        strbuf_append_str(html[index], rules[index]);
+        strbuf_append_str(html[index], "</style>");
+        for (size_t row = 0; row < 8; row++) {
+            strbuf_append_format(html[index], "<div class=frame style='top:%upx'>"
+                "<div class=owner id=%s><div class=leaf>A<br>B</div></div></div>",
+                (unsigned)(row * 180), ids[row]);
+        }
+    }
+    // independently calculated font-table lengths must position glyphs and backgrounds in every export.
+    expect_html_pair_output_parity("font_metric_units", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
+TEST(RenderOutputParity, LiveFontMetricAndParentLeadingChangesReachLayoutAndPaint) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>"
+        "@font-face{font-family:MetricSans;src:url(../../test/layout/data/font/LiberationSans-Regular.ttf)}"
+        "@font-face{font-family:MetricMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html{font:20px/2 MetricSans}body{margin:0;background:white}"
+        "#source{position:absolute;left:0;top:0;font-size:10px;line-height:2lh;width:20ch}"
+        "#leaf{font-size:20px;background:blue;text-indent:9999px;overflow:hidden}"
+        "#update{position:absolute;left:0;top:140px}</style>"
+        "<div id=source><div id=leaf>X</div></div><button id=update>update</button><script>"
+        "document.getElementById('update').addEventListener('click',function(){"
+        "document.documentElement.style.lineHeight='3';"
+        "document.getElementById('source').style.fontFamily='MetricMono';});</script>";
+    const char* events =
+        "{\"name\":\"font metrics and parent leading reach live paint\","
+        "\"html\":\"temp/render_output_parity/font_metric_live.html\","
+        "\"viewport\":{\"width\":200,\"height\":180},\"events\":["
+        "{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#leaf\"},\"width\":111.2305,\"height\":80,\"tolerance\":0.03},"
+        "{\"type\":\"assert_pixel\",\"x\":105,\"y\":75,\"min_b\":240,\"max_r\":20,\"max_g\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":115,\"y\":100,\"min_r\":240,\"min_g\":240,\"min_b\":240},"
+        "{\"type\":\"click\",\"target\":{\"selector\":\"#update\"}},"
+        "{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#leaf\"},\"width\":120.0195,\"height\":120,\"tolerance\":0.03},"
+        "{\"type\":\"assert_pixel\",\"x\":115,\"y\":115,\"min_b\":240,\"max_r\":20,\"max_g\":20},"
+        "{\"type\":\"assert_pixel\",\"x\":125,\"y\":125,\"min_r\":240,\"min_g\":240,\"min_b\":240}]}";
+    ASSERT_TRUE(run_html_fixture_view("temp/render_output_parity/font_metric_live.html",
+        "temp/render_output_parity/font_metric_live.json", html, events));
+}
+
 TEST(RenderOutputParity, LiveInheritedComputedValuesReachPaintAfterAncestorSelectorMutation) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

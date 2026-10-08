@@ -90,12 +90,13 @@ struct FontHandle {
     size_t      memory_buffer_size;
     char*       file_data_path;         // key into file_data_cache for ref-count management (malloc'd)
 
-    // per-face glyph advance cache: codepoint → advance_x
+    // per-face glyph advance cache: codepoint → horizontal and vertical advances
     struct hashmap* advance_cache;
 
     // Font5 §4.2: direct-mapped ASCII advance table (codepoints 32–126)
     // Eliminates hashmap overhead for ~95% of glyph lookups in English text.
     float ascii_advance[95];            // advance_x for codepoints 32–126
+    float ascii_advance_y[95];          // retain upright advances through the ASCII fast path
     uint32_t ascii_glyph_id[95];        // glyph IDs for codepoints 32–126
     bool  ascii_advance_ready;          // lazy init flag
 
@@ -384,6 +385,7 @@ typedef struct GlyphAdvanceEntry {
     uint32_t codepoint;
     uint32_t glyph_id;
     float    advance_x;
+    float    advance_y;
 } GlyphAdvanceEntry;
 
 // ============================================================================

@@ -46,6 +46,56 @@ void font_prop_release_handle(FontProp* fprop) {
     fprop->font_handle = NULL;
 }
 
+bool css_font_metric_unit_px(FontHandle* handle, const FontStyleDesc* style,
+    CssUnit unit, float computed_size, bool upright, float* pixels) {
+    if (!pixels || computed_size < 0.0f) return false;
+    if (unit == CSS_UNIT_EX) {
+        *pixels = computed_size * font_get_x_height_ratio(handle);
+        return true;
+    }
+    if (unit == CSS_UNIT_CAP) {
+        const FontMetrics* metrics = handle ? font_get_metrics(handle) : nullptr;
+        float size = font_handle_get_size_px(handle);
+        // FontMetrics are already CSS pixels; only glyph advances require physical scaling.
+        float cap = metrics ? (metrics->cap_height > 0.0f ? metrics->cap_height : metrics->ascender) : 0.0f;
+        *pixels = size > 0.0f ? cap * computed_size / size : computed_size;
+        return true;
+    }
+    if (unit != CSS_UNIT_CH && unit != CSS_UNIT_IC) return false;
+    float fallback = unit == CSS_UNIT_CH && !upright ? 0.5f : 1.0f;
+    *pixels = computed_size * fallback;
+    if (handle && style) {
+        LoadedGlyph* glyph = font_load_glyph(handle, style,
+            unit == CSS_UNIT_CH ? (uint32_t)'0' : 0x6C34, false);
+        float physical_size = font_handle_get_physical_size_px(handle);
+        float advance = glyph ? (upright ? fabsf(glyph->advance_y) : glyph->advance_x) : 0.0f;
+        if (advance > 0.0f && physical_size > 0.0f)
+            *pixels = advance * computed_size / physical_size;
+    }
+    return true;
+}
+
+bool css_font_line_height_px(FontContext* fonts, const FontStyleDesc* style,
+    const CssValue* line_height, float* pixels) {
+    if (!style || !line_height || !pixels) return false;
+    if (line_height->type == CSS_VALUE_TYPE_NUMBER) {
+        *pixels = line_height->data.number.value * style->size_px;
+        return true;
+    }
+    if (line_height->type == CSS_VALUE_TYPE_LENGTH && line_height->data.length.unit == CSS_UNIT_PX) {
+        *pixels = line_height->data.length.value;
+        return true;
+    }
+    if (line_height->type != CSS_VALUE_TYPE_KEYWORD || line_height->data.keyword != CSS_VALUE_NORMAL) return false;
+    if (style->size_px == 0.0f) { *pixels = 0.0f; return true; }
+    FontHandle* handle = fonts ? font_resolve(fonts, style) : nullptr;
+    if (!handle) return false;
+    // normal leading uses the computed font; zoom and glyph fallback cannot alter this unit basis.
+    *pixels = font_calc_normal_line_height(handle);
+    font_handle_release(handle);
+    return true;
+}
+
 static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
                                      const char* family,
                                      FontWeight weight, FontSlant slant,
