@@ -5981,7 +5981,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                          block->width, block->height);
             }
         }
-        else if (elmt_name == MARKUP_NAME_SVG) {
+        else if (layout_is_svg_viewport(elmt_name)) {
             layout_inline_svg(lycon, block);
         }
         else if (elmt_name == MARKUP_NAME_HR) {
@@ -7822,7 +7822,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
         layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
     }
-    if (elmt_name == MARKUP_NAME_SVG &&
+    if (layout_is_svg_viewport(elmt_name) &&
         !(block->blk && block->block()->content_visibility_hidden)) {
         SvgAnimationSourceScope animation_sources(block->as_element()->doc);
         layout_apply_svg_animated_dimensions(lycon, block);
@@ -9281,7 +9281,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         block->content_height = details_default_summary_line;
     }
     recompute_inline_descendant_bounds(static_cast<View*>(block), font_box_handle(&lycon->font));
-    if (block->tag() == MARKUP_NAME_SVG && block->blk) {
+    if (layout_is_svg_viewport(block->tag()) && block->blk) {
         bool is_border_box = layout_uses_border_box(block);
         if (block->block()->given_width >= 0.0f) {
             block->content_width = layout_content_size_if_border_box(

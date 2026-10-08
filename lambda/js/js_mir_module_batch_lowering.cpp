@@ -3,6 +3,7 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/time_util.h"
 #include "../input/input-script-cache.h"
+#include "../core/mark_reader.hpp"
 
 #include <limits.h>
 #include "../../lib/file.h"
@@ -914,7 +915,7 @@ static bool jm_resolve_http_module_path(const char* base_file,
 }
 
 // Resolve a module specifier relative to the importing file's directory
-void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
+static void jm_resolve_module_path_unmapped(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size) {
     if (jm_resolve_http_module_path(base_file, specifier, spec_len, out, out_size)) {
         return;
@@ -991,8 +992,68 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
     }
 }
 
+static bool jm_import_map_address(const char* base,const char* address,char* out,int capacity) {
+    if (!base || !address || (!strchr(address,':') && address[0]!='.' && address[0]!='/')) return false;
+    Url* base_url=url_parse_path_or_url(base,nullptr);
+    Url* target=base_url?url_parse_with_base(address,base_url):nullptr;
+    const char* path=target?(url_get_scheme(target)==URL_SCHEME_FILE?url_get_pathname(target):url_get_href(target)):nullptr;
+    bool valid=path && strlen(path)<(size_t)capacity;
+    if(valid) str_copy(out,capacity,path,strlen(path));
+    if(target) url_destroy(target);if(base_url) url_destroy(base_url);return valid;
+}
+static bool jm_import_map_match(Runtime* runtime,MapReader mappings,const char* requested,char* out,int capacity,bool* blocked) {
+    bool found=false,prefix=false;ItemReader address;size_t size=0;
+    auto entries=mappings.entries();const char* key;ItemReader value;
+    while(entries.next(&key,&value)) {
+        char normalized[2048];const char* match=jm_import_map_address(runtime->js_document_base_url,key,normalized,sizeof(normalized))?normalized:key;
+        size_t length=strlen(match);
+        if(!length || length<size || (strcmp(match,requested)!=0 && (match[length-1]!='/'||strncmp(match,requested,length)!=0))) continue;
+        found=true;prefix=match[length-1]=='/';address=value;size=length;
+    }
+    if(!found) return false;
+    *blocked=true;
+    if(!address.isString()) return true;
+    const char* target=address.cstring();size_t length=strlen(target);
+    if(prefix && (!length||target[length-1]!='/')) return true;
+    char resolved[2048];if(!jm_import_map_address(runtime->js_document_base_url,target,resolved,sizeof(resolved))) return true;
+    if(strlen(resolved)+strlen(requested+size)>=(size_t)capacity) return true;
+    str_copy(out,capacity,resolved,strlen(resolved));
+    if(prefix) str_cat(out,strlen(out),capacity,requested+size,strlen(requested+size));
+    *blocked=false;return true;
+}
+static bool jm_resolve_import_map(Runtime* runtime,const char* importer,const char* specifier,int length,char* out,int capacity) {
+    if(!runtime || !runtime->js_document_base_url || get_type_id(runtime->js_import_maps)!=LMD_TYPE_ARRAY || length<=0 || length>=2048) return false;
+    char request[2048];str_copy(request,sizeof(request),specifier,length);
+    char normalized[2048];if(jm_import_map_address(importer?importer:runtime->js_document_base_url,request,normalized,sizeof(normalized))) str_copy(request,sizeof(request),normalized,strlen(normalized));
+    ArrayReader maps=ArrayReader(runtime->js_import_maps.array);
+    for(int64_t i=0;i<maps.length();i++) {
+        MapReader map=maps.get(i).asMap();MapReader scopes=map.get("scopes").asMap();
+        // a missing entry in the most specific scope falls through its enclosing scopes.
+        size_t limit=(size_t)-1;bool blocked=false;
+        for(;;) {
+            MapReader scoped;size_t longest=0;auto entries=scopes.entries();const char* key;ItemReader value;
+            while(entries.next(&key,&value)) {
+                char scope[2048];if(!jm_import_map_address(runtime->js_document_base_url,key,scope,sizeof(scope))) continue;
+                size_t n=strlen(scope);if(importer && n>longest && n<limit && strncmp(importer,scope,n)==0 && value.isMap()) { scoped=value.asMap();longest=n; }
+            }
+            if(!longest) break;
+            if(jm_import_map_match(runtime,scoped,request,out,capacity,&blocked)) { if(blocked) out[0]='\0';return true; }
+            limit=longest;
+        }
+        if(jm_import_map_match(runtime,map.get("imports").asMap(),request,out,capacity,&blocked)) {
+            if(blocked) out[0]='\0';return true;
+        }
+    }
+    return false;
+}
+void jm_resolve_module_path(const char* base_file,const char* specifier,int length,char* out,int capacity) {
+    if(jm_resolve_import_map(js_current_runtime(),base_file,specifier,length,out,capacity)) return;
+    jm_resolve_module_path_unmapped(base_file,specifier,length,out,capacity);
+}
+
 bool jm_resolve_document_module_path(Runtime* runtime, const char* script_reference,
         const char* specifier, int spec_len, char* out, int out_size) {
+    if (jm_resolve_import_map(runtime,script_reference,specifier,spec_len,out,out_size)) return true;
     if (!runtime || !runtime->js_document_base_url || !runtime->js_document_base_url[0] ||
             (script_reference && script_reference[0] != '<')) {
         return false;

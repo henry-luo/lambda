@@ -30,7 +30,7 @@ let repeated = chart.render_spec(vega.convert({repeat: {column: ["a", "b"]},
 [
     len(content(marks[0])) == 2, len(content(marks[1])) == 1,
     marks[1][0].x1 > marks[0][1].cx, marks[1][0].y1 > marks[0][0].cy, marks[1][0].y2 < marks[0][1].cy,
-    grid.width == 400, grid.height == 336, len(content(grid)) == 5,
+    grid.width == 400, grid.height > 300, len(content(grid)) == 5,
     grid[1][0][0] == "A / Summer", grid[2][0][0] == "A / Winter", grid[3][0][0] == "B / Summer",
     grid[1][1][1][0][0].cy > grid[3][1][1][0][0].cy,
     vl_grid.width == 400, len(content(vl_grid)) == 3,

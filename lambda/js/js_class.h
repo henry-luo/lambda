@@ -129,6 +129,7 @@ enum JsClass : uint8_t {
     JS_CLASS_CSS_NAMESPACE,
     JS_CLASS_CSSOM,
     JS_CLASS_WEB_API_RESOURCE,
+    JS_CLASS_WEBGL_CONTEXT_EVENT,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -267,6 +268,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "PermissionStatus", 16)) return JS_CLASS_PERMISSION_STATUS;
             break;
         case 17:
+            if (!strncmp(nm, "WebGLContextEvent", 17)) return JS_CLASS_WEBGL_CONTEXT_EVENT;
             if (!strncmp(nm, "GeneratorFunction", 17)) return JS_CLASS_GENERATOR_FUNCTION;
             if (!strncmp(nm, "SharedArrayBuffer", 17)) return JS_CLASS_SHARED_ARRAY_BUFFER;
             break;
@@ -385,6 +387,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         // materialization, so their class-name mapping must be total (D6.2.2v2).
         case JS_CLASS_TRANSITION_EVENT: return "TransitionEvent";
         case JS_CLASS_ANIMATION_EVENT: return "AnimationEvent";
+        case JS_CLASS_WEBGL_CONTEXT_EVENT: return "WebGLContextEvent";
         case JS_CLASS_PROCESS_ENV: return "ProcessEnv";
         case JS_CLASS_CSS_NAMESPACE: return "CSS";
         case JS_CLASS_CSSOM: return "CSSOM";
@@ -428,6 +431,7 @@ static inline bool js_class_is_event_like(JsClass cls) {
         // inherit from UIEvent in the DOM interface hierarchy.
         case JS_CLASS_TRANSITION_EVENT:
         case JS_CLASS_ANIMATION_EVENT:
+        case JS_CLASS_WEBGL_CONTEXT_EVENT:
             return true;
         default:
             return false;

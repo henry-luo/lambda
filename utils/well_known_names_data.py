@@ -114,7 +114,7 @@ CSS_PROPERTY_ENTRIES = [
 ]
 
 POOLS = {
-    0: ("markup", MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + CSS_PROPERTY_ENTRIES),
+    0: ("markup", MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + CSS_PROPERTY_ENTRIES + [("SCENE3D", "scene3d")]),
     1: ("lambda", [
         ("TYPE", "type"), ("STRING", "string"), ("NUMBER", "number"),
         ("BOOLEAN", "boolean"), ("LENGTH", "length"),

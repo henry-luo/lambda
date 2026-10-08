@@ -1,0 +1,15 @@
+<!doctype html>
+<title>Paged window regression</title>
+<style>
+@page { size: 200px 120px; margin: 10px; }
+html, body { margin: 0; padding: 0; }
+section { height: 100px; }
+section + section { break-before: page; }
+#first { background: #ff0000; }
+#second { background: #00ff00; }
+#third { background: #0000ff; }
+@media screen { section { background: #ffff00 !important; } }
+</style>
+<section id="first"></section>
+<section id="second"></section>
+<section id="third"></section>

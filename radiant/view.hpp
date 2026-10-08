@@ -686,6 +686,7 @@ typedef struct ImageSurface {
     // surfaces built on the stack or inside another object, which are never
     // referenced by a retained display list.
     lam::Handle<struct ImageSurface> self;
+    uint32_t snapshot_refs; // immutable publications: owner plus retained display-list leases
     lam::Own<struct ImageSurface> retire_next;  // link in the retire queue once destroyed
 } ImageSurface;
 
@@ -697,6 +698,9 @@ extern ImageSurface* image_surface_alloc(void);
 // valid until the scope ends: destroyed surfaces are released only at a quiet
 // point, when no read scope is open anywhere.
 extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
+// immutable snapshot leases retain storage across replacement/removal (D4.5.1v4).
+extern ImageSurface* image_surface_snapshot_retain(ImageSurface* surface);
+extern void image_surface_snapshot_release(ImageSurface* surface);
 // Invalidates every handle to `surface` and returns its slot at once (only for
 // surfaces no reader can hold; image_surface_destroy defers instead).
 extern void image_surface_release_slot(ImageSurface* surface);
@@ -4141,6 +4145,10 @@ typedef struct UiContext {
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
     lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
+    // the document registry owns the paged edition; launch options outlive the window loop.
+    lam::Up<ViewTree> paged_view;
+    lam::Up<const struct RenderPagedOptions> paged_options;
+    float paged_scroll_x, paged_scroll_y;
     // One Lambda runtime for the window's stateless document loaders (LaTeX,
     // PDF, TikZ, graph, math). Created by the first such load; released after
     // the documents built on it.

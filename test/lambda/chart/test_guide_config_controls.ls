@@ -1,4 +1,5 @@
 import chart: lambda.chart.chart
+import svg: lambda.chart.svg
 
 let image = chart.render(<chart width: 400, height: 300, padding: 0, title: "Styled",
     <config theme: {background: "#123456", axis_label_color: "purple", mark_color: "orange"},
@@ -40,7 +41,7 @@ let nested = chart.render(<chart width: 200, height: 150, padding: 0,
     plot[0][0].fill == "orange", plot[0][0].opacity == 0,
     len(content(plot)) == 2, len(content(x_axis)) == 3,
     name(x_axis[0]) == 'g', len(content(x_axis[0])) == 1,
-    x_axis[0][0].fill == "purple", x_axis[0][0].transform == "rotate(45)",
+    x_axis[0][0].fill == "purple", x_axis[0][0].transform == svg.rotate(45, x_axis[0][0].x, x_axis[0][0].y),
     len(content(raw[1])) == 1, raw[1][0][0].cx == 12, raw[1][0][0].cy == 34,
     raw[1][0][0].fill == "red", len(content(raw)) == 2,
     constant[1][0][0].cx == 12, constant[1][0][0].cy == 34,

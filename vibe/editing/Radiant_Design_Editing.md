@@ -651,7 +651,6 @@ Add paired UI tests that perform the same operation on three fixtures:
 
 - `test/ui/editing/input.html`
 - `test/ui/editing/textarea.html`
-- `test/ui/editing/contenteditable.html`
 - `test/ui/editing/mixed.html` — contenteditable host with an embedded
   `<input>`/`<textarea>`, for the cross-surface boundary cases (§6.2)
 

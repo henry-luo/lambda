@@ -119,6 +119,7 @@ static const JsClassMeta js_class_meta_table[JS_CLASS__COUNT] = {
     { JS_CLASS_WEB_API_RESOURCE, JS_CLASS_FAMILY_HOST,
               JS_CLASS_FLAG_EXOTIC_PROPERTIES, JS_PROTO_POLICY_HOST,
               &js_host_property_ops },
+    JS_META(JS_CLASS_WEBGL_CONTEXT_EVENT),
 };
 #undef JS_META
 #undef JS_META_F

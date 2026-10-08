@@ -30,6 +30,7 @@ void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
     // a registered source is resolved at replay; an unregistered one stays frame-local
     item->blit_surface_scaled.src_resource = src_surface ? src_surface->self : lam::Handle<ImageSurface>{};
     item->blit_surface_scaled.local_source = lam::up(src_surface && src_surface->self.is_null() ? src_surface : nullptr);
+    item->blit_surface_scaled.snapshot_lease = lam::up(image_surface_snapshot_retain(src_surface));
     item->blit_surface_scaled.src_generation = src_generation;
     item->blit_surface_scaled.dst_x = dst_x;
     item->blit_surface_scaled.dst_y = dst_y;

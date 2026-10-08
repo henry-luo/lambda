@@ -1082,7 +1082,11 @@ SvgViewBox svg_parse_viewbox(const char* viewbox_attr) {
     if (!viewbox_attr || !*viewbox_attr) return vb;
 
     float values[4];
-    if (str_parse_float_list(viewbox_attr, ", \t\n\r\f\v", values, 4, nullptr) == 4) {
+    const char* end = nullptr;
+    // reject malformed and negative extents; zero remains a valid disabled viewport.
+    if (str_parse_float_list(viewbox_attr, ", \t\n\r\f\v", values, 4, &end) == 4 &&
+        end && !*str_skip_ascii_space(end) && isfinite(values[0]) && isfinite(values[1]) &&
+        isfinite(values[2]) && isfinite(values[3]) && values[2] >= 0 && values[3] >= 0) {
         vb.min_x = values[0];
         vb.min_y = values[1];
         vb.width = values[2];
@@ -1692,6 +1696,7 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     const char* height_attr = get_svg_attr(svg_element, "height");
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
     if (!viewbox_attr) viewbox_attr = get_svg_attr(svg_element, "viewbox");
+    float numeric_width=NAN,numeric_height=NAN;
 
     SvgViewBox vb = svg_parse_viewbox(viewbox_attr);
 
@@ -1699,7 +1704,11 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     // but not an explicit intrinsic width/height attribute. Percentage
     // attributes are presentation hints resolved against the containing block,
     // so they must not become natural dimensions here.
-    if (width_attr && *width_attr && !strchr(width_attr, '%')) {
+    if (!width_attr && read_svg_number_attr(svg_element,"width",&numeric_width) && numeric_width >= 0) {
+        // Lambda element presentation hints can carry numbers rather than HTML strings.
+        size.width = numeric_width;
+        size.has_intrinsic_width = true;
+    } else if (width_attr && *width_attr && !strchr(width_attr, '%')) {
         size.width = parse_svg_length(width_attr, 300);
         size.has_intrinsic_width = true;
     } else if (vb.has_viewbox && vb.width > 0) {
@@ -1707,7 +1716,10 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     }
 
     // determine height
-    if (height_attr && *height_attr && !strchr(height_attr, '%')) {
+    if (!height_attr && read_svg_number_attr(svg_element,"height",&numeric_height) && numeric_height >= 0) {
+        size.height = numeric_height;
+        size.has_intrinsic_height = true;
+    } else if (height_attr && *height_attr && !strchr(height_attr, '%')) {
         size.height = parse_svg_length(height_attr, 150);
         size.has_intrinsic_height = true;
     } else if (vb.has_viewbox && vb.height > 0) {
@@ -3863,7 +3875,7 @@ static void svg_font_name_from_path(char* out, size_t out_cap, const char* path)
 // family of SVG text that specifies none
 static const char* const SVG_DEFAULT_FONT_FAMILY = "Arial";
 
-static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
+static char* resolve_svg_font_path(const char* font_family, char* out_font_name, size_t name_capacity,
                                     FontContext* font_ctx = nullptr, int weight = 400,
                                     FontSlant slant = FONT_SLANT_NORMAL,
                                     bool allow_nonunicode_fontface = false) {
@@ -3894,61 +3906,33 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         candidates[candidate_count++] = candidate;
     }
 
-    // helper: try a single family with full resolution chain
-    auto try_family = [&](const char* fam) -> char* {
-        // first, check the @font-face registry — embedded fonts (e.g. from
-        // PDFs with FontFile2/FontFile3 streams) live here and would otherwise
-        // be invisible to platform/database lookups.
-        if (font_ctx) {
-            char* p = resolve_font_via_fontface(font_ctx, fam, out_font_name, weight, slant,
-                                                allow_nonunicode_fontface);
-            if (p) return p;
+    // caller-owned names prevent concurrent headless measurements from sharing scratch bytes.
+    auto named_path = [&](char* path, const char* name) -> char* {
+        if (path && out_font_name && name_capacity) {
+            if (name) str_copy(out_font_name, name_capacity, name, strlen(name));
+            else svg_font_name_from_path(out_font_name, name_capacity, path);
         }
-        // weight-aware / slant-aware best match. Use it whenever bold or
-        // italic/oblique is requested — the platform lookup ignores style.
+        return path;
+    };
+    auto try_family = [&](const char* family) -> char* {
+        if (font_ctx) {
+            const char* name = nullptr;
+            char* path = resolve_font_via_fontface(font_ctx, family, &name, weight, slant,
+                allow_nonunicode_fontface);
+            if (path) return named_path(path, name);
+        }
         if (font_ctx && (weight >= 600 || slant != FONT_SLANT_NORMAL)) {
-            FontMatchResult match = font_find_best_match(font_ctx, fam, weight, slant);
-            if (match.found && match.file_path && !strstr(match.file_path, ".ttc")) {
-                char* path = mem_strdup(match.file_path, MEM_CAT_RENDER);
-                if (out_font_name) {
-                    static char bold_font_name[256];
-                    svg_font_name_from_path(bold_font_name, sizeof(bold_font_name),
-                                            match.file_path);
-                    *out_font_name = bold_font_name;
-                }
-                return path;
-            }
+            FontMatchResult match = font_find_best_match(font_ctx, family, weight, slant);
+            if (match.found && match.file_path && !strstr(match.file_path, ".ttc"))
+                return named_path(mem_strdup(match.file_path, MEM_CAT_RENDER), nullptr);
         }
-        // platform lookup
-        lam::Temp<char> p(font_platform_find_fallback(fam, NULL));
-        if (p && strstr(p.get(), ".ttc")) p.reset();
-        if (p) {
-            if (out_font_name) {
-                // derive font_name from the file basename (sans extension); the
-                // candidate `fam` may live in a stack buffer that goes out of
-                // scope after this function returns.
-                static char platform_font_name[256];
-                svg_font_name_from_path(platform_font_name, sizeof(platform_font_name), p.get());
-                *out_font_name = platform_font_name;
-            }
-            return p.release();
-        }
-        // database lookup
+        lam::Temp<char> path(font_platform_find_fallback(family, NULL));
+        if (path && strstr(path.get(), ".ttc")) path.reset();
+        if (path) return named_path(path.release(), nullptr);
         if (font_ctx) {
-            const char* dbname = nullptr;
-            p.reset(resolve_font_via_database(font_ctx, fam, &dbname, weight, slant));
-            if (p) {
-                if (out_font_name) {
-                    static char db_font_name[256];
-                    if (dbname) {
-                        str_copy(db_font_name, sizeof(db_font_name), dbname, strlen(dbname));
-                    } else {
-                        svg_font_name_from_path(db_font_name, sizeof(db_font_name), p.get());
-                    }
-                    *out_font_name = db_font_name;
-                }
-                return p.release();
-            }
+            const char* name = nullptr;
+            path.reset(resolve_font_via_database(font_ctx, family, &name, weight, slant));
+            if (path) return named_path(path.release(), name);
         }
         return nullptr;
     };
@@ -3973,7 +3957,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         }
     }
 
-    if (out_font_name) *out_font_name = nullptr;
+    if (out_font_name && name_capacity) out_font_name[0] = '\0';
     return nullptr;
 }
 
@@ -4748,11 +4732,9 @@ static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool a
     // Name the default family itself: the ThorVG face key found for it (e.g.
     // "Arial Bold") is a file name that font_resolve does not know as a family.
     const char* family = style->font_family[0] ? style->font_family : SVG_DEFAULT_FONT_FAMILY;
-    const char* font_name = nullptr;
-    font->path = lam::own(resolve_svg_font_path(family, &font_name, ctx->font_ctx, style->font_weight,
-                                       style->font_slant, allow_embedded_font));
+    font->path = lam::own(resolve_svg_font_path(family, font->name, sizeof(font->name),
+        ctx->font_ctx, style->font_weight, style->font_slant, allow_embedded_font));
     if (!font->path && (!ctx->font_ctx || allow_embedded_font)) return nullptr;
-    if (font_name) str_copy(font->name, sizeof(font->name), font_name, strlen(font_name));
 
     // Radiant resolves the full authored family list, including collection and fallback faces.
     font->family = ctx->font_ctx && !allow_embedded_font ? family
@@ -5568,48 +5550,55 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
     scratch_restore(ctx->resource_scratch, mark);
 }
 
-RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* lengths,
-    FontContext* font_context) {
-    if (!target || !target->doc || !lengths) return nullptr;
-    bool owns_font_context = !font_context;
-    DomElement* text = target;
-    for (DomNode* node = target; node && node->is_element(); node = node->parent) {
-        DomElement* element = node->as_element();
-        if (element->tag_name && strcmp(element->tag_name, "text") == 0) { text = element; break; }
-    }
-    DomElement* svg = text;
-    for (DomNode* node = text->parent; node && node->is_element(); node = node->parent) {
-        if (node->as_element()->tag_name && strcmp(node->as_element()->tag_name, "svg") == 0) svg = node->as_element();
-    }
-    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.text_geometry");
-    ScratchArena scratch = {};
-    mem_scratch_init(nullptr, &scratch, arena, MEM_ROLE_RENDER, "render.svg.text_geometry.scratch");
-    SvgStyleContext style_context = {};
-    Element* svg_source = dom_element_to_element(svg);
-    if (!svg_style_init(&style_context, svg_source, lengths->viewport_width,
-        lengths->viewport_height, target->doc)) {
-        scratch_release(&scratch); mem_arena_destroy(arena);
-        if (owns_font_context) font_context_destroy(font_context);
-        return nullptr;
-    }
-    if (owns_font_context) {
-        lam::Temp<char> source_path(radiant_document_resource_base(target->doc, MEM_CAT_FONT));
-        font_context = svg_style_font_context(&style_context, source_path.get(), 1.0f, false, nullptr);
-    }
-    if (!font_context) {
-        svg_style_destroy(&style_context); scratch_release(&scratch); mem_arena_destroy(arena);
-        return nullptr;
-    }
-    SvgInlineRenderContext ctx = {};
-    ctx.svg_root = lam::up(svg_source); ctx.id_scope = lam::up(render_svg_reference_scope(svg));
-    lam::Temp<char> reference_base(radiant_document_resource_base(target->doc, MEM_CAT_RENDER));
-    ctx.source_path = lam::up(reference_base.get()); ctx.resource_scratch = lam::up(&scratch); ctx.font_ctx = lam::up(font_context);
-    ctx.style_context = lam::up(&style_context); ctx.transform = rdt_matrix_identity();
-    ctx.current_viewport_w = lengths->viewport_width; ctx.current_viewport_h = lengths->viewport_height;
-    ctx.inherited_font_size = 16.0f; ctx.inherited_font_weight = 400;
-    ctx.fill_color = parse_svg_color("black"); ctx.current_color = ctx.fill_color;
-    ctx.stroke_none = true;
-    ctx.fill_opacity = ctx.stroke_opacity = ctx.opacity = 1.0f;
+struct SvgTextGeometryScope {
+    Arena* arena;
+    ScratchArena scratch;
+    SvgStyleContext style;
+    FontContext* fonts;
+    bool owns_fonts;
+    char* source_path;
+    SvgInlineRenderContext context;
+};
+
+static void svg_text_geometry_scope_close(SvgTextGeometryScope* scope) {
+    svg_style_destroy(&scope->style);
+    scratch_release(&scope->scratch);
+    if (scope->arena) mem_arena_destroy(scope->arena);
+    if (scope->owns_fonts && scope->fonts) font_context_destroy(scope->fonts);
+    if (scope->source_path) mem_free(scope->source_path);
+}
+
+static bool svg_text_geometry_scope_open(SvgTextGeometryScope* scope, DomElement* svg,
+    const SvgLengthContext* lengths, FontContext* fonts) {
+    *scope = {};
+    scope->fonts = fonts;
+    scope->owns_fonts = !fonts;
+    scope->arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.text_geometry");
+    mem_scratch_init(nullptr, &scope->scratch, scope->arena, MEM_ROLE_RENDER, "render.svg.text_geometry.scratch");
+    Element* source = dom_element_to_element(svg);
+    if (!svg_style_init(&scope->style, source, lengths->viewport_width,
+        lengths->viewport_height, svg->doc)) return false;
+    scope->source_path = radiant_document_resource_base(svg->doc, MEM_CAT_FONT);
+    if (scope->owns_fonts) scope->fonts = svg_style_font_context(&scope->style,
+        scope->source_path, 1.0f, false, nullptr);
+    if (!scope->fonts) return false;
+    SvgInlineRenderContext* ctx = &scope->context;
+    ctx->svg_root = lam::up(source); ctx->id_scope = lam::up(render_svg_reference_scope(svg));
+    ctx->source_path = lam::up(scope->source_path); ctx->resource_scratch = lam::up(&scope->scratch);
+    ctx->font_ctx = lam::up(scope->fonts); ctx->style_context = lam::up(&scope->style);
+    ctx->transform = rdt_matrix_identity();
+    ctx->current_viewport_w = lengths->viewport_width; ctx->current_viewport_h = lengths->viewport_height;
+    ctx->inherited_font_size = 16.0f; ctx->inherited_font_weight = 400;
+    ctx->fill_color = parse_svg_color("black"); ctx->current_color = ctx->fill_color;
+    ctx->stroke_none = true;
+    ctx->fill_opacity = ctx->stroke_opacity = ctx->opacity = 1.0f;
+    return true;
+}
+
+static RdtPath* svg_text_geometry_collect(SvgTextGeometryScope* scope, DomElement* target,
+    DomElement* text, SvgTextMeasurement* measurement) {
+    ScratchMark mark = scratch_mark(&scope->scratch);
+    SvgInlineRenderContext ctx = scope->context;
     DomElement* ancestors[64]; int count = 0;
     for (DomNode* node = text->parent; node && count < 64; node = node->parent) {
         if (node->is_element()) ancestors[count++] = node->as_element();
@@ -5619,7 +5608,11 @@ RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* leng
     Element* text_source = dom_element_to_element(text);
     Element* target_source = dom_element_to_element(target);
     RdtPath* path = rdt_path_new();
-    if (path && svg_text_layout_collect(&ctx, text_source, &layout)) {
+    RdtPath* ink = measurement ? rdt_path_new() : nullptr;
+    if (measurement) *measurement = {};
+    bool collected = path && svg_text_layout_collect(&ctx, text_source, &layout);
+    if (measurement) measurement->valid = path && (collected || layout.run_count == 0);
+    if (collected) {
         RdtMatrix identity = rdt_matrix_identity();
         svg_text_measure(&layout, &identity, layout.allow_embedded_font);
         svg_text_place(&layout);
@@ -5627,16 +5620,71 @@ RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* leng
             SvgTextRun* run = &layout.runs[i];
             int ancestor = run->style;
             while (ancestor >= 0 && layout.styles[ancestor].element != target_source) ancestor = layout.styles[ancestor].parent;
-            if (ancestor < 0 || !run->font) continue;
+            if (ancestor < 0) continue;
+            if (!run->font) { if (measurement) measurement->valid = false; continue; }
             svg_text_append_cell(&layout, run, path);
+            if (measurement) {
+                measurement->advance += run->advance;
+                if (!str_all(layout.chars->str + run->start, run->len, str_is_space)) {
+                    RdtPath* glyphs = svg_text_run_path(&layout, run);
+                    if (glyphs) {
+                        RdtMatrix matrix = svg_text_run_transform(run, &identity);
+                        render_path_append_transformed(ink, glyphs, &matrix);
+                        rdt_path_free(glyphs);
+                    }
+                }
+            }
         }
         svg_text_release_fonts(&layout);
     }
+    if (measurement) {
+        measurement->has_logical = rdt_path_get_bounds(path, &measurement->logical.left,
+            &measurement->logical.top, &measurement->logical.right, &measurement->logical.bottom);
+        measurement->has_ink = rdt_path_get_bounds(ink, &measurement->ink.left,
+            &measurement->ink.top, &measurement->ink.right, &measurement->ink.bottom);
+    }
+    if (ink) rdt_path_free(ink);
     if (layout.chars) strbuf_free(layout.chars);
-    svg_style_destroy(&style_context);
-    scratch_release(&scratch); mem_arena_destroy(arena);
-    if (owns_font_context) font_context_destroy(font_context);
+    scratch_restore(&scope->scratch, mark);
     return path;
+}
+
+RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* lengths,
+    FontContext* font_context) {
+    if (!target || !target->doc || !lengths) return nullptr;
+    DomElement* text = target;
+    for (DomNode* node = target; node && node->is_element(); node = node->parent) {
+        DomElement* element = node->as_element();
+        if (element->tag_name && strcmp(element->tag_name, "text") == 0) { text = element; break; }
+    }
+    DomElement* svg = text;
+    for (DomNode* node = text->parent; node && node->is_element(); node = node->parent) {
+        if (node->as_element()->tag_name && strcmp(node->as_element()->tag_name, "svg") == 0) svg = node->as_element();
+    }
+    SvgTextGeometryScope scope = {};
+    bool ready = svg_text_geometry_scope_open(&scope, svg, lengths, font_context);
+    RdtPath* path = ready ? svg_text_geometry_collect(&scope, target, text, nullptr) : nullptr;
+    svg_text_geometry_scope_close(&scope);
+    return path;
+}
+
+bool svg_text_measure_batch(DomElement* svg, const SvgLengthContext* lengths,
+    SvgTextMeasurement* measurements, size_t count) {
+    if (!svg || !svg->doc || !lengths || (!measurements && count)) return false;
+    if (!count) return true;
+    SvgTextGeometryScope scope = {};
+    bool ready = svg_text_geometry_scope_open(&scope, svg, lengths, nullptr);
+    size_t index = 0;
+    // only direct text children are requests; style/defs remain available to font resolution.
+    for (DomElement* text = svg->first_child_element(); ready && text; text = text->next_sibling_element()) {
+        if (!text->tag_name || strcmp(text->tag_name, "text") != 0) continue;
+        if (index >= count) { ready = false; break; }
+        RdtPath* path = svg_text_geometry_collect(&scope, text, text, &measurements[index++]);
+        ready = path && measurements[index - 1].valid;
+        if (path) rdt_path_free(path);
+    }
+    svg_text_geometry_scope_close(&scope);
+    return ready && index == count;
 }
 
 // ============================================================================

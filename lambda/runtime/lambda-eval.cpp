@@ -13566,6 +13566,19 @@ static bool map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_type, changed_entry, new_value, fixed_slot_count);
 }
 
+static bool container_retype_field(Container* owner, TypeId kind, void** type_slot,
+        void** data_slot, int* cap_slot, ShapeEntry* field, Item value) {
+    TypeMap* source = (TypeMap*)*type_slot;
+    TypeId tid = get_type_id(value);
+    Input* tree = runtime_shape_tree();
+    const TypeMapRetypePlan* plan = NULL;
+    TypeMap* target = tree ? type_tree_retype_field(tree, source, field, tid, &plan) : NULL;
+    if (target) return container_move_to_type(type_slot, data_slot, cap_slot,
+        owner, source, target, field, value, 0, NULL, plan);
+    return map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
+        kind, owner, field, type_info[tid].type, value);
+}
+
 // D3.4.3/D3.4.5: immutable transitions for packed plain maps, without JS policy hooks.
 bool map_shape_set(Map* map, String* key, Item value) {
     TypeMap* type = (TypeMap*)map->type;
@@ -13575,13 +13588,8 @@ bool map_shape_set(Map* map, String* key, Item value) {
     TypeId tid = get_type_id(value);
     if (field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
-    Input* tree = runtime_shape_tree();
-    const TypeMapRetypePlan* plan = NULL;
-    TypeMap* target = tree ? type_tree_retype_field(tree, type, field, tid, &plan) : NULL;
-    if (target) return container_move_to_type(&map->type, &map->data, &map->data_cap,
-        map, type, target, field, value, 0, NULL, plan);
-    return map_rebuild_for_type_change(&map->type, &map->data, &map->data_cap,
-        LMD_TYPE_MAP, map, field, type_info[tid].type, value);
+    return container_retype_field(map, LMD_TYPE_MAP, &map->type, &map->data,
+        &map->data_cap, field, value);
 }
 
 bool map_shape_delete(Map* map, String* key) {
@@ -14654,6 +14662,11 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 log_error("fn_map_set: attempted store to virtual shape field");
                 return ItemError;
             }
+            // arena-owned elements cannot trace replacement GC values;
+            // attribute overrides need the same roots as initial stores.
+            if (map_type_id == LMD_TYPE_ELEMENT && context &&
+                    context->ui_mode && context->arena &&
+                    !ui_prepare_element_field(&value)) return ItemError;
             if (map_type_id == LMD_TYPE_MAP &&
                     map_ctor_offset_is_reserved(map_item.map, entry->byte_offset)) {
                 // An RHS, parameter initializer or inherited setter can publish
@@ -14689,7 +14702,18 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 return ItemNull;
             }
             TypeId field_type = entry->type->type_id;
-            entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
+            bool plain_shape = !map_type->js_meta && map_type->type_id == map_type_id &&
+                !map_type->is_shared_constructor_shape && !map_type->slot_entries &&
+                map_type->slot_count == 0 && !map_item.container->has_ctor_reserved &&
+                (map_type_id != LMD_TYPE_MAP || map_item.map->map_kind == MAP_KIND_PLAIN);
+            // D3.4.3v5/D3.4.5: Lambda shared shapes use the context's tree,
+            // never the JS constructor path, which requires an active JS realm.
+            if (plain_shape && field_type != LMD_TYPE_ANY &&
+                    map_shared_ctor_shape_should_detach_for_type(map_type, field_type, value_type)) {
+                return container_retype_field(map_item.container, map_type_id, type_slot,
+                    data_slot, cap_slot, entry, value) ? ItemNull : ItemError;
+            }
+            if (!plain_shape) entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, key_ref, entry, value_type);
             if (!entry || !entry->type) return ItemError;
             // A reserved constructor slot becomes observable only at the
@@ -14828,17 +14852,9 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             // another takes one shared target instead of minting a private
             // chain per write, and its later adds grow from that target in the
             // tree. JS shapes keep their own transitions and the rebuild.
-            if (!map_type->js_meta && map_type->type_id == map_type_id &&
-                    (map_type_id != LMD_TYPE_MAP || map_item.map->map_kind == MAP_KIND_PLAIN)) {
-                Input* tree = runtime_shape_tree();
-                const TypeMapRetypePlan* plan = NULL;
-                TypeMap* target = tree
-                    ? type_tree_retype_field(tree, map_type, entry, value_type, &plan) : NULL;
-                if (target) {
-                    container_move_to_type(type_slot, data_slot, cap_slot, cont, map_type,
-                        target, entry, value, 0, NULL, plan);
-                    return ItemNull;
-                }
+            if (plain_shape) {
+                return container_retype_field(cont, map_type_id, type_slot,
+                    data_slot, cap_slot, entry, value) ? ItemNull : ItemError;
             }
             map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
                                         map_type_id, cont, entry,

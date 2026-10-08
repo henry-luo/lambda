@@ -532,6 +532,8 @@ void ui_context_release_loader_runtime(UiContext* uicon) {
 // the window shell owns the top-level document and releases it here; other
 // holders of `document` only borrow it
 void UiContext::destroy_document() {
+    paged_view = nullptr;
+    paged_scroll_x = paged_scroll_y = 0.0f;
     if (document) {
         free_document(document);
         document = nullptr;

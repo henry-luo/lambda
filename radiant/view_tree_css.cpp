@@ -222,6 +222,26 @@ float view_css_length(ViewTree* tree, const ViewCssStyle* style, const CssValue*
     return resolve_length_value(&context, property, value);
 }
 
+bool view_css_border_spacing(ViewTree* tree, ViewCssStyle* style, float* horizontal, float* vertical) {
+    *horizontal = *vertical = 0.0f;
+    for (ViewCssStyle* owner = style; owner; owner = owner->parent) {
+        const CssValue* value = view_css_property(tree, owner, "border-spacing");
+        LayoutContext context = view_css_length_context(tree, owner, 0.0f, 0.0f);
+        LayoutBorderSpacingValue spacing = layout_resolve_border_spacing_value(&context, value);
+        if (spacing.resolved) {
+            *horizontal = spacing.horizontal; *vertical = spacing.vertical;
+            return isfinite(*horizontal) && isfinite(*vertical) && *horizontal >= 0.0f && *vertical >= 0.0f;
+        }
+        if (value && !spacing.keep_inheriting) return false;
+        if (!value && owner->source && owner->source->tag_id == MARKUP_NAME_TABLE) {
+            // HTML's UA spacing is computed at its owner, without borrowing default-view table geometry.
+            *horizontal = *vertical = layout_html_table_border_spacing(owner->source);
+            return true;
+        }
+    }
+    return true;
+}
+
 ViewBreak view_css_break(const CssValue* value) {
     const char* name = css_value_identifier_name(value);
     if (!name) return VIEW_BREAK_AUTO;

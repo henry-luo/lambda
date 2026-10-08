@@ -406,7 +406,7 @@ static Item jube_member_js_method_item(JubeMemberRecord* rec) {
     int arity = rec->bind && (rec->bind->flags & JUBE_MEMBER_HAS_REQUIRED_ARGS)
         ? (int)(rec->bind->flags >> 8) : rec->arity;
     if (arity < 0) arity = 0;
-    if (arity > 8) arity = 8;
+    // payload functions receive an argument span; WebIDL methods may require more than eight arguments.
     RootFrame roots(1);
     Rooted<Item> function_root(roots, js_new_native_payload_function(jube_tramp_invoke,
         (uint64_t)(uintptr_t)rec, arity));

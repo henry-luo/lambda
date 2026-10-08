@@ -32,6 +32,7 @@ bool css_display_contents_suppresses_element(DomElement* element) {
     case MARKUP_NAME_METER:
     case MARKUP_NAME_PROGRESS:
     case MARKUP_NAME_CANVAS:
+    case MARKUP_NAME_SCENE3D:
     case MARKUP_NAME_EMBED:
     case MARKUP_NAME_OBJECT:
     case MARKUP_NAME_AUDIO:
@@ -63,7 +64,7 @@ bool css_display_element_is_replaced(DomElement* dom_elem) {
     // their HTML conditions make them replaced.
     NameId tag_id = dom_elem->tag_id;
     bool is_replaced = layout_tag_is_css_replaced(tag_id) ||
-        tag_id == MARKUP_NAME_SVG ||
+        layout_is_svg_viewport(tag_id) ||
         (tag_id == MARKUP_NAME_OBJECT && dom_elem->get_attribute(MARKUP_NAME_DATA)) ||
         (tag_id == MARKUP_NAME_AUDIO && dom_elem->has_attribute(MARKUP_NAME_CONTROLS));
     if (dom_elem->specified_style) {

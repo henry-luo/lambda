@@ -1,0 +1,21 @@
+{
+  "name": "paged window print styles, scrolling, resize and device density",
+  "viewport": {"width": 220, "height": 140},
+  "events": [
+    {"type": "assert_pixel", "x": 20, "y": 20, "min_r": 255, "max_g": 0, "max_b": 0},
+    {"type": "assert_pixel", "x": 5, "y": 5, "min_r": 208, "max_r": 208, "min_g": 208, "max_g": 208},
+    {"type": "scroll", "x": 20, "y": 20, "dy": -2.8},
+    {"type": "assert_pixel", "x": 20, "y": 20, "max_r": 0, "min_g": 255, "max_b": 0},
+    {"type": "key_press", "key": "End"},
+    {"type": "assert_pixel", "x": 20, "y": 20, "max_r": 0, "max_g": 0, "min_b": 255},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "assert_pixel", "x": 20, "y": 20, "max_r": 0, "min_g": 255, "max_b": 0},
+    {"type": "key_press", "key": "PageUp"},
+    {"type": "resize", "width": 240, "height": 160},
+    {"type": "assert_pixel", "x": 20, "y": 20, "min_r": 255, "max_g": 0, "max_b": 0},
+    {"type": "assert_pixel", "x": 220, "y": 20, "min_r": 208, "max_r": 208, "min_g": 208, "max_g": 208},
+    {"type": "set_device_scale", "scale": 2},
+    {"type": "assert_pixel", "x": 20, "y": 20, "min_r": 255, "max_g": 0, "max_b": 0}
+  ]
+}

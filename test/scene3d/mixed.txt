@@ -1,0 +1,16 @@
+<html
+  <head
+    <style
+      "html,body{margin:0;background:#ffffff}">>
+  <body
+    <scene3d id: "viewport", camera: "main", width: 128, height: 128, viewBox: "0 0 128 128", style: "position:absolute;left:16px;top:16px;display:block",
+      <camera fov: 90, near: 0.1, far: 1000, type: 'perspective', position: [0, 0, 4], target: [0, 0, 0], id: "main">
+      <light type: 'ambient', color: "#ffffff", intensity: 1>
+      <group position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+        <mesh visible: true,
+          <geometry type: 'box', size: [2, 2, 2]>
+          <material type: 'lambert', color: "#ff0000", opacity: 1>>>>
+    <svg width: 32, height: 32, viewBox: "0 0 32 32", style: "position:absolute;left:200px;top:0",
+      <rect width: 32, height: 32, fill: "#00ff00">>
+    <p style: "position:absolute;top:150px",
+      "Lambda, HTML, SVG and native 3D">>>

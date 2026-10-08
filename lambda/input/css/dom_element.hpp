@@ -253,6 +253,7 @@ struct DomDocumentServices {
     uint32_t layout_cache_allocations;
     void* node_registry;       // external generations, pins, and detached candidates
     void* style_epoch_manager; // versioned canonical specified-style pools
+    void* scene3d_registry;   // document-owned native 3D viewport projections
     void* canvas_registry;     // document-owned HTMLCanvasElement backing surfaces
     void* svg_layer_registry;  // document-owned inline <svg> raster layers (render_svg_inline.cpp)
     void* svg_filter_registry; // document-owned compiled SVG filter programs
@@ -264,7 +265,7 @@ struct DomDocumentServices {
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
         keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
-        style_epoch_manager(nullptr), canvas_registry(nullptr),
+        style_epoch_manager(nullptr), scene3d_registry(nullptr), canvas_registry(nullptr),
         svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), svg_image_document(false) {}
 };
 

@@ -218,7 +218,7 @@ float layout_used_preferred_aspect_ratio(ViewBlock* block) {
         return specified_ratio;
     }
 
-    if (block->tag() == MARKUP_NAME_SVG && facts.has_natural_aspect_ratio) {
+    if (layout_is_svg_viewport(block->tag()) && facts.has_natural_aspect_ratio) {
         // `auto <ratio>` uses an SVG viewBox/natural ratio only when one exists;
         // the synthetic 300x150 fallback must not override the specified ratio.
         return facts.natural_aspect_ratio;
@@ -2575,7 +2575,7 @@ static void intrinsic_materialize_pseudo_content(LayoutContext* lycon, DomElemen
     bool select_listbox = tag == MARKUP_NAME_SELECT &&
         ((element_view && element_view->form && element_view->form->multiple) ||
          element->has_attribute("multiple"));
-    if (tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_SVG ||
+    if (tag == MARKUP_NAME_IMG || layout_is_svg_viewport(tag) ||
         tag == MARKUP_NAME_CANVAS || tag == MARKUP_NAME_IFRAME ||
         tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_AUDIO ||
         tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_OBJECT ||
@@ -2668,7 +2668,7 @@ CssEnum get_element_text_transform(DomElement* element) {
 }
 
 static bool intrinsic_svg_is_ratio_only(DomElement* element, ViewBlock* view) {
-    if (!element || element->tag() != MARKUP_NAME_SVG) return false;
+    if (!element || !layout_is_svg_viewport(element->tag())) return false;
     Element* native_svg = dom_element_backing(lam::dom_require_element(element));
     SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_svg);
     float preferred_ratio = layout_used_preferred_aspect_ratio(view);
@@ -2680,7 +2680,7 @@ static bool intrinsic_replaced_height_from_shared_facts(
         LayoutContext* lycon, ViewBlock* view, DomElement* element,
         float query_width, float* out_height) {
     if (!element || !out_height) return false;
-    if (element->tag() == MARKUP_NAME_SVG) {
+    if (layout_is_svg_viewport(element->tag())) {
         if (intrinsic_svg_is_ratio_only(element, view) && query_width <= 0.0f) {
             *out_height = 0.0f;
             return true;
@@ -3842,7 +3842,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             replaced_width = form_control_em_size(
                 lycon, view_block_replaced, FormDefaults::PROGRESS_INLINE_SIZE_EM);
         }
-        else if (replaced_tag == MARKUP_NAME_SVG &&
+        else if (layout_is_svg_viewport(replaced_tag) &&
                  replaced_facts.has_natural_width && replaced_facts.has_natural_height) {
             float svg_width = replaced_facts.natural_width;
             CssDeclaration* svg_width_declaration =
@@ -3863,10 +3863,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             replaced_width = replaced_facts.natural_width;
         }
         else if (replaced_facts.has_default_size &&
-                 replaced_tag != MARKUP_NAME_SVG) {
+                 !layout_is_svg_viewport(replaced_tag)) {
             replaced_width = replaced_facts.width;
         }
-        else if (replaced_tag == MARKUP_NAME_SVG) {
+        else if (layout_is_svg_viewport(replaced_tag)) {
             // Ratio-only SVGs defer their width until an axis or containing block
             // supplies a size; an unresolved percentage keeps the object fallback.
             const char* width_attr = element->get_attribute("width");
@@ -3984,7 +3984,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
-    if (!replaced_intrinsic_set && element->tag() == MARKUP_NAME_SVG) {
+    if (!replaced_intrinsic_set && layout_is_svg_viewport(element->tag())) {
         float svg_width = layout_replaced_svg_intrinsic_size(element).width;
         sizes.min_content = svg_width;
         sizes.max_content = svg_width;
@@ -6441,7 +6441,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
         else if (elem_tag == MARKUP_NAME_IFRAME || elem_tag == MARKUP_NAME_VIDEO ||
                  elem_tag == MARKUP_NAME_CANVAS || elem_tag == MARKUP_NAME_AUDIO ||
-                 elem_tag == MARKUP_NAME_SVG ||
+                 layout_is_svg_viewport(elem_tag) ||
                  (elem_tag == MARKUP_NAME_OBJECT &&
                   layout_object_uses_default_size(element))) {
             float replaced_height = 0.0f;
@@ -6453,7 +6453,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     }
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
-    if (element->tag() == MARKUP_NAME_SVG && !has_empty_size_containment &&
+    if (layout_is_svg_viewport(element->tag()) && !has_empty_size_containment &&
         !has_contain_intrinsic_height) {
         float svg_height = 0.0f;
         if (intrinsic_replaced_height_from_shared_facts(

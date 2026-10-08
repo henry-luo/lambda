@@ -125,6 +125,7 @@ Item js_ctor_pointer_event_fn(Item type, Item init);
 Item js_ctor_touch_event_fn(Item type, Item init);
 Item js_ctor_transition_event_fn(Item type, Item init);
 Item js_ctor_animation_event_fn(Item type, Item init);
+Item js_ctor_webgl_context_event_fn(Item type, Item init);
 Item js_ctor_static_range_fn(Item init);
 
 // ============================================================================

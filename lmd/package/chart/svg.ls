@@ -207,15 +207,16 @@ pub fn defs(children) {
     >
 }
 
-pub fn linear_gradient(id: string, x1, y1, x2, y2, stops) {
-    let stop_els = [for (s in stops) (
-        let op = if (s.opacity) s.opacity else 1.0,
-        <stop offset: s.offset, 'stop-color': s.color, 'stop-opacity': op>
-    )];
-    <linearGradient id: id, x1: x1, y1: y1, x2: x2, y2: y2,
-        for (el in stop_els) el
-    >
-}
+fn gradient_stops(stops) => [for (s in stops)
+    <stop offset: s.offset, 'stop-color': s.color, 'stop-opacity': if (s.opacity != null) s.opacity else 1.0>]
+
+pub fn linear_gradient(id: string, x1, y1, x2, y2, stops, attrs = {}) =>
+    <linearGradient *:attrs, id: id, x1: x1, y1: y1, x2: x2, y2: y2,
+        for (el in gradient_stops(stops)) el>
+
+pub fn radial_gradient(id: string, cx, cy, radius, fx, fy, inner_radius, stops, attrs = {}) =>
+    <radialGradient *:attrs, id: id, cx: cx, cy: cy, r: radius, fx: fx, fy: fy, fr: inner_radius,
+        for (el in gradient_stops(stops)) el>
 
 pub fn clip_path_el(id: string, children) {
     <clipPath id: id,

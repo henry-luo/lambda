@@ -246,6 +246,24 @@ Layered charts can request `resolve: {scale: {y: "independent"}}`; shared
 scales include full stacked extents. `clip: true` on a chart or mark clips
 plotted content without clipping its axes or legends.
 
+Mark `fill`, `stroke`, and `color` also accept gradient and hatch maps. A
+gradient is `{gradient: "linear" | "radial", stops: [{offset, color, opacity?}, ...]}`;
+linear direction uses `x1`/`y1`/`x2`/`y2`, and radial gradients additionally use
+`r1`/`r2`. Coordinates are relative to the mark's bounding box. The default
+linear direction runs left to right; radial defaults run from the center to
+radius `0.5`. Optional `spread` selects `pad`, `repeat`, or `reflect`.
+Offsets and stop opacity lie in `[0, 1]`; stops must be ordered.
+
+`{pattern: "hatch", color: "black", spacing: 8, angle: 45, stroke_width: 1}`
+draws repeating stripes. Optional `background` fills the tile, `opacity`
+controls stripe opacity, and `cross: true` adds perpendicular stripes.
+Gradients and hatches work through conditional color values, identity color
+fields, and categorical palette ranges, including their legend symbols.
+They also work on annotations, backgrounds, and titles, and across chart
+compositions. Invalid paint maps return value errors (S7.4.1). See the
+[chart design](../vibe/Lambda_Pkg_Chart.md#gradient-and-hatch-paints) for full
+defaults and examples.
+
 Temporal scales use calendar-aligned ticks. `scale.timezone` is a fixed UTC
 offset in minutes (default zero). `time_unit: "yearmonth"` on a channel groups
 records before encoding aggregation; cyclic `month`, `day`/`weekday`, and
@@ -253,6 +271,37 @@ records before encoding aggregation; cyclic `month`, `day`/`weekday`, and
 `<timeunit field: "date", unit: "yearmonth", as: "month">` transform retains
 the source field. Named time zones and daylight-saving rules remain outside
 this subset; see the [chart design](../vibe/Lambda_Pkg_Chart.md#5-encodings-scales-and-color).
+
+Chart axes, legends, titles, and facet headings use measured SVG font bounds.
+The default family is `"Arial"`; chart `font` and guide `label_font_*` /
+`title_font_*` settings control both measurement and output. `label_limit` fits
+text and an ellipsis into a pixel width, preserving whole grapheme clusters
+(including combining marks, emoji sequences, and flags).
+`label_overlap: "hide"` culls against measured positions on either axis and
+across axes, titles, legends, and text annotations within a view;
+`label_separation` sets the gap. Text annotations accept the same overlap
+controls, font family/size/weight/style, and letter/word spacing. Fixed text
+retains its authored position; optional notes precede optional axis labels.
+Plot clipping removes invisible annotation bounds from collision checks.
+Legend rows and margins accommodate the
+selected fonts. Different available fonts can produce different geometry;
+complex-script shaping follows Radiant's current SVG support.
+
+The reusable read-only host function
+`radiant.measure_svg_text(html, width, height)` measures each direct `<text>`
+child of the first SVG in the HTML body, preserving request order. Other SVG
+children can supply font resources. It returns copied `width` (advance),
+`height`, `baseline`, and baseline-relative `left`, `top`, `right`, `bottom`
+bounds covering character cells and visible glyphs. Empty text has zero
+metrics; invalid input or failed measurement returns null. Viewport dimensions
+must be positive integers. This follows **D7.4.6** / **S12.1.1v2**; only scalar
+facts escape the transient document under **D4.2.2v2**.
+
+`radiant.graphemes(text)` returns the original text as an array of extended
+grapheme clusters, following the bundled Unicode segmentation data. Empty
+text returns `[]`; invalid UTF-8 returns null. It preserves spelling without
+normalization and is read-only under **D7.4.6** / **S12.1.1v2**. Chart truncation
+uses these boundaries; ordinary `split` retains its **S17.1.1** contract.
 
 #### Analytical transforms
 

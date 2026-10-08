@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_table.hpp"
 #include "view.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "render.hpp"
 #include "../lib/log.h"
@@ -1885,13 +1886,6 @@ static void table_assign_columns(float* col_widths, int columns, float width) {
     table_assign_span_columns(col_widths, 0, columns, columns, width, NULL);
 }
 
-static void table_copy_columns(float* dst, float* src, int columns) {
-    if (!dst || !src) return;
-    for_each_table_span_column(0, columns, columns, [&](int c) {
-        dst[c] = src[c];
-    });
-}
-
 static void table_scale_columns(float* col_widths, int columns, float scale) {
     if (!col_widths) return;
     for_each_table_span_column(0, columns, columns, [&](int c) {
@@ -1945,18 +1939,18 @@ static bool table_columns_within_tolerance(float* col_widths, int columns, float
 }
 
 template <typename Eligible, typename Weight>
-static void table_distribute_extra(float* col_widths, int columns, float extra,
+static void table_distribute_extra(float* col_widths, size_t columns, float extra,
                                    Eligible eligible, Weight weight) {
     if (!col_widths || columns <= 0 || extra == 0.0f) return;
     float total_weight = 0.0f;
     int eligible_count = 0;
-    for (int i = 0; i < columns; i++) {
+    for (size_t i = 0; i < columns; i++) {
         if (!eligible(i)) continue;
         total_weight += max(weight(i), 0.0f);
         eligible_count++;
     }
     if (eligible_count == 0) return;
-    for (int i = 0; i < columns; i++) {
+    for (size_t i = 0; i < columns; i++) {
         if (!eligible(i)) continue;
         float share = total_weight > 0.0f
             ? extra * max(weight(i), 0.0f) / total_weight
@@ -1965,32 +1959,24 @@ static void table_distribute_extra(float* col_widths, int columns, float extra,
     }
 }
 
-static void table_grow_percent_columns(TableMetadata* meta, float* col_widths,
-                                       int columns, float extra) {
-    if (!meta || !col_widths) return;
-    table_distribute_extra(col_widths, columns, extra,
-        [&](int c) { return meta->col_percent_widths[c] > 0.0f; },
-        [&](int c) { return meta->col_percent_widths[c]; });
-}
-
-static float table_percent_columns_preferred_content_width(
-        TableMetadata* meta, int columns, float total_percent_col_width) {
-    if (!meta || columns <= 0 || total_percent_col_width <= 0.0f ||
+float layout_table_percent_preferred_width(
+        const LayoutTableColumnWidths& tracks, float total_percent_col_width) {
+    if (!tracks.count || total_percent_col_width <= 0.0f ||
         total_percent_col_width >= 100.0f) {
         return 0.0f;
     }
     float non_percent_preferred = 0.0f;
     float percent_minimum = 0.0f;
-    for (int i = 0; i < columns; i++) {
-        float percent = meta->col_percent_widths[i];
+    for (size_t i = 0; i < tracks.count; i++) {
+        float percent = tracks.percentage[i];
         if (percent > 0.0f) {
-            float minimum = meta->col_min_widths[i];
+            float minimum = tracks.minimum[i];
             float required = minimum * 100.0f / percent;
             if (required > percent_minimum) percent_minimum = required;
         } else {
-            float preferred = meta->col_max_widths[i];
-            if (preferred < meta->col_min_widths[i]) {
-                preferred = meta->col_min_widths[i];
+            float preferred = tracks.maximum[i];
+            if (preferred < tracks.minimum[i]) {
+                preferred = tracks.minimum[i];
             }
             non_percent_preferred += preferred;
         }
@@ -2002,25 +1988,25 @@ static float table_percent_columns_preferred_content_width(
         ? percent_minimum : non_percent_minimum;
 }
 
-static bool table_apply_percent_column_distribution(TableMetadata* meta, float* col_widths,
-                                                    int columns, float total_percent_col_width,
+bool layout_table_distribute_percent_columns(const LayoutTableColumnWidths& tracks, float* col_widths,
+                                                    float total_percent_col_width,
                                                     float available_content_width,
                                                     float min_table_content_width) {
-    if (!meta || !col_widths || total_percent_col_width <= 0.0f ||
+    if (!col_widths || !tracks.count || total_percent_col_width <= 0.0f ||
         available_content_width <= min_table_content_width) {
         return false;
     }
     float assigned_total = 0.0f;
-    for (int i = 0; i < columns; i++) {
-        float percent = meta->col_percent_widths[i];
-        float min_floor = meta->col_single_min_widths[i] > 0.0f
-            ? meta->col_single_min_widths[i] : 0.0f;
+    for (size_t i = 0; i < tracks.count; i++) {
+        float percent = tracks.percentage[i];
+        float min_floor = tracks.single_minimum[i] > 0.0f
+            ? tracks.single_minimum[i] : 0.0f;
         float target = 0.0f;
         if (percent > 0.0f) {
             target = available_content_width * percent / 100.0f;
         } else {
-            target = meta->col_max_widths[i] > min_floor
-                ? meta->col_max_widths[i] : min_floor;
+            target = tracks.maximum[i] > min_floor
+                ? tracks.maximum[i] : min_floor;
         }
         if (target < min_floor) target = min_floor;
         col_widths[i] = target;
@@ -2029,15 +2015,15 @@ static bool table_apply_percent_column_distribution(TableMetadata* meta, float* 
     if (assigned_total > available_content_width) {
         float excess = assigned_total - available_content_width;
         float shrink_capacity = 0.0f;
-        for (int i = 0; i < columns; i++) {
-            if (col_widths[i] > meta->col_min_widths[i]) {
-                shrink_capacity += col_widths[i] - meta->col_min_widths[i];
+        for (size_t i = 0; i < tracks.count; i++) {
+            if (col_widths[i] > tracks.minimum[i]) {
+                shrink_capacity += col_widths[i] - tracks.minimum[i];
             }
         }
         if (shrink_capacity > 0.01f) {
             float shrink_step = excess < shrink_capacity ? excess : shrink_capacity;
-            for (int i = 0; i < columns; i++) {
-                float capacity = col_widths[i] - meta->col_min_widths[i];
+            for (size_t i = 0; i < tracks.count; i++) {
+                float capacity = col_widths[i] - tracks.minimum[i];
                 if (capacity <= 0.0f) continue;
                 col_widths[i] -= shrink_step * capacity / shrink_capacity;
             }
@@ -2045,60 +2031,62 @@ static bool table_apply_percent_column_distribution(TableMetadata* meta, float* 
     } else if (assigned_total < available_content_width) {
         float extra = available_content_width - assigned_total;
         int auto_grow_count = 0;
-        for (int i = 0; i < columns; i++) {
-            if (meta->col_percent_widths[i] <= 0.0f) {
+        for (size_t i = 0; i < tracks.count; i++) {
+            if (tracks.percentage[i] <= 0.0f) {
                 auto_grow_count++;
             }
         }
         if (auto_grow_count > 0) {
-            table_distribute_extra(col_widths, columns, extra,
-                [&](int i) { return meta->col_percent_widths[i] <= 0.0f; },
-                [&](int i) { return col_widths[i]; });
+            table_distribute_extra(col_widths, tracks.count, extra,
+                [&](size_t i) { return tracks.percentage[i] <= 0.0f; },
+                [&](size_t i) { return col_widths[i]; });
         } else {
-            table_grow_percent_columns(meta, col_widths, columns, extra);
+            table_distribute_extra(col_widths, tracks.count, extra,
+                [&](size_t i) { return tracks.percentage[i] > 0.0f; },
+                [&](size_t i) { return tracks.percentage[i]; });
         }
     }
     return true;
 }
 
-static void table_apply_auto_column_width_distribution(TableMetadata* meta, float* col_widths,
-                                                       int columns, float available_content_width,
+void layout_table_distribute_auto_columns(const LayoutTableColumnWidths& tracks, float* col_widths,
+                                                       float available_content_width,
                                                        float min_table_content_width,
                                                        float pref_table_content_width) {
-    if (!meta || !col_widths) return;
+    if (!col_widths || !tracks.count) return;
     if (fabsf(available_content_width - pref_table_content_width) < 0.01f) {
-        table_copy_columns(col_widths, meta->col_max_widths, columns);
+        memcpy(col_widths, tracks.maximum, tracks.count * sizeof(float));
         return;
     }
     if (available_content_width <= pref_table_content_width) {
         if (available_content_width < min_table_content_width) {
-            table_copy_columns(col_widths, meta->col_min_widths, columns);
+            memcpy(col_widths, tracks.minimum, tracks.count * sizeof(float));
             return;
         }
         float factor = pref_table_content_width > min_table_content_width
             ? (available_content_width - min_table_content_width) /
               (pref_table_content_width - min_table_content_width) : 0.0f;
-        for (int i = 0; i < columns; i++) {
-            float min_width = meta->col_min_widths[i];
-            float range = meta->col_max_widths[i] - min_width;
+        for (size_t i = 0; i < tracks.count; i++) {
+            float min_width = tracks.minimum[i];
+            float range = tracks.maximum[i] - min_width;
             col_widths[i] = min_width + (range > 0.0f ? range * factor : 0.0f);
         }
         return;
     }
 
-    table_copy_columns(col_widths, meta->col_max_widths, columns);
+    memcpy(col_widths, tracks.maximum, tracks.count * sizeof(float));
     float extra_space = available_content_width - pref_table_content_width;
     int auto_col_count = 0;
-    for (int i = 0; i < columns; i++) {
-        if (!meta->col_has_explicit_width[i]) auto_col_count++;
+    for (size_t i = 0; i < tracks.count; i++) {
+        if (!tracks.constrained[i]) auto_col_count++;
     }
     if (auto_col_count > 0) {
-        table_distribute_extra(col_widths, columns, extra_space,
-            [&](int i) { return !meta->col_has_explicit_width[i]; },
-            [&](int i) { return col_widths[i]; });
+        table_distribute_extra(col_widths, tracks.count, extra_space,
+            [&](size_t i) { return !tracks.constrained[i]; },
+            [&](size_t i) { return col_widths[i]; });
     } else if (pref_table_content_width > 0.0f) {
-        table_distribute_extra(col_widths, columns, extra_space,
-            [](int) { return true; }, [&](int i) { return col_widths[i]; });
+        table_distribute_extra(col_widths, tracks.count, extra_space,
+            [](size_t) { return true; }, [&](size_t i) { return col_widths[i]; });
     }
 }
 
@@ -2403,16 +2391,16 @@ static int table_apply_fixed_first_row_cell_width(LayoutContext* lycon, ViewTabl
     return span;
 }
 
-static void table_distribute_fixed_column_widths(float* explicit_col_widths, int columns,
+void layout_table_distribute_fixed_columns(float* explicit_col_widths, size_t columns,
                                                  float* content_width,
                                                  float total_explicit,
-                                                 int unspecified_cols) {
-    if (!explicit_col_widths || columns <= 0 || !content_width) return;
+                                                 size_t unspecified_cols) {
+    if (!explicit_col_widths || !columns || !content_width) return;
     if (total_explicit > 0.0f) {
         float remaining_width = *content_width - total_explicit;
         if (unspecified_cols > 0 && remaining_width > 0.0f) {
             float width_per_unspecified = remaining_width / unspecified_cols;
-            for (int i = 0; i < columns; i++) {
+            for (size_t i = 0; i < columns; i++) {
                 if (explicit_col_widths[i] == 0.0f) {
                     explicit_col_widths[i] = width_per_unspecified;
                 }
@@ -2423,7 +2411,7 @@ static void table_distribute_fixed_column_widths(float* explicit_col_widths, int
         }
     } else {
         float width_per_col = *content_width / columns;
-        table_assign_columns(explicit_col_widths, columns, width_per_col);
+        for (size_t i = 0; i < columns; i++) explicit_col_widths[i] = width_per_col;
     }
 }
 
@@ -3552,14 +3540,7 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
     if (element->node_type == DOM_NODE_ELEMENT) {
         DomElement* dom_elem = element->as_element();
         if (dom_elem->tag() == MARKUP_NAME_TABLE) {
-            table->tb->border_spacing_h = 2.0f;
-            table->tb->border_spacing_v = 2.0f;
-            const char* cellspacing_attr = dom_elem->get_attribute("cellspacing");
-            if (cellspacing_attr) {
-                float spacing = (float)str_to_double_default(cellspacing_attr, strlen(cellspacing_attr), 0.0);
-                table->tb->border_spacing_h = spacing;
-                table->tb->border_spacing_v = spacing;
-            }
+            table->tb->border_spacing_h = table->tb->border_spacing_v = layout_html_table_border_spacing(dom_elem);
             const char* rules_attr = dom_elem->get_attribute("rules");
             if (rules_attr) {
                 size_t rules_len = strlen(rules_attr);
@@ -7094,7 +7075,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     content_width, &total_explicit, &unspecified_cols);
             });
         }
-        table_distribute_fixed_column_widths(
+        layout_table_distribute_fixed_columns(
             explicit_col_widths, columns, &content_width, total_explicit, unspecified_cols);
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
         table_apply_fixed_height_distribution(lycon, table, rows);
@@ -7109,8 +7090,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     float total_percent_col_width =
         table_sum_span_columns(meta->col_percent_widths, 0, columns, columns);
-    float percent_preferred_content_width = table_percent_columns_preferred_content_width(
-        meta, columns, total_percent_col_width);
+    LayoutTableColumnWidths column_measures = {meta->col_min_widths.get(), meta->col_max_widths.get(),
+        meta->col_single_min_widths.get(), meta->col_percent_widths.get(), meta->col_has_explicit_width.get(),
+        (size_t)columns};
+    float percent_preferred_content_width = layout_table_percent_preferred_width(
+        column_measures, total_percent_col_width);
     if (percent_preferred_content_width > pref_table_content_width) {
         pref_table_content_width = percent_preferred_content_width;
     }
@@ -7162,8 +7146,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (direct_float_expanded_auto_width) {
         available_content_width = pref_table_content_width;
     }
-    bool used_percent_distribution = table_apply_percent_column_distribution(
-        meta, col_widths, columns, total_percent_col_width,
+    bool used_percent_distribution = layout_table_distribute_percent_columns(
+        column_measures, col_widths, total_percent_col_width,
         available_content_width, min_table_content_width);
     bool use_equal_distribution = table_columns_within_tolerance(meta->col_max_widths, columns, 3.0f);
     if (!used_percent_distribution &&
@@ -7172,8 +7156,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table_assign_columns(col_widths, columns, avg_width);
     }
     if (!used_percent_distribution) {
-        table_apply_auto_column_width_distribution(
-            meta, col_widths, columns, available_content_width,
+        layout_table_distribute_auto_columns(
+            column_measures, col_widths, available_content_width,
             min_table_content_width, pref_table_content_width);
     }
     } // End of auto layout algorithm guard

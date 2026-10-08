@@ -327,7 +327,7 @@ Full essay: `doc/The_Unbundled_Monad.md`. The condensed findings:
 
 ### 3.7 The reactive `view`/`edit` template design (review, 2026-07-08)
 
-Reviewed against `doc/Reactive_UI.md` + the five implementation-phase notes (`vibe/Reactive_UI*.md` — through incremental reflow, no-op elision, drag-and-drop, rich text: a mature subsystem, not a sketch).
+Originally reviewed against `doc/Reactive_UI.md` and five phase notes; their design is now consolidated in [Lambda Reactive UI](Lambda_Design_Reactive_UI.md), including incremental presentation, no-op elision, drag-and-drop, and text editing (S12.1.3).
 
 **Strengths:**
 1. **The `fn`/`pn` split does the reactive heavy lifting.** Template body = pure transformation (model → element tree); mutation exists only in `on` handlers (`pn` semantics). That is the Elm architecture *enforced by the effect system rather than by convention* — React needs lint rules and StrictMode double-rendering to *detect* impure renders; Lambda makes them uncompilable. Load-bearing consequence: dirty-tracked re-execution is **sound by construction** (re-running a body is always safe). The ninth entry for §3.6's dividend table.

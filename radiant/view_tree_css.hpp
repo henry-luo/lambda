@@ -111,6 +111,7 @@ ViewCssStyle* view_css_generated_style(ViewTree* tree, ViewCssStyle* base,
     const CssValue* font_size, const CssValue* color, CssEnum align);
 float view_css_length(ViewTree* tree, const ViewCssStyle* style, const CssValue* value,
                      CssPropertyCode property, float inline_size, float block_size);
+bool view_css_border_spacing(ViewTree* tree, ViewCssStyle* style, float* horizontal, float* vertical);
 ViewBreak view_css_break(const CssValue* value);
 ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t page_number,
                                   ViewPageSide side, bool blank, ViewPageStyle* result);

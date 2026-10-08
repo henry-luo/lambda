@@ -4131,7 +4131,7 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
             } else if (has_given_cross) {
                 hypothetical_cross = layout_css_size_to_border_box(
                     item->bound, layout_box_sizing(item_block), given_cross, cross_is_horizontal);
-            } else if (item->tag() == MARKUP_NAME_SVG && cross.axis == LAYOUT_AXIS_Y &&
+            } else if (layout_is_svg_viewport(item->tag()) && cross.axis == LAYOUT_AXIS_Y &&
                        cross.has_intrinsic() && cross.intrinsic()->max_content > 0.0f) {
                 // SVG's intrinsic cross size is already a border-box contribution here.
                 hypothetical_cross = cross.intrinsic()->max_content;

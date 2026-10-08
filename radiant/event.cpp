@@ -1,3 +1,4 @@
+#include "scene3d.hpp"
 #include "event.hpp"
 #include "../lib/queue.h"
 #include "layout.hpp"
@@ -7735,6 +7736,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc) {
     if (!uicon || !doc || doc->js.mutation_count == 0) return;
+    scene3d_collect(doc);
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
@@ -12369,6 +12371,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     // For PDFs, we can still handle basic events using the view_tree
     if (!doc) {
         log_error("No document to handle event");
+        return;
+    }
+    if (uicon && uicon->paged_options && doc == uicon->document) {
+        // preview coordinates belong to page instances, so DOM hit testing cannot consume them.
+        float x = uicon->paged_scroll_x, y = uicon->paged_scroll_y;
+        if (event->type == RDT_EVENT_SCROLL) {
+            x -= event->scroll.xoffset * RDT_WHEEL_PIXEL_STEP;
+            y -= event->scroll.yoffset * RDT_WHEEL_PIXEL_STEP;
+        } else if (event->type == RDT_EVENT_KEY_DOWN) {
+            switch (event->key.key) {
+                case RDT_KEY_LEFT: x -= RDT_WHEEL_PIXEL_STEP; break;
+                case RDT_KEY_RIGHT: x += RDT_WHEEL_PIXEL_STEP; break;
+                case RDT_KEY_UP: y -= RDT_WHEEL_PIXEL_STEP; break;
+                case RDT_KEY_DOWN: y += RDT_WHEEL_PIXEL_STEP; break;
+                case RDT_KEY_PAGE_UP: y -= uicon->viewport_height; break;
+                case RDT_KEY_PAGE_DOWN: y += uicon->viewport_height; break;
+                case RDT_KEY_HOME: x = y = 0.0f; break;
+                case RDT_KEY_END: y = INFINITY; break;
+                default: return;
+            }
+        } else return;
+        render_paged_window_scroll(uicon, x, y);
         return;
     }
     // Native input can arrive while the document loader owns the main thread;

@@ -26,6 +26,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <utf8proc.h>
 
 String* heap_create_name(const char* name, size_t len);
 
@@ -3379,6 +3380,89 @@ RADIANT_C_API Item fn_radiant_measure_html(Item html_item, Item width_item, Item
     return result.get();
 }
 
+// stateful UAX #29 boundaries keep combining marks, emoji sequences, and flag pairs intact.
+RADIANT_C_API Item fn_radiant_graphemes(Item text_item) {
+    if (get_type_id(text_item) != LMD_TYPE_STRING || text_item.get_string()->len > INT_MAX) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> source(roots, text_item);
+    const size_t length = source.get().get_string()->len;
+    Rooted<Item> result(roots, radiant_array_new_item((int)length));
+    size_t start = 0, offset = 0;
+    utf8proc_int32_t previous = 0, state = 0;
+    while (offset < length) {
+        utf8proc_int32_t current = 0;
+        utf8proc_ssize_t bytes = utf8proc_iterate(
+            (const utf8proc_uint8_t*)source.get().get_string()->chars + offset,
+            (utf8proc_ssize_t)(length - offset), &current);
+        if (bytes <= 0) return ItemNull;
+        if (offset && utf8proc_grapheme_break_stateful(previous, current, &state)) {
+            Item cluster = radiant_string_item_n(source.get().get_string()->chars + start, offset - start);
+            radiant_array_push_item(result.get(), cluster);
+            start = offset;
+        }
+        previous = current;
+        offset += (size_t)bytes;
+    }
+    if (start < length) {
+        Item cluster = radiant_string_item_n(source.get().get_string()->chars + start, length - start);
+        radiant_array_push_item(result.get(), cluster);
+    }
+    return result.get();
+}
+
+// SVG measurements share the painter's layout and return only copied scalar facts (D4.2.2v2).
+RADIANT_C_API Item fn_radiant_measure_svg_text(Item html_item, Item width_item, Item height_item) {
+    int width = 0, height = 0;
+    if (get_type_id(html_item) != LMD_TYPE_STRING ||
+        !radiant_item_to_int(width_item, &width) || !radiant_item_to_int(height_item, &height) ||
+        width <= 0 || height <= 0) return ItemNull;
+    DomDocument* doc = radiant_load_html_source(fn_to_cstr(html_item), width, height, "MEASURE_SVG_TEXT");
+    if (!doc) return ItemNull;
+    DomElement* body = dom_document_body_element(doc);
+    DomElement* svg = body ? body->first_child_element() : nullptr;
+    while (svg && (!svg->tag_name || strcmp(svg->tag_name, "svg") != 0)) svg = svg->next_sibling_element();
+    if (!svg) {
+        free_document(doc);
+        return ItemNull;
+    }
+    size_t count = 0;
+    for (DomElement* text = svg->first_child_element(); text; text = text->next_sibling_element())
+        if (text->tag_name && strcmp(text->tag_name, "text") == 0) count++;
+    SvgTextMeasurement* metrics = count ? (SvgTextMeasurement*)mem_calloc(count, sizeof(SvgTextMeasurement),
+        MEM_CAT_RENDER) : nullptr;
+    SvgLengthContext lengths = {};
+    lengths.viewport_width = (float)width; lengths.viewport_height = (float)height;
+    lengths.font_size = 16.0f;
+    if ((count && !metrics) || !svg_text_measure_batch(svg, &lengths, metrics, count)) {
+        if (metrics) mem_free(metrics);
+        free_document(doc);
+        return ItemNull;
+    }
+    RootFrame roots(2);
+    Rooted<Item> result(roots, radiant_array_new_item((int)count));
+    Rooted<Item> box(roots, ItemNull);
+    for (size_t index = 0; index < count; index++) {
+        const SvgTextMeasurement* metric = &metrics[index];
+        Bound bounds = metric->logical;
+        if (metric->has_ink) {
+            bounds.left = fminf(bounds.left, metric->ink.left); bounds.top = fminf(bounds.top, metric->ink.top);
+            bounds.right = fmaxf(bounds.right, metric->ink.right); bounds.bottom = fmaxf(bounds.bottom, metric->ink.bottom);
+        }
+        box.set(radiant_obj_new());
+        radiant_rooted_obj_set(box, "width", radiant_float_item(metric->advance));
+        radiant_rooted_obj_set(box, "height", radiant_float_item(bounds.bottom - bounds.top));
+        radiant_rooted_obj_set(box, "baseline", radiant_float_item(-bounds.top));
+        radiant_rooted_obj_set(box, "left", radiant_float_item(bounds.left));
+        radiant_rooted_obj_set(box, "top", radiant_float_item(bounds.top));
+        radiant_rooted_obj_set(box, "right", radiant_float_item(bounds.right));
+        radiant_rooted_obj_set(box, "bottom", radiant_float_item(bounds.bottom));
+        radiant_array_push_item(result.get(), box.get());
+    }
+    if (metrics) mem_free(metrics);
+    free_document(doc);
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_box(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "BOX");
     if (!node || node->view_type == RDT_VIEW_NONE) return ItemNull;
@@ -3772,6 +3856,10 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_layout(Item node)", (fn_ptr)fn_radiant_layout},
     {"render_svg", "fn(html: string, width: int, height: int) -> string|null", (fn_ptr)fn_radiant_render_svg, JUBE_FN_NONE,
      "Item fn_radiant_render_svg(Item html, Item width, Item height)", (fn_ptr)fn_radiant_render_svg},
+    {"measure_svg_text", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_svg_text, JUBE_FN_NONE,
+     "Item fn_radiant_measure_svg_text(Item html, Item width, Item height)", (fn_ptr)fn_radiant_measure_svg_text},
+    {"graphemes", "fn(text: string) -> array|null", (fn_ptr)fn_radiant_graphemes, JUBE_FN_NONE,
+     "Item fn_radiant_graphemes(Item text)", (fn_ptr)fn_radiant_graphemes},
     {"measure_html", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_html, JUBE_FN_NONE,
      "Item fn_radiant_measure_html(Item html, Item width, Item height)", (fn_ptr)fn_radiant_measure_html},
     {"box", "fn(node: dom_node) -> map|null", (fn_ptr)fn_radiant_box, JUBE_FN_NONE,
@@ -3839,7 +3927,10 @@ static const JubeModuleDef radiant_module = {
     radiant_custom_layout_heap_cleanup,
 };
 
+extern "C" void dom_webgl_register_static(void);
+
 RADIANT_C_API void radiant_jube_register_static(void) {
+    dom_webgl_register_static();
     jube_register_static_module(&radiant_module);
 }
 

@@ -1,0 +1,14 @@
+<!doctype html><html><head><style>
+html,body { margin:0; background:#ffffff; }
+#clip { position:absolute;left:40px;top:20px;width:96px;height:128px;overflow:hidden; }
+#viewport { display:block;width:128px;height:128px;transform:translateX(32px);opacity:0.5; }
+#overlay { position:absolute;left:128px;top:76px;width:16px;height:16px;z-index:2; }
+#canvas { position:absolute;left:176px;top:20px;width:64px;height:64px;transform:translateX(16px);opacity:0.5; }
+</style></head><body>
+<div id="clip"><scene3d id="viewport" camera="main" background="#000000">
+<camera id="main" type="perspective" position="0 0 4" target="0 0 0" fov="90"></camera>
+<mesh><geometry type="box" size="2 2 2"></geometry><material id="color" type="basic" color="#ff0000"></material></mesh>
+</scene3d></div>
+<svg id="overlay" viewBox="0 0 16 16"><rect width="16" height="16" fill="#0000ff"></rect></svg>
+<canvas id="canvas" width="128" height="128"></canvas>
+</body></html>

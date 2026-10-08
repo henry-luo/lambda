@@ -25,4 +25,4 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
 void paged_composition_destroy(ViewTree* tree);
 const TypesetTarget* layout_secondary_target(ViewTree* tree, const char* id);
 bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint);
-bool layout_secondary_paint_root(ViewTree* tree, PaintList* paint);
+bool layout_secondary_paint_root(ViewTree* tree, PaintList* paint, const RdtLogicalRect* clip = nullptr);

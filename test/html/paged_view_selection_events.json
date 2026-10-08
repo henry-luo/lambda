@@ -1,0 +1,8 @@
+{
+  "name": "paged window filtered scaled page",
+  "viewport": {"width": 220, "height": 140},
+  "events": [
+    {"type": "assert_pixel", "x": 20, "y": 20, "max_r": 0, "min_g": 255, "max_b": 0},
+    {"type": "assert_pixel", "x": 120, "y": 20, "min_r": 208, "max_r": 208, "min_g": 208, "max_g": 208}
+  ]
+}
