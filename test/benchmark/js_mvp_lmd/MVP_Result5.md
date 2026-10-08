@@ -1,152 +1,170 @@
 # JS MVP Benchmark Results: MVP_Result5
 
-**Slow kernels, especially triangl** — [MVP §17](../../../vibe/jube/JS_MVP_Lmd.md).
+**Slow kernels; recursive allocation and optional integer locals** — [MVP §17](../../../vibe/jube/JS_MVP_Lmd.md#17-slow-kernel-tuning).
 
-[Series index and comparison](README.md) · [Raw JSON](MVP_Result5.json) · [Previous](MVP_Result4.md)
+[Series index and comparison](README.md) · [Raw JSON](MVP_Result5.json) · [Previous phase](MVP_Result4.md)
 
-The five target kernels improve **1.771×**
-in geometric mean paired speedup against the preceding numeric-tuning release.
-All 42 workloads improve **1.093×**;
-the other 37 improve **1.024×**.
+Updated **2026-10-08T10:36:54.962973+08:00**. This follow-up compares the new release against the
+exact preceding Result5 candidate. All 42 workloads improve **1.025×**
+geometrically; the six tracked kernels improve **1.078×**.
 
-Across 25 standard kernels, current MVP speedups are
-**1.217× versus untyped Lambda**
-and **2.376× versus Node**.
-Above one means MVP is faster. Across all 42 workloads, MVP is
-**1.639× versus Node**.
+Across 25 standard kernels, MVP is **1.247× faster than untyped Lambda**
+and **2.444× faster than Node** geometrically.
+Across all 42 workloads, its speedup over Node is **1.682×**.
+Above one means MVP is faster.
 
 ## Target kernels
 
-| Workload | Before ms | MVP ms | Paired gain | Untyped Lambda ms | Node ms |
+| Workload | Previous Result5 ms | MVP ms | Paired gain | Untyped Lambda ms | Node ms |
 |---|---:|---:|---:|---:|---:|
-| larceny/triangl | 619.608 | 158.933 | 3.90× | 182.761 | 68.185 |
-| larceny/deriv | 18.997 | 8.653 | 2.20× | 21.451 | 3.845 |
-| larceny/gcbench | 99.980 | 94.913 | 1.05× | 116.919 | 22.018 |
-| larceny/pnpoly | 13.678 | 7.436 | 1.83× | 12.454 | 5.819 |
-| beng/binarytrees | 4.099 | 3.887 | 1.05× | 4.928 | 2.080 |
+| larceny/gcbench | 95.970 | 91.792 | 1.046× | 116.486 | 21.876 |
+| beng/binarytrees | 3.981 | 3.753 | 1.061× | 4.845 | 2.081 |
+| larceny/quicksort | 1.707 | 1.298 | 1.316× | 1.080 | 1.835 |
+| larceny/triangl | 157.987 | 155.499 | 1.016× | 181.827 | 67.895 |
+| larceny/deriv | 8.789 | 8.465 | 1.040× | 21.570 | 3.822 |
+| larceny/pnpoly | 7.425 | 7.332 | 1.017× | 12.517 | 5.857 |
 
-`triangl` reduces the gap to Node from about 9× to **2.33×**; the remaining
-gaps are **2.25×** for `deriv`, **4.31×** for `gcbench`, **1.28×** for `pnpoly`,
-and **1.87×** for `binarytrees`. All five now beat their untyped Lambda ports.
-Each target's 95% paired ratio interval excludes no change, with its
-identical-control peer within 0.4% of parity.
+Quicksort's earlier 3.3% regression is reversed: it improves
+**1.316×** against that exact binary.
+The escaped object-retyping microbenchmark is **2.2% slower** in a separate
+30-pair confirmation (90 measured and 3 discarded matching outputs). Its fresh
+control peer is near parity; this is a retained small regression. The full
+42-row table keeps the original 15-pair medians; follow-up samples are separate
+in the JSON. No full-run row has a paired median slowdown above 5%.
+All six tracked kernels' 95% candidate/control ratio intervals are below one.
 
-The retained tradeoff is `quicksort`: **3.3% slower**, with a 95% ratio interval
-of **2.3–4.0% slower**. The final candidate avoids a redundant numeric-consumer
-conversion; the earlier screen showed roughly 5% regression. Optional local
-snapshots still cross integer and double carriers. No workload has a paired
-median slowdown above 5%. Other small changes should be read with their
-control intervals.
+Tree allocation gains remain smaller than the conversion gain. Object allocation,
+collection and recursive call overhead still remain; no region allocator was added.
 
 ## Measurement and provenance
 
-- Frozen release binaries; pinned native MIR in both Lambda profiles;
-  **15 alternating pairs**, an identical-control peer, and one discarded
-  process per lane. Node **v22.13.0**. All **3,330 measured**
-  and **222 discarded** outputs match their oracles.
-- Control SHA-256: `a9aea060e1452656cf791d65f37ccf4ccabc5c19d412f9e331010d7d9c2e4b1f`.
-- Candidate SHA-256: `172cf89c2a781b8dc15b291c335cfb8518fda54a8110c2e857a1e10ee409f1c5`.
-- Compiler source SHA-256: `7d573679dfb84057cb65e7f507c1cb78b7a72f18bdbe4b6da3832f7aca47f7b1`.
-- The binary, compiler source, benchmark sources, runner and Node identities
-  were checked. Frozen binaries, sources, raw outputs and MIR are under
-  `temp/mvp_lmd_slow_tuning_20261008/final/`. [JSON evidence](MVP_Result5.json)
-  includes all commands, samples, hashes and paired bootstrap intervals.
-- Times are medians of self-reported execution milliseconds. Gains are
-  medians of paired ratios. Startup, initial parsing/JIT and teardown are
-  excluded. Node tiering during the workload is included; these fresh-process
-  measurements do not represent fully warmed V8 throughput.
-- The [port/timing audit](MVP_Result4.md#port-and-timing-audit)
-  still applies. Algorithms, inputs, iterations and oracles match; untyped
-  Lambda retains native semantics (**S1.11**) and the corrected output `var`
-  parameters (**S9.1.3**). FFT's zero-input oracle remains weak numeric evidence.
-- Identical-control speedups: **0.982–1.058×**. Untyped Lambda
-  control/candidate speedups: **0.994–1.014×**.
-  One-minute load: **6.3 → 3.1**
-  on 8 logical CPUs. Small differences need their intervals
-  and controls; a short screen alone is not acceptance evidence.
+- **15 alternating release pairs**, identical-control peer, one discarded
+  process per lane; pinned native MIR for MVP and Lambda. Node **v22.13.0**.
+  All **3,330 measured and 222 discarded outputs** match their oracles.
+- Values are medians of self-reported execution milliseconds; gains are medians
+  of paired ratios. Startup, initial parsing/JIT and teardown are excluded.
+  Node tiering within the workload remains included; these are fresh-process
+  workload times, not fully warmed throughput.
+- The [port/timing audit](MVP_Result4.md#port-and-timing-audit) still applies.
+  Workloads and oracles are unchanged. Untyped Lambda retains native semantics
+  (**S1.11**, **S9.1.3**); FFT's zero-input oracle remains weak numeric evidence.
+- Control SHA-256: `172cf89c2a781b8dc15b291c335cfb8518fda54a8110c2e857a1e10ee409f1c5`.
+- Candidate SHA-256: `190d5f602876b1023ba83e9d25eee603af5fd938ebf64c3aaaefe1ef8ff38cf7`.
+- Compiler SHA-256: `88c5dfdc937f124f7555fababe55ae5df4bafe675854df9b733ceedd8319e832`.
+- Frozen binaries, compiler sources, runner, raw outputs and MIR:
+  `temp/mvp_lmd_recursive_20261008/final/`. All source, binary, runner and Node
+  identities were checked. JSON includes samples and bootstrap intervals.
+- Identical-control speedups: **0.987–1.028×**; untyped Lambda
+  control/candidate speedups: **0.986–1.014×**.
+  One-minute host load: **5.4 → 3.5** on 8 logical CPUs.
+  Read small changes alongside their control intervals.
 
 ## Remaining standard kernels
 
-| Workload | Before ms | MVP ms | Paired gain | Untyped Lambda ms | Node ms |
+| Workload | Previous Result5 ms | MVP ms | Paired gain | Untyped Lambda ms | Node ms |
 |---|---:|---:|---:|---:|---:|
-| r7rs/fib | 1.488 | 1.485 | 1.00× | 1.581 | 1.824 |
-| r7rs/fibfp | 1.483 | 1.490 | 1.00× | 2.353 | 1.819 |
-| r7rs/tak | 0.125 | 0.124 | 1.00× | 0.139 | 0.727 |
-| r7rs/cpstak | 0.248 | 0.245 | 1.00× | 0.276 | 0.928 |
-| r7rs/sum | 0.270 | 0.270 | 1.00× | 0.270 | 1.226 |
-| r7rs/sumfp | 0.027 | 0.027 | 1.00× | 0.070 | 0.901 |
-| r7rs/ack | 8.930 | 8.913 | 1.00× | 13.767 | 13.511 |
-| larceny/diviter | 266.791 | 266.712 | 1.00× | 266.853 | 470.800 |
-| larceny/divrec | 0.628 | 0.629 | 1.00× | 1.224 | 7.764 |
-| kostya/collatz | 521.424 | 520.372 | 1.00× | 298.825 | 1429.530 |
-| r7rs/nqueens | 0.941 | 0.947 | 0.99× | 1.088 | 1.786 |
-| r7rs/fft | 0.173 | 0.170 | 1.02× | 0.331 | 1.594 |
-| larceny/array1 | 0.662 | 0.663 | 1.00× | 0.817 | 1.810 |
-| larceny/paraffins | 0.144 | 0.104 | 1.38× | 0.199 | 1.032 |
-| larceny/quicksort | 1.660 | 1.715 | 0.97× | 1.089 | 1.827 |
-| larceny/ray | 0.346 | 0.236 | 1.45× | 0.222 | 3.634 |
-| kostya/primes | 3.406 | 3.440 | 0.99× | 2.303 | 4.333 |
-| kostya/matmul | 5.942 | 5.910 | 1.00× | 5.711 | 15.610 |
-| beng/fannkuch | 0.455 | 0.461 | 0.99× | 0.284 | 2.204 |
-| beng/spectralnorm | 1.083 | 1.072 | 1.00× | 1.691 | 2.503 |
+| r7rs/fib | 1.497 | 1.501 | 0.997× | 1.591 | 1.816 |
+| r7rs/fibfp | 1.491 | 1.500 | 0.993× | 2.370 | 1.858 |
+| r7rs/tak | 0.124 | 0.123 | 1.000× | 0.137 | 0.740 |
+| r7rs/cpstak | 0.243 | 0.245 | 0.996× | 0.271 | 0.931 |
+| r7rs/sum | 0.270 | 0.270 | 1.000× | 0.270 | 1.247 |
+| r7rs/sumfp | 0.027 | 0.027 | 1.000× | 0.070 | 0.893 |
+| r7rs/ack | 8.852 | 8.884 | 0.998× | 14.181 | 13.483 |
+| larceny/diviter | 266.607 | 266.126 | 1.000× | 266.183 | 470.492 |
+| larceny/divrec | 0.629 | 0.628 | 1.002× | 1.223 | 7.738 |
+| kostya/collatz | 519.442 | 519.727 | 1.000× | 297.863 | 1413.390 |
+| r7rs/nqueens | 0.967 | 0.925 | 1.047× | 1.111 | 1.815 |
+| r7rs/fft | 0.169 | 0.168 | 1.006× | 0.324 | 1.593 |
+| larceny/array1 | 0.663 | 0.663 | 0.998× | 0.817 | 1.815 |
+| larceny/paraffins | 0.105 | 0.103 | 1.010× | 0.201 | 1.031 |
+| larceny/ray | 0.237 | 0.237 | 1.000× | 0.221 | 3.660 |
+| kostya/primes | 3.459 | 3.382 | 1.022× | 2.294 | 4.369 |
+| kostya/matmul | 5.887 | 5.853 | 1.002× | 5.702 | 15.489 |
+| beng/fannkuch | 0.465 | 0.380 | 1.210× | 0.277 | 2.172 |
+| beng/spectralnorm | 1.078 | 1.080 | 1.002× | 1.692 | 2.551 |
 
 ## Microbenchmarks
 
-| Workload | Before ms | MVP ms | Paired gain | Untyped Lambda ms | Node ms |
+| Workload | Previous Result5 ms | MVP ms | Paired gain | Untyped Lambda ms | Node ms |
 |---|---:|---:|---:|---:|---:|
-| js_mvp_lmd/integer_dense | 2.744 | 2.739 | 1.00× | 15.370 | 2.988 |
-| js_mvp_lmd/integer_indirect | 1.569 | 1.580 | 0.99× | 5.426 | 1.136 |
-| js_micro/lit | 0.135 | 0.135 | 1.00× | — | 3.685 |
-| js_micro/named | 3.940 | 3.918 | 1.00× | — | 6.180 |
-| js_micro/args_ctl | 3.513 | 3.206 | 1.09× | — | 2.232 |
-| js_micro/args_fp | 3.523 | 3.253 | 1.08× | — | 2.250 |
-| js_mvp_lmd/object_fields | 0.376 | 0.376 | 1.00× | — | 1.536 |
-| js_mvp_lmd/object_growth | 3.529 | 3.514 | 1.01× | — | 3.807 |
-| js_mvp_lmd/object_retype | 0.296 | 0.296 | 1.00× | — | 1.299 |
-| js_mvp_lmd/object_retype_escaped | 6.745 | 6.594 | 1.02× | — | 1.291 |
-| js_mvp_lmd/object_delete | 2.583 | 2.455 | 1.01× | — | 1.125 |
-| js_mvp_lmd/map_lookup | 13.310 | 12.961 | 1.02× | — | 4.029 |
-| js_mvp_lmd/map_iteration | 1.454 | 1.455 | 1.00× | — | 3.551 |
-| js_mvp_lmd/numeric | 70.893 | 70.801 | 1.00× | — | 70.904 |
-| js_mvp_lmd/dense_array | 57.959 | 57.604 | 1.01× | — | 11.500 |
-| js_mvp_lmd/calls | 5.112 | 5.139 | 0.99× | — | 4.609 |
-| js_mvp_lmd/strings | 2.418 | 2.434 | 1.00× | — | 0.257 |
+| js_mvp_lmd/integer_dense | 2.714 | 2.741 | 0.996× | 15.301 | 2.933 |
+| js_mvp_lmd/integer_indirect | 1.565 | 1.570 | 0.997× | 5.268 | 1.148 |
+| js_micro/lit | 0.134 | 0.134 | 1.000× | — | 3.675 |
+| js_micro/named | 3.946 | 3.898 | 0.999× | — | 6.172 |
+| js_micro/args_ctl | 3.235 | 2.699 | 1.199× | — | 2.239 |
+| js_micro/args_fp | 3.240 | 2.692 | 1.200× | — | 2.248 |
+| js_mvp_lmd/object_fields | 0.376 | 0.376 | 1.000× | — | 1.557 |
+| js_mvp_lmd/object_growth | 3.531 | 3.540 | 0.996× | — | 3.748 |
+| js_mvp_lmd/object_retype | 0.296 | 0.296 | 1.000× | — | 1.297 |
+| js_mvp_lmd/object_retype_escaped | 6.576 | 6.699 | 0.977× | — | 1.300 |
+| js_mvp_lmd/object_delete | 2.478 | 2.373 | 0.985× | — | 1.113 |
+| js_mvp_lmd/map_lookup | 12.934 | 13.286 | 0.984× | — | 4.122 |
+| js_mvp_lmd/map_iteration | 1.458 | 1.454 | 1.003× | — | 3.568 |
+| js_mvp_lmd/numeric | 70.668 | 70.723 | 1.000× | — | 70.633 |
+| js_mvp_lmd/dense_array | 57.899 | 57.225 | 1.011× | — | 11.500 |
+| js_mvp_lmd/calls | 5.059 | 5.046 | 0.996× | — | 4.630 |
+| js_mvp_lmd/strings | 2.414 | 2.416 | 1.001× | — | 0.258 |
 
 ## Compilation and process cost
 
 | Workload | MIR instructions before → after | Process wall ms before → after |
 |---|---:|---:|
-| larceny/triangl | 5,006 → 4,309 | 656.803 → 190.393 |
-| larceny/deriv | 6,453 → 6,045 | 54.247 → 42.294 |
-| larceny/gcbench | 4,197 → 3,990 | 135.031 → 128.641 |
-| larceny/pnpoly | 2,743 → 1,889 | 33.201 → 22.781 |
-| beng/binarytrees | 4,247 → 4,040 | 29.063 → 27.888 |
+| larceny/gcbench | 3,990 → 3,793 | 130.657 → 125.451 |
+| beng/binarytrees | 4,040 → 3,864 | 28.100 → 27.562 |
+| larceny/quicksort | 841 → 605 | 12.217 → 10.928 |
+| larceny/triangl | 4,309 → 4,162 | 188.689 → 185.208 |
+| larceny/deriv | 6,045 → 5,587 | 42.918 → 39.963 |
+| larceny/pnpoly | 1,889 → 1,751 | 22.632 → 21.949 |
 
-MIR instruction counts are static compiler output, not native code size.
-Process wall time includes startup, compilation, execution and teardown; it is
-reported separately from the self-reported kernel times above. This run does
-not isolate parsing/JIT latency or fully warmed throughput.
+MIR counts describe static compiler output, not native code size. Process wall
+time includes compilation and teardown and is separate from workload timing.
+Quicksort's static I2D/D2I counts fall from
+**18/19** to
+**12/11**.
 
 ## Implementation and validation
 
-Integer element/presence carriers, direct condition branches, immutable
-container facts, local factory calls, and guarded nullable object stores reuse
-Lambda's existing emitters and shape transitions (**D2.2.5**, **D2.4.3**,
-**D3.4.3**, **D5.3.4**, **D8.2.6**). Two disclosed compiler helpers were added;
-there are no new runtime helpers or imports. No benchmark source was tuned.
+Optional integer locals retain an i64 payload and a presence bit; present-value
+ranges stay separate from ordinary arithmetic ranges. Integer comparisons and
+stores preserve undefined/NaN behavior without round trips through double.
+Closed nonnumeric factories use Lambda's existing plain-Item return ABI;
+nonnumeric locals skip scalar adoption. Fixed-key literal values are evaluated
+in order and precisely rooted before allocating their unobservable parent.
+Existing shape guards and transition fallback remain (**D2.2.5**, **D3.4.3v5**,
+**D5.2.1v3**, **D5.3.4**).
 
-See the [implementation and validation record](../../../vibe/impl/JS_MVP_Lmd_Slow_Tuning.md)
-for the exact gates and remaining limits. MVP tests pass **37/37** normally
-and with forced GC/poisoning; Lambda/input passes **6,362/6,362**; full-JS
-Test262 passes **40,261/40,261**, with zero retries, unstable cases or
-regressions. Test262 is a shared-host gate, not MVP feature coverage.
-Recursive allocation, more complete control-flow bounds and optional integer
-local snapshots remain follow-up work.
+No new compiler/runtime helper or import was added. Only the MVP compiler
+changed; shared runtime and benchmark sources are unchanged. Release build
+passes with zero errors and 28 existing warnings. Benchmark output validation
+is current; **unit, forced-GC and baseline suites were not rerun for this
+follow-up**. The preceding round's 37/37 MVP, 6,362/6,362 Lambda/input and
+40,261/40,261 Test262 results apply to its earlier binary only.
+
+See the [implementation record](../../../vibe/impl/JS_MVP_Lmd_Slow_Tuning.md).
+
+## Phase history retained
+
+| Workload | Before phase 17 ms | Initial Result5 ms | Current Result5 ms |
+|---|---:|---:|---:|
+| larceny/gcbench | 99.980 | 94.913 | 91.792 |
+| beng/binarytrees | 4.099 | 3.887 | 3.753 |
+| larceny/quicksort | 1.660 | 1.715 | 1.298 |
+| larceny/triangl | 619.608 | 158.933 | 155.499 |
+| larceny/deriv | 18.997 | 8.653 | 8.465 |
+| larceny/pnpoly | 13.678 | 7.436 | 7.332 |
+
+These columns were captured sequentially; use the individual rounds' paired
+controls for attribution. The complete initial Result5 JSON and report are
+embedded as `previous_round` and `previous_round_report` in the current JSON.
+Original JSON SHA-256: `b3db70ded08c5c857bfd7d133dd4273f71b3f198ad1b3bdeee7bd6b2f1b4d8b5`.
+Its exact local backup remains `temp/mvp_lmd_recursive_20261008/original_Result5.json`.
+The initial round's all-42 paired gain was **1.093×**; its five original target
+kernels improved **1.771×** geometrically against the preceding numeric release.
 
 ```sh
-python3 temp/mvp_lmd_slow_tuning_20261008/paired.py \
-  --candidate temp/mvp_lmd_slow_tuning_20261008/final/candidate.exe \
-  --control temp/mvp_lmd_slow_tuning_20261008/final/control.exe \
-  --output temp/mvp_lmd_slow_tuning_20261008/replay \
+python3 temp/mvp_lmd_recursive_20261008/paired.py \
+  --candidate temp/mvp_lmd_recursive_20261008/final/candidate.exe \
+  --control temp/mvp_lmd_recursive_20261008/final/control.exe \
+  --output temp/mvp_lmd_recursive_20261008/replay \
   --runs 15 --references --baseline-references
 ```

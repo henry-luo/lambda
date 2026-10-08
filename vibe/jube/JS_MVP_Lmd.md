@@ -750,39 +750,47 @@ pending.
 
 ## 17. Slow-kernel tuning
 
-**Status:** implemented; release pairing, targeted semantic/GC, Lambda/input
-and Test262 gates pass; 2026-10-08.
-Prioritize `triangl`, then `deriv`, `gcbench`, `pnpoly`, and `binarytrees`.
+**Status:** implemented; latest paired release benchmarks pass; 2026-10-08.
+Prioritize `triangl`, `deriv`, `gcbench`, `pnpoly`, `binarytrees`, and optional
+integer conversions in `quicksort`.
 
-- Retain integer element carriers and separate presence flags through nested
-  indexing; use proven element ranges after preserving missing-key errors.
-- Lower conditions directly to branches, preserving short-circuit order.
-- Carry read-only literal array and object facts through closed calls, and
-  admit initialized, unchanged local function factories to existing direct
-  call/inlining paths. Named function expressions retain their self entry.
-- Reuse guarded Lambda shape stores for nullable object fields and compare
-  strict null/undefined singleton values directly.
+- Retain integer elements and optional locals with separate presence flags;
+  preserve missing values, NaN, signed zero, and snapshot ownership.
+- Lower conditions directly to branches and carry immutable container facts
+  through closed calls and unchanged local factories.
+- Reuse guarded Lambda shape stores, plain-Item returns for closed nonnumeric
+  factories, and precise roots. Evaluate fixed-key literal values in order
+  before allocating their unobservable parent; avoid scalar storage for
+  nonnumeric locals.
 
-Reuse existing Lambda storage, shape, scalar-home, and precise-root emitters
-under **D2.2.5**, **D2.4.3**, **D3.4.3**, **D5.3.4**, and **D8.2.6**.
-The two disclosed compiler helpers are `branch_condition` and
-`immutable_member_kind`; no runtime helper is added. Preserve missing values,
-signed zero, coercion order, mutations, and snapshot ownership (**S1.11**).
-Confirm with semantic/GC checks and frozen, paired release measurements over
-all 42 workloads, with pinned MIR and self-reported execution time.
+Reuse Lambda storage, range, conversion, map allocation, return ABI and precise
+root machinery (**S1.11**, **D2.2.5**, **D2.4.3**, **D3.4.3v5**,
+**D5.2.1v3**, **D5.3.4**, **D8.2.6**). The original two disclosed compiler
+helpers remain `branch_condition` and `immutable_member_kind`; this follow-up
+adds no helper or runtime import.
 
-**Latest result:** 15 release pairs pass **3,330 measured and 222 discarded
-output checks**. `triangl` improves **3.90×** (619.61 → 158.93 ms), reducing
-its gap to Node from about 9× to **2.33×**. `deriv` improves **2.20×**,
-`pnpoly` **1.83×**, and both tree kernels about **1.05×**. Across 25 standard
-kernels, MVP is **1.217× faster than untyped Lambda** and **2.376× faster than
-Node** geometrically. `quicksort` regresses **3.3%**; no workload's paired
-median slowdown exceeds 5%. See the [full paired report](../../test/benchmark/js_mvp_lmd/MVP_Result5.md).
+**Latest Result5:** 15 alternating release pairs over all 42 unchanged workloads,
+pinned MIR and self-reported execution time, pass **3,330 measured and 222
+discarded output checks**. Against the preceding Result5 candidate:
 
-Targeted MVP tests pass **37/37**, normally and with forced GC/poisoning.
-Lambda/input passes **6,362/6,362**; full-JS Test262 passes **40,261/40,261**
-with zero retries, unstable cases or regressions. Test262 checks the shared
-host; it does not expand MVP's admitted feature set.
-The [implementation record](../impl/JS_MVP_Lmd_Slow_Tuning.md) records the
-acceptance gates and remaining work: recursive allocation, stronger
-control-flow bounds, and optional-number local conversions.
+| Workload | Before → after ms | Paired gain |
+|---|---:|---:|
+| quicksort | 1.707 → 1.298 | 1.316× |
+| gcbench | 95.970 → 91.792 | 1.046× |
+| binarytrees | 3.981 → 3.753 | 1.061× |
+| triangl | 157.987 → 155.499 | 1.016× |
+| deriv | 8.789 → 8.465 | 1.040× |
+| pnpoly | 7.425 → 7.332 | 1.017× |
+
+All 42 improve **1.025×** geometrically. Across 25 standard kernels, MVP is
+**1.247× faster than untyped Lambda** and **2.444× faster than Node**.
+Escaped object retyping retains a **2.2% slowdown**, confirmed with 30 further
+pairs; no full-run workload slows by more than 5% at its paired median.
+The [Result5 report](../../test/benchmark/js_mvp_lmd/MVP_Result5.md) and JSON
+retain the initial round and both current comparisons.
+
+The release build passes. Unit, forced-GC and baseline suites were not rerun
+for this follow-up; the initial round's gates apply to its earlier binary.
+Remaining work includes recursive allocation/collection cost and stronger
+control-flow bounds. Details and validation scope are in the
+[implementation record](../impl/JS_MVP_Lmd_Slow_Tuning.md).

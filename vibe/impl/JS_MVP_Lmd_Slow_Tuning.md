@@ -1,114 +1,101 @@
 # JS MVP slow-kernel tuning
 
 **Date:** 2026-10-08  
-**Status:** implemented; targeted semantic/GC, release pairing, Lambda/input
-and Test262 gates passed.
+**Status:** implemented; latest release build and benchmark output checks pass.
+Unit, forced-GC and baseline suites were not rerun for the latest follow-up.
 
 Scope: [MVP §17](../jube/JS_MVP_Lmd.md#17-slow-kernel-tuning).
-Authorities: **S1.11**, **D2.2.5**, **D2.4.3**, **D3.4.3**, **D5.3.4**,
-**D8.2.6**. No formal ruling changes.
+Authorities: **S1.11**, **D2.2.5**, **D2.4.3**, **D3.4.3v5**,
+**D5.2.1v3**, **D5.3.4**, **D8.2.6**. No formal ruling changes.
 
-## Changes and reuse
+## Current changes and reuse
 
-- Integer literal and typed-array element reads retain an i64 value plus a
-  presence flag. Missing integer payloads are zero; numeric coercion produces
-  NaN, boxing produces undefined, and truth/equality retain JS semantics.
-  Existing `em_unbox_finite_int_item`, numeric storage/address emitters, and
-  scalar homes provide the physical operations. Immediate numeric consumers
-  merge absence into NaN at the load, avoiding a second conversion branch.
-- Nested indexing uses the range of a present integer element. Missing keys
-  still reach the capability error in the same evaluation order. Unproved
-  bounds retain their checks, and no data pointer crosses a call/GC boundary.
-- Boolean conditions lower `&&`, `||`, and `!` directly to branches. Value
-  contexts retain their original operand results and short-circuit behavior.
-- A closed unit without property mutation or computed/non-identifier object
-  keys can propagate numeric literal-array facts through aliases and calls.
-  The same conservative admission summarizes literal object field kinds.
-  Missing fields contribute undefined; duplicate fields use the last value.
-  These facts do not remove the existing runtime shape guards.
-- Nullable object fields can use predicted Map storage with a value-kind
-  guard and the existing Lambda shape-transition fallback. Strict equality
-  against null or undefined compares their singleton Item encodings.
-- Dominated, unchanged local function initializers reuse direct calls and
-  bounded inlining. Unobserved function identities need no allocation. Named
-  expressions keep the boxed entry that supplies their self binding. The
-  second facts walk no longer mistakes revisiting an initializer for a write.
+- Optional integer locals retain an i64 payload plus a presence flag. The
+  existing range fixed point tracks present-value ranges separately: ordinary
+  arithmetic still treats absence as unknown/NaN. Undefined contributes no
+  present payload; fractional values, negative zero and unresolved cycles
+  prevent integer admission. Dynamic string keys retain the generic range
+  because a successful read may be `length`.
+- Existing scalar conversion, snapshot, equality, relational and typed-array
+  store emitters consume that carrier. Missing payloads stay zero; boxing
+  produces undefined and numeric conversion produces NaN. Integer comparisons
+  also inspect presence; missing values remain unordered. ToInt32(undefined)
+  is zero, while Float64 stores preserve NaN.
+- Closed factories whose result domain excludes Number use Lambda's existing
+  plain-Item return ABI. Producer and consumer read the same return descriptor;
+  pending scalar resolution and caller number homes are omitted only for this
+  domain. Dynamic calls retain their existing companion convention.
+- Nonnumeric local values copy their rooted Items without scalar adoption.
+  Number-capable values retain existing destination-owned scalar homes.
+- Fixed-key planned object literals evaluate their values once, in source
+  order, before allocating the unobservable parent. Child snapshots remain
+  precise roots across later initializers and the existing `map_alloc_for_type`
+  call. Computed/duplicate-key literals retain the incremental path. Existing
+  shape guards and transition fallback still handle field type mismatches.
 
-## Disclosed helpers
+All changes are in `lambda/js/mvp-lmd/mvp_lmd_mir.cpp`. Shared runtime,
+allocator, benchmark and vendor sources are unchanged. No new compiler/runtime
+helper or import was added; existing functions were extended.
 
-Both helpers are in `lambda/js/mvp-lmd/mvp_lmd_mir.cpp` and were disclosed
-before implementation. No runtime helper, import, allocator, GC hook, or
-full-LambdaJS dependency was added.
+The initial round also introduced direct condition branches, integer element
+carriers, immutable container facts across closed calls, nullable object shape
+stores, and local factory inlining. Its two disclosed compiler helpers were
+`branch_condition` and `immutable_member_kind`; both remain compiler-only.
 
-| Helper | Purpose and reuse boundary | Ownership |
-|---|---|---|
-| `branch_condition` | Traverse JS logical conditions using existing truth and MIR branch emitters; Lambda AST traversal cannot consume JS AST nodes | Compiler only; original operand order and rooting |
-| `immutable_member_kind` | Summarize successful literal property reads in an admitted immutable unit using the existing AST index and kind fixed point | Pool-owned compiler metadata; no runtime allocation |
+## Latest release evidence
 
-## Correctness boundaries
+[Result5](../../test/benchmark/js_mvp_lmd/MVP_Result5.md) contains the complete
+42-workload comparison, fresh Node/untyped Lambda references, raw samples,
+bootstrap intervals and the initial round's history.
 
-The existing snapshot tests caught a lost unknown-range fact after array
-parameter propagation: absence of an integer-content proof must be unknown,
-not fixed-point bottom. The fix preserves negative zero and tiny fractions
-when later assignments have integer values. The existing named recursive
-function-expression test also caught a missing self argument; such entries
-remain on their existing boxed ABI.
-
-New regression cases cover optional integer elements, numeric/string/bitwise
-coercion, missing nested keys, short-circuit order, read-only arrays across
-calls, property mutation/deletion/computed-key invalidation, recursive object
-fields, and local factory identity/reassignment/TDZ. Global literal facts are
-fixed before lowering; guarded inlining does not rewrite that summary.
-
-## Evidence
-
-- Release build: `make build-release-compile`, log
-  `temp/mvp_lmd_slow_tuning_20261008/build9.log`; zero errors, 28 existing
-  warnings. Both frozen executable files are 19,549,432 bytes.
-- Rebuilt focused executable: `make -C build/premake config=release_native
-  test_js_mvp_lmd_gtest -j8`. All **37/37** tests pass normally and again with
-  `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. Logs are
-  `tests-final.log` and `tests-gc-final.log` under the same temporary directory;
-  the tested binary is frozen as `mvp-tests-release.exe` (SHA-256
-  `60df763e5456b1ebcc7c00dc1f40232df5eadcbe14a2aa1677b8ce033321f59a`).
-- [Final paired comparison](../../test/benchmark/js_mvp_lmd/MVP_Result5.md):
-  42 workloads, 15 alternating release pairs, pinned native MIR, self-reported
-  times, an identical-control peer, Node, and 27 untyped Lambda
+- Build: `make build-release-compile`; **zero errors, 28 existing warnings**.
+  Logs: `temp/mvp_lmd_recursive_20261008/build4.log` and `build4-full.log`.
+- Control is the exact initial Result5 candidate:
+  `172cf89c2a781b8dc15b291c335cfb8518fda54a8110c2e857a1e10ee409f1c5`.
+- New candidate:
+  `190d5f602876b1023ba83e9d25eee603af5fd938ebf64c3aaaefe1ef8ff38cf7`.
+- Compiler source:
+  `88c5dfdc937f124f7555fababe55ae5df4bafe675854df9b733ceedd8319e832`.
+- **15 alternating release pairs**, pinned native MIR, self-reported execution
+  times, identical-control peer, Node v22.13.0 and 27 untyped Lambda
   control/candidate comparisons. All **3,330 measured and 222 discarded
-  outputs match**. Compiler, binary, benchmark, runner and Node identities
-  are checked and recorded in the linked JSON. Frozen sources/binaries, raw
-  outputs and MIR are under `temp/mvp_lmd_slow_tuning_20261008/final/`.
-- Target paired gains: `triangl` **3.897×**, `deriv` **2.199×**, `pnpoly`
-  **1.829×**, `gcbench` **1.054×**, and `binarytrees` **1.055×**. The five
-  improve **1.771×** geometrically; all 42 improve **1.093×**. Each target's
-  95% interval excludes no change, with its identical-control peer within
-  0.4% of parity. Static MIR instruction counts and total process time also
-  decrease for every target; parsing/JIT latency was not isolated.
-- `quicksort` retains a **3.3%** slowdown (95% ratio interval: **2.3–4.0%**).
-  Numeric-demand loads avoid one unnecessary conversion, but optional local
-  snapshots still convert integer carriers to doubles. No workload's paired
-  median slowdown exceeds 5%. Other small changes remain noise-sensitive.
-- `make test-lambda-baseline`: **6,362/6,362** on the first run (2,104 input
-  and 4,258 runtime cases), including **20/20** MIR-size checks and **37/37**
-  MVP cases. Log: `temp/mvp_lmd_slow_tuning_20261008/lambda-baseline.log`.
-- `make test262-baseline`: **40,261/40,261** fully pass, with **zero retries,
-  unstable cases, batch failures or regressions**; all 169 batches exit zero.
-  The baseline excludes 2,652 discovered tests. Log:
-  `temp/mvp_lmd_slow_tuning_20261008/test262-baseline.log`. This is a shared
-  full-JS regression gate, not a claim that MVP supports all Test262 features.
-  The resulting installed release matches the measured candidate SHA-256.
-- `git diff --check` passes. No shared runtime, benchmark source or vendor
-  source changed in this phase.
+  outputs match** unchanged oracles. Sources, binaries, runner and Node hashes
+  were checked. Frozen artifacts are under
+  `temp/mvp_lmd_recursive_20261008/final/`.
+
+| Workload | Control → candidate ms | Paired gain | Candidate/control 95% interval |
+|---|---:|---:|---:|
+| quicksort | 1.707 → 1.298 | 1.316× | 0.760–0.772 |
+| gcbench | 95.970 → 91.792 | 1.046× | 0.951–0.961 |
+| binarytrees | 3.981 → 3.753 | 1.061× | 0.935–0.962 |
+| triangl | 157.987 → 155.499 | 1.016× | 0.982–0.987 |
+| deriv | 8.789 → 8.465 | 1.040× | 0.943–0.983 |
+| pnpoly | 7.425 → 7.332 | 1.017× | 0.975–0.995 |
+
+The six improve **1.078×** geometrically; all 42 improve **1.025×**.
+Quicksort's MIR instruction count falls **841 → 605**, and static I2D/D2I
+counts fall **18/19 → 12/11**. These are compiler-output counts, not native
+instruction or hardware-counter measurements. Paired evidence measures the
+whole tuning bundle, not individual changes.
+
+The retained tradeoff is escaped object retyping: **2.2% slower**, confirmed
+with 30 additional pairs (90 measured and three discarded matching outputs)
+under `temp/mvp_lmd_recursive_20261008/retype_followup/`. The follow-up remains
+separate in the JSON; it does not overwrite the full-run table. No full-run
+workload has a paired median slowdown above 5%.
+
+Unit, forced-GC and baseline suites were **not rerun for this follow-up**.
+The initial round passed 37/37 MVP tests normally and with forced GC/poisoning,
+6,362/6,362 Lambda/input cases, and 40,261/40,261 Test262 cases with zero
+retries or instability. Those gates apply to the control binary only; their
+logs/hashes are retained in Result5 JSON's `previous_round.validation` and
+`temp/mvp_lmd_slow_tuning_20261008/validation.json`.
 
 ## Remaining scope
 
-Node remains faster on these five kernels: **2.33×** for `triangl`, **2.25×**
-for `deriv`, **4.31×** for `gcbench`, **1.28×** for `pnpoly`, and **1.87×** for
-`binarytrees`. All five now beat their untyped Lambda ports. These comparisons
-are fresh-process workload times, not fully warmed Node throughput.
-
-Recursive allocation, more complete control-flow bounds, and preserving
-optional integer locals across snapshots remain follow-up work. This phase
-does not introduce region allocation, change array storage, or add runtime
-shape feedback. §15's complete constructor/Math edge matrix remains separate
-from this phase's targeted semantic/GC checks.
+Object allocation and collection still dominate part of the recursive tree
+cost. This change reuses the existing allocator and precise roots; it adds no
+region allocation or runtime shape feedback. Stronger control-flow bounds,
+optional values through more generic/inlined paths, and the small escaped
+retyping regression remain tuning opportunities. The complete constructor/Math
+edge matrix from §15 is separate from this phase's benchmark evidence.
