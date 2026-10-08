@@ -59,7 +59,9 @@ static Item create_link_from_definition(MarkupParser* parser,
         char* text_copy = mem_strndup(link_text, text_len, MEM_CAT_INPUT_MARKUP);
         highlight_set_child_origin(parser, link_text);
         if (text_copy) {
+            parser->state.link_depth++;
             Item inner_content = parse_inline_spans(parser, text_copy);
+            parser->state.link_depth--;
             if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
                 list_push((List*)link, inner_content);
             }
@@ -598,7 +600,9 @@ Item parse_link(MarkupParser* parser, const char** text) {
                 highlight_set_child_origin(parser, text_start);
                 if (link_text) {
                     // Recursively parse inline content
+                    parser->state.link_depth++;
                     Item inner_content = parse_inline_spans(parser, link_text);
+                    parser->state.link_depth--;
                     if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
                         list_push((List*)link, inner_content);
                     }

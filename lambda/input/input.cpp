@@ -2558,6 +2558,7 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     input->parse_error_message = nullptr;
     input->parse_embedded_math = false;
     input->embedded_math = nullptr;
+    input->embedded_diagrams = nullptr;
     input->parse_options = nullptr;
     input->xml_stylesheet_href = nullptr;
     // D4.2.6: the Input lives in `pool`, so the pool releases it at the latest.

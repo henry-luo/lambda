@@ -1644,6 +1644,8 @@ typedef struct Input {
     // without walking the tree (pool-owned; null when the document has no math)
     bool parse_embedded_math;
     Array* embedded_math;
+    // Markdown Mermaid fences, retained as source nodes until document presentation.
+    Array* embedded_diagrams;
     // the caller's parse options, valid only while its parser runs (nullable)
     const struct InputParseOptions* parse_options;
     // StringBuf* sb;

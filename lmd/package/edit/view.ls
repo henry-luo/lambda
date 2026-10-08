@@ -138,8 +138,7 @@ fn md_children(item) => join([for (c in content(item)) md_html(c)], "")
 
 fn md_html(item) {
   if (type(item) == string) { escape_text(item) }
-  // the parser keeps a :name: emoji shortcode as a bare symbol
-  else if (type(item) == symbol) { escape_text(":" ++ string(item) ++ ":") }
+  else if (type(item) == symbol) { format([item], 'html') }
   else if (type(item) != element) { "" }
   else {
     let tag = string(name(item))
@@ -155,7 +154,8 @@ fn md_html(item) {
     else if (tag == "footnote-ref") { "<sup class=\"edit-view-note\">[" ++ escape_text(string(item.ref)) ++ "]</sup>" }
     else if (tag == "a") { "<a" ++ attr_html("title", string(item.href or "")) ++ ">" ++ md_children(item) ++ "</a>" }
     else if (tag == "img") {
-      "<img" ++ attr_html("src", string(item.src or "")) ++ attr_html("alt", string(item.alt or "")) ++ ">"
+      "<img" ++ attr_html("src", string(item.src or "")) ++ attr_html("alt", string(item.alt or "")) ++
+        (if (item.style == null) "" else attr_html("style", string(item.style))) ++ ">"
     }
     else if (tag == "input") {
       "<input type=\"checkbox\" disabled=\"disabled\"" ++ (if (item.checked != null) " checked=\"checked\"" else "") ++ ">"

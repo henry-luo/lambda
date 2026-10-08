@@ -136,6 +136,7 @@ fn render_node(n, kids) {
   else if (tag == 'span') <span *kids>
   else if (tag == 'raw_html') view_inline(n, "HTML", kept_source(n))
   else if (tag == 'math') view_inline(n, "Math", "$" ++ attr_get(n, 'tex') ++ "$")
+  else if (tag == 'emoji') view_inline(n, "Emoji", ":" ++ attr_get(n, 'name') ++ ":")
   else if (tag == 'html_block') view_block(n, "HTML", kept_source(n))
   else if (tag == 'math_block') view_block(n, "Math", "$$" ++ attr_get(n, 'tex') ++ "$$")
   else if (tag == 'md_source') view_block(n, "Markdown", attr_get(n, 'markdown'))

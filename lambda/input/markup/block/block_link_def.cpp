@@ -11,10 +11,27 @@
  * reference-style links during inline parsing.
  */
 #include "block_common.hpp"
+#include "../markup_highlight.hpp"
 #include "../../../../lib/mem.h"
 
 namespace lambda {
 namespace markup {
+
+bool parse_definition_block(MarkupParser* parser, const char* line) {
+    if (parser->config.format != Format::MARKDOWN) return false;
+    int start = parser->current_line;
+    if (parser->parseFootnoteDefinition(line)) {
+        highlight_note_block(parser, "footnote_def", start, parser->current_line);
+        return true;
+    }
+    if (is_link_definition_start(line) && parse_link_definition(parser, line)) {
+        highlight_note_block(parser, "link_def", start, parser->current_line + 1);
+        parser->current_line++;
+        return true;
+    }
+    parser->current_line = start;
+    return false;
+}
 
 /**
  * is_link_definition_start - Check if a line might start a link definition

@@ -207,6 +207,9 @@ Item parse_raw_html(MarkupParser* parser, const char** text);
  */
 Item parse_autolink(MarkupParser* parser, const char** text);
 
+bool is_extended_autolink_start(const char* text, const char* begin);
+Item parse_extended_autolink(MarkupParser* parser, const char** text);
+
 // ============================================================================
 // Format-Specific Inline Parsers
 // ============================================================================

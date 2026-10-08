@@ -672,11 +672,6 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
         lines_array[i] = (char*)content_lines->data[i];
     }
 
-    // Save current parser state
-    char** saved_lines = parser->lines;
-    size_t saved_line_count = parser->line_count;
-    size_t saved_current_line = parser->current_line;
-
     // Save and temporarily reset list depth
     // This allows indented code blocks to be detected inside list items
     int saved_list_depth = parser->state.list_depth;
@@ -684,9 +679,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
 
     // Set up parser to process the content lines
     highlight_push_lines(parser, lines_array, num_lines, first_source_line);
-    parser->lines = lines_array;
-    parser->line_count = num_lines;
-    parser->current_line = 0;
+    MarkupLinesScope line_scope(parser, lines_array, (int)num_lines);
 
     // Create container for parsed blocks
     Element* content_container = create_element(parser, "div");
@@ -701,21 +694,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
             continue;
         }
 
-        // Check for link definition first - these should be consumed silently
-        // (they were already added to the link map during pre-scan or are added now)
-        if (is_link_definition_start(content_line)) {
-            log_debug("list: found potential link def: '%s'", content_line);
-            int saved = parser->current_line;
-            if (parse_link_definition(parser, content_line)) {
-                // Link definition was successfully parsed - skip it
-                log_debug("list: link definition parsed, skipping");
-                highlight_note_block(parser, "link_def", saved, parser->current_line + 1);
-                parser->current_line++;
-                continue;
-            }
-            log_debug("list: not a valid link definition");
-            parser->current_line = saved;
-        }
+        if (parse_definition_block(parser, content_line)) continue;
 
         // Detect block type of the stripped content
         int line_before = parser->current_line;
@@ -731,10 +710,8 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
     }
 
     // Restore parser state
-    parser->lines = saved_lines;
+    line_scope.restore();
     highlight_pop_lines(parser, lines_array);
-    parser->line_count = saved_line_count;
-    parser->current_line = saved_current_line;
     parser->state.list_depth = saved_list_depth;
 
     // Free allocated lines and array
@@ -1078,11 +1055,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         lines_array[i] = (char*)content_lines->data[i];
                     }
 
-                    // Save and replace parser state
-                    char** saved_lines = parser->lines;
-                    size_t saved_line_count = parser->line_count;
-                    size_t saved_current_line = parser->current_line;
-
                     // Save and temporarily reset list depth
                     // This allows indented code blocks to be detected inside list items
                     int saved_list_depth = parser->state.list_depth;
@@ -1094,9 +1066,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     parser->state.parsing_list_content = true;
 
                     highlight_push_lines(parser, lines_array, num_lines, first_source_line);
-                    parser->lines = lines_array;
-                    parser->line_count = num_lines;
-                    parser->current_line = 0;
+                    MarkupLinesScope line_scope(parser, lines_array, (int)num_lines);
 
                     // Track for loose list detection:
                     // We need to detect if there's a blank line in the content
@@ -1143,22 +1113,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             continue;
                         }
 
-                        // Check for link definition first - these should be consumed silently
-                        // (they were already added to the link map during pre-scan or are added now)
-                        log_debug("list structure: checking line '%s' for link def", content_line);
-                        if (is_link_definition_start(content_line)) {
-                            log_debug("list structure: is_link_definition_start returned true");
-                            int saved = parser->current_line;
-                            if (parse_link_definition(parser, content_line)) {
-                                // Link definition was successfully parsed - skip it
-                                log_debug("list structure: parse_link_definition returned true, skipping");
-                                highlight_note_block(parser, "link_def", saved, parser->current_line + 1);
-                                parser->current_line++;
-                                continue;
-                            }
-                            log_debug("list structure: parse_link_definition returned false");
-                            parser->current_line = saved;
-                        }
+                        if (parse_definition_block(parser, content_line)) continue;
 
                         int line_before = parser->current_line;
                         Item block_item = parse_list_block_item(parser, content_line);
@@ -1179,10 +1134,8 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     }
 
                     // Restore parser state
-                    parser->lines = saved_lines;
+                    line_scope.restore();
                     highlight_pop_lines(parser, lines_array);
-                    parser->line_count = saved_line_count;
-                    parser->current_line = saved_current_line;
                     parser->state.list_depth = saved_list_depth;
                     parser->state.parsing_list_content = saved_parsing_list_content;
 

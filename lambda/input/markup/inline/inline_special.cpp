@@ -224,48 +224,30 @@ Item parse_subscript(MarkupParser* parser, const char** text) {
  * Handles: :smile:, :heart:, etc.
  */
 Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
-    const char* start = *text;
-
-    // Must start with :
-    if (*start != ':') {
+    size_t consumed = 0;
+    const EmojiShortcode* entry = emoji_shortcode_match(*text, SIZE_MAX, &consumed);
+    if (!entry) {
         return Item{.item = ITEM_UNDEFINED};
     }
-
-    const char* pos = start + 1;
-    const char* name_start = pos;
-
-    // Find closing : (alphanumeric and _ only)
-    while (*pos && (str_char_is_alnum(*pos) || *pos == '_' || *pos == '+' || *pos == '-')) {
-        pos++;
+    if (entry->image_url) {
+        // custom GitHub emoji have no Unicode value; retain their alias on an inline image.
+        Element* image = create_element(parser, "img");
+        if (!image) return Item{.item = ITEM_ERROR};
+        add_attribute_to_element(parser, image, "src", entry->image_url);
+        add_attribute_to_element(parser, image, "class", "emoji");
+        add_attribute_to_element(parser, image, "data-emoji", entry->name);
+        add_attribute_to_element(parser, image, "style", "width:1em;height:1em;vertical-align:-0.1em");
+        String* alt_key = parser->builder.createString("alt");
+        String* alt = parser->builder.createString(*text, consumed);
+        if (!alt_key || !alt) return Item{.item = ITEM_ERROR};
+        parser->builder.putToElement(lam::gc_borrow(image), alt_key, Item{.item = s2it(alt)});
+        *text += consumed;
+        return Item{.item = (uint64_t)image};
     }
-
-    if (*pos != ':' || pos == name_start) {
-        // No closing : or empty name
-        return Item{.item = ITEM_UNDEFINED};
-    }
-
-    size_t name_len = pos - name_start;
-    // Only create a Symbol when the shared renderer can resolve its name.
-    if (!emoji_shortcode_lookup(name_start, name_len)) {
-        return Item{.item = ITEM_UNDEFINED};
-    }
-
-    // Extract shortcode name
-    char* shortcode_name = mem_strndup(name_start, name_len, MEM_CAT_INPUT_MARKUP);
-    if (!shortcode_name) {
-        return Item{.item = ITEM_ERROR};
-    }
-
-    // Create Symbol with the shortcode name
-    Symbol* symbol_str = create_symbol(parser, shortcode_name);
-    mem_free(shortcode_name);
-
-    if (!symbol_str) {
-        return Item{.item = ITEM_ERROR};
-    }
-
-    *text = pos + 1; // Skip closing :
-    return Item{.item = y2it(symbol_str)};
+    Symbol* symbol = create_symbol(parser, entry->name);
+    if (!symbol) return Item{.item = ITEM_ERROR};
+    *text += consumed;
+    return Item{.item = y2it(symbol)};
 }
 
 /**

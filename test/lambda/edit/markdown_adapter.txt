@@ -33,11 +33,11 @@ true
 "gate on unrepresentable formatting:"
 ["block 1 <p> \"under\" would change"]
 "kept blocks:"
-['p', 'md_source', 'md_source', 'md_source', 'md_source', 'p']
+['p', 'md_source', 'md_source', 'md_source', 'p']
 "kept source:"
-["Text[^1] here.", "*Italic with **nested bold***", "[^1]: a note,  spaced", "[ref]: https://example.com"]
+["Text[^1] here.", "*Italic with **nested bold***", "[^1]: a note,  spaced\n\n[ref]: https://example.com"]
 "kept views:"
-["<p>Text<sup class=\"edit-view-note\">[1]</sup> here.</p>", "<p><em>Italic with <strong>nested bold</strong></em></p>", "<p><sup class=\"edit-view-note\">[1]</sup>: a note,  spaced</p>"]
+["<p>Text<sup class=\"edit-view-note\">[1]</sup> here.</p>", "<p><em>Italic with <strong>nested bold</strong></em></p>"]
 "kept blocks save byte for byte:"
 true
 "gate on kept blocks passes:"

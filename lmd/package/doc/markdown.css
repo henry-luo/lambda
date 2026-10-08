@@ -390,6 +390,19 @@ summary {
 }
 
 /* Footnotes */
+footnotes, footnote {
+    display: block;
+}
+
+footnote {
+    margin: 0.5em 0;
+}
+
+footnote::before {
+    content: attr(number) ". ";
+    font-weight: bold;
+}
+
 .footnote-ref {
     font-size: 75%;
     vertical-align: super;

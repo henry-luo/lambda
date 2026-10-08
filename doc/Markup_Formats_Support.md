@@ -24,7 +24,7 @@ All lightweight markup flavors (Markdown, reStructuredText, AsciiDoc, …) parse
 
 | Format | Input type string | Notes |
 |--------|:-----------------:|-------|
-| CommonMark / GitHub Flavored Markdown | `markdown` (`md`) | passes the CommonMark test suite; `{type: 'markup', flavor: 'commonmark'}` selects strict CommonMark |
+| CommonMark / GitHub Flavored Markdown | `markdown` (`md`) | CommonMark plus GFM tables, tasks, strikethrough and bare autolinks; math, Mermaid, footnotes and all aliases in the versioned GitHub emoji catalog; embedded HTML without GFM tag filtering. See [Markdown dialect](../vibe/input/Input_Markdown.md). `{type: 'markup', flavor: 'commonmark'}` selects strict CommonMark. |
 | reStructuredText | `rst` | |
 | MediaWiki / DokuWiki markup | `wiki` | |
 | AsciiDoc | `asciidoc` / `adoc` | |
@@ -72,9 +72,9 @@ Every prose parser produces the same element-tree shape. Element names are align
 | Image | `<img src: …, alt: …>` | |
 | Line break | `<br>` | |
 | Math | `<math type: "inline">`, `<math type: "block">` | the content is the TeX source without delimiters |
-| Footnote | `<footnote-ref ref: "1">` in the text; `<footnote>` holds the text | custom elements |
+| Footnote | `<footnote-ref ref: "label", number: "1">` in the text; `<footnotes>` contains `<footnote label: "label", id: "fn-1", number: "1">` definitions | Markdown resolves forward and repeated references; note bodies retain block content |
 | Citation | `<citation key: "smith2020">` | custom element |
-| Emoji shortcode | `'smile'` | currently a bare symbol, not converted to the character |
+| Emoji shortcode | `'smile'` or `<img data-emoji: "octocat", …>` | Unicode aliases remain symbols and resolve during HTML formatting and rendering; custom image aliases retain their name on an inline image. Both write back as `:name:`. See [emoji coverage](../vibe/input/Input_Markdown.md#emoji-implementation-audit). |
 
 ### 1.3 Side-by-Side: Markdown → Mark Doc
 

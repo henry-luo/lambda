@@ -529,9 +529,19 @@ view <span> { <span class:~.class, style:~.style, *[rendered_children(~)]> }
 view <strong> { <strong *[rendered_children(~)]> }
 view <em> { <em *[rendered_children(~)]> }
 view <del> { <del *[rendered_children(~)]> }
+view <footnotes> { <section class:"footnotes", *[rendered_children(~)]> }
+view <footnote> {
+  let label = (if (~.number != null) ~.number else ~.label) ++ ". ";
+  let marker = <span class:"footnote-number", label>;
+  <div class:"footnote", id:~.id, *[[marker] ++ rendered_children(~)]>
+}
 view <u> { <u *[rendered_children(~)]> }
 view <code> {
-  if (~.type == "block") { <pre <code *[rendered_children(~)]>> }
+  if (~.type == "block" and ~.language == "mermaid") {
+    let source = if (len(content(~)) > 0) content(~)[0] else ""
+    graph_doc.from_mermaid(source) ^ { <pre class:"diagram-error", <code source>> }
+  }
+  else if (~.type == "block") { <pre <code *[rendered_children(~)]>> }
   else { <code *[rendered_children(~)]> }
 }
 view <math> {
@@ -552,7 +562,7 @@ view <ol> { <ol *[rendered_children(~)]> }
 view <li> { <li *[rendered_children(~)]> }
 view <blockquote> { <blockquote *[rendered_children(~)]> }
 view <a> { <a href:~.href, *[rendered_children(~)]> }
-view <img> { <img src:~.src, alt:~.alt> }
+view <img> { <img src:~.src, alt:~.alt, class:~.class, style:~.style, ["data-emoji"]:~["data-emoji"]> }
 view <br> { <br> }
 view <hr> { <hr> }
 view <table> { <table *[rendered_children(~)]> }

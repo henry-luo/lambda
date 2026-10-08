@@ -5,7 +5,7 @@
 "replaced elements show:"
 [1, 1, 1]
 "markdown block:"
-["<p>Press <kbd>K</kbd>, see <a title=\"https://example.com\">docs</a> and <img src=\"p.png\" alt=\"p\"><sup class=\"edit-view-note\">[1]</sup>.</p>"]
+["<p>Press <kbd>K</kbd>, see <a title=\"https://example.com\">docs</a> and <img src=\"p.png\" alt=\"p\">[^1].</p>"]
 "markdown block with raw script:"
 ["<p>Hi  there.</p>"]
 "markdown math renders:"

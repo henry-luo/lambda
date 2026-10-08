@@ -2241,6 +2241,7 @@ TEST(RadiantViewTest, BatchLoaderRuntimeMatchesFreshRuntimes) {
         {"test/input/simple_math_test.md", "input__simple_math_test.json", "simple_math_test.json"},
         {"test/input/test_graph.dot", "input__test_graph.json", "test_graph.json"},
         {"test/input/tikz/plot_parametric.pgf", "tikz__plot_parametric.json", "plot_parametric.json"},
+        {"test/input/markdown_extensions.md", "input__markdown_extensions.json", "markdown_extensions.json"},
     };
     test_radiant_view_ensure_temp_dir();
     const char* output_dir = "./temp/test_loader_runtime_batch";
@@ -2251,6 +2252,7 @@ TEST(RadiantViewTest, BatchLoaderRuntimeMatchesFreshRuntimes) {
 #endif
     const char* batch_args[] = {
         "./lambda.exe", "layout", cases[0].path, cases[1].path, cases[2].path, cases[3].path,
+        cases[4].path,
         "--output-dir", output_dir, "--no-log", NULL,
     };
     ShellOptions options = {0};
@@ -2277,6 +2279,11 @@ TEST(RadiantViewTest, BatchLoaderRuntimeMatchesFreshRuntimes) {
         EXPECT_TRUE(test_radiant_view_same_view_tree(batch_path, single_path))
             << loader_case.path << " lays out differently on the shared loader runtime";
     }
+    // Verify the embedded fence became a diagram instead of surviving as source code.
+    const char* markdown_path = "./temp/test_loader_runtime_batch/input__markdown_extensions.json";
+    EXPECT_TRUE(test_radiant_view_file_contains(markdown_path, "\"tag\": \"graph\""));
+    EXPECT_TRUE(test_radiant_view_file_contains(markdown_path, "\"tag\": \"footnotes\""));
+    EXPECT_FALSE(test_radiant_view_file_contains(markdown_path, "flowchart LR"));
 }
 
 TEST(RadiantViewTest, RenderBatchReleasesImageCacheAfterDocumentOwner) {
