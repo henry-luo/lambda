@@ -2739,6 +2739,7 @@ extern "C" {
     double array_float_get_value(ArrayNum *arr, int64_t index);
     Item list_get(List *list, int64_t index);
     Item fn_string_ascii_at(Item str, int64_t index);
+    String* get_ascii_char_string(unsigned char ch);
     Item fn_string_ord_at(Item str, int64_t index);
     uint8_t fn_string_char_eq_ascii(Item str, int64_t index, uint8_t expected);
     uint8_t fn_string_char_eq(Item left, int64_t left_index,
@@ -3260,6 +3261,7 @@ extern "C" {
 
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);
+    String *str_repeat(String *str, int64_t times);
     String *fn_strcat3(String *part0, String *part1, String *part2);
     String *fn_strcat4(String *part0, String *part1, String *part2, String *part3);
     String *fn_strcat5(String *part0, String *part1, String *part2, String *part3,

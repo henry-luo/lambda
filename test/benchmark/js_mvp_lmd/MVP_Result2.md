@@ -2,7 +2,7 @@
 
 **Object/Map and inlining tuning** — [MVP §§10–12](../../../vibe/jube/JS_MVP_Lmd.md).
 
-[Series index and comparison](README.md) · [Raw JSON](MVP_Result2.json) · [Previous](MVP_Result1.md) · [Next](MVP_Result3.md)
+[Series index and comparison](README.md) · [Raw JSON](MVP_Result2.json) · [Next](MVP_Result3.md)
 
 **Phase:** Object/Map and inlining tuning.
 

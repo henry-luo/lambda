@@ -207,6 +207,66 @@ TEST_F(JsMvpLmd, GuardedIntegerRemainder) {
     numeric("function rem(x){return x%1} rem(5e-324)", 5e-324);
     numeric("var n=5; function rem(){return n++%4} rem()+n", 7);
 }
+TEST_F(JsMvpLmd, PowerOfTwoZeroTestsAndScaling) {
+    boolean("let d=2;function fast(x){return x%2===0}function slow(x){return x%d===0}"
+        "let values=[0,-0,1,-1,2,-2,1.5,-1.5,5e-324,-5e-324,9007199254740991,"
+        "9007199254740992,9007199254740994,1e100,1.7976931348623157e308,Infinity,-Infinity,NaN,'4',null,undefined];"
+        "let ok=true;for(let x of values){if(fast(x)!==slow(x))ok=false}ok");
+    boolean("let d=9007199254740992;function fast(x){return x%9007199254740992!==0}"
+        "function slow(x){return x%d!==0}let values=[0,-0,1,-1,9007199254740991,9007199254740992,"
+        "9007199254740994,-9007199254740992,1e100,Infinity,NaN];"
+        "let ok=true;for(let x of values){if(fast(x)!==slow(x))ok=false}ok");
+    boolean("function integer(x){return x%1==0}integer(-0)&&integer(-3)&&!integer(0.5)&&"
+        "!integer(5e-324)&&!integer(Infinity)&&!integer(NaN)");
+    boolean("let d=4;function fast(x){return x%4===0}function slow(x){return x%d===0}"
+        "let values=[5e-324,-5e-324,1e-323,0.9999999999999999,3.9999999999999996,"
+        "4.000000000000001,18014398509481982,18014398509481984,18014398509481988,"
+        "-18014398509481982,1.7976931348623157e308];"
+        "let ok=true;for(let x of values){if(fast(x)!==slow(x))ok=false}ok");
+    boolean("let n=0;function next(){n++;return 4}next()%2===0&&n===1");
+    boolean("function half(x){return x/2}half(7)===3.5&&1/half(-0)===-Infinity&&"
+        "1/half(-5e-324)===-Infinity&&half(1e-323)===5e-324&&half(Infinity)===Infinity&&half(NaN)!==half(NaN)");
+    error("function f(x){return x%2===0}f({})", "capability");
+}
+TEST_F(JsMvpLmd, SquareBoundsAndResetCursors) {
+    numeric("function f(n){let i=0,sum=0;while(i+2<n){sum+=i;i+=3}return sum+i}f(10)", 18);
+    numeric("function f(){let i=10,sum=0;while(i-2>0){sum+=i;i-=3}return sum+i}f()", 22);
+    numeric("function f(){let i=0;while(i+0.5<3){i++}return i}f()", 3);
+    numeric("function f(){let i=9007199254740989;while(i+2<9007199254740991){i++}return i}f()", 9007199254740989.0);
+    boolean("function f(){const a=[7];let i=3;do{const x=a[i];i=0;return x}while(i<1)}f()===undefined");
+    boolean("function f(){const a=[7];let i=0;while(i<1){i++;return a[i]}}f()===undefined");
+    boolean("function f(){const a=[7];let i=0,x=0;while(i<1){let j=0;"
+        "while(j<2){x=a[i];i=1;j++}}return x}f()===undefined");
+    boolean("function f(){const a=new Uint8Array(1);let i=0,x=0;while(i<1){"
+        "for(let j of [0,1]){x=a[i];i=1}}return x}f()===undefined");
+    numeric("function f(n){let count=0;for(let i=2;i*i<=n;i++){count++}return count}f(1000)", 30);
+    boolean("function f(n){let a=new Uint8Array(n+1);for(let i=2;i*i<=n;i++){"
+        "for(let j=i*i;j<=n;j+=i){a[j]=1}}return a[100]}f(100)===1");
+    numeric("function f(){let count=0;for(let repeat=0;repeat<3;repeat++){"
+        "let lo=0,hi=7;while(lo<hi){count++;lo++;hi--}}return count}f()", 12);
+    numeric("function f(){let count=0;for(let repeat=0;repeat<3;repeat++){"
+        "let hi=8,lo=0;while(hi>lo){count++;hi-=2;lo++}}return count}f()", 9);
+    numeric("function f(){let count=0;for(let i=-2;i*i<=9;i--){count++}return count}f()", 2);
+    numeric("function f(){let count=0;for(let i=0.5;i*i<=4;i++){count++}return count}f()", 2);
+    numeric("function f(){let count=0;let lo=0;for(let repeat=0;repeat<3;repeat++){"
+        "let hi=7;while(lo<hi){count++;lo++;hi--}}return count}f()", 7);
+    numeric("function f(){let count=0;for(let repeat=0;repeat<3;repeat++){"
+        "let lo=0,hi=3;while(lo<hi){count++;hi++;lo+=2}}return count}f()", 9);
+}
+TEST_F(JsMvpLmd, GuardedIntegerLoopReplay) {
+    numeric("function f(n){let x=n,steps=1;while(x!==1){if(x%2===0){x=x/2}else{x=3*x+1}steps++}return steps}f(27)", 112);
+    numeric("function f(n){let x=n,s=1;while(x>1){s++;x=x/2}return s+x}f(5)", 4.625);
+    numeric("function f(n){let x=n,s=1;while(x<9007199254740994){s++;x=3*x+1}return s}f(4503599627370495)", 2);
+    numeric("function f(n){let x=n,s=1;while(x<9007199254740992){s++;x=x+1}return s}f(9007199254740991)", 2);
+    numeric("function f(n){let x=n,s=1;while(x>0){s++;x=x-1}return s}f(3.5)", 5);
+    numeric("function f(n){let x=n,s=1;while(x>0){s++;x=x-1}return s}f(3)", 4);
+    boolean("function f(n){let x=n;while(x>1){x=x/2}return x}1/f(-0)===-Infinity&&f(-2)===-2&&f(0)===0");
+    boolean("function f(n){let x=n;while(x>1){x=x/2}return x}let x=f(NaN);x!==x");
+    numeric("function f(n){let x=n,s=1;while(x>1){s++;x=3*0}return s+x}f(5)", 2);
+    numeric("function f(n){let x=n,s=1;while(x>1){s++;x=x/2;s++}return s+x}f(5)", 7.625);
+    numeric("function f(n){let x=n;while(x++<3){x=x/2}return x}f(3)", 4);
+    numeric("let seen=0;function hit(){seen++}function f(n){let x=n;while(x>1){hit();x=x/2}return x}f(5)+seen", 3.625);
+}
 TEST_F(JsMvpLmd, EqualityAndTruth) {
     boolean("null == undefined && null !== undefined && 0 == false && '1' == true");
     boolean("'x' === 'x' && '1' !== 1 && NaN !== NaN && 0 === -0");
@@ -225,6 +285,98 @@ TEST_F(JsMvpLmd, StringsUseUtf16) {
     boolean("'😀' === ('\\uD83D' + '\\uDE00') && '😀' < '\\uE000'");
     boolean("'a\\u0000b'.length === 3 && 'a\\u0000b'[1] === '\\u0000'");
     boolean("'abc'[3] === undefined && 'abc'['1'] === 'b'");
+}
+TEST_F(JsMvpLmd, ArrayStringBuiltinInferenceAndRowSwaps) {
+    boolean("function repeat(s,n){return s.repeat(n)} function code(s,i){return s.charCodeAt(i)} "
+        "repeat('ab',3)==='ababab' && code(repeat('x',2),1)===120 && code('x',2)!==code('x',2)");
+    boolean("function rows(){let a=new Int32Array(3),b=new Int32Array(3);a[0]=7;b[0]=9;"
+        "for(let i=0;i<5;i++){[a,b]=[b,a]}return a[0]===9&&b[0]===7} rows()");
+    char* mir = dump("temp/mvp_lmd_row_swap.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_property_get"), nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tarray\n"), nullptr);
+    mem_free(mir);
+    boolean("let a=new Int32Array(1),b=new Uint8Array(1);a[0]=-7;b[0]=255;"
+        "[a,b]=[b,a];a[0]=257;b[0]=-9;a[0]===1&&b[0]===-9");
+    boolean("let a=1,b=2;[a,b]=[b,a];a===2&&b===1");
+    boolean("let a=1,b=2;let rhs=([a,b]=[b,a]);rhs[0]===2&&rhs[1]===1&&a===2&&b===1");
+    boolean("let a=1,b=2;[a,b]=[3];a===3&&b===undefined");
+    boolean("let a=1,b=2;[a,b]=[a=5,a+1];a===5&&b===6");
+    boolean("let a=1,b=2;[a,b]=[5e-324,-0];a===5e-324&&1/b===-Infinity");
+    boolean("function f(){let a=1,b=2;[a,b]=[a=5,a+1];"
+        "if(a!==5||b!==6)return false;[a,b]=[5e-324,-0];"
+        "if(a!==5e-324||1/b!==-Infinity)return false;[a,b]=[3];return a===3&&b===undefined}f()");
+    Item completion = run("let a=0,b=0;[a,b]=[4,5]");
+    ASSERT_EQ(get_type_id(completion), LMD_TYPE_ARRAY);
+    ASSERT_EQ(completion.array->length, 2);
+    EXPECT_EQ(it2d(completion.array->items[0]), 4);
+    EXPECT_EQ(it2d(completion.array->items[1]), 5);
+    error("const a=1;let b=2;[b,a]=[4,5];b", "TypeError");
+    error("[a]=[1];let a", "ReferenceError");
+    error("function f(){const a=1;let b=2;[b,a]=[4,5];return b}f()", "TypeError");
+    error("function f(){[a]=[1];let a}f()", "ReferenceError");
+}
+TEST_F(JsMvpLmd, OrdinaryArrayHolesFillAndJoin) {
+    boolean("let a=new Array(3);a[1]=undefined;!(0 in a)&&(1 in a)&&a[0]===undefined&&"
+        "a.join('|')==='||'&&Object.keys(a).join(',')==='1'");
+    boolean("let a=Array(3).fill(false);a[1]=true;delete a[0];"
+        "a.join(',')===',true,false'&&!(0 in a)&&a.pop()===false&&a.length===2");
+    boolean("let a=['a','b'];a.push('c','d');a.join('')==='abcd'&&a.join() === 'a,b,c,d'");
+    boolean("let a=['a',null,undefined,2,false];a.join('|')==='a|||2|false'");
+    boolean("let a=Array(2);a.fill('x',-1);a.join('-')==='-x'&&!(0 in a)&&(1 in a)");
+    boolean("let a=[];a.push(5e-324);let n=a.pop();"
+        "for(let i=0;i<100;i++){a.push(''+i)}n===5e-324&&a.length===100");
+    boolean("let a=[1,2];let alias=a;delete alias[0];a[0]===undefined&&a[1]===2");
+    boolean("let a=[1,2];a.length=0;a.push('x');a.join('')==='x'");
+    boolean("let a=[];a.push()===0&&a.pop()===undefined&&a.join('|')===''&&Array('3')[0]==='3'");
+    boolean("let a=[1,2];a.join((a.push(3),'|'))==='1|2|3'");
+    boolean("let a=Array(2);let n=0;for(let x of a){if(x===undefined)n++}n===2");
+    boolean("function Array(n){return [n]}Array(3)[0]===3&&Array(3).length===1");
+    error("new Array(-1)", "RangeError");
+    error("new Array(1.5)", "RangeError");
+    error("new Array(4294967296)", "RangeError");
+    error("[{}].join('')", "capability");
+}
+TEST_F(JsMvpLmd, CharacterCodesAndAsciiReuse) {
+    boolean("function code(s,i){return s.charCodeAt(i)}"
+        "code('abc',1.9)===98&&code('abc',-0.5)===97&&code('abc',NaN)===97&&"
+        "code('abc',undefined)===97&&code('abc','2')===99&&code('abc',-1)!==code('abc',-1)");
+    boolean("let s='a\\u{1f600}\\ud800';s.length===4&&s.charCodeAt(1)===55357&&"
+        "s.charCodeAt(2)===56832&&s.charCodeAt(3)===55296&&s.charAt(4)===''&&s[4]===undefined");
+    boolean("String.fromCharCode(65,0,65536,0xd800)==='A\\0\\0\\ud800'&&"
+        "'abc'.charAt(1)==='b'&&'abc'[1]==='b'&&'x'.repeat(0)===''");
+    boolean("function read(s,i){return s.charCodeAt(i)}"
+        "read('x',Infinity)!==read('x',Infinity)&&read('x',-Infinity)!==read('x',-Infinity)");
+    boolean("const s='abc';function f(){return s[1]+s.length}f()==='b3'");
+    boolean("const s='abc';function f(i){return s[i]}"
+        "f(3)===undefined&&f('length')===3&&f(1)==='b'");
+    boolean("const s='abc';let n=0,a=[];for(let i=0;i<4;i++){a.push(s[(n++,i)])}"
+        "n===4&&a.join('')==='abc'&&a[3]===undefined");
+    boolean("function f(s){let a=[];for(let i=0;i<s.length;i++){a.push(s[i])}return a.join('')}"
+        "f('a\\0b\\u007f')==='a\\0b\\u007f'&&f('abc')==='abc'");
+    boolean("let s='abc';function f(i){return s[i]}s='\\u{1f600}';"
+        "f(0)==='\\ud83d'&&f(1)==='\\ude00'&&f(2)===undefined");
+    boolean("const s='\\u{1f600}';function f(i){return s[i]}"
+        "s.length===2&&f(1)==='\\ude00'");
+    boolean("let s='ab',n=0;let c=s.charAt((s='xy',n++),(n++));c==='a'&&s==='xy'&&n===2");
+    boolean("'ab'.repeat(2.9)==='abab'&&'x'.repeat(NaN)===''&&String.fromCharCode()===''");
+    boolean("function f(){let String={fromCharCode:(x)=>x+1};return String.fromCharCode(4)===5}f()");
+    error("function f(){return s.length} f();const s='abc'", "ReferenceError");
+    error("function f(i){return s[i]} f(0);const s='abc'", "ReferenceError");
+    error("'x'.repeat(-1)", "RangeError");
+    error("''.repeat(Infinity)", "RangeError");
+}
+TEST_F(JsMvpLmd, ConcatenationOrderAndAliases) {
+    boolean("let n=1;let s='x'+n+true+null+undefined+'z';s==='x1truenullundefinedz'");
+    boolean("let n=1;let s=n+2+'x'+3+4;s==='3x34'");
+    boolean("let calls=0;function f(){calls++;return calls}"
+        "let s='x'+f()+f()+f()+f()+f()+f()+f();s==='x1234567'&&calls===7");
+    boolean("let a='a'+'b'+'c',alias=a;let b=a+'d'+'e';"
+        "let pieces=[a,b];alias==='abc'&&pieces.join('|')==='abc|abcde'");
+    boolean("let a='x',b='y';let s=''+a+(a='z')+a+b;s==='xzzy'&&a==='z'");
+    boolean("let s='a'+'\\ud800'+'\\udc00'+'b';s.length===4&&s.charCodeAt(1)===55296&&s.charCodeAt(2)===56320");
+    boolean("let a=[];for(let i=0;i<200;i++){a.push('x'+i+':'+(i+1)+'!')}"
+        "a[0]==='x0:1!'&&a[199]==='x199:200!'&&a.join('|').length>200");
 }
 TEST_F(JsMvpLmd, MutableBindingsAndHoisting) {
     boolean("var a = x; var x=1; var x; a === undefined && x === 1");
