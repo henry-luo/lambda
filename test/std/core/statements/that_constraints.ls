@@ -33,8 +33,8 @@ type NonEmpty {
     text: string
     that len(text) > 0
 }
-let ne = <NonEmpty text: "hello">
-ne.text
+let nonempty = <NonEmpty text: "hello">
+nonempty.text
 
 // ===== Constraint with method =====
 type Percentage {
@@ -47,7 +47,7 @@ pct.value
 pct.normalized()
 
 // ===== That in type definition (filter-like) =====
-let positives = [1, -2, 3, -4, 5] |> filter((x) => x > 0)
+let positives = [1, -2, 3, -4, 5] |: ~ > 0
 positives
 
 // ===== Constraint inheritance =====

@@ -168,6 +168,7 @@ public:
         std::vector<std::string> scripts;
         std::vector<bool> procs;
         for (const auto& test : g_lambda_tests) {
+            if (test.missing_expected) continue;  // fails in its test body without running
             if (!lambda_script_matches_gtest_filter(test, gtest_filter.c_str())) continue;
             scripts.push_back(test.script_path);
             procs.push_back(test.is_procedural);
@@ -184,6 +185,8 @@ bool LambdaScriptTest::batch_executed = false;
 
 TEST_P(LambdaScriptTest, ExecuteAndCompare) {
     const LambdaTestInfo& info = GetParam();
+    ASSERT_FALSE(info.missing_expected) << "No expected output " << info.expected_path
+        << " for " << info.script_path << ": " LAMBDA_MISSING_GOLDEN_HINT;
 
     // Look up batch result
     auto it = batch_results.find(info.script_path);

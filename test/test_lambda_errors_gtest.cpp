@@ -1964,7 +1964,7 @@ TEST_F(NegativeScriptTest, StaticBracketTypedMapWritesRejectKnownMismatches) {
 }
 
 TEST_F(NegativeScriptTest, StaticArityMismatchIsRejected) {
-    ExpectErrorMessage("test/std/negative/wrong_arg_count.ls",
+    ExpectErrorMessage("test/lambda/negative/semantic/wrong_arg_count.ls",
         "function expects 2 arguments, got 1");
 }
 
@@ -1975,7 +1975,7 @@ TEST_F(NegativeScriptTest, StaticArityMismatchIsRejected) {
 // interior and used to fall through to a block, failing at the `:` with a bare
 // "expected an expression".
 TEST_F(NegativeScriptTest, DoubleQuotedMapKeyNamesTheRule) {
-    ExpectErrorMessage("test/std/negative/map_key_double_quoted.ls",
+    ExpectErrorMessage("test/lambda/negative/syntax/map_key_double_quoted.ls",
         "a map key is a symbol, not a string");
 }
 
@@ -1983,27 +1983,67 @@ TEST_F(NegativeScriptTest, DoubleQuotedMapKeyNamesTheRule) {
 // The generic "expected an expression" sent a real user to conclude the grammar
 // was whitespace-sensitive; the diagnostic must name the rule.
 TEST_F(NegativeScriptTest, ElementSemicolonCannotOpenContent) {
-    ExpectErrorMessage("test/std/negative/element_semicolon_opens_content.ls",
+    ExpectErrorMessage("test/lambda/negative/syntax/element_semicolon_opens_content.ls",
         "';' cannot open element content");
 }
 
 // S16.9.3: element types take the literal's delimiters; the type-pattern
 // parser used to swallow the retired `;` divider.
 TEST_F(NegativeScriptTest, ElementTypeRejectsSemicolon) {
-    ExpectErrorMessage("test/std/negative/element_type_semicolon.ls",
+    ExpectErrorMessage("test/lambda/negative/syntax/element_type_semicolon.ls",
         "';' only separates statements; an element pattern takes ','");
 }
 
 // LR02-9: a `&`/`!` contract must be rejected on a non-conforming value AND
 // named in the diagnostic — it used to print the bare word "type".
 TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {
-    ExpectErrorMessage("test/std/negative/type_set_operator_mismatch.ls",
+    ExpectErrorMessage("test/lambda/negative/semantic/type_set_operator_mismatch.ls",
         "cannot initialize 'a' of type int & string with int");
 }
 
 TEST_F(NegativeScriptTest, OptionalParamArityReportsARange) {
-    ExpectErrorMessage("test/std/negative/wrong_arg_count_optional.ls",
+    ExpectErrorMessage("test/lambda/negative/semantic/wrong_arg_count_optional.ls",
         "function expects 1 to 2 arguments, got 3");
+}
+
+// S12.1.2: assignment, `var`, `while` and `break` belong to procedures; outside
+// a `pn` each is E224, and the rejection must not cascade into a crash.
+TEST_F(NegativeScriptTest, ReassignOutsidePnReportsE224) {
+    ExpectErrorMessage("test/lambda/negative/semantic/immutable_reassign.ls",
+        "error[E224]: assignment is only allowed inside a procedure (pn)");
+}
+
+TEST_F(NegativeScriptTest, ProceduralStatementsInFnReportE224) {
+    ExpectErrorMessage("test/lambda/negative/semantic/mutation_in_fn.ls",
+        "error[E224]: `var` is only allowed inside a procedure (pn)");
+    ExpectErrorMessage("test/lambda/negative/semantic/mutation_in_fn.ls",
+        "error[E224]: `while` is only allowed inside a procedure (pn)");
+}
+
+// S7.5.1: a fallible call must be acknowledged with `^`, a handler or `or`.
+TEST_F(NegativeScriptTest, UnacknowledgedFallibleCallIsE228) {
+    ExpectErrorMessage("test/lambda/negative/semantic/unhandled_error.ls",
+        "error[E228]: error from 'risky' must be handled");
+}
+
+// a module importing itself fails with a diagnostic instead of recursing
+TEST_F(NegativeScriptTest, SelfImportIsCircularE217) {
+    ExpectErrorMessage("test/lambda/negative/semantic/circular_import.ls",
+        "Circular import detected");
+    ExpectErrorMessage("test/lambda/negative/semantic/circular_import.ls",
+        "error[E217]");
+}
+
+// S7.11.4: unbounded mutual recursion is a contained E308 fault, never a crash
+TEST_F(NegativeScriptTest, MutualRecursionOverflowIsE308) {
+    ExpectErrorMessage("test/lambda/negative/runtime/stack_overflow_mutual.ls",
+        "error[E308]: Stack overflow");
+}
+
+// S7.7.2: a typed declaration rejects a non-conforming initializer at the binding
+TEST_F(NegativeScriptTest, TypedArrayDeclarationRejectsWrongElement) {
+    ExpectErrorMessage("test/lambda/negative/runtime/typed_array_type_error.ls",
+        "error[E201]: type check at declaration 'arr' failed");
 }
 
 // S16.9.8: a bare root is a package name, never a file path. `test` names no

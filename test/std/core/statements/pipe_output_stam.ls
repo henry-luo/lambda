@@ -7,24 +7,24 @@ pn main() {
     output("Hello, File!", "./temp/pipe_test_output.txt")^
 
     // ===== Read back the file =====
-    let content = read("./temp/pipe_test_output.txt")
+    let content = input("./temp/pipe_test_output.txt", 'text')^
     print(content)
 
     // ===== Output append =====
     output("\nSecond line", "./temp/pipe_test_output.txt", {mode: "append"})^
-    let content2 = read("./temp/pipe_test_output.txt")
+    let content2 = input("./temp/pipe_test_output.txt", 'text')^
     print(content2)
 
     // ===== Output collection to file =====
-    output([1, 2, 3] |> join(", "), "./temp/pipe_list_output.txt")^
-    let list_content = read("./temp/pipe_list_output.txt")
+    output([1, 2, 3] |> string(~) |> join(", "), "./temp/pipe_list_output.txt")^
+    let list_content = input("./temp/pipe_list_output.txt", 'text')^
     print(list_content)
 
     // ===== Pipe transformed data =====
     output([1, 2, 3, 4, 5]
-        |> map((x) => x * x)
+        |> ~ * ~ |> string(~)
         |> join(" "),
         "./temp/pipe_transform_output.txt")^
-    let transform_content = read("./temp/pipe_transform_output.txt")
+    let transform_content = input("./temp/pipe_transform_output.txt", 'text')^
     print(transform_content)
 }

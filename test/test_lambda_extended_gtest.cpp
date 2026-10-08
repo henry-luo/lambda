@@ -60,6 +60,8 @@ class LambdaExtendedScriptTest : public ::testing::TestWithParam<LambdaTestInfo>
 
 TEST_P(LambdaExtendedScriptTest, ExecuteAndCompare) {
     const LambdaTestInfo& info = GetParam();
+    ASSERT_FALSE(info.missing_expected) << "No expected output " << info.expected_path
+        << " for " << info.script_path << ": " LAMBDA_MISSING_GOLDEN_HINT;
     test_lambda_script_against_file(info.script_path.c_str(), info.expected_path.c_str(), info.is_procedural);
 }
 

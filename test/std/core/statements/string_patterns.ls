@@ -37,7 +37,7 @@ classify_string("hello")
 classify_string("12abc")
 
 // ===== Pattern with quantifiers =====
-type word3 = \(("a" to "z")[3])
+type word3 = \(("a" to "z"){3})
 "abc" is word3
 "ab" is word3
 "abcd" is word3
@@ -61,4 +61,4 @@ type three_chars = \(.{3})
 
 // ===== Used in filter =====
 type upper_pat = \(("A" to "Z")+);
-["HELLO", "world", "FOO", "bar", "BAZ"] |> filter((s) => s is upper_pat)
+["HELLO", "world", "FOO", "bar", "BAZ"] |: ~ is upper_pat

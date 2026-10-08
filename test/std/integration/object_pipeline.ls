@@ -3,9 +3,9 @@
 
 // ===== Define types =====
 type Product {
-    name: string
-    price: float
-    category: string
+    name: string,
+    price: float,
+    category: string,
     fn is_expensive() => ~.price > 50.0
 }
 
@@ -20,36 +20,37 @@ let products = [
 ]
 
 // ===== Pipeline: filter expensive =====
-let expensive = products |> filter((p) => p.is_expensive())
+let expensive = products |: ~.is_expensive()
 len(expensive)
-expensive |> map((p) => p.name)
+expensive |> ~.name
 
 // ===== Pipeline: group by category =====
-let electronics = products |> filter((p) => p.category == "electronics")
+let electronics = products |: ~.category == "electronics"
 len(electronics)
-electronics |> map((p) => p.name)
+electronics |> ~.name
 
 // ===== Pipeline: calculate stats =====
-let prices = products |> map((p) => p.price)
+let prices = products |> ~.price
 prices |> sum()
 prices |> avg()
 prices |> min()
 prices |> max()
 
 // ===== Pipeline: sort by price =====
-products |> sort((a, b) => a.price - b.price) |> map((p) => p.name)
+products |> sort((p) => p.price) |> ~.name
 
 // ===== Pipeline: transform to element tree =====
-let catalog = <catalog>
+let catalog = <catalog
     for (p in products)
-        <product name: p.name, price: str(p.price)> p.category
-catalog?product |> map((p) => p.name)
-len(catalog?product)
+        <product name: p.name, price: string(p.price), p.category>
+>
+catalog?<product> |> ~.name
+count(catalog?<product>)
 
 // ===== Pipeline: find specific product =====
-products |> filter((p) => p.name == "Laptop") |> map((p) => p.price)
+products |: ~.name == "Laptop" |> ~.price
 
 // ===== Combined transform =====
 products
-    |> filter((p) => p.price < 100.0)
-    |> map((p) => p.name & ": $" & str(p.price))
+    |: ~.price < 100.0
+    |> ~.name ++ ": $" ++ string(~.price)

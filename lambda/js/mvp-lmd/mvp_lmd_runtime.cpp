@@ -137,8 +137,21 @@ extern "C" double mvp_lmd_number_pow(double base, double exponent) {
     return pow(base, exponent);
 }
 
-extern "C" int64_t mvp_lmd_string_key(String* s) {
+extern "C" int64_t mvp_lmd_string_key(String* s, int64_t typed) {
     if (s->len == 6 && memcmp(s->chars, "length", 6) == 0) return -1;
+    if (typed) {
+        if (s->len == 4 && memcmp(s->chars, "fill", 4) == 0) return -4;
+        if (s->len == 2 && memcmp(s->chars, "-0", 2) == 0) return -3;
+        double value = mvp_lmd_string_to_number(s);
+        char buffer[64];
+        const char* canonical = buffer;
+        if (isnan(value)) canonical = "NaN";
+        else if (isinf(value)) canonical = value < 0 ? "-Infinity" : "Infinity";
+        else lambda_finite_double_to_shortest(value, buffer, sizeof(buffer));
+        if (s->len != strlen(canonical) || memcmp(s->chars, canonical, s->len)) return -2;
+        // canonical but invalid indices must not become ordinary named properties.
+        return value >= 0 && value <= INT53_MAX && value == trunc(value) ? (int64_t)value : -3;
+    }
     if (!s->len || s->len > 10 || (s->len > 1 && s->chars[0] == '0')) return -2;
     uint64_t index = 0;
     for (uint32_t i = 0; i < s->len; i++) {

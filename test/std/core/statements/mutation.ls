@@ -53,7 +53,7 @@ pn main() {
     var count = 0
     var idx = 0
     while (idx < 10) {
-        if (idx % 3 == 0) count = count + 1
+        if (idx % 3 == 0) { count = count + 1 }
         idx = idx + 1
     }
     print(count)
@@ -62,7 +62,7 @@ pn main() {
     var text = ""
     var w = 0
     while (w < 3) {
-        text = text & str(w)
+        text = text ++ string(w)
         w = w + 1
     }
     print(text)

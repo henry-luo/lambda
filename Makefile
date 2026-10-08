@@ -595,7 +595,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test run-radiant-baseline run-layout-baseline-suites \
@@ -665,11 +665,11 @@ help:
 	@echo "                     Automatically regenerates reference parsers if grammar.js changes"
 	@echo ""
 	@echo "Development:"
-	@echo "  test          - Run ALL test suites (baseline + extended, alias for test-all)"
+	@echo "  test          - Run every suite except jube and test_radiant_online_view_gtest (see test-all)"
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
-	@echo "  test-lambda-full - Run Lambda baseline plus the concurrency runtime gate"
+	@echo "  test-lambda-full - Lambda baseline plus concurrency, extended-script, DOM-node and validator-input gates"
 	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
@@ -703,7 +703,6 @@ help:
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
-	@echo "  test-mir      - Run MIR JIT tests only"
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
 	@echo "  test-coverage - Run all native tests with LLVM C/C++ coverage"
@@ -731,6 +730,8 @@ help:
 	@echo "                  Usage: make lint-full [ARGS=--report]                         ~4 min"
 	@echo "  check-doc-code    - Compile every Lambda block/table row in doc/*.md"
 	@echo "                  Usage: make check-doc-code [ARGS='--filter <doc>']    ~3 min"
+	@echo "  formal-index      - Regenerate doc/Lambda_Formal_Index.md (S#/D# ruling -> spec line)"
+	@echo "  check-formal-index - Fail when the formal-spec ruling index is stale (also in lint)"
 	@echo "  check-code-dup    - Check lib, lambda, and radiant for duplicate code"
 	@echo "  check-lambda-dup  - Check lambda for duplicate code"
 	@echo "  check-radiant-dup - Check radiant for duplicate code"
@@ -3259,6 +3260,14 @@ check-doc-code:
 #   make check-tutorial ARGS='--filter 03'     # one chapter
 check-tutorial:
 	@python3 utils/check_tutorial.py $(ARGS)
+
+# Ruling index for the formal specs (Doc_Convention §3): regenerate after editing
+# either spec; `python3 utils/formal_index.py D7.3.6` prints one ruling.
+formal-index:
+	@python3 utils/formal_index.py --write
+
+check-formal-index:
+	@python3 utils/formal_index.py --check
 
 # Lizard duplicate-code reports with documented generated-file and block exclusions.
 check-code-dup:

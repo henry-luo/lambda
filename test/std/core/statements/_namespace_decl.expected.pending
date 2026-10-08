@@ -1,0 +1,11 @@
+<html.div class: "container",
+  <html.p
+    "Hello">
+  <html.span
+    "World">>
+'html.div'
+<div xml.lang: "en",
+  "Content">
+<svg.circle cx: "50", cy: "50", r: "25">
+'svg.circle'
+["first", "second", "third"]

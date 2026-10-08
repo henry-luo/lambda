@@ -26,18 +26,18 @@ sorted_temps[9]
 sorted_temps[14]
 
 // ===== Filter hot days =====
-let hot = temperatures |> filter((t) => t > 75.0)
+let hot = temperatures |: ~ > 75.0
 len(hot)
 
 // ===== Filter cold days =====
-let cold = temperatures |> filter((t) => t < 70.0)
+let cold = temperatures |: ~ < 70.0
 len(cold)
 
 // ===== Normalize to 0-1 range =====
 let min_t = temperatures |> min()
 let max_t = temperatures |> max()
 let range_t = max_t - min_t
-let normalized = temperatures |> map((t) => (t - min_t) / range_t)
+let normalized = temperatures |> (~ - min_t) / range_t
 normalized |> min()
 normalized |> max()
 
@@ -52,10 +52,10 @@ ma[0]
 
 // ===== Count by category =====
 fn categorize(t) => if (t < 70.0) "cold" else if (t < 77.0) "mild" else "hot"
-let categories = temperatures |> map(categorize)
-let cold_count = categories |> filter((c) => c == "cold") |> len()
-let mild_count = categories |> filter((c) => c == "mild") |> len()
-let hot_count = categories |> filter((c) => c == "hot") |> len()
+let categories = temperatures |> categorize(~)
+let cold_count = categories |: ~ == "cold" |> len()
+let mild_count = categories |: ~ == "mild" |> len()
+let hot_count = categories |: ~ == "hot" |> len()
 cold_count
 mild_count
 hot_count
@@ -63,5 +63,5 @@ cold_count + mild_count + hot_count
 
 // ===== Squared deviations =====
 let mean = temperatures |> avg()
-let sq_devs = temperatures |> map((t) => (t - mean) ** 2)
+let sq_devs = temperatures |> (~ - mean) ** 2
 sq_devs |> avg()

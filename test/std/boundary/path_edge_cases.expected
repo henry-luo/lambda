@@ -1,0 +1,13 @@
+path
+path
+http.'example.com'.path
+https.'example.com'.api.v1
+/.a.b.c.d.e.f.g
+/.data.*.items
+/.root.**.leaf
+/.'hello world'.items
+/.users.list
+true
+false
+3
+true
