@@ -1866,6 +1866,10 @@ static void parse_mdx_input(Input* input, const char* source) {
 }
 
 static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
+    {"model/obj", "obj"},
+    {"model/mtl", "mtl"},
+    {"model/gltf+json", "gltf"},
+    {"text/x-3d-model", "a3d"},
     {"application/json", "json"},
     {"text/csv", "csv"},
     {"text/tab-separated-values", "tsv"},
@@ -2179,6 +2183,7 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
             // HTML NULs are tokenizer input, so preserve the transport's byte count.
             input->root = (Item){.element = html5_parse_n(input, source, source_len, NULL)};
         }
+        else if (input_parse_model(input, source, source_len, effective_type)) {}
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}
 #ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "pdf") == 0) {
