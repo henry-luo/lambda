@@ -1941,6 +1941,14 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
 }
 
 
+extern "C" Item js_new_error_with_name_cstr(const char* name, const char* message) {
+    RootFrame roots(2);
+    // D5.3.3: constructing the message may collect the newly allocated name.
+    Rooted<Item> name_root(roots, make_string_item(name));
+    Rooted<Item> message_root(roots, make_string_item(message));
+    return js_new_error_with_name(name_root.get(), message_root.get());
+}
+
 // ES2022: Extract cause from options object and set on error
 extern "C" Item js_error_set_cause(Item error, Item options) {
     TypeId opt_type = get_type_id(options);

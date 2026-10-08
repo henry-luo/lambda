@@ -29,6 +29,10 @@ class FixtureHandler(SimpleHTTPRequestHandler):
             self.reply_fixture(b"", "text/plain", 302, (
                 ("Location", "/fetch_headers_echo"), ("X-Old-Response", "discarded")))
             return
+        if endpoint == "/fetch_transport_error":
+            # EOF without an HTTP response exercises curl's native failure path.
+            self.close_connection = True
+            return
         if endpoint == "/fetch_headers_echo":
             forbidden = any(self.headers.get(name) is not None for name in
                             ("Cookie", "Sec-Script", "X-HTTP-Method-Override"))

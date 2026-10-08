@@ -63,4 +63,18 @@ console.log(el.className); // test-class
 el.setAttribute("id", "dynamic-el");
 console.log(el.id); // dynamic-el
 
+// WebIDL checks the native Element identity, including for proxies and forgeries.
+var invalidStyleElements = [undefined, null, 0, true, "styled", {}, [], document,
+  document.createTextNode("text"), document.createComment("comment"),
+  document.createDocumentFragment(), Object.create(Element.prototype), new Proxy(styled, {})];
+var invalidStyleErrors = invalidStyleElements.map(function (value) {
+  try { getComputedStyle(value); return "accepted"; }
+  catch (error) { return error instanceof TypeError ? "TypeError" : error.name; }
+});
+console.log(invalidStyleErrors.join(","));
+var styledPrototype = Object.getPrototypeOf(styled);
+Object.setPrototypeOf(styled, null);
+console.log(getComputedStyle(styled).paddingTop);
+Object.setPrototypeOf(styled, styledPrototype);
+
 "DOM style tests complete";

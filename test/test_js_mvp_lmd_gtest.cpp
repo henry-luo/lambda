@@ -410,8 +410,8 @@ TEST_F(JsMvpLmd, DenseArrayAliasesAndMutation) {
     boolean("var a=[1,2]; a.length=0; a[0]=3; a.length===1 && a[1]===undefined");
 }
 TEST_F(JsMvpLmd, ArrayCapabilityAndRangeFailures) {
-    error("var a=[]; a[1]=2", "capability");
-    error("var a=[]; a.length=1", "capability");
+    boolean("var a=[]; a[1]=2; a.length===2 && !(0 in a) && a[0]===undefined");
+    boolean("var a=[]; a.length=1; a.length===1 && !(0 in a)");
     error("var a=[]; a['01']=1", "capability");
     error("var a=[]; a['-0']=1", "capability");
     error("var a=[]; a[4294967295]=1", "capability");
@@ -522,7 +522,7 @@ TEST_F(JsMvpLmd, RecursiveReturnKindsAndNativeBoundaries) {
     boolean("function id(x){return x} id(-0)===0 && 1/id(-0)===-Infinity && id(5e-324)===5e-324");
     numeric("function f(){return 5e-324} function g(){return [f(),f()]} g()[0]", 5e-324);
     error("function bad(){const x=1;x=2;return 3} function caller(){return bad()+1} caller()", "TypeError");
-    error("function bad(){let a=[];a[1]=2;return true} bad()", "capability");
+    boolean("function grow(){let a=[];a[1]=2;return a.length===2 && a[0]===undefined} grow()");
     run("function fib(n){if(n<2)return n;return fib(n-1)+fib(n-2)} fib(5)");
     char* source = dump("temp/mvp_lmd_native_calls.mir");
     ASSERT_NE(source, nullptr);
@@ -544,8 +544,8 @@ TEST_F(JsMvpLmd, SelfTailCallsPreserveActivationAndArguments) {
 }
 TEST_F(JsMvpLmd, RejectsUnsupportedUnitBeforeExecution) {
     error("if(false){({get a(){return 1}})}", "scope");
-    error("function f(){return ()=>x; var x=1} 1", "capture");
-    error("{let x=1; function f(){return x}} 1", "capture");
+    boolean("function f(){return ()=>x; var x=1} f()()===undefined");
+    numeric("{let x=1; function f(){return x}} f()", 1);
     error("function f(a=1){return a} 1", "scope");
     error("function f(){return this} 1", "scope");
     error("[1,,2]", "scope");
@@ -608,6 +608,9 @@ TEST_F(JsMvpLmd, PlainObjectDataProperties) {
     boolean("let o={a:5e-324};let old=o.a;o.a='s';o.a=== 's' && old===5e-324");
 }
 TEST_F(JsMvpLmd, ObjectEvaluationOrderAndImmutableShapes) {
+    boolean("function f(x){return {a:1,b:x,c:3}}let a=f(2),b=f(-0),c=f(5e-324);"
+        "a.a===1 && a.b===2 && a.c===3 && b.a===1 && 1/b.b===-Infinity && b.c===3 &&"
+        "c.a===1 && c.b===5e-324 && c.c===3");
     boolean("let calls=0;let o={x:1};function key(){calls++;return 'x'}function rhs(){o.x='changed';o.y=4;return 2}o[key()]+=rhs();calls===1 && o.x===3 && o.y===4");
     boolean("let o={x:1};let alias=o;function rhs(){o={x:9};return 2}alias.x=rhs();alias.x===2 && o.x===9");
     Item value = run("function make(){return {x:1,b:true}}let a=make();let b=make();a.x='s';[a,b,make()]");
@@ -742,6 +745,8 @@ TEST_F(JsMvpLmd, CollectionProjectionBindingAndGrowth) {
     EXPECT_EQ(it2i(map_get(result.map, Item{.item = s2it(raw)})), 9);
 }
 TEST_F(JsMvpLmd, MapCursorCleanupAndTombstoneCompaction) {
+    numeric("let a=[1,2];let s=0;for(let x of a){s+=x;a=new Map()}s", 3);
+    numeric("let m=new Map();m.set(1,2).set(3,4);let s=0;for(let [k,v] of m){s+=v;m=[]}s", 6);
     Item result = run("let m=new Map();m.set(1,1);function f(){for(let pair of m){return pair}}f();for(let k of m.keys()){break}for(let i=0;i<300;i++){m.set(i,i);m.delete(i)}m.set('live',5e-324);m");
     ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
     OrderedMap* map = (OrderedMap*)result.map;
@@ -749,4 +754,112 @@ TEST_F(JsMvpLmd, MapCursorCleanupAndTombstoneCompaction) {
     EXPECT_LT(map->entries->length, 140);
     boolean("let m=new Map();m.set(1,1);outer:for(let a of m){for(let b of m){break outer}}m.clear();m.set(2,2);let s=0;for(let [k,v] of m){s+=k+v}s===4");
     numeric("let m=new Map();m.set(1,1).set(2,2);let s=0;for(let [k,v] of m){m.delete(k);m.set(k+2,v+2);s+=v;if(k===4)break}s", 10);
+}
+
+TEST_F(JsMvpLmd, SharedEscapingClosures) {
+    numeric("function f(){let x=1;return ()=>++x} let g=f();g()+g()", 5);
+    numeric("function f(){let x=0;return [()=>++x,()=>x]}const a=f();a[0]()+a[1]()", 2);
+    numeric("function f(x){return ()=>()=>++x}const g=f(3)();g()+g()", 9);
+    numeric("function f(){let x=0;function g(n){if(n){x++;return g(n-1)}return x}return g}f()(4)", 4);
+    numeric("function f(){let x=0;return ()=>++x}let a=f();let b=f();a()+a()+b()", 4);
+    boolean("function f(){let x=1;return [()=>x,()=>{x='s'}]}let a=f();a[1]();a[0]()==='s'");
+    numeric("function f(){const x={n:0};return ()=>++x.n}let g=f();g()+g()", 3);
+    numeric("function f(x){const g=()=>x;x=7;return g}f(2)()", 7);
+    numeric("function f(){let x=1;const g=()=>++x;g();return x}f()", 2);
+    numeric("function f(){let x=1;{let x=7;return ()=>x}}f()()", 7);
+    numeric("function f(){return g;function g(){return ++x}var x}let g=f();g()", NAN);
+    numeric("function f(){let x=2;return function self(n){return n?x+self(n-1):x}}f()(3)", 8);
+    boolean("function f(){let x=5e-324;return [()=>x,v=>{x=v}]}let a=f();let old=a[0]();"
+        "a[1](1e-323);for(let i=0;i<100;i++)['x'+i];old===5e-324 && a[0]()===1e-323");
+}
+TEST_F(JsMvpLmd, ClosureInitializationAndConst) {
+    error("function f(){let g=()=>x;g();let x=1}f()", "ReferenceError");
+    error("function f(){let g=()=>{x=2};g();let x=1}f()", "ReferenceError");
+    error("function f(){const x=1;return ()=>{x=2}}f()()", "TypeError");
+    boolean("function f(){return ()=>x;var x=1}f()()===undefined");
+    numeric("function f(){let g=()=>x;let x=3;return g}f()()", 3);
+    numeric("function f(){let x=1;function g(){return x}x=3;return g}f()()", 3);
+}
+TEST_F(JsMvpLmd, ClosureIterationBindings) {
+    numeric("let a=[];for(let i=0;i<3;i++)a.push(()=>i);a[0]()+10*a[1]()+100*a[2]()", 210);
+    numeric("let a=[];for(let i=0;i<4;i++){if(i===1)continue;a.push(()=>i)}"
+        "a[0]()+10*a[1]()+100*a[2]()", 320);
+    numeric("let a=[];for(const i of [1,2,3])a.push(()=>i);a[0]()+10*a[1]()+100*a[2]()", 321);
+    numeric("let a=[];let m=new Map();m.set(1,2);m.set(3,4);"
+        "for(const [k,v] of m)a.push(()=>k+v);a[0]()+a[1]()", 10);
+    numeric("let a=[];for(var i=0;i<3;i++)a.push(()=>i);a[0]()+a[1]()+a[2]()", 9);
+    numeric("let a=[];for(let i=0;i<3;i++){let j=i*2;a.push(()=>j)}a[0]()+a[1]()+a[2]()", 6);
+}
+TEST_F(JsMvpLmd, ClassesAndLexicalReceivers) {
+    error("class A{f(){return 1}}class B extends A{f(){return ()=>super.f()}}new B().f()()", "scope");
+    boolean("class A{constructor(x){this.x=x}f(){return this.x}static g(){return 4}}"
+        "class B extends A{f(){return super.f()+1}}let b=new B(2);"
+        "b.f()===3 && B.g()===4 && b instanceof B && b instanceof A");
+    boolean("class A{f(){return ()=>this}}let a=new A();a.f()()===a");
+    numeric("class A{constructor(x){this.x=x}f(){return ()=>()=>++this.x}}let a=new A(1);"
+        "let g=a.f()();g()+g()", 5);
+    boolean("class A{}class B extends A{constructor(){let f=()=>this;super();this.f=f}}"
+        "let b=new B();b.f()===b");
+    boolean("class A{constructor(){this.f=()=>new.target}}class B extends A{}"
+        "new B().f()===B && new A().f()===A");
+    error("class A{}class B extends A{constructor(){let f=()=>this;f();super()}}new B()", "ReferenceError");
+    error("class A{}A()", "TypeError");
+    error("class A{}new A().missing()", "TypeError");
+}
+TEST_F(JsMvpLmd, SparseArrayGrowthAndSlice) {
+    numeric("function f(){let a=[];for(let i=0;i<20;i++)a[i]=i;let s=0;"
+        "for(let i=0;i<a.length;i++)s+=a[i];return s}f()", 190);
+    boolean("let a=[];for(let i=0;i<5;i+=2)a[i]=i;a[1]===undefined && !(1 in a)");
+    boolean("let a=[];for(let i=0;i<5;i++){if(i===1)continue;a[i]=i}a[1]===undefined && !(1 in a)");
+    boolean("function f(){let a=[];let alias=a;function reset(i){alias.length=0;return i}"
+        "for(let i=0;i<5;i++)a[i]=reset(i);return a[1]===undefined && !(1 in a)}f()");
+    boolean("let a=[1,2,3];a.length=1;a.length=4;"
+        "a[0]===1 && a[1]===undefined && !(1 in a) && !(3 in a) && Object.keys(a).length===1");
+    boolean("let a=[];a[3]=undefined;a[5]=5;let b=a.slice(1,6);"
+        "b.length===5 && !(0 in b) && (2 in b) && b[2]===undefined && b[4]===5");
+    boolean("let a=[1,2,3,4];a.slice(-3,-1).join(',')==='2,3' && a.slice(3,1).length===0 &&"
+        "a.slice(NaN,undefined).length===4 && a.slice(-Infinity,Infinity).length===4");
+    boolean("let nested={x:1};let a=[5e-324,nested];let b=a.slice();a[0]=1e-323;"
+        "b[1].x=2;b[0]===5e-324 && a[0]===1e-323 && a[1].x===2");
+}
+TEST_F(JsMvpLmd, ArrayForEachMutationAndArguments) {
+    numeric("let sum=0;[1,2,3].forEach(x=>{sum+=x});sum", 6);
+    numeric("function f(){let sum=0;[1,2,3].forEach(x=>{sum+=x});return sum}f()", 6);
+    boolean("let a=[];a[1]=undefined;a[3]=4;let seen='';let result=a.forEach((v,i,owner)=>{"
+        "seen+=i+':'+v+';';if(owner!==a)seen='bad'});result===undefined && seen==='1:undefined;3:4;'");
+    numeric("let a=[1,2,3];let sum=0;a.forEach((v,i)=>{sum+=v;if(i===0){a[1]=8;a.push(9);delete a[2]}});sum", 9);
+    numeric("let a=[1,2,3];let sum=0;a.forEach((v,i)=>{sum+=v;if(i===0)a.length=0});sum", 1);
+    numeric("class A{f(x){this.sum+=x}}let a=new A();a.sum=0;[1,2,3].forEach(a.f,a);a.sum", 6);
+    error("[].forEach(1)", "TypeError");
+    error("[1].forEach(()=>{const x=1;x=2})", "TypeError");
+}
+TEST_F(JsMvpLmd, ClassAncestryAndReflection) {
+    boolean("class A{f(){return this.x}}class B extends A{}let b=new B();b.x=2;"
+        "'f' in b && !Object.hasOwn(b,'f') && Object.keys(b).join(',')==='x' &&"
+        "Object.keys(A).length===0 && Object.keys(A.prototype).length===0 && b.f()===2");
+    boolean("class A{}class B extends A{}let b=new B();b.x=1;b.x='s';delete b.x;b.y=5e-324;"
+        "b instanceof A && b instanceof B && b.y===5e-324 && !Object.hasOwn(b,'x')");
+    numeric("class A{f(){return this.x}}class B extends A{f(){return super.f()+1}}"
+        "let b=new B();b.x=4;let f=b.f;b.f=()=>9;b.f()+[1].length", 10);
+    boolean("class A{static f(){return ()=>this}}class B extends A{}B.f()()===B");
+    boolean("class A{constructor(){return 3}}new A() instanceof A");
+    boolean("class A{constructor(){return {x:3}}}class B extends A{}let b=new B();"
+        "b.x===3 && !(b instanceof A) && !(b instanceof B)");
+    error("class A{}class B extends A{constructor(){return 3}}new B()", "TypeError");
+    error("class A{}class B extends A{constructor(){}}new B()", "ReferenceError");
+}
+TEST_F(JsMvpLmd, ClosureEnvironmentUsesSharedTracing) {
+    Item result = run("function f(){let value=[5e-324,'alive'];return ()=>value}f()");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_FUNC);
+    ASSERT_EQ(result.function->closure_field_count, 1);
+    ASSERT_NE(result.function->closure_env, nullptr);
+    heap_gc_collect();
+    result = mvp_lmd_result(execution);
+    Item cell = ((Item*)result.function->closure_env)[0];
+    ASSERT_EQ(get_type_id(cell), LMD_TYPE_ARRAY);
+    ASSERT_EQ(cell.array->length, 1);
+    Item values = cell.array->items[0];
+    ASSERT_EQ(get_type_id(values), LMD_TYPE_ARRAY);
+    EXPECT_EQ(it2d(values.array->items[0]), 5e-324);
+    EXPECT_STREQ(values.array->items[1].get_string()->chars, "alive");
 }

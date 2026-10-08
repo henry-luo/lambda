@@ -17,6 +17,7 @@
 
 #ifndef LAMBDA_HEADLESS
 #include "../../radiant/radiant.hpp"
+#include "../../radiant/rdt_video.h"
 #endif
 
 #include <string.h>
@@ -37,6 +38,15 @@ static void dom_language_append(StrBuf* output, const char* language, size_t len
     if (!end || str_icmp(language, end, "C", 1) == 0 || str_icmp(language, end, "POSIX", 5) == 0) return;
     if (output->length) strbuf_append_char(output, ',');
     for (size_t index = 0; index < end; index++) strbuf_append_char(output, language[index] == '_' ? '-' : language[index]);
+}
+
+extern "C" const char* dom_platform_can_play_type(const char* mime_type, size_t length) {
+#ifndef LAMBDA_HEADLESS
+    return rdt_video_can_play_type(mime_type, length);
+#else
+    // a realm without Radiant has no media decoder.
+    return "";
+#endif
 }
 
 extern "C" char* dom_platform_preferred_languages(void) {

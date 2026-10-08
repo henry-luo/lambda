@@ -98,6 +98,7 @@ int mvp_lmd_builtin_method(String* key, TypeId owner) {
         {"keys", LMD_TYPE_MAP, 7}, {"values", LMD_TYPE_MAP, 8},
         {"fill", LMD_TYPE_ARRAY, LMD_METHOD_FILL}, {"push", LMD_TYPE_ARRAY, LMD_METHOD_PUSH},
         {"pop", LMD_TYPE_ARRAY, LMD_METHOD_POP}, {"join", LMD_TYPE_ARRAY, LMD_METHOD_JOIN},
+        {"slice", LMD_TYPE_ARRAY, LMD_METHOD_SLICE}, {"forEach", LMD_TYPE_ARRAY, LMD_METHOD_FOREACH},
         {"charAt", LMD_TYPE_STRING, LMD_METHOD_CHAR_AT}, {"charCodeAt", LMD_TYPE_STRING, LMD_METHOD_CODE_AT},
         {"repeat", LMD_TYPE_STRING, LMD_METHOD_REPEAT}};
     for (const auto& method : methods)
