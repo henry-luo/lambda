@@ -586,7 +586,10 @@ static void render_output_init_context(RasterRenderContext* rdcon, UiContext* ui
     rdcon->has_transform = false;
     rdcon->raster_scale = ui_context_raster_scale(uicon);
     // retire changed generations before retained ancestors can bypass media traversal.
-    if (uicon->document) scene3d_prepare_document(uicon->document,uicon,rdcon->raster_scale);
+    if (uicon->document) {
+        scene3d_prepare_document(uicon->document,uicon,rdcon->raster_scale);
+        radiant_canvas_prepare_document(uicon->document);
+    }
 
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
     setup_font(uicon, &rdcon->font, default_font);

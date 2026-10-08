@@ -3839,7 +3839,10 @@ static const JubeModuleDef radiant_module = {
     radiant_custom_layout_heap_cleanup,
 };
 
+extern "C" void dom_webgl_register_static(void);
+
 RADIANT_C_API void radiant_jube_register_static(void) {
+    dom_webgl_register_static();
     jube_register_static_module(&radiant_module);
 }
 

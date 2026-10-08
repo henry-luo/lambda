@@ -94,7 +94,8 @@ successful snapshot. `make build-headless` succeeds, and `otool -L`/`nm -u` show
 no GLFW/OpenGL dependencies or imports. The package construction golden also
 passes under `lambda-headless.exe` (D7.1.4v2). The core additionally compiles
 alone with `LAMBDA_NO_GUI`. No ANGLE or software renderer is bundled.
-Page export and JS WebGL/Three.js remain the separately scoped follow-on phases.
+JS WebGL/Three.js is implemented separately in [Phase II](Radiant_WebGL_Phase2.md).
+Further page export remains separately scoped.
 
 ## Public package and schema
 

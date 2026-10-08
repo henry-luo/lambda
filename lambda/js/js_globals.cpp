@@ -15825,6 +15825,7 @@ JS_DEFINE_HOST_CTOR_BODY_2(touch_event, js_ctor_touch_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_1(static_range, js_ctor_static_range_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(transition_event, js_ctor_transition_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(animation_event, js_ctor_animation_event_fn)
+JS_DEFINE_HOST_CTOR_BODY_2(webgl_context_event, js_ctor_webgl_context_event_fn)
 
 Item js_intrinsic_ctor_placeholder_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
@@ -16020,7 +16021,7 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_WHEEL_EVENT, JS_CLASS_KEYBOARD_EVENT, JS_CLASS_COMPOSITION_EVENT,
         JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_TOUCH_EVENT,
         JS_CLASS_STATIC_RANGE,
-        JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT,
+        JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT, JS_CLASS_WEBGL_CONTEXT_EVENT,
         0
     };
     for (int i = 0; intrinsic_classes[i]; i++) {
@@ -16822,6 +16823,7 @@ static JsClass js_intrinsic_prototype_parent_class(JsClass cls) {
         case JS_CLASS_UI_EVENT:
         case JS_CLASS_TRANSITION_EVENT:
         case JS_CLASS_ANIMATION_EVENT:
+        case JS_CLASS_WEBGL_CONTEXT_EVENT:
             return JS_CLASS_EVENT;
         case JS_CLASS_FOCUS_EVENT:
         case JS_CLASS_MOUSE_EVENT:

@@ -13,6 +13,7 @@
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"
+#include "../lambda/module/radiant/radiant_webgl_bridge.hpp"
 #include "../lib/mem.h"
 #include "../lib/log.h"
 
@@ -54,11 +55,11 @@ protected:
         DomElement* m=element("material",result);attr(m,"type",material);attr(m,"color",color);
         return result;
     }
-    DomDocument* load_page(const char* path) {
+    DomDocument* load_page(const char* path, float width=320, float height=240) {
         DocumentJsHostConfig host={};host.ui_context=&ui;host.resource_policy=INPUT_RESOURCE_LOCAL_ONLY;
-        page=load_html_doc(doc.url,(char*)path,320,240,&host);
+        page=load_html_doc(doc.url,(char*)path,width,height,&host);
         if (!page) return nullptr;
-        ui.document=lam::up(page);ui.viewport_width=320;ui.viewport_height=240;ui.window_width=320;ui.window_height=240;ui.create_surface(320,240);
+        ui.document=lam::up(page);ui.viewport_width=width;ui.viewport_height=height;ui.window_width=width;ui.window_height=height;ui.create_surface(width,height);
         layout_html_doc(&ui,page,false);return page;
     }
     ImageSurface* snapshot(float width=128,float height=128,float scale=1) {
@@ -378,4 +379,93 @@ TEST_F(Scene3dTest, ViewportQuotaRecoversAfterDetachedSceneRetirement) {
     ASSERT_TRUE(wrapper->remove_child(root));scene3d_collect(&doc);
     EXPECT_NE(scene3d_snapshot(last,&ui,16,16,1),nullptr)<<scene3d_diagnostic(last);
     Scene3dStats stats{};EXPECT_FALSE(scene3d_stats(root,&stats));
+}
+
+TEST_F(Scene3dTest, WebGl2ApiAndMultipleCanvasPixels) {
+    ASSERT_NE(load_page("test/webgl/api.html"),nullptr);
+    DomElement* result=dom_find_element_by_id(page->root->as_element(),"result");ASSERT_NE(result,nullptr);
+    ASSERT_STREQ(result->get_attribute("data-result"),"passed");
+    EXPECT_GE(strtol(result->get_attribute("data-checks"),nullptr,10),30);
+    RenderOutputTarget target={};target.kind=RENDER_OUTPUT_SCREEN;
+    ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+    pixel(ui.surface,32,64,255,0,0);pixel(ui.surface,192,64,0,255,0);
+}
+TEST_F(Scene3dTest, PinnedUnmodifiedThreeRendererAndAddonProduceRealPixels) {
+    ASSERT_NE(load_page("test/demo/scene3d/three-gallery.html",848,650),nullptr);
+    DomElement* status=dom_find_element_by_id(page->root->as_element(),"status");ASSERT_NE(status,nullptr);
+    // the completed module publishes this marker only after its first actual renderer submission.
+    EXPECT_STREQ(status->get_attribute("data-ready"),"true");
+    RenderOutputTarget target={};target.kind=RENDER_OUTPUT_SCREEN;
+    ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+    pixel(ui.surface,40,130,8,15,34);
+    unsigned colored=0;
+    for(unsigned y=180;y<540;y++) for(unsigned x=160;x<680;x++) {
+        const uint8_t* p=(const uint8_t*)ui.surface->pixels+y*ui.surface->pitch+x*4;
+        if(p[1]>80 && p[2]>80) colored++;
+    }
+    EXPECT_GT(colored,20000u);
+    NativeGlStats stats={};ASSERT_TRUE(radiant_webgl_stats(dom_find_element_by_id(page->root->as_element(),"garden"),&stats));
+    EXPECT_EQ(stats.draws,4u);EXPECT_EQ(stats.shader_normalize_calls,8u);
+    RecordProperty("three_shader_normalize_us",(int64_t)stats.shader_normalize_us);
+    RecordProperty("three_gpu_bytes",(int64_t)stats.gpu_bytes);RecordProperty("three_core_cpu_bytes",(int64_t)stats.cpu_bytes);
+}
+TEST_F(Scene3dTest, WebGlContextLossRestoresNewResourcesAndRejectsStaleWrappers) {
+    ASSERT_NE(load_page("test/webgl/loss.html"),nullptr);
+    DomElement* result=dom_find_element_by_id(page->root->as_element(),"result");ASSERT_NE(result,nullptr);
+    ASSERT_STREQ(result->get_attribute("data-result"),"passed");
+    RenderOutputTarget target={};target.kind=RENDER_OUTPUT_SCREEN;
+    ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+    pixel(ui.surface,32,32,0,0,255);
+}
+
+TEST_F(Scene3dTest, ThreeRendererResizesDensityDisposesAndKeepsCanvasesIndependent) {
+    ASSERT_NE(load_page("test/webgl/three-lifecycle.html"),nullptr);
+    DomElement* result=dom_find_element_by_id(page->root->as_element(),"result");ASSERT_NE(result,nullptr);
+    ASSERT_STREQ(result->get_attribute("data-result"),"passed");
+    EXPECT_GE(strtol(result->get_attribute("data-checks"),nullptr,10),9);
+    RenderOutputTarget target={};target.kind=RENDER_OUTPUT_SCREEN;
+    ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
+    pixel(ui.surface,32,64,255,0,0);pixel(ui.surface,192,64,0,255,0);
+}
+TEST(WebGlShaderTest, NormalizationPreservesCommentsConditionalsAndDesktopSource) {
+    const char* es="// #version 999 in a comment\n#version 300 es\n#ifdef GL_ES\nprecision highp float;\n#endif\n#if __VERSION__ == 300\nout vec4 color;void main(){color=vec4(1); }\n#endif\n";
+    char* adapted=native_gl_shader_source(es,true);ASSERT_NE(adapted,nullptr);
+    EXPECT_NE(strstr(adapted,"// #version 999 in a comment"),nullptr);
+    EXPECT_NE(strstr(adapted,"#version 330 core"),nullptr);EXPECT_NE(strstr(adapted,"#line 3"),nullptr);
+    EXPECT_NE(strstr(adapted,"#ifdef RADIANT_WEBGL_ES"),nullptr);EXPECT_NE(strstr(adapted,"#if 300 == 300"),nullptr);
+    EXPECT_EQ(strstr(adapted,"precision highp float"),nullptr);mem_free(adapted);
+    const char* desktop="#version 330 core\nvoid main(){}";adapted=native_gl_shader_source(desktop,false);
+    ASSERT_NE(adapted,nullptr);EXPECT_STREQ(adapted,desktop);mem_free(adapted);
+}
+TEST_F(Scene3dTest, Es100ShaderAndDefaultFramebufferResolvePreserveApplicationState) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    WebGlOptions options={true,true,true,true,true,false};ASSERT_TRUE(native_gl_webgl_init(graphics,32,32,&options));
+    auto call=[&](WebGlOp op,double a=0,double b=0,double c=0,double d=0) {
+        WebGlCommand command={};command.op=op;command.n[0]=a;command.n[1]=b;command.n[2]=c;command.n[3]=d;
+        WebGlReply reply={};EXPECT_TRUE(native_gl_webgl_call(graphics,&command,&reply));return reply;
+    };
+    char* vertex=native_gl_shader_source("attribute vec3 p;void main(){gl_Position=vec4(p,1);}",false);
+    char* fragment=native_gl_shader_source("precision mediump float;void main(){gl_FragColor=vec4(1);}",true);
+    NativeGlResource program=native_gl_program(graphics,vertex,fragment);EXPECT_NE(program.id,0u)<<native_gl_diagnostic(graphics);
+    mem_free(vertex);mem_free(fragment);native_gl_release(graphics,program);
+    call(WEBGL_clearColor,0,1,0,1);call(WEBGL_clear,0x4000);
+    call(WEBGL_stencilMaskSeparate,0x0404,0x12);call(WEBGL_stencilMaskSeparate,0x0405,0x34);
+    call(WEBGL_scissor,0,0,1,1);call(WEBGL_enable,0x0C11);call(WEBGL_readBuffer,0);
+    ImageSurface* image=native_gl_webgl_snapshot(graphics);ASSERT_NE(image,nullptr);pixel(image,16,16,0,255,0);
+    EXPECT_EQ(call(WEBGL_getParameter,0x0C02).n[0],0);EXPECT_EQ(call(WEBGL_getParameter,0x0C11).n[0],1);
+    EXPECT_EQ(native_gl_webgl_snapshot(graphics),nullptr);
+    call(WEBGL_readBuffer,0x0405);
+    uint8_t readback[4]={9,9,9,9};WebGlCommand command={};command.op=WEBGL_readPixels;
+    command.n[2]=command.n[3]=1;command.n[4]=0x1908;command.n[5]=0x1401;command.data=readback;command.bytes=4;WebGlReply reply={};
+    EXPECT_TRUE(native_gl_webgl_call(graphics,&command,&reply));EXPECT_EQ(readback[0],0);EXPECT_EQ(readback[1],0);EXPECT_EQ(readback[3],0);
+    EXPECT_EQ(call(WEBGL_getParameter,0x0B98).n[0],0x12);EXPECT_EQ(call(WEBGL_getParameter,0x8CA5).n[0],0x34);
+    pixel(image,16,16,0,255,0);EXPECT_EQ(call(WEBGL_getError).n[0],0);
+    image_surface_destroy(image);native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, SelectedPinnedKhronosBufferObjectAndTextureAssertions) {
+    ASSERT_NE(load_page("test/webgl/khronos-selected.html"),nullptr);
+    DomElement* result=dom_find_element_by_id(page->root->as_element(),"result");ASSERT_NE(result,nullptr);
+    ASSERT_STREQ(result->get_attribute("data-result"),"passed");
+    EXPECT_GE(strtol(result->get_attribute("data-checks"),nullptr,10),99);
 }

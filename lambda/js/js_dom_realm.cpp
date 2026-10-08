@@ -1,3 +1,4 @@
+#include "../dom/dom_webgl.h"
 /**
  * js_dom_realm.cpp — publishing the DOM's WebIDL surface into a JS realm
  * (ESO79 slice 2 / ES33).
@@ -765,6 +766,7 @@ extern "C" void dom_selection_install_globals(void) {
     // objects exist — this publishes the declared method function objects onto
     // Range.prototype / Selection.prototype (IDL shape, .length probes) before
     // any script can read them.
+    dom_webgl_install_globals();
     jube_type_prototype((const JubeTypeDef*)radiant_dom_range_host_type());
     jube_type_prototype((const JubeTypeDef*)radiant_dom_selection_host_type());
 

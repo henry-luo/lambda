@@ -3,7 +3,9 @@
 **Status:** Phase I implemented natively on macOS; validation and remaining
 aggregate-baseline failures are recorded in
 [the implementation evidence](../impl/Radiant_Scene3d_Phase1.md).
-Phase II remains planned. On 2026-10-08 the user selected a
+Phase II's initial native WebGL2/unmodified Three.js profile is implemented
+on macOS; its API manifest, browser pixels, validation and limits are recorded
+in [the Phase II evidence](../impl/Radiant_WebGL_Phase2.md). On 2026-10-08 the user selected a
 Lambda-element scene package and native Radiant rendering for Phase I, with
 the JS WebGL wrapper and Three.js execution deferred to Phase II. First-party
 system OpenGL, ANGLE as reference only, and desktop GLSL acceptance remain

@@ -9,10 +9,10 @@ struct NativeGlContext;
 // native names never cross the graphics waist (D7.4.1v2); IDs are context branded.
 struct NativeGlResource { uint64_t id; };
 enum NativeGlKind { NATIVE_GL_BUFFER, NATIVE_GL_VERTEX_ARRAY, NATIVE_GL_TEXTURE,
-    NATIVE_GL_PROGRAM, NATIVE_GL_TARGET };
+    NATIVE_GL_PROGRAM, NATIVE_GL_TARGET, NATIVE_GL_SHADER, NATIVE_GL_FRAMEBUFFER, NATIVE_GL_RENDERBUFFER };
 struct NativeGlStats {
     uint64_t generation, allocated_bytes, draws, frames;
-    uint64_t gpu_bytes, cpu_bytes;
+    uint64_t gpu_bytes, cpu_bytes, shader_normalize_calls, shader_normalize_us;
     uint32_t resources;
     char driver[256], version[128], shading_language[128];
 };
@@ -52,3 +52,13 @@ NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsi
 bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const float background[4]);
 bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw);
 ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource target);
+
+struct WebGlCommand;
+struct WebGlReply;
+struct WebGlOptions;
+char* native_gl_shader_source(const char* source, bool fragment);
+bool native_gl_webgl_init(NativeGlContext*, unsigned, unsigned, const WebGlOptions*);
+bool native_gl_webgl_resize(NativeGlContext*, unsigned, unsigned);
+bool native_gl_webgl_call(NativeGlContext*, const WebGlCommand*, WebGlReply*);
+void native_gl_webgl_error(NativeGlContext*, unsigned);
+ImageSurface* native_gl_webgl_snapshot(NativeGlContext*);

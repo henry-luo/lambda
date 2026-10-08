@@ -4430,3 +4430,5 @@ LAM_NODE_OF(RenderExportSession, NodeStack);
 LAM_NODE_OF(RasterPaintContext, NodeStack);
 LAM_NODE_OF(RasterRenderContext, NodeStack);
 LAM_NODE_OF(SvgInlineRenderContext, NodeStack);
+
+void radiant_canvas_prepare_document(DomDocument* document);

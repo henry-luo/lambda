@@ -127,6 +127,7 @@ struct Runtime {
     // Borrowed canonical document URL. Synthetic inline script labels resolve
     // browser module specifiers against this URL while the document is alive.
     const char* js_document_base_url;
+    Item js_import_maps; // immutable Input-owned document maps; released with the document
     // A document chooses one JS execution tier before its preamble runs;
     // mixing AST and MIR closures in a single realm has no shared ABI.
     bool js_ast_backend;
