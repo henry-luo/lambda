@@ -45,14 +45,22 @@ pub fn variant(ch, style) {
     else cp
 }
 
-let styled_commands = {
-    '\\mathrm': "normal", '\\mathbf': "bold", '\\boldsymbol': "bolditalic",
-    '\\mathit': "italic", '\\mathcal': "cal", '\\mathscr': "script",
-    '\\mathfrak': "fraktur", '\\mathbb': "double", '\\mathsf': "sans",
-    '\\mathtt': "mono", '\\operatorname': "normal"
-}
+// Share command spellings between rendering and style-face acquisition.
+let styled_commands = [
+    {cmd: "\\mathrm", style: "normal"},
+    {cmd: "\\mathbf", style: "bold"},
+    {cmd: "\\boldsymbol", style: "bolditalic"},
+    {cmd: "\\mathit", style: "italic"},
+    {cmd: "\\mathcal", style: "cal"},
+    {cmd: "\\mathscr", style: "script"},
+    {cmd: "\\mathfrak", style: "fraktur"},
+    {cmd: "\\mathbb", style: "double"},
+    {cmd: "\\mathsf", style: "sans"},
+    {cmd: "\\mathtt", style: "mono"},
+    {cmd: "\\operatorname", style: "normal"}
+]
 
-pub fn command_variant(cmd) => styled_commands[cmd]
+pub fn command_variant(cmd) => [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
 
 fn collect(node) {
     if (node is string or node is symbol) {
@@ -85,7 +93,7 @@ pub fn prepare(ast, options) map | error {
     let facts = {*:native, constants: if (native.has_math) native.constants else fallback.constants(native.font_metrics)}
     // Ordinary fonts put italic/bold letters in separate faces, not Unicode math alphabets.
     // Only request style faces used by this formula; each query owns its font resources.
-    let needed_styles = unique(["italic", *[for (cmd, style in styled_commands where contains(source, string(cmd))) style],
+    let needed_styles = unique(["italic", *[for (entry in styled_commands where contains(source, entry.cmd)) entry.style],
         *[for (entry in [{cmd: "\\textbf", style: "bold"}, {cmd: "\\textit", style: "italic"},
             {cmd: "\\emph", style: "italic"}, {cmd: "\\textsf", style: "sans"}, {cmd: "\\texttt", style: "mono"}]
             where contains(source, entry.cmd)) entry.style]])

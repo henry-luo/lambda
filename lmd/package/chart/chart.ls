@@ -25,6 +25,11 @@ import geo: .geo
 import parameter: .parameter
 import interaction: .interaction
 import events: .events
+import network: .network
+import cluster: .cluster
+import field: .field
+import indicator: .indicator
+import primitive: .primitive
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
@@ -286,7 +291,7 @@ fn render_single(spec) {
 
     // The same context resolves every visual encoding in single and layered views.
     let mark_ctx = {*:mark_context(data, enc, x_scale, y_scale, lay, stack_mode), _paints: paints, _theme: theme, _projection: spec.projection,
-        _interactive: spec._interactive, _view_path: spec._view_path};
+        _interactive: spec._interactive, _view_path: spec._view_path, _graph: spec._graph};
     let marks_el = interaction.decorate(render_mark(mark_type, data, mark_ctx, mark_spec), spec, lay, x_scale, y_scale);
 
     // render axes
@@ -354,7 +359,7 @@ fn render_layered(spec) {
             let options = cfg.mark_config(cfg.resolve_theme(layer.config), layer.mark),
             let base = mark_context(layer.data, layer.encoding, mappings[index].x, mappings[index].y, lay, layer.stack_mode),
             let context = {*:base, _paints: paints, _theme: cfg.resolve_theme(layer.config),
-                _interactive: layer._interactive, _view_path: layer._view_path,
+                _interactive: layer._interactive, _view_path: layer._view_path, _graph: layer._graph,
                 _projection: if (layer.projection != null) layer.projection else spec.projection},
             let image = interaction.decorate(if (options.kind == "wordcloud") cloud_marks(layer.data, layer.encoding, options, lay.plot_w, lay.plot_h, context, paints)
                 else render_mark(options.kind, layer.data, context, options), layer, lay, mappings[index].x, mappings[index].y, index == 0),
@@ -597,7 +602,16 @@ fn clip_marks(marks, width, height) => <svg class: "plot-clip", x: 0, y: 0, widt
     viewBox: "0 0 " ++ util.fmt_num(width) ++ " " ++ util.fmt_num(height), overflow: "hidden", marks>
 
 fn render_mark_raw(mark_type, data, ctx, mark_spec) {
-    if (mark_type == "bar")
+    if (contains(["sankey", "chord", "force_graph"], mark_type))
+        network.render({*:ctx._graph, nodes: data}, ctx, mark_spec)
+    else if (mark_type == "tree" or mark_type == "pack") cluster.render(data, ctx, mark_spec)
+    else if (mark_type == "funnel") indicator.funnel(data, ctx, mark_spec)
+    else if (mark_type == "gauge" or mark_type == "liquid") indicator.render(data, ctx, mark_spec)
+    else if (mark_type == "density") field.render_density(data, ctx, mark_spec)
+    else if (mark_type == "beeswarm" or (mark_type == "point" and mark_spec.beeswarm != null and mark_spec.beeswarm != false))
+        field.render_swarm(data, ctx, {*:mark_spec, *:parse.attributes(mark_spec.beeswarm)})
+    else if (contains(["link", "polygon", "path", "vector"], mark_type)) primitive.render(data, ctx, mark_spec)
+    else if (mark_type == "bar")
         (if (ctx.x_type == "quantitative" and (ctx.y_type == "nominal" or ctx.y_type == "ordinal"))
             mark.bar_horizontal(data, ctx, mark_spec) else mark.bar(data, ctx, mark_spec))
     else if (mark_type == "line")

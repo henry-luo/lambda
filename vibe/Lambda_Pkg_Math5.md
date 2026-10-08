@@ -505,22 +505,18 @@ change geometry. Chart measurement uses direct text records. Legacy
 `metrics_data` remains only behind the explicit `mathlive.ls` compatibility
 entry point and its low-level fixtures; production math does not import it.
 
-Validation (2026-10-08): build and Radiant float-dimension lint pass; 15 native
-font tests, 77 selected package/integration tests, and 921/921 legacy MathLive
-fixtures pass. The new renderer also produces finite geometry for all 921
-corpus formulas; this is a smoke check, not a visual equivalence assertion.
-Two-font tests compare layout dimensions and emitted paths to native facts.
-The broader Lambda gate is 6465/6466; its remaining `edit_view_only` check
-expected retired MathLive markup. After migrating that check to SVG paths,
-all 14 editor package tests pass. Radiant's 43 scene and 257 native view tests
-pass. Its remaining gate reports 4102 passes, 350 partials and 4 failures:
-three document-editor fixtures still expected retired math markup, and
-`pp_btn_shapes_01` differs from its visual baseline. The three editor fixtures
-now check measured SVG geometry and pass focused reruns; full Radiant baseline
-acceptance is not claimed.
-Two additional editor fixtures retain non-math footnote/view-only-count
-failures; their math SVG assertions pass. The ordinary-font visual check,
-editor math scroll check, and native metrics forced-GC check also pass.
+Validation (2026-10-09): all 78 selected math/LaTeX/metrics/editor integration
+checks, 15 native font tests, and four editor math UI fixtures pass. The
+STIX-free default produces finite geometry for all 921 corpus formulas;
+this is a smoke check, not a visual equivalence assertion. A rendered sample
+covers fractions, nested scripts, radicals, operators, matrices and distinct
+specialist alphabets. Tests compare dimensions and painted paths to native
+facts, including default CMU italics and bundled KaTeX operator fallback.
+The broader Lambda gate still has `input_model_formats` and `scene3d_assets`
+failures (`E407` for OBJ/scene3d-asset parsing). Earlier Radiant validation
+passed 43 scene and 257 native view tests; its button-image baseline mismatch
+and two additional editor footnote/view-only-count failures remain outside
+this font change. Full baseline acceptance is not claimed.
 
 Limits: direct text measurement shares the current SVG placement/shaping
 capabilities; it adds no shaping engine. MATH accents with a finite variant set
