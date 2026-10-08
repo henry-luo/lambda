@@ -3947,20 +3947,23 @@ bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintL
     return true;
 }
 
-bool layout_secondary_paint_root(ViewTree* tree, PaintList* paint) {
+static bool paged_paint_placement(ViewTree* tree, const ViewPageBox* page,
+        const ViewPagePlacement* placement, void* context) {
+    PaintList* paint = (PaintList*)context;
+    RdtMatrix matrix = rdt_matrix_identity();
+    matrix.e11 = matrix.e22 = placement->scale;
+    matrix.e13 = placement->rect.x; matrix.e23 = placement->rect.y;
+    paint_push_transform(paint, &matrix);
+    bool painted = layout_secondary_paint_page(tree, page, paint);
+    paint_pop_transform(paint);
+    return painted;
+}
+
+bool layout_secondary_paint_root(ViewTree* tree, PaintList* paint, const RdtLogicalRect* clip) {
     if (!paint || !view_tree_model_source_valid(tree) || !tree->model->committed) return false;
     if (tree->model->environment.presentation == VIEW_PRESENTATION_CONTINUOUS) {
         return paged_paint_node(tree->model->root, paint);
     }
-    for (size_t i = 0; i < tree->model->placement_count; i++) {
-        const ViewPagePlacement& placement = tree->model->placements.get()[i];
-        LayoutViewNode* node = view_tree_node_resolve(tree, placement.page);
-        if (!node) return false;
-        RdtMatrix matrix = rdt_matrix_identity();
-        matrix.e11 = matrix.e22 = placement.scale; matrix.e13 = placement.rect.x; matrix.e23 = placement.rect.y;
-        paint_push_transform(paint, &matrix);
-        if (!layout_secondary_paint_page(tree, (ViewPageBox*)node, paint)) return false;
-        paint_pop_transform(paint);
-    }
-    return true;
+    // shared placement traversal culls offscreen sheets before recording glyphs and images.
+    return view_tree_preview_paint(tree, clip, paged_paint_placement, paint) == VIEW_MODEL_OK;
 }

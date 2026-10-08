@@ -4141,6 +4141,10 @@ typedef struct UiContext {
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
     lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
+    // the document registry owns the paged edition; launch options outlive the window loop.
+    lam::Up<ViewTree> paged_view;
+    lam::Up<const struct RenderPagedOptions> paged_options;
+    float paged_scroll_x, paged_scroll_y;
     // One Lambda runtime for the window's stateless document loaders (LaTeX,
     // PDF, TikZ, graph, math). Created by the first such load; released after
     // the documents built on it.

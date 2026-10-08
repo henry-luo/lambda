@@ -3969,6 +3969,9 @@ struct RenderPagedOptions {
     bool block_remote_resources;
 };
 RenderPagedOptions render_paged_options_default();
+// window presentation borrows a registry-owned edition and rasterizes only its viewport.
+bool render_paged_window_compose(UiContext* ui);
+void render_paged_window_scroll(UiContext* ui, float x, float y);
 // complete finite numeric arguments shared by output density and preview geometry.
 bool render_output_parse_extent(const char* text, float* result, bool allow_zero = false);
 // -1 is unknown, 0 is a flag, 1 consumes an argument; values retain the caller's string lifetime.

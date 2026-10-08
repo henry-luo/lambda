@@ -853,6 +853,8 @@ struct DocWindowLaunchOptions {
     bool state_dump;
     const char* graph_view_key;
     bool source_surface;
+    bool paged;
+    RenderPagedOptions paged_options;
     const char* font_dirs[16];
     int font_dir_count;
 };
@@ -873,8 +875,28 @@ static bool lambda_view_path_is_archive(const char* path) {
 static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
                                             DocWindowLaunchOptions* out) {
     *out = DocWindowLaunchOptions{};
+    out->paged_options = render_paged_options_default();
+    // window previews separate paper from the surrounding canvas by default.
+    out->paged_options.preview.padding = 24.0f;
+    out->paged_options.preview.group_gap = 24.0f;
+    bool has_paged_options = false;
     for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
+        if (is_view && strcmp(argv[i], "--paged") == 0) {
+            out->paged = true;
+        } else if (is_view && render_paged_option_arity(argv[i]) >= 0) {
+            const char* name = argv[i];
+            if (!strcmp(name, "--export-pages") || !strcmp(name, "--thumbnail-page")) {
+                fputs("Error: export-only page options are unavailable in view\n", stderr);
+                return false;
+            }
+            const char* value = render_paged_option_arity(name) && i + 1 < argc ? argv[++i] : nullptr;
+            const char* error = nullptr;
+            if (!render_paged_option_apply(&out->paged_options, name, value, &error)) {
+                fprintf(stderr, "Error: %s: %s\n", name, error); // PRINTF_OK: CLI usage error.
+                return false;
+            }
+            has_paged_options = true;
+        } else if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
             out->event_file = argv[++i];
         } else if (strcmp(argv[i], "--event-result") == 0 && i + 1 < argc) {
             out->event_result = argv[++i];
@@ -903,6 +925,14 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
             out->filename = argv[i];
         }
     }
+    if (has_paged_options && !out->paged) {
+        fputs("Error: page preview options require --paged\n", stderr);
+        return false;
+    }
+    if (out->paged && (!out->filename || out->graph_view_key)) {
+        fputs("Error: view --paged requires an HTML or Lambda document and no --view-key\n", stderr);
+        return false;
+    }
     return true;
 }
 #endif // LAMBDA_HEADLESS
@@ -929,7 +959,8 @@ extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                            const char** font_dirs = nullptr, int font_dir_count = 0,
                                            bool enable_event_log = false,
-                                           bool enable_state_dump = false);
+                                           bool enable_state_dump = false,
+                                           const RenderPagedOptions* paged_options = nullptr);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 extern void event_sim_set_result_path(const char* result_path);
@@ -3937,11 +3968,25 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nOptions:\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
+            fputs("  --paged                   Preview HTML/Lambda as print-media pages\n"
+                  "  --pages <1,3-5>           Select physical pages (default: all)\n"
+                  "  --page-grid <rows>x<cols> Arrange pages in groups\n"
+                  "  --page-scale <number>     Preview zoom (default: 1)\n"
+                  "  --page-padding <px>       Outer preview padding\n"
+                  "  --page-column-gap <px>    Gap between page columns\n"
+                  "  --page-row-gap <px>       Gap between page rows\n"
+                  "  --page-group-gap <px>     Gap between page groups\n"
+                  "  --page-fill <row|column>  Fill order within each group\n"
+                  "  --page-groups <vertical|horizontal> Group direction\n"
+                  "  --book [--book-page <n>]  Preview a facing-page spread\n"
+                  "  --right-binding          Use right-bound book order\n"
+                  "  --block-remote-resources Disable remote subresources\n", stdout);
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # Open the bundled lambda.doc document viewer\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
             printf("  %s view page.html                # View HTML document\n", argv[0]);
+            fprintf(stdout, "  %s view test/html/paged_media_demo.html --paged  # Print preview\n", argv[0]); // PRINTF_OK: CLI help.
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
             printf("  %s view script.ls                # View Lambda script result\n", argv[0]);
             printf("  %s view paper.tex                # View LaTeX document\n", argv[0]);
@@ -3956,6 +4001,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  --state-dump  Emit per-cascade Mark state-store dump under ./temp/state/\n");
             printf("\nKeyboard Controls:\n");
             printf("  ESC        Close window\n");
+            fputs("  Paged mode: wheel/arrows scroll; PageUp/PageDown, Home/End navigate\n", stdout);
             printf("  Q          Quit viewer\n");
             return lambda_main_finish(0);
         }
@@ -3988,6 +4034,19 @@ static int lambda_main_impl(int argc, char *argv[]) {
         if (!is_http_url && !file_exists(filename)) {
             printf("Error: File '%s' does not exist\n", filename);
             return lambda_main_finish(1);
+        }
+
+        if (launch.paged) {
+            const char* extension = file_path_ext(filename);
+            if (!is_http_url && (!extension || (strcmp(extension, ".html") &&
+                    strcmp(extension, ".htm") && strcmp(extension, ".ls")))) {
+                fputs("Error: view --paged supports HTML and Lambda documents\n", stderr);
+                return lambda_main_finish(1);
+            }
+            int result = view_doc_in_window_with_events(filename, event_file, headless,
+                font_dirs, font_dir_count, event_log, state_dump, &launch.paged_options);
+            lambda_view_log_completion(result);
+            return lambda_main_finish(result);
         }
 
         // For HTTP URLs, route likely HTML documents directly and probe only

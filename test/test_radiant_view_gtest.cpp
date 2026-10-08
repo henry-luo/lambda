@@ -301,8 +301,9 @@ static bool test_radiant_view_profile_shifted_reuse_at(const char* path,
 static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* event_path,
                                                          const ShellEnvEntry* env,
-                                                         const char* optimization = nullptr) {
-    const char* args[8] = {};
+                                                         const char* optimization = nullptr,
+                                                         const char* const* preview_options = nullptr) {
+    const char* args[32] = {};
     int arg_count = 0;
     args[arg_count++] = "./lambda.exe";
     args[arg_count++] = "view";
@@ -313,11 +314,66 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
     }
     args[arg_count++] = "--headless";
     if (optimization) args[arg_count++] = optimization;
+    if (preview_options) for (size_t i = 0; preview_options[i]; i++) args[arg_count++] = preview_options[i];
     args[arg_count] = NULL;
     ShellOptions options = {0};
     options.env = env;
     options.merge_stderr = true;
     return shell_exec("./lambda.exe", args, &options);
+}
+
+TEST(RadiantViewTest, PagedWindowScrollResizeAndDensity) {
+    const char* options[] = {"--paged", "--page-padding", "10", "--page-group-gap", "20", nullptr};
+    const ShellEnvEntry env[] = {{"VIEW_MEM_STAGES", "1"}, {"MEMTRACK_MODE", "DEBUG"}, {nullptr, nullptr}};
+    ShellResult result = test_radiant_view_run_logged_headless("test/html/paged_view.html",
+        "test/html/paged_view_events.json", env, nullptr, options);
+    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(nullptr, strstr(result.stdout_buf ? result.stdout_buf : "", "[MEMTRACK_LIVE] bytes=0 count=0"));
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, PagedWindowDemoAndBookPreview) {
+    const char* modes[][6] = {{"--paged", nullptr}, {"--paged", "--book", "--book-page", "2", nullptr},
+        {"--paged", "--book", "--book-page", "2", "--right-binding", nullptr},
+        {"--paged", "--pages", "none", nullptr}};
+    for (const char* const* mode : modes) {
+        ShellResult result = test_radiant_view_run_logged_headless("test/html/paged_media_demo.html",
+            nullptr, nullptr, nullptr, mode);
+        EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+    ShellResult result = test_radiant_view_run_logged_headless("test/html/ui_script_content_gc.ls",
+        nullptr, nullptr, nullptr, modes[0]);
+    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, PagedWindowGridAndFilteredZoom) {
+    const char* grid[] = {"--paged", "--page-padding", "10", "--page-grid", "1x3", "--page-column-gap", "20", nullptr};
+    const char* selection[] = {"--paged", "--pages", "2", "--page-scale", "0.5", "--page-padding", "10", nullptr};
+    const char* const* options[] = {grid, selection};
+    const char* events[] = {"test/html/paged_view_grid_events.json", "test/html/paged_view_selection_events.json"};
+    for (size_t i = 0; i < 2; i++) {
+        ShellResult result = test_radiant_view_run_logged_headless("test/html/paged_view.html",
+            events[i], nullptr, nullptr, options[i]);
+        EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+}
+
+TEST(RadiantViewTest, PagedWindowRejectsInvalidOptionsAndComposition) {
+    const char* missing_mode[] = {"--page-grid", "2x2", nullptr};
+    const char* missing_value[] = {"--paged", "--page-scale", nullptr};
+    const char* invalid_scale[] = {"--paged", "--page-scale", "nan", nullptr};
+    const char* invalid_range[] = {"--paged", "--pages", "20", nullptr};
+    const char* export_only[] = {"--paged", "--export-pages", "1", nullptr};
+    const char* const* options[] = {missing_mode, missing_value, invalid_scale, invalid_range, export_only};
+    for (const char* const* option : options) {
+        ShellResult result = test_radiant_view_run_logged_headless("test/html/paged_view.html",
+            nullptr, nullptr, nullptr, option);
+        EXPECT_NE(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
 }
 
 static ShellResult test_radiant_view_run_layout_timing(const char* page,

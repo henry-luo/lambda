@@ -660,15 +660,12 @@ static void render_output_render_view_tree(RasterRenderContext* rdcon, ViewTree*
     render_raster_view_tree(rdcon, view_tree);
 }
 
-ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory,
-        Bound physical_bounds, float raster_scale, Color backdrop) {
+static bool render_display_list_replay_surface(DisplayList* list, MemContext* memory,
+        ImageSurface* surface, Bound physical_bounds, float raster_scale, Color backdrop) {
     if (!list || !isfinite(raster_scale) || raster_scale <= 0.0f ||
         !isfinite(physical_bounds.left) || !isfinite(physical_bounds.top) ||
         !isfinite(physical_bounds.right) || !isfinite(physical_bounds.bottom) ||
-        !dl_validate_or_log(list, "render_display_list_snapshot")) return nullptr;
-    ImageSurface* surface = render_surface_create_budgeted(memory,
-        physical_bounds.right - physical_bounds.left, physical_bounds.bottom - physical_bounds.top);
-    if (!surface) return nullptr;
+        !surface || !dl_validate_or_log(list, "render_display_list_replay_surface")) return false;
     RasterPaintContext raster = raster_paint_context(surface, nullptr, nullptr, 0);
     raster_fill_rect(&raster, nullptr, render_pixel_premultiply_abgr(backdrop.c));
     RdtVector vec = {};
@@ -682,14 +679,104 @@ ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory
     for (size_t i = 0, count = (size_t)surface->width * (size_t)surface->height; i < count; i++)
         ((uint32_t*)surface->pixels)[i] = render_pixel_unpremultiply_abgr(((uint32_t*)surface->pixels)[i]);
     surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
+    return true;
+}
+
+ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory,
+        Bound physical_bounds, float raster_scale, Color backdrop) {
+    ImageSurface* surface = render_surface_create_budgeted(memory,
+        physical_bounds.right - physical_bounds.left, physical_bounds.bottom - physical_bounds.top);
+    if (!surface) return nullptr;
+    if (!render_display_list_replay_surface(list, memory, surface, physical_bounds, raster_scale, backdrop)) {
+        image_surface_destroy(surface);
+        return nullptr;
+    }
     return surface;
 }
 
+void render_paged_window_scroll(UiContext* ui, float x, float y) {
+    if (!ui || !ui->paged_view || !ui->paged_view->model->committed) return;
+    RdtLogicalRect bounds = ui->paged_view->model->root->rect;
+    ui->paged_scroll_x = fmaxf(0.0f, fminf(x, bounds.width - ui->viewport_width));
+    ui->paged_scroll_y = fmaxf(0.0f, fminf(y, bounds.height - ui->viewport_height));
+    if (ui->document && ui->document->state) doc_state_mark_dirty(ui->document->state);
+}
+
+bool render_paged_window_compose(UiContext* ui) {
+    if (!ui || !ui->document || !ui->paged_options) return false;
+    DomDocument* doc = ui->document;
+    ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+    environment.device_scale = ui->device_scale;
+    ViewTree* tree = view_tree_secondary_create(doc, &environment);
+    PagedLayoutOptions layout = paged_layout_options_default();
+    layout.right_binding = ui->paged_options->preview.right_binding;
+    PagedLayoutDiagnostic diagnostic = {};
+    bool ok = tree && layout_secondary_view(tree, &layout, &diagnostic) == TYPESET_OK;
+    Pool* pool = ok ? mem_pool_create((MemContext*)doc->services.mem_ctx,
+        MEM_ROLE_RENDER, "render.window.page.selection") : nullptr;
+    ViewPageSelection selection = {};
+    ViewModelStatus status = pool ? view_page_selection_parse(pool,
+        ui->paged_options->preview_pages, &selection) : VIEW_MODEL_OUT_OF_MEMORY;
+    if (status == VIEW_MODEL_OK) status = view_tree_preview_arrange(tree, &selection, &ui->paged_options->preview);
+    if (pool) pool_destroy(pool);
+    if (!ok || status != VIEW_MODEL_OK) {
+        const char* reason = !ok && diagnostic.reason ? diagnostic.reason
+            : "invalid page selection, preview geometry, or allocation failure";
+        log_error("paged window: composition failed: %s", reason);
+        fprintf(stderr, "view --paged: %s\n", reason); // PRINTF_OK: user-facing layout diagnostic.
+        if (tree) view_tree_secondary_release(doc, tree);
+        return false;
+    }
+    // publish after composition succeeds; the registry owns edition allocations (D4.5.1v4).
+    if (ui->paged_view) view_tree_secondary_release(doc, ui->paged_view);
+    ui->paged_view = lam::up(tree);
+    render_paged_window_scroll(ui, ui->paged_scroll_x, ui->paged_scroll_y);
+    log_notice("paged window: composed %zu physical pages", tree->model->page_count);
+    return true;
+}
+
 static bool render_secondary_snapshot_paint(ViewTree* tree, const ViewPageBox* page,
-        PaintList* paint, RdtLogicalRect* bounds) {
+        PaintList* paint, RdtLogicalRect* bounds, const RdtLogicalRect* clip = nullptr) {
     if (!view_tree_model_source_valid(tree) || !tree->model->committed) return false;
     *bounds = page ? RdtLogicalRect{0, 0, page->node.rect.width, page->node.rect.height} : tree->model->root->rect;
-    return page ? layout_secondary_paint_page(tree, page, paint) : layout_secondary_paint_root(tree, paint);
+    return page ? layout_secondary_paint_page(tree, page, paint) : layout_secondary_paint_root(tree, paint, clip);
+}
+
+static bool render_secondary_raster_record(ViewTree* tree, const ViewPageBox* page,
+        float scale, const RdtLogicalRect* clip, PaintList* paint, DisplayList* list, RdtLogicalRect* bounds) {
+    // replay consumes physical coordinates; apply density once for both snapshots and window previews.
+    RdtMatrix density = rdt_matrix_scale(scale, scale);
+    paint_push_transform(paint, &density);
+    bool ok = render_secondary_snapshot_paint(tree, page, paint, bounds, clip);
+    paint_pop_transform(paint);
+    if (!ok || !paint_ir_validate_or_log(paint, "secondary raster")) return false;
+    render_svg_inline_register_paint_ir_lowerers();
+    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+    paint_ir_lower_raster(paint, list);
+    return true;
+}
+
+static int render_paged_window(UiContext* ui) {
+    if (!ui || !ui->surface) return 1;
+    if ((!view_tree_model_source_valid(ui->paged_view) || !ui->paged_view->model->committed) &&
+        !render_paged_window_compose(ui)) return 1;
+    ViewTree* tree = ui->paged_view;
+    render_paged_window_scroll(ui, ui->paged_scroll_x, ui->paged_scroll_y);
+    float scale = ui->device_scale;
+    RdtLogicalRect viewport = {ui->paged_scroll_x, ui->paged_scroll_y, ui->viewport_width, ui->viewport_height};
+    PaintList paint = {}; paint_list_init(&paint, nullptr);
+    DisplayList list = {}; dl_init(&list, nullptr);
+    RdtLogicalRect bounds = {};
+    bool ok = render_secondary_raster_record(tree, nullptr, scale, &viewport, &paint, &list, &bounds);
+    if (ok) {
+        // replay into the existing framebuffer: memory stays bounded by the window, not the book.
+        ok = render_display_list_replay_surface(&list, (MemContext*)tree->model->document->services.mem_ctx,
+            ui->surface, {viewport.x * scale, viewport.y * scale,
+                (viewport.x + viewport.width) * scale, (viewport.y + viewport.height) * scale},
+            scale, Color{.c = 0xffd0d0d0});
+    }
+    dl_destroy(&list); paint_list_destroy(&paint);
+    return ok ? 0 : 1;
 }
 
 static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox* page,
@@ -699,17 +786,8 @@ static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox
     PaintList paint = {}; paint_list_init(&paint, nullptr);
     DisplayList list = {}; dl_init(&list, nullptr);
     ImageSurface* surface = nullptr;
-    // display-list replay consumes physical coordinates; apply output density once before lowering.
-    RdtMatrix density = rdt_matrix_scale(raster_scale, raster_scale);
-    paint_push_transform(&paint, &density);
     RdtLogicalRect bounds = {};
-    bool painted = render_secondary_snapshot_paint(tree, page, &paint, &bounds);
-    paint_pop_transform(&paint);
-    if (painted && paint_ir_validate_or_log(&paint, "secondary snapshot")) {
-        // raster exports can be the first consumer of an SVG image subscene in this process.
-        render_svg_inline_register_paint_ir_lowerers();
-        paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
-        paint_ir_lower_raster(&paint, &list);
+    if (render_secondary_raster_record(tree, page, raster_scale, nullptr, &paint, &list, &bounds)) {
         MemContext* memory = (MemContext*)tree->model->document->services.mem_ctx;
         surface = render_display_list_snapshot(&list, memory,
             {bounds.x * raster_scale, bounds.y * raster_scale,
@@ -1306,6 +1384,10 @@ int render_document_transform_to_output_target(const char* document_file,
 }
 
 static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
+    if (uicon && uicon->paged_options && !output_file) {
+        render_paged_window(uicon);
+        return;
+    }
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.surface = lam::up(uicon ? uicon->surface : nullptr);

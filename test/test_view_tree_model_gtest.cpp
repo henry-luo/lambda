@@ -4106,6 +4106,39 @@ static void expect_same_page_pixels(ViewTree* left, ViewTree* right, uint32_t nu
     image_surface_destroy(a); image_surface_destroy(b);
 }
 
+TEST_F(SecondaryViewTest, WindowPreviewRecomposesWithoutReplacingDefaultGeometryOrGrowingItsSurface) {
+    preview_document();
+    RenderPagedOptions options = render_paged_options_default();
+    UiContext ui = {}; ui.document = lam::up(&doc); ui.paged_options = lam::up(&options);
+    ui.device_scale = 1.0f; ui.viewport_width = 120.0f; ui.viewport_height = 160.0f;
+    ViewTree* browsing = doc.view_tree;
+    ASSERT_TRUE(render_paged_window_compose(&ui));
+    EXPECT_EQ(doc.view_tree.get(), browsing); EXPECT_FLOAT_EQ(source->width, 640.0f);
+    uint64_t original_id = ui.paged_view->model->tree_id;
+    ImageSurface* surface = render_surface_create_budgeted((MemContext*)doc.services.mem_ctx, 120.0f, 160.0f);
+    ASSERT_NE(surface, nullptr); ui.surface = lam::up(surface);
+    render_paged_window_scroll(&ui, 0.0f, 160.0f);
+    render_html_doc(&ui, browsing, nullptr);
+    EXPECT_EQ(snapshot_pixel(surface, 25, 70), 0xff00ff00u);
+    DomElement* first = (DomElement*)source->first_child.get();
+    EXPECT_TRUE(first->set_attribute("style", "background: #ffffff"));
+    // this low-level fixture has no DOM host to advance the mutation epoch after the write.
+    doc.mutation_epoch++;
+    EXPECT_FALSE(view_tree_model_source_valid(ui.paged_view));
+    render_paged_window_scroll(&ui, 0.0f, 0.0f);
+    render_html_doc(&ui, browsing, nullptr);
+    EXPECT_NE(ui.paged_view->model->tree_id, original_id);
+    EXPECT_EQ(snapshot_pixel(surface, 25, 70), 0xffffffffu);
+    EXPECT_EQ(ui.surface.get(), surface); EXPECT_EQ(surface->width, 120); EXPECT_EQ(surface->height, 160);
+    EXPECT_EQ(doc.view_tree.get(), browsing); EXPECT_FLOAT_EQ(source->x, 11.25f);
+    EXPECT_FLOAT_EQ(source->width, 640.0f); EXPECT_FLOAT_EQ(source->height, 91.75f);
+    options.preview_pages = lam::up("99");
+    ViewTree* committed = ui.paged_view;
+    EXPECT_FALSE(render_paged_window_compose(&ui));
+    EXPECT_EQ(ui.paged_view.get(), committed); EXPECT_TRUE(view_tree_model_source_valid(committed));
+    image_surface_destroy(surface);
+}
+
 TEST_F(SecondaryViewTest, PageInstanceRootsShareFinalizedContentWithIndependentPlacements) {
     preview_document();
     DomElement* first = (DomElement*)source->first_child.get();
