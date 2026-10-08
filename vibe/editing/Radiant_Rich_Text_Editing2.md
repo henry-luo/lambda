@@ -120,6 +120,11 @@ This mirrors Slate's `Editor` / `Renderer` split and ProseMirror's `EditorState`
 
 ### Active blocker — `build_dom_tree` rejects markdown subtree (S2.1 finish)
 
+> **Historical note, 2026-10-08:** the splat and fused `apply;` claims below
+> record the earlier investigation. Current **S2.6.3** spreads list/loop results
+> into element content; bare `apply` uses ordinary statement separation under
+> **S16.2**. See [Reactive UI §§4.4–4.5](../Lambda_Design_Reactive_UI.md#44-recursive-descent-and-child-forwarding).
+
 Rendering the parsed markdown body inside `#doc` (either via per-tag `view <h1>`/`view <p>`/… templates or by embedding `initial_doc[0]` directly under a `<div>`) crashes Radiant during DOM construction:
 
 ```
@@ -132,7 +137,7 @@ signal handler: SIGSEGV at 0x0 is not stack overflow, re-raising
 
 Two distinct issues are in play:
 
-1. **Splat semantics.** The natural per-tag template `view <h1> { <h1 for (c in ~) c> }` does not splat the loop result into the parent element — `for (c in ~) c` produces a list value that becomes a single child of unexpected type, hence the `length=1 but items=NULL` and `invalid type=…` reports. The correct pattern is the bare **`apply;` statement** (per `Reactive_UI.md` §8.3), which the framework expands into a child-template dispatch per child of `~`:
+1. **Splat semantics (historical finding; superseded by S2.6.3).** The investigation attributed the `length=1 but items=NULL` and `invalid type=…` reports to the loop result in `view <h1> { <h1 for (c in ~) c> }` becoming one child. It recommended the then-fused **`apply;` statement** to dispatch each source child. The note above and [Reactive UI §§4.4–4.5](../Lambda_Design_Reactive_UI.md#44-recursive-descent-and-child-forwarding) describe the current list-spreading and bare-`apply` rules. The original workaround was:
 
    ```lambda
    view <h1> { <h1 ; apply; > }
@@ -151,7 +156,7 @@ Two distinct issues are in play:
 
 ### Working notes
 
-- Use `<tag ; apply; >` for per-tag templates. The bare **`apply;` statement** (parens-less, terminating semicolon) is the splat form per `Reactive_UI.md` §8.3 — it dispatches each child of `~` through the template registry, splatting them as element children. The function-call form `apply(target)` is for top-level entry (e.g. `apply(initial_doc[0])`) and requires an explicit target. The `<tag for (c in ~) c>` form does not splat: `for` returns a list which becomes a single (broken) child.
+- The historical recommendation was `<tag ; apply; >`. Current recursive child dispatch uses bare `apply`, while `apply(target)` takes an explicit source item; see [Reactive UI §4.4](../Lambda_Design_Reactive_UI.md#44-recursive-descent-and-child-forwarding). Loop results spread into content under **S2.6.3**, so the old non-splat claim is superseded.
 - Smoke runner accepts `.ls` paths in the JSON `"html"` field — no runner change needed for reactive-UI prototypes.
 - `./lambda.exe view <script>.ls --event-file <file>.json --headless` is the canonical smoke invocation; `--no-log` suppresses the per-event trace once the test stabilises.
 

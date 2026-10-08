@@ -5,7 +5,7 @@
 **Builds on:** [Radiant_Rich_Text_Editing.md](Radiant_Rich_Text_Editing.md) (Stage 1),
 [Radiant_Rich_Text_Editing2.md](Radiant_Rich_Text_Editing2.md) (Stage 2),
 [Radiant_Rich_Text_Editor3.md](Radiant_Rich_Text_Editor3.md) (Stage 3),
-[Reactive_UI.md](Reactive_UI.md) (reactive substrate).
+[Reactive UI](../Lambda_Design_Reactive_UI.md) (reactive substrate).
 **Leads to:** [Radiant_Editor_Stage5.md](Radiant_Editor_Stage5.md) — the full draw.io-class drawing editor (data model, tools, routing, snap, clipboard, render contract, module plan, tests, phases).
 
 ---
