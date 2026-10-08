@@ -1,0 +1,114 @@
+{
+  "name": "View a host directory and expand ZIP-backed and nested archive files",
+  "html": "test/input/zip",
+  "viewport": {
+    "width": 1280,
+    "height": 1600
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".project-root .tree-label"
+      },
+      "equals": "zip"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/sample.docx'] > .tree-row .tree-label"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/sample.docx'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='sample.docx/word'] > .tree-row .tree-label"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='sample.docx/nested.zip'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='sample.docx/nested.zip/inner.txt'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "equals": "nested"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='sample.docx/bad.json'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#property-preview"
+      },
+      "contains": "Unable to parse selected file"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-source"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "equals": "{invalid"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='/sample.jar'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='sample.jar/META-INF'] > .tree-row .tree-label"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='sample.jar/META-INF'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='sample.jar/META-INF/MANIFEST.MF'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "contains": "Main-Class: example.Hello"
+    }
+  ]
+}

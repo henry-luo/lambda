@@ -1,4 +1,5 @@
 #include "input/input.hpp"
+#include "io/zip_archive.hpp"
 #include "format/format.h"
 #include "format/format-markup.h"
 #include "../lib/mime-detect.h"
@@ -855,6 +856,17 @@ struct DocWindowLaunchOptions {
     const char* font_dirs[16];
     int font_dir_count;
 };
+
+static bool lambda_view_path_is_archive(const char* path) {
+    if (zip_source_expected(path, nullptr, 0)) return true;
+    FILE* stream = file_open_regular_read(path);
+    if (!stream) return false;
+    uint8_t signature[4];
+    size_t size = fread(signature, 1, sizeof(signature), stream);
+    fclose(stream);
+    // only route by the signature here; input() validates and captures the archive.
+    return zip_source_expected(path, signature, size);
+}
 
 // Parse argv[2..] for a document-window command. `--view-key` belongs to the
 // viewer and `--source` to the editor. Returns false after reporting a usage error.
@@ -3895,6 +3907,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  The 'view' command opens a document in an interactive window.\n");
             printf("  Supports multiple document formats with full rendering and styling.\n");
             printf("  If no file is specified, opens the bundled lambda.doc document viewer.\n");
+            printf("  Directories and ZIP archives open as browsable file trees.\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
             printf("  .html      HyperText Markup Language\n");
@@ -3920,6 +3933,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .toml      TOML (source view)\n");
             printf("  .txt       Plain text\n");
             printf("  .csv       Comma-separated values (source view)\n");
+            printf("  .zip/.docx/.jar  ZIP-backed archives (file tree)\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nOptions:\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
@@ -4009,6 +4023,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
                 // Get file extension from Content-Type
                 effective_ext = content_type_to_extension(response->content_type);
+                if (zip_source_expected(filename, response->data, response->size)) effective_ext = ".zip";
                 log_info("HTTP Content-Type: %s -> extension: %s",
                          response->content_type ? response->content_type : "(none)",
                          effective_ext ? effective_ext : "(none)");
@@ -4047,7 +4062,16 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check if this is a graph file that needs conversion
         bool is_graph_file = graph_path_is_graph(filename);
 
-        if (is_graph_file && graph_view_key) {
+        bool browse_tree = file_is_dir(filename) || lambda_view_path_is_archive(filename);
+        if (browse_tree) {
+            static const LambdaDocumentTransformConfig browser_transform = {
+                "browse", "lambda.doc.doc_viewer", "open_browser",
+                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false
+            };
+            log_info("VIEW_FILE_TREE: opening directory or ZIP archive: %s", filename);
+            exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump);
+        } else if (is_graph_file && graph_view_key) {
             const LambdaDocumentTransformConfig* transform =
                 lambda_document_transform_for_input_type("graph");
             LambdaDocumentTransformOption option = {"view_key",
@@ -4064,9 +4088,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        }
-
-        if (is_graph_file || (ext && (strcmp(ext, ".pdf") == 0 ||
+        } else if (is_graph_file || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||

@@ -42,6 +42,11 @@ office = archive([
     ('notes/\u00e9 space.txt', b'unicode', 8),
 ])
 (base / 'office.docx').write_bytes(office)
+(base / 'viewer.zip').write_bytes(archive([
+    ('index.html', b'<!doctype html><html><head><style>h1 { color: rgb(20, 60, 100); }</style></head><body><h1>Archive HTML</h1></body></html>', 8),
+    ('readme.md', b'# Archive Markdown\n\nA member preview.\n', 8),
+    ('drawing.svg', b'<svg xmlns="http://www.w3.org/2000/svg" width="30" height="20"><rect width="30" height="20" fill="blue"/></svg>', 0),
+]))
 (base / 'empty.zip').write_bytes(archive([]))
 corrupt = bytearray(normal)
 corrupt[struct.unpack_from('<H', normal, 26)[0] + 30] ^= 0x80

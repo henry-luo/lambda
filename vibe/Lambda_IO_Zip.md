@@ -506,6 +506,15 @@ pn save_constructed_zip() {
   publication. `write_binary_file_atomic` closes/checks the temporary file and
   renames it only after successful encoding. Generic structured output also
   completes fallible formatting before opening its target.
+- **Interactive browsing:** `lambda view archive.zip` (including ZIP-backed
+  DOCX/JAR and renamed ZIP sources) and `lambda view directory/` share the
+  bundled `lambda.doc.doc_viewer` tree (**D7.2.4**). Its path-source entry
+  captures the root once; rows retain member nodes for expansion and preview
+  (**S12.4.1v2/S14.3.1v2**). Structured/text/binary previews read those nodes;
+  images use data URLs and HTML uses `srcdoc`, without extracting members or
+  inventing host member Paths. Diagnostic printing treats virtual carriers as
+  opaque, so UI logging does not force member content. Archive-relative linked
+  resources are not mounted as host files or given a new URL scheme.
 
 ## Appendix B. Superseded proposal choices
 
