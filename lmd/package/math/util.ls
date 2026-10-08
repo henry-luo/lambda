@@ -145,3 +145,78 @@ pub fn content_items(node) {
 
 pub let PT_PER_EM = 10.0
 pub let SCRIPT_SPACE = 0.05
+
+// Shared syntax parsing; callers resolve ex/absolute lengths in their font context.
+pub fn dimension_from_string(raw) {
+    let start = find_number_start(raw, 0)
+    if (start >= len(raw)) {
+        {value: 0.0, sign: 1.0, unit: "em"}
+    } else {
+        let end = find_number_end(raw, start)
+        let unit_end = find_unit_end(raw, end)
+        let num_text = slice(raw, start, end)
+        let unit_text = if (unit_end > end) slice(raw, end, unit_end) else "em"
+        let sign = if (len(num_text) > 0 and slice(num_text, 0, 1) == "-") -1.0 else 1.0
+        let abs_start = if (len(num_text) > 0 and (slice(num_text, 0, 1) == "-" or slice(num_text, 0, 1) == "+")) 1 else 0
+        let abs_text = slice(num_text, abs_start, len(num_text))
+        {value: float(abs_text), sign: sign, unit: unit_text}
+    }
+}
+
+fn find_number_start(s, i) {
+    if (i >= len(s)) i
+    else if (is_number_start_char(slice(s, i, i + 1))) i
+    else find_number_start(s, i + 1)
+}
+
+fn find_number_end(s, i) {
+    if (i >= len(s)) i
+    else if (is_number_char(slice(s, i, i + 1))) find_number_end(s, i + 1)
+    else i
+}
+
+fn find_unit_end(s, i) {
+    if (i >= len(s)) i
+    else if (is_unit_char(slice(s, i, i + 1))) find_unit_end(s, i + 1)
+    else i
+}
+
+fn is_number_start_char(ch) {
+    ch == "-" or ch == "+" or ch == "." or is_digit_char(ch)
+}
+
+fn is_number_char(ch) {
+    ch == "-" or ch == "+" or ch == "." or is_digit_char(ch)
+}
+
+fn is_digit_char(ch) {
+    ch == "0" or ch == "1" or ch == "2" or ch == "3" or ch == "4" or
+    ch == "5" or ch == "6" or ch == "7" or ch == "8" or ch == "9"
+}
+
+fn is_unit_char(ch) {
+    ch == "a" or ch == "b" or ch == "c" or ch == "d" or ch == "e" or
+    ch == "f" or ch == "g" or ch == "h" or ch == "i" or ch == "j" or
+    ch == "k" or ch == "l" or ch == "m" or ch == "n" or ch == "o" or
+    ch == "p" or ch == "q" or ch == "r" or ch == "s" or ch == "t" or
+    ch == "u" or ch == "v" or ch == "w" or ch == "x" or ch == "y" or
+    ch == "z"
+}
+
+
+// Preserve explicit row/cell token boundaries for both rendering backends.
+pub fn parse_rows(body, i, n, rows, current_row, current_cell) {
+    if (i >= n) {
+        rows ++ [make_row(current_row ++ [make_cell(current_cell)])]
+    } else if (body[i] == 'row_sep' or body[i] == 'col_sep') {
+        if (body[i] == 'row_sep')
+            parse_rows(body, i + 1, n, rows ++ [make_row(current_row ++ [make_cell(current_cell)])], [], [])
+        else
+            parse_rows(body, i + 1, n, rows, current_row ++ [make_cell(current_cell)], [])
+    } else
+        parse_rows(body, i + 1, n, rows, current_row, current_cell ++ [body[i]])
+}
+
+fn make_cell(items) => {items: items}
+
+fn make_row(cells) => {cells: cells}

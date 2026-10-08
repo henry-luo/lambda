@@ -204,14 +204,16 @@ name(svg)                // 'svg'
 svg.width                // 400, the default width
 ```
 
-> **Experimental.** The converter supports inline/named/file/URL data, the documented transforms, static expression strings, and layer/facet/concat/repeat composition. Unsupported expression syntax, helpers, or transforms return a diagnostic; use Lambda data preparation for requests outside the supported subset.
+> **Experimental.** The converter supports inline/named/file/URL data, the documented transforms, parameter expressions and selections, and layer/facet/concat/repeat composition. Unsupported expression syntax, helpers, or transforms return a diagnostic; use Lambda data preparation for requests outside the supported subset.
 
 ### 4.2 API
 
 | Function | Description |
 |----------|-------------|
 | `chart.render(chart_el)` | Renders a `<chart>`, `<hconcat>`, `<vconcat>` or `<repeat>` element as an `<svg>` element |
-| `chart.render_spec(spec)` | Renders a specification map, such as the result of `vega.convert`; an element is passed on to `render` |
+| `chart.render_spec(spec, viewport = null, st = null)` | Renders a specification map or native element; optional parameter-state snapshot derives an interactive SVG presentation |
+| `chart.model(spec, viewport = null)` | Creates a chart source element; retain and `apply` it to preserve chart state across parent rerenders |
+| `chart.interactive(spec, viewport = null)` | Applies a Lambda view template with independent interaction state, SVG, and bound input controls |
 | `vega.convert(vl)` | Converts a parsed Vega-Lite document (a map) into a specification map for `render_spec` |
 
 ### 4.3 Specification elements
@@ -222,6 +224,7 @@ svg.width                // 400, the default width
 | `<data>` | Inline `values: [...]` or row children; `name` selects the chart's `datasets` map; `url` and optional `format` use Lambda input loading |
 | `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`, `violin`, `slope`, `trail`, `image`, `radar`, `parallel`, `treemap`, `sunburst`, `geoshape` (`geo`); an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
 | `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<theta2>`, `<radius>`, `<radius2>`, `<longitude>`, `<latitude>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`, `<url>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`; `geojson` for a shape field), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `stack_order`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<params>` | `<param name: ...>` declarations, or supply a chart `params` array; variables, point/interval selections, and bindings |
 | `<transform>` | Ordered `filter`, `sort`, `aggregate`, `joinaggregate`, `calculate`, `bin`, `timeunit`, `fold`, `flatten`, `pivot`, `impute`, `stack`, `quantile`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
 | `<config>` | `theme`: `light`, `dark`, `minimal`, `presentation`, or a custom map; nested `mark`/mark-type/`axis`/`legend` settings or equivalent prefixed attributes; `font`; `axis_grid: true` for horizontal grids |
 | `<layer>` | `<chart>` children drawn over one another |
@@ -350,7 +353,23 @@ Legend rows and margins accommodate the
 selected fonts. Different available fonts can produce different geometry;
 complex-script shaping follows Radiant's current SVG support.
 
-The reusable read-only host function
+The direct read-only API `radiant.measure_text(requests, faces)` accepts an
+array of `{text, font}` records. `font` contains `font_family`, `font_size`
+(CSS pixels), `font_weight`, `font_style`, and optional `letter_spacing` /
+`word_spacing`. `faces` is `null` for installed fonts, or an array of
+`{font_family, data: binary, font_weight?, font_style?}` snapshots acquired by
+Lambda IO (**D7.1.2v2**). Chart labels use this API without constructing HTML.
+Results include advance/width, height, baseline, separate `ink` and `logical`
+bounds, and `resolved_fonts` (the actual face families used, including fallback).
+An empty string has zero bounds and an empty font list. Placement and fallback
+are shared with Radiant's SVG painter; this does not add a new shaping engine.
+`radiant.font_metrics(font, faces)` returns ascent, positive descent, line gap /
+height, x-height, cap-height, space width, units per em, underline thickness,
+OS/2 subscript/superscript baseline offsets, and resolved family.
+Both APIs return copied values or `null` on invalid input/failure
+(**D4.2.2v2, D7.4.6, S12.1.1v2**). Batch-local font caches expire with the query.
+
+The existing read-only host function
 `radiant.measure_svg_text(html, width, height)` measures each direct `<text>`
 child of the first SVG in the HTML body, preserving request order. Other SVG
 children can supply font resources. It returns copied `width` (advance),
@@ -406,13 +425,14 @@ diagnostic. Vega-Lite conversion supports these transforms, including its
 `window` operation array and `regression`/`loess` with `on` syntax.
 
 Filter `test`, calculate `expression`, and channel condition `test` accept
-static Vega expression strings as well as pure Lambda callbacks (S12.1.1v2).
-Expressions bind `datum` and support nested fields, literals, operators,
+Vega expression strings as well as pure Lambda callbacks (S12.1.1v2).
+Expressions bind declared parameter values and `datum` and support nested fields, literals, operators,
 short-circuit conditions, and common mathematical, type, string, and array
 helpers. Missing fields remain distinct from null inside expressions.
 Unknown syntax/helpers and evaluation failures return value errors
-(S7.4.1), including invalid expressions with empty data. Signals, events,
-assignments, method calls, and ambient globals are outside this static subset.
+(S7.4.1), including invalid expressions with empty data. Event selectors also
+bind `event`. Assignments, method calls, signals, and ambient globals are
+outside this expression subset.
 See the [expression contract](../vibe/Lambda_Pkg_Chart.md#color).
 
 Running-sum windows followed by a calculation of each prior total produce
@@ -420,6 +440,70 @@ waterfall charts with ordinary `bar` marks and `y`/`y2` ranges. Density and
 fitted-trend outputs use ordinary line/area marks. See the
 [chart design](../vibe/Lambda_Pkg_Chart.md#6-data-transformations) for full contracts
 and a runnable waterfall example.
+
+### Declarative interactions
+
+Use `chart.interactive` to display a stateful chart in a Lambda view. It adopts
+Vega-Lite's `params` grammar. Parameter values and per-view selection stores
+belong to each applied chart template; `on` handlers update them and rendering
+stays pure (S9.1.4, S12.1.3, D6.2.3v2).
+
+```lambda
+import chart: lambda.chart.chart
+import vega: lambda.chart.vega
+
+let spec = vega.convert({
+    data: {values: [{group: "A", x: 2, y: 3}, {group: "B", x: 7, y: 8}]},
+    params: [{name: "picked", select: {type: "point", fields: ["group"]}}],
+    mark: "point",
+    encoding: {
+        x: {field: "x", type: "quantitative"},
+        y: {field: "y", type: "quantitative"},
+        color: {condition: {param: "picked", empty: false, value: "red"}, value: "grey"}
+    }
+});
+<html <body chart.interactive(spec)>>
+```
+
+Native markup accepts the same `params` array or a `<params <param ...>>`
+child. Ordinary `chart.render` produces the initial static snapshot. For a
+chart nested in a parent that rerenders, create `chart.model(spec)` once, keep
+that source value in the parent model, and call `apply(~.chart)` in its body.
+This retains state on the same chart instance (S9.1.4); see the
+[source/template identity contract](../vibe/Lambda_Design_Reactive_UI.md#5-instance-state-and-identity).
+
+- `select: {type: "point"}` selects hit records. `fields` or `encodings`
+  projects the stored tuples. Click replaces; Shift-click toggles by default.
+  `nearest: true` supports nearest-point hover with `on: "pointerover"`.
+- `select: {type: "interval", encodings: ["x"]}` creates a horizontal brush.
+  Omit `encodings` for both positional axes. Drag within the brush translates;
+  the wheel zooms. `clear` defaults to `"dblclick"`; `false` disables clearing.
+- `{filter: {param: "brush"}}` links a view's data to a selection, including
+  sibling views. Conditions use the same `param` predicate. Empty selections
+  match all records unless `empty: false`. `resolve` accepts `"global"`,
+  `"union"`, or `"intersect"` for selection stores from multiple views.
+- Variable declarations use `{name, value}` or read-only `{name, expr}`.
+  Expressions can reference declared parameter names, and option values can
+  use `{expr: "..."}`.
+- `bind: {input: "range", min: 0, max: 100, step: 1}` generates a control.
+  Text, number, checkbox, select, and radio inputs are also supported; point
+  selections can bind each projected field. `bind: "legend"` selects from a
+  categorical legend. Interval `bind: "scales"` enables continuous-scale pan
+  and pointer-centered zoom.
+
+Event selectors support filters such as `"click[event.shiftKey]"`, unions,
+and captured interval streams such as
+`"[pointerdown, window:pointerup] > window:pointermove"`. A chart emits
+`chart_change` with projected parameter values to a handling ancestor. A
+`chart_parameter` event delivered to the chart accepts `param`, `value`, and
+an optional projected `field`, directly or in custom event `detail`, for
+programmatic updates. Wordcloud words
+participate in point selections through their source records.
+
+See [interaction contracts and remaining compatibility gaps](../vibe/Lambda_Pkg_Chart.md#10-declarative-interactions)
+for projection, initialization, binding, and event-stream details. Timed
+streams, general external/window subscriptions, external DOM input bindings,
+and rich HTML tooltip overlays are not implemented.
 
 ### 4.4 Word and tag clouds
 
@@ -604,25 +688,50 @@ lambda render arch.dsl -o containers.svg --view-key Containers   # one Structuri
 
 ## 6. `math` — Math Typesetting
 
-The math package typesets a parsed math tree (from `parse(text, 'math')` or `input(path, 'math')`) as HTML `<span>` elements styled by its own stylesheet. [Math_Support.md §2](Math_Support.md#2-rendering-math-to-html) documents it in full; this is a summary.
+The math package typesets a parsed math tree as self-contained inline SVG,
+using the selected font's glyph outlines and optional OpenType MATH data. The default reuses
+bundled CMU Serif and the existing small KaTeX symbol/alphabet faces; geometry
+has no dependency on `metrics_data.mark`. No new font asset is distributed.
+[Math_Support.md §2](Math_Support.md#2-rendering-math-to-html) documents the API.
 
 ```lambda
 import math: lambda.doc.math.math
 
 let ast = parse("\\sqrt{x^2 + 1}", 'math')^
 let el = math.render_display(ast)
-el.class                                                   // "lm_latex"
-contains(format(el, 'html'), "lm_sqrt")                    // true
-contains(math.stylesheet({font: "katex"}), "KaTeX_Main")   // true
+el.class                              // "lambda-math"
+contains(format(el, 'html'), "<path") // true
 ```
 
 | Function | Description |
 |----------|-------------|
-| `render_math(ast, options)` | Renders with options `display` (bool), `standalone` (bool: embed the stylesheet) and `color` |
+| `render_math(ast, options)` | Renders with `display`, `color`, `font_family`, `fonts`, and optional CSS-pixel `font_size` |
+| `render_box(ast, options)` | Returns the emitted element and full-precision width/height/depth in em |
+| `render_box_element(box)` | Emits an already measured box without remeasurement |
 | `render_inline(ast)` | Inline (text) style |
 | `render_display(ast)` | Display (block) style |
-| `render_standalone(ast)` | Display style with the stylesheet embedded in a `<style>` element |
-| `stylesheet(options = null)` | The CSS as a string; `{font: "katex"}` selects the KaTeX fonts |
+| `render_standalone(ast)` | Self-contained display style SVG |
+| `stylesheet(options = null)` | Returns `""`; outlined math requires no external font CSS |
+
+`fonts` uses the same binary face records as Radiant's metrics API. An explicit
+`font_family` without `fonts` uses installed fonts. MATH is optional: ordinary
+fonts use their measured geometry and MathML Core fallback layout constants;
+italic/bold letters resolve the corresponding ordinary style faces when the
+Unicode math alphabet is absent. Symbols missing from the face use normal
+font fallback, measuring and emitting the resolved glyph's own outline.
+`radiant.math_metrics(font, codepoints, faces)` exposes copied glyph
+metrics/outlines and normal `font_metrics` for every usable face. `has_math`
+reports table availability; `constants` is `null` when absent. When available,
+it additionally exposes MATH constants, italic corrections, accent attachments,
+corner kerns, variants and assembly connectors. `font.fallback: true` enables
+codepoint fallback (off by default), and each glyph reports its actual family.
+Invalid font data returns `null`; a codepoint with no glyph returns a null entry.
+Distances use the requested CSS pixel size; MATH percentages remain percentages.
+Algorithms stay in Lambda and font parsing stays in `lib/font` (**D7.1.1**).
+
+The explicit `lambda.doc.math.mathlive` import retains the previous HTML/CSS
+renderer for font-specific compatibility fixtures. Its `metrics_data` dependency
+is isolated from the production entry point.
 
 `lambda view`, `lambda layout` and `lambda render` typeset the `$…$` and `$$…$$` math of Markdown documents through this package, and the `latex` package uses it for the math inside LaTeX documents.
 
@@ -665,7 +774,7 @@ name(page)                               // 'html'
 | `render_file_to_html(path)` | Parses a LaTeX file and returns an HTML string |
 | `render_string(source)`, `render_string_to_html(source)` | Meant to render LaTeX source text; see the note below |
 
-`options` may be `null`. `standalone` selects a complete page; `font_option: "katex"` selects KaTeX math fonts; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. Parsed-document CLI transforms receive a neutral `source_path` option from the host, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and `--font-option katex` passes the font option; `lambda view`, `layout` and `render` always render the standalone page.
+`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. Parsed-document CLI transforms receive a neutral `source_path` option from the host, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change outlined math; `lambda view`, `layout` and `render` always render the standalone page.
 
 `render_string` and `render_string_to_html` parse source text directly. For resources referenced from a source string, parse it and call `render` or `render_result` with an explicit `base_uri`.
 

@@ -1,0 +1,32 @@
+<html
+  <head
+    <style
+      "body{margin:0} .lambda-chart{display:inline-block;outline:none} .chart-controls{padding:8px} .chart-control{display:inline-block}">>
+  <body
+    <div class: "lambda-chart", tabindex: "0",
+      <svg xmlns: "http://www.w3.org/2000/svg", width: 420, height: 160, viewBox: "0 0 420 160",
+        <rect width: 420, height: 160, fill: "white">
+        <g transform: "translate(0, 0)",
+          <svg font-family: "Arial", data-chart-root: "chart-c0", xmlns: "http://www.w3.org/2000/svg", width: 200, height: 160, viewBox: "0 0 200 160",
+            <rect width: 200, height: 160, fill: "white">
+            <g transform: "translate(20, 20)",
+              <g data-chart-frame: "{\n  \"view\": \"chart-c0\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"group\"\n        ]\n      }\n    },\n    {\n      \"name\": \"brush\",\n      \"select\": {\n        \"type\": \"interval\",\n        \"encodings\": [\n          \"x\"\n        ]\n      }\n    },\n    {\n      \"name\": \"threshold\",\n      \"value\": 0,\n      \"bind\": {\n        \"input\": \"range\",\n        \"min\": 0,\n        \"max\": 10,\n        \"step\": 1\n      }\n    }\n  ],\n  \"encoding\": {\n    \"x\": {\n      \"field\": \"x\",\n      \"dtype\": \"quantitative\"\n    },\n    \"y\": {\n      \"field\": \"y\",\n      \"dtype\": \"quantitative\"\n    },\n    \"color\": {\n      \"field\": null,\n      \"dtype\": null\n    }\n  },\n  \"data\": [\n    {\n      \"group\": \"A\",\n      \"x\": 2,\n      \"y\": 2\n    },\n    {\n      \"group\": \"B\",\n      \"x\": 5,\n      \"y\": 5\n    },\n    {\n      \"group\": \"C\",\n      \"x\": 8,\n      \"y\": 8\n    }\n  ],\n  \"scales\": {\n    \"x\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        0,\n        160\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    },\n    \"y\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        120,\n        0\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    }\n  },\n  \"x\": 20,\n  \"y\": 20,\n  \"width\": 160,\n  \"height\": 120,\n  \"svg_width\": 200,\n  \"svg_height\": 160\n}",
+                <rect class: "chart-interaction-plane", width: 160, height: 120, fill: "transparent", pointer-events: "all">
+                <g class: "marks points",
+                  <circle cx: 32, cy: 96, r: 7.978845608028654, fill: "grey", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"A\",\n  \"x\": 2,\n  \"y\": 2\n}", data-chart-view: "chart-c0">
+                  <circle cx: 80, cy: 60, r: 7.978845608028654, fill: "grey", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"B\",\n  \"x\": 5,\n  \"y\": 5\n}", data-chart-view: "chart-c0">
+                  <circle cx: 128, cy: 24, r: 7.978845608028654, fill: "grey", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"C\",\n  \"x\": 8,\n  \"y\": 8\n}", data-chart-view: "chart-c0">>>>>>
+        <g transform: "translate(220, 0)",
+          <svg font-family: "Arial", data-chart-root: "chart-c1", xmlns: "http://www.w3.org/2000/svg", width: 200, height: 160, viewBox: "0 0 200 160",
+            <rect width: 200, height: 160, fill: "white">
+            <g transform: "translate(20, 20)",
+              <g data-chart-frame: "{\n  \"view\": \"chart-c1\",\n  \"params\": [\n    {\n      \"name\": \"pick\",\n      \"select\": {\n        \"type\": \"point\",\n        \"fields\": [\n          \"group\"\n        ]\n      }\n    },\n    {\n      \"name\": \"brush\",\n      \"select\": {\n        \"type\": \"interval\",\n        \"encodings\": [\n          \"x\"\n        ]\n      }\n    },\n    {\n      \"name\": \"threshold\",\n      \"value\": 0,\n      \"bind\": {\n        \"input\": \"range\",\n        \"min\": 0,\n        \"max\": 10,\n        \"step\": 1\n      }\n    }\n  ],\n  \"encoding\": {\n    \"x\": {\n      \"field\": \"x\",\n      \"dtype\": \"quantitative\"\n    },\n    \"y\": {\n      \"field\": \"y\",\n      \"dtype\": \"quantitative\"\n    }\n  },\n  \"data\": [\n    {\n      \"group\": \"A\",\n      \"x\": 2,\n      \"y\": 2\n    },\n    {\n      \"group\": \"B\",\n      \"x\": 5,\n      \"y\": 5\n    },\n    {\n      \"group\": \"C\",\n      \"x\": 8,\n      \"y\": 8\n    }\n  ],\n  \"scales\": {\n    \"x\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        0,\n        160\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    },\n    \"y\": {\n      \"kind\": \"linear\",\n      \"domain\": [\n        0,\n        10\n      ],\n      \"range\": [\n        120,\n        0\n      ],\n      \"clamp\": null,\n      \"round\": null,\n      \"base\": 10,\n      \"timezone\": 0,\n      \"exponent\": 1\n    }\n  },\n  \"x\": 20,\n  \"y\": 20,\n  \"width\": 160,\n  \"height\": 120,\n  \"svg_width\": 200,\n  \"svg_height\": 160\n}",
+                <rect class: "chart-interaction-plane", width: 160, height: 120, fill: "transparent", pointer-events: "all">
+                <g class: "marks points",
+                  <circle cx: 32, cy: 96, r: 7.978845608028654, fill: "#4e79a7", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"A\",\n  \"x\": 2,\n  \"y\": 2\n}", data-chart-view: "chart-c1">
+                  <circle cx: 80, cy: 60, r: 7.978845608028654, fill: "#4e79a7", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"B\",\n  \"x\": 5,\n  \"y\": 5\n}", data-chart-view: "chart-c1">
+                  <circle cx: 128, cy: 24, r: 7.978845608028654, fill: "#4e79a7", opacity: 1, stroke: "white", stroke-width: 0.5, data-chart-row: "{\n  \"group\": \"C\",\n  \"x\": 8,\n  \"y\": 8\n}", data-chart-view: "chart-c1">>>>>>>
+      <div class: "chart-controls",
+        <label class: "chart-control",
+          "threshold "
+          <input data-chart-input: "threshold", type: "range", value: "0", min: "0", max: "10", step: "1">>>>>>

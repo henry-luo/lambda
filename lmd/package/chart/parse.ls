@@ -70,6 +70,9 @@ pub fn parse_chart(chart_el) {
         data: data,
         data_source: attributes(data_el),
         datasets: chart_el.datasets,
+        params: if (chart_el.params != null) chart_el.params else (
+            let params = find_child(chart_el, 'params', children_count),
+            if (params != null) [for (param in content(params)) attributes(param)] else null),
         projection: chart_el.projection,
         resolve: chart_el.resolve,
         clip: chart_el.clip,

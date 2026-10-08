@@ -5,8 +5,120 @@
 #include "../../lib/font/font_internal.h"
 #include "../../lib/font/font_glyf.h"
 #include "../../lib/font/font_tables.h"
+#include "../../lib/font/font_math.h"
+#include "../../lib/endian.h"
 #include "../../lib/arena.h"
 #include "../../lib/hashmap_helpers.h"
+
+class FontMathTest : public ::testing::Test {
+protected:
+    Pool* pool = nullptr;
+    uint8_t* bytes = nullptr;
+    FontTables* tables = nullptr;
+    FontMathTable math = {};
+
+    void load(const char* path, bool expect_math = true) {
+        FILE* file = fopen(path, "rb");
+        ASSERT_NE(file, nullptr);
+        ASSERT_EQ(fseek(file, 0, SEEK_END), 0);
+        long length = ftell(file);
+        ASSERT_GT(length, 0);
+        rewind(file);
+        bytes = (uint8_t*)malloc((size_t)length);
+        ASSERT_NE(bytes, nullptr);
+        ASSERT_EQ(fread(bytes, 1, (size_t)length, file), (size_t)length);
+        fclose(file);
+        pool = pool_create();
+        ASSERT_NE(pool, nullptr);
+        tables = font_tables_open(bytes, (size_t)length, pool);
+        ASSERT_NE(tables, nullptr);
+        ASSERT_EQ(font_math_open(tables, &math), expect_math);
+    }
+
+    void TearDown() override {
+        if (tables) font_tables_close(tables, pool);
+        if (pool) pool_destroy(pool);
+        free(bytes);
+    }
+};
+
+TEST_F(FontMathTest, ReadsIndependentFontConstants) {
+    load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
+    ASSERT_NE(tables, nullptr);
+    int32_t value = 0;
+    ASSERT_TRUE(font_math_constant(&math, FONT_MATH_axis_height, &value));
+    EXPECT_EQ(value, 278);
+    ASSERT_TRUE(font_math_constant(&math, FONT_MATH_radical_kern_after_degree, &value));
+    EXPECT_LT(value, 0);
+    EXPECT_TRUE(font_math_constant_is_percent(FONT_MATH_script_percent_scale_down));
+    EXPECT_FALSE(font_math_constant_is_percent(FONT_MATH_axis_height));
+}
+
+TEST_F(FontMathTest, MissingMathIsAnOrdinaryFontCapability) {
+    load("test/ui/svg_font_assets/rectangle.ttf", false);
+    ASSERT_NE(tables, nullptr);
+    EXPECT_EQ(math.data, nullptr);
+    EXPECT_NE(font_tables_get_hmtx(tables), nullptr);
+}
+
+TEST_F(FontMathTest, ReadsGlyphVariantsAndConnectors) {
+    load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
+    ASSERT_NE(tables, nullptr);
+    CmapTable* cmap = font_tables_get_cmap(tables);
+    ASSERT_NE(cmap, nullptr);
+    FontMathConstruction construction;
+    ASSERT_TRUE(font_math_construction(&math, cmap_lookup(cmap, '('), true, &construction));
+    ASSERT_GT(construction.variant_count, 1);
+    ASSERT_GT(construction.part_count, 0);
+    FontMathVariant first, last;
+    ASSERT_TRUE(font_math_variant(&construction, 0, &first));
+    ASSERT_TRUE(font_math_variant(&construction, construction.variant_count - 1, &last));
+    EXPECT_GT(last.advance, first.advance);
+    bool extender = false;
+    for (uint16_t index = 0; index < construction.part_count; index++) {
+        FontMathPart part;
+        ASSERT_TRUE(font_math_part(&construction, index, &part));
+        EXPECT_LE(part.start_connector, part.advance);
+        EXPECT_LE(part.end_connector, part.advance);
+        extender = extender || part.extender;
+    }
+    EXPECT_TRUE(extender);
+    FontMathGlyph glyph;
+    ASSERT_TRUE(font_math_glyph(&math, cmap_lookup(cmap, 0x1d453), &glyph));
+    EXPECT_TRUE(glyph.has_italic);
+    EXPECT_TRUE(glyph.has_accent);
+}
+
+TEST_F(FontMathTest, RejectsTruncatedMathStructures) {
+    load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
+    ASSERT_NE(tables, nullptr);
+    FontMathTable truncated = math;
+    for (uint32_t length = 0; length < 10; length++) {
+        truncated.length = length;
+        int32_t value;
+        FontMathGlyph glyph;
+        FontMathConstruction construction;
+        EXPECT_FALSE(font_math_constant(&truncated, FONT_MATH_axis_height, &value));
+        EXPECT_FALSE(font_math_glyph(&truncated, 1, &glyph));
+        EXPECT_FALSE(font_math_construction(&truncated, 1, true, &construction));
+    }
+    // a valid directory must not let an overflowing subtable escape its owner.
+    write_be16((uint8_t*)math.data + 4, 0xffff);
+    truncated.length = 1000;
+    int32_t value;
+    EXPECT_FALSE(font_math_constant(&truncated, FONT_MATH_axis_height, &value));
+}
+
+TEST_F(FontMathTest, RejectsMalformedCoverageInsteadOfMissingGlyph) {
+    load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
+    ASSERT_NE(tables, nullptr);
+    uint8_t* info = (uint8_t*)math.data + read_be16(math.data + 6);
+    uint8_t* italics = info + read_be16(info);
+    uint8_t* coverage = italics + read_be16(italics);
+    write_be16(coverage, 99);
+    FontMathGlyph glyph;
+    EXPECT_FALSE(font_math_glyph(&math, 1, &glyph));
+}
 
 static uint64_t test_loaded_glyph_cache_hash(const void* item,
                                              uint64_t seed0, uint64_t seed1) {

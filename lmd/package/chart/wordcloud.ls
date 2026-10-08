@@ -280,7 +280,8 @@ fn render_word(word) element^ {
     svg.group("translate(" ++ util.fmt_num(word.x) ++ ", " ++ util.fmt_num(word.y) ++
         ") rotate(" ++ util.fmt_num(word.rotation) ++ ")", [
         <title word.text ++ ": " ++ string(word.weight)>,
-        <text x: 0.0 - word.text_width / 2.0, y: word.baseline - word.text_height / 2.0,
+        <text *:(if (word._chart_attrs != null) word._chart_attrs else {}),
+            x: 0.0 - word.text_width / 2.0, y: word.baseline - word.text_height / 2.0,
             'font-family': word.font_family, 'font-weight': word.font_weight,
             'font-size': word.font_size, fill: word.color, 'xml:space': "preserve",
             word.text>

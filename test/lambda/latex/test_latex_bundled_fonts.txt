@@ -1,14 +1,14 @@
 "native document:"
 {
   cmu: true,
-  katex: true,
+  katex: false,
   absolute: true,
   readable: true
 }
 "standalone HTML:"
 {
   cmu: true,
-  katex: true,
+  katex: false,
   absolute: true,
   readable: true
 }
@@ -16,8 +16,7 @@
 0
 "standalone math:"
 {
-  cmu: true,
-  katex: true,
-  absolute: true,
-  readable: true
+  svg: true,
+  outlines: true,
+  external_stylesheets: 0
 }

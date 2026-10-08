@@ -22,6 +22,9 @@ import composition: .composition
 import specialized: .specialized
 import hierarchy: .hierarchy
 import geo: .geo
+import parameter: .parameter
+import interaction: .interaction
+import events: .events
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
@@ -30,12 +33,81 @@ import geo: .geo
 pub fn render(chart_el, viewport = null) => render_spec(chart_el, viewport)
 
 // render from a pre-parsed spec map (no element tree needed)
-pub fn render_spec(spec, viewport = null) {
+pub fn render_spec(spec, viewport = null, st = null) {
+    if (spec is element and name(spec) == 'svg') spec else render_chart(spec, viewport, st)
+}
+
+fn render_chart(spec, viewport, st) {
     let context = sizing.viewport(viewport);
-    if (context is error) context else {
-        let prepared = composition.resolve(composition.prepare(spec, prepare_mark_data));
+    let definitions = parameter.definitions(spec);
+    let initial = if (st != null) st else parameter.initial(definitions);
+    let values = if (initial is error) initial else parameter.values(definitions, initial);
+    if (context is error) context else if (values is error) values else {
+        let parsed = if (spec is element) parse.parse_top(spec) else spec;
+        let prepared = composition.resolve(composition.prepare({*:parsed,
+            _parameter_state: initial, _parameter_values: values, _interactive: st != null}, prepare_mark_data));
         if (prepared is error) prepared else render_spec_scoped({*:prepared, _viewport: context}, "chart")
     }
+}
+
+// State belongs to this chart instance, never a module global or a closure (S9.1.4).
+pub fn model(spec, viewport = null) => <chart_view spec: spec, viewport: viewport>
+pub fn interactive(spec, viewport = null) => apply(model(spec, viewport))
+
+view <chart_view> state interaction_state: null {
+    let definitions = parameter.definitions(~.spec);
+    let st = if (interaction_state == null) parameter.initial(definitions) else interaction_state;
+    let image = if (st is error) st else render_spec(~.spec, ~.viewport, st);
+    if (image is error) image else <div class: "lambda-chart", tabindex: "0",
+        image;
+        events.controls(definitions, st)
+    >
+}
+on click(evt)       { interaction_state = chart_event(~, interaction_state, evt) }
+on dblclick(evt)    { interaction_state = chart_event(~, interaction_state, evt) }
+on pointerdown(evt) {
+    interaction_state = chart_event(~, interaction_state, evt)
+    if (interaction_state.gesture != null) { return 'prevent-default' }
+    'pass'
+}
+on pointermove(evt) { interaction_state = chart_event(~, interaction_state, evt) }
+on pointerup(evt)   { interaction_state = chart_event(~, interaction_state, evt) }
+on pointercancel(evt) { interaction_state = chart_event(~, interaction_state, evt) }
+on pointerover(evt) { interaction_state = chart_event(~, interaction_state, evt) }
+on pointerout(evt)  { interaction_state = chart_event(~, interaction_state, evt) }
+on pointerenter(evt) { interaction_state = chart_event(~, interaction_state, evt) }
+on pointerleave(evt) { interaction_state = chart_event(~, interaction_state, evt) }
+on mouseover(evt)   { interaction_state = chart_event(~, interaction_state, evt) }
+on mouseout(evt)    { interaction_state = chart_event(~, interaction_state, evt) }
+on mouseenter(evt)  { interaction_state = chart_event(~, interaction_state, evt) }
+on mouseleave(evt)  { interaction_state = chart_event(~, interaction_state, evt) }
+on mousemove(evt)   { interaction_state = chart_event(~, interaction_state, evt) }
+on mousedown(evt)   { interaction_state = chart_event(~, interaction_state, evt) }
+on mouseup(evt)     { interaction_state = chart_event(~, interaction_state, evt) }
+on wheel(evt) {
+    let before = interaction_state;
+    interaction_state = chart_event(~, interaction_state, evt)
+    if (interaction_state != before) { return 'prevent-default' }
+    'pass'
+}
+on input(evt)  { interaction_state = chart_event(~, interaction_state, evt) }
+on change(evt) { interaction_state = chart_event(~, interaction_state, evt) }
+on keydown(evt) { interaction_state = chart_event(~, interaction_state, evt) }
+on keyup(evt)   { interaction_state = chart_event(~, interaction_state, evt) }
+on chart_parameter(evt) {
+    let definitions = parameter.definitions(~.spec);
+    let current = if (interaction_state == null) parameter.initial(definitions) else interaction_state;
+    let payload = if (evt.detail != null) evt.detail else evt;
+    interaction_state = interaction.update(current, {*:payload, frame: {view: "chart", params: definitions}})
+    emit("chart_change", parameter.expression_values(parameter.values(definitions, interaction_state)))
+}
+
+pn chart_event(model, st, evt) {
+    let definitions = parameter.definitions(model.spec);
+    let current = if (st == null) parameter.initial(definitions) else st;
+    let next = events.dispatch(current, evt, definitions);
+    if (next.values != current.values) { emit("chart_change", parameter.expression_values(parameter.values(definitions, next))) }
+    next
 }
 
 fn render_spec_scoped(spec, scope) {
@@ -105,7 +177,8 @@ fn cloud_marks(data, encoding, options, width, height, visual = null, paints = n
                 weight: parse.channel_value(size_ch, row, row.weight),
                 color: paint.value(mark.appearance({encoding: encoding, color_scale: color_scale}, "color", row,
                     if (row.color != null) row.color else options.color), paints),
-                font_size: if (row.font_size != null) row.font_size else options.font_size
+                font_size: if (row.font_size != null) row.font_size else options.font_size,
+                *:(if (visual._interactive == true) {_chart_attrs: parameter.target_attributes(visual, row)} else {})
             })
         else record];
     // Chart entry points return value errors; preserve the direct API's validation diagnostic (S7.4.1–S7.4.2).
@@ -119,10 +192,11 @@ fn render_wordcloud(spec) {
     let data = spec.data;
     let lay = layout.compute_layout(spec, null, null, false, null);
     let image = if (paints._error is error) paints._error else
-        cloud_marks(data, spec.encoding, cfg.mark_config(theme, spec.mark), lay.plot_w, lay.plot_h, null, paints);
+        cloud_marks(data, spec.encoding, cfg.mark_config(theme, spec.mark), lay.plot_w, lay.plot_h,
+            {_interactive: spec._interactive, _view_path: spec._view_path}, paints);
     if (image is error) image
     else {
-        let result = assemble_svg(spec, lay, image, null, null, null, null, theme);
+        let result = assemble_svg(spec, lay, interaction.decorate(image, spec, lay), null, null, null, null, theme);
         if (result is error) result else <svg *:map(result), role: "img",
             'aria-label': if (spec.title) spec.title else "Word cloud",
             'data-unplaced': image["data-unplaced"],
@@ -211,8 +285,9 @@ fn render_single(spec) {
     else build_position_scale_y2(y_ch, data, lay.plot_h, 0.0, mark_type, y2_ch);
 
     // The same context resolves every visual encoding in single and layered views.
-    let mark_ctx = {*:mark_context(data, enc, x_scale, y_scale, lay, stack_mode), _paints: paints, _theme: theme, _projection: spec.projection};
-    let marks_el = render_mark(mark_type, data, mark_ctx, mark_spec);
+    let mark_ctx = {*:mark_context(data, enc, x_scale, y_scale, lay, stack_mode), _paints: paints, _theme: theme, _projection: spec.projection,
+        _interactive: spec._interactive, _view_path: spec._view_path};
+    let marks_el = interaction.decorate(render_mark(mark_type, data, mark_ctx, mark_spec), spec, lay, x_scale, y_scale);
 
     // render axes
     let x_title = if (x_ch and x_ch.title) x_ch.title
@@ -279,9 +354,10 @@ fn render_layered(spec) {
             let options = cfg.mark_config(cfg.resolve_theme(layer.config), layer.mark),
             let base = mark_context(layer.data, layer.encoding, mappings[index].x, mappings[index].y, lay, layer.stack_mode),
             let context = {*:base, _paints: paints, _theme: cfg.resolve_theme(layer.config),
+                _interactive: layer._interactive, _view_path: layer._view_path,
                 _projection: if (layer.projection != null) layer.projection else spec.projection},
-            let image = if (options.kind == "wordcloud") cloud_marks(layer.data, layer.encoding, options, lay.plot_w, lay.plot_h, context, paints)
-                else render_mark(options.kind, layer.data, context, options),
+            let image = interaction.decorate(if (options.kind == "wordcloud") cloud_marks(layer.data, layer.encoding, options, lay.plot_w, lay.plot_h, context, paints)
+                else render_mark(options.kind, layer.data, context, options), layer, lay, mappings[index].x, mappings[index].y, index == 0),
             // Preserve leaf diagnostics before annotations wrap the rendered value (S7.4.1).
             if (image is error) image
             else if (guide_layout.annotations[index]._error is error) guide_layout.annotations[index]._error
@@ -374,8 +450,10 @@ fn render_arc(spec) {
 
     // layout
     let lay = layout.compute_arc_layout(spec, has_legend, color_categories, guides);
-    let arc_ctx = arc_context(data, enc, mark_spec, lay.plot_w, lay.plot_h, paints, lay.cx, lay.cy);
-    let arcs_el = if (arc_ctx is error) arc_ctx else mark.arc_mark(data, arc_ctx, mark_spec);
+    let arc_ctx0 = arc_context(data, enc, mark_spec, lay.plot_w, lay.plot_h, paints, lay.cx, lay.cy);
+    let arc_ctx = if (arc_ctx0 is error) arc_ctx0 else {*:arc_ctx0, _interactive: spec._interactive, _view_path: spec._view_path};
+    let arcs_el = if (arc_ctx is error) arc_ctx else interaction.decorate(mark.arc_mark(data, arc_ctx, mark_spec), spec,
+        {*:lay, plot_x: 0.0, plot_y: 0.0, plot_w: lay.total_w, plot_h: lay.total_h});
 
     // legend
     let legend_el = leg.render_plans(guides, lay);
@@ -400,7 +478,7 @@ fn render_arc(spec) {
     else children1;
 
     let failure = util.first_error([paints._error, lay._error, arcs_el, legend_el]);
-    if (failure is error) failure else svg.svg_root(width, height, children, cfg.svg_attributes(theme))
+    if (failure is error) failure else svg.svg_root(width, height, children, {*:cfg.svg_attributes(theme), *:interaction_attributes(spec)})
 }
 
 // Pie and ranged arcs use identical scale, style, and radius validation in every view.
@@ -542,7 +620,7 @@ fn render_mark_raw(mark_type, data, ctx, mark_spec) {
         geo.render(data, ctx, mark_spec)
     else if (mark_type == "arc") (
         let arc = arc_context(data, ctx.encoding, mark_spec, ctx.plot_w, ctx.plot_h, ctx._paints),
-        if (arc is error) arc else mark.arc_mark(data, arc, mark_spec))
+        if (arc is error) arc else mark.arc_mark(data, {*:arc, _interactive: ctx._interactive, _view_path: ctx._view_path}, mark_spec))
     else if (mark_type == "area")
         mark.area_mark(data, ctx, mark_spec)
     else if (mark_type == "point")
@@ -603,9 +681,11 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
          if (legend_el.class == "legends") legend_el else <g transform: svg.translate(lay.legend_x, lay.legend_y), legend_el>]
     else children1;
 
-    svg.svg_root(width, height, children, cfg.svg_attributes(theme))
+    svg.svg_root(width, height, children, {*:cfg.svg_attributes(theme), *:interaction_attributes(spec)})
     }
 }
+
+fn interaction_attributes(spec) => if (spec._interactive != true) {} else {'data-chart-root': spec._view_path}
 
 // ============================================================
 // Faceted chart rendering (small multiples)

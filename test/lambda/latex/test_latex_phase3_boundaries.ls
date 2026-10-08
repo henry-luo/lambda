@@ -37,7 +37,7 @@ let assets = render("\\usepackage{biblatex}\\begin{filecontents*}{inline.bib}\n@
  coil_geometry: len(spring_html) > 0 and not contains(spring_html, "TikZ picture could not") and
     len(split(spring_html, " L")) > 30,
  nested_alignment: not contains(aligned_html, "col_sep") and
-    contains(aligned_html, "lm_mtable") and contains(aligned_html, "col-align-r"),
+    contains(aligned_html, "data-math-kind=\"matrix\"") and contains(aligned_html, "data-column-align=\"r\""),
  resource_resolution: len(assets) == 3 and all([for (asset in assets) asset.offset is int]) and
     assets[0].source == "test/latex/samples/absent.png" and assets[0].available == false and
     assets[1].origin == "inline" and assets[1].available == true and

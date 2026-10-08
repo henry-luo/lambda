@@ -150,7 +150,8 @@ let accents = {
     bar: "̄", overline: "‾",
     vec: "⃗", dot: "̇", ddot: "̈",
     acute: "́", grave: "̀", breve: "̆",
-    check: "̌", mathring: "̊"
+    check: "̌", mathring: "̊",
+    overleftarrow: "⃖", overrightarrow: "⃗", overleftrightarrow: "⃡"
 }
 
 // ============================================================

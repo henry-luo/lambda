@@ -1036,3 +1036,44 @@ FontTables* font_tables_open_face(const uint8_t* data, size_t data_len,
     // non-TTC: ignore face_index, open directly
     return font_tables_open(data, data_len, pool);
 }
+
+// shared OpenType coverage lookup for GPOS and MATH tables.
+int font_coverage_lookup(const uint8_t* cov_data, uint32_t cov_len, uint16_t glyph_id) {
+    if (!cov_data || cov_len < 4) return -2;
+    uint16_t format = rd16(cov_data);
+
+    if (format == 1) {
+        // Format 1: array of glyph IDs (sorted)
+        uint16_t count = rd16(cov_data + 2);
+        if (cov_len < 4 + (uint32_t)count * 2) return -2;
+        // binary search
+        int lo = 0, hi = (int)count - 1;
+        while (lo <= hi) {
+            int mid = (lo + hi) / 2;
+            uint16_t g = rd16(cov_data + 4 + mid * 2);
+            if (g == glyph_id) return mid;
+            if (g < glyph_id) lo = mid + 1;
+            else hi = mid - 1;
+        }
+        return -1;
+    } else if (format == 2) {
+        // Format 2: array of ranges [startGlyphID, endGlyphID, startCoverageIndex]
+        uint16_t count = rd16(cov_data + 2);
+        if (cov_len < 4 + (uint32_t)count * 6) return -2;
+        int lo = 0, hi = (int)count - 1;
+        while (lo <= hi) {
+            int mid = (lo + hi) / 2;
+            const uint8_t* r = cov_data + 4 + mid * 6;
+            uint16_t start = rd16(r);
+            uint16_t end   = rd16(r + 2);
+            if (glyph_id < start) hi = mid - 1;
+            else if (glyph_id > end) lo = mid + 1;
+            else {
+                uint16_t start_idx = rd16(r + 4);
+                return start_idx + (glyph_id - start);
+            }
+        }
+        return -1;
+    }
+    return -2;
+}

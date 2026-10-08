@@ -452,6 +452,111 @@ Acceptance:
   considering the migration complete;
 - field census for legacy vertical fields returns zero.
 
+### Phase 11 — Metrics From the Rendered Font (2026-10-08)
+
+Goal: remove the MathLive/KaTeX font dependency from production math geometry.
+Before this phase, CSS could select CMU/Latin Modern while `metrics_data.mark`
+described fixed MathLive faces, and `text_box` estimated width as `0.8em` per
+character. Moving those tables from Lambda source to Mark did not fix this
+font/measurement mismatch.
+
+Work, in dependency order:
+
+1. Expose batched `radiant.measure_text` and `radiant.font_metrics` over the
+   existing font and SVG text machinery. Accept text/style records directly;
+   return advance, separate ink/logical bounds, baseline and font identity in
+   CSS pixels. Share resolution, fallback and placement with painting; keep
+   full precision and cache within the font-resource lifetime. Chart labels
+   migrate from constructing HTML measurement requests to this API.
+2. Read OpenType `MATH` in `lib/font`: constants, italic corrections, accent
+   attachments, math kerns, glyph variants and assemblies. Expose copied math
+   facts through Radiant. Reuse the existing CMU/KaTeX faces in production;
+   none of these 20 faces has this table. MATH is optional: absent tables use
+   normal glyph metrics and shared layout defaults. Noto Sans Math supplies
+   test-only coverage for the enhanced path.
+3. Carry the resolved font context through math boxes and emission. Replace
+   character-count widths, per-character heuristics, Computer Modern sigma
+   constants and KaTeX Size1–4 recipes with the selected font's data. Keep
+   layout algorithms in Lambda and font parsing in `lib/font`. Emit the same
+   font resources/glyphs that were measured; retire `metrics_data` after its
+   consumers migrate.
+4. Gate on measured/rendered agreement for two math fonts, size/style changes,
+   fallback, text runs, nested scripts/fractions, accents and stretched
+   delimiters. Retain MathLive snapshots as explicit compatibility fixtures;
+   their font-specific HTML is not the oracle for other fonts. Run the Lambda
+   and Radiant baseline gates and the Radiant float-dimension lint.
+
+Boundaries: **D7.1.1** owns layering; **D7.1.2v2** keeps resource acquisition
+in `lambda-io`; **D7.4.6 / S12.1.1v2** govern read-only host queries against a
+stable font context; **D4.2.2v2** requires copied results rather than borrowed
+font/document pointers. Runtime-only hosts report unavailable Radiant services
+under **D7.1.6**. The OpenType [MATH specification](https://learn.microsoft.com/en-us/typography/opentype/spec/math)
+defines font data; it does not replace the math layout algorithms.
+
+Implemented: the production `math.ls` entry point now uses `font.ls`,
+`typeset.ls`, `stretch.ls` and `svg_box.ls`. Radiant exposes `measure_text`,
+`font_metrics` and `math_metrics`; `lib/font/font_math.c` reads MATH data.
+The default is bundled CMU Serif, with existing CMU style faces and small
+KaTeX symbol/alphabet faces. Noto Sans Math remains a MATH-table test fixture
+under `test/lambda/math/fonts`. Explicit binary font snapshots keep resource
+acquisition in Lambda IO.
+SVG carries the measured glyph outlines, so downstream font substitution cannot
+change geometry. Chart measurement uses direct text records. Legacy
+`metrics_data` remains only behind the explicit `mathlive.ls` compatibility
+entry point and its low-level fixtures; production math does not import it.
+
+Validation (2026-10-08): build and Radiant float-dimension lint pass; 15 native
+font tests, 77 selected package/integration tests, and 921/921 legacy MathLive
+fixtures pass. The new renderer also produces finite geometry for all 921
+corpus formulas; this is a smoke check, not a visual equivalence assertion.
+Two-font tests compare layout dimensions and emitted paths to native facts.
+The broader Lambda gate is 6465/6466; its remaining `edit_view_only` check
+expected retired MathLive markup. After migrating that check to SVG paths,
+all 14 editor package tests pass. Radiant's 43 scene and 257 native view tests
+pass. Its remaining gate reports 4102 passes, 350 partials and 4 failures:
+three document-editor fixtures still expected retired math markup, and
+`pp_btn_shapes_01` differs from its visual baseline. The three editor fixtures
+now check measured SVG geometry and pass focused reruns; full Radiant baseline
+acceptance is not claimed.
+Two additional editor fixtures retain non-math footnote/view-only-count
+failures; their math SVG assertions pass. The ordinary-font visual check,
+editor math scroll check, and native metrics forced-GC check also pass.
+
+Limits: direct text measurement shares the current SVG placement/shaping
+capabilities; it adds no shaping engine. MATH accents with a finite variant set
+stop at the largest supplied variant. Ordinary faces without constructions
+use geometric outline stretching, which can change stroke weights.
+Font caches are query-local, and math
+outlines trade selectable text for deterministic measured/painted geometry.
+SVG titles retain the source expression. The Phase 1–10 acceptance criteria
+below describe the retained MathLive adapter; Phase 11 uses the gates above.
+
+Font audit and revision (2026-10-08, user): **MATH is an optional enhancement.**
+The 8 existing KaTeX WOFF2 faces and 12 CMU WOFF2 faces have no MATH table;
+their glyph advances, bounds and outlines remain usable. `math_metrics` now
+returns normal glyph facts and `has_math: false` / `constants: null` for these
+faces. `fallback.ls` applies [MathML Core §5.1 defaults](https://w3c.github.io/mathml-core/#layout-constants-mathconstants)
+using the selected font's x-height, post underline thickness and OS/2 script
+offsets. The normal font API exposes those facts; Lambda retains layout policy
+(**D7.1.1 / D7.1.2v2**). No metrics from a different font are copied onto a glyph.
+Absent mathematical-alphabet glyphs use ordinary italic/bold faces. Missing
+symbols use explicit codepoint fallback with the actual face's own metrics,
+MATH data if present, and outline. Without stretch recipes, ordinary glyphs
+are scaled together with their boxes; zero-advance combining accents use
+ink bounds for stretching and attachment. Invalid font data and unresolvable
+glyphs remain errors. Selecting an installed family bypasses bundled resource
+loading. Tests cover two ordinary CMU families alongside Noto, script styles,
+normal-font rule/axis derivation, glyph fallback, and measured/painted agreement.
+
+Distribution revision (2026-10-08, user): removed the 1,517,976-byte STIX font
+and its license from the package. `bundled.ls` selects existing CMU and KaTeX
+resources; it contains no glyph dimensions or stretch recipes. Default
+rendering exercises the no-MATH path, including ordinary italic/bold faces,
+CMU sans/monospace, and the existing script/calligraphic/fraktur/AMS alphabets.
+Missing symbols try the authored bundled symbol families before platform
+fallback. Native MATH parser tests now use the test-only Noto fixture;
+production rendering neither reads nor requires that fixture.
+
 ## 7. Risk Register
 
 | ID | Severity | Risk | Mitigation |

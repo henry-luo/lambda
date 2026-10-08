@@ -55,7 +55,7 @@ fn render_body(body, context, render_fn, env_name, columns) {
     else context
     let declared_cols = declared_column_count(columns)
     let items = util.content_items(body)
-    let source_rows = parse_rows(items, 0, len(items), [], [], [])
+    let source_rows = util.parse_rows(items, 0, len(items), [], [], [])
     let row_groups = if (declared_cols > 0)
         expand_declared_rows(source_rows, declared_cols, 0, [])
     else source_rows
@@ -79,22 +79,6 @@ fn is_matrix_env(env_name) {
 
 // Parse source rows before rendering so ragged matrices do not shift later
 // cells into the wrong row.
-fn parse_rows(body, i, n, rows, current_row, current_cell) {
-    if (i >= n) {
-        rows ++ [make_row(current_row ++ [make_cell(current_cell)])]
-    } else if (is_sep(body[i])) {
-        if (is_row_sep(body[i]))
-            parse_rows(body, i + 1, n, rows ++ [make_row(current_row ++ [make_cell(current_cell)])], [], [])
-        else
-            parse_rows(body, i + 1, n, rows, current_row ++ [make_cell(current_cell)], [])
-    } else
-        parse_rows(body, i + 1, n, rows, current_row, current_cell ++ [body[i]])
-}
-
-fn make_cell(items) => {items: items}
-
-fn make_row(cells) => {cells: cells}
-
 fn expand_declared_rows(rows, ncols, i, acc) {
     if (i >= len(rows)) acc
     else expand_declared_rows(rows, ncols, i + 1, acc ++ chunk_row(rows[i].cells, ncols, 0, []))
@@ -106,7 +90,7 @@ fn chunk_row(row, ncols, i, acc) {
         // A column preamble controls alignment/chunking, but MathLive does not
         // materialize missing `&` cells as visible blank columns.
         chunk_row(row, ncols, i + ncols,
-            acc ++ [make_row(slice(row, i, min(len(row), i + ncols)))])
+            acc ++ [{cells: slice(row, i, min(len(row), i + ncols))}])
 }
 
 fn max_cols(rows, i, acc) {
@@ -262,24 +246,6 @@ fn apply_spacing(boxes, context) {
 
 fn blank_cell_box() =>
     box.ml_box("\u00A0", 0.0, 0.0, 0.5, "mord")
-
-// ============================================================
-// Separator detection
-// ============================================================
-
-fn is_sep(child) {
-    is_row_sep(child) or is_col_sep(child)
-}
-
-fn is_row_sep(child) {
-    if (child is symbol) string(child) == "row_sep"
-    else false
-}
-
-fn is_col_sep(child) {
-    if (child is symbol) string(child) == "col_sep"
-    else false
-}
 
 // ============================================================
 // Table building (MathLive-style columns of vlists)
