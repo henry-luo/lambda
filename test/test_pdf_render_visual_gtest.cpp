@@ -986,45 +986,110 @@ static void expect_preview_pixel(const ImageData& image, int x, int y, uint8_t r
     EXPECT_EQ(pixel[0], r); EXPECT_EQ(pixel[1], g); EXPECT_EQ(pixel[2], b);
 }
 
-TEST(RenderOutputParity, PagedFixedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
+TEST(RenderOutputParity, PagedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-    const char* html_path = "temp/render_output_parity/paged_fixed_tables.html";
-    const char* pdf_path = "temp/render_output_parity/paged_fixed_tables.pdf";
-    const char* preview_path = "temp/render_output_parity/paged_fixed_tables.png";
-    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
-    strbuf_append_str(html, "<!doctype html><style>@page{size:240px 140px;margin:10px}"
-        "html,body{margin:0;font:10px/12px Arial}table{table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0}"
-        "td,th{vertical-align:top;padding:2px;border:1px solid black;orphans:1;widows:1}"
-        "thead{background:#cce0ff}tfoot{background:#ddffdd}.long{white-space:pre-wrap}</style>"
-        "<table><thead><tr><th>Heading A</th><th>Heading B</th></tr></thead>"
-        "<tfoot><tr><td>Footer A</td><td>Footer B</td></tr></tfoot><tbody>");
-    for (size_t i = 0; i < 9; i++) strbuf_append_str(html, "<tr><td>Body A</td><td>Body B</td></tr>");
-    strbuf_append_str(html, "<tr><td class='long'>A\nB\nC\nD\nE\nF\nG\nH\nI\nJ</td><td>Short</td></tr></tbody></table>");
-    bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
-    strbuf_free(html); ASSERT_TRUE(rendered);
-    ASSERT_EQ(pdf_page_count(pdf_path), 4);
-    EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
-    ASSERT_TRUE(render_document_fixture(html_path, preview_path,
-        "--paged --block-remote-resources --page-grid 2x2 --page-scale .5"));
-    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
-    EXPECT_EQ(preview.width, 240); EXPECT_EQ(preview.height, 140);
-    const int footers[] = {106, 106, 115, 97};
-    for (int page = 0; page < 4; page++) {
-        int x = page % 2 * 120, y = page / 2 * 70;
-        expect_preview_pixel(preview, x + 100, y + 8, 204, 224, 255);
-        expect_preview_pixel(preview, x + 100, y + footers[page] / 2, 221, 255, 221);
+    const char* html_path = "temp/render_output_parity/paged_tables.html";
+    const char* pdf_path = "temp/render_output_parity/paged_tables.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_tables.png";
+    for (bool automatic : {false, true}) {
+        SCOPED_TRACE(automatic ? "automatic layout" : "fixed layout");
+        StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+        strbuf_append_format(html, "<!doctype html><style>@page{size:240px 140px;margin:10px}"
+            "html,body{margin:0;font:10px/12px Arial}table{table-layout:fixed;width:100%%;border-collapse:separate;border-spacing:0}"
+            "td,th{vertical-align:top;padding:2px;border:1px solid black;orphans:1;widows:1}"
+            "thead{background:#cce0ff}tfoot{background:#ddffdd}.long{white-space:pre-wrap}.automatic tbody td:first-child{width:80px}.automatic tfoot td:last-child{width:100px}</style>"
+            "<table class='automatic' style=\"%s\"><thead><tr><th>Heading A</th><th>Heading B</th></tr></thead>"
+            "<tfoot><tr><td>Footer A</td><td>Footer B</td></tr></tfoot><tbody>", automatic ? "table-layout:auto;width:auto;margin:0 auto" : "");
+        for (size_t i = 0; i < 9; i++) strbuf_append_str(html, "<tr><td>Body A</td><td>Body B</td></tr>");
+        strbuf_append_str(html, "<tr><td class='long'>A\nB\nC\nD\nE\nF\nG\nH\nI\nJ</td><td>Short</td></tr></tbody></table>");
+        bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
+        strbuf_free(html); ASSERT_TRUE(rendered);
+        ASSERT_EQ(pdf_page_count(pdf_path), 4);
+        EXPECT_FALSE(file_contains_text(pdf_path, "/Subtype /Image"));
+        ASSERT_TRUE(render_document_fixture(html_path, preview_path,
+            "--paged --block-remote-resources --page-grid 2x2 --page-scale .5"));
+        ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+        EXPECT_EQ(preview.width, 240); EXPECT_EQ(preview.height, 140);
+        const int footers[] = {106, 106, 115, 97};
+        for (int page = 0; page < 4; page++) {
+            int x = page % 2 * 120, y = page / 2 * 70;
+            expect_preview_pixel(preview, x + 100, y + 8, 204, 224, 255);
+            expect_preview_pixel(preview, x + 100, y + footers[page] / 2, 221, 255, 221);
+        }
+        if (automatic) {
+            expect_preview_pixel(preview, 10, 8, 255, 255, 255);
+            expect_preview_pixel(preview, 15, 6, 204, 224, 255);
+            expect_preview_pixel(preview, 112, 8, 255, 255, 255);
+        }
+        image_free(preview.pixels);
+        ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+        PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
+        snprintf(pdf.base, sizeof(pdf.base), "paged_tables");
+        for (int page = 0; page < 4; page++) {
+            char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page + 1, png, sizeof(png)));
+            ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+            EXPECT_EQ(image.width, 600); EXPECT_EQ(image.height, 350);
+            expect_preview_pixel(image, 500, 40, 204, 224, 255);
+            expect_preview_pixel(image, 500, footers[page] * 5 / 2, 221, 255, 221);
+            if (automatic) {
+                expect_preview_pixel(image, 50, 40, 255, 255, 255);
+                expect_preview_pixel(image, 75, 30, 204, 224, 255);
+                expect_preview_pixel(image, 560, 40, 255, 255, 255);
+            }
+            image_free(image.pixels);
+        }
     }
-    image_free(preview.pixels);
-    ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
-    PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
-    snprintf(pdf.base, sizeof(pdf.base), "paged_fixed_tables");
-    for (int page = 0; page < 4; page++) {
-        char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page + 1, png, sizeof(png)));
-        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
-        EXPECT_EQ(image.width, 600); EXPECT_EQ(image.height, 350);
-        expect_preview_pixel(image, 500, 40, 204, 224, 255);
-        expect_preview_pixel(image, 500, footers[page] * 5 / 2, 221, 255, 221);
-        image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, PagedTableSpacingKeepsBackgroundGapsAcrossCellContinuations) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_table_spacing.html";
+    const char* pdf_path = "temp/render_output_parity/paged_table_spacing.pdf";
+    const char* preview_path = "temp/render_output_parity/paged_table_spacing.png";
+    for (const char* algorithm : {"fixed", "auto"}) {
+        SCOPED_TRACE(algorithm); StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+        strbuf_append_format(html, "<!doctype html><style>@page{size:120px 100px;margin:10px}"
+            "html,body{margin:0;font:10px/12px Arial}table{table-layout:%s;width:100%%;border-spacing:4px 3px;background:#ff00ff}"
+            "td{vertical-align:top;padding:2px;border:1px solid black;orphans:1;widows:1}"
+            "thead{background:#cce0ff}tfoot{background:#ddffdd}tbody tr{background:#ffff00}"
+            "tbody td:last-child{background:red}.long{white-space:pre-wrap}</style>"
+            "<table><thead><tr><td>Head</td><td>Head</td></tr></thead><tfoot><tr><td>Foot</td><td>Foot</td></tr></tfoot>"
+            "<tbody><tr><td class=long>A\nB\nC\nD\nE\nF</td><td>Short</td></tr></tbody></table>", algorithm);
+        bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged --block-remote-resources");
+        strbuf_free(html); ASSERT_TRUE(rendered); ASSERT_EQ(pdf_page_count(pdf_path), 3);
+        ASSERT_TRUE(render_document_fixture(html_path, preview_path,
+            "--paged --block-remote-resources --page-grid 1x3"));
+        ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+        EXPECT_EQ(preview.width, 360); EXPECT_EQ(preview.height, 100);
+        const int footer_y[] = {64, 61, 64};
+        const struct { int x, y; uint8_t r, g, b; } points[] = {
+            {12, 18, 255, 0, 255}, {60, 18, 255, 0, 255}, {50, 11, 255, 0, 255},
+            {50, 32, 255, 0, 255}, {50, 18, 204, 224, 255},
+            {50, 40, 255, 255, 0}, {100, 40, 255, 0, 0}};
+        for (int page = 0; page < 3; page++) {
+            for (const auto& point : points)
+                expect_preview_pixel(preview, page * 120 + point.x, point.y, point.r, point.g, point.b);
+            expect_preview_pixel(preview, page * 120 + 50, footer_y[page] + 6, 221, 255, 221);
+            expect_preview_pixel(preview, page * 120 + 50, footer_y[page] - 2, 255, 0, 255);
+            expect_preview_pixel(preview, page * 120 + 50, footer_y[page] + 19, 255, 0, 255);
+            expect_preview_pixel(preview, page * 120 + 50, footer_y[page] + 23, 255, 255, 255);
+        }
+        image_free(preview.pixels);
+        ASSERT_TRUE(command_exists("pdftoppm")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+        PdfFileInfo pdf = {}; snprintf(pdf.path, sizeof(pdf.path), "%s", pdf_path);
+        snprintf(pdf.base, sizeof(pdf.base), "paged_table_spacing");
+        for (int page = 0; page < 3; page++) {
+            char png[PATH_MAX]; ASSERT_TRUE(render_reference_page(&pdf, page + 1, png, sizeof(png)));
+            ImageData image = {}; ASSERT_TRUE(load_png_rgba(png, &image));
+            EXPECT_EQ(image.width, RENDER_WIDTH); EXPECT_EQ(image.height, RENDER_WIDTH * 100 / 120);
+            for (const auto& point : points)
+                expect_preview_pixel(image, point.x * RENDER_WIDTH / 120, point.y * RENDER_WIDTH / 120, point.r, point.g, point.b);
+            expect_preview_pixel(image, 50 * RENDER_WIDTH / 120, (footer_y[page] + 6) * RENDER_WIDTH / 120, 221, 255, 221);
+            expect_preview_pixel(image, 50 * RENDER_WIDTH / 120, (footer_y[page] - 2) * RENDER_WIDTH / 120, 255, 0, 255);
+            expect_preview_pixel(image, 50 * RENDER_WIDTH / 120, (footer_y[page] + 19) * RENDER_WIDTH / 120, 255, 0, 255);
+            expect_preview_pixel(image, 50 * RENDER_WIDTH / 120, (footer_y[page] + 23) * RENDER_WIDTH / 120, 255, 255, 255);
+            image_free(image.pixels);
+        }
     }
 }
 

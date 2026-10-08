@@ -13,7 +13,7 @@ h1 { font-size: 28px; line-height: 34px; color: #165bb8; }
 h2 { font-size: 20px; line-height: 26px; color: #165bb8; }
 p { margin: 12px 0; }
 .chapter { break-before: page; }
-table { table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0; }
+table { table-layout: auto; width: 100%; border-collapse: separate; border-spacing: 4px 3px; }
 th, td { padding: 6px; border: 1px solid #cbd5e1; vertical-align: top; }
 th { background: #e0ecff; }
 @media screen { body { background: #edf3fa; } }
@@ -26,7 +26,7 @@ th { background: #e0ecff; }
 <p>The same composed pages can be viewed here or exported to PDF, SVG and PNG. Window resizing changes the visible area while the paper dimensions stay fixed.</p>
 <p>Try a two-column preview with <code>--page-grid 1x2 --page-column-gap 24</code>, or a facing spread with <code>--book --book-page 2</code>.</p>
 <h2 class="chapter">Tables across pages</h2>
-<p>The header repeats when this fixed-layout table continues onto another sheet.</p>
+<p>The header repeats when this automatically sized table continues onto another sheet. Cell spacing is preserved across page breaks.</p>
 <table>
   <thead><tr><th>Feature</th><th>Example</th></tr></thead>
   <tbody>

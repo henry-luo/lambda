@@ -4601,6 +4601,7 @@ struct LayoutBorderSpacingValue {
 
 LayoutBorderSpacingValue layout_resolve_border_spacing_value(
     LayoutContext* lycon, const CssValue* value);
+float layout_html_table_border_spacing(DomElement* element);
 bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
                                         float* spacing_h, float* spacing_v);
 bool layout_image_orientation_uses_from_image(DomElement* element);
