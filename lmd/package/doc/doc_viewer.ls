@@ -1135,8 +1135,7 @@ fn viewer_document(tree_model) {
   <head
     <meta charset:"UTF-8">
     <title "Lambda Document Viewer">
-    // resolve bundled fonts independently of the browsed directory/archive base URL (D7.2.4).
-    <link rel:"stylesheet", href:absolute_file_path(sys.lambda.home# ++ "/package/math/katex.css")>
+    for (sheet in math_css.font_stylesheets()) { sheet }
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
     <style math_css.get_stylesheet(null)>

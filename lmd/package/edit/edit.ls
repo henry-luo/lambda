@@ -18,6 +18,7 @@ import sess: lambda.edit.session
 import files: lambda.edit.files
 import tools: lambda.edit.toolbar
 import lambda.editor.mod_editor
+import math_css: lambda.doc.math.css
 
 // Every editable format, in lookup order. The source surface opens the text
 // formats no rich surface claims, and any file under `--source`
@@ -74,6 +75,7 @@ fn page(shown) =>
     <head
       <meta charset: "UTF-8">
       <title sess.window_title(shown.session, false)>
+      for (sheet in math_css.font_stylesheets()) { sheet }
       <style files.css ++ tools.css ++ shell.surface_css ++ src.surface_css>
     >
     apply(<edit_doc shown: shown>, {mode: "edit"})

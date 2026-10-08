@@ -286,7 +286,6 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
 
     CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(font);
     bool is_color = (traits & kCTFontTraitColorGlyphs) != 0;
-    bool is_italic = (traits & kCTFontTraitItalic) != 0;
 
     int bytes_per_pixel;
     CGColorSpaceRef color_space;
@@ -312,7 +311,7 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
         CGColorSpaceRelease(color_space);
         return NULL;
     }
-    memset(buffer, 0, buf_size);
+    memset(buffer, is_color ? 0 : 255, buf_size);
 
     CGContextRef cg_ctx = CGBitmapContextCreate(buffer, (size_t)bmp_width, (size_t)bmp_height,
                                                  8, (size_t)pitch, color_space, bitmap_info);
@@ -323,23 +322,15 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
         return NULL;
     }
 
-    // enable anti-aliasing and font smoothing for stroke thickening.
-    // CoreGraphics font smoothing adds stroke thickening that matches browser
-    // rendering weight.  However, CG also applies a gamma ~2.0 encoding to
-    // coverage values in the grayscale context, making raw output appear
-    // excessively bold.  We undo this gamma after drawing (see below) using
-    // the same approach as Skia/Chrome: new_pixel = (pixel² + 128) / 255.
-    // This preserves the thickened strokes while linearizing the tonal curve,
-    // producing glyph weight within ~2% of Chrome/Safari.
-    bool use_font_smoothing = !is_italic;
+    // native grayscale smoothing preserves thin italic strokes as well as upright ones.
     CGContextSetAllowsAntialiasing(cg_ctx, true);
     CGContextSetShouldAntialias(cg_ctx, true);
-    CGContextSetAllowsFontSmoothing(cg_ctx, use_font_smoothing);
-    CGContextSetShouldSmoothFonts(cg_ctx, use_font_smoothing);
+    CGContextSetAllowsFontSmoothing(cg_ctx, true);
+    CGContextSetShouldSmoothFonts(cg_ctx, true);
 
     if (!is_color) {
-        // for grayscale, set white foreground on black background
-        CGContextSetGrayFillColor(cg_ctx, 1.0, 1.0);
+        // use CoreText's black-on-white mask path, as browser rasterizers do.
+        CGContextSetGrayFillColor(cg_ctx, 0.0, 1.0);
     }
 
     // scale and position: CoreGraphics origin is bottom-left
@@ -355,18 +346,14 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
 
     CGContextRelease(cg_ctx);
 
-    // Linearize CG's gamma-encoded coverage (grayscale glyphs only).
-    // CoreGraphics applies gamma ~2.0 to coverage values in offscreen contexts.
-    // Undo with: new = (old * old + 128) / 255  (same formula as Skia's
-    // gLinearCoverageFromCGLCDValue in SkScalerContext_mac_ct.cpp).
-    // This preserves stroke thickening from font smoothing while removing the
-    // gamma-induced weight excess — matching Chrome/Skia's rendering pipeline.
+    // grayscale output already includes the native tonal response. LCD gamma
+    // linearization here changes edge coverage and erases thin math strokes.
     if (!is_color) {
         for (int row = 0; row < bmp_height; row++) {
             uint8_t* p = buffer + row * pitch;
             for (int col = 0; col < bmp_width; col++) {
                 uint8_t v = p[col];
-                p[col] = (uint8_t)((v * v + 128) / 255);
+                p[col] = (uint8_t)(255 - v);
             }
         }
     }

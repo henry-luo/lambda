@@ -59,7 +59,7 @@ let katex_ss = css.get_stylesheet({font_option: "katex"})
 // ---- wrap_standalone() ----
 let wrapped = css.wrap_standalone(<span "x">)
 "41. wrap tag:"; name(wrapped)
-"42. wrap has style child:"; name(wrapped[0])
-"43. wrap has content:"; name(wrapped[1])
+"42. wrap has style child:"; name(wrapped[2])
+"43. wrap has content:"; name(wrapped[3])
 
 "===== ALL CSS TESTS DONE ====="

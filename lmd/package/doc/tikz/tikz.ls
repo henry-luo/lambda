@@ -1089,6 +1089,7 @@ pub fn render_document(ast, options) any^ {
             <meta charset: "utf-8">
             <meta name: "viewport", content: "width=device-width, initial-scale=1">
             <title "TikZ/PGF Picture">
+            for (sheet in math_css.font_stylesheets()) { sheet }
             <style math_stylesheet>
         >
         <body style: "margin:0;padding:24px;background:white;color:#222;" ++

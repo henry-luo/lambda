@@ -11,10 +11,8 @@
  *   4. Rasterize via SwCanvas to ABGR8888 buffer
  *   5. Extract alpha channel → 8-bit grayscale (linear coverage, no gamma)
  *
- * Note: unlike the CoreText path, NO γ² correction is applied here. ThorVG
- * outputs linear coverage values directly. The γ² formula in font_rasterize_ct.c
- * undoes CoreGraphics' internal gamma encoding — that encoding does not exist
- * in ThorVG's software rasterizer.
+ * ThorVG outputs linear coverage directly. Neither this backend nor CoreText's
+ * grayscale mask path needs the gamma correction used for LCD color masks.
  *
  * Copyright (c) 2026 Lambda Script Project
  */
@@ -471,7 +469,7 @@ extern "C" GlyphBitmap* font_rasterize_tvg_render(void* tvg_ctx, FontTables* tab
     tvg_canvas_sync(ctx->canvas);
     tvg_canvas_remove(ctx->canvas, NULL);
 
-    // extract alpha channel → 8-bit grayscale + gamma linearization
+    // extract alpha channel → 8-bit grayscale coverage
     int pitch = bmp_w;
     size_t gray_size = (size_t)pitch * (size_t)bmp_h;
     uint8_t* gray_buf = (uint8_t*)arena_alloc(arena, gray_size);
@@ -482,10 +480,7 @@ extern "C" GlyphBitmap* font_rasterize_tvg_render(void* tvg_ctx, FontTables* tab
             // ABGR8888: alpha is in the highest byte
             uint32_t pixel = ctx->pixel_buf[row * bmp_w + col];
             uint8_t alpha = (uint8_t)(pixel >> 24);
-            // ThorVG outputs linear coverage values directly (no gamma encoding),
-            // so no gamma correction is needed here. The γ² formula used in the
-            // CoreText path is only needed to undo CoreGraphics' internal gamma ~2.0
-            // encoding in offscreen grayscale contexts — it does NOT apply here.
+            // ThorVG outputs linear coverage directly, without gamma encoding.
             gray_buf[row * pitch + col] = alpha;
         }
     }
