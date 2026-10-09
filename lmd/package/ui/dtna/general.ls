@@ -113,7 +113,7 @@ view dtna_presentation: <dtna> {
     else if (kind == 'paragraph') <p *:styled(~), *c.contents(~)>
     else if (kind == 'link') <a *:styled(~), href:p.href, target:p.target, *c.contents(~)>
     else if (kind == 'divider') <div *:styled(~), role:"separator", ["aria-orientation"]:c.text(c.option(p, "direction", "horizontal")), *c.contents(~)>
-    else if (kind == 'row') <div *:styled(~), style:style_with(p, "display:flex;flex-wrap:wrap;gap:" ++ c.px(c.option(p, "gutter", 0)) ++ ";"), *c.contents(~)>
+    else if (kind == 'row') <div *:styled(~), style:style_with(p, "--dtna-gutter:" ++ c.px(c.option(p, "gutter", 0)) ++ ";"), *c.contents(~)>
     else if (kind == 'col') <div *:styled(~), style:style_with(p, "flex:0 0 " ++ string(c.option(p, "span", 24) * 100.0 / 24) ++ "%;max-width:" ++ string(c.option(p, "span", 24) * 100.0 / 24) ++ "%;"), *c.contents(~)>
     else if (kind == 'avatar') avatar(~)
     else if (kind == 'badge') badge(~)

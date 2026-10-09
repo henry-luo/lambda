@@ -7,6 +7,9 @@ import controls: .dtna.input
 import navigation: .dtna.navigation
 import forms: .dtna.form
 import contract: .dtna.contract
+import disclosure: .dtna.collapse
+import trees: .dtna.tree
+import tables: .dtna.table
 
 
 fn component(kind, props, child, allowed = []) element^ {
@@ -81,3 +84,6 @@ pub fn pagination(props = {}) element^ => navigation.pagination(props)^
 pub fn palette(seed) array^ => theme.palette(seed)^
 pub fn form(props = {}, child = null) element^ => component('form',props,child)^
 pub fn form_item(props = {}, child = null) element^ => component('form-item',props,child,["for","required","help"])^
+pub fn collapse(props) element^ => disclosure.collapse(props)^
+pub fn tree(props) element^ => trees.tree(props)^
+pub fn table(props) element^ => tables.table(props)^

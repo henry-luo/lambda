@@ -12,6 +12,12 @@
   {"type":"assert_rect","target":{"selector":"#outcome .dtna-icon"},"width":48,"height":48,"tolerance":0.1},
   {"type":"assert_style","target":{"selector":"#rtl-child"},"property":"direction","equals":"rtl"},
   {"type":"assert_rect","target":{"selector":"#sized-icon"},"width":24,"height":18,"tolerance":0.1},
+  {"type":"assert_rect","target":{"selector":"#grid"},"width":424,"height":20,"tolerance":0.1},
+  {"type":"assert_rect","target":{"selector":"#grid-left"},"width":212,"height":20,"tolerance":0.1},
+  {"type":"assert_rect","target":{"selector":"#grid-right"},"width":212,"height":20,"tolerance":0.1},
+  {"type":"assert_rect","target":{"selector":"#left-content"},"width":188,"tolerance":0.1},
+  {"type":"assert_rect","target":{"selector":"#right-content"},"width":188,"tolerance":0.1},
+  {"type":"assert_rect","target":{"selector":"#sort-layout-arrow"},"x":56,"width":10,"tolerance":0.1},
   {"type":"click","target":{"selector":"#notice .dtna-close svg path"}},
   {"type":"assert_count","target":{"selector":"#notice"},"count":0},
   {"type":"render","file":"temp/ui_dtna/styles.png"}

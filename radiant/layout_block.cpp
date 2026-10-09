@@ -2750,6 +2750,9 @@ void layout_align_deferred_inline_line_runs(ViewElement* parent, float final_con
         (text_align != CSS_VALUE_CENTER && text_align != CSS_VALUE_RIGHT)) {
         return;
     }
+    // flex/grid children already have item positions, not deferred inline lines.
+    if (parent->display.inner == CSS_VALUE_FLEX ||
+        parent->display.inner == CSS_VALUE_GRID) return;
     DeferredInlineLineRun runs[256] = {};
     int run_count = 0;
     collect_deferred_inline_line_runs(parent->first_placed_child(), runs, &run_count);

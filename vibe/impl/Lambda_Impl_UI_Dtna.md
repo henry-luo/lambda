@@ -4,10 +4,11 @@
 **Design:** [Lambda_Pkg_UI.md](../Lambda_Pkg_UI.md).
 **Public guide:** [Lambda_UI.md](../../doc/Lambda_UI.md).
 
-The initial increment implements reusable component sources, a default-light
-theme, native controls and flat navigation, and a rendered component explorer.
+The implementation provides reusable component sources, a default-light
+theme, native controls, flat navigation, disclosure and collection components,
+and rendered component explorers.
 The complete 73-entry Phase 1 remains the objective. The inventory currently
-records **0 complete, 34 partial, 39 planned**; this increment does not close
+records **0 complete, 37 partial, 36 planned**; this increment does not close
 M0 or the full Phase 1 gate. Browser interaction and additional themes remain
 deferred by the user's scope decision.
 
@@ -39,6 +40,7 @@ deferred by the user's scope decision.
 | `lmd/package/ui/dtna.ls` | Public constructors, explicit prop contracts, page/render helpers |
 | `ui/core/component.ls` | Descriptor/slot construction, attribute filtering, boolean omission, action records |
 | `ui/core/collection.ls` | Unique keys, disabled-item navigation, sorting and pagination helpers |
+| `ui/core/interaction.ls` | Scoped delegated event targets and keyboard focus |
 | `ui/dtna/contract.ls` | Component-specific input validation |
 | `ui/dtna/tokens.ls` | Validated seeds, derived palette, complete/scoped CSS variables |
 | `ui/dtna/style.ls` | Scoped default-light recipes and native interaction states |
@@ -46,6 +48,9 @@ deferred by the user's scope decision.
 | `ui/dtna/navigation.ls` | Tabs, Segmented, flat Menu, Pagination and roving focus |
 | `ui/dtna/general.ls` | Original SVG icons, layout/display/feedback recipes, providers |
 | `ui/dtna/form.ls` | Native Form submission/reset and labelled Form Item |
+| `ui/dtna/collapse.ls` | Multiple/accordion disclosure, retained content and keyboard headers |
+| `ui/dtna/tree.ls` | Recursive model, disabled check barriers, selection and visible-node keyboard navigation |
+| `ui/dtna/table.ls` | Semantic rich cells, local sort/filter/page, selection, details and summaries |
 
 The package exports implemented constructors only. Placeholder exports are not
 used to count planned components as implemented. The JSON-formatted inventory
@@ -104,7 +109,118 @@ parent's primary color.
 
 No vendored code, generated parsers, or formal rulings were changed.
 
-## Validation and artifacts
+## Collection and disclosure increment
+
+Collapse adds controlled/default active keys, multiple or accordion expansion,
+disabled headings, extra slots, eager retained content and keyboard focus.
+Tabs adds opt-in `keep_mounted:true`; native input edits survive hiding and
+reopening, and input arrows no longer select another tab. Shared event helpers
+reject another same-kind component's bubbling targets.
+
+Tree validates globally unique typed keys, flattens hierarchy with explicit
+parent/level/sibling metadata and renders visible nodes. Check conduction stops
+at disabled or checkbox-disabled nodes; eligible ancestors derive checked and
+mixed states. Strict checking is independent. Selection, expansion, arrow
+navigation, Home/End, Enter/Space and cyclic first-letter search have real
+native fixtures. Table uses the shared key and pagination helpers for typed
+cross-page selection and local filter/sort/page operations. Semantic table
+cells accept pure render functions; caption, summary, row detail, empty/loading
+and controlled requests are included. This is partial M2/M5 progress; overlays,
+virtualization, asynchronous data and editable enterprise tables remain open.
+
+Three engine regressions were reduced before fixing their causes:
+
+1. **Regenerated native constraints stayed stale.** StateStore migrated old
+   `disabled`/`readonly`/`required` bits over new markup, so a pagination button
+   remained disabled after leaving page 1. Migration now reapplies authored
+   constraints while retaining native edits. `dtna/constraints` fails on the
+   pre-fix pinned host; a unit regression verifies both constraint directions
+   and preservation of the native text buffer.
+2. **Imported scalar propagation unboxed twice in MIR.** The cross-module
+   boxed-call path unboxed a string before the `^` consumer checked its Item
+   error tag, then the consumer unboxed the raw pointer again. It produced null
+   where T0 returned `"multiple"`, hiding Table's select-page control. The import
+   path now retains an Item for propagation/handlers, records its actual
+   representation and roots that representation. `dtna_imported_outcomes`
+   covers success, comparison and error handling across all three tiers
+   (**S7.6.1v4/S7.6.3v2; D2.4.1–D2.4.3; D8.1.1v17**).
+3. **Shrink-to-fit alignment moved flex children twice.** Deferred inline-line
+   alignment treated the direct text and the sort-arrow span in an inline-flex
+   button as separate flow lines, moving the arrow over its label. The shared
+   deferred-line helper now excludes flex/grid containers, whose item algorithms
+   already own those positions. The reduced native Ahem geometry fixture fails
+   on the pre-fix host and passes after the fix; the gallery was rendered again.
+
+Controlled null is recognized through `at` key membership (**S8.2.2v4**),
+instead of the current `contains` implementation's non-null value test. Native
+inspection also exposed blank numeric cells and wrapped 12/12 grid columns:
+shared slot rendering now converts numeric/bool/symbol scalars to text, and
+Row gutters use column padding rather than adding gaps to 100% of column
+widths. Native text and geometry assertions cover both defects.
+
+The new explorer is `test/ui/dtna_data_gallery.ls`. Its native PNG is
+`temp/ui_dtna/collections_validation/temp/data_gallery_final.png` (1100 × 1000),
+inspected for numeric/rich cells, selection, indentation, disabled appearance,
+disclosure and two-column layout. This remains native inspection evidence;
+the locked AntD reference application and pixel comparison are still open.
+
+### Validation — collection and disclosure increment
+
+The final focused sweep passes **11 package GTests**, including nine golden
+scripts across interpreter/automatic/JIT modes (27 combinations) and native
+render-error rejection; **15 StateStore tests**; and all nine native fixtures
+on forced interpreter and JIT. Each native tier passes **128 assertions**:
+constraints 5, controlled collections 13, controls 25, disclosure 13, form 5,
+navigation 11, styles 16, Table 19 and Tree 21. Pointer, native keyboard
+activation, focus, edits, controlled requests, disabled behavior and layout
+geometry are exercised. Catalog validation and Radiant dimension lint pass.
+
+The commands are the test stages of `make test-ui-dtna ARGS='--jobs 1'`, run
+from `temp/ui_dtna/collections_validation/` against an isolated debug host.
+`provenance.json` records the executable and engine/package source hashes;
+`temp/collections_final_{pure,state,native_interp,native_jit}.log` and
+`temp/collections_final_exits.txt` retain their results. Debug and release
+hosts were linked directly into separate validation directories through the
+generated Makefile's `TARGETDIR` override, without editing generated files.
+
+`make test-lambda-baseline` passes **6546/6548**, including the dtna cases,
+and fails `edit_view_only` (the existing math round-trip mismatch) and
+`map_model` (an expected/actual boolean mismatch). The focused rerun on the
+pinned host reproduces `edit_view_only`; `map_model` passes after the concurrent
+map source changes. The original aggregate remains failed and its causes are
+not assigned here.
+The aggregate log is `temp/ui_dtna/collections_lambda_baseline_retry.log`;
+the rerun is `collections_validation/temp/collections_aggregate_failures_rerun.log`.
+An earlier attempt stopped at a concurrent `geomap.cpp` duplicate declaration.
+
+`make test-radiant-baseline` stops during compilation of the concurrently
+edited `test_map_gtest.cpp`: a `DomNode*` is used to access `first_child`.
+The log is `temp/ui_dtna/collections_radiant_baseline.log`. This is not a
+passing aggregate; unrelated sources, expectations and harnesses were not
+changed to bypass it.
+
+The isolated layout checks pass the recorded form baseline **378/378**
+(365 fully passing and 13 recorded partial matches) and CSS display baseline
+**145/145 fully passing**. Logs are
+`temp/ui_dtna/collections_layout_validation/{form,display}.log`.
+
+The final Test262 run is clean: **40261/40261 fully passing**, zero
+non-fully-passing cases, lost/crashed batches, retries or regressions, exit 0.
+It uses an isolated `release_native` host and the standard baseline/async
+population with `--jobs=3` to reduce contention. The executable SHA-256 and
+engine/harness/baseline source hashes are recorded in
+`temp/ui_dtna/collections_release_validation/provenance.json`; the result is
+`temp/collections_test262_final.log` in that directory. No tests, thresholds
+or baseline expectations were changed.
+
+The earlier `make test262-baseline` invocation suffered spawn failures while
+concurrent builds replaced the shared host. An isolated attempt launched
+before its release link finished is also invalid evidence. The first complete
+isolated run used seven workers and recovered one slow Unicode-identifier
+case only on retry; its exit 0 is not a clean gate. These attempt logs remain
+separate from the final clean result.
+
+## Validation and artifacts — initial increment
 
 ```bash
 CCACHE_DIR="$PWD/temp/ccache" make test-ui-dtna ARGS='--jobs 1'
@@ -193,12 +309,15 @@ items are the supported pattern in this increment.
 Native text `value` is applied when the authored value changes; an unchanged
 value does not force user edits back to its previous value. Full controlled
 text semantics, unmount/remount state preservation and collection identity
-remain open. Tabs mounts only its active panel. Menu is flat. Select is the
+remain open. Tabs mounts only its active panel unless eager retention is
+requested; visited-only lazy retention remains open. Collapse eagerly retains
+panels, while Tree children and Table row details unmount when hidden. Menu is
+flat. Select is the
 native single-select control. Locale currently sets HTML `lang` without
 translating strings. Provider size/motion defaults are unimplemented.
 
 Remaining M1–M7 features are listed individually in the inventory, including
-tables/trees/pickers/uploads, overlays and focus management, virtualization,
+advanced table/tree features, pickers/uploads, overlays and focus management, virtualization,
 localization, motion, responsive fidelity, accessibility, static export
 coverage and stress/performance gates. A name or idle-state screenshot is not
 feature completion.

@@ -421,15 +421,17 @@
       ],
       "owner": "lmd/package/ui/dtna/navigation.ls",
       "implemented": [
-        "Keyed single panel, disabled tabs, roving keyboard focus and selection events"
+        "Keyed single panel, disabled tabs, roving keyboard focus and selection events",
+        "Opt-in eager keep_mounted panels retain native edits; panel input arrows remain native"
       ],
       "remaining": [
-        "Editable tabs, overflow, keep-mounted panels and drag reorder"
+        "Editable tabs, overflow, lazy visited-panel mounting, variants and drag reorder"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
-        "test/ui/dtna/navigation.json"
+        "test/ui/dtna/navigation.json",
+        "test/ui/dtna/disclosure.json"
       ]
     },
     {
@@ -903,14 +905,24 @@
       "required_features": [
         "Accordion/multiple panels, icons, disabled sections, retained/lazy content and keyboard use"
       ],
-      "status": "planned",
-      "exports": [],
-      "owner": null,
-      "implemented": [],
-      "remaining": [
-        "Accordion/multiple panels, icons, disabled sections, retained/lazy content and keyboard use"
+      "status": "partial",
+      "exports": [
+        "collapse"
       ],
-      "evidence": []
+      "owner": "lmd/package/ui/dtna/collapse.ls",
+      "implemented": [
+        "Accordion or multiple open panels; disabled headers, extra slots and controlled/default keys",
+        "Eager retained panels preserve native input edits; nested ownership and header keyboard navigation"
+      ],
+      "remaining": [
+        "Lazy first mounting, destroy-on-close option, variant/icon customization, motion and accessibility audit"
+      ],
+      "evidence": [
+        "test/lambda/ui_dtna/dtna_disclosure.ls",
+        "test/ui/dtna/disclosure.json",
+        "test/ui/dtna/controlled_collections.json",
+        "test/ui/dtna_data_gallery.ls"
+      ]
     },
     {
       "name": "Descriptions",
@@ -1102,14 +1114,29 @@
       "required_features": [
         "Columns, sorting/filtering, pagination, selection, expansion/tree rows, fixed regions, edit, summaries and virtualization"
       ],
-      "status": "planned",
-      "exports": [],
-      "owner": null,
-      "implemented": [],
-      "remaining": [
-        "Columns, sorting/filtering, pagination, selection, expansion/tree rows, fixed regions, edit, summaries and virtualization"
+      "status": "partial",
+      "exports": [
+        "table"
       ],
-      "evidence": []
+      "owner": "lmd/package/ui/dtna/table.ls",
+      "implemented": [
+        "Semantic columns, pure rich-cell renderers, caption/summary, empty/loading state and row details",
+        "Local stable single-column sorting, inline single-value typed filters and pagination",
+        "Single/multiple selection across pages, visible enabled-row select-all and controlled/default state"
+      ],
+      "remaining": [
+        "Tree rows, grouped/fixed headers and columns, editable cells, merged cells and virtualization",
+        "Popup/multi-value/custom filters, multi-column/custom sorting, remote data workflows and page-size controls",
+        "Detail-slot retention, general reordered-child identity, native accessibility audit and stress metrics"
+      ],
+      "evidence": [
+        "test/lambda/ui_dtna/dtna_table.ls",
+        "test/lambda/ui_dtna/dtna_imported_outcomes.ls",
+        "test/ui/dtna/table.json",
+        "test/ui/dtna/controlled_collections.json",
+        "test/ui/dtna/constraints.json",
+        "test/ui/dtna_data_gallery.ls"
+      ]
     },
     {
       "name": "Tag",
@@ -1201,14 +1228,26 @@
       "required_features": [
         "Expansion, checked/selected keys, disabled nodes, lazy load, drag/drop, typeahead and virtualization"
       ],
-      "status": "planned",
-      "exports": [],
-      "owner": null,
-      "implemented": [],
-      "remaining": [
-        "Expansion, checked/selected keys, disabled nodes, lazy load, drag/drop, typeahead and virtualization"
+      "status": "partial",
+      "exports": [
+        "tree"
       ],
-      "evidence": []
+      "owner": "lmd/package/ui/dtna/tree.ls",
+      "implemented": [
+        "Globally unique typed keys; expansion, single/multiple selection and controlled/default keys",
+        "Conducted or independent checks with mixed ancestors and disabled-node barriers",
+        "Visible-node keyboard navigation, first-letter search and typed actions"
+      ],
+      "remaining": [
+        "Lazy loading, drag/drop, directory mode, timed multi-character typeahead and virtualization",
+        "Reconstructed/reordered-node identity, native accessibility bridge and stress metrics"
+      ],
+      "evidence": [
+        "test/lambda/ui_dtna/dtna_tree.ls",
+        "test/ui/dtna/tree.json",
+        "test/ui/dtna/controlled_collections.json",
+        "test/ui/dtna_data_gallery.ls"
+      ]
     },
     {
       "name": "Alert",

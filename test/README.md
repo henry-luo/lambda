@@ -167,7 +167,7 @@ WebAssembly build and tests: `make build-wasm`, `make test-wasm`, and [`doc/dev/
 package goldens on T0/automatic/MIR tiers (**D8.1.1v17**), state-store regressions,
 and the manifest-owned `dtna` native UI suite on forced interpreter/JIT paths.
 The shared Radiant baseline also
-includes this suite. The gallery is `test/ui/dtna_gallery.ls`; the JSON-formatted
+includes this suite. The galleries are `test/ui/dtna_gallery.ls` and `test/ui/dtna_data_gallery.ls`; the JSON-formatted
 coverage inventory uses `.manifest` because every `.json` under `test/ui/` must
 be an executable fixture with exactly one owner.
 

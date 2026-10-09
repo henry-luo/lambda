@@ -384,6 +384,40 @@ TEST_F(StateStoreDomMutationTest, RegeneratedTextControlKeepsNativeValueOnlyForS
     live->form = orphan->form = nullptr;
 }
 
+TEST_F(StateStoreDomMutationTest, RegeneratedControlAppliesConstraintsAndKeepsNativeEdits) {
+    FormControlProp old_prop{};
+    FormControlProp new_prop{};
+    old_prop.control_type = new_prop.control_type = FORM_CONTROL_TEXT;
+    live->tag_name = orphan->tag_name = lam::up("input");
+    live->tag_id = orphan->tag_id = MARKUP_NAME_INPUT;
+    live->id = orphan->id = lam::up("field");
+    live->form = lam::view_prop(&old_prop);
+    orphan->form = lam::view_prop(&new_prop);
+    ASSERT_TRUE(form_control_store_text_value(state(), live, "typed", 5, 5));
+    ViewState* before = view_state_get(state(), live);
+    ASSERT_NE(before, nullptr);
+    before->data.form.disabled = 1;
+    before->data.form.readonly = 1;
+    ASSERT_TRUE(orphan->set_attribute("required", ""));
+
+    view_state_preserve_subtree_identity(state(), live, orphan);
+    EXPECT_EQ(view_state_get(state(), orphan), before);
+    EXPECT_FALSE(form_control_is_disabled(state(), orphan));
+    EXPECT_FALSE(form_control_is_readonly(state(), orphan));
+    EXPECT_TRUE(form_control_is_required(state(), orphan));
+    EXPECT_STREQ(form_control_get_value(state(), orphan, nullptr), "typed");
+
+    ASSERT_TRUE(live->set_attribute("disabled", ""));
+    ASSERT_TRUE(live->set_attribute("readonly", ""));
+    view_state_preserve_subtree_identity(state(), orphan, live);
+    EXPECT_EQ(view_state_get(state(), live), before);
+    EXPECT_TRUE(form_control_is_disabled(state(), live));
+    EXPECT_TRUE(form_control_is_readonly(state(), live));
+    EXPECT_FALSE(form_control_is_required(state(), live));
+    EXPECT_STREQ(form_control_get_value(state(), live, nullptr), "typed");
+    live->form = orphan->form = nullptr;
+}
+
 TEST_F(StateStoreDomMutationTest, DetachedTextControlRetainsValueAcrossReflow) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);

@@ -5,7 +5,7 @@
 > **Requested namespace:** `lambda.ui.dtna` (`dtna` reverses `antd`).
 > **Phase 1 target:** native Radiant, confirmed by the user. Interactive browser support is deferred.
 > **Scope:** a comprehensive Ant Design-inspired component package, reusable UI foundations, and an executable conformance workload for Lambda styling and interaction.
-> **Implementation status:** initial native subset implemented; [progress and open gates](impl/Lambda_Impl_UI_Dtna.md). All 73 entries remain in scope; the feature manifest marks 34 partial and 39 planned. Performance and AntD pixel parity are unmeasured.
+> **Implementation status:** native controls/navigation plus initial Collapse, Tree and Table implemented; [progress and open gates](impl/Lambda_Impl_UI_Dtna.md). All 73 entries remain in scope; the feature manifest marks 37 partial and 36 planned. Performance and AntD pixel parity are unmeasured.
 > **Authority:** [formal semantics](../doc/Lambda_Formal_Semantics.md), [formal design](../doc/Lambda_Formal_Design.md), then the existing [reactive UI design](Lambda_Design_Reactive_UI.md) and DOM design records. Implementation planning is collected in the appendices, following [Doc Convention](../doc/Doc_Convention.md).
 
 | Subject | Formal linkage | Consequence for this proposal |

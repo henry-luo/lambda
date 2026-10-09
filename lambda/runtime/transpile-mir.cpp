@@ -32587,14 +32587,20 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             // including its nullable lanes: an imported `float?` null read as
             // NaN and a `bool?` null as false.
             TypeId call_tid = mir_expr_carrier_type(mt, (AstNode*)call_node);
-            if (                    (mir_is_native_scalar_value_type(call_tid) ||
+            if (!call_node->propagate && !mt->in_handler_operand &&
+                    (mir_is_native_scalar_value_type(call_tid) ||
                      call_tid == LMD_TYPE_STRING)) {
+                emit_return_if_item_error(mt, result);
                 result = emit_unbox_contract_lane(mt, result, call_tid,
                     ((AstNode*)call_node)->type);
+            } else {
+                // propagation/handlers must inspect the boxed error before unboxing.
+                returned_boxed_item = true;
             }
 
             strbuf_free(fn_import_name);
-            result = root_gc_result_if_needed(mt, result, MIR_T_I64, call_tid, "impcall_rv");
+            result = root_gc_result_if_needed(mt, result, MIR_T_I64,
+                returned_boxed_item ? LMD_TYPE_ANY : call_tid, "impcall_rv");
             RETURN_CALL_VALUE(result);
         }
 
