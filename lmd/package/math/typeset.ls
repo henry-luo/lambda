@@ -102,7 +102,8 @@ fn node(n, c) {
         case 'sized_delimiter': sized_delimiter(n, c)^
         case 'middle_delim': delimiter(value(n), font.UNITS * scale(c), c, "mrel")^
         case 'command': command_node(n, c)^
-        case 'symbol_command': command(value(n), c)^
+        // parsed symbol commands store their spelling in name, like command nodes.
+        case 'symbol_command': command_node(n, c)^
         case 'big_operator': command(value(n), c)^
         case 'operator': text(value(n), {*:c, variant: "normal"})^
         case 'relation': text(value(n), {*:c, variant: "normal"})^
